@@ -1,0 +1,15 @@
+--- a/.github/workflows/esp32.yml
++++ b/.github/workflows/esp32.yml
+@@ -56,0 +57,5 @@
++      - name: Install avatar preview dependency
++        run: |
++          . "$IDF_PATH/export.sh" > /dev/null
++          python -m pip install 'Pillow>=10,<13'
++
+@@ -60,0 +66,6 @@
++
++      - name: Check avatar renderers with sanitizers
++        run: |
++          . "$IDF_PATH/export.sh" > /dev/null
++          CC="cc -fsanitize=address,undefined -fno-sanitize-recover=all" \
++            python -m unittest discover -s tests -p 'test_avatar_customizer.py' -v

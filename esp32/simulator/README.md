@@ -22,6 +22,12 @@ and the avatar renderer. SDL supplies the display, mouse input, and timing while
 small host adapters stand in for ESP-IDF, FreeRTOS, Wi-Fi, Bluetooth, Link,
 settings, and power services.
 
+The simulator uses `components/muse/avatar/muse_pixel.c` when it exists,
+matching the firmware and GIF preview tools. Otherwise it uses the default
+avatar. CMake tracks additions/removals of the local override; building after
+an install switches to the selected character. See the
+[avatar customizer](../tools/muse/CUSTOMIZER.md) for presets and sprite exports.
+
 The simulator is intended for fast UI work and repeatable screenshots. It does
 not emulate the ESP32-S3 CPU, the Watcher's Himax camera, audio hardware,
 Bluetooth radio, memory pressure, or power timing. Those paths still need a

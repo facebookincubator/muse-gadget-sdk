@@ -22,6 +22,7 @@ when there is one, else the default avatar. Needs a C compiler and Pillow.
 """
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -37,37 +38,62 @@ def renderer_source(default=False):
     return DEFAULT_SRC if default or not os.path.exists(CUSTOM_SRC) else CUSTOM_SRC
 
 
-def render(src, out):
-    """Builds tools/muse/anim.c against `src` and writes one GIF per animation to `out`.
+def iter_render_frames(src, scale=5):
+    """Compile the real renderer and return RGB frames grouped by animation.
 
-    Raises subprocess.CalledProcessError (with the compiler's output) if it doesn't build.
+    scale=1 exports native 64x64 pixels; scale=5 preserves the GIF preview size.
+    CC may name a compiler (or a compiler plus flags) for host builds.
     """
     from PIL import Image
 
-    os.makedirs(out, exist_ok=True)
-    paths = []
+    if type(scale) is not int or not 1 <= scale <= 5:
+        raise ValueError("scale must be an integer from 1 to 5")
     with tempfile.TemporaryDirectory() as tmp:
         exe = os.path.join(tmp, "muse_anim")
         subprocess.run(
-            ["cc", "-O2", "-Wall", "-I", "components/muse", "tools/muse/anim.c", src, "-lm", "-o", exe],
-            cwd=ROOT, check=True, capture_output=True, text=True,
+            shlex.split(os.environ.get("CC", "cc")) +
+            ["-O2", "-Wall", "-Werror", f"-DMUSE_ANIM_SCALE={scale}",
+             "-I", "components/muse", "tools/muse/anim.c", os.path.abspath(src), "-lm", "-o", exe],
+            cwd=ROOT, check=True, capture_output=True, text=True, timeout=60,
         )
         frames_dir = os.path.join(tmp, "frames")
         os.makedirs(frames_dir)
-        subprocess.check_call([exe, frames_dir])
-
+        subprocess.run([exe, frames_dir], check=True, capture_output=True, text=True, timeout=60)
         for name in sorted(os.listdir(frames_dir)):
             d = os.path.join(frames_dir, name)
-            frames = [Image.open(os.path.join(d, f)).convert("RGB") for f in sorted(os.listdir(d))]
-            # One shared palette keeps colours from shimmering between frames.
-            strip = Image.new("RGB", (frames[0].width, frames[0].height * len(frames)))
-            for i, f in enumerate(frames):
-                strip.paste(f, (0, i * f.height))
-            pal = strip.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
-            frames = [f.quantize(palette=pal, dither=Image.Dither.NONE) for f in frames]
-            path = os.path.join(out, name + ".gif")
-            frames[0].save(path, save_all=True, append_images=frames[1:], duration=FRAME_MS, loop=0, optimize=False)
-            paths.append((path, len(frames)))
+            frames = []
+            for f in sorted(os.listdir(d)):
+                with Image.open(os.path.join(d, f)) as im:
+                    frames.append(im.convert("RGB"))
+            yield name, frames
+
+
+def render_frames(src, scale=5):
+    """Collect native preview frames; GIF export can iterate one state at a time."""
+    return dict(iter_render_frames(src, scale))
+
+
+def save_gif(frames, path):
+    """Use one shared palette to prevent colours shimmering between frames."""
+    from PIL import Image
+
+    strip = Image.new("RGB", (frames[0].width, frames[0].height * len(frames)))
+    for i, frame in enumerate(frames):
+        strip.paste(frame, (0, i * frame.height))
+    palette = strip.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+    indexed = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f in frames]
+    indexed[0].save(path, format="GIF", save_all=True, append_images=indexed[1:],
+                    duration=FRAME_MS, loop=0, optimize=False)
+
+
+def render(src, out):
+    """Write one 320px GIF per animation; return (path, frame count) pairs."""
+    os.makedirs(out, exist_ok=True)
+    paths = []
+    for name, frames in iter_render_frames(src):
+        path = os.path.join(out, name + ".gif")
+        save_gif(frames, path)
+        paths.append((path, len(frames)))
     return paths
 
 

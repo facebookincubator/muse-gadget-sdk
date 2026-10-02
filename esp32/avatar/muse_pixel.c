@@ -1,6 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
 #include "muse_pixel.h"
+#include "muse_avatar_style.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -44,6 +45,8 @@ enum {
     C_SHADOW,
     C_HEART,
     C_WHITE,
+    C_CLOTH,
+    C_CLOTHD,
     C_COUNT,
 };
 
@@ -70,25 +73,27 @@ static const scheme_t SCHEMES[MUSE_MODE_COUNT] = {
 /* Cream fur and a peach face. */
 static const uint32_t FIXED[C_COUNT] = {
     [C_BG] = 0x000000,
-    [C_OUT] = 0x3a2b22,
-    [C_OUT2] = 0x8c7560,
-    [C_BD] = 0xae987e,
-    [C_BM] = 0xcfbc9f,
-    [C_BL] = 0xe6d7bd,
-    [C_BH] = 0xf8eedc,
-    [C_SKIND] = 0xe9cba4,
-    [C_SKIN] = 0xf6dfbd,
-    [C_SKINL] = 0xfdeed6,
-    [C_IRIS] = 0x120d0b,
+    [C_OUT] = MUSE_STYLE_OUT,
+    [C_OUT2] = MUSE_STYLE_OUT2,
+    [C_BD] = MUSE_STYLE_FUR_D,
+    [C_BM] = MUSE_STYLE_FUR,
+    [C_BL] = MUSE_STYLE_FUR_L,
+    [C_BH] = MUSE_STYLE_FUR_H,
+    [C_SKIND] = MUSE_STYLE_FACE_D,
+    [C_SKIN] = MUSE_STYLE_FACE,
+    [C_SKINL] = MUSE_STYLE_FACE_L,
+    [C_IRIS] = MUSE_STYLE_EYES,
     [C_SHINE] = 0xffffff,
     [C_BROW] = 0x6b5444,
-    [C_BLUSH] = 0xf4aaa0,
-    [C_BLUSHD] = 0xea8f8e,
+    [C_BLUSH] = MUSE_STYLE_BLUSH,
+    [C_BLUSHD] = MUSE_STYLE_BLUSH_D,
     [C_MOUTH] = 0x3a1f1a,
     [C_TONGUE] = 0xe86a7a,
     [C_SHADOW] = 0x16101f,
     [C_HEART] = 0xff4f8b,
     [C_WHITE] = 0xffffff,
+    [C_CLOTH] = MUSE_STYLE_CLOTH,
+    [C_CLOTHD] = MUSE_STYLE_CLOTH_D,
 };
 
 static rgb_t s_scheme[5];      /* live, blended: f0..f3, acc */
@@ -624,6 +629,35 @@ static void draw_avatar(const avatar_t *j, const limb_t arms[2], const limb_t fe
     }
 }
 
+/* A small cloth accessory follows the animated neck and stays on the torso. */
+static void draw_accessory(const avatar_t *j)
+{
+#if MUSE_STYLE_ACCESSORY != 0
+    int cy = iround(j->fy + j->fb + 2.5f);
+    int cx = iround(j->fx + j->fa * 0.35f);
+    int left = iround(j->cx - j->a * 0.75f);
+    int right = iround(j->cx + j->a * 0.75f);
+    for (int y = cy - 1; y <= cy + 5; y++) {
+        for (int x = left; x <= right; x++) {
+            if ((unsigned)x >= W || (unsigned)y >= H || s_mask[y * W + x] != M_BODY) {
+                continue;
+            }
+#if MUSE_STYLE_ACCESSORY == 1
+            bool cloth = y <= cy + 1 || (x >= cx && x <= cx + 2 && y <= cy + 5);
+#else
+            int dx = abs(x - cx), dy = abs(y - cy);
+            bool cloth = dx <= 4 && dy <= 2 && (dx == 0 || dy < dx);
+#endif
+            if (cloth) {
+                px(x, y, y == cy + 1 ? C_CLOTHD : C_CLOTH);
+            }
+        }
+    }
+#else
+    (void)j;
+#endif
+}
+
 typedef enum {
     EYES_NORMAL,
     EYES_WIDE,
@@ -934,13 +968,17 @@ void muse_pixel_render(const muse_pose_t *p)
     float breathe = sinf(t * breathe_rate + 1.0f) * 0.03f;
     avatar_t j;
     j.a = 16.0f * (1 + breathe) * (2.0f - squash) + level * 0.8f;
-    j.b = 23.0f * (1 - breathe) * squash;
+    j.a *= MUSE_STYLE_WIDTH;
+    j.b = 23.0f * (1 - breathe) * squash * MUSE_STYLE_HEIGHT;
     j.cx = 32.0f + lean;
     j.cy = 56.5f - j.b + bob * 0.5f - hop;   /* feet stay near the ground */
     j.fa = j.a * 0.66f;
     j.fb = 7.4f * squash;
     j.fx = j.cx + lean * 0.3f;
     j.fy = j.cy - j.b * 0.30f + bob * 0.3f;
+
+    j.fx += MUSE_STYLE_FACE_X;
+    j.fy += MUSE_STYLE_FACE_Y;
 
     /* ---- background layers ---- */
     float aura_r = 29.0f + level * 4.0f + sinf(t * 1.5f) * 1.0f;
@@ -1006,6 +1044,7 @@ void muse_pixel_render(const muse_pose_t *p)
     }
     }
     draw_avatar(&j, arms, feet);
+    draw_accessory(&j);
 
     /* ---- face ---- */
     float eye_y = j.fy - 0.5f;

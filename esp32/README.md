@@ -256,3 +256,17 @@ their upstream licenses:
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.
+
+## Customize your character
+
+On display boards, use the [local avatar studio](tools/muse/CUSTOMIZER.md) to
+change colours, proportions, and accessories, preview every animation, and
+export or install a preset. It runs without a connected board or token:
+
+```sh
+python3 -m pip install pillow
+python3 tools/muse/customize.py
+```
+
+The [avatar recipe](tools/muse/AVATAR_RECIPE.md) also supports asking Muse to
+draw or edit a character. Character artwork retains its own licensing terms.

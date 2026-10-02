@@ -31,6 +31,13 @@ exists, the firmware build and the preview tools use it in place of the default 
 The directory is gitignored, so your avatar stays on your machine. Delete
 the file to go back to the default avatar.
 
+## Customize locally
+
+For a browser editor with colours, proportions, accessories, animation previews,
+and preset/sprite exports, run `python3 tools/muse/customize.py`. It needs a C
+compiler and Pillow, with no connected board or Muse token. See
+[`CUSTOMIZER.md`](CUSTOMIZER.md) for installing a preset and adding templates.
+
 ## The quick way
 
 Plug in the board (the S3 or AIPI Lite), then run:

@@ -25,7 +25,10 @@
 #include <sys/stat.h>
 #include "muse_pixel.h"
 
-#define S 5
+#ifndef MUSE_ANIM_SCALE
+#define MUSE_ANIM_SCALE 5
+#endif
+#define S MUSE_ANIM_SCALE
 #define N (MUSE_PX_W * S)
 #define DT 0.04f        /* 40 ms, same as muse_ui */
 #define WARMUP 1.5f     /* let palette blending and eyes settle before recording */

@@ -1,0 +1,210 @@
+<!doctype html>
+<!-- Copyright (c) Meta Platforms, Inc. and affiliates.
+Licensed under the Apache License, Version 2.0. See LICENSE in the repository root.
+This tool's license does not grant rights to character artwork. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Muse · Avatar studio</title>
+  <style>
+    :root { color-scheme: light; --ink:#272823; --muted:#6b6d63; --line:#dcded5; --paper:#f5f6f0; --accent:#355f46; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.5 system-ui,sans-serif; }
+    header { max-width:1200px; margin:auto; padding:32px 32px 24px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    h1 { font-size:25px; font-weight:600; letter-spacing:-.8px; margin:0; }
+    header p { color:var(--muted); margin:3px 0 0; }
+    .local { border:1px solid var(--line); border-radius:30px; padding:7px 13px; font-size:12px; white-space:nowrap; }
+    .local::before { content:'●'; color:var(--accent); margin-right:7px; }
+    main { max-width:1200px; margin:auto; padding:0 32px 40px; display:grid; grid-template-columns:340px 1fr; grid-template-rows:auto 1fr; align-items:start; gap:24px; }
+    .panel { background:white; border:1px solid var(--line); border-radius:20px; padding:24px; }
+    .controls { grid-row:span 2; }
+    h2 { font-size:14px; font-weight:650; margin:0 0 14px; }
+    fieldset { border:0; padding:0; margin:24px 0 0; }
+    legend { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:12px; }
+    label { display:block; font-size:13px; margin-bottom:7px; }
+    input[type=text], select { width:100%; border:1px solid var(--line); border-radius:9px; background:#fafbf7; padding:10px 12px; color:var(--ink); font:inherit; }
+    .row { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; }
+    .row label { margin:0; }
+    input[type=color] { width:49px; height:34px; border:1px solid var(--line); border-radius:7px; padding:3px; background:white; cursor:pointer; }
+    input[type=range] { width:100%; accent-color:var(--accent); margin:4px 0 15px; }
+    output { color:var(--muted); font-variant-numeric:tabular-nums; }
+    button { font:inherit; color:inherit; border:1px solid var(--line); border-radius:9px; background:white; padding:9px 13px; cursor:pointer; }
+    button:hover { background:#edf2e8; }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline:3px solid #8fc9a3; outline-offset:3px; }
+    button:disabled { opacity:.5; cursor:wait; }
+    .primary { background:var(--accent); border-color:var(--accent); color:white; }
+    .primary:hover { background:#284d37; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+    .preview { padding:18px; min-width:0; }
+    .stage { border-radius:14px; background:#080a0c; min-height:380px; display:flex; justify-content:center; align-items:center; overflow:hidden; position:relative; }
+    canvas { width:min(100%,384px); height:auto; image-rendering:pixelated; }
+    .state-tag { position:absolute; top:16px; left:18px; color:#b2b8ae; font-size:11px; text-transform:uppercase; letter-spacing:1.5px; }
+    .modes { display:flex; gap:6px; flex-wrap:wrap; margin-top:16px; }
+    .modes button { font-size:12px; border-radius:20px; padding:6px 12px; }
+    .modes button[aria-pressed=true] { background:#e5efdf; border-color:#a3b79a; color:#284d37; }
+    .playback { display:flex; align-items:center; gap:14px; margin-top:15px; }
+    .playback input { margin:0; }
+    .playback output { min-width:69px; font-size:12px; text-align:right; }
+    #status { margin:12px 0 0; color:var(--muted); font-size:12px; min-height:18px; }
+    .export p, .notice { color:var(--muted); font-size:12px; }
+    .export h2 { font-size:16px; }
+    details { margin-top:16px; font-size:13px; }
+    pre { overflow:auto; background:var(--paper); padding:12px; border-radius:9px; font-size:11px; }
+    .notice { margin:16px 0 0; }
+    @media(max-width:800px) { header { padding:22px 18px; } main { padding:0 18px 28px; grid-template-columns:1fr; } .controls { grid-row:auto; } .preview { grid-row:1; } .stage { min-height:300px; } canvas { max-width:320px; } .local { display:none; } }
+  </style>
+</head>
+<body>
+  <header><div><h1>Muse <span style="font-weight:350">/ Avatar studio</span></h1><p>A little character. Your own look.</p></div><span class="local">Local preview</span></header>
+  <main>
+    <section class="panel controls" aria-label="Appearance controls">
+      <h2>Make it yours</h2>
+      <label for="pack">Character</label><select id="pack"></select>
+      <label for="name" style="margin-top:14px">Preset name</label><input id="name" type="text" maxlength="64" value="My Muse">
+      <fieldset><legend>Palette</legend>
+        <div class="row"><label for="fur">Fur</label><input id="fur" type="color"></div>
+        <div class="row"><label for="face">Face</label><input id="face" type="color"></div>
+        <div class="row"><label for="eyes">Eyes</label><input id="eyes" type="color"></div>
+        <div class="row"><label for="blush">Cheeks</label><input id="blush" type="color"></div>
+      </fieldset>
+      <fieldset><legend>Shape</legend>
+        <div class="row"><label for="width">Body width</label><output id="width-value"></output></div><input id="width" type="range" step=".01">
+        <div class="row"><label for="height">Body height</label><output id="height-value"></output></div><input id="height" type="range" step=".01">
+        <div class="row"><label for="face_x">Face · left / right</label><output id="face_x-value"></output></div><input id="face_x" type="range" step=".25">
+        <div class="row"><label for="face_y">Face · up / down</label><output id="face_y-value"></output></div><input id="face_y" type="range" step=".25">
+      </fieldset>
+      <fieldset><legend>Dress up</legend>
+        <label for="accessory">Accessory</label><select id="accessory"><option value="none">None</option><option value="scarf">Scarf</option><option value="bow">Bow</option></select>
+        <div class="row" style="margin-top:12px"><label for="accessory_color">Accessory colour</label><input id="accessory_color" type="color"></div>
+      </fieldset>
+      <div class="toolbar" style="margin-top:20px"><button id="reset">Reset look</button><button id="import">Load preset</button><input id="preset-file" type="file" accept=".json,application/json" hidden></div>
+      <p class="notice" id="notice"></p>
+    </section>
+    <section class="panel preview" aria-label="Animation preview">
+      <div class="stage"><span id="state-tag" class="state-tag">Idle</span><canvas id="avatar" width="64" height="64" aria-label="Animated character preview"></canvas></div>
+      <div id="modes" class="modes" aria-label="Animation states"></div>
+      <div class="playback"><button id="play" aria-label="Pause animation">Pause</button><input id="timeline" type="range" min="0" max="149" value="0" step="1" aria-label="Animation frame"><output id="frame-value">1 / 150</output></div>
+      <p id="status" role="status" aria-live="polite">Preparing your preview…</p>
+    </section>
+    <section class="panel export">
+      <h2>Take your character with you</h2>
+      <p>Save a preset to edit later, or download the complete pack: renderer, eight animations, and sprite sheets with frame timings.</p>
+      <div class="toolbar"><button id="save">Save preset</button><button id="export" class="primary" disabled>Download character pack</button></div>
+      <details><summary>Put it on your M5Stack</summary><p>Extract the pack, then run these commands from the SDK’s <code>esp32</code> directory. Installing saves your previous character; flashing keeps pairing and Wi-Fi settings.</p><pre>python3 tools/muse/customize.py --preset /path/to/preset.json --install
+tools/muse/board.sh build sticks3
+tools/muse/board.sh flash sticks3</pre><p>For other boards, use their profile from the SDK’s board instructions.</p></details>
+    </section>
+  </main>
+  <script>
+    'use strict';
+    const TOKEN='__SESSION_TOKEN__';
+    const $=id=>document.getElementById(id);
+    const STATES=['boot','idle','listening','thinking','speaking','happy','off','error'];
+    const NUMBERS=['width','height','face_x','face_y'];
+    const context=$('avatar').getContext('2d');
+    let catalog, data, images={}, state='idle', frame=0, playing=true, lastTime=0, timer, generation=0, busy=false;
+    const title=s=>s[0].toUpperCase()+s.slice(1);
+    function preset() {
+      const p={version:1};
+      for(const key of Object.keys(catalog.defaults)) if(key!=='version') p[key]=NUMBERS.includes(key)?Number($(key).value):$(key).value;
+      return p;
+    }
+    function apply(p) {
+      const merged={...catalog.defaults,...p};
+      for(const key of Object.keys(catalog.defaults)) if(key!=='version') $(key).value=merged[key];
+      labels();
+    }
+    function labels() {
+      for(const key of NUMBERS) $(key+'-value').textContent=Number($(key).value).toFixed(2);
+      $('notice').textContent=catalog.packs[$('pack').value]?.notice || '';
+    }
+    async function post(route,p) {
+      const response=await fetch(route,{method:'POST',headers:{'Content-Type':'application/json','X-Muse-Session':TOKEN},body:JSON.stringify(p)});
+      if(!response.ok) throw new Error((await response.json()).error);
+      return response;
+    }
+    function draw() {
+      if(!data || !images[state]) return;
+      const entry=data.manifest.states[state], w=data.manifest.width, h=data.manifest.height;
+      context.drawImage(images[state],(frame%entry.columns)*w,Math.floor(frame/entry.columns)*h,w,h,0,0,64,64);
+      $('timeline').max=entry.frames-1; $('timeline').value=frame;
+      $('frame-value').textContent=`${frame+1} / ${entry.frames}`;
+    }
+    function setPlaying(value) {
+      playing=value; $('play').textContent=value?'Pause':'Play'; $('play').setAttribute('aria-label',value?'Pause animation':'Play animation'); lastTime=0;
+    }
+    function selectState(value) {
+      state=value; frame=0; setPlaying(true); $('state-tag').textContent=title(value);
+      for(const button of $('modes').children) button.setAttribute('aria-pressed',String(button.dataset.state===value));
+      draw();
+    }
+    async function refresh() {
+      const mine=++generation;
+      busy=true; $('export').disabled=true; $('status').textContent='Rendering all eight animations…';
+      try {
+        const next=await (await post('/api/preview',preset())).json();
+        const loaded={};
+        await Promise.all(STATES.map(name=>new Promise((resolve,reject)=>{const im=new Image(); im.onload=()=>{loaded[name]=im;resolve();}; im.onerror=()=>reject(new Error('Could not load preview.')); im.src=next.images[name];})));
+        if(mine!==generation) return;
+        data=next; images=loaded; frame=0; lastTime=0; draw();
+        $('status').textContent='Preview ready · 64 × 64 pixels · 25 frames per second';
+      } catch(error) { if(mine===generation) $('status').textContent=error.message; }
+      finally { if(mine===generation) {busy=false; $('export').disabled=false;} }
+    }
+    function changed() { labels(); clearTimeout(timer); ++generation; $('export').disabled=true; timer=setTimeout(refresh,450); }
+    async function download(route,p) {
+      const result=await (await post(route,p)).json();
+      const link=document.createElement('a'); link.href=result.download; link.download='';
+      document.body.append(link); link.click(); link.remove();
+    }
+    function tick(time) {
+      if(playing && data && (!lastTime || time-lastTime>=data.manifest.frame_ms)) {
+        const entry=data.manifest.states[state];
+        if(lastTime) {
+          const steps=Math.min(10,Math.floor((time-lastTime)/data.manifest.frame_ms));
+          frame+=steps;
+          if(frame>=entry.frames) {if(entry.loop) frame%=entry.frames; else {frame=entry.frames-1;setPlaying(false);}}
+        }
+        lastTime=time; draw();
+      }
+      requestAnimationFrame(tick);
+    }
+    async function start() {
+      catalog=await (await fetch('/api/catalog')).json();
+      for(const [id,pack] of Object.entries(catalog.packs)) {const option=document.createElement('option');option.value=id;option.textContent=pack.name;$('pack').append(option);}
+      for(const [key,limits] of Object.entries(catalog.limits)) {$(key).min=limits[0];$(key).max=limits[1];}
+      for(const name of STATES) {const button=document.createElement('button');button.textContent=title(name);button.dataset.state=name;button.onclick=()=>selectState(name);$('modes').append(button);}
+      for(const key of Object.keys(catalog.defaults)) if(key!=='version') $(key).addEventListener('input',key==='name'?()=>{}:changed);
+      apply(catalog.defaults); selectState('idle');
+      $('reset').onclick=()=>{const pack=$('pack').value; apply({...catalog.defaults,pack});changed();};
+      $('play').onclick=()=>{if(data && frame===data.manifest.states[state].frames-1)frame=0;setPlaying(!playing);};
+      $('timeline').oninput=()=>{setPlaying(false);frame=Number($('timeline').value);draw();};
+      $('save').onclick=async()=>{
+        try {await download('/api/preset',preset());$('status').textContent='Preset ready. Check your browser’s downloads.';}
+        catch(error) {$('status').textContent=error.message;}
+      };
+      $('import').onclick=()=>$('preset-file').click();
+      $('preset-file').onchange=async()=>{
+        try {
+          const file=$('preset-file').files[0]; if(!file) return; if(file.size>8192) throw new Error('Preset is too large.');
+          const p=JSON.parse(await file.text());
+          // Validate with the same schema used to generate the preview before applying.
+          const next=await (await post('/api/preview',p)).json();
+          if(!next.manifest) throw new Error('Invalid preset.');
+          apply(p);changed();
+        } catch(error) {$('status').textContent=error.message;}
+        $('preset-file').value='';
+      };
+      $('export').onclick=async()=>{
+        if(busy) return; $('export').disabled=true; $('status').textContent='Preparing your character pack…';
+        try {await download('/api/export',preset());$('status').textContent='Character pack ready. Your preset is included.';}
+        catch(error) {$('status').textContent=error.message;}
+        finally {$('export').disabled=false;}
+      };
+      requestAnimationFrame(tick); await refresh();
+    }
+    start().catch(error=>{$('status').textContent=error.message;});
+  </script>
+</body>
+</html>
