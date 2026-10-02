@@ -101,8 +101,14 @@ crypto tests skipped for unavailable dependencies. The production avatar and
 pairing UI were rendered in the SDL simulator with a temporary 320×240 BOX-3
 board profile; the simulator does not exercise the real settings UI or drivers.
 
-No hardware was flashed or accessed during validation. Before treating the
-port as hardware-tested, check:
+An initial hardware boot check on 2026-10-02 passed after backing up the
+original flash and programming the token-configured image. The ESP32-S3 rev
+0.2 reported 16 MB PSRAM, initialized the ILI9341 display and GT911 touch
+controller, opened both audio codecs at 16 kHz stereo, and advertised over
+BLE. Microphone self-test captured both channels. A 30-second startup capture
+showed no panic or reboot loop. This verifies initialization, not end-to-end
+pairing, touch accuracy, voice quality, or power behavior. Complete these
+checks before treating the port as fully hardware-tested:
 
 1. Boot reports the BOX-3 board name and PSRAM, without panics or reset loops.
 2. The display has correct colors/orientation and touch aligns at all corners.
