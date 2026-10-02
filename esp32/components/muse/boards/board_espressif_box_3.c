@@ -31,6 +31,7 @@
 #include "muse_board.h"
 #include "muse_audio.h"
 #include "muse_mem.h"
+#include "box_3_microphone.h"
 
 static const char *TAG = "board";
 static muse_gpio_button_t s_boot;
@@ -43,6 +44,7 @@ static esp_err_t init(void)
     gpio_hold_dis(BSP_POWER_AMP_IO);
     rtc_gpio_deinit(BSP_BUTTON_CONFIG_IO);
     ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c init");
+    ESP_RETURN_ON_ERROR(box_3_microphone_init(), TAG, "microphone mute input");
     return muse_gpio_button_init(&s_boot, BSP_BUTTON_CONFIG_IO);
 }
 
@@ -93,18 +95,19 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     };
     ESP_RETURN_ON_ERROR(bsp_audio_init(&cfg), TAG, "duplex audio init");
     *spk = s_spk = bsp_audio_codec_speaker_init();
-    *mic = s_mic = bsp_audio_codec_microphone_init();
+    *mic = s_mic = box_3_microphone_create();
     return *spk && *mic ? ESP_OK : ESP_FAIL;
 }
 
 static void set_mic_gain(esp_codec_dev_handle_t mic, int db)
 {
-    db = (db / 3) * 3;   /* ES7210 PGA steps; 33 maps to the 34.5 dB step. */
-    esp_codec_dev_set_in_gain(mic, db == 33 ? 34.5f : (float)db);
+    (void)mic;
+    box_3_microphone_set_gain(db);
 }
 
 static unsigned poll_buttons(void)
 {
+    box_3_microphone_poll();
     return muse_gpio_button_poll(&s_boot);
 }
 

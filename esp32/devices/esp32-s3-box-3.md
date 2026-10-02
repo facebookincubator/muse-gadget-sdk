@@ -83,7 +83,10 @@ record a voice message and release it to send. Settings use the touchscreen.
 ## Controls and limits
 
 - BOOT/CONFIG (GPIO0): pairing confirmation, push-to-talk and wake from sleep.
-- The hardware microphone mute switch is not reassigned as a menu button.
+- The hardware microphone mute button cuts ADC power and its data output.
+  The port reads its active-low status on GPIO1 and reinitializes the ES7210
+  after unmuting; it also boots while muted. A short settling interval after
+  unmute is discarded. The button is not reassigned as a menu button.
 - The capacitive home button is not integrated; use touch settings.
 - Power off puts the ESP32 into deep sleep and disables the backlight and
   speaker amplifier. It cannot disconnect USB power; dock peripherals may
@@ -96,7 +99,7 @@ record a voice message and release it to send. Settings use the touchscreen.
 Validation for this port used ESP-IDF v6.0.1: BOX-3, AIPI, and the default C5
 firmware builds passed. The BOX-3 signed image is `0x211000` bytes with 48%
 of its 4 MB app slot free, and all overlay settings reached the generated
-configuration. The host suite ran 143 tests successfully, with three optional
+configuration. The host suite ran 144 tests successfully, with three optional
 crypto tests skipped for unavailable dependencies. The production avatar and
 pairing UI were rendered in the SDL simulator with a temporary 320×240 BOX-3
 board profile; the simulator does not exercise the real settings UI or drivers.
@@ -106,14 +109,24 @@ original flash and programming the token-configured image. The ESP32-S3 rev
 0.2 reported 16 MB PSRAM, initialized the ILI9341 display and GT911 touch
 controller, opened both audio codecs at 16 kHz stereo, and advertised over
 BLE. Microphone self-test captured both channels. A 30-second startup capture
-showed no panic or reboot loop. This verifies initialization, not end-to-end
-pairing, touch accuracy, voice quality, or power behavior. Complete these
+showed no panic or reboot loop. The owner subsequently confirmed pairing and
+audible recording chirps, but reported silent voice notes. Both ADC channels
+returned zero until reboot. The BOX-3 schematic (ADC and Mute sheets) shows
+that hardware mute removes ES7210 power; the initial BSP-only integration did
+not restore its lost configuration. The microphone adapter now rebuilds that
+configuration after unmute without restarting the speaker or shared I2S bus.
+Host coverage exercises muted boot, mute/unmute, a mute cycle during playback,
+gain restoration, sleep/wake, and initialization retries. The updated image
+booted without a panic and its acoustic loopback test measured both channels
+responding to speaker tones at all tested gain settings. Physical mute/unmute
+and intelligible voice-note validation still need owner confirmation. Complete these
 checks before treating the port as fully hardware-tested:
 
 1. Boot reports the BOX-3 board name and PSRAM, without panics or reset loops.
 2. The display has correct colors/orientation and touch aligns at all corners.
 3. BLE pairing, button confirmation and Wi-Fi reconnect work.
 4. Push-to-talk records intelligible audio, spoken replies play, volume and
-   microphone gain work, and the hardware mute switch silences capture.
+   microphone gain work, and the hardware mute button silences capture.
+   Unmuting must restore speech without RESET; also test booting while muted.
 5. Images and settings work while the network session remains connected.
 6. Screen timeout, touch/button wake, power off and BOOT/CONFIG wake work.
