@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "width": 64,
+  "height": 64,
+  "frame_ms": 40,
+  "background": "opaque",
+  "states": {
+    "boot": {
+      "file": "sprites/boot.png",
+      "frames": 75,
+      "columns": 10,
+      "rows": 8,
+      "loop": false
+    },
+    "idle": {
+      "file": "sprites/idle.png",
+      "frames": 150,
+      "columns": 10,
+      "rows": 15,
+      "loop": true
+    },
+    "listening": {
+      "file": "sprites/listening.png",
+      "frames": 100,
+      "columns": 10,
+      "rows": 10,
+      "loop": true
+    },
+    "thinking": {
+      "file": "sprites/thinking.png",
+      "frames": 100,
+      "columns": 10,
+      "rows": 10,
+      "loop": true
+    },
+    "speaking": {
+      "file": "sprites/speaking.png",
+      "frames": 100,
+      "columns": 10,
+      "rows": 10,
+      "loop": true
+    },
+    "happy": {
+      "file": "sprites/happy.png",
+      "frames": 75,
+      "columns": 10,
+      "rows": 8,
+      "loop": false
+    },
+    "off": {
+      "file": "sprites/off.png",
+      "frames": 50,
+      "columns": 10,
+      "rows": 5,
+      "loop": false
+    },
+    "error": {
+      "file": "sprites/error.png",
+      "frames": 75,
+      "columns": 10,
+      "rows": 8,
+      "loop": true
+    }
+  }
+}

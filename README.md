@@ -69,4 +69,5 @@ Dependencies fetched at build time are under their own licenses: ESP-IDF
 components (into `esp32/managed_components/`), and the simulator's LVGL and
 SDL (listed in [`esp32/simulator/THIRD_PARTY.md`](esp32/simulator/THIRD_PARTY.md)).
 
-The Apache License does not cover the [Jollybot avatar](esp32/avatar).
+The Apache License does not cover the [Jollybot avatar](esp32/avatar) or the
+[derived plush rear-view example](esp32/avatar/packs/plush-rear).

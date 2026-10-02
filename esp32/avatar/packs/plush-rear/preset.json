@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "pack": "plush-rear",
+  "name": "Booty plush",
+  "fur": "#cfbc9f",
+  "face": "#f6dfbd",
+  "eyes": "#120d0b",
+  "blush": "#f4aaa0",
+  "width": 1.0,
+  "height": 1.0,
+  "face_x": 0.0,
+  "face_y": 0.0,
+  "accessory": "none",
+  "accessory_color": "#5cb8ff"
+}
