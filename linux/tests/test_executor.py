@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import time
 
 import pytest
 
@@ -60,6 +61,16 @@ def test_system_run_times_out_and_kills_the_process_group(ex):
     result = ex.run("system.run", {"command": "sleep 30 & sleep 30", "timeout_ms": 300})
     assert result["ok"] and result["payload"]["timed_out"]
     assert result["payload"]["duration_ms"] < 5000
+
+
+def test_system_run_timeout_does_not_wait_for_a_detached_process(ex):
+    # A process that left the group with setsid survives the group kill and keeps the
+    # output pipes open. The timeout must still return promptly.
+    started = time.monotonic()
+    result = ex.run("system.run", {"command": "setsid sleep 6 & sleep 30", "timeout_ms": 500})
+    elapsed = time.monotonic() - started
+    assert result["ok"] and result["payload"]["timed_out"]
+    assert elapsed < 4
 
 
 def test_system_run_truncates_large_output(ex):
