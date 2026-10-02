@@ -38,6 +38,10 @@ dependencies:
     version: "^3.0.1"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_175\""
+  espressif/esp-box-3:
+    version: "3.2.0"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"espressif_box_3\""
   waveshare/esp32_c6_touch_amoled_1_8:
     version: "^1.0.0"
     rules:
