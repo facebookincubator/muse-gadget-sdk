@@ -31,9 +31,10 @@
 #define LV_USE_STDLIB_STRING LV_STDLIB_CLIB
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_CLIB
 
-/* Two draw units match the SenseCAP Watcher profile. SDL supplies their OS
- * primitives on supported desktop hosts. */
-#define LV_USE_OS LV_OS_SDL2
+/* Two draw units match the SenseCAP Watcher profile. Use POSIX primitives
+ * to keep the draw workers independent of SDL video shutdown. Both supported
+ * desktop hosts provide pthreads. */
+#define LV_USE_OS LV_OS_PTHREAD
 #define LV_DRAW_SW_DRAW_UNIT_CNT 2
 #define LV_DRAW_SW_COMPLEX 1
 
