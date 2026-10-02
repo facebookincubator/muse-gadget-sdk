@@ -39,6 +39,8 @@ log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_S = 120
 MAX_TIMEOUT_S = 600
+# How long to wait for output after killing a timed-out command's process group.
+KILL_GRACE_S = 2
 # /link-control accepts at most 256 KiB per message from the device; leave
 # room for the JSON envelope and escaping.
 MAX_OUTPUT_BYTES = 96 * 1024
@@ -181,7 +183,16 @@ class Executor:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            stdout, stderr = proc.communicate()
+            try:
+                stdout, stderr = proc.communicate(timeout=KILL_GRACE_S)
+            except subprocess.TimeoutExpired as exc:
+                # A process that left the group (setsid, a daemon) survived the kill and
+                # still holds the pipes. Keep what was read instead of waiting on it.
+                stdout, stderr = exc.stdout or b"", exc.stderr or b""
+                for pipe in (proc.stdout, proc.stderr):
+                    if pipe is not None:
+                        pipe.close()
+                proc.wait()
         out, out_cut = _clip(stdout)
         err, err_cut = _clip(stderr)
         return ok({
