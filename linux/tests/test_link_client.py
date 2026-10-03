@@ -216,7 +216,8 @@ def test_send_chat_posts_a_device_attributed_message_on_the_same_session():
         assert (request.kind, request.value.verb, request.value.path, request.value.end_body) == (
             "request", "POST", "/chat/stream", True)
         assert json.loads(request.value.body) == {
-            "message": "porch light on", "device_id": "homelink-abcdef", "session_id": "side-1"}
+            "message": "porch light on", "output_modality": "text", "device_id": "homelink-abcdef",
+            "session_id": "side-1"}
         headers = {h.key.lower(): h.value for h in request.value.headers}
         assert headers["content-type"] == "application/json"
         await vm.send_frame(ServiceFrame.response(

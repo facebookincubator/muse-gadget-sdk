@@ -97,7 +97,7 @@ from `$IDF_PATH`, `~/esp/esp-idf-v6.0.1`, `~/esp/esp-idf-v6` or `~/esp/esp-idf`.
 
 `tools/board.sh home-assistant-voice build` builds a status-and-voice gadget:
 the LED ring shows the status colours, holding the centre button records a
-voice note that Muse answers out loud, and the dial sets the speaker volume
+voice note that Muse answers in the app, and the dial sets the speaker volume
 (shown on the ring, kept across restarts). It advertises as
 `MuseGadget-ha-voice-XXXXXX`.
 

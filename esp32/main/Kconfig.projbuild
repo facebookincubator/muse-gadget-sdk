@@ -227,9 +227,11 @@ menu "ESP32 Device SDK"
         default y
         help
             Hold the centre button, speak, release: the audio goes to the
-            agent's chat as a voice note, and the reply is spoken. The VM
-            transcribes and synthesizes speech, over a second Noise session
-            (Muse's voice session) with Link's account. While the mute
+            agent's chat as a voice note, which the VM transcribes, and the
+            reply appears in the Muse app as text. To speak it, plug a TTS
+            API of your own into start_tts in muse_chat_session.cpp. This
+            uses a second Noise session (Muse's voice session) with Link's
+            account. While the mute
             switch is on, the button keeps its setup role (tap to confirm
             pairing, hold to reset).
 

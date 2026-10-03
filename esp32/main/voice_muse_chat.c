@@ -86,7 +86,7 @@ size_t muse_settings_hatch_token_len(void) {
     return 0;
 }
 
-// Replies are always spoken: there's no screen to show them on.
+// No screen to show replies on: anything played goes to the speaker.
 bool muse_settings_speaker_on(void) {
     return true;
 }

@@ -1322,7 +1322,7 @@ static char *build_register_json(void) {
                             "Speaker volume, 0 to 100; kept across restarts.");
     cJSON_AddItemToObject(volume_optional, "volume", volume_param);
     add_command(commands, "voice.configure",
-                "Set the speaker volume for spoken replies. Without volume, "
+                "Set the speaker volume. Without volume, "
                 "reports the current one.",
                 nullptr, volume_optional);
 #endif

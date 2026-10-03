@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# minimp3: public-domain (CC0) MP3 decoder for the Muse's spoken replies. See README.md.
+# minimp3: public-domain (CC0) MP3 decoder for replies spoken through a TTS API of your own. See README.md.
 idf_component_register(SRCS "src/minimp3.c" INCLUDE_DIRS "include")
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -Wno-unused-function)

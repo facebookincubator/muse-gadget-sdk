@@ -86,15 +86,16 @@ menu "Muse"
             Leave disabled to build without camera support.
 
     config MUSE_HATCH
-        bool "Muse's own voice session, with spoken replies"
+        bool "Muse's own voice session"
         depends on MUSE_ENABLED
         default y if SPIRAM
         default n
         help
             Push-to-talk turns go over a voice session of Muse's own, to the
             VM Home Link is paired with or one set up on the device with a
-            device token, and replies are spoken. Needs PSRAM. Without it,
-            voice notes go over Home Link's own session to its paired VM and
-            replies are shown as text only.
+            device token. Replies are text, shown as captions; start_tts in
+            muse_chat_session.cpp is where a TTS API of your own can speak
+            them. Needs PSRAM. Without it, voice notes go over Home Link's own
+            session to its paired VM and replies are shown as text.
 
 endmenu

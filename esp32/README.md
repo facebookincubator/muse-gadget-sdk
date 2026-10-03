@@ -206,6 +206,19 @@ To work on the UI without a board, use the
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
 
+Replies from Muse are text: push-to-talk sends your voice note, Muse
+transcribes it and answers in writing, and boards with a screen show the
+answer as captions (the Voice PE's replies show up in the Muse app). Two
+things you can change:
+
+- **Shorter answers.** Ask for them in the message itself, such as "Answer in
+  one sentence."
+- **Spoken answers.** Send each reply's text to a text-to-speech API of your
+  choice and play the audio it returns. On boards with PSRAM, `start_tts` in
+  [`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
+  is the spot: it has the reply text, and the MP3 decoder, speaker and volume
+  are already wired up there.
+
 A few things worth knowing:
 
 - Your SDK token ships inside the firmware, so treat it as an identifier

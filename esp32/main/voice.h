@@ -15,9 +15,10 @@
  */
 
 // Push-to-talk voice chat with the agent. Hold the button and speak; on
-// release the recording goes to the agent's chat as a voice note, and the
-// reply is spoken as it arrives. Transcription and speech both run on the VM,
-// over the voice session borrowed from Muse (muse_chat.h).
+// release the recording goes to the agent's chat as a voice note, which the
+// VM transcribes, over the voice session borrowed from Muse (muse_chat.h).
+// The reply is text and shows up in the Muse app; a TTS API of your own can
+// speak it (start_tts in muse_chat_session.cpp).
 
 #pragma once
 

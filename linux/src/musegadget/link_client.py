@@ -245,7 +245,11 @@ class LinkSession:
         has not seen before starts a new one. Without it the message goes to
         the main chat.
         """
-        request_body = {"message": message, "device_id": self._device.node_id}
+        request_body = {
+            "message": message,
+            "output_modality": "text",
+            "device_id": self._device.node_id,
+        }
         if session_id:
             request_body["session_id"] = session_id
         body = json.dumps(request_body).encode()

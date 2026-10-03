@@ -40,7 +40,7 @@ void muse_hatch_chat_forget(void);
 
 /* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
 #define MUSE_HATCH_NOTE_HEAD \
-    "{\"message\":\"\",\"output_modality\":\"voice\",\"items\":[{\"type\":\"file\"," \
+    "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
     "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44

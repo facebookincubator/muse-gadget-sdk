@@ -31,7 +31,8 @@ extern "C" {
  * Home Link uses) and runs each push-to-talk turn over it, entirely on the VM:
  *   speech -> POST /api/voice/dictation (streamed 24 kHz PCM, NDJSON transcripts)
  *   text   -> POST /chat/stream, reply events on POST /chat/subscribe
- *   reply  -> GET /api/voice/tts-stream?message_id=... (MP3, decoded here)
+ *   reply  -> text, shown at reading pace (start_tts in muse_chat_session.cpp
+ *             is where a TTS API of your own would plug in)
  *
  * Credentials: a device token, exchanged through the Muse API for the VM's own
  * token. If the account API rejects it and a VM ID is set, the token is tried
