@@ -99,7 +99,8 @@ void muse_hatch_tail_words(const char *src, char *out, size_t cap)
 /*
  * The next line of `text` wrapped to `cols` characters as the caption shows
  * them (an ellipsis as three dots, muse_text.h), splitting only words longer
- * than a line.
+ * than a line. CJK has no spaces: it breaks between characters, but never
+ * before closing punctuation.
  */
 static bool next_line(const char **text, int cols, const char **start, size_t *len)
 {
@@ -109,19 +110,26 @@ static bool next_line(const char **text, int cols, const char **start, size_t *l
     }
     const char *end = p, *brk = NULL;
     int n = 0;
+    muse_text_cjk_t prev = MUSE_TEXT_NOT_CJK;
     while (*end && *end != '\n') {
         size_t bytes;
         char shown[4];
         int w = muse_text_ascii(end, &bytes, shown);
         w = w < 0 ? 1 : w;
+        muse_text_cjk_t cjk = muse_text_cjk(end);
+        bool cjk_break = n && cjk != MUSE_TEXT_CJK_CLOSE && (cjk || prev);
         if (n + w > cols && n) {
+            if (cjk_break) {
+                brk = end;
+            }
             break;
         }
-        if (*end == ' ') {
+        if (*end == ' ' || cjk_break) {
             brk = end;
         }
         n += w;
         end += bytes;
+        prev = cjk;
     }
     if (*end && *end != ' ' && *end != '\n' && brk) {
         end = brk;   /* don't split a word */

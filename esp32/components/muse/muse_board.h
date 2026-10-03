@@ -59,6 +59,7 @@ typedef struct {
     const char *name;
     int width, height;
     bool round;             /* circular panel: keep content inside the circle */
+    int edge_px;            /* what the case hides at each edge: captions keep clear */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
     bool keyboard;          /* dedicated menu navigation keys */
@@ -66,6 +67,10 @@ typedef struct {
     const char *aux_button;     /* "bottom" */
     muse_button_hint_t talk_hint;   /* mic icon; the menu's hints follow both */
     muse_button_hint_t aux_hint;    /* power or menu icon; left out, there's none */
+    /* The menu turns a right-edge aux button's hint on end, which LVGL draws
+     * through a ~14 KB layer; set this where that's too much RAM (the C3) and
+     * the hint lies flat on the menu's bar, left of the talk button's. */
+    bool flat_menu_hints;
     int frame_ms;           /* face animation period */
 
     /* Power rails, buses, expanders. Runs first. */

@@ -66,6 +66,9 @@ menu "Muse"
         config MUSE_BOARD_M5STACK_STOPWATCH
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_AI_PASSPORT
+            bool "FoloToy AI Passport (ESP32-C3, three buttons, no touch)"
+            depends on IDF_TARGET_ESP32C3
     endchoice
 
     config MUSE_ENABLED
@@ -86,6 +89,7 @@ menu "Muse"
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB
@@ -104,6 +108,16 @@ menu "Muse"
             double-click camera preview. Camera buffers and tasks consume
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
+
+    config MUSE_CJK_FONT
+        bool "Show Chinese, Japanese and Korean in captions"
+        depends on MUSE_ENABLED
+        default n
+        help
+            Captions fall back to GNU Unifont's 16x16 bitmaps for CJK
+            punctuation, kana, the CJK Unified Ideographs and fullwidth
+            forms that the ASCII caption font lacks. Takes about 850 KB of
+            flash and no RAM. Without it those characters show as boxes.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

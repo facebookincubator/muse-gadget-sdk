@@ -883,13 +883,20 @@ const char *link_pairing_decrypt_command(cJSON *root, char **plaintext_json) {
         return "error_pairing_decrypt";
     }
 
-    uint8_t *cipher = malloc(8192);
-    uint8_t *plain = malloc(8193);
+    // Sized to the message (base64url_decode takes at most 4096 characters,
+    // so 3 KB): two fixed 8 KB buffers don't fit beside the UI on boards
+    // without PSRAM.
+    size_t cipher_cap = strlen(cipher_b64) / 4 * 3 + 3;
+    uint8_t *cipher = malloc(cipher_cap);
+    uint8_t *plain = malloc(cipher_cap + 1);
+    if (!cipher || !plain) {
+        ESP_LOGE(TAG, "no memory to decrypt a %u-byte command", (unsigned)cipher_cap);
+    }
     uint8_t tag[GCM_TAG_BYTES];
     size_t cipher_len = 0;
     size_t tag_len = 0;
     bool ok = cipher && plain
-              && base64url_decode(cipher_b64, cipher, 8192, &cipher_len)
+              && base64url_decode(cipher_b64, cipher, cipher_cap, &cipher_len)
               && base64url_decode(tag_b64, tag, sizeof(tag), &tag_len)
               && tag_len == GCM_TAG_BYTES
               && aes_gcm_decrypt(s_rx_key, cipher, cipher_len, tag,

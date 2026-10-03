@@ -33,6 +33,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Seeed SenseCAP Watcher | [Seeed-Studio/SenseCAP-Watcher-Firmware](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware) | `components/sensecap-watcher/` is Seeed's BSP. `include/sensecap-watcher.h` has the pins for the LCD, touch, knob, IO expander, audio, battery, SD card and the Himax camera chip (driven through `components/sscma_client/`). `examples/factory_firmware/` is the firmware it ships with. xiaozhi-esp32's [sensecap-watcher board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/sensecap-watcher) is a second reference. |
 | Every M5Stack board (StickS3, StickC Plus2, Cardputer ADV, StopWatch) | [m5stack/M5Unified](https://github.com/m5stack/M5Unified), and [M5GFX](https://github.com/m5stack/M5GFX) for the panels | `src/M5Unified.inl` for pins, buttons and audio. `src/utility/` for power and the battery (`Power_Class.inl`), the IMU, RTC, mic, speaker and LEDs. `src/M5GFX.cpp` in M5GFX for the panel. Search both for the model's `board_M5...` name. For the StopWatch, M5's factory firmware [m5stack/M5StopWatch-UserDemo](https://github.com/m5stack/M5StopWatch-UserDemo): `main/hal/` for the power chip, IO expander, buttons and audio, and `main/apps/app_stopwatch/view/view.cpp` for where the buttons sit. |
 | Espressif ESP32-S3-BOX-3 | [espressif/esp-bsp](https://github.com/espressif/esp-bsp) | `bsp/esp-box-3/`: pins in `include/bsp/esp-box-3.h`, LCD/touch revision detection and codecs in `esp-box-3.c`, duplex I2S in `esp-box-3_idf5.c`. |
+| FoloToy AI Passport | [FoloToy/ai-passport](https://github.com/FoloToy/ai-passport) | `components/bsp/include/bsp_pins.h` for every pin, the button ladder's windows and the I2C addresses. `components/bsp/src/` for the ST7789P3's init table (`bsp_display.c`), the ES8311 setup (`bsp_audio.c`, keep `no_dac_ref`) and the CW2017 gauge (`bsp_battery.c`). `docs/hardware-design/` has the hardware guide. |
 | AIPI Lite | xiaozhi-esp32's [aipi-lite board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/xorigin/aipi-lite) | `config.h` for pins, then `aipi-lite.cc` and `power_manager.h`. |
 | Home Assistant Voice Preview Edition | [esphome/home-assistant-voice-pe](https://github.com/esphome/home-assistant-voice-pe) | `home-assistant-voice.yaml`, its ESPHome config. |
 
@@ -200,8 +201,10 @@ The fields of `muse_board_t`:
 |---|---|
 | `name`, `width`, `height` | The panel as the UI draws it |
 | `round`, `touch` | Round panel; `touch` only if `display_start` returns an input device |
+| `edge_px` | Pixels the case hides at each edge of a rectangular panel; captions and the status row keep clear of them. 0 when the whole panel shows |
 | `keyboard` | Dedicated navigation keys: `poll_buttons` emits `MUSE_BTN_UP/DOWN/LEFT/RIGHT/ENTER/ESCAPE` presses. Enter selects and confirms pairing; Talk is not repurposed as Select while the menu is open. Defaults to false for two-button boards. |
 | `talk_button`, `aux_button` | On-screen captions ("boot", "pwr"). `talk_hint` and `aux_hint` place them next to the physical button |
+| `flat_menu_hints` | With `aux_hint` on `LV_ALIGN_RIGHT_MID` the menu turns that button's hint on end, drawn through a ~14 KB layer. Set it on a board that can't spare the RAM (the ESP32-C3): the hint lies flat on the menu's bar instead |
 | `frame_ms` | Avatar frame period: 40 on the S3 boards, 50 on the C6 |
 | `init` | Runs first: power latches, I2C bus, PMU |
 | `display_start` | Panel, LVGL and its task. Returns the display; leaves `*touch` NULL without touch |
