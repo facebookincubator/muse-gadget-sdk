@@ -68,6 +68,7 @@ BOARDS = {
     "M5Stack Cardputer ADV": "cardputer-adv",
     "M5Stack StickC Plus2": "plus2",
     "M5Stack StopWatch": "stopwatch",
+    "FoloToy AI Passport": "ai-passport",
 }
 CHAT_BOARDS = ("s3", "s3n", "aipi", "box3", "sticks3", "watcher", "stopwatch")
 

@@ -66,6 +66,9 @@ menu "Muse"
         config MUSE_BOARD_M5STACK_STOPWATCH
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_AI_PASSPORT
+            bool "FoloToy AI Passport (ESP32-C3, three buttons, no touch)"
+            depends on IDF_TARGET_ESP32C3
     endchoice
 
     config MUSE_ENABLED
@@ -86,6 +89,7 @@ menu "Muse"
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB

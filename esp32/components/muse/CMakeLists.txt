@@ -84,6 +84,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_m5stack_stickc_plus2.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH)
         list(APPEND srcs "boards/board_m5stack_stopwatch.c" "boards/muse_lcd_bands.c")
+    elseif(CONFIG_MUSE_BOARD_AI_PASSPORT)
+        list(APPEND srcs "boards/board_ai_passport.c")
     endif()
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
