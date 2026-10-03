@@ -157,7 +157,9 @@ If the panel driver isn't part of `esp_lcd` in IDF v6.0.1 (check
 `led_strip` is. Images from Muse are sized with
 `tools/image_for_display.py --width W --height H`.
 
-A status light the existing backends don't cover (another pin or LED type)
+A single addressable LED on another pin needs only the overlay:
+`CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27=y` and `CONFIG_HOMEHUB_LED_STRIP_GPIO`
+(and `CONFIG_HOMEHUB_LED_RGB_ORDER=n` for the usual GRB order). Another LED type
 follows the same two steps. Copy `DEVKIT_GPIO27` (addressable) or `PWM_RGB`.
 
 ## 6. Boards with the full UI: add a board

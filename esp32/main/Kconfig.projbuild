@@ -162,7 +162,8 @@ menu "ESP32 Device SDK"
         help
             Select the physical status LED implementation for this build. The
             Muse Home Link board uses a 3-channel PWM RGB LED. A stock
-            ESP32-C5 DevKitC-1 has a single addressable RGB LED on GPIO27.
+            ESP32-C5 DevKitC-1 has a single addressable RGB LED on GPIO27;
+            other boards with one set HOMEHUB_LED_STRIP_GPIO.
             The always-on red power LED on the DevKitC-1 is not firmware
             controlled. The ideaspark ESP32 board and the SenseCAP Indicator
             have no status LED; their displays show the status colour in bars
@@ -178,7 +179,7 @@ menu "ESP32 Device SDK"
             bool "Muse Home Link PWM RGB LED"
 
         config HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
-            bool "ESP32-C5 DevKitC-1 GPIO27 addressable RGB LED"
+            bool "Addressable RGB LED (ESP32-C5 DevKitC-1 GPIO27 by default)"
 
         config HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
             bool "ideaspark ESP32 1.9 inch ST7789 display (status bars)"
@@ -215,6 +216,17 @@ menu "ESP32 Device SDK"
             The LED on Espressif's ESP32-C5 DevKitC-1 (ESP32-C5-WROOM-1) takes
             red first, unlike the usual WS2812 green first (GRB). Turn this
             off if your board shows green as red and amber as green.
+
+    config HOMEHUB_LED_STRIP_GPIO
+        int "Addressable LED data GPIO"
+        depends on HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
+        range 0 28 if IDF_TARGET_ESP32C5
+        range 0 48
+        default 27
+        help
+            GPIO driving the single addressable status LED. The ESP32-C5
+            DevKitC-1 uses GPIO27. The build stops if the pin is one the chip
+            uses for its SPI flash or PSRAM.
 
     config HOMEHUB_DISPLAY
         bool
