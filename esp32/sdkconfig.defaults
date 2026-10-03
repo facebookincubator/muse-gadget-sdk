@@ -95,16 +95,15 @@ CONFIG_ESP_PHY_DEFAULT_INIT_IF_INVALID=y
 # esp_ota_mark_app_valid_cancel_rollback() (see ota_verify_task in app.c).
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
-# OTA image signing WITHOUT hardware secure boot. The build signs the app with
-# the RSA-3072 key below (Secure Boot v2 app-signing scheme); esp_https_ota
-# verifies the signature on every update, so only images signed by this key can
-# be installed. dev_signing_key.pem is a SHARED DEV KEY checked into the repo —
-# replace it with a secret release key (kept out of git) before shipping.
-CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
-CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
-CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
-CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
-CONFIG_SECURE_BOOT_SIGNING_KEY="dev_signing_key.pem"
+# Public/dev builds must not enable firmware signing with a repository-local
+# private key. A signing key in source control would let anyone who obtains the
+# repository create a firmware image accepted by OTA verification. Release
+# builds must explicitly enable app signing and provide a secret signing key
+# from protected build infrastructure.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=n
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=n
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=n
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
 
 # Bluetooth: NimBLE host only (smaller than Bluedroid). Needed for first-time
 # provisioning + iOS app pairing.
