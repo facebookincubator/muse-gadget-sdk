@@ -467,6 +467,18 @@ static int event_watch(void *userdata, SDL_Event *event)
     return 1;
 }
 
+static int quit_filter(void *userdata, SDL_Event *event)
+{
+    (void)userdata;
+    if (event->type == SDL_QUIT || (event->type == SDL_WINDOWEVENT &&
+        event->window.event == SDL_WINDOWEVENT_CLOSE)) {
+        s_quit = 1;
+        /* Keep shutdown on our main path so LVGL workers stop before SDL. */
+        return 0;
+    }
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     const char *scenario = NULL;
@@ -510,24 +522,30 @@ int main(int argc, char **argv)
     muse_state_init();
     muse_state_set_power(&s_power);
     muse_board = sim_board_get();
+    int result = 0;
     if (muse_board->init && muse_board->init() != ESP_OK) {
         fprintf(stderr, "simulator board initialization failed\n");
-        return 1;
+        result = 1;
+        goto shutdown;
     }
     if (muse_ui_start() != ESP_OK) {
         fprintf(stderr, "UI initialization failed\n");
-        return 1;
+        result = 1;
+        goto shutdown;
     }
     SDL_AddEventWatch(event_watch, NULL);
+    SDL_SetEventFilter(quit_filter, NULL);
     s_ready = true;
 
     if (scenario && !run_scenario(scenario, !headless)) {
-        return 2;
+        result = 2;
+        goto shutdown;
     }
     if (headless || screenshot) {
         render_for(run_ms, false);
         if (screenshot && !write_snapshot(screenshot)) {
-            return 1;
+            result = 1;
+            goto shutdown;
         }
     } else {
         while (!s_quit) {
@@ -535,7 +553,15 @@ int main(int argc, char **argv)
         }
     }
 
+shutdown:
+    s_ready = false;
     SDL_DelEventWatch(event_watch, NULL);
+    SDL_SetEventFilter(NULL, NULL);
+    /* LVGL 9.5's SDL display delete callback calls SDL_Quit during lv_deinit,
+     * before draw workers are joined. Delete the display first so SDL remains
+     * alive until LVGL workers have stopped. */
+    if (sim_board_display()) lv_display_delete(sim_board_display());
     lv_deinit();
-    return 0;
+    SDL_Quit();
+    return result;
 }
