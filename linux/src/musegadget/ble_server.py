@@ -305,7 +305,10 @@ class BleServer:
             log.info("device %s %s", path, "connected" if changed["Connected"] else "disconnected")
         if changed.get("Connected") is False:
             with self._lock:
-                ours = self._device_path in (None, path)
+                # Before the first write, there is no authenticated/selected
+                # client yet. Do not treat an unrelated device disconnect as ours;
+                # otherwise any nearby BLE device can abort an active pairing.
+                ours = self._device_path is not None and self._device_path == path
                 if ours:
                     self._device_path = None
                     self._mtu = _ASSUMED_MTU
