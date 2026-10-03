@@ -194,6 +194,15 @@ static void menu_button(bool pressed, bool edge)
     }
 }
 
+static void aux_key(bool pressed, bool edge)
+{
+    if (muse_board->touch) {
+        aux_button(pressed, edge);
+    } else {
+        menu_button(pressed, edge);
+    }
+}
+
 /* Talk button: push-to-talk, or Select while the menu is open. Asleep, the
  * press wakes and is posted as a waking one: muse_voice records only if it's
  * still held once awake. */
@@ -371,17 +380,28 @@ static void input_task(void *arg)
                      ev & MUSE_BTN_TALK_RELEASE ? " release" : "");
             talk_button(ev);
         }
+        /* A latched key (the 1.75's PMU) can report press and release in the
+         * same poll, and a release can land just before the next press; keep
+         * them ordered, as talk_button does. */
+        bool aux_press = ev & MUSE_BTN_AUX_PRESS;
+        bool aux_release = ev & MUSE_BTN_AUX_RELEASE;
         bool aux_edge = false;
-        if ((ev & MUSE_BTN_AUX_PRESS) && !aux_down) {
-            aux_down = aux_edge = true;
-        } else if ((ev & MUSE_BTN_AUX_RELEASE) && aux_down) {
+        if (aux_down && aux_release) {
             aux_down = false;
+            aux_release = false;
             aux_edge = true;
+            aux_key(false, true);
         }
-        if (muse_board->touch) {
-            aux_button(aux_down, aux_edge);
-        } else {
-            menu_button(aux_down, aux_edge);
+        if (!aux_down && aux_press) {
+            aux_down = aux_edge = true;
+            aux_key(true, true);
+            if (aux_release) {
+                aux_down = false;
+                aux_key(false, true);
+            }
+        }
+        if (!aux_edge) {
+            aux_key(aux_down, false);
         }
 
         if (s_power_off_requested) {
