@@ -117,7 +117,7 @@ class MessageDecoder:
                 continue  # keepalive
             try:
                 message = json.loads(raw)
-            except json.JSONDecodeError:
+            except ValueError:  # bad JSON, or bytes that aren't UTF-8
                 log.warning("dropping malformed control message (%d bytes)", length)
                 continue
             if isinstance(message, dict):

@@ -928,7 +928,8 @@ static size_t resample(resampler_t *r, const int16_t *in, size_t n, int16_t *out
         size_t i = r->pos >> 16;
         int32_t a = i ? in[i - 1] : r->prev;
         int32_t b = in[i];
-        out[o++] = a + (((b - a) * (int32_t)(r->pos & 0xffff)) >> 16);
+        /* (b - a) spans 17 bits and the fraction 16, so the product needs 64. */
+        out[o++] = (int16_t)(a + (int32_t)(((int64_t)(b - a) * (int64_t)(r->pos & 0xffff)) >> 16));
         r->pos += r->step;
     }
     r->pos -= n << 16;

@@ -117,6 +117,13 @@ def test_backoff_doubles_to_a_ceiling_and_honours_the_floor():
     assert backoff.next_delay() == 15
 
 
+def test_backoff_stays_at_the_ceiling_through_a_long_outage():
+    backoff = Backoff()
+    for _ in range(1100):  # 2 ** 1024 no longer fits a float
+        delay = backoff.next_delay()
+    assert delay == 60
+
+
 def refresh_with(service_kwargs, pairing, calls=1):
     """Run _maybe_refresh `calls` times on a Service built inside the loop (Python 3.9)."""
     async def scenario():

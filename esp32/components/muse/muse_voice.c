@@ -530,6 +530,11 @@ static void hold_rec(bool tried)
         go_idle("COULDN'T SAVE THE NOTE");
         return;
     }
+    if (!s_rec_n) {   /* nothing captured: realloc to 0 would free s_rec and return NULL */
+        drop_rec();
+        go_idle("HOLD LONGER TO TALK");
+        return;
+    }
     int16_t *pcm = heap_caps_realloc(s_rec, s_rec_n * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_held[s_held_count++] = (held_note_t){
         .pcm = pcm ? pcm : s_rec,

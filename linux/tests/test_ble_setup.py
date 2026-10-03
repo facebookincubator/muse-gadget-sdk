@@ -292,3 +292,23 @@ def test_writes_are_reassembled_before_dispatch():
     finally:
         h.controller.stop()
     assert h.transport.messages[0]["type"] == "pairing_ready"
+
+
+def test_provision_refusal_without_session_keys_does_not_deadlock():
+    # The session can expire between the dispatcher's confirmed check and
+    # mark_provisioning(). The refusal then goes out without keys, and that
+    # path of send_status() takes the state lock itself.
+    h = Harness()
+    h.pair()
+    sealed = h.mobile.seal(PROVISION)
+
+    def expire_then_refuse() -> int:
+        h.pairing.reset()
+        return 0
+
+    h.pairing.mark_provisioning = expire_then_refuse
+    worker = threading.Thread(target=h.send, args=(sealed,), daemon=True)
+    worker.start()
+    worker.join(2.0)
+    assert not worker.is_alive(), "provision refusal deadlocked on the state lock"
+    assert h.pairing.encrypt_status("probe") is None

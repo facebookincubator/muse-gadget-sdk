@@ -199,6 +199,12 @@ def test_decoder_rejects_oversize_messages():
         MessageDecoder().feed(struct.pack("<I", 1 << 30))
 
 
+def test_decoder_drops_messages_that_are_not_utf8():
+    garbage = b'{"a":"\xff"}'
+    data = struct.pack("<I", len(garbage)) + garbage + encode_message({"b": 2})
+    assert MessageDecoder().feed(data) == [{"b": 2}]
+
+
 def test_vm_id_is_escaped_like_encode_uri_component():
     assert noise_url("h", "a-b_c.d!~*'()?&=") == "wss://h/v1/noise?vm_id=a-b_c.d!~*'()%3F%26%3D"
 

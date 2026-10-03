@@ -265,9 +265,14 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
     }
 
     wifi_config_t wc = {0};
-    strncpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid) - 1);
+    // The driver reads these arrays without a terminator, so a 32-byte SSID
+    // (the 802.11 maximum, which wifi_known and the scan picker accept) or a
+    // 64-char PSK fills the whole field. wc is zeroed, so shorter values stay
+    // NUL-padded.
+    memcpy(wc.sta.ssid, ssid, strnlen(ssid, sizeof(wc.sta.ssid)));
     if (password) {
-        strncpy((char *)wc.sta.password, password, sizeof(wc.sta.password) - 1);
+        memcpy(wc.sta.password, password,
+               strnlen(password, sizeof(wc.sta.password)));
     }
     wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
     wc.sta.pmf_cfg.capable = true;
