@@ -55,6 +55,7 @@ before adding a feature to one.
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-box-3` | `tools/muse/board.sh build box3` |
 | AIPI Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-aipi` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18` | manual |
+| Waveshare ESP32-S3-Touch-AMOLED-1.8 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-18` | manual |
 | Seeed SenseCAP Watcher | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher` | manual |
 | M5Stack Cardputer ADV (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
@@ -116,7 +117,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -223,7 +224,7 @@ flash size and status backend.
    | `top` | Waveshare ESP32-S3-Touch-AMOLED-1.75C |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
-   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, or the ESP32-S3-Touch-AMOLED-1.75 — tell them apart by the target (`esp32c6` or `esp32s3`) |
+   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, or the ESP32-S3-Touch-AMOLED-1.75 or 1.8 — tell the C6 apart by the target (`esp32c6` or `esp32s3`), and the two S3 boards by the name `chat.py --status` reports |
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.

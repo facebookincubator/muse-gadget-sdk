@@ -21,7 +21,7 @@
 
 The board posts the text to your Muse as a typed turn and streams the reply
 back over its console (muse_hatch_text_turn in components/muse/muse_chat.h),
-so this machine needs no token or network setup. Boards with PSRAM (s3,
+so this machine needs no token or network setup. Boards with PSRAM (s3, s3-18,
 aipi, sticks3, stopwatch, watcher, plus2) can do it; the C6 can't. The Watcher needs
 firmware with MUSE_CONSOLE_UART, and its CH342 drops bytes from whole
 packets, so writes to it are paced.
