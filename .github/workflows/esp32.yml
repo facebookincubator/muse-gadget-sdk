@@ -137,6 +137,9 @@ jobs:
           - board: muse-m5stack-sticks3
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3"
+          - board: muse-m5stack-stopwatch
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch"
           - board: muse-m5stack-stickc-plus2
             target: esp32
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2"

@@ -17,9 +17,9 @@
 # sdkconfig.muse-waveshare-s3-175c, sdkconfig.muse-aipi,
 # sdkconfig.muse-waveshare-c6-18, sdkconfig.muse-sensecap-watcher,
 # sdkconfig.muse-espressif-box-3, sdkconfig.muse-m5stack-sticks3,
-# or sdkconfig.muse-m5stack-stickc-plus2. Link owns
-# Wi-Fi, BLE pairing, credentials and OTA; the display shows Link's status
-# instead of a status LED.
+# sdkconfig.muse-m5stack-stopwatch or sdkconfig.muse-m5stack-stickc-plus2.
+# Link owns Wi-Fi, BLE pairing, credentials and OTA; the display shows Link's
+# status instead of a status LED.
 CONFIG_HOMEHUB_LED_BACKEND_MUSE=y
 # These boards pair in community mode (no factory key). The Hatch app lists
 # community devices by this name, and only with hatch_link.community_devices on.

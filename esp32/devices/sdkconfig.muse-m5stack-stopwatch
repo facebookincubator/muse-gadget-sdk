@@ -1,0 +1,66 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# M5Stack StopWatch: ESP32-S3R8 (16 MB flash, 8 MB octal PSRAM), native USB,
+# round touch AMOLED. Load last, after sdkconfig.muse, which has the 16 MB
+# flash size and partition table.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_M5STACK_STOPWATCH=y
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# Static buffers in PSRAM: Wi-Fi's, lwIP's and BT's, and those marked
+# EXT_RAM_BSS_ATTR (Muse's chat turn, the tunnel batch). Without it light
+# sleep's code leaves Link under 16 KB of DMA RAM once connected, too little
+# to send link.register, so the tunnel never opens. The chip always has
+# PSRAM, so booting without it needn't be allowed.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
+# That forces Wi-Fi's TX buffers static, in internal RAM: 8, not 16, at 1.6 KB
+# each, which voice over the tunnel doesn't fill.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+
+# As on the Waveshare 1.75C, the same chip and panel. Screen off on battery: the CPU drops to the crystal clock and light-sleeps
+# between button polls (muse_input.c). BLE has to allow that with modem sleep;
+# there's no 32 kHz crystal, so its sleep clock is the main crystal, kept
+# powered. On USB power the chip stays awake at full speed.
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_BT_CTRL_MODEM_SLEEP=y
+CONFIG_BT_CTRL_MODEM_SLEEP_MODE_1=y
+CONFIG_BT_CTRL_LPCLK_SEL_MAIN_XTAL=y
+CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP=y
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# The CPU stays powered in light sleep: saving its state takes 8.5 KB of
+# internal RAM, more than Wi-Fi can spare here.
+# CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set
+# Pins keep their state in light sleep. This workaround would float them all,
+# panel and touch reset and the amp enable included.
+# CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND is not set
+# For the battery meter (muse_battery.h, ">power" on the console): time
+# actually slept, and how long each power lock kept the chip awake.
+CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
+CONFIG_PM_PROFILING=y
