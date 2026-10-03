@@ -447,6 +447,26 @@ static const lv_font_t *font_pick(const lv_font_t *full, const lv_font_t *compac
     return s_small ? compact : full;
 }
 
+#if CONFIG_MUSE_CJK_FONT
+LV_FONT_DECLARE(muse_font_cjk_16);
+#endif
+
+/* unscii-16 for captions and replies; with CONFIG_MUSE_CJK_FONT, a copy that
+ * falls back to Unifont's 16x16 CJK, the same cell, for what unscii lacks. */
+static const lv_font_t *caption_font(void)
+{
+#if CONFIG_MUSE_CJK_FONT
+    static lv_font_t font;
+    if (!font.get_glyph_dsc) {
+        font = lv_font_unscii_16;
+        font.fallback = &muse_font_cjk_16;
+    }
+    return &font;
+#else
+    return &lv_font_unscii_16;
+#endif
+}
+
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
 {
     lv_obj_t *l = lv_label_create(parent);
@@ -665,7 +685,7 @@ static void build_answer(lv_obj_t *face, int ring_in)
         int d = ring_in - spk_r - 4;   /* just inside the ring, even when swollen */
         spk_x = -(int)sqrtf((float)(d * d - spk_y * spk_y));
     }
-    const lv_font_t *font = &lv_font_unscii_16;
+    const lv_font_t *font = caption_font();
     int cw = lv_font_get_glyph_width(font, 'M', ' ');
     int pitch = lv_font_get_line_height(font) + CAPTION_LINE_SPACE;
 
@@ -869,7 +889,7 @@ static void build_screen(void)
      * these rows, so there's nowhere to put this without covering the face. */
     lv_obj_set_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
 
-    s_caption_lbl = make_label(face, font_pick(&lv_font_unscii_16, &lv_font_unscii_8), COLOR_CAPTION);
+    s_caption_lbl = make_label(face, font_pick(caption_font(), &lv_font_unscii_8), COLOR_CAPTION);
     if (s_small) {
         /* Two lines over the bottom of the face, on a dark band so they stay
          * legible. A tall screen has room to keep them above the mic icon. */
