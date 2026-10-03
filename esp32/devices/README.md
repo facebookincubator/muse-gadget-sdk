@@ -36,6 +36,7 @@ session to Muse. The rest depends on the hardware.
 | **Home Assistant Voice Preview Edition** | ESP32-S3 | None (12-LED ring) | 16 MB / 8 MB | [ESPHome repo](https://github.com/esphome/home-assistant-voice-pe) | [Home Assistant](https://www.home-assistant.io/voice-pe/) |
 | **Waveshare ESP32-S3-Touch-AMOLED-1.75C** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 32 MB / 8 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75C), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75C) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.75c.htm) |
 | **Waveshare ESP32-S3-Touch-AMOLED-1.75** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm) |
+| **OSTB EchoEar-2ST (experimental)** | ESP32-S3 rev 0.2 | 1.85" 360×360 round ST77916 LCD, touch | 16 MB / 8 MB octal (measured) | [Product](https://docs.yishierniao.cn/details/ai/echoear-2st/product.html), [setup](ostb-echoear-2st.md) | — |
 | **Espressif ESP32-S3-BOX-3** | ESP32-S3 | 2.4" 320×240 LCD, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3), [ESP-BOX](https://github.com/espressif/esp-box) | — |
 | **AIPI Lite** | ESP32-S3 | 128×128 LCD | 16 MB / 8 MB | [xiaozhi-esp32 board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/xorigin/aipi-lite) | [AliExpress](https://www.aliexpress.com/w/wholesale-aipi-lite.html) |
 | **Waveshare ESP32-C6-Touch-AMOLED-1.8** | ESP32-C6 | 1.8" 368×448 AMOLED, touch | 16 MB / none | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-C6-Touch-AMOLED-1.8) | [Waveshare](https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm) |
@@ -45,21 +46,29 @@ session to Muse. The rest depends on the hardware.
 | **M5Stack StopWatch** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/StopWatch), [M5Unified](https://github.com/m5stack/M5Unified), [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo) | — |
 | **M5Stack StickC Plus2** | ESP32 | 1.14" 135×240 LCD | 8 MB / 2 MB | [M5Stack docs](https://docs.m5stack.com/en/core/M5StickC%20PLUS2), [M5Unified](https://github.com/m5stack/M5Unified) | [M5Stack](https://shop.m5stack.com/products/m5stickc-plus2-esp32-mini-iot-development-kit) (end of life) |
 
+The experimental [OSTB EchoEar-2ST port](ostb-echoear-2st.md) targets the
+measured 16 MB flash / 8 MB PSRAM unit. Its hardware and validation limits
+are documented separately; this is not a generic ESP-VoCat profile.
+
 ## Features
 
-| | DevKitC-1 | ideaspark | SenseCAP Indicator | reTerminal E1001 | HA Voice PE | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: | :-: |:-:|
-| Home-network tunnel | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| Shows status on | Light | Screen | Screen | E-paper | Light ring | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
-| Images from Muse | — | ✅ | ✅ | Black and white | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| UI and settings | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ |
-| Push-to-talk | — | — | — | — | ✅ | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ |
-| Speaker and mic | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ |
-| Air sensors | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — |
-| Touch | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ |
-| Battery status | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ |
-| Over-the-air updates | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On |
-| Buttons | BOOT | BOOT | Top | Green | Centre (talk), dial | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR |
+| | DevKitC-1 | ideaspark | SenseCAP Indicator | reTerminal E1001 | HA Voice PE | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | EchoEar-2ST* |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: | :-: |:-:| :-: |
+| Home-network tunnel | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled |
+| Shows status on | Light | Screen | Screen | E-paper | Light ring | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
+| Images from Muse | — | ✅ | ✅ | Black and white | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled |
+| UI and settings | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | Experimental |
+| Push-to-talk | — | — | — | — | ✅ | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | Screen mic |
+| Speaker and mic | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ES8311 / ES7210 |
+| Air sensors | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Touch | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ |
+| Battery status | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | Unverified |
+| Over-the-air updates | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On |
+| Buttons | BOOT | BOOT | Top | Green | Centre (talk), dial | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | Touch; bottom power button |
+
+*EchoEar-2ST entries describe configured capabilities. The prototype was checked
+for display, touch pairing, recording and local playback; the cleaned branch
+has not been flashed. See [validation limits](ostb-echoear-2st.md#validation).
 
 Boards without PSRAM (the ideaspark, Waveshare C6 and Cardputer ADV) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
@@ -221,6 +230,14 @@ enters deep sleep; BOOT/CONFIG or RESET wakes the unit.
 See [BOX-3 setup](esp32-s3-box-3.md) for PowerShell build and flash commands,
 token setup, and the hardware verification checklist.
 
+## OSTB EchoEar-2ST
+
+Experimental port for the measured 16 MB / 8 MB unit. Hold the screen
+microphone to talk and release it to send; press the screen when the Muse app
+requests pairing confirmation. The bottom button controls physical power.
+Firmware power-off is unsupported; battery telemetry, IMU and SD are unverified.
+See [EchoEar setup](ostb-echoear-2st.md) for pins, builds and validation limits.
+
 ## Build
 
 From the `esp32` directory, load `sdkconfig.defaults` first and then the
@@ -235,6 +252,7 @@ board's overlays, in order:
 | Home Assistant Voice PE | `esp32s3` | [`devices/sdkconfig.home-assistant-voice`](sdkconfig.home-assistant-voice) | `tools/board.sh home-assistant-voice build` |
 | Waveshare S3 1.75C | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175c`](sdkconfig.muse-waveshare-s3-175c) | by hand |
 | Waveshare S3 1.75 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175`](sdkconfig.muse-waveshare-s3-175) | by hand |
+| OSTB EchoEar-2ST (experimental) | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-ostb-echoear-2st`](sdkconfig.muse-ostb-echoear-2st) | `tools/muse/board.sh build echoear` |
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-espressif-box-3`](sdkconfig.muse-espressif-box-3) | `tools/muse/board.sh build box3` |
 | AIPI Lite | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-aipi`](sdkconfig.muse-aipi) | by hand |
 | Waveshare C6 1.8 | `esp32c6` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-c6-18`](sdkconfig.muse-waveshare-c6-18) | by hand |

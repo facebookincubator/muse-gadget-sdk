@@ -17,6 +17,7 @@
 #include "muse_input.h"
 
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +47,13 @@
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
+
+static atomic_uint s_touch_talk_events;
+
+void muse_input_touch_talk(bool pressed)
+{
+    atomic_fetch_or(&s_touch_talk_events, pressed ? MUSE_BTN_TALK_PRESS : MUSE_BTN_TALK_RELEASE);
+}
 
 static const char *TAG = "muse_input";
 
@@ -398,7 +406,7 @@ static void input_task(void *arg)
     TickType_t powered = xTaskGetTickCount() - pdMS_TO_TICKS(POWER_MS);
 
     for (;;) {
-        unsigned ev = muse_board->poll_buttons();
+        unsigned ev = muse_board->poll_buttons() | atomic_exchange(&s_touch_talk_events, 0);
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",
                      ev & MUSE_BTN_TALK_RELEASE ? " release" : "");

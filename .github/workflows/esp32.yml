@@ -104,6 +104,9 @@ jobs:
           - board: devkit
             target: esp32c5
             overlays: ""
+          - board: echoear-2st
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-ostb-echoear-2st"
           - board: ideaspark
             target: esp32
             overlays: ";devices/sdkconfig.ideaspark"

@@ -61,6 +61,7 @@ typedef struct {
     bool round;             /* circular panel: keep content inside the circle */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
+    bool touch_talk;        /* on-screen mic supplies talk edges; no physical talk button */
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */
     const char *aux_button;     /* "bottom" */
