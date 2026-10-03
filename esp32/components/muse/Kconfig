@@ -63,6 +63,10 @@ menu "Muse"
             bool "M5Stack StickC Plus2 (ESP32, two buttons, no touch)"
             depends on IDF_TARGET_ESP32
 
+        config MUSE_BOARD_ESP32_S31_KORVO_1
+            bool "Espressif ESP32-S31-Korvo-1 (S31, ES8389, 800x480 RGB LCD)"
+            depends on IDF_TARGET_ESP32S31
+
         config MUSE_BOARD_M5STACK_STOPWATCH
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
@@ -88,6 +92,7 @@ menu "Muse"
         default "sensecap_watcher" if MUSE_BOARD_SENSECAP_WATCHER
         default "m5stack_sticks3" if MUSE_BOARD_M5STACK_STICKS3
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
+        default "esp32_s31_korvo_1" if MUSE_BOARD_ESP32_S31_KORVO_1
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
