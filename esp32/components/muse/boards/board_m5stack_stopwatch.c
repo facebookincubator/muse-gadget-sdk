@@ -510,6 +510,12 @@ static esp_err_t read_power(muse_power_t *out)
     return ESP_OK;
 }
 
+static void panel_off(void *arg)
+{
+    (void)arg;
+    esp_lcd_panel_disp_on_off(s_panel, false);
+}
+
 /*
  * Screen, touch, audio and the L3B rail off, then deep sleep until either
  * button is pressed. Double-clicking the power button has the power chip cut
@@ -518,9 +524,12 @@ static esp_err_t read_power(muse_power_t *out)
 static esp_err_t power_off(void)
 {
     set_brightness(0);
-    esp_lcd_panel_disp_on_off(s_panel, false);
+    muse_lcd_bands_run(panel_off, NULL);
+    /* Best effort: with the screen already off on battery (display_pause) the
+     * touch controller is asleep and doesn't answer. */
     reg_write(s_tp, TP_REG_SLEEP, (uint8_t[]){ 0x03 }, 1);
-    ioe_set(IOE_SPK | IOE_AUDIO | IOE_L3B, false);
+    /* Sleeping with these still powered would drain the battery. */
+    ESP_RETURN_ON_ERROR(ioe_set(IOE_SPK | IOE_AUDIO | IOE_L3B, false), TAG, "rails off");
     while (gpio_get_level(TALK_GPIO) == 0 || gpio_get_level(AUX_GPIO) == 0) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
