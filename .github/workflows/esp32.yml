@@ -128,6 +128,9 @@ jobs:
           - board: muse-waveshare-c6-18
             target: esp32c6
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18"
+          - board: muse-waveshare-s3-18
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-18"
           - board: muse-sensecap-watcher
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher"
