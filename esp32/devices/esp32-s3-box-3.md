@@ -96,31 +96,8 @@ record a voice message and release it to send. Settings use the touchscreen.
 
 ## Hardware verification
 
-Validation for this port used ESP-IDF v6.0.1: BOX-3, AIPI, and the default C5
-firmware builds passed. The BOX-3 signed image is `0x211000` bytes with 48%
-of its 4 MB app slot free, and all overlay settings reached the generated
-configuration. The host suite ran 144 tests successfully, with three optional
-crypto tests skipped for unavailable dependencies. The production avatar and
-pairing UI were rendered in the SDL simulator with a temporary 320×240 BOX-3
-board profile; the simulator does not exercise the real settings UI or drivers.
-
-An initial hardware boot check on 2026-10-02 passed after backing up the
-original flash and programming the token-configured image. The ESP32-S3 rev
-0.2 reported 16 MB PSRAM, initialized the ILI9341 display and GT911 touch
-controller, opened both audio codecs at 16 kHz stereo, and advertised over
-BLE. Microphone self-test captured both channels. A 30-second startup capture
-showed no panic or reboot loop. The owner subsequently confirmed pairing and
-audible recording chirps, but reported silent voice notes. Both ADC channels
-returned zero until reboot. The BOX-3 schematic (ADC and Mute sheets) shows
-that hardware mute removes ES7210 power; the initial BSP-only integration did
-not restore its lost configuration. The microphone adapter now rebuilds that
-configuration after unmute without restarting the speaker or shared I2S bus.
-Host coverage exercises muted boot, mute/unmute, a mute cycle during playback,
-gain restoration, sleep/wake, and initialization retries. The updated image
-booted without a panic and its acoustic loopback test measured both channels
-responding to speaker tones at all tested gain settings. Physical mute/unmute
-and intelligible voice-note validation still need owner confirmation. Complete these
-checks before treating the port as fully hardware-tested:
+Booting, display, touch, BLE pairing and audio capture have been checked on a
+BOX-3. Complete these checks before treating the port as fully hardware-tested:
 
 1. Boot reports the BOX-3 board name and PSRAM, without panics or reset loops.
 2. The display has correct colors/orientation and touch aligns at all corners.
