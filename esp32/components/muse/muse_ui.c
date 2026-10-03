@@ -33,6 +33,7 @@
 
 #include "muse_ble.h"
 #include "muse_board.h"
+#include "muse_input.h"
 #include "muse_chat.h"
 #include "muse_console.h"
 #include "muse_link.h"
@@ -418,6 +419,21 @@ static void set_mic_color(uint32_t color)
     }
 }
 
+static void on_touch_mic(lv_event_t *e)
+{
+    switch (lv_event_get_code(e)) {
+    case LV_EVENT_PRESSED:
+        muse_input_touch_talk(true);
+        break;
+    case LV_EVENT_RELEASED:
+    case LV_EVENT_PRESS_LOST:
+        muse_input_touch_talk(false);
+        break;
+    default:
+        break;
+    }
+}
+
 /* Icons beside the physical buttons, in place of an instruction caption. */
 static void build_button_icons(lv_obj_t *face)
 {
@@ -425,6 +441,14 @@ static void build_button_icons(lv_obj_t *face)
     s_mic_icon = make_mic(face, s_tall ? 24 : s_small ? 12 : 26);
     lv_obj_align(s_mic_icon, t->align, t->x, t->y);
     set_mic_color(COLOR_DIM);
+    if (muse_board->touch_talk) {
+        lv_obj_add_flag(s_mic_icon, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(s_mic_icon, 12);
+        for (uint32_t i = 0; i < lv_obj_get_child_count(s_mic_icon); i++) {
+            lv_obj_remove_flag(lv_obj_get_child(s_mic_icon, i), LV_OBJ_FLAG_CLICKABLE);
+        }
+        lv_obj_add_event_cb(s_mic_icon, on_touch_mic, LV_EVENT_ALL, NULL);
+    }
 
     /* Without touch the aux button opens the menu rather than sleeping. A board
      * that leaves aux_hint out has no button to put an icon beside. */
@@ -987,6 +1011,10 @@ static void on_camera_hint_clicked(lv_event_t *e)
 static void on_any_press(lv_event_t *e)
 {
     (void)e;
+    if (muse_board->touch_talk && muse_link_state() == MUSE_LINK_CONFIRM) {
+        muse_input_touch_talk(true);
+        muse_input_touch_talk(false);
+    }
     muse_state_poke();
 }
 
@@ -1211,8 +1239,12 @@ static void update_chrome(float now)
     if (b.passkey || confirm) {
         char code[24], hint[40];
         if (confirm) {
-            strlcpy(code, s_small ? "Press" : "Press button", sizeof(code));
-            snprintf(hint, sizeof(hint), s_small ? "%s button" : "Press the %s button", muse_board->talk_button);
+            strlcpy(code, muse_board->touch_talk ? "Tap screen" : s_small ? "Press" : "Press button", sizeof(code));
+            if (muse_board->touch_talk) {
+                strlcpy(hint, "Tap to confirm pairing", sizeof(hint));
+            } else {
+                snprintf(hint, sizeof(hint), s_small ? "%s button" : "Press the %s button", muse_board->talk_button);
+            }
         } else {
             snprintf(code, sizeof(code), "%06lu", (unsigned long)b.passkey);
             strlcpy(hint, s_small ? "Enter on phone" : "Enter it on your phone", sizeof(hint));
