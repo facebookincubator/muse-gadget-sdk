@@ -185,6 +185,9 @@ jobs:
           - board: muse-vn-s3-183
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-vn-s3-183"
+          - board: muse-ai-passport
+            target: esp32c3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport"
     defaults:
       run:
         shell: bash

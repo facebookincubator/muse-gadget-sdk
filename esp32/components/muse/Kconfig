@@ -95,6 +95,9 @@ menu "Muse"
         config MUSE_BOARD_VN_S3_183
             bool "VN ESP32-S3 board (1.83\" 284x240 NV3023 LCD, ES8311 and ES7210)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_AI_PASSPORT
+            bool "FoloToy AI Passport (ESP32-C3, three buttons, no touch)"
+            depends on IDF_TARGET_ESP32C3
     endchoice
 
     config MUSE_ENABLED
@@ -123,6 +126,7 @@ menu "Muse"
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
         default "waveshare_s3_lcd7" if MUSE_BOARD_WAVESHARE_S3_LCD7
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
+        default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB

@@ -23,14 +23,15 @@ endif()
 
 # Old generated profiles retain 64 KiB TCP buffers and can exhaust the DMA heap
 # during tunnel bursts even when sdkconfig.defaults has been updated.
-# TCP limits: the no-PSRAM Cardputer has no tunnel and uses four-MSS windows.
+# TCP limits: the no-PSRAM Cardputer and AI Passport have no tunnel and use
+# four-MSS windows.
 if((NOT CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 16384 OR
     NOT CONFIG_LWIP_TCP_WND_DEFAULT EQUAL 16384) AND
-   NOT (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV AND NOT CONFIG_SPIRAM AND
+   NOT ((CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV OR CONFIG_MUSE_BOARD_AI_PASSPORT) AND NOT CONFIG_SPIRAM AND
         NOT CONFIG_HOMEHUB_TUNNEL AND CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 5760 AND
         CONFIG_LWIP_TCP_WND_DEFAULT EQUAL 5760))
     message(FATAL_ERROR
-        "ESP32 Device SDK requires TCP send buffer and receive window 16384 (5760 on the no-tunnel Cardputer ADV) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
+        "ESP32 Device SDK requires TCP send buffer and receive window 16384 (5760 on the no-tunnel Cardputer ADV and AI Passport) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
 endif()
 
 # A token from gadgets.muse.ai is mgst_ plus 43 canonical base64url characters.
