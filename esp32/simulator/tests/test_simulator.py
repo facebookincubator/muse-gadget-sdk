@@ -20,9 +20,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 
 WIDTH = HEIGHT = 412
 HERE = Path(__file__).resolve().parent
@@ -70,6 +72,25 @@ def main() -> None:
     binary = args.binary.resolve()
     assert binary.is_file(), binary
     assert SCENARIOS, "no simulator scenarios found"
+
+    # Signals must join the drawing workers before SDL2-compat tears down SDL3.
+    # Run the interactive loop with dummy video so it stays alive until signaled.
+    for stop_signal in (signal.SIGINT, signal.SIGTERM):
+        proc = subprocess.Popen(
+            [str(binary)],
+            env={**os.environ, "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        try:
+            time.sleep(0.5)
+            assert proc.poll() is None, "simulator exited before shutdown signal"
+            proc.send_signal(stop_signal)
+            stdout, stderr = proc.communicate(timeout=10)
+            assert proc.returncode == 0, f"{stop_signal}:\n{stdout}\n{stderr}"
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
 
     with tempfile.TemporaryDirectory(prefix="muse-simulator-test-") as tmp:
         tmp_path = Path(tmp)
