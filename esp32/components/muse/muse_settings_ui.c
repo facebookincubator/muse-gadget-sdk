@@ -193,6 +193,8 @@ static lv_obj_t *back_button(lv_obj_t *p)
 /* A page: title, optional back arrow, and a vertically scrolling column. */
 static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **list_out)
 {
+    const bool compact = !muse_board->round && muse_board->height <= 240;
+    const int list_top = compact ? (back ? 48 : 36) : LIST_TOP;
     lv_obj_t *p = lv_obj_create(tile);
     lv_obj_remove_style_all(p);
     lv_obj_set_size(p, lv_pct(100), lv_pct(100));
@@ -200,22 +202,27 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
     lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
     catch_swipes(p);
 
-    lv_obj_t *t = label(p, &lv_font_unscii_16, COLOR_ACCENT, title);
-    lv_obj_set_style_text_letter_space(t, 2, 0);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_t *t = label(p, compact ? &lv_font_montserrat_16 : &lv_font_unscii_16, COLOR_ACCENT, title);
+    lv_obj_set_style_text_letter_space(t, compact ? 0 : 2, 0);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, compact ? (back ? 12 : 8) : 44);
 
     if (back) {
-        back_button(p);
+        lv_obj_t *b = back_button(p);
+        if (compact) {
+            lv_obj_set_size(b, 44, 44);
+            lv_obj_align(b, LV_ALIGN_TOP_LEFT, 4, 0);
+        }
     }
 
     lv_obj_t *list = lv_obj_create(p);
     lv_obj_remove_style_all(list);
-    lv_obj_set_size(list, LIST_W, muse_board->height - LIST_TOP);
-    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, LIST_TOP);
+    lv_obj_set_size(list, compact ? muse_board->width - 16 : LIST_W, muse_board->height - list_top);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, list_top);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(list, 10, 0);
-    lv_obj_set_style_pad_bottom(list, 110, 0);   /* lets the last row scroll up out of the bottom curve */
+    /* Clear the page dots on flat panels, or the bottom curve on round ones. */
+    lv_obj_set_style_pad_bottom(list, compact ? 32 : 110, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     *list_out = list;

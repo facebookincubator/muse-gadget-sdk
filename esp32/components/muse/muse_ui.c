@@ -879,7 +879,8 @@ static void build_screen(void)
         lv_obj_set_style_bg_color(s_caption_lbl, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, s_tall ? -30 : -3);
+        /* Touch screens need the caption above the navigation dots too. */
+        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
 
         s_bar = lv_obj_create(face);
         lv_obj_remove_style_all(s_bar);
