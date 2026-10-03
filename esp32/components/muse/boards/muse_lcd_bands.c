@@ -47,6 +47,8 @@ static SemaphoreHandle_t s_chunk_free;   /* internal buffers not on the wire */
 static uint8_t *s_chunk[2];
 static size_t s_chunk_bytes;
 static int s_chunks_out;                 /* of the band being sent */
+static SemaphoreHandle_t s_band_done;    /* given once the band LVGL queued has gone */
+static volatile bool s_band_busy;        /* queued and not yet gone */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /* A piece has gone, or failed to; true if it was the band's last. */
@@ -65,7 +67,12 @@ static bool IRAM_ATTR on_chunk_sent(esp_lcd_panel_io_handle_t io, esp_lcd_panel_
     (void)ctx;
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_chunk_free, &woken);
-    bool yield = chunk_done() && esp_lv_adapter_display_notify_color_trans_done_from_isr(s_disp);
+    bool yield = false;
+    if (chunk_done()) {
+        s_band_busy = false;
+        xSemaphoreGiveFromISR(s_band_done, &woken);
+        yield = esp_lv_adapter_display_notify_color_trans_done_from_isr(s_disp);
+    }
     return yield || woken == pdTRUE;
 }
 
@@ -76,7 +83,29 @@ static esp_err_t queue_band(lv_display_t *disp, esp_lcd_panel_handle_t panel, in
     (void)panel;
     (void)ctx;
     band_t b = { data, x1, y1, x2, y2 };
-    return xQueueSend(s_bands, &b, 0) == pdTRUE ? ESP_OK : ESP_FAIL;
+    xSemaphoreTake(s_band_done, 0);   /* left by a band that had gone before LVGL waited for it */
+    s_band_busy = true;
+    if (xQueueSend(s_bands, &b, 0) != pdTRUE) {
+        s_band_busy = false;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+/*
+ * LVGL's wait for a band to go, in place of its own, which spins. LVGL's task
+ * can be running above the send task when it gets here: it holds two mutexes
+ * while it draws, and once a higher task has waited for either, FreeRTOS keeps
+ * it at that task's priority until it has let go of both. Spinning there, it
+ * would keep the send task off the core for good, with the band still queued.
+ * The timeout is only a second look at s_band_busy.
+ */
+static void wait_band(lv_display_t *disp)
+{
+    (void)disp;
+    while (s_band_busy) {
+        xSemaphoreTake(s_band_done, pdMS_TO_TICKS(100));
+    }
 }
 
 /*
@@ -109,6 +138,8 @@ static void send_bands(void *arg)
             if (err != ESP_OK) {
                 xSemaphoreGive(s_chunk_free);
                 if (chunk_done()) {
+                    s_band_busy = false;
+                    xSemaphoreGive(s_band_done);
                     lv_display_flush_ready(s_disp);
                 }
             }
@@ -128,9 +159,10 @@ lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int l
     s_call_lock = xSemaphoreCreateMutex();
     s_call_done = xSemaphoreCreateBinary();
     s_chunk_free = xSemaphoreCreateCounting(2, 2);
+    s_band_done = xSemaphoreCreateBinary();
     s_chunk[0] = heap_caps_malloc(chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     s_chunk[1] = heap_caps_malloc(chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!s_bands || !s_call_lock || !s_call_done || !s_chunk_free || !s_chunk[0] || !s_chunk[1] ||
+    if (!s_bands || !s_call_lock || !s_call_done || !s_chunk_free || !s_band_done || !s_chunk[0] || !s_chunk[1] ||
         xTaskCreatePinnedToCore(send_bands, "lcd_send", 2560, NULL, MUSE_UI_PRIORITY + 1, NULL, MUSE_UI_CORE) != pdPASS) {
         return NULL;
     }
@@ -146,6 +178,7 @@ lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int l
         return NULL;
     }
     lv_display_set_color_format(s_disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
+    lv_display_set_flush_wait_cb(s_disp, wait_band);
     const esp_lv_adapter_draw_bitmap_callbacks_t draw_cbs = { .custom_draw_bitmap = queue_band };
     esp_lv_adapter_set_draw_bitmap_callbacks(s_disp, &draw_cbs, NULL);
     return s_disp;
