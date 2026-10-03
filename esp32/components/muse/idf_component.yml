@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
+# Modified 2026 by Patrick McDowell for the M5Stack Core2 port.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -62,3 +63,7 @@ dependencies:
     version: "^2.2.0"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"m5stack_stopwatch\""
+  espressif/m5stack_core_2:
+    version: "^3.0.3"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"m5stack_core2\""

@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
+# Modified 2026 by Patrick McDowell for the M5Stack Core2 port.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -70,6 +71,10 @@ menu "Muse"
         config MUSE_BOARD_M5STACK_CORES3
             bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_M5STACK_CORE2
+            bool "M5Stack Core2 v1.0 (ESP32, touch LCD, touch-strip talk)"
+            depends on IDF_TARGET_ESP32
     endchoice
 
     config MUSE_ENABLED
@@ -91,6 +96,7 @@ menu "Muse"
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
+        default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB

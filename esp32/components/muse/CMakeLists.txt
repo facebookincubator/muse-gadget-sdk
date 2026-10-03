@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
+# Modified 2026 by Patrick McDowell for the M5Stack Core2 port.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -83,6 +84,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_m5stack_stopwatch.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_CORES3)
         list(APPEND srcs "boards/board_m5stack_cores3.c")
+    elseif(CONFIG_MUSE_BOARD_M5STACK_CORE2)
+        list(APPEND srcs "boards/board_m5stack_core2.c")
     endif()
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
