@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import pwd
+import select
 import shutil
 import signal
 import socket
@@ -170,29 +171,32 @@ class Executor:
             proc = subprocess.Popen(
                 ["/bin/bash", "-c", command], cwd=cwd,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                bufsize=0,
                 **self._child_options(),
             )
         except OSError as exc:
             return error(f"could not start command: {exc}")
-        timed_out = False
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+        timed_out, stdout, stderr = _wait_for_shell(proc, timeout_s)
+        if timed_out:
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None and not pipe.closed:
+                    os.set_blocking(pipe.fileno(), True)
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             try:
-                stdout, stderr = proc.communicate(timeout=KILL_GRACE_S)
+                more_out, more_err = proc.communicate(timeout=KILL_GRACE_S)
             except subprocess.TimeoutExpired as exc:
                 # A process that left the group (setsid, a daemon) survived the kill and
                 # still holds the pipes. Keep what was read instead of waiting on it.
-                stdout, stderr = exc.stdout or b"", exc.stderr or b""
+                more_out, more_err = exc.stdout or b"", exc.stderr or b""
                 for pipe in (proc.stdout, proc.stderr):
                     if pipe is not None:
                         pipe.close()
                 proc.wait()
+            stdout += more_out
+            stderr += more_err
         out, out_cut = _clip(stdout)
         err, err_cut = _clip(stderr)
         return ok({
@@ -214,6 +218,58 @@ class Executor:
             return json.loads(proc.stdout)
         except json.JSONDecodeError:
             return error(proc.stderr.decode(errors="replace")[-2000:] or "file operation failed")
+
+
+def _read_available(pipe) -> tuple[bytes, bool]:
+    chunks = []
+    while True:
+        try:
+            chunk = pipe.read(65536)
+        except BlockingIOError:
+            return b"".join(chunks), True
+        if chunk is None:
+            return b"".join(chunks), True
+        if chunk == b"":
+            return b"".join(chunks), False
+        chunks.append(chunk)
+
+
+def _wait_for_shell(proc, timeout_s: float) -> tuple[bool, bytes, bytes]:
+    # Wait until the shell exits. Read only bytes already queued so a grandchild
+    # that inherited the pipes cannot hold this open until EOF.
+    streams: dict = {}
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is None:
+            continue
+        os.set_blocking(pipe.fileno(), False)
+        streams[pipe] = []
+    watching = list(streams)
+    deadline = time.monotonic() + timeout_s
+    while proc.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return True, _joined(streams, proc.stdout), _joined(streams, proc.stderr)
+        if not watching:
+            time.sleep(min(remaining, 0.05))
+            continue
+        ready, _, _ = select.select(watching, [], [], min(remaining, 0.05))
+        for pipe in ready:
+            data, still_open = _read_available(pipe)
+            if data:
+                streams[pipe].append(data)
+            if not still_open:
+                watching.remove(pipe)
+    for pipe in streams:
+        if pipe.closed:
+            continue
+        data, _ = _read_available(pipe)
+        if data:
+            streams[pipe].append(data)
+    return False, _joined(streams, proc.stdout), _joined(streams, proc.stderr)
+
+
+def _joined(streams: dict, pipe) -> bytes:
+    return b"".join(streams.get(pipe, ()))
 
 
 def _clip(data: bytes) -> tuple[str, bool]:
