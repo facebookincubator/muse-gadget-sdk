@@ -256,6 +256,12 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 Run `idf.py build` once first so the downloaded components are in place.
 
+Two crypto tests are skipped unless the host has what they need. Install the
+host Mbed TLS library (`brew install mbedtls pkgconf` on macOS,
+`apt-get install libmbedtls-dev pkg-config` on Debian or Ubuntu), and run the
+tests from a terminal where you ran ESP-IDF's `export.sh`, which sets
+`IDF_PATH`. The last line of the output shows `skipped=` if any were left out.
+
 ## Community
 
 Meet other hackers who are building and customizing Muse gadgets in our

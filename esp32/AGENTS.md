@@ -460,6 +460,16 @@ Run one `idf.py build` first: `test_link_discovery` compiles cJSON from
 `managed_components/`, and that directory only exists after a build. Set `CC`
 or `CXX` to change compilers.
 
+Two tests skip quietly when their inputs are missing; check the summary for
+`skipped=`:
+
+- `test_noise_core` links against the host's PSA Crypto library, found with
+  `pkg-config mbedcrypto`. Install `libmbedtls-dev` and `pkg-config` on Debian
+  or Ubuntu (as CI does), or `mbedtls` and `pkgconf` with Homebrew.
+- `test_link_pairing_handshake` builds Mbed TLS from source for its
+  real-crypto case, so it needs `IDF_PATH` (set by `export.sh`) or
+  `MBEDTLS_SOURCE_DIR`.
+
 ## Before you hand back work
 
 1. `idf.py build` (and the board build you touched) passes, with the size check
