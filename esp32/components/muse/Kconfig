@@ -67,6 +67,10 @@ menu "Muse"
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_M5STACK_CORES3
+            bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_GUITION_JC3248W535
             bool "Guition JC3248W535 (ESP32-S3, 3.5\" 320x480 touch LCD, speaker)"
             depends on IDF_TARGET_ESP32S3
@@ -90,6 +94,7 @@ menu "Muse"
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
         default "none"
 
@@ -99,6 +104,12 @@ menu "Muse"
     config MUSE_CONSOLE_UART
         bool
         default y if MUSE_BOARD_SENSECAP_WATCHER || !SOC_USB_SERIAL_JTAG_SUPPORTED
+
+    # A board overlay can raise this for a quiet speaker.
+    config MUSE_DEFAULT_VOLUME
+        int "Speaker volume until one is chosen in settings (percent)"
+        range 0 100
+        default 70
 
     config MUSE_WATCHER_CAMERA
         bool "SenseCAP Watcher camera capture and live preview"

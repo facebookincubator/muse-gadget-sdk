@@ -143,6 +143,9 @@ jobs:
           - board: muse-m5stack-stopwatch
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch"
+          - board: muse-m5stack-cores3
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3"
           - board: muse-guition-jc3248w535
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535"
