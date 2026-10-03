@@ -66,6 +66,10 @@ menu "Muse"
         config MUSE_BOARD_M5STACK_STOPWATCH
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_GUITION_JC3248W535
+            bool "Guition JC3248W535 (ESP32-S3, 3.5\" 320x480 touch LCD, speaker)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -86,6 +90,7 @@ menu "Muse"
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB
@@ -104,6 +109,18 @@ menu "Muse"
             double-click camera preview. Camera buffers and tasks consume
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
+
+    config MUSE_JC3248W535_MIC_GPIO
+        int "JC3248W535: GPIO for an external I2S mic's data (SD) line"
+        depends on MUSE_BOARD_GUITION_JC3248W535
+        range -1 48
+        default -1
+        help
+            The board has a speaker amp but no microphone. Wire an I2S MEMS
+            mic such as an INMP441 to the speaker's clocks (SCK to GPIO42, WS
+            to GPIO2), L/R to GND, power to 3.3 V, and its SD line to a free
+            GPIO, and set that GPIO here. -1 leaves push-to-talk recording
+            silence.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

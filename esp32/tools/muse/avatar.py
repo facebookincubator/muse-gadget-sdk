@@ -68,8 +68,9 @@ BOARDS = {
     "M5Stack Cardputer ADV": "cardputer-adv",
     "M5Stack StickC Plus2": "plus2",
     "M5Stack StopWatch": "stopwatch",
+    "Guition JC3248W535": "jc3248w535",
 }
-CHAT_BOARDS = ("s3", "s3n", "aipi", "box3", "sticks3", "watcher", "stopwatch")
+CHAT_BOARDS = ("s3", "s3n", "aipi", "box3", "sticks3", "watcher", "stopwatch", "jc3248w535")
 
 
 class Stop(Exception):

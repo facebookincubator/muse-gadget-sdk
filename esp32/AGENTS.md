@@ -59,6 +59,7 @@ before adding a feature to one.
 | M5Stack Cardputer ADV (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
+| Guition JC3248W535 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535` | `tools/muse/board.sh build jc3248w535` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on
@@ -116,7 +117,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|jc3248w535> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -223,7 +224,7 @@ flash size and status backend.
    | `top` | Waveshare ESP32-S3-Touch-AMOLED-1.75C |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
-   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, or the ESP32-S3-Touch-AMOLED-1.75 — tell them apart by the target (`esp32c6` or `esp32s3`) |
+   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75 or the Guition JC3248W535 — tell the C6 by its target (`esp32c6`), and the two S3 boards by the `muse: board:` line a reset logs |
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
