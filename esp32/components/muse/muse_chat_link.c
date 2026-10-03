@@ -99,6 +99,7 @@ static unsigned s_pending_count;
 static uint64_t s_last_seq;
 static bool s_early_evicted, s_skipped_big;
 static char s_note_id[80], s_parent_id[80]; /* ACK IDs shared under s_rx_lock */
+static muse_chat_rejected_t s_rejected;   /* under s_rx_lock */
 
 /* Voice task only. */
 static struct {
@@ -339,8 +340,16 @@ static bool related(const row_t *row)
     if (!strcmp(row->event, "message.user")) {
         return !s_note_id[0] || !strcmp(row->msg, s_note_id) || !strcmp(row->msg, s_parent_id);
     }
-    return !s_note_id[0] || !row->reply_to[0]
-        || !strcmp(row->reply_to, s_note_id) || !strcmp(row->reply_to, s_parent_id);
+    if (muse_chat_is_rejected(&s_rejected, row->msg)) return false;
+    if (!s_note_id[0]) return true;
+    if (!row->reply_to[0]) {
+        /* After overflow, parentless events must match a correlated delta. */
+        return !s_rejected.overflow || (!strcmp(row->msg, s_delta.msg) && s_delta.reply_to[0]
+            && (!strcmp(s_delta.reply_to, s_note_id) || !strcmp(s_delta.reply_to, s_parent_id)));
+    }
+    if (!strcmp(row->reply_to, s_note_id) || !strcmp(row->reply_to, s_parent_id)) return true;
+    muse_chat_reject(&s_rejected, row->msg);
+    return false;
 }
 
 /* Append whole UTF-8 characters even when the caption is already nearly full. */
@@ -462,6 +471,7 @@ static void rx_clear(rx_t *rx)
         s_last_seq = 0;
         s_early_evicted = false;
         s_note_id[0] = s_parent_id[0] = 0;
+        memset(&s_rejected, 0, sizeof(s_rejected));
         memset(&s_delta, 0, sizeof(s_delta));
     }
 }

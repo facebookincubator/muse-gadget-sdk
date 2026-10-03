@@ -21,6 +21,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "muse_chat.h"
 
@@ -37,6 +38,34 @@ void muse_hatch_report(muse_hatch_state_t state, const char *detail);
 void muse_hatch_chat_connect(void);
 /* Drops the connection and the cached VM credentials (settings changed). */
 void muse_hatch_chat_forget(void);
+
+/* Keep rejected IDs for the turn: later events may omit their parent.
+ * On overflow, require a known parent for new messages. */
+#define MUSE_CHAT_REJECTED_MAX 8
+typedef struct {
+    char ids[MUSE_CHAT_REJECTED_MAX][80];
+    unsigned count;
+    bool overflow;
+} muse_chat_rejected_t;
+
+static inline bool muse_chat_is_rejected(const muse_chat_rejected_t *rejected, const char *id)
+{
+    for (unsigned i = 0; i < rejected->count; i++) {
+        if (!strcmp(rejected->ids[i], id)) return true;
+    }
+    return false;
+}
+
+static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *id)
+{
+    if (!id[0] || muse_chat_is_rejected(rejected, id)) return;
+    size_t len = strlen(id);
+    if (rejected->count == MUSE_CHAT_REJECTED_MAX || len >= sizeof(rejected->ids[0])) {
+        rejected->overflow = true;
+        return;
+    }
+    memcpy(rejected->ids[rejected->count++], id, len + 1);
+}
 
 /* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
 #define MUSE_HATCH_NOTE_HEAD \

@@ -183,6 +183,56 @@ static void correlation(void) {
     assert(!strcmp(s_pending[0].msg,"second") && !strcmp(s_pending[1].msg,"third"));
     assert_replied("Second Third"); /* newest two finals between voice-task polls */
 }
+
+static void delta(const char *event,const char *id,const char *parent,const char *text) {
+    char line[2048];
+    snprintf(line,sizeof(line),"{\"type\":\"event\",\"event\":\"delta.%s\",\"payload\":{\"message_id\":\"%s\",\"parent_message_id\":\"%s\",\"text\":\"%s\"}}\n",event,id,parent,text);
+    sub(line);
+}
+static void rejected_deltas(void) {
+    begin(); release(); note_ack();
+    delta("message_start","other","elsewhere","");
+    delta("text_append","other","","Wrong reply");
+    delta("message_done","other","","");
+    final("other","","Wrong final");
+    pump(); assert(!s_pending_count && !s_turn.replied && s_turn.phase==T_REPLY);
+    assert(!s_delta.text[0]);
+    delta("message_start","reply","note","");
+    delta("text_append","reply","","Our reply");
+    delta("message_done","reply","","");
+    assert_replied("Our reply");
+}
+static void rejected_before_ack(void) {
+    begin(); release();
+    delta("message_start","other","elsewhere","");
+    note_ack();
+    delta("text_append","other","","Wrong reply");
+    delta("message_done","other","","");
+    pump(); assert(!s_pending_count && !s_turn.replied);
+    final("reply","note","Our reply"); assert_replied("Our reply");
+    muse_hatch_turn_cancel(); begin(); release();
+    final("other","elsewhere","Early wrong final"); note_ack();
+    final("other","","Wrong final repeated");
+    pump(); assert(!s_pending_count && !s_turn.replied);
+}
+
+static void bounded_rejections(void) {
+    begin(); release(); note_ack();
+    delta("message_start","reply","note","");
+    char id[20];
+    for(int i=0;i<9;i++) { /* exceed the eight rejected IDs retained per turn */
+        snprintf(id,sizeof(id),"other%d",i);
+        delta("message_start",id,"elsewhere","");
+    }
+    final("other0","","Wrong final"); final(id,"","Overflow final");
+    pump(); assert(!s_pending_count && !s_turn.replied);
+    delta("text_append","reply","","Our reply");
+    delta("message_done","reply","","");
+    assert_replied("Our reply");
+    final("second","note","Second"); assert_replied("Our reply Second");
+    muse_hatch_turn_cancel(); begin(); release(); note_ack();
+    final("other0","","New turn"); assert_replied("New turn"); /* reset remembered IDs and overflow */
+}
 static void oversized(void) {
     begin(); release(); note_ack();
     bytewise("{\"type\":\"event\",\"seq\":1,\"event\":\"delta.text_append\",\"payload\":{\"message_id\":\"reply\",\"parent_message_id\":\"note\",\"text\":\"Retained text\"}}\n");
@@ -280,6 +330,9 @@ int main(int argc,char **argv) {
     case 5: denied_and_ack(); break;
     case 6: text_modality(); break;
     case 7: transcript_and_lines(); break;
+    case 8: rejected_deltas(); break;
+    case 9: rejected_before_ack(); break;
+    case 10: bounded_rejections(); break;
     default: return 2;
     }
     muse_hatch_turn_cancel();
@@ -328,3 +381,12 @@ int main(int argc,char **argv) {
 
     def test_transcript_and_multiple_complete_lines_need_no_receive_allocation(self):
         self.run_case(7)
+
+    def test_rejected_message_deltas_do_not_complete_turn(self):
+        self.run_case(8)
+
+    def test_ack_rejection_remembers_pending_and_partial_message_ids(self):
+        self.run_case(9)
+
+    def test_rejection_capacity_preserves_correlation_and_resets(self):
+        self.run_case(10)
