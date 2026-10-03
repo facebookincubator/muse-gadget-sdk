@@ -256,13 +256,61 @@ menu "ESP32 Device SDK"
         help
             Hold the centre button (XIAO BOOT on reSpeaker Lite), speak,
             release: the audio goes to the agent's chat as a voice note,
-            which the VM transcribes, and the
-            reply appears in the Muse app as text. To speak it, plug a TTS
-            API of your own into start_tts in muse_chat_session.cpp. This
+            which the VM transcribes, and the reply appears in the Muse app
+            as text. To speak it, turn on HA_TTS below, or plug a TTS API
+            of your own into start_tts in muse_chat_session.cpp. This
             uses a second Noise session (Muse's voice session) with Link's
             account. While the mute
             switch is on, the button keeps its setup role (tap to confirm
             pairing, hold to reset).
+
+    config HA_TTS
+        bool "Speak replies with Home Assistant TTS"
+        depends on HOMEHUB_VOICE
+        default n
+        help
+            Muse's replies are text. This has your Home Assistant turn each
+            one into speech with one of its TTS engines (Piper, Home
+            Assistant Cloud, ...): the reply is fetched as MP3 from
+            /api/tts_get_url and plays on this device's speaker at the dial's
+            volume. The engine has to give MP3, HA's default. The token
+            ships inside the firmware: give it to an HA user made just for
+            this, not an admin.
+
+            Setting up HA's side:
+            https://www.home-assistant.io/integrations/tts/ (TTS engines),
+            https://www.home-assistant.io/integrations/piper/ (a local
+            voice) and https://www.home-assistant.io/docs/authentication/
+            (long-lived access tokens).
+
+    if HA_TTS
+
+    config HA_TTS_URL
+        string "Home Assistant URL"
+        default "http://homeassistant.local:8123"
+        help
+            How this device reaches HA on your network. If .local names don't
+            resolve, use its IP address, such as http://192.168.1.10:8123.
+
+    config HA_TTS_TOKEN
+        string "Home Assistant long-lived access token"
+        default ""
+        help
+            From your HA profile, Security > Long-lived access tokens. See
+            https://www.home-assistant.io/docs/authentication/
+
+    config HA_TTS_ENGINE
+        string "TTS entity"
+        default "tts.piper"
+        help
+            The TTS engine's entity id, as in Settings > Entities: tts.piper,
+            tts.home_assistant_cloud, tts.google_translate_en_com, ...
+
+    config HA_TTS_LANGUAGE
+        string "Language (blank for the engine's default)"
+        default ""
+
+    endif
 
     config HOMEHUB_SENSECAP_SENSORS
         bool "SenseCAP Indicator air sensors (sensors.read)"

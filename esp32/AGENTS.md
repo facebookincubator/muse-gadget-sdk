@@ -123,6 +123,12 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 - While voice chat is ready, the centre button is push-to-talk. Turn the mute
   switch on to get its setup role back (pairing confirmation, the 5 s
   factory-reset hold).
+- Replies are silent unless `CONFIG_HA_TTS` is on: then Home Assistant speaks
+  them on the speaker (`components/muse/muse_ha_tts.c` fetches each one as
+  MP3 from `/api/tts_get_url`). Its settings (URL, token, TTS entity) are in
+  menuconfig under "ESP32 Device SDK"; the token is a secret, so keep it in
+  the board's `sdkconfig`, never in a committed overlay.
+  `tests/test_muse_ha_tts.py` covers the text and MP3 handling.
 
 ### Boards with the full UI, by hand
 

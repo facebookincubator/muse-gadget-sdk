@@ -235,7 +235,18 @@ things you can change:
   choice and play the audio it returns. On boards with PSRAM, `start_tts` in
   [`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
   is the spot: it has the reply text, and the MP3 decoder, speaker and volume
-  are already wired up there.
+  are already wired up there. On the Voice PE, Home Assistant can do it for
+  you: turn on `CONFIG_HA_TTS` in `idf.py menuconfig` (under "ESP32 Device
+  SDK") and give it your HA's URL, a long-lived access token and a TTS engine
+  (Piper, Home Assistant Cloud, ...), and replies play on the Voice PE's
+  speaker. The token ships inside the firmware too: make it for an HA user
+  that isn't an admin. To set up the HA side, see its docs on
+  [text-to-speech](https://www.home-assistant.io/integrations/tts/),
+  [Piper](https://www.home-assistant.io/integrations/piper/) for a local
+  voice, and
+  [long-lived access tokens](https://www.home-assistant.io/docs/authentication/).
+  To check it before flashing, try the engine under Developer tools > Actions
+  with `tts.speak`.
 
 A few things worth knowing:
 
