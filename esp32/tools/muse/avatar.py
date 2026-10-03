@@ -61,6 +61,7 @@ BOARDS = {
     "Espressif ESP32-S3-BOX-3": "box3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75C": "s3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75": "s3n",
+    "Waveshare ESP32-S3-Touch-AMOLED-2.16": "s3-216",
     "AIPI Lite": "aipi",
     "Waveshare ESP32-C6-Touch-AMOLED-1.8": "c6",
     "Seeed SenseCAP Watcher": "watcher",
@@ -70,7 +71,7 @@ BOARDS = {
     "M5Stack StopWatch": "stopwatch",
     "M5Stack CoreS3": "cores3",
 }
-CHAT_BOARDS = ("s3", "s3n", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3")
+CHAT_BOARDS = ("s3", "s3n", "s3-216", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3")
 
 
 class Stop(Exception):
