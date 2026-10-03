@@ -22,6 +22,8 @@
 # Load last, after sdkconfig.defaults and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_MUSE_BOARD_M5STACK_CORES3=y
+# The AW88298 and 1 W speaker are quiet at the usual 70%.
+CONFIG_MUSE_DEFAULT_VOLUME=100
 # Unused by Muse builds (the talk button confirms pairing); GPIO0 is I2S MCLK here.
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

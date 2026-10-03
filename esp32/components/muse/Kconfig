@@ -100,11 +100,10 @@ menu "Muse"
         bool
         default y if MUSE_BOARD_SENSECAP_WATCHER || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
-    # The CoreS3's AW88298 and 1 W speaker are quiet at the usual 70%.
+    # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME
         int "Speaker volume until one is chosen in settings (percent)"
         range 0 100
-        default 100 if MUSE_BOARD_M5STACK_CORES3
         default 70
 
     config MUSE_WATCHER_CAMERA
