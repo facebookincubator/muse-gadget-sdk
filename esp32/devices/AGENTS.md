@@ -103,8 +103,9 @@ settings grouped under short comments saying why. Set:
   (see `sdkconfig.sensecap-indicator`). With no PSRAM, copy the whole block from
   `sdkconfig.ideaspark`: `CONFIG_SPIRAM=n`, mbedtls internal allocation,
   `CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096` and `CONFIG_HOMEHUB_TUNNEL=n`.
-- `CONFIG_HOMEHUB_BLE_NAME_PREFIX="HomeLink-Disp"` on status-screen boards.
-  Light boards keep the default, and `sdkconfig.muse` sets `MuseGadget`.
+- `CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"` on status-screen boards, which
+  advertise as `MuseGadget-Disp-XXXXXX`. Light boards keep the defaults, and
+  `sdkconfig.muse` sets the `MuseGadget` prefix explicitly.
 - On a classic ESP32, `sdkconfig.ideaspark`'s chip block: `CONFIG_ESP32_REV_MIN_3=y`
   (signed apps need it), BLE-only BTDM, and the Wi-Fi and lwIP IRAM options off.
 
@@ -228,7 +229,7 @@ On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
 
 - For light and status-screen boards, add a case to `tools/board.sh` with
   `TARGET`, the overlay appended to `DEFAULTS`, and the `PORTS` globs for its
-  USB. Add a line to the usage comment, and widen the `sed -n '16,26p'` range
+  USB. Add a line to the usage comment, and widen the `sed -n '16,31p'` range
   in `usage()` by the lines you added.
 - In `devices/README.md`, add a row to Supported devices, a column to
   Features, and a row to Build. Link only to reference and store pages you

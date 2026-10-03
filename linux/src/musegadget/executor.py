@@ -218,7 +218,14 @@ class Executor:
 
 def _clip(data: bytes) -> tuple[str, bool]:
     cut = len(data) > MAX_OUTPUT_BYTES
-    return data[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace"), cut
+    text = data[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+    # The budget is for the message, where json.dumps writes every non-ASCII
+    # character as a 6- or 12-byte escape and each undecodable byte became
+    # U+FFFD, so binary or non-Latin output can grow sixfold.
+    while len(json.dumps(text)) - 2 > MAX_OUTPUT_BYTES:
+        text = text[: len(text) * 3 // 4]
+        cut = True
+    return text, cut
 
 
 def device_health() -> dict:

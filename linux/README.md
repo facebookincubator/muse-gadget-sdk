@@ -126,7 +126,7 @@ A few other ways to build on it:
 ## Manage it
 
 ```sh
-musegadget info                          # name, node id and pairing state
+sudo musegadget info                     # name, node id and pairing state
 sudo systemctl status musegadget         # is it running?
 sudo journalctl -u musegadget -f         # follow the log
 sudo musegadget pair                     # pair again

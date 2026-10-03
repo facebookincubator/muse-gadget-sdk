@@ -384,6 +384,13 @@ static ssize_t ws_recv_frame(esp_tls_t *tls, uint8_t *buf, size_t buf_cap) {
                  (unsigned long long)payload_len, (unsigned)buf_cap);
         return -1;
     }
+    // RFC 6455 §5.5: control frames carry at most 125 bytes. A longer ping
+    // can't be echoed in a pong's 7-bit length field, so fail the connection
+    // instead of sending a malformed pong.
+    if (opcode >= 0x8 && payload_len > 125) {
+        ESP_LOGE(TAG, "WS control frame too large: %llu", (unsigned long long)payload_len);
+        return -1;
+    }
 
     // Read payload
     size_t plen = static_cast<size_t>(payload_len);
@@ -505,6 +512,10 @@ static ssize_t ws_recv_frame_nonblock(esp_tls_t *tls, uint8_t *buf, size_t cap) 
 
     if (payload_len > cap) {
         ESP_LOGE(TAG, "WS frame too large: %llu", (unsigned long long)payload_len);
+        return -1;
+    }
+    if (opcode >= 0x8 && payload_len > 125) { // RFC 6455 §5.5, as above
+        ESP_LOGE(TAG, "WS control frame too large: %llu", (unsigned long long)payload_len);
         return -1;
     }
 

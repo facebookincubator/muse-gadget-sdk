@@ -236,4 +236,10 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    return args.func(args)
+    try:
+        return args.func(args)
+    except PermissionError as exc:
+        # The state directory is root-only on an installed device.
+        print(f"Can't access {exc.filename or config.state_dir()}; run this with sudo.",
+              file=sys.stderr)
+        return 1

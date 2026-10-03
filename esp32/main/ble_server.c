@@ -364,7 +364,9 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
                && !link_pairing_session_confirmed()) {
         ble_server_send_status("error_pairing_confirm_required");
     } else if (decrypted && strcmp(act, "wifi_scan") == 0) {
-        xTaskCreate(scan_task, "scan", 4096, NULL, 5, NULL);
+        if (xTaskCreate(scan_task, "scan", 4096, NULL, 5, NULL) != pdPASS) {
+            ble_server_send_status("error_operation_in_progress");
+        }
     } else if (decrypted && strcmp(act, "device.ota") == 0) {
         {
             cJSON *u = cJSON_GetObjectItem(root, "url");
@@ -387,11 +389,17 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
                     delete_command_json(root, decrypted);
                     return;
                 }
-                xTaskCreate(ble_ota_task, "ble_ota", 4096, a, 5, NULL);
+                if (xTaskCreate(ble_ota_task, "ble_ota", 4096, a, 5, NULL) != pdPASS) {
+                    free(a->url);
+                    free(a);
+                    ble_server_send_status("error_operation_in_progress");
+                }
             }
         }
     } else if (decrypted && strcmp(act, "unpair") == 0) {
-        xTaskCreate(unpair_task, "unpair", 4096, NULL, 5, NULL);
+        if (xTaskCreate(unpair_task, "unpair", 4096, NULL, 5, NULL) != pdPASS) {
+            ble_server_send_status("error_operation_in_progress");
+        }
     } else if (decrypted && strcmp(act, "provision_v2") != 0) {
         ble_server_send_status("error_unknown_action");
     } else if (decrypted && strcmp(act, "provision_v2") == 0) {

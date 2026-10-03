@@ -79,7 +79,10 @@ check_system() {
     [ -r /etc/os-release ] || die "cannot identify this Linux distribution (/etc/os-release missing)."
     # shellcheck disable=SC1091
     . /etc/os-release
-    local id="${ID:-}" version="${VERSION_ID:-0}" major="${VERSION_ID%%.*}"
+    local id="${ID:-}" version="${VERSION_ID:-0}"
+    # Debian testing and sid have no VERSION_ID; with set -u the raw expansion
+    # above would abort the script, and the same local line can't reuse $version.
+    local major="${version%%.*}"
     case "$id" in
         debian|raspbian)
             [ "${major:-0}" -ge 11 ] 2>/dev/null ||

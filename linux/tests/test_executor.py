@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import time
 
@@ -78,6 +79,15 @@ def test_system_run_truncates_large_output(ex):
     payload = result["payload"]
     assert payload["truncated"]
     assert len(payload["stdout"]) == executor.MAX_OUTPUT_BYTES
+
+
+def test_clip_bounds_the_json_encoded_size():
+    text, cut = executor._clip(b"x" * executor.MAX_OUTPUT_BYTES)
+    assert (len(text), cut) == (executor.MAX_OUTPUT_BYTES, False)
+    # Undecodable bytes become U+FFFD, which json.dumps writes as a 6-byte escape.
+    text, cut = executor._clip(b"\xff" * executor.MAX_OUTPUT_BYTES)
+    assert cut
+    assert executor.MAX_OUTPUT_BYTES // 2 < len(json.dumps(text)) - 2 <= executor.MAX_OUTPUT_BYTES
 
 
 def test_system_run_requires_a_command(ex):
