@@ -155,6 +155,9 @@ jobs:
           - board: muse-m5stack-core2
             target: esp32
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2"
+          - board: muse-fnk0104b
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b"
     defaults:
       run:
         shell: bash

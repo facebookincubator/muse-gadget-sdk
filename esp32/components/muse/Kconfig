@@ -74,6 +74,9 @@ menu "Muse"
         config MUSE_BOARD_M5STACK_CORE2
             bool "M5Stack Core2 v1.0 (ESP32, touch LCD, touch-strip talk)"
             depends on IDF_TARGET_ESP32
+        config MUSE_BOARD_FNK0104B
+            bool "Freenove FNK0104B (ESP32-S3, 240x320 touch LCD, ES8311 speaker and mic)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -96,6 +99,7 @@ menu "Muse"
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
         default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
+        default "fnk0104b" if MUSE_BOARD_FNK0104B
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB
