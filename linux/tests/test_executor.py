@@ -73,6 +73,27 @@ def test_system_run_timeout_does_not_wait_for_a_detached_process(ex):
     assert elapsed < 4
 
 
+def test_system_run_returns_when_the_shell_exits_but_a_child_holds_the_pipes(ex):
+    # setsid leaves the group and keeps the inherited pipes open after bash exits 0.
+    # Waiting on pipe EOF reports a timeout for a command that already succeeded.
+    started = time.monotonic()
+    result = ex.run("system.run", {"command": "setsid sleep 30 &", "timeout_ms": 2000})
+    elapsed = time.monotonic() - started
+    assert result["ok"], result
+    payload = result["payload"]
+    assert payload["exit_code"] == 0 and not payload["timed_out"]
+    assert elapsed < 1
+
+    echo = ex.run("system.run", {"command": "echo hi"})
+    assert echo["ok"]
+    assert (echo["payload"]["stdout"], echo["payload"]["exit_code"]) == ("hi\n", 0)
+    assert not echo["payload"]["timed_out"]
+
+    hung = ex.run("system.run", {"command": "sleep 30", "timeout_ms": 300})
+    assert hung["ok"] and hung["payload"]["timed_out"]
+    assert hung["payload"]["duration_ms"] < 5000
+
+
 def test_system_run_truncates_large_output(ex):
     result = ex.run("system.run", {"command": "head -c 200000 /dev/zero | tr '\\0' x"})
     payload = result["payload"]
