@@ -87,7 +87,7 @@ the serial port.
 
 When the board doesn't answer, it's usually running firmware from before
 serial chat. Add `--board s3` (or `--board aipi`, `--board sticks3`,
-`--board stopwatch`, `--board watcher`) and the tool flashes current firmware
+`--board stopwatch`, `--board cores3`, `--board watcher`) and the tool flashes current firmware
 first, then carries on.
 
 The SenseCAP Watcher chats on its CH342 port ending in `3`, with firmware

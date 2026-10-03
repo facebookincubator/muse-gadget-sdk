@@ -45,7 +45,7 @@ static struct {
     char vm[MUSE_VM_MAX + 1];
     char token[MUSE_TOKEN_MAX + 1];
 } s = {
-    .volume = 70,
+    .volume = CONFIG_MUSE_DEFAULT_VOLUME,
     .speaker_on = true,
     .mic_gain = 30,
     .brightness = 100,
