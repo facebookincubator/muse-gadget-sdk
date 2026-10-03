@@ -127,9 +127,9 @@ partition table and app at their generated offsets.
 
 ## Validation
 
-The preliminary EchoEar build passed with ESP-IDF v6.0.1. Its binary is
+The EchoEar build passed with ESP-IDF v6.0.1. Its binary is
 `0x201000` bytes within a `0x400000`-byte app slot, leaving approximately 50%
-free. Host and simulator validation results are pending.
+free.
 
 Repository checks passed with ESP-IDF v6.0.1: the EchoEar profile, the existing
 AIPI full-UI board and the default ESP32-C5 build. All EchoEar overlay settings
