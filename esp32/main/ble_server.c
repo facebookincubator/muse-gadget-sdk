@@ -28,8 +28,10 @@
 #include "esp_err.h"
 #include "esp_bt.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "mbedtls/platform_util.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
@@ -457,7 +459,14 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
             // stack during TLS handshake than v5's 3.x (~2 KB more peak).
             a->session_generation = link_pairing_mark_provisioning_active();
             if (a->session_generation == 0
-                || xTaskCreate(provision_task, "prov", 8192, a, 5, NULL) != pdPASS) {
+                ||
+#if CONFIG_SPIRAM
+                xTaskCreateWithCaps(provision_task, "prov", 8192, a, 5, NULL,
+                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS
+#else
+                xTaskCreate(provision_task, "prov", 8192, a, 5, NULL) != pdPASS
+#endif
+                ) {
                 uint32_t generation = a->session_generation;
                 secure_free_str(a->ssid);
                 secure_free_str(a->password);

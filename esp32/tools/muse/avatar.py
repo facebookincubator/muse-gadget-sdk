@@ -65,12 +65,13 @@ BOARDS = {
     "Waveshare ESP32-C6-Touch-AMOLED-1.8": "c6",
     "Seeed SenseCAP Watcher": "watcher",
     "M5Stack StickS3": "sticks3",
+    "Elecrow CrowPanel Advance 4.3 V1.3": "crowpanel-43",
     "M5Stack Cardputer ADV": "cardputer-adv",
     "M5Stack StickC Plus2": "plus2",
     "M5Stack StopWatch": "stopwatch",
     "M5Stack CoreS3": "cores3",
 }
-CHAT_BOARDS = ("s3", "s3n", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3")
+CHAT_BOARDS = ("s3", "s3n", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "crowpanel-43")
 
 
 class Stop(Exception):

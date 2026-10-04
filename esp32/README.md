@@ -130,14 +130,18 @@ run `idf.py -p PORT erase-flash` first.
 
 ### 4. Set it up with Muse
 
-Once flashed, the status light breathes **orange**: the device is ready for
-setup. In the Muse app, turn on **Settings > Devices > Developer mode**, then
-add the device (**Settings > Devices > Add Device**, the **+** icon in the top
-right). It shows up as `MuseGadget-XXXXXX`. When the light breathes **blue**, press the **BOOT**
-button to confirm it's really you. The light turns **green** when Muse is
-connected.
+In the Muse app, turn on **Settings > Devices > Developer mode**, then add the
+device (**Settings > Devices > Add Device**, the **+** icon in the top right).
+It shows up as `MuseGadget-XXXXXX`. On boards with a status light, orange means
+ready for setup and blue means the app is waiting for button confirmation.
+When the device asks you to confirm, briefly press its pairing button. On
+display boards, follow the on-screen prompt instead: it may show a pairing code
+to enter in the app, or ask you to press the button.
 
-| Light | What it means |
+The CrowPanel Advance has no RGB status light, so the color guide below does
+not apply to it. Use the display and its BOOT button for setup.
+
+| Status light | What it means |
 |---|---|
 | Orange, breathing | Ready for setup |
 | Blue, breathing | Press the button to confirm pairing |
@@ -156,8 +160,8 @@ attack. Set it up on a network you trust.
 
 ## Boards
 
-The last seven run the full on-screen UI: an animated avatar, push-to-talk and
-settings. Audio and image support vary by board, so check the feature table in
+The display boards with a full on-screen UI run an animated avatar,
+push-to-talk and settings. Audio and image support vary by board, so check the feature table in
 [`devices/`](devices). The others show status on a light, a ring or a simple
 status screen.
 
@@ -179,6 +183,7 @@ status screen.
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Elecrow CrowPanel Advance 4.3 V1.3 | UI, touch, BOOT push-to-talk, settings, speaker and mic, images | `tools/muse/board.sh build crowpanel-43` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.

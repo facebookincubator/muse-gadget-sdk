@@ -17,6 +17,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "driver/gpio.h"
@@ -82,8 +83,11 @@ typedef struct {
      * running. */
     void (*display_pause)(bool pause);
 
-    /* Codec handles for one duplex, 2-slot I2S bus, not yet opened. */
+    /* Speaker codec and optional mic codec, not yet opened. A board may use
+     * read_mic instead when its microphone is not standard I2S PCM. */
     esp_err_t (*audio_init)(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic);
+    /* Direct mono PCM input for microphones that bypass esp_codec_dev. */
+    esp_err_t (*read_mic)(int16_t *mono, size_t frames, int gain_db);
     int mic_slot;           /* slot carrying the mic (0/1), or -1 to mix both */
     void (*set_mic_gain)(esp_codec_dev_handle_t mic, int db);   /* NULL: esp_codec_dev_set_in_gain */
 
