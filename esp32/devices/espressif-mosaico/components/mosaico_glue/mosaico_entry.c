@@ -89,6 +89,11 @@ static esp_err_t screen_begin(const esp_iris_media_desc_t *requested, esp_iris_m
         /* Not lv_snapshot_create_draw_buf(): it lays the screen out first,
          * which is too deep for this stack. */
         s_frame = lv_draw_buf_create(BSP_LCD_H_RES, BSP_LCD_V_RES, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        if (s_frame) {
+            /* A read may start past offset 0, before anything is drawn, and
+             * must not get what the heap held before. */
+            lv_draw_buf_clear(s_frame, NULL);
+        }
     }
     bsp_display_unlock();
     if (!s_frame) {
