@@ -36,6 +36,7 @@ warranties, brownouts, or bankruptcies. Proceed at your own risk!
 |---|---|
 | [**ESP32 Device SDK**](esp32) | Connect your ESP32 board to Muse through our open source SDK. Throw in a screen to show images, add audio in and out, or wire up other sensors. |
 | [**Linux Device SDK**](linux) | Turn that spare Raspberry Pi or Linux box into a Muse gadget. Hack in your own commands to let Muse handle sysadmin chores or your Home Assistant setup. |
+| [**macOS Companion**](macos) | Chat with your Muse through an already paired Linux SDK container, with a native rotating 3D mascot and streamed text replies. |
 
 Before you flash or pair a gadget, get an
 [SDK token](https://gadgets.muse.ai/settings/sdk-tokens) and review the
@@ -70,3 +71,5 @@ components (into `esp32/managed_components/`), and the simulator's LVGL and
 SDL (listed in [`esp32/simulator/THIRD_PARTY.md`](esp32/simulator/THIRD_PARTY.md)).
 
 The Apache License does not cover the [Jollybot avatar](esp32/avatar).
+The copy used by the [macOS companion](macos/Sources/MuseCompanion/Resources/jollybot.gif)
+retains the same artwork exclusion.

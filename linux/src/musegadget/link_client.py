@@ -38,10 +38,12 @@ import struct
 import time
 import uuid
 from dataclasses import dataclass
+from contextlib import asynccontextmanager
 from typing import Callable
 from urllib.parse import quote
 
 from musegadget.muse_api import user_agent
+from musegadget.chat import Subscription, SubscriptionHTTPError, Turn
 from musegadget.noise import Header, NoiseTransport, NoiseXXInitiator
 
 log = logging.getLogger(__name__)
@@ -150,8 +152,9 @@ class LinkSession:
         self._tasks: set[asyncio.Task] = set()
         self._stream_id = 0
         self._register_id = ""
-        self._requests: dict[int, _Request] = {}
+        self._requests: dict[int, _Request | Subscription] = {}
         self.registered_at: float | None = None
+        self._chat_lock = asyncio.Lock()
 
     async def run(self, stop: asyncio.Event) -> Outcome:
         try:
@@ -175,6 +178,9 @@ class LinkSession:
             for task in self._tasks:
                 task.cancel()
             for request in self._requests.values():
+                if isinstance(request, Subscription):
+                    request.fail(ConnectionError("Muse session ended"))
+                    continue
                 if not request.done.done():
                     request.done.set_exception(ConnectionError("session ended"))
             self._requests.clear()
@@ -273,6 +279,80 @@ class LinkSession:
         return {"ok": 200 <= status < 300, "status": status, "response": decoded}
 
     # -- Sending --------------------------------------------------------------
+
+    @asynccontextmanager
+    async def _chat_subscription(self, session_id):
+        body = {"session_id": session_id} if session_id else {}
+        encrypted = self._transport.encrypt_http_request(
+            "POST", "/chat/subscribe", json.dumps(body).encode(), headers=[
+                Header("Content-Type", "application/json"),
+                Header("Accept", "application/x-ndjson"),
+                Header("x-app-id", APP_ID),
+                Header("x-request-id", str(uuid.uuid4())),
+            ])
+        subscription = Subscription()
+        self._requests[encrypted.stream_id] = subscription
+        try:
+            await self._send_frames(encrypted.frames)
+            error = await asyncio.wait_for(subscription.ready, REQUEST_TIMEOUT_S)
+            if error:
+                raise error
+            yield subscription
+        finally:
+            self._requests.pop(encrypted.stream_id, None)
+            subscription.fail(ConnectionError("chat cancelled"))
+            try:
+                await self._send_frames(self._transport.encrypt_reset(encrypted.stream_id))
+            except (ConnectionError, OSError):
+                pass
+
+    async def chat_events(self, message: str, session_id: str | None = None,
+                          timeout: float = 180, settle: float = 3):
+        """Stream replies through the existing paired device session.
+
+        Existing chats subscribe before posting, retaining pre-ACK events.
+        Muse returns 404 for a new side chat; its first POST creates it, then
+        we subscribe immediately. Never retry that POST or duplicate a turn.
+        """
+        async with self._chat_lock:
+            posted = False
+            try:
+                async with self._chat_subscription(session_id) as subscription:
+                    posted = True
+                    ack = await self.send_chat(message, session_id)
+                    async for update in self._chat_replies(subscription, ack, timeout, settle):
+                        yield update
+            except SubscriptionHTTPError as exc:
+                if posted or exc.status != 404 or session_id is None:
+                    raise
+                ack = await self.send_chat(message, session_id)
+                if not ack["ok"]:
+                    raise ConnectionError(f"Muse rejected the message: HTTP {ack['status']}")
+                async with self._chat_subscription(session_id) as subscription:
+                    async for update in self._chat_replies(subscription, ack, timeout, settle):
+                        yield update
+
+    async def _chat_replies(self, subscription, ack, timeout, settle):
+        if not ack["ok"]:
+            raise ConnectionError(f"Muse rejected the message: HTTP {ack['status']}")
+        turn = Turn(ack["response"])
+        yield {"type": "ack"}
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Muse reply timed out")
+            quiet = max(0.01, settle - (time.monotonic() - turn.last_activity))
+            try:
+                event = await subscription.next_event(min(remaining, quiet) if turn.settled else remaining)
+            except asyncio.TimeoutError:
+                if turn.settled:
+                    yield {"type": "done"}
+                    return
+                raise TimeoutError("Muse reply timed out") from None
+            update = turn.feed(event)
+            if update:
+                yield update
 
     async def send(self, message: dict) -> None:
         frames = self._transport.encrypt_body_chunk(self._stream_id, encode_message(message))

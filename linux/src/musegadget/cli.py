@@ -175,7 +175,7 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
             request = {"message": message}
             if args.session_id:
                 request["session_id"] = args.session_id
-            sock.sendall(json.dumps(request).encode() + b"\n")
+            sock.sendall(json.dumps(request, ensure_ascii=False).encode() + b"\n")
             reply = json.loads(sock.makefile("rb").readline())
     except (OSError, ValueError) as exc:
         print(f"Could not reach the musegadget service: {exc}", file=sys.stderr)
@@ -195,6 +195,44 @@ def cmd_info(args: argparse.Namespace) -> int:
     print(f"BLE name:  {ident.ble_name}")
     print(f"paired:    {'yes' if paired else 'no'}")
     return 0
+
+
+def cmd_chat(args: argparse.Namespace) -> int:
+    """Stream NDJSON for desktop clients; send prompts through stdin safely."""
+    import json
+    import socket
+
+    message = sys.stdin.read() if args.message == ["-"] else " ".join(args.message)
+    if not message.strip():
+        print("Enter a message first.", file=sys.stderr)
+        return 1
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(240)
+            sock.connect(str(config.socket_path()))
+            request = {"message": message, "stream": True}
+            if args.session_id:
+                request["session_id"] = args.session_id
+            sock.sendall(json.dumps(request).encode() + b"\n")
+            for line in sock.makefile("rb"):
+                event = json.loads(line)
+                if args.json:
+                    print(json.dumps(event), flush=True)
+                elif event.get("type") == "reply":
+                    print(event.get("text", ""), flush=True)
+                if event.get("type") == "done":
+                    return 0
+                if event.get("type") == "error" or event.get("ok") is False:
+                    if not args.json:
+                        print(event.get("error", "Chat failed"), file=sys.stderr)
+                    return 1
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"type": "error", "error": str(exc)}), flush=True)
+        else:
+            print(f"Could not reach Muse: {exc}", file=sys.stderr)
+        return 1
+    return 1
 
 
 def cmd_unpair(args: argparse.Namespace) -> int:
@@ -227,6 +265,12 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("--session-id",
                      help="send to this side chat (a new id starts one) instead of the main chat")
     send.set_defaults(func=cmd_send_user_msg)
+
+    chat = sub.add_parser("chat", help="send a message and stream Muse's replies")
+    chat.add_argument("message", nargs="+", help="message, or - to read stdin")
+    chat.add_argument("--session-id", help="side chat id")
+    chat.add_argument("--json", action="store_true", help="emit NDJSON for desktop apps")
+    chat.set_defaults(func=cmd_chat)
 
     sub.add_parser("info", help="show device identity").set_defaults(func=cmd_info)
     sub.add_parser("unpair", help="forget the saved pairing").set_defaults(func=cmd_unpair)

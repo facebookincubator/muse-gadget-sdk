@@ -1,0 +1,24 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Licensed under the Apache License, Version 2.0 (see LICENSE).
+name: macOS companion
+on:
+  pull_request:
+    paths: ['macos/**', '.github/workflows/macos.yml']
+  push:
+    branches: [main]
+    paths: ['macos/**', '.github/workflows/macos.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: swift test --disable-xctest
+      - run: bash build.sh
+      - run: codesign --verify --verbose "dist/Muse Companion.app"

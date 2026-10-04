@@ -109,6 +109,48 @@ def test_local_message_must_be_non_empty_text():
     run_with_socket(check)
 
 
+def test_local_stream_delivers_events_and_disconnect_cancels_subscription():
+    async def check(service, path):
+        cancelled = asyncio.Event()
+
+        class StreamingSession(FakeSession):
+            async def chat_events(self, message, session_id):
+                self.sent.append((message, session_id))
+                try:
+                    yield {"type": "ack"}
+                    yield {"type": "reply", "message_id": "r", "text": "Hello 🌟", "complete": False}
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+
+        session = StreamingSession(); service._current = session
+        reader, writer = await asyncio.open_unix_connection(str(path))
+        writer.write(b'{"message":"hello","stream":true,"session_id":"side-1"}\n')
+        await writer.drain()
+        assert json.loads(await reader.readline())["type"] == "ack"
+        assert json.loads(await reader.readline())["text"] == "Hello 🌟"
+        assert session.sent == [("hello", "side-1")]
+        writer.close(); await writer.wait_closed()
+        await asyncio.wait_for(cancelled.wait(), 1)
+    run_with_socket(check)
+
+
+def test_local_stream_errors_are_readable():
+    async def check(service, path):
+        class FailedSession(FakeSession):
+            async def chat_events(self, message, session_id):
+                yield {"type": "ack"}
+                raise ConnectionError("Muse disconnected")
+        service._current = FailedSession()
+        reader, writer = await asyncio.open_unix_connection(str(path))
+        writer.write(b'{"message":"hello","stream":true}\n'); await writer.drain()
+        assert json.loads(await reader.readline())["type"] == "ack"
+        assert json.loads(await reader.readline()) == {"type": "error", "error": "Muse disconnected"}
+        assert await reader.readline() == b""
+        writer.close()
+    run_with_socket(check)
+
+
 def test_backoff_doubles_to_a_ceiling_and_honours_the_floor():
     backoff = Backoff()
     assert [backoff.next_delay() for _ in range(7)] == [2, 4, 8, 16, 32, 60, 60]

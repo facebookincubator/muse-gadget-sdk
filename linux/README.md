@@ -111,6 +111,20 @@ keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_r
 is a complete example: a webhook listener that sends every note from a Pebble
 ring to its own Muse chat.
 
+To receive the assistant's replies as well as send a prompt:
+
+```sh
+musegadget chat --session-id 6f1c2d4e-0b7a-4c3e-9f5d-2a8b1e0c7d93 "What should I build this weekend?"
+printf '%s' "Hello Muse" | musegadget chat --json --session-id 6f1c2d4e-0b7a-4c3e-9f5d-2a8b1e0c7d93 -
+```
+
+`--json` emits NDJSON events: `ack`, `status`, `reply`, `done`, and `error`.
+Each `reply` carries `message_id`, the accumulated `text`, and `complete`.
+Replace the text for that id when a new snapshot arrives. Without `--json`,
+the CLI prints reply snapshots. The existing paired service must run this
+version of the SDK. The [macOS companion](../macos) uses this streaming CLI
+inside a local Docker container.
+
 A few other ways to build on it:
 
 - **Let Muse do it.** Muse can run commands on the machine, so you can ask it to

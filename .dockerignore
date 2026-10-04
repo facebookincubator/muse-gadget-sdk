@@ -1,0 +1,9 @@
+.git
+**/.venv
+**/__pycache__
+**/.build
+**/dist
+.sdk-token
+.muse-state
+.x11
+backups

@@ -224,13 +224,53 @@ class Service:
     async def _handle_local(self, reader, writer) -> None:
         try:
             line = await asyncio.wait_for(reader.readline(), 10)
+            request = json.loads(line)
+            if isinstance(request, dict) and request.get("stream") is True:
+                await self._stream_chat(request, reader, writer)
+                return
             reply = await self._local_request(line)
         except Exception as exc:
             reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         writer.write(json.dumps(reply).encode() + b"\n")
         try:
             await writer.drain()
+        except (ConnectionError, OSError):
+            pass
         finally:
+            writer.close()
+
+    async def _stream_chat(self, request, reader, writer):
+        message, session_id = request.get("message"), request.get("session_id")
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("message must be non-empty text")
+        if session_id is not None and not (
+            isinstance(session_id, str) and _SESSION_ID_RE.fullmatch(session_id)
+        ):
+            raise ValueError("invalid session id")
+        session = self._current
+        if session is None or session.registered_at is None:
+            raise ConnectionError("not connected to the Muse")
+
+        async def forward():
+            try:
+                async for event in session.chat_events(message, session_id):
+                    writer.write(json.dumps(event).encode() + b"\n")
+                    await writer.drain()
+            except (ConnectionError, OSError, ValueError, TimeoutError, asyncio.TimeoutError) as exc:
+                writer.write(json.dumps({"type": "error", "error": str(exc)}).encode() + b"\n")
+                await writer.drain()
+
+        sending = asyncio.ensure_future(forward())
+        # EOF cancels the subscription immediately when the desktop app stops.
+        disconnected = asyncio.ensure_future(reader.read(1))
+        try:
+            done, _ = await asyncio.wait({sending, disconnected}, return_when=asyncio.FIRST_COMPLETED)
+            if sending in done:
+                await sending
+        finally:
+            sending.cancel()
+            disconnected.cancel()
+            await asyncio.gather(sending, disconnected, return_exceptions=True)
             writer.close()
 
     async def _local_request(self, line: bytes) -> dict:
