@@ -1,0 +1,45 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Xingzhi Cube 1.54" TFT WiFi (SKU xingzhi-cube-1.54tft-wifi): ESP32-S3
+# (QFN56 rev v0.2) with 16 MB flash (Winbond, QIO) and 8 MB embedded octal
+# PSRAM (AP_3v3, S3R8), native USB Serial/JTAG (303a:1001). Facts measured
+# with esptool on the bench board (2026-10-03) and from the vendor firmware
+# it ships with, xiaozhi-esp32 (main/boards/nologo/xingzhi-cube-1.54tft-wifi/
+# config.h): BOOT button GPIO0, volume buttons GPIO40/GPIO39, ST7789 240x240
+# SPI display (not driven by this light port yet), simplex I2S mic/speaker
+# (not used yet), battery ADC on GPIO38. Load last, after sdkconfig.defaults.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# No status LED on this board, and the display backend is a later step:
+# status is visible in the Muse app only for now.
+CONFIG_HOMEHUB_LED_BACKEND_NONE=y
+# BOOT button, active low with internal pull-up.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+
+# 16 MB flash (QIO at 80 MHz, as in the defaults; the stock firmware boot
+# log confirms qio). The partition table stays the 8 MB layout in
+# partitions.csv; the upper 8 MB is unused.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# 8 MB octal PSRAM, as on the SenseCAP Indicator (also an S3R8 part).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+# The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
+# NimBLE host allocations in PSRAM so pairing has room.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y

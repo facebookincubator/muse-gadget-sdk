@@ -91,6 +91,8 @@ menu "Muse"
 
         config MUSE_BOARD_WAVESHARE_S3_LCD7
             bool "Waveshare ESP32-S3-Touch-LCD-7 (800x480 touch LCD, no audio)"
+        config MUSE_BOARD_XINGZHI_CUBE
+            bool "Xingzhi Cube 1.54TFT WiFi (ESP32-S3, 240x240 ST7789, no touch)"
             depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_VN_S3_183
             bool "VN ESP32-S3 board (1.83\" 284x240 NV3023 LCD, ES8311 and ES7210)"
@@ -104,8 +106,6 @@ menu "Muse"
         bool
         default y if !MUSE_BOARD_NONE
 
-    # Always defined, unlike the target-dependent board options, so
-    # idf_component.yml rules can select each board's managed components.
     config MUSE_BOARD_ID
         string
         default "waveshare_s3_175c" if MUSE_BOARD_WAVESHARE_S3_175C
@@ -127,6 +127,7 @@ menu "Muse"
         default "waveshare_s3_lcd7" if MUSE_BOARD_WAVESHARE_S3_LCD7
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
+        default "xingzhi_cube" if MUSE_BOARD_XINGZHI_CUBE
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB

@@ -28,6 +28,8 @@
 #              reSpeaker Lite with XIAO ESP32-S3 (experimental voice profile)
 #   reterminal-e1001
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
+#   xingzhi-cube
+#              Xingzhi Cube 1.54 inch TFT WiFi (ESP32-S3), 240x240 TFT, no touch
 #   reterminal-e1002
 #              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
 #   c6-nopsram ESP32-C6 devkit without PSRAM (status LED on GPIO8, no display)
@@ -99,6 +101,9 @@ case "$BOARD" in
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # The S3's own USB-Serial-JTAG.
+  xingzhi-cube)
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.xingzhi-cube"
+    # Native USB Serial/JTAG (303a:1001), like the DevKitC-1.
     PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
   *) echo "error: unknown board '$BOARD'" >&2; usage 2 ;;
