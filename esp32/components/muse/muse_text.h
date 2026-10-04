@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -44,6 +45,9 @@ typedef enum {
 
 /* What the UTF-8 character at s is, for line breaking. */
 muse_text_cjk_t muse_text_cjk(const char *s);
+
+/* Whether the UTF-8 text s has any CJK in it. */
+bool muse_text_has_cjk(const char *s);
 
 /* Puts the stand-ins into s, which has room for cap bytes. If one doesn't fit,
  * the text ends there. */

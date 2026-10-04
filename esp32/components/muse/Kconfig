@@ -106,14 +106,17 @@ menu "Muse"
             Leave disabled to build without camera support.
 
     config MUSE_CJK_FONT
-        bool "Show Chinese, Japanese and Korean in captions"
+        bool "Show Chinese and Japanese in captions"
         depends on MUSE_ENABLED
         default n
         help
             Captions fall back to GNU Unifont's 16x16 bitmaps for CJK
             punctuation, kana, the CJK Unified Ideographs and fullwidth
-            forms that the ASCII caption font lacks. Takes about 850 KB of
-            flash and no RAM. Without it those characters show as boxes.
+            forms that the ASCII caption font lacks. Small screens, whose
+            captions are two lines of 8 px text, show a reply with CJK in it
+            one 16 px line at a time. Takes about 850 KB of flash and no RAM.
+            Without it those characters show as boxes. Hangul isn't
+            included.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

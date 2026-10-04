@@ -108,7 +108,7 @@ static bool next_line(const char **text, int cols, const char **start, size_t *l
     while (*p == ' ' || *p == '\n') {
         p++;
     }
-    const char *end = p, *brk = NULL;
+    const char *end = p, *brk = NULL, *movable = NULL;
     int n = 0;
     muse_text_cjk_t prev = MUSE_TEXT_NOT_CJK;
     while (*end && *end != '\n') {
@@ -121,8 +121,13 @@ static bool next_line(const char **text, int cols, const char **start, size_t *l
         if (n + w > cols && n) {
             if (cjk_break) {
                 brk = end;
+            } else if (cjk == MUSE_TEXT_CJK_CLOSE && !brk) {
+                brk = movable;   /* a full word: its last character goes with the punctuation */
             }
             break;
+        }
+        if (n && cjk != MUSE_TEXT_CJK_CLOSE) {
+            movable = end;
         }
         if (*end == ' ' || cjk_break) {
             brk = end;
@@ -148,7 +153,7 @@ static bool next_line(const char **text, int cols, const char **start, size_t *l
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
 {
     int cols, lines;
-    muse_state_page(&cols, &lines);
+    muse_state_page(muse_text_has_cjk(text), &cols, &lines);
     const char *p = text, *start;
     size_t len;
     int line = -1, n = 0;

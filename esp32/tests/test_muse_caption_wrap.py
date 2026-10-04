@@ -101,6 +101,15 @@ class CaptionWrapTest(unittest.TestCase):
             for line in self.wrap("好消息在后头：冷空气正在南下，明天雨就收了。气温一路往下走。", cols)[1:]:
                 self.assertNotIn(line[:1], CLOSING, f"{cols} columns: {line!r}")
 
+    def test_closing_punctuation_after_a_full_line_of_ascii(self) -> None:
+        self.assertEqual(self.wrap("好abcdefghijklm，后", 13), ["好", "abcdefghijkl", "m，后"])
+        text = "广州今天雷阵雨，30°/24°，还伴有8级左右的雷雨大风和短时强降水，出门小心。"
+        for cols in range(4, 16):
+            lines = self.wrap(text, cols)
+            self.assertEqual("".join(lines), text)
+            for line in lines[1:]:
+                self.assertNotIn(line[:1], CLOSING, f"{cols} columns: {line!r}")
+
     def test_mixed_text_breaks_at_spaces_or_between_cjk(self) -> None:
         self.assertEqual(self.wrap("Muse 说 hello world", 8), ["Muse 说", "hello", "world"])
 

@@ -215,6 +215,19 @@ muse_text_cjk_t muse_text_cjk(const char *s)
     return cjk ? MUSE_TEXT_CJK : MUSE_TEXT_NOT_CJK;
 }
 
+bool muse_text_has_cjk(const char *s)
+{
+    while (*s) {
+        if (muse_text_cjk(s) != MUSE_TEXT_NOT_CJK) {
+            return true;
+        }
+        size_t len;
+        decode((const unsigned char *)s, &len);
+        s += len;
+    }
+    return false;
+}
+
 void muse_text_to_ascii(char *s, size_t cap)
 {
     size_t n = strlen(s);

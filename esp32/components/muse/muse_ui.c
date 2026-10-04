@@ -42,6 +42,7 @@
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
 #include "muse_state.h"
+#include "muse_text.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
@@ -448,7 +449,7 @@ static const lv_font_t *font_pick(const lv_font_t *full, const lv_font_t *compac
 }
 
 #if CONFIG_MUSE_CJK_FONT
-LV_FONT_DECLARE(muse_font_cjk_16);
+LV_FONT_DECLARE(muse_font_cjk_16)
 #endif
 
 /* unscii-16 for captions and replies; with CONFIG_MUSE_CJK_FONT, a copy that
@@ -901,6 +902,11 @@ static void build_screen(void)
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
         /* Touch screens need the caption above the navigation dots too. */
         lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+#if CONFIG_MUSE_CJK_FONT
+        /* CJK doesn't fit unscii-8's cell, so a reply with CJK in it fills the
+         * band one line at a time in the 16 px caption font instead. */
+        muse_state_set_cjk_page(s_w / lv_font_get_glyph_width(caption_font(), 'M', ' '), 1);
+#endif
 
         s_bar = lv_obj_create(face);
         lv_obj_remove_style_all(s_bar);
@@ -1403,6 +1409,11 @@ static void update_status(muse_mode_t mode, float now)
     }
     if (fresh) {
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
+#if CONFIG_MUSE_CJK_FONT
+        if (s_small) {
+            lv_obj_set_style_text_font(s_caption_lbl, muse_text_has_cjk(caption) ? caption_font() : &lv_font_unscii_8, 0);
+        }
+#endif
         lv_label_set_text(lbl, caption);
         lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !caption[0]);
         if (s_reply_lbl) {

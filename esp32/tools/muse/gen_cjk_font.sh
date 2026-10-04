@@ -25,8 +25,10 @@ OUT="$HERE/components/muse/fonts/muse_font_cjk_16.c"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+SHA256=0e3981ab552231b5a2a870f2b61741903a4bf25c23ef5aeb05fdced1b3c7af4d
 curl -fsSL -o "$TMP/unifont.otf" \
     "https://unifoundry.com/pub/unifont/unifont-$VERSION/font-builds/unifont-$VERSION.otf"
+echo "$SHA256  $TMP/unifont.otf" | shasum -a 256 -c - >/dev/null
 npx -y lv_font_conv@1.5.3 --font "$TMP/unifont.otf" --size 16 --bpp 1 \
     --format lvgl --lv-font-name muse_font_cjk_16 --no-compress \
     -r 0x3000-0x30FF -r 0x4E00-0x9FFF -r 0xFF00-0xFFEF -o "$TMP/font.c"
