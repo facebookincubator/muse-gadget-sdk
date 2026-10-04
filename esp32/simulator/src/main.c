@@ -32,6 +32,7 @@
 #include "src/drivers/sdl/lv_sdl_window.h"
 
 #include "muse_state.h"
+#include "muse_pixel.h"
 #include "muse_ui.h"
 #include "sim_board.h"
 #include "sim_platform.h"
@@ -52,11 +53,105 @@ static muse_power_t s_power = {
 static muse_ble_state_t s_ble_state = MUSE_BLE_CONNECTED;
 static uint32_t s_passkey;
 static char s_ble_name[32] = "MuseGadget-SIM001";
+static bool s_spin;
+static lv_obj_t *s_spin_avatar;
+static const lv_image_dsc_t *s_spin_original;
+static lv_image_dsc_t s_spin_image;
+static uint32_t *s_spin_pixels;
+static uint32_t s_spin_start;
+static uint32_t s_spin_frame;
+
+/* The production avatar streams image strips. Rotation needs a complete
+ * image, so the desktop demo materializes it without changing the firmware. */
+static lv_obj_t *find_avatar(lv_obj_t *obj)
+{
+    if (lv_obj_check_type(obj, &lv_image_class)) {
+        const void *src = lv_image_get_src(obj);
+        if (src && lv_image_src_get_type(src) == LV_IMAGE_SRC_VARIABLE) {
+            const lv_image_dsc_t *image = src;
+            if (image->data == (const uint8_t *)src) {
+                return obj;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+        lv_obj_t *avatar = find_avatar(lv_obj_get_child(obj, (int32_t)i));
+        if (avatar) {
+            return avatar;
+        }
+    }
+    return NULL;
+}
+
+static bool set_spin(bool enabled)
+{
+    if (enabled && !s_spin_avatar) {
+        s_spin_avatar = find_avatar(lv_screen_active());
+        if (!s_spin_avatar) {
+            fprintf(stderr, "could not find the simulator avatar\n");
+            return false;
+        }
+        s_spin_original = lv_image_get_src(s_spin_avatar);
+        unsigned size = s_spin_original->header.w;
+        if (!size || size > 512 || size != s_spin_original->header.h) {
+            fprintf(stderr, "unsupported simulator avatar size\n");
+            s_spin_avatar = NULL;
+            return false;
+        }
+        s_spin_pixels = malloc(size * size * sizeof(*s_spin_pixels));
+        if (!s_spin_pixels) {
+            s_spin_avatar = NULL;
+            return false;
+        }
+        s_spin_image.header.magic = LV_IMAGE_HEADER_MAGIC;
+        s_spin_image.header.cf = LV_COLOR_FORMAT_ARGB8888;
+        s_spin_image.header.w = size;
+        s_spin_image.header.h = size;
+        s_spin_image.header.stride = size * sizeof(*s_spin_pixels);
+        s_spin_image.data_size = size * s_spin_image.header.stride;
+        s_spin_image.data = (const uint8_t *)s_spin_pixels;
+        lv_image_set_pivot(s_spin_avatar, (int32_t)size / 2, (int32_t)size / 2);
+    }
+    s_spin = enabled;
+    s_spin_start = lv_tick_get();
+    s_spin_frame = UINT32_MAX;
+    if (!enabled && s_spin_avatar) {
+        lv_image_set_rotation(s_spin_avatar, 0);
+        lv_image_set_src(s_spin_avatar, s_spin_original);
+    }
+    return true;
+}
+
+static void update_spin(void)
+{
+    uint32_t now = lv_tick_get();
+    if (!s_spin || now / 40 == s_spin_frame) {
+        return;
+    }
+    s_spin_frame = now / 40;
+    int size = (int)s_spin_image.header.w;
+    uint16_t row[512];
+    for (int y = 0; y < size; y++) {
+        muse_pixel_scale(row, size, 0, size - 1, y, y);
+        for (int x = 0; x < size; x++) {
+            uint16_t color = row[x];
+            unsigned r = (color >> 11) & 31;
+            unsigned g = (color >> 5) & 63;
+            unsigned b = color & 31;
+            s_spin_pixels[y * size + x] = color == 0 ? 0 :
+                0xff000000u | ((r * 255 / 31) << 16) |
+                ((g * 255 / 63) << 8) | (b * 255 / 31);
+        }
+    }
+    lv_image_set_src(s_spin_avatar, &s_spin_image);
+    lv_image_set_rotation(s_spin_avatar, (int32_t)((now - s_spin_start) % 3000) * 3600 / 3000);
+    lv_obj_invalidate(s_spin_avatar);
+}
 
 static void usage(FILE *out, const char *argv0)
 {
     fprintf(out,
-            "Usage: %s [--headless] [--scenario FILE] [--run-ms N] "
+            "Usage: %s [--headless] [--spin] [--scenario FILE] [--run-ms N] "
             "[--screenshot FILE.ppm]\n"
             "\n"
             "Scenario lines are key=value. Supported keys:\n"
@@ -71,7 +166,7 @@ static void usage(FILE *out, const char *argv0)
             "\n"
             "Interactive keys: F1..F7 select face states, H is happy, Space is\n"
             "push-to-talk, +/- change level, [/] change progress, S sleeps,\n"
-            "P writes muse-simulator.ppm, Esc quits. Mouse input is touch.\n",
+            "R toggles mascot spin, P writes muse-simulator.ppm, Esc quits. Mouse input is touch.\n",
             argv0);
 }
 
@@ -91,6 +186,7 @@ static void render_for(uint32_t duration_ms, bool real_time)
         }
         sim_time_advance_us((int64_t)step * 1000);
         lv_timer_handler();
+        update_spin();
         if (real_time) {
             SDL_Delay(step);
         }
@@ -461,6 +557,8 @@ static int event_watch(void *userdata, SDL_Event *event)
         muse_state_set_progress(s_progress);
     } else if (down && key == SDLK_s) {
         muse_state_set_asleep(!muse_state_asleep());
+    } else if (down && key == SDLK_r) {
+        (void)set_spin(!s_spin);
     } else if (down && key == SDLK_p) {
         (void)write_snapshot("muse-simulator.ppm");
     }
@@ -473,9 +571,12 @@ int main(int argc, char **argv)
     const char *screenshot = NULL;
     uint32_t run_ms = 1000;
     bool headless = false;
+    bool spin = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--headless")) {
             headless = true;
+        } else if (!strcmp(argv[i], "--spin")) {
+            spin = true;
         } else if (!strcmp(argv[i], "--scenario") && i + 1 < argc) {
             scenario = argv[++i];
         } else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) {
@@ -524,6 +625,9 @@ int main(int argc, char **argv)
     if (scenario && !run_scenario(scenario, !headless)) {
         return 2;
     }
+    if (spin && !set_spin(true)) {
+        return 1;
+    }
     if (headless || screenshot) {
         render_for(run_ms, false);
         if (screenshot && !write_snapshot(screenshot)) {
@@ -537,5 +641,6 @@ int main(int argc, char **argv)
 
     SDL_DelEventWatch(event_watch, NULL);
     lv_deinit();
+    free(s_spin_pixels);
     return 0;
 }

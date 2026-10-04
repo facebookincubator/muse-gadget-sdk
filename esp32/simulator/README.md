@@ -109,6 +109,7 @@ Mouse input acts as touch. The keyboard controls the common UI states:
 |---|---|
 | F1 ... F7 | Boot, idle, listening, thinking, speaking, error, and off |
 | H | Happy idle animation |
+| R | Toggle a 360° mascot spin (one turn every three seconds) |
 | Space, held | Listen while held, then switch to thinking |
 | `+` / `-` | Raise or lower the audio level |
 | `[` / `]` | Lower or raise turn progress |
@@ -140,6 +141,16 @@ An included scenario can also initialize a visible interactive session:
 ./esp32/simulator/build/muse_simulator \
   --scenario esp32/simulator/tests/scenarios/pairing.txt
 ```
+
+Start with the mascot spinning using `--spin`, for example:
+
+```sh
+./esp32/simulator/build/muse_simulator --spin \
+  --scenario esp32/simulator/tests/scenarios/idle.txt
+```
+
+The spin is a desktop-only 2D rotation of the live avatar image. Press R to
+stop or restart it. It also works with headless screenshots.
 
 An interactive window requires a display session. Use `--headless` when
 running over SSH or in CI.

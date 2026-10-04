@@ -39,11 +39,12 @@ def read_ppm(path: Path) -> bytes:
     return pixels
 
 
-def render(binary: Path, scenario: Path, output: Path) -> tuple[str, subprocess.CompletedProcess[str]]:
+def render(binary: Path, scenario: Path, output: Path, *, spin: bool = False) -> tuple[str, subprocess.CompletedProcess[str]]:
     env = {**os.environ, "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}
     proc = subprocess.run(
         [
             str(binary),
+            *(["--spin"] if spin else []),
             "--headless",
             "--scenario",
             str(scenario),
@@ -81,6 +82,19 @@ def main() -> None:
             hashes[scenario.stem] = first
 
         assert len(set(hashes.values())) == len(hashes), f"scenarios rendered identically: {hashes}"
+
+        idle = HERE / "scenarios/idle.txt"
+        spin_first, _ = render(binary, idle, tmp_path / "spin-1.ppm", spin=True)
+        spin_second, _ = render(binary, idle, tmp_path / "spin-2.ppm", spin=True)
+        assert spin_first == spin_second, "Mascot spin is not deterministic"
+        assert spin_first != hashes["idle"], "Mascot spin did not change the framebuffer"
+
+        upright = read_ppm(tmp_path / "idle-1.ppm")
+        rotated = read_ppm(tmp_path / "spin-1.ppm")
+        # Rotation should leave the header and bottom controls in place.
+        edge_bytes = 40 * WIDTH * 3
+        assert upright[:edge_bytes] == rotated[:edge_bytes], "Spin changed the header"
+        assert upright[-edge_bytes:] == rotated[-edge_bytes:], "Spin changed the bottom controls"
 
         # Showing shutdown must not lock subsequent preview state selections.
         after_off = tmp_path / "after-off.txt"

@@ -46,7 +46,7 @@ BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
 UNPAIRED_POLL_S = 30.0
-MAX_LOCAL_REQUEST = 64 * 1024
+MAX_LOCAL_REQUEST = 256 * 1024
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 # Device access tokens live about 4 hours; rotate at 3.
 TOKEN_REFRESH_AGE_S = 3 * 3600
@@ -224,13 +224,63 @@ class Service:
     async def _handle_local(self, reader, writer) -> None:
         try:
             line = await asyncio.wait_for(reader.readline(), 10)
+            request = json.loads(line)
+            if isinstance(request, dict) and request.get("stream") is True:
+                await self._stream_chat(request, reader, writer)
+                return
             reply = await self._local_request(line)
         except Exception as exc:
             reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         writer.write(json.dumps(reply).encode() + b"\n")
         try:
             await writer.drain()
+        except (ConnectionError, OSError):
+            pass
         finally:
+            writer.close()
+
+    async def _stream_chat(self, request, reader, writer):
+        message, session_id = request.get("message"), request.get("session_id")
+        items = request.get("items")
+        timeout = request.get("timeout_s")
+        if timeout is not None and (not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 1 <= timeout <= 600):
+            raise ValueError("timeout_s must be between 1 and 600")
+        if items is not None and (not isinstance(items, list) or not items or
+                                  any(not isinstance(item, dict) for item in items)):
+            raise ValueError("items must be a non-empty list of attachments")
+        if not isinstance(message, str) or (not message.strip() and not items):
+            raise ValueError("message or attachment is required")
+        if session_id is not None and not (
+            isinstance(session_id, str) and _SESSION_ID_RE.fullmatch(session_id)
+        ):
+            raise ValueError("invalid session id")
+        session = self._current
+        if session is None or session.registered_at is None:
+            raise ConnectionError("not connected to the Muse")
+
+        async def forward():
+            try:
+                options = {}
+                if items is not None: options["items"] = items
+                if timeout is not None: options["timeout"] = timeout
+                async for event in session.chat_events(message, session_id, **options):
+                    writer.write(json.dumps(event).encode() + b"\n")
+                    await writer.drain()
+            except (ConnectionError, OSError, ValueError, TimeoutError, asyncio.TimeoutError) as exc:
+                writer.write(json.dumps({"type": "error", "error": str(exc)}).encode() + b"\n")
+                await writer.drain()
+
+        sending = asyncio.ensure_future(forward())
+        # EOF cancels the subscription immediately when the desktop app stops.
+        disconnected = asyncio.ensure_future(reader.read(1))
+        try:
+            done, _ = await asyncio.wait({sending, disconnected}, return_when=asyncio.FIRST_COMPLETED)
+            if sending in done:
+                await sending
+        finally:
+            sending.cancel()
+            disconnected.cancel()
+            await asyncio.gather(sending, disconnected, return_exceptions=True)
             writer.close()
 
     async def _local_request(self, line: bytes) -> dict:

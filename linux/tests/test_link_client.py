@@ -203,7 +203,11 @@ def test_vm_id_is_escaped_like_encode_uri_component():
     assert noise_url("h", "a-b_c.d!~*'()?&=") == "wss://h/v1/noise?vm_id=a-b_c.d!~*'()%3F%26%3D"
 
 
-def test_send_chat_posts_a_device_attributed_message_on_the_same_session():
+@pytest.mark.parametrize("message,items", [
+    ("porch light on", None),
+    ("", [{"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav", "data_base64": "UklGRg=="}]),
+])
+def test_send_chat_posts_a_device_attributed_message_on_the_same_session(message, items):
     async def scenario():
         session, vm = make_session(lambda *a: {"ok": True}, [])
         task = asyncio.ensure_future(session.run(asyncio.Event()))
@@ -211,13 +215,13 @@ def test_send_chat_posts_a_device_attributed_message_on_the_same_session():
         await vm.accept_control_stream()
         await vm.next_message()  # link.register
 
-        reply = asyncio.ensure_future(session.send_chat("porch light on", "side-1"))
+        reply = asyncio.ensure_future(session.send_chat(message, "side-1", items=items))
         request = await vm.next_frame()
         assert (request.kind, request.value.verb, request.value.path, request.value.end_body) == (
             "request", "POST", "/chat/stream", True)
-        assert json.loads(request.value.body) == {
-            "message": "porch light on", "output_modality": "text", "device_id": "homelink-abcdef",
-            "session_id": "side-1"}
+        expected = {"message": message, "output_modality": "text", "device_id": "homelink-abcdef", "session_id": "side-1"}
+        if items is not None: expected["items"] = items
+        assert json.loads(request.value.body) == expected
         headers = {h.key.lower(): h.value for h in request.value.headers}
         assert headers["content-type"] == "application/json"
         await vm.send_frame(ServiceFrame.response(

@@ -108,6 +108,25 @@ def test_local_message_must_be_non_empty_text():
 
     run_with_socket(check)
 
+def test_streaming_voice_attachment_is_forwarded_without_local_transcription():
+    async def check(service, path):
+        class VoiceSession(FakeSession):
+            async def chat_events(self, message, session_id, *, items=None):
+                self.sent.append((message, session_id, items))
+                yield {"type": "ack"}
+                yield {"type": "reply", "text": "Hello", "message_id": "reply", "complete": True}
+                yield {"type": "done"}
+        session = VoiceSession(); service._current = session
+        items = [{"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav", "data_base64": "UklGRg=="}]
+        reader, writer = await asyncio.open_unix_connection(str(path))
+        writer.write(json.dumps(dict(stream=True, message="", session_id="voice-1", items=items)).encode() + b"\n")
+        await writer.drain()
+        events = [json.loads(await reader.readline()) for _ in range(3)]
+        assert [event["type"] for event in events] == ["ack", "reply", "done"]
+        assert session.sent == [("", "voice-1", items)]
+        writer.close(); await writer.wait_closed()
+    run_with_socket(check)
+
 
 def test_backoff_doubles_to_a_ceiling_and_honours_the_floor():
     backoff = Backoff()

@@ -197,6 +197,32 @@ if(MUSE_SIM_SANITIZERS)
 endif()
 
 include(CTest)
+option(MUSE_BUILD_DESKTOP_APP "Build the native LVGL conversation app" ON)
+if(MUSE_BUILD_DESKTOP_APP)
+    add_executable(muse_linux_app
+        ../../linux/lvgl/main.c
+        ../../linux/lvgl/chat_client.c
+        ../../linux/lvgl/media_client.c
+        src/sim_platform.c
+        "${MUSE_COMPONENT_DIR}/muse_state.c"
+        "${MUSE_COMPONENT_DIR}/muse_text.c"
+        "${MUSE_COMPONENT_DIR}/../../avatar/muse_pixel.c"
+    )
+    target_include_directories(muse_linux_app PRIVATE compat include "${MUSE_COMPONENT_DIR}")
+    target_link_libraries(muse_linux_app PRIVATE ${MUSE_SIM_LVGL_TARGET} ${MUSE_SIM_SDL_TARGET} Threads::Threads m)
+    target_compile_options(muse_linux_app PRIVATE -Wall -Wextra -Wpedantic)
+    if(APPLE)
+        target_link_libraries(muse_linux_app PRIVATE ${MUSE_SIM_IOKIT_FRAMEWORK})
+    endif()
+    if(MUSE_SIM_SANITIZERS)
+        target_compile_options(muse_linux_app PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(muse_linux_app PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    if(BUILD_TESTING)
+        add_test(NAME muse_linux_app_smoke COMMAND muse_linux_app --headless --run-ms 800
+                 --screenshot "${CMAKE_CURRENT_BINARY_DIR}/muse-linux-app.ppm")
+    endif()
+endif()
 if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py")
     find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
     add_test(
