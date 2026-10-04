@@ -1,0 +1,10 @@
+*
+!linux/
+!linux/**
+!docker-mac/
+!docker-mac/board-sim/
+!docker-mac/board-sim/entrypoint.sh
+!docker-mac/board-sim/sshd_config
+linux/.venv
+linux/**/__pycache__
+linux/.pytest_cache

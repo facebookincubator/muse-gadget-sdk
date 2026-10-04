@@ -1,0 +1,15 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Licensed under the Apache License, Version 2.0 (see LICENSE).
+Port 22
+HostKey /etc/ssh/host-keys/ssh_host_ed25519_key
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+UsePAM no
+AllowUsers root
+AllowTcpForwarding no
+X11Forwarding no
+PermitTunnel no
+LogLevel ERROR

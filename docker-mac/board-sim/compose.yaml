@@ -1,0 +1,80 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Licensed under the Apache License, Version 2.0 (see LICENSE).
+name: muse-board-sim
+x-board: &board
+  platform: linux/arm64
+  image: muse-ma35-board-sim:local
+  build:
+    context: ../..
+    dockerfile: docker-mac/board-sim/Dockerfile
+  init: true
+  cpus: 2
+  # Intel Macs need additional RAM for ARM translation and concurrent SSH peers.
+  # Limits below include 256 MB beyond board DDR; they do not prove hardware fit.
+  healthcheck:
+    test: ["CMD-SHELL", "test -S /run/musegadget/musegadget.sock && pgrep -x sshd >/dev/null"]
+    interval: 5s
+    timeout: 3s
+    retries: 12
+services:
+  ma35d1-a1:
+    <<: *board
+    container_name: muse-ma35d1-a1-sim
+    labels: {"muse.board.ddr_mb": "512"}
+    mem_limit: 768m
+    memswap_limit: 768m
+    ports: ["127.0.0.1:2224:22"]
+    volumes:
+      - ../../.board-sim/client_key.pub:/opt/muse/client_key.pub:ro
+      - d1-a1-state:/var/lib/musegadget
+      - d1-a1-host-keys:/etc/ssh/host-keys
+      - d1-a1-home:/home/muse
+  ma35d1-s1:
+    <<: *board
+    container_name: muse-ma35d1-s1-sim
+    labels: {"muse.board.ddr_mb": "256"}
+    mem_limit: 512m
+    memswap_limit: 512m
+    ports: ["127.0.0.1:2225:22"]
+    volumes:
+      - ../../.board-sim/client_key.pub:/opt/muse/client_key.pub:ro
+      - d1-s1-state:/var/lib/musegadget
+      - d1-s1-host-keys:/etc/ssh/host-keys
+      - d1-s1-home:/home/muse
+  ma35h0-a1:
+    <<: *board
+    container_name: muse-ma35h0-a1-sim
+    labels: {"muse.board.ddr_mb": "128"}
+    mem_limit: 384m
+    memswap_limit: 384m
+    ports: ["127.0.0.1:2226:22"]
+    volumes:
+      - ../../.board-sim/client_key.pub:/opt/muse/client_key.pub:ro
+      - h0-a1-state:/var/lib/musegadget
+      - h0-a1-host-keys:/etc/ssh/host-keys
+      - h0-a1-home:/home/muse
+  ma35h0-a2:
+    <<: *board
+    container_name: muse-ma35h0-a2-sim
+    labels: {"muse.board.ddr_mb": "128"}
+    mem_limit: 384m
+    memswap_limit: 384m
+    ports: ["127.0.0.1:2227:22"]
+    volumes:
+      - ../../.board-sim/client_key.pub:/opt/muse/client_key.pub:ro
+      - h0-a2-state:/var/lib/musegadget
+      - h0-a2-host-keys:/etc/ssh/host-keys
+      - h0-a2-home:/home/muse
+volumes:
+  d1-a1-state:
+  d1-a1-host-keys:
+  d1-a1-home:
+  d1-s1-state:
+  d1-s1-host-keys:
+  d1-s1-home:
+  h0-a1-state:
+  h0-a1-host-keys:
+  h0-a1-home:
+  h0-a2-state:
+  h0-a2-host-keys:
+  h0-a2-home:

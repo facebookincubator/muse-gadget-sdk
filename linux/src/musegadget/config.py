@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 
 STATE_DIR_ENV = "MUSEGADGET_STATE_DIR"
@@ -56,9 +57,32 @@ def sdk_token(directory: Path | None = None) -> str | None:
     token = token.strip()
     if not token:
         return None
+    return validate_sdk_token(token)
+
+
+def validate_sdk_token(token: str) -> str:
+    token = token.strip()
     if not _SDK_TOKEN.fullmatch(token):
         raise ValueError("the SDK token is not valid; copy it again from gadgets.muse.ai")
     return token
+
+
+def save_sdk_token(token: str, directory: Path | None = None) -> None:
+    """Validate and atomically save a token without exposing it in arguments."""
+    token = validate_sdk_token(token)
+    directory = directory or state_dir()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory.chmod(0o700)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
+                                     prefix=".sdk_token.", delete=False) as temp:
+        temporary = Path(temp.name)
+        try:
+            temp.write(token + "\n")
+            temp.flush()
+            os.fsync(temp.fileno())
+            os.replace(temporary, directory / SDK_TOKEN_FILE)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def load_json(name: str, directory: Path | None = None) -> dict | None:

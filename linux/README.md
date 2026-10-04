@@ -57,6 +57,11 @@ opens Bluetooth pairing.
 
 ## Set it up with Muse
 
+A Linux board without Bluetooth can use the
+[Mac enrollment relay over USB networking](../docker-mac/BOARD-ENROLLMENT.md).
+The phone pairs with the Mac's BLE radio while the encrypted setup protocol runs
+on the board. The board then connects over Ethernet with its own saved credentials.
+
 When the installer says pairing is open, go to the Muse app:
 
 1. Turn on **Settings > Devices > Developer mode**.

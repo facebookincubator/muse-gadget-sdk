@@ -6,7 +6,6 @@ from __future__ import annotations
 import getpass
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,30 +13,7 @@ sys.path.insert(0, str(ROOT / "linux/src"))
 import mac_ble
 from musegadget import config
 
-def save_token(token: str, directory: Path) -> None:
-    """Validate with the SDK, then atomically save an owner-readable token."""
-    token = token.strip()
-    previous = os.environ.get(config.SDK_TOKEN_ENV)
-    os.environ[config.SDK_TOKEN_ENV] = token
-    try:
-        if not token or not config.sdk_token():
-            raise ValueError("the SDK token is empty")
-    finally:
-        if previous is None:
-            os.environ.pop(config.SDK_TOKEN_ENV, None)
-        else:
-            os.environ[config.SDK_TOKEN_ENV] = previous
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    directory.chmod(0o700)
-    with tempfile.NamedTemporaryFile(mode="w", dir=directory, prefix=".sdk_token.", delete=False) as temp:
-        temporary = Path(temp.name)
-        try:
-            temp.write(token + "\n")
-            temp.flush()
-            os.fsync(temp.fileno())
-            os.replace(temporary, directory / config.SDK_TOKEN_FILE)
-        finally:
-            temporary.unlink(missing_ok=True)
+save_token = config.save_sdk_token
 
 
 def main(argv=None) -> int:

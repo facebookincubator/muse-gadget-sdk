@@ -33,7 +33,7 @@ jobs:
       - name: Test packet transport and credential handoff
         env:
           PYTHONPATH: linux/src:docker-mac
-        run: python -m pytest -q docker-mac/test_mac_ble.py docker-mac/test_pair_mac.py
+        run: python -m pytest -q docker-mac/test_mac_ble.py docker-mac/test_pair_mac.py docker-mac/test_pair_board.py linux/tests/test_stdio_ble.py
 
   scripts:
     runs-on: ubuntu-latest
@@ -44,4 +44,7 @@ jobs:
       - name: Check shell scripts and Compose
         run: |
           shellcheck docker-mac/*.sh docker-mac/start.command
+          shellcheck docker-mac/board-sim/*.sh
           docker compose config --quiet
+          docker compose -f docker-mac/board-sim/compose.yaml config --quiet
+          docker compose -f docker-mac/board-sim/compose.yaml -f docker-mac/board-sim/compose-ai.yaml config --quiet
