@@ -59,6 +59,10 @@ menu "Muse"
             bool "M5Stack StickS3 (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_CROWPANEL_ADVANCE_43
+            bool "Elecrow CrowPanel Advance 4.3 V1.3 (800x480 touch, speaker and mic)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_M5STACK_STICKC_PLUS2
             bool "M5Stack StickC Plus2 (ESP32, two buttons, no touch)"
             depends on IDF_TARGET_ESP32
@@ -87,6 +91,7 @@ menu "Muse"
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
         default "sensecap_watcher" if MUSE_BOARD_SENSECAP_WATCHER
         default "m5stack_sticks3" if MUSE_BOARD_M5STACK_STICKS3
+        default "crowpanel_advance_43" if MUSE_BOARD_CROWPANEL_ADVANCE_43
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
@@ -98,7 +103,7 @@ menu "Muse"
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_CROWPANEL_ADVANCE_43 || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
     # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME

@@ -29,7 +29,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"crowpanel_advance_43\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\"]"
   waveshare/esp32_s3_touch_amoled_1_75c:
     version: "^3.0.0"
     rules:
@@ -58,6 +58,10 @@ dependencies:
     version: "^2.0.1"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"sensecap_watcher\""
+  espressif/esp_lcd_touch_gt911:
+    version: "^1.2.1"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"crowpanel_advance_43\""
   espressif/esp_lcd_co5300:
     version: "^2.2.0"
     rules:

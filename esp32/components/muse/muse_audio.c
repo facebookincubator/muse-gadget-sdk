@@ -39,6 +39,7 @@ static esp_codec_dev_handle_t s_spk;
 static esp_codec_dev_handle_t s_mic;
 static bool s_open;
 static int16_t s_in_stereo[MUSE_AUDIO_CHUNK * CHANNELS];
+static int16_t s_in_mono[MUSE_AUDIO_CHUNK];
 static int16_t s_out_stereo[MUSE_AUDIO_CHUNK * CHANNELS];
 
 /* One-pole high-pass on the mixed mic signal. */
@@ -53,15 +54,33 @@ static esp_err_t open_codecs(void)
         .bits_per_sample = 16,
     };
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_spk, &fs) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "open speaker");
-    ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_mic, &fs) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "open mic");
+    if (s_mic) {
+        ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_mic, &fs) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "open mic");
+    }
     s_open = true;
+    return ESP_OK;
+}
+
+static esp_err_t read_input(size_t frames)
+{
+    if (s_mic) {
+        return esp_codec_dev_read(s_mic, s_in_stereo, frames * CHANNELS * sizeof(int16_t)) == ESP_CODEC_DEV_OK
+            ? ESP_OK : ESP_FAIL;
+    }
+    if (!muse_board->read_mic || muse_board->read_mic(s_in_mono, frames, muse_settings_mic_gain()) != ESP_OK) {
+        return ESP_FAIL;
+    }
+    for (size_t i = 0; i < frames; i++) {
+        s_in_stereo[2 * i] = s_in_mono[i];
+        s_in_stereo[2 * i + 1] = s_in_mono[i];
+    }
     return ESP_OK;
 }
 
 esp_err_t muse_audio_init(int volume, int mic_gain_db)
 {
     ESP_RETURN_ON_ERROR(muse_board->audio_init(&s_spk, &s_mic), TAG, "codec init failed");
-    ESP_RETURN_ON_FALSE(s_spk && s_mic, ESP_FAIL, TAG, "codec init failed");
+    ESP_RETURN_ON_FALSE(s_spk && (s_mic || muse_board->read_mic), ESP_FAIL, TAG, "codec init failed");
 
     ESP_RETURN_ON_ERROR(open_codecs(), TAG, "open codecs");
     muse_audio_set_volume(volume);
@@ -91,7 +110,9 @@ void muse_audio_power(bool on)
         }
     } else {
         esp_codec_dev_close(s_spk);
-        esp_codec_dev_close(s_mic);
+        if (s_mic) {
+            esp_codec_dev_close(s_mic);
+        }
         s_open = false;
     }
     esp_log_level_set("i2s_common", lvl);
@@ -127,13 +148,13 @@ void muse_audio_selftest(void)
 
     /* Capture: drop the DMA backlog, then time a known number of frames. */
     for (int n = 0; n < FLUSH; n += MUSE_AUDIO_CHUNK) {
-        esp_codec_dev_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
+        read_input(MUSE_AUDIO_CHUNK);
     }
     double sl = 0, sr = 0, slr = 0, ml = 0, mr = 0;
     int pl = 0, pr = 0;
     int64_t t0 = esp_timer_get_time();
     for (int n = 0; n < MEASURE; n += MUSE_AUDIO_CHUNK) {
-        esp_codec_dev_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
+        read_input(MUSE_AUDIO_CHUNK);
         for (int i = 0; i < MUSE_AUDIO_CHUNK; i++) {
             int l = s_in_stereo[2 * i], r = s_in_stereo[2 * i + 1];
             ml += l;
@@ -217,7 +238,7 @@ void muse_audio_loopback_test(int volume)
                     s_out_stereo[2 * i] = s_out_stereo[2 * i + 1] = v;
                 }
                 esp_codec_dev_write(s_spk, s_out_stereo, sizeof(s_out_stereo));
-                esp_codec_dev_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
+                read_input(MUSE_AUDIO_CHUNK);
                 /* Skip the first SKIP*2 frames: DMA latency plus the previous tone's tail. */
                 if (n >= 2 * SKIP && got + MUSE_AUDIO_CHUNK <= MEAS) {
                     memcpy(cap + got * CHANNELS, s_in_stereo, sizeof(s_in_stereo));
@@ -251,7 +272,7 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 {
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
-        if (esp_codec_dev_read(s_mic, s_in_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
+        if (read_input(n) != ESP_OK) {
             return ESP_FAIL;
         }
         for (size_t i = 0; i < n; i++) {
