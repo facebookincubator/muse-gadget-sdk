@@ -1335,6 +1335,47 @@ static char *build_register_json(void) {
         cJSON_AddNumberToObject(
             cJSON_GetObjectItem(commands, "display.draw_url"), "timeout_ms",
             bits == 4 ? 120000 : 60000);
+#if CONFIG_HOMEHUB_TEXT_PAGES
+        cJSON *page_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(page_required, "page",
+                              string_param("Short page name, up to 15 characters, such as "
+                                           "priorities, today, workout or note. Setting "
+                                           "an existing name replaces that page."));
+        cJSON_AddItemToObject(page_required, "text",
+                              string_param("The page body, in plain ASCII, up to 460 "
+                                           "characters. Use \\n between lines; about 26 "
+                                           "characters a line and 18 lines fit. Lists "
+                                           "read well as one item per line, with [ ] and "
+                                           "[x] for to-dos."));
+        cJSON *page_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(page_optional, "title",
+                              string_param("Heading shown at the top, up to 20 characters. "
+                                           "Defaults to the page name."));
+        add_command(commands, "pages.set",
+                    "Create or replace one of up to 6 text pages kept on the device, and "
+                    "show it. The person scrolls through the pages with the up and down "
+                    "buttons, so use this for things they come back to: priorities, "
+                    "today's schedule, a workout, a note or a list. Pages stay across "
+                    "restarts.",
+                    page_required, page_optional);
+        cJSON *clear_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(clear_required, "page",
+                              string_param("Name of the page to remove."));
+        add_command(commands, "pages.clear", "Remove a page set with pages.set.",
+                    clear_required, nullptr);
+#endif
+#if CONFIG_HOMEHUB_DISPLAY_TEXT
+        cJSON *text_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(text_required, "text",
+                              string_param("The message, in plain ASCII. Lines wrap at "
+                                           "spaces; use \\n for a new line. About 26 "
+                                           "characters a line and 20 lines fit."));
+        add_command(commands, "display.show_text",
+                    "Show a text message on the e-paper screen, under the agent's "
+                    "name, until display.show_animation. Up to 600 characters. Use "
+                    "this for a one-off message; pages.set keeps a page.",
+                    text_required, nullptr);
+#endif
         add_command(commands, "display.show_animation",
                     epaper ? "Clear the image and bring back the status screen "
                            "and the agent's name."

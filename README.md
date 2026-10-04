@@ -64,6 +64,7 @@ upstream licenses:
 |---|---|---|
 | [`esp32/components/minimp3/include/minimp3.h`](esp32/components/minimp3) | [lieff/minimp3](https://github.com/lieff/minimp3) | CC0-1.0, see [`LICENSE`](esp32/components/minimp3/LICENSE) |
 | [`esp32/main/pixel_font.c`](esp32/main/pixel_font.c) | Adafruit GFX `glcdfont.c` | BSD-2-Clause, in the file header |
+| Waveform tables and controller sequences in [`esp32/main/epaper_x3_status.c`](esp32/main/epaper_x3_status.c) | [Free-Ink/freeink-sdk](https://github.com/Free-Ink/freeink-sdk) | MIT, Copyright (c) 2026 FreeInk, noted in the file header |
 
 Dependencies fetched at build time are under their own licenses: ESP-IDF
 components (into `esp32/managed_components/`), and the simulator's LVGL and

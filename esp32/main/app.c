@@ -55,6 +55,12 @@
 #include "image_fetch.h"
 #include "noise_tunnel.h"
 #include "led_status.h"
+#if CONFIG_HOMEHUB_DISPLAY_TEXT
+#include "x3_display.h"
+#endif
+#if CONFIG_HOMEHUB_TEXT_PAGES
+#include "x3_pages.h"
+#endif
 #include "button.h"
 #include "tunnel_netif.h"
 #include "net_discovery.h"
@@ -1867,6 +1873,59 @@ static cJSON *on_ws_command(
         cJSON_AddBoolToObject(async, "_async", true);
         return async;
     }
+#if CONFIG_HOMEHUB_TEXT_PAGES
+    if (strcmp(command, "pages.set") == 0 || strcmp(command, "pages.clear") == 0) {
+        cJSON *page = cJSON_GetObjectItem(params, "page");
+        if (!cJSON_IsString(page) || !page->valuestring || !page->valuestring[0]) {
+            return command_error("missing_param", "page is required");
+        }
+        if (strlen(page->valuestring) > X3_PAGE_NAME_MAX) {
+            return command_error("too_long", "page is at most 15 characters");
+        }
+        if (strcmp(command, "pages.clear") == 0) {
+            if (!x3_pages_clear(page->valuestring)) {
+                return command_error("not_found", "no page with that name");
+            }
+        } else {
+            cJSON *title = cJSON_GetObjectItem(params, "title");
+            cJSON *text = cJSON_GetObjectItem(params, "text");
+            if (!cJSON_IsString(text) || !text->valuestring) {
+                return command_error("missing_param", "text is required");
+            }
+            if (strlen(text->valuestring) > X3_PAGE_TEXT_MAX) {
+                return command_error("too_long", "text is at most 460 characters");
+            }
+            if (title && (!cJSON_IsString(title) || !title->valuestring
+                          || strlen(title->valuestring) > X3_PAGE_TITLE_MAX)) {
+                return command_error("too_long", "title is a string of at most 20 characters");
+            }
+            if (!x3_pages_set(page->valuestring, title ? title->valuestring : NULL,
+                              text->valuestring)) {
+                return command_error("full", "all 6 pages are in use; clear one first");
+            }
+        }
+        cJSON *result = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "ok", true);
+        return result;
+    }
+#endif
+#if CONFIG_HOMEHUB_DISPLAY_TEXT
+    if (strcmp(command, "display.show_text") == 0) {
+        cJSON *text = cJSON_GetObjectItem(params, "text");
+        if (!cJSON_IsString(text) || !text->valuestring || !text->valuestring[0]) {
+            return command_error("missing_param", "text is required");
+        }
+        if (strlen(text->valuestring) > 600) {
+            return command_error("too_long", "text is at most 600 characters");
+        }
+        if (!x3_display_show_text(text->valuestring)) {
+            return command_error("no_display", "the screen is not ready");
+        }
+        cJSON *result = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "ok", true);
+        return result;
+    }
+#endif
     if (strcmp(command, "display.show_animation") == 0) {
         led_status_show_animation();
         cJSON *result = cJSON_CreateObject();
