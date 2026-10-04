@@ -2023,8 +2023,18 @@ extern "C" void muse_hatch_start(void)
     }
     cJSON_Hooks hooks = { json_alloc, heap_caps_free };
     cJSON_InitHooks(&hooks);
-    s_cmds = xQueueCreate(16, sizeof(cmd_t));
-    s_events = xQueueCreate(16, sizeof(ev_t));
+    /* Keep the command/event queues out of internal DRAM, which Wi-Fi, BLE and
+     * mbedTLS can exhaust: when the allocation failed here hatch_task never
+     * started and every turn was silently dropped. Fall back to internal RAM
+     * on parts without usable PSRAM. */
+    s_cmds = xQueueCreateWithCaps(16, sizeof(cmd_t), MALLOC_CAP_SPIRAM);
+    if (!s_cmds) {
+        s_cmds = xQueueCreate(16, sizeof(cmd_t));
+    }
+    s_events = xQueueCreateWithCaps(16, sizeof(ev_t), MALLOC_CAP_SPIRAM);
+    if (!s_events) {
+        s_events = xQueueCreate(16, sizeof(ev_t));
+    }
     s_in = xStreamBufferCreateWithCaps(IN_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_out = xStreamBufferCreateWithCaps(OUT_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_turn.chunk = static_cast<uint8_t *>(psram_alloc(DICT_CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL)));
