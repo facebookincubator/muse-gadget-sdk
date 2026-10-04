@@ -2402,6 +2402,7 @@ static void on_ws_control_status(const char *status) {
 // We gate validation on the control WS coming up: that's the channel a future
 // device.ota would arrive on, so if the new image can't reach it, reverting is
 // the only way to keep the device recoverable.
+#if !CONFIG_HOMEHUB_EXTERNAL_INSTALLER
 static void ota_verify_task(void *arg) {
     (void)arg;
     int64_t deadline = esp_timer_get_time() + OTA_VERIFY_TIMEOUT_US;
@@ -2430,6 +2431,7 @@ static void ota_verify_task(void *arg) {
     stack_monitor_record(NULL);
     vTaskDelete(NULL);
 }
+#endif
 
 // ---- Heap snapshot helper ---------------------------------------------------
 
@@ -2524,7 +2526,9 @@ void app_run(void) {
         s_ota_pending_verify = true;
         ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
     }
+#if !CONFIG_HOMEHUB_EXTERNAL_INSTALLER
     xTaskCreate(ota_verify_task, "ota_verify", 4096, NULL, 4, NULL);
+#endif
 
     bool setup_complete = config_setup_complete();
     bool provisioned = config_is_provisioned();

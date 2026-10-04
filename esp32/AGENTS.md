@@ -32,6 +32,8 @@ avatar/voice/settings UI on boards with a display.
 - **ESP-IDF v6.0.1**, installed and activated (`. $IDF_PATH/export.sh`) so
   `idf.py` is on `PATH`. Other versions are unsupported. Errors about missing
   IDF headers such as `gcm.h` or `gpio_ll.h` usually mean the wrong IDF tag.
+  The one exception is the ESP-Mosaico: its chip isn't in v6.0.1, and
+  `devices/README.md` says which ESP-IDF builds it.
 - Python 3 and a C/C++ compiler (`cc`, `c++`) for the host tests.
 - A USB data cable. Flashing needs access to the serial port. A sandboxed
   agent usually has to run flash and monitor commands outside the sandbox.
@@ -62,6 +64,7 @@ before adding a feature to one.
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
 | M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
+| Espressif ESP-Mosaico | `esp32s31` | `devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-mosaico` | `mosaico.py` (below) |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on
 GPIO27, the BOOT button on GPIO28 (active low), 8 MB flash and quad PSRAM.
@@ -118,7 +121,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|mosaico> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -157,6 +160,17 @@ more, except the StickS3, StickC Plus2 and Cardputer ADV, which have 8 MB and us
 All boards share `managed_components/` and `dependencies.lock` in this
 directory. If the component manager fails after you switch between a board
 with the full UI and one without (lvgl is the usual offender), delete both and build again.
+
+### ESP-Mosaico
+
+Never flash an ESP-Mosaico with `idf.py flash` or esptool: that replaces Vibe
+Mode, Espressif's retained firmware. It is installed as an ESP-Mosaico
+application, the project in `devices/espressif-mosaico/`, with Espressif's
+`mosaico.py` from an ESP-Mosaico workspace and the ESP-IDF commit that
+workspace pins. `devices/README.md` has the commands, where the SDK token
+goes, and how to read the log and the screen over USB.
+`tools/muse/board.sh build mosaico` only checks that the board compiles, and
+refuses to flash.
 
 ### A new board
 
@@ -203,6 +217,7 @@ flash size and status backend.
    | CH340 (`1a86:7523`) | ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002 |
    | CH9102 | M5Stack StickC Plus2 |
    | CH342, two `usbmodem` ports | SenseCAP Watcher: the S3 console is the one ending in `3`, the other is the Himax camera |
+   | Espressif `303a:4002`, "ESP-Iris Mosaico muse_gadget" (`ESP_Iris` in `ioreg`) | ESP-Mosaico running this firmware. The port is ESP-Iris, not a serial console: use `mosaico.py` (`devices/README.md`) |
 
 3. **Ask the chip.** When you can write to the port (this resets the board):
 
