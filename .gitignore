@@ -24,3 +24,8 @@ muse-simulator.ppm
 # Local gadget provisioning and original-device flash backups.
 .sdk-token
 /backups/
+
+# Local Mac Bluetooth pairing state and dependencies.
+.muse-state/
+.mac-venv/
+docker-mac/*.log

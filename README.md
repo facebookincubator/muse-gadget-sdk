@@ -48,6 +48,9 @@ prefixed with "MuseGadget".
 Each directory has a `README.md` to get started and an `AGENTS.md` for coding
 agents like [Muse Code](https://developer.meta.com/ai/lp/muse-code/).
 
+On macOS, [Mac BLE pairing with Docker](docker-mac) uses the Mac's built-in
+Bluetooth Low Energy radio for phone setup, then runs the Linux SDK in Docker.
+
 ## Community
 
 Meet other hackers who are building and customizing Muse gadgets in our

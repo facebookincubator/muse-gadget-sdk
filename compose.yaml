@@ -1,0 +1,24 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Licensed under the Apache License, Version 2.0 (see LICENSE).
+name: muse-gadget
+services:
+  muse:
+    image: muse-gadget-linux:local
+    build:
+      context: .
+      dockerfile: docker-mac/Dockerfile
+      target: runtime
+    container_name: muse-gadget-linux
+    init: true
+    restart: unless-stopped
+    volumes:
+      - ./.muse-state:/var/lib/musegadget
+      - muse-home:/home/muse
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,socket; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect('/run/musegadget/musegadget.sock'); s.sendall(b'{}'+bytes([10])); reply=json.loads(s.recv(4096)); assert reply.get('ok') is False; s.close()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+volumes:
+  muse-home:

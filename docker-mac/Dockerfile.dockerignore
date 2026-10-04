@@ -1,0 +1,9 @@
+*
+!linux/
+!linux/**
+!docker-mac/
+!docker-mac/Dockerfile
+!docker-mac/entrypoint.sh
+linux/.venv
+linux/**/__pycache__
+linux/.pytest_cache
