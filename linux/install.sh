@@ -34,6 +34,7 @@ BLUEZ_CONF="/etc/bluetooth/main.conf"
 BLUEZ_DROPIN="/etc/systemd/system/bluetooth.service.d/zz-musegadget.conf"
 DEFAULT_SOURCE="git+https://github.com/facebookincubator/muse-gadget-sdk@main#subdirectory=linux"
 APT_PACKAGES=(bluez python3 python3-dbus python3-gi python3-cryptography curl ca-certificates)
+ARCH_PACKAGES=(bluez python python-dbus python-gobject python-cryptography curl ca-certificates)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -47,9 +48,9 @@ Usage: install.sh [options]
                     wheel, or a pip/uv URL. Default: $DEFAULT_SOURCE
   --run-as USER     Account whose permissions your Muse's commands run with.
                     Default: the account running this installer.
-  --sdk-token TOKEN Your mgst_ SDK token from gadgets.muse.ai. Every gadget
-                    needs one to pair. Saved, readable only by root, in
-                    $STATE_DIR/sdk_token.
+  --sdk-token TOKEN Your mgst_ SDK token from gadgets.muse.ai. If omitted, an
+                    interactive install prompts securely. Saved, readable
+                    only by root, in $STATE_DIR/sdk_token.
   --yes             Don't ask for confirmation.
   --no-pair         Install without opening Bluetooth pairing.
   --uninstall       Remove musegadget. Keeps the device identity and pairing
@@ -79,25 +80,41 @@ check_system() {
     [ -r /etc/os-release ] || die "cannot identify this Linux distribution (/etc/os-release missing)."
     # shellcheck disable=SC1091
     . /etc/os-release
-    local id="${ID:-}" version="${VERSION_ID:-0}" major="${VERSION_ID%%.*}"
+    local id="${ID:-}" version="${VERSION_ID:-0}" major="${VERSION_ID:-0}"
+    major="${major%%.*}"
     case "$id" in
         debian|raspbian)
+            DISTRO_FAMILY=debian
             [ "${major:-0}" -ge 11 ] 2>/dev/null ||
                 die "$PRETTY_NAME is too old. Upgrade to Debian 11 (Raspberry Pi OS Bullseye) or later." ;;
         ubuntu)
+            DISTRO_FAMILY=debian
             [ "$(printf '%s\n22.04\n' "$version" | sort -V | head -1)" = 22.04 ] ||
                 die "$PRETTY_NAME is too old. Upgrade to Ubuntu 22.04 or later." ;;
+        arch)
+            DISTRO_FAMILY=arch ;;
         *)
             case " ${ID_LIKE:-} " in
-                *" debian "*|*" ubuntu "*) warn "$PRETTY_NAME is untested; continuing because it is Debian-based." ;;
-                *) die "$PRETTY_NAME is not supported. This installer needs a Debian or Ubuntu based system." ;;
+                *" arch "*)
+                    DISTRO_FAMILY=arch
+                    warn "$PRETTY_NAME is untested; continuing because it is Arch-based." ;;
+                *" debian "*|*" ubuntu "*)
+                    DISTRO_FAMILY=debian
+                    warn "$PRETTY_NAME is untested; continuing because it is Debian-based." ;;
+                *) die "$PRETTY_NAME is not supported. This installer needs Debian/Ubuntu or Arch Linux." ;;
             esac ;;
     esac
-    command -v apt-get >/dev/null || die "apt-get not found."
-    # Many 32-bit Raspberry Pi installs run a 64-bit kernel, so ask dpkg,
-    # which reports the userland architecture.
-    ARCH="$(dpkg --print-architecture)"
-    case "$ARCH" in armhf|arm64|amd64) ;; *) die "unsupported architecture: $ARCH" ;; esac
+    if [ "$DISTRO_FAMILY" = arch ]; then
+        command -v pacman >/dev/null || die "pacman not found."
+        ARCH="$(uname -m)"
+        case "$ARCH" in x86_64|aarch64) ;; *) die "unsupported Arch architecture: $ARCH" ;; esac
+    else
+        command -v apt-get >/dev/null || die "apt-get not found."
+        # Many 32-bit Raspberry Pi installs run a 64-bit kernel, so ask dpkg,
+        # which reports the userland architecture.
+        ARCH="$(dpkg --print-architecture)"
+        case "$ARCH" in armhf|arm64|amd64) ;; *) die "unsupported architecture: $ARCH" ;; esac
+    fi
     if ! systemd_running; then
         warn "systemd is not running; the service will be installed but not started."
     fi
@@ -127,14 +144,24 @@ choose_account() {
 
 install_packages() {
     local missing=() pkg
-    for pkg in "${APT_PACKAGES[@]}"; do
-        dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed' || missing+=("$pkg")
-    done
+    if [ "$DISTRO_FAMILY" = arch ]; then
+        for pkg in "${ARCH_PACKAGES[@]}"; do
+            pacman -Qq "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+        done
+    else
+        for pkg in "${APT_PACKAGES[@]}"; do
+            dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed' || missing+=("$pkg")
+        done
+    fi
     case "$SOURCE" in git+*) command -v git >/dev/null || missing+=(git) ;; esac
     if [ "${#missing[@]}" -eq 0 ]; then return; fi
     say "Installing system packages: ${missing[*]}"
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}"
+    if [ "$DISTRO_FAMILY" = arch ]; then
+        as_root pacman -S --needed --noconfirm "${missing[@]}"
+    else
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}"
+    fi
 }
 
 install_uv() {
@@ -145,6 +172,13 @@ install_uv() {
     as_root mkdir -p "$PREFIX/bin"
     curl -fsSL "https://astral.sh/uv/$UV_VERSION/install.sh" |
         as_root env UV_INSTALL_DIR="$PREFIX/bin" UV_NO_MODIFY_PATH=1 sh -s -- --quiet
+}
+
+enable_bluez() {
+    if [ "$DISTRO_FAMILY" = arch ] && systemd_running; then
+        say "Enabling the BlueZ service"
+        as_root systemctl enable --now bluetooth.service
+    fi
 }
 
 install_musegadget() {
@@ -264,6 +298,19 @@ save_sdk_token() {
     printf '%s\n' "$SDK_TOKEN" | as_root install -m 0600 /dev/stdin "$STATE_DIR/sdk_token"
 }
 
+prompt_sdk_token() {
+    if [ -n "$SDK_TOKEN" ] || [ "$NO_PAIR" = 1 ] || [ "$ASSUME_YES" = 1 ]; then
+        return 0
+    fi
+    [ -r /dev/tty ] || return 0
+    printf 'Muse SDK token (mgst_...; input hidden, Enter to keep/skip): ' >/dev/tty
+    IFS= read -r -s SDK_TOKEN </dev/tty || SDK_TOKEN=""
+    printf '\n' >/dev/tty
+    if [ -n "$SDK_TOKEN" ] && ! [[ "$SDK_TOKEN" =~ ^mgst_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$ ]]; then
+        die "that SDK token is not valid; copy it again from gadgets.muse.ai."
+    fi
+}
+
 install_service() {
     say "Installing the musegadget service"
     sed "s/@RUN_AS@/$RUN_AS/" "$DATA_DIR/musegadget.service" | as_root tee "$UNIT" >/dev/null
@@ -354,14 +401,16 @@ main() {
         sudo true || die "this installer needs sudo."
     fi
     if [ "$UNINSTALL" = 1 ]; then uninstall; return; fi
-    if [ -n "$SDK_TOKEN" ] && ! [[ "$SDK_TOKEN" =~ ^mgst_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$ ]]; then
-        die "that SDK token is not valid; copy it again from gadgets.muse.ai."
-    fi
     if [ -d "$SOURCE" ]; then SOURCE="$(cd "$SOURCE" && pwd)"; fi
 
     check_system
+    prompt_sdk_token
+    if [ -n "$SDK_TOKEN" ] && ! [[ "$SDK_TOKEN" =~ ^mgst_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$ ]]; then
+        die "that SDK token is not valid; copy it again from gadgets.muse.ai."
+    fi
     choose_account
     install_packages
+    enable_bluez
     install_uv
     install_musegadget
     configure_bluez
