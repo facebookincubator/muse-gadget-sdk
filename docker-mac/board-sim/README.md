@@ -101,10 +101,11 @@ sh docker-mac/board-sim/enable-ai.sh /path/to/companion-checkout/linux ma35d1-a1
 .mac-venv/bin/python docker-mac/board-sim/ai-smoke.py ma35d1-a1 ma35d1-s1
 ```
 
-The test starts a separate side chat for each board, checks a greeting and
-`17 × 23 = 391`, then asks Muse to run `uname -m` and `id -un` on that board.
-The command check requires both the reported output and a matching invocation
-in that target's logs. Results are saved under the ignored `.board-sim/`
+The test starts a separate side chat for each board and checks a greeting and
+`17 × 23 = 391`. Add `--commands` to also ask Muse to run `uname -m` and `id -un`
+on that board. The optional command check requires both the reported output
+and a matching invocation in that target's logs; it is separate from basic AI
+chat. Results, including failed turns, are saved under the ignored `.board-sim/`
 directory. AI inference runs remotely in Muse; the Linux gadget executes its
 requested commands. This does not benchmark a local model on Nuvoton hardware.
 

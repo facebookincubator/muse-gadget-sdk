@@ -19,7 +19,7 @@ def call(command, **kwargs):
                           timeout=240, **kwargs).stdout
 
 
-def test_board(board):
+def test_board(board, *, commands=False):
     container = "muse-" + board + "-sim"
     info = call(["docker", "exec", container, "musegadget", "info"])
     if "paired:    yes" not in info:
@@ -29,24 +29,34 @@ def test_board(board):
     tests = [
         ("greeting", "Say a short hello. This is a live AI chat test from " + board + "."),
         ("arithmetic", "What is 17 times 23? Reply with the number only."),
-        ("board-command", "On the Linux gadget with node id " + node + " (" + board +
-         "), use its system.run command to execute `uname -m && id -un`. "
-         "Report the actual output. This is a read-only smoke test; keep your reply short."),
     ]
+    if commands:
+        tests.append(("board-command", "On the Linux gadget with node id " + node + " (" + board +
+         "), use its system.run command to execute `uname -m && id -un`. "
+         "Report the actual output. This is a read-only smoke test; keep your reply short."))
     results = []
     for name, prompt in tests:
         since = datetime.now(timezone.utc).isoformat()
         print(board + ": testing " + name, flush=True)
-        output = call(["docker", "exec", "-i", container, "musegadget", "chat",
-                       "--json", "--session-id", session, "-"], input=prompt)
+        error = None
+        try:
+            output = call(["docker", "exec", "-i", container, "musegadget", "chat",
+                           "--json", "--session-id", session, "-"], input=prompt)
+        except subprocess.CalledProcessError as failure:
+            output = failure.stdout or ""
+            error = failure.stderr.strip() or "Muse chat ended without completing the turn"
+        except subprocess.TimeoutExpired:
+            output = ""
+            error = "Muse chat timed out"
         events = [json.loads(line) for line in output.splitlines() if line.strip()]
+        error = next((e.get("error") for e in events if e.get("type") == "error"), error)
         replies = {}
         for event in events:
             if event.get("type") == "reply":
                 replies[event["message_id"]] = event["text"]
         answer = "\n".join(replies.values()).strip()
         complete = any(e.get("type") == "done" for e in events)
-        passed = bool(answer) and complete
+        passed = bool(answer) and complete and not error
         invoked = False
         if name == "arithmetic":
             passed = passed and bool(re.search(r"\b391\b", answer))
@@ -57,19 +67,22 @@ def test_board(board):
             invoked = "invoke system.run" in logs and "system.run as muse" in logs
             passed = passed and "aarch64" in answer and bool(re.search(r"\bmuse\b", answer)) and invoked
         result = dict(board=board, node_id=node, test=name, prompt=prompt,
-                      answer=answer, passed=passed, invoked=invoked)
+                      answer=answer, passed=passed, invoked=invoked, error=error)
         results.append(result)
-        print(("PASS " if passed else "FAIL ") + board + " " + name + ": " + answer, flush=True)
+        print(("PASS " if passed else "FAIL ") + board + " " + name + ": " + (error or answer), flush=True)
+        destination = ROOT / ".board-sim" / (board + "-ai-results.json")
+        destination.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     return results
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("boards", nargs="+", choices=BOARDS)
+    parser.add_argument("--commands", action="store_true", help="also test a read-only board command")
     args = parser.parse_args()
     results = []
     for board in args.boards:
-        results.extend(test_board(board))
+        results.extend(test_board(board, commands=args.commands))
     destination = ROOT / ".board-sim/live-ai-results.json"
     destination.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     print("Results: " + str(destination))
