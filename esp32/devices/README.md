@@ -44,6 +44,7 @@ session to Muse. The rest depends on the hardware.
 | **Espressif ESP32-S3-BOX-3** | ESP32-S3 | 2.4" 320×240 LCD, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3), [ESP-BOX](https://github.com/espressif/esp-box) | — |
 | **AIPI Lite** | ESP32-S3 | 128×128 LCD | 16 MB / 8 MB | [xiaozhi-esp32 board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/xorigin/aipi-lite) | [AliExpress](https://www.aliexpress.com/w/wholesale-aipi-lite.html) |
 | **Waveshare ESP32-C6-Touch-AMOLED-1.8** | ESP32-C6 | 1.8" 368×448 AMOLED, touch | 16 MB / none | [Waveshare wiki](https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-1.8) | [Waveshare](https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm) |
+| **Waveshare ESP32-C6-Touch-AMOLED-2.06** | ESP32-C6 | 2.06" 410×502 AMOLED, touch | 16 MB / none | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-C6-Touch-AMOLED-2.06) | [Waveshare](https://www.waveshare.com/esp32-c6-touch-amoled-2.06.htm) |
 | **Seeed SenseCAP Watcher** | ESP32-S3 | 1.45" 412×412 round LCD, touch | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/watcher/), [GitHub](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware) | [Seeed Studio](https://www.seeedstudio.com/SenseCAP-Watcher-W1-A-p-5979.html) |
 | **M5Stack Cardputer ADV (experimental)** | ESP32-S3 | 1.14" 240×135 LCD | 8 MB / none | [M5Stack docs](https://docs.m5stack.com/en/core/Cardputer-Adv) | — |
 | **M5Stack StickS3** | ESP32-S3 | 1.14" 135×240 LCD | 8 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/StickS3), [M5Unified](https://github.com/m5stack/M5Unified) | [M5Stack](https://shop.m5stack.com/products/m5sticks3-esp32s3-mini-iot-dev-kit) |
@@ -57,19 +58,19 @@ session to Muse. The rest depends on the hardware.
 
 ## Features
 
-| | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | SenseCAP Indicator | reTerminal E1001 | reTerminal E1002 | HA Voice PE | reSpeaker Lite (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 | Waveshare LCD7 |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: |
-| Home-network tunnel | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Shows status on | Light | Light | Screen | Screen | Screen | E-paper | E-paper | Light ring | RGB LED | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar | Avatar |
-| Images from Muse | — | — | ✅ | ✅ | ✅ | Black and white | Six colours | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| UI and settings | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| Push-to-talk | — | — | — | — | — | — | — | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ | ✅ | — | With an added I2S mic | — |
-| Speaker and mic | — | — | — | — | — | — | — | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | — |
-| Air sensors | — | — | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Touch | — | — | — | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| Battery status | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — | — |
-| Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (flash only) |
+| | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | SenseCAP Indicator | reTerminal E1001 | reTerminal E1002 | HA Voice PE | reSpeaker Lite (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Waveshare C6 2.06 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 | Waveshare LCD7 |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: |
+| Home-network tunnel | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Shows status on | Light | Light | Screen | Screen | Screen | E-paper | E-paper | Light ring | RGB LED | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar | Avatar |
+| Images from Muse | — | — | ✅ | ✅ | ✅ | Black and white | Six colours | — | — | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| UI and settings | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| Push-to-talk | — | — | — | — | — | — | — | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | Text replies | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ | ✅ | — | With an added I2S mic | — |
+| Speaker and mic | — | — | — | — | — | — | — | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | — |
+| Air sensors | — | — | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Touch | — | — | — | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| Battery status | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — | — |
+| Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On |
+| Buttons | BOOT | BOOT | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (flash only) |
 
 Boards without PSRAM (the ideaspark, the C6 boards and the Cardputer ADV) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
@@ -276,6 +277,38 @@ python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 jc3248w535.bin
 tools/muse/board.sh flash jc3248w535 PORT
 ```
 
+## Waveshare ESP32-C6-Touch-AMOLED-2.06
+
+Use the `c6-206` profile for this watch; `c6` remains the 1.8-inch board.
+The 2.06-inch model has different display/touch wiring, an ES7210 with two
+microphones, and an AXP2101 power chip. PWR edges are read from the PMU;
+BOOT (GPIO9) is
+push-to-talk and pairing confirmation. Tap PWR to turn the screen off or
+wake it, and hold it for 1.5 seconds to power off.
+
+```sh
+tools/muse/board.sh build c6-206
+tools/muse/board.sh flash c6-206 /dev/cu.usbmodemXXXX
+```
+
+Set your SDK token in `build-muse-waveshare-c6-206/sdkconfig` before building
+(see the main README). The board has 16 MB flash and no PSRAM, so it uses
+Link's session for voice notes with text replies. Images, the home-network
+tunnel, and spoken replies are not supported by this profile. The IMU and RTC
+are not exposed by this port. Battery life and suspend behavior need on-device
+measurement; this profile does not add automatic light sleep.
+
+The v2.0.0 vendor BSP takes its draw-buffer height from Kconfig rather than
+`bsp_display_cfg_t`. The overlay uses 8 lines instead of the 100-line default
+and selects I2S0, the C6's only I2S peripheral. Keep these settings when
+updating the BSP.
+
+Before treating a build as hardware-validated, check cold boot and reboot,
+all touch edges, BOOT/PWR press and release, BLE pairing, Wi-Fi reconnect,
+several push-to-talk/text reply cycles, microphone levels, battery reporting,
+charging, screen-off/wake, and software power-off. USB builds and host tests
+alone cannot verify these behaviors.
+
 ## Cardputer ADV port
 
 Experimental ADV-only port, tested with ESP-IDF 6.0.1. Supports the display,
@@ -339,6 +372,7 @@ board's overlays, in order:
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-espressif-box-3`](sdkconfig.muse-espressif-box-3) | `tools/muse/board.sh build box3` |
 | AIPI Lite | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-aipi`](sdkconfig.muse-aipi) | by hand |
 | Waveshare C6 1.8 | `esp32c6` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-c6-18`](sdkconfig.muse-waveshare-c6-18) | by hand |
+| Waveshare C6 2.06 | `esp32c6` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-c6-206`](sdkconfig.muse-waveshare-c6-206) | `tools/muse/board.sh build c6-206` |
 | SenseCAP Watcher | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-sensecap-watcher`](sdkconfig.muse-sensecap-watcher) | by hand |
 | M5Stack Cardputer ADV | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-sticks3`](sdkconfig.muse-m5stack-sticks3) | by hand |

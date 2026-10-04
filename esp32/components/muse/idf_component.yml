@@ -54,6 +54,10 @@ dependencies:
     version: "^1.0.0"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_c6_18\""
+  waveshare/esp32_c6_touch_amoled_2_06:
+    version: "2.0.0"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_c6_206\""
   espressif/esp_lcd_spd2010:
     version: "^2.0.0"
     rules:

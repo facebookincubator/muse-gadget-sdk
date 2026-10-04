@@ -60,6 +60,7 @@ before adding a feature to one.
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-box-3` | `tools/muse/board.sh build box3` |
 | AIPI Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-aipi` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18` | manual |
+| Waveshare ESP32-C6-Touch-AMOLED-2.06 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-206` | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher` | manual |
 | M5Stack Cardputer ADV (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
@@ -126,7 +127,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -345,7 +346,7 @@ message on. The exit status says what kind of failure it was:
 
 - **2**: no board, or it can't do this. If it says the board doesn't answer,
   rerun with `--board s3` or `--board aipi` (from the board's name, or ask) to
-  flash firmware that can. On the C6 or Watcher, follow the manual steps in
+  flash firmware that can. On the C6 boards or Watcher, follow the manual steps in
   `tools/muse/AVATAR_RECIPE.md`.
 - **3**: the board isn't on Wi-Fi, or it isn't paired in the Muse app and has
   no device token, so their Muse isn't connected. Tell them, and point them to
