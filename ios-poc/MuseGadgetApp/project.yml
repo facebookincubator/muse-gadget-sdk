@@ -1,0 +1,33 @@
+# Generate the Xcode project with `xcodegen` (brew install xcodegen).
+name: MuseGadget
+options:
+  bundleIdPrefix: com.biswarupmondal
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  MuseGadgetKit:
+    path: ../MuseGadgetKit
+targets:
+  MuseGadget:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: MuseGadgetKit
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Muse Gadget
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSBluetoothAlwaysUsageDescription: Muse Gadget advertises over Bluetooth so the Muse app on another phone can pair with it.
+        # Keeps the GATT server serving while briefly backgrounded. Advertising
+        # in the background drops the name, so pair with the app open.
+        UIBackgroundModes: [bluetooth-peripheral]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.biswarupmondal.musegadget
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.0"
+        DEVELOPMENT_TEAM: ND68M6V2DG
