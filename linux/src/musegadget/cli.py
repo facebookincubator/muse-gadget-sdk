@@ -175,7 +175,7 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
             request = {"message": message}
             if args.session_id:
                 request["session_id"] = args.session_id
-            sock.sendall(json.dumps(request, ensure_ascii=False).encode() + b"\n")
+            sock.sendall(json.dumps(request).encode() + b"\n")
             reply = json.loads(sock.makefile("rb").readline())
     except (OSError, ValueError) as exc:
         print(f"Could not reach the musegadget service: {exc}", file=sys.stderr)
@@ -213,7 +213,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
             request = {"message": message, "stream": True}
             if args.session_id:
                 request["session_id"] = args.session_id
-            sock.sendall(json.dumps(request).encode() + b"\n")
+            sock.sendall(json.dumps(request, ensure_ascii=False).encode() + b"\n")
             for line in sock.makefile("rb"):
                 event = json.loads(line)
                 if args.json:
