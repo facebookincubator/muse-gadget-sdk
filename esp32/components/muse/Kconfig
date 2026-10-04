@@ -70,6 +70,10 @@ menu "Muse"
         config MUSE_BOARD_M5STACK_CORES3
             bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_ESPRESSIF_MOSAICO
+            bool "Espressif ESP-Mosaico (ESP32-S31, 480x480 touch AMOLED)"
+            depends on IDF_TARGET_ESP32S31
     endchoice
 
     config MUSE_ENABLED
@@ -91,14 +95,16 @@ menu "Muse"
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
+        default "espressif_mosaico" if MUSE_BOARD_ESPRESSIF_MOSAICO
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB
     # bridge, where the chip's own USB Serial/JTAG isn't wired to a connector
-    # (the Watcher's USB-C goes to a CH342) or the chip has none.
+    # (the Watcher's USB-C goes to a CH342, the ESP-Mosaico's to the chip's
+    # high-speed USB) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_ESPRESSIF_MOSAICO || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
     # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME

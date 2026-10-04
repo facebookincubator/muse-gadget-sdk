@@ -1,0 +1,26 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Name,    Type, SubType, Offset,   Size,     Flags
+# The ESP-Mosaico's retained layout, with the table at 0x8000. Everything
+# below 0x200000 belongs to Vibe Mode (it is `factory`) and must stay as it is:
+# esp-mosaico-utils, esp-mosaico-recovery/product_contract.json. The gadget
+# has the rest: its NVS, and one app slot, since Vibe Mode does the updating.
+otadata,   data, ota,     0x9000,   0x2000,
+phy_init,  data, phy,     0xb000,   0x1000,
+sysmeta,   data, nvs,     0xc000,   0x14000,
+factory,   app,  factory, 0x20000,  0x1c0000,
+coredump,  data, coredump,0x1e0000, 0x20000,
+nvs,       data, nvs,     0x200000, 0x10000,
+ota_0,     app,  ota_0,   0x210000, 0xdf0000,

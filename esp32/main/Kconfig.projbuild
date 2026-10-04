@@ -79,6 +79,17 @@ menu "ESP32 Device SDK"
             Optional OTA parameters in Wi-Fi setup are ignored so provisioning
             can finish normally. Internal builds enable this explicitly.
 
+    config HOMEHUB_EXTERNAL_INSTALLER
+        bool "Another installer decides whether a new image is kept"
+        default n
+        help
+            Normally the firmware marks the running image valid once the
+            control session is up, and rolls a newly installed image back if
+            it does not get there within five minutes. Turn this on when
+            another installer owns that decision, as Vibe Mode does on the
+            ESP-Mosaico: an unpaired gadget never reaches the control session,
+            so a first install would be rolled back.
+
     config HOMEHUB_SUPPORT_BUG_REPORT
         bool "Enable private support bug reporting"
         default n

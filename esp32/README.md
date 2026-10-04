@@ -180,6 +180,7 @@ status screen.
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Espressif ESP-Mosaico | UI, touch, push-to-talk, settings, images | [ESP-Mosaico](devices/README.md#esp-mosaico) |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.

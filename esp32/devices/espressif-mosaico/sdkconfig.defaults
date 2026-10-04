@@ -1,0 +1,65 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# What the Muse gadget needs to be an ESP-Mosaico application. Loaded after the
+# gadget's sdkconfig.defaults, sdkconfig.muse and the board's overlay,
+# sdkconfig.muse-espressif-mosaico (see CMakeLists.txt). The ESP-Iris values
+# follow the ESP-Mosaico application template in
+# https://github.com/esp-mosaico/esp-mosaico-utils
+# (mosaico-tools/templates/hello_world).
+
+# The retained Vibe Mode layout. Its table sits at the ESP-IDF default offset,
+# not the gadget's 0x10000.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# Vibe Mode installs images and decides whether one is kept. The gadget's own
+# updater is off (sdkconfig.muse turns it on), so it neither signs images nor
+# rolls a new one back: an unpaired gadget never reaches the control session
+# that check waits for.
+CONFIG_HOMEHUB_OTA_ENABLED=n
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=n
+CONFIG_HOMEHUB_EXTERNAL_INSTALLER=y
+
+# A panic leaves a core dump in the retained coredump partition, for
+# `mosaico.py` to collect.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
+
+# ESP-Iris has the USB port: installing, logs and screenshots go through
+# `mosaico.py iris`. USB only, because its TCP listener binds every interface,
+# and the gadget's home-network tunnel is one of them. It starts on the main
+# task, ahead of the gadget.
+CONFIG_ESP_IRIS_TRANSPORT_USB=y
+CONFIG_ESP_IRIS_USB_PRODUCT="ESP-Iris Mosaico muse_gadget"
+CONFIG_ESP_IRIS_NVS_PARTITION_NAME="sysmeta"
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=20480
+# Its buffers go to PSRAM and its tasks get small stacks, which leaves the
+# internal RAM to Wi-Fi, BLE and TLS.
+CONFIG_ESP_IRIS_USB_TASK_STACK_SIZE=2048
+CONFIG_ESP_IRIS_SERVICE_STACK_SIZE=4096
+CONFIG_ESP_IRIS_SERVICE_PERSISTENT=y
+CONFIG_ESP_IRIS_SERVICE_CONTEXT_PSRAM=y
+CONFIG_ESP_IRIS_SERVICE_STATE_PSRAM=y
+CONFIG_ESP_IRIS_RPC_RESPONSE_PSRAM=y
+CONFIG_ESP_IRIS_WIRE_BUFFERS_PSRAM=y
+CONFIG_ESP_IRIS_MEDIA_BUFFER_PSRAM=y
+CONFIG_ESP_IRIS_LOG_RING_BYTES=4096
+CONFIG_ESP_IRIS_LOG_RING_STORAGE_PSRAM=y
+CONFIG_TINYUSB_CDC_RX_BUFSIZE=1024
+CONFIG_TINYUSB_CDC_TX_BUFSIZE=1024
+CONFIG_TINYUSB_CDC_EP_BUFSIZE=512
+# `mosaico.py iris screenshot` reads the screen through LVGL's snapshot. Its
+# buffer, the size of the screen, exists only during a screenshot or a mirror.
+CONFIG_LV_USE_SNAPSHOT=y

@@ -21,10 +21,14 @@ dependencies:
     public: true
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} != \"none\""
+  # The first match gives the version: the ESP-Mosaico's board support package
+  # asks for 1.6.
   espressif/esp_codec_dev:
     version: "~1.5"
     public: true
-    rules:
+    matches:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"espressif_mosaico\""
+        version: "~1.6"
       - if: "$CONFIG{MUSE_BOARD_ID} != \"none\""
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
@@ -62,3 +66,11 @@ dependencies:
     version: "^2.2.0"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"m5stack_stopwatch\""
+  # The ESP-Mosaico's board support package isn't in the component registry, so
+  # it comes from its repository, at the commit the ESP-Mosaico workspace pins.
+  esp-mosaico-bsp:
+    git: https://github.com/esp-mosaico/esp-mosaico-bsp.git
+    path: components/esp-mosaico-bsp
+    version: a2c985ad698b3f04a21c63e006b43e7e948bc1d7
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"espressif_mosaico\""

@@ -46,22 +46,23 @@ session to Muse. The rest depends on the hardware.
 | **M5Stack StopWatch** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/StopWatch), [M5Unified](https://github.com/m5stack/M5Unified), [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo) | — |
 | **M5Stack CoreS3** | ESP32-S3 | 2" 320×240 LCD, touch | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/CoreS3), [Espressif BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3) | — |
 | **M5Stack StickC Plus2** | ESP32 | 1.14" 135×240 LCD | 8 MB / 2 MB | [M5Stack docs](https://docs.m5stack.com/en/core/M5StickC%20PLUS2), [M5Unified](https://github.com/m5stack/M5Unified) | [M5Stack](https://shop.m5stack.com/products/m5stickc-plus2-esp32-mini-iot-development-kit) (end of life) |
+| **Espressif ESP-Mosaico** | ESP32-S31 | 480×480 AMOLED, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/esp-mosaico/esp-mosaico-bsp), [ESP-Mosaico workspace](https://github.com/esp-mosaico/esp-mosaico-vibe) | — |
 
 ## Features
 
-| | DevKitC-1 | ideaspark | SenseCAP Indicator | reTerminal E1001 | reTerminal E1002 | HA Voice PE | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: | :-: |:-:|:-:|
-| Home-network tunnel | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ |
-| Shows status on | Light | Screen | Screen | E-paper | E-paper | Light ring | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
-| Images from Muse | — | ✅ | ✅ | Black and white | Six colours | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ |
-| UI and settings | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ |
-| Push-to-talk | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ |
-| Speaker and mic | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ |
-| Air sensors | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Touch | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ |
-| Battery status | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ |
-| Over-the-air updates | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On |
-| Buttons | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST |
+| | DevKitC-1 | ideaspark | SenseCAP Indicator | reTerminal E1001 | reTerminal E1002 | HA Voice PE | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 | ESP-Mosaico |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: | :-: |:-:|:-:|:-:|
+| Home-network tunnel | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| Shows status on | Light | Screen | Screen | E-paper | E-paper | Light ring | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
+| Images from Muse | — | ✅ | ✅ | Black and white | Six colours | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| UI and settings | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ |
+| Push-to-talk | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ |
+| Speaker and mic | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ |
+| Air sensors | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Touch | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ |
+| Battery status | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | — |
+| Over-the-air updates | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On | Off |
+| Buttons | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | AI (talk), BOOT (sleep) |
 
 Boards without PSRAM (the ideaspark, Waveshare C6 and Cardputer ADV) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
@@ -245,6 +246,64 @@ enters deep sleep; BOOT/CONFIG or RESET wakes the unit.
 See [BOX-3 setup](esp32-s3-box-3.md) for PowerShell build and flash commands,
 token setup, and the hardware verification checklist.
 
+## ESP-Mosaico
+
+The ESP-Mosaico is Espressif's ESP32-S31 board: a square 480×480 CO5300
+AMOLED with CST9217 touch, and one ES8311 for its speaker and microphone. Muse
+drives them through Espressif's
+[board support package](https://github.com/esp-mosaico/esp-mosaico-bsp). It
+isn't in the component registry, so the build fetches it from GitHub, at the
+commit pinned in
+[`components/muse/idf_component.yml`](../components/muse/idf_component.yml).
+AI is push-to-talk and pairing confirmation, and settings are on the touch
+screen (swipe left from Muse). BOOT puts the screen to sleep and wakes it; two
+quick presses turn phone setup over BLE on or off, and a 1.5 s hold asks the
+board to power off through its shutdown signal. The battery level isn't
+shown: the fuel gauge gives the charge, but nothing on the board says whether
+USB power is present, and Muse rests Wi-Fi when it believes it runs on
+battery. The IMU, magnetometers, NAND flash, vibration motor and module slots
+aren't used yet.
+
+The ESP32-S31 isn't in ESP-IDF v6.0.1. It is a preview target from v6.1, and
+the board support package asks for 6.2, so build with the ESP-IDF commit that
+the [ESP-Mosaico workspace](https://github.com/esp-mosaico/esp-mosaico-vibe)
+pins in its `AGENTS.md`. This port was made with
+`7b9cc1ac79f865983f59bb8ff3ff43eb74ff1dbe`. CI doesn't build this board.
+
+The board comes with Vibe Mode, Espressif's retained firmware. It keeps the
+first 2 MB of the flash and installs applications over the USB-C port, which
+is the chip's high-speed USB, not its USB Serial/JTAG. So Muse goes on as an
+ESP-Mosaico application instead of being flashed with esptool.
+[`espressif-mosaico/`](espressif-mosaico) is an ESP-IDF project that builds
+this firmware with the board's partition layout and with ESP-Iris, Espressif's
+USB link, in place of the gadget's own updater. Espressif's `mosaico.py`
+builds and installs it. From the `esp32` directory:
+
+```sh
+export IDF_PATH=/path/to/esp-idf                     # at the pinned commit
+export MOSAICO_WORKSPACE=/path/to/esp-mosaico-vibe   # with submodule/esp-mosaico-utils
+python3 "$MOSAICO_WORKSPACE/mosaico.py" iris system-update --project devices/espressif-mosaico
+```
+
+Set your SDK token in `devices/espressif-mosaico/build/sdkconfig` (ignored by
+Git), as `CONFIG_GADGET_SDK_TOKEN="mgst_…"`. Before the first build, a file
+with only that line will do. In a generated one, also delete the `# default:`
+line above it: while that line is there, the build log prints the token. A
+board without Vibe Mode on it needs `mosaico.py recover` first. Pair as on any
+other board.
+
+The log, the screen and two speaker tests come over the same USB link, each
+with `--project devices/espressif-mosaico`: `mosaico.py iris logs`,
+`mosaico.py iris screenshot OUT.png`, and `mosaico.py iris rpc 0x4D47 1`,
+which plays the built-in sample (`2` plays test tones and logs how loud the
+microphone hears each). The tools here that use the serial console
+(`tools/muse/chat.py`, `avatar.py`, `snap.py`, `monitor.py`) don't reach this
+board: its console is UART0, which isn't on the USB port.
+
+`tools/muse/board.sh build mosaico` builds the board without the application
+project. That is a compile check only: its bootloader and partition table
+would replace Vibe Mode, and that build has not been run on hardware.
+
 ## Build
 
 From the `esp32` directory, load `sdkconfig.defaults` first and then the
@@ -269,6 +328,7 @@ board's overlays, in order:
 | M5Stack StopWatch | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stopwatch`](sdkconfig.muse-m5stack-stopwatch) | by hand |
 | M5Stack CoreS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-cores3`](sdkconfig.muse-m5stack-cores3) | `tools/muse/board.sh build cores3` |
 | M5Stack StickC Plus2 | `esp32` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stickc-plus2`](sdkconfig.muse-m5stack-stickc-plus2) | by hand |
+| Espressif ESP-Mosaico | `esp32s31` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-espressif-mosaico`](sdkconfig.muse-espressif-mosaico) | [as an ESP-Mosaico application](#esp-mosaico) |
 
 `tools/board.sh BOARD [build|flash|monitor|flash-monitor] [PORT]` builds each
 board in its own `build-<board>` directory. For the boards with the full UI, run `idf.py`
