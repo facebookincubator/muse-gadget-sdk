@@ -12,4 +12,5 @@
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>Pair this Mac directly with your Muse phone app.</string>
 </dict></plist>

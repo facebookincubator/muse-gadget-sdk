@@ -36,7 +36,7 @@ warranties, brownouts, or bankruptcies. Proceed at your own risk!
 |---|---|
 | [**ESP32 Device SDK**](esp32) | Connect your ESP32 board to Muse through our open source SDK. Throw in a screen to show images, add audio in and out, or wire up other sensors. |
 | [**Linux Device SDK**](linux) | Turn that spare Raspberry Pi or Linux box into a Muse gadget. Hack in your own commands to let Muse handle sysadmin chores or your Home Assistant setup. |
-| [**macOS Companion**](macos) | Chat with your Muse through an already paired Linux SDK container, with a native rotating 3D mascot and streamed text replies. |
+| [**macOS Companion**](macos) | Pair your Mac directly with the Muse phone app over Bluetooth, then chat with streamed replies and a rotating 3D mascot. |
 
 Before you flash or pair a gadget, get an
 [SDK token](https://gadgets.muse.ai/settings/sdk-tokens) and review the

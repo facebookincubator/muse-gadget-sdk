@@ -122,8 +122,8 @@ printf '%s' "Hello Muse" | musegadget chat --json --session-id 6f1c2d4e-0b7a-4c3
 Each `reply` carries `message_id`, the accumulated `text`, and `complete`.
 Replace the text for that id when a new snapshot arrives. Without `--json`,
 the CLI prints reply snapshots. The existing paired service must run this
-version of the SDK. The [macOS companion](../macos) uses this streaming CLI
-inside a local Docker container.
+version of the SDK. The [macOS companion](../macos) reuses the SDK's pairing
+and streaming protocol in a local macOS runtime and pairs directly over Bluetooth.
 
 A few other ways to build on it:
 

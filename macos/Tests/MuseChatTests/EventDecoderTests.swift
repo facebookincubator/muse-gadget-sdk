@@ -5,6 +5,14 @@ import Foundation
 @testable import MuseChat
 
 struct EventDecoderTests {
+    @Test func testDirectPairingAndConnectionEvents() throws {
+        var decoder = EventDecoder()
+        let events = try decoder.feed(Data("{\"type\":\"connection\",\"paired\":true,\"online\":false,\"pairing\":false,\"ble_name\":\"MuseGadget123456\"}\n{\"type\":\"turn_finished\"}\n".utf8))
+        #expect(events[0].paired == true)
+        #expect(events[0].online == false)
+        #expect(events[0].bleName == "MuseGadget123456")
+        #expect(events[1].type == "turn_finished")
+    }
     @Test func testEveryUTF8SplitAndMultipleEvents() throws {
         let bytes = Data("{\"type\":\"reply\",\"message_id\":\"r\",\"text\":\"Hi 🌟 你好\",\"complete\":false}\n{\"type\":\"done\"}\n".utf8)
         for split in 0...bytes.count {

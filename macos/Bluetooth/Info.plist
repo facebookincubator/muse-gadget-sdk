@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>MuseBluetooth</string>
+  <key>CFBundleIdentifier</key><string>org.musegadget.companion.bluetooth</string>
+  <key>CFBundleName</key><string>Muse Bluetooth Pairing</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>Pair this Mac directly with your Muse phone app.</string>
+  <key>NSBluetoothPeripheralUsageDescription</key><string>Advertise this Mac so your Muse phone app can pair with it.</string>
+</dict></plist>

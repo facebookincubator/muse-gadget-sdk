@@ -12,16 +12,18 @@ struct MuseCompanionApp: App {
             CompanionView(model: model)
                 .preferredColorScheme(.dark)
                 .onAppear { model.checkConnection(); model.runDebugProbe() }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.stop() }
         }.defaultSize(width: 1120, height: 760)
         .commands { CommandGroup(replacing: .newItem) {
             Button("New Chat") { model.newChat() }.keyboardShortcut("n").disabled(model.busy)
         } }
         Settings {
             Form {
-                TextField("Gadget container", text: $model.container)
-                Text("Use the running Docker container paired with your Muse app.")
+                Text(model.paired ? "This Mac is paired with Muse." : "Pair this Mac directly with the Muse phone app.")
+                Text("Bluetooth pairs the device; your Mac's internet connection carries the conversation.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Check connection") { model.checkConnection() }
+                Button("Reconnect") { model.checkConnection() }
+                if !model.paired { Button("Pair this Mac") { model.showPairing = true } }
             }.padding(24).frame(width: 420)
         }
     }
@@ -49,6 +51,7 @@ struct CompanionView: View {
         }
         .background(Color(red: 0.055, green: 0.048, blue: 0.09))
         .frame(minWidth: 850, minHeight: 640)
+        .sheet(isPresented: $model.showPairing) { pairingView }
     }
     private var mascotPanel: some View {
         VStack(spacing: 0) {
@@ -103,6 +106,7 @@ struct CompanionView: View {
                 Button { model.newChat() } label: { Image(systemName: "square.and.pencil").font(.system(size: 17)).padding(10) }
                     .buttonStyle(.plain).help("New chat").disabled(model.busy)
                 SettingsLink { Image(systemName: "slider.horizontal.3").padding(10) }.buttonStyle(.plain)
+                if !model.paired { Button("Pair this Mac") { model.showPairing = true } }
             }.padding(28)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -135,6 +139,7 @@ struct CompanionView: View {
                 HStack {
                     Text("Replies from your connected Muse").font(.system(size: 10)).foregroundStyle(.tertiary)
                     Spacer()
+                    if model.busy { Button("Cancel") { model.cancel() }.buttonStyle(.plain).font(.system(size: 12)) }
                     Button { model.send() } label: {
                         HStack(spacing: 8) { Text("Send"); Image(systemName: "arrow.up") }.font(.system(size: 12, weight: .semibold)).padding(.horizontal, 15).padding(.vertical, 9)
                     }.buttonStyle(.plain).background(model.canSend ? violet : .white.opacity(0.08), in: Capsule())
@@ -144,6 +149,29 @@ struct CompanionView: View {
             }.padding(16).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 18))
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.09), lineWidth: 1)).padding(28)
         }
+    }
+    private var pairingView: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Pair this Mac").font(.title2.bold())
+            Text("Use the Muse app on your phone to add this Mac as a device. Allow Bluetooth when macOS asks.")
+            Text(model.deviceName).font(.headline).textSelection(.enabled)
+            if !model.pairing {
+                if model.sdkTokenSaved { Text("Your SDK token is saved on this Mac.").font(.callout).foregroundStyle(.secondary) }
+                else {
+                    SecureField("Muse SDK token", text: $model.sdkToken).textFieldStyle(.roundedBorder)
+                    Link("Get your SDK token", destination: URL(string: "https://gadgets.muse.ai/settings/sdk-tokens")!)
+                }
+                Button("Start pairing") { model.pair() }.disabled(!model.sdkTokenSaved && model.sdkToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } else {
+                ProgressView().controlSize(.small)
+                Text(model.pairingStatus).textSelection(.enabled)
+                Button("Stop pairing") { model.cancelPairing() }
+            }
+            if let error = model.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
+            Text("In Muse: Settings → Devices → Developer mode → Add Device. Choose the name shown above and approve pairing.")
+                .font(.callout).foregroundStyle(.secondary)
+            Button("Close") { model.showPairing = false }
+        }.padding(28).frame(width: 490)
     }
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 16) {

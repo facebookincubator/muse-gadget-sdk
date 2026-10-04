@@ -3,10 +3,10 @@
 name: macOS companion
 on:
   pull_request:
-    paths: ['macos/**', '.github/workflows/macos.yml']
+    paths: ['macos/**', 'linux/**', '.github/workflows/macos.yml']
   push:
     branches: [main]
-    paths: ['macos/**', '.github/workflows/macos.yml']
+    paths: ['macos/**', 'linux/**', '.github/workflows/macos.yml']
 permissions:
   contents: read
 jobs:
@@ -21,4 +21,6 @@ jobs:
           persist-credentials: false
       - run: swift test --disable-xctest
       - run: bash build.sh
-      - run: codesign --verify --verbose "dist/Muse Companion.app"
+      - run: .runtime/bin/python3 -m pip install pytest
+      - run: PYTHONPATH=../linux/src .runtime/bin/python3 -m pytest -q ../linux/tests Backend
+      - run: codesign --verify --deep --strict --verbose "dist/Muse Companion.app"

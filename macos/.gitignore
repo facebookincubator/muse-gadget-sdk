@@ -1,4 +1,7 @@
+.runtime/
+.local/
 .build*/
 .swiftpm/
-dist/
 *.xcodeproj/
+dist/
+__pycache__/

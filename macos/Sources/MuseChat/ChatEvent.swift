@@ -10,9 +10,16 @@ public struct ChatEvent: Decodable {
     public let busy: Bool?
     public let error: String?
     public let ok: Bool?
+    public let paired: Bool?
+    public let online: Bool?
+    public let pairing: Bool?
+    public let bleName: String?
+    public let sdkTokenSaved: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case type, text, complete, busy, error, ok
+        case type, text, complete, busy, error, ok, paired, online, pairing
+        case bleName = "ble_name"
+        case sdkTokenSaved = "sdk_token_saved"
         case messageID = "message_id"
     }
 }
