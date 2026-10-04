@@ -49,6 +49,7 @@ before adding a feature to one.
 | ideaspark ESP32 + 1.9" ST7789 | `esp32` | `devices/sdkconfig.ideaspark` | `tools/board.sh ideaspark` |
 | Seeed SenseCAP Indicator | `esp32s3` | `devices/sdkconfig.sensecap-indicator` | `tools/board.sh sensecap-indicator` |
 | Seeed reTerminal E1001 | `esp32s3` | `devices/sdkconfig.reterminal-e1001` | `tools/board.sh reterminal-e1001` |
+| Seeed reTerminal E1002 | `esp32s3` | `devices/sdkconfig.reterminal-e1002` | `tools/board.sh reterminal-e1002` |
 | Home Assistant Voice Preview Edition | `esp32s3` | `devices/sdkconfig.home-assistant-voice` | `tools/board.sh home-assistant-voice` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
@@ -200,7 +201,7 @@ flash size and status backend.
    | Descriptor | Board |
    |---|---|
    | Espressif `303a:1001`, "USB JTAG/serial debug unit" | the chip's own USB: C5, C6, S3 and the S3 boards with the full UI. Its serial number is the MAC |
-   | CH340 (`1a86:7523`) | ideaspark, SenseCAP Indicator, reTerminal E1001 |
+   | CH340 (`1a86:7523`) | ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002 |
    | CH340 (`1a86:7522`) | Elecrow CrowPanel Advance 4.3 V1.3 |
    | CH9102 | M5Stack StickC Plus2 |
    | CH342, two `usbmodem` ports | SenseCAP Watcher: the S3 console is the one ending in `3`, the other is the Himax camera |
@@ -243,8 +244,8 @@ cd build && python -m esptool --chip esp32c5 -b 460800 \
 
 Typical ports: `/dev/cu.usbmodem*` or `/dev/ttyACM*` for native USB (C5, S3 and
 C6 boards), and `/dev/cu.usbserial-*`, `/dev/cu.wchusbserial*` or `/dev/ttyUSB*`
-for CH340 bridges (ideaspark, SenseCAP Indicator, reTerminal E1001 and
-CrowPanel Advance 4.3). On Linux,
+for CH340 bridges (ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002,
+and CrowPanel Advance 4.3). On Linux,
 add yourself to the `dialout` (or `uucp`) group. If the chip won't enter the
 bootloader, hold BOOT, tap RESET, release BOOT, and flash again.
 
@@ -383,7 +384,7 @@ Button (BOOT on the dev boards):
 - **hold for 5 s**: reset setup (unpair and forget Wi-Fi)
 
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
-ideaspark, SenseCAP Indicator and reTerminal E1001 overlays, `MuseGadget-ha-voice-XXXXXX` on the
+ideaspark, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE). It uses **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the button press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.

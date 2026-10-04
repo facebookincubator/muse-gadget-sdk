@@ -69,7 +69,7 @@ from that vendor's code.
 |---|---|---|---|
 | Light | status LED, or nothing | an overlay | `sdkconfig.defaults` (the C5 DevKitC-1) |
 | Status screen | edge bars and an animation | an overlay and a display backend in `main/` | `sdkconfig.ideaspark`, `sdkconfig.sensecap-indicator` |
-| E-paper | a status screen with text | an overlay and its own `led_status.h` implementation | `sdkconfig.reterminal-e1001`, `main/epaper_status.c` |
+| E-paper | a status screen with text | an overlay and its own `led_status.h` implementation | `sdkconfig.reterminal-e1001`, `sdkconfig.reterminal-e1002`, `main/epaper_status.c` |
 | UI | LVGL avatar, voice and settings | an overlay on top of `sdkconfig.muse` and a `muse_board_t` | `sdkconfig.muse-*` |
 
 A board with a screen, mic and speaker should run the full UI. The UI needs 8 MB

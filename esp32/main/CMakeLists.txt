@@ -70,7 +70,8 @@ set(GADGET_REQUIRES
 )
 
 # E-paper has its own status screen in place of led_status.c.
-if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
+if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+   OR CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
     list(APPEND GADGET_SRCS "epaper_status.c")
 else()
     list(APPEND GADGET_SRCS "led_status.c")

@@ -33,6 +33,7 @@ session to Muse. The rest depends on the hardware.
 | **ideaspark ESP32 with 1.9" display** | ESP32 | 1.9" 170×320 LCD | 16 MB / none | — | [Amazon](https://www.amazon.com/s?k=ideaspark+ESP32+1.9+inch+ST7789) |
 | **Seeed SenseCAP Indicator** | ESP32-S3 | 4" 480×480 LCD | 8 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/SenseCAP_Indicator_Get_Started/) | [Seeed Studio](https://www.seeedstudio.com/SenseCAP-Indicator-D1-p-5643.html) |
 | **Seeed reTerminal E1001** | ESP32-S3 | 7.5" 800×480 black and white e-paper | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/getting_started_with_reterminal_e1001/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-E1001-p-6534.html) |
+| **Seeed reTerminal E1002** | ESP32-S3 | 7.3" 800×480 six-colour e-paper (E Ink Spectra 6) | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/reterminal_e10xx_with_esphome/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html) |
 | **Home Assistant Voice Preview Edition** | ESP32-S3 | None (12-LED ring) | 16 MB / 8 MB | [ESPHome repo](https://github.com/esphome/home-assistant-voice-pe) | [Home Assistant](https://www.home-assistant.io/voice-pe/) |
 | **Waveshare ESP32-S3-Touch-AMOLED-1.75C** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 32 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.75C), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75C) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.75c.htm) |
 | **Waveshare ESP32-S3-Touch-AMOLED-1.75** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.75), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm) |
@@ -49,19 +50,20 @@ session to Muse. The rest depends on the hardware.
 
 ## Features
 
-| | DevKitC-1 | ideaspark | SenseCAP Indicator | reTerminal E1001 | HA Voice PE | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 | CrowPanel 4.3 |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: | :-: |:-:|:-:|:-:|
-| Home-network tunnel | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| Shows status on | Light | Screen | Screen | E-paper | Light ring | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
-| Images from Muse | — | ✅ | ✅ | Black and white | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| UI and settings | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ |
-| Push-to-talk | — | — | — | — | ✅ | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ |
-| Speaker and mic | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ |
-| Air sensors | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Touch | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ |
-| Battery status | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | — |
-| Over-the-air updates | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On | On |
-| Buttons | BOOT | BOOT | Top | Green | Centre (talk), dial | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | BOOT (talk) |
+| | DevKitC-1 | ideaspark | SenseCAP Indicator | reTerminal E1001 | reTerminal E1002 | HA Voice PE | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 |
+| | DevKitC-1 | ideaspark | SenseCAP Indicator | reTerminal E1001 | reTerminal E1002 | HA Voice PE | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 | CrowPanel 4.3 |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: | :-: |:-:|:-:|:-:|
+| Home-network tunnel | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| Shows status on | Light | Screen | Screen | E-paper | E-paper | Light ring | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
+| Images from Muse | — | ✅ | ✅ | Black and white | Six colours | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| UI and settings | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ |
+| Push-to-talk | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ |
+| Speaker and mic | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ |
+| Air sensors | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Touch | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ |
+| Battery status | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | — |
+| Over-the-air updates | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On | On |
+| Buttons | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | BOOT (talk) |
 
 The CrowPanel's BOOT button is push-to-talk; the GT911 touchscreen opens
 settings. Set the K1 switch to its `S1=0, S0=0` position for microphone and
@@ -87,6 +89,13 @@ agent's name, the character and a line of status text) that changes only when
 the status does, since each refresh takes a second or two. Images from Muse are dithered
 to black and white on the device and refresh once they are all in, with a
 brief black-and-white flash. `display.draw_url` tells Muse the bit depth.
+
+The reTerminal E1002 is the same board with a six-colour E Ink Spectra 6
+panel: black, white, yellow, red, blue and green, 4 bits per pixel. It shows
+the same status screen, with the character in colour. Images from Muse are
+dithered to those six inks on the device (grays to black and white only),
+and each refresh takes about 30 seconds and flashes. `display.draw_url` tells
+Muse the six exact colours, the resolution and how slow it is.
 
 The SenseCAP Watcher keeps its factory data (the identity SenseCraft uses) in
 an `nvsfactory` partition at `0x9000`, where Muse puts its partition table and
@@ -254,6 +263,7 @@ board's overlays, in order:
 | ideaspark ESP32 | `esp32` | [`devices/sdkconfig.ideaspark`](sdkconfig.ideaspark) | `tools/board.sh ideaspark build` |
 | Seeed SenseCAP Indicator | `esp32s3` | [`devices/sdkconfig.sensecap-indicator`](sdkconfig.sensecap-indicator) | `tools/board.sh sensecap-indicator build` |
 | Seeed reTerminal E1001 | `esp32s3` | [`devices/sdkconfig.reterminal-e1001`](sdkconfig.reterminal-e1001) | `tools/board.sh reterminal-e1001 build` |
+| Seeed reTerminal E1002 | `esp32s3` | [`devices/sdkconfig.reterminal-e1002`](sdkconfig.reterminal-e1002) | `tools/board.sh reterminal-e1002 build` |
 | Home Assistant Voice PE | `esp32s3` | [`devices/sdkconfig.home-assistant-voice`](sdkconfig.home-assistant-voice) | `tools/board.sh home-assistant-voice build` |
 | Waveshare S3 1.75C | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175c`](sdkconfig.muse-waveshare-s3-175c) | by hand |
 | Waveshare S3 1.75 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175`](sdkconfig.muse-waveshare-s3-175) | by hand |

@@ -46,18 +46,20 @@ void led_status_set_title(const char *title);
 // Display backends only: the screen size in pixels. Returns false without a
 // display.
 bool led_status_display_info(int *width, int *height);
-// Bits per pixel the screen shows: 16 for the RGB565 colour LCDs, 1 for
-// black and white e-paper, 0 without a display.
+// Bits per pixel the screen shows: 16 for the RGB565 colour LCDs, 4 for
+// six-colour e-paper (the reTerminal E1002's Spectra 6), 1 for black and
+// white e-paper, 0 without a display.
 int led_status_display_bits(void);
 // Draw w x h pixels at (x, y). `pixels` holds RGB565, 2 bytes each with the
 // high byte first, left to right and top to bottom; at most 23 full rows'
 // worth per call. The first call replaces the animation and title until
 // led_status_show_animation(); the status bars and dot stay on top. E-paper
-// turns colour into dithered black and white, and shows it only at
-// led_status_draw_done().
+// dithers colour to its inks (black and white, or the E1002's six), and shows
+// it only at led_status_draw_done().
 bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels);
 // The image is complete: e-paper refreshes now, and returns once it has
-// (a second or two). LCDs have shown each draw already.
+// (a second or two in black and white, about 30 s in six colours). LCDs have
+// shown each draw already.
 void led_status_draw_done(void);
 // Clear the image and bring back the animation and title.
 void led_status_show_animation(void);

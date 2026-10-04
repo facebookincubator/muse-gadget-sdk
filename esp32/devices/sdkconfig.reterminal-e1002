@@ -1,0 +1,40 @@
+# Seeed reTerminal E1002: ESP32-S3R8 (8 MB octal PSRAM) with 32 MB flash, a
+# 7.3 inch 800x480 six-colour e-paper (E Ink Spectra 6) on SPI, and a USB-UART
+# bridge. The same board as the E1001 apart from the panel. Load last, after
+# sdkconfig.defaults (see README.md in this directory).
+#
+# Sources: Seeed's ESPHome cookbooks for the reTerminal E series
+# (wiki.seeedstudio.com/reterminal_e10xx_with_esphome) and ESPHome's
+# Seeed-reTerminal-E1002 model for the pins; esptool flash-id on the board
+# for the chip, PSRAM and flash.
+#
+# It overrides the ESP32-C5 assumptions in sdkconfig.defaults; C5-only options
+# there are ignored for this target.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# No status LED under firmware control that can show colours: the e-paper
+# shows a status screen.
+CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6=y
+# Advertise as <prefix>-Disp-XXXXXX to tell this board apart from real devices:
+# MuseGadget-Disp in the open-source build, HomeLink-Disp in the internal one.
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# The green button on top, active low. The two white ones (GPIO4 and 5) are
+# not used.
+CONFIG_HOMEHUB_BUTTON_GPIO=3
+
+# 32 MB flash, of which the first 16 MB are used: beyond that needs 32-bit
+# flash addressing, and the partitions end at 4.3 MB.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# Octal PSRAM holds the 750 KB RGB565 canvas and the 188 KB panel frame.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+# The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
+# NimBLE host's allocations in PSRAM so pairing has room.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y

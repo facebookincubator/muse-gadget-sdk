@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-// Host e-paper pixel harness: RGB565 to gray, gray to packed 1-bit frames.
+// Host e-paper pixel harness: RGB565 to gray, gray to packed 1-bit frames,
+// and RGB565 to packed 4-bit Spectra 6 ink codes.
 // The runner extracts the production pixel code into epaper_pixels.inc.
 #include <assert.h>
 #include <stdbool.h>
@@ -22,6 +23,8 @@
 #include <stdio.h>
 #include <string.h>
 
+// Both panels' code.
+#define EPD_COLOR 1
 #include "epaper_pixels.inc"
 
 #define W 64
@@ -30,6 +33,19 @@
 static uint8_t gray[W * H];
 static uint8_t bits[W / 8 * H];
 static int16_t err[2 * (W + 2)];
+static uint16_t rgb[W * H];
+static uint8_t codes[W / 2 * H];
+static int16_t color_err[6 * (W + 2)];
+
+// The ink code of pixel (x, y) in `codes`.
+static int code_at(int x, int y) {
+    uint8_t byte = codes[y * W / 2 + x / 2];
+    return x & 1 ? byte & 0x0F : byte >> 4;
+}
+
+static void fill_rgb(uint16_t px) {
+    for (int i = 0; i < W * H; i++) rgb[i] = px;
+}
 
 static int white_count(void) {
     int n = 0;
@@ -82,9 +98,64 @@ static void check_dither(void) {
     }
 }
 
+static void check_color_dither(void) {
+    // Each ink's own colour comes through exactly, as its controller code.
+    const struct { uint16_t px; int code; } inks[] = {
+        {0x0000, 0}, {0xFFFF, 1}, {0xFFE0, 2}, {0xF800, 3}, {0x001F, 5}, {0x07E0, 6},
+    };
+    for (size_t i = 0; i < sizeof(inks) / sizeof(inks[0]); i++) {
+        fill_rgb(inks[i].px);
+        dither_color(rgb, codes, W, H, color_err);
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) assert(code_at(x, y) == inks[i].code);
+        }
+    }
+
+    // Left pixel in the high nibble: red, blue, then white.
+    fill_rgb(0xFFFF);
+    rgb[0] = 0xF800;
+    rgb[1] = 0x001F;
+    dither_color(rgb, codes, W, H, color_err);
+    assert(codes[0] == 0x35);
+    assert(codes[1] == 0x11);
+
+    // Grays stay black and white, as that share of white dots.
+    const uint16_t grays[] = {0x2104, 0x8410, 0xC618};
+    for (size_t g = 0; g < sizeof(grays) / sizeof(grays[0]); g++) {
+        fill_rgb(grays[g]);
+        dither_color(rgb, codes, W, H, color_err);
+        int white = 0;
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                int c = code_at(x, y);
+                assert(c == 0 || c == 1);
+                white += c;
+            }
+        }
+        int expect = W * H * luma565(grays[g]) / 255;
+        assert(white > expect - W * H / 50 && white < expect + W * H / 50);
+    }
+
+    // Orange mixes red and yellow, and nothing else.
+    fill_rgb(0xFC00);
+    dither_color(rgb, codes, W, H, color_err);
+    int red = 0, yellow = 0;
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            int c = code_at(x, y);
+            assert(c == 2 || c == 3);
+            red += c == 3;
+            yellow += c == 2;
+        }
+    }
+    assert(red > W * H / 4 && yellow > W * H / 4);
+}
+
 int main(void) {
     check_luma();
     check_dither();
-    puts("PASS epaper pixels: RGB565 luma, exact black and white, bit order, checkerboard, gray levels as dot density");
+    check_color_dither();
+    puts("PASS epaper pixels: RGB565 luma, exact black and white, bit order, checkerboard, gray levels as dot density; "
+         "exact Spectra 6 inks, nibble order, grays in black and white, orange as red and yellow");
     return 0;
 }

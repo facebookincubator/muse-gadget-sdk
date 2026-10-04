@@ -26,12 +26,14 @@
 #              Home Assistant Voice PE (ESP32-S3), push-to-talk voice chat
 #   reterminal-e1001
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
+#   reterminal-e1002
+#              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
 #
 # The action defaults to build. Without PORT, flash and monitor use the only
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -54,7 +56,7 @@ case "$BOARD" in
     # CH340 bridge. The SenseCAP Indicator's RP2040 shows up as a usbmodem, not here.
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
     ;;
-  reterminal-e1001)
+  reterminal-e1001|reterminal-e1002)
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
