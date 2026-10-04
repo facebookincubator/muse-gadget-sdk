@@ -1,5 +1,0 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# Licensed under the Apache License, Version 2.0 (see LICENSE).
-FROM muse-ma35-board-sim:local
-COPY chat.py cli.py link_client.py service.py /tmp/muse-chat/
-RUN python -c "from pathlib import Path; import shutil, musegadget; target=Path(musegadget.__file__).parent; [shutil.copyfile(p, target/p.name) for p in Path('/tmp/muse-chat').glob('*.py')]"

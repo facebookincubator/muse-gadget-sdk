@@ -29,4 +29,3 @@ muse-simulator.ppm
 .muse-state/
 .mac-venv/
 docker-mac/*.log
-.board-sim/

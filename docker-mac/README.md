@@ -7,12 +7,6 @@ SDK's Python setup, ECDH/encryption and provisioning code without modification.
 The helper transports BLE packets through local subprocess pipes, with no network
 listener. After pairing, the Linux service uses the saved identity over the network.
 
-To enroll an Ethernet-only Linux board such as the Nuvoton MA35D1 or MA35H0 through the
-Mac instead, see [board enrollment over USB](BOARD-ENROLLMENT.md). The Mac supplies
-BLE for setup; the board supplies its identity, encryption and credential storage.
-The [four-board Docker simulator](board-sim/README.md) runs independent ARM64
-instances for MA35D1-A1/S1 and MA35H0-A1/A2 before hardware is available.
-
 ## Requirements
 
 - macOS 14 or later on Intel or Apple Silicon, with Bluetooth enabled.
@@ -103,7 +97,7 @@ The Mac transport and token-handoff checks require pytest:
 
 ```sh
 .mac-venv/bin/python -m pip install pytest
-PYTHONPATH=linux/src:docker-mac .mac-venv/bin/python -m pytest -q docker-mac/test_mac_ble.py docker-mac/test_pair_mac.py docker-mac/test_pair_board.py
+PYTHONPATH=linux/src:docker-mac .mac-venv/bin/python -m pytest -q docker-mac/test_mac_ble.py docker-mac/test_pair_mac.py
 ```
 
 ## Platform limits
