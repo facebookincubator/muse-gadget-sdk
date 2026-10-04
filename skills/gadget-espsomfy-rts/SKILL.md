@@ -17,7 +17,7 @@ Use this skill when an already-installed ESPSomfy-RTS gateway controls the user'
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An existing gateway with its motors and groups already configured, plus authentication required by the installed firmware.
 - User approval for the named shade or group and movement. Confirm an awning or window covering can move safely.

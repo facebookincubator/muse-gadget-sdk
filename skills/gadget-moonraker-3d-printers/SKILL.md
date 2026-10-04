@@ -17,7 +17,7 @@ Use this skill when current discovery or a user-confirmed endpoint identifies an
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - A commissioned printer with Moonraker already installed and any required API key or access token stored securely.
 - For print operations, an explicitly selected file already available to the printer, plus confirmation that the build area and printer are ready. Do not substitute an arbitrary local file.

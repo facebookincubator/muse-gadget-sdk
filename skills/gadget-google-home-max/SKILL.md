@@ -18,7 +18,7 @@ Use this skill when current discovery identifies the Google Home Max.
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - The device is already provisioned and available as a receiver in its supported operating state.
 - For new playback, an existing user-authorized media source must be reachable by the receiver. Device access alone does not supply media hosting.

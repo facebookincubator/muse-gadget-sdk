@@ -17,7 +17,7 @@ Use this skill when the exact Wi-Fi Roomba or Braava model and firmware support 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - The robot's existing BLID and local password in approved secret storage.
 - A compatible dorita980 local client or equivalent MQTT/TLS implementation routed through HomeLink; retain device-specific TLS handling.
