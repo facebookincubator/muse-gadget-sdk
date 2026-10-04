@@ -1,11 +1,15 @@
 # Skill Catalog
 
-43 active skills: 42 device/family skills and one shared Google Cast skill.
+44 active skills: 42 device/family skills, one shared Google Cast skill, and one payments skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
 
 - [Google Cast](gadget-google-cast/SKILL.md) — media, volume and existing speaker groups.
+
+## Payments
+
+- [x402 payments](gadget-x402-payment/SKILL.md) — pay over x402 from the gadget: 402 discovery, rail select, EIP-191 proof signature, X-PAYMENT header, on-device confirmation and hard spend caps.
 
 ## Lights and plugs
 
