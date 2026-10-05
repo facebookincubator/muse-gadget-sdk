@@ -18,3 +18,7 @@ dependencies:
   espressif/led_strip: "~3.0"
   idf:
     version: ">=5.1"
+  espressif/esp_codec_dev:
+    version: "~1.5"
+    rules:
+      - if: "$CONFIG{HOMEHUB_VOICE_BOARD_ID} == \"waveshare_s3_audio_board\""
