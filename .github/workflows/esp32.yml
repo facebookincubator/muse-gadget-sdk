@@ -131,6 +131,9 @@ jobs:
           - board: seeed-respeaker-lite
             target: esp32s3
             overlays: ";devices/sdkconfig.seeed-respeaker-lite"
+          - board: waveshare-s3-audio-board
+            target: esp32s3
+            overlays: ";devices/sdkconfig.waveshare-s3-audio-board"
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"

@@ -169,7 +169,8 @@ menu "ESP32 Device SDK"
             have no status LED; their displays show the status colour in bars
             along the top and bottom edges, with an animation in between. The
             Home Assistant Voice PE shows the status colour on its LED ring.
-            Seeed reSpeaker Lite shows it on a single RGB LED.
+            Seeed reSpeaker Lite shows it on a single RGB LED; the Waveshare
+            Audio Board uses its seven-LED ring.
             The reTerminal E1001 and E1002 show a still status screen on
             their e-paper instead (black and white on the E1001, six colours
             on the E1002).
@@ -207,6 +208,10 @@ menu "ESP32 Device SDK"
 
         config HOMEHUB_LED_BACKEND_RESPEAKER_LITE
             bool "Seeed reSpeaker Lite single RGB LED (experimental)"
+            depends on IDF_TARGET_ESP32S3
+
+        config HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO
+            bool "Waveshare ESP32-S3-AUDIO-Board 7-LED ring"
             depends on IDF_TARGET_ESP32S3
 
         config HOMEHUB_LED_BACKEND_MUSE
@@ -249,12 +254,22 @@ menu "ESP32 Device SDK"
             agent name (a still status screen on e-paper), and the display.*
             commands.
 
+    config HOMEHUB_VOICE_BOARD_ID
+        string
+        default "waveshare_s3_audio_board" if HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO
+        default "respeaker_lite" if HOMEHUB_LED_BACKEND_RESPEAKER_LITE
+        default "home_assistant_voice" if HOMEHUB_LED_BACKEND_VOICE_RING
+        default "none"
+        help
+            Stable board identifier for managed audio dependencies. Unlike a
+            target-specific bool, this exists on every supported target.
+
     config HOMEHUB_VOICE
         bool "Push-to-talk voice chat"
-        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE) && SPIRAM
+        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE || HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO) && SPIRAM
         default y
         help
-            Hold the centre button (XIAO BOOT on reSpeaker Lite), speak,
+            Hold the centre button (BOOT on reSpeaker Lite or Audio Board), speak,
             release: the audio goes to the agent's chat as a voice note,
             which the VM transcribes, and the
             reply appears in the Muse app as text. To speak it, plug a TTS
@@ -262,7 +277,8 @@ menu "ESP32 Device SDK"
             uses a second Noise session (Muse's voice session) with Link's
             account. While the mute
             switch is on, the button keeps its setup role (tap to confirm
-            pairing, hold to reset).
+            pairing, hold to reset). On the Audio Board, hold K1 for that
+            setup role; K2/K3 decrease/increase the speaker volume.
 
     config HOMEHUB_SENSECAP_SENSORS
         bool "SenseCAP Indicator air sensors (sensors.read)"

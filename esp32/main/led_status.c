@@ -33,7 +33,7 @@
 #elif CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
 #include "led_strip.h"
 #include "soc/spi_pins.h"
-#elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE
+#elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO
 #include "driver/gpio.h"
 #include "led_strip.h"
 #elif CONFIG_HOMEHUB_DISPLAY
@@ -94,13 +94,17 @@ static const char *TAG = "link.led";
 #endif
 #define LED_STRIP_LED_COUNT  1
 #define LED_STRIP_RMT_RES_HZ (10 * 1000 * 1000)
-#elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE
+#elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO
 // Home Assistant Voice PE: 12 WS2812 LEDs in a ring, index 0 at the top and
 // counting clockwise, powered through a switch on GPIO45.
 #if CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE
 // Seeed vendor pinout: XIAO D0=GPIO1; one WS2812, no power switch.
 #define RING_GPIO            1
 #define RING_LEDS            1
+#elif CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO
+// Waveshare schematic: seven WS2812 LEDs on GPIO38, no power switch.
+#define RING_GPIO            38
+#define RING_LEDS            7
 #else
 #define RING_GPIO            21
 #define RING_POWER_GPIO      45
@@ -327,7 +331,7 @@ static bool led_hw_init(void) {
     ESP_LOGI(TAG, "LED status ready: addressable RGB (GPIO=%d)", LED_STRIP_GPIO);
     return true;
 }
-#elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE
+#elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO
 static led_strip_handle_t s_strip = NULL;
 // Steady frames shown since the ring last turned green for "connected".
 static int s_connected_frames = 0;
@@ -893,7 +897,7 @@ static bool led_hw_init(void) {
 #endif
 
 #if !CONFIG_HOMEHUB_DISPLAY
-#if !(CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
+#if !(CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO)
 static void led_hw_set_connected(void) {
     led_hw_set_color(COLOR_GREEN);
 }
@@ -1123,7 +1127,7 @@ bool led_status_init(void) {
 
     led_hw_set_color(COLOR_ORANGE);
     // 2026-09-20: increase margin; measured only 904 bytes free with a 2048-byte stack.
-#if CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE
+#if CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO
     // The RMT ring driver takes about 2 KB of the task's stack per frame.
     const uint32_t stack = 4096;
 #else
