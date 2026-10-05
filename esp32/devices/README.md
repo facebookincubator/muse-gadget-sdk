@@ -57,19 +57,19 @@ session to Muse. The rest depends on the hardware.
 
 ## Features
 
-| | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | SenseCAP Indicator | reTerminal E1001 | reTerminal E1002 | HA Voice PE | reSpeaker Lite (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| Home-network tunnel | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Shows status on | Light | Light | Screen | Screen | Screen | E-paper | E-paper | Light ring | RGB LED | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar |
-| Images from Muse | — | — | ✅ | ✅ | ✅ | Black and white | Six colours | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
-| UI and settings | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
-| Push-to-talk | — | — | — | — | — | — | — | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ | ✅ | — | With an added I2S mic |
-| Speaker and mic | — | — | — | — | — | — | — | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic |
-| Air sensors | — | — | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Touch | — | — | — | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
-| Battery status | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — |
-| Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) |
+| | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | SenseCAP Indicator | reTerminal E1001 | reTerminal E1002 | HA Voice PE | reSpeaker Lite (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | AIPI Lite | Waveshare C6 1.8 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 | Waveshare LCD7 |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:| :-: |
+| Home-network tunnel | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Shows status on | Light | Light | Screen | Screen | Screen | E-paper | E-paper | Light ring | RGB LED | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar | Avatar |
+| Images from Muse | — | — | ✅ | ✅ | ✅ | Black and white | Six colours | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| UI and settings | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| Push-to-talk | — | — | — | — | — | — | — | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ | ✅ | — | With an added I2S mic | — |
+| Speaker and mic | — | — | — | — | — | — | — | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | — |
+| Air sensors | — | — | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Touch | — | — | — | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| Battery status | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — | — |
+| Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On |
+| Buttons | BOOT | BOOT | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (flash only) |
 
 Boards without PSRAM (the ideaspark, the C6 boards and the Cardputer ADV) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
@@ -345,6 +345,7 @@ board's overlays, in order:
 | M5Stack StopWatch | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stopwatch`](sdkconfig.muse-m5stack-stopwatch) | by hand |
 | M5Stack CoreS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-cores3`](sdkconfig.muse-m5stack-cores3) | `tools/muse/board.sh build cores3` |
 | Guition JC3248W535 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-guition-jc3248w535`](sdkconfig.muse-guition-jc3248w535) | `tools/muse/board.sh build jc3248w535` |
+| Waveshare ESP32-S3-Touch-LCD-7 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-lcd7`](sdkconfig.muse-waveshare-s3-lcd7) | `tools/muse/board.sh build lcd7` |
 | M5Stack StickC Plus2 | `esp32` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stickc-plus2`](sdkconfig.muse-m5stack-stickc-plus2) | by hand |
 | M5Stack Core2 | `esp32` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-core2`](sdkconfig.muse-m5stack-core2) | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-fnk0104b`](sdkconfig.muse-fnk0104b) | `tools/muse/board.sh build fnk0104b` |

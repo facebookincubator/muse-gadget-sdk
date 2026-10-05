@@ -211,6 +211,7 @@ The fields of `muse_board_t`:
 | `keyboard` | Dedicated navigation keys: `poll_buttons` emits `MUSE_BTN_UP/DOWN/LEFT/RIGHT/ENTER/ESCAPE` presses. Enter selects and confirms pairing; Talk is not repurposed as Select while the menu is open. Defaults to false for two-button boards. |
 | `talk_button`, `aux_button` | On-screen captions ("boot", "pwr"). `talk_hint` and `aux_hint` place them next to the physical button |
 | `frame_ms` | Avatar frame period: 40 on the S3 boards, 50 on the C6 |
+| `avatar_px` | Optional avatar canvas size in pixels; 0 uses the layout default |
 | `init` | Runs first: power latches, I2C bus, PMU |
 | `display_start` | Panel, LVGL and its task. Returns the display; leaves `*touch` NULL without touch |
 | `display_lock`, `display_unlock` | LVGL's lock |
