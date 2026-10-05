@@ -236,6 +236,26 @@ things you can change:
   is the spot: it has the reply text, and the MP3 decoder, speaker and volume
   are already wired up there.
 
+  `CONFIG_MUSE_LOCAL_TTS` (under **Muse** in `idf.py menuconfig`) does that
+  against an HTTP server you run, so any TTS that can return MP3 will do. Set
+  `CONFIG_MUSE_LOCAL_TTS_URL` and, if your server checks one,
+  `CONFIG_MUSE_LOCAL_TTS_KEY` in the build's `sdkconfig`. For each reply the
+  firmware sends:
+
+  ```
+  POST <your URL>
+  Content-Type: text/plain; charset=utf-8
+  X-Key: <your key>
+
+  <the reply's text, UTF-8, up to 4095 bytes, Markdown included>
+  ```
+
+  Answer `200` with MP3, streamed or whole, mono or stereo at any sample
+  rate. Speech starts as the first frames arrive and captions follow it. On
+  any other answer, and while the speaker is off, the reply is shown as
+  captions only. An `https://` URL is checked against the certificate bundle;
+  over `http://` the key and the replies cross your network in the clear.
+
 A few things worth knowing:
 
 - Your SDK token ships inside the firmware, so treat it as an identifier

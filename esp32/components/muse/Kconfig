@@ -167,4 +167,28 @@ menu "Muse"
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
+    config MUSE_LOCAL_TTS
+        bool "Speak replies with a TTS server of your own"
+        depends on MUSE_HATCH
+        default n
+        help
+            Each reply's text is POSTed to MUSE_LOCAL_TTS_URL and the MP3 that
+            comes back is played, unless the speaker is off. See "Spoken
+            answers" in the README for what the server has to do.
+
+    config MUSE_LOCAL_TTS_URL
+        string "TTS server URL (POST the text, get MP3 back)"
+        depends on MUSE_LOCAL_TTS
+        default ""
+        help
+            http:// or https://. Empty: replies are captions only.
+
+    config MUSE_LOCAL_TTS_KEY
+        string "Key sent to that server, as X-Key"
+        depends on MUSE_LOCAL_TTS
+        default ""
+        help
+            Ships inside the firmware, like the SDK token. Set it in the
+            build's sdkconfig, not in an overlay you commit.
+
 endmenu
