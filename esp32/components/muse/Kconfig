@@ -181,7 +181,10 @@ menu "Muse"
         depends on MUSE_LOCAL_TTS
         default ""
         help
-            http:// or https://. Empty: replies are captions only.
+            http:// or https://. Empty: replies are captions only. Over
+            http:// the key below and every reply cross the network
+            unencrypted: use https:// unless the server is on a network you
+            trust.
 
     config MUSE_LOCAL_TTS_KEY
         string "Key sent to that server, as X-Key"

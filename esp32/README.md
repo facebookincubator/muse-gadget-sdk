@@ -247,14 +247,16 @@ things you can change:
   Content-Type: text/plain; charset=utf-8
   X-Key: <your key>
 
-  <the reply's text, UTF-8, up to 4095 bytes, Markdown included>
+  <the reply's text, UTF-8, up to 2559 bytes, Markdown included>
   ```
 
   Answer `200` with MP3, streamed or whole, mono or stereo at any sample
   rate. Speech starts as the first frames arrive and captions follow it. On
-  any other answer, and while the speaker is off, the reply is shown as
-  captions only. An `https://` URL is checked against the certificate bundle;
-  over `http://` the key and the replies cross your network in the clear.
+  any other answer, a body with no MP3 in it, no speech within 15 seconds, or
+  while the speaker is off, the reply is shown as captions only. A turn ends after 180 seconds, so a reply
+  longer than that is cut off there, and the request is dropped when the turn
+  ends. An `https://` URL is checked against the certificate bundle; over
+  `http://` the key and the replies cross your network in the clear.
 
 A few things worth knowing:
 

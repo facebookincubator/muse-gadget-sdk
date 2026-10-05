@@ -60,6 +60,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
@@ -100,7 +101,7 @@ static const char *TAG = "muse_chat_session";
 #define OUT_BYTES (MIC_RATE * 2 * 2)       /* 2 s of decoded reply */
 #define EV_TEXT 72
 #ifdef CONFIG_MUSE_LOCAL_TTS
-#define TEXT_MAX 4096                      /* a message's text: all of it is spoken, so more of it is kept */
+#define TEXT_MAX 2560                      /* a message's text: about what's spoken before TURN_CAP_US ends the turn */
 #else
 #define TEXT_MAX 1024                      /* a message's text, for captions timed to its speech */
 #endif
@@ -954,6 +955,8 @@ static size_t resample(resampler_t *r, const int16_t *in, size_t n, int16_t *out
  */
 #define LTTS_BUF (32 * 1024)
 #define LTTS_STACK 6144
+#define LTTS_TIMEOUT_MS 15000   /* connecting, and each wait for more of the response */
+#define LTTS_FIRST_AUDIO_US (15 * 1000000LL)   /* no speech by then: the reply is shown instead */
 
 struct ltts_t {
     StreamBufferHandle_t sb;
@@ -964,10 +967,23 @@ struct ltts_t {
     std::atomic<int> refs{2};
     std::atomic<bool> cancel{false};
     std::atomic<int> state{0};   /* 0 fetching, 1 done, -1 failed */
+    int fd = -1;                 /* the fetch's socket while it's open; under s_ltts_fd_lock */
     char *text;
 };
 
 static ltts_t *s_ltts;
+static int64_t s_ltts_start_us;
+static SemaphoreHandle_t s_ltts_fd_lock;
+
+#ifdef CONFIG_MUSE_LOCAL_TTS
+/* The fetch's socket, or -1 once it's about to be closed. Holding the lock keeps it open. */
+static void ltts_set_fd(ltts_t *j, int fd)
+{
+    xSemaphoreTake(s_ltts_fd_lock, portMAX_DELAY);
+    j->fd = fd;
+    xSemaphoreGive(s_ltts_fd_lock);
+}
+#endif
 
 static bool ltts_enabled(void)
 {
@@ -1007,7 +1023,7 @@ static void ltts_fetch(ltts_t *j)
     esp_http_client_config_t cfg = {};
     cfg.url = CONFIG_MUSE_LOCAL_TTS_URL;
     cfg.method = HTTP_METHOD_POST;
-    cfg.timeout_ms = 15000;
+    cfg.timeout_ms = LTTS_TIMEOUT_MS;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
     bool ok = false;
@@ -1018,28 +1034,40 @@ static void ltts_fetch(ltts_t *j)
         }
         int len = (int)strlen(j->text);
         int status = 0;
-        if (esp_http_client_open(c, len) == ESP_OK && esp_http_client_write(c, j->text, len) == len &&
-            esp_http_client_fetch_headers(c) >= 0) {
-            status = esp_http_client_get_status_code(c);
+        if (esp_http_client_open(c, len) == ESP_OK) {
+            /*
+             * From here the reads below can block for as long as the server
+             * keeps a byte coming within the timeout. ltts_drop() shuts this
+             * socket down when the turn ends, which fails them at once.
+             */
+            ltts_set_fd(j, esp_http_client_get_socket(c));
+            if (!j->cancel && esp_http_client_write(c, j->text, len) == len && esp_http_client_fetch_headers(c) >= 0) {
+                status = esp_http_client_get_status_code(c);
+            }
         }
         ok = status == 200;
-        if (!ok) {
+        if (!ok && !j->cancel) {
             ESP_LOGW(TAG, "local TTS: HTTP %d", status);
         }
         uint8_t buf[1024];
         while (ok && !j->cancel) {
             int n = esp_http_client_read(c, reinterpret_cast<char *>(buf), sizeof(buf));
             if (n <= 0) {
-                ok = n == 0;
+                /* 0 is the end of the body, or the connection closing before it. */
+                ok = n == 0 && esp_http_client_is_complete_data_received(c);
+                if (!ok && !j->cancel) {
+                    ESP_LOGW(TAG, "local TTS: response cut short (%d)", n);
+                }
                 break;
             }
             for (int off = 0; off < n && !j->cancel;) {
                 off += (int)xStreamBufferSend(j->sb, buf + off, n - off, pdMS_TO_TICKS(100));
             }
         }
+        ltts_set_fd(j, -1);
         esp_http_client_cleanup(c);
     }
-    j->state = ok ? 1 : -1;
+    j->state = ok && !j->cancel ? 1 : -1;
     ltts_release(j);
 }
 
@@ -1058,10 +1086,38 @@ static void ltts_task(void *arg)
 }
 #endif
 
+#ifdef CONFIG_MUSE_LOCAL_TTS
+/* Drops a UTF-8 character cut short at the end of s. */
+static void utf8_trim(char *s)
+{
+    size_t n = strlen(s), back = 0;
+    while (back < 3 && back < n && (static_cast<unsigned char>(s[n - 1 - back]) & 0xC0) == 0x80) {
+        back++;   /* continuation bytes */
+    }
+    if (back == n) {
+        return;
+    }
+    unsigned char lead = static_cast<unsigned char>(s[n - 1 - back]);
+    size_t want = lead >= 0xF0 ? 3 : lead >= 0xE0 ? 2 : lead >= 0xC0 ? 1 : 0;
+    if (back < want) {
+        s[n - 1 - back] = '\0';
+    }
+}
+#endif
+
 /* Starts speaking text from the local TTS. False if the fetch couldn't start. */
 static bool ltts_start(const char *text)
 {
 #ifdef CONFIG_MUSE_LOCAL_TTS
+    if (!s_ltts_fd_lock) {
+        s_ltts_fd_lock = xSemaphoreCreateMutex();
+        if (!s_ltts_fd_lock) {
+            return false;
+        }
+        if (CONFIG_MUSE_LOCAL_TTS_KEY[0] && !strncmp(CONFIG_MUSE_LOCAL_TTS_URL, "http://", 7)) {
+            ESP_LOGW(TAG, "local TTS: the key goes to the server unencrypted over http://");
+        }
+    }
     if (!s_ltts_q) {
         s_ltts_q = xQueueCreate(4, sizeof(ltts_t *));
         if (!s_ltts_q || xTaskCreatePinnedToCoreWithCaps(ltts_task, "muse_ltts", LTTS_STACK, nullptr, 5, nullptr,
@@ -1081,11 +1137,15 @@ static bool ltts_start(const char *text)
     j->sb_store = static_cast<uint8_t *>(heap_caps_malloc(LTTS_BUF + 1, MALLOC_CAP_SPIRAM));
     j->sb = j->sb_struct && j->sb_store ? xStreamBufferCreateStatic(LTTS_BUF, 1, j->sb_store, j->sb_struct) : nullptr;
     j->text = strdup(text);
+    if (j->text) {
+        utf8_trim(j->text);   /* a reply longer than TEXT_MAX is cut at a byte, not a character */
+    }
     if (!j->sb || !j->text || xQueueSend(s_ltts_q, &j, 0) != pdTRUE) {
         ltts_free(j);
         return false;
     }
     s_ltts = j;
+    s_ltts_start_us = now_us();
     return true;
 #else
     (void)text;
@@ -1097,6 +1157,11 @@ static void ltts_drop(void)
 {
     if (s_ltts) {
         s_ltts->cancel = true;
+        xSemaphoreTake(s_ltts_fd_lock, portMAX_DELAY);
+        if (s_ltts->fd >= 0) {
+            shutdown(s_ltts->fd, SHUT_RDWR);   /* fails the fetch's read, however slowly the server sends */
+        }
+        xSemaphoreGive(s_ltts_fd_lock);
         ltts_release(s_ltts);
         s_ltts = nullptr;
     }
@@ -1768,14 +1833,13 @@ static void ltts_pump(void)
     }
     if (state != 0 && xStreamBufferIsEmpty(j->sb)) {
         ltts_drop();
-        msg_t &m = s_turn.msgs[s_turn.tts_msg];
-        if (state < 0 && !s_turn.mp3_len && s_turn.pcm_out == m.pcm_start) {
-            /* Nothing to play: show the reply at reading pace, as with the speaker off. */
-            m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
-            s_turn.silent = true;
-            return;
-        }
         s_turn.mp3_ended = true;   /* decode() plays what came, then finishes */
+    } else if (s_turn.pcm_out == s_turn.msgs[s_turn.tts_msg].pcm_start && now_us() - s_ltts_start_us > LTTS_FIRST_AUDIO_US) {
+        /* Too slow to wait for: decode() falls back to showing the reply. */
+        ESP_LOGW(TAG, "local TTS: no speech after %d s", (int)(LTTS_FIRST_AUDIO_US / 1000000));
+        ltts_drop();
+        s_turn.mp3_len = 0;
+        s_turn.mp3_ended = true;
     }
 }
 
@@ -1855,6 +1919,13 @@ static void decode(void)
         /* All of it is here: what's decoded plus what the bitrate says the rest holds. */
         uint32_t rest = (uint32_t)((uint64_t)s_turn.mp3_len * 8 * MIC_RATE / (s_turn.kbps * 1000));
         m.pcm_frames = s_turn.pcm_out - m.pcm_start + rest;
+    }
+    if (s_turn.mp3_ended && !s_turn.mp3_len && s_turn.pcm_out == m.pcm_start) {
+        /* No speech in it (the fetch failed, or what came wasn't MP3): show the
+         * reply at reading pace, as with the speaker off. */
+        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        s_turn.silent = true;
+        return;
     }
     if (s_turn.mp3_ended && !s_turn.mp3_len) {
         m.pcm_frames = s_turn.pcm_out - m.pcm_start;
