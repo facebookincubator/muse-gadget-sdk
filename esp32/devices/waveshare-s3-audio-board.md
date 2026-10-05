@@ -93,6 +93,13 @@ seven-LED ring initialization, ES8311/ES7210 initialization, voice task start
 and BLE advertising as `MuseGadget-audio-XXXXXX`. A local bench using this
 same driver captured 80,000 PCM16 samples in five seconds and completed
 microphone replay plus three one-second speaker test transfers without I2S
-errors. Intelligible speech and audible playback have not been confirmed.
-Physical pairing, Muse replies in the phone app, K1/K2/K3 controls, setup
-reset and reconnection are also not yet verified.
+errors.
+On 2026-10-05 the operator confirmed phone pairing and completed voice
+conversations. A Muse app screenshot shows two transcribed voice notes
+and their text replies; a live serial capture confirms Wi-Fi, the control
+session and tunnel are up. This verifies the BOOT push-to-talk flow and usable
+microphone input. Perceived recording loudness has not been measured.
+A software restart retained pairing and restored Wi-Fi, the control session
+and tunnel by the nine-second heartbeat, with no panic or error during the
+40-second capture. Audible board playback, K1/K2/K3 controls and clearing
+setup are not yet verified.
