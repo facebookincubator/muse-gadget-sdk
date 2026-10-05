@@ -301,6 +301,7 @@ static const muse_board_t s_board = {
     .name = "Waveshare ESP32-S3-Touch-LCD-7",
     .width = LCD_W,
     .height = LCD_H,
+    .avatar_px = 288,
     .round = false,
     .touch = true,
     .diagonal_in = 7.0f,

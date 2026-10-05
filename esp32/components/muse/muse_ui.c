@@ -1538,6 +1538,9 @@ esp_err_t muse_ui_start(void)
         /* Leave the header's first 40 rows and bottom captions clear. */
         s_canvas_px = s_h * 2 / 3;
     }
+    if (muse_board->avatar_px > 0) {
+        s_canvas_px = muse_board->avatar_px;
+    }
     if (s_canvas_px > s_w) {
         s_canvas_px = s_w / MUSE_PX_W * MUSE_PX_W;
     }
