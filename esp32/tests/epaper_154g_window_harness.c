@@ -102,14 +102,14 @@ static void check_image_window(void) {
     assert(w.changed && !w.full && w.y == 100 && w.height == 2 && w.width == 80);
     assert(w.changed_pixels == 81);
 
-    // Up to 40 percent of the panel is a window; more is a full refresh.
+    // Up to 75 percent of the panel is a window; more is a full refresh.
     reset();
-    for (int y = 0; y < 80; y++) {
+    for (int y = 0; y < 150; y++) {
         for (int x = 0; x < EPAPER_154G_WINDOW_WIDTH; x++) epaper_154g_rotation_put(next, x, y, 0);
     }
     w = plan_image(80);
-    assert(w.changed && !w.full && w.y == 0 && w.height == 80 && w.width == EPAPER_154G_WINDOW_WIDTH);
-    for (int x = 0; x < EPAPER_154G_WINDOW_WIDTH; x++) epaper_154g_rotation_put(next, x, 80, 0);
+    assert(w.changed && !w.full && w.y == 0 && w.height == 150 && w.width == EPAPER_154G_WINDOW_WIDTH);
+    for (int x = 0; x < EPAPER_154G_WINDOW_WIDTH; x++) epaper_154g_rotation_put(next, x, 150, 0);
     check_full(plan_image(80));
 }
 
@@ -230,7 +230,7 @@ int main(void) {
     check_encode_and_commit();
     check_rotation();
     check_power_button();
-    puts("PASS epaper window: band windows, one-row fix, image floor and 40% cap, "
+    puts("PASS epaper window: band windows, one-row fix, image floor and 75% cap, "
          "rotated bands, R83H encoding, rotation, PWR page/rotate/combo");
     return 0;
 }

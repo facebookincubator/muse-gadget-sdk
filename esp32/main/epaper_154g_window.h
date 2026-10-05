@@ -100,7 +100,7 @@ static inline epaper_154g_window_t epaper_154g_window_plan_area(const uint8_t *s
         else top--;
     }
     if (image && (right - left + 1) * 4 * (bottom - top + 1) * 100
-        > EPAPER_154G_WINDOW_WIDTH * EPAPER_154G_WINDOW_HEIGHT * 40) return full;
+        > EPAPER_154G_WINDOW_WIDTH * EPAPER_154G_WINDOW_HEIGHT * 75) return full;
     return (epaper_154g_window_t){left * 4, top, (right - left + 1) * 4, bottom - top + 1,
                              true, false, full.changed_pixels};
 }

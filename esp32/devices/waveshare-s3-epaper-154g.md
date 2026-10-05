@@ -29,7 +29,7 @@ Text uses GNU Unifont bitmaps for Latin-1 and Cyrillic, see [`main/fonts/README.
 Images from Muse map each pixel to the nearest ink without dithering, so text and flat shapes stay sharp; Muse
 is asked for raw RGB565 at 200×200. A full refresh takes about 20 s and flashes. When only part of the screen
 changes, the panel refreshes that rectangle through its partial window (R83H in the [panel
-manual](https://files.waveshare.com/wiki/ESP32-S3-ePaper-1.54G/1.54inch_e-Paper_G.pdf)); a change over 40% of
+manual](https://files.waveshare.com/wiki/ESP32-S3-ePaper-1.54G/1.54inch_e-Paper_G.pdf)); a change over 75% of
 the panel, and every tenth window, is a full refresh.
 
 ## Buttons
