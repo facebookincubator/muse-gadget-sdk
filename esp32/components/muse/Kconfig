@@ -43,6 +43,10 @@ menu "Muse"
             bool "Espressif ESP32-S3-BOX-3 (320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_WAVESHARE_C5_28
+            bool "Waveshare ESP32-C5-Touch-LCD-2.8 (240x320 touch LCD, ES8311)"
+            depends on IDF_TARGET_ESP32C5
+
         config MUSE_BOARD_WAVESHARE_C6_18
             bool "Waveshare ESP32-C6-Touch-AMOLED-1.8"
             depends on IDF_TARGET_ESP32C6
@@ -94,6 +98,7 @@ menu "Muse"
         default "waveshare_s3_175" if MUSE_BOARD_WAVESHARE_S3_175
         default "aipi" if MUSE_BOARD_AIPI
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
+        default "waveshare_c5_28" if MUSE_BOARD_WAVESHARE_C5_28
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
         default "sensecap_watcher" if MUSE_BOARD_SENSECAP_WATCHER
         default "m5stack_sticks3" if MUSE_BOARD_M5STACK_STICKS3

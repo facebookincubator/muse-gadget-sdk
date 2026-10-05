@@ -1,0 +1,50 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-C5-Touch-LCD-2.8: 32 MB flash, 8 MB quad PSRAM,
+# native USB Serial/JTAG (303a:1001). Load after sdkconfig.defaults and sdkconfig.muse.
+# Pins and peripheral initialization follow Waveshare's ESP-IDF BSP:
+# https://github.com/waveshareteam/ESP32-C5-Touch-LCD-2.8
+CONFIG_IDF_TARGET="esp32c5"
+CONFIG_MUSE_BOARD_WAVESHARE_C5_28=y
+CONFIG_HOMEHUB_BUTTON_GPIO=28
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="32MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+
+# GPIO27 is the ES8311 microphone data input, not a DevKit RGB LED.
+# sdkconfig.muse selects the display status backend.
+# The C5 shares one CPU between the UI, Wi-Fi and voice.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# The C5 has 384 KB SRAM. Keep NimBLE's host allocations and larger UI
+# allocations in PSRAM so duplex I2S DMA and Wi-Fi can coexist during pairing.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+
+# Pairing needs an 8 KB internal stack while LVGL, duplex I2S and a Wi-Fi
+# scan are active. C5 enables this extra IRAM optimization independently of
+# the two Wi-Fi IRAM options disabled by sdkconfig.muse.
+CONFIG_ESP_WIFI_SLP_IRAM_OPT=n
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_RX_BA_WIN=8
+
+# One phone and a paced notification stream: smaller NimBLE pools leave
+# internal heap for provisioning and the subsequent TLS/session tasks.
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=15
