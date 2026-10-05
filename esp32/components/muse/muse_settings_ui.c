@@ -54,6 +54,23 @@
 #define COLOR_WARN 0xffb45c
 #define COLOR_DANGER 0xff5c5c
 
+/* Compact layout: short panels, and ones too narrow for LIST_W.
+ *
+ * Short is the original rule (the BOX-3 is 240 px tall) and narrow is what a
+ * 170 px panel needs: with the row's padding and icon column taken out, a
+ * montserrat_20 label runs off it. Height alone can't catch that case. */
+static bool compact_layout(void)
+{
+    return !muse_board->round
+        && (muse_board->height <= 240 || muse_board->width < LIST_W);
+}
+
+/* Row body text: one size down on a compact panel. */
+static const lv_font_t *body_font(void)
+{
+    return compact_layout() ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
+}
+
 typedef void (*text_done_cb_t)(const char *text);
 
 /* The screen size the text page is scaled to (see text_px). */
@@ -194,7 +211,7 @@ static lv_obj_t *back_button(lv_obj_t *p)
 static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **list_out)
 {
     /* Flat short panels, and ones too narrow for LIST_W, get tighter rows. */
-    const bool compact = !muse_board->round && (muse_board->height <= 240 || muse_board->width < LIST_W);
+    const bool compact = compact_layout();
     const int list_top = compact ? (back ? 48 : 36) : LIST_TOP;
     lv_obj_t *p = lv_obj_create(tile);
     lv_obj_remove_style_all(p);
@@ -232,17 +249,18 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
 
 static lv_obj_t *card(lv_obj_t *list, bool clickable)
 {
+    const bool compact = compact_layout();
     lv_obj_t *c = clickable ? lv_button_create(list) : lv_obj_create(list);
     lv_obj_remove_style_all(c);
-    lv_obj_set_size(c, lv_pct(100), ROW_H);
+    lv_obj_set_size(c, lv_pct(100), compact ? 46 : ROW_H);
     lv_obj_set_style_radius(c, 18, 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD), 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD_PRESSED), LV_STATE_PRESSED);
-    lv_obj_set_style_pad_hor(c, 16, 0);
+    lv_obj_set_style_pad_hor(c, compact ? 10 : 16, 0);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(c, 12, 0);
+    lv_obj_set_style_pad_column(c, compact ? 8 : 12, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     return c;
 }
@@ -251,16 +269,18 @@ static lv_obj_t *card(lv_obj_t *list, bool clickable)
 static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_t **value_out,
                      lv_event_cb_t cb, void *user)
 {
+    const bool compact = compact_layout();
     lv_obj_t *c = card(list, true);
     if (icon) {
-        label(c, &lv_font_montserrat_20, COLOR_ACCENT, icon);
+        label(c, body_font(), COLOR_ACCENT, icon);
     }
-    lv_obj_t *t = label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
+    lv_obj_t *t = label(c, body_font(), COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
     lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
     if (value_out) {
-        lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_DIM, "");
-        lv_obj_set_style_max_width(v, 130, 0);
+        lv_obj_t *v = label(c, compact ? &lv_font_montserrat_14 : &lv_font_montserrat_16, COLOR_DIM, "");
+        /* 130 px was most of a 170 px panel on its own. */
+        lv_obj_set_style_max_width(v, compact ? 64 : 130, 0);
         lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);
         *value_out = v;
     }
@@ -270,11 +290,15 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
 
 static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_cb_t cb)
 {
+    const bool compact = compact_layout();
     lv_obj_t *c = card(list, false);
-    lv_obj_t *t = label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
+    lv_obj_t *t = label(c, body_font(), COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
     lv_obj_t *sw = lv_switch_create(c);
-    lv_obj_set_size(sw, 60, 32);
+    lv_obj_set_size(sw, compact ? 44 : 60, compact ? 24 : 32);
+    /* On a narrow panel the switch sits against the right edge a finger can
+     * miss, so grow the touch target without growing the control. */
+    lv_obj_set_ext_click_area(sw, compact ? 16 : 8);
     lv_obj_set_style_bg_color(sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
     lv_obj_set_style_bg_color(sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (on) {
@@ -288,7 +312,7 @@ static lv_obj_t *button(lv_obj_t *list, const char *text, uint32_t color, lv_eve
 {
     lv_obj_t *b = card(list, true);
     lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *l = label(b, &lv_font_montserrat_20, color, text);
+    lv_obj_t *l = label(b, body_font(), color, text);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     if (label_out) {
         *label_out = l;
@@ -307,8 +331,8 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_set_style_pad_ver(c, 6, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
 
-    label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
-    lv_obj_t *v = label(c, &lv_font_montserrat_20, COLOR_ACCENT, "");
+    label(c, body_font(), COLOR_TEXT, text);
+    lv_obj_t *v = label(c, body_font(), COLOR_ACCENT, "");
     lv_obj_align(v, LV_ALIGN_TOP_RIGHT, 0, 0);
     *value_out = v;
 
@@ -501,7 +525,7 @@ static void build_keyboard(void)
     lv_obj_set_style_bg_opa(s_text_kb, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(s_text_kb, 2, 0);
     lv_obj_set_style_pad_gap(s_text_kb, 4, 0);
-    lv_obj_set_style_text_font(s_text_kb, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_text_kb, body_font(), LV_PART_ITEMS);
     lv_obj_set_style_bg_color(s_text_kb, lv_color_hex(COLOR_CARD), LV_PART_ITEMS);
     lv_obj_set_style_text_color(s_text_kb, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
     lv_obj_set_style_radius(s_text_kb, 8, LV_PART_ITEMS);
@@ -523,13 +547,13 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_t *back = back_button(s_text);
 
     /* Between the back arrow and its mirror image. */
-    s_text_title = label(s_text, &lv_font_montserrat_20, COLOR_ACCENT, "");
+    s_text_title = label(s_text, body_font(), COLOR_ACCENT, "");
     lv_obj_set_width(s_text_title, 150);
     lv_obj_set_style_text_align(s_text_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_text_title, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 40);
 
-    const lv_font_t *font = &lv_font_montserrat_20;
+    const lv_font_t *font = body_font();
     int h = text_px(48), border = 2;
     int pad = (h - 2 * border - lv_font_get_line_height(font)) / 2;
     s_text_ta = lv_textarea_create(s_text);

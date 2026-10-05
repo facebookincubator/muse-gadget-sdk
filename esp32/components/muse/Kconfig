@@ -79,6 +79,8 @@ menu "Muse"
             depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_GUITION_JC3248W535
             bool "Guition JC3248W535 (ESP32-S3, 3.5\" 320x480 touch LCD, speaker)"
+        config MUSE_BOARD_WAVESHARE_S3_LCD19
+            bool "Waveshare ESP32-S3-Touch-LCD-1.9 (170x320 SH8601, one button)"
             depends on IDF_TARGET_ESP32S3
     endchoice
 
@@ -104,6 +106,7 @@ menu "Muse"
         default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
         default "fnk0104b" if MUSE_BOARD_FNK0104B
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
+        default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB
