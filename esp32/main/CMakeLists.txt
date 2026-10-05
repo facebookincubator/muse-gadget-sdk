@@ -53,6 +53,7 @@ set(GADGET_REQUIRES
     product_info
     bt
     driver
+    esp_adc
     esp_driver_gpio
     esp_driver_i2c
     esp_driver_ledc
@@ -70,7 +71,9 @@ set(GADGET_REQUIRES
 )
 
 # E-paper has its own status screen in place of led_status.c.
-if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+if(CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X3)
+    list(APPEND GADGET_SRCS "epaper_x3_status.c" "x3_pages.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
    OR CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
     list(APPEND GADGET_SRCS "epaper_status.c")
 else()

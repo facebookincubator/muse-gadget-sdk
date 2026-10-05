@@ -30,6 +30,7 @@
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
 #   reterminal-e1002
 #              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
+#   xteink-x3  Xteink X3 (ESP32-C3) e-paper reader
 #   c6-nopsram ESP32-C6 devkit without PSRAM (status LED on GPIO8, no display)
 #   espressif-s3-devkitc-1
 #              ESP32-S3-DevKitC-1 v1.1 N8R8 (status LED, no display)
@@ -40,7 +41,7 @@
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,39p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -72,6 +73,12 @@ case "$BOARD" in
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
+    ;;
+  xteink-x3)
+    TARGET=esp32c3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    # The C3's own USB-Serial-JTAG, over the 4-pin magnetic cable.
+    PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
   home-assistant-voice|seeed-respeaker-lite)
     TARGET=esp32s3
