@@ -1,15 +1,15 @@
 ---
 name: gadget-tuya-cloud-devices
 description: >-
-  Read status and control the user's Tuya app devices through the Tuya Open Platform end-user
-  API with a user-supplied API key: homes and rooms, device detail, thing-model property control,
+  Read status and control the user's Tuya app devices through Tuya's cloud end-user API with a
+  user-supplied API key: homes and rooms, device detail, thing-model property control,
   rename, weather, hourly statistics, self-send notifications and IPC cloud snapshots. Cloud
   only; prefer a device-specific or local-TCP skill when one matches.
 ---
 
 # Tuya Cloud Devices: End-User API Control
 
-Use this skill when the user supplies a Tuya Open Platform end-user API key (`sk-...`) and asks
+Use this skill when the user supplies a Tuya end-user API key (`sk-...`) and asks
 to control or query devices from their Tuya app account. Devices are reached in the cloud, so no
 local keys or model-specific datapoint maps are needed. For direct local-TCP control with a
 confirmed key and datapoint schema, prefer [Tuya Wi-Fi devices](../gadget-tuya-wifi-devices/SKILL.md).
@@ -18,14 +18,14 @@ confirmed key and datapoint schema, prefer [Tuya Wi-Fi devices](../gadget-tuya-w
 
 Follow the shared HomeLink networking and safety rules in `home_link.md`.
 
-- A user-supplied end-user API key from https://tuya.ai/ (or https://tuyasmart.com/ in mainland
-  China). Treat it as a credential: pass it in a header, never log or echo it.
+- A user-supplied end-user API key, applied for at https://tuya.ai/. Treat it as a credential:
+  pass it in a header, never log or echo it.
 - Send `Authorization: Bearer <key>` on every call. Pick the base URL from the first two
-  characters after `sk-`; it must match the account's region.
+  characters after `sk-`; it must match the account's region. If the prefix is not listed, ask
+  the user to confirm the key was issued for an international account at https://tuya.ai/.
 
   | Prefix | Base URL |
   |---|---|
-  | AY | https://openapi.tuyacn.com |
   | AZ | https://openapi.tuyaus.com |
   | EU | https://openapi.tuyaeu.com |
   | IN | https://openapi.tuyain.com |
@@ -90,4 +90,4 @@ Follow the shared HomeLink networking and safety rules in `home_link.md`.
 ## Sources
 
 - [tuya-openclaw-skills](https://github.com/tuya/tuya-openclaw-skills) — upstream skill this was adapted from.
-- [Tuya developer documentation](https://developer.tuya.com/en/)
+- [Tuya developer docs](https://tuya.ai/developer/docs)
