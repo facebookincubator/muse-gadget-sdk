@@ -352,6 +352,7 @@ static bool hatch_reply(bool *delivered)
     static const int16_t silence[MUSE_AUDIO_CHUNK];
     char text[96];
     static char page[MUSE_CAPTION_MAX];
+    char incomplete[sizeof(text)] = "";
     bool done = false, speaking = false, replied = false;
     size_t played = 0;
     int64_t t0 = esp_timer_get_time();
@@ -381,6 +382,7 @@ static bool hatch_reply(bool *delivered)
                 break;
             case MUSE_HATCH_EV_DONE:
                 done = *delivered = true;
+                strlcpy(incomplete, text, sizeof(incomplete));
                 break;
             case MUSE_HATCH_EV_ERROR:
                 ESP_LOGW(TAG, "muse: %s", text);
@@ -422,6 +424,11 @@ static bool hatch_reply(bool *delivered)
     muse_state_set_level(0);
     ESP_LOGI(TAG, "muse reply: %.2fs of audio, %.2fs total", (double)played / MUSE_AUDIO_RATE,
              (esp_timer_get_time() - t0) / 1e6);
+    if (incomplete[0]) {
+        ESP_LOGW(TAG, "muse: %s", incomplete);
+        go_idle(incomplete);
+        return false;
+    }
     if (!played) {
         /* No speech (TTS unavailable): leave the reply text up for a moment. */
         vTaskDelay(pdMS_TO_TICKS(2500));
