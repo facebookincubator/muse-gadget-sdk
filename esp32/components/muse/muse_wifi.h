@@ -74,6 +74,9 @@ void muse_wifi_power(muse_wifi_power_t level);
 void muse_wifi_nap(bool nap);
 
 esp_err_t muse_wifi_scan(void);
+
+/* 开"用手机配网"门户（设备自开热点 + 网页），10 分钟无操作自动关 */
+esp_err_t muse_wifi_open_portal(void);
 bool muse_wifi_scanning(void);
 /* Copies the latest results (strongest first); *gen changes when they do. */
 int muse_wifi_scan_results(muse_wifi_ap_t *out, int max, uint32_t *gen);

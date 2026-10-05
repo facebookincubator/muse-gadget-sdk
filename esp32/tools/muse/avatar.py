@@ -61,6 +61,7 @@ BOARDS = {
     "Espressif ESP32-S3-BOX-3": "box3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75C": "s3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75": "s3n",
+    "Waveshare ESP32-S3-Touch-LCD-1.85B": "s3-185b",
     "AIPI Lite": "aipi",
     "Waveshare ESP32-C6-Touch-AMOLED-1.8": "c6",
     "Seeed SenseCAP Watcher": "watcher",

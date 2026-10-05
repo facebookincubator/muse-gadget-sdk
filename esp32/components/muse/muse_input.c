@@ -15,6 +15,7 @@
  */
 
 #include "muse_input.h"
+#include "i18n.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -59,8 +60,9 @@ static const char *TAG = "muse_input";
 #define DOUBLE_TICKS 35        /* 350 ms: a second aux press within this toggles phone setup */
 
 #define GOODBYE_MS 1500        /* let the goodbye animation play */
-#define HINT_TICKS 60          /* 0.6 s: warn that holding powers off */
-#define LONG_TICKS 150         /* 1.5 s: power off */
+#define HINT_TICKS 60          /* 0.6 s: show the BOOT-key actions */
+#define LONG_TICKS 200         /* 2 s: release to enter deep sleep */
+#define RESET_TICKS 500        /* 5 s: release to reset pairing and Wi-Fi */
 #define SLEEP_CHECK_MS 100
 
 #define SERIAL_RX 1024         /* the driver drops what doesn't fit, so a console line must */
@@ -70,6 +72,14 @@ static const char *TAG = "muse_input";
 static QueueHandle_t s_queue;
 static TaskHandle_t s_input;
 static bool s_talk_down;
+static bool s_touch_talk_down;
+static bool s_touch_talk_swallow;
+static bool s_power_key_down;
+static bool s_power_key_swallow;
+static bool s_power_key_menu;
+static TickType_t s_power_key_started;
+static int s_power_key_hint;
+static char s_power_key_saved_caption[64];
 static bool s_cpu_low;      /* display stopped and the CPU allowed to sleep */
 static volatile bool s_power_off_requested;
 static volatile bool s_nap_now;   /* ">nap": asleep, as if on battery, nap without waiting WIFI_NAP_MS */
@@ -91,14 +101,14 @@ static void power_off(void)
     muse_state_set_progress(0);
     muse_state_set_level(0);
     muse_state_set_mode(MUSE_MODE_OFF);
-    muse_state_set_caption("GOODBYE!");
+    muse_state_set_caption(tr("GOODBYE!"));
     vTaskDelay(pdMS_TO_TICKS(GOODBYE_MS));
     esp_err_t err = muse_board->power_off();
     /* Only reached if the board couldn't power off. */
     vTaskDelay(pdMS_TO_TICKS(500));
     ESP_LOGE(TAG, "power-off failed (%s)", esp_err_to_name(err));
     muse_state_set_mode(MUSE_MODE_IDLE);
-    muse_state_set_caption("COULDN'T POWER OFF");
+    muse_state_set_caption(tr("COULDN'T POWER OFF"));
 }
 
 static void set_asleep(bool asleep, const char *why)
@@ -130,7 +140,72 @@ static void toggle_phone_setup(void)
 }
 
 /*
- * Aux button: short press sleeps, a 1.5 s hold powers off, any press wakes.
+ * The 1.85B has one app-readable key (BOOT). A tap toggles the display sleep;
+ * a 2-5 s hold enters deep sleep, and a 5+ s hold resets pairing/Wi-Fi.
+ * Pairing confirmation takes precedence. Touch provides push-to-talk.
+ */
+static void power_key(unsigned ev)
+{
+    if ((ev & MUSE_BTN_TALK_PRESS) && !s_power_key_down && !s_power_key_swallow) {
+        if (muse_link_talk_press()) {
+            muse_state_poke();
+            s_power_key_swallow = true;
+            return;
+        }
+        if (muse_state_asleep()) {
+            set_asleep(false, muse_board->talk_button);
+            s_power_key_swallow = true;
+            return;
+        }
+        s_power_key_down = true;
+        s_power_key_started = xTaskGetTickCount();
+        s_power_key_hint = -1;
+        s_power_key_menu = muse_menu_is_open();
+        uint32_t version = UINT32_MAX;
+        muse_state_caption(s_power_key_saved_caption, sizeof(s_power_key_saved_caption), &version);
+    }
+
+    if ((ev & MUSE_BTN_TALK_RELEASE) && s_power_key_swallow) {
+        s_power_key_swallow = false;
+        return;
+    }
+    if ((ev & MUSE_BTN_TALK_RELEASE) && s_power_key_down) {
+        TickType_t held = xTaskGetTickCount() - s_power_key_started;
+        s_power_key_down = false;
+        if (held >= pdMS_TO_TICKS(RESET_TICKS * POLL_MS)) {
+            muse_state_set_caption(tr("RESETTING SETUP"));
+            muse_link_reset_setup();
+        } else if (held >= pdMS_TO_TICKS(LONG_TICKS * POLL_MS)) {
+            power_off();
+        } else if (s_power_key_menu) {
+            muse_menu_key(MUSE_MENU_SELECT);
+        } else {
+            if (s_power_key_hint) {
+                muse_state_set_caption("%s", s_power_key_saved_caption);
+            }
+            set_asleep(true, muse_board->talk_button);
+        }
+        s_power_key_menu = false;
+        s_power_key_hint = 0;
+    }
+}
+
+static void power_key_tick(void)
+{
+    if (!s_power_key_down || s_power_key_menu) return;
+    TickType_t held = xTaskGetTickCount() - s_power_key_started;
+    int hint = held >= pdMS_TO_TICKS(RESET_TICKS * POLL_MS) ? 2
+             : held >= pdMS_TO_TICKS(LONG_TICKS * POLL_MS) ? 1
+             : held >= pdMS_TO_TICKS(HINT_TICKS * POLL_MS) ? 0 : -1;
+    if (hint < 0 || hint == s_power_key_hint) return;
+    s_power_key_hint = hint;
+    muse_state_set_caption(hint == 2 ? tr("RELEASE TO RESET SETUP")
+                           : hint == 1 ? tr("RELEASE TO POWER OFF")
+                                       : tr("HOLD 2s OFF / 5s RESET"));
+}
+
+/*
+ * Aux button: short press sleeps, a hold powers off, any press wakes.
  * Two quick presses toggle BLE phone setup, so the sleep waits a moment to
  * see whether a second press follows.
  */
@@ -163,7 +238,7 @@ static void aux_button(bool pressed, bool edge)
         if (held == HINT_TICKS) {
             uint32_t v = UINT32_MAX;
             muse_state_caption(saved_caption, sizeof(saved_caption), &v);
-            muse_state_set_caption("HOLD TO POWER OFF");
+            muse_state_set_caption(tr("HOLD TO POWER OFF"));
             hinted = true;
         } else if (held == LONG_TICKS) {
             swallow = true;
@@ -389,6 +464,8 @@ static bool update_wifi_nap(TickType_t now, bool paused)
     return napping;
 }
 
+static TickType_t s_single_press;   /* 单键板：说话键按下的时刻 */
+
 static void input_task(void *arg)
 {
     (void)arg;
@@ -402,8 +479,27 @@ static void input_task(void *arg)
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",
                      ev & MUSE_BTN_TALK_RELEASE ? " release" : "");
-            talk_button(ev);
+            /* 单键板（1.85B 只有 BOOT 可读）：这颗键是唯一能按的东西，全给"按住说话"
+             * 的话，短按等于一次被丢弃的录音，按键看起来就是没作用。所以短按（这里定
+             * 350ms，和 watcher 双击窗一致）额外当一次菜单键；语音层对这种过短录音本来
+             * 就会自己丢弃并提示，不需要动它的状态机。 */
+            if (muse_board->single_button && !muse_state_asleep()) {
+                if (ev & MUSE_BTN_TALK_PRESS) {
+                    s_single_press = xTaskGetTickCount();
+                } else if (s_single_press &&
+                           xTaskGetTickCount() - s_single_press < pdMS_TO_TICKS(350)) {
+                    s_single_press = 0;
+                    /* 触摸板上"菜单"就是设置页；muse_menu_key() 那条队列在这里没起 */
+                    bool to_settings = muse_ui_toggle_settings();
+                    ESP_LOGI(TAG, "short tap: %s", to_settings ? "settings" : "home");
+                } else {
+                    s_single_press = 0;
+                }
+            }
+            if (muse_board->button_power_controls) power_key(ev);
+            else talk_button(ev);
         }
+        power_key_tick();
         keyboard_buttons(ev);
         /* A latched key (the 1.75's PMU) can report press and release in the
          * same poll, and a release can land just before the next press; keep
@@ -501,7 +597,7 @@ static void chat_line(char *piece, bool last, bool whole)
         s_chat = heap_caps_malloc(CHAT_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         s_chat_len = 0;
     }
-    const char *err = !whole ? "LINE TOO LONG" : !s_chat ? "OUT OF MEMORY" : s_chat_len + n >= CHAT_MAX ? "TOO LONG" : NULL;
+    const char *err = !whole ? tr("LINE TOO LONG") : !s_chat ? tr("OUT OF MEMORY") : s_chat_len + n >= CHAT_MAX ? tr("TOO LONG") : NULL;
     if (err) {
         free(s_chat);
         s_chat = NULL;
@@ -568,8 +664,19 @@ static void set_face(const char *name)
  * Console-only commands; false for setup commands. Their buffers are taken
  * per command: without PSRAM, static ones would hold internal RAM for good.
  */
+static muse_console_hook_t s_console_hook;
+
+void muse_console_set_local_hook(muse_console_hook_t hook)
+{
+    s_console_hook = hook;
+}
+
 static bool console_command(char *line, bool whole)
 {
+    if (s_console_hook && s_console_hook(line)) {
+        return true;
+    }
+
     if (!strcmp(line, "status")) {
         size_t cap = 1024;   /* long SSID, host and VM names escaped: past 512 */
         char *json = heap_caps_malloc(cap, MUSE_BIG_CAPS);
@@ -627,7 +734,7 @@ static bool console_command(char *line, bool whole)
     return false;
 #else
     (void)whole;
-    muse_hatch_console("error", "THIS BOARD CAN'T CHAT OVER SERIAL", NULL);
+    muse_hatch_console("error", tr("THIS BOARD CAN'T CHAT OVER SERIAL"), NULL);
     return true;
 #endif
 }
@@ -693,4 +800,30 @@ esp_err_t muse_input_start(QueueHandle_t queue)
 void muse_input_request_power_off(void)
 {
     s_power_off_requested = true;
+}
+
+void muse_input_touch_ptt(bool down)
+{
+    if (!s_queue) return;
+    if (down) {
+        if (s_touch_talk_down || s_touch_talk_swallow) return;
+        if (muse_link_talk_press()) {
+            muse_state_poke();
+            s_touch_talk_swallow = true;
+        } else if (muse_state_asleep()) {
+            set_asleep(false, "touch");
+            s_touch_talk_swallow = true;
+        } else if (muse_menu_is_open()) {
+            muse_menu_key(MUSE_MENU_SELECT);
+            s_touch_talk_swallow = true;
+        } else {
+            post(MUSE_PTT_DOWN, false);
+            s_touch_talk_down = true;
+        }
+    } else if (s_touch_talk_swallow) {
+        s_touch_talk_swallow = false;
+    } else if (s_touch_talk_down) {
+        post(MUSE_PTT_UP, false);
+        s_touch_talk_down = false;
+    }
 }

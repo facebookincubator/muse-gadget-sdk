@@ -49,6 +49,26 @@ void wifi_mgr_disconnect(void);
 
 bool wifi_mgr_is_connected(void);
 
+/*
+ * 最近一次 STA 断连的原因（esp_wifi_reason_t），以及一句人话。
+ * 屏幕和配网门户都用它解释"为什么连不上" —— 以前只有日志里有。
+ */
+uint8_t wifi_mgr_last_disconnect_reason(void);
+void wifi_mgr_failure_text(char *out, size_t out_size);
+
+/*
+ * 配网门户：临时起一个开放热点（Muse-XXXXXX），让手机连上来用浏览器填 Wi-Fi。
+ * 之所以不走 BLE：那条路要完成配对握手并把命令加密，设备配好之后还会拒绝重新配对，
+ * 而 HTTP 表单在手机上任何浏览器都能用，也能把失败原因直接回显。
+ */
+esp_err_t wifi_mgr_portal_start(void);
+void wifi_mgr_portal_stop(void);
+bool wifi_mgr_portal_active(void);
+const char *wifi_mgr_portal_ip(void);
+const char *wifi_mgr_portal_ssid(void);
+const char *wifi_mgr_portal_password(void);
+
+
 // While wifi_mgr_connect() is joining a network, copies its name out and
 // returns true.
 bool wifi_mgr_joining(char *ssid, size_t cap);

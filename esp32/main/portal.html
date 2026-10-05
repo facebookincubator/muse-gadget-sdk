@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>给 Muse 配网</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px 16px 40px;
+    background: #14121c; color: #e8e6f0;
+    font: 16px/1.5 -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #9b96ad; font-size: 13px; margin-bottom: 20px; }
+  .card { background: #1e1b29; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  button { font: inherit; }
+  .primary {
+    width: 100%; padding: 14px; border: 0; border-radius: 12px;
+    background: #7c5cff; color: #fff; font-weight: 600;
+  }
+  .primary[disabled] { opacity: .45; }
+  .ghost {
+    width: 100%; padding: 12px; margin-top: 10px; border: 1px solid #3a3550;
+    border-radius: 12px; background: transparent; color: #cfcade;
+  }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 13px 4px; border-bottom: 1px solid #2a2638;
+  }
+  li:last-child { border-bottom: 0; }
+  li.sel { color: #b9a5ff; font-weight: 600; }
+  .sig { color: #8b8599; font-size: 13px; white-space: nowrap; }
+  .lock { margin-right: 6px; }
+  label { display: block; font-size: 13px; color: #9b96ad; margin: 0 0 6px; }
+  .row { display: flex; gap: 8px; }
+  input[type=password], input[type=text] {
+    flex: 1; min-width: 0; padding: 13px; border-radius: 12px;
+    border: 1px solid #3a3550; background: #14121c; color: #e8e6f0; font: inherit;
+  }
+  .reveal { padding: 0 14px; border-radius: 12px; border: 1px solid #3a3550; background: transparent; color: #cfcade; }
+  #msg { margin-top: 12px; font-size: 14px; min-height: 22px; }
+  #msg.err { color: #ff9a9a; }
+  #msg.ok { color: #8ee6a0; }
+  .spin { color: #9b96ad; }
+  .hint { color: #7d7891; font-size: 12px; margin-top: 18px; }
+  code { background: #1e1b29; padding: 2px 6px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<h1>给 Muse 配网</h1>
+<div class="sub">在手机上选网络、输密码。连上之后这个热点会自己关掉。</div>
+
+<div class="card">
+  <div id="nets"><div class="spin">正在扫描附近的网络…</div></div>
+  <button class="ghost" id="rescan">重新扫描</button>
+</div>
+
+<div class="card" id="pwcard" style="display:none">
+  <label id="pwlabel">密码</label>
+  <div class="row">
+    <input type="password" id="pw" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Wi-Fi 密码">
+    <button class="reveal" id="reveal">显示</button>
+  </div>
+  <button class="primary" id="join" style="margin-top:12px">连接</button>
+</div>
+
+<div id="msg"></div>
+<div class="hint">
+  连不上时会告诉你原因（密码不对 / 找不到网络 / 信号太弱）。<br>
+  设备端也会把结果记在设置页的 Wi-Fi 那一行。
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let picked = null;
+
+function say(text, kind) {
+  const m = $('msg');
+  m.textContent = text || '';
+  m.className = kind || '';
+}
+
+function signal(rssi) {
+  if (rssi >= -55) return '信号很强';
+  if (rssi >= -67) return '信号不错';
+  if (rssi >= -75) return '信号一般';
+  return '信号弱';
+}
+
+async function scan() {
+  $('nets').innerHTML = '<div class="spin">正在扫描附近的网络…</div>';
+  say('');
+  try {
+    let j = null;
+    for (let i = 0; i < 15; i++) {              /* 设备是后台扫描，这里轮询等结果 */
+      const r = await fetch('/api/scan', { cache: 'no-store' });
+      j = await r.json();
+      if (!j.scanning) break;
+      await new Promise((res) => setTimeout(res, 1200));
+    }
+    if (j.error) { $('nets').innerHTML = ''; say(j.error, 'err'); return; }
+    const nets = j.nets || [];
+    if (!nets.length) { $('nets').innerHTML = '<div class="spin">没扫到网络，走近路由器再点重新扫描</div>'; return; }
+    const ul = document.createElement('ul');
+    for (const n of nets) {
+      const li = document.createElement('li');
+      li.innerHTML = '<span>' + (n.secure ? '<span class="lock">🔒</span>' : '') + escapeHtml(n.ssid) + '</span>' +
+                     '<span class="sig">' + signal(n.rssi) + '</span>';
+      li.onclick = () => pick(n);
+      ul.appendChild(li);
+    }
+    $('nets').innerHTML = '';
+    $('nets').appendChild(ul);
+  } catch (e) {
+    $('nets').innerHTML = '';
+    say('读取网络列表失败：' + e.message, 'err');
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function pick(net) {
+  picked = net;
+  for (const li of $('nets').querySelectorAll('li')) li.classList.remove('sel');
+  for (const li of $('nets').querySelectorAll('li')) {
+    if (li.textContent.includes(net.ssid)) { li.classList.add('sel'); break; }
+  }
+  $('pwcard').style.display = 'block';
+  $('pwlabel').textContent = net.secure ? ('密码 · ' + net.ssid) : ('开放网络 · ' + net.ssid);
+  $('pw').value = '';
+  if (net.secure) { $('pw').focus(); } else { say('这是开放网络，直接点连接。'); }
+  $('pwcard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function join() {
+  if (!picked) return;
+  $('join').disabled = true;
+  say('正在连接 ' + picked.ssid + ' …', 'spin');
+  try {
+    const r = await fetch('/api/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ssid: picked.ssid, password: $('pw').value })
+    });
+    const j = await r.json();
+    if (!j.started) {
+      say(j.reason || '设备没能开始连接', 'err');
+      $('join').disabled = false;
+      return;
+    }
+    /* 设备在后台连，这里轮询状态；失败会把真实原因写回来 */
+    for (let i = 0; i < 40; i++) {
+      await new Promise((res) => setTimeout(res, 1500));
+      let s;
+      try {
+        s = await (await fetch('/api/status', { cache: 'no-store' })).json();
+      } catch (e) {
+        /* 设备切网成功的话，这个页面（走的是旧网络）会自己断开 —— 正常 */
+        say('设备正在切换网络，这个页面会断开几秒。切完回设备屏幕上看结果就行。', 'ok');
+        $('join').disabled = false;
+        return;
+      }
+      if (s.connected) {
+        say('已连上 ' + picked.ssid + '。可以回到设备了。', 'ok');
+        $('join').disabled = false;
+        return;
+      }
+      if (s.detail) {
+        say(s.detail, 'err');
+        $('join').disabled = false;
+        return;
+      }
+    }
+    say('40 秒还没连上：可能是密码不对或信号太弱，换个网络再试。', 'err');
+  } catch (e) {
+    say('请求失败：' + e.message, 'err');
+  } finally {
+    $('join').disabled = false;
+  }
+}
+
+$('rescan').onclick = scan;
+$('join').onclick = join;
+$('reveal').onclick = () => {
+  const p = $('pw');
+  const show = p.type === 'password';
+  p.type = show ? 'text' : 'password';
+  $('reveal').textContent = show ? '隐藏' : '显示';
+};
+$('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
+
+scan();
+fetch('/api/status').then(r => r.json()).then(j => {
+  if (j.connected) say('设备已经连着网了，换个网络也可以。');
+  else if (j.reason && j.reason !== '还没失败过') say('上次的问题：' + j.reason);
+}).catch(() => {});
+</script>
+</body>
+</html>

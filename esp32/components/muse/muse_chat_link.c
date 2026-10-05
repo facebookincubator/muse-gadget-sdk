@@ -23,6 +23,7 @@
  * Lines are parsed without cJSON; bounded buffers keep internal RAM use small.
  */
 #include "muse_chat.h"
+#include "i18n.h"
 #include "muse_chat_priv.h"
 
 #include <inttypes.h>
@@ -592,7 +593,7 @@ static void on_ack(void)
     rx_t *rx = &s_rx[RX_NOTE];
     if (rx->status != 200 || rx->overflow) {
         ESP_LOGW(TAG, "chat/stream: %d", rx->status);
-        fail(rx->status < 0 ? "LOST CONNECTION TO MUSE" : "MUSE DIDN'T TAKE IT");
+        fail(rx->status < 0 ? tr("LOST CONNECTION TO MUSE") : tr("MUSE DIDN'T TAKE IT"));
         return;
     }
     cJSON *root = cJSON_Parse(rx->body);
@@ -604,7 +605,7 @@ static void on_ack(void)
     cJSON_Delete(root);
     if (!s_turn.note_id[0]) {
         ESP_LOGW(TAG, "chat/stream ack without a message id");
-        fail("MUSE DIDN'T TAKE IT");
+        fail(tr("MUSE DIDN'T TAKE IT"));
         return;
     }
     xSemaphoreTake(s_rx_lock, portMAX_DELAY);
@@ -628,13 +629,13 @@ static void on_row(row_t *r)
         s_turn.after_note = !strcmp(r->msg, s_turn.note_id) || !strcmp(r->msg, s_turn.parent_id);
     }
     if (s_turn.after_note && !strcmp(r->event, "message.user")) {
-        /* The row reads "<transcript>\n[file:audio/wav ...]", or "[Voice note]" before transcription. */
+        /* The row reads "<transcript>\n[file:audio/wav ...]", or tr("[Voice note]") before transcription. */
         char *heard = r->text;   /* the voice task owns this dequeued row */
         char *att = strstr(heard, "\n[file:");
         if (att) {
             *att = '\0';
         }
-        if (heard[0] && strcmp(heard, "[Voice note]") && !s_turn.heard) {
+        if (heard[0] && strcmp(heard, tr("[Voice note]")) && !s_turn.heard) {
             char line[EV_TEXT];
             muse_hatch_tail_words(heard, line, sizeof(line));
             emit(MUSE_HATCH_EV_HEARD, line);
@@ -673,9 +674,9 @@ static void on_row(row_t *r)
 
 static void subscription_error(int status)
 {
-    if (status == 403) fail("MUSE REPLY ACCESS DENIED (403)");
-    else if (status == 401) fail("MUSE REPLY AUTH REQUIRED (401)");
-    else if (status <= 0 || status == 200) fail("LOST CONNECTION TO MUSE");
+    if (status == 403) fail(tr("MUSE REPLY ACCESS DENIED (403)"));
+    else if (status == 401) fail(tr("MUSE REPLY AUTH REQUIRED (401)"));
+    else if (status <= 0 || status == 200) fail(tr("LOST CONNECTION TO MUSE"));
     else {
         char why[EV_TEXT];
         snprintf(why, sizeof(why), "MUSE REPLY ERROR (HTTP %d)", status);
@@ -742,7 +743,7 @@ static void pump(void)
     }
     if (s_turn.phase != T_REPLY) {
         if (s_turn.phase == T_ACK && now - s_turn.t_end > REPLY_TIMEOUT_US) {
-            fail("NO REPLY FROM MUSE");
+            fail(tr("NO REPLY FROM MUSE"));
         }
         return;
     }
@@ -752,7 +753,7 @@ static void pump(void)
             emit(MUSE_HATCH_EV_DONE, NULL);
         }
     } else if (now - s_turn.t_end > REPLY_TIMEOUT_US) {
-        fail(skipped_big ? "REPLY TOO LONG" : early_evicted ? "REPLY BUFFER LIMIT - TRY AGAIN" : "NO REPLY FROM MUSE");
+        fail(skipped_big ? tr("REPLY TOO LONG") : early_evicted ? tr("REPLY BUFFER LIMIT - TRY AGAIN") : tr("NO REPLY FROM MUSE"));
     }
 }
 
@@ -771,16 +772,16 @@ void muse_hatch_status(muse_hatch_status_t *out)
 {
     if (!muse_link_hatch_linked()) {
         out->state = MUSE_HATCH_NOT_SET;
-        strlcpy(out->detail, "Pair in the Muse app", sizeof(out->detail));
+        strlcpy(out->detail, tr("Pair in the Muse app"), sizeof(out->detail));
     } else if (!muse_wifi_connected()) {
         out->state = MUSE_HATCH_OFFLINE;
-        strlcpy(out->detail, "Waiting for Wi-Fi", sizeof(out->detail));
+        strlcpy(out->detail, tr("Waiting for Wi-Fi"), sizeof(out->detail));
     } else if (muse_link_req_ready()) {
         out->state = MUSE_HATCH_REACHABLE;
-        strlcpy(out->detail, "Through Home Link, text replies", sizeof(out->detail));
+        strlcpy(out->detail, tr("Through Home Link, text replies"), sizeof(out->detail));
     } else {
         out->state = MUSE_HATCH_TESTING;
-        strlcpy(out->detail, "Connecting...", sizeof(out->detail));
+        strlcpy(out->detail, tr("Connecting..."), sizeof(out->detail));
     }
 }
 
@@ -800,12 +801,12 @@ void muse_hatch_set_resting(bool resting)
 const char *muse_hatch_state_name(muse_hatch_state_t state)
 {
     switch (state) {
-    case MUSE_HATCH_NOT_SET: return "Not set up";
-    case MUSE_HATCH_OFFLINE: return "Offline";
-    case MUSE_HATCH_UNTESTED: return "Saved";
-    case MUSE_HATCH_TESTING: return "Connecting";
-    case MUSE_HATCH_REACHABLE: return "Connected";
-    case MUSE_HATCH_UNREACHABLE: return "Can't connect";
+    case MUSE_HATCH_NOT_SET: return tr("Not set up");
+    case MUSE_HATCH_OFFLINE: return tr("Offline");
+    case MUSE_HATCH_UNTESTED: return tr("Saved");
+    case MUSE_HATCH_TESTING: return tr("Connecting");
+    case MUSE_HATCH_REACHABLE: return tr("Connected");
+    case MUSE_HATCH_UNREACHABLE: return tr("Can't connect");
     }
     return "";
 }
@@ -823,12 +824,12 @@ void muse_hatch_turn_begin(void)
     s_turn.stage = malloc(STAGE_BYTES);
     s_turn.chunk = malloc(CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL));
     if (!s_turn.stage || !s_turn.chunk) {
-        fail("OUT OF MEMORY");
+        fail(tr("OUT OF MEMORY"));
         return;
     }
     if (!request(RX_NOTE, "POST", "/chat/stream", true, false)
         || !muse_link_req_send(s_stream[RX_NOTE], MUSE_HATCH_NOTE_HEAD, sizeof(MUSE_HATCH_NOTE_HEAD) - 1, false, SEND_WAIT_MS)) {
-        fail("CAN'T REACH MUSE");
+        fail(tr("CAN'T REACH MUSE"));
         return;
     }
     muse_hatch_wav_header(s_turn.stage, MIC_RATE);
@@ -847,7 +848,7 @@ void muse_hatch_turn_audio(const int16_t *pcm, size_t frames)
         p += take;
         n -= take;
         if (s_turn.stage_len == STAGE_BYTES && !send_stage(false)) {
-            fail("CAN'T KEEP UP");
+            fail(tr("CAN'T KEEP UP"));
         }
     }
 }
@@ -856,18 +857,18 @@ void muse_hatch_turn_end(void)
 {
     if (s_turn.phase != T_TALKING) {
         /* Failed while recording: that error went to the recording caption. */
-        emit(MUSE_HATCH_EV_ERROR, s_turn.error[0] ? s_turn.error : "CAN'T REACH MUSE");
+        emit(MUSE_HATCH_EV_ERROR, s_turn.error[0] ? s_turn.error : tr("CAN'T REACH MUSE"));
         return;
     }
     /* Subscribe only after recording: keep inbound reply traffic out of the
      * real-time audio upload. Queue it before the note's final body chunk. */
     if (!request(RX_SUB, "POST", "/chat/subscribe", true, false)
         || !muse_link_req_send(s_stream[RX_SUB], "{}", 2, true, SEND_WAIT_MS)) {
-        fail("CAN'T SUBSCRIBE TO MUSE");
+        fail(tr("CAN'T SUBSCRIBE TO MUSE"));
         return;
     }
     if (!send_stage(true)) {
-        fail("CAN'T KEEP UP");
+        fail(tr("CAN'T KEEP UP"));
         return;
     }
     free(s_turn.stage);

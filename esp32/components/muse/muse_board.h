@@ -60,6 +60,9 @@ typedef struct {
     int width, height;
     bool round;             /* circular panel: keep content inside the circle */
     bool touch;             /* no touch: no settings screen, set up over BLE */
+    bool button_power_controls; /* board-specific BOOT power gestures instead of PTT */
+    bool single_button;         /* 只有一个可读键：短按开菜单，按住说话 */
+    bool manual_touch_swipes; /* switch touch tiles from LVGL's recognized swipe event */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */

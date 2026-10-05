@@ -48,3 +48,12 @@ esp_err_t muse_input_start(QueueHandle_t queue);
 
 /* Plays the goodbye animation and powers off (from the input task). */
 void muse_input_request_power_off(void);
+/* Touch push-to-talk: call on press and on release/press-lost. */
+void muse_input_touch_ptt(bool down);
+
+/*
+ * 让 main 挂自己的本机控制台命令（串口 '>' 开头，不走 BLE 配对）。
+ * 返回 true 表示这条已被处理。配网门户就是这么挂上来的：>portal=on / off / status
+ */
+typedef bool (*muse_console_hook_t)(const char *line);
+void muse_console_set_local_hook(muse_console_hook_t hook);

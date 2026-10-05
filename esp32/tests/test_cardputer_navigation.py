@@ -65,6 +65,7 @@ static void activate(int item, int dir) { activated = item; direction = dir; }
 static void muse_input_request_power_off(void) { ++power_count; }
 static void muse_link_reset_setup(void) { ++reset_count; }
 static void muse_state_set_caption(const char *p) { (void)p; }
+static const char *tr(const char *en) { (void)en; return en; }
 ''' + function(board, 'poll_buttons') + '\n' + function(menu, 'handle') + '\n' + function(menu, 'value_step') + r'''
 static unsigned key(uint8_t event) { irq = 0; raw = event; return poll_buttons(); }
 static void keyboard_test(void) {

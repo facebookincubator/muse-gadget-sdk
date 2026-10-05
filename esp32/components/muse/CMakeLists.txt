@@ -38,6 +38,9 @@ if(CONFIG_MUSE_ENABLED)
         "muse_settings.c"
         "muse_settings_ui.c"
         "muse_text.c"
+        "i18n.c"
+        "zh_font_12.c"
+        "zh_font_24.c"
         "muse_keypad.c"
         "muse_lv_mem.c"
         "muse_link.c"
@@ -62,7 +65,9 @@ if(CONFIG_MUSE_ENABLED)
     else()
         list(APPEND srcs "../../avatar/muse_pixel.c")
     endif()
-    if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_175)
+    if(CONFIG_MUSE_BOARD_WAVESHARE_S3_185B)
+        list(APPEND srcs "boards/board_waveshare_s3_185b.c")
+    elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_175)
         # One driver: the 1.75 differs only in pins (its BSP's) and its PWR key.
         list(APPEND srcs "boards/board_waveshare_s3_175c.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_AIPI)
@@ -106,6 +111,9 @@ set(muse_priv_requires
     noise_core minimp3
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt)
+if(CONFIG_MUSE_BOARD_WAVESHARE_S3_185B)
+    list(APPEND muse_priv_requires esp_lcd_st77916 esp_lcd_touch_cst816s esp_lcd_panel_io_additions)
+endif()
 list(APPEND muse_priv_requires camera)
 
 idf_component_register(
