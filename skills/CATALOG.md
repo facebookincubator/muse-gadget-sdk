@@ -1,6 +1,6 @@
 # Skill Catalog
 
-43 active skills: 42 device/family skills and one shared Google Cast skill.
+44 active skills: 43 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -60,6 +60,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [VELUX KLF200](gadget-velux-klf200/SKILL.md) — commissioned nodes, positions and scenes.
 - [ESPHome devices](gadget-esphome-devices/SKILL.md) — entities exposed by installed firmware.
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
+- [SinricPro cloud devices](gadget-sinricpro-cloud-devices/SKILL.md) — REST API with a supplied key: state, actions, scenes and schedules.
 
 ## Read-only network and camera access
 
