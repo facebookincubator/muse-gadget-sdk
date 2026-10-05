@@ -39,6 +39,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Home Assistant Voice Preview Edition | [esphome/home-assistant-voice-pe](https://github.com/esphome/home-assistant-voice-pe) | `home-assistant-voice.yaml`, its ESPHome config. |
 | Freenove FNK0104B | [Freenove/Freenove_ESP32_S3_Display](https://github.com/Freenove/Freenove_ESP32_S3_Display) | `Tutorial_With_Touch/Sketches/`: `Sketch_07.1_Music` (ES8311 + I2S pins), `Sketch_11.1_Touch` (FT6336U), `Sketch_05.1_Battery_Voltage` (battery divider), `Sketch_02.1_LedPixel` (WS2812 pin). `Libraries/FNK0104AB/` has the TFT_eSPI setup with the display pins. |
 | Seeed reSpeaker Lite | [respeaker/reSpeaker_Lite](https://github.com/respeaker/reSpeaker_Lite) | `doc/images/pinout.png`, the I2C examples, `xmos_firmwares/`. |
+| FoloToy AI Passport | [FoloToy/ai-passport](https://github.com/FoloToy/ai-passport) | `components/bsp/include/bsp_pins.h` for the pins, the ADC key windows and the backlight; `components/bsp/src/bsp_display.c` for the ST7789P3 vendor sequence (and `docs/hardware-design/AI_HARDWARE_DEVELOPMENT_GUIDE.md` for what the panel needs); `src/bsp_audio.c` for the ES8311 and duplex I2S setup; `src/bsp_button.c` for how the key ladder is read; `src/bsp_battery.c` for the CW2017 registers. |
 
 For the Cardputer ADV keyboard, also read [m5stack/M5Cardputer](https://github.com/m5stack/M5Cardputer), especially `src/utility/Keyboard/KeyboardReader/TCA8418.cpp` and `src/utility/Adafruit_TCA8418/`.
 

@@ -66,6 +66,7 @@ before adding a feature to one.
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
 | M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
 | Freenove FNK0104B | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b` | `tools/muse/board.sh build fnk0104b` |
+| FoloToy AI Passport | `esp32c3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport` | `tools/muse/board.sh build ai-passport` |
 | Guition JC3248W535 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535` | `tools/muse/board.sh build jc3248w535` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
 | M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
@@ -158,8 +159,8 @@ arguments, except on the SenseCAP Watcher: `idf.py flash` runs plain esptool,
 which fails on its USB bridge (see "Flash it"). Build the Watcher with
 `idf.py`, flash it with `tools/muse/board.sh flash watcher`, then
 `idf.py … -p PORT monitor` as usual; reading from the bridge works. Muse builds use `partitions_muse.csv` and need 16 MB of flash or
-more, except the StickS3, StickC Plus2 and Cardputer ADV, which have 8 MB and use
-`partitions_muse_8mb.csv`.
+more, except the StickS3, StickC Plus2, Cardputer ADV and AI Passport, which have
+8 MB and use `partitions_muse_8mb.csv`.
 
 All boards share `managed_components/` and `dependencies.lock` in this
 directory. If the component manager fails after you switch between a board
@@ -232,6 +233,7 @@ flash size and status backend.
    | `front` | M5Stack StickS3, or StickC Plus2 — tell them apart by the port: the StickS3 is native USB, the Plus2 is a CH9102 `usbserial` |
    | `top` | Waveshare ESP32-S3-Touch-AMOLED-1.75C |
    | `bottom right` | AIPI Lite |
+   | `OK` | FoloToy AI Passport (the three keys read UP/DOWN step the menu) |
    | `wheel` | Seeed SenseCAP Watcher |
    | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75 or the Guition JC3248W535 — tell the C6 by its target (`esp32c6`), and the two S3 boards by the `muse: board:` line a reset logs |
 
