@@ -15,6 +15,7 @@
  */
 
 #include "muse_link.h"
+#include "i18n.h"
 
 #include <string.h>
 
@@ -48,14 +49,14 @@ muse_link_state_t muse_link_state(void)
 const char *muse_link_state_name(muse_link_state_t state)
 {
     switch (state) {
-    case MUSE_LINK_BOOT: return "Starting";
-    case MUSE_LINK_UNPAIRED: return "Ready to pair";
-    case MUSE_LINK_PAIRING: return "App connected";
-    case MUSE_LINK_CONFIRM: return "Confirm pairing";
-    case MUSE_LINK_CONNECTING: return "Connecting";
-    case MUSE_LINK_ONLINE: return "Online";
-    case MUSE_LINK_OFFLINE: return "Offline";
-    case MUSE_LINK_ERROR: return "Error";
+    case MUSE_LINK_BOOT: return tr("Starting");
+    case MUSE_LINK_UNPAIRED: return tr("Ready to pair");
+    case MUSE_LINK_PAIRING: return tr("App connected");
+    case MUSE_LINK_CONFIRM: return tr("Confirm pairing");
+    case MUSE_LINK_CONNECTING: return tr("Connecting");
+    case MUSE_LINK_ONLINE: return tr("Online");
+    case MUSE_LINK_OFFLINE: return tr("Offline");
+    case MUSE_LINK_ERROR: return tr("Error");
     }
     return "";
 }
@@ -159,7 +160,7 @@ void muse_wifi_status(muse_wifi_status_t *out)
     }
     memset(out, 0, sizeof(*out));
     out->state = MUSE_WIFI_OFF;
-    strlcpy(out->detail, "Starting...", sizeof(out->detail));
+    strlcpy(out->detail, tr("Starting..."), sizeof(out->detail));
 }
 
 bool muse_wifi_connected(void)
@@ -201,6 +202,11 @@ void muse_wifi_nap(bool nap)
 esp_err_t muse_wifi_scan(void)
 {
     return s_ops && s_ops->wifi_scan ? s_ops->wifi_scan() : ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t muse_wifi_open_portal(void)
+{
+    return s_ops && s_ops->wifi_portal ? s_ops->wifi_portal() : ESP_ERR_INVALID_STATE;
 }
 
 bool muse_wifi_scanning(void)

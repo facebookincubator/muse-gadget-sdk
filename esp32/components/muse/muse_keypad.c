@@ -15,6 +15,7 @@
  */
 
 #include "muse_keypad.h"
+#include "i18n.h"
 
 #include <ctype.h>
 #include <string.h>
@@ -98,7 +99,7 @@ static void update_map(void)
         s_map[i++] = " ";   /* a hidden spacer: an empty label would end the map */
     }
     s_map[i++] = NEXT_MODE[s_mode];
-    s_map[i++] = lv_textarea_get_password_mode(s_ta) ? "Show" : "Hide";
+    s_map[i++] = lv_textarea_get_password_mode(s_ta) ? tr("Show") : tr("Hide");
     s_map[i++] = LV_SYMBOL_OK;
     if (s_round) {
         s_map[i++] = " ";
@@ -269,7 +270,7 @@ lv_obj_t *muse_keypad_create(lv_obj_t *parent, lv_obj_t *ta, bool round)
 
     lv_obj_remove_style_all(s_kp);
     lv_obj_set_style_pad_gap(s_kp, 6, 0);
-    lv_obj_set_style_text_font(s_kp, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_kp, UI_FONT_BIG, LV_PART_ITEMS);
     lv_obj_set_style_text_color(s_kp, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
     lv_obj_set_style_bg_opa(s_kp, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_bg_color(s_kp, lv_color_hex(COLOR_CARD), LV_PART_ITEMS);

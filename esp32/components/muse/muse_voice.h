@@ -50,3 +50,7 @@ bool muse_voice_resting(void);
 /* Voice notes recorded out of Hatch's reach wait to go, the oldest from the
  * last half hour: worth keeping Wi-Fi up for. */
 bool muse_voice_notes_waiting(void);
+
+/* 录音时是否同时把 PCM 丢到串口（本地 ASR 用；默认开） */
+void muse_voice_set_mic_dump(bool on);
+bool muse_voice_mic_dump(void);

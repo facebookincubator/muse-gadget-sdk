@@ -15,6 +15,7 @@
  */
 
 #include "muse_chat_priv.h"
+#include "i18n.h"
 
 #include <string.h>
 
@@ -47,7 +48,7 @@ void muse_hatch_test(void)
     if (!muse_hatch_configured() || !muse_wifi_connected()) {
         return;
     }
-    muse_hatch_report(MUSE_HATCH_TESTING, "Connecting...");
+    muse_hatch_report(MUSE_HATCH_TESTING, tr("Connecting..."));
     muse_hatch_chat_connect();
 }
 
@@ -61,7 +62,7 @@ void muse_hatch_status(muse_hatch_status_t *out)
 {
     if (!muse_hatch_configured()) {
         out->state = MUSE_HATCH_NOT_SET;
-        strlcpy(out->detail, "Pair in the Muse app", sizeof(out->detail));
+        strlcpy(out->detail, tr("Pair in the Muse app"), sizeof(out->detail));
         return;
     }
     portENTER_CRITICAL(&s_lock);
@@ -70,21 +71,21 @@ void muse_hatch_status(muse_hatch_status_t *out)
     portEXIT_CRITICAL(&s_lock);
     if (!muse_wifi_connected() && out->state != MUSE_HATCH_TESTING) {
         out->state = MUSE_HATCH_OFFLINE;
-        strlcpy(out->detail, "Waiting for Wi-Fi", sizeof(out->detail));
+        strlcpy(out->detail, tr("Waiting for Wi-Fi"), sizeof(out->detail));
     } else if (out->state == MUSE_HATCH_UNTESTED && !out->detail[0]) {
-        strlcpy(out->detail, "Connects when you talk", sizeof(out->detail));
+        strlcpy(out->detail, tr("Connects when you talk"), sizeof(out->detail));
     }
 }
 
 const char *muse_hatch_state_name(muse_hatch_state_t state)
 {
     switch (state) {
-    case MUSE_HATCH_NOT_SET: return "Not set up";
-    case MUSE_HATCH_OFFLINE: return "Offline";
-    case MUSE_HATCH_UNTESTED: return "Saved";
-    case MUSE_HATCH_TESTING: return "Connecting";
-    case MUSE_HATCH_REACHABLE: return "Connected";
-    case MUSE_HATCH_UNREACHABLE: return "Can't connect";
+    case MUSE_HATCH_NOT_SET: return tr("Not set up");
+    case MUSE_HATCH_OFFLINE: return tr("Offline");
+    case MUSE_HATCH_UNTESTED: return tr("Saved");
+    case MUSE_HATCH_TESTING: return tr("Connecting");
+    case MUSE_HATCH_REACHABLE: return tr("Connected");
+    case MUSE_HATCH_UNREACHABLE: return tr("Can't connect");
     }
     return "";
 }

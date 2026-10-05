@@ -17,6 +17,7 @@ set(GADGET_SRCS
     "app.c"
     "ble_server.c"
     "wifi_mgr.c"
+    "portal.c"
     "wifi_known.c"
     "identity.c"
     "config_store.c"
@@ -40,6 +41,7 @@ set(GADGET_SRCS
 )
 
 set(GADGET_REQUIRES
+    esp_http_server
     nvs_flash
     esp_wifi
     esp_event
@@ -104,6 +106,7 @@ endif()
 
 idf_component_register(
     SRCS ${GADGET_SRCS}
+    EMBED_FILES "portal.html"
     INCLUDE_DIRS "."
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}

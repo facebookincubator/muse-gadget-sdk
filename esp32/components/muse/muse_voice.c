@@ -15,6 +15,7 @@
  */
 
 #include "muse_voice.h"
+#include "i18n.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -23,6 +24,8 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "mbedtls/base64.h"
+#include "muse_link.h"
 #include "esp_timer.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
@@ -73,6 +76,10 @@ static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
 static volatile bool s_loopback;
 static volatile bool s_mp3test;
+static volatile bool s_mic_dump = true;   /* 录音同时丢一份到串口（本地 ASR/调试用） */
+
+void muse_voice_set_mic_dump(bool on) { s_mic_dump = on; }
+bool muse_voice_mic_dump(void) { return s_mic_dump; }
 
 /*
  * Pre-roll: while idle the mic keeps running into this ring, so a recording
@@ -255,7 +262,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
         go_live();
     }
-    muse_state_set_caption(s_live ? "LISTENING..." : "RECORDING...");
+    muse_state_set_caption(s_live ? tr("LISTENING...") : tr("RECORDING..."));
     bool heard = false, ok = true;
     bool gave_up = false;   /* Hatch failed this note: it's kept, and goes later */
     char text[96];
@@ -275,6 +282,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         }
     }
     size_t pre = n;
+    if (s_mic_dump) ESP_LOGI(TAG, "recording: dumping mic PCM to serial (pre=%u)", (unsigned)pre);
     bool released = false;
     size_t stop_at = MAX_FRAMES;
     while (n + MUSE_AUDIO_CHUNK <= stop_at) {
@@ -282,6 +290,17 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
             break;
         }
         muse_state_set_level(muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK));
+        /* 没有云端会话时（未配对/离线），录音同时丢一份到串口：
+         * 让主机侧能做本地 ASR —— 本地语音闭环靠这条把"耳朵"接出来。 */
+        if (s_mic_dump) {
+            unsigned char b64[900];
+            size_t olen = 0;
+            if (mbedtls_base64_encode(b64, sizeof(b64), &olen,
+                                      (const unsigned char *)s_chunk,
+                                      MUSE_AUDIO_CHUNK * sizeof(int16_t)) == 0) {
+                printf(">mic %.*s\n", (int)olen, (const char *)b64);
+            }
+        }
         take(&st, s_chunk);
         /* Live transcript as the caption. A failure stops the streaming; the
          * kept note goes later, or without one the failure is the caption. */
@@ -310,7 +329,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         }
         muse_state_set_progress((float)n / MAX_FRAMES);
         if (!heard && ok && tick) {
-            muse_state_set_caption("%s %.1fs", s_live ? "LISTENING" : "RECORDING", (double)n / MUSE_AUDIO_RATE);
+            muse_state_set_caption("%s %.1fs", s_live ? tr("LISTENING") : "RECORDING", (double)n / MUSE_AUDIO_RATE);
         }
         /*
          * Capture runs 60-80 ms behind real time and people let go on their
@@ -347,7 +366,7 @@ static void go_idle(const char *caption);
 static bool hatch_reply(bool *delivered)
 {
     muse_state_set_mode(MUSE_MODE_THINKING);
-    muse_state_set_caption("SENDING VOICE NOTE");   /* until there's a transcript or reply */
+    muse_state_set_caption(tr("SENDING VOICE NOTE"));   /* until there's a transcript or reply */
     static int16_t buf[MUSE_AUDIO_CHUNK];
     static const int16_t silence[MUSE_AUDIO_CHUNK];
     char text[96];
@@ -368,7 +387,7 @@ static bool hatch_reply(bool *delivered)
             case MUSE_HATCH_EV_SENT:
                 *delivered = true;
                 if (!speaking && !replied) {
-                    muse_state_set_caption("NOTE SENT - WAITING FOR MUSE");
+                    muse_state_set_caption(tr("NOTE SENT - WAITING FOR MUSE"));
                 }
                 break;
             case MUSE_HATCH_EV_REPLY:
@@ -442,9 +461,9 @@ static const char *not_ready_reason(void)
     muse_hatch_status_t st;
     muse_hatch_status(&st);
     switch (st.state) {
-    case MUSE_HATCH_NOT_SET: return "SET UP MUSE FIRST";
-    case MUSE_HATCH_OFFLINE: return "NO WI-FI";
-    default: return "CAN'T REACH MUSE";
+    case MUSE_HATCH_NOT_SET: return tr("SET UP MUSE FIRST");
+    case MUSE_HATCH_OFFLINE: return tr("NO WI-FI");
+    default: return tr("CAN'T REACH MUSE");
     }
 }
 
@@ -527,7 +546,7 @@ static void hold_rec(bool tried)
 {
     if (s_held_count >= HELD_MAX) {   /* can_record() leaves room: not expected */
         drop_rec();
-        go_idle("COULDN'T SAVE THE NOTE");
+        go_idle(tr("COULDN'T SAVE THE NOTE"));
         return;
     }
     int16_t *pcm = heap_caps_realloc(s_rec, s_rec_n * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -542,7 +561,7 @@ static void hold_rec(bool tried)
         back_off();
     }
     ESP_LOGI(TAG, "saved a %.1fs note to send later (%d waiting)", (double)s_rec_n / MUSE_AUDIO_RATE, s_held_count);
-    go_idle(tried ? "SAVED, WILL TRY AGAIN" : "SAVED, SENDS WHEN ONLINE");
+    go_idle(tried ? tr("SAVED, WILL TRY AGAIN") : tr("SAVED, SENDS WHEN ONLINE"));
 }
 
 static void drop_oldest(void)
@@ -634,7 +653,7 @@ static bool send_held(bool quiet)
              h->tries + 1);
     if (!quiet) {
         muse_state_set_mode(MUSE_MODE_THINKING);
-        muse_state_set_caption("SENDING SAVED NOTE");
+        muse_state_set_caption(tr("SENDING SAVED NOTE"));
     }
     muse_hatch_turn_begin();
     size_t sent = 0;
@@ -660,16 +679,16 @@ static bool send_held(bool quiet)
         s_next_send_us = 0;   /* the next one right away */
         s_send_backoff_us = RETRY_MIN_US;
         if (quiet) {
-            muse_state_set_caption("SAVED NOTE SENT");
+            muse_state_set_caption(tr("SAVED NOTE SENT"));
         }
         return interrupted;
     } else if (++h->tries >= HELD_TRIES) {
         ESP_LOGW(TAG, "giving up on a saved note after %d tries", h->tries);
         drop_oldest();
-        caption = "COULDN'T SEND A SAVED NOTE";
+        caption = tr("COULDN'T SEND A SAVED NOTE");
     } else {
         back_off();
-        caption = "SAVED NOTE: WILL TRY AGAIN";
+        caption = tr("SAVED NOTE: WILL TRY AGAIN");
     }
     if (quiet) {
         muse_state_set_caption("%s", caption);
@@ -723,7 +742,7 @@ static bool finish_note(void)
         if (s_live && !fed) {
             /* Hatch is behind (still connecting, say): the rest from the kept note. */
             muse_state_set_mode(MUSE_MODE_THINKING);
-            muse_state_set_caption("SENDING VOICE NOTE");
+            muse_state_set_caption(tr("SENDING VOICE NOTE"));
             fed = feed_rest(s_rec, s_rec_n, &s_sent, false) == FED;
             if (!fed) {
                 muse_hatch_turn_cancel();
@@ -751,6 +770,14 @@ static bool finish_note(void)
  */
 static bool can_record(void)
 {
+    /* 本地模式（s_mic_dump）：没有云端会话也允许录音 —— PCM 会走串口给主机做 ASR。
+     * 上游这里要求 Hatch 会话就绪、设备已 setup，否则按键说话直接被打回。 */
+    if (s_mic_dump && !muse_hatch_ready()) {
+        if (!muse_wifi_connected()) {
+            muse_wifi_apply();
+        }
+        return true;
+    }
     if (!muse_wifi_connected()) {
         muse_wifi_apply();   /* retry now, not after the backoff */
     }
@@ -759,11 +786,11 @@ static bool can_record(void)
     muse_hatch_status_t st;
     muse_hatch_status(&st);
     if (st.state == MUSE_HATCH_NOT_SET) {
-        go_idle("SET UP MUSE FIRST");
+        go_idle(tr("SET UP MUSE FIRST"));
         return false;
     }
     if ((!ready || s_held_count) && s_held_count >= HELD_MAX) {
-        go_idle("NOTES STILL WAITING TO SEND");
+        go_idle(tr("NOTES STILL WAITING TO SEND"));
         return false;
     }
     if (ready && s_held_count) {
@@ -865,7 +892,7 @@ static void voice_task(void *arg)
             muse_hatch_turn_cancel();
             drop_rec();
             pre_reset();
-            go_idle("HOLD LONGER TO TALK");
+            go_idle(tr("HOLD LONGER TO TALK"));
             continue;
         }
         if (!ok) {
@@ -888,7 +915,7 @@ esp_err_t muse_voice_start(QueueHandle_t queue)
     s_pre = heap_caps_malloc(PRE_CHUNKS * sizeof(pre_chunk_t), MUSE_BIG_CAPS);
     if (!s_pre || muse_audio_init(muse_settings_volume(), muse_settings_mic_gain()) != ESP_OK) {
         muse_state_set_mode(MUSE_MODE_ERROR);
-        muse_state_set_caption("AUDIO INIT FAILED");
+        muse_state_set_caption(tr("AUDIO INIT FAILED"));
         return ESP_FAIL;
     }
     /* Stack in PSRAM if there is any (this task never writes flash) to spare internal RAM for Wi-Fi/BLE. */

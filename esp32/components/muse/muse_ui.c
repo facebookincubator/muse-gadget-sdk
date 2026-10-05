@@ -15,6 +15,7 @@
  */
 
 #include "muse_ui.h"
+#include "i18n.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -27,6 +28,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "lvgl.h"
+#include "libs/qrcode/qrcodegen.h"
 #include "mbedtls/base64.h"
 #include "src/draw/lv_image_decoder_private.h"   /* custom decoder */
 #include "src/misc/lv_area_private.h"            /* lv_area_intersect, for the ring */
@@ -36,6 +38,7 @@
 #include "muse_chat.h"
 #include "muse_console.h"
 #include "muse_link.h"
+#include "muse_input.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
 #include "muse_pixel.h"
@@ -74,9 +77,9 @@ static const char *TAG = "muse_ui";
 
 /* Text on 128 px screens, as in the button menu (muse_menu.c). */
 #if LV_FONT_MONTSERRAT_12
-#define FONT_COMPACT (&lv_font_montserrat_12)
+#define FONT_COMPACT (UI_FONT_TEXT)
 #else
-#define FONT_COMPACT (&lv_font_montserrat_14)
+#define FONT_COMPACT (UI_FONT_TEXT)
 #endif
 
 /*
@@ -89,6 +92,7 @@ static bool s_small;
 static bool s_tall;         /* compact, with room above and below Muse (StickS3) */
 static int s_canvas_px;     /* Muse's size on screen */
 static int s_dy;            /* full layout: offset from a 466 px tall screen */
+static int s_header_dy;   /* 360 圆屏：顶部标签整体上移，给放大的头像让位 */
 static lv_indev_t *s_indev;
 static lv_obj_t *s_tv;
 static lv_obj_t *s_face;
@@ -130,7 +134,7 @@ static bool s_ready;
 static float s_level;
 static int s_shown_state = -1;
 static const char *s_shown_name;
-static const char *s_idle_name = "READY";   /* idle's label: set by the Wi-Fi state */
+static const char *s_idle_name;   /* idle's label: set by the Wi-Fi state */
 static int s_shown_lit = -1;
 static uint32_t s_shown_accent;
 static bool s_meter_visible = true;
@@ -420,19 +424,51 @@ static void set_mic_color(uint32_t color)
 }
 
 /* Icons beside the physical buttons, in place of an instruction caption. */
+static bool s_mic_touch_down;
+
+static void on_mic_touch(lv_event_t *e)
+{
+    switch (lv_event_get_code(e)) {
+    case LV_EVENT_PRESSED:
+        if (!s_mic_touch_down) {
+            s_mic_touch_down = true;
+            set_mic_color(COLOR_ACCENT);
+            muse_input_touch_ptt(true);
+        }
+        break;
+    case LV_EVENT_RELEASED:
+    case LV_EVENT_PRESS_LOST:
+        if (s_mic_touch_down) {
+            s_mic_touch_down = false;
+            set_mic_color(COLOR_DIM);
+            muse_input_touch_ptt(false);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 static void build_button_icons(lv_obj_t *face)
 {
     const muse_button_hint_t *t = &muse_board->talk_hint, *a = &muse_board->aux_hint;
     s_mic_icon = make_mic(face, s_tall ? 24 : s_small ? 12 : 26);
     lv_obj_align(s_mic_icon, t->align, t->x, t->y);
     set_mic_color(COLOR_DIM);
+    if (muse_board->button_power_controls && muse_board->touch) {
+        lv_obj_add_flag(s_mic_icon, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_set_ext_click_area(s_mic_icon, 14);
+        lv_obj_add_event_cb(s_mic_icon, on_mic_touch, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(s_mic_icon, on_mic_touch, LV_EVENT_RELEASED, NULL);
+        lv_obj_add_event_cb(s_mic_icon, on_mic_touch, LV_EVENT_PRESS_LOST, NULL);
+    }
 
     /* Without touch the aux button opens the menu rather than sleeping. A board
      * that leaves aux_hint out has no button to put an icon beside. */
     if (a->align == LV_ALIGN_DEFAULT) {
         return;
     }
-    s_aux_icon = make_label(face, s_small ? &lv_font_montserrat_14 : &lv_font_montserrat_28, COLOR_DIM);
+    s_aux_icon = make_label(face, s_small ? UI_FONT_TEXT : UI_FONT_BIG, COLOR_DIM);
     lv_label_set_text(s_aux_icon, muse_board->touch ? LV_SYMBOL_POWER : LV_SYMBOL_LIST);
     lv_obj_align(s_aux_icon, a->align, a->x, a->y);
 }
@@ -517,12 +553,12 @@ static void on_speaker_event(lv_event_t *e)
         muse_settings_set_speaker_on(!on);
         show_speaker(!on);
         if (idle) {
-            muse_state_set_caption(on ? "SPEAKER OFF" : "SPEAKER ON");
+            muse_state_set_caption(on ? tr("SPEAKER OFF") : tr("SPEAKER ON"));
         }
         break;
     case LV_EVENT_SHORT_CLICKED:
         if (idle) {
-            muse_state_set_caption(on ? "HOLD TO MUTE" : "HOLD TO UNMUTE");
+            muse_state_set_caption(on ? tr("HOLD TO MUTE") : tr("HOLD TO UNMUTE"));
         }
         break;
     case LV_EVENT_RELEASED:
@@ -549,9 +585,10 @@ static void build_speaker(lv_obj_t *face, int x, int y)
     for (size_t i = 0; i < sizeof(EVENTS) / sizeof(EVENTS[0]); i++) {
         lv_obj_add_event_cb(s_speaker, on_speaker_event, EVENTS[i], NULL);
     }
-    s_speaker_icon = make_label(s_speaker, &lv_font_montserrat_28, COLOR_DIM);
+    s_speaker_icon = make_label(s_speaker, UI_FONT_BIG, COLOR_DIM);
     lv_obj_center(s_speaker_icon);
     lv_obj_align(s_speaker, LV_ALIGN_CENTER, x, y);
+    lv_obj_add_flag(s_speaker, LV_OBJ_FLAG_GESTURE_BUBBLE);
     show_speaker(muse_settings_speaker_on());
 }
 
@@ -804,6 +841,9 @@ static void build_screen(void)
         lv_obj_set_style_bg_opa(s_tv, LV_OPA_COVER, 0);
         lv_obj_set_scrollbar_mode(s_tv, LV_SCROLLBAR_MODE_OFF);
         s_face = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);
+        /* The tile itself is scrollable and contains clickable controls; let
+         * their horizontal gestures reach the tileview. */
+        lv_obj_add_flag(s_face, LV_OBJ_FLAG_GESTURE_BUBBLE);
         /* It never scrolls, but LVGL would size its scrollbars from all its
          * children every time it draws any part of it. */
         lv_obj_set_scrollbar_mode(s_face, LV_SCROLLBAR_MODE_OFF);
@@ -836,7 +876,7 @@ static void build_screen(void)
      * whose blank bottom rows can tuck in behind the meter.
      */
     int ring_in = (s_w < s_h ? s_w : s_h) / 2 - 10;   /* the ring's inner edge */
-    int cap_h = 2 * lv_font_get_line_height(&lv_font_unscii_16) + CAPTION_LINE_SPACE;
+    int cap_h = 2 * lv_font_get_line_height(UI_FONT_TEXT) + CAPTION_LINE_SPACE;
     int cap_bottom = 179;                              /* a 466 px circle's; fine for rectangles */
     if (muse_board->round) {
         cap_bottom = (int)sqrtf((float)(ring_in * ring_in - CAPTION_W * CAPTION_W / 4)) - 3;
@@ -852,7 +892,7 @@ static void build_screen(void)
     lv_image_set_src(s_canvas, &s_muse_src);
     lv_obj_align(s_canvas, LV_ALIGN_CENTER, 0, s_big_y);
     s_muse_y = s_big_y;
-    lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_add_event_cb(s_canvas, on_canvas_clicked, LV_EVENT_CLICKED, NULL);
     if (s_ring) {
         /* The canvas's black corners reach the bezel; keep the ring on top. */
@@ -868,24 +908,24 @@ static void build_screen(void)
     lv_obj_set_flex_flow(status, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(status, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(status, s_small ? 4 : 8, 0);
-    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, s_small ? 1 : 20 + s_dy);
-    s_wifi_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
-    s_ble_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
-    s_power_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
+    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, (s_small ? 1 : 20 + s_dy) + s_header_dy);
+    s_wifi_icon = make_label(status, UI_FONT_TEXT, COLOR_DIM);
+    s_ble_icon = make_label(status, UI_FONT_TEXT, COLOR_DIM);
+    s_power_lbl = make_label(status, UI_FONT_TEXT, COLOR_DIM);
 
     /* The compact layout leaves the state to the avatar and the caption,
      * unless the screen is tall enough to fit it in small type above Muse. */
-    s_state_lbl = make_label(face, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16, 0xffffff);
+    s_state_lbl = make_label(face, s_small ? UI_FONT_TEXT : UI_FONT_TEXT, 0xffffff);
     lv_obj_set_style_text_letter_space(s_state_lbl, s_small ? 1 : 2, 0);
-    lv_obj_align(s_state_lbl, LV_ALIGN_TOP_MID, 0, s_small ? 22 : 40 + s_dy);
+    lv_obj_align(s_state_lbl, LV_ALIGN_TOP_MID, 0, (s_small ? 22 : 40 + s_dy) + s_header_dy);
     lv_obj_set_flag(s_state_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
 
     /* This gadget's own name, dim under the state while it's unpaired: with
      * more than one on the bench, the screen says which one to pick in the
      * Muse app. update_chrome() fills it in, shortens it to the hex tail on a
      * screen too narrow for the whole thing, and empties it once paired. */
-    s_name_lbl = make_label(face, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16, COLOR_DIM);
-    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, s_small ? 32 : 60 + s_dy);
+    s_name_lbl = make_label(face, s_small ? UI_FONT_TEXT : UI_FONT_TEXT, COLOR_DIM);
+    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, (s_small ? 32 : 60 + s_dy) + s_header_dy);
     /* Same rule as the state label: a square 128 px screen centres Muse over
      * these rows, so there's nowhere to put this without covering the face. */
     lv_obj_set_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
@@ -1013,7 +1053,36 @@ static void on_camera_hint_clicked(lv_event_t *e)
 static void on_any_press(lv_event_t *e)
 {
     (void)e;
+    lv_point_t p;
+    lv_indev_get_point(s_indev, &p);
+    ESP_LOGI(TAG, "touch press x=%d y=%d", (int)p.x, (int)p.y);
     muse_state_poke();
+}
+
+static void on_any_release(lv_event_t *e)
+{
+    (void)e;
+    lv_point_t p;
+    lv_indev_get_point(s_indev, &p);
+    ESP_LOGI(TAG, "touch release x=%d y=%d", (int)p.x, (int)p.y);
+}
+
+static void on_any_gesture(lv_event_t *e)
+{
+    (void)e;
+    lv_dir_t dir = lv_indev_get_gesture_dir(s_indev);
+    ESP_LOGI(TAG, "touch gesture dir=%d", (int)dir);
+    if (!muse_board->manual_touch_swipes || !s_tv) return;
+
+    lv_obj_t *active = lv_tileview_get_tile_active(s_tv);
+    if (dir == LV_DIR_LEFT && active == s_face) {
+        ESP_LOGI(TAG, "manual swipe: home -> settings");
+        lv_tileview_set_tile(s_tv, s_settings, LV_ANIM_ON);
+    } else if (dir == LV_DIR_RIGHT && active == s_settings
+               && !muse_settings_ui_in_subpage()) {
+        ESP_LOGI(TAG, "manual swipe: settings -> home");
+        lv_tileview_set_tile(s_tv, s_face, LV_ANIM_ON);
+    }
 }
 
 static void build_overlays(void)
@@ -1050,7 +1119,7 @@ static void build_overlays(void)
     lv_obj_set_style_radius(s_camera_hint, 18, 0);
     lv_obj_add_flag(s_camera_hint, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *hint_text = lv_label_create(s_camera_hint);
-    lv_label_set_text(hint_text, "TAP TO TAKE PHOTO");
+    lv_label_set_text(hint_text, tr("TAP TO TAKE PHOTO"));
     lv_obj_center(hint_text);
     lv_obj_add_event_cb(s_camera_hint, on_camera_hint_clicked, LV_EVENT_CLICKED, NULL);
 #endif
@@ -1073,13 +1142,13 @@ static void build_overlays(void)
     lv_obj_set_style_border_width(s_pair, 2, 0);
     lv_obj_remove_flag(s_pair, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_pair, LV_OBJ_FLAG_HIDDEN);
-    s_pair_title = make_label(s_pair, font_pick(&lv_font_montserrat_20, FONT_COMPACT), COLOR_LIT);
-    lv_label_set_text(s_pair_title, "Pairing code");
-    s_pair_code = make_label(s_pair, font_pick(&lv_font_montserrat_28, &lv_font_montserrat_20), COLOR_ACCENT);
+    s_pair_title = make_label(s_pair, font_pick(UI_FONT_BIG, FONT_COMPACT), COLOR_LIT);
+    lv_label_set_text(s_pair_title, tr("Pairing code"));
+    s_pair_code = make_label(s_pair, font_pick(UI_FONT_BIG, UI_FONT_BIG), COLOR_ACCENT);
     lv_obj_set_style_text_letter_space(s_pair_code, s_small ? 2 : 6, 0);
-    s_pair_hint = make_label(s_pair, font_pick(&lv_font_montserrat_14, FONT_COMPACT), COLOR_DIM);
-    lv_label_set_text(s_pair_hint, s_small ? "Enter on phone" : "Enter it on your phone");
-    /* Wraps: "bottom right button" is wider than the AIPI's card. */
+    s_pair_hint = make_label(s_pair, font_pick(UI_FONT_TEXT, FONT_COMPACT), COLOR_DIM);
+    lv_label_set_text(s_pair_hint, s_small ? tr("Enter on phone") : tr("Enter it on your phone"));
+    /* Wraps: tr("bottom right button") is wider than the AIPI's card. */
     lv_obj_set_width(s_pair_hint, lv_pct(100));
     lv_label_set_long_mode(s_pair_hint, LV_LABEL_LONG_MODE_WRAP);
 
@@ -1095,6 +1164,8 @@ static void build_overlays(void)
 
     if (s_indev) {
         lv_indev_add_event_cb(s_indev, on_any_press, LV_EVENT_PRESSED, NULL);
+        lv_indev_add_event_cb(s_indev, on_any_release, LV_EVENT_RELEASED, NULL);
+        lv_indev_add_event_cb(s_indev, on_any_gesture, LV_EVENT_GESTURE, NULL);
     }
 }
 
@@ -1155,13 +1226,13 @@ static const char *idle_name(muse_wifi_state_t wifi)
     switch (wifi) {
     case MUSE_WIFI_CONNECTED:
         joined = true;
-        return MODE_NAMES[MUSE_MODE_IDLE];
+        return tr(MODE_NAMES[MUSE_MODE_IDLE]);
     case MUSE_WIFI_OFF:
-        return "WI-FI OFF";
+        return tr("WI-FI OFF");
     case MUSE_WIFI_NO_NETWORK:
-        return "SET UP WI-FI";
+        return tr("SET UP WI-FI");
     case MUSE_WIFI_NOT_NEARBY:
-        return "NO WI-FI";   /* none of the saved networks is in range */
+        return tr("NO WI-FI");   /* none of the saved networks is in range */
     default:
         return joined ? "RECONNECTING" : "CONNECTING";
     }
@@ -1219,7 +1290,7 @@ static void update_chrome(float now)
      * read layout unhides it on the way out. A narrow screen gets the hex tail
      * on its own, which is the part that differs between two of them, rather
      * than a head that ends in dots before it gets there. */
-    const lv_font_t *name_font = s_small ? &lv_font_unscii_8 : &lv_font_unscii_16;
+    const lv_font_t *name_font = s_small ? UI_FONT_TEXT : UI_FONT_TEXT;
     int name_cw = lv_font_get_glyph_width(name_font, 'M', ' ');
     const char *shown = paired ? "" : b.name;
     if (name_cw > 0 && (int)strlen(shown) * name_cw > s_w) {
@@ -1237,13 +1308,13 @@ static void update_chrome(float now)
     if (b.passkey || confirm) {
         char code[24], hint[40];
         if (confirm) {
-            strlcpy(code, s_small ? "Press" : "Press button", sizeof(code));
+            strlcpy(code, s_small ? tr("Press") : tr("Press button"), sizeof(code));
             snprintf(hint, sizeof(hint), s_small ? "%s button" : "Press the %s button", muse_board->talk_button);
         } else {
             snprintf(code, sizeof(code), "%06lu", (unsigned long)b.passkey);
-            strlcpy(hint, s_small ? "Enter on phone" : "Enter it on your phone", sizeof(hint));
+            strlcpy(hint, s_small ? tr("Enter on phone") : tr("Enter it on your phone"), sizeof(hint));
         }
-        const char *title = confirm ? (s_small ? "Muse app" : "Pair with Muse app") : "Pairing code";
+        const char *title = confirm ? (s_small ? tr("Muse app") : tr("Pair with Muse app")) : tr("Pairing code");
         if (strcmp(code, lv_label_get_text(s_pair_code)) != 0) {
             lv_label_set_text(s_pair_code, code);
             lv_label_set_text(s_pair_title, title);
@@ -1259,7 +1330,7 @@ static void update_chrome(float now)
     if (s_speaker && paired == lv_obj_has_flag(s_speaker, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_set_flag(s_speaker, LV_OBJ_FLAG_HIDDEN, !paired);
     }
-    /* Unpaired, a press only says "SET UP MUSE FIRST", so the mic goes too.
+    /* Unpaired, a press only says tr("SET UP MUSE FIRST"), so the mic goes too.
      * While a reply's layout is up it decides; that's only ever paired. */
     if (s_answer < 0 && paired == lv_obj_has_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_set_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN, !paired);
@@ -1305,7 +1376,7 @@ static void update_power(float now)
     muse_power_t p = muse_state_power();
     char buf[32];
     if (p.battery_pct < 0) {
-        strlcpy(buf, p.usb ? (s_small ? "USB" : "USB POWER") : "", sizeof(buf));
+        strlcpy(buf, p.usb ? (s_small ? "USB" : tr("USB POWER")) : "", sizeof(buf));
     } else if (s_small) {
         snprintf(buf, sizeof(buf), "%s%d%%", p.charging ? "+" : "", p.battery_pct);
     } else if (p.charging) {
@@ -1321,7 +1392,7 @@ static void update_power(float now)
 static void update_status(muse_mode_t mode, float now)
 {
     uint32_t accent = muse_pixel_accent(mode);
-    const char *name = mode == MUSE_MODE_IDLE ? s_idle_name : MODE_NAMES[mode];
+    const char *name = mode == MUSE_MODE_IDLE ? (s_idle_name ? s_idle_name : tr("READY")) : tr(MODE_NAMES[mode]);
 
     if (name != s_shown_name) {
         lv_label_set_text(s_state_lbl, name);
@@ -1544,6 +1615,15 @@ esp_err_t muse_ui_start(void)
         s_canvas_px = (MUSE_PX_W * 5 + 2 * s_dy) / MUSE_PX_W * MUSE_PX_W;
         s_dy = 0;
     }
+    /* 360 圆屏：上游原本给的是 3 格（192px）—— 它比 466px 参考屏矮，头部和字幕
+     * 都挤，之前为了避开名字/状态标签被压到 2 格（128px），结果 Muse 显得很小。
+     * 这里放回 192px，并把顶部那三行标签整体上移给它让位（见 build_screen）。
+     * 只对这块 1.85B 的 360 圆屏生效，别的板子不受影响。 */
+    s_header_dy = 0;
+    if (muse_board->round && s_w <= 360 && s_h <= 360) {
+        s_canvas_px = MUSE_PX_W * 3;
+        s_header_dy = -20;
+    }
 
     lv_display_t *disp = muse_board->display_start(&s_indev);
     if (!disp) {
@@ -1566,6 +1646,20 @@ esp_err_t muse_ui_start(void)
 
     ESP_LOGI(TAG, "UI up: %dx%d, %d px Muse, %d ms frames", s_w, s_h, s_canvas_px, muse_board->frame_ms);
     return ESP_OK;
+}
+
+/* 单键板：短按在首页和设置页之间切。上游在触摸板上用设置页代替"菜单"，
+ * 所以按键动作要落到这里，而不是 muse_menu_key()（那个队列在触摸板上没起）。 */
+bool muse_ui_toggle_settings(void)
+{
+    if (!s_ready || !s_tv || !s_face || !s_settings) {
+        return false;
+    }
+    muse_board->display_lock(-1);
+    bool to_settings = lv_tileview_get_tile_active(s_tv) != s_settings;
+    lv_tileview_set_tile(s_tv, to_settings ? s_settings : s_face, LV_ANIM_ON);
+    muse_board->display_unlock();
+    return to_settings;
 }
 
 void muse_ui_show_face(void)
@@ -1650,6 +1744,148 @@ void muse_ui_image_hide(void)
 #if CONFIG_MUSE_WATCHER_CAMERA
     if (s_camera_hint) lv_obj_add_flag(s_camera_hint, LV_OBJ_FLAG_HIDDEN);
 #endif
+    muse_board->display_unlock();
+}
+
+/* ---- 配网门户提示：二维码 + 热点名 + 网址 ---- */
+
+static lv_obj_t *s_portal_panel;
+static lv_obj_t *s_portal_qr;          /* canvas：模块 1px，再整体整数放大 */
+static lv_obj_t *s_portal_ap;
+static lv_obj_t *s_portal_url;
+static lv_obj_t *s_portal_code;
+static lv_obj_t *s_portal_tip;
+#define PORTAL_QR_MAX_PX 200          /* 200x200 够版本 4 + 静区（模块 4~5px） */
+static uint16_t *s_portal_qr_buf;     /* PSRAM，一次性分配、不释放：画布只是引用，别和 LVGL 抢所有权 */
+static int s_portal_qr_px;
+
+/* 把 WiFi 配置型二维码画进 canvas：WIFI:T:nopass;S:<ssid>;; —— 手机相机扫一下就能加入热点。
+ * 画成 1px/模块再由 LVGL 整数放大，缓冲区小、边缘又不糊。 */
+static void portal_qr_paint(const char *payload)
+{
+    uint8_t *tmp = heap_caps_malloc(qrcodegen_BUFFER_LEN_MAX, MUSE_BIG_CAPS);
+    uint8_t *qr = heap_caps_malloc(qrcodegen_BUFFER_LEN_MAX, MUSE_BIG_CAPS);
+    if (!tmp || !qr) {
+        ESP_LOGW(TAG, "portal qr: out of memory");
+        free(tmp);
+        free(qr);
+        return;
+    }
+    if (!qrcodegen_encodeText(payload, tmp, qr, qrcodegen_Ecc_MEDIUM,
+                              qrcodegen_VERSION_MIN, 4, qrcodegen_Mask_AUTO, true)) {
+        ESP_LOGW(TAG, "portal qr: payload too long");
+        free(tmp);
+        free(qr);
+        return;
+    }
+    const int mods = qrcodegen_getSize(qr) + 4;      /* 两侧各留 2 模块静区 */
+    /* 5px/模块：直接画满不缩放；太高就退到 4px，保证下面四行文字还在屏内 */
+    int cell = (54 + mods * 5 + 4 * 16 + 12 <= 336) ? 5 : 4;
+    int side = mods * cell;
+    if (side > PORTAL_QR_MAX_PX) {
+        cell = (PORTAL_QR_MAX_PX - 4) / mods;      /* 兜底：再缩小模块 */
+        if (cell < 1) cell = 1;
+        side = mods * cell;
+    }
+    if (!s_portal_qr_buf) {
+        s_portal_qr_buf = heap_caps_malloc((size_t)PORTAL_QR_MAX_PX * PORTAL_QR_MAX_PX * sizeof(uint16_t),
+                                           MUSE_BIG_CAPS);
+    }
+    if (!s_portal_qr_buf) {
+        free(tmp);
+        free(qr);
+        return;
+    }
+    s_portal_qr_px = side;
+    const uint16_t white = 0xffff, black = 0x0000;
+    for (int my = -2; my < mods - 2; my++) {
+        for (int mx = -2; mx < mods - 2; mx++) {
+            const uint16_t px = (mx >= 0 && my >= 0 && qrcodegen_getModule(qr, mx, my)) ? black : white;
+            for (int dy = 0; dy < cell; dy++) {
+                uint16_t *row = &s_portal_qr_buf[((my + 2) * cell + dy) * side];
+                for (int dx = 0; dx < cell; dx++) {
+                    row[(mx + 2) * cell + dx] = px;
+                }
+            }
+        }
+    }
+    lv_canvas_set_buffer(s_portal_qr, s_portal_qr_buf, side, side, LV_COLOR_FORMAT_RGB565);
+    free(tmp);
+    free(qr);
+}
+
+/* 这个提示是整页盖住的，必须给用户一个出口：轻触屏幕就收起（门户/热点继续开着，
+ * 到时间自己关），不至于被困在这一屏。 */
+static void portal_panel_tapped(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    lv_obj_t *panel = lv_event_get_target(e);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    ESP_LOGI(TAG, "portal hint dismissed by tap");
+}
+
+void muse_ui_portal_hint(bool visible, const char *line, const char *url,
+                         const char *pair_code, const char *payload)
+{
+    if (!s_ready) {
+        return;                                  /* UI 还没建好 */
+    }
+    muse_board->display_lock(-1);
+    if (!visible) {
+        if (s_portal_panel) {
+            lv_obj_add_flag(s_portal_panel, LV_OBJ_FLAG_HIDDEN);
+        }
+        muse_board->display_unlock();
+        return;
+    }
+    if (!s_portal_panel) {
+        s_portal_panel = lv_obj_create(lv_screen_active());
+        lv_obj_remove_style_all(s_portal_panel);
+        lv_obj_set_size(s_portal_panel, LV_PCT(100), LV_PCT(100));
+        lv_obj_set_style_bg_color(s_portal_panel, lv_color_hex(0x0b0a12), 0);
+        lv_obj_set_style_bg_opa(s_portal_panel, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(s_portal_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_add_flag(s_portal_panel, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(s_portal_panel, portal_panel_tapped, LV_EVENT_CLICKED, NULL);
+
+        lv_obj_t *title = make_label(s_portal_panel, UI_FONT_BIG, 0xffffff);
+        lv_label_set_text(title, tr("Scan to set up"));
+        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 22);
+
+        s_portal_qr = lv_canvas_create(s_portal_panel);
+        /* 二维码固定占中间这段；下面的文字全部按顶部坐标排，避免圆的边缘把字切掉。 */
+        lv_obj_align(s_portal_qr, LV_ALIGN_TOP_MID, 0, 54);
+
+        s_portal_ap = make_label(s_portal_panel, UI_FONT_TEXT, 0xffffff);
+        s_portal_url = make_label(s_portal_panel, UI_FONT_TEXT, COLOR_ACCENT);
+        s_portal_code = make_label(s_portal_panel, UI_FONT_TEXT, 0xffffff);
+        s_portal_tip = make_label(s_portal_panel, UI_FONT_TEXT, COLOR_DIM);
+        lv_label_set_text(s_portal_tip, tr("Scan to join. Tap anywhere to close this"));
+    }
+    lv_obj_remove_flag(s_portal_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_portal_panel);
+
+    portal_qr_paint(payload ? payload : "");
+    /* 文字跟着二维码底部排，避免和二维码撞在一起 */
+    const int qr_bottom = 54 + s_portal_qr_px;
+    lv_obj_align(s_portal_ap, LV_ALIGN_TOP_MID, 0, qr_bottom + 8);
+    lv_obj_align(s_portal_url, LV_ALIGN_TOP_MID, 0, qr_bottom + 24);
+    lv_obj_align(s_portal_code, LV_ALIGN_TOP_MID, 0, qr_bottom + 40);
+    lv_obj_align(s_portal_tip, LV_ALIGN_TOP_MID, 0, qr_bottom + 60);
+    if (s_portal_ap) {
+        lv_label_set_text(s_portal_ap, line ? line : "");
+    }
+    if (s_portal_url) {
+        lv_label_set_text(s_portal_url, url ? url : "");
+    }
+    if (s_portal_code) {
+        char line[80];
+        snprintf(line, sizeof(line), "%s %s", tr("Pairing code"), pair_code ? pair_code : "—");
+        lv_label_set_text(s_portal_code, line);
+    }
     muse_board->display_unlock();
 }
 

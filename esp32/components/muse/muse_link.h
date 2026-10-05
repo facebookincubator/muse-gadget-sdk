@@ -71,6 +71,9 @@ typedef struct {
     void (*wifi_nap)(bool nap);                   /* screen off a while: leave Wi-Fi until false */
     int (*wifi_saved)(muse_wifi_saved_t *out, int max);   /* most recently joined first */
     void (*wifi_forget)(const char *ssid);        /* one saved network; empty forgets them all */
+    /* 打开"用手机配网"门户：设备自开热点 + 网页，手机上选网络、用手机键盘打密码。
+     * 小圆屏上找网络/敲密码太折磨，而 BLE 配网要配对+加密、配好后还拒绝重新配对。 */
+    esp_err_t (*wifi_portal)(void);
 } muse_link_ops_t;
 
 void muse_link_register(const muse_link_ops_t *ops);

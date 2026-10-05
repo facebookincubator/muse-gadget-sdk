@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <stdatomic.h>
 
+#include "esp_check.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -51,6 +52,8 @@ static bool s_connecting = false;        // true during initial wifi_mgr_connect
 // The network wifi_mgr_connect() is joining, for status screens.
 static portMUX_TYPE s_join_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_join_ssid[33];
+static volatile uint8_t s_last_reason;   /* 最近一次断连原因码 */
+static char s_last_reason_ssid[33];      /* 以及是哪个网络 */
 static bool s_keep_connected = false;    // true once we've ever had a successful association
 static atomic_bool s_connect_pending = ATOMIC_VAR_INIT(false);
 // Not joined or joining: nothing for wifi_mgr_connect() to tear down first.
@@ -157,6 +160,10 @@ static void event_handler(void *arg, esp_event_base_t base,
             (const wifi_event_sta_disconnected_t *)data;
         ESP_LOGW(TAG, "station disconnected reason=%u rssi=%d",
                  ev ? ev->reason : 0, ev ? ev->rssi : 0);
+        s_last_reason = ev ? ev->reason : 0;
+        if (s_join_ssid[0]) {
+            strlcpy(s_last_reason_ssid, s_join_ssid, sizeof(s_last_reason_ssid));
+        }
 
         xEventGroupClearBits(s_events, BIT_CONNECTED | BIT_GOT_IP);
         atomic_store(&s_sta_idle, true);
@@ -412,6 +419,117 @@ bool wifi_mgr_joining(char *ssid, size_t cap) {
     if (joining && ssid && cap) strlcpy(ssid, s_join_ssid, cap);
     portEXIT_CRITICAL(&s_join_lock);
     return joining;
+}
+
+uint8_t wifi_mgr_last_disconnect_reason(void) { return s_last_reason; }
+
+void wifi_mgr_failure_text(char *out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    const char *who = s_last_reason_ssid[0] ? s_last_reason_ssid : "该网络";
+    switch (s_last_reason) {
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+        snprintf(out, out_size, "连不上 %s：密码可能不对", who);
+        break;
+    case WIFI_REASON_NO_AP_FOUND:
+    case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+        snprintf(out, out_size, "找不到 %s：不在范围内，或它只开了 5GHz", who);
+        break;
+    case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+        snprintf(out, out_size, "找不到 %s：信号太弱", who);
+        break;
+    case WIFI_REASON_ASSOC_FAIL:
+    case WIFI_REASON_CONNECTION_FAIL:
+        snprintf(out, out_size, "连 %s 被拒绝：路由可能满了，或信号不稳", who);
+        break;
+    case WIFI_REASON_BEACON_TIMEOUT:
+        snprintf(out, out_size, "%s 的信号丢了", who);
+        break;
+    case 0:
+        snprintf(out, out_size, "还没失败过");
+        break;
+    default:
+        snprintf(out, out_size, "连 %s 失败（reason=%u）", who, (unsigned)s_last_reason);
+        break;
+    }
+}
+
+/* ---- 配网门户：临时 AP，手机连上来用浏览器填 Wi-Fi ---- */
+
+static esp_netif_t *s_ap_netif;
+static bool s_portal;
+static char s_portal_ssid[33];
+static char s_portal_pass[16];
+static char s_portal_ip[16];
+
+static const char *portal_finish(void) {
+    /* APSTA 回到纯 STA：AP 关掉，已连的 STA 不受影响。 */
+    if (esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK) {
+        ESP_LOGW(TAG, "portal: failed to leave APSTA");
+    } else {
+        ESP_LOGI(TAG, "portal: AP off");
+    }
+    s_portal = false;
+    return s_portal_ip;
+}
+
+esp_err_t wifi_mgr_portal_start(void) {
+    wifi_mgr_init();
+    if (s_portal) return ESP_OK;
+    if (!s_ap_netif) {
+        s_ap_netif = esp_netif_create_default_wifi_ap();
+        ESP_RETURN_ON_FALSE(s_ap_netif, ESP_FAIL, TAG, "AP netif");
+    }
+
+    uint8_t mac[6] = {0};
+    esp_wifi_get_mac(WIFI_IF_AP, mac);
+    wifi_config_t ap = {0};
+    snprintf((char *)ap.ap.ssid, sizeof(ap.ap.ssid), "Muse-%02X%02X%02X",
+             mac[3], mac[4], mac[5]);
+    ap.ap.ssid_len = strlen((char *)ap.ap.ssid);
+    /* 带密码的 WPA2：一是 iOS 对开放网络的二维码加入支持很差（扫了报"无法加入网络"），
+     * 二是短时间开放热点也容易被同网的人扫到。密码随二维码给出去，用户不用打。 */
+    snprintf(s_portal_pass, sizeof(s_portal_pass), "muse%02x%02x%02x",
+             mac[3], mac[4], mac[5]);
+    strlcpy((char *)ap.ap.password, s_portal_pass, sizeof(ap.ap.password));
+    ap.ap.channel = 1;
+    ap.ap.max_connection = 4;
+    ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    ap.ap.pmf_cfg.required = false;
+
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "APSTA");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "AP config");
+
+    strlcpy(s_portal_ssid, (char *)ap.ap.ssid, sizeof(s_portal_ssid));
+    esp_netif_ip_info_t ip = {0};
+    if (esp_netif_get_ip_info(s_ap_netif, &ip) == ESP_OK && ip.ip.addr) {
+        snprintf(s_portal_ip, sizeof(s_portal_ip), IPSTR, IP2STR(&ip.ip));
+    } else {
+        strlcpy(s_portal_ip, "192.168.4.1", sizeof(s_portal_ip));
+    }
+    s_portal = true;
+    ESP_LOGI(TAG, "portal: AP 「%s」 up at http://%s/", s_portal_ssid, s_portal_ip);
+    return ESP_OK;
+}
+
+void wifi_mgr_portal_stop(void) {
+    if (!s_portal) return;
+    portal_finish();
+}
+
+bool wifi_mgr_portal_active(void) { return s_portal; }
+
+const char *wifi_mgr_portal_ip(void) {
+    return s_portal_ip[0] ? s_portal_ip : "192.168.4.1";
+}
+
+const char *wifi_mgr_portal_ssid(void) {
+    return s_portal_ssid[0] ? s_portal_ssid : "Muse-setup";
+}
+
+const char *wifi_mgr_portal_password(void) {
+    return s_portal_pass;
 }
 
 bool wifi_mgr_is_connected(void) {

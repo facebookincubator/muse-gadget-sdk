@@ -44,6 +44,7 @@
 
 #include "identity.h"
 #include "config_store.h"
+#include "portal.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
 #include "customer_product_info.h"
@@ -2731,9 +2732,13 @@ void app_run(void) {
         } else {
             ui_set_status("wifi_failed");
             led_status_set_state(LED_STATE_ERROR);
+            // 连不上：把配网门户开出来，换网络不用重置、也不用 App。
+            ESP_LOGI(TAG, "wi-fi join failed; opening the setup portal");
+            (void)portal_start();
         }
     } else {
-        ESP_LOGI(TAG, "no wifi creds, waiting for BLE provision");
+        ESP_LOGI(TAG, "no wifi creds; opening the setup portal");
+        (void)portal_start();
     }
 
 #if CONFIG_MUSE_ENABLED

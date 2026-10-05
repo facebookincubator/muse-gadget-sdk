@@ -57,6 +57,7 @@ before adding a feature to one.
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-lite` | `tools/board.sh seeed-respeaker-lite` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
+| Waveshare ESP32-S3-Touch-LCD-1.85B | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-185b` | `tools/muse/board.sh build s3-185b` |
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-box-3` | `tools/muse/board.sh build box3` |
 | AIPI Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-aipi` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18` | manual |
@@ -125,7 +126,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-185b|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the

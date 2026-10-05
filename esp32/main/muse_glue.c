@@ -15,8 +15,10 @@
  */
 
 #include "muse_glue.h"
+#include "i18n.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -34,9 +36,14 @@
 #include "noise_control.h"
 #include "stack_monitor.h"
 #include "wifi_known.h"
+#include "mbedtls/base64.h"
+#include "muse_audio.h"
+#include "muse_voice.h"
+#include "portal.h"
 #include "wifi_mgr.h"
 
 #include "muse_ble.h"
+#include "muse_input.h"
 #include "muse_board.h"
 #include "muse_link.h"
 #include "muse_mem.h"
@@ -195,7 +202,7 @@ static void op_wifi_status(muse_wifi_status_t *out) {
         // Found one: which, when it's not the first saved network.
         out->state = MUSE_WIFI_CONNECTING;
         strlcpy(out->ssid, joining, sizeof(out->ssid));
-        strlcpy(out->detail, "Joining...", sizeof(out->detail));
+        strlcpy(out->detail, tr("Joining..."), sizeof(out->detail));
     } else if (!out->ssid[0]) {
         out->state = MUSE_WIFI_NO_NETWORK;
     } else if (s_away) {
@@ -205,7 +212,7 @@ static void op_wifi_status(muse_wifi_status_t *out) {
         out->state = MUSE_WIFI_FAILED;
     } else {
         out->state = MUSE_WIFI_CONNECTING;
-        strlcpy(out->detail, "Joining...", sizeof(out->detail));
+        strlcpy(out->detail, tr("Joining..."), sizeof(out->detail));
     }
 }
 
@@ -327,6 +334,11 @@ static void scan_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+static esp_err_t op_wifi_portal(void)
+{
+    return portal_start();
+}
+
 static esp_err_t op_wifi_scan(void) {
     if (!(xEventGroupGetBits(s_ready) & BIT_LINK) || s_joining) return ESP_ERR_INVALID_STATE;
     if (s_scanning) return ESP_OK;
@@ -380,6 +392,7 @@ static void op_reset_setup(void) {
 }
 
 static const muse_link_ops_t s_ops = {
+    .wifi_portal = op_wifi_portal,
     .wifi_status = op_wifi_status,
     .wifi_apply = op_wifi_apply,
     .wifi_get = op_wifi_get,
@@ -575,7 +588,7 @@ static void keeper_task(void *arg) {
                 // Quietly: nothing here touches the screen. Waking it or a
                 // talk press looks again at once (muse_wifi_apply), unless
                 // this look was just now.
-                set_fail("No saved network nearby");
+                set_fail(tr("No saved network nearby"));
                 s_away = true;
                 int64_t wait = muse_state_asleep() || away_backoff < AWAY_AWAKE_MAX_US ? away_backoff
                                                                                       : AWAY_AWAKE_MAX_US;
@@ -583,7 +596,7 @@ static void keeper_task(void *arg) {
                 away_backoff = away_backoff * 2 > AWAY_MAX_US ? AWAY_MAX_US : away_backoff * 2;
                 ESP_LOGI(TAG, "no saved wifi network nearby; looking again in %d s", (int)(wait / 1000000));
             } else if (r == APP_WIFI_FAILED) {
-                set_fail("Can't join; retrying");
+                set_fail(tr("Can't join; retrying"));
                 s_away = false;
                 // Waking the screen or a talk press retries at once
                 // (muse_wifi_apply).
@@ -615,9 +628,151 @@ static void boot_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+
+/*
+ * 本机控制台命令（串口 '>' 开头，不走 BLE 配对）：
+ *   >portal=on | >portal=off | >portal       配网门户开关与状态
+ *   >wifi.scan                               扫网（带信号强度）
+ * 桌面调试用；也让"设备连不上时"有个不依赖手机的口子。
+ */
+static bool glue_console_hook(const char *line)
+{
+    if (!strncmp(line, "portal", 6)) {
+        const char *arg = line + 6;
+        if (!strcmp(arg, "=on")) {
+            esp_err_t err = portal_start();
+            printf("@portal %s ip=%s\n", err == ESP_OK ? "on" : "error", wifi_mgr_portal_ip());
+            fflush(stdout);
+            return true;
+        }
+        if (!strcmp(arg, "=ap")) {
+            esp_err_t err = portal_start_ap();     /* 强制热点模式：设备在隔离网时救命用 */
+            printf("@portal %s ip=%s\n", err == ESP_OK ? "ap" : "error", wifi_mgr_portal_ip());
+            fflush(stdout);
+            return true;
+        }
+        if (!strcmp(arg, "=qr")) {
+            portal_print_qr();          /* 串口打印二维码，烧录完直接扫 */
+            return true;
+        }
+        if (!strcmp(arg, "=off")) {
+            portal_stop();
+            printf("@portal off\n");
+            fflush(stdout);
+            return true;
+        }
+        char reason[96];
+        wifi_mgr_failure_text(reason, sizeof(reason));
+        printf("@portal active=%d ip=%s connected=%d reason=%s\n",
+               portal_active(), wifi_mgr_portal_ip(), wifi_mgr_is_connected(), reason);
+        fflush(stdout);
+        return true;
+    }
+    /* >wifi=<ssid>,<password>  —— 插着 USB 时最省事的配网：直接把凭据写进去并连。
+     * 不经过热点、网页、BLE 配对，也不依赖手机。 */
+    if (!strncmp(line, "wifi=", 5)) {
+        const char *arg = line + 5;
+        const char *comma = strchr(arg, ',');
+        if (!comma || comma == arg) {
+            printf("@wifi 用法: >wifi=<ssid>,<password>\n");
+            fflush(stdout);
+            return true;
+        }
+        char ssid[33] = {0};
+        char pass[65] = {0};
+        size_t sl = (size_t)(comma - arg);
+        if (sl > sizeof(ssid) - 1) sl = sizeof(ssid) - 1;
+        memcpy(ssid, arg, sl);
+        strlcpy(pass, comma + 1, sizeof(pass));
+        if (!muse_link_wifi_set(ssid, pass)) {
+            printf("@wifi 设备没接受（ssid 太长或为空）\n");
+        } else {
+            muse_wifi_apply();
+            printf("@wifi 已写入 %s 并开始连接（用 >portal 看结果）\n", ssid);
+        }
+        fflush(stdout);
+        return true;
+    }
+    /* >pcm=<base64 16k 单声道 s16le> —— 把 TTS 合成好的音频直接写进扬声器。
+     * 走 USB 而不是网络：设备可能挂在一个没有外网的网络上，但 USB 一定在。 */
+    if (!strncmp(line, "pcm=", 4)) {
+        const char *b64 = line + 4;
+        size_t cap = strlen(b64) * 3 / 4 + 8;
+        int16_t *pcm = heap_caps_malloc(cap, MUSE_BIG_CAPS);
+        size_t out = 0;
+        if (pcm && mbedtls_base64_decode((unsigned char *)pcm, cap, &out,
+                                         (const unsigned char *)b64, strlen(b64)) == 0) {
+            esp_err_t err = muse_audio_write(pcm, out / sizeof(int16_t));
+            printf("@pcm %u frames %s\n", (unsigned)(out / sizeof(int16_t)),
+                   err == ESP_OK ? "ok" : "fail");
+        } else {
+            printf("@pcm decode failed\n");
+        }
+        free(pcm);
+        fflush(stdout);
+        return true;
+    }
+    /* >mic=NN —— 从麦克风抓 NN 帧（16000 帧/秒），按 320 帧（20ms）分块 base64 回传。
+     * 给本地语音闭环用：Mac 侧收下来做 ASR，再走 LLM，最后用 >pcm= 把回复念出来。 */
+    if (!strncmp(line, "mic=", 4)) {
+        int frames = atoi(line + 4);
+        if (frames <= 0) frames = 320;
+        if (frames > 32000) frames = 32000;
+        int16_t buf[320];
+        unsigned char b64[600];
+        printf("@mic %d\n", frames);
+        fflush(stdout);
+        for (int left = frames; left > 0; ) {
+            int n = left > 320 ? 320 : left;
+            if (muse_audio_read(buf, (size_t)n) != ESP_OK) {
+                printf("@mic read failed\n");
+                break;
+            }
+            size_t olen = 0;
+            if (mbedtls_base64_encode(b64, sizeof(b64), &olen,
+                                      (const unsigned char *)buf, (size_t)n * 2) == 0) {
+                printf(">mic %.*s\n", (int)olen, (const char *)b64);
+            }
+            left -= n;
+        }
+        printf("@mic end\n");
+        fflush(stdout);
+        return true;
+    }
+    /* >micdump=0|1 —— 录音是否同时丢串口 */
+    if (!strncmp(line, "micdump=", 8)) {
+        muse_voice_set_mic_dump(atoi(line + 8) != 0);
+        printf("@micdump %d\n", muse_voice_mic_dump());
+        fflush(stdout);
+        return true;
+    }
+    /* >vol=NN —— 扬声器音量 0..100（设备默认 38%，TTS 听着偏小就调它） */
+    if (!strncmp(line, "vol=", 4)) {
+        int v = atoi(line + 4);
+        if (v < 0) v = 0;
+        if (v > 100) v = 100;
+        muse_audio_set_volume(v);
+        printf("@vol %d\n", v);
+        fflush(stdout);
+        return true;
+    }
+    if (!strcmp(line, "wifi.scan")) {
+        wifi_scan_entry_t found[16];
+        int n = wifi_mgr_scan(found, 16, 0, NULL);
+        printf("@wifi.scan %d\n", n);
+        for (int i = 0; i < n; i++) {
+            printf("  %4d dBm  %s\n", found[i].rssi, found[i].ssid);
+        }
+        fflush(stdout);
+        return true;
+    }
+    return false;
+}
+
 void muse_glue_start(void) {
     s_ready = xEventGroupCreate();
     muse_link_register(&s_ops);
+    muse_console_set_local_hook(glue_console_hook);
     muse_ble_set_name(identity_ble_name());
     ble_companion_t companion = {
         .svcs = muse_ble_services(),

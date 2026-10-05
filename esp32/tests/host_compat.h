@@ -59,4 +59,12 @@ static inline size_t muse_test_strlcat(char *dst, const char *src, size_t cap)
 #define strlcat muse_test_strlcat
 #endif
 
+/* Production UI code looks its strings up in the Chinese table
+ * (components/muse/i18n.h). Host harnesses compile that code without LVGL, so
+ * they get the English key back: the tests pin the untranslated text. */
+static inline const char *tr(const char *en)
+{
+    return en;
+}
+
 #endif
