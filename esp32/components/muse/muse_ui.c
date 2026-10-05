@@ -807,6 +807,10 @@ static void build_screen(void)
         /* It never scrolls, but LVGL would size its scrollbars from all its
          * children every time it draws any part of it. */
         lv_obj_set_scrollbar_mode(s_face, LV_SCROLLBAR_MODE_OFF);
+        /* Match the avatar's black canvas; the tile's theme background otherwise
+         * shows as a different-coloured square around the character. */
+        lv_obj_set_style_bg_color(s_face, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(s_face, LV_OPA_COVER, 0);
         s_settings = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_LEFT);
         face = s_face;
     }
