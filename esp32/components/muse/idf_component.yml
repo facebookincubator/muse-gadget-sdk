@@ -90,3 +90,15 @@ dependencies:
     version: "1.2.1"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_lcd7\""
+  espressif/esp_lcd_touch:
+    version: "^1.2.0"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_185c\""
+  espressif/esp_lcd_st77916:
+    version: "==2.0.2"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_185c\""
+  espressif/esp_lcd_touch_cst816s:
+    version: "==1.1.2"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_185c\""
