@@ -1391,6 +1391,62 @@ static void update_status(muse_mode_t mode, float now)
 
     static char caption[MUSE_CAPTION_MAX];
     bool fresh = muse_state_caption(caption, sizeof(caption), &s_caption_version);
+
+    /*
+     * AIPI / compact-display reply mode:
+     * expand the existing caption into a full-screen wrapped text page
+     * while Muse is thinking/speaking.
+     */
+    if (s_small) {
+        static bool compact_reply = false;
+        bool replying = mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING;
+
+        if (replying != compact_reply) {
+            compact_reply = replying;
+
+            if (replying) {
+                const lv_font_t *font = font_pick(caption_font(), &lv_font_unscii_8);
+                int cw = lv_font_get_glyph_width(font, 'M', ' ');
+                int pitch = lv_font_get_line_height(font) + 2;
+
+                int margin = 4;
+                int usable_w = s_w - margin * 2;
+                int usable_h = s_h - margin * 2;
+
+                int cols = usable_w / cw;
+                int lines = usable_h / pitch;
+
+                /* Tell Muse how much text fits on our new page. */
+                muse_state_set_page(cols, lines);
+
+                /* Full-screen reply: hide Muse and the progress bar. */
+                lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(s_bar, LV_OBJ_FLAG_HIDDEN);
+
+                lv_obj_set_size(s_caption_lbl, usable_w, usable_h);
+                lv_obj_set_style_pad_all(s_caption_lbl, 0, 0);
+                lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
+                lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_COVER, 0);
+                lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_WRAP);
+                lv_obj_align(s_caption_lbl, LV_ALIGN_CENTER, 0, 0);
+            } else {
+                /* Restore the normal compact AIPI display. */
+                lv_obj_remove_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_remove_flag(s_bar, LV_OBJ_FLAG_HIDDEN);
+
+                lv_obj_set_size(s_caption_lbl, s_w, 2 * 8 + 2 + 4);
+                lv_obj_set_style_pad_ver(s_caption_lbl, 2, 0);
+                lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
+                lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
+                lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
+                lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0,
+                             (s_tall || s_tv) ? -30 : -3);
+            }
+
+            fresh = true;
+        }
+    }
+
     int answer = -1;
     if (s_reply_lbl) {
         /* The speaker picks the layout, even mid-reply: the voice task pages to fit. */
