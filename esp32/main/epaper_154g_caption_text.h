@@ -60,6 +60,12 @@ static inline bool epaper_154g_caption_normalize(const char *src, char *out, siz
     size_t used = 0;
     if (!cap) return *p != 0;
     while (*p) {
+        // Choice prompts arrive as [[...]] for the app's buttons; leave them out.
+        if (p[0] == '[' && p[1] == '[') {
+            const char *close = strstr(p + 2, "]]");
+            p = close ? close + 2 : p + strlen(p);
+            continue;
+        }
         uint32_t code = epaper_154g_caption_decode(&p);
         if (code <= ' ' || code == 0xa0) {
             if (!used || out[used - 1] == ' ') continue;
@@ -67,7 +73,13 @@ static inline bool epaper_154g_caption_normalize(const char *src, char *out, siz
         } else if (code == 0x2018 || code == 0x2019) code = '\'';
         else if (code == 0x201c || code == 0x201d) code = '"';
         else if (code == 0x2013 || code == 0x2014 || code == 0xad) code = '-';
-        else if (!epaper_154g_caption_glyph(code)) code = '?';
+        else if (epaper_154g_caption_glyph(code)) {
+        } else if ((code >= 0x200b && code <= 0x200f) || (code >= 0x2060 && code <= 0x206f)
+                   || (code >= 0x2600 && code <= 0x27bf) || (code >= 0xfe00 && code <= 0xfe0f)
+                   || (code >= 0x1f000 && code <= 0x1faff) || (code >= 0xe0000 && code <= 0xe007f)) {
+            // Emoji, flags and invisible joiners have no 8x16 glyph: leave them out.
+            continue;
+        } else code = '?';
         size_t bytes = code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
         if (used + bytes >= cap) { out[used] = 0; return true; }
         if (bytes == 1) {

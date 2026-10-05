@@ -62,12 +62,20 @@ static void check_normalize(void) {
     assert(!epaper_154g_caption_normalize("  Hello,\n\n  world\t ", out, sizeof(out)));
     assert(!strcmp(out, "Hello, world"));
     // Typographic quotes and dashes become the font's ASCII, an unknown glyph a question mark.
-    assert(!epaper_154g_caption_normalize("\xe2\x80\x9cq\xe2\x80\x9d \xe2\x80\x94 \xf0\x9f\x98\x80", out, sizeof(out)));
+    assert(!epaper_154g_caption_normalize("\xe2\x80\x9cq\xe2\x80\x9d \xe2\x80\x94 \xd7\x90", out, sizeof(out)));
     assert(!strcmp(out, "\"q\" - ?"));
     assert(!epaper_154g_caption_normalize("Привет", out, sizeof(out)) && !strcmp(out, "Привет"));
     // Three-byte letters and symbols keep their glyphs.
     assert(!epaper_154g_caption_normalize("Γειά ქართული Tiếng № €", out, sizeof(out)));
     assert(!strcmp(out, "Γειά ქართული Tiếng № €"));
+    // Flags, emoji with their variation selector and joined emoji are left out.
+    assert(!epaper_154g_caption_normalize("\xf0\x9f\x87\xac\xf0\x9f\x87\xb7 Σήμερα \xe2\x98\x80\xef\xb8\x8f 15\xc2\xb0 "
+                                          "\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9", out, sizeof(out)));
+    assert(!strcmp(out, "Σήμερα 15°"));
+    // Choice prompts in [[...]] are left out, an unclosed one up to the end.
+    assert(!epaper_154g_caption_normalize("Коллаж? [[Весна 2027]] [[Картины]] ок", out, sizeof(out)));
+    assert(!strcmp(out, "Коллаж? ок"));
+    assert(!epaper_154g_caption_normalize("Выбор: [[Весна", out, sizeof(out)) && !strcmp(out, "Выбор:"));
     // A short buffer cuts between characters and reports the cut.
     assert(epaper_154g_caption_normalize("Привет", out, 4) && !strcmp(out, "П"));
     assert(!epaper_154g_caption_normalize(NULL, out, sizeof(out)) && !out[0]);

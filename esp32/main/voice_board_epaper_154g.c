@@ -42,7 +42,7 @@ static const audio_codec_ctrl_if_t *s_ctrl;
 static const audio_codec_data_if_t *s_data;
 static const audio_codec_if_t *s_codec;
 static esp_codec_dev_handle_t s_dev;
-static bool s_recording, s_playing;
+static bool s_recording, s_playing, s_cue;
 static bool s_tx_logged;
 static int s_volume = 60;
 // Every use and conversion is under s_lock, including microphone unpacking.
@@ -174,7 +174,8 @@ void voice_board_amp(bool on) {
 
 esp_err_t voice_board_speaker_write(const int32_t *frames, size_t count) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool playing = s_playing;
+    // A cue owns the speaker; a silent reply keeps its pace without writing over it.
+    bool playing = s_playing && !s_cue;
     xSemaphoreGive(s_lock);
     if (!playing) {
         bool audible = false;
@@ -259,6 +260,8 @@ esp_err_t voice_board_init(void) {
     if (err != ESP_OK) return err;
     i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan.auto_clear = true;
+    // 180 ms of microphone, so a busy network task does not drop speech.
+    chan.dma_desc_num = 12;
     err = i2s_new_channel(&chan, &s_tx, &s_rx);
     if (err != ESP_OK) return err;
     const i2s_std_config_t std = {
@@ -291,6 +294,9 @@ static esp_err_t cue(bool end, bool button) {
         0, -383, -707, -924, -1000, -924, -707, -383,
     };
     int32_t stereo[160 * 2];
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cue = true;
+    xSemaphoreGive(s_lock);
     voice_board_amp(true);
     esp_err_t err = ESP_OK;
     for (size_t chunk = 0; chunk < 5 && err == ESP_OK; chunk++) {
@@ -321,6 +327,9 @@ static esp_err_t cue(bool end, bool button) {
     int64_t left = tail_until - esp_timer_get_time();
     if (left > 0) vTaskDelay(pdMS_TO_TICKS((left + 999) / 1000));
     voice_board_amp(false);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cue = false;
+    xSemaphoreGive(s_lock);
     return err;
 }
 

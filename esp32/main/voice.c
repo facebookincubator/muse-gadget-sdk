@@ -147,6 +147,9 @@ static size_t record(void) {
     static int16_t chunk[CAPTURE_CHUNK];
     if (voice_board_mic_start() != ESP_OK) return 0;
 #if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+    // Above the network tasks, so a TLS handshake cannot starve the microphone.
+    UBaseType_t priority = uxTaskPriorityGet(NULL);
+    vTaskPrioritySet(NULL, 6);
     atomic_store(&s_capturing, true);
     // Steady green means the warm-up/discard finished: speaking can start.
     led_status_set_voice(LED_VOICE_LISTENING);
@@ -168,6 +171,7 @@ static size_t record(void) {
     }
 #if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
     atomic_store(&s_capturing, false);
+    vTaskPrioritySet(NULL, priority);
 #else
     voice_board_mic_stop();
 #endif
@@ -281,8 +285,6 @@ static bool run_turn(void) {
 #if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
     // Finish any old speaker task before the cue shares its I2S channel.
     while (!voice_player_wait(40)) {}
-    // Switch to the reply layout now, so the reply only redraws its text band.
-    voice_epaper_154g_show_text("...", NULL);
     if (voice_board_mic_start() != ESP_OK) return fail("microphone unavailable");
     if (voice_board_cue(false) != ESP_OK) {
         voice_board_mic_stop();
@@ -302,9 +304,6 @@ static bool run_turn(void) {
         muse_hatch_turn_cancel();
         if (!samples) return fail("microphone unavailable");
         ESP_LOGI(TAG, "press too short");
-#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
-        voice_epaper_154g_show_text(NULL, NULL);
-#endif
         led_status_set_voice(LED_VOICE_IDLE);
         return false;
     }
