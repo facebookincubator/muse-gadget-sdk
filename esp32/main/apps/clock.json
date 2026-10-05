@@ -1,0 +1,62 @@
+{
+ "id": "clock",
+ "title": "Clock",
+ "order": 10,
+ "bg": "#05030f",
+ "layout": "none",
+ "_about": "The time and date with a ring of seconds, placed freely (layout none). Updates every second only while its page shows (show/hide events, every, cancel); a tap switches 12/24 hours. Uses device.time.",
+ "children": [
+  {
+   "type": "arc",
+   "id": "ring",
+   "w": 340,
+   "h": 340,
+   "align": "center",
+   "min": 0,
+   "max": 60,
+   "value": 0,
+   "start": 0,
+   "end": 360,
+   "rotation": 270,
+   "thickness": 6,
+   "knob": false,
+   "color": "#a77dff"
+  },
+  {
+   "type": "label",
+   "id": "day",
+   "align": "center",
+   "y": -82,
+   "font": 20,
+   "color": "#a77dff",
+   "text": ""
+  },
+  {
+   "type": "label",
+   "id": "time",
+   "align": "center",
+   "y": -20,
+   "font": 48,
+   "color": "#f2efff",
+   "text": "--:--"
+  },
+  {
+   "type": "label",
+   "id": "date",
+   "align": "center",
+   "y": 40,
+   "font": 20,
+   "color": "#d8d2ff",
+   "text": ""
+  },
+  {
+   "type": "label",
+   "id": "ampm",
+   "align": "center",
+   "y": 78,
+   "font": 16,
+   "color": "#8b84a8",
+   "text": ""
+  }
+ ]
+}

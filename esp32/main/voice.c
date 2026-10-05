@@ -30,6 +30,7 @@
 
 #include "button.h"
 #include "config_store.h"
+#include "identity.h"
 #include "led_status.h"
 #include "muse_chat.h"
 #include "voice_board.h"
@@ -260,6 +261,7 @@ void voice_init(void) {
     }
     atomic_store(&s_volume, load_volume());
     voice_hatch_refresh();
+    muse_chat_set_device_id(identity_node_id());
     muse_hatch_start();
     // The stack is in PSRAM, so the task must not touch flash (NVS): pairing
     // needs an 8 KB internal block for its TLS task.

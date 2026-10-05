@@ -1,0 +1,92 @@
+{
+ "id": "timer",
+ "title": "Timer",
+ "order": 20,
+ "bg": "#0b0710",
+ "layout": "none",
+ "_about": "A focus timer: buttons with icons, an arc as a countdown ring, every() for the seconds (counting on while other pages show, drawing only on its own), then a chime (audio.beep) and the light blinking (led.set). A long press resets. It never switches pages by itself: only people do that, or Muse when asked.",
+ "children": [
+  {
+   "type": "arc",
+   "id": "ring",
+   "w": 330,
+   "h": 330,
+   "align": "center",
+   "y": -6,
+   "min": 0,
+   "max": 1500,
+   "value": 1500,
+   "start": 0,
+   "end": 360,
+   "rotation": 270,
+   "thickness": 12,
+   "knob": false,
+   "color": "#ff9f0a"
+  },
+  {
+   "type": "label",
+   "id": "state",
+   "align": "center",
+   "y": -78,
+   "font": 16,
+   "color": "#8b84a8",
+   "text": "READY"
+  },
+  {
+   "type": "label",
+   "id": "time",
+   "align": "center",
+   "y": -22,
+   "font": 48,
+   "color": "#f2efff",
+   "text": "25:00"
+  },
+  {
+   "type": "row",
+   "id": "btns",
+   "align": "center",
+   "y": 58,
+   "w": 250,
+   "gap": 14,
+   "children": [
+    {
+     "type": "button",
+     "id": "minus",
+     "w": 62,
+     "h": 52,
+     "icon": "minus",
+     "bg": "#2a2140",
+     "radius": 26
+    },
+    {
+     "type": "button",
+     "id": "go",
+     "w": 80,
+     "h": 60,
+     "icon": "play",
+     "bg": "#ff9f0a",
+     "radius": 30,
+     "color": "#1a1000"
+    },
+    {
+     "type": "button",
+     "id": "plus",
+     "w": 62,
+     "h": 52,
+     "icon": "plus",
+     "bg": "#2a2140",
+     "radius": 26
+    }
+   ]
+  },
+  {
+   "type": "label",
+   "id": "hint",
+   "align": "center",
+   "y": 114,
+   "font": 14,
+   "color": "#5f5878",
+   "text": "hold play to reset"
+  }
+ ]
+}

@@ -69,6 +69,7 @@ extern "C" {
 #include "muse_account_api.h"
 #include "muse_link.h"
 #include "muse_settings.h"
+#include "muse_state.h"
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
@@ -110,9 +111,12 @@ static const char *TAG = "muse_chat_session";
 #define AUTO_RETRY_MAX_US (120 * 1000000LL)
 #define FINAL_TIMEOUT_US (15 * 1000000LL)  /* release -> final transcript */
 #define REPLY_TIMEOUT_US (60 * 1000000LL)  /* chat posted -> first assistant message */
-#define TURN_CAP_US (180 * 1000000LL)
+#define TURN_CAP_US (300 * 1000000LL)      /* an agent at work (a web search, the device's apps) can take minutes */
 #define SETTLE_US (3 * 1000000LL)          /* quiet period that ends a turn */
-#define BUSY_HOLD_US (20 * 1000000LL)      /* how long a busy agent keeps it open */
+#define BUSY_HOLD_US (75 * 1000000LL)      /* a busy agent keeps it open this long past its last status */
+#define ACTIVITY_STALE_US (90 * 1000000LL) /* busy, and no status since: it stopped without saying */
+#define ONLINE_GRACE_US (20 * 1000000LL)   /* "online" with its task still open: a pause, or the end unsaid */
+#define FOLLOWUP_US (5 * 60 * 1000000LL)   /* after a request, its replies still get played this long */
 #define TEXT_REPLY_TIMEOUT_US (5 * 60 * 1000000LL)   /* typed turns: agents can work a while */
 #define TEXT_TURN_CAP_US (15 * 60 * 1000000LL)
 #define TEXT_BUSY_HOLD_US (5 * 60 * 1000000LL)
@@ -165,6 +169,8 @@ static bool s_connected;
 static muse_hatch_vm_t s_vm;       /* cached per-VM credentials */
 static bool s_vm_direct;           /* s_vm.vm_token is the device token itself */
 static char s_host[MUSE_HOST_MAX + 1];
+static bool s_unnamed;             /* the VM refused a chat request with device_id: send none */
+static char s_modality[16];        /* bench: every turn's output_modality; "" for each's own */
 /* When to connect without a turn asking: once Wi-Fi is up, again with backoff
  * if that fails or the connection drops, not after an idle close. */
 static int64_t s_auto_next_us;
@@ -172,7 +178,7 @@ static int64_t s_auto_backoff_us = AUTO_RETRY_MIN_US;
 
 /* ---- Streams on the connection ---- */
 
-enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS };
+enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS, K_IDENT };
 
 struct stream_t {
     int64_t id;
@@ -215,6 +221,14 @@ struct turn_t {
     uint32_t gen;
     bool text;               /* typed at the console: the reply goes there, unspoken */
     bool end_requested, end_sent, chat_posted, acked;
+    bool followup;           /* no note: the agent's later reply to the turn before */
+    bool named;              /* its chat request carried device_id */
+    bool voice_out;          /* it asked for output_modality "voice" */
+    bool head_sent;          /* the note's head went out (send_head) */
+    bool photo_sent;         /* ...carrying a photo */
+    bool photo_turn;         /* a photo talk key's: its note carries the photo that comes */
+    int64_t photo_by_us;     /* a photo is coming: the head waits for it until then, or 0 */
+    bool recovering;         /* the device's own "What did you find?" (s_recover) */
     int64_t dict_id, chat_id;
     int64_t start_us, end_sent_us, chat_us, last_event_us, last_content_us;
     uint64_t sent24;         /* 24 kHz frames sent to dictation */
@@ -250,6 +264,90 @@ struct turn_t {
  * there (the AIPI), so Wi-Fi setup and TLS have the internal RAM. */
 EXT_RAM_BSS_ATTR static turn_t s_turn;
 
+/*
+ * A reply that comes after its turn ended (the agent went on working, past
+ * the turn's end or its cap) is played as a follow-up turn. For a while after
+ * a voice turn, a new reply starts one; the turn's ids, kept here, tell the
+ * replies already played, and the thread messages that answer it.
+ * s_followup hands its generation to the voice task (muse_chat_followup).
+ */
+EXT_RAM_BSS_ATTR static struct {
+    char ids[2 + MAX_MSGS][80];   /* the user's first, then the replies */
+    int n, users;
+    int64_t until_us;
+    int64_t turn_us;   /* when the voice turn's request began */
+} s_prev;
+static std::atomic<uint32_t> s_followup{0};
+
+/*
+ * A voice turn's reply can come before tool work that goes on after it ("I'm
+ * looking that up"), and that work's answer may not be posted on its own.
+ * When the agent goes quiet after tool work that followed a voice turn's
+ * reply, with no answer of its own, the device asks "What did you find?",
+ * once, and plays the reply as a follow-up (a typed turn's goes to the
+ * console).
+ */
+#define RECOVER_QUIET_US (3 * 1000000LL)   /* quiet this long after the tool work: ask */
+/* A note that carries a photo goes as two chat messages. If its reply is empty
+ * or an error, both are in the chat, so asked again it can answer. */
+static const char PHOTO_RETRY_ASK[] = "Please answer my question about the photo I just sent.";
+#define PHOTO_RETRY_US (60 * 1000000LL)   /* only this soon after the turn ended: later it's out of the blue */
+#define RECOVER_WINDOW_US FOLLOWUP_US         /* only this long after the request: later work is someone else's */
+static const char RECOVER_ASK[] = "What did you find?";
+static struct {
+    bool armed;          /* a voice-mode turn ended: tool work after its reply may need asking */
+    bool text;           /* it was typed */
+    bool tooling;        /* tool work since the agent last spoke */
+    int64_t quiet_us;    /* when the agent went quiet after it, or 0 */
+    int64_t turn_us;     /* when the turn's request began */
+    bool retry;          /* a photo question failed: ask it again */
+    int64_t retry_by_us; /* ...before this */
+} s_recover;
+
+static int64_t now_us(void);
+
+/* A photo for the next voice note (muse_chat_attach_image), and one on its
+ * way for the turn a talk key is beginning (muse_chat_expect_photo). Muse
+ * makes each of a note's items a message of its own: the photo goes first, so
+ * the question follows the picture it's about. */
+#define ATTACH_TTL_US (60 * 1000000LL)
+#define PHOTO_EXPECT_US (2 * 1000000LL)   /* the turn must be posted this soon after */
+#define PHOTO_WAIT_US (3 * 1000000LL)     /* the note waits this long for it, once open */
+static std::atomic<int64_t> s_expect_photo_us{0};
+/* The generation of the turn that's a photo turn, decided when it's posted:
+ * connecting first can take longer than PHOTO_EXPECT_US. */
+static std::atomic<uint32_t> s_photo_gen{0};
+static portMUX_TYPE s_attach_lock = portMUX_INITIALIZER_UNLOCKED;
+static struct {
+    char *b64;
+    size_t len;
+    int64_t at;
+} s_attach;
+
+static bool attachment_waiting(void)
+{
+    portENTER_CRITICAL(&s_attach_lock);
+    bool waiting = s_attach.b64 != nullptr;
+    portEXIT_CRITICAL(&s_attach_lock);
+    return waiting;
+}
+
+/* The photo waiting for this note, if a fresh one is: the caller frees it. */
+static char *take_attachment(size_t *len)
+{
+    portENTER_CRITICAL(&s_attach_lock);
+    char *b64 = s_attach.b64;
+    *len = s_attach.len;
+    bool fresh = b64 && now_us() - s_attach.at < ATTACH_TTL_US;
+    s_attach.b64 = nullptr;
+    portEXIT_CRITICAL(&s_attach_lock);
+    if (b64 && !fresh) {
+        heap_caps_free(b64);
+        b64 = nullptr;
+    }
+    return b64;
+}
+
 /* Turn milestones, logged together when the turn ends. */
 enum mark_t : uint8_t { M_RELEASE, M_SENT, M_ACK, M_TEXT, M_DONE, M_TTS, M_MP3, M_AUDIO, M_COUNT };
 static const char *const MARK_NAMES[M_COUNT] = { "release", "sent", "ack", "text", "done", "tts", "mp3", "audio" };
@@ -257,6 +355,60 @@ static int64_t s_marks[M_COUNT];
 static char s_reply_shown[EV_TEXT];   /* the pre-speech caption last sent */
 
 static void mark(mark_t m);
+
+/*
+ * What the agent is doing, turn or no turn. agent.status carries
+ * activity_code ("working", "responding", "online"...) and activity_text
+ * ("Reviewing docs"); task.status says when the whole task is "completed".
+ * "online" alone can be a pause between steps (after a reply it may go on to
+ * "Transcribing audio"...), so the task is open from the first "working" to
+ * its "completed", or to "online" and nothing more for ONLINE_GRACE_US. The
+ * voice task and the UI read it (muse_chat_activity).
+ */
+static portMUX_TYPE s_act_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_act_open;        /* a task under way */
+static int64_t s_act_online;   /* when it last said "online" with the task open, or 0 */
+static int64_t s_act_us;       /* its last status */
+static char s_act_text[48];
+
+static bool activity_busy_locked(int64_t t)
+{
+    return s_act_open && t - s_act_us < ACTIVITY_STALE_US && (!s_act_online || t - s_act_online < ONLINE_GRACE_US);
+}
+
+static bool activity_busy(void)
+{
+    portENTER_CRITICAL(&s_act_lock);
+    bool busy = activity_busy_locked(now_us());
+    portEXIT_CRITICAL(&s_act_lock);
+    return busy;
+}
+
+/* A status: working (with what, or NULL to keep it), online (a pause, maybe
+ * the end), or the task finished. */
+enum act_t { ACT_WORKING, ACT_ONLINE, ACT_FINISHED };
+
+static void note_activity(act_t a, const char *text)
+{
+    portENTER_CRITICAL(&s_act_lock);
+    int64_t t = now_us();
+    if (a == ACT_WORKING) {
+        s_act_open = true;
+        s_act_online = 0;
+        if (text) {
+            strlcpy(s_act_text, text, sizeof(s_act_text));
+        }
+    } else {
+        s_act_text[0] = '\0';
+        if (a == ACT_FINISHED) {
+            s_act_open = false;
+        } else if (s_act_open && !s_act_online) {
+            s_act_online = t;
+        }
+    }
+    s_act_us = t;
+    portEXIT_CRITICAL(&s_act_lock);
+}
 static bool open_note(void);
 static void log_marks(void);
 static int16_t *s_pcm;       /* MINIMP3_MAX_SAMPLES_PER_FRAME */
@@ -746,6 +898,7 @@ static void disconnect(const char *why)
         s.kind = K_NONE;
     }
     s_connected = false;
+    s_recover.retry = false;   /* not asked again after a reconnect, maybe much later */
 }
 
 static void forget_vm(void)
@@ -799,11 +952,51 @@ static bool resolve_vm(char *err, size_t err_cap)
     return false;
 }
 
+/* The Muse's name (its identity's, "Jolly"), for the pet to go by. */
+static portMUX_TYPE s_name_lock = portMUX_INITIALIZER_UNLOCKED;
+static char s_muse_name[32];
+EXT_RAM_BSS_ATTR static char s_ident[2048];   /* the identity's reply as it comes */
+static size_t s_ident_len;
+static int64_t s_ident_next_us;   /* when to ask for it (again), until known */
+static int s_ident_tries;         /* asks on this connection */
+#define IDENT_RETRY_US (30 * 1000000LL)
+#define IDENT_TRIES 3             /* then not until the next connection */
+
+/* An ask still waiting for its reply: no second one meanwhile. */
+static bool ident_pending(void)
+{
+    for (auto &s : s_streams) {
+        if (s.kind == K_IDENT) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void ident_end(bool ok)
+{
+    s_ident[s_ident_len] = '\0';
+    cJSON *root = ok ? cJSON_Parse(s_ident) : nullptr;
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "name"));
+    if (name && name[0]) {
+        portENTER_CRITICAL(&s_name_lock);
+        strlcpy(s_muse_name, name, sizeof(s_muse_name));
+        portEXIT_CRITICAL(&s_name_lock);
+        ESP_LOGI(TAG, "the Muse's name: %s", name);
+    } else {
+        ESP_LOGW(TAG, "no name in the Muse's identity (%s)", ok ? "unreadable" : "failed");
+    }
+    cJSON_Delete(root);
+    s_ident_len = 0;
+}
+
 static bool open_subscription(void)
 {
     s_last_seq = 0;
     s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", "{}",
                                 true);
+    s_ident_next_us = 0;   /* ask for the name as soon as connected (the loop does) */
+    s_ident_tries = 0;
     return s_conn.sub_id != 0;
 }
 
@@ -951,8 +1144,53 @@ static void turn_reset_streams(void)
     }
 }
 
+/* A reply of the last voice turn or its follow-ups; when full, the oldest
+ * reply (never the user's message) makes room. */
+static void prev_add(const char *id)
+{
+    const int cap = (int)(sizeof(s_prev.ids) / sizeof(s_prev.ids[0]));
+    if (s_prev.n == cap) {
+        memmove(s_prev.ids[s_prev.users], s_prev.ids[s_prev.users + 1],
+                (size_t)(cap - s_prev.users - 1) * sizeof(s_prev.ids[0]));
+        s_prev.n--;
+    }
+    strlcpy(s_prev.ids[s_prev.n++], id, sizeof(s_prev.ids[0]));
+}
+
 static void turn_finish(void)
 {
+    if (s_turn.photo_turn || s_turn.head_sent) {
+        size_t n;
+        heap_caps_free(take_attachment(&n));   /* one that came too late for this note isn't the next's */
+    }
+    if (s_recover.retry) {
+        s_recover.retry_by_us = now_us() + PHOTO_RETRY_US;
+    }
+    if (s_turn.voice_out && s_turn.nmsgs && !s_turn.recovering) {
+        s_recover.armed = true;
+        s_recover.text = s_turn.text;
+        s_recover.turn_us = s_turn.start_us;   /* the request */
+    }
+    if (!s_turn.text && (s_turn.user_ids[0][0] || s_turn.followup)) {
+        /* Its replies, or replies to them, may still come. A follow-up keeps
+         * the ids it came for, adding its own. */
+        if (!s_turn.followup) {
+            s_prev.n = 0;
+            s_prev.turn_us = s_turn.start_us;   /* the request */
+            for (int k = 0; k < 2; k++) {
+                if (s_turn.user_ids[k][0]) strlcpy(s_prev.ids[s_prev.n++], s_turn.user_ids[k], sizeof(s_prev.ids[0]));
+            }
+            s_prev.users = s_prev.n;
+        }
+        for (int i = 0; i < s_turn.nmsgs; i++) {
+            /* One still arriving when the turn ended (at its cap) is left out:
+             * when it's done, it plays as a follow-up. */
+            if (s_turn.msgs[i].done) {
+                prev_add(s_turn.msgs[i].id);
+            }
+        }
+        s_prev.until_us = s_prev.turn_us + FOLLOWUP_US;
+    }
     turn_reset_streams();
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
@@ -985,6 +1223,7 @@ static void turn_done(bool complete)
 /* Ends any turn in progress and starts a fresh one. False if Hatch can't be reached. */
 static bool turn_start(uint32_t gen, bool text)
 {
+    s_recover.armed = s_recover.retry = false;
     if (s_turn.phase != P_IDLE) {
         if (s_turn.text) {
             turn_fail("INTERRUPTED");
@@ -1015,9 +1254,11 @@ static bool turn_start(uint32_t gen, bool text)
 
 static void turn_begin(uint32_t gen)
 {
+    bool photo = s_photo_gen.load() == gen;   /* turn_start clears s_turn */
     if (!turn_start(gen, false)) {
         return;
     }
+    s_turn.photo_turn = photo;
     if (VOICE_NOTE) {
         if (!open_note()) {
             disconnect("chat open failed");
@@ -1107,11 +1348,65 @@ static bool send_note_part(bool last)
     return send_body(s_turn.chat_id, s_turn.chunk, n, last);
 }
 
+/* The node id for a chat request's device_id, or NULL. */
+static const char *device_id(void)
+{
+    return s_unnamed ? nullptr : muse_chat_device_id();
+}
+
+/* The note's head: the photo's item first if one waits, then the audio's,
+ * whose base64 the parts continue. */
+static bool send_head(void)
+{
+    s_turn.head_sent = true;
+    const char *dev = device_id();
+    char head[sizeof(MUSE_HATCH_NOTE_HEAD) + 80];
+    int n = snprintf(head, sizeof(head), MUSE_CHAT_NOTE_START "%s\",%s%s%s" MUSE_CHAT_NOTE_ITEMS,
+                     s_modality[0] ? s_modality : "text", dev ? "\"device_id\":\"" : "", dev ? dev : "",
+                     dev ? "\"," : "");
+    if (n <= 0 || n >= (int)sizeof(head)) {
+        return false;
+    }
+    s_turn.named = dev != nullptr;
+    s_turn.voice_out = s_modality[0] && !strcmp(s_modality, "voice");   /* replies are text unless asked */
+    s_turn.body_sent = (size_t)n;
+    size_t plen;
+    char *photo = take_attachment(&plen);
+    if (photo && !s_turn.photo_turn) {
+        heap_caps_free(photo);   /* only a photo talk key's note carries one, never a plain talk */
+        photo = nullptr;
+    }
+    if (!photo) {
+        return send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(head), (size_t)n, false);
+    }
+    s_turn.photo_sent = true;
+    /* The head ends opening the audio's item: the photo's goes in before it. */
+    static const char audio[] = MUSE_CHAT_NOTE_ITEMS;
+    static const char open_photo[] = "\"items\":[{\"type\":\"file\",\"mime_type\":\"image/jpeg\",\"filename\":\"photo.jpg\",\"data_base64\":\"";
+    static const char next[] = "\"},";
+    const size_t items = sizeof("\"items\":[") - 1;
+    n -= sizeof(audio) - 1;
+    bool ok = send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(head), (size_t)n, false) &&
+              send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(open_photo), sizeof(open_photo) - 1, false);
+    for (size_t off = 0; ok && off < plen; off += CHAT_PART) {
+        size_t k = plen - off < CHAT_PART ? plen - off : CHAT_PART;
+        ok = send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(photo) + off, k, false);
+    }
+    ok = ok && send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(next), sizeof(next) - 1, false) &&
+         send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(audio) + items, sizeof(audio) - 1 - items, false);
+    ESP_LOGI(TAG, "the note carries a photo, first (%u bytes of base64)", (unsigned)plen);
+    s_turn.body_sent += plen;
+    heap_caps_free(photo);
+    return ok;
+}
+
 /*
  * Opens the chat request at the press and streams the note while it's
  * recorded, so only the last chunk goes out after the release. The length
  * isn't known until the end, so the WAV header gives the streaming "unknown"
- * size and the server reads to the end of the data.
+ * size and the server reads to the end of the data. A talk key that takes a
+ * photo (muse_chat_expect_photo) holds the head back until the photo comes,
+ * the mic's audio waiting meanwhile, so the photo goes first.
  */
 static bool open_note(void)
 {
@@ -1119,18 +1414,23 @@ static bool open_note(void)
     if (!s_turn.chat_id) {
         return false;
     }
-    s_turn.body_sent = sizeof(MUSE_HATCH_NOTE_HEAD) - 1;
-    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(MUSE_HATCH_NOTE_HEAD), sizeof(MUSE_HATCH_NOTE_HEAD) - 1, false)) {
-        return false;
-    }
     muse_hatch_wav_header(s_turn.note, MIC_RATE);
     s_turn.note_len = MUSE_HATCH_WAV_HEADER;
-    return true;
+    s_turn.photo_by_us = s_turn.photo_turn ? now_us() + PHOTO_WAIT_US : 0;
+    return s_turn.photo_by_us || send_head();
 }
 
 /* Moves the mic into the note request; on release, sends the rest and waits for the reply. */
 static bool record_note(void)
 {
+    if (!s_turn.head_sent) {
+        if (s_turn.photo_by_us && now_us() < s_turn.photo_by_us && !attachment_waiting()) {
+            return true;   /* the photo is still coming: the mic's audio waits in s_in */
+        }
+        if (!send_head()) {
+            return false;
+        }
+    }
     for (;;) {
         size_t room = NOTE_PART_BYTES - s_turn.note_len;
         size_t left = NOTE_MAX_BYTES - s_turn.pcm_bytes;
@@ -1174,7 +1474,13 @@ static void send_chat(const char *text, const char *modality)
     s_turn.chat_posted = true;
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "message", text);
-    cJSON_AddStringToObject(body, "output_modality", modality);
+    cJSON_AddStringToObject(body, "output_modality", s_modality[0] ? s_modality : modality);
+    const char *dev = device_id();
+    if (dev) {
+        cJSON_AddStringToObject(body, "device_id", dev);
+    }
+    s_turn.named = dev != nullptr;
+    s_turn.voice_out = !strcmp(s_modality[0] ? s_modality : modality, "voice");
     char *json = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     size_t len = json ? strlen(json) : 0;
@@ -1217,14 +1523,14 @@ static void post_chat(const char *text)
     send_chat(text, "text");
 }
 
-/* A typed turn: the text goes straight to the chat. */
-static void text_begin(const char *text)
+/* A typed turn: the text goes straight to the chat, as text or as speech. */
+static void text_begin(const char *text, bool voice)
 {
     if (!turn_start(0, true)) {
         return;
     }
-    ESP_LOGI(TAG, "typed turn: %u bytes", (unsigned)strlen(text));
-    send_chat(text, "text");
+    ESP_LOGI(TAG, "typed turn%s: %u bytes", voice ? " (as speech)" : "", (unsigned)strlen(text));
+    send_chat(text, "text");   /* as a voice note is: Muse replies in text */
     if (s_turn.phase == P_WAIT_REPLY) {
         mark(M_SENT);
         muse_hatch_console("sent", nullptr, "\"bytes\":%u", (unsigned)strlen(text));
@@ -1288,9 +1594,33 @@ static int find_msg(const char *id)
     return -1;
 }
 
+/* A message in a thread, not the conversation itself (a background agent's
+ * working notes, say): payload.is_thread, or its chat_context's. */
+static bool in_thread(cJSON *payload)
+{
+    cJSON *ctx = cJSON_GetObjectItem(payload, "chat_context");
+    const char *tid = cJSON_GetStringValue(cJSON_GetObjectItem(ctx, "thread_id"));
+    return cJSON_IsTrue(cJSON_GetObjectItem(payload, "is_thread")) || cJSON_IsTrue(cJSON_GetObjectItem(ctx, "is_thread"))
+           || (tid && tid[0]);
+}
+
+static bool is_prev_id(const char *id)
+{
+    for (int i = 0; id && id[0] && i < s_prev.n; i++) {
+        if (!strcmp(id, s_prev.ids[i])) return true;
+    }
+    return false;
+}
+
 static bool is_user_id(const char *id)
 {
     return id && id[0] && (!strcmp(id, s_turn.user_ids[0]) || !strcmp(id, s_turn.user_ids[1]));
+}
+
+/* Whose request a message answers: its chat_context's device_id, or NULL. */
+static const char *msg_device(cJSON *payload)
+{
+    return cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(payload, "chat_context"), "device_id"));
 }
 
 /* The message `id` if it belongs to this turn, binding it on first sight; else -1. */
@@ -1307,8 +1637,17 @@ static int bind_msg(const char *id, cJSON *payload)
     if (!parent) {
         parent = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "parent_message_id"));
     }
-    /* Once the ack names our message, replies to anything else are someone else's. */
-    if (parent && parent[0] && s_turn.acked && !is_user_id(parent) && find_msg(parent) < 0) {
+    /* Once the ack names our message, replies to anything else are someone
+     * else's; in a follow-up, so are the turn before's. */
+    if (parent && parent[0] && s_turn.acked && !is_user_id(parent) && find_msg(parent) < 0
+        && !(s_turn.followup && is_prev_id(parent))) {
+        muse_chat_reject(&s_turn.rejected, id);
+        return -1;
+    }
+    /* One that names another device answers someone else (the Muse app, say). */
+    const char *dev = msg_device(payload);
+    const char *mine = muse_chat_device_id();
+    if (dev && dev[0] && mine && strcmp(dev, mine)) {
         muse_chat_reject(&s_turn.rejected, id);
         return -1;
     }
@@ -1374,6 +1713,11 @@ static void message_done(int i, const char *final_text)
     if (m.done) {
         return;
     }
+    if (s_turn.photo_sent && !s_turn.recovering &&
+        (!(m.len || (final_text && final_text[0])) || (final_text && !strncmp(final_text, "Sorry, I ran into a problem", 27)))) {
+        s_recover.retry = true;
+        ESP_LOGW(TAG, "Muse failed the photo question: asking again");
+    }
     m.done = true;
     mark(M_DONE);
     if (s_turn.text) {
@@ -1393,7 +1737,8 @@ static void message_done(int i, const char *final_text)
     if (m.len && m.tts == TTS_NONE) {
         m.tts = TTS_QUEUED;
     }
-    ESP_LOGI(TAG, "message %s done (%u chars)", m.id, (unsigned)m.len);
+    ESP_LOGI(TAG, "message %s done (%u chars): %.160s", m.id, (unsigned)m.len,
+             s_turn.texts && m.len ? s_turn.texts + i * TEXT_MAX : "");
 }
 
 static const char *msg_id(cJSON *payload, cJSON *event)
@@ -1406,6 +1751,59 @@ static const char *msg_id(cJSON *payload, cJSON *event)
         id = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "id"));
     }
     return id && id[0] ? id : nullptr;
+}
+
+static const char *parent_of(cJSON *payload)
+{
+    const char *p = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "reply_to_message_id"));
+    return p ? p : cJSON_GetStringValue(cJSON_GetObjectItem(payload, "parent_message_id"));
+}
+
+/* Idle, a reply to the last voice turn: starts a turn with no note to play it. */
+static void followup_begin(void)
+{
+    uint32_t gen = ++s_gen;
+    uint8_t *chunk = s_turn.chunk, *mp3 = s_turn.mp3, *note = s_turn.note;
+    char *texts = s_turn.texts;
+    s_turn = turn_t{};
+    s_turn.chunk = chunk;
+    s_turn.mp3 = mp3;
+    s_turn.note = note;
+    s_turn.texts = texts;
+    s_turn.gen = gen;
+    s_turn.tts_msg = -1;
+    s_turn.followup = true;
+    s_turn.acked = true;
+    s_turn.phase = P_WAIT_REPLY;
+    s_turn.start_us = s_turn.chat_us = s_turn.last_event_us = now_us();
+    memset(s_marks, 0, sizeof(s_marks));
+    s_reply_shown[0] = '\0';
+    s_followup.store(gen);
+#if CONFIG_MUSE_ENABLED   /* the Voice PE board has no face or rest (main/voice_muse_chat.c) */
+    muse_state_set_asleep(false);   /* the voice task comes out of its rest for it */
+#endif
+    ESP_LOGI(TAG, "a follow-up to the last turn: playing it");
+}
+
+/* The agent went quiet after tool work with no answer, or failed a photo
+ * question: ask, once. */
+static void recover_ask(const char *ask)
+{
+    bool text = s_recover.text;
+    s_recover.armed = false;
+    s_recover.retry = false;
+    ESP_LOGI(TAG, "asking \"%s\"", ask);
+    if (text) {
+        if (!turn_start(0, true)) {
+            return;
+        }
+        muse_hatch_console("recover", ask, nullptr);
+    } else {
+        followup_begin();   /* the voice task plays the reply */
+        s_turn.acked = false;
+    }
+    s_turn.recovering = true;
+    send_chat(ask, "voice");
 }
 
 static void on_event(cJSON *line)
@@ -1421,25 +1819,63 @@ static void on_event(cJSON *line)
         }
         s_last_seq = v > s_last_seq ? v : s_last_seq;
     }
-    if (s_turn.phase != P_WAIT_REPLY) {
-        return;
-    }
     const char *event = cJSON_GetStringValue(cJSON_GetObjectItem(line, "event")) ?: "";
     cJSON *payload = cJSON_GetObjectItem(line, "payload");
 
+    /* The agent's work, whatever the device is doing: after its reply it may go
+     * on (actions, more messages), or work on something started elsewhere. */
     if (!strcmp(event, "agent.status") || !strcmp(event, "task.status")) {
         const char *code = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "activity_code"));
         const char *status = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "status"));
-        bool was = s_turn.agent_busy;
+        const char *what = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "activity_text"));
         if (code) {
-            s_turn.agent_busy = code[0] && strcmp(code, "online") && strcmp(code, "idle");
+            bool resting = !code[0] || !strcmp(code, "online") || !strcmp(code, "idle") || !strcmp(code, "offline");
+            if (!strcmp(code, "responding")) {
+                what = "";   /* "is responding": its words are on the way */
+            }
+            note_activity(resting ? ACT_ONLINE : ACT_WORKING, what);
+            if (!resting && what && what[0] && strcmp(what, "is working") && strncmp(what, "Transcrib", 9)) {
+                s_recover.tooling = true;   /* "Searching web"...: at work, not just thinking of a reply */
+                s_recover.quiet_us = 0;
+            } else if (resting && s_recover.tooling && !s_recover.quiet_us) {
+                s_recover.quiet_us = now_us();
+            }
+            const char *agent = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "agent_id"));
+            ESP_LOGI(TAG, "agent %s%s%s (%.8s%s)", resting ? "resting" : "working", what && what[0] ? ": " : "",
+                     what && what[0] ? what : "", agent ? agent : "?",
+                     cJSON_IsTrue(cJSON_GetObjectItem(payload, "is_thread")) ? ", thread" : "");
         } else if (status) {
-            s_turn.agent_busy = status[0] && strcmp(status, "completed") && strcmp(status, "failed");
+            /* A finished task with helpers still out isn't the end. A status it
+             * doesn't know changes nothing: read as work, one that ended
+             * (connecting replays the last task's, "errored") kept the face
+             * busy until the status went stale. */
+            static const char *const ENDED[] = { "completed", "failed", "errored", "error", "cancelled", "canceled",
+                                                 "aborted", "timeout", "timed_out", "stopped", "done", "succeeded" };
+            static const char *const GOING[] = { "running", "started", "queued", "pending", "in_progress", "working",
+                                                 "active", "resumed" };
+            bool ended = false, going = false;
+            for (const char *e : ENDED) ended = ended || !strcmp(status, e);
+            for (const char *g : GOING) going = going || !strcmp(status, g);
+            cJSON *helpers = cJSON_GetObjectItem(payload, "active_subagent_count");
+            bool out = cJSON_IsNumber(helpers) && helpers->valuedouble > 0;
+            if (ended || going) {
+                note_activity(ended && !out ? ACT_FINISHED : ACT_WORKING, nullptr);
+            }
+            if (ended && !out && s_recover.tooling && !s_recover.quiet_us) {
+                s_recover.quiet_us = now_us();
+            }
+            char *raw = cJSON_PrintUnformatted(payload);
+            ESP_LOGI(TAG, "task %s%s: %.240s", status, ended || going ? "" : " (not known: ignored)", raw ? raw : "");
+            cJSON_free(raw);
         }
-        if (s_turn.text && s_turn.agent_busy != was) {
-            muse_hatch_console("busy", nullptr, "\"on\":%s", s_turn.agent_busy ? "true" : "false");
+        bool busy = activity_busy();
+        if (s_turn.phase == P_WAIT_REPLY) {
+            if (s_turn.text && s_turn.agent_busy != busy) {
+                muse_hatch_console("busy", nullptr, "\"on\":%s", busy ? "true" : "false");
+            }
+            s_turn.agent_busy = busy;
+            s_turn.last_event_us = now_us();
         }
-        s_turn.last_event_us = now_us();
         return;
     }
     bool start = !strcmp(event, "delta.message_start");
@@ -1447,10 +1883,51 @@ static void on_event(cJSON *line)
     bool done = !strcmp(event, "delta.message_done");
     bool full = !strcmp(event, "message.assistant");
     if (!start && !append && !done && !full) {
+        /* Anything else, briefly: a reply might come some other way. */
+        char *raw = cJSON_PrintUnformatted(payload);
+        ESP_LOGI(TAG, "event %s: %.200s", event, raw ? raw : "");
+        cJSON_free(raw);
         return;
     }
     const char *id = msg_id(payload, line);
+    const char *parent = parent_of(payload);
+    bool thread = in_thread(payload);
+    if ((start || full) && !thread) {
+        s_recover.tooling = false;
+        s_recover.quiet_us = 0;
+    }
+    /* Its done event carries the whole text, so one begun before the turn
+     * ended can still start it. */
+    /* Unasked, only a reply that names this device is shown: not the app's,
+     * nor a request sent some other way. */
+    const char *from = msg_device(payload);
+    bool mine = from && device_id() && !strcmp(from, device_id());
+    if (s_turn.phase == P_IDLE && (start || done || full) && id && now_us() < s_prev.until_us && !is_prev_id(id)
+        && mine && (!thread || (parent && is_prev_id(parent)))) {
+        followup_begin();
+    }
+    const char *channel = cJSON_GetStringValue(
+        cJSON_GetObjectItem(cJSON_GetObjectItem(payload, "chat_context"), "originating_channel"));
+    if (start) {
+        /* How a message is linked (agent, thread, context...): what tells ours. */
+        char *raw = cJSON_PrintUnformatted(payload);
+        if (raw) {
+            ESP_LOGI(TAG, "message start: %.500s", raw);
+            cJSON_free(raw);
+        }
+    }
+    if (s_turn.phase != P_WAIT_REPLY) {
+        if (!append) {
+            ESP_LOGI(TAG, "%s %s (reply to %s, %s%s): not ours, no turn", event, id ? id : "?", parent ? parent : "-",
+                     thread ? "thread, " : "", channel ? channel : "?");
+        }
+        return;
+    }
     int i = id ? bind_msg(id, payload) : -1;
+    if (!append) {
+        ESP_LOGI(TAG, "%s %s (reply to %s, %s%s): %s", event, id ? id : "?", parent ? parent : "-",
+                 thread ? "thread, " : "", channel ? channel : "?", i >= 0 ? "ours" : "not ours");
+    }
     if (i < 0) {
         return;
     }
@@ -1504,6 +1981,12 @@ static void on_chat_ack(stream_t *s)
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
+        return;
+    }
+    /* A follow-up's speech waits for the voice task to take it: until then it
+     * may still be playing out the turn before, and would play the start of
+     * this one there, or drop it when it takes this one. */
+    if (s_turn.followup && s_followup.load() == s_turn.gen) {
         return;
     }
     for (int i = 0; i < s_turn.nmsgs; i++) {
@@ -1664,9 +2147,11 @@ static void check_turn(void)
         turn_done(false);
         return;
     }
+    s_turn.agent_busy = activity_busy();   /* "online" with the task open expires by itself */
     if (!s_turn.nmsgs) {
-        /* A typed turn waits as long as the agent says it's working. */
-        if (t - s_turn.chat_us > (text ? TEXT_REPLY_TIMEOUT_US : REPLY_TIMEOUT_US) && !(text && s_turn.agent_busy)) {
+        /* No reply yet: as long as the agent says it's working, it's coming. */
+        bool working = s_turn.agent_busy && t - s_turn.last_event_us < (text ? TEXT_BUSY_HOLD_US : BUSY_HOLD_US);
+        if (t - s_turn.chat_us > (text ? TEXT_REPLY_TIMEOUT_US : REPLY_TIMEOUT_US) && !working) {
             turn_fail("NO REPLY FROM MUSE");
         }
         return;
@@ -1679,7 +2164,13 @@ static void check_turn(void)
     if (t - s_turn.last_event_us < SETTLE_US) {
         return;
     }
-    if (s_turn.agent_busy && t - s_turn.last_content_us < (text ? TEXT_BUSY_HOLD_US : BUSY_HOLD_US)) {
+    /* Replied, but still at work (its actions, maybe more to say): open until it
+     * says it's done, or goes quiet that long. Its status events keep it fresh.
+     * Tool work gone quiet without an answer won't bring one (voice mode keeps
+     * it): the turn ends there, and the device asks for it (s_recover). */
+    bool asking = s_turn.voice_out && !s_turn.recovering && s_recover.tooling && s_recover.quiet_us &&
+                  t - s_recover.quiet_us >= RECOVER_QUIET_US;
+    if (s_turn.agent_busy && !asking && t - s_turn.last_event_us < (text ? TEXT_BUSY_HOLD_US : BUSY_HOLD_US)) {
         return;
     }
     ESP_LOGI(TAG, "turn done: %d message(s) in %.1fs", s_turn.nmsgs, (t - s_turn.start_us) / 1e6);
@@ -1751,6 +2242,12 @@ static void stream_data(stream_t *s, ConstByteSpan data)
             tts_data(data.data(), data.size());
         }
         break;
+    case K_IDENT: {
+        size_t take = data.size() < sizeof(s_ident) - 1 - s_ident_len ? data.size() : sizeof(s_ident) - 1 - s_ident_len;
+        memcpy(s_ident + s_ident_len, data.data(), take);
+        s_ident_len += take;
+        break;
+    }
     default:
         break;
     }
@@ -1760,6 +2257,10 @@ static void stream_data(stream_t *s, ConstByteSpan data)
 static bool stream_end(stream_t *s, bool ok)
 {
     switch (s->kind) {
+    case K_IDENT:
+        close_stream(s);
+        ident_end(ok);
+        break;
     case K_SUB:
         ESP_LOGW(TAG, "subscription ended");
         return false;
@@ -1793,6 +2294,17 @@ static bool on_http_error(stream_t *s, const ApplicationResponseView &resp)
     memcpy(body, resp.body.data(), n);
     body[n] = '\0';
     ESP_LOGW(TAG, "stream %lld: HTTP %d %s", (long long)s->id, (int)resp.status, body);
+    if (s->kind == K_IDENT) {
+        close_stream(s);   /* no name yet: the loop asks again */
+        s_ident_len = 0;
+        return true;
+    }
+    if (s->kind == K_CHAT && s_turn.named && (resp.status == 400 || resp.status == 422) && strstr(body, "device_id")) {
+        /* Refused for naming the device: the next turns go without it (Muse
+         * just won't know they came from here), until the settings change. */
+        s_unnamed = true;
+        ESP_LOGW(TAG, "chat/stream refused device_id: sending none from now on");
+    }
     return stream_end(s, false);
 }
 
@@ -1896,6 +2408,7 @@ static void handle(const cmd_t &cmd)
         }
         disconnect("settings changed");
         forget_vm();
+        s_unnamed = false;
         s_auto_next_us = 0;
         s_auto_backoff_us = AUTO_RETRY_MIN_US;
         break;
@@ -1919,7 +2432,7 @@ static void handle(const cmd_t &cmd)
         if (s_turn.phase != P_IDLE && !s_turn.text) {
             muse_hatch_console("error", "BUSY WITH A VOICE TURN", nullptr);
         } else {
-            text_begin(cmd.text);
+            text_begin(cmd.text, cmd.gen == 1);   /* gen: 1 asks as speech */
         }
         free(cmd.text);
         break;
@@ -1993,6 +2506,21 @@ static void hatch_task(void *arg)
         check_turn();
 
         int64_t t = now_us();
+        if (s_turn.phase == P_IDLE && !s_muse_name[0] && s_ident_tries < IDENT_TRIES && t >= s_ident_next_us &&
+            !ident_pending()) {
+            s_ident_next_us = t + IDENT_RETRY_US;
+            s_ident_tries++;
+            s_ident_len = 0;
+            int64_t used = s_conn.last_use_us;   /* asking isn't use: the idle close still comes */
+            open_stream(K_IDENT, "GET", "/api/identity", nullptr, "application/json", nullptr, true);
+            s_conn.last_use_us = used;
+        }
+        if (s_turn.phase == P_IDLE && s_recover.retry && t < s_recover.retry_by_us) {
+            recover_ask(PHOTO_RETRY_ASK);
+        } else if (s_turn.phase == P_IDLE && s_recover.armed && s_recover.tooling && s_recover.quiet_us &&
+                   t - s_recover.quiet_us >= RECOVER_QUIET_US && t - s_recover.turn_us < RECOVER_WINDOW_US) {
+            recover_ask(RECOVER_ASK);
+        }
         if (t - s_conn.last_rx_us > DEAD_US) {
             drop_connection("server went quiet");
         } else if (s_turn.phase == P_IDLE && t - s_conn.last_use_us > IDLE_CLOSE_US) {
@@ -2083,6 +2611,8 @@ extern "C" bool muse_hatch_ready(void)
 extern "C" void muse_hatch_turn_begin(void)
 {
     uint32_t gen = ++s_gen;
+    int64_t expected = s_expect_photo_us.exchange(0);
+    s_photo_gen.store(expected && now_us() - expected < PHOTO_EXPECT_US ? gen : 0);
     xStreamBufferReset(s_in);
     drain_out();
     post(CMD_BEGIN, gen);
@@ -2100,6 +2630,33 @@ extern "C" void muse_hatch_turn_audio(const int16_t *pcm, size_t frames)
 extern "C" size_t muse_hatch_turn_audio_wait(const int16_t *pcm, size_t frames, int wait_ms)
 {
     return xStreamBufferSend(s_in, pcm, frames * sizeof(int16_t), pdMS_TO_TICKS(wait_ms)) / sizeof(int16_t);
+}
+
+extern "C" bool muse_chat_followup_waiting(void)
+{
+    uint32_t g = s_followup.load();
+    return g && g == s_gen.load();
+}
+
+extern "C" bool muse_chat_followup(void)
+{
+    uint32_t g = s_followup.exchange(0);
+    if (!g || g != s_gen.load()) {
+        return false;   /* a press has begun a turn of its own since */
+    }
+    drain_out();
+    return true;
+}
+
+extern "C" bool muse_chat_activity(char *text, size_t cap)
+{
+    portENTER_CRITICAL(&s_act_lock);
+    bool busy = activity_busy_locked(now_us());
+    if (text && cap) {
+        strlcpy(text, busy ? s_act_text : "", cap);
+    }
+    portEXIT_CRITICAL(&s_act_lock);
+    return busy;
 }
 
 extern "C" void muse_hatch_turn_end(void)
@@ -2122,9 +2679,9 @@ extern "C" void muse_hatch_set_resting(bool resting)
     }
 }
 
-extern "C" void muse_hatch_text_turn(char *text)
+static void text_turn(char *text, bool voice)
 {
-    cmd_t cmd{ CMD_TEXT, 0, text };
+    cmd_t cmd{ CMD_TEXT, voice ? 1u : 0u, text };
     if (!s_cmds || !muse_hatch_configured()) {
         muse_hatch_console("error", "MUSE NOT SET UP", nullptr);
         free(text);
@@ -2132,6 +2689,52 @@ extern "C" void muse_hatch_text_turn(char *text)
         muse_hatch_console("error", "BUSY", nullptr);
         free(text);
     }
+}
+
+extern "C" void muse_hatch_text_turn(char *text)
+{
+    text_turn(text, false);
+}
+
+extern "C" void muse_chat_text_turn_voice(char *text)
+{
+    text_turn(text, true);
+}
+
+extern "C" bool muse_chat_muse_name(char *out, size_t cap)
+{
+    portENTER_CRITICAL(&s_name_lock);
+    strlcpy(out, s_muse_name, cap);
+    portEXIT_CRITICAL(&s_name_lock);
+    return out[0] != '\0';
+}
+
+extern "C" void muse_chat_expect_photo(void)
+{
+    s_expect_photo_us.store(now_us());
+}
+
+extern "C" void muse_chat_attach_image(char *jpeg_base64, size_t len)
+{
+    portENTER_CRITICAL(&s_attach_lock);
+    char *old = s_attach.b64;
+    s_attach.b64 = jpeg_base64;
+    s_attach.len = len;
+    s_attach.at = now_us();
+    portEXIT_CRITICAL(&s_attach_lock);
+    heap_caps_free(old);
+}
+
+extern "C" void muse_chat_set_modality(const char *modality)
+{
+    /* Letters and underscores only: it goes into the note's JSON as is. */
+    size_t n = strspn(modality ? modality : "", "abcdefghijklmnopqrstuvwxyz_");
+    if (!modality || n != strlen(modality) || n >= sizeof(s_modality)) {
+        n = 0;
+    }
+    memcpy(s_modality, modality, n);
+    s_modality[n] = '\0';
+    ESP_LOGI(TAG, "output modality: %s", s_modality[0] ? s_modality : "each turn's own");
 }
 
 extern "C" void muse_hatch_text_cancel(void)

@@ -72,6 +72,10 @@ void muse_hatch_config_changed(void);
 const char *muse_hatch_state_name(muse_hatch_state_t state);
 /* Screen off, voice idle: check the connection less often. */
 void muse_hatch_set_resting(bool resting);
+/* The node id Home Link registers with Muse, before muse_hatch_start. Chat
+ * messages carry it as device_id, as the Linux client's do: Muse then knows
+ * the turn came from this device and sends its device commands back here. */
+void muse_chat_set_device_id(const char *node_id);
 
 /* ---- Push-to-talk turns (voice task only) ---- */
 
@@ -109,6 +113,23 @@ bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
 /* Reply speech as 16 kHz mono. Waits up to wait_ms for some; returns frames read. */
 size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms);
 
+/*
+ * Whether Muse's agent is at work, turn or no turn (the Muse app's action
+ * names and "..."), with what it says it's doing ("Reviewing docs"), or ""
+ * while it writes a reply. From its agent.status and task.status events;
+ * busy with no word for 90 s counts as done. Safe from any task.
+ */
+bool muse_chat_activity(char *text, size_t cap);
+
+/*
+ * The agent's reply to the last voice turn came after that turn ended (it
+ * went on working): a follow-up turn waits to be played. Waiting peeks;
+ * muse_chat_followup takes it (false if a press has begun a turn since),
+ * and then muse_hatch_turn_event / _read / _caption serve it as a turn.
+ */
+bool muse_chat_followup_waiting(void);
+bool muse_chat_followup(void);
+
 /* Bench test: decodes a built-in MP3 to 16 kHz; caller frees *pcm. Returns frames. */
 size_t muse_hatch_mp3_selftest(int16_t **pcm);
 
@@ -131,6 +152,22 @@ size_t muse_hatch_turn_audio_wait(const int16_t *pcm, size_t frames, int wait_ms
  * press ends a typed turn; a typed turn is refused while a voice turn runs.
  */
 void muse_hatch_text_turn(char *text);
+/* The same, asked as speech is (output_modality "voice"): Muse answers as it
+ * would a voice note, the reply still going to the console. */
+void muse_chat_text_turn_voice(char *text);
+/* A photo for the note of a photo talk key's press (muse_chat_expect_photo)
+ * to carry, beside the audio: a JPEG as base64, taken over (freed once sent,
+ * when a newer one comes, when another note goes out, or after a minute).
+ * From any task (the camera's worker). */
+void muse_chat_attach_image(char *jpeg_base64, size_t len);
+/* The Muse's name (its identity), once connected: false until known. */
+bool muse_chat_muse_name(char *out, size_t cap);
+/* A photo is on its way for the turn about to begin (an app's talk key that
+ * takes one): the note waits a few seconds for it, so it goes before the question. */
+void muse_chat_expect_photo(void);
+/* Bench: the output_modality every turn asks for from now on (voice notes and
+ * typed turns alike), or "" for each's own. Not kept across a restart. */
+void muse_chat_set_modality(const char *modality);
 void muse_hatch_text_cancel(void);
 
 /*

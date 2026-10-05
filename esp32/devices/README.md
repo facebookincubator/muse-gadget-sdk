@@ -68,7 +68,16 @@ session to Muse. The rest depends on the hardware.
 | Touch | — | — | — | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
 | Battery status | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) |
+| Buttons | BOOT | BOOT | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Two | BOOT (talk), PWR | Wheel (press to talk, turn for volume) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) |
+
+On the face boards, the face keeps thinking while Muse is still at work, even
+after it has answered, and its caption says what Muse is doing, as the app
+does (*Reviewing docs...*). A reply that comes later, up to five minutes after
+you asked, is shown when it arrives. If a question asked with a photo gets no
+answer or an error, the board asks once more; and on a turn that asks for voice
+replies (the console's `>modality=voice`), it asks Muse once for the result of
+tool work that went quiet without an answer ("What did you find?"). Both
+questions show in your chat.
 
 Boards without PSRAM (the ideaspark, the C6 boards and the Cardputer ADV) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
@@ -113,6 +122,125 @@ arrives at once, so plain esptool can't upload its stub or write flash
 (`0107: Checksum error`, `0105: The format of the received message is
 invalid`). `tools/muse/paced_esptool.py` takes esptool's arguments and sends 64
 bytes at a time at the line rate; `tools/muse/board.sh flash watcher` uses it.
+
+On the Watcher, Muse's agent can also use all of the hardware itself, beside
+the face and settings (`CONFIG_MUSE_HW_COMMANDS`,
+[`main/muse_hw_commands.c`](../main/muse_hw_commands.c) and its neighbours).
+Push-to-talk still works as before, and turning the wheel sets the volume.
+
+The face is one of several pages. Swipe right from it for the pet, left for
+settings, and up for apps. The face's status row shows the battery's level;
+its name line says READY only once Muse's VM answers, WORKING... while Muse
+is busy, and otherwise what it's waiting for (PAIR IN APP, CONNECTING,
+REACHING MUSE...).
+
+| Command | What it does |
+|---|---|
+| `display.show_text`, `display.show_ui` | Text, or a screen with a title, text, a progress bar and buttons, over the face |
+| `display.set_brightness`, `display.power` | Screen brightness; screen off or on |
+| `input.read` | Taps, long presses and swipes with where they were, wheel clicks and turns, `show_ui` buttons, camera detections. It can wait for the next one and capture input so the UI ignores it meanwhile |
+| `led.set` | The RGB light: a colour, solid, blinking or breathing |
+| `audio.play_url`, `audio.beep` | An MP3 or WAV from a URL or the SD card, or tones, on the speaker |
+| `audio.record`, `audio.listen` | A clip from the mic as a WAV (or saved to the card); how loud the room is |
+| `audio.set_volume` | Speaker volume |
+| `camera.capture`, `camera.detect`, `camera.models` | A photo from the Himax camera (JPEG, up to 640x480); its person, pet and gesture models |
+| `camera.preview`, `camera.watch`, `camera.stop` | Live video on the screen; detections as input events |
+| `camera.at` | Any SSCMA AT command to the Himax |
+| `storage.*` | Files on the SD card: info, list, read, write, delete |
+| `grove.power`, `i2c.scan`, `i2c.read`, `i2c.write` | The Grove port's power and I2C bus (the device's own chips are read-only) |
+| `uart.write`, `uart.read` | The 2x4 header's GPIO19 (TX) and GPIO20 (RX) |
+| `device.status`, `device.time` | Battery, charging, Wi-Fi, chip temperature, what Muse is doing; the clock (NTP, kept in the RTC) and timezone |
+| `wifi.scan`, `device.reboot`, `device.power_off` | Networks in range; restart; power off |
+| `app.define`, `app.update`, `app.remove` | Apps: pages of widgets below the face, from JSON, kept across restarts (below) |
+| `app.show`, `app.list`, `app.get` | Bring up a page (an app, `face`, `pet` or `settings`); list them; an app's JSON |
+| `app.library`, `app.example`, `app.install` | The example apps that come with the device, their JSON and scripts, and putting one back |
+| `pet.status`, `pet.care`, `pet.name` | The pet (below): how it is; feed, wash, play, put to bed, give medicine; its name |
+| `script.*` | On-device Lua scripts (below); `script.read` shows one's source |
+
+`device.status` also says how the device last started (`boot_reason`: a
+crash, a watchdog, a brownout...). After a crash it carries `last_crash`, the
+reason, task, PC and backtrace kept in RTC memory through the restart
+([`main/muse_crash.c`](../main/muse_crash.c)), and `memory` has the free heap.
+
+The agent can also leave the device a program: a Lua 5.4 script
+(`CONFIG_MUSE_SCRIPTS`, [`main/muse_script.c`](../main/muse_script.c)) that runs
+without the cloud, calls the commands above as functions and reacts to events:
+
+```lua
+camera.watch{model = "person"}
+on("detection", function(e)
+  led.set{color = "red", effect = "blink"}
+  audio.beep{tones = "880:150,0:80,880:150"}
+  notify("Someone's at the door (" .. e.score .. "%)")
+end)
+every(60000, function() print("still watching") end)
+```
+
+Scripts are kept on the `scripts` partition and can start at boot. Each gets
+256 KB of memory, and a callback that runs ~0.1 s without waiting is stopped.
+They can't change settings that are stored in flash, restart the device, or
+manage scripts. `notify()` posts to the agent's chat.
+
+Without the cloud, `tools/muse/hw.py` runs any of these commands over the USB
+cable: `tools/muse/hw.py camera.capture '{"resolution": "416x416"}'`.
+
+### Apps
+
+An app is a page below the face, described in JSON: widgets (labels, buttons,
+switches, sliders, arcs, bars, charts, images, a canvas, QR codes, tables,
+rollers, text inputs...) laid out in a column, or placed freely. The agent
+defines one with `app.define` and changes it in place with `app.update`. What
+people do on it (a click, a slider moved, the page shown or hidden) arrives as
+`ui` events, for the agent through `input.read` and for a script through
+`on("ui", ...)`. A script that defines an app owns it: deleting the script
+removes the app. Apps are kept on the `scripts` partition, up to 16 of them.
+
+```lua
+app.define{app = {id = "count", title = "Count", children = {
+  {type = "label", id = "n", text = "0", font = 48},
+  {type = "button", id = "up", icon = "plus"}}}}
+local n = 0
+on("ui", function(e)
+  if e.app == "count" and e.id == "up" and e.event == "click" then
+    n = n + 1
+    app.update{app = "count", set = {n = {text = tostring(n)}}}
+  end
+end)
+```
+
+The device comes with a library of example apps
+([`main/apps`](../main/apps)), installed at the first boot: a launcher (the
+first page below the face), a clock, a focus timer, the camera, a sound
+meter, the light, the system's state and dice. Each is a page and a script,
+and each shows off something different, so the agent reads them
+(`app.library`, then `app.example`) before it writes its own. A newer
+firmware updates the ones nobody has changed and leaves out any that were
+removed; `app.install` puts one back as shipped.
+
+On the camera app, hold the Ask button and speak to ask Muse about what the
+camera sees: its press takes a photo, which goes to Muse with your question.
+Muse listens there on the camera's page, and its answer shows on the screen.
+
+### The pet
+
+Swiping right from the face opens the pet: Muse itself, as a virtual pet. It
+gets hungry, dirty, bored and tired as the hours go by, poops a while after a
+meal, and falls ill after about a day of neglect. After two it faints until
+it gets medicine. It goes by your Muse's name until you give it one. Its page
+shows its needs as rings, with its care round the bottom: a food to drag onto
+it (a drumstick, a rice ball or an apple is a meal, a cupcake a treat, and
+after each is eaten another comes), a shower to drag (held over a poop it
+washes it away, held over the pet it gives it a bath), and buttons to play,
+put it to bed and give it medicine. Tap it to stroke it; a poop can also be
+tapped away. Care makes Muse happy on the face too.
+The model is in
+[`components/muse/muse_pet.c`](../components/muse/muse_pet.c) and its state
+is kept in NVS. Scripts get `pet` events (`hungry`, `poop`, `sick`, `feed`...).
+
+If wheel turns come out backwards, flip `KNOB_CW_SIGN` in
+[`board_sensecap_watcher.c`](../components/muse/boards/board_sensecap_watcher.c).
+The Himax camera and SD card share SPI2: the board keeps both of their rails up
+while either is in use, and the card's CS high.
 
 The M5Stack StickS3 has 8 MB of flash, so it uses its own partition table with
 two smaller app slots. The front button is push-to-talk and the side button
@@ -377,6 +505,15 @@ Got it working on something new? Share it in the
 [Muse Gadgets Discord](https://discord.gg/3bhjCkZdd6).
 
 ### Watcher camera
+
+With the SenseCAP Watcher example's hardware commands
+(`CONFIG_MUSE_HW_COMMANDS`, on by default for the Watcher), the example's own
+`camera.*` commands (`main/muse_hw_camera.c`) drive the camera instead, and
+the option below is hidden: the two would share the Himax and its SPI bus.
+There, `camera.capture` returns the same `payload.data_base64` and
+`payload.format`, with `width`, `height` and `bytes` too; `camera.preview` and
+the camera app replace the double-click view; and the camera app's Ask button
+sends a photo along with your question.
 
 Camera support is disabled by default. In the Watcher build's `menuconfig`,
 under **Muse**, enable **SenseCAP Watcher camera capture and live preview**

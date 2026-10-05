@@ -26,6 +26,9 @@
 #include "muse_ble.h"
 #include "muse_chat.h"
 #include "muse_input.h"
+#if CONFIG_MUSE_HW_COMMANDS
+#include "muse_pet.h"
+#endif
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_ui.h"
@@ -69,6 +72,11 @@ void muse_app_run(const muse_board_t *board)
     muse_settings_set_listener(on_setting);
     muse_state_init();
     muse_battery_init();
+#if CONFIG_MUSE_HW_COMMANDS
+    if (board->touch) {
+        muse_pet_init();   /* its page needs a touch screen; nowhere to look after it without */
+    }
+#endif
     muse_state_set_caption("WAKING UP...");
     ESP_ERROR_CHECK(muse_ui_start());
     ESP_LOGI(TAG, "UI built: free internal %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));

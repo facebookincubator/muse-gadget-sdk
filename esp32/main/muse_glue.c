@@ -38,6 +38,12 @@
 
 #include "muse_ble.h"
 #include "muse_board.h"
+#if CONFIG_MUSE_HATCH
+#include "muse_chat.h"
+#endif
+#if CONFIG_MUSE_HW_COMMANDS
+#include "muse_hw_commands.h"
+#endif
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_settings.h"
@@ -609,6 +615,9 @@ static void boot_task(void *arg) {
     (void)arg;
     xEventGroupWaitBits(s_ready, BIT_STORAGE, pdFALSE, pdTRUE, portMAX_DELAY);
     load_creds();
+#if CONFIG_MUSE_HATCH
+    muse_chat_set_device_id(identity_node_id());   // identity_init ran before storage was ready
+#endif
     muse_app_run(muse_board_get());
     xEventGroupSetBits(s_ready, BIT_MUSE);
     stack_monitor_record(NULL);
@@ -617,6 +626,9 @@ static void boot_task(void *arg) {
 
 void muse_glue_start(void) {
     s_ready = xEventGroupCreate();
+#if CONFIG_MUSE_HW_COMMANDS
+    muse_hw_commands_init();
+#endif
     muse_link_register(&s_ops);
     muse_ble_set_name(identity_ble_name());
     ble_companion_t companion = {

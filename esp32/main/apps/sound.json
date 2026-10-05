@@ -1,0 +1,67 @@
+{
+ "id": "sound",
+ "title": "Sound",
+ "order": 40,
+ "bg": "#060a10",
+ "_about": "A sound meter: the microphone's level a second at a time (audio.listen) in a gauge arc with a label inside it, and a bar chart of the last half minute (push). It listens only while its page shows, in a loop in the show handler.",
+ "children": [
+  {
+   "type": "label",
+   "id": "title",
+   "text": "SOUND",
+   "font": 16,
+   "color": "#64d2ff"
+  },
+  {
+   "type": "arc",
+   "id": "meter",
+   "w": 180,
+   "h": 180,
+   "min": 0,
+   "max": 80,
+   "value": 0,
+   "start": 135,
+   "end": 45,
+   "rotation": 0,
+   "thickness": 14,
+   "knob": false,
+   "color": "#64d2ff",
+   "children": [
+    {
+     "type": "label",
+     "id": "db",
+     "align": "center",
+     "font": 36,
+     "text": "--",
+     "color": "#f2efff"
+    }
+   ]
+  },
+  {
+   "type": "label",
+   "id": "what",
+   "text": "",
+   "font": 16,
+   "color": "#8b84a8"
+  },
+  {
+   "type": "chart",
+   "id": "hist",
+   "kind": "bar",
+   "w": 250,
+   "h": 64,
+   "min": 0,
+   "max": 80,
+   "points": 30,
+   "series": [
+    {
+     "color": "#64d2ff",
+     "values": []
+    }
+   ],
+   "bg": "#0b1522",
+   "border": 0,
+   "radius": 8
+  }
+ ]
+}

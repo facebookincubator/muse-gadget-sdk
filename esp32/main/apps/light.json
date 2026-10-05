@@ -1,0 +1,157 @@
+{
+ "id": "light",
+ "title": "Light",
+ "order": 50,
+ "bg": "#0a0710",
+ "_about": "The RGB light (led.set): colour swatches (buttons), a brightness slider reporting while dragged (live), and effect buttons. Ids carry meaning (c_red, e_breathe) so one handler reads them with patterns.",
+ "children": [
+  {
+   "type": "label",
+   "id": "title",
+   "text": "LIGHT",
+   "font": 16,
+   "color": "#ffd60a"
+  },
+  {
+   "type": "label",
+   "id": "state",
+   "text": "OFF",
+   "font": 14,
+   "color": "#8b84a8"
+  },
+  {
+   "type": "row",
+   "id": "swatches",
+   "wrap": true,
+   "w": 250,
+   "gap": 12,
+   "children": [
+    {
+     "type": "button",
+     "id": "c_red",
+     "w": 50,
+     "h": 50,
+     "radius": 25,
+     "bg": "#ff3b30",
+     "border": 2,
+     "border_color": "#1c1830"
+    },
+    {
+     "type": "button",
+     "id": "c_orange",
+     "w": 50,
+     "h": 50,
+     "radius": 25,
+     "bg": "#ff9f0a",
+     "border": 2,
+     "border_color": "#1c1830"
+    },
+    {
+     "type": "button",
+     "id": "c_yellow",
+     "w": 50,
+     "h": 50,
+     "radius": 25,
+     "bg": "#ffd60a",
+     "border": 2,
+     "border_color": "#1c1830"
+    },
+    {
+     "type": "button",
+     "id": "c_green",
+     "w": 50,
+     "h": 50,
+     "radius": 25,
+     "bg": "#34c759",
+     "border": 2,
+     "border_color": "#1c1830"
+    },
+    {
+     "type": "button",
+     "id": "c_cyan",
+     "w": 50,
+     "h": 50,
+     "radius": 25,
+     "bg": "#64d2ff",
+     "border": 2,
+     "border_color": "#1c1830"
+    },
+    {
+     "type": "button",
+     "id": "c_blue",
+     "w": 50,
+     "h": 50,
+     "radius": 25,
+     "bg": "#0a84ff",
+     "border": 2,
+     "border_color": "#1c1830"
+    },
+    {
+     "type": "button",
+     "id": "c_purple",
+     "w": 50,
+     "h": 50,
+     "radius": 25,
+     "bg": "#bf5af2",
+     "border": 2,
+     "border_color": "#1c1830"
+    },
+    {
+     "type": "button",
+     "id": "c_white",
+     "w": 50,
+     "h": 50,
+     "radius": 25,
+     "bg": "#ffffff",
+     "border": 2,
+     "border_color": "#1c1830"
+    }
+   ]
+  },
+  {
+   "type": "slider",
+   "id": "bright",
+   "min": 5,
+   "max": 100,
+   "value": 40,
+   "w": 230,
+   "color": "#ffd60a",
+   "live": true
+  },
+  {
+   "type": "row",
+   "id": "fx",
+   "w": 280,
+   "gap": 8,
+   "children": [
+    {
+     "type": "button",
+     "id": "e_solid",
+     "text": "Solid",
+     "w": 78,
+     "h": 40,
+     "bg": "#2a2140",
+     "radius": 20
+    },
+    {
+     "type": "button",
+     "id": "e_breathe",
+     "text": "Breathe",
+     "w": 96,
+     "h": 40,
+     "bg": "#2a2140",
+     "radius": 20
+    },
+    {
+     "type": "button",
+     "id": "e_off",
+     "text": "Off",
+     "w": 66,
+     "h": 40,
+     "bg": "#2a2140",
+     "radius": 20
+    }
+   ]
+  }
+ ]
+}

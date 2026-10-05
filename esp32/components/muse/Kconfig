@@ -121,13 +121,16 @@ menu "Muse"
 
     config MUSE_WATCHER_CAMERA
         bool "SenseCAP Watcher camera capture and live preview"
-        depends on MUSE_BOARD_SENSECAP_WATCHER && SPIRAM
+        depends on MUSE_BOARD_SENSECAP_WATCHER && SPIRAM && !MUSE_HW_COMMANDS
         default n
         help
             Enable the camera.capture Home Link command and the wheel
             double-click camera preview. Camera buffers and tasks consume
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
+
+            Not with MUSE_HW_COMMANDS, whose camera.* commands drive the
+            same Himax camera over the same SPI bus (main/muse_hw_camera.c).
 
     config MUSE_CJK_FONT
         bool "Show Chinese and Japanese in captions"

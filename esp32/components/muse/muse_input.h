@@ -46,5 +46,12 @@ typedef struct {
 /* PTT events are posted to `queue` (items are muse_input_event_t). */
 esp_err_t muse_input_start(QueueHandle_t queue);
 
+/* Screen sleep or wake, from any task (display.power). */
+void muse_input_set_asleep(bool asleep);
+
+/* An on-screen talk key (an app's "talk" button) pressed or let go: as the
+ * board's own talk button. From any task. */
+void muse_input_talk(bool down);
+
 /* Plays the goodbye animation and powers off (from the input task). */
 void muse_input_request_power_off(void);

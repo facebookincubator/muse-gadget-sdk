@@ -16,5 +16,10 @@ dependencies:
   espressif/esp_websocket_client: "~1.2"
   espressif/cjson: "~1.7"
   espressif/led_strip: "~3.0"
+  # On-device scripts' storage (muse_script.c).
+  joltwallet/littlefs:
+    version: "~1.22"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"sensecap_watcher\""
   idf:
     version: ">=5.1"

@@ -67,6 +67,14 @@ set(GADGET_REQUIRES
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
     esp_driver_pcnt
+    minimp3     # audio.play_url (muse_hw_commands.c)
+    lua               # scripts (muse_script_sandbox.c)
+    spi_flash         # ... and their storage (muse_script.c)
+    esp_partition
+    fatfs             # storage.* on the SD card (muse_hw_storage.c)
+    sdmmc
+    esp_driver_sdspi
+    esp_driver_tsens  # the chip's temperature (muse_hw_io.c)
 )
 
 # E-paper has its own status screen in place of led_status.c.
@@ -79,6 +87,18 @@ endif()
 
 if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
+endif()
+
+if(CONFIG_MUSE_HW_COMMANDS)
+    list(APPEND GADGET_SRCS "muse_hw_commands.c" "muse_hw_camera.c" "muse_hw_io.c" "muse_hw_storage.c"
+        "muse_hw_pet.c" "muse_crash.c")
+endif()
+
+if(CONFIG_MUSE_SCRIPTS)
+    list(APPEND GADGET_SRCS "muse_script.c" "muse_script_sandbox.c" "muse_hw_apps.c")
+    # The app library (muse_hw_apps.c's LIBRARY): each example's page and script.
+    file(GLOB GADGET_APP_LIBRARY CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/apps/*.json"
+        "${CMAKE_CURRENT_LIST_DIR}/apps/*.lua")
 endif()
 
 if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING OR CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
@@ -107,4 +127,10 @@ idf_component_register(
     INCLUDE_DIRS "."
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}
+    EMBED_TXTFILES ${GADGET_APP_LIBRARY}
 )
+
+if(CONFIG_MUSE_HW_COMMANDS)
+    # muse_crash.c notes a crash for the next boot, then ESP-IDF's handler runs.
+    target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
+endif()

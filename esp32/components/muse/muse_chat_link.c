@@ -895,6 +895,24 @@ muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
     return ev.type;
 }
 
+bool muse_chat_activity(char *text, size_t cap)
+{
+    if (text && cap) {
+        text[0] = '\0';   /* Link's chat has no agent status */
+    }
+    return false;
+}
+
+bool muse_chat_followup_waiting(void)
+{
+    return false;
+}
+
+bool muse_chat_followup(void)
+{
+    return false;
+}
+
 bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
 {
     (void)played;   /* no speech: the reply's page follows the reading pace */

@@ -145,7 +145,19 @@ turns on screenshots: `tools/muse/snap.py PORT KEYS OUT.png` sends bench keys
 and saves the screen, and `>face=thinking` (or `idle`, `listening`,
 `speaking`, `error`, `boot`, `off`, `happy`) in KEYS picks the avatar mode first.
 Screenshots are off in normal builds because each one takes a buffer the size
-of the screen. `>face=` works in any build. Or run `idf.py` directly:
+of the screen. `>face=` works in any build.
+
+The console also drives the voice path without a voice in the room. `>chat=TEXT`
+sends a typed turn (`tools/muse/chat.py`), and `>chat.voice=TEXT` sends it as a
+voice note's question goes, as a voice turn.
+`>clip+=`/`>clip=` pieces of base64 16 kHz mono PCM stand in for the mic in the
+next talk press (`d` and `u` over the console press and release it), so a whole
+voice turn runs silently with the volume at 0. `>modality=NAME` overrides every
+turn's `output_modality` until a restart, and `>mute=1` silences the speaker
+(not saved; `>mute=0` or a restart undoes it). `>photo.expect` stands in for
+a photo talk key's press.
+
+Or run `idf.py` directly:
 
 ```sh
 idf.py -B build-muse-aipi -DIDF_TARGET=esp32s3 \
@@ -324,6 +336,82 @@ board first (it needs `pyserial`). A healthy boot logs
 `link.main: Muse Gadget starting`. For a board with the full UI, `$(tools/muse/ports.py BOARD)`
 gives the port, with BOARD as in `tools/muse/board.sh`.
 
+## Hardware commands, the serial console and scripts
+
+On the Watcher (`CONFIG_MUSE_HW_COMMANDS`), the agent's commands reach all of the
+hardware: `main/muse_hw_commands.c` (screen, input, light, audio, Wi-Fi, device),
+`main/muse_hw_camera.c` (the Himax over `components/muse/muse_camera.c`),
+`main/muse_hw_io.c` (Grove, I2C, UART, the clock) and `main/muse_hw_storage.c`
+(the SD card). `devices/README.md` lists them. Each adds itself to
+`link.register` (which may take 32 KB with them) and answers through
+`noise_ctrl_send_command_result`.
+
+To run one without the cloud, over the USB cable:
+
+```sh
+python tools/muse/hw.py device.status
+python tools/muse/hw.py led.set '{"color": "blue", "effect": "breathe"}'
+python tools/muse/hw.py script.install '{"name": "hi", "source": "print(1)"}'
+```
+
+It opens the port without the auto-reset pulse, so the board keeps running.
+The Watcher's console is the UART behind its CH342 (`CONFIG_MUSE_CONSOLE_UART`);
+`>hw {json}` lines run a command and `@hw {json}` lines answer.
+
+Lua scripts (`CONFIG_MUSE_SCRIPTS`): `main/muse_script_sandbox.c` is the portable
+sandbox, host-tested in `tests/test_muse_script.py`; `main/muse_script.c` is its
+home on the device. Rules that keep it safe:
+
+- Only the scripting task touches Lua, and its stack is in PSRAM: it never
+  writes flash. Commands that do (`display.set_brightness`, `audio.set_volume`,
+  a timezone) are refused to scripts.
+- A command that answers later (`camera.capture`) returns
+  `{"_async": true}`; the script waits and its result comes back through the
+  result hook with the script session's generation.
+- Add a command to the scripts' `COMMANDS` allowlist only if it's safe from a
+  PSRAM stack and can't brick or reset the device. Reading flash counts too:
+  `app.get`, `app.library` and `script.read` stay off it.
+- Anything a script can reach that saves state defers the write to the
+  esp_timer task (the app files in `main/muse_hw_apps.c`, the pet in
+  `components/muse/muse_pet.c`).
+
+Apps are pages below the face: `components/muse/muse_apps.c` builds them from
+JSON (every property it reads is in `apply()`; a button with `"talk": true` is
+a talk key, held while Muse listens, and with `"photo": true` too its press
+has the app take a photo, `camera.capture{ask=true}`, that the voice note
+carries, first), and `main/muse_hw_apps.c`
+turns that into `app.*` commands and keeps them on the scripts' partition. The
+page order is pet, face and settings across, with apps below the face
+(`muse_ui.c`'s tileview). To add an example to the library, put `<id>.json`
+and `<id>.lua` in `main/apps` and add the id to `LIBRARY` in
+`main/muse_hw_apps.c`. `tests/test_muse_apps.py` checks the page against
+`apply()`. It runs the script in the real sandbox against a fake device that
+validates every command, drives the page's events, and fails if the page keeps
+redrawing while hidden. The pet's care model is host-tested there too.
+
+On a board, `tools/muse/apps_check.py` checks the lot over the serial console:
+the library, pages and events, every widget type, the pet, scripts, loops
+that watch for leaks, and what a restart keeps. It takes about four minutes;
+`--quick` skips the restarts and loops.
+
+A crash leaves its reason, task and backtrace in RTC memory
+(`main/muse_crash.c` wraps ESP-IDF's panic handler). The next boot logs it as
+`link.crash` and `device.status` reports it as `last_crash`. To resolve the
+addresses, run `xtensa-esp32s3-elf-addr2line -pfiaC -e build-muse-sensecap-watcher/muse-gadget.elf <addresses>`
+against the same build. There's no core dump: its stacks would cost ~4 KB of
+internal RAM, which the Watcher can't spare. It idles with ~17 KB free, and
+under ~8 KB things start to fail.
+
+A frozen screen leaves a record too: if the display lock stays taken for a
+minute, `muse_stall` (in `main/muse_crash.c`) logs every task's backtrace and
+restarts. LVGL's asserts abort where they would spin forever
+(`components/muse/CMakeLists.txt` sets its handler), and `muse_crash.c`
+records them as crashes. LVGL mustn't spin waiting for a flush either:
+`muse_lcd_bands.c` gives it a wait that sleeps until the transfer's interrupt.
+A spinning wait holds the display lock, and when a higher-priority task waits
+on the lock, priority inheritance lifts the spinner above the LCD task that
+would end the flush.
+
 ## Update my avatar
 
 When someone asks to put their own avatar on their board (or to update or
@@ -359,10 +447,11 @@ The default avatar is in `avatar/`: its renderer (`muse_pixel.c`) and
 its animation (`jollybot.gif`, and `happy_anim.c/.h` made from it by
 `tools/gen_happy_anim.py`).
 
-Third-party code keeps its upstream license and header: `minimp3.h` (CC0) and
-`main/pixel_font.c` (BSD-2-Clause, Adafruit). Don't restyle them or replace
-their headers with the Apache one; `components/minimp3/README.md` says how to
-update minimp3.
+Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
+`main/pixel_font.c` (BSD-2-Clause, Adafruit) and Lua in `components/lua/src/`
+(MIT, with one change marked `SANDBOX PATCH`). Don't restyle them or replace
+their headers with the Apache one; `components/minimp3/README.md` and
+`components/lua/README.md` say how to update minimp3 and Lua.
 
 The Apache License doesn't cover the Jollybot avatar in `avatar/`. Its files
 carry only a Meta copyright line; don't add the Apache header to them.

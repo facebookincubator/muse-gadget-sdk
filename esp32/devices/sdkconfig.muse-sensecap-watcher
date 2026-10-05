@@ -67,3 +67,27 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # actually slept, and how long each power lock kept the chip awake.
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
+
+# Apps (muse_apps.c): big fonts for clocks and timers, and QR codes.
+CONFIG_LV_FONT_MONTSERRAT_36=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+CONFIG_LV_USE_QRCODE=y
+
+# The scripts' LittleFS buffers in PSRAM, not internal RAM.
+CONFIG_LITTLEFS_MALLOC_STRATEGY_SPIRAM=y
+
+# Long file names on the SD card (storage.*), their buffers on the heap.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+
+# The RGB light (led.set) is one pixel, refreshed now and then: its RMT code
+# can run from flash, leaving ~3 KB of internal RAM to Wi-Fi and BLE.
+# CONFIG_RMT_ENCODER_FUNC_IN_IRAM is not set
+# CONFIG_RMT_TX_ISR_HANDLER_IN_IRAM is not set
+# CONFIG_RMT_RX_ISR_HANDLER_IN_IRAM is not set
+
+
+# No core dump: its stacks would take ~4 KB of internal RAM. muse_crash.c
+# keeps a crash's reason and backtrace in RTC memory instead.
+# CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH is not set
+CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y

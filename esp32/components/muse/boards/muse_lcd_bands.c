@@ -26,6 +26,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "src/display/lv_display_private.h"   /* flushing, for the wait below */
 
 #include "muse_mem.h"
 
@@ -47,6 +48,7 @@ static SemaphoreHandle_t s_chunk_free;   /* internal buffers not on the wire */
 static uint8_t *s_chunk[2];
 static size_t s_chunk_bytes;
 static int s_chunks_out;                 /* of the band being sent */
+static SemaphoreHandle_t s_flushed;      /* a band's last piece has gone */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /* A piece has gone, or failed to; true if it was the band's last. */
@@ -65,8 +67,25 @@ static bool IRAM_ATTR on_chunk_sent(esp_lcd_panel_io_handle_t io, esp_lcd_panel_
     (void)ctx;
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_chunk_free, &woken);
-    bool yield = chunk_done() && esp_lv_adapter_display_notify_color_trans_done_from_isr(s_disp);
+    bool last = chunk_done();
+    bool yield = last && esp_lv_adapter_display_notify_color_trans_done_from_isr(s_disp);
+    if (last) {
+        xSemaphoreGiveFromISR(s_flushed, &woken);
+    }
     return yield || woken == pdTRUE;
+}
+
+/*
+ * LVGL's own wait for a band spins on its flag. A task above lcd_send's
+ * priority waiting for the display lock (the esp_timer task, say) lends the
+ * LVGL task its priority, and the spin then starves lcd_send on this core for
+ * good: the screen freezes, with the lock held. This one sleeps.
+ */
+static void wait_flush(lv_display_t *disp)
+{
+    while (disp->flushing) {
+        xSemaphoreTake(s_flushed, 1);
+    }
 }
 
 static esp_err_t queue_band(lv_display_t *disp, esp_lcd_panel_handle_t panel, int x1, int y1, int x2, int y2,
@@ -110,6 +129,7 @@ static void send_bands(void *arg)
                 xSemaphoreGive(s_chunk_free);
                 if (chunk_done()) {
                     lv_display_flush_ready(s_disp);
+                    xSemaphoreGive(s_flushed);
                 }
             }
             k ^= 1;
@@ -128,9 +148,10 @@ lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int l
     s_call_lock = xSemaphoreCreateMutex();
     s_call_done = xSemaphoreCreateBinary();
     s_chunk_free = xSemaphoreCreateCounting(2, 2);
+    s_flushed = xSemaphoreCreateBinary();
     s_chunk[0] = heap_caps_malloc(chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     s_chunk[1] = heap_caps_malloc(chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!s_bands || !s_call_lock || !s_call_done || !s_chunk_free || !s_chunk[0] || !s_chunk[1] ||
+    if (!s_bands || !s_call_lock || !s_call_done || !s_chunk_free || !s_flushed || !s_chunk[0] || !s_chunk[1] ||
         xTaskCreatePinnedToCore(send_bands, "lcd_send", 2560, NULL, MUSE_UI_PRIORITY + 1, NULL, MUSE_UI_CORE) != pdPASS) {
         return NULL;
     }
@@ -146,6 +167,7 @@ lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int l
         return NULL;
     }
     lv_display_set_color_format(s_disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
+    lv_display_set_flush_wait_cb(s_disp, wait_flush);
     const esp_lv_adapter_draw_bitmap_callbacks_t draw_cbs = { .custom_draw_bitmap = queue_band };
     esp_lv_adapter_set_draw_bitmap_callbacks(s_disp, &draw_cbs, NULL);
     return s_disp;

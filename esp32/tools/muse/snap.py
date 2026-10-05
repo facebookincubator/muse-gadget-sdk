@@ -54,7 +54,7 @@ for k in keys:
 if command:
     s.write(f'>{line}\n'.encode()); time.sleep(0.35)
 s.write(b'p')
-log = rd(20, b'SNAP END', b'SNAP OFF').decode('latin1')   # 20 s: a UART console at 115200 takes ~8 s for 135x240
+log = rd(90, b'SNAP END', b'SNAP OFF').decode('latin1')   # a UART console at 115200: ~8 s for 135x240, ~45 s for 412x412
 if 'SNAP BEGIN' not in log:
     sys.exit('screenshots are off in this build: MUSE_BENCH=1 tools/muse/board.sh build|flash <board>'
              if 'SNAP OFF' in log else 'no screenshot: the board never answered')

@@ -37,6 +37,18 @@ void muse_hatch_report(muse_hatch_state_t state, const char *detail)
     portEXIT_CRITICAL(&s_lock);
 }
 
+static char s_device_id[40];
+
+void muse_chat_set_device_id(const char *node_id)
+{
+    strlcpy(s_device_id, node_id ? node_id : "", sizeof(s_device_id));
+}
+
+const char *muse_chat_device_id(void)
+{
+    return s_device_id[0] ? s_device_id : NULL;
+}
+
 bool muse_hatch_configured(void)
 {
     return muse_settings_hatch_token_len() > 0 || muse_link_hatch_linked();

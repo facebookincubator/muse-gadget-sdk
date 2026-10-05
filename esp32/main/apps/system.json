@@ -1,0 +1,67 @@
+{
+ "id": "system",
+ "title": "System",
+ "order": 60,
+ "bg": "#070a0a",
+ "_about": "The device at a glance from device.status (battery, Wi-Fi, chip temperature, uptime, how it last started) in a table, and a line chart of the chip's temperature, every 2 s while shown.",
+ "children": [
+  {
+   "type": "label",
+   "id": "title",
+   "text": "SYSTEM",
+   "font": 16,
+   "color": "#34c759"
+  },
+  {
+   "type": "table",
+   "id": "t",
+   "col_w": [
+    100,
+    190
+   ],
+   "rows": [
+    [
+     "Battery",
+     "-"
+    ],
+    [
+     "Wi-Fi",
+     "-"
+    ],
+    [
+     "Signal",
+     "-"
+    ],
+    [
+     "Chip",
+     "-"
+    ],
+    [
+     "Uptime",
+     "-"
+    ],
+    [
+     "Started",
+     "-"
+    ]
+   ],
+   "font": 14,
+   "pad": 5
+  },
+  {
+   "type": "chart",
+   "id": "temp",
+   "w": 250,
+   "h": 56,
+   "min": 30,
+   "max": 80,
+   "points": 40,
+   "series": [
+    {
+     "color": "#34c759",
+     "values": []
+    }
+   ]
+  }
+ ]
+}

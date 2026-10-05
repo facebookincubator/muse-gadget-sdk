@@ -1,0 +1,84 @@
+{
+ "id": "camera",
+ "title": "Camera",
+ "order": 30,
+ "bg": "#000000",
+ "layout": "none",
+ "_about": "Live video in an image widget while the page shows (camera.preview with widget, off on hide); a photo saved to the SD card (camera.capture save), or with no card (storage.info) held still in the image a few seconds from its base64 (src b64:); the camera's own AI (camera.detect); and a talk button (\"talk\": true, \"photo\": true) that asks Muse about what the camera sees: held, Muse listens, and its press takes a photo (camera.capture ask) that goes before the question. Photos and detections pause the video; it comes back by itself.",
+ "children": [
+  {
+   "type": "image",
+   "id": "view",
+   "w": 300,
+   "h": 300,
+   "align": "center",
+   "y": -20
+  },
+  {
+   "type": "label",
+   "id": "info",
+   "align": "center",
+   "y": -20,
+   "font": 16,
+   "color": "#8b84a8",
+   "text": "starting the camera..."
+  },
+  {
+   "type": "label",
+   "id": "seen",
+   "align": "top",
+   "y": 34,
+   "font": 16,
+   "color": "#f2efff",
+   "text": ""
+  },
+  {
+   "type": "row",
+   "id": "btns",
+   "align": "bottom",
+   "y": -28,
+   "w": 264,
+   "gap": 10,
+   "children": [
+    {
+     "type": "button",
+     "id": "snap",
+     "w": 56,
+     "h": 50,
+     "icon": "image",
+     "bg": "#2a2140",
+     "radius": 25
+    },
+    {
+     "type": "button",
+     "id": "detect",
+     "w": 56,
+     "h": 50,
+     "icon": "eye",
+     "bg": "#2a2140",
+     "radius": 25
+    },
+    {
+     "type": "button",
+     "id": "full",
+     "w": 56,
+     "h": 50,
+     "icon": "video",
+     "bg": "#2a2140",
+     "radius": 25
+    },
+    {
+     "type": "button",
+     "id": "ask",
+     "w": 56,
+     "h": 50,
+     "icon": "audio",
+     "bg": "#6b4fd8",
+     "radius": 25,
+     "talk": true,
+     "photo": true
+    }
+   ]
+  }
+ ]
+}

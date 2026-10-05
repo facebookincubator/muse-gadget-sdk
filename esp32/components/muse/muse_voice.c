@@ -74,6 +74,23 @@ static volatile bool s_chirp;
 static volatile bool s_loopback;
 static volatile bool s_mp3test;
 
+/* Muse's agent: a clip to play and a listen, one of each at a time. */
+static portMUX_TYPE s_req_lock = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool s_play;
+static int16_t *s_play_pcm;
+static size_t s_play_frames;
+static muse_voice_play_cb s_play_done;
+static void *s_play_user;
+static volatile bool s_record;
+static int16_t *s_record_pcm;
+static size_t s_record_frames;
+static muse_voice_record_cb s_record_done;
+static void *s_record_user;
+static volatile bool s_listen;
+static int s_listen_ms;
+static muse_voice_listen_cb s_listen_done;
+static void *s_listen_user;
+
 /*
  * Pre-roll: while idle the mic keeps running into this ring, so a recording
  * can start a little before the press. People start talking as they press,
@@ -94,6 +111,59 @@ static size_t s_pre_next, s_pre_fill;
 static muse_adpcm_t s_pre_enc;
 #endif
 static int16_t s_chunk[MUSE_AUDIO_CHUNK];
+
+/* Bench clip (muse_voice_clip_add): filled by the console, read by the next
+ * recording once armed, then dropped. */
+static int16_t *s_clip;
+static size_t s_clip_bytes, s_clip_len, s_clip_at;   /* bytes loaded (a piece may end mid-sample), frames, frames taken */
+static volatile bool s_clip_armed;
+
+bool muse_voice_clip_add(const uint8_t *pcm, size_t bytes, bool done)
+{
+    if (s_clip_armed) {
+        return false;   /* one at a time: the last hasn't been used */
+    }
+    if (!s_clip) {
+        s_clip = heap_caps_malloc(MAX_FRAMES * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+        s_clip_bytes = 0;
+        if (!s_clip) {
+            return false;
+        }
+    }
+    if (s_clip_bytes + bytes > MAX_FRAMES * sizeof(int16_t)) {
+        return false;
+    }
+    memcpy((uint8_t *)s_clip + s_clip_bytes, pcm, bytes);
+    s_clip_bytes += bytes;
+    s_clip_len = s_clip_bytes / sizeof(int16_t);
+    if (done) {
+        s_clip_at = 0;
+        s_clip_armed = true;
+        ESP_LOGI(TAG, "bench clip: %.2fs for the next press", (double)s_clip_len / MUSE_AUDIO_RATE);
+    }
+    return true;
+}
+
+/* The mic's chunk, or the bench clip's in its place (silence after its end). */
+static void clip_take(int16_t *chunk)
+{
+    if (!s_clip_armed) {
+        return;
+    }
+    for (size_t i = 0; i < MUSE_AUDIO_CHUNK; i++) {
+        chunk[i] = s_clip_at < s_clip_len ? s_clip[s_clip_at++] : 0;
+    }
+}
+
+static void clip_done(void)
+{
+    if (s_clip_armed) {
+        s_clip_armed = false;
+        heap_caps_free(s_clip);
+        s_clip = NULL;
+        s_clip_bytes = s_clip_len = 0;
+    }
+}
 static int s_settle;
 
 /*
@@ -281,6 +351,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
             break;
         }
+        clip_take(s_chunk);
         muse_state_set_level(muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK));
         take(&st, s_chunk);
         /* Live transcript as the caption. A failure stops the streaming; the
@@ -322,6 +393,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         }
     }
     muse_state_set_level(0);
+    clip_done();
     *held = n - pre;
 
     char tail[160];
@@ -340,25 +412,41 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
 
 static void go_idle(const char *caption);
 
+static void play_clip(void);
+static void listen_room(void);
+static void record_clip(void);
+
 /*
  * Plays Hatch's reply as it arrives, with its text as the caption. Returns
  * true if interrupted by a new press. *delivered: the VM has the note.
+ * opening: the caption until there's a transcript or reply.
  */
-static bool hatch_reply(bool *delivered)
+static bool hatch_reply(bool *delivered, const char *opening)
 {
     muse_state_set_mode(MUSE_MODE_THINKING);
-    muse_state_set_caption("SENDING VOICE NOTE");   /* until there's a transcript or reply */
+    muse_state_set_caption("%s", opening);
+    muse_state_set_progress(0);   /* not the note's length, left from listening */
     static int16_t buf[MUSE_AUDIO_CHUNK];
     static const int16_t silence[MUSE_AUDIO_CHUNK];
     char text[96];
     static char page[MUSE_CAPTION_MAX];
-    bool done = false, speaking = false, replied = false;
+    char act[48], shown[56] = "";   /* the agent's work, as last captioned */
+    bool done = false, speaking = false, replied = false, working = false;
+    int64_t hush_us = 0;   /* when the speech last stopped; 0 while it plays */
     size_t played = 0;
     int64_t t0 = esp_timer_get_time();
     *delivered = false;
     for (;;) {
         muse_hatch_ev_t ev;
-        while ((ev = muse_hatch_turn_event(text, sizeof(text))) != MUSE_HATCH_EV_NONE) {
+        /* A follow-up waiting means this turn is over (the session starts one
+         * only once a turn has ended), though its end may have been dropped as
+         * stale when the follow-up took the generation over: this reply is done
+         * once its audio runs out, and the follow-up's events wait for the next. */
+        bool next = muse_chat_followup_waiting();
+        if (next) {
+            done = *delivered = true;
+        }
+        while (!next && (ev = muse_hatch_turn_event(text, sizeof(text))) != MUSE_HATCH_EV_NONE) {
             switch (ev) {
             case MUSE_HATCH_EV_HEARD:
                 if (!speaking && !replied) {
@@ -398,24 +486,71 @@ static bool hatch_reply(bool *delivered)
             return true;
         }
         size_t n = muse_hatch_turn_read(buf, MUSE_AUDIO_CHUNK, speaking || done ? 0 : 20);
+        int64_t now = esp_timer_get_time();
         if (n) {
             if (!speaking) {
-                speaking = true;
-                muse_state_set_mode(MUSE_MODE_SPEAKING);
-                ESP_LOGI(TAG, "reply audio after %.2fs", (esp_timer_get_time() - t0) / 1e6);
+                ESP_LOGI(TAG, "reply audio after %.2fs", (now - t0) / 1e6);
             }
+            if (!speaking || working) {
+                speaking = true;
+                working = false;
+                muse_state_set_mode(MUSE_MODE_SPEAKING);
+            }
+            hush_us = 0;
             muse_state_set_level(muse_audio_level(buf, n));
             muse_audio_write(buf, n);
             played += n;
         } else if (done) {
             break;
-        } else if (speaking) {
-            /* Between messages: keep the speaker fed so it doesn't replay stale DMA. */
-            muse_state_set_level(0);
-            muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+        } else {
+            if (speaking) {
+                /* Between messages: keep the speaker fed so it doesn't replay stale DMA. */
+                muse_state_set_level(0);
+                muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+            }
+            if (!hush_us) {
+                hush_us = now;
+            }
+        }
+        /* No speech for a moment (before the reply, between messages, after the
+         * last): if the agent is at work, show what it's doing, as the Muse app
+         * does, rather than look finished. A brief gap in the speech isn't one. */
+        bool hushed = !n && (!speaking || now - hush_us > 400000);
+        bool busy = muse_chat_activity(act, sizeof(act));
+        if (busy && hushed) {
+            if (!working) {
+                working = true;
+                shown[0] = '\0';
+                muse_state_set_mode(MUSE_MODE_THINKING);
+            }
+            char want[sizeof(shown)];
+            snprintf(want, sizeof(want), "%s...", act[0] ? act : "Working");
+            if (strcmp(want, shown)) {
+                strlcpy(shown, want, sizeof(shown));
+                muse_state_set_caption("%s", shown);
+            }
+        } else if (working && !busy) {
+            working = false;
+            muse_state_set_mode(speaking ? MUSE_MODE_SPEAKING : MUSE_MODE_THINKING);
+        }
+        /* Its own clips and recordings meanwhile, which would otherwise wait for
+         * the turn to end while it waits for them. */
+        if (hushed && (s_play || s_listen || s_record)) {
+            if (s_play) {
+                play_clip();
+            }
+            if (s_listen) {
+                listen_room();
+            }
+            if (s_record) {
+                record_clip();
+            }
+            pre_reset();
+            working = false;   /* the status comes back at the next pass */
+            muse_state_set_mode(speaking ? MUSE_MODE_SPEAKING : MUSE_MODE_THINKING);
         }
         /* The page being said, or before the speech the reply's opening page. */
-        if ((speaking || replied) && muse_hatch_turn_caption(played, page, sizeof(page))) {
+        if (!working && (speaking || replied) && muse_hatch_turn_caption(played, page, sizeof(page))) {
             muse_state_set_caption("%s", page);
         }
     }
@@ -434,6 +569,89 @@ static void go_idle(const char *caption)
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
     muse_state_set_caption("%s", caption);
+}
+
+static bool press_queued(void)
+{
+    muse_input_event_t ev;
+    return xQueuePeek(s_queue, &ev, 0) == pdTRUE && ev.type == MUSE_PTT_DOWN;
+}
+
+/* The agent's clip, with Muse speaking it. A talk press cuts it short and is
+ * left for the loop. */
+static void play_clip(void)
+{
+    bool played = true;
+    muse_state_set_caption("%s", "");
+    muse_state_set_mode(MUSE_MODE_SPEAKING);
+    for (size_t i = 0; i < s_play_frames; i += MUSE_AUDIO_CHUNK) {
+        if (press_queued()) {
+            played = false;
+            break;
+        }
+        size_t n = s_play_frames - i < MUSE_AUDIO_CHUNK ? s_play_frames - i : MUSE_AUDIO_CHUNK;
+        muse_state_set_level(muse_audio_level(s_play_pcm + i, n));
+        muse_state_set_progress((float)(i + n) / s_play_frames);
+        muse_audio_write(s_play_pcm + i, n);
+        muse_state_poke();
+    }
+    muse_state_set_level(0);
+    go_idle("");
+    muse_voice_play_cb done = s_play_done;
+    void *user = s_play_user;
+    free(s_play_pcm);
+    s_play_pcm = NULL;
+    s_play = false;
+    if (done) {
+        done(played, user);
+    }
+}
+
+/* A recording for the agent, into its buffer. A talk press ends it early. */
+static void record_clip(void)
+{
+    size_t got = 0;
+    while (got < s_record_frames && !press_queued()) {
+        size_t n = s_record_frames - got < MUSE_AUDIO_CHUNK ? s_record_frames - got : MUSE_AUDIO_CHUNK;
+        if (muse_audio_read(s_record_pcm + got, n) != ESP_OK) {
+            break;
+        }
+        got += n;
+    }
+    muse_voice_record_cb done = s_record_done;
+    void *user = s_record_user;
+    s_record = false;
+    if (done) {
+        done(got, user);
+    }
+}
+
+/* The room's level for the agent: power-averaged dBFS, the loudest 20 ms,
+ * and the share of 20 ms chunks above -40 dBFS. A talk press ends it early. */
+static void listen_room(void)
+{
+    int16_t *buf = s_chunk;   /* idle_capture's, on this task */
+    double power = 0;
+    float peak = -100.0f;
+    int chunks = 0, loud = 0;
+    for (int ms = 0; ms < s_listen_ms && !press_queued(); ms += MUSE_AUDIO_CHUNK * 1000 / MUSE_AUDIO_RATE) {
+        if (muse_audio_read(buf, MUSE_AUDIO_CHUNK) != ESP_OK) {
+            break;
+        }
+        float db = muse_audio_dbfs(buf, MUSE_AUDIO_CHUNK);
+        power += pow(10.0, db / 10.0);
+        peak = db > peak ? db : peak;
+        loud += db > -40.0f;
+        chunks++;
+    }
+    muse_voice_listen_cb done = s_listen_done;
+    void *user = s_listen_user;
+    s_listen = false;
+    if (done) {
+        float avg = chunks ? (float)(10.0 * log10(power / chunks)) : -100.0f;
+        done(chunks * MUSE_AUDIO_CHUNK * 1000 / MUSE_AUDIO_RATE, avg < -100.0f ? -100.0f : avg, peak,
+             chunks ? loud * 100 / chunks : 0, user);
+    }
 }
 
 /* Why a press can't go to Hatch; voice notes only go there. */
@@ -648,7 +866,7 @@ static bool send_held(bool quiet)
     if (fed == FED && quiet) {
         delivered = wait_delivered();
     } else if (fed == FED) {
-        interrupted = hatch_reply(&delivered);
+        interrupted = hatch_reply(&delivered, "SENDING VOICE NOTE");
     }
     if (fed != FED || quiet) {
         muse_hatch_turn_cancel();   /* asleep, the reply is left for the app */
@@ -735,7 +953,7 @@ static bool finish_note(void)
             }
         }
         if (fed) {
-            interrupted = hatch_reply(&delivered);
+            interrupted = hatch_reply(&delivered, "SENDING VOICE NOTE");
         }
         if (delivered || interrupted) {
             drop_rec();
@@ -747,7 +965,7 @@ static bool finish_note(void)
 #endif
     muse_hatch_turn_end();   /* before the chirp, which takes ~90 ms */
     muse_audio_chirp(0);
-    return hatch_reply(&delivered);
+    return hatch_reply(&delivered, "SENDING VOICE NOTE");
 }
 
 /*
@@ -796,7 +1014,9 @@ static void voice_task(void *arg)
             muse_input_event_t ev;
             bool asleep = muse_state_asleep();
             bool battery = muse_state_on_battery();
-            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback;
+            bool followup = muse_chat_followup_waiting();   /* the agent's reply after its turn */
+            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && !s_play && !s_listen && !s_record &&
+                        !followup;
 #if HOLD_NOTES
             /* A press goes first: send_held() leaves it queued and returns
              * without backing off, so retrying before it's read would spin. */
@@ -806,7 +1026,9 @@ static void voice_task(void *arg)
                 pending_down = send_held(asleep);
                 pre_reset();
                 if (!pending_down && !asleep && muse_state_mode(NULL) != MUSE_MODE_IDLE) {
-                    muse_state_make_happy();
+                    if (!muse_chat_activity(NULL, 0)) {
+                        muse_state_make_happy();   /* done: not while it's still at work */
+                    }
                     go_idle("");
                 }
                 continue;
@@ -842,6 +1064,30 @@ static void voice_task(void *arg)
                 s_loopback = false;
                 muse_audio_loopback_test(muse_settings_volume());
                 pre_reset();
+            }
+            if (s_play) {
+                play_clip();
+                pre_reset();
+            }
+            if (s_listen) {
+                listen_room();
+                pre_reset();
+            }
+            if (s_record) {
+                record_clip();
+                pre_reset();
+            }
+            if (followup && muse_chat_followup()) {
+                /* What it went on to say after its turn ended: played as a reply. */
+                ESP_LOGI(TAG, "a follow-up from Muse");
+                muse_wifi_power(MUSE_WIFI_FULL);
+                bool delivered;
+                pending_down = hatch_reply(&delivered, "");
+                pre_reset();
+                if (!pending_down && muse_state_mode(NULL) != MUSE_MODE_IDLE) {
+                    go_idle("");
+                }
+                continue;
             }
             /* The 20 ms read paces this loop. */
             idle_capture();
@@ -881,7 +1127,9 @@ static void voice_task(void *arg)
         pending_down = finish_note();
         pre_reset();
         if (!pending_down && muse_state_mode(NULL) != MUSE_MODE_IDLE) {
-            muse_state_make_happy();
+            if (!muse_chat_activity(NULL, 0)) {
+                muse_state_make_happy();   /* done: not while it's still at work */
+            }
             go_idle("");
         }
     }
@@ -931,6 +1179,59 @@ void muse_voice_request_mp3test(void)
 {
     s_mp3test = true;
     muse_state_nudge();
+}
+
+bool muse_voice_request_play(int16_t *pcm, size_t frames, muse_voice_play_cb done, void *user)
+{
+    taskENTER_CRITICAL(&s_req_lock);
+    bool busy = s_play;
+    if (!busy) {
+        s_play_pcm = pcm;
+        s_play_frames = frames;
+        s_play_done = done;
+        s_play_user = user;
+        s_play = true;
+    }
+    taskEXIT_CRITICAL(&s_req_lock);
+    if (!busy) {
+        muse_state_nudge();
+    }
+    return !busy;
+}
+
+bool muse_voice_request_listen(int ms, muse_voice_listen_cb done, void *user)
+{
+    taskENTER_CRITICAL(&s_req_lock);
+    bool busy = s_listen;
+    if (!busy) {
+        s_listen_ms = ms;
+        s_listen_done = done;
+        s_listen_user = user;
+        s_listen = true;
+    }
+    taskEXIT_CRITICAL(&s_req_lock);
+    if (!busy) {
+        muse_state_nudge();
+    }
+    return !busy;
+}
+
+bool muse_voice_request_record(int16_t *pcm, size_t frames, muse_voice_record_cb done, void *user)
+{
+    taskENTER_CRITICAL(&s_req_lock);
+    bool busy = s_record;
+    if (!busy) {
+        s_record_pcm = pcm;
+        s_record_frames = frames;
+        s_record_done = done;
+        s_record_user = user;
+        s_record = true;
+    }
+    taskEXIT_CRITICAL(&s_req_lock);
+    if (!busy) {
+        muse_state_nudge();
+    }
+    return !busy;
 }
 
 bool muse_voice_resting(void)

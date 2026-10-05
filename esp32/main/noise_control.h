@@ -96,6 +96,14 @@ void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result);
 
+// Results of commands that didn't come over this session (the serial console,
+// on-device scripts: muse_hw_commands.c) by their generation: the hook takes
+// such a result and returns true before it would be queued for the server.
+typedef bool (*noise_ctrl_result_hook)(
+    noise_ctrl_session_generation_t session_generation,
+    const char *request_id, cJSON *result);
+void noise_ctrl_set_result_hook(noise_ctrl_result_hook hook);
+
 // ---- Extra daemon requests on this session (Muse builds only) ----
 //
 // Any task can open an HTTP request to the VM daemon on its own stream of this

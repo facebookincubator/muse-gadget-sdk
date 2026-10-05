@@ -38,6 +38,8 @@ esp_err_t muse_audio_init(int volume, int mic_gain_db);
 void muse_audio_power(bool on);
 
 void muse_audio_set_volume(int volume);          /* 0..100 */
+/* Bench: silent whatever the volume, until unmuted or a restart; not saved. */
+void muse_audio_mute(bool muted);
 void muse_audio_set_mic_gain(int db);            /* 0..MUSE_MIC_GAIN_MAX */
 
 /* Measures the real capture/playback rates and per-mic levels; logs the result. */

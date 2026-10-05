@@ -181,6 +181,14 @@ void muse_hatch_status(muse_hatch_status_t *out)
     }
 }
 
+bool muse_chat_activity(char *text, size_t cap)
+{
+    if (text && cap) {
+        text[0] = '\0';
+    }
+    return false;
+}
+
 muse_link_state_t muse_link_state(void)
 {
     return s_link;

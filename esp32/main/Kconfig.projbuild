@@ -283,6 +283,42 @@ menu "ESP32 Device SDK"
             Set when display.draw_url can draw a downloaded image: the
             display backends, and boards with the full UI and PSRAM for the image.
 
+    config MUSE_HW_COMMANDS
+        bool "SenseCAP Watcher example: hardware commands, apps and a virtual pet"
+        depends on MUSE_ENABLED && MUSE_HATCH && HOMEHUB_LED_BACKEND_MUSE && MUSE_BOARD_SENSECAP_WATCHER
+        default y
+        help
+            Lets Muse's agent use all of the Watcher's hardware beside the
+            face and settings (see main/muse_hw_commands.c and its neighbours):
+            - the screen (display.*), taps, swipes, the wheel and buttons, which
+              it can capture from the UI (input.read), and the RGB light (led.set)
+            - the speaker (audio.play_url, audio.beep, audio.set_volume) and the
+              mic (audio.record, audio.listen)
+            - the Himax camera: photos, detection with its models, live video on
+              the screen and detections as events (camera.*). It drives the
+              camera itself, so MUSE_WATCHER_CAMERA can't be on with it.
+            - the SD card (storage.*), the Grove port, I2C and the header's UART
+            - device.status (battery, Wi-Fi, chip temperature, CPU and memory,
+              the last crash, kept in RTC memory), the clock, Wi-Fi scans,
+              restart and power off
+            It also adds app pages below the face (app.*), with a library of
+            example apps, and a virtual pet on a page left of the face (pet.*).
+            The camera and mic are reachable by the agent, and by scripts with
+            MUSE_SCRIPTS.
+
+    config MUSE_SCRIPTS
+        bool "On-device Lua scripts the agent installs (script.*)"
+        depends on MUSE_HW_COMMANDS && SPIRAM
+        default y if MUSE_BOARD_SENSECAP_WATCHER
+        help
+            The agent installs Lua 5.4 scripts that run on the device and react
+            to its events (taps, the wheel, what the camera sees) with its
+            hardware commands, without the cloud, including the camera and the
+            mic. Sandboxed: a memory budget each, stopped if they run too long
+            between waits, and kept from commands that write settings, restart
+            the device or manage scripts. Kept on the "scripts" LittleFS
+            partition (partitions_muse.csv). See main/muse_script.c.
+
     config HOMEHUB_PRE_DVT_GPIO
         bool "Use pre-DVT GPIO assignments"
         depends on HOMEHUB_LED_BACKEND_PWM_RGB

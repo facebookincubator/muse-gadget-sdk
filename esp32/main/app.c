@@ -71,6 +71,9 @@
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
+#if CONFIG_MUSE_HW_COMMANDS
+#include "muse_hw_commands.h"
+#endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
@@ -1838,6 +1841,10 @@ static cJSON *bug_report_command(
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
+#if CONFIG_MUSE_HW_COMMANDS
+    cJSON *hw = muse_hw_command(command, params, request_id, session_generation);
+    if (hw) return hw;
+#endif
     if (strcmp(command, "device.list_vms") == 0) {
         return list_vms_command();
     }
@@ -2520,6 +2527,9 @@ void app_run(void) {
 
     noise_ctrl_init(identity_node_id(), identity_ble_name(), on_ws_control_status);
     noise_ctrl_set_command_cb(on_ws_command);
+#if CONFIG_MUSE_HW_COMMANDS
+    muse_hw_commands_set_dispatcher(on_ws_command);
+#endif
     noise_ctrl_set_agent_name_cb(led_status_set_title);
     heap_snapshot("after noise_ctrl_init");
 

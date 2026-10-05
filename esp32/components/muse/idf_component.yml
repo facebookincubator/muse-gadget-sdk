@@ -74,3 +74,8 @@ dependencies:
     version: "^2.1.1"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"guition_jc3248w535\""
+  # The Watcher's RGB light.
+  espressif/led_strip:
+    version: "~3.0"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"sensecap_watcher\""

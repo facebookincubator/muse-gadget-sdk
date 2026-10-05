@@ -47,6 +47,9 @@ extern "C" {
 }
 #endif
 }
+#if CONFIG_MUSE_HW_COMMANDS
+#include "muse_hw_commands.h"
+#endif
 
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
@@ -1403,15 +1406,25 @@ static char *build_register_json(void) {
                     ota_required, ota_optional);
     }
 
+#if CONFIG_MUSE_HW_COMMANDS
+    muse_hw_commands_register(commands);
+#endif
+
     cJSON_AddItemToObject(params, "commands_v2", commands);
     cJSON_AddItemToObject(root, "params", params);
 
     // cJSON_PrintUnformatted grows its buffer by doubling, holding the old
     // one each time, so ~2 KB of JSON briefly needs ~6 KB of byte-addressable
     // heap. Right after the handshake there is often not that much, so print
-    // into one buffer sized to fit instead.
+    // into one buffer sized to fit instead. The hardware commands need more
+    // than 8 KB; their boards have PSRAM for it (the server takes 256 KB).
+#if CONFIG_MUSE_HW_COMMANDS
+    const int max_size = 32768;
+#else
+    const int max_size = 8192;
+#endif
     char *json = nullptr;
-    for (int size = 2048; size <= 8192 && !json; size += 512) {
+    for (int size = 2048; size <= max_size && !json; size += size < 8192 ? 512 : 2048) {
         json = (char *)malloc(size);
         if (!json) break;
         if (!cJSON_PrintPreallocated(root, json, size, false)) {
@@ -1970,6 +1983,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
             goto cleanup;
         }
+        ESP_LOGI(TAG, "link.register: %u bytes", (unsigned)strlen(reg_json));
         control_tx = {reg_json, strlen(reg_json), 0, false, session_generation};
         control_tx.is_registration = true;
     }
@@ -2411,9 +2425,19 @@ extern "C" bool noise_ctrl_is_running(void) {
     return s_task != nullptr;
 }
 
+static noise_ctrl_result_hook s_result_hook;
+
+extern "C" void noise_ctrl_set_result_hook(noise_ctrl_result_hook hook) {
+    s_result_hook = hook;
+}
+
 extern "C" void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result) {
+    if (s_result_hook && request_id && result
+        && s_result_hook(session_generation, request_id, result)) {
+        return;
+    }
     if (!session_generation || !request_id || !result) {
         if (result) cJSON_Delete(result);
         return;

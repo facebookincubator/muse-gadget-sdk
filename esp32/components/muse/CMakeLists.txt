@@ -42,6 +42,11 @@ if(CONFIG_MUSE_ENABLED)
         "muse_lv_mem.c"
         "muse_link.c"
         "muse_ble.c")
+    if(CONFIG_MUSE_HW_COMMANDS)
+        # The SenseCAP Watcher example (main/Kconfig.projbuild): hardware events
+        # and capture, the camera's SSCMA client, app pages and the pet.
+        list(APPEND srcs "muse_hw.c" "muse_camera.c" "muse_apps.c" "muse_pet.c")
+    endif()
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest

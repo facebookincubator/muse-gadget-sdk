@@ -17,15 +17,19 @@
 /*
  * Seeed SenseCAP Watcher: ESP32-S3 with 8 MB PSRAM, round 412 px SPD2010 LCD
  * on QSPI with built-in touch, ES8311 speaker and ES7243E (older units:
- * ES7243) mic, and a wheel in the top-right corner: a rotary encoder on GPIOs
- * with its push on a PCA9535 expander. The expander also switches the power
- * rails and reads the charger. The wheel's push powers the board on, and the
- * firmware then holds the system rail. The Himax camera rail stays off until
- * a capture request or live preview; the SD card and Grove rails stay off.
- * Pins follow Seeed's sensecap-watcher BSP
+ * ES7243) mic, a WS2813 RGB light, and a wheel in the top-right corner: a
+ * rotary encoder on GPIOs with its push on a PCA9535 expander. The expander
+ * also switches the power rails and reads the charger. The wheel's push powers
+ * the board on, and the firmware then holds the system rail. The Himax AI
+ * camera speaks SSCMA over SPI2, which it shares with the SD card. Its rail
+ * stays off until a capture request, the live preview (components/camera) or
+ * Muse's agent (muse_camera.h) needs it; the SD card and Grove rails stay off
+ * until used. Touches, the wheel and the light also go to Muse's agent
+ * (muse_hw.h). Pins follow Seeed's sensecap-watcher BSP
  * (SenseCAP-Watcher-Firmware) and xiaozhi-esp32's sensecap-watcher board.
  */
 #include <stdlib.h>
+#include <string.h>
 
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
@@ -38,6 +42,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
+#include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_io_interface.h"
 #include "esp_lcd_panel_ops.h"
@@ -50,9 +55,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "led_strip.h"
 
 #include "muse_audio.h"
 #include "muse_board.h"
+#include "muse_hw.h"
+
+#if CONFIG_MUSE_WATCHER_CAMERA && CONFIG_MUSE_HW_COMMANDS
+#error "One driver for the Himax per build: MUSE_HW_COMMANDS' camera.* or MUSE_WATCHER_CAMERA's"
+#endif
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #if CONFIG_MUSE_WATCHER_CAMERA
@@ -90,6 +101,9 @@ static const char *TAG = "board";
 
 #define KNOB_A GPIO_NUM_41
 #define KNOB_B GPIO_NUM_42
+/* The encoder counts down turning clockwise (A leads B); -1 flips it if not. */
+#define KNOB_CW_SIGN (-1)
+#define RGB_LED GPIO_NUM_40
 #define BATT_ADC ADC_CHANNEL_2     /* GPIO3, through a 62k/20k divider */
 
 /* PCA9535 at 0x21: port 0 in the low byte, port 1 in the high byte. */
@@ -102,25 +116,41 @@ static const char *TAG = "board";
 #define EXP_STDBY BIT(1)           /* low once charged */
 #define EXP_VBUS BIT(2)            /* low on USB power */
 #define EXP_WHEEL BIT(3)           /* low while pressed */
+#define EXP_SD_DET BIT(4)          /* low while a card is in */
 #define EXP_CAM_SYNC BIT(6)        /* high while the Himax has a reply waiting */
+#define EXP_HIMAX_RST BIT(7)       /* pulled up; driven low, it resets the Himax */
+#define EXP_PWR_SD BIT(8)          /* also powers the SPI2 pull-ups the Himax needs */
 #define EXP_PWR_LCD BIT(9)
 #define EXP_PWR_SYSTEM BIT(10)     /* holds the board on from battery */
 #define EXP_PWR_AI BIT(11)         /* Himax vision coprocessor */
 #define EXP_PWR_CODEC_PA BIT(12)
+#define EXP_PWR_GROVE BIT(14)
 #define EXP_PWR_BAT_ADC BIT(15)
 #define EXP_RAILS (EXP_PWR_LCD | EXP_PWR_CODEC_PA | EXP_PWR_BAT_ADC)
 
-/* The Himax camera speaks SSCMA on its own SPI bus (Seeed's BSP pins). */
+/* The Himax camera speaks SSCMA on SPI2 (Seeed's BSP pins), a bus it shares
+ * with the SD card. As in Seeed's sscma_client, every command is one 256-byte
+ * packet, and the answer is clocked out after a pause. */
 #define CAM_HOST SPI2_HOST
 #define CAM_SCLK GPIO_NUM_4
 #define CAM_MOSI GPIO_NUM_5
 #define CAM_MISO GPIO_NUM_6
 #define CAM_CS GPIO_NUM_21
+#define SD_CS GPIO_NUM_46          /* pulled down: undriven, the card answers too */
+#define CAM_HZ (12 * 1000 * 1000)
+#define HEADER_TX GPIO_NUM_19      /* the 2x4 header's spare pins, a UART in Seeed's firmware */
+#define HEADER_RX GPIO_NUM_20
+#define CAM_PACKET 256
+#define CAM_PAYLOAD 250
+#define CAM_WAIT_MS 2              /* before each packet and each answer, as Seeed's BSP */
+#define CAM_FEATURE 0x10
+#define CAM_READ 0x01
+#define CAM_WRITE 0x02
+#define CAM_AVAILABLE 0x03
 
 #define DEBOUNCE_SAMPLES 3
-#define TURN_COUNTS 2      /* encoder quarter-steps that make a turn */
+#define TURN_COUNTS 2      /* encoder quarter-steps to a detent */
 #define TURN_REST 20       /* 200 ms without movement ends a turn */
-#define TURN_MAX 40        /* 400 ms, well short of Muse's hold-to-power-off */
 #define TP_LIFT_MS 40      /* touch reads empty this long before the finger counts as lifted */
 #define TP_POLL_MS 10      /* between touch polls while a finger is down */
 #define TP_IDLE_POLL_MS 20 /* and while not */
@@ -130,6 +160,11 @@ static const char *TAG = "board";
 static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_exp;
 static uint16_t s_exp_out;
+static uint16_t s_exp_cfg = EXP_INPUTS;
+/* The output and config shadows: the camera and the SD card switch rails from
+ * their own tasks, so changes to them take turns. */
+static SemaphoreHandle_t s_exp_lock;
+static SemaphoreHandle_t s_spi2_lock;  /* spi2_rails(): its count and the rails it switches, together */
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static pcnt_unit_handle_t s_knob;
@@ -156,9 +191,6 @@ static esp_err_t exp_read(uint16_t *v)
     return ESP_OK;
 }
 
-/* The camera switches its rail from its own task, so changes to s_exp_out take turns. */
-static SemaphoreHandle_t s_exp_lock;
-
 static esp_err_t exp_set(uint16_t mask, bool on)
 {
     xSemaphoreTake(s_exp_lock, portMAX_DELAY);
@@ -168,18 +200,15 @@ static esp_err_t exp_set(uint16_t mask, bool on)
     return err;
 }
 
-#if CONFIG_MUSE_WATCHER_CAMERA
-static esp_err_t camera_power(bool on)
+/* Pins in `mask` become inputs (true) or outputs (false). */
+static esp_err_t exp_input(uint16_t mask, bool input)
 {
-    return exp_set(EXP_PWR_AI, on);
+    xSemaphoreTake(s_exp_lock, portMAX_DELAY);
+    s_exp_cfg = input ? s_exp_cfg | mask : s_exp_cfg & ~mask;
+    esp_err_t err = exp_write(EXP_REG_CONFIG, s_exp_cfg);
+    xSemaphoreGive(s_exp_lock);
+    return err;
 }
-
-static bool camera_has_data(void)
-{
-    uint16_t in;
-    return exp_read(&in) == ESP_OK && (in & EXP_CAM_SYNC);
-}
-#endif
 
 /* Deep sleep until an expander input changes. The wheel's push is one. */
 static void sleep_until_wheel(void)
@@ -239,6 +268,20 @@ static esp_err_t knob_init(void)
     return pcnt_unit_start(s_knob);
 }
 
+static esp_err_t set_led(uint8_t r, uint8_t g, uint8_t b);
+#if CONFIG_MUSE_WATCHER_CAMERA
+static esp_err_t camera_power(bool on)
+{
+    return exp_set(EXP_PWR_AI, on);
+}
+
+static bool camera_has_data(void)
+{
+    uint16_t in;
+    return exp_read(&in) == ESP_OK && (in & EXP_CAM_SYNC);
+}
+#endif
+
 static esp_err_t init(void)
 {
     /* Hold the LCD and touch lines low until the LCD rail is up, as Seeed's BSP does. */
@@ -263,14 +306,16 @@ static esp_err_t init(void)
         .flags.enable_internal_pullup = true,
     };
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_cfg, &s_i2c), TAG, "i2c");
+    s_exp_lock = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_exp_lock, ESP_ERR_NO_MEM, TAG, "expander lock");
+    s_spi2_lock = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_spi2_lock, ESP_ERR_NO_MEM, TAG, "spi2 rails lock");
     const i2c_device_config_t exp_cfg = { .device_address = EXP_ADDR, .scl_speed_hz = 400000 };
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(s_i2c, &exp_cfg, &s_exp), TAG, "expander");
 
-    s_exp_lock = xSemaphoreCreateMutex();
-    ESP_RETURN_ON_FALSE(s_exp_lock, ESP_ERR_NO_MEM, TAG, "expander lock");
     /* Outputs start low, then the system rail, then the rails Muse uses (Seeed's order). */
     ESP_RETURN_ON_ERROR(exp_write(EXP_REG_OUTPUT, 0), TAG, "expander outputs");
-    ESP_RETURN_ON_ERROR(exp_write(EXP_REG_CONFIG, EXP_INPUTS), TAG, "expander config");
+    ESP_RETURN_ON_ERROR(exp_write(EXP_REG_CONFIG, s_exp_cfg), TAG, "expander config");
     uint16_t in;
     ESP_RETURN_ON_ERROR(exp_read(&in), TAG, "expander inputs");
     if ((esp_sleep_get_wakeup_causes() & BIT(ESP_SLEEP_WAKEUP_EXT0)) && (in & EXP_WHEEL)) {
@@ -303,6 +348,11 @@ static esp_err_t init(void)
     s_wheel_down = !(in & EXP_WHEEL);
 
     ESP_RETURN_ON_ERROR(knob_init(), TAG, "knob");
+    /* The RGB light shows whatever its data line picked up at power-on until
+     * something drives it, so start it off. */
+    if (set_led(0, 0, 0) != ESP_OK) {
+        ESP_LOGW(TAG, "rgb light didn't answer");
+    }
     /* The expander holds EXP_INT low from an input changing until the inputs
      * are read. wait_buttons() sleeps on it, as Seeed's BSP does. */
     const gpio_config_t int_cfg = {
@@ -373,10 +423,14 @@ static void poll_touch(void *arg)
             taskENTER_CRITICAL(&s_tp_lock);
             s_tp_down = false;
             taskEXIT_CRITICAL(&s_tp_lock);
+            if (last_us) {
+                muse_hw_touch(false, 0, 0);
+            }
             last_us = 0;
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             continue;
         }
+        bool was_down = last_us != 0;
         uint8_t n = 0;
         if (esp_lcd_touch_read_data(tp) == ESP_OK) {
             esp_lcd_touch_get_data(tp, &p, &n, 1);
@@ -390,7 +444,11 @@ static void poll_touch(void *arg)
             last_us = 0;
         }
         s_tp_down = last_us != 0;
+        esp_lcd_touch_point_data_t at = s_tp_point;
         taskEXIT_CRITICAL(&s_tp_lock);
+        if (last_us || was_down) {
+            muse_hw_touch(last_us != 0, at.x, at.y);
+        }
         vTaskDelay(pdMS_TO_TICKS(last_us ? TP_POLL_MS : TP_IDLE_POLL_MS));
     }
 }
@@ -403,7 +461,7 @@ static esp_err_t tp_read(esp_lcd_touch_handle_t tp, esp_lcd_touch_point_data_t *
     (void)ctx;
     taskENTER_CRITICAL(&s_tp_lock);
     points[0] = s_tp_point;
-    *count = s_tp_down;
+    *count = s_tp_down && !muse_hw_captured();
     taskEXIT_CRITICAL(&s_tp_lock);
     return ESP_OK;
 }
@@ -668,51 +726,49 @@ static unsigned poll_wheel_push(void)
     }
     s_wheel_stable = 0;
     s_wheel_down = raw;
+    muse_hw_wheel_push(raw);
     return raw ? MUSE_BTN_TALK_PRESS : MUSE_BTN_TALK_RELEASE;
 }
 
 /*
- * A turn of the wheel, either way, reads as one short press: it goes down on
- * the first step and up once the wheel rests. A long turn is cut short so it
- * can't become Muse's hold-to-power-off; the rest of it is ignored.
+ * The wheel's turns, for the dial: detents since the last poll, + clockwise,
+ * TURN_COUNTS quarter-steps each. Muse's agent gets each turn whole, with its
+ * direction, once the wheel rests. Paused, PCNT is stopped and a move of
+ * either line reads as one detent, which only wakes Muse.
  */
-static unsigned poll_wheel_turn(void)
+static int poll_dial(void)
 {
-    static int moved, rest, held;
-    static bool down, spent;
-    int n = 0;
+    static int counts, turned, rest;
     if (s_paused) {
-        n = s_wheel_moved ? TURN_COUNTS : 0;
-    } else if (pcnt_unit_get_count(s_knob, &n) == ESP_OK && n) {
+        if (!s_wheel_moved) {
+            return 0;
+        }
+        s_wheel_moved = false;
+        return 1;
+    }
+    int n = 0;
+    if (pcnt_unit_get_count(s_knob, &n) == ESP_OK && n) {
         pcnt_unit_clear_count(s_knob);
     }
     rest = n ? 0 : rest + 1;
-    if (down) {
-        if (rest < TURN_REST && ++held < TURN_MAX) {
-            return 0;
-        }
-        down = false;
-        spent = rest < TURN_REST;
-        moved = 0;
-        return MUSE_BTN_TALK_RELEASE;
+    counts += n;
+    turned += n;
+    if (rest == TURN_REST && turned) {
+        int steps = turned / TURN_COUNTS;
+        muse_hw_wheel_turn(KNOB_CW_SIGN * (steps ? steps : turned > 0 ? 1 : -1));
+        turned = 0;
     }
+    int detents = counts / TURN_COUNTS;
+    counts -= detents * TURN_COUNTS;
     if (rest >= TURN_REST) {
-        moved = 0;
-        spent = false;
-        return 0;
+        counts = 0;   /* half a detent, left when the wheel rests, is a wobble */
     }
-    moved += n;
-    if (spent || abs(moved) < TURN_COUNTS) {
-        return 0;
-    }
-    down = true;
-    held = 0;
-    return MUSE_BTN_TALK_PRESS;
+    return KNOB_CW_SIGN * detents;
 }
 
 static unsigned poll_buttons(void)
 {
-    return poll_wheel_push() | poll_wheel_turn() << 2;
+    return poll_wheel_push();
 }
 
 /*
@@ -764,9 +820,37 @@ static esp_err_t read_power(muse_power_t *out)
     }
     int v = sum / 8 * 82 / 20;
     out->battery_mv = v;
+    /* Measured on USB too, for the percentage. The voltage tells whether the
+     * cell is there: below 3 V on USB it's gone or cut off. */
+    bool battery = v >= 3000 || !out->usb;
+    out->charging = out->charging && battery;
+    if (!battery) {
+        return ESP_OK;
+    }
     int pct = (-v * v + 9016 * v - 19189000) / 10000;
     out->battery_pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
     return ESP_OK;
+}
+
+/* The WS2813 on GPIO40, as Seeed's BSP drives it. Started on first use. */
+static esp_err_t set_led(uint8_t r, uint8_t g, uint8_t b)
+{
+    static led_strip_handle_t led;
+    if (!led) {
+        const led_strip_config_t cfg = {
+            .strip_gpio_num = RGB_LED,
+            .max_leds = 1,
+            .led_model = LED_MODEL_WS2812,
+            .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        };
+        const led_strip_rmt_config_t rmt = {
+            .clk_src = RMT_CLK_SRC_DEFAULT,
+            .resolution_hz = 10 * 1000 * 1000,
+        };
+        ESP_RETURN_ON_ERROR(led_strip_new_rmt_device(&cfg, &rmt, &led), TAG, "rgb light");
+    }
+    ESP_RETURN_ON_ERROR(led_strip_set_pixel(led, 0, r, g, b), TAG, "rgb light");
+    return led_strip_refresh(led);
 }
 
 static void panel_off(void *arg)
@@ -780,8 +864,10 @@ static esp_err_t power_off(void)
     set_brightness(0);
     muse_lcd_bands_run(panel_off, NULL);
     /* On battery, dropping the system rail cuts power once the wheel is up.
-     * USB keeps the board on, so sleep until the wheel is pressed. */
-    ESP_RETURN_ON_ERROR(exp_set(EXP_RAILS | EXP_PWR_AI | EXP_PWR_SYSTEM, false), TAG, "rails off");
+     * USB keeps the board on, so sleep until the wheel is pressed, with the
+     * camera, SD card and Grove rails off too. */
+    ESP_RETURN_ON_ERROR(exp_set(EXP_RAILS | EXP_PWR_AI | EXP_PWR_SD | EXP_PWR_GROVE | EXP_PWR_SYSTEM, false), TAG,
+                        "rails off");
     uint16_t in;
     while (exp_read(&in) == ESP_OK && !(in & EXP_WHEEL)) {
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -790,6 +876,286 @@ static esp_err_t power_off(void)
     sleep_until_wheel();
     return ESP_FAIL;
 }
+
+/* ---- The Himax camera: SSCMA over SPI2 ---- */
+
+static spi_device_handle_t s_cam;
+static uint8_t *s_cam_tx;          /* one packet, in DMA-capable internal RAM while powered */
+static uint8_t *s_cam_rx;          /* one answer, likewise */
+static int s_spi2_users;           /* the camera and the SD card: while either, both rails stay up */
+static bool s_spi2_bus;
+
+/* The bus, and the SD card's CS kept high (it's pulled down). */
+static esp_err_t spi2_bus_start(void)
+{
+    if (s_spi2_bus) {
+        return ESP_OK;
+    }
+    /* Keep the SD card off the bus: its CS is pulled down. */
+    const gpio_config_t cs = { .pin_bit_mask = BIT64(SD_CS), .mode = GPIO_MODE_OUTPUT, .pull_up_en = true };
+    ESP_RETURN_ON_ERROR(gpio_config(&cs), TAG, "sd cs");
+    gpio_set_level(SD_CS, 1);
+    const spi_bus_config_t bus = {
+        .sclk_io_num = CAM_SCLK,
+        .mosi_io_num = CAM_MOSI,
+        .miso_io_num = CAM_MISO,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = MUSE_SSCMA_READ_MAX + 1,
+    };
+    esp_err_t err = spi_bus_initialize(CAM_HOST, &bus, SPI_DMA_CH_AUTO);
+    ESP_RETURN_ON_FALSE(err == ESP_OK || err == ESP_ERR_INVALID_STATE, err, TAG, "spi2 bus");
+    s_spi2_bus = true;
+    return ESP_OK;
+}
+
+/*
+ * The SD rail carries the bus pull-ups and the Himax, powered, keeps its pins
+ * from dragging the bus: both are up while the camera or the card is in use,
+ * as in Seeed's firmware. Each of those holds them with on, then lets go.
+ */
+static esp_err_t spi2_rails(bool on)
+{
+    /* Held through the switch and the settle: an off racing an on can't
+     * leave the rails off while counted on, or let on return before they're up. */
+    xSemaphoreTake(s_spi2_lock, portMAX_DELAY);
+    /* Never below none: an unmatched off would leave the rails dead for good. */
+    bool change = on ? s_spi2_users++ == 0 : s_spi2_users > 0 && --s_spi2_users == 0;
+    esp_err_t err = ESP_OK;
+    if (change) {
+        err = exp_set(EXP_PWR_SD | EXP_PWR_AI, on);
+        if (on) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+    xSemaphoreGive(s_spi2_lock);
+    return err;
+}
+
+/* The reader's polls (muse_camera.c's task) and requests' writes (the caller's)
+ * share one SPI device, and the driver's bus lock is the device's, not a
+ * task's: two tasks interleaving acquire and release trip its assert. So each
+ * whole transfer holds this; waiting for it is bounded, so a power-down never
+ * has to kill the reader mid-transfer. (The bus itself can only be waited for
+ * without a limit: the card's transfers are short.) */
+#define CAM_LOCK_MS 300
+static SemaphoreHandle_t s_cam_lock;
+
+static bool cam_take(void)
+{
+    if (!s_cam_lock || xSemaphoreTake(s_cam_lock, pdMS_TO_TICKS(CAM_LOCK_MS)) != pdTRUE) {
+        return false;
+    }
+    if (s_cam_tx && spi_device_acquire_bus(s_cam, portMAX_DELAY) == ESP_OK) {
+        return true;
+    }
+    xSemaphoreGive(s_cam_lock);   /* powered down meanwhile */
+    return false;
+}
+
+static void cam_give(void)
+{
+    spi_device_release_bus(s_cam);
+    xSemaphoreGive(s_cam_lock);
+}
+
+static esp_err_t cam_bus_start(void)
+{
+    if (!s_cam_lock) {
+        s_cam_lock = xSemaphoreCreateMutex();
+        ESP_RETURN_ON_FALSE(s_cam_lock, ESP_ERR_NO_MEM, TAG, "camera lock");
+    }
+    if (s_cam) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(spi2_bus_start(), TAG, "spi2 bus");
+    const spi_device_interface_config_t dev = {
+        .clock_speed_hz = CAM_HZ,
+        .mode = 0,
+        .spics_io_num = CAM_CS,
+        .queue_size = 1,
+    };
+    return spi_bus_add_device(CAM_HOST, &dev, &s_cam);
+}
+
+static bool s_cam_rails;   /* the camera holds the SPI2 rails: off undoes only what on did */
+
+static esp_err_t cam_power(bool on)
+{
+    if (!on) {
+        /* Not under a transfer: the reader is gone, but a request may be late. */
+        bool locked = s_cam_lock && xSemaphoreTake(s_cam_lock, pdMS_TO_TICKS(2 * CAM_LOCK_MS)) == pdTRUE;
+        exp_input(EXP_HIMAX_RST, false);   /* held in reset while the card may still use the bus */
+        if (s_cam_rails) {
+            spi2_rails(false);
+            s_cam_rails = false;
+        }
+        heap_caps_free(s_cam_tx);
+        heap_caps_free(s_cam_rx);
+        s_cam_tx = s_cam_rx = NULL;
+        if (locked) {
+            xSemaphoreGive(s_cam_lock);
+        }
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(cam_bus_start(), TAG, "camera bus");
+    if (!s_cam_tx || !s_cam_rx) {
+        heap_caps_free(s_cam_tx);
+        heap_caps_free(s_cam_rx);
+        s_cam_tx = heap_caps_calloc(1, CAM_PACKET, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        s_cam_rx = heap_caps_malloc(MUSE_SSCMA_READ_MAX + 1, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (!s_cam_tx || !s_cam_rx) {
+            heap_caps_free(s_cam_tx);
+            heap_caps_free(s_cam_rx);
+            s_cam_tx = s_cam_rx = NULL;
+            ESP_LOGE(TAG, "camera buffers: no internal DMA memory");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    /* The rails, then a reset: its latch is 0, so as an output it holds the
+     * Himax in reset. */
+    if (!s_cam_rails) {
+        s_cam_rails = true;   /* counted even if the expander write fails: off uncounts it */
+        ESP_RETURN_ON_ERROR(spi2_rails(true), TAG, "camera rails");
+    }
+    ESP_RETURN_ON_ERROR(exp_input(EXP_HIMAX_RST, false), TAG, "himax reset");
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_RETURN_ON_ERROR(exp_input(EXP_HIMAX_RST, true), TAG, "himax run");
+    vTaskDelay(pdMS_TO_TICKS(200));
+    return ESP_OK;
+}
+
+/* One command packet: feature, command, length, payload, two 0xFF, zeros to 256. */
+static esp_err_t cam_packet(uint8_t cmd, uint16_t len, const void *payload, size_t n)
+{
+    memset(s_cam_tx, 0, CAM_PACKET);
+    s_cam_tx[0] = CAM_FEATURE;
+    s_cam_tx[1] = cmd;
+    s_cam_tx[2] = len >> 8;
+    s_cam_tx[3] = len & 0xff;
+    if (payload) {
+        memcpy(s_cam_tx + 4, payload, n);
+    }
+    s_cam_tx[4 + n] = 0xff;
+    s_cam_tx[5 + n] = 0xff;
+    vTaskDelay(pdMS_TO_TICKS(CAM_WAIT_MS));
+    spi_transaction_t t = { .length = CAM_PACKET * 8, .tx_buffer = s_cam_tx };
+    return spi_device_transmit(s_cam, &t);
+}
+
+static esp_err_t cam_answer(size_t n)
+{
+    vTaskDelay(pdMS_TO_TICKS(CAM_WAIT_MS));
+    spi_transaction_t t = { .length = n * 8, .rxlength = n * 8, .rx_buffer = s_cam_rx };
+    return spi_device_transmit(s_cam, &t);
+}
+
+static esp_err_t cam_write(const void *data, size_t len)
+{
+    if (!cam_take()) {
+        return s_cam_tx ? ESP_ERR_TIMEOUT : ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t err = ESP_OK;
+    for (size_t off = 0; err == ESP_OK && off < len; off += CAM_PAYLOAD) {
+        size_t n = len - off < CAM_PAYLOAD ? len - off : CAM_PAYLOAD;
+        err = cam_packet(CAM_WRITE, n, (const uint8_t *)data + off, n);
+    }
+    cam_give();
+    return err;
+}
+
+static esp_err_t cam_available(size_t *len)
+{
+    *len = 0;
+    ESP_RETURN_ON_FALSE(s_cam_tx, ESP_ERR_INVALID_STATE, TAG, "camera off");
+    uint16_t in;
+    ESP_RETURN_ON_ERROR(exp_read(&in), TAG, "expander read");
+    if (!(in & EXP_CAM_SYNC)) {
+        return ESP_OK;
+    }
+    if (!cam_take()) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = cam_packet(CAM_AVAILABLE, 0, NULL, 0);
+    if (err == ESP_OK) {
+        err = cam_answer(2);
+    }
+    if (err == ESP_OK) {
+        size_t n = s_cam_rx[0] << 8 | s_cam_rx[1];
+        *len = n == 0xffff ? 0 : n;
+    }
+    cam_give();
+    return err;
+}
+
+static esp_err_t cam_read(void *buf, size_t len)
+{
+    ESP_RETURN_ON_FALSE(len <= MUSE_SSCMA_READ_MAX, ESP_ERR_INVALID_ARG, TAG, "camera read");
+    if (!cam_take()) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = cam_packet(CAM_READ, len, NULL, 0);
+    if (err == ESP_OK) {
+        err = cam_answer(len);
+    }
+    if (err == ESP_OK) {
+        memcpy(buf, s_cam_rx, len);
+    }
+    cam_give();
+    return err;
+}
+
+/* ---- Ports: Grove, the header's UART, the SD card ---- */
+
+static esp_err_t sd_power(bool on)
+{
+    if (on) {
+        ESP_RETURN_ON_ERROR(spi2_bus_start(), TAG, "spi2 bus");
+        /* The Himax isn't in use: keep it in reset, quiet on the bus. */
+        if (!s_cam_tx) {
+            exp_input(EXP_HIMAX_RST, false);
+        }
+    }
+    return spi2_rails(on);
+}
+
+static bool sd_present(void)
+{
+    uint16_t in;
+    return exp_read(&in) == ESP_OK && !(in & EXP_SD_DET);
+}
+
+static esp_err_t grove_power(bool on)
+{
+    return exp_set(EXP_PWR_GROVE, on);
+}
+
+/* The expander, both codecs and the RTC Seeed's BSP expects. */
+static const uint8_t ONBOARD_I2C[] = { EXP_ADDR, 0x18, ES7243_ADDR, ES7243E_ADDR, 0x51, 0 };
+
+static const muse_ports_t *ports(void)
+{
+    static muse_ports_t p;
+    p = (muse_ports_t){
+        .i2c_bus = s_i2c,
+        .i2c_onboard = ONBOARD_I2C,
+        .grove_power = grove_power,
+        .uart_tx = HEADER_TX,
+        .uart_rx = HEADER_RX,
+        .sd_spi_host = CAM_HOST,
+        .sd_cs = SD_CS,
+        .sd_power = sd_power,
+        .sd_present = sd_present,
+    };
+    return &p;
+}
+
+static const muse_sscma_ops_t s_sscma = {
+    .power = cam_power,
+    .write = cam_write,
+    .available = cam_available,
+    .read = cam_read,
+};
 
 static const muse_board_t s_board = {
     .name = "Seeed SenseCAP Watcher",
@@ -800,10 +1166,12 @@ static const muse_board_t s_board = {
     .diagonal_in = 1.45f,
     .talk_button = "wheel",
     .aux_button = "scroll",
-    /* The wheel is in the top-right corner: press it to talk, turn it to sleep.
-     * Turning it isn't a button of its own, so no aux_hint: a power icon beside
-     * the wheel would point at a button that isn't there. */
-    .talk_hint = { LV_ALIGN_CENTER, 100, -143 },    /* 55 degrees above 3 o'clock */
+    /* The wheel is in the top-right corner: press it to talk, turn it for the
+     * volume. Turning it isn't a button of its own (poll_dial, not the aux
+     * button), so aux_hint places the volume icon beside the wheel, not a
+     * power icon. */
+    .talk_hint = { LV_ALIGN_CENTER, 100, -143 },    /* 55 and 35 degrees above 3 o'clock */
+    .aux_hint = { LV_ALIGN_CENTER, 143, -100 },
     .frame_ms = 40,
     .init = init,
     .display_start = display_start,
@@ -817,6 +1185,10 @@ static const muse_board_t s_board = {
     .wait_buttons = wait_buttons,
     .read_power = read_power,
     .power_off = power_off,
+    .set_led = set_led,
+    .poll_dial = poll_dial,
+    .sscma = &s_sscma,
+    .ports = ports,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

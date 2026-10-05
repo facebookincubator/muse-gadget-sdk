@@ -25,18 +25,23 @@ class ChatSession(unittest.TestCase):
         types = source[source.index('enum phase_t'):source.index('/* 10 KB')]
         handlers = source[source.index('static int find_msg('):source.index('static void on_chat_ack(')]
         reset = source[source.index('static bool turn_start('):source.index('static void turn_begin(')]
+        # The SenseCAP Watcher example's state the handlers use: follow-ups and asking again.
+        example = source[source.index('/*\n * A reply that comes after its turn ended'):source.index('static int64_t now_us(void);')]
         code = r'''
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <atomic>
 #include <initializer_list>
 #include "host_compat.h"
 #include "cJSON.h"
 #include "minimp3.h"
 #include "muse_chat_priv.h"
-#define ESP_LOGI(...) ((void)0)
+static inline void log_ignored(const char *, const char *, ...) {}
+#define ESP_LOGI(...) log_ignored(__VA_ARGS__)
+#define ESP_LOGW(...) log_ignored(__VA_ARGS__)
 ''' + constants + types + r'''
 static turn_t s_turn;
 static char s_reply_shown[EV_TEXT];
@@ -58,7 +63,21 @@ static void turn_fail(const char *) { turn_finish(); }
 static bool ensure_connected() { return true; }
 bool muse_hatch_configured() { return true; }
 static void resampler_init(resampler_t *, int, int) {}
+#ifndef EXT_RAM_BSS_ATTR
+#define EXT_RAM_BSS_ATTR
+#endif
+''' + example + r'''
+static std::atomic<uint32_t> s_gen{0};
+static const char *TAG = "test";
+enum act_t { ACT_WORKING, ACT_ONLINE, ACT_FINISHED };
+static void note_activity(act_t, const char *) {}
+static bool activity_busy() { return false; }
+static const char *device_id() { return nullptr; }
+static void send_chat(const char *, const char *) {}
+const char *muse_chat_device_id(void) { return nullptr; }
 ''' + reset + handlers + r'''
+/* The example's asks run from code this test doesn't copy. */
+[[maybe_unused]] static void example_uses() { (void)PHOTO_RETRY_ASK; (void)RECOVER_ASK; (void)&recover_ask; }
 static void begin(bool typed = false) {
     assert(turn_start(s_turn.gen + 1, typed));
     s_turn.phase = P_WAIT_REPLY;

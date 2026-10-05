@@ -97,11 +97,21 @@ void muse_audio_power(bool on)
     esp_log_level_set("i2s_common", lvl);
 }
 
+static bool s_muted;   /* bench (muse_audio_mute): silent whatever the volume */
+static int s_volume;
+
 void muse_audio_set_volume(int volume)
 {
+    s_volume = volume;
     if (s_spk) {
-        esp_codec_dev_set_out_vol(s_spk, volume);
+        esp_codec_dev_set_out_vol(s_spk, s_muted ? 0 : volume);
     }
+}
+
+void muse_audio_mute(bool muted)
+{
+    s_muted = muted;
+    muse_audio_set_volume(s_volume);
 }
 
 void muse_audio_set_mic_gain(int db)

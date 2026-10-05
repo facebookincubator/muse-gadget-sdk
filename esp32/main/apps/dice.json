@@ -1,0 +1,47 @@
+{
+ "id": "dice",
+ "title": "Dice",
+ "order": 70,
+ "bg": "#100808",
+ "layout": "none",
+ "_about": "Dice drawn on a canvas (rect and circle draw ops), rolled by a tap with a short animation (wait) and sounds played alongside (after). A long press switches one or two dice. math.random, seeded from now().",
+ "children": [
+  {
+   "type": "label",
+   "id": "title",
+   "align": "top",
+   "y": 62,
+   "font": 16,
+   "color": "#ff9f0a",
+   "text": "TAP TO ROLL"
+  },
+  {
+   "type": "canvas",
+   "id": "c",
+   "w": 300,
+   "h": 150,
+   "align": "center",
+   "y": -12,
+   "fill": "#100808",
+   "clickable": true
+  },
+  {
+   "type": "label",
+   "id": "sum",
+   "align": "center",
+   "y": 92,
+   "font": 36,
+   "color": "#f2efff",
+   "text": ""
+  },
+  {
+   "type": "label",
+   "id": "hint",
+   "align": "bottom",
+   "y": -52,
+   "font": 14,
+   "color": "#6a5d5d",
+   "text": "hold for one or two dice"
+  }
+ ]
+}

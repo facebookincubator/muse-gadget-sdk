@@ -67,11 +67,18 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
     memcpy(rejected->ids[rejected->count++], id, len + 1);
 }
 
-/* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
-#define MUSE_HATCH_NOTE_HEAD \
-    "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
-    "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
+/* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL.
+ * The head is NOTE_START, the output modality, and NOTE_ITEMS, with room for a
+ * "device_id" before the items. */
+#define MUSE_CHAT_NOTE_START "{\"message\":\"\",\"output_modality\":\""
+#define MUSE_CHAT_NOTE_OPEN MUSE_CHAT_NOTE_START "text\","
+#define MUSE_CHAT_NOTE_ITEMS \
+    "\"items\":[{\"type\":\"file\",\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
+#define MUSE_HATCH_NOTE_HEAD MUSE_CHAT_NOTE_OPEN MUSE_CHAT_NOTE_ITEMS
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
+
+/* The node id Home Link registers with Muse, or NULL (muse_chat_set_device_id). */
+const char *muse_chat_device_id(void);
 #define MUSE_HATCH_WAV_HEADER 44
 
 /* Voice note helpers (muse_chat_text.c). The note's length isn't known until

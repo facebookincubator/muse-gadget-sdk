@@ -1,0 +1,152 @@
+{
+ "id": "apps",
+ "title": "Apps",
+ "order": 0,
+ "bg": "#07050f",
+ "_about": "The launcher, first below the face: a button for every page, filled in each time it's shown. Shows app.list, changing a page with app.update (text, hidden) and app.show.",
+ "children": [
+  {
+   "type": "label",
+   "id": "title",
+   "text": "APPS",
+   "font": 20,
+   "color": "#a77dff"
+  },
+  {
+   "type": "row",
+   "id": "grid",
+   "wrap": true,
+   "gap": 10,
+   "w": 300,
+   "children": [
+    {
+     "type": "button",
+     "id": "b1",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b2",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b3",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b4",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b5",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b6",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b7",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b8",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b9",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b10",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b11",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    },
+    {
+     "type": "button",
+     "id": "b12",
+     "w": 92,
+     "h": 56,
+     "hidden": true,
+     "bg": "#221a38",
+     "radius": 16,
+     "font": 14
+    }
+   ]
+  },
+  {
+   "type": "label",
+   "id": "count",
+   "text": "",
+   "font": 14,
+   "color": "#8b84a8"
+  }
+ ]
+}

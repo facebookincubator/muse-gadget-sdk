@@ -30,11 +30,13 @@
 #include "esp_pm.h"
 #endif
 
+#include "muse_audio.h"
 #include "muse_battery.h"
 #include "muse_ble.h"
 #include "muse_board.h"
 #include "muse_chat.h"
 #include "muse_console.h"
+#include "muse_hw.h"
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
@@ -57,6 +59,8 @@ static const char *TAG = "muse_input";
 #define REST_POWER_MS 10000    /* ... while paused */
 #define WIFI_NAP_MS (2 * 60 * 1000)   /* low power this long: Wi-Fi off until it ends */
 #define DOUBLE_TICKS 35        /* 350 ms: a second aux press within this toggles phone setup */
+#define VOLUME_STEP 5          /* percent a dial detent */
+#define VOLUME_SHOW_TICKS 150  /* 1.5 s: how long the volume stays on screen after the dial rests */
 
 #define GOODBYE_MS 1500        /* let the goodbye animation play */
 #define HINT_TICKS 60          /* 0.6 s: warn that holding powers off */
@@ -66,6 +70,7 @@ static const char *TAG = "muse_input";
 #define SERIAL_RX 1024         /* the driver drops what doesn't fit, so a console line must */
 #define SERIAL_LINE 1024
 #define CHAT_MAX (192 * 1024)  /* a typed message, assembled from "chat+=" lines */
+#define HW_MAX (256 * 1024)    /* a hardware command (a script), assembled from "hw+=" lines */
 
 static QueueHandle_t s_queue;
 static TaskHandle_t s_input;
@@ -79,6 +84,12 @@ static void post(muse_ptt_t type, bool wake)
     muse_input_event_t ev = { .type = type, .wake = wake };
     ESP_LOGI(TAG, "PTT %s%s", type == MUSE_PTT_DOWN ? "down" : "up", wake ? " (waking)" : "");
     xQueueSend(s_queue, &ev, 0);
+}
+
+void muse_input_talk(bool down)
+{
+    muse_state_poke();
+    post(down ? MUSE_PTT_DOWN : MUSE_PTT_UP, false);
 }
 
 static bool update_power(void);
@@ -292,6 +303,43 @@ static void keyboard_buttons(unsigned ev)
     else if (ev & MUSE_BTN_ENTER) muse_menu_key(MUSE_MENU_SELECT);
 }
 
+/*
+ * The dial (the Watcher's wheel): turning wakes the screen, and awake sets the
+ * volume, shown in place of the caption until the dial rests. Muse's agent
+ * gets the turns instead while it captures input.
+ */
+static void dial(int steps)
+{
+    static int show;
+    static char saved_caption[64];
+
+    if (!steps) {
+        if (show && --show == 0) {
+            muse_state_set_caption("%s", saved_caption);
+        }
+        return;
+    }
+    if (muse_hw_captured()) {
+        return;
+    }
+    if (muse_state_asleep()) {
+        set_asleep(false, "dial");
+        return;
+    }
+    muse_state_poke();
+    int volume = muse_settings_volume() + steps * VOLUME_STEP;
+    volume = volume < 0 ? 0 : volume > 100 ? 100 : volume;
+    if (volume != muse_settings_volume()) {
+        muse_settings_set_volume(volume);
+    }
+    if (!show) {
+        uint32_t v = UINT32_MAX;
+        muse_state_caption(saved_caption, sizeof(saved_caption), &v);
+    }
+    muse_state_set_caption("VOLUME %d%%", volume);
+    show = VOLUME_SHOW_TICKS;
+}
+
 /* A pairing prompt wakes the screen and keeps it on; otherwise idle sleeps. */
 static void check_sleep(void)
 {
@@ -399,6 +447,13 @@ static void input_task(void *arg)
 
     for (;;) {
         unsigned ev = muse_board->poll_buttons();
+        if (muse_hw_captured()) {
+            /* Muse's agent has the buttons (muse_hw.h), and the screen stays
+             * awake for it. Releases still land, so a press from before the
+             * capture ends as it began. */
+            muse_state_poke();
+            ev &= ~(MUSE_BTN_TALK_PRESS | MUSE_BTN_AUX_PRESS);
+        }
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",
                      ev & MUSE_BTN_TALK_RELEASE ? " release" : "");
@@ -427,6 +482,9 @@ static void input_task(void *arg)
         }
         if (!aux_edge) {
             aux_key(aux_down, false);
+        }
+        if (muse_board->poll_dial) {
+            dial(muse_board->poll_dial());
         }
 
         if (s_power_off_requested) {
@@ -494,7 +552,7 @@ static bool read_line(char *buf, size_t cap)
 static char *s_chat;        /* the message so far */
 static size_t s_chat_len;
 
-static void chat_line(char *piece, bool last, bool whole)
+static void chat_line(char *piece, bool last, bool whole, bool voice)
 {
     size_t n = muse_hatch_unescape(piece);
     if (!s_chat) {
@@ -513,7 +571,11 @@ static void chat_line(char *piece, bool last, bool whole)
     s_chat[s_chat_len] = '\0';
     muse_hatch_console("ack", NULL, "\"bytes\":%u", (unsigned)s_chat_len);
     if (last) {
-        muse_hatch_text_turn(s_chat);   /* frees it */
+        if (voice) {
+            muse_chat_text_turn_voice(s_chat);   /* frees it */
+        } else {
+            muse_hatch_text_turn(s_chat);
+        }
         s_chat = NULL;
     }
 }
@@ -568,8 +630,91 @@ static void set_face(const char *name)
  * Console-only commands; false for setup commands. Their buffers are taken
  * per command: without PSRAM, static ones would hold internal RAM for good.
  */
+/* ">hw {json}" runs a hardware command (muse_hw.h); a longer one comes as
+ * ">hw+=" pieces and a last ">hw=" one, as "chat+=" does. */
+static void hw_line(const char *piece, bool last, bool whole)
+{
+    static char *buf;
+    static size_t len;
+    size_t n = strlen(piece);
+    if (!whole || len + n >= HW_MAX) {
+        printf("@hw {\"result\":{\"ok\":false,\"error\":{\"code\":\"too_long\","
+               "\"message\":\"send long commands in hw+= pieces, under 256 KB\"}}}\n");
+        fflush(stdout);
+        free(buf);
+        buf = NULL;
+        len = 0;
+        return;
+    }
+    if (!buf) {
+        buf = heap_caps_malloc(HW_MAX, MUSE_BIG_CAPS);
+        len = 0;
+        if (!buf) {
+            return;
+        }
+    }
+    memcpy(buf + len, piece, n + 1);
+    len += n;
+    if (!last) {
+        return;
+    }
+    if (!muse_hw_console(buf)) {
+        printf("@hw {\"result\":{\"ok\":false,\"error\":{\"code\":\"unsupported\","
+               "\"message\":\"no hardware commands in this build\"}}}\n");
+        fflush(stdout);
+    }
+    free(buf);
+    buf = NULL;
+    len = 0;
+}
+
+#if CONFIG_MUSE_HATCH
+/* Base64 into out (cap bytes); the length, or -1 if it isn't base64 or won't fit. */
+static int b64_decode(const char *in, uint8_t *out, size_t cap)
+{
+    uint32_t acc = 0;
+    int bits = 0;
+    size_t n = 0;
+    for (; *in && *in != '='; in++) {
+        const char c = *in;
+        int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26
+              : c >= '0' && c <= '9' ? c - '0' + 52 : c == '+' ? 62 : c == '/' ? 63 : -1;
+        if (v < 0) {
+            return -1;
+        }
+        acc = acc << 6 | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (n == cap) {
+                return -1;
+            }
+            out[n++] = (uint8_t)(acc >> bits);
+        }
+    }
+    return (int)n;
+}
+
+/* ">clip+=B64" pieces and a last ">clip=B64": a 16 kHz mono PCM clip for the
+ * next press to record instead of the mic (muse_voice_clip_add). */
+static void clip_line(const char *b64, bool last)
+{
+    uint8_t *buf = heap_caps_malloc(SERIAL_LINE * 3 / 4, MUSE_BIG_CAPS);   /* off the console's small stack */
+    int n = buf ? b64_decode(b64, buf, SERIAL_LINE * 3 / 4) : -1;
+    bool ok = n >= 0 && muse_voice_clip_add(buf, (size_t)n, last);
+    free(buf);
+    printf("@clip {\"ok\":%s,\"bytes\":%d,\"armed\":%s}\n", ok ? "true" : "false", n, ok && last ? "true" : "false");
+    fflush(stdout);
+}
+#endif
+
 static bool console_command(char *line, bool whole)
 {
+    if (!strncmp(line, "hw ", 3) || !strncmp(line, "hw=", 3) || !strncmp(line, "hw+=", 4)) {
+        bool more = line[2] == '+';
+        hw_line(line + (more ? 4 : 3), !more, whole);
+        return true;
+    }
     if (!strcmp(line, "status")) {
         size_t cap = 1024;   /* long SSID, host and VM names escaped: past 512 */
         char *json = heap_caps_malloc(cap, MUSE_BIG_CAPS);
@@ -607,6 +752,27 @@ static bool console_command(char *line, bool whole)
         s_nap_now = true;
         return true;
     }
+    if (!strncmp(line, "mute=", 5)) {
+        muse_audio_mute(line[5] == '1');
+        printf("@mute %s\n", line[5] == '1' ? "on" : "off");
+        fflush(stdout);
+        return true;
+    }
+#if CONFIG_MUSE_HATCH
+    if (!strncmp(line, "clip=", 5) || !strncmp(line, "clip+=", 6)) {
+        bool last = line[4] == '=';
+        clip_line(line + (last ? 5 : 6), last);
+        return true;
+    }
+    if (!strcmp(line, "photo.expect")) {   /* as a photo talk key's press: the next note waits for a photo */
+        muse_chat_expect_photo();
+        return true;
+    }
+    if (!strncmp(line, "modality=", 9)) {
+        muse_chat_set_modality(line + 9);
+        return true;
+    }
+#endif
     if (!strncmp(line, "face=", 5)) {
         set_face(line + 5);
         return true;
@@ -619,9 +785,11 @@ static bool console_command(char *line, bool whole)
         chat_cancel();
         return true;
     }
-    bool last = !strncmp(line, "chat=", 5);
+    /* "chat.voice=" sends it as speech is sent: Muse answers as it would a voice note. */
+    bool voice = !strncmp(line, "chat.voice=", 11);
+    bool last = voice || !strncmp(line, "chat=", 5);
     if (last || !strncmp(line, "chat+=", 6)) {
-        chat_line(line + (last ? 5 : 6), last, whole);
+        chat_line(line + (voice ? 11 : last ? 5 : 6), last, whole, voice);
         return true;
     }
     return false;
@@ -642,8 +810,10 @@ static bool console_command(char *line, bool whole)
  * the device's state, "power" the battery meter (muse_battery.h) and
  * "power.reset" starts it over, "nap" sleeps and leaves Wi-Fi at once (as
  * two minutes asleep on battery would; 'w' rejoins), "face=" shows a face
- * (see set_face), and "chat=" sends a typed message to Hatch (see chat_line
- * and tools/muse/chat.py).
+ * (see set_face), and "chat=" sends a typed message to Muse (see chat_line
+ * and tools/muse/chat.py), "chat.voice=" as speech is sent. "clip=" gives the
+ * next press a clip to record instead of the mic, and "modality=" overrides
+ * the turns' output modality.
  */
 static void serial_task(void *arg)
 {
@@ -688,6 +858,11 @@ esp_err_t muse_input_start(QueueHandle_t queue)
     /* Bench-test and setup console; the input still works if it can't start. */
     xTaskCreate(serial_task, "muse_serial", 3584, NULL, 5, NULL);
     return ESP_OK;
+}
+
+void muse_input_set_asleep(bool asleep)
+{
+    set_asleep(asleep, "Muse");
 }
 
 void muse_input_request_power_off(void)

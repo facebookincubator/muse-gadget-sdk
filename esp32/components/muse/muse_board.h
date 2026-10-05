@@ -17,6 +17,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "driver/gpio.h"
@@ -54,6 +55,41 @@ typedef struct {
     lv_align_t align;
     int16_t x, y;
 } muse_button_hint_t;
+
+/*
+ * An AI camera that speaks Seeed's SSCMA AT protocol over SPI (the Watcher's
+ * Himax), for muse_camera.c: the board's transport only. Every call may block
+ * on the bus for a few ms.
+ */
+typedef struct {
+    /* On: rails up, the chip reset and booting (muse_camera.c waits for it). */
+    esp_err_t (*power)(bool on);
+    /* Sends bytes of an AT command line. */
+    esp_err_t (*write)(const void *data, size_t len);
+    /* Bytes the chip has queued for us; 0 when it has none. */
+    esp_err_t (*available)(size_t *len);
+    /* Reads up to MUSE_SSCMA_READ_MAX of them. */
+    esp_err_t (*read)(void *buf, size_t len);
+} muse_sscma_ops_t;
+
+#define MUSE_SSCMA_READ_MAX 4095
+
+/* The board's expansion ports and storage, for main/muse_hw_io.c and
+ * muse_hw_storage.c. Any field may be empty (NULL, -1). */
+typedef struct {
+    /* The I2C bus behind the Grove port (an i2c_master_bus_handle_t), shared
+     * with on-board chips at these 7-bit addresses (0-terminated): readable,
+     * never written by the agent. */
+    void *i2c_bus;
+    const uint8_t *i2c_onboard;
+    esp_err_t (*grove_power)(bool on);
+    int uart_tx, uart_rx;             /* a spare UART on a header */
+    /* An SD card on SPI: its host and CS; power() brings up its rail (and
+     * whatever shares the bus), present() reads card-detect. */
+    int sd_spi_host, sd_cs;
+    esp_err_t (*sd_power)(bool on);
+    bool (*sd_present)(void);
+} muse_ports_t;
 
 typedef struct {
     const char *name;
@@ -97,6 +133,16 @@ typedef struct {
     esp_err_t (*read_power)(muse_power_t *out);
     /* Turns the board off; returns only on failure. */
     esp_err_t (*power_off)(void);
+    /* An RGB light Muse's agent can set (muse_hw.h); all zero is off. NULL: none. */
+    esp_err_t (*set_led)(uint8_t r, uint8_t g, uint8_t b);
+    /* A dial, like the Watcher's wheel: detents turned since the last call,
+     * + clockwise, polled with poll_buttons. Turning wakes the screen, then
+     * sets the volume. Its turns aren't the aux button. NULL: none. */
+    int (*poll_dial)(void);
+    /* An SSCMA AI camera (muse_camera.h). NULL: none. */
+    const muse_sscma_ops_t *sscma;
+    /* Expansion ports and storage. NULL: none. */
+    const muse_ports_t *(*ports)(void);
 } muse_board_t;
 
 /* The running board, set by muse_app_run(). */
