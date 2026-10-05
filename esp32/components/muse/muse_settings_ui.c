@@ -194,7 +194,7 @@ static lv_obj_t *back_button(lv_obj_t *p)
 static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **list_out)
 {
     /* Flat short panels, and ones too narrow for LIST_W, get tighter rows. */
-    const bool compact = !muse_board->round && (muse_board->height <= 240 || muse_board->width < 300);
+    const bool compact = !muse_board->round && (muse_board->height <= 240 || muse_board->width < LIST_W);
     const int list_top = compact ? (back ? 48 : 36) : LIST_TOP;
     lv_obj_t *p = lv_obj_create(tile);
     lv_obj_remove_style_all(p);
