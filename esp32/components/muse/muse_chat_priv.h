@@ -23,6 +23,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+
 #include "muse_chat.h"
 
 #ifdef __cplusplus
@@ -67,9 +71,21 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
     memcpy(rejected->ids[rejected->count++], id, len + 1);
 }
 
+/* A request preference, not a limit on returned text or spoken audio.
+ * Keep this literal JSON-safe: it is embedded in the streaming note body.
+ * The instruction asks Muse to honor explicit requests for more detail. */
+#if defined(CONFIG_MUSE_BRIEF_VOICE_REPLIES) && CONFIG_MUSE_BRIEF_VOICE_REPLIES
+#define MUSE_VOICE_REPLY_REQUEST \
+    "For this voice message, answer in at most two short sentences, about 40 words, " \
+    "unless I explicitly ask for more detail. Use plain language suitable for " \
+    "spoken playback; avoid markdown, lists and reading URLs aloud."
+#else
+#define MUSE_VOICE_REPLY_REQUEST ""
+#endif
+
 /* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
 #define MUSE_HATCH_NOTE_HEAD \
-    "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
+    "{\"message\":\"" MUSE_VOICE_REPLY_REQUEST "\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
     "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44

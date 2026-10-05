@@ -159,6 +159,19 @@ menu "Muse"
             GPIO, and set that GPIO here. -1 leaves push-to-talk recording
             silence.
 
+    config MUSE_BRIEF_VOICE_REPLIES
+        bool "Request brief push-to-talk replies"
+        depends on MUSE_ENABLED || HOMEHUB_VOICE
+        default n
+        help
+            Add a request for at most two short sentences, about 40 words,
+            alongside each voice note. Explicit requests for more detail
+            can override it. Applies to the PSRAM and Home Link voice-note
+            paths, including headless voice boards. Typed messages and the
+            experimental streaming-dictation path are unchanged.
+            This is a prompt preference, not a guaranteed length limit.
+            It neither truncates replies nor enables text-to-speech.
+
     config MUSE_HATCH
         bool "Muse's own voice session"
         depends on MUSE_ENABLED
