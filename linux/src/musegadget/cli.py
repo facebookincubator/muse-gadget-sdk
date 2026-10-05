@@ -19,9 +19,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 import threading
 import time
+import unicodedata
 from typing import Callable
 
 from musegadget import __version__, config, identity, muse_api, network
@@ -170,9 +172,11 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
     message = sys.stdin.read() if args.message == ["-"] else " ".join(args.message)
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(90)
+            sock.settimeout(190 if args.wait else 90)
             sock.connect(str(config.socket_path()))
             request = {"message": message}
+            if args.wait:
+                request["wait_for_reply"] = True
             if args.session_id:
                 request["session_id"] = args.session_id
             sock.sendall(json.dumps(request).encode() + b"\n")
@@ -181,10 +185,31 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
         print(f"Could not reach the musegadget service: {exc}", file=sys.stderr)
         return 1
     if not reply.get("ok"):
-        print(f"Not delivered: {reply.get('error') or reply}", file=sys.stderr)
+        message = "Could not get a Muse response" if args.wait else "Not delivered"
+        print(f"{message}: {reply.get('error') or reply}", file=sys.stderr)
         return 1
+    if args.wait:
+        response = reply.get("response")
+        if not isinstance(response, str) or not response:
+            print("Muse returned an empty response.", file=sys.stderr)
+            return 1
+        response = sanitize_reply(response)
+        if not response:
+            print("Muse returned no printable response text.", file=sys.stderr)
+            return 1
+        print(response)
+        return 0
     print("Sent to your Muse.")
     return 0
+
+
+def sanitize_reply(text: str) -> str:
+    """Remove terminal-control and formatting characters before displaying a reply."""
+    text = re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))", "", text)
+    return "".join(
+        char for char in text
+        if char == "\n" or unicodedata.category(char) not in ("Cc", "Cf")
+    )
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -226,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("message", nargs="+", help="the message, or - to read it from stdin")
     send.add_argument("--session-id",
                      help="send to this side chat (a new id starts one) instead of the main chat")
+    send.add_argument("--wait", action="store_true",
+                      help="wait for Muse's text reply and print it")
     send.set_defaults(func=cmd_send_user_msg)
 
     sub.add_parser("info", help="show device identity").set_defaults(func=cmd_info)
