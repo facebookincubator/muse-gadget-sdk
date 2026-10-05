@@ -1,0 +1,56 @@
+name: MuseWatch
+options:
+  bundleIdPrefix: org.musegadget
+  deploymentTarget:
+    watchOS: '10.0'
+    macOS: '14.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  MuseWatch:
+    type: application
+    platform: watchOS
+    sources: [Shared, Watch]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.musegadget.watch
+        SDKROOT: watchos
+        TARGETED_DEVICE_FAMILY: '4'
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_WKApplication: YES
+        INFOPLIST_KEY_WKWatchOnly: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Muse
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: Connect to your Mac to talk with your Muse.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Dictate a message to your Muse.
+        INFOPLIST_KEY_NSHealthShareUsageDescription: Read the health measurements, sleep, symptoms, events and workouts you authorize for a summary you can review and share with Muse.
+    entitlements:
+      path: Watch/MuseWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+  MuseWatchRelay:
+    type: application
+    platform: macOS
+    sources: [Shared, Mac]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.musegadget.watchrelay
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Muse Watch Relay
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: Pair with Muse and relay your Apple Watch conversations.
+        INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription: Pair with Muse and relay your Apple Watch conversations.
+        ENABLE_APP_SANDBOX: NO
+    postBuildScripts:
+      - name: Bundle the local Muse SDK runtime
+        script: '"$SRCROOT/scripts/bundle-runtime.sh"'
+schemes:
+  MuseWatch:
+    build:
+      targets:
+        MuseWatch: all
+  MuseWatchRelay:
+    build:
+      targets:
+        MuseWatchRelay: all

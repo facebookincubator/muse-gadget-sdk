@@ -153,3 +153,11 @@ other, and share what you make.
 ## License
 
 Apache 2.0. See [`LICENSE`](../LICENSE).
+
+### Embedded reply streaming
+
+`LinkSession.chat_events(message, session_id)` yields acknowledgement, status,
+reply snapshots and completion events over the existing paired session. It
+subscribes before sending when a chat exists and creates a new side chat once
+when subscription returns 404. The [watch relay](../watchos) uses this interface;
+the Linux command-line and local-socket interfaces are unchanged.

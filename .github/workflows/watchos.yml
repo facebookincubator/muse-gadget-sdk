@@ -1,0 +1,25 @@
+name: Apple Watch prototype
+on:
+  pull_request:
+    paths: ['watchos/**', 'linux/**', '.github/workflows/watchos.yml']
+  push:
+    branches: [main]
+    paths: ['watchos/**', 'linux/**', '.github/workflows/watchos.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: watchos
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: brew install xcodegen
+      - run: bash scripts/test.sh
+      - run: bash scripts/build.sh
+      - run: .runtime/bin/python3 -m pip install pytest
+      - run: PYTHONPATH=../linux/src .runtime/bin/python3 -m pytest -q ../linux/tests Backend
+      - run: codesign --verify --deep --strict --verbose build/Build/Products/Debug/MuseWatchRelay.app

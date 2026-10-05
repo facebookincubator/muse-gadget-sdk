@@ -273,3 +273,103 @@ def test_describe_result(result, described):
 def test_printable_replaces_control_characters():
     assert printable("system.run") == "system.run"
     assert printable("a\nb\x1b[2Jc") == "a?b?[2Jc"
+
+
+def test_streaming_chat_keeps_pre_ack_replies_and_control_commands():
+    async def scenario():
+        session, vm = make_session(lambda *args: {"ok": True, "payload": {"value": 42}}, [])
+        stop = asyncio.Event()
+        running = asyncio.ensure_future(session.run(stop))
+        await vm.handshake()
+        await vm.accept_control_stream()
+        await vm.next_message()
+
+        async def collect():
+            return [item async for item in session.chat_events("hello", "side-1", settle=0.02)]
+
+        collecting = asyncio.ensure_future(collect())
+        subscribe = await vm.next_frame()
+        assert subscribe.value.path == "/chat/subscribe"
+        assert json.loads(subscribe.value.body) == {"session_id": "side-1"}
+        await vm.send_frame(ServiceFrame.response(subscribe.stream_id, ApplicationResponse(status=200)))
+        chat = await vm.next_frame()
+        assert chat.value.path == "/chat/stream"
+
+        # Events can arrive before the POST response that identifies their parent.
+        def row(name, text, parent="user-1"):
+            return json.dumps({"type": "event", "event": name, "payload": {
+                "message_id": "reply-1" if parent == "user-1" else "unrelated",
+                "reply_to_message_id": parent, "text": text}}).encode() + b"\n"
+
+        await vm.send_frame(ServiceFrame.body_chunk(subscribe.stream_id, BodyChunk(data=(
+            row("delta.text_append", "hidden", "other") + row("delta.text_append", "Hello 🌟")
+        ))))
+        await vm.send_frame(ServiceFrame.response(chat.stream_id, ApplicationResponse(
+            status=200, body=b'{"message_id":"user-1"}', end_body=True)))
+        await vm.send_message({"method": "link.invoke", "id": "during-chat", "command": "system.run", "params": {}})
+        result = await vm.next_message()
+        assert result["id"] == "during-chat" and result["payload"]["value"] == 42
+        await vm.send_frame(ServiceFrame.body_chunk(subscribe.stream_id, BodyChunk(data=row("delta.message_done", "Hello 🌟"))))
+        updates = await asyncio.wait_for(collecting, 2)
+        assert [update["type"] for update in updates] == ["ack", "reply", "reply", "done"]
+        assert updates[1]["text"] == updates[2]["text"] == "Hello 🌟"
+        reset = await vm.next_frame()
+        assert reset.kind == "reset" and reset.stream_id == subscribe.stream_id
+        assert not session._requests
+        stop.set()
+        assert await asyncio.wait_for(running, 2) is Outcome.STOPPED
+    asyncio.run(scenario())
+
+
+def test_closing_chat_generator_resets_subscription():
+    async def scenario():
+        session, vm = make_session(lambda *args: {"ok": True}, [])
+        stop = asyncio.Event()
+        running = asyncio.ensure_future(session.run(stop))
+        await vm.handshake(); await vm.accept_control_stream(); await vm.next_message()
+        stream = session.chat_events("hello")
+        first = asyncio.ensure_future(stream.__anext__())
+        subscribe = await vm.next_frame()
+        await vm.send_frame(ServiceFrame.response(subscribe.stream_id, ApplicationResponse(status=200)))
+        chat = await vm.next_frame()
+        await vm.send_frame(ServiceFrame.response(chat.stream_id, ApplicationResponse(
+            status=200, body=b'{"message_id":"user-1"}', end_body=True)))
+        assert (await first)["type"] == "ack"
+        await stream.aclose()
+        reset = await vm.next_frame()
+        assert reset.kind == "reset" and not session._requests
+        stop.set(); await running
+    asyncio.run(scenario())
+
+
+def test_new_side_chat_404_creates_once_then_subscribes():
+    async def scenario():
+        session, vm = make_session(lambda *args: {"ok": True}, [])
+        stop = asyncio.Event()
+        running = asyncio.ensure_future(session.run(stop))
+        await vm.handshake(); await vm.accept_control_stream(); await vm.next_message()
+        async def collect():
+            return [item async for item in session.chat_events("first prompt", "side-1", settle=0.01)]
+        collecting = asyncio.ensure_future(collect())
+        initial = await vm.next_frame()
+        await vm.send_frame(ServiceFrame.response(initial.stream_id, ApplicationResponse(status=404, end_body=True)))
+        assert (await vm.next_frame()).kind == "reset"
+        chat = await vm.next_frame()
+        assert chat.value.path == "/chat/stream"
+        assert json.loads(chat.value.body)["message"] == "first prompt"
+        await vm.send_frame(ServiceFrame.response(chat.stream_id, ApplicationResponse(
+            status=200, body=b'{"message_id":"user-1","session_id":"side-1"}', end_body=True)))
+        subscription = await vm.next_frame()
+        assert subscription.value.path == "/chat/subscribe"
+        await vm.send_frame(ServiceFrame.response(subscription.stream_id, ApplicationResponse(status=200)))
+        events = []
+        for name, extra in [("delta.message_start", {}), ("delta.text_append", {"parent_message_id": "r", "text": "Hello"}), ("delta.message_done", {})]:
+            events.append(json.dumps({"type": "event", "event": name, "payload": {
+                "message_id": "r", "session_id": "side-1", "reply_to_message_id": None, **extra}}).encode() + b"\n")
+        await vm.send_frame(ServiceFrame.body_chunk(subscription.stream_id, BodyChunk(data=b"".join(events))))
+        updates = await asyncio.wait_for(collecting, 2)
+        assert updates[-1] == {"type": "done"}
+        assert updates[-2]["text"] == "Hello" and updates[-2]["complete"]
+        assert (await vm.next_frame()).kind == "reset"
+        stop.set(); await running
+    asyncio.run(scenario())
