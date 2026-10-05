@@ -169,6 +169,7 @@ menu "ESP32 Device SDK"
             have no status LED; their displays show the status colour in bars
             along the top and bottom edges, with an animation in between. The
             Home Assistant Voice PE shows the status colour on its LED ring.
+            Seeed reSpeaker Lite shows it on a single RGB LED.
             The reTerminal E1001 and E1002 show a still status screen on
             their e-paper instead (black and white on the E1001, six colours
             on the E1002).
@@ -184,6 +185,10 @@ menu "ESP32 Device SDK"
         config HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
             bool "ideaspark ESP32 1.9 inch ST7789 display (status bars)"
 
+        config HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+            bool "Waveshare ESP32-C6-LCD-1.47 inch ST7789 display (status bars)"
+            depends on IDF_TARGET_ESP32C6
+
         config HOMEHUB_LED_BACKEND_SENSECAP_ST7701
             bool "SenseCAP Indicator 4 inch ST7701S RGB display (status bars)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
@@ -198,6 +203,10 @@ menu "ESP32 Device SDK"
 
         config HOMEHUB_LED_BACKEND_VOICE_RING
             bool "Home Assistant Voice PE 12-LED ring"
+            depends on IDF_TARGET_ESP32S3
+
+        config HOMEHUB_LED_BACKEND_RESPEAKER_LITE
+            bool "Seeed reSpeaker Lite single RGB LED (experimental)"
             depends on IDF_TARGET_ESP32S3
 
         config HOMEHUB_LED_BACKEND_MUSE
@@ -231,6 +240,7 @@ menu "ESP32 Device SDK"
     config HOMEHUB_DISPLAY
         bool
         default y if HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
@@ -240,12 +250,13 @@ menu "ESP32 Device SDK"
             commands.
 
     config HOMEHUB_VOICE
-        bool "Push-to-talk voice chat (Home Assistant Voice PE)"
-        depends on HOMEHUB_LED_BACKEND_VOICE_RING && SPIRAM
+        bool "Push-to-talk voice chat"
+        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE) && SPIRAM
         default y
         help
-            Hold the centre button, speak, release: the audio goes to the
-            agent's chat as a voice note, which the VM transcribes, and the
+            Hold the centre button (XIAO BOOT on reSpeaker Lite), speak,
+            release: the audio goes to the agent's chat as a voice note,
+            which the VM transcribes, and the
             reply appears in the Muse app as text. To speak it, plug a TTS
             API of your own into start_tts in muse_chat_session.cpp. This
             uses a second Noise session (Muse's voice session) with Link's

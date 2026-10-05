@@ -1,0 +1,28 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-C6-LCD-1.47: ST7789 LCD (172x320, SPI), RGB LED, BOOT button.
+# Status-screen board: shows state on the display with edge bars and animation.
+# 4 MB flash: one app slot, no OTA.
+CONFIG_IDF_TARGET="esp32c6"
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_waveshare_c6_lcd_147.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+CONFIG_SPIRAM=n
+CONFIG_HOMEHUB_BUTTON_GPIO=9
+CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789=y
+CONFIG_HOMEHUB_TUNNEL=n

@@ -19,6 +19,7 @@ from __future__ import annotations
 import shutil
 import socket
 import subprocess
+from pathlib import Path
 
 from musegadget.muse_api import API_BASE
 
@@ -35,7 +36,7 @@ def is_online(timeout: float = 5.0) -> bool:
         return False
 
 
-def active_wifi_ssid() -> str | None:
+def _ssid_from_nmcli() -> str | None:
     """SSID of the active Wi-Fi connection, via NetworkManager if present."""
     if not shutil.which("nmcli"):
         return None
@@ -51,6 +52,51 @@ def active_wifi_ssid() -> str | None:
         if active == "yes" and ssid:
             return ssid.replace("\\:", ":")
     return None
+
+
+def _wireless_interfaces() -> list[str]:
+    """Interface names that have a wireless sysfs node, e.g. ``["wlan0"]``."""
+    try:
+        return sorted(
+            p.name for p in Path("/sys/class/net").iterdir()
+            if (p / "wireless").is_dir()
+        )
+    except OSError:
+        return []
+
+
+def _ssid_from_wpa_cli() -> str | None:
+    """SSID from wpa_supplicant, for hosts NetworkManager does not manage.
+
+    netplan and systemd-networkd drive wpa_supplicant directly, so every
+    device reads as ``unmanaged`` to nmcli and the query above finds nothing
+    even while Wi-Fi is associated. wpa_cli needs root, which the service has.
+    """
+    if not shutil.which("wpa_cli"):
+        return None
+    for iface in _wireless_interfaces():
+        try:
+            out = subprocess.run(
+                ["wpa_cli", "-i", iface, "status"],
+                capture_output=True, text=True, timeout=5, check=False,
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        state = ssid = ""
+        for line in out.splitlines():
+            key, _, value = line.partition("=")
+            if key == "wpa_state":
+                state = value.strip()
+            elif key == "ssid":
+                ssid = value.strip()
+        if ssid and state == "COMPLETED":
+            return ssid
+    return None
+
+
+def active_wifi_ssid() -> str | None:
+    """SSID of the active Wi-Fi connection, via NetworkManager or wpa_supplicant."""
+    return _ssid_from_nmcli() or _ssid_from_wpa_cli()
 
 
 def current_connection_entry() -> dict:

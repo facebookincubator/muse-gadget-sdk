@@ -1497,17 +1497,26 @@ static void discover_task(void *arg) {
     discover_task_args_t *args = (discover_task_args_t *)arg;
     ESP_LOGI(TAG, "starting network discovery scan");
     cJSON *result = net_discovery_run(args->params);
-    if (result) {
-        cJSON *wrapper = cJSON_CreateObject();
-        if (!wrapper || !cJSON_AddBoolToObject(wrapper, "ok", true)
-            || !cJSON_AddItemToObject(wrapper, "payload", result)) {
+    cJSON *wrapper = result ? cJSON_CreateObject() : NULL;
+    if (!wrapper || !cJSON_AddBoolToObject(wrapper, "ok", true)
+        || !cJSON_AddItemToObject(wrapper, "payload", result)) {
+        // Out of memory. Answer anyway, so the Muse isn't left waiting out
+        // the command's timeout.
+        ESP_LOGW(TAG, "network discovery ran out of memory");
+        cJSON_Delete(wrapper);
+        cJSON_Delete(result);
+        wrapper = cJSON_CreateObject();
+        cJSON *failure = cJSON_AddObjectToObject(wrapper, "error");
+        if (!cJSON_AddBoolToObject(wrapper, "ok", false)
+            || !cJSON_AddStringToObject(failure, "code", "out_of_memory")
+            || !cJSON_AddStringToObject(failure, "message",
+                                        "not enough memory for the discovery results")) {
             cJSON_Delete(wrapper);
-            cJSON_Delete(result);
-        } else {
-            noise_ctrl_send_command_result(
-                args->session_generation, args->request_id, wrapper);
+            wrapper = NULL;
         }
     }
+    noise_ctrl_send_command_result(
+        args->session_generation, args->request_id, wrapper);
     if (args->params) cJSON_Delete(args->params);
     free(args);
     stack_monitor_record(NULL);

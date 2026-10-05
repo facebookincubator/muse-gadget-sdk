@@ -107,6 +107,9 @@ jobs:
           - board: c6-nopsram
             target: esp32c6
             overlays: ";devices/sdkconfig.c6-nopsram"
+          - board: waveshare-c6-lcd-147
+            target: esp32c6
+            overlays: ";devices/sdkconfig.waveshare-c6-lcd-147"
           - board: ideaspark
             target: esp32
             overlays: ";devices/sdkconfig.ideaspark"
@@ -125,6 +128,9 @@ jobs:
           - board: espressif-s3-devkitc-1
             target: esp32s3
             overlays: ";devices/sdkconfig.espressif-s3-devkitc-1"
+          - board: seeed-respeaker-lite
+            target: esp32s3
+            overlays: ";devices/sdkconfig.seeed-respeaker-lite"
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"

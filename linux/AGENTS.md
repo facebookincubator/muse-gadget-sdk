@@ -112,6 +112,9 @@ unpairing, `pairing.json` holds the device tokens. The local socket is
 
 A healthy start logs `commands run as <user>`, `Noise session established`,
 `sent link.register` and `registered with the Muse`.
+Each command the Muse runs logs `invoke <command>`, then how it ended, such as
+`system.run ok, exit 0 in 41 ms` or `file.read failed in 3 ms`. The log
+never has a command's parameters, output or error message.
 
 ## Pairing
 

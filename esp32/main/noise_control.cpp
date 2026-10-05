@@ -1772,16 +1772,27 @@ static void process_inbound_body_chunk(
                     cJSON *id = cJSON_GetObjectItem(msg, "id");
                     if (cJSON_IsString(id) && id->valuestring
                         && strcmp(id->valuestring, s_register_req_id) == 0) {
-                        s_register_acked = true;
-                        ESP_LOGI(TAG, "link.register acked; tunnel may open");
-                        cJSON *type = cJSON_GetObjectItem(msg, "type");
-                        cJSON *reply = cJSON_GetObjectItem(msg, "result");
-                        cJSON *status = cJSON_GetObjectItem(reply, "status");
-                        s_heartbeat_registered = cJSON_IsString(type)
-                            && strcmp(type->valuestring, "res") == 0
-                            && cJSON_IsString(status)
-                            && strcmp(status->valuestring, "registered") == 0
-                            && !cJSON_GetObjectItem(msg, "error");
+                        cJSON *failure = cJSON_GetObjectItem(msg, "error");
+                        if (failure && !cJSON_IsNull(failure) && !cJSON_IsFalse(failure)) {
+                            // Not registered, so the server would refuse the
+                            // tunnel and the Muse can't invoke this device.
+                            cJSON *reason = cJSON_IsObject(failure)
+                                ? cJSON_GetObjectItem(failure, "message") : failure;
+                            ESP_LOGE(TAG, "link.register rejected: %s",
+                                     cJSON_IsString(reason) && reason->valuestring
+                                         ? reason->valuestring : "no reason given");
+                        } else {
+                            s_register_acked = true;
+                            ESP_LOGI(TAG, "link.register acked; tunnel may open");
+                            cJSON *type = cJSON_GetObjectItem(msg, "type");
+                            cJSON *reply = cJSON_GetObjectItem(msg, "result");
+                            cJSON *status = cJSON_GetObjectItem(reply, "status");
+                            s_heartbeat_registered = cJSON_IsString(type)
+                                && strcmp(type->valuestring, "res") == 0
+                                && cJSON_IsString(status)
+                                && strcmp(status->valuestring, "registered") == 0
+                                && !failure;
+                        }
                     }
                     cJSON_Delete(msg);
                 }
