@@ -65,6 +65,18 @@
 #if CONFIG_HOMEHUB_VOICE
 #include "voice.h"
 #endif
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G && (CONFIG_HOMEHUB_VOICE || CONFIG_HOMEHUB_SHTC3_SENSORS)
+#include "epaper_154g_i2c.h"
+#endif
+#if CONFIG_HOMEHUB_SHTC3_SENSORS
+#include "epaper_154g_sensors.h"
+#endif
+#if CONFIG_HOMEHUB_EPD154G_BATTERY
+#include "epaper_154g_battery.h"
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+#include "epaper_154g_power.h"
+#endif
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
 #include "sensecap_sensors.h"
 #endif
@@ -1910,6 +1922,9 @@ static cJSON *on_ws_command(
         return reterminal_sht4x_command();
     }
 #endif
+#if CONFIG_HOMEHUB_SHTC3_SENSORS
+    if (strcmp(command, "sensors.read") == 0) return epaper_154g_sensors_command();
+#endif
     if (strcmp(command, "device.reset_vm") == 0) {
         return queue_ws_control(WS_CONTROL_RESET_VM, NULL);
     }
@@ -2518,6 +2533,16 @@ void app_run(void) {
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
 
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G && (CONFIG_HOMEHUB_VOICE || CONFIG_HOMEHUB_SHTC3_SENSORS)
+    esp_err_t bus_err = epaper_154g_i2c_init();
+    if (bus_err != ESP_OK) ESP_LOGW(TAG, "peripheral I2C init failed: %s", esp_err_to_name(bus_err));
+#endif
+#if CONFIG_HOMEHUB_SHTC3_SENSORS
+    epaper_154g_sensors_init();
+#endif
+#if CONFIG_HOMEHUB_EPD154G_BATTERY
+    epaper_154g_battery_init();
+#endif
     if (!led_status_init()) {
         ESP_LOGW(TAG, "LED init failed — continuing without status LED");
     }
@@ -2628,10 +2653,20 @@ void app_run(void) {
     (void)on_button_double_press;
     (void)on_button_long_press;
 #else
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+    esp_err_t power_button_err = epaper_154g_power_button_init();
+    if (power_button_err != ESP_OK) ESP_LOGW(TAG, "PWR button unavailable: %s", esp_err_to_name(power_button_err));
+#endif
     if (!button_init(on_button_short_press, on_button_double_press,
                      on_button_long_press)) {
         ESP_LOGW(TAG, "button init failed — physical setup reset unavailable");
     }
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G && CONFIG_PM_ENABLE
+    else {
+        esp_err_t err = epaper_154g_power_init();
+        if (err != ESP_OK) ESP_LOGW(TAG, "power management disabled: %s", esp_err_to_name(err));
+    }
+#endif
 #endif
 #if CONFIG_HOMEHUB_VOICE
     voice_init();

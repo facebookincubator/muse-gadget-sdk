@@ -18,6 +18,7 @@
 // must keep the scheme the fetch was sized for, and the whole download must
 // finish within its deadline however slowly the server sends.
 
+#include <assert.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -67,6 +68,7 @@ int64_t esp_timer_get_time(void) {
 
 typedef struct {
     int status;
+    bool jpeg;
     const char *location;   // for redirects
     size_t body_len;        // raw RGB565 bytes, a pattern
     int chunk;              // bytes per read, 0 for all at once
@@ -116,7 +118,18 @@ static void spend(esp_http_client_handle_t c, int64_t us) {
     }
 }
 
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+static int transfers;
+void wifi_mgr_transfer(bool active) {
+    if (active) { assert(transfers == 0); transfers++; }
+    else { assert(transfers == 1); transfers--; }
+}
+#endif
+
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config) {
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+    assert(transfers == 1);
+#endif
     esp_http_client_handle_t c = calloc(1, sizeof(*c));
     CHECK(c, "calloc");
     snprintf(c->url, sizeof(c->url), "%s", config->url);
@@ -179,7 +192,11 @@ int esp_http_client_read(esp_http_client_handle_t c, char *buffer, int len) {
         size_t n = (size_t)(len - got) < left ? (size_t)(len - got) : left;
         if (c->resp->chunk && n > (size_t)c->resp->chunk) n = (size_t)c->resp->chunk;
         spend(c, c->resp->read_us);
-        for (size_t i = 0; i < n; i++) buffer[got + i] = (char)(c->sent + i);
+        for (size_t i = 0; i < n; i++) {
+            size_t offset = c->sent + i;
+            buffer[got + i] = c->resp->jpeg && offset < 2
+                ? (char)(offset == 0 ? 0xff : 0xd8) : (char)offset;
+        }
         c->sent += n;
         got += (int)n;
         if (c->handler) {
@@ -226,6 +243,9 @@ BaseType_t xTaskCreate(TaskFunction_t task, const char *name, unsigned stack_dep
 }
 
 void vTaskDelete(TaskHandle_t task) {
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+    assert(transfers == 0);
+#endif
     (void)task;
 }
 
@@ -270,7 +290,14 @@ bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
     return true;
 }
 
+static int g_normal_done, g_format_done;
+static bool g_raw;
 void led_status_draw_done(void) {
+    g_normal_done++;
+}
+void epaper_154g_image_draw_done(bool raw) {
+    g_format_done++;
+    g_raw = raw;
 }
 
 JRESULT jd_prepare(JDEC *jd, UINT (*infunc)(JDEC *, BYTE *, UINT), void *pool,
@@ -307,7 +334,8 @@ static void on_done(const image_fetch_result_t *result, void *user) {
 static void fetch(const char *url) {
     const char *code = NULL, *message = NULL;
     g_done = false;
-    g_rows_drawn = 0;
+    g_rows_drawn = g_normal_done = g_format_done = 0;
+    g_raw = false;
     g_deadline_hint_us = g_now_us + 60 * 1000000LL;
     CHECK(image_fetch_start(url, 0, on_done, NULL, &code, &message),
           "start %s refused: %s", url, message ? message : "");
@@ -391,7 +419,23 @@ static void test_slow_redirect_chain_stops_at_the_limit(void) {
     CHECK(g_max_timeout_overrun_us == 0, "an open could block past the deadline");
 }
 
+static void test_format_completion(void) {
+    for (int jpeg = 0; jpeg <= 1; jpeg++) {
+        reset_server();
+        add_response((response_t){.status = 200, .body_len = ROW_BYTES, .jpeg = jpeg});
+        fetch("http://host/img");
+        CHECK(strcmp(g_result.format, jpeg ? "jpeg" : "rgb565") == 0, "wrong format");
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        CHECK(g_format_done == 1 && g_normal_done == 0, "completion lost source format");
+        CHECK(g_raw == !jpeg, "lossless flag inverted");
+#else
+        CHECK(g_normal_done == 1 && g_format_done == 0, "other board completion changed");
+#endif
+    }
+}
+
 int main(void) {
+    test_format_completion();
     test_http_redirect_to_https_is_refused();
     test_https_redirect_to_http_is_refused();
     test_scheme_check_ignores_case();

@@ -17,6 +17,9 @@
 #include "ota.h"
 #include "esp_app_desc.h"
 #include "sdkconfig.h"
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+#include "wifi_mgr.h"
+#endif
 
 #include <stddef.h>
 
@@ -177,6 +180,9 @@ static void ota_task(void *arg) {
         .http_config = &http_cfg,
     };
 
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+    wifi_mgr_transfer(true);
+#endif
     esp_https_ota_handle_t handle = NULL;
     esp_err_t err = esp_https_ota_begin(&ota_cfg, &handle);
     if (err != ESP_OK || !handle) {
@@ -247,6 +253,9 @@ static void ota_task(void *arg) {
     esp_restart();
 
 done:
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+    wifi_mgr_transfer(false);
+#endif
     free(ctx->url);
     free(ctx);
     stack_monitor_record(NULL);

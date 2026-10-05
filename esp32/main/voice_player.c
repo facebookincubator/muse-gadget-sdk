@@ -45,10 +45,21 @@ static TaskHandle_t s_task;
 static volatile bool s_active;
 static volatile bool s_ended;
 static volatile bool s_started;
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+static volatile bool s_failed;
+#endif
 
-// 16 kHz mono to 48 kHz stereo 32-bit, by linear interpolation. `last`
+// Voice PE: 16 kHz mono to 48 kHz stereo 32-bit, by interpolation. `last`
 // carries the previous sample across chunks.
 static size_t upsample(const int16_t *in, size_t n, int32_t *out, int16_t *last) {
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+    // The ES8311's ADC and DAC share a 16 kHz bus. No rate conversion.
+    for (size_t i = 0; i < n; i++) {
+        out[2 * i] = out[2 * i + 1] = (int32_t)in[i] * 65536;
+    }
+    (void)last;
+    return n;
+#else
     for (size_t i = 0; i < n; i++) {
         int32_t prev = *last, cur = in[i];
         int32_t s[3] = {(2 * prev + cur) / 3, (prev + 2 * cur) / 3, cur};
@@ -59,6 +70,7 @@ static size_t upsample(const int16_t *in, size_t n, int32_t *out, int16_t *last)
         *last = in[i];
     }
     return 3 * n;
+#endif
 }
 
 static void player_task(void *arg) {
@@ -74,7 +86,9 @@ static void player_task(void *arg) {
         while (s_active && !s_ended && xStreamBufferBytesAvailable(s_buf) < PREBUFFER_BYTES) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
+#if !CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
         if (s_active) voice_board_amp(true);
+#endif
         int16_t last = 0;
         while (s_active) {
             size_t got = xStreamBufferReceive(s_buf, in, CHUNK_SAMPLES * sizeof(int16_t),
@@ -86,7 +100,15 @@ static void player_task(void *arg) {
                 continue;
             }
             size_t frames = upsample(in, got / sizeof(int16_t), out, &last);
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+            if (voice_board_speaker_write(out, frames) != ESP_OK) {
+                s_failed = true;
+                s_active = false;
+                break;
+            }
+#else
             voice_board_speaker_write(out, frames);
+#endif
             s_started = true;
         }
         vTaskDelay(pdMS_TO_TICKS(AMP_TAIL_MS));
@@ -104,7 +126,12 @@ esp_err_t voice_player_init(void) {
     // Above the network tasks, so playback keeps up while replies download.
     // Buffers and stack in PSRAM (it never touches flash): pairing needs an
     // 8 KB internal block for its TLS task.
-    if (xTaskCreateWithCaps(player_task, "voice_play", 3072, NULL, 5, &s_task,
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+    const int stack_size = 4096;
+#else
+    const int stack_size = 3072;
+#endif
+    if (xTaskCreateWithCaps(player_task, "voice_play", stack_size, NULL, 5, &s_task,
                             MALLOC_CAP_SPIRAM) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
@@ -118,6 +145,9 @@ void voice_player_begin(void) {
     xStreamBufferReset(s_buf);
     s_ended = false;
     s_started = false;
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+    s_failed = false;
+#endif
     s_active = true;
     xEventGroupClearBits(s_events, BIT_IDLE);
     xTaskNotifyGive(s_task);
@@ -151,3 +181,7 @@ void voice_player_stop(void) {
 bool voice_player_started(void) {
     return s_started;
 }
+
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+bool voice_player_failed(void) { return s_failed; }
+#endif

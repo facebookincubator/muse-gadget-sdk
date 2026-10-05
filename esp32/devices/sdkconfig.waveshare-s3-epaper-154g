@@ -1,0 +1,79 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-S3-ePaper-1.54G: ESP32-S3-PICO-1-N8R8 (8 MB flash, 8 MB
+# octal PSRAM) on native USB, a 1.54 inch 200x200 four-colour e-paper (black,
+# white, yellow and red) on SPI, and a battery whose power the board latches.
+# Load last, after sdkconfig.defaults (see README.md in this directory).
+#
+# Sources: Waveshare's schematic and ESP-IDF examples
+# (github.com/waveshareteam/ESP32-S3-ePaper-1.54G) for the pins, the power
+# switches and the panel; esptool chip-id on the board for the chip, flash
+# and PSRAM.
+#
+# It overrides the ESP32-C5 assumptions in sdkconfig.defaults; C5-only options
+# there are ignored for this target.
+CONFIG_HOMEHUB_WIFI_MIN_MODEM=y
+CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM=y
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+
+# E-paper shows status and images. Voice feedback uses the green GPIO3 LED.
+CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G=y
+CONFIG_HOMEHUB_VOICE=y
+# Advertise as <prefix>-Disp-XXXXXX to tell this board apart from real devices:
+# MuseGadget-Disp in the open-source build, HomeLink-Disp in the internal one.
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# BOOT talks when paired and voice is ready. Hold PWR (GPIO18) first to
+# leave BOOT available for setup. PWR also turns the board on from battery.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+
+# 8 MB of embedded flash.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# The USB-C port goes straight to the chip's USB Serial/JTAG; UART0 (GPIO43
+# and 44) only reaches the expansion header. Make that the console, with
+# input, rather than a non-blocking second copy of UART0's output.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Octal PSRAM, as Waveshare's ESP-IDF examples set it, holds the 78 KB RGB565
+# canvas and the 10 KB panel frame.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+# The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
+# NimBLE host's allocations in PSRAM so pairing has room.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+
+# Built-in temperature and humidity for sensors.read.
+CONFIG_HOMEHUB_SHTC3_SENSORS=y
+# The cell's voltage, through the GPIO4 divider, for device.health.
+CONFIG_HOMEHUB_EPD154G_BATTERY=y
+
+# Keep the crystal running for BLE's sleep clock; this board has no 32 kHz crystal.
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_BT_CTRL_MODEM_SLEEP=y
+CONFIG_BT_CTRL_MODEM_SLEEP_MODE_1=y
+CONFIG_BT_CTRL_LPCLK_SEL_MAIN_XTAL=y
+CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP=y
+# USB Serial/JTAG cannot survive light sleep while attached to a host.
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# Preserve the panel latch, power rails and LED outputs in light sleep.
+# CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND is not set
+# CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set

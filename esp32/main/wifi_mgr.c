@@ -224,6 +224,9 @@ void wifi_mgr_init(void) {
     ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO));
 #endif
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM || CONFIG_HOMEHUB_WIFI_MIN_MODEM
+    wifi_mgr_power_save_init();
+#endif
     s_inited = true;
 
     uint8_t mac[6] = {0};
@@ -276,7 +279,7 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
     }
     wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
     wc.sta.pmf_cfg.capable = true;
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
     // Beacons between wakes in max modem sleep (Muse asleep on battery):
     // about 1 s at the usual 102.4 ms interval, a third of the wakes of the
     // default 3. Min modem sleep (awake between turns) wakes every DTIM.
@@ -618,3 +621,39 @@ int wifi_mgr_scan_and_merge_cache(void) {
     ESP_LOGI(TAG, "merged scan: %d fresh, %d cached total", n, total);
     return total;
 }
+
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+static SemaphoreHandle_t s_transfer_mutex;
+static unsigned s_transfers;
+static wifi_ps_type_t s_ps_mode = WIFI_PS_MAX_MODEM;
+
+void wifi_mgr_transfer(bool active) {
+    if (!s_transfer_mutex) return;
+    xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
+    if (active) s_transfers++;
+    else if (s_transfers) s_transfers--;
+    wifi_ps_type_t mode = s_transfers ? WIFI_PS_MIN_MODEM : WIFI_PS_MAX_MODEM;
+    if (mode != s_ps_mode) {
+        esp_err_t err = esp_wifi_set_ps(mode);
+        if (err == ESP_OK) {
+            s_ps_mode = mode;
+            ESP_LOGI(TAG, "modem sleep %s", mode == WIFI_PS_MAX_MODEM ? "MAX (idle)" : "MIN (transfer)");
+        } else {
+            ESP_LOGW(TAG, "modem sleep update failed: %s", esp_err_to_name(err));
+        }
+    }
+    xSemaphoreGive(s_transfer_mutex);
+}
+#endif
+
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM || CONFIG_HOMEHUB_WIFI_MIN_MODEM
+void wifi_mgr_power_save_init(void) {
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+    s_transfer_mutex = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(s_transfer_mutex ? ESP_OK : ESP_ERR_NO_MEM);
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MAX_MODEM));
+#else
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+#endif
+}
+#endif

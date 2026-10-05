@@ -44,3 +44,8 @@ bool voice_player_wait(int timeout_ms);
 void voice_player_stop(void);
 // True once this reply has made a sound.
 bool voice_player_started(void);
+
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+// A hardware write failed during this reply.
+bool voice_player_failed(void);
+#endif

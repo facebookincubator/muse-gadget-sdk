@@ -46,6 +46,9 @@ extern "C" {
 #include "muse_state.h"
 }
 #endif
+#if CONFIG_HOMEHUB_EPD154G_BATTERY
+#include "epaper_154g_battery.h"
+#endif
 }
 
 #include <xplat/noise/core/ClientSession.h>
@@ -1299,7 +1302,11 @@ static char *build_register_json(void) {
         // and, for e-paper, the exact inks.
         int bits = led_status_display_bits();
         bool mono = bits == 1;
-        bool epaper = bits == 1 || bits == 4;
+        bool epaper = bits == 1 || bits == 4
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+                      || bits == 2
+#endif
+                      ;
         char desc[1536];
         snprintf(desc, sizeof(desc),
                  "Download an image and draw it on the %dx%d %s. Takes a "
@@ -1320,6 +1327,9 @@ static char *build_register_json(void) {
                  mono ? "black and white e-paper screen, 1 bit per pixel"
                  : bits == 4 ? "six-colour e-paper screen (E Ink Spectra 6), "
                                "4 bits per pixel"
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+                 : bits == 2 ? "four-colour e-paper screen, 2 bits per pixel"
+#endif
                              : "colour screen, 16 bits per pixel (RGB565)",
                  disp_w * 2,
                  mono ? " The screen has no gray or colour: the device "
@@ -1342,6 +1352,25 @@ static char *build_register_json(void) {
                                "screen rather than several parts, at most "
                                "about once a minute. The image stays on "
                                "screen without power."
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+                 : bits == 2 ? " This 1.54-inch screen is read from arm's length. "
+                               "Prefer raw RGB565 at exactly 200x200. Render text "
+                               "and icons as vectors (e.g. SVG) on your machine, "
+                               "then rasterise using only four exact inks: black "
+                               "#000000, white #ffffff, yellow #ffff00 and red "
+                               "#ff0000. Send high byte first, 400 bytes per row. "
+                               "Use a baseline JPEG only if raw is not possible. "
+                               "Use at most 3-4 short lines of large bold text "
+                               "(letters at least 24 px tall), thick lines and "
+                               "big shapes with flat fills. No gradients, shadows, "
+                               "anti-aliasing, photos, small text or fine detail. "
+                               "The device snaps every other colour to the "
+                               "nearest ink without dithering. It refreshes once "
+                               "the whole image is in, taking about 20 s and "
+                               "flashing, so send one whole screen rather than "
+                               "several parts, at most about once a minute. The "
+                               "image stays on screen without power."
+#endif
                              : ""
 #if !CONFIG_HOMEHUB_LED_BACKEND_MUSE
                  , epaper ? "status screen" : "animation"
@@ -1362,11 +1391,15 @@ static char *build_register_json(void) {
 #endif
         cJSON_AddItemToObject(url_optional, "row", top_param);
         add_command(commands, "display.draw_url", desc, url_required, url_optional);
-        // The six-colour e-paper may first finish a status screen refresh,
-        // then takes as long again for the image.
+        // The colour e-paper may first finish a status screen refresh, then
+        // takes as long again for the image.
         cJSON_AddNumberToObject(
             cJSON_GetObjectItem(commands, "display.draw_url"), "timeout_ms",
-            bits == 4 ? 120000 : 60000);
+            bits == 4
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+            || bits == 2
+#endif
+            ? 120000 : 60000);
         add_command(commands, "display.show_animation",
                     epaper ? "Clear the image and bring back the status screen "
                            "and the agent's name."
@@ -1403,6 +1436,13 @@ static char *build_register_json(void) {
                 "Read the onboard air sensor: temperature in degrees Celsius "
                 "and relative humidity in percent. Each reading has its age "
                 "in seconds; a sensor with no recent reading is null.",
+                nullptr, nullptr);
+#endif
+
+#if CONFIG_HOMEHUB_SHTC3_SENSORS
+    add_command(commands, "sensors.read",
+                "Read the built-in SHTC3: temperature in degrees Celsius and "
+                "relative humidity in percent. Each reading has its age in seconds.",
                 nullptr, nullptr);
 #endif
 
@@ -1552,6 +1592,15 @@ static void send_device_health(
         charging = cJSON_CreateBool(power.charging);
     }
     usb_power = cJSON_CreateBool(power.usb);
+#elif CONFIG_HOMEHUB_EPD154G_BATTERY
+    // No charge or VBUS signal reaches the chip: charging stays null, and a
+    // USB host on the serial port is the only sign of USB power.
+    epaper_154g_battery_t battery;
+    if (epaper_154g_battery_read(&battery) == ESP_OK) {
+        battery_pct = cJSON_CreateNumber(battery.percent);
+        battery_mv = cJSON_CreateNumber(battery.millivolts);
+        if (battery.usb_host) usb_power = cJSON_CreateBool(true);
+    }
 #endif
     cJSON_AddItemToObject(metrics, "battery_pct",
                           battery_pct ? battery_pct : cJSON_CreateNull());
