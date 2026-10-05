@@ -65,6 +65,9 @@ static void check_normalize(void) {
     assert(!epaper_154g_caption_normalize("\xe2\x80\x9cq\xe2\x80\x9d \xe2\x80\x94 \xf0\x9f\x98\x80", out, sizeof(out)));
     assert(!strcmp(out, "\"q\" - ?"));
     assert(!epaper_154g_caption_normalize("Привет", out, sizeof(out)) && !strcmp(out, "Привет"));
+    // Three-byte letters and symbols keep their glyphs.
+    assert(!epaper_154g_caption_normalize("Γειά ქართული Tiếng № €", out, sizeof(out)));
+    assert(!strcmp(out, "Γειά ქართული Tiếng № €"));
     // A short buffer cuts between characters and reports the cut.
     assert(epaper_154g_caption_normalize("Привет", out, 4) && !strcmp(out, "П"));
     assert(!epaper_154g_caption_normalize(NULL, out, sizeof(out)) && !out[0]);
@@ -122,6 +125,6 @@ int main(void) {
     check_wrap();
     check_pages();
     check_format();
-    puts("PASS epaper caption: UTF-8, Cyrillic glyphs, normalising, wrap, pages, question line");
+    puts("PASS epaper caption: UTF-8, alphabet glyphs, normalising, wrap, pages, question line");
     return 0;
 }

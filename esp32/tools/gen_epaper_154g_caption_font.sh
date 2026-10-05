@@ -48,14 +48,21 @@ function hex(s,    i,n) {
 }
 length($2) == 32 {
     code = hex($1)
-    if ((code >= 32 && code <= 126) || (code >= 160 && code <= 255) ||
-        (code >= 1024 && code <= 1279)) {
+    # Latin, IPA, Greek, Cyrillic, Armenian, Georgian, Latin and Greek
+    # extended, punctuation, currency, letterlike, arrows and math: the
+    # alphabets written left to right without shaping. awk has no hex.
+    if ((code >= 32 && code <= 126) || (code >= 160 && code <= 767) ||
+        (code >= 880 && code <= 1327) || (code >= 1329 && code <= 1423) ||
+        (code >= 4256 && code <= 4351) || (code >= 7680 && code <= 8191) ||
+        (code >= 8208 && code <= 8231) || (code >= 8240 && code <= 8286) ||
+        (code >= 8352 && code <= 8384) || (code >= 8448 && code <= 8527) ||
+        (code >= 8592 && code <= 8959)) {
         codes[++count] = code
         bits[count] = $2
     }
 }
 END {
-    if (count != 444) exit 1
+    if (count != 2308) exit 1
     for (i = 1; i <= count; i++) {
         if (i % 12 == 1) printf "    "
         printf "0x%04x,", codes[i]

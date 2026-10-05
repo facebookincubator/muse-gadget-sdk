@@ -1,7 +1,9 @@
 # Fonts
 
 `epaper_154g_caption_font.h` holds GNU Unifont 16.0.04's 8x16 bitmaps for
-printable ASCII, Latin-1 and Cyrillic captions on the Waveshare 1.54G.
+captions on the Waveshare 1.54G: Latin, Greek, Cyrillic, Armenian and Georgian
+letters with common punctuation and symbols, the scripts written left to right
+without shaping.
 `tools/gen_epaper_154g_caption_font.sh` regenerates it.
 
 GNU Unifont is by Roman Czyborra, Paul Hardy and contributors

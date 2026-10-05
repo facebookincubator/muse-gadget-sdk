@@ -24,7 +24,7 @@ firmware with voice.
 
 The reTerminals' status, redrawn at 200×200 in the four inks. While idle the character fills the screen with
 "Hold BOOT to speak"; from the start of a voice turn a smaller character sits above seven lines of reply text.
-Text uses GNU Unifont bitmaps for Latin-1 and Cyrillic, see [`main/fonts/README.md`](../main/fonts/README.md).
+Text uses GNU Unifont bitmaps for Latin, Greek, Cyrillic, Armenian and Georgian letters, see [`main/fonts/README.md`](../main/fonts/README.md).
 
 Images from Muse map each pixel to the nearest ink without dithering, so text and flat shapes stay sharp; Muse
 is asked for raw RGB565 at 200×200. A full refresh takes about 20 s and flashes. When only part of the screen

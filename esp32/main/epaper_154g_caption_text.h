@@ -68,10 +68,18 @@ static inline bool epaper_154g_caption_normalize(const char *src, char *out, siz
         else if (code == 0x201c || code == 0x201d) code = '"';
         else if (code == 0x2013 || code == 0x2014 || code == 0xad) code = '-';
         else if (!epaper_154g_caption_glyph(code)) code = '?';
-        size_t bytes = code < 0x80 ? 1 : 2;
+        size_t bytes = code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
         if (used + bytes >= cap) { out[used] = 0; return true; }
-        if (bytes == 2) out[used++] = (char)(0xc0 | code >> 6);
-        out[used++] = (char)(bytes == 1 ? code : 0x80 | (code & 0x3f));
+        if (bytes == 1) {
+            out[used++] = (char)code;
+        } else if (bytes == 2) {
+            out[used++] = (char)(0xc0 | code >> 6);
+            out[used++] = (char)(0x80 | (code & 0x3f));
+        } else {
+            out[used++] = (char)(0xe0 | code >> 12);
+            out[used++] = (char)(0x80 | (code >> 6 & 0x3f));
+            out[used++] = (char)(0x80 | (code & 0x3f));
+        }
     }
     while (used && out[used - 1] == ' ') used--;
     out[used] = 0;
