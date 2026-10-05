@@ -18,7 +18,7 @@ Use this skill when fresh discovery identifies an Elgato Key Light and the user 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - The light must already be on Wi-Fi. The local HTTP API is unauthenticated; that does not waive host/action authorization.
 - Confirm the requested lighting change will not unexpectedly disrupt a call, recording or live stream.

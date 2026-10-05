@@ -104,6 +104,9 @@ jobs:
           - board: devkit
             target: esp32c5
             overlays: ""
+          - board: c6-nopsram
+            target: esp32c6
+            overlays: ";devices/sdkconfig.c6-nopsram"
           - board: ideaspark
             target: esp32
             overlays: ";devices/sdkconfig.ideaspark"
@@ -113,9 +116,15 @@ jobs:
           - board: reterminal-e1001
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-e1001"
+          - board: reterminal-e1002
+            target: esp32s3
+            overlays: ";devices/sdkconfig.reterminal-e1002"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"
+          - board: espressif-s3-devkitc-1
+            target: esp32s3
+            overlays: ";devices/sdkconfig.espressif-s3-devkitc-1"
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"
@@ -152,6 +161,12 @@ jobs:
           - board: muse-m5stack-stickc-plus2
             target: esp32
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2"
+          - board: muse-m5stack-core2
+            target: esp32
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2"
+          - board: muse-fnk0104b
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b"
     defaults:
       run:
         shell: bash

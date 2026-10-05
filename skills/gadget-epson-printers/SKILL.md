@@ -17,7 +17,7 @@ Use this skill when a confirmed Epson printer advertises IPP/IPPS, or an exact E
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - The actual service endpoints, any device authentication, and user permission for the document or physical scan.
 - A binary IPP client for printing. For scanning, an eSCL-capable client and the exact device's advertised eSCL base path.

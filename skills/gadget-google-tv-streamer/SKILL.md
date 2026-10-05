@@ -17,7 +17,7 @@ Use this skill when the confirmed Google TV Streamer advertises a usable Cast re
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An already-provisioned device with the relevant interface available.
 - For Remote v2, a compatible `androidtvremote2` client, the normal on-screen pairing code and securely retained client certificate/private key.

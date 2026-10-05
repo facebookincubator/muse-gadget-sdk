@@ -71,6 +71,12 @@ menu "Muse"
             bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_M5STACK_CORE2
+            bool "M5Stack Core2 v1.0 (ESP32, touch LCD, touch-strip talk)"
+            depends on IDF_TARGET_ESP32
+        config MUSE_BOARD_FNK0104B
+            bool "Freenove FNK0104B (ESP32-S3, 240x320 touch LCD, ES8311 speaker and mic)"
+            depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_GUITION_JC3248W535
             bool "Guition JC3248W535 (ESP32-S3, 3.5\" 320x480 touch LCD, speaker)"
             depends on IDF_TARGET_ESP32S3
@@ -95,6 +101,8 @@ menu "Muse"
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
+        default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
+        default "fnk0104b" if MUSE_BOARD_FNK0104B
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
         default "none"
 
@@ -120,6 +128,19 @@ menu "Muse"
             double-click camera preview. Camera buffers and tasks consume
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
+
+    config MUSE_CJK_FONT
+        bool "Show Chinese and Japanese in captions"
+        depends on MUSE_ENABLED
+        default n
+        help
+            Captions fall back to GNU Unifont's 16x16 bitmaps for CJK
+            punctuation, kana, the CJK Unified Ideographs and fullwidth
+            forms that the ASCII caption font lacks. Small screens, whose
+            captions are two lines of 8 px text, show a reply with CJK in it
+            one 16 px line at a time. Takes about 850 KB of flash and no RAM.
+            Without it those characters show as boxes. Hangul isn't
+            included.
 
     config MUSE_JC3248W535_MIC_GPIO
         int "JC3248W535: GPIO for an external I2S mic's data (SD) line"

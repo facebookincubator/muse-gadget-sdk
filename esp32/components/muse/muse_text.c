@@ -16,6 +16,7 @@
 
 #include "muse_text.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -191,6 +192,40 @@ int muse_text_ascii(const char *s, size_t *len, char out[4])
     }
     strlcpy(out, a, 4);
     return (int)strlen(out);
+}
+
+muse_text_cjk_t muse_text_cjk(const char *s)
+{
+    static const uint16_t CLOSE[] = {
+        0x3001, 0x3002, 0x3009, 0x300B, 0x300D, 0x300F, 0x3011, 0x3015, 0x3017, 0x3019,
+        0x301B, 0x30FB, 0x30FC, 0xFF01, 0xFF09, 0xFF0C, 0xFF0E, 0xFF1A, 0xFF1B, 0xFF1F,
+        0xFF3D, 0xFF5D, 0xFF60,
+    };
+    size_t len;
+    int32_t cp = decode((const unsigned char *)s, &len);
+    for (size_t i = 0; i < sizeof(CLOSE) / sizeof(CLOSE[0]); i++) {
+        if (cp == CLOSE[i]) {
+            return MUSE_TEXT_CJK_CLOSE;
+        }
+    }
+    bool cjk = (cp >= 0x2E80 && cp <= 0x9FFF)      /* radicals, punctuation, kana, ideographs */
+               || (cp >= 0xAC00 && cp <= 0xD7AF)   /* Hangul */
+               || (cp >= 0xF900 && cp <= 0xFAFF)   /* compatibility ideographs */
+               || (cp >= 0xFF00 && cp <= 0xFFEF);  /* fullwidth forms */
+    return cjk ? MUSE_TEXT_CJK : MUSE_TEXT_NOT_CJK;
+}
+
+bool muse_text_has_cjk(const char *s)
+{
+    while (*s) {
+        if (muse_text_cjk(s) != MUSE_TEXT_NOT_CJK) {
+            return true;
+        }
+        size_t len;
+        decode((const unsigned char *)s, &len);
+        s += len;
+    }
+    return false;
 }
 
 void muse_text_to_ascii(char *s, size_t cap)

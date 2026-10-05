@@ -156,7 +156,7 @@ attack. Set it up on a network you trust.
 
 ## Boards
 
-The last twelve run the full on-screen UI: an animated avatar, push-to-talk and
+Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
 settings. Audio and image support vary by board, so check the feature table in
 [`devices/`](devices). The others show status on a light, a ring or a simple
 status screen.
@@ -164,9 +164,12 @@ status screen.
 | Board | What you get | Build it |
 |---|---|---|
 | ESP32-C5 DevKitC-1 | Status light and button | `idf.py build` |
+| ESP32-C6 devkit without PSRAM | Status light and button | `tools/board.sh c6-nopsram build` |
+| Espressif ESP32-S3-DevKitC-1 | Status light and button | `tools/board.sh espressif-s3-devkitc-1 build` |
 | ideaspark ESP32 with 1.9" display | Status on screen, images | `tools/board.sh ideaspark build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
+| Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
@@ -180,6 +183,8 @@ status screen.
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
+| Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.
@@ -206,6 +211,10 @@ To put your own avatar on a board's screen, plug in the board and run
 board's pixel avatar, checks the result, then builds and flashes it. Your avatar
 stays out of git. See [`tools/muse/AVATAR_RECIPE.md`](tools/muse/AVATAR_RECIPE.md)
 for how it works and for boards that need the manual steps.
+
+To give Muse a command of its own, such as reading a sensor or switching a
+relay, advertise it in `link.register` and handle it in `main/app.c`.
+[`AGENTS.md`](AGENTS.md#adding-a-command) walks through it.
 
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
@@ -255,6 +264,12 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 Run `idf.py build` once first so the downloaded components are in place.
+
+Two crypto tests are skipped unless the host has what they need. Install the
+host Mbed TLS library (`brew install mbedtls pkgconf` on macOS,
+`apt-get install libmbedtls-dev pkg-config` on Debian or Ubuntu), and run the
+tests from a terminal where you ran ESP-IDF's `export.sh`, which sets
+`IDF_PATH`. The last line of the output shows `skipped=` if any were left out.
 
 ## Community
 

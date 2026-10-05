@@ -18,7 +18,7 @@ Use this skill when fresh discovery identifies a Shelly Gen 4 plug and the user 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Identify what is plugged in before switching, especially networking, heating, medical or other consequential loads.
 - When `auth_en` is true, use the documented HTTP/RPC digest authentication with approved stored credentials; the device username is `admin`. Never place the password in a command.

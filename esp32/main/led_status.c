@@ -32,6 +32,7 @@
 #include "driver/ledc.h"
 #elif CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
 #include "led_strip.h"
+#include "soc/spi_pins.h"
 #elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING
 #include "driver/gpio.h"
 #include "led_strip.h"
@@ -73,9 +74,24 @@ static const char *TAG = "link.led";
 #define LED_PWM_FREQ  5000
 #define LED_PWM_RES   LEDC_TIMER_8_BIT
 #elif CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
-// ESP32-C5 DevKitC-1 onboard addressable RGB LED. The separate red power LED
-// is always on when USB-powered and is not firmware-controlled.
-#define LED_STRIP_GPIO       27
+// Single addressable RGB LED, GPIO27 on the ESP32-C5 DevKitC-1. The DevKitC-1's
+// separate red power LED is always on when USB-powered and is not
+// firmware-controlled.
+#define LED_STRIP_GPIO       CONFIG_HOMEHUB_LED_STRIP_GPIO
+// Routing the LED to a flash or PSRAM pin takes that pin off the memory bus the
+// chip runs from, so refuse the build. GPIO27, the default, is one on the S3.
+#if LED_STRIP_GPIO == MSPI_IOMUX_PIN_NUM_CLK || LED_STRIP_GPIO == MSPI_IOMUX_PIN_NUM_CS0 \
+    || LED_STRIP_GPIO == MSPI_IOMUX_PIN_NUM_MISO || LED_STRIP_GPIO == MSPI_IOMUX_PIN_NUM_MOSI \
+    || LED_STRIP_GPIO == MSPI_IOMUX_PIN_NUM_HD || LED_STRIP_GPIO == MSPI_IOMUX_PIN_NUM_WP
+#error "CONFIG_HOMEHUB_LED_STRIP_GPIO is an SPI flash pin on this chip"
+#endif
+#if CONFIG_SPIRAM && defined(MSPI_IOMUX_PIN_NUM_CS1) && LED_STRIP_GPIO == MSPI_IOMUX_PIN_NUM_CS1
+#error "CONFIG_HOMEHUB_LED_STRIP_GPIO is the PSRAM chip select on this chip"
+#endif
+#if (CONFIG_SPIRAM_MODE_OCT || CONFIG_ESPTOOLPY_OCT_FLASH) && defined(MSPI_IOMUX_PIN_NUM_D4) \
+    && LED_STRIP_GPIO >= MSPI_IOMUX_PIN_NUM_D4 && LED_STRIP_GPIO <= MSPI_IOMUX_PIN_NUM_DQS
+#error "CONFIG_HOMEHUB_LED_STRIP_GPIO is an octal flash/PSRAM pin on this chip"
+#endif
 #define LED_STRIP_LED_COUNT  1
 #define LED_STRIP_RMT_RES_HZ (10 * 1000 * 1000)
 #elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING
@@ -284,8 +300,7 @@ static bool led_hw_init(void) {
         return false;
     }
 
-    ESP_LOGI(TAG, "LED status ready: ESP32-C5 DevKitC-1 addressable RGB (GPIO=%d)",
-             LED_STRIP_GPIO);
+    ESP_LOGI(TAG, "LED status ready: addressable RGB (GPIO=%d)", LED_STRIP_GPIO);
     return true;
 }
 #elif CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING
