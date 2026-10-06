@@ -373,8 +373,10 @@ Supports the display, buttons, BLE/Wi-Fi pairing, voice notes, text replies
 The C3 has about 400 KB of SRAM shared between code and heap, and no PSRAM.
 The overlay moves driver code out of IRAM and trims the BLE, Wi-Fi, TCP and
 LVGL buffers so the UI, the Link session and a voice note fit together; the
-session uses 12 KB inbound frames where the Cardputer ADV uses 17 KB. Replies
-may be shortened; use the Muse app for the full conversation. Spoken replies,
+session uses 12 KB inbound frames where the Cardputer ADV uses 17 KB. A reply
+frame bigger than that shows "REPLY TOO LONG: SEE MUSE APP" and the session
+reconnects. Replies may be shortened; use the Muse app for the full
+conversation. Spoken replies,
 images, the home-network tunnel, OTA and the charging state are not supported.
 
 Set your SDK token in `build-muse-ai-passport/sdkconfig` (ignored by Git).
