@@ -17,12 +17,7 @@
 #include "image_fetch.h"
 #include "led_status.h"
 #include "sdkconfig.h"
-#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
 #include "wifi_mgr.h"
-#endif
-#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
-#include "epaper_154g_window.h"
-#endif
 
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
 
@@ -326,9 +321,7 @@ static esp_err_t open_following_redirects(fetch_t *f, int *status) {
 
 static void fetch_task(void *arg) {
     fetch_t *f = arg;
-#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
     wifi_mgr_transfer(true);
-#endif
     int64_t start = esp_timer_get_time();
     f->deadline_us = start + FETCH_DEADLINE_MS * 1000LL;
     image_fetch_result_t result = { .code = "download_failed" };
@@ -375,11 +368,7 @@ static void fetch_task(void *arg) {
             result.height = rows;
         }
         // Show what arrived, even if the download broke off.
-#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
-        epaper_154g_image_draw_done(strcmp(result.format, "rgb565") == 0);
-#else
         led_status_draw_done();
-#endif
         if (fail && f->timed_out) fail = "download timed out";
         if (fail) {
             result.message = fail;
@@ -393,9 +382,7 @@ static void fetch_task(void *arg) {
         }
     }
     if (f->http) esp_http_client_cleanup(f->http);
-#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
     wifi_mgr_transfer(false);
-#endif
 
     result.bytes = f->bytes;
     result.ms = (int)((esp_timer_get_time() - start) / 1000);

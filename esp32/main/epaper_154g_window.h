@@ -35,20 +35,11 @@ typedef struct {
 
 static inline epaper_154g_window_t epaper_154g_window_plan_area(const uint8_t *shown, const uint8_t *next,
                                                 bool valid, bool force_full,
-                                                int band_x, int band_y, int band_width, int band_height, unsigned image_min_pixels) {
+                                                int band_x, int band_y, int band_width, int band_height) {
     epaper_154g_window_t full = {0, 0, EPAPER_154G_WINDOW_WIDTH, EPAPER_154G_WINDOW_HEIGHT, true, true, 0};
     if (!valid) return full;
     const bool image = band_x == 0 && band_y == 0 && band_width == EPAPER_154G_WINDOW_WIDTH
                        && band_height == EPAPER_154G_WINDOW_HEIGHT;
-    enum { REGION_HEIGHT = 40, REGION_COUNT = EPAPER_154G_WINDOW_HEIGHT / REGION_HEIGHT };
-    uint32_t regions[REGION_COUNT] = {0};
-    int region_left[REGION_COUNT], region_right[REGION_COUNT];
-    int region_top[REGION_COUNT], region_bottom[REGION_COUNT];
-    for (int i = 0; i < REGION_COUNT; i++) {
-        region_left[i] = EPAPER_154G_WINDOW_ROW_BYTES;
-        region_right[i] = region_bottom[i] = -1;
-        region_top[i] = EPAPER_154G_WINDOW_HEIGHT;
-    }
     int left = EPAPER_154G_WINDOW_ROW_BYTES, right = -1;
     int top = EPAPER_154G_WINDOW_HEIGHT, bottom = -1;
     bool outside = false;
@@ -60,18 +51,11 @@ static inline epaper_154g_window_t epaper_154g_window_plan_area(const uint8_t *s
             for (int shift = 0; shift < 8; shift += 2) {
                 if ((delta >> shift) & 3) {
                     full.changed_pixels++;
-                    regions[y / REGION_HEIGHT]++;
                     int x = byte * 4 + (6 - shift) / 2;
                     if (x < band_x || x >= band_x + band_width
                         || y < band_y || y >= band_y + band_height) outside = true;
                 }
             }
-            int region = y / REGION_HEIGHT;
-            if (byte < region_left[region]) region_left[region] = byte;
-            if (byte > region_right[region]) region_right[region] = byte;
-            if (y < region_top[region]) region_top[region] = y;
-            if (y > region_bottom[region]) region_bottom[region] = y;
-
             if (byte < left) left = byte;
             if (byte > right) right = byte;
             if (y < top) top = y;
@@ -79,20 +63,6 @@ static inline epaper_154g_window_t epaper_154g_window_plan_area(const uint8_t *s
         }
     }
     if (right < 0) return (epaper_154g_window_t){0};
-    if (image) {
-        left = EPAPER_154G_WINDOW_ROW_BYTES;
-        right = bottom = -1;
-        top = EPAPER_154G_WINDOW_HEIGHT;
-        for (int region = 0; region < REGION_COUNT; region++) {
-            if (!regions[region] || regions[region] < image_min_pixels) continue;
-            if (region_left[region] < left) left = region_left[region];
-            if (region_right[region] > right) right = region_right[region];
-            if (region_top[region] < top) top = region_top[region];
-            if (region_bottom[region] > bottom) bottom = region_bottom[region];
-        }
-        // Ignored noise stays in the glass shadow, so later changes accumulate.
-        if (bottom < 0) return (epaper_154g_window_t){0};
-    }
     if (force_full || outside) return full;
     // R83H requires end Y greater than start Y, even for a one-row change.
     if (top == bottom) {
@@ -108,15 +78,14 @@ static inline epaper_154g_window_t epaper_154g_window_plan_area(const uint8_t *s
 // Existing callers describe a horizontal logical status band.
 static inline epaper_154g_window_t epaper_154g_window_plan(const uint8_t *shown, const uint8_t *next,
                                                 bool valid, bool force_full,
-                                                int band_y, int band_height, unsigned image_min_pixels) {
+                                                int band_y, int band_height) {
     return epaper_154g_window_plan_area(shown, next, valid, force_full, 0, band_y,
-                                   EPAPER_154G_WINDOW_WIDTH, band_height, image_min_pixels);
+                                   EPAPER_154G_WINDOW_WIDTH, band_height);
 }
 
 static inline epaper_154g_window_t epaper_154g_window_plan_rotated(const uint8_t *shown, const uint8_t *next,
                                                         bool valid, bool force_full, int band_y,
-                                                        int band_height, unsigned image_min_pixels,
-                                                        unsigned rotation) {
+                                                        int band_height, unsigned rotation) {
     int x = 0, y = band_y, width = EPAPER_154G_WINDOW_WIDTH, height = band_height;
     switch (rotation & 3) {
     case 1: x = EPAPER_154G_WINDOW_WIDTH - band_y - band_height; y = 0;
@@ -124,7 +93,7 @@ static inline epaper_154g_window_t epaper_154g_window_plan_rotated(const uint8_t
     case 2: y = EPAPER_154G_WINDOW_HEIGHT - band_y - band_height; break;
     case 3: x = band_y; y = 0; width = band_height; height = EPAPER_154G_WINDOW_HEIGHT; break;
     }
-    return epaper_154g_window_plan_area(shown, next, valid, force_full, x, y, width, height, image_min_pixels);
+    return epaper_154g_window_plan_area(shown, next, valid, force_full, x, y, width, height);
 }
 
 // R83H uses inclusive coordinates; each byte covers four 2-bit pixels.
@@ -148,5 +117,3 @@ static inline void epaper_154g_window_commit(uint8_t *shown, const uint8_t *next
         memcpy(shown + offset, next + offset, window.width / 4);
     }
 }
-
-void epaper_154g_image_draw_done(bool raw);

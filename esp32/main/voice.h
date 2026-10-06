@@ -31,7 +31,3 @@ void voice_init(void);
 // voice.configure: sets the speaker volume (0-100), kept in NVS. The dial on
 // top sets it too.
 cJSON *voice_configure_command(cJSON *params);
-
-#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
-void voice_button_cue(bool long_hold);
-#endif

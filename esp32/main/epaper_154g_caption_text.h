@@ -151,22 +151,3 @@ static inline unsigned epaper_154g_caption_page(const char *text, unsigned page,
     }
     return pages;
 }
-
-static inline void epaper_154g_caption_format(const char *reply, const char *heard, char *out) {
-    epaper_154g_caption_normalize(reply, out, EPAPER_154G_CAPTION_BYTES);
-    if (!out[0]) return;
-    char question[EPAPER_154G_CAPTION_PAGE_BYTES];
-    bool heard_cut = epaper_154g_caption_normalize(heard, question, sizeof(question));
-    if (question[0] && !heard_cut && strlen(out) < EPAPER_154G_CAPTION_PAGE_BYTES) {
-        size_t question_bytes = strlen(question), answer_bytes = strlen(out);
-        char both[EPAPER_154G_CAPTION_PAGE_BYTES];
-        if (question_bytes + answer_bytes + 12 < sizeof(both)) {
-            memcpy(both, "You: ", 5);
-            memcpy(both + 5, question, question_bytes);
-            memcpy(both + 5 + question_bytes, " Muse: ", 7);
-            memcpy(both + 12 + question_bytes, out, answer_bytes + 1);
-            if (epaper_154g_caption_wrap(both, EPAPER_154G_CAPTION_COLS, 0, NULL, NULL) <= EPAPER_154G_CAPTION_LINES)
-                memcpy(out, both, strlen(both) + 1);
-        }
-    }
-}

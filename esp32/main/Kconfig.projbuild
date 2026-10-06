@@ -59,17 +59,9 @@ menu "ESP32 Device SDK"
             Password for CONFIG_HOMEHUB_WIFI_SSID. Ignored when the SSID
             override is empty.
 
-    config HOMEHUB_WIFI_MIN_MODEM
-        bool "Wi-Fi minimum modem power saving"
-        default n
-        help
-            Use WIFI_PS_MIN_MODEM so the station wakes for each DTIM beacon.
-            Incoming traffic can wait until the next DTIM. When disabled,
-            keep WIFI_PS_NONE. This does not enable CPU or light sleep.
-
     config HOMEHUB_WIFI_IDLE_MAX_MODEM
         bool "Wi-Fi maximum modem power saving while idle"
-        depends on HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G && PM_ENABLE && HOMEHUB_WIFI_MIN_MODEM
+        depends on !MUSE_ENABLED
         default n
         help
             Wake for every tenth beacon while idle. Voice turns, image

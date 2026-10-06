@@ -17,7 +17,15 @@
 
 #pragma once
 #include <stdbool.h>
+
+// The 1.54G's voice extras: the green LED, the reply on the e-paper and the PWR cues.
 bool voice_epaper_154g_led_init(void);
 
+// The mic is warm and the start cue has finished: LISTENING turns steady.
+void voice_epaper_154g_mic_ready(bool ready);
+
 // Queues one status-band refresh, without waiting for the panel. NULL clears it.
-void voice_epaper_154g_show_text(const char *reply, const char *heard);
+void voice_epaper_154g_show_text(const char *reply);
+
+// A click for a PWR page turn, a lower tone for the rotation hold.
+void voice_epaper_154g_button_cue(bool long_hold);

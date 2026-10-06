@@ -42,7 +42,6 @@ static adc_cali_handle_t s_cali;
 static SemaphoreHandle_t s_lock;
 static int s_last_percent = -1; // guarded by s_lock
 
-// ---- Battery maths (host-tested) ----
 // The curve the other single-cell boards use: 0 below about 3.5 V, 100 at
 // about 4.2 V. Under load the cell reads low, so this is an estimate.
 static int battery_percent(int mv) {
@@ -68,7 +67,6 @@ static void battery_line(char *buf, size_t cap, const epaper_154g_battery_t *b) 
     snprintf(buf, cap, "battery %d mV, %d%%, USB host %s", b->millivolts, b->percent,
              b->usb_host ? "connected" : "not seen");
 }
-// ---- End battery maths ----
 
 esp_err_t epaper_154g_battery_read(epaper_154g_battery_t *out) {
     if (!s_adc || !s_cali || !s_lock) return ESP_ERR_INVALID_STATE;

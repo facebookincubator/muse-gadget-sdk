@@ -22,7 +22,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #if CONFIG_HOMEHUB_VOICE
-#include "voice.h"
+#include "voice_epaper_154g.h"
 #endif
 
 static bool s_button_ready;
@@ -96,6 +96,6 @@ void epaper_154g_power_button_poll(bool boot_pressed) {
     if (action == EPAPER_154G_POWER_ROTATE) epaper_154g_status_rotate();
 #if CONFIG_HOMEHUB_VOICE
     if (action == EPAPER_154G_POWER_PAGE) epaper_154g_status_next_page();
-    if (action != EPAPER_154G_POWER_NONE) voice_button_cue(action == EPAPER_154G_POWER_ROTATE);
+    if (action != EPAPER_154G_POWER_NONE) voice_epaper_154g_button_cue(action == EPAPER_154G_POWER_ROTATE);
 #endif
 }

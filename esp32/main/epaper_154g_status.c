@@ -24,7 +24,7 @@
 
 #include "sdkconfig.h"
 #if CONFIG_HOMEHUB_VOICE
-#include "voice_epaper_154g_led.h"
+#include "voice_epaper_154g.h"
 #endif
 
 #include "epaper_154g_window.h"
@@ -145,7 +145,6 @@ static unsigned s_rotation, s_drawn_rotation; // guarded by s_panel_lock
 static unsigned s_requested_rotation; // guarded by s_mutex
 
 static int s_status_band_y, s_status_band_height;
-static unsigned s_image_min_pixels = 80;
 static bool s_ready;
 
 // Guards the panel, s_frame, s_shown and s_fast_refreshes. Taken before
@@ -229,8 +228,7 @@ static const epd_init_cmd_t s_init[] = {
 // Caller holds s_panel_lock.
 static esp_err_t epd_update(bool full) {
     epaper_154g_window_t window = epaper_154g_window_plan_rotated(s_shown, s_frame, s_shown_valid, full,
-                                                       s_status_band_y, s_status_band_height,
-                                                       s_image_min_pixels, s_rotation);
+                                                       s_status_band_y, s_status_band_height, s_rotation);
     if (!window.changed) return ESP_OK;
     full = window.full;
     // A failed transfer leaves the visible pixels unknown; retry with a full frame.
@@ -293,7 +291,7 @@ static void epd_dither(void) {
     epaper_154g_rotation_frame(s_logical_frame, s_frame, s_rotation);
 }
 
-// ---- Status screen (host-tested) --------------------------------------------
+// ---- Status screen ----------------------------------------------------------
 
 // Status screen: the title band on top, the character in the middle, the
 // status text below, wrapped onto up to STATUS_LINES lines.
@@ -394,14 +392,8 @@ static int wrap_text(const char *text, int width, int max, int *start, int *len)
     return lines;
 }
 
-// ---- Voice caption formatting (host-tested) ----
 #define VOICE_TEXT_LINES EPAPER_154G_CAPTION_LINES
 #define VOICE_TEXT_COLS EPAPER_154G_CAPTION_COLS
-#if CONFIG_HOMEHUB_VOICE
-static void voice_caption(const char *reply, const char *heard, char *out) {
-    epaper_154g_caption_format(reply, heard, out);
-}
-#endif
 
 static void draw_caption_glyphs(const char *text, int bytes, int x, int y, canvas_t ink) {
     const char *p = text, *end = text + bytes;
@@ -428,7 +420,6 @@ static void draw_caption_text(const char *text, int text_y, int max_lines, canva
         draw_caption_glyphs(p, len[line], x, y, ink);
     }
 }
-// ---- End voice caption formatting ----
 
 // Draw `text` in black, centred in the band from the row at `y` that
 // `max_lines` lines at `max_scale` take, in the largest pixel size up to
@@ -862,6 +853,9 @@ bool led_status_init(void) {
     }
     s_ready = true;
     xTaskNotifyGive(s_task);
+#if CONFIG_HOMEHUB_VOICE
+    if (!voice_epaper_154g_led_init()) ESP_LOGE(TAG, "voice LED unavailable");
+#endif
     ESP_LOGI(TAG, "LED status ready: " EPD_NAME " %dx%d e-paper, " EPD_DEPTH,
              EPD_W, EPD_H);
     return true;
@@ -884,11 +878,11 @@ void led_status_set_state(led_state_t state) {
 }
 
 #if CONFIG_HOMEHUB_VOICE
-void voice_epaper_154g_show_text(const char *reply, const char *heard) {
+void voice_epaper_154g_show_text(const char *reply) {
     if (!s_ready) return;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     char *text = s_voice_buffers->formatted;
-    voice_caption(reply, heard, text);
+    epaper_154g_caption_normalize(reply, text, EPAPER_154G_CAPTION_BYTES);
     // A new PTT turn must leave an old image even when no old caption exists.
     // The full background refresh starts here; the final reply then changes only its band.
     if (!reply || strcmp(text, s_voice_text) != 0) {
@@ -988,7 +982,7 @@ bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
     return true;
 }
 
-void epaper_154g_image_draw_done(bool raw) {
+void led_status_draw_done(void) {
     if (!s_ready) return;
     xSemaphoreTake(s_panel_lock, portMAX_DELAY);
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -1001,7 +995,6 @@ void epaper_154g_image_draw_done(bool raw) {
     if (show) {
         s_status_band_y = 0;
         s_status_band_height = EPD_H;
-        s_image_min_pixels = raw ? 1 : 80;
         if (epd_update(s_fast_refreshes >= FULL_REFRESH_EVERY) != ESP_OK) {
             xSemaphoreTake(s_lock, portMAX_DELAY);
             if (s_image_mode) s_image_dirty = true;
@@ -1009,10 +1002,6 @@ void epaper_154g_image_draw_done(bool raw) {
         }
     }
     xSemaphoreGive(s_panel_lock);
-}
-
-void led_status_draw_done(void) {
-    epaper_154g_image_draw_done(false);
 }
 
 void led_status_show_animation(void) {

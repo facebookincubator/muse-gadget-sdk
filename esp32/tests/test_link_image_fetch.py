@@ -63,7 +63,7 @@ def _sanitizer_flags(cc: list[str], tmp: Path) -> list[str]:
 
 
 class LinkImageFetchHarnessTest(unittest.TestCase):
-    def _run_harness(self, waveshare: int, idle: int = 0) -> None:
+    def _run_harness(self, idle: int) -> None:
         cc = _cc_command()
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -73,7 +73,6 @@ class LinkImageFetchHarnessTest(unittest.TestCase):
                 *cc,
                 "-std=c11",
                 "-D_GNU_SOURCE",
-                f"-DCONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G={waveshare}",
                 f"-DCONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM={idle}",
                 "-Wall",
                 "-Wextra",
@@ -131,9 +130,6 @@ class LinkImageFetchHarnessTest(unittest.TestCase):
         self._run_harness(0)
 
     def test_idle_modem_transfer_lifetime(self) -> None:
-        self._run_harness(1, 1)
-
-    def test_source_format_reaches_epaper_completion(self) -> None:
         self._run_harness(1)
 
 

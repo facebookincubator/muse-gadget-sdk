@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #include "voice_board.h"
 
 #include "driver/gpio.h"
@@ -25,8 +24,11 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "link_pairing.h"
+#include "voice_epaper_154g.h"
 
 // Waveshare's S3_ePaper_1_54 codec_board record: one ES8311, one analog
 // microphone. Both directions use the same 16 kHz clock pair and MCLK.
@@ -34,31 +36,34 @@
 #define AUDIO_PA    46  // active high; controlled here, not by the codec
 #define SETUP_BUTTON 18 // hold PWR to leave BOOT available for setup
 #define AUDIO_CHUNK 320
+// Above the network tasks, so a TLS handshake cannot starve the microphone.
+#define CAPTURE_PRIORITY 6
+// voice.c drops presses shorter than its CAPTURE_MIN_MS (300 ms): no end cue for those.
+#define END_CUE_FRAMES   (VOICE_MIC_RATE * 300 / 1000)
 
 static const char *TAG = "link.voice_board";
-static SemaphoreHandle_t s_lock;
+static SemaphoreHandle_t s_lock, s_cue_lock;
+static TaskHandle_t s_cue_task;
 static i2s_chan_handle_t s_tx, s_rx;
 static const audio_codec_ctrl_if_t *s_ctrl;
 static const audio_codec_data_if_t *s_data;
 static const audio_codec_if_t *s_codec;
 static esp_codec_dev_handle_t s_dev;
 static bool s_recording, s_playing, s_cue;
-static bool s_tx_logged;
+static UBaseType_t s_priority;
+static size_t s_frames; // read since voice_board_mic_start(), under s_lock
 static int s_volume = 60;
 // Every use and conversion is under s_lock, including microphone unpacking.
 static int16_t s_stereo[AUDIO_CHUNK * 2];
 
-// ---- Audio lifetime (host-tested) ----
 static void power_down(void) {
     gpio_set_level(AUDIO_PA, 0);
     if (s_dev) {
+        // Also disables the I2S data after an open() that failed partway.
         esp_codec_dev_close(s_dev);
         esp_codec_dev_delete(s_dev);
         s_dev = NULL;
     }
-    // open() can fail partway through enabling the codec and I2S.
-    // Close both data directions explicitly, including that partial failure.
-    if (s_data) s_data->enable(s_data, ESP_CODEC_DEV_TYPE_IN_OUT, false);
     if (s_codec) {
         audio_codec_delete_codec_if(s_codec);
         s_codec = NULL;
@@ -90,7 +95,12 @@ static esp_err_t power_up(void) {
     esp_codec_dev_sample_info_t fs = {
         .sample_rate = VOICE_MIC_RATE, .channel = 2, .bits_per_sample = 16,
     };
-    if (!s_dev || esp_codec_dev_open(s_dev, &fs) != ESP_CODEC_DEV_OK) goto fail;
+    if (!s_dev) goto fail;
+    // open() disables both channels before it sets the format; that logs an
+    // error for a channel that is not running yet.
+    i2s_channel_enable(s_tx);
+    i2s_channel_enable(s_rx);
+    if (esp_codec_dev_open(s_dev, &fs) != ESP_CODEC_DEV_OK) goto fail;
     if (esp_codec_dev_set_in_gain(s_dev, 30.0f) != ESP_CODEC_DEV_OK ||
         esp_codec_dev_set_out_vol(s_dev, s_volume) != ESP_CODEC_DEV_OK) goto fail;
     return ESP_OK;
@@ -99,19 +109,121 @@ fail:
     return ESP_FAIL;
 }
 
+// Under s_lock.
+static bool speaker_on(void) {
+    if (power_up() != ESP_OK) return false;
+    if (!gpio_get_level(AUDIO_PA)) {
+        gpio_set_level(AUDIO_PA, 1);
+        // NS4150B startup is typically 120 ms. Queue no tone before it wakes.
+        vTaskDelay(pdMS_TO_TICKS(150));
+    }
+    return true;
+}
+
+// Under s_lock: switch off whatever nothing uses any more.
+static void release(void) {
+    if (!s_playing && !s_cue) gpio_set_level(AUDIO_PA, 0);
+    if (!s_playing && !s_cue && !s_recording) power_down();
+}
+
+// Under s_lock.
+static esp_err_t write_stereo(const int16_t *stereo, size_t frames) {
+    const uint8_t *p = (const uint8_t *)stereo;
+    size_t left = frames * sizeof(int16_t) * 2;
+    esp_err_t err = ESP_OK;
+    while (left && err == ESP_OK) {
+        size_t sent = 0;
+        err = i2s_channel_write(s_tx, p, left, &sent, 200);
+        if (err == ESP_OK && !sent) err = ESP_ERR_TIMEOUT;
+        p += sent;
+        left -= sent;
+    }
+    return err;
+}
+
+// A local cue only: no network turn and no microphone data is sent by this.
+// The caller holds s_cue_lock.
+static void cue(bool end, bool button) {
+    static const int16_t wave[16] = {
+        0, 383, 707, 924, 1000, 924, 707, 383,
+        0, -383, -707, -924, -1000, -924, -707, -383,
+    };
+    static int16_t tone[160 * 2];
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cue = true;
+    esp_err_t err = speaker_on() ? ESP_OK : ESP_FAIL;
+    xSemaphoreGive(s_lock);
+    for (size_t chunk = 0; chunk < 5 && err == ESP_OK; chunk++) {
+        if (button && gpio_get_level(CONFIG_HOMEHUB_BUTTON_GPIO) == 0) break;
+        for (size_t i = 0; i < 160; i++) {
+            size_t sample = chunk * 160 + i;
+            // 1 kHz start, 500 Hz finish; 5 ms fades reduce the edges.
+            int gain = sample < 80 ? sample : sample >= 720 ? 799 - sample : 80;
+            tone[2 * i] = tone[2 * i + 1] = wave[(end ? sample / 2 : sample) % 16] * 8192 * gain / 80000;
+        }
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        err = write_stereo(tone, 160);
+        xSemaphoreGive(s_lock);
+    }
+    int64_t tail_until = esp_timer_get_time() + 120000;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (!end && err == ESP_OK && s_recording) {
+        // The mic is already powered. Drain its settling samples during the
+        // cue tail, not after the user starts talking.
+        for (int i = 0; i < 4 && err == ESP_OK; i++) {
+            size_t got = 0;
+            err = i2s_channel_read(s_rx, s_stereo, sizeof(s_stereo), &got, 100);
+            if (err == ESP_ERR_TIMEOUT) err = ESP_OK;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    int64_t left = tail_until - esp_timer_get_time();
+    if (left > 0) vTaskDelay(pdMS_TO_TICKS((left + 999) / 1000));
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cue = false;
+    release();
+    xSemaphoreGive(s_lock);
+    if (err != ESP_OK) ESP_LOGW(TAG, "cue failed: %s", esp_err_to_name(err));
+}
+
+// voice.c reads the mic from a priority 4 task, below the network tasks. On
+// battery, with the CPU scaled down, a TLS handshake there dropped speech, so
+// the reader runs at CAPTURE_PRIORITY until voice_board_mic_stop(). The start
+// cue and the codec warm-up take about 0.3 s after voice.c shows LISTENING;
+// the LED turns steady only once they are done.
 esp_err_t voice_board_mic_start(void) {
+    xSemaphoreTake(s_cue_lock, portMAX_DELAY);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     esp_err_t err = power_up();
-    if (err == ESP_OK) s_recording = true;
+    s_recording = err == ESP_OK;
+    s_frames = 0;
     xSemaphoreGive(s_lock);
+    if (err == ESP_OK) {
+        s_priority = uxTaskPriorityGet(NULL);
+        vTaskPrioritySet(NULL, CAPTURE_PRIORITY);
+        cue(false, false);
+        voice_epaper_154g_mic_ready(true);
+    }
+    xSemaphoreGive(s_cue_lock);
     return err;
 }
 
 void voice_board_mic_stop(void) {
+    xSemaphoreTake(s_cue_lock, portMAX_DELAY);
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_recording = false;
-    if (!s_playing) power_down();
+    bool recording = s_recording;
+    bool long_enough = s_frames >= END_CUE_FRAMES;
     xSemaphoreGive(s_lock);
+    if (recording) {
+        voice_epaper_154g_mic_ready(false);
+        if (long_enough) cue(true, false);
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        s_recording = false;
+        release();
+        xSemaphoreGive(s_lock);
+    }
+    xSemaphoreGive(s_cue_lock);
+    if (recording) vTaskPrioritySet(NULL, s_priority);
 }
 
 size_t voice_board_mic_read(int16_t *pcm, size_t frames, int *peak) {
@@ -130,6 +242,7 @@ size_t voice_board_mic_read(int16_t *pcm, size_t frames, int *peak) {
     }
     size_t n = bytes / (sizeof(int16_t) * 2);
     if (n > frames) n = frames;
+    s_frames += n;
     for (size_t i = 0; i < n; i++) {
         pcm[i] = stereo[2 * i]; // ES8311 ADC's left slot, not a second mic
         int value = pcm[i];
@@ -140,80 +253,42 @@ size_t voice_board_mic_read(int16_t *pcm, size_t frames, int *peak) {
     return n;
 }
 
-static void speaker_state(void) {
-    const int regs[] = {0x09, 0x12, 0x31, 0x32};
-    int values[4] = {-1, -1, -1, -1};
-    unsigned errors = 0;
-    for (int i = 0; i < 4; i++) {
-        if (esp_codec_dev_read_reg(s_dev, regs[i], &values[i]) != ESP_CODEC_DEV_OK) errors |= 1U << i;
-    }
-    ESP_LOGI(TAG, "speaker: rail=%d PA=%d volume=%d SDP=%02x DAC=%02x mute=%02x gain=%02x read_errors=%x",
-             gpio_get_level(AUDIO_POWER), gpio_get_level(AUDIO_PA), s_volume,
-             values[0], values[1], values[2], values[3], errors);
-}
-
+// The player calls this around every reply. The speaker powers up on the
+// first audible frame instead, so a silent text reply leaves the codec off.
 void voice_board_amp(bool on) {
+    if (on) return;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (on) {
-        bool was_playing = s_playing;
-        s_playing = power_up() == ESP_OK;
-        gpio_set_level(AUDIO_PA, s_playing ? 1 : 0);
-        if (s_playing && !was_playing) {
-            // NS4150B startup is typically 120 ms. Queue no tone before it wakes.
-            vTaskDelay(pdMS_TO_TICKS(150));
-            s_tx_logged = false;
-            speaker_state();
-        }
-    } else {
-        gpio_set_level(AUDIO_PA, 0);
-        s_playing = false;
-        if (!s_recording) power_down();
-    }
+    s_playing = false;
+    release();
     xSemaphoreGive(s_lock);
 }
 
 esp_err_t voice_board_speaker_write(const int32_t *frames, size_t count) {
+    // The player produces 48 kHz. Average each three stereo frames to the
+    // codec's 16 kHz bus; player chunks are always a multiple of three.
+    if (count % 3) return ESP_ERR_INVALID_SIZE;
+    bool audible = false;
+    for (size_t i = 0; i < count * 2; i++) audible |= frames[i] / 65536 != 0;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    // A cue owns the speaker; a silent reply keeps its pace without writing over it.
+    // A cue owns the speaker; a reply keeps its pace without writing over it.
+    if (!s_playing && audible && !s_cue) s_playing = speaker_on();
     bool playing = s_playing && !s_cue;
     xSemaphoreGive(s_lock);
     if (!playing) {
-        bool audible = false;
-        for (size_t i = 0; i < count * 2; i++) audible |= frames[i] / 65536 != 0;
-        if (!audible) {
-            // Text replies supply paced zero PCM; preserve timing without powering the codec.
-            vTaskDelay(pdMS_TO_TICKS(count * 1000 / VOICE_MIC_RATE));
-            return ESP_OK;
-        }
-        voice_board_amp(true);
+        vTaskDelay(pdMS_TO_TICKS(count * 1000 / VOICE_SPEAKER_RATE));
+        return ESP_OK;
     }
-    int16_t *stereo = s_stereo;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    esp_err_t err = s_playing ? ESP_OK : ESP_ERR_INVALID_STATE;
-    while (count && err == ESP_OK) {
-        size_t n = count > AUDIO_CHUNK ? AUDIO_CHUNK : count;
-        int peak = 0;
-        for (size_t i = 0; i < n * 2; i++) {
-            stereo[i] = frames[i] / 65536;
-            int value = stereo[i];
-            if (value < 0) value = -value;
-            if (value > peak) peak = value;
+    esp_err_t err = ESP_OK;
+    for (size_t at = 0; at < count && err == ESP_OK;) {
+        size_t n = 0;
+        for (; n < AUDIO_CHUNK && at < count; n++, at += 3) {
+            for (size_t c = 0; c < 2; c++) {
+                int64_t sum = (int64_t)frames[2 * at + c] + frames[2 * at + 2 + c] + frames[2 * at + 4 + c];
+                s_stereo[2 * n + c] = sum / 3 / 65536;
+            }
         }
-        const uint8_t *p = (const uint8_t *)stereo;
-        size_t left = n * sizeof(int16_t) * 2;
-        while (left && err == ESP_OK) {
-            size_t sent = 0;
-            err = i2s_channel_write(s_tx, p, left, &sent, 200);
-            if (err == ESP_OK && !sent) err = ESP_ERR_TIMEOUT;
-            p += sent;
-            left -= sent;
-        }
-        if (!s_tx_logged) {
-            ESP_LOGI(TAG, "speaker TX: frames=%u peak=%d result=%s", (unsigned)n, peak, esp_err_to_name(err));
-            s_tx_logged = true;
-        }
-        frames += n * 2;
-        count -= n;
+        err = write_stereo(s_stereo, n);
     }
     xSemaphoreGive(s_lock);
     return err;
@@ -226,22 +301,32 @@ void voice_board_set_volume(int percent) {
     xSemaphoreGive(s_lock);
 }
 
+// BOOT keeps its setup role while PWR is held or a pairing waits for its
+// confirmation.
 bool voice_board_muted(void) {
-    return gpio_get_level(SETUP_BUTTON) == 0;
+    return gpio_get_level(SETUP_BUTTON) == 0 || link_pairing_confirmation_required();
 }
 
 int voice_board_dial_steps(void) { return 0; }
-// ---- End audio lifetime ----
 
-void voice_board_log_idle(void) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    i2s_chan_info_t rx = {0}, tx = {0};
-    esp_err_t rx_err = i2s_channel_get_info(s_rx, &rx);
-    esp_err_t tx_err = i2s_channel_get_info(s_tx, &tx);
-    ESP_LOGI(TAG, "audio idle: rail=%d PA=%d codec_closed=%d RX_enabled=%d TX_enabled=%d RX_query=%s TX_query=%s",
-             gpio_get_level(AUDIO_POWER), gpio_get_level(AUDIO_PA), s_dev == NULL,
-             rx.is_enabled, tx.is_enabled, esp_err_to_name(rx_err), esp_err_to_name(tx_err));
-    xSemaphoreGive(s_lock);
+// PWR cues play here, so the button task keeps polling during the tone.
+static void cue_task(void *arg) {
+    for (;;) {
+        uint32_t long_hold = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &long_hold, portMAX_DELAY);
+        // BOOT down means a turn is starting; its own cue follows.
+        if (gpio_get_level(CONFIG_HOMEHUB_BUTTON_GPIO) == 0) continue;
+        if (xSemaphoreTake(s_cue_lock, 0) != pdTRUE) continue;
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool recording = s_recording;
+        xSemaphoreGive(s_lock);
+        if (!recording) cue(long_hold, true);
+        xSemaphoreGive(s_cue_lock);
+    }
+}
+
+void voice_epaper_154g_button_cue(bool long_hold) {
+    if (s_cue_task) xTaskNotify(s_cue_task, long_hold, eSetValueWithOverwrite);
 }
 
 esp_err_t voice_board_init(void) {
@@ -283,60 +368,12 @@ esp_err_t voice_board_init(void) {
     // Probe at boot with the PA low, then leave the entire audio rail off.
     err = power_up();
     power_down();
-    if (err == ESP_OK) ESP_LOGI(TAG, "ES8311 ready: 16000 Hz duplex; PWR+BOOT=setup; audio rail off");
-    return err;
-}
-
-// A local cue only: no network turn and no microphone data is sent by this.
-static esp_err_t cue(bool end, bool button) {
-    static const int16_t wave[16] = {
-        0, 383, 707, 924, 1000, 924, 707, 383,
-        0, -383, -707, -924, -1000, -924, -707, -383,
-    };
-    int32_t stereo[160 * 2];
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_cue = true;
-    xSemaphoreGive(s_lock);
-    voice_board_amp(true);
-    esp_err_t err = ESP_OK;
-    for (size_t chunk = 0; chunk < 5 && err == ESP_OK; chunk++) {
-        if (button && gpio_get_level(CONFIG_HOMEHUB_BUTTON_GPIO) == 0) break;
-        for (size_t i = 0; i < 160; i++) {
-            size_t sample = chunk * 160 + i;
-            // 1 kHz start, 500 Hz finish; 5 ms fades reduce the edges.
-            int gain = sample < 80 ? sample : sample >= 720 ? 799 - sample : 80;
-            int32_t value = wave[(end ? sample / 2 : sample) % 16] * 8192 * gain / 80000;
-            stereo[2 * i] = stereo[2 * i + 1] = value * 65536;
-        }
-        err = voice_board_speaker_write(stereo, 160);
-    }
-    int64_t tail_until = esp_timer_get_time() + 120000;
-    if (!end && err == ESP_OK) {
-        // The mic is already powered. Drain its settling samples during the
-        // cue tail, not after powering it up again once the user starts talking.
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        if (s_recording) {
-            for (int i = 0; i < 4; i++) {
-                size_t got = 0;
-                esp_err_t read = i2s_channel_read(s_rx, s_stereo, sizeof(s_stereo), &got, 100);
-                if (read != ESP_OK && read != ESP_ERR_TIMEOUT) { err = read; break; }
-            }
-        }
-        xSemaphoreGive(s_lock);
-    }
-    int64_t left = tail_until - esp_timer_get_time();
-    if (left > 0) vTaskDelay(pdMS_TO_TICKS((left + 999) / 1000));
-    voice_board_amp(false);
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_cue = false;
-    xSemaphoreGive(s_lock);
-    return err;
-}
-
-esp_err_t voice_board_cue(bool end) {
-    return cue(end, false);
-}
-
-void voice_board_button_cue(bool long_hold) {
-    if (gpio_get_level(CONFIG_HOMEHUB_BUTTON_GPIO) != 0) cue(long_hold, true);
+    if (err != ESP_OK) return err;
+    s_cue_lock = xSemaphoreCreateMutex();
+    if (!s_cue_lock) return ESP_ERR_NO_MEM;
+    // The stack is in PSRAM: a cue never touches flash.
+    if (xTaskCreateWithCaps(cue_task, "cue", 4096, NULL, 3, &s_cue_task, MALLOC_CAP_SPIRAM) != pdPASS)
+        return ESP_ERR_NO_MEM;
+    ESP_LOGI(TAG, "ES8311 ready: 16000 Hz duplex; PWR+BOOT=setup; audio rail off");
+    return ESP_OK;
 }

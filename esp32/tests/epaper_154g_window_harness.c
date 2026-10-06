@@ -39,11 +39,11 @@ static void reset(void) {
 }
 
 static epaper_154g_window_t plan_status(void) {
-    return epaper_154g_window_plan(shown, next, true, false, BAND_Y, BAND_H, 80);
+    return epaper_154g_window_plan(shown, next, true, false, BAND_Y, BAND_H);
 }
 
-static epaper_154g_window_t plan_image(unsigned min_pixels) {
-    return epaper_154g_window_plan(shown, next, true, false, 0, EPAPER_154G_WINDOW_HEIGHT, min_pixels);
+static epaper_154g_window_t plan_image(void) {
+    return epaper_154g_window_plan(shown, next, true, false, 0, EPAPER_154G_WINDOW_HEIGHT);
 }
 
 static void check_full(epaper_154g_window_t w) {
@@ -54,8 +54,8 @@ static void check_full(epaper_154g_window_t w) {
 static void check_status_window(void) {
     reset();
     assert(!plan_status().changed);
-    assert(!epaper_154g_window_plan(shown, next, true, true, BAND_Y, BAND_H, 80).changed);
-    check_full(epaper_154g_window_plan(shown, next, false, false, BAND_Y, BAND_H, 80));
+    assert(!epaper_154g_window_plan(shown, next, true, true, BAND_Y, BAND_H).changed);
+    check_full(epaper_154g_window_plan(shown, next, false, false, BAND_Y, BAND_H));
 
     // One pixel: a four-pixel column, two rows high (the controller wants end Y > start Y).
     epaper_154g_rotation_put(next, 17, 170, 0);
@@ -75,7 +75,7 @@ static void check_status_window(void) {
     check_full(plan_status());
     reset();
     epaper_154g_rotation_put(next, 8, 160, 0);
-    w = epaper_154g_window_plan(shown, next, true, true, BAND_Y, BAND_H, 80);
+    w = epaper_154g_window_plan(shown, next, true, true, BAND_Y, BAND_H);
     check_full(w);
     assert(w.changed_pixels == 1);
 
@@ -88,29 +88,27 @@ static void check_status_window(void) {
 }
 
 static void check_image_window(void) {
-    // A 40-row region below the noise floor is left alone; raw images have a floor of one.
+    // Every changed pixel counts; a one-row change is widened to two rows.
     reset();
     for (int x = 0; x < 79; x++) epaper_154g_rotation_put(next, x, 100, 0);
-    assert(!plan_image(80).changed);
-    epaper_154g_window_t w = plan_image(1);
+    epaper_154g_window_t w = plan_image();
     assert(w.changed && !w.full && w.x == 0 && w.width == 80 && w.y == 100 && w.height == 2);
 
-    // At the floor the region counts; a quieter region does not widen the window.
-    epaper_154g_rotation_put(next, 79, 100, 0);
+    // Changes far apart share one window.
     epaper_154g_rotation_put(next, 150, 10, 0);
-    w = plan_image(80);
-    assert(w.changed && !w.full && w.y == 100 && w.height == 2 && w.width == 80);
-    assert(w.changed_pixels == 81);
+    w = plan_image();
+    assert(w.changed && !w.full && w.x == 0 && w.width == 152 && w.y == 10 && w.height == 91);
+    assert(w.changed_pixels == 80);
 
     // Up to 75 percent of the panel is a window; more is a full refresh.
     reset();
     for (int y = 0; y < 150; y++) {
         for (int x = 0; x < EPAPER_154G_WINDOW_WIDTH; x++) epaper_154g_rotation_put(next, x, y, 0);
     }
-    w = plan_image(80);
+    w = plan_image();
     assert(w.changed && !w.full && w.y == 0 && w.height == 150 && w.width == EPAPER_154G_WINDOW_WIDTH);
     for (int x = 0; x < EPAPER_154G_WINDOW_WIDTH; x++) epaper_154g_rotation_put(next, x, 150, 0);
-    check_full(plan_image(80));
+    check_full(plan_image());
 }
 
 static void check_rotated_band(void) {
@@ -120,7 +118,7 @@ static void check_rotated_band(void) {
         reset();
         epaper_154g_rotation_xy(r, 17, 170, &px, &py);
         epaper_154g_rotation_put(next, px, py, 0);
-        epaper_154g_window_t w = epaper_154g_window_plan_rotated(shown, next, true, false, BAND_Y, BAND_H, 80, r);
+        epaper_154g_window_t w = epaper_154g_window_plan_rotated(shown, next, true, false, BAND_Y, BAND_H, r);
         assert(w.changed && !w.full);
         assert(w.x <= px && px < w.x + w.width && w.y <= py && py < w.y + w.height);
         assert(w.x % 4 == 0 && w.width % 4 == 0 && w.height >= 2);
@@ -128,7 +126,7 @@ static void check_rotated_band(void) {
         reset();
         epaper_154g_rotation_xy(r, 17, BAND_Y - 1, &px, &py);
         epaper_154g_rotation_put(next, px, py, 0);
-        check_full(epaper_154g_window_plan_rotated(shown, next, true, false, BAND_Y, BAND_H, 80, r));
+        check_full(epaper_154g_window_plan_rotated(shown, next, true, false, BAND_Y, BAND_H, r));
     }
 }
 
@@ -230,7 +228,7 @@ int main(void) {
     check_encode_and_commit();
     check_rotation();
     check_power_button();
-    puts("PASS epaper window: band windows, one-row fix, image floor and 75% cap, "
+    puts("PASS epaper window: band windows, one-row fix, image windows and 75% cap, "
          "rotated bands, R83H encoding, rotation, PWR page/rotate/combo");
     return 0;
 }

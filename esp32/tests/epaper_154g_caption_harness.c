@@ -112,27 +112,12 @@ static void check_pages(void) {
     assert(epaper_154g_caption_page(text, 3, page) == 3 && !page[0]);
 }
 
-static void check_format(void) {
-    char out[EPAPER_154G_CAPTION_BYTES];
-    char reply[400];
-    // Question and answer share the screen when they fit it; otherwise the answer alone.
-    epaper_154g_caption_format("Twelve degrees.", "what is the temperature", out);
-    assert(!strcmp(out, "You: what is the temperature Muse: Twelve degrees."));
-    memset(reply, 'a', 300);
-    reply[300] = 0;
-    epaper_154g_caption_format(reply, "question", out);
-    assert(!strcmp(out, reply));
-    epaper_154g_caption_format("", "question", out);
-    assert(!out[0]);
-}
-
 int main(void) {
     check_decode();
     check_glyphs();
     check_normalize();
     check_wrap();
     check_pages();
-    check_format();
-    puts("PASS epaper caption: UTF-8, alphabet glyphs, normalising, wrap, pages, question line");
+    puts("PASS epaper caption: UTF-8, alphabet glyphs, normalising, wrap, pages");
     return 0;
 }

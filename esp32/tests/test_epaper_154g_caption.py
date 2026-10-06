@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class EpaperCaptionTest(unittest.TestCase):
-    def test_utf8_wrap_pages_and_question_line(self):
+    def test_utf8_wrap_and_pages(self):
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory) / "epaper_154g_caption"
             cmd = [*shlex.split(os.environ.get("CC", "cc")), "-std=c11", "-Wall", "-Wextra", "-Werror",
