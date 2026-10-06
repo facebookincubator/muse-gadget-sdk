@@ -39,6 +39,10 @@ menu "Muse"
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_ATK_DNESP32S3_BOX
+            bool "ALIENTEK ATK-DNESP32S3-BOX V1.1 (320x240 LCD, ES8311, three keys, no touch)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_ESPRESSIF_BOX_3
             bool "Espressif ESP32-S3-BOX-3 (320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
@@ -97,6 +101,7 @@ menu "Muse"
         default "waveshare_s3_175c" if MUSE_BOARD_WAVESHARE_S3_175C
         default "waveshare_s3_175" if MUSE_BOARD_WAVESHARE_S3_175
         default "aipi" if MUSE_BOARD_AIPI
+        default "atk_dnesp32s3_box" if MUSE_BOARD_ATK_DNESP32S3_BOX
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
         default "sensecap_watcher" if MUSE_BOARD_SENSECAP_WATCHER
