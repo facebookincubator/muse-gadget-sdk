@@ -260,10 +260,21 @@ extern "C" bool noise_tunnel_on_session_up(const noise_tunnel_emit_t *emit) {
 
 extern "C" void noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit) {
     if (s_connected.load(std::memory_order_relaxed)
-        || !emit || !emit->open_stream) return;
+        || !emit || !emit->open_stream || !emit->reset_stream) return;
     uint64_t now = esp_timer_get_time();
     if (now - s_last_open_attempt_us < TUN_REOPEN_INTERVAL_US) return;
     ESP_LOGI(TAG, "retrying tunnel stream open");
+    // Every reopen reuses TUNNEL_STREAM_ID, and the server rejects a Request
+    // for an id it still tracks ("duplicate id"). When we mark the tunnel down
+    // locally (keepalive timeout, failed ping) the server's stream is still
+    // open, and the daemon dispatcher never reaps it, so without this Reset
+    // every retry is refused until the whole Noise session restarts. A Reset
+    // for an id the server already dropped (it reset/rejected us) is a no-op.
+    s_last_open_attempt_us = now;
+    if (!emit->reset_stream(emit->ctx)) {
+        ESP_LOGW(TAG, "tunnel stream reset failed; skipping reopen");
+        return;
+    }
     try_open_stream(emit);
 }
 

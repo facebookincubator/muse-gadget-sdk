@@ -1026,6 +1026,25 @@ static bool tunnel_send_body_inplace(void *vctx, uint8_t *buf, size_t headroom,
     return ws_send_frame_inplace(c->tls, buf + r.offset, r.size);
 }
 
+// Reset TUNNEL_STREAM_ID so the server drops its record of the old stream
+// before noise_tunnel_maybe_reopen reuses the id.
+static bool tunnel_reset_stream(void *vctx) {
+    auto *c = static_cast<tunnel_emit_ctx *>(vctx);
+    ResetView reset;
+    reset.code = ResetCode::Cancelled;
+    reset.reason = StringView("tunnel reopen");
+    auto sws = c->session->StartOutboundReset(
+        ServiceType::Daemon, TUNNEL_STREAM_ID, reset,
+        ByteSpan(c->svc_scratch, OUT_SVC_SCRATCH),
+        ByteSpan(c->env_scratch, OUT_ENV_SCRATCH));
+    if (!sws.ok()) {
+        ESP_LOGE(TAG, "tunnel StartOutboundReset failed: %s",
+                 sws.status().str());
+        return false;
+    }
+    return flush_outbound(c->tls, *c->session, c->ws_buf);
+}
+
 // ---- Extra daemon requests (noise_ctrl_req_*) --------------------------------
 
 // Opened by Muse and by an app's own code (CONFIG_HOMEHUB_DAEMON_REQUESTS);
@@ -2230,7 +2249,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     // registration and takes a 403 + slow reopen.
     tunnel_emit_ctx tun_ctx = {tls, &session, svc_scratch, env_scratch, ws_buf};
     noise_tunnel_emit_t tun_emit = {&tun_ctx, tunnel_open_stream, tunnel_send_body,
-                                    tunnel_send_body_inplace};
+                                    tunnel_send_body_inplace, tunnel_reset_stream};
     bool tunnel_opened = false;
     uint64_t last_busy_us = esp_timer_get_time();
 

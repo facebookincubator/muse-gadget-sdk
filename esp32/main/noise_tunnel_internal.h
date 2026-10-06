@@ -55,6 +55,11 @@ typedef struct {
     // scratch for the frame headers and the tag. NULL: send_body is used.
     bool (*send_body_inplace)(void *ctx, uint8_t *buf, size_t headroom,
                               size_t len, size_t tailroom);
+
+    // Send a Reset on the tunnel stream (StartOutboundReset + flush), so the
+    // server forgets TUNNEL_STREAM_ID before we reuse it. Returns true on
+    // success.
+    bool (*reset_stream)(void *ctx);
 } noise_tunnel_emit_t;
 
 // Room around each outbound batch for in-place encoding: the WebSocket header
@@ -92,7 +97,8 @@ bool noise_tx_has_contiguous_dma_headroom(void);
 bool noise_tunnel_on_session_up(const noise_tunnel_emit_t *emit);
 
 // Retry opening the tunnel stream if it is currently down while the control
-// session is still up (e.g. after a transient backend 503). Rate-limited
+// session is still up (e.g. after a transient backend 503). Resets the old
+// stream first so the server accepts the reused stream id. Rate-limited
 // internally; safe to call every loop iteration. No-op if already up.
 void noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit);
 

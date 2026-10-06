@@ -96,12 +96,20 @@ static void log_message(const char *, const char *fmt, ...) {
 #include "noise_tunnel.inc"
 
 static std::vector<uint8_t> sent;
-static bool exhaust_after_send, fail_send, refill, fail_open;
+static bool exhaust_after_send, fail_send, refill, fail_open, fail_reset;
 static bool session_alive = true;
 static unsigned pings;
+// Ordered record of stream-level emits: 'R' reset, 'O' open.
+static std::string stream_ops;
 static bool open_stream(void *) {
+    stream_ops += 'O';
     if (fail_open) { session_alive = false; poison_noise_session(); }
     return !fail_open;
+}
+static bool reset_stream(void *) {
+    stream_ops += 'R';
+    if (fail_reset) { session_alive = false; poison_noise_session(); }
+    return !fail_reset;
 }
 static bool send_body(void *, const uint8_t *data, size_t len) {
     assert(len == 1);
@@ -122,7 +130,8 @@ static bool send_body(void *, const uint8_t *data, size_t len) {
     if (fail_send) { session_alive = false; poison_noise_session(); }
     return !fail_send;
 }
-static const noise_tunnel_emit_t emit = {nullptr, open_stream, send_body, nullptr};
+static const noise_tunnel_emit_t emit = {nullptr, open_stream, send_body, nullptr,
+                                         reset_stream};
 
 // In-place emit: the batch arrives inside its slot with room around it.
 static unsigned inplace_calls;
@@ -139,7 +148,7 @@ static bool send_body_inplace(void *, uint8_t *buf, size_t headroom, size_t len,
     return true;
 }
 static const noise_tunnel_emit_t emit_inplace = {
-    nullptr, open_stream, send_body, send_body_inplace};
+    nullptr, open_stream, send_body, send_body_inplace, reset_stream};
 static void enqueue(uint8_t value) {
     assert(noise_tunnel_send_packet(&value, 1));
 }
@@ -147,9 +156,12 @@ static void reopen() {
     noise_tunnel_on_session_down();
     session_alive = true;
     reset_noise_session();
-    fail_open = false;
+    fail_open = fail_reset = false;
     pings = 0;
+    stream_ops.clear();
     assert(noise_tunnel_on_session_up(&emit));
+    // A fresh session's first open has no stale server stream to reset.
+    assert(stream_ops == "O");
     dma_free = 64 * 1024;
     dma_largest = 20 * 1024;
     exhaust_after_send = fail_send = refill = false;
@@ -826,8 +838,19 @@ int main(int argc, char **argv) {
     dma_free = 16 * 1024;
     noise_tunnel_maybe_reopen(&emit);
     assert(noise_tunnel_is_connected());
+    // The locally-declared-dead stream is still open on the server; the reused
+    // stream id is only accepted if the Reset precedes the new Request.
+    assert(stream_ops == "ORO");
     assert(noise_tunnel_pump_tx(&emit) == 0 && sent.empty());
     for (uint8_t i = 1; i <= 8; ++i) enqueue(i);
+
+    // A failed Reset poisons Noise and must not be followed by an open.
+    reopen();
+    noise_tunnel_on_session_down();
+    fail_reset = true;
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(control_tx_turn());
+    assert(!session_alive && !noise_tunnel_is_connected() && stream_ops == "OR");
 
     // The void ping hook poisons Noise while there are no data/results queued.
     // The actual loop must notice this on the same turn, before WS keepalive.
