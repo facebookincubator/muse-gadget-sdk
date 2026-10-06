@@ -89,7 +89,6 @@ static bool s_small;
 static bool s_tall;         /* compact, with room above and below Muse (StickS3) */
 static int s_canvas_px;     /* Muse's size on screen */
 static int s_dy;            /* full layout: offset from a 466 px tall screen */
-static int s_head_dy;       /* ... for the rows at the top, kept on a shorter rectangle */
 static lv_indev_t *s_indev;
 static lv_obj_t *s_tv;
 static lv_obj_t *s_face;
@@ -625,27 +624,16 @@ static void set_answer(int which)
 static bool fits_across(int w, int y, int ring_in)
 {
     if (!muse_board->round) {
-        return w <= s_w - 16 - 2 * muse_board->edge_px;
+        return w <= s_w - 16;
     }
     int r = ring_in - 6;
     return w * w / 4 + y * y <= r * r;
 }
 
-/* Caption columns that fit across a rectangular screen with the full layout:
- * CAPTION_W's 16 on most, fewer on one narrower than that (a 240 px portrait
- * panel). The compact layout of small screens is left as it is. */
-static int caption_cols(int cols, int cw, int ring_in)
-{
-    while (!muse_board->round && !s_small && cols > 1 && !fits_across(cols * cw, 0, ring_in)) {
-        cols--;
-    }
-    return cols;
-}
-
 /* How far down a reply `w` px wide can reach: inside the ring, above the page dots. */
 static int reply_bottom(int w, int ring_in)
 {
-    int bottom = s_h / 2 - 28 - muse_board->edge_px;
+    int bottom = s_h / 2 - 28;
     if (muse_board->round) {
         int r = ring_in - 6;
         int chord = w / 2 < r ? (int)sqrtf((float)(r * r - w * w / 4)) : 0;
@@ -710,8 +698,7 @@ static void build_answer(lv_obj_t *face, int ring_in)
     l->align = LV_TEXT_ALIGN_CENTER;
     int h = 3 * pitch - CAPTION_LINE_SPACE;
     int art_bottom = l->y + l->px / 2 - ART_BLANK_ROWS * cell;
-    int cols = caption_cols(CAPTION_W / cw, cw, ring_in);
-    set_reply_box(l, cols, 3, reply_bottom(cols * cw, ring_in) - h, cw, pitch);
+    set_reply_box(l, CAPTION_W / cw, 3, reply_bottom(CAPTION_W, ring_in) - h, cw, pitch);
     for (int c = 24; c > l->cols; c--) {   /* wider if it still clears Muse */
         int top = reply_bottom(c * cw, ring_in) - h;
         if (top >= art_bottom + 6 && fits_across(c * cw, top, ring_in)) {
@@ -724,13 +711,13 @@ static void build_answer(lv_obj_t *face, int ring_in)
     }
 
     l = &s_answers[ANSWER_READ];
-    int status_bottom = 20 + s_head_dy + 16 - s_h / 2;
+    int status_bottom = 20 + s_dy + 16 - s_h / 2;
     l->px = MUSE_PX_W * MINI_CELL_PX;
     l->y = status_bottom + 2 + l->px / 2;   /* its sparkles clear of the status line */
     l->align = LV_TEXT_ALIGN_LEFT;
     art_bottom = l->y + l->px / 2 - ART_BLANK_ROWS * MINI_CELL_PX;
     int top = (art_bottom > spk_y + spk_r ? art_bottom : spk_y + spk_r) + 8;
-    set_reply_box(l, caption_cols(16, cw, ring_in), 2, top, cw, pitch);
+    set_reply_box(l, 16, 2, top, cw, pitch);
     /* The widest page isn't the biggest: a round screen narrows towards the bottom. */
     for (int c = 12; c <= 24 && fits_across(c * cw, top, ring_in); c++) {
         int n = (reply_bottom(c * cw, ring_in) - top + CAPTION_LINE_SPACE) / pitch;
@@ -857,8 +844,6 @@ static void build_screen(void)
     int cap_bottom = 179;                              /* a 466 px circle's; fine for rectangles */
     if (muse_board->round) {
         cap_bottom = (int)sqrtf((float)(ring_in * ring_in - CAPTION_W * CAPTION_W / 4)) - 3;
-    } else if (!s_small && cap_bottom > reply_bottom(CAPTION_W, ring_in)) {
-        cap_bottom = reply_bottom(CAPTION_W, ring_in);   /* a shorter panel: on screen, where replies end */
     }
     int cap_top = cap_bottom - cap_h;
     int meter_y = cap_top - 6 - METER_SEG_PX / 2;
@@ -887,7 +872,7 @@ static void build_screen(void)
     lv_obj_set_flex_flow(status, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(status, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(status, s_small ? 4 : 8, 0);
-    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, s_small ? 1 : 20 + s_head_dy);
+    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, s_small ? 1 : 20 + s_dy);
     s_wifi_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_ble_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_power_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
@@ -896,7 +881,7 @@ static void build_screen(void)
      * unless the screen is tall enough to fit it in small type above Muse. */
     s_state_lbl = make_label(face, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16, 0xffffff);
     lv_obj_set_style_text_letter_space(s_state_lbl, s_small ? 1 : 2, 0);
-    lv_obj_align(s_state_lbl, LV_ALIGN_TOP_MID, 0, s_small ? 22 : 40 + s_head_dy);
+    lv_obj_align(s_state_lbl, LV_ALIGN_TOP_MID, 0, s_small ? 22 : 40 + s_dy);
     lv_obj_set_flag(s_state_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
 
     /* This gadget's own name, dim under the state while it's unpaired: with
@@ -904,7 +889,7 @@ static void build_screen(void)
      * Muse app. update_chrome() fills it in, shortens it to the hex tail on a
      * screen too narrow for the whole thing, and empties it once paired. */
     s_name_lbl = make_label(face, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16, COLOR_DIM);
-    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, s_small ? 32 : 60 + s_head_dy);
+    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, s_small ? 32 : 60 + s_dy);
     /* Same rule as the state label: a square 128 px screen centres Muse over
      * these rows, so there's nowhere to put this without covering the face. */
     lv_obj_set_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
@@ -935,8 +920,7 @@ static void build_screen(void)
         return;
     }
     /* Fixed height: a longer caption ends in dots rather than growing into the ring. */
-    int cw = lv_font_get_glyph_width(caption_font(), 'M', ' ');
-    lv_obj_set_size(s_caption_lbl, caption_cols(CAPTION_W / cw, cw, ring_in) * cw, cap_h);
+    lv_obj_set_size(s_caption_lbl, CAPTION_W, cap_h);
     lv_obj_set_style_text_line_space(s_caption_lbl, CAPTION_LINE_SPACE, 0);
     lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_align(s_caption_lbl, LV_ALIGN_CENTER, 0, cap_top + cap_h / 2);
@@ -1571,12 +1555,6 @@ esp_err_t muse_ui_start(void)
          * are and shrink Muse to whole pixels that fit between them. */
         s_canvas_px = (MUSE_PX_W * 5 + 2 * s_dy) / MUSE_PX_W * MUSE_PX_W;
         s_dy = 0;
-    }
-    /* A rectangle shorter than 466 px would push the status row, 20 px down
-     * a full-size screen, off the top: keep it just inside the case's edge. */
-    s_head_dy = s_dy;
-    if (!s_small && !muse_board->round && 20 + s_head_dy < 4 + muse_board->edge_px) {
-        s_head_dy = 4 + muse_board->edge_px - 20;
     }
 
     lv_display_t *disp = muse_board->display_start(&s_indev);

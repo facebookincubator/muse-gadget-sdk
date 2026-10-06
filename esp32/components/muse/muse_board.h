@@ -59,7 +59,6 @@ typedef struct {
     const char *name;
     int width, height;
     bool round;             /* circular panel: keep content inside the circle */
-    int edge_px;            /* what the case hides at each edge: captions keep clear */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
     bool keyboard;          /* dedicated menu navigation keys */

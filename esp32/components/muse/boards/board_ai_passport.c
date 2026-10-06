@@ -488,7 +488,6 @@ static const muse_board_t s_board = {
     .width = LCD_W,
     .height = LCD_H,
     .round = false,
-    .edge_px = 8,               /* the case's window and the panel's rounded corners */
     .touch = false,
     .diagonal_in = 2.0f,
     .talk_button = "ok",
