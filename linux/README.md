@@ -153,3 +153,10 @@ other, and share what you make.
 ## License
 
 Apache 2.0. See [`LICENSE`](../LICENSE).
+
+## MA35 Linux HMI example
+
+See [the MA35 HMI gateway](examples/ma35_hmi/README.md) for live streaming chat,
+tap-to-talk voice input, local headphone TTS, and Muse command examples that
+control a simulated temperature dial and real headphone volume/mute. Validated
+on MA35H0; MA35D1 ports require adapting panel, touch and codec settings.

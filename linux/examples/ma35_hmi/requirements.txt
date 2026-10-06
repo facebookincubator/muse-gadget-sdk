@@ -1,0 +1,4 @@
+-e ../..
+Pillow>=10
+piper-tts==1.8.0
+pytest>=8

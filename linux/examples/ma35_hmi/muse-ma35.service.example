@@ -1,0 +1,18 @@
+[Unit]
+Description=Muse MA35 Linux HMI gateway
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+# Replace the account and paths with your deployment values.
+User=YOUR_USER
+WorkingDirectory=/opt/muse-ma35
+Environment=PYTHONUNBUFFERED=1
+Environment=MA35_SSH_TARGET=root@192.168.137.2
+ExecStart=/opt/muse-ma35/venv/bin/python /opt/muse-ma35/board_bridge.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+[Install]
+WantedBy=multi-user.target

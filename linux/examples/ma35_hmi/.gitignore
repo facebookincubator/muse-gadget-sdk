@@ -1,0 +1,11 @@
+state/
+venv/
+__pycache__/
+.pytest_cache/
+*.sock
+*.log
+voices/
+touch_reader
+*.wav
+muse-logo.svg
+jollybot.gif
