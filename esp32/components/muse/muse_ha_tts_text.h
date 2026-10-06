@@ -47,6 +47,36 @@ void muse_ha_tts_clean(char *text);
  * its 10-byte header have arrived). */
 size_t muse_ha_tts_id3_size(const uint8_t *data, size_t len);
 
+/* Sorts out the start of HA's audio however it's split across reads: holds
+ * the first 10 bytes until they're all in, refuses WAV, skips an ID3v2 tag,
+ * checks that what follows starts with an MP3 frame (an HTML error page
+ * doesn't), and passes the audio to `emit`. Zero it to start. */
+typedef struct {
+    uint8_t head[10];
+    size_t have;             /* of head, until started */
+    size_t skip;             /* what's left of the ID3 tag */
+    bool started;
+    uint8_t first;           /* the audio's first byte, held until the second shows it's MP3 */
+    bool held, synced;
+} muse_ha_tts_mp3_t;
+
+typedef enum {
+    MUSE_HA_TTS_MP3_OK,
+    MUSE_HA_TTS_MP3_WAV,     /* it's WAV: stop */
+    MUSE_HA_TTS_MP3_STOPPED, /* emit returned false */
+    MUSE_HA_TTS_MP3_NOT_MP3, /* no MP3 frame where the audio starts: stop */
+} muse_ha_tts_mp3_result_t;
+
+typedef bool (*muse_ha_tts_emit_t)(void *ctx, const uint8_t *data, size_t len);
+
+/* Takes the next `len` bytes of the download. */
+muse_ha_tts_mp3_result_t muse_ha_tts_mp3_feed(muse_ha_tts_mp3_t *m, const uint8_t *data, size_t len,
+                                              muse_ha_tts_emit_t emit, void *ctx);
+
+/* The download ended: sorts out a start too short to have been, and says
+ * NOT_MP3 if no audio came at all. */
+muse_ha_tts_mp3_result_t muse_ha_tts_mp3_end(muse_ha_tts_mp3_t *m, muse_ha_tts_emit_t emit, void *ctx);
+
 /* Copies `base` without trailing slashes. */
 void muse_ha_tts_base(char *out, size_t cap, const char *base);
 

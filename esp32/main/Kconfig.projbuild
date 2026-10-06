@@ -291,6 +291,10 @@ menu "ESP32 Device SDK"
         help
             How this device reaches HA on your network. If .local names don't
             resolve, use its IP address, such as http://192.168.1.10:8123.
+            Over http:// the token is sent unencrypted with each reply (the
+            audio download itself carries no token). https:// works with a
+            certificate the ESP-IDF bundle trusts, i.e. from a public CA, not
+            a self-signed one.
 
     config HA_TTS_TOKEN
         string "Home Assistant long-lived access token"

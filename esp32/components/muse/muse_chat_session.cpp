@@ -115,6 +115,7 @@ static const char *TAG = "muse_chat_session";
 #define REPLY_TIMEOUT_US (60 * 1000000LL)  /* chat posted -> first assistant message */
 #define TURN_CAP_US (180 * 1000000LL)
 #define SPEAKING_CAP_US (10 * 60 * 1000000LL)   /* HA TTS: a turn that has started speaking */
+#define HA_STALL_US (15 * 1000000LL)       /* HA TTS: no MP3 for this long gives up on the fetch */
 #define SETTLE_US (3 * 1000000LL)          /* quiet period that ends a turn */
 #define BUSY_HOLD_US (20 * 1000000LL)      /* how long a busy agent keeps it open */
 #define TEXT_REPLY_TIMEOUT_US (5 * 60 * 1000000LL)   /* typed turns: agents can work a while */
@@ -250,7 +251,10 @@ struct turn_t {
     int down_rate;
 #if CONFIG_HA_TTS
     muse_ha_tts_speech_t speech[MAX_MSGS];   /* each message's whole text, for HA to speak */
-    bool spoke;              /* HA has started speaking a message: SPEAKING_CAP_US applies */
+    bool spoke;              /* HA's audio has started arriving: SPEAKING_CAP_US applies */
+    bool ha_waiting;         /* this message waits on HA's first audio: SPEAKING_CAP_US, for now */
+    int64_t ha_progress_us;  /* when the fetch last made progress, for HA_STALL_US */
+    bool ha_rest;            /* the fetch was cut off: show the rest at reading pace */
 #endif
 };
 
@@ -1562,10 +1566,13 @@ static void start_tts(void)
          */
 #if CONFIG_HA_TTS
         const muse_ha_tts_speech_t &sp = s_turn.speech[i];
-        if (sp.buf) {
-            if (muse_ha_tts_state() == MUSE_HA_TTS_RUNNING) {
-                return;   /* a cancelled fetch is still winding down */
-            }
+        if (!muse_settings_speaker_on()) {
+            /* Speaker off: shown, not spoken, so there's nothing to fetch. */
+        } else if (sp.buf && muse_ha_tts_state() == MUSE_HA_TTS_RUNNING) {
+            /* An abandoned fetch is still unwinding: rather than wait on it, show
+             * this one at reading pace, as without TTS. */
+            ESP_LOGW(TAG, "HA TTS is busy; showing message %s unspoken", m.id);
+        } else if (sp.buf) {
             if (sp.cut) {
                 ESP_LOGW(TAG, "message %s is %u chars; speaking the first %u", m.id, (unsigned)m.len,
                          (unsigned)sp.len);
@@ -1581,7 +1588,9 @@ static void start_tts(void)
                 s_turn.kbps = 0;
                 s_turn.down_rate = 0;
                 mp3dec_init(&s_turn.dec);
-                s_turn.spoke = true;
+                s_turn.ha_progress_us = now_us();
+                s_turn.ha_rest = false;
+                s_turn.ha_waiting = true;
                 mark(M_TTS);
                 ESP_LOGI(TAG, "speaking message %s (%u chars) with HA", m.id, (unsigned)m.len);
                 show_reply_start(m);
@@ -1645,20 +1654,37 @@ static void ha_tts_pump(void)
             break;
         }
         tts_data(buf, n);
+        s_turn.spoke = true;
+        s_turn.ha_waiting = false;
+        s_turn.ha_progress_us = now_us();
     }
-    /* Still downloading, or the decode buffer filled before HA's emptied:
-     * there's more to come either way, so the stream hasn't ended. */
-    if (state == MUSE_HA_TTS_RUNNING || !drained) {
-        return;
+    if (!drained) {
+        s_turn.ha_progress_us = now_us();   /* MP3 is waiting on the decoder, not on HA */
     }
-    if (state == MUSE_HA_TTS_FAILED && !muse_ha_tts_bytes()) {
+    bool stalled = false;
+    if (state == MUSE_HA_TTS_RUNNING) {
+        if (now_us() - s_turn.ha_progress_us < HA_STALL_US) {
+            return;   /* more to come */
+        }
+        /* HA has gone quiet (or is trickling): give up on it rather than hold
+         * the reply. The cancel wakes the fetch, which unwinds on its own. */
+        ESP_LOGW(TAG, "HA TTS stalled; giving up on it");
+        muse_ha_tts_cancel();
+        stalled = true;
+    }
+    if (!drained) {
+        return;   /* the decode buffer filled before HA's emptied */
+    }
+    msg_t &m = s_turn.msgs[s_turn.tts_msg];
+    s_turn.ha_waiting = false;   /* the fetch is over, one way or another */
+    if ((stalled || state == MUSE_HA_TTS_FAILED) && !muse_ha_tts_bytes()) {
         /* Nothing came: show it at reading pace, as without TTS. */
-        msg_t &m = s_turn.msgs[s_turn.tts_msg];
         m.pcm_start = s_turn.pcm_out;
         m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
         s_turn.silent = true;
         return;
     }
+    s_turn.ha_rest = stalled || state == MUSE_HA_TTS_FAILED;   /* cut off partway */
     s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
 }
 #endif
@@ -1748,6 +1774,20 @@ static void decode(void)
     }
     if (s_turn.mp3_ended && !s_turn.mp3_len) {
         m.pcm_frames = s_turn.pcm_out - m.pcm_start;
+#if CONFIG_HA_TTS
+        if (s_turn.ha_rest) {
+            /* HA's audio stopped partway (Wi-Fi dropped, say): show the rest at
+             * reading pace, from about where its length says the speech got to. */
+            s_turn.ha_rest = false;
+            uint32_t said = (uint32_t)((uint64_t)m.pcm_frames * SPEECH_CHARS_PER_S / MIC_RATE);
+            if (said < m.len) {
+                ESP_LOGW(TAG, "HA's audio for message %s stopped partway; showing the rest", m.id);
+                m.pcm_frames += (uint32_t)((m.len - said) * MIC_RATE / TEXT_CHARS_PER_S);
+                s_turn.silent = true;
+                return;
+            }
+        }
+#endif
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
     }
@@ -1768,8 +1808,13 @@ static void check_turn(void)
     int64_t cap = text ? TEXT_TURN_CAP_US : TURN_CAP_US;
 #if CONFIG_HA_TTS
     /* A long reply takes minutes to speak: once it's speaking, let the turn
-     * finish (a press still stops it) rather than cut it off mid-sentence. */
-    if (s_turn.spoke) {
+     * finish (a press still stops it) rather than cut it off mid-sentence.
+     * While this message waits on HA's first audio the cap stretches too, so a
+     * reply that comes late isn't cut off just before it's spoken; HA_STALL_US
+     * bounds that wait. If the fetch fails instead, the cap goes back to
+     * TURN_CAP_US, and a turn already past it ends then: it's a hard cap, so
+     * text shown in place of speech doesn't get time of its own. */
+    if (s_turn.spoke || s_turn.ha_waiting) {
         cap = SPEAKING_CAP_US;
     }
 #endif

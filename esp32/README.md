@@ -240,8 +240,10 @@ things you can change:
   SDK") and give it your HA's URL, a long-lived access token and a TTS engine
   (Piper, Home Assistant Cloud, ...), and replies play on the Voice PE's
   speaker. The token ships inside the firmware too: make it for an HA user
-  that isn't an admin. To set up the HA side, see its docs on
-  [text-to-speech](https://www.home-assistant.io/integrations/tts/),
+  that isn't an admin. With an `http://` URL (the default) it also crosses
+  your network unencrypted on each reply; an `https://` URL with a
+  certificate from a public CA keeps it private. To set up the HA side, see
+  its docs on [text-to-speech](https://www.home-assistant.io/integrations/tts/),
   [Piper](https://www.home-assistant.io/integrations/piper/) for a local
   voice, and
   [long-lived access tokens](https://www.home-assistant.io/docs/authentication/).

@@ -36,8 +36,8 @@ typedef enum {
 /* Starts the task. Safe to call more than once. */
 void muse_ha_tts_start(void);
 
-/* Starts fetching `text` as MP3. False while a fetch is still running
- * (one that was cancelled winds down within a read) or if it can't queue. */
+/* Starts fetching `text` as MP3. False while a fetch is still running, or if
+ * it can't queue: the caller shows the reply unspoken rather than wait. */
 bool muse_ha_tts_fetch(const char *text);
 
 /* Copies up to `cap` bytes of fetched MP3 without blocking. */
@@ -50,5 +50,8 @@ muse_ha_tts_state_t muse_ha_tts_state(void);
 /* MP3 bytes the current fetch has handed over so far. */
 size_t muse_ha_tts_bytes(void);
 
-/* Abandons the current fetch. */
+/* Abandons the current fetch, without blocking: once its request is open,
+ * the socket is shut down, which fails a blocked read; before that, the fetch
+ * sees the cancel when connecting returns (the 15 s HTTP timeout bounds the TCP
+ * connect and TLS handshake, not a DNS lookup). Then the state goes to FAILED. */
 void muse_ha_tts_cancel(void);

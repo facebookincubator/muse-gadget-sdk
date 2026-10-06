@@ -24,7 +24,11 @@
  *                         appends each PIECE to a speech buffer of at most MAX
  *                         bytes, whose allocations fail after GROWS of them
  *                         (-1: never); prints each append's result, then
- *                         "cut=<0|1> len=<n>" and the text on its own line */
+ *                         "cut=<0|1> len=<n>" and the text on its own line
+ *   mp3 STOP CHUNK...     stdin is a download: feeds it in pieces of the CHUNK
+ *                         sizes, in turn, then ends it; emit refuses after STOP
+ *                         calls (-1: never). Prints "<result>\n" and what emit
+ *                         was given */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +67,28 @@ static void *limited_realloc(void *p, size_t n)
         s_grows_left--;
     }
     return realloc(p, n);
+}
+
+static long s_emits_left;
+static uint8_t *s_out;
+static size_t s_out_len;
+
+static bool collect(void *ctx, const uint8_t *data, size_t len)
+{
+    (void)ctx;
+    if (!len) {
+        exit(4);   /* emit is never given nothing */
+    }
+    if (s_emits_left == 0) {
+        return false;
+    }
+    if (s_emits_left > 0) {
+        s_emits_left--;
+    }
+    s_out = realloc(s_out, s_out_len + len);
+    memcpy(s_out + s_out_len, data, len);
+    s_out_len += len;
+    return true;
 }
 
 static const char *arg(const char *s)
@@ -125,6 +151,30 @@ int main(int argc, char **argv)
         }
         return 0;
     }
-    fprintf(stderr, "usage: clean | id3 | base BASE CAP | url BASE PATH URL CAP | speech MAX GROWS PIECE...\n");
+    if (argc >= 4 && !strcmp(argv[1], "mp3")) {
+        size_t len;
+        uint8_t *in = (uint8_t *)read_all(&len);
+        s_emits_left = strtol(argv[2], NULL, 10);
+        muse_ha_tts_mp3_t m = { 0 };
+        muse_ha_tts_mp3_result_t r = MUSE_HA_TTS_MP3_OK;
+        size_t off = 0;
+        for (int i = 3; off < len && r == MUSE_HA_TTS_MP3_OK; i = i + 1 < argc ? i + 1 : 3) {
+            size_t n = strtoul(argv[i], NULL, 10);
+            if (n > len - off) {
+                n = len - off;
+            }
+            r = muse_ha_tts_mp3_feed(&m, in + off, n, collect, NULL);
+            off += n;
+        }
+        if (r == MUSE_HA_TTS_MP3_OK) {
+            r = muse_ha_tts_mp3_end(&m, collect, NULL);
+        }
+        printf("%d\n", (int)r);
+        fwrite(s_out, 1, s_out_len, stdout);
+        free(in);
+        free(s_out);
+        return 0;
+    }
+    fprintf(stderr, "usage: clean | id3 | base BASE CAP | url BASE PATH URL CAP | speech MAX GROWS PIECE... | mp3 STOP CHUNK...\n");
     return 2;
 }

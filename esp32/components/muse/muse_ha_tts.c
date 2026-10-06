@@ -34,12 +34,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
+#include "lwip/sockets.h"
 
 static const char *TAG = "muse_ha_tts";
 
-#define HTTP_TIMEOUT_MS 15000
+#define HTTP_TIMEOUT_MS 15000              /* connecting, and each read */
 #define RESP_MAX 1024                      /* tts_get_url's JSON: a URL and a path */
 #define MP3_BYTES (32 * 1024)              /* between the HTTP task and the session */
 #define CHUNK 2048
@@ -47,6 +49,12 @@ static const char *TAG = "muse_ha_tts";
 
 static QueueHandle_t s_reqs;               /* char *: the text to fetch, in PSRAM, freed by the task */
 static StreamBufferHandle_t s_mp3;
+/* Not xStreamBufferCreateWithCaps: IDF 6.0.1's vStreamBufferDeleteWithCaps
+ * deletes with vSemaphoreDelete and frees twice (espressif/esp-idf#18855). */
+static StaticStreamBuffer_t *s_mp3_struct;
+static uint8_t *s_mp3_store;
+static SemaphoreHandle_t s_lock;           /* guards s_sock */
+static int s_sock = -1;                    /* the open request's socket, for muse_ha_tts_cancel */
 static char *s_auth;                       /* "Bearer <token>" */
 static char s_base[160];                   /* CONFIG_HA_TTS_URL without a trailing slash */
 static atomic_int s_state = MUSE_HA_TTS_IDLE;
@@ -63,7 +71,41 @@ static char *psram_strdup(const char *s)
     return d;
 }
 
-static esp_http_client_handle_t client_for(const char *url, esp_http_client_method_t method)
+/*
+ * A cancel has to wake a read that's blocked, which esp_http_client's own
+ * timeout doesn't do: it applies to each transport read, so a server that
+ * trickles, or keeps sending chunk extensions and never a body byte, can hold
+ * a read for as long as it likes. esp_http_client_cancel_request is no help
+ * from another task: it closes the transport under the reader and reconnects.
+ * Instead the open request's socket is published here, and a cancel shuts it
+ * down: the read fails at once and the request unwinds on its own task.
+ */
+
+/* Publishes c's socket; false if a cancel came first. */
+static bool watch(esp_http_client_handle_t c)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_sock = esp_http_client_get_socket(c);
+    xSemaphoreGive(s_lock);
+    return !atomic_load(&s_cancel);   /* checked after publishing, so no cancel is missed */
+}
+
+/* Closes a request opened by open_request(), unpublishing its socket first so a
+ * cancel never shuts down a descriptor that's since been reused. */
+static void finish(esp_http_client_handle_t c)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_sock = -1;
+    xSemaphoreGive(s_lock);
+    esp_http_client_cleanup(c);
+}
+
+/* Opens a request to `url`, sends `json` if given, and reads the headers.
+ * Returns the request, with its HTTP status in *status, or NULL. A cancel
+ * while connecting is seen when connecting returns (HTTP_TIMEOUT_MS bounds the
+ * TCP connect and TLS handshake, not DNS); after that, its socket is shut down. */
+static esp_http_client_handle_t open_request(const char *url, esp_http_client_method_t method, bool auth,
+                                             const char *json, int *status)
 {
     esp_http_client_config_t cfg = {
         .url = url,
@@ -73,69 +115,37 @@ static esp_http_client_handle_t client_for(const char *url, esp_http_client_meth
         .crt_bundle_attach = esp_crt_bundle_attach,   /* only used for https */
     };
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
-    if (c) {
+    if (!c) {
+        return NULL;
+    }
+    if (auth) {
         esp_http_client_set_header(c, "Authorization", s_auth);
     }
-    return c;
-}
-
-/* POSTs JSON to HA. Returns the HTTP status (0 if it couldn't connect); the
- * response body lands in resp, if given. */
-static int post_json(const char *path, cJSON *body, char *resp, size_t resp_cap)
-{
-    if (resp) {
-        resp[0] = '\0';   /* the callers log it, even when nothing came back */
+    int len = json ? (int)strlen(json) : 0;
+    if (json) {
+        esp_http_client_set_header(c, "Content-Type", "application/json");
     }
-    char url[320];
-    snprintf(url, sizeof(url), "%s%s", s_base, path);
-    char *json = cJSON_PrintUnformatted(body);
-    if (!json) {
-        return 0;
-    }
-    int status = 0;
-    esp_http_client_handle_t c = client_for(url, HTTP_METHOD_POST);
-    if (!c) {
-        cJSON_free(json);
-        return 0;
-    }
-    esp_http_client_set_header(c, "Content-Type", "application/json");
-    int len = (int)strlen(json);
     esp_err_t err = esp_http_client_open(c, len);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "can't reach %s: %s", s_base, esp_err_to_name(err));
-        goto out;
+        esp_http_client_cleanup(c);
+        return NULL;
     }
-    if (esp_http_client_write(c, json, len) != len || esp_http_client_fetch_headers(c) < 0) {
-        ESP_LOGW(TAG, "POST %s failed", path);
-        goto out;
-    }
-    status = esp_http_client_get_status_code(c);
-    if (resp) {
-        int got = 0, n;
-        while (got < (int)resp_cap - 1 && (n = esp_http_client_read(c, resp + got, resp_cap - 1 - got)) > 0) {
-            got += n;
+    if (!watch(c) || (json && esp_http_client_write(c, json, len) != len) || esp_http_client_fetch_headers(c) < 0) {
+        if (!atomic_load(&s_cancel)) {
+            ESP_LOGW(TAG, "request to %s failed", s_base);
         }
-        resp[got] = '\0';
+        finish(c);
+        return NULL;
     }
-out:
-    esp_http_client_cleanup(c);
-    cJSON_free(json);
-    return status;
-}
-
-static cJSON *tts_body(const char *text)
-{
-    cJSON *body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "message", text);
-    if (CONFIG_HA_TTS_LANGUAGE[0]) {
-        cJSON_AddStringToObject(body, "language", CONFIG_HA_TTS_LANGUAGE);
-    }
-    return body;
+    *status = esp_http_client_get_status_code(c);
+    return c;
 }
 
 /* Hands MP3 to the session, waiting while its buffer is full. False on a cancel. */
-static bool hand_over(const uint8_t *data, size_t len)
+static bool hand_over(void *ctx, const uint8_t *data, size_t len)
 {
+    (void)ctx;
     while (len) {
         if (atomic_load(&s_cancel)) {
             return false;
@@ -148,83 +158,94 @@ static bool hand_over(const uint8_t *data, size_t len)
     return true;
 }
 
-static bool fetch(const char *text)
+/* Asks HA where the MP3 for `text` is (/api/tts_get_url): its URL in url. */
+static bool audio_url(const char *text, char *url, size_t cap)
 {
-    /* 1. Have HA render it: tts_get_url answers with where the MP3 is. */
-    cJSON *body = tts_body(text);
+    cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "engine_id", CONFIG_HA_TTS_ENGINE);
+    cJSON_AddStringToObject(body, "message", text);
+    if (CONFIG_HA_TTS_LANGUAGE[0]) {
+        cJSON_AddStringToObject(body, "language", CONFIG_HA_TTS_LANGUAGE);
+    }
+    char *json = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
     char *resp = heap_caps_malloc(RESP_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!resp) {
-        cJSON_Delete(body);
+    if (!json || !resp) {
+        cJSON_free(json);
+        free(resp);
         return false;
     }
-    int status = post_json("/api/tts_get_url", body, resp, RESP_MAX);
-    cJSON_Delete(body);
+    char post[320];
+    snprintf(post, sizeof(post), "%s/api/tts_get_url", s_base);
+    int status = 0, got = 0, n;
+    esp_http_client_handle_t c = open_request(post, HTTP_METHOD_POST, true, json, &status);
+    cJSON_free(json);
+    if (!c) {
+        free(resp);
+        return false;
+    }
+    while (got < RESP_MAX - 1 && (n = esp_http_client_read(c, resp + got, RESP_MAX - 1 - got)) > 0) {
+        got += n;
+    }
+    resp[got] = '\0';
+    finish(c);
     if (status != 200) {
         ESP_LOGW(TAG, "tts_get_url: HTTP %d %.120s", status, resp);
         free(resp);
         return false;
     }
-
-    char url[320];
-    cJSON *json = cJSON_Parse(resp);
-    bool have = muse_ha_tts_audio_url(url, sizeof(url), s_base,
-                                      cJSON_GetStringValue(cJSON_GetObjectItem(json, "path")),
-                                      cJSON_GetStringValue(cJSON_GetObjectItem(json, "url")));
-    cJSON_Delete(json);
+    cJSON *parsed = cJSON_Parse(resp);
+    bool have = muse_ha_tts_audio_url(url, cap, s_base,
+                                      cJSON_GetStringValue(cJSON_GetObjectItem(parsed, "path")),
+                                      cJSON_GetStringValue(cJSON_GetObjectItem(parsed, "url")));
+    cJSON_Delete(parsed);
     free(resp);
     if (!have) {
         ESP_LOGW(TAG, "tts_get_url: no url in the response");
-        return false;
     }
-    if (atomic_load(&s_cancel)) {
+    return have;
+}
+
+static bool fetch(const char *text)
+{
+    /* 1. Have HA render it. */
+    char url[320];
+    if (!audio_url(text, url, sizeof(url)) || atomic_load(&s_cancel)) {
         return false;
     }
 
-    /* 2. Stream the MP3 to the session. */
-    esp_http_client_handle_t c = client_for(url, HTTP_METHOD_GET);
+    /* 2. Stream the MP3 to the session. No token: the proxy URL is its own
+     * credential, so the token doesn't go out twice. */
+    int status = 0;
+    esp_http_client_handle_t c = open_request(url, HTTP_METHOD_GET, false, NULL, &status);
     if (!c) {
         return false;
     }
     bool ok = false;
-    esp_err_t err = esp_http_client_open(c, 0);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "can't fetch %s: %s", url, esp_err_to_name(err));
-        goto out;
-    }
-    esp_http_client_fetch_headers(c);
-    status = esp_http_client_get_status_code(c);
     if (status != 200) {
         ESP_LOGW(TAG, "GET %s: HTTP %d", url, status);
         goto out;
     }
     static uint8_t buf[CHUNK];
-    bool first = true;
-    size_t skip = 0;                       /* what's left of an ID3v2 tag */
-    int n;
-    while ((n = esp_http_client_read(c, (char *)buf, sizeof(buf))) > 0) {
-        if (first) {
-            first = false;
-            if (n >= 4 && !memcmp(buf, "RIFF", 4)) {
-                ESP_LOGW(TAG, "HA sent WAV, not MP3; set the engine's output to MP3");
-                goto out;
-            }
-            /* HA tags its MP3 (ID3v2): skip the tag so the decoder never
-             * mistakes its bytes for a frame. */
-            skip = muse_ha_tts_id3_size(buf, n);
-        }
-        size_t drop = skip < (size_t)n ? skip : (size_t)n;
-        skip -= drop;
-        if (!hand_over(buf + drop, n - drop)) {
-            goto out;
-        }
+    muse_ha_tts_mp3_t mp3 = { 0 };
+    muse_ha_tts_mp3_result_t r = MUSE_HA_TTS_MP3_OK;
+    int n = 0;
+    while (r == MUSE_HA_TTS_MP3_OK && (n = esp_http_client_read(c, (char *)buf, sizeof(buf))) > 0) {
+        r = muse_ha_tts_mp3_feed(&mp3, buf, n, hand_over, NULL);
     }
-    ok = n == 0 && esp_http_client_is_complete_data_received(c);
-    if (!ok) {
+    if (r == MUSE_HA_TTS_MP3_OK && n == 0 && esp_http_client_is_complete_data_received(c)) {
+        r = muse_ha_tts_mp3_end(&mp3, hand_over, NULL);
+        ok = r == MUSE_HA_TTS_MP3_OK;
+    }
+    if (r == MUSE_HA_TTS_MP3_WAV) {
+        ESP_LOGW(TAG, "HA sent WAV, not MP3; set the engine's output to MP3");
+    } else if (r == MUSE_HA_TTS_MP3_NOT_MP3) {
+        ESP_LOGW(TAG, "HA's answer from %s isn't MP3", url);
+    } else if (!ok && !atomic_load(&s_cancel)) {
         ESP_LOGW(TAG, "MP3 download cut off");
     }
 out:
-    esp_http_client_cleanup(c);
+    finish(c);
     return ok;
 }
 
@@ -246,6 +267,29 @@ static void tts_task(void *arg)
     }
 }
 
+/* Undoes a start that failed partway. */
+static void stop(void)
+{
+    if (s_reqs) {
+        vQueueDelete(s_reqs);
+        s_reqs = NULL;
+    }
+    if (s_mp3) {
+        vStreamBufferDelete(s_mp3);
+        s_mp3 = NULL;
+    }
+    heap_caps_free(s_mp3_struct);
+    heap_caps_free(s_mp3_store);
+    s_mp3_struct = NULL;
+    s_mp3_store = NULL;
+    if (s_lock) {
+        vSemaphoreDelete(s_lock);
+        s_lock = NULL;
+    }
+    heap_caps_free(s_auth);
+    s_auth = NULL;
+}
+
 void muse_ha_tts_start(void)
 {
     if (s_reqs) {
@@ -259,16 +303,28 @@ void muse_ha_tts_start(void)
     size_t auth_len = sizeof("Bearer ") + strlen(CONFIG_HA_TTS_TOKEN);
     s_auth = heap_caps_malloc(auth_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_reqs = xQueueCreate(1, sizeof(char *));   /* one fetch at a time */
-    s_mp3 = xStreamBufferCreateWithCaps(MP3_BYTES, 1, MALLOC_CAP_SPIRAM);
-    /* Stack in PSRAM, as the session's: TLS (for an https URL) runs here. */
-    if (!s_auth || !s_reqs || !s_mp3 ||
-        xTaskCreatePinnedToCoreWithCaps(tts_task, "ha_tts", 16 * 1024, NULL, 4, NULL, 1,
-                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+    s_mp3_struct = heap_caps_calloc(1, sizeof(StaticStreamBuffer_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_mp3_store = heap_caps_malloc(MP3_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_mp3_struct && s_mp3_store) {
+        s_mp3 = xStreamBufferCreateStatic(MP3_BYTES, 1, s_mp3_store, s_mp3_struct);
+    }
+    s_lock = xSemaphoreCreateMutex();
+    if (!s_auth || !s_reqs || !s_mp3 || !s_lock) {
         ESP_LOGE(TAG, "start failed");
-        s_reqs = NULL;
+        stop();
         return;
     }
     snprintf(s_auth, auth_len, "Bearer %s", CONFIG_HA_TTS_TOKEN);
+    /* Stack in PSRAM, as the session's: TLS (for an https URL) runs here. */
+    if (xTaskCreatePinnedToCoreWithCaps(tts_task, "ha_tts", 16 * 1024, NULL, 4, NULL, 1,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        ESP_LOGE(TAG, "start failed");
+        stop();
+        return;
+    }
+    if (!strncmp(s_base, "http://", 7)) {
+        ESP_LOGW(TAG, "%s is plain HTTP: the token crosses your network unencrypted", s_base);
+    }
     ESP_LOGI(TAG, "replies speak through %s (%s)", s_base, CONFIG_HA_TTS_ENGINE);
 }
 
@@ -277,14 +333,14 @@ bool muse_ha_tts_fetch(const char *text)
     if (!s_reqs || atomic_load(&s_state) == MUSE_HA_TTS_RUNNING) {
         return false;
     }
-    /* The task is idle, so nothing is blocked on the buffer: safe to reset. */
-    xStreamBufferReset(s_mp3);
-    atomic_store(&s_cancel, false);
-    atomic_store(&s_bytes, 0);
     char *copy = text && text[0] ? psram_strdup(text) : NULL;
     if (!copy) {
         return false;
     }
+    /* The task is idle, so nothing is blocked on the buffer: safe to reset. */
+    xStreamBufferReset(s_mp3);
+    atomic_store(&s_cancel, false);
+    atomic_store(&s_bytes, 0);
     atomic_store(&s_state, MUSE_HA_TTS_RUNNING);
     if (xQueueSend(s_reqs, &copy, 0) != pdTRUE) {
         atomic_store(&s_state, MUSE_HA_TTS_IDLE);
@@ -312,6 +368,14 @@ size_t muse_ha_tts_bytes(void)
 void muse_ha_tts_cancel(void)
 {
     atomic_store(&s_cancel, true);
+    if (!s_lock) {
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_sock >= 0) {
+        shutdown(s_sock, SHUT_RDWR);   /* wakes a blocked read; finish() closes it */
+    }
+    xSemaphoreGive(s_lock);
 }
 
 #else  /* !CONFIG_HA_TTS */

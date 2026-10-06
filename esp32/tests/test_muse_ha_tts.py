@@ -179,6 +179,50 @@ class HarnessTest(unittest.TestCase):
             with self.subTest(data=data[:12]):
                 self.assertEqual(self.run_harness("id3", data=data), f"{size}\n".encode())
 
+    def mp3(self, data: bytes, *chunks: int, stop: int = -1) -> tuple[int, bytes]:
+        out = self.run_harness("mp3", str(stop), *map(str, chunks), data=data)
+        result, _, emitted = out.partition(b"\n")
+        return int(result), emitted
+
+    def test_mp3_start_however_it_is_split(self) -> None:
+        audio = b"\xff\xf3\x60\xc4" * 300
+        tag = id3(35) + b"\x00" * 35
+        riff = b"RIFF\x24\x08\x00\x00WAVEfmt " + b"\x00" * 200
+        cases = [
+            (tag + audio, 0, audio),           # what HA sends
+            (id3(100, footer=True) + b"\x01" * 110 + audio, 0, audio),
+            (audio, 0, audio),                 # untagged
+            (riff, 1, b""),                    # WAV is refused, never passed on
+        ]
+        for data, want_result, want in cases:
+            # Every split of the first 20 bytes, then a range of read sizes.
+            plans = [(k, len(data)) for k in range(1, 21)] + [(n,) for n in (1, 2, 3, 7, 9, 10, 11, 64, 4096)]
+            for plan in plans:
+                with self.subTest(data=data[:4], plan=plan):
+                    self.assertEqual(self.mp3(data, *plan), (want_result, want))
+
+    def test_mp3_tiny_downloads(self) -> None:
+        self.assertEqual(self.mp3(b"\xff\xf3\x60", 1), (0, b"\xff\xf3\x60"))   # under 10 bytes, but MP3
+        self.assertEqual(self.mp3(b"RIFF\x00", 1), (1, b""))                          # still WAV
+        # No audio at all is a failure, so the reply is shown instead.
+        for data in (b"", b"\xff", id3(35)[:9], id3(35) + b"\x00" * 20):
+            with self.subTest(data=data):
+                self.assertEqual(self.mp3(data, 4), (3, b""))
+
+    def test_mp3_refuses_what_isnt_mp3(self) -> None:
+        html = b"<!DOCTYPE html><html><body>502 Bad Gateway</body></html>"
+        for data in (html, id3(35) + b"\x00" * 35 + html, b'{"message": "Entity not found"}', b"\xff\x00" + html):
+            for plan in [(k, len(data)) for k in range(1, 12)] + [(1,), (4096,)]:
+                with self.subTest(data=data[:12], plan=plan):
+                    self.assertEqual(self.mp3(data, *plan), (3, b""))
+
+    def test_mp3_stops_when_emit_refuses(self) -> None:
+        audio = b"\xff\xf3\x60\xc4" * 300
+        result, emitted = self.mp3(id3(35) + b"\x00" * 35 + audio, 100, stop=1)
+        self.assertEqual(result, 2)
+        self.assertEqual(emitted, audio[:len(emitted)])
+        self.assertLess(len(emitted), len(audio))
+
     def test_base_drops_trailing_slashes(self) -> None:
         cases = [
             ("http://10.0.0.5:8123/", "200", "http://10.0.0.5:8123"),
