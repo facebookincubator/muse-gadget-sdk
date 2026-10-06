@@ -52,6 +52,15 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_CJK_FONT)
         list(APPEND srcs "fonts/muse_font_cjk_16.c")   # captions' CJK fallback
     endif()
+    if(CONFIG_MUSE_APPS_DEMO)
+        list(APPEND srcs
+            "muse_apps_demo.c"
+            "app_manager.c"
+            "apps/app_launcher.c"
+            "apps/app_debugger.c"
+            "apps/app_demo.c"
+            "avatar/pet_world.c")
+    endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
     # default is in avatar/ at the top of the project.
