@@ -147,6 +147,16 @@ menu "Muse"
             Without it those characters show as boxes. Hangul isn't
             included.
 
+    config MUSE_CJK_FONT_NOTO
+        bool "Draw CJK captions with Noto Sans SC instead of Unifont"
+        depends on MUSE_CJK_FONT
+        default n
+        help
+            Anti-aliased Noto Sans SC Medium at 16 px in place of Unifont's
+            1-bit bitmaps, in the same 16 px cell. Covers the 6763 hanzi of
+            GB2312 rather than every CJK Unified Ideograph: rarer characters
+            show as boxes. Takes about 910 KB of flash, against 850 KB.
+
     config MUSE_JC3248W535_MIC_GPIO
         int "JC3248W535: GPIO for an external I2S mic's data (SD) line"
         depends on MUSE_BOARD_GUITION_JC3248W535

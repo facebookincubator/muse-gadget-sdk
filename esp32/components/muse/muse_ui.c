@@ -448,8 +448,12 @@ static const lv_font_t *font_pick(const lv_font_t *full, const lv_font_t *compac
     return s_small ? compact : full;
 }
 
-#if CONFIG_MUSE_CJK_FONT
+#if CONFIG_MUSE_CJK_FONT_NOTO
+LV_FONT_DECLARE(muse_font_cjk_noto_16)
+#define CJK_FONT muse_font_cjk_noto_16
+#elif CONFIG_MUSE_CJK_FONT
 LV_FONT_DECLARE(muse_font_cjk_16)
+#define CJK_FONT muse_font_cjk_16
 #endif
 
 /* unscii-16 for captions and replies; with CONFIG_MUSE_CJK_FONT, a copy that
@@ -460,7 +464,7 @@ static const lv_font_t *caption_font(void)
     static lv_font_t font;
     if (!font.get_glyph_dsc) {
         font = lv_font_unscii_16;
-        font.fallback = &muse_font_cjk_16;
+        font.fallback = &CJK_FONT;
     }
     return &font;
 #else
