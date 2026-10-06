@@ -91,7 +91,22 @@ static int s_canvas_px;     /* Muse's size on screen */
 static int s_dy;            /* full layout: offset from a 466 px tall screen */
 static lv_indev_t *s_indev;
 static lv_obj_t *s_tv;
+/* True while the face tile is the visible tile. Updated in the LVGL task;
+ * read from any task (single word, benign if briefly stale). */
+static volatile bool s_face_active = true;
 static lv_obj_t *s_face;
+
+static void tile_changed_cb(lv_event_t *e)
+{
+    lv_obj_t *tv = lv_event_get_target(e);
+    s_face_active = (lv_tileview_get_tile_active(tv) == s_face);
+}
+
+/* From any task: the face tile is the currently visible tile. */
+bool muse_ui_face_active(void)
+{
+    return s_face_active;
+}
 static lv_obj_t *s_settings;
 static lv_obj_t *s_dots[2];
 static lv_obj_t *s_wifi_icon;
@@ -829,6 +844,7 @@ static void build_screen(void)
         lv_obj_set_style_bg_color(s_face, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_face, LV_OPA_COVER, 0);
         s_settings = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_LEFT);
+        lv_obj_add_event_cb(s_tv, tile_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
         face = s_face;
     }
 

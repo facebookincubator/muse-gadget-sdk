@@ -18,7 +18,7 @@
  * Waveshare ESP32-S3-Touch-LCD-1.85C: round 360 px ST77916 QSPI panel with
  * CST816 touch, ES8311 speaker DAC + ES7210 mic ADC, TCA9554 I/O expander (display
  * and touch resets live on its EXIO2/EXIO1 pins), no PMU. BOOT (GPIO0) is the
- * talk button.
+ * talk button; holding a finger on the face tile also talks.
  */
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -42,12 +42,13 @@
 
 #include "muse_audio.h"
 #include "muse_board.h"
+#include "muse_ui.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 
-#include "waveshare_s3_185c/esp_lcd_st77916.h"
+#include "esp_lcd_st77916.h"
+#include "esp_lcd_touch_cst816s.h"
 #include "waveshare_s3_185c/st77916_init_185c.h"
-#include "waveshare_s3_185c/CST816.h"
 
 static const char *TAG = "board";
 
@@ -90,6 +91,7 @@ static i2c_master_dev_handle_t s_tca;
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_touch_handle_t s_tp;
+static lv_indev_t *s_touch_indev;
 static muse_gpio_button_t s_boot;
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_cali = NULL;
@@ -258,7 +260,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
     lv_display_add_event_cb(disp, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
 
     esp_lcd_panel_io_handle_t tp_io;
-    const esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_CST816_CONFIG();
+    const esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
     if (esp_lcd_new_panel_io_i2c(s_i2c, &tp_io_cfg, &tp_io) != ESP_OK) {
         ESP_LOGE(TAG, "touch io");
         return NULL;
@@ -274,7 +276,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
             .mirror_y = 0,
         },
     };
-    if (esp_lcd_touch_new_i2c_cst816(tp_io, &tp_cfg, &s_tp) != ESP_OK) {
+    if (esp_lcd_touch_new_i2c_cst816s(tp_io, &tp_cfg, &s_tp) != ESP_OK) {
         ESP_LOGE(TAG, "cst816");
         return NULL;
     }
@@ -283,6 +285,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (!*touch || esp_lv_adapter_start() != ESP_OK) {
         return NULL;
     }
+    s_touch_indev = *touch;
     return disp;
 }
 
@@ -380,25 +383,46 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     return ESP_OK;
 }
 
+/* Hold-to-talk on the face tile: a finger held on the avatar for
+ * TOUCH_HOLD_MS acts as the talk button. Taps and touches on other tiles
+ * (e.g. settings) never trigger talk. Touch state comes from LVGL's input
+ * device, which owns the CST816 driver handle; reading the driver here
+ * would race LVGL's own reads. */
+#define TOUCH_HOLD_MS 500
+
 static unsigned poll_buttons(void)
 {
     unsigned ev = muse_gpio_button_poll(&s_boot);
-    /* Tap-to-talk: a finger on the screen acts as the talk button. The
-     * Poll the CST816 via its driver handle (INT is a data-ready pulse,
-     * not a level, so the raw pin cannot be used directly). */
-    static bool tp_pressed = false;
-    bool tp_raw = false;
-    if (s_tp) {
-        uint16_t x[1], y[1], s[1];
-        uint8_t n = 1;
-        if (esp_lcd_touch_read_data(s_tp) == ESP_OK &&
-            esp_lcd_touch_get_coordinates(s_tp, x, y, s, &n, 1)) {
-            tp_raw = (n > 0);
-        }
+
+    static bool tp_down = false;          /* finger currently on screen */
+    static bool tp_talking = false;       /* hold threshold reached */
+    static TickType_t tp_press_tick = 0;  /* when the current press began */
+    static bool tp_on_face = false;       /* press started on the face tile */
+
+    bool pressed = false;
+    if (s_touch_indev) {
+        pressed = (lv_indev_get_state(s_touch_indev) == LV_INDEV_STATE_PRESSED);
     }
-    if (tp_raw != tp_pressed) {
-        tp_pressed = tp_raw;
-        ev |= tp_raw ? MUSE_BTN_TALK_PRESS : MUSE_BTN_TALK_RELEASE;
+
+    if (pressed && !tp_down) {
+        /* New press: only a hold that starts on the face tile can talk. */
+        tp_down = true;
+        tp_on_face = muse_ui_face_active();
+        tp_press_tick = xTaskGetTickCount();
+        tp_talking = false;
+    } else if (!pressed && tp_down) {
+        /* Release: end the talk if one started. */
+        if (tp_talking) {
+            ev |= MUSE_BTN_TALK_RELEASE;
+        }
+        tp_down = false;
+        tp_talking = false;
+    } else if (pressed && tp_down && tp_on_face && !tp_talking) {
+        /* Still held on the face: start talking once the hold threshold passes. */
+        if ((xTaskGetTickCount() - tp_press_tick) >= pdMS_TO_TICKS(TOUCH_HOLD_MS)) {
+            tp_talking = true;
+            ev |= MUSE_BTN_TALK_PRESS;
+        }
     }
     return ev;
 }
