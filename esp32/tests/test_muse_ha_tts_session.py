@@ -291,6 +291,36 @@ static void partial_then_paced()
     assert(s_done == 1 && s_complete && s_played > 0);
 }
 
+/* A successful HTTP download is not speech until the decoder produces PCM. */
+static void zero_pcm_falls_back(int kind)
+{
+    reply_at(kind == 2 ? 179 : 10);
+    step();
+    std::vector<uint8_t> data;
+    if (kind == 0) {
+        /* Two ADTS AAC frames: valid sync bits, but MPEG layer bits are zero. */
+        for (int i = 0; i < 2; i++) {
+            const uint8_t frame[] = {0xff, 0xf1, 0x50, 0x80, 0x01, 0x3f, 0xfc, 0, 0};
+            data.insert(data.end(), frame, frame + sizeof(frame));
+        }
+    } else {
+        data = {0xff, 0xf3, 0x60};   /* truncated MP3 header */
+    }
+    if (kind == 2) run_to(181);
+    ha_send(data, 0, data.size());
+    s_ha = MUSE_HA_TTS_OK;
+    step();
+    assert(s_turn.silent && !s_turn.ha_waiting && !s_turn.spoke);
+    assert(s_turn.pcm_out == 0 && s_played == 0);
+    if (kind == 2) {
+        assert(s_done == 1 && !s_complete && logged("time cap"));
+    } else {
+        assert(open_());
+        run_to(40);
+        assert(s_done == 1 && s_complete && s_played > 0);
+    }
+}
+
 /* Speaker off: nothing is fetched. */
 static void speaker_off()
 {
@@ -320,6 +350,9 @@ int main(int argc, char **argv)
     case 5: full_buffer_is_not_a_stall(); break;
     case 6: partial_then_paced(); break;
     case 7: speaker_off(); break;
+    case 8: zero_pcm_falls_back(0); break;
+    case 9: zero_pcm_falls_back(1); break;
+    case 10: zero_pcm_falls_back(2); break;
     default: return 2;
     }
     return 0;
@@ -394,6 +427,15 @@ class HaTtsSession(unittest.TestCase):
 
     def test_speaker_off_fetches_nothing(self) -> None:
         self.run_case(7)
+
+    def test_adts_without_decoded_audio_is_paced(self) -> None:
+        self.run_case(8)
+
+    def test_truncated_mp3_without_decoded_audio_is_paced(self) -> None:
+        self.run_case(9)
+
+    def test_late_zero_audio_restores_the_hard_cap(self) -> None:
+        self.run_case(10)
 
 
 if __name__ == "__main__":

@@ -202,9 +202,10 @@ class HarnessTest(unittest.TestCase):
                     self.assertEqual(self.mp3(data, *plan), (want_result, want))
 
     def test_mp3_tiny_downloads(self) -> None:
-        self.assertEqual(self.mp3(b"\xff\xf3\x60", 1), (0, b"\xff\xf3\x60"))   # under 10 bytes, but MP3
+        self.assertEqual(self.mp3(b"\xff\xf3\x60", 1), (0, b"\xff\xf3\x60"))   # sync prefix only; the session must reject zero decoded PCM
         self.assertEqual(self.mp3(b"RIFF\x00", 1), (1, b""))                          # still WAV
-        # No audio at all is a failure, so the reply is shown instead.
+        # No recognizable audio prefix is a helper failure. Complete-frame validity
+        # and reading-pace fallback are tested with the real decoder in the session.
         for data in (b"", b"\xff", id3(35)[:9], id3(35) + b"\x00" * 20):
             with self.subTest(data=data):
                 self.assertEqual(self.mp3(data, 4), (3, b""))

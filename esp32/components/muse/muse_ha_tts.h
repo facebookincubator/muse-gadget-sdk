@@ -52,6 +52,7 @@ size_t muse_ha_tts_bytes(void);
 
 /* Abandons the current fetch, without blocking: once its request is open,
  * the socket is shut down, which fails a blocked read; before that, the fetch
- * sees the cancel when connecting returns (the 15 s HTTP timeout bounds the TCP
- * connect and TLS handshake, not a DNS lookup). Then the state goes to FAILED. */
+ * sees the cancel when open returns. The 15 s timeout bounds TCP connect and
+ * individual TLS receives, not the whole blocking handshake or DNS lookup.
+ * The session watchdog falls back independently. Then the state goes to FAILED. */
 void muse_ha_tts_cancel(void);

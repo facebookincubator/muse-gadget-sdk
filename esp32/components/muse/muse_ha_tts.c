@@ -102,8 +102,9 @@ static void finish(esp_http_client_handle_t c)
 
 /* Opens a request to `url`, sends `json` if given, and reads the headers.
  * Returns the request, with its HTTP status in *status, or NULL. A cancel
- * while connecting is seen when connecting returns (HTTP_TIMEOUT_MS bounds the
- * TCP connect and TLS handshake, not DNS); after that, its socket is shut down. */
+ * before open returns is seen only when it returns. HTTP_TIMEOUT_MS bounds the
+ * TCP connect and individual TLS receives, not the whole blocking handshake or
+ * DNS lookup; after open returns, cancellation shuts down its socket. */
 static esp_http_client_handle_t open_request(const char *url, esp_http_client_method_t method, bool auth,
                                              const char *json, int *status)
 {

@@ -252,6 +252,7 @@ struct turn_t {
 #if CONFIG_HA_TTS
     muse_ha_tts_speech_t speech[MAX_MSGS];   /* each message's whole text, for HA to speak */
     bool spoke;              /* HA's audio has started arriving: SPEAKING_CAP_US applies */
+    bool ha_spoke_before;    /* preserve earlier speech if this message decodes to no PCM */
     bool ha_waiting;         /* this message waits on HA's first audio: SPEAKING_CAP_US, for now */
     int64_t ha_progress_us;  /* when the fetch last made progress, for HA_STALL_US */
     bool ha_rest;            /* the fetch was cut off: show the rest at reading pace */
@@ -1590,6 +1591,7 @@ static void start_tts(void)
                 mp3dec_init(&s_turn.dec);
                 s_turn.ha_progress_us = now_us();
                 s_turn.ha_rest = false;
+                s_turn.ha_spoke_before = s_turn.spoke;
                 s_turn.ha_waiting = true;
                 mark(M_TTS);
                 ESP_LOGI(TAG, "speaking message %s (%u chars) with HA", m.id, (unsigned)m.len);
@@ -1775,6 +1777,18 @@ static void decode(void)
     if (s_turn.mp3_ended && !s_turn.mp3_len) {
         m.pcm_frames = s_turn.pcm_out - m.pcm_start;
 #if CONFIG_HA_TTS
+        if (!m.pcm_frames) {
+            /* HTTP success and sync bits do not guarantee playable MP3 (AAC
+             * ADTS shares the sync bits). Nothing decoded: pace the whole text. */
+            ESP_LOGW(TAG, "HA's audio for message %s decoded to no PCM; showing it unspoken", m.id);
+            s_turn.ha_waiting = false;
+            s_turn.ha_rest = false;
+            s_turn.spoke = s_turn.ha_spoke_before;
+            m.pcm_start = s_turn.pcm_out;
+            m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+            s_turn.silent = true;
+            return;
+        }
         if (s_turn.ha_rest) {
             /* HA's audio stopped partway (Wi-Fi dropped, say): show the rest at
              * reading pace, from about where its length says the speech got to. */
