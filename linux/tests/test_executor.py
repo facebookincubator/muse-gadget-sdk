@@ -18,6 +18,7 @@ import base64
 import hashlib
 import json
 import os
+import stat
 import time
 
 import pytest
@@ -159,6 +160,18 @@ def test_file_write_rejects_out_of_order_chunks(ex, tmp_path, monkeypatch):
     assert ex.run("file.write", {"path": target, "data_b64": "aGk="})["ok"]
     result = ex.run("file.write", {"path": target, "data_b64": "aGk=", "offset": 5})
     assert not result["ok"] and "expected offset 2" in result["error"]
+
+
+def test_file_write_keeps_the_mode_of_the_file_it_replaces(ex, tmp_path, monkeypatch):
+    _child_env_passes_pythonpath(monkeypatch)
+    for name, mode in (("secret", 0o600), ("script.sh", 0o755)):
+        target = tmp_path / name
+        target.write_bytes(b"old")
+        target.chmod(mode)
+        result = ex.run("file.write", {"path": str(target), "data_b64": "aGk=", "final": True})
+        assert result["ok"], result
+        assert target.read_bytes() == b"hi"
+        assert stat.S_IMODE(target.stat().st_mode) == mode, name
 
 
 def test_file_paths_must_be_absolute(ex, monkeypatch):

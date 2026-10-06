@@ -29,6 +29,7 @@ import base64
 import hashlib
 import json
 import os
+import stat
 import sys
 
 MAX_CHUNK_BYTES = 64 * 1024
@@ -106,6 +107,12 @@ def write(request: dict) -> dict:
     if os.path.exists(path) and not request.get("overwrite", True):
         os.unlink(partial)
         raise FileOpError("file exists and overwrite is false")
+    # Keep the mode of the file being replaced, such as 0600 or 0755, instead
+    # of giving it the partial file's 0644. A new file keeps 0644.
+    try:
+        os.chmod(partial, stat.S_IMODE(os.stat(path).st_mode))
+    except OSError:
+        pass
     os.replace(partial, path)
     return {"path": path, "size": written, "sha256": digest.hexdigest(), "complete": True}
 
