@@ -468,6 +468,25 @@ static const lv_font_t *caption_font(void)
 #endif
 }
 
+#if CONFIG_MUSE_CJK_FONT
+#define CJK_BAND_PAD 6          /* px each side of a CJK caption on a small screen */
+#define CJK_LINE_SPACE 4
+static int s_cjk_lines;         /* lines of CJK the small screen's caption band holds */
+
+/* The small screen's band: two lines of unscii-8, or s_cjk_lines of the 16 px
+ * caption font with room between them. */
+static void set_caption_font(bool cjk)
+{
+    int lines = cjk ? s_cjk_lines : 2;
+    int line_h = cjk ? lv_font_get_line_height(caption_font()) : 8;
+    int space = cjk && lines > 1 ? CJK_LINE_SPACE : 2;
+    lv_obj_set_style_text_font(s_caption_lbl, cjk ? caption_font() : &lv_font_unscii_8, 0);
+    lv_obj_set_style_text_line_space(s_caption_lbl, space, 0);
+    lv_obj_set_style_pad_hor(s_caption_lbl, cjk ? CJK_BAND_PAD : 0, 0);
+    lv_obj_set_height(s_caption_lbl, lines * line_h + (lines - 1) * space + (cjk ? 6 : 4));
+}
+#endif
+
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
 {
     lv_obj_t *l = lv_label_create(parent);
@@ -908,8 +927,12 @@ static void build_screen(void)
         lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
 #if CONFIG_MUSE_CJK_FONT
         /* CJK doesn't fit unscii-8's cell, so a reply with CJK in it fills the
-         * band one line at a time in the 16 px caption font instead. */
-        muse_state_set_cjk_page(s_w / lv_font_get_glyph_width(caption_font(), 'M', ' '), 1);
+         * band in the 16 px caption font instead: one line at a time, or two
+         * on a landscape screen with the height for them, such as the
+         * BOX-3's 320x240 (set_caption_font). */
+        s_cjk_lines = !s_tall && s_h >= 200 ? 2 : 1;
+        muse_state_set_cjk_page((s_w - 2 * CJK_BAND_PAD) / lv_font_get_glyph_width(caption_font(), 'M', ' '),
+                                s_cjk_lines);
 #endif
 
         s_bar = lv_obj_create(face);
@@ -1420,7 +1443,7 @@ static void update_status(muse_mode_t mode, float now)
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
 #if CONFIG_MUSE_CJK_FONT
         if (s_small) {
-            lv_obj_set_style_text_font(s_caption_lbl, muse_text_has_cjk(caption) ? caption_font() : &lv_font_unscii_8, 0);
+            set_caption_font(muse_text_has_cjk(caption));
         }
 #endif
         lv_label_set_text(lbl, caption);
