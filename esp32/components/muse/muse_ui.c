@@ -47,6 +47,9 @@
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
+#if CONFIG_MUSE_APPS_DEMO
+#include "muse_apps_demo.h"
+#endif
 
 static const char *TAG = "muse_ui";
 
@@ -1529,6 +1532,23 @@ esp_err_t muse_ui_start(void)
 {
     s_w = muse_board->width;
     s_h = muse_board->height;
+#if CONFIG_MUSE_APPS_DEMO
+    /* Optional multi-app demo: a launcher + three apps drawn to a full-screen
+     * framebuffer, in place of the avatar. Skips the avatar layout entirely. */
+    {
+        lv_display_t *disp = muse_board->display_start(&s_indev);
+        if (!disp) {
+            ESP_LOGE(TAG, "display init failed");
+            return ESP_FAIL;
+        }
+        muse_board->display_lock(-1);
+        muse_apps_demo_start(s_indev, muse_board->frame_ms);
+        s_ready = true;
+        muse_board->display_unlock();
+        ESP_LOGI(TAG, "UI up (multi-app demo): %dx%d", s_w, s_h);
+        return ESP_OK;
+    }
+#endif
     /* The full layout assumes room for the 466 px board's header and bottom
      * captions. Short landscape panels (BOX-3) need the compact layout too,
      * as does anything narrower than its fixed 256 px captions. */

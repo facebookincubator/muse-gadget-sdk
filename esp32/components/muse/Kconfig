@@ -124,6 +124,21 @@ menu "Muse"
         range 0 100
         default 70
 
+    config MUSE_APPS_DEMO
+        bool "M5Stack multi-app demo UI (launcher + Pet World + diagnostics + hardware demo)"
+        depends on MUSE_BOARD_M5STACK_CORE2 && SPIRAM
+        default n
+        help
+            Replace the avatar face with a touch-driven launcher and three
+            sample apps: Pet World (an animated pet with day/night rooms and
+            speech bubbles tied to the voice session), a diagnostics debugger
+            (Wi-Fi/Noise status, a live mic VU meter, a speaker beep and a
+            cloud ping), and a hardware/SDK demo (battery telemetry, a touch
+            physics canvas, an audio spectrum). A 320x240 RGB565 framebuffer in
+            PSRAM is blitted full-screen. Intended as an example of building a
+            custom UI on the board's display; leave disabled for the standard
+            avatar interface.
+
     config MUSE_WATCHER_CAMERA
         bool "SenseCAP Watcher camera capture and live preview"
         depends on MUSE_BOARD_SENSECAP_WATCHER && SPIRAM
