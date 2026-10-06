@@ -1,6 +1,6 @@
 # Skill Catalog
 
-43 active skills: 42 device/family skills and one shared Google Cast skill.
+44 active skills: 43 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -44,6 +44,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Dyson HP04](gadget-dyson-pure-hot-cool-hp04/SKILL.md) — local status and supported fan/heating controls.
 - [Miele G 7566](gadget-miele-g7566-dishwasher/SKILL.md) — local status; commands only if supported and permitted.
 - [Moonraker 3D printers](gadget-moonraker-3d-printers/SKILL.md) — existing-service status and print/job controls.
+- [Espresso bar](gadget-espresso-bar/SKILL.md) — grind-by-weight grinder and brew-by-weight shot controller over HTTP.
 
 ## Vacuums
 
