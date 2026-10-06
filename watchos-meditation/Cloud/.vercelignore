@@ -1,0 +1,10 @@
+.env*
+.venv
+tests
+__pycache__
+.pytest_cache
+*.pyc
+provision.py
+probe.py
+trace_probe.py
+vendor

@@ -1,0 +1,37 @@
+name: MuseCalm
+options:
+  bundleIdPrefix: org.example.muse
+  deploymentTarget:
+    watchOS: '11.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: '1.0'
+    CURRENT_PROJECT_VERSION: '5'
+targets:
+  MuseCalm:
+    type: application
+    platform: watchOS
+    sources:
+      - Shared
+      - Watch
+    info:
+      path: Watch/Info.plist
+      properties:
+        WKBackgroundModes: [audio]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.example.muse.calm
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SDKROOT: watchos
+        TARGETED_DEVICE_FAMILY: '4'
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_WKApplication: YES
+        INFOPLIST_KEY_WKWatchOnly: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Muse Calm
+schemes:
+  MuseCalm:
+    build:
+      targets:
+        MuseCalm: all

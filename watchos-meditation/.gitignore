@@ -1,0 +1,14 @@
+build/
+.voice-env/
+Watch/CloudBootstrap.json
+*.xcuserstate
+xcuserdata/
+.DS_Store
+MuseCalm.xcodeproj/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env*
+!.env.example
+.vercel/

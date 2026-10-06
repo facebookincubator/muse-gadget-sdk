@@ -1,0 +1,6 @@
+fastapi==0.142.2
+cryptography==46.0.7
+websockets==16.1.1
+kokoro-onnx==0.6.1
+onnxruntime==1.23.2
+soundfile==0.14.0
