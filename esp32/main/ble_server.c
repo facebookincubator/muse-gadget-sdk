@@ -537,9 +537,20 @@ static void handle_rx_write_locked(const uint8_t *data, size_t len,
         if (idx == 0 || s_rx_total != total) {
             rx_reset_locked();
             s_rx_total = total;
-            s_rx_cap = MAX_RX_TOTAL_BYTES;
+            // Sized to the message: a fixed 8 KB buffer doesn't fit beside the
+            // UI on boards without PSRAM. The sender fills every chunk but the
+            // last, so the longer of this chunk and one ATT write bounds them.
+            size_t chunk_max = s_mtu > 3 + CHUNK_HEADER_BYTES
+                               ? (size_t)s_mtu - 3 - CHUNK_HEADER_BYTES : 0;
+            if (flen > chunk_max) chunk_max = flen;
+            s_rx_cap = (size_t)total * chunk_max;
+            if (s_rx_cap > MAX_RX_TOTAL_BYTES) s_rx_cap = MAX_RX_TOTAL_BYTES;
             s_rx_buf = malloc(s_rx_cap);
-            if (!s_rx_buf) { rx_reset_locked(); return; }
+            if (!s_rx_buf) {
+                ESP_LOGE(TAG, "no memory to reassemble a %u-byte command", (unsigned)s_rx_cap);
+                rx_reset_locked();
+                return;
+            }
             s_rx_len = 0;
         }
 
