@@ -492,7 +492,8 @@ bool muse_menu_is_open(void)
     return s_open;
 }
 
-/* On the bottom bar, on the side of the button's face icon. */
+/* On the bottom bar, on the side of the button's face icon; a button in the
+ * middle of the top edge (the ATK-DNESP32S3-BOX's K1) goes in the middle. */
 static void align_on_bar(lv_obj_t *l, lv_align_t icon, int pad)
 {
     switch (icon) {
@@ -501,6 +502,7 @@ static void align_on_bar(lv_obj_t *l, lv_align_t icon, int pad)
         lv_obj_align(l, LV_ALIGN_BOTTOM_LEFT, 2 * pad, -pad);
         break;
     case LV_ALIGN_BOTTOM_MID:
+    case LV_ALIGN_TOP_MID:
         lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -pad);
         break;
     default:

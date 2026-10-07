@@ -62,6 +62,7 @@ BOARDS = {
     "Waveshare ESP32-S3-Touch-AMOLED-1.75C": "s3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75": "s3n",
     "AIPI Lite": "aipi",
+    "ALIENTEK ATK-DNESP32S3-BOX": "atk-box",
     "Waveshare ESP32-C6-Touch-AMOLED-1.8": "c6",
     "Seeed SenseCAP Watcher": "watcher",
     "M5Stack StickS3": "sticks3",
@@ -74,7 +75,7 @@ BOARDS = {
     "Guition JC3248W535": "jc3248w535",
     "Waveshare ESP32-S3-Touch-LCD-7": "lcd7",
 }
-CHAT_BOARDS = ("s3", "s3n", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7")
+CHAT_BOARDS = ("s3", "s3n", "aipi", "atk-box", "box3", "sticks3", "watcher", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7")
 
 
 class Stop(Exception):
