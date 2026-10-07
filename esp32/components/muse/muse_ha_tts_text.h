@@ -47,17 +47,17 @@ void muse_ha_tts_clean(char *text);
  * its 10-byte header have arrived). */
 size_t muse_ha_tts_id3_size(const uint8_t *data, size_t len);
 
-/* Sorts out the start of HA's audio however it's split across reads: holds
- * the first 10 bytes until they're all in, refuses WAV, skips an ID3v2 tag,
- * checks that what follows starts with an MP3 frame (an HTML error page
- * doesn't), and passes the audio to `emit`. Zero it to start. */
+/* Sorts out the start of HA's audio however it's split across reads: refuses
+ * WAV, skips any number of ID3v2 tags (HA can send two: its own, holding the
+ * reply's text, then the encoder's), checks that what follows starts with an
+ * MP3 frame (an HTML error page doesn't), and passes the audio to `emit`.
+ * Zero it to start. */
 typedef struct {
-    uint8_t head[10];
-    size_t have;             /* of head, until started */
-    size_t skip;             /* what's left of the ID3 tag */
-    bool started;
-    uint8_t first;           /* the audio's first byte, held until the second shows it's MP3 */
-    bool held, synced;
+    uint8_t head[10];        /* the next header, held until all 10 bytes are in */
+    size_t have;
+    size_t skip;             /* what's left of the ID3 tag being skipped */
+    bool started;            /* past the very first header (where WAV would show) */
+    bool synced;             /* the audio has started: the rest goes straight to emit */
 } muse_ha_tts_mp3_t;
 
 typedef enum {

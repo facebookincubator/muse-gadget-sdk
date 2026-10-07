@@ -121,72 +121,66 @@ size_t muse_ha_tts_id3_size(const uint8_t *data, size_t len)
     return 10 + size + (data[5] & 0x10 ? 10 : 0);
 }
 
-/* Passes data on, dropping what's left of the ID3 tag first, and checking that
- * the audio after it opens with an MP3 frame sync: 11 set bits. */
-static muse_ha_tts_mp3_result_t pass(muse_ha_tts_mp3_t *m, const uint8_t *data, size_t len,
-                                     muse_ha_tts_emit_t emit, void *ctx)
+/* Decides what the header held in m->head is: WAV (only at the very start),
+ * an ID3 tag to skip, or the audio, which has to open with an MP3 frame sync
+ * (11 set bits). At the end of the download (`final`) the header may be short. */
+static muse_ha_tts_mp3_result_t decide(muse_ha_tts_mp3_t *m, bool final, muse_ha_tts_emit_t emit, void *ctx)
 {
-    size_t drop = m->skip < len ? m->skip : len;
-    m->skip -= drop;
-    data += drop;
-    len -= drop;
-    if (len && !m->synced) {
-        if (!m->held) {
-            m->first = *data++;
-            m->held = true;
-            if (!--len) {
-                return MUSE_HA_TTS_MP3_OK;   /* the second byte decides */
-            }
-        }
-        if (m->first != 0xff || (*data & 0xe0) != 0xe0) {
-            return MUSE_HA_TTS_MP3_NOT_MP3;
-        }
-        m->synced = true;
-        if (!emit(ctx, &m->first, 1)) {
-            return MUSE_HA_TTS_MP3_STOPPED;
-        }
-    }
-    if (len && !emit(ctx, data, len)) {
-        return MUSE_HA_TTS_MP3_STOPPED;
-    }
-    return MUSE_HA_TTS_MP3_OK;
-}
-
-/* The first 10 bytes are in: decides what the audio is, then passes them on. */
-static muse_ha_tts_mp3_result_t start(muse_ha_tts_mp3_t *m, muse_ha_tts_emit_t emit, void *ctx)
-{
+    bool at_start = !m->started;
     m->started = true;
-    if (m->have >= 4 && !memcmp(m->head, "RIFF", 4)) {
+    if (at_start && m->have >= 4 && !memcmp(m->head, "RIFF", 4)) {
         return MUSE_HA_TTS_MP3_WAV;
     }
-    m->skip = muse_ha_tts_id3_size(m->head, m->have);
-    return pass(m, m->head, m->have, emit, ctx);
+    if (m->have >= 3 && !memcmp(m->head, "ID3", 3)) {
+        if (final || m->have < sizeof(m->head)) {
+            return MUSE_HA_TTS_MP3_NOT_MP3;   /* a tag cut short: no audio after it */
+        }
+        m->skip = muse_ha_tts_id3_size(m->head, m->have) - m->have;   /* its header is in */
+        m->have = 0;
+        return MUSE_HA_TTS_MP3_OK;
+    }
+    if (m->have < 2 || m->head[0] != 0xff || (m->head[1] & 0xe0) != 0xe0) {
+        return MUSE_HA_TTS_MP3_NOT_MP3;
+    }
+    m->synced = true;
+    size_t n = m->have;
+    m->have = 0;
+    return emit(ctx, m->head, n) ? MUSE_HA_TTS_MP3_OK : MUSE_HA_TTS_MP3_STOPPED;
 }
 
 muse_ha_tts_mp3_result_t muse_ha_tts_mp3_feed(muse_ha_tts_mp3_t *m, const uint8_t *data, size_t len,
                                               muse_ha_tts_emit_t emit, void *ctx)
 {
-    if (!m->started) {
+    while (len) {
+        if (m->synced) {
+            return emit(ctx, data, len) ? MUSE_HA_TTS_MP3_OK : MUSE_HA_TTS_MP3_STOPPED;
+        }
+        if (m->skip) {
+            size_t drop = m->skip < len ? m->skip : len;
+            m->skip -= drop;
+            data += drop;
+            len -= drop;
+            continue;
+        }
         size_t take = sizeof(m->head) - m->have < len ? sizeof(m->head) - m->have : len;
         memcpy(m->head + m->have, data, take);
         m->have += take;
         data += take;
         len -= take;
-        if (m->have < sizeof(m->head)) {
-            return MUSE_HA_TTS_MP3_OK;
-        }
-        muse_ha_tts_mp3_result_t r = start(m, emit, ctx);
-        if (r != MUSE_HA_TTS_MP3_OK) {
-            return r;
+        if (m->have == sizeof(m->head)) {
+            muse_ha_tts_mp3_result_t r = decide(m, false, emit, ctx);
+            if (r != MUSE_HA_TTS_MP3_OK) {
+                return r;
+            }
         }
     }
-    return len ? pass(m, data, len, emit, ctx) : MUSE_HA_TTS_MP3_OK;
+    return MUSE_HA_TTS_MP3_OK;
 }
 
 muse_ha_tts_mp3_result_t muse_ha_tts_mp3_end(muse_ha_tts_mp3_t *m, muse_ha_tts_emit_t emit, void *ctx)
 {
-    if (!m->started && m->have) {
-        muse_ha_tts_mp3_result_t r = start(m, emit, ctx);
+    if (!m->synced && !m->skip && m->have) {
+        muse_ha_tts_mp3_result_t r = decide(m, true, emit, ctx);
         if (r != MUSE_HA_TTS_MP3_OK) {
             return r;
         }

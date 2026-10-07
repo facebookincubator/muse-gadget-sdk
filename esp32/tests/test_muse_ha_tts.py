@@ -201,6 +201,25 @@ class HarnessTest(unittest.TestCase):
                 with self.subTest(data=data[:4], plan=plan):
                     self.assertEqual(self.mp3(data, *plan), (want_result, want))
 
+    def test_mp3_skips_every_tag_before_the_audio(self) -> None:
+        # HA serving from its cache: its own tag (the reply's text, so it can be
+        # kilobytes), then the encoder's, then the audio.
+        audio = b"\xff\xf3\xa0\xc4" * 300
+        ha_tag = id3(8443) + b"\x00" * 8443
+        lavf = id3(35) + b"\x00" * 35
+        for data in (ha_tag + lavf + audio, lavf + lavf + lavf + audio, id3(0) + audio):
+            plans = [(k, len(data)) for k in (1, 9, 10, 11, 2047, 2048, 8452, 8453, 8454, 8497, 8498)] + \
+                    [(n,) for n in (1, 7, 10, 2048, 4096)]
+            for plan in plans:
+                with self.subTest(head=data[:4], size=len(data), plan=plan):
+                    self.assertEqual(self.mp3(data, *plan), (0, audio))
+        # Tags are fine anywhere before the audio, but they still have to lead to it.
+        for data in (ha_tag + lavf, ha_tag + lavf + b"<html>not audio</html>", lavf + id3(35)[:7]):
+            with self.subTest(tail=data[-8:]):
+                self.assertEqual(self.mp3(data, 2048)[0], 3)
+        # WAV is only WAV at the very start; after a tag, it's just not MP3.
+        self.assertEqual(self.mp3(lavf + b"RIFF\x24\x08\x00\x00WAVE", 2048)[0], 3)
+
     def test_mp3_tiny_downloads(self) -> None:
         self.assertEqual(self.mp3(b"\xff\xf3\x60", 1), (0, b"\xff\xf3\x60"))   # sync prefix only; the session must reject zero decoded PCM
         self.assertEqual(self.mp3(b"RIFF\x00", 1), (1, b""))                          # still WAV
