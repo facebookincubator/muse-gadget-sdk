@@ -39,6 +39,10 @@ menu "Muse"
             bool "OSTB EchoEar-2ST (360px round touch LCD, experimental)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_WAVESHARE_S3_216
+            bool "Waveshare ESP32-S3-Touch-AMOLED-2.16"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_AIPI
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
@@ -49,6 +53,10 @@ menu "Muse"
 
         config MUSE_BOARD_WAVESHARE_C6_18
             bool "Waveshare ESP32-C6-Touch-AMOLED-1.8"
+            depends on IDF_TARGET_ESP32C6
+
+        config MUSE_BOARD_WAVESHARE_C6_206
+            bool "Waveshare ESP32-C6-Touch-AMOLED-2.06"
             depends on IDF_TARGET_ESP32C6
 
         config MUSE_BOARD_SENSECAP_WATCHER
@@ -70,6 +78,30 @@ menu "Muse"
         config MUSE_BOARD_M5STACK_STOPWATCH
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_M5STACK_CORES3
+            bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_M5STACK_CORE2
+            bool "M5Stack Core2 v1.0 (ESP32, touch LCD, touch-strip talk)"
+            depends on IDF_TARGET_ESP32
+        config MUSE_BOARD_FNK0104B
+            bool "Freenove FNK0104B (ESP32-S3, 240x320 touch LCD, ES8311 speaker and mic)"
+            depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_GUITION_JC3248W535
+            bool "Guition JC3248W535 (ESP32-S3, 3.5\" 320x480 touch LCD, speaker)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_LCD7
+            bool "Waveshare ESP32-S3-Touch-LCD-7 (800x480 touch LCD, no audio)"
+            depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_VN_S3_183
+            bool "VN ESP32-S3 board (1.83\" 284x240 NV3023 LCD, ES8311 and ES7210)"
+            depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_AI_PASSPORT
+            bool "FoloToy AI Passport (ESP32-C3, three buttons, no touch)"
+            depends on IDF_TARGET_ESP32C3
     endchoice
 
     config MUSE_ENABLED
@@ -83,14 +115,23 @@ menu "Muse"
         default "waveshare_s3_175c" if MUSE_BOARD_WAVESHARE_S3_175C
         default "waveshare_s3_175" if MUSE_BOARD_WAVESHARE_S3_175
         default "ostb_echoear_2st" if MUSE_BOARD_OSTB_ECHOEAR_2ST
+        default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
         default "aipi" if MUSE_BOARD_AIPI
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
+        default "waveshare_c6_206" if MUSE_BOARD_WAVESHARE_C6_206
         default "sensecap_watcher" if MUSE_BOARD_SENSECAP_WATCHER
         default "m5stack_sticks3" if MUSE_BOARD_M5STACK_STICKS3
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
+        default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
+        default "fnk0104b" if MUSE_BOARD_FNK0104B
+        default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
+        default "waveshare_s3_lcd7" if MUSE_BOARD_WAVESHARE_S3_LCD7
+        default "vn_s3_183" if MUSE_BOARD_VN_S3_183
+        default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB
@@ -98,7 +139,13 @@ menu "Muse"
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || !SOC_USB_SERIAL_JTAG_SUPPORTED
+
+    # A board overlay can raise this for a quiet speaker.
+    config MUSE_DEFAULT_VOLUME
+        int "Speaker volume until one is chosen in settings (percent)"
+        range 0 100
+        default 70
 
     config MUSE_WATCHER_CAMERA
         bool "SenseCAP Watcher camera capture and live preview"
@@ -109,6 +156,31 @@ menu "Muse"
             double-click camera preview. Camera buffers and tasks consume
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
+
+    config MUSE_CJK_FONT
+        bool "Show Chinese and Japanese in captions"
+        depends on MUSE_ENABLED
+        default n
+        help
+            Captions fall back to GNU Unifont's 16x16 bitmaps for CJK
+            punctuation, kana, the CJK Unified Ideographs and fullwidth
+            forms that the ASCII caption font lacks. Small screens, whose
+            captions are two lines of 8 px text, show a reply with CJK in it
+            one 16 px line at a time. Takes about 850 KB of flash and no RAM.
+            Without it those characters show as boxes. Hangul isn't
+            included.
+
+    config MUSE_JC3248W535_MIC_GPIO
+        int "JC3248W535: GPIO for an external I2S mic's data (SD) line"
+        depends on MUSE_BOARD_GUITION_JC3248W535
+        range -1 48
+        default -1
+        help
+            The board has a speaker amp but no microphone. Wire an I2S MEMS
+            mic such as an INMP441 to the speaker's clocks (SCK to GPIO42, WS
+            to GPIO2), L/R to GND, power to 3.3 V, and its SD line to a free
+            GPIO, and set that GPIO here. -1 leaves push-to-talk recording
+            silence.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

@@ -107,6 +107,12 @@ jobs:
           - board: echoear-2st
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-ostb-echoear-2st"
+          - board: c6-nopsram
+            target: esp32c6
+            overlays: ";devices/sdkconfig.c6-nopsram"
+          - board: waveshare-c6-lcd-147
+            target: esp32c6
+            overlays: ";devices/sdkconfig.waveshare-c6-lcd-147"
           - board: ideaspark
             target: esp32
             overlays: ";devices/sdkconfig.ideaspark"
@@ -116,21 +122,39 @@ jobs:
           - board: reterminal-e1001
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-e1001"
+          - board: reterminal-e1002
+            target: esp32s3
+            overlays: ";devices/sdkconfig.reterminal-e1002"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"
+          - board: espressif-s3-devkitc-1
+            target: esp32s3
+            overlays: ";devices/sdkconfig.espressif-s3-devkitc-1"
+          - board: seeed-respeaker-lite
+            target: esp32s3
+            overlays: ";devices/sdkconfig.seeed-respeaker-lite"
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"
           - board: muse-waveshare-s3-175
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175"
+          - board: muse-waveshare-s3-lcd7
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd7"
+          - board: muse-waveshare-s3-216
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216"
           - board: muse-aipi
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-aipi"
           - board: muse-waveshare-c6-18
             target: esp32c6
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18"
+          - board: muse-waveshare-c6-206
+            target: esp32c6
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-206"
           - board: muse-sensecap-watcher
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher"
@@ -146,9 +170,27 @@ jobs:
           - board: muse-m5stack-stopwatch
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch"
+          - board: muse-m5stack-cores3
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3"
+          - board: muse-guition-jc3248w535
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535"
           - board: muse-m5stack-stickc-plus2
             target: esp32
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2"
+          - board: muse-m5stack-core2
+            target: esp32
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2"
+          - board: muse-fnk0104b
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b"
+          - board: muse-vn-s3-183
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-vn-s3-183"
+          - board: muse-ai-passport
+            target: esp32c3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport"
     defaults:
       run:
         shell: bash

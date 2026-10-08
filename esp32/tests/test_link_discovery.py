@@ -19,6 +19,8 @@ import subprocess
 import tempfile
 import unittest
 
+from test_link_ota import function_source
+
 ROOT = Path(__file__).resolve().parents[1]
 # CI supplies pinned upstream sources; local IDF builds already have cJSON.
 JSON = Path(os.environ.get(
@@ -37,6 +39,11 @@ class LinkDiscoveryTest(unittest.TestCase):
         noise = (ROOT / "main/noise_control.cpp").read_text()
         start = noise.index("static char *wrap_result_json(")
         (out / "noise_result.inc").write_text(noise[start:noise.index("// ---- Reconnect policy", start)])
+        app = (ROOT / "main/app.c").read_text()
+        start = app.index("typedef struct {", app.index("// ---- Network discovery task"))
+        (out / "discover_task.inc").write_text(
+            app[start:app.index("static void discover_task(", start)]
+            + function_source(app, "static void discover_task("))
         cc = shlex.split(os.environ.get("CC", "cc"))
         cxx = shlex.split(os.environ.get("CXX", "c++"))
         # glibc hides ip_mreq in strict C11 mode without its default extensions.
@@ -45,6 +52,7 @@ class LinkDiscoveryTest(unittest.TestCase):
             [*cc, "-std=c11", *flags, "-c", str(JSON / "cJSON.c"), "-o", str(out / "cjson.o")],
             [*cc, "-std=c11", *flags, str(ROOT / "tests/link_discovery_harness.c"), str(out / "cjson.o"), "-lm", "-o", str(out / "discovery")],
             [*cxx, "-std=c++17", *flags, str(ROOT / "tests/link_discovery_payload_harness.cpp"), str(out / "cjson.o"), "-lm", "-o", str(out / "payload")],
+            [*cc, "-std=c11", *flags, str(ROOT / "tests/link_discover_task_harness.c"), str(out / "cjson.o"), "-lm", "-o", str(out / "discover_task")],
         ]
         for cmd in commands:
             compiled = subprocess.run(cmd, capture_output=True, text=True)
@@ -61,6 +69,11 @@ class LinkDiscoveryTest(unittest.TestCase):
 
     def test_direct_payload_ownership_and_legacy_compatibility(self):
         self.run_harness("payload")
+
+    def test_discovery_task_always_answers(self):
+        # Out of memory, it used to send nothing, leaving the Muse to wait out
+        # device.discover's 90 s timeout.
+        self.run_harness("discover_task")
 
     def test_discovery_task_transfers_tree_without_serialization(self):
         app = (ROOT / "main/app.c").read_text()

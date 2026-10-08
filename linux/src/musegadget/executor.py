@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import pwd
+import select
 import shutil
 import signal
 import socket
@@ -41,6 +42,8 @@ DEFAULT_TIMEOUT_S = 120
 MAX_TIMEOUT_S = 600
 # How long to wait for output after killing a timed-out command's process group.
 KILL_GRACE_S = 2
+# How long to keep reading queued output after the shell exits.
+DRAIN_S = 0.5
 # /link-control accepts at most 256 KiB per message from the device; leave
 # room for the JSON envelope and escaping.
 MAX_OUTPUT_BYTES = 96 * 1024
@@ -170,29 +173,32 @@ class Executor:
             proc = subprocess.Popen(
                 ["/bin/bash", "-c", command], cwd=cwd,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                bufsize=0,
                 **self._child_options(),
             )
         except OSError as exc:
             return error(f"could not start command: {exc}")
-        timed_out = False
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+        timed_out, stdout, stderr = _wait_for_shell(proc, timeout_s)
+        if timed_out:
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None and not pipe.closed:
+                    os.set_blocking(pipe.fileno(), True)
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             try:
-                stdout, stderr = proc.communicate(timeout=KILL_GRACE_S)
+                more_out, more_err = proc.communicate(timeout=KILL_GRACE_S)
             except subprocess.TimeoutExpired as exc:
                 # A process that left the group (setsid, a daemon) survived the kill and
                 # still holds the pipes. Keep what was read instead of waiting on it.
-                stdout, stderr = exc.stdout or b"", exc.stderr or b""
+                more_out, more_err = exc.stdout or b"", exc.stderr or b""
                 for pipe in (proc.stdout, proc.stderr):
                     if pipe is not None:
                         pipe.close()
                 proc.wait()
+            stdout += more_out
+            stderr += more_err
         out, out_cut = _clip(stdout)
         err, err_cut = _clip(stderr)
         return ok({
@@ -216,9 +222,72 @@ class Executor:
             return error(proc.stderr.decode(errors="replace")[-2000:] or "file operation failed")
 
 
+def _read_available(pipe, deadline: float) -> tuple[bytes, bool]:
+    # Stop at the deadline too: a writer that outpaces the reads would
+    # otherwise keep this loop from ever seeing an empty pipe.
+    chunks = []
+    while time.monotonic() < deadline:
+        try:
+            chunk = pipe.read(65536)
+        except BlockingIOError:
+            return b"".join(chunks), True
+        if chunk is None:
+            return b"".join(chunks), True
+        if chunk == b"":
+            return b"".join(chunks), False
+        chunks.append(chunk)
+    return b"".join(chunks), True
+
+
+def _wait_for_shell(proc, timeout_s: float) -> tuple[bool, bytes, bytes]:
+    # Wait until the shell exits. Read only bytes already queued so a grandchild
+    # that inherited the pipes cannot hold this open until EOF.
+    streams: dict = {}
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is None:
+            continue
+        os.set_blocking(pipe.fileno(), False)
+        streams[pipe] = []
+    watching = list(streams)
+    deadline = time.monotonic() + timeout_s
+    while proc.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return True, _joined(streams, proc.stdout), _joined(streams, proc.stderr)
+        if not watching:
+            time.sleep(min(remaining, 0.05))
+            continue
+        ready, _, _ = select.select(watching, [], [], min(remaining, 0.05))
+        for pipe in ready:
+            data, still_open = _read_available(pipe, deadline)
+            if data:
+                streams[pipe].append(data)
+            if not still_open:
+                watching.remove(pipe)
+    drain_deadline = time.monotonic() + DRAIN_S
+    for pipe in streams:
+        if pipe.closed:
+            continue
+        data, _ = _read_available(pipe, drain_deadline)
+        if data:
+            streams[pipe].append(data)
+    return False, _joined(streams, proc.stdout), _joined(streams, proc.stderr)
+
+
+def _joined(streams: dict, pipe) -> bytes:
+    return b"".join(streams.get(pipe, ()))
+
+
 def _clip(data: bytes) -> tuple[str, bool]:
     cut = len(data) > MAX_OUTPUT_BYTES
-    return data[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace"), cut
+    text = data[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+    # The budget is for the message, where json.dumps writes every non-ASCII
+    # character as a 6- or 12-byte escape and each undecodable byte became
+    # U+FFFD, so binary or non-Latin output can grow sixfold.
+    while len(json.dumps(text)) - 2 > MAX_OUTPUT_BYTES:
+        text = text[: len(text) * 3 // 4]
+        cut = True
+    return text, cut
 
 
 def device_health() -> dict:

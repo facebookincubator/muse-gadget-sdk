@@ -16,6 +16,7 @@
 
 #include "muse_text.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -58,6 +59,10 @@ static const struct {
     { 0x0149, "'n" },
     { 0x0152, "OE" },
     { 0x0153, "oe" },
+    { 0x01A0, "O" },     /* Vietnamese O and U with horn */
+    { 0x01A1, "o" },
+    { 0x01AF, "U" },
+    { 0x01B0, "u" },
     { 0x02BC, "'" },     /* modifier apostrophe */
     { 0x02C6, "^" },
     { 0x02DC, "~" },
@@ -127,6 +132,12 @@ static const char LATIN[] =
     "AaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIi__JjKkkLlLlLlLlLl"
     "NnNnNn_NnOoOoOo__RrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs";
 
+/* U+1EA0-1EF9, Vietnamese letters with a tone mark (and a hat, breve or
+ * horn), by their plain letter. */
+static const char VIETNAMESE[] =
+    "AaAaAaAaAaAaAaAaAaAaAaAaEeEeEeEeEeEeEeEeIiIiOoOoOoOoOoOoOoOoOoOoOoOo"
+    "UuUuUuUuUuUuUuYyYyYyYy";
+
 /* The code point at s, and its length in *len; -1 if it's broken. */
 static int32_t decode(const unsigned char *s, size_t *len)
 {
@@ -185,12 +196,51 @@ int muse_text_ascii(const char *s, size_t *len, char out[4])
         out[1] = '\0';
         return 1;
     }
+    if (cp >= 0x1EA0 && cp <= 0x1EF9) {
+        out[0] = VIETNAMESE[cp - 0x1EA0];
+        out[1] = '\0';
+        return 1;
+    }
     const char *a = stand_in(cp);
     if (!a) {
         return -1;
     }
     strlcpy(out, a, 4);
     return (int)strlen(out);
+}
+
+muse_text_cjk_t muse_text_cjk(const char *s)
+{
+    static const uint16_t CLOSE[] = {
+        0x3001, 0x3002, 0x3009, 0x300B, 0x300D, 0x300F, 0x3011, 0x3015, 0x3017, 0x3019,
+        0x301B, 0x30FB, 0x30FC, 0xFF01, 0xFF09, 0xFF0C, 0xFF0E, 0xFF1A, 0xFF1B, 0xFF1F,
+        0xFF3D, 0xFF5D, 0xFF60,
+    };
+    size_t len;
+    int32_t cp = decode((const unsigned char *)s, &len);
+    for (size_t i = 0; i < sizeof(CLOSE) / sizeof(CLOSE[0]); i++) {
+        if (cp == CLOSE[i]) {
+            return MUSE_TEXT_CJK_CLOSE;
+        }
+    }
+    bool cjk = (cp >= 0x2E80 && cp <= 0x9FFF)      /* radicals, punctuation, kana, ideographs */
+               || (cp >= 0xAC00 && cp <= 0xD7AF)   /* Hangul */
+               || (cp >= 0xF900 && cp <= 0xFAFF)   /* compatibility ideographs */
+               || (cp >= 0xFF00 && cp <= 0xFFEF);  /* fullwidth forms */
+    return cjk ? MUSE_TEXT_CJK : MUSE_TEXT_NOT_CJK;
+}
+
+bool muse_text_has_cjk(const char *s)
+{
+    while (*s) {
+        if (muse_text_cjk(s) != MUSE_TEXT_NOT_CJK) {
+            return true;
+        }
+        size_t len;
+        decode((const unsigned char *)s, &len);
+        s += len;
+    }
+    return false;
 }
 
 void muse_text_to_ascii(char *s, size_t cap)

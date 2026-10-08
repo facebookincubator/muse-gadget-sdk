@@ -150,11 +150,6 @@ CONFIG_LOG_VERSION_1=y
 CONFIG_LOG_MODE_TEXT=y
 CONFIG_LOG_COLORS=n
 CONFIG_LOG_TIMESTAMP_SOURCE_RTOS=y
-# Disable per-tag runtime log level lookup. With it on, every ESP_LOG*
-# call does a hash-table lookup even when filtered (~11 us/call).
-# Disabling makes esp_log_level_set() a no-op but compile-time
-# LOG_MAXIMUM_LEVEL still works.
-CONFIG_LOG_DYNAMIC_LEVEL_CONTROL=n
 
 # WiFi: no NVS (we only show visible APs, creds are in our own config store).
 CONFIG_ESP_WIFI_NVS_ENABLED=n
@@ -192,7 +187,6 @@ CONFIG_LWIP_TCPIP_CORE_LOCKING_INPUT=y
 
 # 1 kHz tick for finer scheduling granularity (default 100 Hz = 10 ms).
 CONFIG_FREERTOS_HZ=1000
-CONFIG_LWIP_NETIF_API=y
 
 # Don't abort if PSRAM init fails on first boot (can happen on power-on reset).
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y

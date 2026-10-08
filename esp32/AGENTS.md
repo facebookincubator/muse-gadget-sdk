@@ -46,21 +46,35 @@ before adding a feature to one.
 | Board | Target | Overlay(s) after `sdkconfig.defaults` | Helper |
 |---|---|---|---|
 | ESP32-C5 DevKitC-1 (default) | `esp32c5` | none | `tools/board.sh devkit` |
+| ESP32-C6 devkit without PSRAM | `esp32c6` | `devices/sdkconfig.c6-nopsram` | `tools/board.sh c6-nopsram` |
+| Espressif ESP32-S3-DevKitC-1 v1.1 (N8R8) | `esp32s3` | `devices/sdkconfig.espressif-s3-devkitc-1` | `tools/board.sh espressif-s3-devkitc-1` |
 | ideaspark ESP32 + 1.9" ST7789 | `esp32` | `devices/sdkconfig.ideaspark` | `tools/board.sh ideaspark` |
+| Waveshare ESP32-C6-LCD-1.47 | `esp32c6` | `devices/sdkconfig.waveshare-c6-lcd-147` | `tools/board.sh waveshare-c6-lcd-147` |
 | Seeed SenseCAP Indicator | `esp32s3` | `devices/sdkconfig.sensecap-indicator` | `tools/board.sh sensecap-indicator` |
 | Seeed reTerminal E1001 | `esp32s3` | `devices/sdkconfig.reterminal-e1001` | `tools/board.sh reterminal-e1001` |
+| Seeed reTerminal E1002 | `esp32s3` | `devices/sdkconfig.reterminal-e1002` | `tools/board.sh reterminal-e1002` |
 | Home Assistant Voice Preview Edition | `esp32s3` | `devices/sdkconfig.home-assistant-voice` | `tools/board.sh home-assistant-voice` |
+| Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-lite` | `tools/board.sh seeed-respeaker-lite` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
+| Waveshare ESP32-S3-Touch-AMOLED-2.16 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216` | `tools/muse/board.sh build s3-216` |
 | OSTB EchoEar-2ST (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ostb-echoear-2st` | `tools/muse/board.sh build echoear` |
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-box-3` | `tools/muse/board.sh build box3` |
 | AIPI Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-aipi` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18` | manual |
+| Waveshare ESP32-C6-Touch-AMOLED-2.06 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-206` | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher` | manual |
 | M5Stack Cardputer ADV (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
+| M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
+| Freenove FNK0104B | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b` | `tools/muse/board.sh build fnk0104b` |
+| VN ESP32-S3 1.83-inch NV3023 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-vn-s3-183` | `tools/muse/board.sh build vn183` |
+| Guition JC3248W535 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535` | `tools/muse/board.sh build jc3248w535` |
+| Waveshare ESP32-S3-Touch-LCD-7 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd7` | `tools/muse/board.sh build lcd7` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
+| M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
+| FoloToy AI Passport (experimental) | `esp32c3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport` | `tools/muse/board.sh build ai-passport` |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on
 GPIO27, the BOOT button on GPIO28 (active low), 8 MB flash and quad PSRAM.
@@ -117,7 +131,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|echoear> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-216|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7|vn183|ai-passport|echoear> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -150,7 +164,7 @@ arguments, except on the SenseCAP Watcher: `idf.py flash` runs plain esptool,
 which fails on its USB bridge (see "Flash it"). Build the Watcher with
 `idf.py`, flash it with `tools/muse/board.sh flash watcher`, then
 `idf.py … -p PORT monitor` as usual; reading from the bridge works. Muse builds use `partitions_muse.csv` and need 16 MB of flash or
-more, except the StickS3, StickC Plus2 and Cardputer ADV, which have 8 MB and use
+more, except the StickS3, StickC Plus2, Cardputer ADV and AI Passport, which have 8 MB and use
 `partitions_muse_8mb.csv`.
 
 All boards share `managed_components/` and `dependencies.lock` in this
@@ -213,8 +227,9 @@ flash size and status backend.
    | Descriptor | Board |
    |---|---|
    | Espressif `303a:1001`, "USB JTAG/serial debug unit" | the chip's own USB: C5, C6, S3 and the S3 boards with the full UI. Its serial number is the MAC |
-   | CH340 (`1a86:7523`) | ideaspark, SenseCAP Indicator, reTerminal E1001 |
+   | CH340 (`1a86:7523`) | ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002 |
    | CH9102 | M5Stack StickC Plus2 |
+   | CH343 (`1a86:55d3`), "USB Single Serial" | Waveshare ESP32-S3-Touch-LCD-7 |
    | CH342, two `usbmodem` ports | SenseCAP Watcher: the S3 console is the one ending in `3`, the other is the Himax camera |
 
 3. **Ask the chip.** When you can write to the port (this resets the board):
@@ -224,7 +239,7 @@ flash size and status backend.
    ```
 
    The target narrows it a long way: `esp32c5` is the DevKitC-1, `esp32c6` the
-   Waveshare C6, `esp32` the ideaspark or the StickC Plus2.
+   Waveshare C6 or a C6 devkit, `esp32` the ideaspark or the StickC Plus2.
 
 4. **Fall back to a read-only capture.** If the board is mid-run and you can't
    write to the port, the `## Monitor` recipe below reads it without resetting,
@@ -234,11 +249,13 @@ flash size and status backend.
    | Hint | Board |
    |---|---|
    | `yellow` | M5Stack StopWatch |
+   | `power` | M5Stack CoreS3 |
    | `front` | M5Stack StickS3, or StickC Plus2 — tell them apart by the port: the StickS3 is native USB, the Plus2 is a CH9102 `usbserial` |
    | `top` | Waveshare ESP32-S3-Touch-AMOLED-1.75C |
+   | `key` | Waveshare ESP32-S3-Touch-AMOLED-2.16 |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
-   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, or the ESP32-S3-Touch-AMOLED-1.75 — tell them apart by the target (`esp32c6` or `esp32s3`) |
+   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, the Guition JC3248W535 or the VN ESP32-S3 1.83-inch NV3023 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
@@ -254,7 +271,7 @@ cd build && python -m esptool --chip esp32c5 -b 460800 \
 
 Typical ports: `/dev/cu.usbmodem*` or `/dev/ttyACM*` for native USB (C5, S3 and
 C6 boards), and `/dev/cu.usbserial-*`, `/dev/cu.wchusbserial*` or `/dev/ttyUSB*`
-for CH340 bridges (ideaspark, SenseCAP Indicator, reTerminal E1001). On Linux,
+for CH340 bridges (ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002). On Linux,
 add yourself to the `dialout` (or `uucp`) group. If the chip won't enter the
 bootloader, hold BOOT, tap RESET, release BOOT, and flash again.
 
@@ -348,7 +365,7 @@ message on. The exit status says what kind of failure it was:
 
 - **2**: no board, or it can't do this. If it says the board doesn't answer,
   rerun with `--board s3` or `--board aipi` (from the board's name, or ask) to
-  flash firmware that can. On the C6 or Watcher, follow the manual steps in
+  flash firmware that can. On the C6 boards or Watcher, follow the manual steps in
   `tools/muse/AVATAR_RECIPE.md`.
 - **3**: the board isn't on Wi-Fi, or it isn't paired in the Muse app and has
   no device token, so their Muse isn't connected. Tell them, and point them to
@@ -398,8 +415,9 @@ on-screen microphone to record and release it to send once paired. It has no
 physical talk/setup button, so the GPIO button reset gesture does not apply.
 
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
-ideaspark, SenseCAP Indicator and reTerminal E1001 overlays, `MuseGadget-ha-voice-XXXXXX` on the
-Voice PE). It uses **community pairing v5**, so the phone app must support v5
+ideaspark, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
+Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite). It uses
+**community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.
 
@@ -432,6 +450,67 @@ The device still needs to be paired once for its token.
   manufacturing locations, and the table offset of `0x10000` leaves room for a
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
   output: app slots are 2 MB (4 MB on Muse).
+
+## Adding a command
+
+Muse calls a gadget's commands by name: the firmware lists them in
+`link.register` and answers each `link.invoke`. A command you add lives in two
+places, which must use the same name. (`device.health` and `device.ota` are
+handled in `noise_control.cpp` itself; everything else goes through
+`on_ws_command()`.)
+
+1. **Advertise it** in `build_register_json()` in `main/noise_control.cpp`:
+   `add_command(commands, "relay.set", "<description>", required, optional)`.
+   `required` and `optional` map each parameter's name to `{type,
+   description}` (`string_param()` makes a string one). Muse reads the
+   descriptions, so say what the command does and what it returns. If it can
+   take longer than the default 30 seconds, set its `timeout_ms`, as
+   `device.discover` does.
+2. **Handle it** in `on_ws_command()` in `main/app.c`. Return
+   `{"ok": true, "payload": {...}}`, or `command_error(code, message)` for a
+   failure. Only `ok`, `payload` (or a `payload_json` string) and the
+   error's `message` reach the Muse. Always return a result: `NULL` reaches
+   the Muse as a generic "command handler did not return a result" error.
+   Validate the parameters yourself: `params` is `NULL` when the request has
+   none, and the firmware doesn't check them against the advertised
+   `required` and `optional`, so check each one's presence, type, length and
+   allowed values.
+3. **Don't block.** `on_ws_command()` runs on the Noise session's task, so
+   anything slow (the network, a slow sensor, a camera) belongs in its own
+   task. Copy `request_id`, `session_generation` and every parameter the task
+   needs, strings included, into memory the task owns (`device.discover`
+   uses `cJSON_Duplicate()`): the request is freed as soon as
+   `on_ws_command()` returns. If an allocation or the task start fails, free
+   what you allocated and return `command_error()`. Otherwise start the task
+   and return `{"_async": true}`. The task then calls
+   `noise_ctrl_send_command_result()` once, failures included, or the Muse
+   waits out the timeout. It takes ownership of the result and frees it, so
+   don't free or reuse it afterwards. `camera.capture` and `device.discover`
+   work this way. A result from an earlier session is dropped.
+4. **Gate it on a Kconfig option** in `main/Kconfig.projbuild` when it needs
+   particular hardware, and wrap both places in the same `#if`, as
+   `sensors.read` does with `CONFIG_HOMEHUB_SENSECAP_SENSORS`. Add new source
+   files to `main/CMakeLists.txt`.
+5. **Keep `link.register` small.** It's printed into at most 8 KB, and a
+   device whose registration doesn't fit never registers.
+6. **Add a host test** in `tests/`. `test_link_sensecap_sensors.py` checks
+   that `sensors.read` is advertised and dispatched under the same option, and
+   runs its parser against a harness.
+
+Report environmental sensors (temperature, humidity, CO2, tVOC, light and so
+on) through `sensors.read`, on every board that has them, so Muse has one
+command to call wherever it runs. Don't add them to `device.health`, which is
+for the link itself (battery, power, network), or give them a board-specific
+command. Return each reading as `{value, unit, age_s}`, as
+`sensecap_sensors.c` does, and report a sensor with no recent reading as null.
+Read slow or I2C sensors in a background task and have `sensors.read` return
+the latest value.
+
+Muse sees the command once the board reconnects with the new firmware. Keep
+the management commands that `on_ws_command()` also handles (`device.list_vms`,
+`device.set_vm`, `device.reset_vm` and `device.unpair`) out of
+`link.register`: `tests/test_link_transport_contract.py` checks they stay
+unadvertised.
 
 ## Say Muse, never Hatch
 
@@ -476,6 +555,16 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 Run one `idf.py build` first: `test_link_discovery` compiles cJSON from
 `managed_components/`, and that directory only exists after a build. Set `CC`
 or `CXX` to change compilers.
+
+Two tests skip quietly when their inputs are missing; check the summary for
+`skipped=`:
+
+- `test_noise_core` links against the host's PSA Crypto library, found with
+  `pkg-config mbedcrypto`. Install `libmbedtls-dev` and `pkg-config` on Debian
+  or Ubuntu (as CI does), or `mbedtls` and `pkgconf` with Homebrew.
+- `test_link_pairing_handshake` builds Mbed TLS from source for its
+  real-crypto case, so it needs `IDF_PATH` (set by `export.sh`) or
+  `MBEDTLS_SOURCE_DIR`.
 
 ## Before you hand back work
 

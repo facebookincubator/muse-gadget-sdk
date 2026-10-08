@@ -162,14 +162,17 @@ menu "ESP32 Device SDK"
         help
             Select the physical status LED implementation for this build. The
             Muse Home Link board uses a 3-channel PWM RGB LED. A stock
-            ESP32-C5 DevKitC-1 has a single addressable RGB LED on GPIO27.
+            ESP32-C5 DevKitC-1 has a single addressable RGB LED on GPIO27;
+            other boards with one set HOMEHUB_LED_STRIP_GPIO.
             The always-on red power LED on the DevKitC-1 is not firmware
             controlled. The ideaspark ESP32 board and the SenseCAP Indicator
             have no status LED; their displays show the status colour in bars
             along the top and bottom edges, with an animation in between. The
             Home Assistant Voice PE shows the status colour on its LED ring.
-            The reTerminal E1001 shows a still status screen on its
-            black and white e-paper instead.
+            Seeed reSpeaker Lite shows it on a single RGB LED.
+            The reTerminal E1001 and E1002 show a still status screen on
+            their e-paper instead (black and white on the E1001, six colours
+            on the E1002).
             Boards with the full UI have no status LED; their screen shows Link's pairing
             and connection state instead.
 
@@ -177,10 +180,14 @@ menu "ESP32 Device SDK"
             bool "Muse Home Link PWM RGB LED"
 
         config HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
-            bool "ESP32-C5 DevKitC-1 GPIO27 addressable RGB LED"
+            bool "Addressable RGB LED (ESP32-C5 DevKitC-1 GPIO27 by default)"
 
         config HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
             bool "ideaspark ESP32 1.9 inch ST7789 display (status bars)"
+
+        config HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+            bool "Waveshare ESP32-C6-LCD-1.47 inch ST7789 display (status bars)"
+            depends on IDF_TARGET_ESP32C6
 
         config HOMEHUB_LED_BACKEND_SENSECAP_ST7701
             bool "SenseCAP Indicator 4 inch ST7701S RGB display (status bars)"
@@ -190,8 +197,16 @@ menu "ESP32 Device SDK"
             bool "reTerminal E1001 7.5 inch UC8179 e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
+        config HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+            bool "reTerminal E1002 7.3 inch Spectra 6 colour e-paper (status screen)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
         config HOMEHUB_LED_BACKEND_VOICE_RING
             bool "Home Assistant Voice PE 12-LED ring"
+            depends on IDF_TARGET_ESP32S3
+
+        config HOMEHUB_LED_BACKEND_RESPEAKER_LITE
+            bool "Seeed reSpeaker Lite single RGB LED (experimental)"
             depends on IDF_TARGET_ESP32S3
 
         config HOMEHUB_LED_BACKEND_MUSE
@@ -211,23 +226,37 @@ menu "ESP32 Device SDK"
             red first, unlike the usual WS2812 green first (GRB). Turn this
             off if your board shows green as red and amber as green.
 
+    config HOMEHUB_LED_STRIP_GPIO
+        int "Addressable LED data GPIO"
+        depends on HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
+        range 0 28 if IDF_TARGET_ESP32C5
+        range 0 48
+        default 27
+        help
+            GPIO driving the single addressable status LED. The ESP32-C5
+            DevKitC-1 uses GPIO27. The build stops if the pin is one the chip
+            uses for its SPI flash or PSRAM.
+
     config HOMEHUB_DISPLAY
         bool
         default y if HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+        default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
         help
             Set for backends with a display: the status bars, animation and
             agent name (a still status screen on e-paper), and the display.*
             commands.
 
     config HOMEHUB_VOICE
-        bool "Push-to-talk voice chat (Home Assistant Voice PE)"
-        depends on HOMEHUB_LED_BACKEND_VOICE_RING && SPIRAM
+        bool "Push-to-talk voice chat"
+        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE) && SPIRAM
         default y
         help
-            Hold the centre button, speak, release: the audio goes to the
-            agent's chat as a voice note, which the VM transcribes, and the
+            Hold the centre button (XIAO BOOT on reSpeaker Lite), speak,
+            release: the audio goes to the agent's chat as a voice note,
+            which the VM transcribes, and the
             reply appears in the Muse app as text. To speak it, plug a TTS
             API of your own into start_tts in muse_chat_session.cpp. This
             uses a second Noise session (Muse's voice session) with Link's
@@ -245,6 +274,24 @@ menu "ESP32 Device SDK"
             humidity. The D1S and D1Pro have CO2 and tVOC built in;
             temperature and humidity need the Grove AHT20. Needs Seeed's stock
             RP2040 firmware.
+
+    config HOMEHUB_RETERMINAL_SHT4X
+        bool "reTerminal E100x onboard SHT4x sensor (sensors.read)"
+        depends on HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default y
+        help
+            Poll the onboard Sensirion SHT4x temperature and humidity sensor
+            over I2C (SDA GPIO19, SCL GPIO20, address 0x44) and answer
+            sensors.read with the latest temperature and humidity.
+
+    config HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET
+        int "SHT4x temperature offset, in tenths of a degree Celsius"
+        depends on HOMEHUB_RETERMINAL_SHT4X
+        default -33
+        help
+            Calibration offset added to the SHT4x temperature reading, in
+            tenths of a degree Celsius. The onboard sensor reads warm from
+            board heat; -33 (-3.3 C, about -6 F) is a starting point.
 
     config HOMEHUB_DISPLAY_COMMANDS
         bool

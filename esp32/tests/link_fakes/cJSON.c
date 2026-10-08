@@ -430,6 +430,14 @@ int cJSON_IsArray(const cJSON *item) {
     return item && item->type == cJSON_Array;
 }
 
+int cJSON_IsFalse(const cJSON *item) {
+    return item && item->type == cJSON_False;
+}
+
+int cJSON_IsNull(const cJSON *item) {
+    return item && item->type == cJSON_NULL;
+}
+
 int cJSON_IsObject(const cJSON *item) {
     return item && item->type == cJSON_Object;
 }

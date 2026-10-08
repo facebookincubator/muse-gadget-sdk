@@ -17,7 +17,7 @@ Use this skill when the confirmed VIZIO D40f-G9 exposes a compatible SmartCast l
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An already-configured TV and a compatible pyvizio client over HomeLink HTTPS.
 - Normal on-screen PIN pairing when required, secure storage of the returned authentication token, and appropriate device-specific TLS trust.

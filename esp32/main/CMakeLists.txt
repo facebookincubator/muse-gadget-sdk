@@ -70,7 +70,8 @@ set(GADGET_REQUIRES
 )
 
 # E-paper has its own status screen in place of led_status.c.
-if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
+if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+   OR CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
     list(APPEND GADGET_SRCS "epaper_status.c")
 else()
     list(APPEND GADGET_SRCS "led_status.c")
@@ -80,21 +81,28 @@ if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
 endif()
 
-if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING)
+if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING OR CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
     list(APPEND GADGET_REQUIRES led_strip)
 endif()
 
 if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
     list(APPEND GADGET_SRCS "sensecap_sensors.c")
 endif()
+if(CONFIG_HOMEHUB_RETERMINAL_SHT4X)
+    list(APPEND GADGET_SRCS "reterminal_sht4x.c")
+endif()
 
 if(CONFIG_HOMEHUB_VOICE)
     list(APPEND GADGET_SRCS
         "voice.c"
-        "voice_board.c"
         "voice_muse_chat.c"
         "voice_player.c"
     )
+    if(CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
+        list(APPEND GADGET_SRCS "voice_board_respeaker_lite.c")
+    else()
+        list(APPEND GADGET_SRCS "voice_board.c")
+    endif()
 endif()
 
 idf_component_register(

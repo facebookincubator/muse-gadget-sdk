@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|echoear> [serial|port]
+#   tools/muse/board.sh build|flash <s3|s3n|s3-216|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7|vn183|ai-passport|echoear> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -23,23 +23,33 @@
 # flashes in build-muse-<profile>-bench/, so neither build's sdkconfig hides
 # the other's.
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|echoear}
+cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7|vn183|ai-passport|echoear}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
     s3n)     profile=waveshare-s3-175;     target=esp32s3 ;;
+    s3-216)  profile=waveshare-s3-216;     target=esp32s3 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;
     echoear) profile=ostb-echoear-2st; target=esp32s3 ;;
     box3)    profile=espressif-box-3;       target=esp32s3 ;;
     c6)      profile=waveshare-c6-18;      target=esp32c6 ;;
+    c6-206)  profile=waveshare-c6-206;     target=esp32c6 ;;
     # Its CH342 bridge drops bytes when esptool sends a whole packet at once,
     # so pace the writes (paced_esptool.py) at the baud they were tested at.
     watcher) profile=sensecap-watcher;     target=esp32s3; baud=115200; paced=1 ;;
     cardputer-adv) profile=m5stack-cardputer-adv; target=esp32s3 ;;
     sticks3) profile=m5stack-sticks3;      target=esp32s3 ;;
     stopwatch) profile=m5stack-stopwatch;  target=esp32s3 ;;
+    cores3)  profile=m5stack-cores3;       target=esp32s3 ;;
+    fnk0104b) profile=fnk0104b;            target=esp32s3 ;;
+    jc3248w535) profile=guition-jc3248w535; target=esp32s3 ;;
+    lcd7) profile=waveshare-s3-lcd7; target=esp32s3 ;;
+    vn183)   profile=vn-s3-183;            target=esp32s3 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
+    # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.
+    core2)   profile=m5stack-core2; target=esp32; baud=230400 ;;
+    ai-passport) profile=ai-passport;      target=esp32c3 ;;
     *) echo "unknown board $board"; exit 2 ;;
 esac
 baud=${baud:-460800}

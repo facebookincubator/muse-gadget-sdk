@@ -17,7 +17,7 @@ Use this skill when current discovery and entity metadata identify an already-in
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An already commissioned controller attached to a working opener, and credentials for its enabled HTTP or native TCP API.
 - An explicit requested door/light/lock action. Confirm the intended door and that movement is safe; preserve all opener interlocks and obstruction protections.

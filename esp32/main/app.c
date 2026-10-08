@@ -68,6 +68,9 @@
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
 #include "sensecap_sensors.h"
 #endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+#include "reterminal_sht4x.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -1497,17 +1500,26 @@ static void discover_task(void *arg) {
     discover_task_args_t *args = (discover_task_args_t *)arg;
     ESP_LOGI(TAG, "starting network discovery scan");
     cJSON *result = net_discovery_run(args->params);
-    if (result) {
-        cJSON *wrapper = cJSON_CreateObject();
-        if (!wrapper || !cJSON_AddBoolToObject(wrapper, "ok", true)
-            || !cJSON_AddItemToObject(wrapper, "payload", result)) {
+    cJSON *wrapper = result ? cJSON_CreateObject() : NULL;
+    if (!wrapper || !cJSON_AddBoolToObject(wrapper, "ok", true)
+        || !cJSON_AddItemToObject(wrapper, "payload", result)) {
+        // Out of memory. Answer anyway, so the Muse isn't left waiting out
+        // the command's timeout.
+        ESP_LOGW(TAG, "network discovery ran out of memory");
+        cJSON_Delete(wrapper);
+        cJSON_Delete(result);
+        wrapper = cJSON_CreateObject();
+        cJSON *failure = cJSON_AddObjectToObject(wrapper, "error");
+        if (!cJSON_AddBoolToObject(wrapper, "ok", false)
+            || !cJSON_AddStringToObject(failure, "code", "out_of_memory")
+            || !cJSON_AddStringToObject(failure, "message",
+                                        "not enough memory for the discovery results")) {
             cJSON_Delete(wrapper);
-            cJSON_Delete(result);
-        } else {
-            noise_ctrl_send_command_result(
-                args->session_generation, args->request_id, wrapper);
+            wrapper = NULL;
         }
     }
+    noise_ctrl_send_command_result(
+        args->session_generation, args->request_id, wrapper);
     if (args->params) cJSON_Delete(args->params);
     free(args);
     stack_monitor_record(NULL);
@@ -1889,6 +1901,11 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
     if (strcmp(command, "sensors.read") == 0) {
         return sensecap_sensors_command();
+    }
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    if (strcmp(command, "sensors.read") == 0) {
+        return reterminal_sht4x_command();
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {
@@ -2619,6 +2636,9 @@ void app_run(void) {
 #endif
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
     sensecap_sensors_init();
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    reterminal_sht4x_init();
 #endif
 
     if (!setup_complete) {

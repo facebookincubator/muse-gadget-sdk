@@ -30,28 +30,50 @@ import sys
 USJ = (0x303A, 0x1001)      # the chip's own USB Serial/JTAG
 CH342 = (0x1A86, 0x55D2)    # WCH dual UART bridge: two ports per device
 CH9102 = (0x1A86, 0x55D4)   # WCH single UART bridge
+CH343 = (0x1A86, 0x55D3)    # WCH single UART bridge on Waveshare 7-inch LCD
+CP210X = (0x10C4, 0xEA60)   # Silicon Labs CP2104 bridge
+
+
+def _usbs(usb):
+    """The board.sh name maps to one USB device, or several (the Core2 shipped
+    with a CP2104 or a CH9102F bridge). A device is a (vid, pid) pair; several
+    is a tuple of pairs."""
+    if isinstance(usb, tuple) and usb and isinstance(usb[0], tuple):
+        return usb
+    return (usb,)
+
 
 # board.sh's name -> the USB device carrying its console.
 USB = {
     "s3": USJ,
     "s3n": USJ,
+    "s3-216": USJ,
     "aipi": USJ,
     "box3": USJ,
     "echoear": USJ,
     "c6": USJ,
+    "c6-206": USJ,
     "sticks3": USJ,
     "cardputer-adv": USJ,
     "stopwatch": USJ,
+    "cores3": USJ,
+    "fnk0104b": USJ,
+    "jc3248w535": USJ,
+    "lcd7": CH343,
+    "vn183": USJ,
+    "ai-passport": USJ,
     "watcher": CH342,   # the ESP32-S3 on the second port; the Himax camera chip is on the first
     "plus2": CH9102,
+    "core2": (CP210X, CH9102),
 }
 # Boards whose console takes Muse's serial commands (tools/muse/chat.py). The
 # Watcher reads them on its CH342 port with MUSE_CONSOLE_UART.
-COMMANDS = ("s3", "s3n", "aipi", "box3", "c6", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "echoear")
+COMMANDS = ("s3", "s3n", "s3-216", "aipi", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "vn183", "ai-passport", "echoear")
 # Bridges that drop bytes when a whole packet arrives at once, so writes to them
 # go 64 bytes at a time at the line rate (paced_esptool.py, chat.Board.write).
 PACED = (CH342,)
-KINDS = {USJ: "Espressif USB Serial/JTAG", CH342: "CH342 bridge", CH9102: "CH9102 bridge"}
+KINDS = {USJ: "Espressif USB Serial/JTAG", CH342: "CH342 bridge", CH9102: "CH9102 bridge", CH343: "CH343 bridge",
+         CP210X: "CP2104 bridge"}
 
 
 class NotFound(Exception):
@@ -66,9 +88,10 @@ def comports():
 
 def devices(usb, ports=None):
     """One port per attached USB device of this kind: a two-port bridge's second."""
+    kinds = _usbs(usb)
     found = {}
     for p in sorted(comports() if ports is None else ports, key=lambda p: p.device):
-        if (p.vid, p.pid) == usb:
+        if (p.vid, p.pid) in kinds:
             found[p.serial_number or p.device] = p
     return list(found.values())
 
@@ -83,7 +106,7 @@ def find(board, serial=None, ports=None):
         cands = [p for p in cands if (p.serial_number or "").lower() == serial.lower()]
     if len(cands) == 1:
         return cands[0].device
-    kind = KINDS[usb]
+    kind = " / ".join(KINDS[u] for u in _usbs(usb))
     if not cands:
         raise NotFound(f"No {board} board on USB (no {kind}{' ' + serial if serial else ''}).")
     listed = ", ".join(f"{p.device} ({p.serial_number})" for p in cands)
@@ -105,7 +128,7 @@ def command_ports(ports=None):
 def main(argv):
     if argv[1:2] == ["--list"]:
         for usb, kind in KINDS.items():
-            boards = "/".join(b for b, u in USB.items() if u == usb)
+            boards = "/".join(b for b, u in USB.items() if usb in _usbs(u))
             for p in devices(usb):
                 print(f"{p.device}  {kind} {p.serial_number}  ({boards})")
         return 0

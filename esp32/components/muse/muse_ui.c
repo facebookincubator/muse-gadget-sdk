@@ -43,6 +43,7 @@
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
 #include "muse_state.h"
+#include "muse_text.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
@@ -471,6 +472,26 @@ static const lv_font_t *font_pick(const lv_font_t *full, const lv_font_t *compac
     return s_small ? compact : full;
 }
 
+#if CONFIG_MUSE_CJK_FONT
+LV_FONT_DECLARE(muse_font_cjk_16)
+#endif
+
+/* unscii-16 for captions and replies; with CONFIG_MUSE_CJK_FONT, a copy that
+ * falls back to Unifont's 16x16 CJK, the same cell, for what unscii lacks. */
+static const lv_font_t *caption_font(void)
+{
+#if CONFIG_MUSE_CJK_FONT
+    static lv_font_t font;
+    if (!font.get_glyph_dsc) {
+        font = lv_font_unscii_16;
+        font.fallback = &muse_font_cjk_16;
+    }
+    return &font;
+#else
+    return &lv_font_unscii_16;
+#endif
+}
+
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
 {
     lv_obj_t *l = lv_label_create(parent);
@@ -689,7 +710,7 @@ static void build_answer(lv_obj_t *face, int ring_in)
         int d = ring_in - spk_r - 4;   /* just inside the ring, even when swollen */
         spk_x = -(int)sqrtf((float)(d * d - spk_y * spk_y));
     }
-    const lv_font_t *font = &lv_font_unscii_16;
+    const lv_font_t *font = caption_font();
     int cw = lv_font_get_glyph_width(font, 'M', ' ');
     int pitch = lv_font_get_line_height(font) + CAPTION_LINE_SPACE;
 
@@ -810,6 +831,10 @@ static void build_screen(void)
         /* It never scrolls, but LVGL would size its scrollbars from all its
          * children every time it draws any part of it. */
         lv_obj_set_scrollbar_mode(s_face, LV_SCROLLBAR_MODE_OFF);
+        /* Match the avatar's black canvas; the tile's theme background otherwise
+         * shows as a different-coloured square around the character. */
+        lv_obj_set_style_bg_color(s_face, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(s_face, LV_OPA_COVER, 0);
         s_settings = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_LEFT);
         face = s_face;
     }
@@ -893,7 +918,7 @@ static void build_screen(void)
      * these rows, so there's nowhere to put this without covering the face. */
     lv_obj_set_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
 
-    s_caption_lbl = make_label(face, font_pick(&lv_font_unscii_16, &lv_font_unscii_8), COLOR_CAPTION);
+    s_caption_lbl = make_label(face, font_pick(caption_font(), &lv_font_unscii_8), COLOR_CAPTION);
     if (s_small) {
         /* Two lines over the bottom of the face, on a dark band so they stay
          * legible. A tall screen has room to keep them above the mic icon. */
@@ -905,6 +930,11 @@ static void build_screen(void)
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
         /* Touch screens need the caption above the navigation dots too. */
         lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+#if CONFIG_MUSE_CJK_FONT
+        /* CJK doesn't fit unscii-8's cell, so a reply with CJK in it fills the
+         * band one line at a time in the 16 px caption font instead. */
+        muse_state_set_cjk_page(s_w / lv_font_get_glyph_width(caption_font(), 'M', ' '), 1);
+#endif
 
         s_bar = lv_obj_create(face);
         lv_obj_remove_style_all(s_bar);
@@ -1239,10 +1269,11 @@ static void update_chrome(float now)
     if (b.passkey || confirm) {
         char code[24], hint[40];
         if (confirm) {
-            strlcpy(code, muse_board->touch_talk ? "Tap screen" : s_small ? "Press" : "Press button", sizeof(code));
-            if (muse_board->touch_talk) {
+            if (muse_board->touch_talk || !muse_board->audio_init) {
+                strlcpy(code, "Tap screen", sizeof(code));
                 strlcpy(hint, "Tap to confirm pairing", sizeof(hint));
             } else {
+                strlcpy(code, s_small ? "Press" : "Press button", sizeof(code));
                 snprintf(hint, sizeof(hint), s_small ? "%s button" : "Press the %s button", muse_board->talk_button);
             }
         } else {
@@ -1262,13 +1293,13 @@ static void update_chrome(float now)
     if (s_speaker && (int)speaker != s_shown_speaker) {
         show_speaker(speaker);
     }
-    if (s_speaker && paired == lv_obj_has_flag(s_speaker, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_set_flag(s_speaker, LV_OBJ_FLAG_HIDDEN, !paired);
+    if (s_speaker && (paired && muse_board->audio_init) == lv_obj_has_flag(s_speaker, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_set_flag(s_speaker, LV_OBJ_FLAG_HIDDEN, !paired || !muse_board->audio_init);
     }
     /* Unpaired, a press only says "SET UP MUSE FIRST", so the mic goes too.
      * While a reply's layout is up it decides; that's only ever paired. */
-    if (s_answer < 0 && paired == lv_obj_has_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_set_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN, !paired);
+    if (s_answer < 0 && (paired && muse_board->audio_init) == lv_obj_has_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_set_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN, !paired || !muse_board->audio_init);
     }
 }
 
@@ -1415,6 +1446,11 @@ static void update_status(muse_mode_t mode, float now)
     }
     if (fresh) {
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
+#if CONFIG_MUSE_CJK_FONT
+        if (s_small) {
+            lv_obj_set_style_text_font(s_caption_lbl, muse_text_has_cjk(caption) ? caption_font() : &lv_font_unscii_8, 0);
+        }
+#endif
         lv_label_set_text(lbl, caption);
         lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !caption[0]);
         if (s_reply_lbl) {
@@ -1522,9 +1558,10 @@ esp_err_t muse_ui_start(void)
     s_w = muse_board->width;
     s_h = muse_board->height;
     /* The full layout assumes room for the 466 px board's header and bottom
-     * captions. Short landscape panels (BOX-3) need the compact layout too. */
+     * captions. Short landscape panels (BOX-3) need the compact layout too,
+     * as does anything narrower than its fixed 256 px captions. */
     bool short_landscape = s_w > s_h && s_h < 320;
-    s_small = s_h < 200 || s_w < 200 || short_landscape;
+    s_small = s_h < 200 || s_w < 200 || short_landscape || s_w < 300;
     s_tall = s_small && s_h >= s_w + 64;
     /* Small screens keep room for the status line and button icons. A narrow
      * one is as wide as Muse gets, in whole pixels. */
@@ -1532,6 +1569,9 @@ esp_err_t muse_ui_start(void)
     if (short_landscape) {
         /* Leave the header's first 40 rows and bottom captions clear. */
         s_canvas_px = s_h * 2 / 3;
+    }
+    if (muse_board->avatar_px > 0) {
+        s_canvas_px = muse_board->avatar_px;
     }
     if (s_canvas_px > s_w) {
         s_canvas_px = s_w / MUSE_PX_W * MUSE_PX_W;

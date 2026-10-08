@@ -17,7 +17,7 @@ Use this skill when fresh discovery identifies a compatible Lutron Smart Bridge 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - HAP requires the eight-digit setup code for a pairable bridge or previously authorized controller pairing keys.
 - A bridge already in Apple Home does not automatically give Muse its credentials. Do not reset or remove an existing pairing. If access is unavailable, use only a supported independently authorized alternative or request setup.

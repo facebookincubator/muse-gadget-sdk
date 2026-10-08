@@ -17,7 +17,7 @@ Use this skill when fresh discovery identifies a HomePod mini, commonly model id
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - A compatible pyatv client with its control sockets routed over HomeLink, using discovery already supplied by Link rather than agent-side multicast.
 - Honor the speaker's existing access/password/pairing requirements and preserve any credentials and session encryption. Do not weaken access settings to obtain a connection.

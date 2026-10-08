@@ -1,0 +1,47 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# M5Stack Core2 v1.0: ESP32-D0WDQ6-V3 (classic ESP32, 16 MB flash, 8 MB quad
+# PSRAM), 2.0" 320x240 ILI9342C touch LCD, PDM mic, I2S speaker, AXP192 PMU,
+# console on a CP2104 or CH9102F USB-UART bridge. Load last, after
+# sdkconfig.muse.
+# Sources: https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_2
+# (pins, AXP rail setup, panel/touch/audio init) and
+# https://github.com/m5stack/M5Unified (AXP192 registers, mic pins).
+CONFIG_IDF_TARGET="esp32"
+CONFIG_MUSE_BOARD_M5STACK_CORE2=y
+# Signed apps without Secure Boot use the Secure Boot V2 (RSA) scheme, which
+# the ESP32 supports from chip revision 3.0 (the D0WDQ6-V3 is one).
+CONFIG_ESP32_REV_MIN_3=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+CONFIG_SPIRAM=y
+# CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
+# Muse's voice task keeps its stack in PSRAM. Off by default on the ESP32 for
+# the revision 1 PSRAM cache bug, which revision 3 (above) doesn't have.
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+
+# Release the classic Bluetooth controller memory; pairing is BLE only.
+CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
+CONFIG_BTDM_CTRL_MODE_BTDM=n
+
+# Core2 v1.0 PMU is the AXP192. Core2 v1.1 (AXP2101) is not supported;
+# the board revision is printed on its back sticker or PCB.
+CONFIG_BSP_PMU_AXP192=y

@@ -17,7 +17,7 @@ Use this skill when the camera already runs a confirmed compatible yi-hack fork 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Already-installed compatible firmware and its existing HTTP/RTSP credentials.
 - A credential-aware HTTP or RTSP client using HomeLink. RTSP media must support interleaved TCP.

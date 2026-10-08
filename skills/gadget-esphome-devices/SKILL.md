@@ -17,7 +17,7 @@ Use this skill when the device is confirmed to run ESPHome and already exposes a
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Already-installed, commissioned firmware with native API or web server enabled.
 - The existing native API encryption key/password or web authentication, if configured, plus a compatible client. Enabling an absent API by reflashing is not part of this skill.

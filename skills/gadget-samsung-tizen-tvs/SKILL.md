@@ -17,7 +17,7 @@ Use this skill when a confirmed Samsung Tizen TV exposes a compatible local remo
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - A compatible local WebSocket client routed through HomeLink, with device-specific TLS trust preserved.
 - User approval of the normal TV pairing prompt when required, and secure storage/reuse of its returned token.

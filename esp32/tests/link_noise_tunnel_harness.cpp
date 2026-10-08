@@ -554,6 +554,35 @@ static void test_heartbeat() {
         assert(!control_tx_turn());
         assert(control_bytes.empty() && !control_tx.json && !heartbeat_sent);
     }
+    // A rejected registration isn't acked, so the tunnel doesn't open, and the
+    // reason is logged. A later success for the same request still counts.
+    for (const auto &[reply, reason] : std::vector<std::pair<const char *, const char *>>{
+            {R"({"id":"register-id","type":"res","result":{"status":"registered"},"error":"denied"})",
+             "link.register rejected: denied"},
+            {R"({"id":"register-id","type":"res","error":{"code":"invalid","message":"too many commands"}})",
+             "link.register rejected: too many commands"},
+            {R"({"id":"register-id","type":"res","error":{"code":"invalid"}})",
+             "link.register rejected: no reason given"}}) {
+        reset_control();
+        strcpy(s_register_req_id, "register-id");
+        logs.clear();
+        receive(reply);
+        assert(!s_register_acked && !s_heartbeat_registered);
+        assert(std::find(logs.begin(), logs.end(), reason) != logs.end());
+        receive(registered);
+        assert(s_register_acked && s_heartbeat_registered);
+    }
+    // "error": null or false is no error: acked, though not a heartbeat
+    // registration.
+    for (const char *reply : {
+            R"({"id":"register-id","type":"res","result":{"status":"registered"},"error":null})",
+            R"({"id":"register-id","type":"res","result":{"status":"registered"},"error":false})"}) {
+        reset_control();
+        strcpy(s_register_req_id, "register-id");
+        receive(reply);
+        assert(s_register_acked && !s_heartbeat_registered);
+    }
+
     // An unrelated reply doesn't consume registration; a reconnect needs a new ACK.
     for (int connection = 0; connection < 2; ++connection) {
         reset_control();

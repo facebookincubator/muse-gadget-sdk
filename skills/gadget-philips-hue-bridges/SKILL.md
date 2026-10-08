@@ -18,7 +18,7 @@ Use this skill when fresh discovery identifies a Hue bridge exposing CLIP v2 and
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Use an existing local application key or obtain one with the user's physical bridge-button approval. An account/cloud discovery service is not required.
 - For pairing, POST a documented `devicetype` to `/api` while the link-button window is open and securely store the returned username/application key. Do not log it.

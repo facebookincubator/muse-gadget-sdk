@@ -117,7 +117,7 @@ class MessageDecoder:
                 continue  # keepalive
             try:
                 message = json.loads(raw)
-            except json.JSONDecodeError:
+            except ValueError:  # bad JSON, or bytes that aren't UTF-8
                 log.warning("dropping malformed control message (%d bytes)", length)
                 continue
             if isinstance(message, dict):
@@ -345,12 +345,33 @@ class LinkSession:
         timeout_ms = message.get("timeout_ms") or None
         if not invoke_id:
             return
-        log.info("invoke %s", command)
+        shown = printable(command)
+        log.info("invoke %s", shown)
         async with self._invokes:
+            started = time.monotonic()
             result = await asyncio.get_running_loop().run_in_executor(
                 None, self._run_command, command, params, timeout_ms,
             )
+            log.info("%s %s in %d ms", shown, describe_result(result),
+                     (time.monotonic() - started) * 1000)
         await self.send({"method": "link.result", "id": invoke_id, **result})
+
+
+def printable(text: str) -> str:
+    """text with control characters replaced, so it can't forge log lines."""
+    return "".join(ch if ch.isprintable() else "?" for ch in text)
+
+
+def describe_result(result: dict) -> str:
+    """How an invoke ended, for the log. Never its parameters, output or error,
+    which can echo them."""
+    if not result.get("ok"):
+        return "failed"
+    payload = result.get("payload")
+    if isinstance(payload, dict) and isinstance(payload.get("exit_code"), int):
+        timed_out = ", timed out" if payload.get("timed_out") else ""
+        return f"ok, exit {payload['exit_code']}{timed_out}"
+    return "ok"
 
 
 class _Request:

@@ -14,6 +14,9 @@
 
 from __future__ import annotations
 
+import os
+import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -23,13 +26,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _cc_command() -> list[str]:
+    cmd = shlex.split(os.environ.get("CC", "cc"))
+    # Fail rather than skip: a missing compiler must not let the pairing
+    # security checks pass silently.
+    if not cmd or shutil.which(cmd[0]) is None:
+        raise RuntimeError("C compiler not available; set CC")
+    return cmd
+
+
 class LinkPairingSignerPolicyTest(unittest.TestCase):
     def test_empty_block_is_the_only_community_efuse_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / "pairing_signer_policy_test"
             subprocess.run(
                 [
-                    "cc",
+                    *_cc_command(),
                     "-std=c11",
                     "-Wall",
                     "-Wextra",

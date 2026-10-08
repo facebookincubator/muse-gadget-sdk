@@ -1,0 +1,47 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Espressif ESP32-S3-DevKitC-1 v1.1, N8R8 (ESP32-S3-WROOM-1-N8R8 or -1U-N8R8):
+# 8 MB quad flash, 8 MB octal PSRAM, an addressable RGB LED on GPIO38, the BOOT
+# button, and two USB ports, the S3's own USB-Serial-JTAG and a USB-UART
+# bridge. Load last, after sdkconfig.defaults (see README.md in this
+# directory). The N32R16V variant (octal flash, 1.8 V) is not covered.
+# Source: Espressif's ESP32-S3-DevKitC-1 v1.1 user guide and IDF's blink
+# example (sdkconfig.defaults.esp32s3).
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# The onboard addressable LED. v1.0 boards have it on GPIO48 instead.
+CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27=y
+CONFIG_HOMEHUB_LED_STRIP_GPIO=38
+# Green first, as WS2812s usually are; unlike the C5 DevKitC-1's LED.
+CONFIG_HOMEHUB_LED_RGB_ORDER=n
+# BOOT button, active low.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+
+# 8 MB quad flash, as listed for the N8R8 module.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# Octal PSRAM holds the TLS buffers and keeps the home-network tunnel on.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+
+# The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
+# NimBLE host's allocations in PSRAM so pairing has room.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y

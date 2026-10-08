@@ -67,7 +67,12 @@ typedef struct {
     const char *aux_button;     /* "bottom" */
     muse_button_hint_t talk_hint;   /* mic icon; the menu's hints follow both */
     muse_button_hint_t aux_hint;    /* power or menu icon; left out, there's none */
+    /* The menu turns a right-edge aux button's hint on end, which LVGL draws
+     * through a ~14 KB layer; set this where that's too much RAM (the C3) and
+     * the hint lies flat on the menu's bar, left of the talk button's. */
+    bool flat_menu_hints;
     int frame_ms;           /* face animation period */
+    int avatar_px;          /* optional avatar canvas size; 0 uses the UI default */
 
     /* Power rails, buses, expanders. Runs first. */
     esp_err_t (*init)(void);

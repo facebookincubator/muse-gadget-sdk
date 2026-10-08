@@ -29,7 +29,7 @@ pairing and control protocols, so the same app pairs either.
 
 | Module | Role |
 |---|---|
-| `cli.py` | `musegadget pair`, `run`, `say`, `info`, `unpair` |
+| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `info`, `unpair` |
 | `pairing.py` | Community pairing v5: P-256 ECDH, HKDF-SHA256, AES-256-GCM, `confirm_app` |
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
 | `ble_setup.py` | Setup commands behind the GATT characteristics (no BlueZ dependency) |
@@ -91,19 +91,20 @@ For a quicker loop, build a wheel and install it into the existing venv:
 ```sh
 uv build --wheel
 # on the device:
-sudo /opt/musegadget/venv/bin/pip install --no-deps --force-reinstall musegadget-*.whl
+sudo /opt/musegadget/bin/uv pip install --python /opt/musegadget/venv/bin/python --no-deps --reinstall musegadget-*.whl
 sudo systemctl restart musegadget
 ```
 
-Installer flags: `--run-as USER`, `--no-pair`, `--yes`, `--from SOURCE`,
-`--uninstall`, `--purge`. The installer is ShellCheck-clean; keep it that way.
+Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
+`--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
+keep it that way.
 
 ## Run and debug
 
 ```sh
 sudo journalctl -u musegadget -f     # service log
 sudo musegadget -v pair              # pairing, verbose
-musegadget info                      # identity and pairing state
+sudo musegadget info                 # identity and pairing state
 ```
 
 State lives in `/var/lib/musegadget` (mode 0700): `identity.json` survives
@@ -112,6 +113,9 @@ unpairing, `pairing.json` holds the device tokens. The local socket is
 
 A healthy start logs `commands run as <user>`, `Noise session established`,
 `sent link.register` and `registered with the Muse`.
+Each command the Muse runs logs `invoke <command>`, then how it ended, such as
+`system.run ok, exit 0 in 41 ms` or `file.read failed in 3 ms`. The log
+never has a command's parameters, output or error message.
 
 ## Pairing
 

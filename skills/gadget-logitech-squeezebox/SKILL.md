@@ -17,7 +17,7 @@ Use this skill when a Squeezebox-compatible player is already connected to a rea
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An existing configured Lyrion server, any required HTTP authentication, and a player already connected to it.
 - A JSON-RPC HTTP client routed through HomeLink. No new server or SlimProto implementation is needed.
