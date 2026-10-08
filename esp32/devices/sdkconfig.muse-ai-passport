@@ -20,6 +20,9 @@
 CONFIG_IDF_TARGET="esp32c3"
 CONFIG_MUSE_BOARD_AI_PASSPORT=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+# UART0's TX is GPIO21, the backlight: keep the console off it. The ROM
+# bootloader still prints there, so the backlight flickers once at power-on.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=1
 # Two-button-style menu on a small screen.
 CONFIG_LV_FONT_MONTSERRAT_12=y

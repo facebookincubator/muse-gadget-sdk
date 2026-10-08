@@ -366,8 +366,8 @@ Supports the display, buttons, BLE/Wi-Fi pairing, voice notes, text replies
 (with `CONFIG_MUSE_CJK_FONT` for Chinese and Japanese) and the battery gauge.
 
 - The three buttons on the right edge share one ADC ladder on GPIO0. Hold
-  **OK** (the bottom one) to talk; it also confirms pairing. **UP** or
-  **DOWN** opens the menu and moves through it.
+  **OK** (the bottom one) to talk; it also confirms pairing. **DOWN** opens
+  the menu and moves down it; **UP** moves up.
 - Menu power-off enters deep sleep; any button wakes it.
 
 The C3 has about 400 KB of SRAM shared between code and heap, and no PSRAM.

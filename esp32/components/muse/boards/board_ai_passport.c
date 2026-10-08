@@ -59,7 +59,7 @@ static const char *TAG = "board";
 #define LCD_MOSI GPIO_NUM_9
 #define LCD_CS GPIO_NUM_1
 #define LCD_DC GPIO_NUM_20
-#define LCD_BL GPIO_NUM_21         /* also UART0's default TX: the console stays on USB-Serial-JTAG */
+#define LCD_BL GPIO_NUM_21         /* also UART0's TX: the overlay puts the console on USB-Serial-JTAG */
 #define LCD_PCLK_HZ (80 * 1000 * 1000)
 #define BL_HZ 5000
 #define LVGL_TASK_STACK 6144       /* down from the adapter's 8 KB: drawing runs on LVGL's own thread */
@@ -409,15 +409,17 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     return *spk && *mic ? ESP_OK : ESP_FAIL;
 }
 
-/* OK talks; UP and DOWN both open the menu, as the aux button. */
+/* OK talks; DOWN is the aux button, which opens the menu and moves down; UP
+ * moves up, as the VN board's Vol- does. */
 static unsigned key_edges(btn_key_t key, bool press)
 {
     switch (key) {
     case KEY_OK:
         return press ? MUSE_BTN_TALK_PRESS : MUSE_BTN_TALK_RELEASE;
-    case KEY_UP:
     case KEY_DOWN:
         return press ? MUSE_BTN_AUX_PRESS : MUSE_BTN_AUX_RELEASE;
+    case KEY_UP:
+        return press ? MUSE_BTN_UP : 0;
     default:
         return 0;
     }
@@ -491,7 +493,7 @@ static const muse_board_t s_board = {
     .touch = false,
     .diagonal_in = 2.0f,
     .talk_button = "ok",
-    .aux_button = "up/down",
+    .aux_button = "down",
     /* All three buttons are on the right edge beside the screen: UP near the
      * top, DOWN in the middle, OK (talk) near the bottom. */
     .talk_hint = { LV_ALIGN_RIGHT_MID, -8, 110 },

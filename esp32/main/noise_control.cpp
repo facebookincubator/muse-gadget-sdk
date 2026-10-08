@@ -2073,7 +2073,12 @@ static session_result_t run_session(stack_monitor_t *stack) {
 
             if (!inbound.ok()) {
                 ESP_LOGW(TAG, "ProcessInbound failed: %s", inbound.status.str());
-                if (inbound.status.IsResourceExhausted()) s_req_too_large = true;
+                // Too large only if the frame's plaintext can't fit the scratch:
+                // a PSA allocation failure is ResourceExhausted too, and isn't.
+                if (inbound.status.IsResourceExhausted() &&
+                    static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
+                    s_req_too_large = true;
+                }
                 error = true;
                 break;
             }
