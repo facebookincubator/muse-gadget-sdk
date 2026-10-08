@@ -190,6 +190,17 @@ menu "Muse"
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
 
+    config MUSE_P4_CSI_CAMERA
+        bool "ESP32-P4 MIPI-CSI camera capture"
+        depends on MUSE_BOARD_WAVESHARE_P4_LCD35 && SPIRAM
+        default n
+        help
+            Enable the camera.capture Home Link command on an OV5647 module
+            on the board's MIPI-CSI connector: esp_video runs the sensor
+            through the ISP and the P4's JPEG encoder compresses one frame
+            per capture. devices/sdkconfig.muse-waveshare-p4-lcd35-camera
+            turns it on with the sensor's settings.
+
     config MUSE_CJK_FONT
         bool "Show Chinese and Japanese in captions"
         depends on MUSE_ENABLED
