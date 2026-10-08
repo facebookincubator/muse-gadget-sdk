@@ -63,7 +63,9 @@ icon under BOOT.
 - **PWR:** wired only to the AXP2101. The port latches its key edges over I2C
   and treats them as talk too. The PMU powers the board off after a 10 s hold.
   Because its IRQ isn't wired to the ESP32, PWR can't wake the chip from light
-  sleep.
+  sleep: a quick press while the screen is off is ignored, so use KEY3 to wake
+  it. Holding KEY3 and PWR together keeps one turn going until both are
+  released.
 - **BOOT (GPIO0):** the aux button.
 - Replies from Muse are text and show as captions; there is no spoken output
   yet (see `README.md`, "Replies from Muse are text").

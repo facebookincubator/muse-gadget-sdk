@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -46,6 +46,7 @@ static const char *TAG = "board";
 #define LCD_CHUNK_BYTES (BSP_LCD_H_RES * 8 * 2)
 
 #define KEY_GPIO GPIO_NUM_18 /* KEY3, active low with the board's pull-up */
+#define PMU_KEY_EVERY 2      /* poll the PMU over I2C every 20 ms */
 
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_touch_handle_t s_tp;
@@ -207,14 +208,35 @@ static void set_mic_gain(esp_codec_dev_handle_t mic, int db)
     esp_codec_dev_set_in_gain(mic, db == 33 ? 34.5f : (float)db);
 }
 
+/* KEY3 and PWR both talk: the turn runs while either is held. */
 static unsigned poll_buttons(void)
 {
-    unsigned edges = muse_gpio_button_poll(&s_key) | muse_gpio_button_poll(&s_boot) << 2; /* BOOT is aux */
-    /* PWR only reaches the PMU; map its edges to talk, like the 1.75C's PWR. */
-    unsigned pmu = muse_pmu_poll_key();
-    if (pmu & MUSE_PMU_KEY_PRESS)
+    static unsigned tick;
+    static bool key_held, pwr_held;
+    bool was_held = key_held || pwr_held;
+    unsigned key = muse_gpio_button_poll(&s_key);
+    unsigned edges = muse_gpio_button_poll(&s_boot) << 2; /* BOOT is aux */
+    if (key & MUSE_BTN_TALK_PRESS)
+        key_held = true;
+    if (key & MUSE_BTN_TALK_RELEASE)
+        key_held = false;
+    /* PWR only reaches the PMU, as on the 1.75. */
+    if (tick++ % PMU_KEY_EVERY == 0) {
+        unsigned pmu = muse_pmu_poll_key();
+        /* Both edges in one read means the whole press went by unpolled, while
+         * wait_buttons slept on KEY3 and BOOT: drop it rather than send a
+         * zero-length turn. */
+        if ((pmu & (MUSE_PMU_KEY_PRESS | MUSE_PMU_KEY_RELEASE)) != (MUSE_PMU_KEY_PRESS | MUSE_PMU_KEY_RELEASE)) {
+            if (pmu & MUSE_PMU_KEY_PRESS)
+                pwr_held = true;
+            if (pmu & MUSE_PMU_KEY_RELEASE)
+                pwr_held = false;
+        }
+    }
+    bool held = key_held || pwr_held;
+    if (held && !was_held)
         edges |= MUSE_BTN_TALK_PRESS;
-    if (pmu & MUSE_PMU_KEY_RELEASE)
+    if (!held && was_held)
         edges |= MUSE_BTN_TALK_RELEASE;
     return edges;
 }
