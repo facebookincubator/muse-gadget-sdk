@@ -44,6 +44,9 @@
 #include "muse_state.h"
 #include "muse_text.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -110,6 +113,9 @@ static lv_obj_t *s_name_lbl;    /* this gadget's own name, to tell it from the n
 static lv_obj_t *s_power_lbl;
 static lv_obj_t *s_caption_lbl;
 static lv_obj_t *s_reply_lbl;   /* full layout: the reply's page while answering */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+static lv_obj_t *s_review_position;
+#endif
 static lv_obj_t *s_meter[METER_SEGS];
 static lv_obj_t *s_speaker;
 static lv_obj_t *s_speaker_icon;
@@ -738,6 +744,11 @@ static void build_answer(lv_obj_t *face, int ring_in)
     lv_label_set_long_mode(s_reply_lbl, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_remove_flag(s_reply_lbl, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    s_review_position = make_label(face, &lv_font_unscii_8, COLOR_DIM);
+    lv_obj_align(s_review_position, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_add_flag(s_review_position, LV_OBJ_FLAG_HIDDEN);
+#endif
 
     if (muse_board->touch) {
         build_speaker(face, spk_x, spk_y);
@@ -1401,9 +1412,15 @@ static void update_status(muse_mode_t mode, float now)
     static char caption[MUSE_CAPTION_MAX];
     bool fresh = muse_state_caption(caption, sizeof(caption), &s_caption_version);
     int answer = -1;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    bool reviewing = muse_review_active();
+#endif
     if (s_reply_lbl) {
         /* The speaker picks the layout, even mid-reply: the voice task pages to fit. */
         int layout = muse_settings_speaker_on() ? ANSWER_HEARD : ANSWER_READ;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+        if (reviewing) layout = ANSWER_READ;
+#endif
         if (layout != s_page_for) {
             muse_state_set_page(s_answers[layout].cols, s_answers[layout].lines);
             s_page_for = layout;
@@ -1411,6 +1428,19 @@ static void update_status(muse_mode_t mode, float now)
         if (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING) {
             answer = layout;
         }
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+        int page = 0, pages = 0;
+        if (reviewing && muse_review_page(caption, sizeof(caption), &page, &pages)) {
+            answer = ANSWER_READ;
+            fresh = true;
+            char position[24];
+            snprintf(position, sizeof(position), "%d / %d", page, pages);
+            lv_label_set_text(s_review_position, position);
+            lv_obj_remove_flag(s_review_position, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_review_position, LV_OBJ_FLAG_HIDDEN);
+        }
+#endif
     }
     if (answer != s_answer) {
         set_answer(answer);

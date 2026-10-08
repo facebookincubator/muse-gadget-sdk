@@ -72,6 +72,9 @@ extern "C" {
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#endif
 
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
@@ -98,7 +101,11 @@ static const char *TAG = "muse_chat_session";
 #define IN_BYTES (MIC_RATE * 2 * 8)        /* 8 s of mic backlog while connecting */
 #define OUT_BYTES (MIC_RATE * 2 * 2)       /* 2 s of decoded reply */
 #define EV_TEXT 72
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#define TEXT_MAX (32 * 1024)               /* keep streamed replies for wheel review in PSRAM */
+#else
 #define TEXT_MAX 1024                      /* a message's text, for captions timed to its speech */
+#endif
 #define SPEECH_CHARS_PER_S 14              /* until the speech's length is known */
 #define TEXT_CHARS_PER_S 16                /* speaker off: reading pace, a little over speech */
 #define TEXT_HOLD_S 2                      /* speaker off: how long a message's last lines stay up */
@@ -1376,6 +1383,12 @@ static void message_done(int i, const char *final_text)
     }
     m.done = true;
     mark(M_DONE);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    /* Keep complete final text, rather than the 1 KB automatic-caption copy. */
+    const char *review = final_text && final_text[0] ? final_text
+        : m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+    muse_review_store(s_turn.gen, review);
+#endif
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */
         size_t n = m.len;
@@ -1460,7 +1473,11 @@ static void on_event(cJSON *line)
         const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "text"));
         if (text && text[0] && s_turn.text) {
             mark(M_TEXT);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+            append_text(m, text);
+#else
             m.len += strlen(text);
+#endif
             muse_hatch_console("text", text, "\"msg\":%d", i);
         } else if (text && text[0]) {
             mark(M_TEXT);

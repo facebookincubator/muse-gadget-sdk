@@ -119,8 +119,6 @@ static const char *TAG = "board";
 
 #define DEBOUNCE_SAMPLES 3
 #define TURN_COUNTS 2      /* encoder quarter-steps that make a turn */
-#define TURN_REST 20       /* 200 ms without movement ends a turn */
-#define TURN_MAX 40        /* 400 ms, well short of Muse's hold-to-power-off */
 #define TP_LIFT_MS 40      /* touch reads empty this long before the finger counts as lifted */
 #define TP_POLL_MS 10      /* between touch polls while a finger is down */
 #define TP_IDLE_POLL_MS 20 /* and while not */
@@ -671,48 +669,32 @@ static unsigned poll_wheel_push(void)
     return raw ? MUSE_BTN_TALK_PRESS : MUSE_BTN_TALK_RELEASE;
 }
 
-/*
- * A turn of the wheel, either way, reads as one short press: it goes down on
- * the first step and up once the wheel rests. A long turn is cut short so it
- * can't become Muse's hold-to-power-off; the rest of it is ignored.
- */
+/* Keep the encoder's direction and sub-step remainder for reply navigation. */
 static unsigned poll_wheel_turn(void)
 {
-    static int moved, rest, held;
-    static bool down, spent;
+    static int moved;
     int n = 0;
     if (s_paused) {
-        n = s_wheel_moved ? TURN_COUNTS : 0;
+        if (!s_wheel_moved) return 0;
+        s_wheel_moved = false;
+        moved = 0;
+        /* PCNT stops during sleep; the first edge opens the first page. */
+        return MUSE_BTN_REVIEW_NEXT;
     } else if (pcnt_unit_get_count(s_knob, &n) == ESP_OK && n) {
         pcnt_unit_clear_count(s_knob);
     }
-    rest = n ? 0 : rest + 1;
-    if (down) {
-        if (rest < TURN_REST && ++held < TURN_MAX) {
-            return 0;
-        }
-        down = false;
-        spent = rest < TURN_REST;
-        moved = 0;
-        return MUSE_BTN_TALK_RELEASE;
-    }
-    if (rest >= TURN_REST) {
-        moved = 0;
-        spent = false;
-        return 0;
-    }
     moved += n;
-    if (spent || abs(moved) < TURN_COUNTS) {
-        return 0;
+    if (abs(moved) >= TURN_COUNTS) {
+        unsigned ev = moved > 0 ? MUSE_BTN_REVIEW_NEXT : MUSE_BTN_REVIEW_PREV;
+        moved %= TURN_COUNTS;
+        return ev;
     }
-    down = true;
-    held = 0;
-    return MUSE_BTN_TALK_PRESS;
+    return 0;
 }
 
 static unsigned poll_buttons(void)
 {
-    return poll_wheel_push() | poll_wheel_turn() << 2;
+    return poll_wheel_push() | poll_wheel_turn();
 }
 
 /*
@@ -799,10 +781,8 @@ static const muse_board_t s_board = {
     .touch = true,
     .diagonal_in = 1.45f,
     .talk_button = "wheel",
-    .aux_button = "scroll",
-    /* The wheel is in the top-right corner: press it to talk, turn it to sleep.
-     * Turning it isn't a button of its own, so no aux_hint: a power icon beside
-     * the wheel would point at a button that isn't there. */
+    .aux_button = "wheel",
+    /* Hold to talk, click to sleep/wake, turn to review the latest reply. */
     .talk_hint = { LV_ALIGN_CENTER, 100, -143 },    /* 55 degrees above 3 o'clock */
     .frame_ms = 40,
     .init = init,

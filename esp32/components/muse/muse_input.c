@@ -43,6 +43,10 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#include "muse_wheel.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -210,25 +214,9 @@ static void talk_button(unsigned ev)
 {
     bool talk_down = s_talk_down;
     static bool swallow;
-#if CONFIG_MUSE_WATCHER_CAMERA
-    static TickType_t last_release;
-    if ((ev & MUSE_BTN_TALK_PRESS) && !muse_state_asleep()
-        && !muse_menu_is_open() && last_release
-        && xTaskGetTickCount() - last_release <= pdMS_TO_TICKS(350)) {
-        ESP_LOGI(TAG, "wheel double-click: camera preview/shutter");
-        last_release = 0;
-        watcher_camera_preview_toggle();
-        swallow = true;
-        return;
-    }
-#endif
-
     /* A quick tap can latch press and release in the same poll, and a release
      * can land just before the next press; keep them ordered. */
     bool released = ev & MUSE_BTN_TALK_RELEASE;
-#if CONFIG_MUSE_WATCHER_CAMERA
-    bool saw_release = released;
-#endif
     if ((talk_down || swallow) && released) {
         if (talk_down) {
             post(MUSE_PTT_UP, false);
@@ -260,11 +248,6 @@ static void talk_button(unsigned ev)
         }
         talk_down = swallow = false;
     }
-#if CONFIG_MUSE_WATCHER_CAMERA
-    if (saw_release && !swallow) {
-        last_release = xTaskGetTickCount();
-    }
-#endif
     s_talk_down = talk_down;
 }
 
@@ -291,6 +274,69 @@ static void keyboard_buttons(unsigned ev)
     else if (ev & MUSE_BTN_RIGHT) muse_menu_key(MUSE_MENU_RIGHT);
     else if (ev & MUSE_BTN_ENTER) muse_menu_key(MUSE_MENU_SELECT);
 }
+
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+static void watcher_buttons(unsigned ev)
+{
+    static muse_wheel_t wheel;
+    bool down = wheel.down;
+    if (ev & MUSE_BTN_TALK_PRESS) down = true;
+    bool confirmed = down && !wheel.down && muse_link_talk_press();
+    bool asleep = muse_state_asleep();
+    uint32_t now = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+#if CONFIG_MUSE_WATCHER_CAMERA
+    static bool sleep_pending;
+    static uint32_t sleep_deadline;
+    if (confirmed) sleep_pending = false;
+    if (sleep_pending && (int32_t)(now - sleep_deadline) >= 0) {
+        sleep_pending = false;
+        set_asleep(true, "wheel click");
+        asleep = true;
+    }
+    if (down && !wheel.down && sleep_pending) {
+        sleep_pending = false;
+        confirmed = true;   /* consume the second click without starting a note */
+        muse_review_close();
+        ESP_LOGI(TAG, "wheel double-click: camera preview/shutter");
+        watcher_camera_preview_toggle();
+    }
+#endif
+    muse_wheel_action_t action = muse_wheel_update(&wheel, down, now, asleep, confirmed);
+    if (confirmed) muse_state_poke();
+    if (action == MUSE_WHEEL_WAKE) {
+        set_asleep(false, "wheel click");
+    } else if (action == MUSE_WHEEL_TALK_DOWN) {
+        muse_review_close();
+        talk_button(MUSE_BTN_TALK_PRESS);
+    }
+    if (ev & MUSE_BTN_TALK_RELEASE) {
+        action = muse_wheel_update(&wheel, false, now, muse_state_asleep(), false);
+    }
+    if (action == MUSE_WHEEL_TALK_UP) {
+        talk_button(MUSE_BTN_TALK_RELEASE);
+    } else if (action == MUSE_WHEEL_SLEEP) {
+        muse_review_close();
+#if CONFIG_MUSE_WATCHER_CAMERA
+        sleep_pending = true;
+        sleep_deadline = now + 350;
+#else
+        set_asleep(true, "wheel click");
+#endif
+    }
+    if ((ev & (MUSE_BTN_REVIEW_PREV | MUSE_BTN_REVIEW_NEXT)) && !wheel.down) {
+#if CONFIG_MUSE_WATCHER_CAMERA
+        sleep_pending = false;
+#endif
+        set_asleep(false, "wheel review");
+        muse_state_poke();
+        if (muse_review_step(ev & MUSE_BTN_REVIEW_NEXT ? 1 : -1)) {
+            ESP_LOGI(TAG, "wheel: reviewing reply");
+        } else {
+            muse_state_set_caption("NO REPLY YET");
+        }
+    }
+}
+#endif
 
 /* A pairing prompt wakes the screen and keeps it on; otherwise idle sleeps. */
 static void check_sleep(void)
@@ -402,8 +448,13 @@ static void input_task(void *arg)
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",
                      ev & MUSE_BTN_TALK_RELEASE ? " release" : "");
+#if !CONFIG_MUSE_BOARD_SENSECAP_WATCHER
             talk_button(ev);
+#endif
         }
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+        watcher_buttons(ev);
+#endif
         keyboard_buttons(ev);
         /* A latched key (the 1.75's PMU) can report press and release in the
          * same poll, and a release can land just before the next press; keep
@@ -570,6 +621,23 @@ static void set_face(const char *name)
  */
 static bool console_command(char *line, bool whole)
 {
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    if (!strcmp(line, "review.next") || !strcmp(line, "review.prev")) {
+        set_asleep(false, "reply review");
+        muse_state_poke();
+        muse_review_step(!strcmp(line, "review.next") ? 1 : -1);
+        char page[MUSE_CAPTION_MAX];
+        int at = 0, pages = 0;
+        muse_review_page(page, sizeof(page), &at, &pages);
+        printf("@review {\"page\":%d,\"pages\":%d}\n", at, pages);
+        fflush(stdout);
+        return true;
+    }
+    if (!strcmp(line, "review.close")) {
+        muse_review_close();
+        return true;
+    }
+#endif
     if (!strcmp(line, "status")) {
         size_t cap = 1024;   /* long SSID, host and VM names escaped: past 512 */
         char *json = heap_caps_malloc(cap, MUSE_BIG_CAPS);

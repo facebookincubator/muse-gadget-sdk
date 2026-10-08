@@ -16,6 +16,10 @@
 
 #pragma once
 
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+
 /* Between the status side (muse_chat.c) and the session task (muse_chat_session.cpp),
  * plus voice note and caption helpers shared with muse_chat_link.c. */
 
@@ -84,6 +88,11 @@ size_t muse_hatch_base64(const uint8_t *in, size_t n, char *out);
  * of wrapped lines holding byte `at` of `text` (false if there's no text). */
 void muse_hatch_tail_words(const char *src, char *out, size_t cap);
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap);
+/* Manual pages, with the same word/UTF-8 wrapping as automatic captions.
+ * Returns the total number of pages; page is clamped to that range. */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+int muse_hatch_caption_page(const char *text, int page, char *out, size_t cap);
+#endif
 
 #ifdef __cplusplus
 }

@@ -37,11 +37,16 @@ class ChatSession(unittest.TestCase):
 #include "minimp3.h"
 #include "muse_chat_priv.h"
 #define ESP_LOGI(...) ((void)0)
+#define CONFIG_MUSE_BOARD_SENSECAP_WATCHER 1
 ''' + constants + types + r'''
 static turn_t s_turn;
 static char s_reply_shown[EV_TEXT];
 static int64_t s_last_seq, s_marks[4];
-static int captions, console_events;
+static int captions, console_events, reviews;
+static char reviewed[40000];
+static void muse_review_store(uint32_t, const char *text) {
+    if (text && text[0]) { reviews++; strlcpy(reviewed, text, sizeof(reviewed)); }
+}
 enum mark_t { M_TEXT, M_DONE };
 static void mark(mark_t) {}
 static int64_t now_us() { return 12345; }
@@ -65,7 +70,8 @@ static void begin(bool typed = false) {
     s_turn.acked = true;
     strlcpy(s_turn.user_ids[0], "note", sizeof(s_turn.user_ids[0]));
     strlcpy(s_turn.user_ids[1], "parent", sizeof(s_turn.user_ids[1]));
-    captions = console_events = 0;
+    captions = console_events = reviews = 0;
+    reviewed[0] = 0;
 }
 static void event(const char *kind, const char *id, const char *parent = "", const char *text = "") {
     cJSON *root = cJSON_CreateObject(), *payload = cJSON_CreateObject();
@@ -86,7 +92,7 @@ static void rejected_deltas() {
         event("delta.text_append", "other", "", "Wrong reply");
         event("delta.message_done", "other");
         event("message.assistant", "other", "", "Wrong final");
-        assert(!s_turn.nmsgs && !captions && !console_events);
+        assert(!s_turn.nmsgs && !captions && !console_events && !reviews);
         assert(!s_turn.last_content_us && !s_turn.last_event_us);
         event("delta.message_start", "reply", "note");
         event("delta.text_append", "reply", "", "Our reply");
@@ -97,6 +103,28 @@ static void rejected_deltas() {
         event("message.assistant", "other", "", "New turn");
         assert(s_turn.nmsgs == 1 && s_turn.msgs[0].done);
     }
+}
+static void review_text() {
+    s_turn.texts = static_cast<char *>(calloc(MAX_MSGS, TEXT_MAX));
+    for (bool typed : {false, true}) {
+        begin(typed);
+        event("delta.message_start", "reply", "note");
+        char long_text[5000];
+        memset(long_text, 'a', sizeof(long_text) - 1);
+        long_text[sizeof(long_text) - 1] = 0;
+        event("delta.text_append", "reply", "", long_text);
+        event("delta.message_done", "reply");
+        assert(reviews == 1 && !strcmp(reviewed, long_text));
+        begin(typed);
+        event("delta.message_start", "reply", "note");
+        event("delta.text_append", "reply", "", "short delta");
+        event("message.assistant", "reply", "note", "Complete final reply");
+        assert(reviews == 1 && !strcmp(reviewed, "Complete final reply"));
+        event("delta.message_done", "reply");
+        assert(reviews == 1); // duplicate completion does not append twice
+    }
+    free(s_turn.texts);
+    s_turn.texts = nullptr;
 }
 static void valid_parents() {
     begin();
@@ -134,6 +162,7 @@ int main(int argc, char **argv) {
     case 0: rejected_deltas(); break;
     case 1: valid_parents(); break;
     case 2: bounded_rejections(); break;
+    case 3: review_text(); break;
     default: return 2;
     }
 }
@@ -166,3 +195,6 @@ int main(int argc, char **argv) {
 
     def test_rejection_capacity_preserves_correlation(self):
         self.run_case(2)
+
+    def test_review_keeps_full_final_and_long_streamed_voice_or_typed_reply(self):
+        self.run_case(3)

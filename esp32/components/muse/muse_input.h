@@ -30,7 +30,8 @@
  * wakes from sleep; the talk button's press is also posted, marked `wake`, so
  * holding it on through waking records a note. Waking also retries Wi-Fi at
  * once if it's down. Also runs auto-sleep and refreshes battery status into
- * muse_state.
+ * muse_state. The Watcher's single wheel instead uses a click for sleep/wake,
+ * a 300 ms hold for talk, and rotation for reviewing reply pages.
  */
 
 typedef enum {
