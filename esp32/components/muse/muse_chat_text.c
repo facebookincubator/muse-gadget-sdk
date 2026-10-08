@@ -183,6 +183,36 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
     return true;
 }
 
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+int muse_hatch_caption_page(const char *text, int page, char *out, size_t cap)
+{
+    if (!cap) return 0;
+    out[0] = '\0';
+    int cols, lines;
+    muse_state_page(muse_text_has_cjk(text), &cols, &lines);
+    if (cols < 1 || lines < 1) return 0;
+    const char *p = text, *start;
+    size_t len;
+    int count = 0;
+    while (next_line(&p, cols, &start, &len)) count++;
+    if (!count) return 0;
+    int stride = lines > 1 ? lines - 1 : 1;
+    /* The last overlapping page must contribute at least one new line. */
+    int pages = count <= lines ? 1 : 1 + (count - lines + stride - 1) / stride;
+    if (page < 0) page = 0;
+    if (page >= pages) page = pages - 1;
+    int first = page * stride;
+    p = text;
+    size_t o = 0;
+    for (int n = 0; n < first + lines && next_line(&p, cols, &start, &len); n++) {
+        if (n < first) continue;
+        if (o + (o ? 1 : 0) + len >= cap) break;
+        o += snprintf(out + o, cap - o, "%s%.*s", o ? "\n" : "", (int)len, start);
+    }
+    return pages;
+}
+#endif
+
 /* ---- Typed turns on the serial console ---- */
 
 /* JSON-escapes whole characters of *src into out, up to cap - 1 bytes; moves *src past them. */

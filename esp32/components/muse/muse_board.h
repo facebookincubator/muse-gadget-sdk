@@ -48,6 +48,11 @@ extern "C" {
 #define MUSE_BTN_RIGHT        (1u << 7)
 #define MUSE_BTN_ENTER        (1u << 8)
 #define MUSE_BTN_ESCAPE       (1u << 9)
+/* Rotary reply navigation; these are steps, not held buttons. */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#define MUSE_BTN_REVIEW_PREV  (1u << 10)
+#define MUSE_BTN_REVIEW_NEXT  (1u << 11)
+#endif
 
 /* Where a button's icon goes on screen: beside the button, inside the panel. */
 typedef struct {

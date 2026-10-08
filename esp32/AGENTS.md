@@ -245,6 +245,12 @@ flash size and status backend.
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
 
+On the Watcher, rotation opens and pages through the latest reply. A short
+wheel click sleeps/wakes; a 300 ms hold starts push-to-talk. Pairing still
+confirms on the initial press. `muse_review.c` keeps up to 32 KB of the reply
+in PSRAM across the end of the turn. `>review.next`, `>review.prev`, and
+`>review.close` exercise navigation over the serial console.
+
 ### Flash it
 
 ```sh

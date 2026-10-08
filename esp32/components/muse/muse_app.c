@@ -31,6 +31,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#endif
 
 static const char *TAG = "muse";
 
@@ -68,6 +71,9 @@ void muse_app_run(const muse_board_t *board)
     ESP_ERROR_CHECK(muse_settings_init());
     muse_settings_set_listener(on_setting);
     muse_state_init();
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    ESP_ERROR_CHECK(muse_review_init());
+#endif
     muse_battery_init();
     muse_state_set_caption("WAKING UP...");
     ESP_ERROR_CHECK(muse_ui_start());
