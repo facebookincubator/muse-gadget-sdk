@@ -588,7 +588,9 @@ static void setup_disconnect_to_clean(void) {
     wifi_mgr_disconnect();
     ui_set_vm(NULL);
     ui_set_wifi(NULL);
+#if CONFIG_HOMEHUB_SUPPORT_BUG_REPORT
     diagnostic_log_clear();
+#endif
 }
 
 static bool setup_wipe_to_clean(void) {

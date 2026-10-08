@@ -32,6 +32,15 @@ menu "ESP32 Device SDK"
             app inside the encrypted pairing session and includes it when it
             refreshes its device token.
 
+    config GADGET_SDK_TOKEN_WARN
+        bool "Warn on every build when no SDK token is set"
+        default y
+        help
+            Print a prominent warning during each build while
+            CONFIG_GADGET_SDK_TOKEN is empty. The build still succeeds.
+            Internal builds that intentionally ship without an SDK token
+            turn this off.
+
     config HOMEHUB_WIFI_SSID
         string "WiFi SSID override (dev iteration)"
         default ""
@@ -156,6 +165,14 @@ menu "ESP32 Device SDK"
             Uses an internal pull-up and treats a low level as pressed.
             Muse Home Link and the ESP32-C5 DevKitC-1 BOOT button both use GPIO28.
 
+    config HOMEHUB_BUTTON_LABEL
+        string "Button label shown in status prompts"
+        default "BOOT"
+        help
+            The name shown in prompts like "Press <label> to confirm".
+            Board overlays override this when the physical button has
+            its own name.
+
     choice HOMEHUB_LED_BACKEND
         prompt "Status LED hardware"
         default HOMEHUB_LED_BACKEND_PWM_RGB
@@ -201,6 +218,10 @@ menu "ESP32 Device SDK"
             bool "reTerminal E1002 7.3 inch Spectra 6 colour e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
+        config HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
+            bool "Waveshare ESP32-S3-1.54inch-ePaper SSD1681 e-paper (status screen)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
         config HOMEHUB_LED_BACKEND_VOICE_RING
             bool "Home Assistant Voice PE 12-LED ring"
             depends on IDF_TARGET_ESP32S3
@@ -244,6 +265,7 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
         help
             Set for backends with a display: the status bars, animation and
             agent name (a still status screen on e-paper), and the display.*

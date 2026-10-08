@@ -1,0 +1,43 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-S3-1.54inch-ePaper: ESP32-S3-PICO-1 (LGA56), 8 MB embedded
+# flash, 8 MB embedded octal PSRAM, a 1.54 inch 200x200 black and white
+# e-paper (SSD1681 controller) on SPI, native USB (USB-Serial/JTAG). Load
+# last, after sdkconfig.defaults (see README.md in this directory).
+#
+# Sources: Waveshare wiki (waveshare.com/wiki/ESP32-S3-1.54inch-ePaper) for
+# the pins; esptool chip-id on the board for the chip, PSRAM and flash.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# The e-paper shows a status screen.
+CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681=y
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# BOOT button on GPIO0; the only user button.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+
+# 8 MB embedded flash; use the 8 MB partition table.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"
+
+# 8 MB embedded octal PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
