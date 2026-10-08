@@ -32,6 +32,9 @@
 #include "muse_audio.h"
 #include "muse_mem.h"
 #include "muse_pmu.h"
+#if CONFIG_MUSE_P4_CSI_CAMERA
+#include "p4_csi_camera.h"
+#endif
 
 #define PMU_KEY_EVERY 2         /* poll the PMU over I2C every 20 ms */
 
@@ -44,6 +47,10 @@ static esp_err_t init(void)
 {
     ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c init");
     ESP_RETURN_ON_ERROR(muse_gpio_button_init(&s_talk, GPIO_NUM_35), TAG, "BOOT");
+#if CONFIG_MUSE_P4_CSI_CAMERA
+    /* The OV5647 shares the I2C bus; it starts on the first capture. */
+    p4_csi_camera_register(bsp_i2c_get_handle());
+#endif
     /* Only the PMU sees PWR: latch its edges for poll_buttons(). */
     esp_err_t err = muse_pmu_init(bsp_i2c_get_handle(), true);
     if (err != ESP_OK) {
