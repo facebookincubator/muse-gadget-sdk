@@ -1119,8 +1119,9 @@ static bool open_note(void)
     if (!s_turn.chat_id) {
         return false;
     }
-    s_turn.body_sent = sizeof(MUSE_HATCH_NOTE_HEAD) - 1;
-    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(MUSE_HATCH_NOTE_HEAD), sizeof(MUSE_HATCH_NOTE_HEAD) - 1, false)) {
+    s_turn.body_sent = sizeof(MUSE_HATCH_NOTE_VOICE_HEAD) - 1;
+    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(MUSE_HATCH_NOTE_VOICE_HEAD),
+                   sizeof(MUSE_HATCH_NOTE_VOICE_HEAD) - 1, false)) {
         return false;
     }
     muse_hatch_wav_header(s_turn.note, MIC_RATE);
@@ -1175,6 +1176,9 @@ static void send_chat(const char *text, const char *modality)
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "message", text);
     cJSON_AddStringToObject(body, "output_modality", modality);
+    if (!strcmp(modality, "voice")) {
+        cJSON_AddStringToObject(body, "device", "mcu-wearable");
+    }
     char *json = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     size_t len = json ? strlen(json) : 0;
@@ -1214,7 +1218,7 @@ static void post_chat(const char *text)
     }
     ESP_LOGI(TAG, "heard: \"%s\"", text);
     emit(MUSE_HATCH_EV_HEARD, text);
-    send_chat(text, "text");
+    send_chat(text, "voice");
 }
 
 /* A typed turn: the text goes straight to the chat. */
@@ -1501,6 +1505,18 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+static void start_silent_tts(int i)
+{
+    msg_t &m = s_turn.msgs[i];
+    m.pcm_start = s_turn.pcm_out;
+    m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+    m.tts = TTS_ACTIVE;
+    s_turn.tts_msg = i;
+    s_turn.silent = true;
+    ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+    show_reply_start(m);
+}
+
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1511,27 +1527,36 @@ static void start_tts(void)
         if (m.tts != TTS_QUEUED) {
             continue;
         }
-        /*
-         * Replies are text, shown at reading pace: silence in place of speech
-         * paces the captions and ends the turn. To speak them instead, send
-         * the message's text (s_turn.texts + i * TEXT_MAX, if texts was
-         * allocated; up to TEXT_MAX - 1 bytes) to a TTS API of your choice and
-         * play the MP3 it returns. In place of the silence below: keep
-         * m.tts = TTS_ACTIVE and s_turn.tts_msg = i, set s_turn.silent = false,
-         * m.pcm_start = s_turn.pcm_out, m.pcm_frames = 0, s_turn.mp3_len = 0,
-         * s_turn.mp3_ended = false, s_turn.kbps = 0, s_turn.down_rate = 0 and
-         * mp3dec_init(&s_turn.dec). Then, on this task, pass the MP3 to
-         * tts_data() as it arrives (it buffers up to MP3_BUF and drops the
-         * rest, so hold off while it's full) and set s_turn.mp3_ended at the
-         * end. decode() plays it at the speaker's volume, captions following,
-         * and finishes the message once it's drained.
-         */
+        char escaped[3 * sizeof(m.id) + 1];
+        query_escape(m.id, escaped, sizeof(escaped));
+        char path[sizeof(escaped) + 40];
+        int n = snprintf(path, sizeof(path), "/voice/tts-stream?message_id=%s", escaped);
+        if (n < 0 || n >= (int)sizeof(path)) {
+            ESP_LOGW(TAG, "TTS message id is too long; using captions");
+            start_silent_tts(i);
+            return;
+        }
+
+        int64_t id = open_stream(K_TTS, "GET", path, nullptr, "audio/mpeg", nullptr, true);
+        stream_t *stream = find_stream(id);
+        if (!id || !stream) {
+            ESP_LOGW(TAG, "TTS request failed to start; using captions");
+            start_silent_tts(i);
+            return;
+        }
+        stream->msg = i;
         m.pcm_start = s_turn.pcm_out;
-        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        m.pcm_frames = 0;
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
-        s_turn.silent = true;
-        ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+        s_turn.silent = false;
+        s_turn.mp3_len = 0;
+        s_turn.mp3_ended = false;
+        s_turn.kbps = 0;
+        s_turn.down_rate = 0;
+        mp3dec_init(&s_turn.dec);
+        mark(M_TTS);
+        ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
         show_reply_start(m);
         return;
     }
@@ -1558,8 +1583,10 @@ static void tts_end(stream_t *s, bool ok)
     if (ok) {
         s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
     } else {
-        s_turn.msgs[i].tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
+        s_turn.mp3_len = 0;
+        ESP_LOGW(TAG, "TTS stream failed; using captions");
+        start_silent_tts(i);
     }
 }
 

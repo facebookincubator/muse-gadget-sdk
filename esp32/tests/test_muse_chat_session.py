@@ -14,6 +14,22 @@ JSON = Path(os.environ.get(
 ))
 
 
+class VoiceTtsContract(unittest.TestCase):
+    def test_voice_turn_uses_vm_tts_with_caption_fallback(self):
+        source = (ROOT / 'components/muse/muse_chat_session.cpp').read_text()
+        private = (ROOT / 'components/muse/muse_chat_priv.h').read_text()
+
+        self.assertIn('send_chat(text, "voice")', source)
+        self.assertIn('send_chat(text, "text")', source)
+        self.assertIn('MUSE_HATCH_NOTE_VOICE_HEAD', source)
+        self.assertIn('"/voice/tts-stream?message_id=%s"', source)
+        self.assertIn('open_stream(K_TTS, "GET", path, nullptr, "audio/mpeg", nullptr, true)', source)
+        self.assertIn('TTS stream failed; using captions', source)
+        self.assertIn('start_silent_tts(i)', source)
+        self.assertIn('\\"output_modality\\":\\"voice\\"', private)
+        self.assertIn('\\"device\\":\\"mcu-wearable\\"', private)
+
+
 class ChatSession(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
