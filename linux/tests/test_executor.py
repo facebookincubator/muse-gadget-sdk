@@ -174,6 +174,29 @@ def test_file_write_keeps_the_mode_of_the_file_it_replaces(ex, tmp_path, monkeyp
         assert stat.S_IMODE(target.stat().st_mode) == mode, name
 
 
+def test_file_write_drops_setuid_setgid_and_sticky_bits(ex, tmp_path, monkeypatch):
+    _child_env_passes_pythonpath(monkeypatch)
+    target = tmp_path / "tool"
+    target.write_bytes(b"old")
+    target.chmod(0o6755)
+    result = ex.run("file.write", {"path": str(target), "data_b64": "aGk=", "final": True})
+    assert result["ok"], result
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+
+
+def test_file_write_keeps_the_partial_file_private_until_it_is_done(ex, tmp_path, monkeypatch):
+    _child_env_passes_pythonpath(monkeypatch)
+    target = tmp_path / "new"
+    assert ex.run("file.write", {"path": str(target), "data_b64": "aGk="})["ok"]
+    partial = tmp_path / ".new.musegadget-partial"
+    assert stat.S_IMODE(partial.stat().st_mode) == 0o600
+    result = ex.run("file.write", {"path": str(target), "data_b64": "aGk=", "offset": 2, "final": True})
+    assert result["ok"], result
+    umask = os.umask(0)
+    os.umask(umask)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644 & ~umask
+
+
 def test_file_paths_must_be_absolute(ex, monkeypatch):
     _child_env_passes_pythonpath(monkeypatch)
     result = ex.run("file.read", {"path": "relative.txt"})

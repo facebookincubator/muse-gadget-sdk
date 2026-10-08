@@ -81,7 +81,10 @@ def write(request: dict) -> dict:
     if offset == 0:
         if request.get("create_parents"):
             os.makedirs(os.path.dirname(path), exist_ok=True)
-        fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        # Keep the content private while it arrives: the final mode, which
+        # may be wider, is applied just before the rename.
+        fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)  # a partial left by an earlier write keeps its mode
     else:
         try:
             fd = os.open(partial, os.O_WRONLY)
@@ -107,12 +110,16 @@ def write(request: dict) -> dict:
     if os.path.exists(path) and not request.get("overwrite", True):
         os.unlink(partial)
         raise FileOpError("file exists and overwrite is false")
-    # Keep the mode of the file being replaced, such as 0600 or 0755, instead
-    # of giving it the partial file's 0644. A new file keeps 0644.
+    # Keep the permission bits of the file being replaced, such as 0600 or
+    # 0755, but not its setuid, setgid or sticky bits. A new file gets 0644,
+    # less the umask.
     try:
-        os.chmod(partial, stat.S_IMODE(os.stat(path).st_mode))
+        mode = stat.S_IMODE(os.stat(path).st_mode) & 0o777
     except OSError:
-        pass
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o644 & ~umask
+    os.chmod(partial, mode)
     os.replace(partial, path)
     return {"path": path, "size": written, "sha256": digest.hexdigest(), "complete": True}
 
