@@ -82,6 +82,7 @@ static uint32_t esp_random(void) { return 42; }
 static bool muse_link_hatch_linked(void) { return true; }
 static bool muse_wifi_connected(void) { return true; }
 static bool muse_link_req_ready(void) { return true; }
+#define MUSE_LINK_REQ_TOO_LARGE (-2)   /* muse_link.h */
 void muse_state_page(bool cjk, int *cols, int *lines) { (void)cjk; *cols = 16; *lines = 2; }
 
 /* The note's request: everything sent on /chat/stream, chunk by chunk. */
