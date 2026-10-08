@@ -29,7 +29,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"xingzhi_cube\"]"
   78/esp_lcd_nv3023:
     version: "1.0.1"
     rules:
