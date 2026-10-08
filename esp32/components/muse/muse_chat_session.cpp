@@ -1661,12 +1661,17 @@ static void check_turn(void)
     bool text = s_turn.text;
     if (t - s_turn.start_us > (text ? TEXT_TURN_CAP_US : TURN_CAP_US)) {
         ESP_LOGW(TAG, "turn hit the time cap");
+        /* A voice turn that waited out the cap on a busy agent got no reply at all. */
+        if (!text && !s_turn.nmsgs) {
+            turn_fail("NO REPLY FROM MUSE");
+            return;
+        }
         turn_done(false);
         return;
     }
     if (!s_turn.nmsgs) {
-        /* A typed turn waits as long as the agent says it's working. */
-        if (t - s_turn.chat_us > (text ? TEXT_REPLY_TIMEOUT_US : REPLY_TIMEOUT_US) && !(text && s_turn.agent_busy)) {
+        /* Wait as long as the agent says it's working; the turn cap still applies. */
+        if (t - s_turn.chat_us > (text ? TEXT_REPLY_TIMEOUT_US : REPLY_TIMEOUT_US) && !s_turn.agent_busy) {
             turn_fail("NO REPLY FROM MUSE");
         }
         return;

@@ -23,23 +23,45 @@ endif()
 
 # Old generated profiles retain 64 KiB TCP buffers and can exhaust the DMA heap
 # during tunnel bursts even when sdkconfig.defaults has been updated.
-# TCP limits: the no-PSRAM Cardputer has no tunnel and uses four-MSS windows.
+# TCP limits: the no-PSRAM Cardputer and AI Passport have no tunnel and use
+# four-MSS windows.
 if((NOT CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 16384 OR
     NOT CONFIG_LWIP_TCP_WND_DEFAULT EQUAL 16384) AND
-   NOT (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV AND NOT CONFIG_SPIRAM AND
+   NOT ((CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV OR CONFIG_MUSE_BOARD_AI_PASSPORT) AND NOT CONFIG_SPIRAM AND
         NOT CONFIG_HOMEHUB_TUNNEL AND CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 5760 AND
         CONFIG_LWIP_TCP_WND_DEFAULT EQUAL 5760))
     message(FATAL_ERROR
-        "ESP32 Device SDK requires TCP send buffer and receive window 16384 (5760 on the no-tunnel Cardputer ADV) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
+        "ESP32 Device SDK requires TCP send buffer and receive window 16384 (5760 on the no-tunnel Cardputer ADV and AI Passport) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
 endif()
 
 # A token from gadgets.muse.ai is mgst_ plus 43 canonical base64url characters.
-# Manufacturer builds pair with fleet attestation instead.
+# Manufacturer builds pair with fleet attestation instead, and internal builds
+# without a token disable CONFIG_GADGET_SDK_TOKEN_WARN.
 if("${CONFIG_GADGET_SDK_TOKEN}" STREQUAL "")
-    if(NOT CONFIG_HOMEHUB_PAIRING_EFUSE_AUTH)
-        message(WARNING
-            "No SDK token: set CONFIG_GADGET_SDK_TOKEN (idf.py menuconfig > ESP32 Device SDK) "
+    if(CONFIG_GADGET_SDK_TOKEN_WARN AND NOT CONFIG_HOMEHUB_PAIRING_EFUSE_AUTH)
+        set(GADGET_SDK_TOKEN_WARNING
+            "No SDK token: set CONFIG_GADGET_SDK_TOKEN (idf.py menuconfig > ESP32 Device SDK)"
             "to the token from gadgets.muse.ai. Gadgets without one will stop pairing.")
+        list(GET GADGET_SDK_TOKEN_WARNING 0 GADGET_SDK_TOKEN_LINE1)
+        list(GET GADGET_SDK_TOKEN_WARNING 1 GADGET_SDK_TOKEN_LINE2)
+        string(JOIN " " GADGET_SDK_TOKEN_WARNING_TEXT ${GADGET_SDK_TOKEN_WARNING})
+        message(WARNING "${GADGET_SDK_TOKEN_WARNING_TEXT}")
+        # Configure-time warnings vanish on incremental builds, so repeat the
+        # banner after the app links on every build.
+        set(GADGET_SDK_TOKEN_BANNER
+            "################################################################################")
+        add_custom_target(gadget_sdk_token_warning ALL
+            COMMAND ${CMAKE_COMMAND} -E echo ""
+            COMMAND ${CMAKE_COMMAND} -E echo "${GADGET_SDK_TOKEN_BANNER}"
+            COMMAND ${CMAKE_COMMAND} -E echo "##  WARNING: ${GADGET_SDK_TOKEN_LINE1}"
+            COMMAND ${CMAKE_COMMAND} -E echo "##  ${GADGET_SDK_TOKEN_LINE2}"
+            COMMAND ${CMAKE_COMMAND} -E echo "${GADGET_SDK_TOKEN_BANNER}"
+            COMMAND ${CMAKE_COMMAND} -E echo ""
+            COMMENT "Checking SDK token"
+            VERBATIM)
+        if(TARGET app)
+            add_dependencies(gadget_sdk_token_warning app)
+        endif()
     endif()
 else()
     string(LENGTH "${CONFIG_GADGET_SDK_TOKEN}" GADGET_SDK_TOKEN_LENGTH)

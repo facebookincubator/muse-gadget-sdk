@@ -59,6 +59,10 @@ static const struct {
     { 0x0149, "'n" },
     { 0x0152, "OE" },
     { 0x0153, "oe" },
+    { 0x01A0, "O" },     /* Vietnamese O and U with horn */
+    { 0x01A1, "o" },
+    { 0x01AF, "U" },
+    { 0x01B0, "u" },
     { 0x02BC, "'" },     /* modifier apostrophe */
     { 0x02C6, "^" },
     { 0x02DC, "~" },
@@ -128,6 +132,12 @@ static const char LATIN[] =
     "AaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIi__JjKkkLlLlLlLlLl"
     "NnNnNn_NnOoOoOo__RrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs";
 
+/* U+1EA0-1EF9, Vietnamese letters with a tone mark (and a hat, breve or
+ * horn), by their plain letter. */
+static const char VIETNAMESE[] =
+    "AaAaAaAaAaAaAaAaAaAaAaAaEeEeEeEeEeEeEeEeIiIiOoOoOoOoOoOoOoOoOoOoOoOo"
+    "UuUuUuUuUuUuUuYyYyYyYy";
+
 /* The code point at s, and its length in *len; -1 if it's broken. */
 static int32_t decode(const unsigned char *s, size_t *len)
 {
@@ -183,6 +193,11 @@ int muse_text_ascii(const char *s, size_t *len, char out[4])
     }
     if (cp >= 0xC0 && cp <= 0x17F && LATIN[cp - 0xC0] != '_') {
         out[0] = LATIN[cp - 0xC0];
+        out[1] = '\0';
+        return 1;
+    }
+    if (cp >= 0x1EA0 && cp <= 0x1EF9) {
+        out[0] = VIETNAMESE[cp - 0x1EA0];
         out[1] = '\0';
         return 1;
     }

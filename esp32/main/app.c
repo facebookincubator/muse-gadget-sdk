@@ -68,6 +68,9 @@
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
 #include "sensecap_sensors.h"
 #endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+#include "reterminal_sht4x.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -1900,6 +1903,11 @@ static cJSON *on_ws_command(
         return sensecap_sensors_command();
     }
 #endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    if (strcmp(command, "sensors.read") == 0) {
+        return reterminal_sht4x_command();
+    }
+#endif
     if (strcmp(command, "device.reset_vm") == 0) {
         return queue_ws_control(WS_CONTROL_RESET_VM, NULL);
     }
@@ -2628,6 +2636,9 @@ void app_run(void) {
 #endif
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
     sensecap_sensors_init();
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    reterminal_sht4x_init();
 #endif
 
     if (!setup_complete) {

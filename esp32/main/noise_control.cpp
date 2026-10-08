@@ -98,12 +98,23 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // but the tunnel stream (multiplexed on this session) carries ~8 KB IP-packet
 // batches, so scratch must fit a full batch plus ServiceFrame/envelope overhead.
 // Chat subscriptions deliver 16 KB body chunks plus framing, even on boards
-// without PSRAM. Reserve enough inbound space for those frames.
+// without PSRAM. Reserve enough inbound space for those frames. Not on the
+// ESP32-C3 AI Passport: three 17 KB buffers beside its UI leave too little to
+// upload a voice note. It takes 12 KB, as the PSRAM boards' session does.
+// Chat events arrive one per frame; a frame over that ends the session (it
+// can't be skipped: Noise's nonces and the ordered framer would desync), the
+// request in flight ends with NOISE_CTRL_REQ_TOO_LARGE, and the session
+// reconnects.
+#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#define SVC_FRAME_SCRATCH (12 * 1024)
+#else
 #define SVC_FRAME_SCRATCH (SMALL_CONTROL_SESSION ? 17 * 1024 : 12288)
+#endif
 
-// The ADV cannot allocate the session with the larger inbound buffers and the
-// usual outbound buffers together. Keep this reduction local to that board.
-#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV
+// The ADV and the ESP32-C3 AI Passport cannot allocate the session with the
+// larger inbound buffers and the usual outbound buffers together. Keep this
+// reduction local to those boards.
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT)
 #define CARDPUTER_CONTROL_SESSION 1
 #else
 #define CARDPUTER_CONTROL_SESSION 0
@@ -132,9 +143,15 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define WS_BUF_SIZE (SMALL_CONTROL_SESSION ? 7 * 1024 : 16 * 1024)
 #endif
 // Inbound WebSocket frames: SVC_FRAME_SCRATCH plus framing and the AEAD tag.
+#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#define WS_RX_BUF_SIZE (SVC_FRAME_SCRATCH + 1024)
+#else
 #define WS_RX_BUF_SIZE (SMALL_CONTROL_SESSION ? 17 * 1024 : WS_BUF_SIZE)
+#endif
 
 static char s_node_id[64];
+// A frame too big for this board's buffers is ending the session.
+static bool s_req_too_large;
 static char s_display_name[64];
 static char s_wifi_ssid[33];
 static noise_ctrl_status_cb s_status_cb = nullptr;
@@ -522,6 +539,7 @@ static ssize_t ws_recv_frame_nonblock(esp_tls_t *tls, uint8_t *buf, size_t cap) 
 
     if (payload_len > cap) {
         ESP_LOGE(TAG, "WS frame too large: %llu", (unsigned long long)payload_len);
+        s_req_too_large = true;
         return -1;
     }
     if (opcode >= 0x8 && payload_len > 125) { // RFC 6455 §5.5, as above
@@ -978,18 +996,21 @@ static void req_drop(req_op &op) {
     free(op.data);
 }
 
-static void req_fail(req_stream *s) {
+static void req_fail(req_stream *s, int status = -1) {
     req_stream gone = *s;
     *s = {};
-    gone.cb(gone.ctx, -1, nullptr, 0, true);
+    gone.cb(gone.ctx, status, nullptr, 0, true);
 }
 
-// The session is gone, and every request with it.
+// The session is gone, and every request with it: NOISE_CTRL_REQ_TOO_LARGE
+// when a frame too big for this board's buffers ended it.
 static void req_end_all(void) {
     req_op op;
     while (req_take(&op)) req_drop(op);
+    int status = s_req_too_large ? NOISE_CTRL_REQ_TOO_LARGE : -1;
+    s_req_too_large = false;
     for (auto &s : s_req_streams) {
-        if (s.id) req_fail(&s);
+        if (s.id) req_fail(&s, status);
     }
 }
 
@@ -1375,6 +1396,13 @@ static char *build_register_json(void) {
                 "humidity in percent. Each reading has its age in seconds; a "
                 "sensor with no recent reading is null. Temperature and "
                 "humidity need the Grove AHT20 plugged in.",
+                nullptr, nullptr);
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    add_command(commands, "sensors.read",
+                "Read the onboard air sensor: temperature in degrees Celsius "
+                "and relative humidity in percent. Each reading has its age "
+                "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
 #endif
 
@@ -2045,6 +2073,12 @@ static session_result_t run_session(stack_monitor_t *stack) {
 
             if (!inbound.ok()) {
                 ESP_LOGW(TAG, "ProcessInbound failed: %s", inbound.status.str());
+                // Too large only if the frame's plaintext can't fit the scratch:
+                // a PSA allocation failure is ResourceExhausted too, and isn't.
+                if (inbound.status.IsResourceExhausted() &&
+                    static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
+                    s_req_too_large = true;
+                }
                 error = true;
                 break;
             }

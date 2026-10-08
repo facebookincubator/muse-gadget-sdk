@@ -29,7 +29,11 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\"]"
+  78/esp_lcd_nv3023:
+    version: "1.0.1"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"vn_s3_183\""
   espressif/esp_lcd_ili9341:
     version: "^2.1.0"
     rules:
@@ -42,6 +46,10 @@ dependencies:
     version: "^3.0.1"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_175\""
+  waveshare/esp32_s3_touch_amoled_2_16:
+    version: "^2.0.1"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_216\""
   espressif/esp-box-3:
     version: "3.2.0"
     rules:
@@ -54,6 +62,10 @@ dependencies:
     version: "^1.0.0"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_c6_18\""
+  waveshare/esp32_c6_touch_amoled_2_06:
+    version: "2.0.0"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_c6_206\""
   espressif/esp_lcd_spd2010:
     version: "^2.0.0"
     rules:

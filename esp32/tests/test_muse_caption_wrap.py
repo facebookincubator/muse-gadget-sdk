@@ -14,7 +14,8 @@
 
 """How reply captions wrap to the screen's page (muse_chat_text.c): words stay
 whole, and CJK, which has no spaces, breaks between characters but never puts
-closing punctuation at the start of a line."""
+closing punctuation at the start of a line. Letters the ASCII fonts lack show
+as their plain ones (muse_text.c)."""
 
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -112,6 +114,23 @@ class CaptionWrapTest(unittest.TestCase):
 
     def test_mixed_text_breaks_at_spaces_or_between_cjk(self) -> None:
         self.assertEqual(self.wrap("Muse 说 hello world", 8), ["Muse 说", "hello", "world"])
+
+    def shown(self, text: str) -> str:
+        proc = subprocess.run(
+            [str(self.binary), "ascii"], input=text.encode(), capture_output=True, check=True
+        )
+        return proc.stdout.decode()
+
+    def test_vietnamese_shows_its_plain_letters(self) -> None:
+        self.assertEqual(
+            self.shown("Thời tiết Hà Nội hôm nay đẹp, được không?"),
+            "Thoi tiet Ha Noi hom nay dep, duoc khong?",
+        )
+        # Every Vietnamese letter, upper and lower case, decomposed or not.
+        letters = "".join(map(chr, range(0x1EA0, 0x1EFA))) + "ƠơƯưĐđ"
+        plain = "".join(unicodedata.normalize("NFD", c)[0] for c in letters).replace("Đ", "D").replace("đ", "d")
+        self.assertEqual(self.shown(letters), plain)
+        self.assertEqual(self.shown(unicodedata.normalize("NFD", letters)), plain)
 
 
 if __name__ == "__main__":

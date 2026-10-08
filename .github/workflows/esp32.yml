@@ -140,12 +140,18 @@ jobs:
           - board: muse-waveshare-s3-lcd7
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd7"
+          - board: muse-waveshare-s3-216
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216"
           - board: muse-aipi
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-aipi"
           - board: muse-waveshare-c6-18
             target: esp32c6
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18"
+          - board: muse-waveshare-c6-206
+            target: esp32c6
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-206"
           - board: muse-sensecap-watcher
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher"
@@ -176,6 +182,12 @@ jobs:
           - board: muse-fnk0104b
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b"
+          - board: muse-vn-s3-183
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-vn-s3-183"
+          - board: muse-ai-passport
+            target: esp32c3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport"
     defaults:
       run:
         shell: bash
