@@ -115,6 +115,10 @@ struct tx_slot {
 static noise_tunnel_packet_cb s_packet_cb = nullptr;
 static std::atomic_bool s_connected{false};
 static uint64_t s_last_open_attempt_us = 0;
+// Set when we mark the tunnel down without the server knowing (keepalive
+// timeout, failed ping), so the server still tracks TUNNEL_STREAM_ID and would
+// reject a reopen on it as "duplicate id". Session-task-owned.
+static bool s_needs_reset = false;
 
 // Tunnel-stream keepalive liveness (see TUN_KEEPALIVE_* above). Both are set
 // when the stream opens and updated on the session task, so no locking is
@@ -254,28 +258,35 @@ static bool try_open_stream(const noise_tunnel_emit_t *emit) {
 
 extern "C" bool noise_tunnel_on_session_up(const noise_tunnel_emit_t *emit) {
     ensure_pool();
+    s_needs_reset = false;
     if (!emit || !emit->open_stream) return false;
     return try_open_stream(emit);
 }
 
-extern "C" void noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit) {
+extern "C" bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit) {
     if (s_connected.load(std::memory_order_relaxed)
-        || !emit || !emit->open_stream || !emit->reset_stream) return;
+        || !emit || !emit->open_stream || !emit->reset_stream) return true;
     uint64_t now = esp_timer_get_time();
-    if (now - s_last_open_attempt_us < TUN_REOPEN_INTERVAL_US) return;
+    if (now - s_last_open_attempt_us < TUN_REOPEN_INTERVAL_US) return true;
+    // Reset + Request seal through the AES DMA path; a failed seal would turn
+    // a tunnel blip into a full reconnect. Retry next turn once pressure clears.
+    if (!noise_tx_has_dma_headroom(nullptr)
+        || !noise_tx_has_contiguous_dma_headroom()) return true;
     ESP_LOGI(TAG, "retrying tunnel stream open");
-    // Every reopen reuses TUNNEL_STREAM_ID, and the server rejects a Request
-    // for an id it still tracks ("duplicate id"). When we mark the tunnel down
-    // locally (keepalive timeout, failed ping) the server's stream is still
-    // open, and the daemon dispatcher never reaps it, so without this Reset
-    // every retry is refused until the whole Noise session restarts. A Reset
-    // for an id the server already dropped (it reset/rejected us) is a no-op.
     s_last_open_attempt_us = now;
-    if (!emit->reset_stream(emit->ctx)) {
-        ESP_LOGW(TAG, "tunnel stream reset failed; skipping reopen");
-        return;
+    // The daemon dispatcher never reaps a stream we abandoned locally, so
+    // without this Reset every reopen on the reused id is refused.
+    if (s_needs_reset) {
+        if (!emit->reset_stream(emit->ctx)) {
+            // Some Reset failures leave Noise established; reopening without
+            // the Reset can never succeed, so the session must be torn down.
+            ESP_LOGW(TAG, "tunnel stream reset failed; tearing down session");
+            return false;
+        }
+        s_needs_reset = false;
     }
     try_open_stream(emit);
+    return true;
 }
 
 extern "C" void noise_tunnel_on_session_down(void) {
@@ -350,6 +361,7 @@ extern "C" void noise_tunnel_tick(const noise_tunnel_emit_t *emit) {
     if (now - s_last_rx_us >= TUN_KEEPALIVE_TIMEOUT_US) {
         ESP_LOGW(TAG, "tunnel keepalive timeout (%llus idle); marking down",
                  (unsigned long long)((now - s_last_rx_us) / 1000000));
+        s_needs_reset = true;
         s_connected.store(false, std::memory_order_relaxed);
         return;
     }
@@ -374,6 +386,7 @@ extern "C" void noise_tunnel_tick(const noise_tunnel_emit_t *emit) {
             ESP_LOGW(TAG, "tunnel keepalive ping failed; marking down (dma_free=%u dma_largest=%u)",
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+            s_needs_reset = true;
             s_connected.store(false, std::memory_order_relaxed);
         }
     }

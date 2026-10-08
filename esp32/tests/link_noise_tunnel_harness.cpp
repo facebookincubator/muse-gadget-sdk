@@ -97,6 +97,9 @@ static void log_message(const char *, const char *fmt, ...) {
 
 static std::vector<uint8_t> sent;
 static bool exhaust_after_send, fail_send, refill, fail_open, fail_reset;
+// A failed Reset seal poisons Noise; encode/precondition failures do not.
+static bool reset_poisons = true;
+static bool send_fails_without_poison;
 static bool session_alive = true;
 static unsigned pings;
 // Ordered record of stream-level emits: 'R' reset, 'O' open.
@@ -108,13 +111,14 @@ static bool open_stream(void *) {
 }
 static bool reset_stream(void *) {
     stream_ops += 'R';
-    if (fail_reset) { session_alive = false; poison_noise_session(); }
+    if (fail_reset && reset_poisons) { session_alive = false; poison_noise_session(); }
     return !fail_reset;
 }
 static bool send_body(void *, const uint8_t *data, size_t len) {
     assert(len == 1);
     if (*data == 0) {
         ++pings;
+        if (send_fails_without_poison) return false;
         if (fail_send) { session_alive = false; poison_noise_session(); }
         return !fail_send;
     }
@@ -157,6 +161,7 @@ static void reopen() {
     session_alive = true;
     reset_noise_session();
     fail_open = fail_reset = false;
+    reset_poisons = true;
     pings = 0;
     stream_ops.clear();
     assert(noise_tunnel_on_session_up(&emit));
@@ -835,8 +840,19 @@ int main(int argc, char **argv) {
     ++now_us;
     noise_tunnel_tick(&emit);
     assert(!noise_tunnel_is_connected() && pings == 0);
+    // Reopen seals Reset + Request, so it waits out DMA pressure without
+    // consuming the retry interval.
+    const uint64_t last_attempt = s_last_open_attempt_us;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(!noise_tunnel_is_connected() && stream_ops == "O");
+    assert(s_last_open_attempt_us == last_attempt);
     dma_free = 16 * 1024;
-    noise_tunnel_maybe_reopen(&emit);
+    dma_largest = 2 * 1024 - 1;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(!noise_tunnel_is_connected() && stream_ops == "O");
+    assert(s_last_open_attempt_us == last_attempt);
+    dma_largest = 2 * 1024;
+    assert(noise_tunnel_maybe_reopen(&emit));
     assert(noise_tunnel_is_connected());
     // The locally-declared-dead stream is still open on the server; the reused
     // stream id is only accepted if the Reset precedes the new Request.
@@ -844,13 +860,45 @@ int main(int argc, char **argv) {
     assert(noise_tunnel_pump_tx(&emit) == 0 && sent.empty());
     for (uint8_t i = 1; i <= 8; ++i) enqueue(i);
 
-    // A failed Reset poisons Noise and must not be followed by an open.
+    // When the server dropped the stream (Reset, non-200), reopen sends no Reset.
     reopen();
     noise_tunnel_on_session_down();
-    fail_reset = true;
     now_us += TUN_REOPEN_INTERVAL_US;
-    assert(control_tx_turn());
-    assert(!session_alive && !noise_tunnel_is_connected() && stream_ops == "OR");
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(noise_tunnel_is_connected() && stream_ops == "OO");
+
+    // A failed ping also abandons the stream locally, so it needs a Reset.
+    reopen();
+    now_us += TUN_KEEPALIVE_INTERVAL_US;
+    send_fails_without_poison = true;
+    noise_tunnel_tick(&emit);
+    send_fails_without_poison = false;
+    assert(!noise_tunnel_is_connected() && pings == 1);
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(noise_tunnel_is_connected() && stream_ops == "ORO");
+
+    // A Reset is only needed once: if the reopened Request is then rejected,
+    // the server has dropped the id and the next retry is a bare open.
+    noise_tunnel_on_session_down();
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(noise_tunnel_is_connected() && stream_ops == "OROO");
+
+    // A failed Reset tears the session down and is not followed by an open,
+    // whether or not the failure poisoned Noise.
+    for (bool poisons : {true, false}) {
+        reopen();
+        now_us = s_last_rx_us + TUN_KEEPALIVE_TIMEOUT_US;
+        noise_tunnel_tick(&emit);
+        assert(!noise_tunnel_is_connected());
+        fail_reset = true;
+        reset_poisons = poisons;
+        now_us += TUN_REOPEN_INTERVAL_US;
+        assert(control_tx_turn());
+        assert(session_alive == !poisons && noise_session->isEstablished() == !poisons);
+        assert(!noise_tunnel_is_connected() && stream_ops == "OR");
+    }
 
     // The void ping hook poisons Noise while there are no data/results queued.
     // The actual loop must notice this on the same turn, before WS keepalive.

@@ -2456,8 +2456,9 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // Retry opening the tunnel stream if it went down while control is up
         // (e.g. transient backend 503). Rate-limited internally. Only after the
         // initial post-register open, so we never race registration.
-        if (tunnel_opened) {
-            noise_tunnel_maybe_reopen(&tun_emit);
+        if (tunnel_opened && !noise_tunnel_maybe_reopen(&tun_emit)) {
+            error = true;
+            break;
         }
 
         // TX: drain the tunnel batch queue (multiplexed on this session).

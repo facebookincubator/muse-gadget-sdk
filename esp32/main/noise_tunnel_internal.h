@@ -97,10 +97,12 @@ bool noise_tx_has_contiguous_dma_headroom(void);
 bool noise_tunnel_on_session_up(const noise_tunnel_emit_t *emit);
 
 // Retry opening the tunnel stream if it is currently down while the control
-// session is still up (e.g. after a transient backend 503). Resets the old
-// stream first so the server accepts the reused stream id. Rate-limited
-// internally; safe to call every loop iteration. No-op if already up.
-void noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit);
+// session is still up (e.g. after a transient backend 503). If we marked the
+// stream down locally, Resets it first so the server accepts the reused stream
+// id. Rate-limited and DMA-gated internally; safe to call every loop
+// iteration. No-op if already up. Returns false if the session must be torn
+// down (the Reset failed).
+bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit);
 
 // Session torn down: mark the tunnel down and forget the emit context.
 void noise_tunnel_on_session_down(void);
