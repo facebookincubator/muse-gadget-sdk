@@ -56,6 +56,10 @@ HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
 MAX_INBOUND_MESSAGE = 4 * 1024 * 1024
+# Documented VM limit: 256 KiB per device control message. Include the u32
+# length prefix in our budget, conservatively, not just the JSON payload.
+MAX_CONTROL_MESSAGE_BYTES = 256 * 1024
+REGISTER_ID_BYTES = 36  # str(uuid.uuid4())
 # Matches JavaScript's encodeURIComponent, as the firmware does.
 _URI_COMPONENT_SAFE = "-_.!~*'()"
 
@@ -86,6 +90,10 @@ class DeviceDescription:
             "is_wakeup_supported": False,
             "commands_v2": self.commands,
         }
+
+    def register_message(self, request_id: str) -> dict:
+        return {"type": "req", "id": request_id, "method": "link.register",
+                "params": self.register_params()}
 
 
 def encode_message(obj: dict) -> bytes:
@@ -226,12 +234,10 @@ class LinkSession:
         self._stream_id = encrypted.stream_id
         await self._send_frames(encrypted.frames)
         self._register_id = str(uuid.uuid4())
-        await self.send({
-            "type": "req",
-            "id": self._register_id,
-            "method": "link.register",
-            "params": self._device.register_params(),
-        })
+        message = self._device.register_message(self._register_id)
+        if len(encode_message(message)) > MAX_CONTROL_MESSAGE_BYTES:
+            raise ValueError("link.register exceeds the VM's control message budget")
+        await self.send(message)
         log.info("sent link.register as %s", self._device.node_id)
 
     # -- Device-originated requests -------------------------------------------
