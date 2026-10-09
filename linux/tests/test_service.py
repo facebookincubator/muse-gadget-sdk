@@ -24,9 +24,10 @@ from pathlib import Path
 
 import pytest
 
-from musegadget import muse_api
+from musegadget import config, muse_api
 from musegadget.executor import Account, Executor
 from musegadget.identity import Identity
+from musegadget.link_client import DeviceDescription, Outcome
 from musegadget.service import Backoff, Service
 
 
@@ -107,6 +108,54 @@ def test_local_message_must_be_non_empty_text():
         assert not reply["ok"] and "JSONDecodeError" in reply["error"]
 
     run_with_socket(check)
+
+
+def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(tmp_path, monkeypatch):
+    monkeypatch.setenv(config.STATE_DIR_ENV, str(tmp_path))
+    config.save_json(config.PAIRING_FILE, fresh_pairing())
+    vm = {"is_default": True, "vm_id": "vm-1", "vm_name": "muse", "vm_auth_token": "vm-token"}
+    monkeypatch.setattr(muse_api, "fetch_vms_with_status", lambda token, api: ([vm], 200))
+    links = []
+
+    class Link(FakeSession):
+        def __init__(self, **kwargs):
+            super().__init__()
+            self.kwargs = kwargs
+            links.append(self)
+
+    monkeypatch.setattr("musegadget.service.LinkSession", Link)
+
+    class Lamp(Service):
+        def describe(self):
+            return DeviceDescription(self.identity.node_id, "Lamp", "2.0", {"lamp.on": {}})
+
+        def run_command(self, name, params, timeout_ms=None):
+            return {"ok": True, "lit": name}
+
+        async def serve(self, session, vm, stop):
+            self.replies = [vm["vm_id"], await ask(self.socket, b'{"message": "hi"}\n')]
+            return Outcome.STOPPED
+
+    async def scenario():
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            lamp = Lamp(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current()))
+            lamp.socket = Path(tmp) / "mg.sock"
+            server = await lamp.serve_local(lamp.socket)
+            try:
+                await lamp.run()
+                return lamp.replies + [await ask(lamp.socket, b'{"message": "late"}\n')]
+            finally:
+                server.close()
+
+    replies = asyncio.run(scenario())
+    assert replies == ["vm-1", {"ok": True, "status": 200, "response": None},
+                       {"ok": False, "error": "not connected to the Muse"}]
+    [link] = links
+    assert link.sent == [("hi", None)]
+    assert link.kwargs["device"] == DeviceDescription("homelink-000001", "Lamp", "2.0", {"lamp.on": {}})
+    assert link.kwargs["run_command"]("lamp.on", {}, None) == {"ok": True, "lit": "lamp.on"}
+    assert (link.kwargs["noise_host"], link.kwargs["vm_id"], link.kwargs["vm_auth_token"]) == (
+        "hatch.metaaivm.com", "vm-1", "vm-token")
 
 
 def test_backoff_doubles_to_a_ceiling_and_honours_the_floor():

@@ -118,6 +118,9 @@ A few other ways to build on it:
 - **Add a command.** Commands live in [`src/musegadget/executor.py`](src/musegadget/executor.py):
   add a spec to `COMMAND_SPECS` and a branch in `Executor.run`.
   [`AGENTS.md`](AGENTS.md) walks through it.
+- **Build your own gadget.** A program on its own hardware can pair, stay
+  connected and talk to Muse through the `musegadget` package.
+  [`AGENTS.md`](AGENTS.md) lists what it can use.
 - **Change the account.** `bash install.sh --run-as someone` gives Muse a
   different account, such as one without sudo.
 - **Change the SDK token.** `bash install.sh --sdk-token mgst_…` replaces it.

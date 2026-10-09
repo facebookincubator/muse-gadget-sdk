@@ -129,28 +129,44 @@ class Service:
             log.info("reconnecting in %.0fs", delay)
             await self._sleep(delay)
 
-    async def _session(self, vm: dict, pairing: dict) -> tuple[Outcome, float]:
-        device = DeviceDescription(
+    def describe(self) -> DeviceDescription:
+        """The device this service registers with Muse. Override to describe another device."""
+        return DeviceDescription(
             node_id=self.identity.node_id,
             display_name=self.display_name,
             version=__version__,
             commands=COMMAND_SPECS,
         )
+
+    def run_command(self, name: str, params: dict, timeout_ms: int | None = None) -> dict:
+        """Run one command from Muse. Override to run commands without an Executor."""
+        return self.executor.run(name, params, timeout_ms)
+
+    async def serve(self, session: LinkSession, vm: dict, stop: asyncio.Event) -> Outcome:
+        """Run one session until it ends or ``stop`` is set, and return how it ended.
+
+        Override to run the gadget's own work beside the session. The local
+        message socket forwards to ``session`` for as long as this runs.
+        """
+        try:
+            return await session.run(stop)
+        except Exception as exc:
+            log.warning("session failed: %s: %s", type(exc).__name__, exc)
+            return Outcome.CLOSED
+
+    async def _session(self, vm: dict, pairing: dict) -> tuple[Outcome, float]:
         session = LinkSession(
             noise_host=pairing.get("noise_host") or DEFAULT_NOISE_HOST,
             vm_id=vm["vm_id"] or vm["vm_name"],
             vm_auth_token=vm["vm_auth_token"],
-            device=device,
-            run_command=self.executor.run,
+            device=self.describe(),
+            run_command=self.run_command,
         )
         log.info("connecting to %s", vm["vm_name"] or vm["vm_id"])
         started = time.monotonic()
         self._current = session
         try:
-            outcome = await session.run(self._stop)
-        except Exception as exc:
-            log.warning("session failed: %s: %s", type(exc).__name__, exc)
-            outcome = Outcome.CLOSED
+            outcome = await self.serve(session, vm, self._stop)
         finally:
             self._current = None
         lasted = time.monotonic() - (session.registered_at or time.monotonic())
