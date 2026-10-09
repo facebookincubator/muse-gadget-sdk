@@ -236,6 +236,14 @@ things you can change:
 
 - **Shorter answers.** Ask for them in the message itself, such as "Answer in
   one sentence."
+- **Brief push-to-talk replies by default.** Enable
+  `Muse > Request brief push-to-talk replies` in `idf.py menuconfig`
+  (`CONFIG_MUSE_BRIEF_VOICE_REPLIES=y`). Each voice note includes a request
+  for at most two short sentences, about 40 words, suitable for spoken
+  playback. Say that you want more detail to override the request. This
+  applies to both voice-note transports, including headless voice boards;
+  typed messages and streaming dictation are unchanged. Muse may exceed
+  the requested length. No response is truncated and no TTS is enabled.
 - **Spoken answers.** Send each reply's text to a text-to-speech API of your
   choice and play the audio it returns. On boards with PSRAM, `start_tts` in
   [`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
