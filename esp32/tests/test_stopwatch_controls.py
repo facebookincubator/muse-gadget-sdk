@@ -192,7 +192,76 @@ int main(void) {
     return 0;
 }
 '''
-        for name, code in (("board", board), ("input", inp), ("ui", ui)):
+        power_defines = "\n".join(re.findall(r"^#define PMIC_.*", cls.board, re.M))
+        power = common + r'''
+#define BIT(n) (1u << (n))
+#define ESP_OK 0
+#define TAG "test"
+typedef int esp_err_t;
+#define ESP_RETURN_ON_ERROR(expr, tag, ...) do { int e = (expr); if(e) return e; } while(0)
+static void *s_pmic;
+static uint8_t regs[256];
+static int failed_reg = -1, write_error, writes;
+static int reg_read(void *dev, uint8_t reg, uint8_t *out, size_t n) {
+    (void)dev; assert(n == 1 || n == 2);
+    if (reg == failed_reg) return -7;
+    memcpy(out, regs + reg, n); return ESP_OK;
+}
+static int reg_write(void *dev, uint8_t reg, const uint8_t *data, size_t n) {
+    (void)dev; assert(reg == 0x06 && n == 1); ++writes;
+    if (write_error) return write_error;
+    regs[reg] = data[0]; return ESP_OK;
+}
+static void vin(int mv) { regs[0x24] = mv; regs[0x25] = mv >> 8; }
+''' + power_defines + '\n' + '\n'.join(function(cls.board, n) for n in ('pmic_update', 'read_usb_power', 'pmic_mv', 'read_power')) + r'''
+int main(int argc, char **argv) {
+    assert(argc == 2); int test = atoi(argv[1]); bool usb = true;
+    regs[0x06] = 0xef; /* preserve every charge/rail/reserved bit */
+    if (test == 0) {
+        vin(0); assert(read_usb_power(&usb) == ESP_OK && !usb);
+        assert(regs[0x06] == 0xef && writes == 0);
+        vin(5000); assert(read_usb_power(&usb) == ESP_OK && usb);
+        assert(regs[0x06] == 0xff && writes == 1);
+        assert(read_usb_power(&usb) == ESP_OK && writes == 1);
+        vin(0); assert(read_usb_power(&usb) == ESP_OK && !usb);
+        assert(regs[0x06] == 0xef && writes == 2);
+    } else if (test == 1) {
+        regs[0x06] = 0xff; failed_reg = 0x24;
+        assert(read_usb_power(&usb) == -7 && usb);
+        assert(regs[0x06] == 0xff && writes == 0);
+        failed_reg = -1; assert(read_usb_power(&usb) == ESP_OK && !usb);
+        assert(regs[0x06] == 0xef && writes == 1);
+    } else if (test == 2) {
+        vin(5000); failed_reg = 0x06;
+        assert(read_usb_power(&usb) == -7 && regs[0x06] == 0xef && writes == 0);
+        failed_reg = -1; assert(read_usb_power(&usb) == ESP_OK);
+        assert(regs[0x06] == 0xff && writes == 1);
+    } else if (test == 3) {
+        vin(5000); write_error = -8;
+        assert(read_usb_power(&usb) == -8 && regs[0x06] == 0xef && writes == 1);
+        write_error = 0; assert(read_usb_power(&usb) == ESP_OK);
+        assert(regs[0x06] == 0xff && writes == 2);
+    } else if (test == 4) {
+        vin(4000); assert(read_usb_power(&usb) == ESP_OK && !usb && writes == 0);
+        vin(4001); assert(read_usb_power(&usb) == ESP_OK && usb && writes == 1);
+        vin(3999); assert(read_usb_power(&usb) == ESP_OK && !usb && writes == 2);
+    } else if (test == 5) {
+        muse_power_t p = {0}; regs[0x22] = 3900 & 0xff; regs[0x23] = 3900 >> 8;
+        vin(5000); assert(read_power(&p) == ESP_OK && p.usb && p.charging);
+        assert(p.battery_mv == 3900 && p.battery_pct >= 0 && p.battery_pct <= 100);
+        regs[0x12] = BIT(2); assert(read_power(&p) == ESP_OK && p.usb && !p.charging);
+        vin(0); regs[0x12] = 0; assert(read_power(&p) == ESP_OK && !p.usb && !p.charging);
+        assert(regs[0x06] == 0xef);
+    } else {
+        muse_power_t p = {0}; vin(5000); /* no valid battery: LED still follows VIN */
+        assert(read_power(&p) == ESP_OK && p.usb && p.battery_pct == -1);
+        vin(0); assert(read_power(&p) == ESP_OK && !p.usb && p.battery_pct == -1);
+        assert(regs[0x06] == 0xef && writes == 2);
+    }
+    return 0;
+}
+'''
+        for name, code in (("board", board), ("input", inp), ("ui", ui), ("power", power)):
             path = Path(cls.tmp.name) / (name + '.c')
             path.write_text(code)
             subprocess.run(shlex.split(os.environ.get('CC', 'cc')) + ['-std=gnu11', '-Wall', '-Wextra', '-Werror', str(path), '-o', str(path.with_suffix(''))], check=True, capture_output=True, text=True)
@@ -214,6 +283,19 @@ int main(void) {
     def test_speaker_toggle_and_wake_only(self): self.run_case('input', 2)
     def test_legacy_aux_and_talk_not_reinterpreted(self): self.run_case('input', 3)
     def test_icon_hints_all_modes_mute_and_settings(self): self.run_case('ui', 0)
+    def test_led_usb_battery_transitions_preserve_rails(self): self.run_case('power', 0)
+    def test_led_vin_read_failure_is_not_a_transition(self): self.run_case('power', 1)
+    def test_led_config_read_failure_does_not_write(self): self.run_case('power', 2)
+    def test_led_write_failure_retried_next_read(self): self.run_case('power', 3)
+    def test_led_uses_factory_usb_voltage_threshold(self): self.run_case('power', 4)
+    def test_led_preserves_charging_and_battery_reporting(self): self.run_case('power', 5)
+    def test_led_updates_without_valid_battery_reading(self): self.run_case('power', 6)
+
+    def test_led_applied_at_boot_and_periodic_power_reads(self):
+        self.assertIn('read_usb_power(&usb)', function(self.board, 'init'))
+        self.assertIn('read_usb_power(&out->usb)', function(self.board, 'read_power'))
+        self.assertIn('paused ? REST_POWER_MS : POWER_MS', self.input)
+        self.assertIn('muse_board->read_power(&p)', self.input)
 
     def test_settings_power_hint_uses_red_not_ptt(self):
         source = (MUSE / 'muse_settings_ui.c').read_text()

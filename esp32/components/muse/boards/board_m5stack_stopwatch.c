@@ -91,6 +91,7 @@ static const char *TAG = "board";
 
 #define PMIC_ADDR 0x6E
 #define PMIC_PWR_CFG 0x06
+#define PMIC_PWR_LED BIT(4)
 #define PMIC_PWR_5V_OUT 0x08       /* 5 V boost to the Grove port */
 #define PMIC_I2C_CFG 0x09          /* 0: no I2C idle sleep */
 #define PMIC_WDT 0x0A              /* 0: watchdog off */
@@ -171,6 +172,19 @@ static esp_err_t pmic_update(uint8_t reg, uint8_t mask, uint8_t bits)
     ESP_RETURN_ON_ERROR(reg_read(s_pmic, reg, &v, 1), TAG, "pmic read %02x", reg);
     uint8_t want = (v & ~mask) | (bits & mask);
     return want == v ? ESP_OK : reg_write(s_pmic, reg, &want, 1);
+}
+
+/* M5Unified's M5PM1_Class::setLedEnLevel controls PWR_CFG bit4.
+ * StopWatch schematic sheet 2: LED_EN_PP -> R19 -> green LED1 -> GND
+ * (active high). Keep the USB indicator, but save its current on battery.
+ * Use a checked VIN read, as factory hal_pmic.cpp does; an I2C failure is
+ * not a power-source transition. pmic_update preserves charging and rails. */
+static esp_err_t read_usb_power(bool *usb)
+{
+    uint8_t b[2];
+    ESP_RETURN_ON_ERROR(reg_read(s_pmic, PMIC_VIN_MV, b, sizeof(b)), TAG, "pmic vin");
+    *usb = (b[0] | b[1] << 8) > 4000;
+    return pmic_update(PMIC_PWR_CFG, PMIC_PWR_LED, *usb ? PMIC_PWR_LED : 0);
 }
 
 static int pmic_mv(uint8_t reg)
@@ -284,6 +298,8 @@ static esp_err_t init(void)
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_GPIO_OUT, PMIC_CHG_PROG, 0), TAG, "pmic gpio3 low");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_GPIO_MODE, PMIC_CHG_STAT | PMIC_CHG_PROG, PMIC_CHG_PROG), TAG, "pmic gpio mode");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_PWR_CFG, PMIC_PWR_5V_OUT, 0), TAG, "5 V out off");
+    bool usb;
+    ESP_RETURN_ON_ERROR(read_usb_power(&usb), TAG, "power LED");
     /* Factory hal_pmic.cpp disables single-click reset. Keep double-click
      * emergency shutdown and download access; delay the PMIC's long action
      * to 4 s so Muse's 1.5 s hold plus goodbye can shut down cleanly first. */
@@ -556,8 +572,8 @@ static esp_err_t read_power(muse_power_t *out)
 {
     uint8_t in;
     ESP_RETURN_ON_ERROR(reg_read(s_pmic, PMIC_GPIO_IN, &in, 1), TAG, "pmic read");
+    ESP_RETURN_ON_ERROR(read_usb_power(&out->usb), TAG, "power LED");
     int v = pmic_mv(PMIC_VBAT_MV);
-    out->usb = pmic_mv(PMIC_VIN_MV) > 4000;
     out->charging = out->usb && !(in & PMIC_CHG_STAT);
     out->battery_mv = v;
     if (v < 2500) {

@@ -18,12 +18,18 @@ Reproduce with `MUSE_BENCH=1 tools/muse/board.sh build stopwatch` and the serial
 
 ## Automated checks
 
-- Full host suite: 210 tests passed, zero skips; includes 12 compiled production-code StopWatch control/input/UI/settings regressions.
+- Full host suite: 218 tests passed, zero skips; includes 20 compiled production-code StopWatch control/input/UI/settings/power regressions, covering LED power-source transitions, failed reads/writes, and charge/rail preservation.
 - ESP-IDF 6.0.1 bench and non-bench StopWatch builds: app fits the 4 MiB slot with 48% free; bootloader 66% free.
 - Attached-board boot reaches `muse: ready` with 8 MiB PSRAM and the 466x466 UI.
 
-## Hardware validation limits
+## Hardware validation
 
-Physical key presses, touch navigation, audible playback, app pairing, and red-key PMIC shutdown require separate manual confirmation. Serial-selected UI modes and host fakes do not prove those behaviors.
+The owner completed manual testing and reported that the controls worked well.
+Isolated serial MP3 playback checks passed 4/4 (including speaker toggles),
+and serial sleep/wake passed 3/3. The captures above remain rendering examples,
+not recordings of that manual testing.
 
-An intermittent panic reboot was observed during one MP3 bench attempt that also included unsolicited PTT input events and a changed speaker setting. The native USB disconnect lost the backtrace. An isolated repeat completed successfully; this is **not a root-cause fix claim**. The PR remains draft pending further physical-control and panic validation.
+One earlier MP3 bench attempt produced a panic reboot and lost its backtrace
+when native USB disconnected. Subsequent isolated repeats and the owner's
+manual testing passed; this change does not claim to establish or fix the
+cause of that earlier observation.

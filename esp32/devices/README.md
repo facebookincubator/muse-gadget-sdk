@@ -213,7 +213,10 @@ the factory does, and extends the PMIC long delay to 4 s. Settings are one
 swipe left from Muse. Icon-only physical hints (microphone, speaker/mute and
 power) stay beside the rim on the face, reply and pairing views, but are hidden
 in settings so they don't cover controls. Speaker/mute follows the saved
-speaker setting; the microphone brightens while recording.
+speaker setting; the microphone brightens while recording. The green PMIC
+power LED is off on battery and on with USB power, updated at boot and with
+the normal battery readings (including while the screen sleeps). This changes
+only M5PM1 `PWR_CFG` (`0x06`) bit 4, preserving charging and the power rails.
 M5's IO expander (M5IOE1) switches the panel and touch resets, audio power
 and the amp; its power chip (M5PM1) reads the battery, charger and red key's
 live state (register `0x48`, bit 0). The IMU, RTC, vibration motor and Grove
