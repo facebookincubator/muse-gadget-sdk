@@ -48,6 +48,9 @@ prefixed with "MuseGadget".
 Each directory has a `README.md` to get started and an `AGENTS.md` for coding
 agents like [Muse Code](https://developer.meta.com/ai/lp/muse-code/).
 
+The [UNIHIKER K10 guide](UNIHIKER-K10.md) is a community port for that board.
+It is not made or endorsed by Meta.
+
 ## Community
 
 Meet other hackers who are building and customizing Muse gadgets in our
