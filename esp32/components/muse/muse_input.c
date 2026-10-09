@@ -389,6 +389,52 @@ static bool update_wifi_nap(TickType_t now, bool paused)
     return napping;
 }
 
+/* Independent POWER never goes through PTT, AUX's menu or its setup double
+ * click. LONG is supplied by the board only after a validated hold. */
+static bool s_power_down, s_power_swallow;
+
+static void power_release(void)
+{
+    if (!s_power_down) return;
+    s_power_down = false;
+    if (!s_power_swallow) set_asleep(true, muse_board->power_button);
+    s_power_swallow = false;
+}
+
+static void dedicated_buttons(unsigned ev)
+{
+    bool release = (ev & MUSE_BTN_POWER_RELEASE) != 0;
+    /* Preserve release-before-new-press ordering for latched boards. */
+    if (s_power_down && release) {
+        power_release();
+        release = false;
+    }
+    if (!s_power_down && (ev & MUSE_BTN_POWER_PRESS)) {
+        s_power_down = true;
+        s_power_swallow = muse_state_asleep();
+        muse_state_poke();
+        if (s_power_swallow) set_asleep(false, muse_board->power_button);
+    }
+    if (s_power_down && !s_power_swallow && (ev & MUSE_BTN_POWER_LONG)) {
+        s_power_swallow = true;   /* no sleep on release after shutdown/failure */
+        if (s_talk_down) talk_button(MUSE_BTN_TALK_RELEASE);
+        power_off();
+    }
+    if (release) power_release();
+    if (ev & MUSE_BTN_SPEAKER_PRESS) {
+        muse_state_poke();
+        if (muse_state_asleep()) {
+            set_asleep(false, muse_board->speaker_button);   /* wake-only press */
+        } else if (muse_state_mode(NULL) != MUSE_MODE_OFF) {
+            bool on = !muse_settings_speaker_on();
+            muse_settings_set_speaker_on(on);
+            if (muse_state_mode(NULL) == MUSE_MODE_IDLE) {
+                muse_state_set_caption(on ? "SPEAKER ON" : "SPEAKER OFF");
+            }
+        }
+    }
+}
+
 static void input_task(void *arg)
 {
     (void)arg;
@@ -405,6 +451,7 @@ static void input_task(void *arg)
             talk_button(ev);
         }
         keyboard_buttons(ev);
+        dedicated_buttons(ev);
         /* A latched key (the 1.75's PMU) can report press and release in the
          * same poll, and a release can land just before the next press; keep
          * them ordered, as talk_button does. */
@@ -607,6 +654,16 @@ static bool console_command(char *line, bool whole)
         s_nap_now = true;
         return true;
     }
+#if LV_USE_SNAPSHOT
+    if (!strcmp(line, "ui.demo=1") || !strcmp(line, "ui.demo=0")) {
+        muse_ui_bench_demo(!strcmp(line, "ui.demo=1"));
+        return true;
+    }
+    if (!strcmp(line, "ui=settings") || !strcmp(line, "ui=face")) {
+        muse_ui_bench_page(!strcmp(line, "ui=settings"));
+        return true;
+    }
+#endif
     if (!strncmp(line, "face=", 5)) {
         set_face(line + 5);
         return true;

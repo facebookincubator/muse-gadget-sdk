@@ -30,6 +30,10 @@
  * Panel_StopWatch) and M5's factory firmware, M5StopWatch-UserDemo at 6b4aa125
  * (main/hal/). The panel's 466 columns start at 6, as on the Waveshare 1.75C;
  * the factory firmware hands touch coordinates to LVGL unscaled.
+ * Dedicated controls also follow factory BtnA -> left, BtnB -> right
+ * (app_stopwatch/view/view.cpp) and M5PM1 1.0.6 at 8f1f1a60:
+ * src/M5PM1.h/btnGetState(), BTN_CFG_1 and SYS_CMD, not an invented PWR GPIO.
+ * Vendor clones read for this change: M5Unified fd40d58, M5GFX c5a3fef.
  */
 #include <string.h>
 
@@ -45,7 +49,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
-#include "esp_sleep.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -77,8 +81,8 @@ static const char *TAG = "board";
 #define I2S_DOUT GPIO_NUM_21
 #define I2S_DIN GPIO_NUM_16
 
-#define TALK_GPIO GPIO_NUM_2       /* KEYA, yellow, upper left */
-#define AUX_GPIO GPIO_NUM_1        /* KEYB, blue, upper right */
+#define TALK_GPIO GPIO_NUM_1       /* KEYB / BtnB, blue, upper right: PTT */
+#define SPEAKER_GPIO GPIO_NUM_2    /* KEYA / BtnA, yellow, upper left: speaker */
 
 #define TP_ADDR 0x15
 #define TP_REG_POINTS 0x02         /* finger count, then X and Y, 12 bits each */
@@ -99,6 +103,18 @@ static const char *TAG = "board";
 #define PMIC_CHG_PROG BIT(3)       /* driven low, as M5's firmware does */
 #define PMIC_VBAT_MV 0x22          /* 16-bit little-endian millivolts */
 #define PMIC_VIN_MV 0x24           /* USB */
+/* M5PM1 v1.0.6 src/M5PM1.h and btnGetState(): red PWR is PMIC BTN,
+ * not an ESP GPIO. Bit7 records a past press and clears on read; ignore it. */
+#define PMIC_BTN_STATUS 0x48
+#define PMIC_BTN_PRESSED BIT(0)
+#define PMIC_BTN_CFG1 0x49
+#define PMIC_SINGLE_RESET_DISABLE BIT(0)
+#define PMIC_LONG_DELAY_MASK 0x18
+#define PMIC_LONG_DELAY_4S 0x18
+#define PMIC_SYS_CMD 0x0C
+#define PMIC_SHUTDOWN 0xA1
+#define POWER_DEBOUNCE_US 30000
+#define POWER_HOLD_US 1500000
 
 #define IOE_ADDR 0x4F
 #define IOE_MODE 0x03              /* 16 bits, IO1 in bit 0; 1 = output */
@@ -122,7 +138,10 @@ static i2c_master_dev_handle_t s_pmic, s_ioe, s_tp;
 static SemaphoreHandle_t s_ioe_lock;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
-static muse_gpio_button_t s_talk, s_aux;
+static muse_gpio_button_t s_talk, s_speaker;
+static bool s_power_pressed, s_power_candidate, s_power_armed, s_power_long;
+static int64_t s_power_changed_at, s_power_held_at;
+static unsigned poll_power_button(void);
 
 /* Both chips are microcontrollers and now and then miss a transfer; retry. */
 static esp_err_t reg_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t *buf, size_t n)
@@ -265,6 +284,11 @@ static esp_err_t init(void)
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_GPIO_OUT, PMIC_CHG_PROG, 0), TAG, "pmic gpio3 low");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_GPIO_MODE, PMIC_CHG_STAT | PMIC_CHG_PROG, PMIC_CHG_PROG), TAG, "pmic gpio mode");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_PWR_CFG, PMIC_PWR_5V_OUT, 0), TAG, "5 V out off");
+    /* Factory hal_pmic.cpp disables single-click reset. Keep double-click
+     * emergency shutdown and download access; delay the PMIC's long action
+     * to 4 s so Muse's 1.5 s hold plus goodbye can shut down cleanly first. */
+    ESP_RETURN_ON_ERROR(pmic_update(PMIC_BTN_CFG1, PMIC_SINGLE_RESET_DISABLE | PMIC_LONG_DELAY_MASK,
+                                   PMIC_SINGLE_RESET_DISABLE | PMIC_LONG_DELAY_4S), TAG, "power key config");
 
     /* Motor and amp off, audio and the L3B rail on, and both resets released
      * (driven push-pull). Then reset the panel and touch together, as M5GFX
@@ -282,10 +306,13 @@ static esp_err_t init(void)
     vTaskDelay(pdMS_TO_TICKS(120));   /* the panel's wake from reset */
 
     ESP_RETURN_ON_ERROR(muse_gpio_button_init(&s_talk, TALK_GPIO), TAG, "talk button");
-    ESP_RETURN_ON_ERROR(muse_gpio_button_init(&s_aux, AUX_GPIO), TAG, "aux button");
-    /* A button that woke the board from power-off is still down; don't count it. */
+    ESP_RETURN_ON_ERROR(muse_gpio_button_init(&s_speaker, SPEAKER_GPIO), TAG, "speaker button");
+    /* A button that woke the board from power-off is still down; don't count it.
+     * The PMIC key arms only after a debounced release, even if its first read fails. */
     s_talk.pressed = gpio_get_level(TALK_GPIO) == 0;
-    s_aux.pressed = gpio_get_level(AUX_GPIO) == 0;
+    s_speaker.pressed = gpio_get_level(SPEAKER_GPIO) == 0;
+    s_power_pressed = s_power_candidate = true;
+    s_power_changed_at = esp_timer_get_time();
     return ESP_OK;
 }
 
@@ -481,14 +508,47 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     return *spk && *mic ? ESP_OK : ESP_FAIL;
 }
 
-static unsigned poll_buttons(void)
+/* Read the live PMIC key, not its IRQ click flag (no held state there).
+ * Failed transfers never create edges or count towards a shutdown hold. */
+static unsigned poll_power_button(void)
 {
-    return muse_gpio_button_poll(&s_talk) | muse_gpio_button_poll(&s_aux) << 2;
+    int64_t now = esp_timer_get_time();
+    uint8_t status;
+    if (reg_read(s_pmic, PMIC_BTN_STATUS, &status, 1) != ESP_OK) {
+        s_power_changed_at = now;
+        s_power_held_at = 0;
+        return 0;
+    }
+    bool pressed = (status & PMIC_BTN_PRESSED) != 0;
+    if (pressed != s_power_candidate) {
+        s_power_candidate = pressed;
+        s_power_changed_at = now;
+        s_power_held_at = 0;
+    }
+    unsigned ev = 0;
+    if (pressed != s_power_pressed && now - s_power_changed_at >= POWER_DEBOUNCE_US) {
+        s_power_pressed = pressed;
+        s_power_long = false;
+        if (!pressed && !s_power_armed) {
+            s_power_armed = true;   /* release after boot: not an input event */
+        } else if (s_power_armed) {
+            ev = pressed ? MUSE_BTN_POWER_PRESS : MUSE_BTN_POWER_RELEASE;
+        }
+    }
+    if (pressed && s_power_pressed && s_power_armed && !s_power_long) {
+        if (!s_power_held_at) s_power_held_at = now;
+        if (now - s_power_held_at >= POWER_HOLD_US) {
+            s_power_long = true;
+            ev |= MUSE_BTN_POWER_LONG;
+        }
+    }
+    return ev;
 }
 
-static void wait_buttons(int timeout_ms)
+static unsigned poll_buttons(void)
 {
-    muse_gpio_buttons_wait((muse_gpio_button_t *const[]){ &s_talk, &s_aux }, 2, timeout_ms);
+    return muse_gpio_button_poll(&s_talk) |
+           muse_gpio_button_poll(&s_speaker) << 13 | poll_power_button();
 }
 
 /* The power chip measures the battery and USB; the charger's CHG_STAT reaches its GPIO2. */
@@ -510,42 +570,16 @@ static esp_err_t read_power(muse_power_t *out)
     return ESP_OK;
 }
 
-static void panel_off(void *arg)
-{
-    (void)arg;
-    esp_lcd_panel_disp_on_off(s_panel, false);
-}
-
-/*
- * Screen, touch, audio and the L3B rail off, then deep sleep until either
- * button is pressed. Double-clicking the power button has the power chip cut
- * the rest, and a click turns it back on.
- */
+/* The documented PMIC shutdown command cuts the main rail; the red POWER
+ * button turns it back on. Do not substitute an ESP GPIO or deep-sleep wake. */
 static esp_err_t power_off(void)
 {
-    set_brightness(0);
-    muse_lcd_bands_run(panel_off, NULL);
-    /* Best effort: with the screen already off on battery (display_pause) the
-     * touch controller is asleep and doesn't answer. */
-    reg_write(s_tp, TP_REG_SLEEP, (uint8_t[]){ 0x03 }, 1);
-    /* Sleeping with these still powered would drain the battery. */
-    ESP_RETURN_ON_ERROR(ioe_set(IOE_SPK | IOE_AUDIO | IOE_L3B, false), TAG, "rails off");
-    while (gpio_get_level(TALK_GPIO) == 0 || gpio_get_level(AUX_GPIO) == 0) {
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    vTaskDelay(pdMS_TO_TICKS(50));
-    /* M5's firmware pulls the buttons up internally, so keep those pull-ups
-     * powered through deep sleep. */
-    const gpio_num_t keys[] = { TALK_GPIO, AUX_GPIO };
-    for (int i = 0; i < 2; i++) {
-        rtc_gpio_pullup_en(keys[i]);
-        rtc_gpio_pulldown_dis(keys[i]);
-    }
-    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
-    ESP_RETURN_ON_ERROR(esp_sleep_enable_ext1_wakeup_io(BIT64(TALK_GPIO) | BIT64(AUX_GPIO), ESP_EXT1_WAKEUP_ANY_LOW),
-                        TAG, "button wake");
-    esp_deep_sleep_start();
-    return ESP_FAIL;
+    uint8_t cmd = PMIC_SHUTDOWN;
+    /* Don't turn off peripheral rails first: on a failed command the shared
+     * input/UI must be able to display COULDN'T POWER OFF and remain usable. */
+    ESP_RETURN_ON_ERROR(reg_write(s_pmic, PMIC_SYS_CMD, &cmd, 1), TAG, "pmic shutdown");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    return ESP_FAIL;   /* still running: the PMIC didn't cut power */
 }
 
 static const muse_board_t s_board = {
@@ -555,12 +589,15 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .diagonal_in = 1.75f,
-    .talk_button = "yellow",
-    .aux_button = "blue",
-    /* The buttons sit on the rim either side of 12 o'clock, about 27 degrees
-     * off it, where M5's stopwatch app draws them. */
-    .talk_hint = { LV_ALIGN_CENTER, -91, -178 },
-    .aux_hint = { LV_ALIGN_CENTER, 91, -178 },
+    .talk_button = "top-right",
+    .power_button = "red bottom-left",
+    .speaker_button = "top-left",
+    .rim_controls = true,
+    /* Physical positions with USB down: blue ~2 o'clock, yellow ~10,
+     * red ~7:30. All hint corners fit inside the 223 px inner rim. */
+    .talk_hint = { LV_ALIGN_CENTER, 144, -110 },
+    .speaker_hint = { LV_ALIGN_CENTER, -144, -110 },
+    .power_hint = { LV_ALIGN_CENTER, -144, 110 },
     .frame_ms = 40,
     .init = init,
     .display_start = display_start,
@@ -572,7 +609,8 @@ static const muse_board_t s_board = {
     .audio_init = audio_init,
     .mic_slot = 0,              /* one mic, on the left slot */
     .poll_buttons = poll_buttons,
-    .wait_buttons = wait_buttons,
+    /* Red POWER is on the PMIC, with no ESP interrupt: poll even while paused. */
+    .wait_buttons = NULL,
     .read_power = read_power,
     .power_off = power_off,
 };
