@@ -373,4 +373,60 @@ menu "ESP32 Device SDK"
             Manufacturing provisions the pairing key in KEY2 before Secure Boot
             locks read protection. No shared software attestation key is used.
 
+    config HOMEHUB_SHT40_ENABLED
+        bool "SHT40 temperature/humidity sensor"
+        default n
+        help
+            Read a Sensirion SHT40 over I2C and report temp_c and
+            humidity_pct in device.health metrics. The reTerminal E1002
+            carries one at I2C address 0x44.
+
+    config HOMEHUB_SHT40_SDA_GPIO
+        int "SHT40 I2C SDA GPIO"
+        depends on HOMEHUB_SHT40_ENABLED
+        default 19
+        help
+            GPIO for the SHT40 I2C data line (reTerminal E1002: GPIO19).
+
+    config HOMEHUB_SHT40_SCL_GPIO
+        int "SHT40 I2C SCL GPIO"
+        depends on HOMEHUB_SHT40_ENABLED
+        default 20
+        help
+            GPIO for the SHT40 I2C clock line (reTerminal E1002: GPIO20).
+
+    config HOMEHUB_BATTERY_ADC_ENABLED
+        bool "Battery voltage ADC"
+        default n
+        help
+            Read the battery voltage through the ADC and report
+            battery_mv and battery_pct in device.health metrics.
+            The reTerminal E1002 monitors its battery via ADC1
+            channel 0 (GPIO1) with a 1:2 divider enabled by GPIO21.
+
+    config HOMEHUB_BATTERY_ADC_GPIO
+        int "Battery ADC GPIO"
+        depends on HOMEHUB_BATTERY_ADC_ENABLED
+        default 1
+        help
+            GPIO for the battery voltage divider output
+            (reTerminal E1002: GPIO1, ADC1 channel 0).
+
+    config HOMEHUB_BATTERY_ENABLE_GPIO
+        int "Battery monitor enable GPIO"
+        depends on HOMEHUB_BATTERY_ADC_ENABLED
+        default 21
+        help
+            GPIO that enables the battery voltage divider, active high
+            (reTerminal E1002: GPIO21).
+
+    config HOMEHUB_WIFI_MODEM_SLEEP
+        bool "Wi-Fi modem sleep"
+        default n
+        help
+            Let the Wi-Fi radio sleep between access-point beacons while
+            staying associated (WIFI_PS_MIN_MODEM instead of
+            WIFI_PS_NONE). Reduces average power draw at the cost of
+            slightly higher latency for incoming packets.
+
 endmenu

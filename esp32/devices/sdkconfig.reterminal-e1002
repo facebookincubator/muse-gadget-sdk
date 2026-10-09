@@ -53,3 +53,16 @@ CONFIG_SPIRAM_SPEED_80M=y
 # The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
 # NimBLE host's allocations in PSRAM so pairing has room.
 CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+
+# SHT40 temperature/humidity sensor at I2C address 0x44
+# (SDA GPIO19, SCL GPIO20): report temp_c/humidity_pct in device.health.
+CONFIG_HOMEHUB_SHT40_ENABLED=y
+# Allow firmware updates over Wi-Fi via device.ota. The partition table
+# already provides dual 2 MB OTA app slots with rollback.
+CONFIG_HOMEHUB_OTA_ENABLED=y
+
+# Battery voltage via ADC1 (GPIO1, divider enabled by GPIO21):
+# report battery_mv/battery_pct in device.health.
+CONFIG_HOMEHUB_BATTERY_ADC_ENABLED=y
+# Let the Wi-Fi radio sleep between beacons while staying associated.
+CONFIG_HOMEHUB_WIFI_MODEM_SLEEP=y

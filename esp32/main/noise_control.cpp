@@ -39,8 +39,10 @@
 
 extern "C" {
 #include "cJSON.h"
+#include "battery_adc.h"
 #include "led_status.h"
 #include "ota.h"
+#include "sht40.h"
 #if CONFIG_MUSE_ENABLED
 extern "C" {
 #include "muse_state.h"
@@ -1282,7 +1284,9 @@ static char *build_register_json(void) {
     add_command(commands, "device.health",
                 "Report basic Link health, including battery level (percent), "
                 "voltage, and whether it is charging or on USB power; each is "
-                "null when the device has no battery or can't measure it",
+                "null when the device has no battery or can't measure it. "
+                "Boards with an SHT40 sensor also report temp_c (Celsius) and "
+                "humidity_pct (null when unavailable)",
                 nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
@@ -1553,6 +1557,21 @@ static void send_device_health(
     }
     usb_power = cJSON_CreateBool(power.usb);
 #endif
+#if CONFIG_HOMEHUB_BATTERY_ADC_ENABLED
+    int batt_mv = 0, batt_pct = 0;
+    if (battery_adc_read(&batt_mv, &batt_pct)) {
+        if (battery_pct) {
+            cJSON_Delete(battery_pct);
+            battery_pct = nullptr;
+        }
+        if (battery_mv) {
+            cJSON_Delete(battery_mv);
+            battery_mv = nullptr;
+        }
+        battery_pct = cJSON_CreateNumber(batt_pct);
+        battery_mv = cJSON_CreateNumber(batt_mv);
+    }
+#endif
     cJSON_AddItemToObject(metrics, "battery_pct",
                           battery_pct ? battery_pct : cJSON_CreateNull());
     cJSON_AddItemToObject(metrics, "battery_mv",
@@ -1561,6 +1580,16 @@ static void send_device_health(
                           charging ? charging : cJSON_CreateNull());
     cJSON_AddItemToObject(metrics, "usb_power",
                           usb_power ? usb_power : cJSON_CreateNull());
+#if CONFIG_HOMEHUB_SHT40_ENABLED
+    float sht_temp_c = 0, sht_humidity_pct = 0;
+    if (sht40_read(&sht_temp_c, &sht_humidity_pct)) {
+        cJSON_AddNumberToObject(metrics, "temp_c", sht_temp_c);
+        cJSON_AddNumberToObject(metrics, "humidity_pct", sht_humidity_pct);
+    } else {
+        cJSON_AddNullToObject(metrics, "temp_c");
+        cJSON_AddNullToObject(metrics, "humidity_pct");
+    }
+#endif
     cJSON_AddItemToObject(health, "metrics", metrics);
     if (wifi_ssid[0]) {
         cJSON_AddStringToObject(health, "network_ssid", wifi_ssid);
