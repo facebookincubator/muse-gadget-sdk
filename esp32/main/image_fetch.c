@@ -17,6 +17,7 @@
 #include "image_fetch.h"
 #include "led_status.h"
 #include "sdkconfig.h"
+#include "wifi_mgr.h"
 
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
 
@@ -320,6 +321,7 @@ static esp_err_t open_following_redirects(fetch_t *f, int *status) {
 
 static void fetch_task(void *arg) {
     fetch_t *f = arg;
+    wifi_mgr_transfer(true);
     int64_t start = esp_timer_get_time();
     f->deadline_us = start + FETCH_DEADLINE_MS * 1000LL;
     image_fetch_result_t result = { .code = "download_failed" };
@@ -380,6 +382,7 @@ static void fetch_task(void *arg) {
         }
     }
     if (f->http) esp_http_client_cleanup(f->http);
+    wifi_mgr_transfer(false);
 
     result.bytes = f->bytes;
     result.ms = (int)((esp_timer_get_time() - start) / 1000);

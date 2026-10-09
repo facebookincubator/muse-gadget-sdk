@@ -106,6 +106,11 @@ muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap);
  */
 bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
 
+/* Latest available assistant reply, retained through DONE until the next turn.
+ * Copies up to cap - 1 bytes; false clears out when no reply is available.
+ * Without the session text buffer, only its latest tail words are available. */
+bool muse_hatch_turn_reply(char *out, size_t cap);
+
 /* Reply speech as 16 kHz mono. Waits up to wait_ms for some; returns frames read. */
 size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms);
 

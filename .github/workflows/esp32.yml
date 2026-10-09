@@ -122,6 +122,9 @@ jobs:
           - board: reterminal-e1002
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-e1002"
+          - board: waveshare-s3-epaper-154g
+            target: esp32s3
+            overlays: ";devices/sdkconfig.waveshare-s3-epaper-154g"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"

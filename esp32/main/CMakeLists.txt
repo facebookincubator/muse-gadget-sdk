@@ -67,6 +67,10 @@ set(GADGET_REQUIRES
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
     esp_driver_pcnt
+    # Battery voltage, light sleep and the USB host check, for the same reason.
+    esp_adc
+    esp_pm
+    esp_driver_usb_serial_jtag
 )
 
 # E-paper has its own status screen in place of led_status.c, with
@@ -77,6 +81,8 @@ elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1681.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G)
+    list(APPEND GADGET_SRCS "epaper_154g_status.c")
 else()
     list(APPEND GADGET_SRCS "led_status.c")
 endif()
@@ -96,6 +102,16 @@ if(CONFIG_HOMEHUB_RETERMINAL_SHT4X)
     list(APPEND GADGET_SRCS "reterminal_sht4x.c")
 endif()
 
+if(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G AND (CONFIG_HOMEHUB_VOICE OR CONFIG_HOMEHUB_SHTC3_SENSORS))
+    list(APPEND GADGET_SRCS "epaper_154g_i2c.c")
+endif()
+if(CONFIG_HOMEHUB_SHTC3_SENSORS)
+    list(APPEND GADGET_SRCS "epaper_154g_sensors.c")
+endif()
+if(CONFIG_HOMEHUB_EPD154G_BATTERY)
+    list(APPEND GADGET_SRCS "epaper_154g_battery.c")
+endif()
+
 if(CONFIG_HOMEHUB_VOICE)
     list(APPEND GADGET_SRCS
         "voice.c"
@@ -104,9 +120,16 @@ if(CONFIG_HOMEHUB_VOICE)
     )
     if(CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
         list(APPEND GADGET_SRCS "voice_board_respeaker_lite.c")
+    elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G)
+        list(APPEND GADGET_SRCS "voice_board_epaper_154g.c" "voice_epaper_154g_led.c")
+        list(APPEND GADGET_REQUIRES esp_codec_dev)
     else()
         list(APPEND GADGET_SRCS "voice_board.c")
     endif()
+endif()
+
+if(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G)
+    list(APPEND GADGET_SRCS "epaper_154g_power.c")
 endif()
 
 idf_component_register(

@@ -59,6 +59,15 @@ menu "ESP32 Device SDK"
             Password for CONFIG_HOMEHUB_WIFI_SSID. Ignored when the SSID
             override is empty.
 
+    config HOMEHUB_WIFI_IDLE_MAX_MODEM
+        bool "Wi-Fi maximum modem power saving while idle"
+        depends on !MUSE_ENABLED
+        default n
+        help
+            Wake for every tenth beacon while idle. Voice turns, image
+            downloads and OTA use minimum modem sleep until all transfers
+            finish. Incoming idle traffic can wait about a second.
+
     config HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS
         int "Proactive device token refresh interval (days, 0 = disabled)"
         range 0 365
@@ -187,9 +196,10 @@ menu "ESP32 Device SDK"
             along the top and bottom edges, with an animation in between. The
             Home Assistant Voice PE shows the status colour on its LED ring.
             Seeed reSpeaker Lite shows it on a single RGB LED.
-            The reTerminal E1001 and E1002 show a still status screen on
-            their e-paper instead (black and white on the E1001, six colours
-            on the E1002).
+            The reTerminal E1001 and E1002 and the Waveshare
+            ESP32-S3-ePaper-1.54G show a still status screen on their e-paper
+            instead (black and white on the E1001, six colours on the E1002,
+            four on the 1.54G).
             Boards with the full UI have no status LED; their screen shows Link's pairing
             and connection state instead.
 
@@ -220,6 +230,10 @@ menu "ESP32 Device SDK"
 
         config HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
             bool "Waveshare ESP32-S3-1.54inch-ePaper SSD1681 e-paper (status screen)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
+        config HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+            bool "Waveshare ESP32-S3-ePaper-1.54G four-colour e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
         config HOMEHUB_LED_BACKEND_VOICE_RING
@@ -266,6 +280,7 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
         help
             Set for backends with a display: the status bars, animation and
             agent name (a still status screen on e-paper), and the display.*
@@ -273,10 +288,10 @@ menu "ESP32 Device SDK"
 
     config HOMEHUB_VOICE
         bool "Push-to-talk voice chat"
-        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE) && SPIRAM
+        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE || HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G) && SPIRAM
         default y
         help
-            Hold the centre button (XIAO BOOT on reSpeaker Lite), speak,
+            Hold the centre button (XIAO BOOT on reSpeaker Lite, BOOT on the 1.54G), speak,
             release: the audio goes to the agent's chat as a voice note,
             which the VM transcribes, and the
             reply appears in the Muse app as text. To speak it, plug a TTS
@@ -314,6 +329,26 @@ menu "ESP32 Device SDK"
             Calibration offset added to the SHT4x temperature reading, in
             tenths of a degree Celsius. The onboard sensor reads warm from
             board heat; -33 (-3.3 C, about -6 F) is a starting point.
+
+    config HOMEHUB_SHTC3_SENSORS
+        bool "Waveshare 1.54G temperature and humidity (sensors.read)"
+        depends on HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        default y
+        help
+            Measure the built-in SHTC3 on demand over the shared I2C bus.
+            Answer sensors.read with temperature in Celsius and humidity in
+            percent RH. Readings with an I2C or checksum error are rejected.
+
+    config HOMEHUB_EPD154G_BATTERY
+        bool "Waveshare 1.54G battery voltage (device.health)"
+        depends on HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        default y
+        help
+            Read the cell through the divider on GPIO4, report it in
+            device.health as battery_mv and an estimated battery_pct, and log
+            it once a minute. The board gives the chip no charge-status or VBUS
+            line, so charging stays null; usb_power is true only while a USB
+            host is connected to the chip's serial port.
 
     config HOMEHUB_DISPLAY_COMMANDS
         bool

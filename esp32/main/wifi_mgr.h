@@ -30,6 +30,13 @@ typedef struct {
 
 void wifi_mgr_init(void);
 
+// Pair each transfer start/end; overlapping transfers keep MIN modem sleep.
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+void wifi_mgr_transfer(bool active);
+#else
+static inline void wifi_mgr_transfer(bool active) { (void)active; }
+#endif
+
 // Returns the STA esp_netif handle (NULL before wifi_mgr_init()). The pointer
 // is stable for the lifetime of the process.
 esp_netif_t *wifi_mgr_get_netif(void);
