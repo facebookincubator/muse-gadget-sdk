@@ -59,7 +59,7 @@ static const char *TAG = "link.noise_ctrl";
 #define NOISE_DEFAULT_HOST "hatch.metaaivm.com"
 static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define NOISE_PATH       "/v1/noise"
-#define NOISE_PORT       443
+#define NOISE_PORT       (CONFIG_HOMEHUB_RELAY_PORT > 0 ? CONFIG_HOMEHUB_RELAY_PORT : 443)
 #define CTRL_STREAM_ID   1
 // One-shot GET /identity for the agent's name (TUNNEL_STREAM_ID is 2).
 #define IDENTITY_STREAM_ID 3

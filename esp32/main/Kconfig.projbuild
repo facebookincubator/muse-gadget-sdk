@@ -50,6 +50,42 @@ menu "ESP32 Device SDK"
             Password for CONFIG_HOMEHUB_WIFI_SSID. Ignored when the SSID
             override is empty.
 
+    config HOMEHUB_STATIC_IP
+        string "Static IPv4 address (empty = DHCP)"
+        default ""
+        help
+            When set together with HOMEHUB_STATIC_GW, the station disables
+            DHCP and uses this address. Useful to route the gadget's traffic
+            through another host (e.g. a Mac running a VPN) by pointing the
+            gateway at it.
+
+    config HOMEHUB_STATIC_GW
+        string "Static IPv4 gateway (used when static IP set)"
+        default ""
+
+    config HOMEHUB_STATIC_DNS
+        string "Static DNS server (used when static IP set)"
+        default ""
+
+    config HOMEHUB_DNS_MAP_IP
+        string "Answer this IPv4 for every hostname (SNI relay, empty = off)"
+        default ""
+        help
+            When set, getaddrinfo() never sends DNS queries: every hostname
+            resolves to this address, where a relay (muse_relay.py) accepts
+            TCP/443 and forwards by TLS SNI. Use to cross networks where real
+            DNS/UDP-53 is intercepted or poisoned.
+
+    config HOMEHUB_RELAY_PORT
+        int "TCP port the SNI relay listens on (0 = default 443)"
+        default 0
+        help
+            When nonzero, vm_api and the Noise control session connect to the
+            relay on this TCP port instead of 443; the relay still forwards to
+            the real host on 443 (SNI still carries the hostname, so TLS cert
+            checks are unaffected). Use when something on the relay host (e.g.
+            a VPN's transparent proxy) hijacks inbound TCP/443.
+
     config HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS
         int "Proactive device token refresh interval (days, 0 = disabled)"
         range 0 365
@@ -193,6 +229,10 @@ menu "ESP32 Device SDK"
             bool "SenseCAP Indicator 4 inch ST7701S RGB display (status bars)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
+        config HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
+            bool "Waveshare ESP32-S3-Touch-LCD-3.5 ST7796 display (status bars)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
         config HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
             bool "reTerminal E1001 7.5 inch UC8179 e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
@@ -242,6 +282,7 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
         help

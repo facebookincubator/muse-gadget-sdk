@@ -35,12 +35,14 @@
 #              ESP32-S3-DevKitC-1 v1.1 N8R8 (status LED, no display)
 #   waveshare-c6-lcd-147
 #              Waveshare ESP32-C6-LCD-1.47 with a 172x320 status screen
+#   waveshare-s3-lcd-35
+#              Waveshare ESP32-S3-Touch-LCD-3.5 with a 320x480 status screen
 #
 # The action defaults to build. Without PORT, flash and monitor use the only
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -91,6 +93,12 @@ case "$BOARD" in
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # The "ESP32-S3 USB Port", the chip's own USB-Serial-JTAG. The
     # USB-to-UART port works too; pass it explicitly.
+    PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
+    ;;
+  waveshare-s3-lcd-35)
+    TARGET=esp32s3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    # The S3's own USB-Serial-JTAG.
     PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
   *) echo "error: unknown board '$BOARD'" >&2; usage 2 ;;

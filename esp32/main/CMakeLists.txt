@@ -85,6 +85,10 @@ if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_
     list(APPEND GADGET_REQUIRES led_strip)
 endif()
 
+if(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796)
+    list(APPEND GADGET_REQUIRES espressif__esp_lcd_st7796)
+endif()
+
 if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
     list(APPEND GADGET_SRCS "sensecap_sensors.c")
 endif()
@@ -108,3 +112,9 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}
 )
+
+# Resolve every hostname to the SNI relay address (see wifi_mgr.c) so no DNS
+# packets leave the radio on networks where UDP/53 is hijacked or poisoned.
+if(NOT "${CONFIG_HOMEHUB_DNS_MAP_IP}" STREQUAL "")
+    target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=lwip_getaddrinfo")
+endif()

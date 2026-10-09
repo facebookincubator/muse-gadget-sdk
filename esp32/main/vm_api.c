@@ -103,6 +103,19 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt) {
 void vm_api_set_base_url(const char *url) {
     snprintf(s_api_base, sizeof(s_api_base), "%s",
              url && *url ? url : VM_API_DEFAULT_BASE_URL);
+#if CONFIG_HOMEHUB_RELAY_PORT
+    // The relay host hijacks/handles inbound 443 elsewhere; talk to it on the
+    // relay port. The SNI/cert hostname stays the bare domain, so append the
+    // port only when the URL has none of its own.
+    const char *p = strstr(s_api_base, "://");
+    const char *slash = p ? strchr(p + 3, '/') : NULL;
+    const char *colon = p ? strchr(p + 3, ':') : NULL;
+    if (p && (!colon || (slash && colon > slash))) {
+        size_t n = strlen(s_api_base);
+        snprintf(s_api_base + n, sizeof(s_api_base) - n, ":%d",
+                 CONFIG_HOMEHUB_RELAY_PORT);
+    }
+#endif
 }
 
 void vm_api_set_sdk_token(const char *sdk_token) {

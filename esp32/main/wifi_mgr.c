@@ -24,6 +24,9 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "lwip/netdb.h"
+#include "lwip/memp.h"
+#include "lwip/sockets.h"
 #include "soc/soc_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -46,6 +49,48 @@ static EventGroupHandle_t s_events;
 static SemaphoreHandle_t s_scan_mutex = NULL;
 static SemaphoreHandle_t s_cache_mutex = NULL;
 static esp_netif_t *s_sta_netif;
+
+/* When CONFIG_HOMEHUB_DNS_MAP_IP is set, every hostname resolves locally to
+ * that address (an SNI relay on the LAN, e.g. muse_relay.py) — no DNS packet
+ * ever leaves the radio. Linked in via -Wl,--wrap=lwip_getaddrinfo. The
+ * allocation mirrors lwIP's create_addrinfo() so freeaddrinfo() works. */
+extern int __real_lwip_getaddrinfo(const char *nodename, const char *servname,
+                                   const struct addrinfo *hints,
+                                   struct addrinfo **res);
+
+int __wrap_lwip_getaddrinfo(const char *nodename, const char *servname,
+                            const struct addrinfo *hints,
+                            struct addrinfo **res) {
+    if (!CONFIG_HOMEHUB_DNS_MAP_IP[0] || !nodename ||
+        (hints && hints->ai_family == AF_INET6) ||
+        inet_aton(nodename, NULL)) {
+        return __real_lwip_getaddrinfo(nodename, servname, hints, res);
+    }
+    int port = servname ? atoi(servname) : 0;
+    if (servname && !port) {
+        port = !strcmp(servname, "https") ? 443
+             : !strcmp(servname, "http") ? 80 : 0;
+    }
+    size_t total = sizeof(struct addrinfo) + sizeof(struct sockaddr_storage);
+    struct addrinfo *ai = memp_malloc(MEMP_NETDB);
+    if (!ai) return EAI_MEMORY;
+    memset(ai, 0, total);
+    struct sockaddr_in *sa =
+        (struct sockaddr_in *)(void *)((uint8_t *)ai + sizeof(struct addrinfo));
+    sa->sin_len = sizeof(struct sockaddr_in);
+    sa->sin_family = AF_INET;
+    sa->sin_port = lwip_htons((uint16_t)port);
+    inet_aton(CONFIG_HOMEHUB_DNS_MAP_IP, &sa->sin_addr);
+    ai->ai_family = AF_INET;
+    if (hints) {
+        ai->ai_socktype = hints->ai_socktype;
+        ai->ai_protocol = hints->ai_protocol;
+    }
+    ai->ai_addrlen = sizeof(struct sockaddr_storage);
+    ai->ai_addr = (struct sockaddr *)sa;
+    *res = ai;
+    return 0;
+}
 static bool s_inited = false;
 static bool s_connecting = false;        // true during initial wifi_mgr_connect() call
 // The network wifi_mgr_connect() is joining, for status screens.
@@ -203,6 +248,33 @@ void wifi_mgr_init(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     s_sta_netif = esp_netif_create_default_wifi_sta();
+
+    // Static addressing: bypass DHCP and force IP/gateway/DNS, so the gadget
+    // can route through another host (e.g. a Mac running a VPN tunnel).
+    if (CONFIG_HOMEHUB_STATIC_IP[0] && CONFIG_HOMEHUB_STATIC_GW[0]) {
+        esp_netif_dhcpc_stop(s_sta_netif);
+        esp_netif_ip_info_t ip = {0};
+        esp_netif_dns_info_t dns = {0};
+        esp_netif_str_to_ip4(CONFIG_HOMEHUB_STATIC_IP, &ip.ip);
+        esp_netif_str_to_ip4("255.255.255.0", &ip.netmask);
+        esp_netif_str_to_ip4(CONFIG_HOMEHUB_STATIC_GW, &ip.gw);
+        esp_netif_str_to_ip4(CONFIG_HOMEHUB_STATIC_DNS[0]
+                                 ? CONFIG_HOMEHUB_STATIC_DNS
+                                 : CONFIG_HOMEHUB_STATIC_GW,
+                             &dns.ip.u_addr.ip4);
+        dns.ip.type = ESP_IPADDR_TYPE_V4;
+        esp_netif_set_ip_info(s_sta_netif, &ip);
+        esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &dns);
+        ESP_LOGI(TAG, "static IP %s gw %s dns %s",
+                 CONFIG_HOMEHUB_STATIC_IP, CONFIG_HOMEHUB_STATIC_GW,
+                 CONFIG_HOMEHUB_STATIC_DNS[0] ? CONFIG_HOMEHUB_STATIC_DNS
+                                              : CONFIG_HOMEHUB_STATIC_GW);
+    }
+
+    if (CONFIG_HOMEHUB_DNS_MAP_IP[0]) {
+        ESP_LOGI(TAG, "DNS map: all hostnames -> %s (SNI relay)",
+                 CONFIG_HOMEHUB_DNS_MAP_IP);
+    }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));

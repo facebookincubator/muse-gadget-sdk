@@ -69,6 +69,8 @@ before adding a feature to one.
 | Guition JC3248W535 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535` | `tools/muse/board.sh build jc3248w535` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
 | M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 | `esp32s3` | `devices/sdkconfig.waveshare-s3-lcd-35` | `tools/board.sh waveshare-s3-lcd-35` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd-35` | `tools/muse/board.sh build s3lcd35` |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on
 GPIO27, the BOOT button on GPIO28 (active low), 8 MB flash and quad PSRAM.

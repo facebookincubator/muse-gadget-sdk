@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535> [serial|port]
+#   tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|s3lcd35> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -23,7 +23,7 @@
 # flashes in build-muse-<profile>-bench/, so neither build's sdkconfig hides
 # the other's.
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535}
+cmd=${1:?build|flash}; board=${2:?s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|s3lcd35}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -40,6 +40,7 @@ case $board in
     cores3)  profile=m5stack-cores3;       target=esp32s3 ;;
     fnk0104b) profile=fnk0104b;            target=esp32s3 ;;
     jc3248w535) profile=guition-jc3248w535; target=esp32s3 ;;
+    s3lcd35) profile=waveshare-s3-lcd-35;  target=esp32s3 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.

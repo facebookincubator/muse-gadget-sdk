@@ -16,5 +16,6 @@ dependencies:
   espressif/esp_websocket_client: "~1.2"
   espressif/cjson: "~1.7"
   espressif/led_strip: "~3.0"
+  espressif/esp_lcd_st7796: "~1.4"
   idf:
     version: ">=5.1"
