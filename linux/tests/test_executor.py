@@ -206,3 +206,16 @@ def test_file_paths_must_be_absolute(ex, monkeypatch):
 def test_device_health_reports_basics(ex):
     payload = ex.run("device.health", {})["payload"]
     assert payload["version"] and payload["hostname"] and "disk_gb" in payload
+
+
+def test_file_write_without_overwrite_uses_the_child_protocol(ex, tmp_path, monkeypatch):
+    _child_env_passes_pythonpath(monkeypatch)
+    target = tmp_path / "new"
+    request = {"path": str(target), "data_b64": "aGk=", "final": True, "overwrite": False}
+    assert ex.run("file.write", request)["ok"]
+    assert target.read_bytes() == b"hi"
+    request["data_b64"] = "bmV3"
+    result = ex.run("file.write", request)
+    assert result == {"ok": False, "error": "file exists and overwrite is false"}
+    assert target.read_bytes() == b"hi"
+    assert not (tmp_path / ".new.musegadget-partial").exists()
