@@ -47,6 +47,7 @@ before adding a feature to one.
 |---|---|---|---|
 | ESP32-C5 DevKitC-1 (default) | `esp32c5` | none | `tools/board.sh devkit` |
 | ESP32-C6 devkit without PSRAM | `esp32c6` | `devices/sdkconfig.c6-nopsram` | `tools/board.sh c6-nopsram` |
+| ESP32-C3 devkit (4 MB flash) | `esp32c3` | `devices/sdkconfig.c3-devkit` | `tools/board.sh c3-devkit` |
 | Espressif ESP32-S3-DevKitC-1 v1.1 (N8R8) | `esp32s3` | `devices/sdkconfig.espressif-s3-devkitc-1` | `tools/board.sh espressif-s3-devkitc-1` |
 | ideaspark ESP32 + 1.9" ST7789 | `esp32` | `devices/sdkconfig.ideaspark` | `tools/board.sh ideaspark` |
 | Waveshare ESP32-C6-LCD-1.47 | `esp32c6` | `devices/sdkconfig.waveshare-c6-lcd-147` | `tools/board.sh waveshare-c6-lcd-147` |
@@ -492,6 +493,76 @@ the management commands that `on_ws_command()` also handles (`device.list_vms`,
 `device.set_vm`, `device.reset_vm` and `device.unpair`) out of
 `link.register`: `tests/test_link_transport_contract.py` checks they stay
 unadvertised.
+
+## Matter devices
+
+`components/esp32_matter_controller` runs a Matter controller (`esp-matter`'s
+commissioner) on the device, on a fabric of its own, and adds the `matter.*`
+Link commands: `matter.commission`, `matter.commissionables`, `matter.nodes`,
+`matter.remove`, `matter.invoke`, `matter.read`, `matter.write` and
+`matter.open_window`. `skills/gadget-esp32-matter-controller` tells the agent
+how to use them. It is off by default (`CONFIG_HOMEHUB_MATTER_CONTROLLER`). The
+Matter overlays include flash layouts for 4 MB and 8 MB boards
+(`partitions_matter_4mb.csv`, `partitions_matter_8mb.csv`). To add it to a
+board that uses another layout, such as the boards with the full UI, change its
+partition table to add the `matter` and `paa_cert` partitions.
+
+- **Build:** load the Matter overlays after the board's own:
+  `devices/sdkconfig.matter-controller`, then
+  `devices/sdkconfig.matter-controller-psram` if the board has PSRAM, then
+  `devices/sdkconfig.matter-controller-8mb` or `-4mb` for its flash. For the C3 devkit, as CI builds it:
+
+  ```bash
+  idf.py -B build-c3-matter -DIDF_TARGET=esp32c3 -DSDKCONFIG=build-c3-matter/sdkconfig \
+    -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.c3-devkit;devices/sdkconfig.matter-controller;devices/sdkconfig.matter-controller-4mb" \
+    build
+  ```
+  - `esp-matter` comes from the component registry, and only into a build
+    with the option on: other builds don't download it.
+  - The first build compiles CHIP and takes a while.
+- **On the network only:** devices are added in their own commissioning
+  window on Wi-Fi, or on Thread through the home's border router. That is
+  usually a code shared from another app ("add to another app"). CHIP is
+  built without Bluetooth: devices are added only on the network, and the
+  firmware's own Bluetooth (setup and pairing with the Muse app) is
+  unaffected.
+- **Starts on demand:** Matter starts with the first `matter.*` command (a
+  couple of seconds), so `main/` only dispatches the commands and forgets the
+  fabric on a setup reset.
+- **Discovery:** `matter.commissionables` lists devices waiting to be added
+  (`_matterc._udp`). It doesn't replace `device.discover`, which (on builds
+  with the tunnel) scans the network for everything else, already
+  commissioned Matter devices (`_matter._tcp`) included.
+- **Flash layout:** the two layouts add a `matter` NVS partition (the fabric,
+  its devices and CHIP's own data) and `paa_cert`, the trust store.
+  - An OTA update changes neither.
+  - With 4 MB of flash there is one app slot, so no OTA.
+- **Trust store:** `components/esp32_matter_controller/paa/paa_cert.bin` is a
+  prebuilt image of the production PAAs and CHIP's vendor-0xFFF1 test PAA,
+  which `idf.py flash` writes with the app (`paa/README.md` shows how to
+  re-generate it and flash it independently).
+  - Devices that don't chain to one of them are refused with
+    `attestation_failed`.
+  - To refresh it, get the `.der` files with connectedhomeip's
+    `fetch_paa_certs_from_dcl.py` and run `tools/matter_paa_image.py`
+    (`paa/README.md`).
+- **Test devices** (CHIP's example apps, `esp-matter`'s example firmware, and
+  prototypes using CHIP's example attestation credentials, vendor ID 0xFFF1)
+  chain to the test PAA and carry certification declarations signed with
+  CHIP's test key. They are accepted by default
+  (`CONFIG_ESP_MATTER_COMMISSIONER_SUPPORT_TEST_CD=y` in
+  `devices/sdkconfig.matter-controller`), and so are uncertified devices of
+  real vendors. Set it to `n` in product firmware to accept only certified
+  devices.
+- **The fabric's keys**, including its CA key, are in the `matter` partition,
+  readable by anyone who can read the flash. This `esp-matter` version doesn't
+  support the HMAC-based NVS encryption scheme
+  (`CONFIG_HOMEHUB_NVS_ENCRYPTION`), so the two can't be combined.
+  - A setup reset (long press, `device.unpair`) forgets the fabric and its
+    devices; the devices keep a stale fabric until they are reset.
+- **Tests:** `tests/test_link_matter.py` runs the protocol helpers (parameter
+  checks, the node list) against a harness and checks that the commands are
+  advertised and dispatched under the option.
 
 ## Say Muse, never Hatch
 

@@ -1,0 +1,66 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+# Matter devices through Link commands (components/esp32_matter_controller).
+# Load after the board's overlay; then, on a board with PSRAM,
+# devices/sdkconfig.matter-controller-psram; then the flash layout,
+# devices/sdkconfig.matter-controller-4mb or -8mb.
+CONFIG_HOMEHUB_MATTER_CONTROLLER=y
+
+# esp-matter as a controller only: a commissioner on its own fabric, no
+# Matter server (the board is not a Matter device itself).
+CONFIG_ENABLE_CHIP_CONTROLLER_BUILD=y
+CONFIG_ESP_MATTER_CONTROLLER_ENABLE=y
+CONFIG_ESP_MATTER_COMMISSIONER_ENABLE=y
+CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER=n
+CONFIG_ENABLE_CHIP_SHELL=n
+CONFIG_WIFI_NETWORK_COMMISSIONING_DRIVER=n
+# Devices are added on the network, so CHIP has no Bluetooth of its own: the
+# firmware's pairing keeps NimBLE to itself.
+CONFIG_ENABLE_ESP32_BLE_CONTROLLER=n
+CONFIG_ENABLE_CHIPOBLE=n
+
+# Devices must chain to a PAA in the paa_cert partition
+# (components/esp32_matter_controller/paa). Certification declarations signed
+# with CHIP's test key are accepted, so test devices (CHIP's example
+# credentials, vendor 0xFFF1) and uncertified devices can be added; set =n in
+# product firmware to accept only certified devices.
+CONFIG_SPIFFS_ATTESTATION_TRUST_STORE=y
+CONFIG_ESP_MATTER_COMMISSIONER_SUPPORT_TEST_CD=y
+
+# CHIP for a controller: the commissioner needs a larger CHIP task stack (as in
+# esp-matter's controller example); CHIPProjectConfig.h has the limits Kconfig
+# doesn't (sessions, CASE clients, devices being commissioned at once).
+CONFIG_CHIP_PROJECT_CONFIG="components/esp32_matter_controller/CHIPProjectConfig.h"
+CONFIG_CHIP_TASK_STACK_SIZE=15360
+
+# Matter's data in its own NVS partition ("matter" in the flash layouts)
+CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="matter"
+CONFIG_CHIP_CONFIG_NAMESPACE_PARTITION_LABEL="matter"
+CONFIG_CHIP_COUNTERS_NAMESPACE_PARTITION_LABEL="matter"
+CONFIG_CHIP_KVS_NAMESPACE_PARTITION_LABEL="matter"
+
+# Thread devices answer from the border router's on-link prefix (SLAAC), and
+# CHIP's route hook turns the border router's route information into a route.
+CONFIG_LWIP_IPV6_AUTOCONFIG=y
+CONFIG_LWIP_IPV6_NUM_ADDRESSES=6
+CONFIG_ENABLE_ROUTE_HOOK=y
+CONFIG_LWIP_HOOK_IP6_ROUTE_DEFAULT=y
+CONFIG_LWIP_HOOK_ND6_GET_GW_DEFAULT=y
+
+# CHIP's own logs: errors only. At INFO it logs every message, which on a UART
+# console holds up its thread long enough for its event queue to back up (set
+# CHIP_LOG_DEFAULT_LEVEL_PROGRESS to debug).
+CONFIG_CHIP_LOG_DEFAULT_LEVEL_ERROR=y

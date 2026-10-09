@@ -315,6 +315,32 @@ menu "ESP32 Device SDK"
             tenths of a degree Celsius. The onboard sensor reads warm from
             board heat; -33 (-3.3 C, about -6 F) is a starting point.
 
+    config HOMEHUB_MATTER_CONTROLLER
+        bool "Matter devices through Link commands"
+        default n
+        help
+            Run a Matter controller on the device, on a fabric of its own, and
+            offer matter.* Link commands to add and control Matter devices on
+            the network (Wi-Fi, and Thread through the home's border router).
+            The controller is components/esp32_matter_controller; esp-matter
+            comes from the component registry. Load
+            devices/sdkconfig.matter-controller (and
+            devices/sdkconfig.matter-controller-psram with PSRAM), then
+            devices/sdkconfig.matter-controller-4mb or -8mb, for the settings
+            and the flash layout it needs; a board with another layout needs
+            matter and paa_cert partitions added to its partition table.
+            Can't be combined with HOMEHUB_NVS_ENCRYPTION: this esp-matter
+            version doesn't support the HMAC-based NVS encryption scheme.
+
+    config HOMEHUB_MATTER_CONTROLLER_MAX_NODES
+        int "Matter devices remembered"
+        default 16
+        range 1 64
+        depends on HOMEHUB_MATTER_CONTROLLER
+        help
+            The size of the node list matter.nodes returns; a device beyond it
+            is refused.
+
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY

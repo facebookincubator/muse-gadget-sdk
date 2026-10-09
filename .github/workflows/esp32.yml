@@ -107,6 +107,10 @@ jobs:
           - board: c6-nopsram
             target: esp32c6
             overlays: ";devices/sdkconfig.c6-nopsram"
+          - board: c3-devkit
+            target: esp32c3
+            # With the optional Matter controller, so that CI builds it too.
+            overlays: ";devices/sdkconfig.c3-devkit;devices/sdkconfig.matter-controller;devices/sdkconfig.matter-controller-4mb"
           - board: waveshare-c6-lcd-147
             target: esp32c6
             overlays: ";devices/sdkconfig.waveshare-c6-lcd-147"

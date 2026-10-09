@@ -31,6 +31,7 @@ session to Muse. The rest depends on the hardware.
 |---|---|---|---|---|---|
 | **ESP32-C5 DevKitC-1** | ESP32-C5 | None (RGB status light) | 8 MB / 8 MB | [Espressif docs](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c5/esp32-c5-devkitc-1/index.html) | [DigiKey](https://www.digikey.com/en/products/result?keywords=ESP32-C5-DevKitC-1) |
 | **ESP32-C6 devkit without PSRAM** | ESP32-C6 | None (RGB status light) | 8 MB or more / none | [Espressif docs](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c6/esp32-c6-devkitc-1/user_guide.html) | — |
+| **ESP32-C3 devkit** | ESP32-C3 | None (RGB status light) | 4 MB / none | [Espressif docs](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c3/esp32-c3-devkitm-1/user_guide.html) | — |
 | **Espressif ESP32-S3-DevKitC-1 (N8R8)** | ESP32-S3 | None (RGB status light) | 8 MB / 8 MB | [Espressif docs](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitc-1/user_guide_v1.1.html) | — |
 | **ideaspark ESP32 with 1.9" display** | ESP32 | 1.9" 170×320 LCD | 16 MB / none | — | [Amazon](https://www.amazon.com/s?k=ideaspark+ESP32+1.9+inch+ST7789) |
 | **Waveshare ESP32-C6-LCD-1.47** | ESP32-C6 | 1.47" 172×320 LCD (ST7789) | 4 MB / none | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-C6-LCD-1.47) | [Waveshare](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) |
@@ -104,7 +105,7 @@ Boards without PSRAM (the ideaspark, the C6 boards and the Cardputer ADV) don't 
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On | On | Off |
 | Buttons | BOOT | BOOT | BOOT | BOOT | Top | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | BOOT, PWR (talk), KEY (talk) on top | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | OK (talk), UP/DOWN (menu) |
 
-Boards without PSRAM (the ideaspark, the C6 boards, the Cardputer ADV and the AI Passport) don't have room for
+Boards without PSRAM (the ideaspark, the C3 devkit, the C6 boards, the Cardputer ADV and the AI Passport) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
 control session is up. The Waveshare C6, Cardputer ADV and AI Passport also can't hold their own voice
 session, so push-to-talk sends your voice note over its control session to the
@@ -442,6 +443,7 @@ board's overlays, in order:
 |---|---|---|---|
 | ESP32-C5 DevKitC-1 | `esp32c5` | none | `idf.py build` |
 | ESP32-C6 devkit without PSRAM | `esp32c6` | [`devices/sdkconfig.c6-nopsram`](sdkconfig.c6-nopsram) | `tools/board.sh c6-nopsram build` |
+| ESP32-C3 devkit | `esp32c3` | [`devices/sdkconfig.c3-devkit`](sdkconfig.c3-devkit) | `tools/board.sh c3-devkit build` |
 | ESP32-S3-DevKitC-1 | `esp32s3` | [`devices/sdkconfig.espressif-s3-devkitc-1`](sdkconfig.espressif-s3-devkitc-1) | `tools/board.sh espressif-s3-devkitc-1 build` |
 | ideaspark ESP32 | `esp32` | [`devices/sdkconfig.ideaspark`](sdkconfig.ideaspark) | `tools/board.sh ideaspark build` |
 | Waveshare C6 LCD 1.47 | `esp32c6` | [`devices/sdkconfig.waveshare-c6-lcd-147`](sdkconfig.waveshare-c6-lcd-147) | `tools/board.sh waveshare-c6-lcd-147 build` |
@@ -470,6 +472,12 @@ board's overlays, in order:
 | Freenove FNK0104B | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-fnk0104b`](sdkconfig.muse-fnk0104b) | `tools/muse/board.sh build fnk0104b` |
 | VN ESP32-S3 1.83-inch NV3023 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-vn-s3-183`](sdkconfig.muse-vn-s3-183) | `tools/muse/board.sh build vn183` |
 | FoloToy AI Passport | `esp32c3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-ai-passport`](sdkconfig.muse-ai-passport) | `tools/muse/board.sh build ai-passport` |
+
+Boards can also run an optional Matter controller, which adds Matter devices on
+the network and controls them through `matter.*` commands. It loads more
+overlays after the board's, and a board whose flash layout they don't cover
+needs its partition table changed: see
+[Matter devices](../AGENTS.md#matter-devices) in `esp32/AGENTS.md`.
 
 `tools/board.sh BOARD [build|flash|monitor|flash-monitor] [PORT]` builds each
 board in its own `build-<board>` directory. For the boards with the full UI, run `idf.py`

@@ -63,6 +63,7 @@ set(GADGET_REQUIRES
     mbedtls
     efuse
     muse
+    esp32_matter_controller
     # The voice board's. Requirements are resolved before the configuration
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s

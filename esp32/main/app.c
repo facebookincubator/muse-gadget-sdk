@@ -71,6 +71,9 @@
 #if CONFIG_HOMEHUB_RETERMINAL_SHT4X
 #include "reterminal_sht4x.h"
 #endif
+#if CONFIG_HOMEHUB_MATTER_CONTROLLER
+#include "esp32_matter_controller.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -1381,6 +1384,11 @@ static void finish_setup_reset_with_gate_held(void) {
     led_status_set_state(LED_STATE_UNPAIRED);
     ble_server_send_status("unpaired");
     link_pairing_reset();
+#if CONFIG_HOMEHUB_MATTER_CONTROLLER
+    // Every reset (button, menu, BLE or server unpair) ends here: the next
+    // owner doesn't get this home's Matter devices.
+    esp32_matter_controller_erase();
+#endif
 }
 
 static bool reset_setup_with_gate_held(const char *source) {
@@ -1908,6 +1916,14 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_RETERMINAL_SHT4X
     if (strcmp(command, "sensors.read") == 0) {
         return reterminal_sht4x_command();
+    }
+#endif
+#if CONFIG_HOMEHUB_MATTER_CONTROLLER
+    // matter.commission, .commissionables, .nodes, .remove, .invoke, .read,
+    // .write, .open_window. Matter starts with the first.
+    if (strncmp(command, "matter.", 7) == 0) {
+        return esp32_matter_controller_command(command, params, request_id, session_generation,
+                                               noise_ctrl_send_command_result);
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {

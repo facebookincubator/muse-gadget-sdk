@@ -1228,6 +1228,15 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
+#if CONFIG_HOMEHUB_MATTER_CONTROLLER
+static cJSON *typed_param(const char *type, const char *description) {
+    cJSON *param = cJSON_CreateObject();
+    cJSON_AddStringToObject(param, "type", type);
+    cJSON_AddStringToObject(param, "description", description);
+    return param;
+}
+#endif
+
 static void add_command(cJSON *commands, const char *name,
                         const char *description,
                         cJSON *required, cJSON *optional) {
@@ -1404,6 +1413,95 @@ static char *build_register_json(void) {
                 "and relative humidity in percent. Each reading has its age "
                 "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
+#endif
+
+#if CONFIG_HOMEHUB_MATTER_CONTROLLER
+    {
+        // Matter devices on this device's own fabric (components/esp32_matter_controller).
+        // The watchdogs answer 10 s before these timeouts.
+        cJSON *commission_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(commission_required, "code",
+                              string_param("Setup code: the QR text (MT:...) or the 11/21-digit manual code."));
+        cJSON *commission_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(commission_optional, "label", string_param("A name for the device."));
+        add_command(commands, "matter.commission",
+                    "Add a Matter device that is on the network and in pairing mode (a code shared from "
+                    "another app, or a Thread device through the home's border router); returns its node_id.",
+                    commission_required, commission_optional);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "matter.commission"), "timeout_ms", 160000);
+
+        cJSON *discover_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(discover_optional, "timeout_s",
+                              typed_param("integer", "How long to listen, 1-15 s (default 4)."));
+        add_command(commands, "matter.commissionables",
+                    "List Matter devices on the network waiting to be added (in pairing mode): vendor, "
+                    "product, discriminator, name. device.discover, where present, scans for everything else.",
+                    nullptr, discover_optional);
+
+        add_command(commands, "matter.nodes", "List this home's Matter devices (node_id, label).", nullptr,
+                    nullptr);
+
+        cJSON *remove_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(remove_required, "node_id", typed_param("integer", "The device's node_id."));
+        cJSON *remove_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(remove_optional, "forget",
+                              typed_param("boolean", "Only drop it from the list (it was reset or is gone)."));
+        add_command(commands, "matter.remove",
+                    "Remove a device from this home; other apps it is in keep it.", remove_required,
+                    remove_optional);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "matter.remove"), "timeout_ms", 70000);
+
+        // node_id, endpoint and cluster for invoke and write; reads take wildcards.
+        const char *path_keys[] = {"node_id", "endpoint", "cluster"};
+        const char *path_desc[] = {"The device's node_id.", "Endpoint.", "Cluster ID."};
+        const char *read_desc[] = {"The device's node_id.", "Endpoint (65535: all).", "Cluster ID (4294967295: all)."};
+        cJSON *invoke_required = cJSON_CreateObject();
+        cJSON *read_required = cJSON_CreateObject();
+        cJSON *write_required = cJSON_CreateObject();
+        for (int i = 0; i < 3; i++) {
+            cJSON_AddItemToObject(invoke_required, path_keys[i], typed_param("integer", path_desc[i]));
+            cJSON_AddItemToObject(read_required, path_keys[i], typed_param("integer", read_desc[i]));
+            cJSON_AddItemToObject(write_required, path_keys[i], typed_param("integer", path_desc[i]));
+        }
+        cJSON_AddItemToObject(invoke_required, "command", typed_param("integer", "Command ID."));
+        cJSON *invoke_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(invoke_optional, "fields",
+                              typed_param("object", "Command fields keyed \"TAG:TYPE\", e.g. {\"0:U8\": 128}."));
+        cJSON_AddItemToObject(invoke_optional, "timed_ms",
+                              typed_param("integer", "Timed request timeout in ms (locks need one)."));
+        add_command(commands, "matter.invoke",
+                    "Send a cluster command to a device; returns its response fields, if any, keyed "
+                    "\"TAG:TYPE\".",
+                    invoke_required, invoke_optional);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "matter.invoke"), "timeout_ms", 70000);
+
+        cJSON_AddItemToObject(read_required, "attribute",
+                              typed_param("integer", "Attribute ID (4294967295: all)."));
+        add_command(commands, "matter.read",
+                    "Read attributes from a device. Values are JSON; struct fields are keyed \"TAG:TYPE\" "
+                    "and octet strings are base64.",
+                    read_required, nullptr);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "matter.read"), "timeout_ms", 70000);
+
+        cJSON_AddItemToObject(write_required, "attribute", typed_param("integer", "Attribute ID."));
+        cJSON_AddItemToObject(write_required, "value",
+                              typed_param("object", "The value as {\"0:TYPE\": value}, e.g. {\"0:U16\": 300}."));
+        cJSON *write_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(write_optional, "timed_ms",
+                              typed_param("integer", "Timed request timeout in ms, if the attribute needs one."));
+        add_command(commands, "matter.write", "Write an attribute on a device.", write_required, write_optional);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "matter.write"), "timeout_ms", 70000);
+
+        cJSON *window_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(window_required, "node_id", typed_param("integer", "The device's node_id."));
+        cJSON *window_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(window_optional, "timeout_s",
+                              typed_param("integer", "How long it stays open, 180-900 s (default 300)."));
+        add_command(commands, "matter.open_window",
+                    "Let another app or ecosystem add a device too; returns the manual code to enter there.",
+                    window_required, window_optional);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "matter.open_window"), "timeout_ms", 70000);
+    }
 #endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA

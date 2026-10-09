@@ -165,6 +165,7 @@ status screen.
 |---|---|---|
 | ESP32-C5 DevKitC-1 | Status light and button | `idf.py build` |
 | ESP32-C6 devkit without PSRAM | Status light and button | `tools/board.sh c6-nopsram build` |
+| ESP32-C3 devkit | Status light and button | `tools/board.sh c3-devkit build` |
 | Espressif ESP32-S3-DevKitC-1 | Status light and button | `tools/board.sh espressif-s3-devkitc-1 build` |
 | ideaspark ESP32 with 1.9" display | Status on screen, images | `tools/board.sh ideaspark build` |
 | Waveshare ESP32-C6-LCD-1.47 | Status on screen, images | `tools/board.sh waveshare-c6-lcd-147 build` |
