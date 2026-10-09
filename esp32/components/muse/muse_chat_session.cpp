@@ -2182,6 +2182,23 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
     return muse_hatch_caption_at(text, at, out, cap);
 }
 
+extern "C" bool muse_hatch_turn_reread(size_t at, char *out, size_t cap)
+{
+    /* The finished turn's texts stay until the next turn_start clears them. */
+    if (s_turn.phase != P_IDLE || !s_turn.texts) {
+        return false;
+    }
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        const char *text = s_turn.texts + i * TEXT_MAX;
+        size_t len = strlen(text);
+        if (at < len) {
+            return muse_hatch_caption_at(text, at, out, cap);
+        }
+        at -= len;
+    }
+    return false;
+}
+
 extern "C" size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms)
 {
     return xStreamBufferReceive(s_out, pcm, frames * sizeof(int16_t), pdMS_TO_TICKS(wait_ms)) / sizeof(int16_t);

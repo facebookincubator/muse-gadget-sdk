@@ -31,6 +31,7 @@ typedef enum {
     MUSE_MODE_LISTENING,
     MUSE_MODE_THINKING,
     MUSE_MODE_SPEAKING,
+    MUSE_MODE_READING,   /* the reply's speech is over: its text pages through to be read */
     MUSE_MODE_ERROR,
     MUSE_MODE_OFF,       /* powering down */
     MUSE_MODE_COUNT,

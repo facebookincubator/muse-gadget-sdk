@@ -542,6 +542,7 @@ static void set_face(const char *name)
         [MUSE_MODE_LISTENING] = "listening",
         [MUSE_MODE_THINKING] = "thinking",
         [MUSE_MODE_SPEAKING] = "speaking",
+        [MUSE_MODE_READING] = "reading",
         [MUSE_MODE_ERROR] = "error",
         [MUSE_MODE_OFF] = "off",
     };

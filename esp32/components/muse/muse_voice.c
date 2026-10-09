@@ -66,6 +66,7 @@ static const char *TAG = "muse_voice";
 #define RETRY_MAX_US (120LL * 1000000)
 #define STALL_US (30LL * 1000000)               /* Hatch took none of a note this long: give up */
 #define ACK_WAIT_US (30LL * 1000000)            /* asleep, waiting for the VM to have a note */
+#define READ_BYTES_PER_S 14                     /* read-back pace once a reply's speech is over */
 
 static QueueHandle_t s_queue;
 static volatile bool s_monitor;
@@ -341,6 +342,30 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
 static void go_idle(const char *caption);
 
 /*
+ * The reply's speech is over: page its text through at reading pace, so the
+ * whole of it can be read rather than only the lines said last. Returns true
+ * if a press starts the next note instead.
+ */
+static bool read_reply(void)
+{
+    muse_state_set_mode(MUSE_MODE_READING);
+    char page[MUSE_CAPTION_MAX];
+    int64_t t0 = esp_timer_get_time();
+    for (;;) {
+        if (got_event(MUSE_PTT_DOWN)) {
+            muse_hatch_turn_cancel();
+            return true;
+        }
+        size_t at = (size_t)((esp_timer_get_time() - t0) * READ_BYTES_PER_S / 1000000);
+        if (!muse_hatch_turn_reread(at, page, sizeof(page))) {
+            return false;
+        }
+        muse_state_set_caption("%s", page);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+/*
  * Plays Hatch's reply as it arrives, with its text as the caption. Returns
  * true if interrupted by a new press. *delivered: the VM has the note.
  */
@@ -426,7 +451,7 @@ static bool hatch_reply(bool *delivered)
         /* No speech (TTS unavailable): leave the reply text up for a moment. */
         vTaskDelay(pdMS_TO_TICKS(2500));
     }
-    return false;
+    return replied && read_reply();
 }
 
 static void go_idle(const char *caption)
