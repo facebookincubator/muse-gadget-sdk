@@ -16,7 +16,8 @@
 # Regenerates components/muse/fonts/muse_font_cjk_16.c, the CJK fallback for
 # the caption font (CONFIG_MUSE_CJK_FONT): GNU Unifont's 16x16 bitmaps, the
 # same cell as unscii-16, for CJK punctuation, kana, every CJK Unified
-# Ideograph and the fullwidth forms. Needs curl and npx (Node.js).
+# Ideograph, fullwidth forms, Hangul jamo and Hangul syllables.
+# Needs curl and npx (Node.js).
 set -eu
 
 VERSION=16.0.04
@@ -31,7 +32,8 @@ curl -fsSL -o "$TMP/unifont.otf" \
 echo "$SHA256  $TMP/unifont.otf" | shasum -a 256 -c - >/dev/null
 npx -y lv_font_conv@1.5.3 --font "$TMP/unifont.otf" --size 16 --bpp 1 \
     --format lvgl --lv-font-name muse_font_cjk_16 --no-compress \
-    -r 0x3000-0x30FF -r 0x4E00-0x9FFF -r 0xFF00-0xFFEF -o "$TMP/font.c"
+    -r 0x3000-0x30FF -r 0x4E00-0x9FFF -r 0xFF00-0xFFEF \
+    -r 0x1100-0x11FF -r 0x3130-0x318F -r 0xAC00-0xD7AF -o "$TMP/font.c"
 # The project includes LVGL as "lvgl.h"; the header names no temp paths.
 sed -e 's|#include "lvgl/lvgl.h"|#include "lvgl.h"|' -e "s|$TMP/||g" "$TMP/font.c" > "$OUT"
 echo "wrote $OUT"

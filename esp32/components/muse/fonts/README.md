@@ -3,7 +3,9 @@
 `muse_font_cjk_16.c` is the CJK fallback for the caption font, built in only
 with `CONFIG_MUSE_CJK_FONT`. It holds GNU Unifont 16.0.04's 16x16 bitmaps,
 the same cell as unscii-16, for CJK punctuation, kana, every CJK Unified
-Ideograph (U+4E00 to U+9FFF) and the fullwidth forms: about 850 KB of flash.
+Ideograph (U+4E00 to U+9FFF), fullwidth forms, Hangul jamo (U+1100 to
+U+11FF), Hangul compatibility jamo (U+3130 to U+318F) and Hangul syllables
+(U+AC00 to U+D7AF): about 1.2 MB of read-only font data, 33,024 glyphs.
 `tools/muse/gen_cjk_font.sh` regenerates it.
 
 GNU Unifont is by Roman Czyborra, Paul Hardy and contributors
