@@ -25,12 +25,14 @@ each prefixed with its length as a little-endian u32:
   as ``link.unpaired``.
 
 Messages the device sends to the Muse (:meth:`LinkSession.send_chat`) go as
-separate ``POST /chat/stream`` requests on the same session.
+separate ``POST /chat/stream`` requests on the same session. Replies come back
+on ``POST /chat/subscribe``, a live NDJSON event stream.
 """
 
 from __future__ import annotations
 
 import asyncio
+import collections
 import enum
 import json
 import logging
@@ -49,9 +51,13 @@ log = logging.getLogger(__name__)
 NOISE_PATH = "/v1/noise"
 CONTROL_PATH = "/link-control"
 CHAT_PATH = "/chat/stream"
+SUBSCRIBE_PATH = "/chat/subscribe"
 APP_ID = "musegadget"
 REQUEST_TIMEOUT_S = 60
 MAX_RESPONSE_BYTES = 1024 * 1024
+MAX_EVENT_LINE = 1024 * 1024
+MAX_REPLY_WAIT_S = 600
+SUBSCRIBE_RETRY_S = 5
 HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
@@ -129,6 +135,83 @@ def noise_url(noise_host: str, vm_id: str) -> str:
     return f"wss://{noise_host}{NOISE_PATH}?vm_id={quote(vm_id, safe=_URI_COMPONENT_SAFE)}"
 
 
+def parse_chat_event(line: bytes) -> dict | None:
+    """Flatten one ``/chat/subscribe`` row into event, ids and text, or None if it is not an event."""
+    try:
+        row = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(row, dict) or row.get("type") != "event":
+        return None
+    payload = row.get("payload")
+    fields = {**row, **(payload if isinstance(payload, dict) else {})}
+    text = next((fields[k] for k in ("display_text", "content", "text")
+                 if isinstance(fields.get(k), str)), "")
+    return {
+        "event": fields.get("event_name") or fields.get("event") or "",
+        "message_id": fields.get("message_id") or fields.get("id") or "",
+        # An explicit reply_to_message_id wins even when empty: the Muse leaves it
+        # empty and sets parent_message_id to the message's own id.
+        "reply_to": (fields["reply_to_message_id"] if isinstance(fields.get("reply_to_message_id"), str)
+                     else fields.get("parent_message_id") or ""),
+        "text": text,
+        "seq": fields.get("seq") if isinstance(fields.get("seq"), int) else None,
+    }
+
+
+class ReplyCollector:
+    """Picks the Muse's answer to one note out of the subscribe events.
+
+    ``reply_to_message_id`` is empty on replies, so this goes by order: the first
+    assistant message after the ``message.user`` event for our note. Events
+    before it (history replayed on subscribe) are ignored. An assistant event
+    that does name the note is accepted wherever it falls.
+    """
+
+    def __init__(self) -> None:
+        self.note_id = ""
+        self._after_note = False
+        self._owner = ""
+        self._text: dict[str, str] = {}
+        self._buffered: list[dict] = []
+
+    def feed(self, event: dict) -> str | None:
+        """Returns the finished reply text, or None while it is still coming."""
+        if not self.note_id:
+            # Events can arrive before /chat/stream returns the note's id.
+            self._buffered.append(event)
+            return None
+        name, mid = event["event"], event["message_id"]
+        if name == "message.user":
+            if mid == self.note_id:
+                self._after_note = True
+            return None
+        if name not in ("delta.message_start", "delta.text_append",
+                        "delta.message_done", "message.assistant"):
+            return None
+        if event["reply_to"] == self.note_id:
+            self._after_note = True
+        elif not self._after_note or (self._owner and mid != self._owner):
+            return None
+        self._owner = self._owner or mid
+        if name == "delta.text_append":
+            self._text[mid] = self._text.get(mid, "") + event["text"]
+        elif name == "message.assistant":
+            return event["text"] or self._text.get(mid, "")
+        elif name == "delta.message_done":
+            return event["text"] or self._text.get(mid, "")
+        return None
+
+    def set_note_id(self, note_id: str) -> str | None:
+        self.note_id = note_id
+        buffered, self._buffered = self._buffered, []
+        for event in buffered:
+            done = self.feed(event)
+            if done is not None:
+                return done
+        return None
+
+
 class LinkSession:
     def __init__(
         self,
@@ -150,7 +233,8 @@ class LinkSession:
         self._tasks: set[asyncio.Task] = set()
         self._stream_id = 0
         self._register_id = ""
-        self._requests: dict[int, _Request] = {}
+        self._requests: dict[int, _Request | _Subscription] = {}
+        self._main_sub: _Subscription | None = None
         self.registered_at: float | None = None
 
     async def run(self, stop: asyncio.Event) -> Outcome:
@@ -163,6 +247,7 @@ class LinkSession:
             self._ws = ws
             self._transport = await asyncio.wait_for(self._handshake(ws), HANDSHAKE_TIMEOUT_S)
             await self._open_control_stream()
+            self._spawn(self._keep_subscribed())
             reader = asyncio.ensure_future(self._read_loop())
             stopper = asyncio.ensure_future(stop.wait())
             done, _ = await asyncio.wait({reader, stopper}, return_when=asyncio.FIRST_COMPLETED)
@@ -175,8 +260,7 @@ class LinkSession:
             for task in self._tasks:
                 task.cancel()
             for request in self._requests.values():
-                if not request.done.done():
-                    request.done.set_exception(ConnectionError("session ended"))
+                request.abort()
             self._requests.clear()
             await ws.close()
 
@@ -236,7 +320,8 @@ class LinkSession:
 
     # -- Device-originated requests -------------------------------------------
 
-    async def send_chat(self, message: str, session_id: str | None = None) -> dict:
+    async def send_chat(self, message: str, session_id: str | None = None,
+                        wait_reply: float | None = None) -> dict:
         """Post a user message to the Muse as coming from this device.
 
         Sent on this session, so the VM attributes the turn to the device
@@ -244,7 +329,33 @@ class LinkSession:
         commands back here. ``session_id`` targets a side chat; an id the Muse
         has not seen before starts a new one. Without it the message goes to
         the main chat.
+
+        ``/chat/stream`` only acknowledges the note. With ``wait_reply``
+        (seconds) the answer is read from ``/chat/subscribe`` and returned as
+        ``reply``, or None if it did not finish in time.
         """
+        if not wait_reply:
+            return await self._post_chat(message, session_id)
+        events: asyncio.Queue = asyncio.Queue()
+        side = None
+        if session_id:
+            # Only the main chat is on the session-wide subscription.
+            side = await self._subscribe(session_id)
+            side.listeners.add(events)
+        elif self._main_sub is not None:
+            self._main_sub.listeners.add(events)
+        try:
+            result = await self._post_chat(message, session_id)
+            result["reply"] = await self._await_reply(
+                events, result, min(wait_reply, MAX_REPLY_WAIT_S))
+            return result
+        finally:
+            if self._main_sub is not None:
+                self._main_sub.listeners.discard(events)
+            if side is not None:
+                await self._close_subscription(side)
+
+    async def _post_chat(self, message: str, session_id: str | None) -> dict:
         request_body = {
             "message": message,
             "output_modality": "text",
@@ -271,6 +382,67 @@ class LinkSession:
         except json.JSONDecodeError:
             decoded = response.decode("utf-8", errors="replace")[:2000]
         return {"ok": 200 <= status < 300, "status": status, "response": decoded}
+
+    # -- Replies: POST /chat/subscribe ----------------------------------------
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.ensure_future(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _subscribe(self, session_id: str | None = None) -> "_Subscription":
+        """Open a ``/chat/subscribe`` stream: the main chat, or one side chat."""
+        body = json.dumps({"session_id": session_id}).encode() if session_id else b"{}"
+        headers = [
+            Header("Content-Type", "application/json"),
+            Header("Accept", "application/x-ndjson"),
+            Header("x-request-id", str(uuid.uuid4())),
+            Header("x-app-id", APP_ID),
+        ]
+        encrypted = self._transport.encrypt_http_request(
+            "POST", SUBSCRIBE_PATH, body, headers=headers)
+        subscription = _Subscription(encrypted.stream_id)
+        self._requests[encrypted.stream_id] = subscription
+        await self._send_frames(encrypted.frames)
+        return subscription
+
+    async def _keep_subscribed(self) -> None:
+        """Hold the main-chat subscription open for the life of the session."""
+        while True:
+            started = time.monotonic()
+            subscription = await self._subscribe()
+            self._main_sub = subscription
+            await subscription.closed.wait()
+            self._requests.pop(subscription.stream_id, None)
+            # Back off after a refusal or an immediate close.
+            await asyncio.sleep(1 if time.monotonic() - started > 10 else SUBSCRIBE_RETRY_S)
+
+    async def _close_subscription(self, subscription: "_Subscription") -> None:
+        self._requests.pop(subscription.stream_id, None)
+        if subscription.closed.is_set():
+            return
+        try:
+            await self._send_frames(self._transport.encrypt_reset(subscription.stream_id))
+        except Exception as exc:
+            log.debug("could not reset the subscribe stream: %s", exc)
+
+    async def _await_reply(self, events: asyncio.Queue, ack: dict, timeout: float) -> str | None:
+        if not ack["ok"]:
+            return None
+        response = ack["response"] if isinstance(ack["response"], dict) else {}
+        collector = ReplyCollector()
+        deadline = asyncio.get_running_loop().time() + timeout
+        reply = collector.set_note_id(str(response.get("message_id") or ""))
+        while reply is None:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return None
+            try:
+                event = await asyncio.wait_for(events.get(), remaining)
+            except asyncio.TimeoutError:
+                return None
+            reply = collector.feed(event)
+        return reply
 
     # -- Sending --------------------------------------------------------------
 
@@ -382,6 +554,10 @@ class _Request:
         self.status = 0
         self.body = bytearray()
 
+    def abort(self) -> None:
+        if not self.done.done():
+            self.done.set_exception(ConnectionError("session ended"))
+
     def on_frame(self, frame) -> None:
         if self.done.done():
             return
@@ -400,7 +576,58 @@ class _Request:
             self.done.set_result((self.status, bytes(self.body)))
 
 
+class _Subscription:
+    """A ``/chat/subscribe`` stream, decoded into events for each listener queue."""
+
+    def __init__(self, stream_id: int) -> None:
+        self.stream_id = stream_id
+        self.listeners: set[asyncio.Queue] = set()
+        self.closed = asyncio.Event()
+        self._buffer = b""
+        self._seen: collections.deque = collections.deque(maxlen=256)
+
+    def abort(self) -> None:
+        self.closed.set()
+
+    def on_frame(self, frame) -> None:
+        if self.closed.is_set():
+            return
+        if frame.kind == "reset":
+            self.closed.set()
+            return
+        if frame.kind == "response":
+            log.debug("subscribe: HTTP %d", frame.value.status)
+            if frame.value.status >= 400:
+                log.warning("/chat/subscribe refused: HTTP %d", frame.value.status)
+                self.closed.set()
+                return
+            data, ended = frame.value.body, frame.value.end_body
+        else:
+            data, ended = frame.value.data, frame.value.end_body
+        log.debug("subscribe: %d bytes, end=%s: %r", len(data), ended, data[:300])
+        self._buffer += data
+        *lines, self._buffer = self._buffer.split(b"\n")
+        if len(self._buffer) > MAX_EVENT_LINE:
+            self.closed.set()
+            return
+        for line in lines:
+            event = parse_chat_event(line) if line.strip() else None
+            if event is None:
+                continue
+            key = (event["event"], event["seq"], event["message_id"])
+            if event["seq"] is not None and key in self._seen:
+                continue
+            self._seen.append(key)
+            for queue in self.listeners:
+                queue.put_nowait(event)
+        if ended:
+            self.closed.set()
+
+
 class _NoRequest:
+    def abort(self) -> None:
+        pass
+
     def on_frame(self, frame) -> None:
         pass
 
