@@ -53,7 +53,13 @@ ports, with no credentials in commands or committed results.
 5. Run `tools/muse/watcher_power.py arm --port DUT_PORT --ppk-control-dir RUN/control --output RUN/acquisition.json`.
    It begins recording via the existing owner, bounds the UART clock mapping,
    and requires the Watcher's actual VBUS-present acknowledgment. Do not
-   re-arm blindly after a timeout: command outcome may be unknown.
+   re-arm blindly after a timeout: command outcome may be unknown. Omission
+   of `--matrix` keeps peripheral v1 (27 states, repeats 1–2). Use
+   `--matrix sleep --repeats 1` only for sleep v2 characterization from truly
+   untouched codec hardware; MCU reset cannot restore cold codec registers.
+   Sleep repeats >1 are explicitly rejected. Verify the emitted plan: v2 has
+   26 states including final `warm_ref_9` before its two timer-deep states.
+   This extra A brackets both late combined/polling B variants.
 6. Only then prompt: **"Unplug all Watcher USB cables now. Leave PPK USB and
    source wiring connected."** The device starts its sweep on actual VBUS
    absence. No BLE connection is required for radio-off states.
@@ -70,6 +76,26 @@ On failure, reconnect Watcher USB safely before explicit PPK finish. Never
 unplug PPK or terminate its process while it is the only source. Do not
 restart source mode, auto-reset hardware, or erase NVS as generic recovery.
 
+## USB-only diagnostic preflight
+
+After authorized console access, run
+`python3 tools/muse/watcher_power.py dryrun --port DUT_PORT --matrix sleep --output RUN/dryrun.json --timeout-s 60`
+while USB remains connected and no sweep is active. It strictly applies/reads
+sleep indices 0–23, skips deep entry, holds the USB awake lock, exercises no PM
+or timing dwell, restores resting configuration, and emits per-state evidence
+plus exactly one final summary. It uses no PPK source and leaves the RTC run
+journal unchanged. Bank error rows/raw frames; false `codec_regs_expected` is
+not an error, while I2C transport/transition/restore errors are. Logs are bounded
+96-character safe ASCII with no UART forwarding; wildcard NONE/selective
+BSP ERROR plus disconnected ROM printf sinks keep UART protocol-only. Drain
+TX to actual idle before parking pads and after dry-run lines; timeout fails
+without parking. Successful states clear ignored-component logs. First fatal evidence is
+checkpointed before cleanup. Codec maps contain integer bytes/null and detected
+ADC variant, with unavailable snapshots explicit. The host verifies fresh
+nonced STATUS before/after, unchanged boot and live USB; any error returns
+nonzero. **This consumes cold codec state: fully power-cycle before a subsequent
+cold quantitative sweep.** Never infer hardware authorization from this skill.
+
 ## What counts as evidence
 
 The arm reply lists the actual state plan. The device journal records actual
@@ -81,8 +107,37 @@ sweep rather than being averaged as a low-power success.
 The minimum isolated sweep covers CPU idle policies, automatic light sleep,
 LCD/touch rail and brightness, shared audio codecs/I2S/PA, mic draining,
 bounded sine playback, battery divider/conversions and unassociated Wi-Fi
-scan. Unsupported radio/connected/SSCMA/SD/Grove/deep-sleep states stay
-explicitly skipped. Do not relabel rail power as proven camera operation.
+scan. Those unsupported peripheral-v1 radio/connected/SSCMA/SD/Grove/deep-sleep
+states stay explicitly skipped. Sleep v2 instead characterizes cold,
+constructor-initialized and actually opened/closed codecs, reversible narrow
+GPIO/pull/isolation knobs, CPU power-down permission, slower VBUS polling and
+two timer-only deep resets. Initialized means constructor register writes
+(including ADC enable), not cold or powered down; suspended means checked
+open/disable/close driver sequencing, not proof from register-byte equality.
+Codec snapshots are evidence: only I2C transport errors fail, and
+`codec_regs_expected:false` never rejects a measurement. Failed codec
+init/open/disable requires ordered vendor shutdown with transport-checked
+snapshots and poisoned-driver non-reuse; constructor-only success stays intact.
+Independent fenced RTC markers track pad ownership before holds and sticky warm
+attempts before constructors. Release owned holds before UART setup even with
+an invalid run journal; preserve warm proof across subsequent retained resets,
+never relabel an MCU reset as cold. Final/abort resting readback is mandatory.
+On ESP-IDF 6.0.1/S3 RTC fast+slow retention is forced by rtc_sleep_init, not absent
+public RTC memory-PD enum calls. CPU ON/OFF reference balancing vetoes/allows retention PD
+without clearing other owners; permission is not observed PD proof. Internal
+pull/wake changes are diagnostic-only, not a production-ready fix.
+
+ACK/status/results identify matrix/version and always include sleep timeline
+uncertainty. Plans carry knobs/deep_sleep/poll_ms plus role/ref_group; records
+carry verified-knob/codec metadata and entry boot identity. Match every deep
+record's entry/resume chain, timer wake, deep-sleep reset and RTC duration:
+only a valid matching pending journal may resume. Require retrieval and live
+boot to equal the last timer-resume boot (or original armed boot with no
+resumes); an ordinary intervening reset is recovery evidence, not quantitative
+continuity. Virtual timestamps retain the run epoch and add ceil(1% RTC elapsed)
++50 ms per resume: a conservative unvalidated slow-RC timing assumption. Keep
+this uncertainty inside guards; do not infer deep sleep from light-sleep counters.
+Do not relabel rail power as proven camera operation.
 
 This is **isolated BSP characterization, not the production application**.
 Measure the normal application separately for advertising, connected idle,

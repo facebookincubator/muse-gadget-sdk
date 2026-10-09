@@ -183,7 +183,11 @@ alone as permission to remove USB.
 The same exclusive backend starts one fast raw thread only at initial acquisition.
 It performs bounded serial reads, arrival stamps, and queue counters—never decode,
 statistics, or file writes. Consumer batches are at most 64 KiB. The queue defaults
-to 1 MiB (`--receiver-max-bytes`, integer 1024–16777216) and at most 4096 entries.
+to 1 MiB (`--receiver-max-bytes`, integer 1024–16777216). Its default entry cap
+is `max(4096, ceil(capacity_bytes / 1024))`: 4096 for 1 MiB, 16384 for 16 MiB.
+Approximately 1 KiB reads can therefore use the larger byte budget instead of
+hitting 4096 entries near 4 MiB; smaller packets can still hit the separate,
+bounded metadata cap first. Explicit entry caps remain bounded at 1–16384.
 Overflow/read errors latch an **INVALID transport fault**, invalidate queued
 continuation, and count discarded subsequent bytes while continuing raw drain.
 There is no silent-drop/restart policy. Stop/join occurs only at confirmed finish
@@ -242,6 +246,21 @@ host drift large enough to cross a state guard. Conservatively exclude boundary
 windows. Require included-state coverage ≥99%, but do not treat this alone as
 proof of no misplaced loss. Record alignment, guard, and drift assumptions.
 Scrub local USB identifiers and host paths before publishing reports.
+
+Watcher offline `analyze --pre-fault-prefix` is a narrow opt-in exception for
+whole earlier rows, not capture recovery or permission to restart/shut down.
+Only the matching final raw receiver `queue_overflow`/`read_error` with a host
+arrival timestamp qualifies. Require zero new missing/invalid/late samples and
+four-byte decoded/consumed accounting. A surplus requires receiver conservation,
+an unchanged invalidated queue, and at most one pre-fault 64 KiB in-flight batch
+plus three framing bytes; absent or contradictory evidence fails closed.
+The cutoff is fault host offset minus the larger final session/receiver observed
+consumer delay minus the requested guard. Reject entire rows ending later; keep
+all coverage/gap/loss/drift checks and require each selected window's original
+backlog peak, not a later global peak. `transport_fault_cutoff` records the
+cutoff and accounting; the original fault remains **INVALID**, and no post-fault
+continuation or complete-capture claim is allowed. Timing is still conditional
+on observed delays and the stated drift model.
 
 ## Host-only verification
 

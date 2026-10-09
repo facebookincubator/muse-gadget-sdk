@@ -115,6 +115,44 @@ class ReceiverTest(unittest.TestCase):
         self.assertEqual(snapshot["queued_bytes"], 2)
         self.assertEqual(snapshot["discarded_bytes"], 1)
 
+    def test_default_entry_budget_scales_with_bytes_but_stays_bounded(self):
+        for capacity, entries in ((1024, 4096), (1024*1024, 4096),
+                                  (5*1024*1024+1, 5121), (16*1024*1024, 16384)):
+            receiver = FastRawReceiver(lambda: (b"", 0), max_bytes=capacity)
+            self.assertEqual(receiver.snapshot()["capacity_chunks"], entries)
+        for entries in (0, True, 16385, 16384.0):
+            with self.assertRaises(ValueError):
+                FastRawReceiver(lambda: (b"", 0), max_chunks=entries)
+
+    def test_16mib_queue_passes_old_entry_limit_and_reaches_byte_budget(self):
+        # O(1) fake backlog snapshots keep this bounded stress test inexpensive.
+        for count, size, overflows in ((4097, 1020, False), (16386, 1024, True)):
+            with self.subTest(count=count):
+                incoming = deque([b"x" * size] * count)
+                def read():
+                    backlog = len(incoming) * size
+                    return (incoming.popleft(), backlog) if incoming else (b"", 0)
+                receiver = FastRawReceiver(read, max_bytes=16*1024*1024).start()
+                try:
+                    self.assertTrue(wait_receiver(receiver, lambda: receiver.received_bytes == count*size, timeout=5))
+                    snapshot = receiver.snapshot()
+                    self.assertEqual(snapshot["capacity_chunks"], 16384)
+                    if not overflows:
+                        self.assertIsNone(snapshot["fault"])
+                        self.assertEqual(snapshot["queued_chunks"], 4097)
+                        self.assertEqual(snapshot["queued_bytes"], count*size)
+                    else:
+                        self.assertEqual(snapshot["fault"]["kind"], "queue_overflow")
+                        self.assertEqual(snapshot["queued_bytes"], 16*1024*1024)
+                        self.assertEqual(snapshot["invalidated_queue_bytes"], 16*1024*1024)
+                        self.assertEqual(snapshot["overflow_count"], 1)
+                        self.assertEqual(snapshot["discarded_bytes"], 2048)
+                        with self.assertRaises(TransportFault):
+                            receiver.read_batch()
+                    self.assertTrue(snapshot["running"])
+                finally:
+                    receiver.stop()
+
     def test_read_failure_latches_and_future_bytes_are_invalidated(self):
         receiver = self.make()
         self.source.errors = 1

@@ -24,7 +24,8 @@ from dataclasses import dataclass
 
 MAX_BATCH_BYTES = 65_536
 DEFAULT_QUEUE_BYTES = 1024 * 1024
-MAX_QUEUE_CHUNKS = 4096
+DEFAULT_MIN_QUEUE_CHUNKS = 4096
+MAX_QUEUE_CHUNKS = 16 * 1024
 
 
 def validate_queue_bytes(value):
@@ -53,10 +54,14 @@ class RawChunk:
 
 class FastRawReceiver:
     def __init__(self, read_chunk, *, max_bytes=DEFAULT_QUEUE_BYTES,
-                 max_chunks=MAX_QUEUE_CHUNKS, clock=time.monotonic):
+                 max_chunks=None, clock=time.monotonic):
         validate_queue_bytes(max_bytes)
+        if max_chunks is None:
+            # Keep tiny-packet metadata bounded, without imposing the old 4 MiB
+            # effective limit on a 16 MiB queue receiving approximately 1 KiB.
+            max_chunks = max(DEFAULT_MIN_QUEUE_CHUNKS, (max_bytes + 1023) // 1024)
         if type(max_chunks) is not int or not 1 <= max_chunks <= MAX_QUEUE_CHUNKS:
-            raise ValueError("raw receiver entry cap must be 1..4096")
+            raise ValueError("raw receiver entry cap must be 1..16384")
         self.read_chunk = read_chunk  # returns (bounded bytes, OS backlog snapshot)
         self.max_bytes = max_bytes
         self.max_chunks = max_chunks

@@ -4,7 +4,10 @@
 
 The USB-free diagnostic sweep completed: **23 measured states, four explicit
 skips, no firmware or collector errors**. See the [measured profile and limitations](sensecap-watcher-findings.md)
-and [scrubbed CSV](sensecap-watcher-profile.csv). Figures are conditional
+and [scrubbed CSV](sensecap-watcher-profile.csv). A second sleep-matrix sweep
+covers light-sleep knobs and timer deep sleep: see the
+[sleep deep dive](sensecap-watcher-sleep-findings.md) and
+[its CSV](sensecap-watcher-sleep-profile.csv). Figures are conditional
 receive-window estimates under an assumed 250 ppm drift budget and 1-second
 guards; neither sample-exact timing nor a production power fix is claimed.
 The fixture replaces the internal battery with PPK2 VOUT on VBAT and common
@@ -186,13 +189,196 @@ where uninterrupted power is a safety requirement.
 ## State matrix and evidence
 
 The firmware arm acknowledgment lists the exact plan for that build. Each
-result contains the state name, repeat, apply/capture/end timestamps in ESP
-boot microseconds, error/status, and hardware configuration/readback. Planned
+result contains the state name, repeat, virtual apply/capture/end timestamps,
+error/status, and hardware configuration/readback. Planned
 but unsupported states are explicitly skipped, never successful zero-current
 results. The baseline is repeated before/after groups to identify failure to
 restore a peripheral or hysteresis.
 
-Initial characterization targets:
+### Matrix selection and protocol
+
+`watcher_power.py arm --matrix peripheral` (or omission) selects the unchanged
+27-state peripheral matrix, version 1, with one or two repeats. The strict
+firmware arm JSON accepts only the four required keys `run_id`, `settle_ms`,
+`capture_ms`, `repeats`, plus optional `matrix:"peripheral"|"sleep"`.
+`--matrix sleep --repeats 1` selects sleep matrix version 2. More than one sleep
+repeat is rejected as `sleep_requires_one_repeat_cold_not_reversible`: codec
+constructors change external registers, and an MCU-only reset cannot recreate
+an untouched cold codec. Start this characterization with genuinely untouched
+codec hardware; there is no automatic power-cycle or cold-state reset.
+
+Sleep v2 runs: `cold_ref`, `cold_i2s_low`, `cold_i2s_hiz`,
+`cold_i2s_low_b`, `codec_initialized`, `codec_suspended`, then warm references
+bracketing UART high-Z, RGB DIN low, internal-pulls-off, unused-interface
+high-Z, sleep GPIO isolation, CPU power-down permission, and combined knobs.
+`best_combined_b` and `best_poll_5s` are followed by `warm_ref_9`, then
+`deep_sleep_timer` and `deep_sleep_timer_held`. This final reference makes the
+matrix **26 states**, explicitly added to bracket both late variants for A/B/A.
+The ACK is authoritative for the complete order and conservative runtime;
+5000 ms settling + 20000 ms capture gives a **940000 ms** maximum duration.
+
+ACK/status/results carry `matrix`, `matrix_version`, `resume_count`,
+`timeline_offset_us`, and `timeline_uncertainty_us` (including zero). Plan
+entries add `knobs`, `deep_sleep`, `poll_ms`, `role` (`ref`, `variant`, `other`)
+and `ref_group` (`cold`, `warm`, or empty). Records preserve index/id/name and
+add entry `boot_id`, uncertainty, polling and reference metadata; `actual`
+adds numeric `knobs_applied` and `codec_state`. Ordinary VBUS polling is
+1000 ms; the combined polling variant uses 5000 ms and retains boundary
+wakeups. UART0 pins are re-routed as soon as the next power sample detects USB
+or uncertain power, and on state reversion/finish/abort. It is not an
+asynchronous VBUS interrupt; deep sleep cannot poll VBUS.
+
+`codec_initialized` runs audio/I2S initialization and codec constructors,
+but never opens wrapper streams; both I2S directions are then stopped.
+ES8311 construction writes reset/clock/system setup (including 0D=FA), and
+ES7243/ES7243E construction **enables the ADC**. Wrapper close on a never-opened
+stream does not undo those writes. `codec_suspended` actually opens then closes
+both codecs. The diagnostic checks each owned low-level disable callback;
+register bytes are **evidence, never value assertions**. Failed
+initialization/open/disable attempts get the vendor's ordered shutdown sequence
+after DMA stops, followed by transport-checked snapshots; a poisoned driver is
+not reused that boot. Warm bootstrap is checked even without recreated wrappers,
+and finish/abort restoration requires readback before it can report success.
+A fenced, independent
+sticky warm-attempt marker is stored **before constructors** and survives retained
+resets and held-pad release; lost/torn run journals cannot manufacture a cold
+label. A genuine rail power cycle, not an MCU reset, is needed to start cold again.
+Neither state switches off the always-powered codec rail.
+
+The parking pins are narrow, schematic-backed connected nets: I2S
+10/11/12/16 outputs and DIN15; UART0 43/44; RGB DIN40; I2C0 47/48 and EXP_INT2
+(external R30/R31 2.2 kΩ and R131 10 kΩ pull-ups); knob41/42 (external
+R122/R123 100 kΩ); and unowned shared Himax/SD interfaces 4/5/6/21/46/17/18
+only with SD/AI rails off. Disabling knob inputs sacrifices production wake
+behavior. RGB DIN low is not LED rail-off. Diagnostic isolation uses IDF's
+sleep configuration/switch, then exempts LCD/touch rail-off low pads and any
+selected I2S/RGB low outputs. Ordinary reversion disables the switch and
+restores saved pad configuration; held deep outputs are configured low before
+hold release, then safely floated during fresh-boot restoration.
+
+Only the diagnostic overlay enables CPU retention/power-down support. Every
+state without `cpu_pd` holds one tracked CPU-domain ON reference; `cpu_pd`
+releases that reference with OFF, never AUTO (AUTO clears other owners).
+IDF v6.0.1 uses the remaining ON references to veto CPU power-down; eligibility
+and other vetoes can still prevent it. The knob reports permission, not proof
+that CPU power-down occurred. Compile-time retention support itself may add
+overhead even while vetoed; comparability to the earlier binary needs measurement.
+
+### Codec bytes and error-site evidence
+
+Records, STATUS and RESULTS add `codec_regs`, `codec_regs_available`,
+`codec_regs_expected` and `last_error_log`. `codec_regs.dac` has ES8311 keys
+`00,01,02,0d,0e,12,14`; `codec_regs.adc` has ES7243 keys `00,05,06` or ES7243E
+keys `00,01,04,f9`, with `adc_variant:"es7243"|"es7243e"|"unknown"`.
+Values are integer bytes or null for failed/unavailable reads; unknown ADC
+has an empty map. Only I2C transport errors fail snapshots. Cold and open
+states have no fixed expected-byte assertion. Other `codec_regs_expected`
+values compare source-requested final writes, **not guaranteed silicon
+readback or proven power state**; false never rejects a measurement.
+
+Source expectations (hex): ES8311 initialized `0d=fa`; suspended
+`01=00,02=00,0d=fc,0e=ff,12=02,14=00`. ES7243 initialized
+`00=01,05=13,06=00`; suspended `06=5c`. ES7243E initialized
+`00=80,01=3a,04=01,f9=00`; suspended `00=1e,01=00,04=01,f9=01`.
+GPIO/pin configuration and owned expander outputs remain checked; external
+input values and codec/ADC registers are reported, not asserted.
+
+A 26-slot deduplicating RTC pool preserves each sleep record's last snapshot
+without overwriting another record. Peripheral repeats can exceed 26 distinct
+snapshots; excess snapshots are explicitly unavailable, never a run failure.
+This changes the private retained-journal version to 3, not wire schema 1 or
+matrix versions. ERROR logs are captured without forwarding to UART, reset
+per state, truncated to 96 printable ASCII characters, stripped of ANSI/CR/LF,
+and quote/backslash/nonprintable characters sanitized. Wildcard logging is
+NONE; only `board` and `watcher_ptest` ERROR tags use the capture-only hook.
+Both ROM printf sinks are disconnected after init so EARLY/DRAM output cannot
+interleave with UART protocol bytes. Successful rows/readbacks/restoration
+clear ignored component errors; log fields describe failures only. The first fatal
+record/log is checkpointed before cleanup, then restoration results are saved.
+Logs are evidence, not a substitute for error codes.
+
+### USB-only transition dry run
+
+With operator-authorized console access and USB present, before any PPK run:
+
+```sh
+python3 tools/muse/watcher_power.py dryrun --port "$DUT_PORT" \
+  --matrix sleep --output "$RUN/dryrun.json" --timeout-s 60
+```
+
+This sends strict `>ptest.dryrun={"matrix":"sleep"}`. Extra/duplicate keys,
+other matrices, active ARMED/RUNNING runs, and absent/unknown USB are rejected.
+It applies and reads back sleep indices 0–23, skips both deep states, and
+restores resting configuration. Each attempted state emits `dryrun_state`
+with identity, error/log, codec bytes/state and `knobs_applied`; exactly one
+`dryrun_done` reports `states,errors,restore_error,last_error_log` after accepted
+execution. `errors` counts failed state rows plus a failed restoration.
+Apply errors still get readback; verified USB loss/unknown stops further
+states but does not skip restoration or the final frame.
+
+The UART driver drains TX with a bounded `uart_wait_tx_done` before either
+UART pad is parked, and the dry run drains every state line and its final
+line; FIFO completion, not a fixed pacing sleep, prevents truncating a prior
+warm-reference frame. Drain failure leaves pads connected, stops further
+states, restores resting configuration, and fails final restoration/transport
+verification. A final-DONE-only drain failure emits an explicit `type:error`
+`dryrun_done_tx_failed` after the single DONE; the host must reject it, not
+call the run successful. No later state is silently treated as applied after
+transport failure.
+
+`pm_exercised:false`: no capture/settle dwell, PM/CPU reference changes,
+light-sleep measurement or deep entry. The USB no-light-sleep lock remains
+held even on lost/unknown VBUS; UART is restored before state output, including
+loss after brief parking. The RTC run journal is not changed. Hardware codec
+warm-history markers necessarily change: **dry run consumes cold state;
+fully power-cycle the codec rail before a cold quantitative sweep.**
+The host uses fresh nonced STATUS before/after, requires the same boot and
+live USB, banks raw/error frames, and exits nonzero for errors/protocol loss.
+The timeout is configurable 1–300 seconds; this is diagnostic execution,
+not power data. Never open/change a PPK source for this command.
+
+### Timer-deep-sleep journal and timing
+
+Deep states disable all wake sources before enabling timer-only wake for
+`settle_ms + capture_ms`. RTC slow and fast memories are retained: ESP-IDF
+6.0.1's S3 `rtc_sleep_init()` forces both powered; its public RTC memory-PD
+domains are absent on S3, so optional retain-ON calls are capability-guarded.
+An independent fenced pad-ownership marker is committed before the first hold
+and cleared only after all releases; it is consulted even if the large run
+journal is invalid, before UART allocation. A separate sticky warm marker is
+never cleared by pad release. Combined recovery banks plus run journal consume
+7,680 bytes on both C host and S3 target ABIs (7,680-byte static ceiling),
+leaving 512 bytes for SDK RTC metadata; the current IDF image uses 7,716 total
+RTC slow bytes including its 36 bytes of SDK data. A
+checksum/version/bounds-validated journal first marks `deep_sleep_pending`;
+entry virtual and RTC timestamps are banked before sleeping. Configuration
+failure never enters sleep. Only a matching pending record, deep-sleep reset
+and timer wake can resume, after checking VBUS is still absent; all other
+interrupted resets remain `incomplete_reboot`. No UART-ready reply is emitted
+while the resumed sweep is running.
+
+The record's `deep_sleep` object carries `entry_boot_id`, `resume_boot_id`,
+`programmed_us`, `rtc_slept_us`, `wake_cause:"timer"`, and
+`resume_reset_reason:"deepsleep"`. Its `boot_id` is the entry boot;
+`run_boot_id` stays the armed boot and `retrieval_boot_id` is the current boot.
+`fw_now = esp_timer_get_time() + timeline_offset_us` continues the run epoch,
+with offset `entry_virtual + RTC_elapsed - new_esp_timer`. Deep capture begins
+at entry + settling and ends at the RTC-derived wake/early-boot time, before
+normal resumed initialization. Do not treat LS counters as deep-sleep proof.
+
+Each RTC resume adds **ceil(1% of RTC elapsed) + 50 ms** uncertainty. IDF's
+internal RC slow clock is calibrated against XTAL, with retained/calibrated
+RTC accumulation (`esp_clk.c`, `sleep_modes.c`); temperature-dependent drift
+is not specified here. This is a conservative **engineering assumption**, not
+a validated oscillator bound or sample-exact synchronization. Include it in
+guards; short windows can become unusable. Fresh ARM preserves the current
+virtual offset/uncertainty so the preceding STATUS clock sync stays meaningful.
+A retained completed journal may reconstruct timing after another reset for
+private recovery evidence, but quantitative collection still rejects an
+unexpected retrieval/live boot: it must match the final timer-resume boot
+(or the armed boot when there were no resumes).
+
+Initial peripheral characterization targets:
 
 - Radios-off idle with DFS and automatic light sleep, versus fixed
   40/80/160/240 MHz awake idle.
@@ -246,6 +432,48 @@ PPK2's Python stream has no exact lost-frame locations. Percentiles from
 per-window reservoirs cannot be recombined; use retained raw samples or a
 properly timed histogram to compute state quantiles. Never interpolate missing
 current or turn empty/rejected captures into zero-current results.
+
+### Optional pre-fault prefix (offline only)
+
+Without an explicit flag, a final collector fault still rejects every row. If
+an otherwise clean sweep is followed by a timestamped raw receiver
+`queue_overflow` or `read_error`, analyze a **new** prefix report:
+
+```sh
+tools/power/.venv/bin/python tools/muse/watcher_power.py analyze \
+  --results "$RUN/results.json" --samples "$RUN/ppk.jsonl" \
+  --output "$RUN/profile-prefix.json" --guard-s 1.0 --clock-drift-ppm 250 \
+  --pre-fault-prefix
+tools/power/.venv/bin/python tools/muse/watcher_power.py compare \
+  --profile "$RUN/profile-prefix.json" --output "$RUN/compare-prefix.json"
+```
+
+The original receiver fault must match the final collector fault. New decoded
+missing, invalid, and late deltas must remain zero. Consumed bytes must account
+for all four-byte decoded frames (including known pre-BEGIN invalid/missing
+frames); a bounded surplus is accepted only with receiver byte conservation,
+unchanged retained/invalidated queue bytes, and evidence of at most one
+already-dequeued 64 KiB batch plus three framing bytes. Missing or inconsistent
+proof fails closed; no post-fault dequeue is allowed by the receiver contract.
+
+`transport_fault_cutoff` reports the fault host offset, the larger final
+session/receiver `max_consumer_delay_s`, cutoff, accepted whole-row count, and
+byte-accounting evidence. The cutoff is **fault arrival host offset − final
+observed consumer delay − requested guard**. Any guarded state-window end beyond
+it rejects the entire row—never shorten a state into an apparently valid result.
+Existing per-window coverage, gaps, loss, clock drift and timing gates still
+apply. Only the selected windows' captured `max_observed_backlog_bytes` peaks
+are used; a later global backlog spike does not rewrite their earlier evidence.
+The capture/receiver remains **INVALID** after the fault; this does not validate
+later continuation, prove a complete capture, change the conditional timing
+model, or authorize source restart/shutdown.
+
+The raw receiver's separate entry cap now scales with its byte capacity:
+`max(4096, ceil(capacity_bytes / 1024))`, bounded at 16384 entries. A 16 MiB
+budget therefore permits roughly 1 KiB chunks to approach its byte cap rather
+than overflowing at 4096 entries near 4 MiB. Tiny chunks can still exhaust the
+bounded metadata cap. Overflow remains latched, queued continuation invalid,
+and raw drain/continuous source ownership unchanged.
 
 Publish current mean/min/max, sample count/coverage, included duration,
 settling/guard, sampled charge, source-voltage-basis energy, and measurement

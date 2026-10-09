@@ -95,16 +95,17 @@ Blank skipped-state cells mean not measured, never zero current.
 
 ## Interpretation and power work
 
-**The off-state is history-dependent.** The initial codecs have never been
-initialized; the later closed state follows an open/close cycle. Although the
-power-expander output/direction readbacks agree, fixed-80-MHz
-`codecs_closed_pre` is 61.126 mA versus 26.068 mA afterward. The DFS baseline
-similarly changes from 36.151 to 3.077 mA. The sequence demonstrates a large
-initialization/cleanup-history effect, **not an isolated 35 mA codec saving**.
-Do not pool these baselines or subtract the final warm baseline from earlier
-cold measurements to assign peripheral costs. Cold boot versus explicit codec
-initialization/power-down is a priority for a focused controlled follow-up;
-other initialization/cleanup effects must also be isolated.
+**The off-state is history-dependent, and the follow-up explains why.** Before
+this run the board ran production firmware, which keeps the codecs open on
+USB. The codec rail stays powered through reflashing and ESP-only resets, so
+the "cold" states here still had running codecs until the sweep's first
+open/close cycle suspended them. Fixed-80-MHz `codecs_closed_pre` is 61.126 mA
+versus 26.068 mA afterward, and the DFS baseline drops from 36.151 to 3.077 mA.
+The [sleep deep dive](sensecap-watcher-sleep-findings.md) repeated the
+measurement after a full power cycle: power-on-default codecs rest at 3.68 mA,
+suspended codecs at 2.97 mA. So the ~33 mA is codecs left running by earlier
+firmware, not a cold-boot cost. Do not pool these baselines or subtract the
+final warm baseline from earlier measurements to assign peripheral costs.
 
 Within this one sequence:
 

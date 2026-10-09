@@ -330,7 +330,8 @@ class WatcherPowerTest(unittest.TestCase):
         self.assertEqual(after["retrieval_boot_id"], 222)
         self.assertEqual(after["state"], "complete")
         self.assertEqual(after["records"], before["records"])
-        self.assertLess(after["now_us"], after["finished_us"])
+        self.assertGreaterEqual(after["now_us"], after["finished_us"])
+        self.assertGreater(after["timeline_uncertainty_us"], 0)
 
     def test_interrupted_rtc_run_never_resumes_and_keeps_completed_windows(self):
         _, result, status = self.run_commands(
@@ -364,7 +365,8 @@ class WatcherPowerTest(unittest.TestCase):
         self.assertNotIn("nvs_open", source)
         self.assertNotIn("app_run()", source)
         self.assertNotIn("muse_glue_start()", source)
-        self.assertNotIn("esp_deep_sleep_start", source)
+        self.assertIn("fw_enter_deep();", source)
+        self.assertIn("fw_timer_reset(reset_reason)", source)
         self.assertIn("cfg.nvs_enable = false", source)
         self.assertIn("ESP_PM_NO_LIGHT_SLEEP", source)
         self.assertIn("s_usb_lock_held", source)
@@ -375,6 +377,346 @@ class WatcherPowerTest(unittest.TestCase):
         config = (ROOT / "components/muse/Kconfig").read_text().split("config MUSE_WATCHER_POWER_TEST", 1)[1].split("config MUSE_WATCHER_CAMERA", 1)[0]
         self.assertIn("default n", config)
         self.assertIn("MUSE_BOARD_SENSECAP_WATCHER", config)
+
+
+    def sleep_complete(self, *extra):
+        return self.run_commands(
+            arm(matrix="sleep"), "usb 0", "advance 180000",
+            "deep_resume 2000 5 4", "deep_resume 2000 5 4", *extra,
+            ">ptest.results", "stats",
+        )
+
+    def test_sleep_plan_selection_exact_order_and_bounds(self):
+        ack = self.run_commands(arm(matrix="sleep", settle_ms=5000, capture_ms=20000))[0]
+        names = [
+            "cold_ref", "cold_i2s_low", "cold_i2s_hiz", "cold_i2s_low_b",
+            "codec_initialized", "codec_suspended", "warm_ref", "uart_hiz",
+            "warm_ref_2", "rgb_low", "warm_ref_3", "pulls_off", "warm_ref_4",
+            "unused_hiz", "warm_ref_5", "gpio_isolate", "warm_ref_6", "cpu_pd",
+            "warm_ref_7", "best_combined", "warm_ref_8", "best_combined_b",
+            "best_poll_5s", "warm_ref_9", "deep_sleep_timer", "deep_sleep_timer_held",
+        ]
+        self.assertEqual(ack["matrix"], "sleep")
+        self.assertEqual(ack["matrix_version"], 2)
+        self.assertEqual([p["id"] for p in ack["plan"]], names)
+        self.assertEqual(ack["max_duration_ms"], 940000)
+        self.assertEqual(ack["plan"][22]["poll_ms"], 5000)
+        self.assertEqual([p["deep_sleep"] for p in ack["plan"]], [False] * 24 + [True] * 2)
+        self.assertEqual(ack["plan"][0]["ref_group"], "")
+        self.assertEqual(ack["plan"][2]["role"], "variant")
+        self.assertEqual(ack["plan"][23]["ref_group"], "warm")
+        self.assertEqual(ack["timeline_uncertainty_us"], 0)
+        self.assertLessEqual(ack["rtc_bytes"], 7680)
+        for kwargs in [{}, {"matrix": "peripheral"}]:
+            legacy = self.run_commands(arm(**kwargs))[0]
+            self.assertEqual((legacy["matrix"], legacy["matrix_version"]), ("peripheral", 1))
+            self.assertEqual(len(legacy["plan"]), 27)
+            self.assertEqual(sum(p["deep_sleep"] for p in legacy["plan"]), 0)
+
+    def test_sleep_parser_strict_matrix_and_irreversible_cold_repeat(self):
+        rejected = self.run_commands(arm(matrix="sleep", repeats=2))[0]
+        self.assertEqual(rejected["type"], "error")
+        self.assertEqual(rejected["message"], "sleep_requires_one_repeat_cold_not_reversible")
+        for matrix in ["", "Sleep", "unknown", 0, False, None]:
+            with self.subTest(matrix=matrix):
+                self.assertEqual(self.run_commands(arm(matrix=matrix))[0]["type"], "error")
+        duplicate = arm(matrix="sleep")[:-1] + ', "matrix":"sleep"}'
+        self.assertEqual(self.run_commands(duplicate)[0]["type"], "error")
+        reordered = '>ptest.arm={"matrix":"sleep","repeats":1,"capture_ms":1000,"run_id":"test","settle_ms":1000}'
+        self.assertEqual(self.run_commands(reordered)[0]["matrix"], "sleep")
+
+    def test_sleep_core_applies_variants_and_reverts_refs(self):
+        ack, result, stats = self.sleep_complete()
+        self.assertTrue(result["complete"])
+        self.assertEqual([r["name"] for r in result["records"]], [p["id"] for p in ack["plan"]])
+        self.assertTrue(all(r["valid"] for r in result["records"]))
+        self.assertEqual(stats["knobs"], 0)
+        self.assertGreater(stats["knob_reverts"], 8)
+        self.assertGreater(stats["uart_restores"], 0)
+        records = {r["name"]: r for r in result["records"]}
+        self.assertEqual(records["cold_ref"]["actual"]["codec_state"], "cold")
+        self.assertEqual(records["codec_initialized"]["actual"]["codec_state"], "initialized")
+        self.assertEqual(records["codec_suspended"]["actual"]["codec_state"], "suspended")
+        for name in ["warm_ref", "warm_ref_2", "warm_ref_3", "warm_ref_9"]:
+            self.assertEqual(records[name]["actual"]["knobs_applied"], 0)
+        self.assertEqual(records["cold_i2s_low"]["actual"]["knobs_applied"], 1)
+        self.assertEqual(records["cold_i2s_hiz"]["actual"]["knobs_applied"], 2)
+        self.assertEqual(records["best_poll_5s"]["poll_ms"], 5000)
+        self.assertEqual(records["deep_sleep_timer_held"]["actual"]["knobs_applied"] & 256, 256)
+
+    def test_parked_audio_cold_honesty_and_uart_usb_restore(self):
+        low, blocked, init, not_cold = self.run_commands(
+            "usb 0", "knob_apply 1", "audio_open", "knob_apply 4", "knob_apply 0",
+        )
+        self.assertEqual(low["knobs"], 1)
+        self.assertNotEqual(blocked["error"], 0)
+        self.assertEqual(init["error"], 0)
+        self.assertEqual(init["codec_state"], 2)
+        self.assertNotEqual(not_cold["error"], 0)
+        for power in ["usb 1", "power_error 263"]:
+            with self.subTest(power=power):
+                parked, _, stats = self.run_commands(
+                    "usb 0", "knob_apply 7", power, ">ptest.status", "stats",
+                )
+                self.assertTrue(parked["uart_parked"])
+                self.assertEqual(stats["uart_restores"], 1)
+                self.assertEqual(stats["knobs"] & 4, 0)
+
+    def test_deep_pending_two_matched_resumes_and_virtual_timeline(self):
+        ack, pending, between, result, stats = self.run_commands(
+            arm(matrix="sleep"), "usb 0", "advance 180000", ">ptest.results",
+            "deep_resume 2000 5 4", ">ptest.status",
+            "deep_resume 2000 5 4", ">ptest.results", "stats",
+        )
+        self.assertFalse(pending["complete"])
+        self.assertEqual(pending["records"][-1]["status"], "deep_sleep_pending")
+        self.assertFalse(pending["records"][-1]["valid"])
+        self.assertEqual(pending["resume_count"], 0)
+        self.assertEqual(between["resume_count"], 1)
+        self.assertEqual(result["resume_count"], 2)
+        self.assertEqual(result["run_boot_id"], ack["boot_id"])
+        self.assertEqual(result["retrieval_boot_id"], 333)
+        self.assertEqual(stats["deep_entries"], 2)
+        self.assertEqual(stats["holds_released"], 1)
+        uncertainty = 0
+        previous_end = result["sequence_start_us"]
+        previous_boot = ack["boot_id"]
+        for record in result["records"]:
+            self.assertGreaterEqual(record["enter_us"], previous_end)
+            previous_end = record["end_us"]
+            if "deep_sleep" not in record:
+                continue
+            deep = record["deep_sleep"]
+            self.assertEqual(record["boot_id"], previous_boot)
+            self.assertEqual(deep["entry_boot_id"], previous_boot)
+            self.assertEqual(deep["wake_cause"], "timer")
+            self.assertEqual(deep["resume_reset_reason"], "deepsleep")
+            self.assertEqual(deep["programmed_us"], 2000000)
+            self.assertEqual(record["end_us"] - record["enter_us"], deep["rtc_slept_us"])
+            self.assertEqual(record["measure_start_us"] - record["enter_us"], 1000000)
+            self.assertEqual(record["actual"]["slept_us"], 0)
+            uncertainty += (deep["rtc_slept_us"] + 99) // 100 + 50000
+            self.assertEqual(record["timeline_uncertainty_us"], uncertainty)
+            previous_boot = deep["resume_boot_id"]
+        self.assertEqual(result["timeline_uncertainty_us"], uncertainty)
+        self.assertGreater(result["timeline_offset_us"], 0)
+        self.assertGreaterEqual(result["now_us"], result["finished_us"])
+
+    def test_deep_only_matching_timer_journal_can_resume(self):
+        for reset, wake, elapsed, mutation in [
+            (3, 4, 2000, None), (5, 0, 2000, None), (5, 4, 2000, "wrong_pending"),
+            (5, 4, 0, None), (5, 4, 20000, None),
+        ]:
+            with self.subTest(reset=reset, wake=wake, elapsed=elapsed, mutation=mutation):
+                commands = [arm(matrix="sleep"), "usb 0", "advance 180000"]
+                if mutation:
+                    commands.append(mutation)
+                commands += [f"deep_resume {elapsed} {reset} {wake}", ">ptest.results", "stats"]
+                _, result, stats = self.run_commands(*commands)
+                self.assertEqual(result["state"], "incomplete_reboot")
+                self.assertEqual(result["resume_count"], 0)
+                self.assertEqual(result["records"][-1]["end_us"], 0)
+                self.assertFalse(result["records"][-1]["valid"])
+                self.assertEqual(stats["deep_entries"], 1)
+
+    def test_usb_dryrun_happy_is_24_states_and_preserves_journal(self):
+        rows = self.run_commands("journal_hash", ">ptest.status", '>ptest.dryrun={"matrix":"sleep"}', ">ptest.status", "journal_hash", "stats")
+        states = [r for r in rows if r["type"] == "dryrun_state"]
+        done = [r for r in rows if r["type"] == "dryrun_done"]
+        self.assertEqual([r["index"] for r in states], list(range(24)))
+        self.assertEqual(len(done), 1)
+        self.assertEqual((done[0]["states"], done[0]["errors"], done[0]["restore_error"]), (24, 0, 0))
+        self.assertTrue(all(r["usb"] and not r["pm_exercised"] for r in states))
+        self.assertEqual(rows[0]["hash"], rows[-2]["hash"])
+        self.assertGreaterEqual(rows[-3]["now_us"], rows[1]["now_us"]) # bounded I/O executes, no capture dwell
+        self.assertTrue(all("measure_start_us" not in row for row in states))
+        self.assertEqual(rows[-3]["state"], "idle")
+        self.assertEqual(rows[-1]["deep_entries"], 0)
+        self.assertEqual(rows[-1]["knobs"], 0)
+
+    def test_usb_dryrun_strict_json_usb_and_active_gates(self):
+        for payload in ['{}', '[]', '{"matrix":"peripheral"}', '{"matrix":"sleep","matrix":"sleep"}', '{"matrix":"sleep","extra":1}', '{"matrix":"sleep"} junk', '{"matrix":"sleep"', '{"matrix":1}', '{"matrix":"sl\\\\u0065ep"}']:
+            with self.subTest(payload=payload):
+                row = self.run_commands(">ptest.dryrun=" + payload)[0]
+                self.assertEqual(row["type"], "error")
+        for gate in ["usb 0", arm(), "init_error 263"]:
+            with self.subTest(gate=gate):
+                rows = self.run_commands(gate, '>ptest.dryrun={"matrix":"sleep"}')
+                self.assertEqual(rows[-1]["type"], "error")
+                self.assertFalse(any(r["type"] == "dryrun_state" for r in rows))
+
+    def test_usb_dryrun_reports_error_and_continues_with_per_state_log_reset(self):
+        rows = self.run_commands("readback_error 4 263", '>ptest.dryrun={"matrix":"sleep"}')
+        self.assertEqual(len(rows), 25)
+        self.assertEqual(rows[4]["error"], 263)
+        self.assertIn("fake readback", rows[4]["last_error_log"])
+        self.assertNotIn('"', rows[4]["last_error_log"])
+        self.assertNotIn("\\\\", rows[4]["last_error_log"])
+        self.assertEqual(rows[5]["last_error_log"], "")
+        self.assertEqual((rows[-1]["errors"], rows[-1]["restore_error"]), (1, 0))
+        self.assertTrue(rows[-1]["usb"])
+
+    def test_usb_dryrun_restoration_failure_has_done_and_log(self):
+        rows = self.run_commands("readback_error 26 263", '>ptest.dryrun={"matrix":"sleep"}')
+        self.assertEqual(len(rows), 25)
+        self.assertEqual((rows[-1]["errors"], rows[-1]["restore_error"]), (1, 263))
+        self.assertIn("fake readback", rows[-1]["last_error_log"])
+        self.assertTrue(rows[-1]["usb"])
+
+    def test_codec_mismatch_is_retained_evidence_not_run_error(self):
+        _, result = self.run_commands("codec_mismatch 1", arm(matrix="sleep"), "usb 0", "advance 180000", "deep_resume 2000 5 4", "deep_resume 2000 5 4", ">ptest.results")
+        self.assertTrue(result["complete"])
+        self.assertTrue(all(r["valid"] for r in result["records"]))
+        self.assertTrue(all(not r["codec_regs_expected"] and r["codec_regs"]["dac"]["0d"] == 0x99 for r in result["records"]))
+
+    def test_error_capture_is_bounded_safe_ascii_and_not_uart(self):
+        message = 'E ' + ('quotes"slash\\\\tab\\t' * 20)
+        row = self.run_commands("init_error 263", "log " + message, ">ptest.status")[0]
+        value = row["last_error_log"]
+        self.assertEqual(len(value), 96)
+        self.assertTrue(all(32 <= ord(c) <= 126 and c not in '\"\\\\' for c in value))
+
+    def test_split_error_log_preserves_body_through_newline_and_ansi_reset(self):
+        row = self.run_commands("log_split", "init_error 263", ">ptest.status")[0]
+        self.assertEqual(row["last_error_log"], "E (42) fake: transport 263")
+
+    def test_uart_dryrun_vbus_loss_restores_before_error_frame(self):
+        rows = self.run_commands("drop_usb 7", '>ptest.dryrun={"matrix":"sleep"}', "stats")
+        states = [r for r in rows if r["type"] == "dryrun_state"]
+        self.assertEqual(len(states), 8)
+        self.assertFalse(states[-1]["usb"])
+        self.assertNotEqual(states[-1]["error"], 0)
+        self.assertEqual(rows[-2]["type"], "dryrun_done")
+        self.assertGreater(rows[-1]["uart_restores"], 0) # fw_write asserts UART is restored
+        self.assertEqual(rows[-1]["knobs"], 0)
+
+    def test_first_error_log_survives_reset_inside_cleanup(self):
+        ack, result, status = self.run_commands("reset_cleanup 1", "readback_error 4 263", arm(matrix="sleep"), "usb 0", "advance 180000", ">ptest.results", ">ptest.status")
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"], 263)
+        self.assertEqual(result["records"][-1]["status"], "error")
+        self.assertEqual(result["records"][-1]["error"], 263)
+        self.assertIn("fake readback", result["records"][-1]["last_error_log"])
+        self.assertEqual(result["last_error_log"], status["last_error_log"])
+        self.assertEqual(status["boot_id"], 222)
+        self.assertFalse(result["complete"])
+
+    def test_dryrun_drains_fifo_before_every_next_state_and_done(self):
+        rows = self.run_commands('>ptest.dryrun={"matrix":"sleep"}', "flush_stats")
+        self.assertEqual(rows[-2]["states"], 24)
+        self.assertEqual(rows[-1]["calls"], 25)
+        self.assertFalse(rows[-1]["pending"])
+        # The real core runs against fw_apply's no-pending-TX parking assertion.
+        self.assertEqual([r["index"] for r in rows[:-2]], list(range(24)))
+
+    def test_dryrun_tx_timeout_stops_states_and_reports_final_failure(self):
+        rows = self.run_commands("flush_error 263", '>ptest.dryrun={"matrix":"sleep"}')
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[1]["states"], 1)
+        self.assertEqual((rows[1]["errors"], rows[1]["restore_error"]), (1, 263))
+        self.assertIn("UART TX drain", rows[1]["last_error_log"])
+        self.assertEqual(rows[2]["type"], "error")
+
+    def test_final_done_drain_failure_is_explicit_error_not_silent_success(self):
+        rows = self.run_commands("flush_error 263", "flush_nth 25", '>ptest.dryrun={"matrix":"sleep"}')
+        self.assertEqual(len(rows), 26)
+        self.assertEqual(rows[-2]["type"], "dryrun_done")
+        self.assertEqual(rows[-2]["states"], 24)
+        self.assertEqual(rows[-1]["type"], "error")
+
+    def test_successful_records_do_not_expose_ignored_component_error_logs(self):
+        rows = self.run_commands("noise 1", '>ptest.dryrun={"matrix":"sleep"}', ">ptest.status")
+        self.assertTrue(all(r["last_error_log"] == "" for r in rows))
+        self.assertEqual(rows[-2]["errors"], 0)
+        self.assertEqual(self.run_commands("log ignored", ">ptest.status")[0]["last_error_log"], "")
+
+    def test_uart_parking_waits_before_any_pin_change(self):
+        board = (ROOT / "components/muse/boards/board_sensecap_watcher.c").read_text()
+        start = board.index("if (knobs & MUSE_PTEST_UART_HIZ)")
+        end = board.index("if (knobs & MUSE_PTEST_RGB_LOW)", start)
+        block = board[start:end]
+        self.assertLess(block.index("uart_wait_tx_done"), block.index("s_ptest_uart_parked = true"))
+        self.assertLess(block.index("uart_wait_tx_done"), block.index("GPIO_NUM_43"))
+        self.assertIn("ESP_RETURN_ON_ERROR(uart_wait_tx_done", block)
+
+    def test_runtime_error_capture_and_dryrun_uart_restore_guards(self):
+        core = SOURCE.read_text()
+        self.assertIn('esp_log_level_set("*", ESP_LOG_NONE)', core)
+        self.assertIn('esp_log_level_set("board", ESP_LOG_ERROR)', core)
+        self.assertIn('esp_rom_install_channel_putc(1, NULL)', core)
+        self.assertIn('esp_rom_install_channel_putc(2, NULL)', core)
+        self.assertIn("esp_log_set_vprintf(capture_error_log)", core)
+        self.assertIn("if (s_dryrun || e || out->usb)", core)
+        self.assertIn("remember_error(); save_run();", core)
+
+    def test_semantically_invalid_checksummed_journals_are_discarded(self):
+        for mutation in range(23):
+            with self.subTest(mutation=mutation):
+                _, result, stats = self.run_commands(
+                    arm(matrix="sleep"), "usb 0", "advance 180000",
+                    f"journal_bad {mutation}", "deep_resume 2000 5 4", ">ptest.results", "stats",
+                )
+                self.assertFalse(result["complete"])
+                self.assertEqual(result["state"], "idle")
+                self.assertEqual(result["records"], [])
+                self.assertEqual(result["resume_count"], 0)
+                self.assertEqual(stats["deep_entries"], 1)
+
+    def test_finish_readback_failure_prevents_complete_sleep_run(self):
+        _, result = self.run_commands(
+            arm(matrix="sleep"), "usb 0", "advance 180000",
+            "deep_resume 2000 5 4", "readback_error 26 263",
+            "deep_resume 2000 5 4", ">ptest.results",
+        )
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["state"], "error")
+        self.assertEqual(result["restore_error"], 263)
+
+    def test_deep_timer_config_and_resume_usb_fail_closed(self):
+        _, result, stats = self.run_commands(
+            "timer_error 263", arm(matrix="sleep"), "usb 0", "advance 180000", ">ptest.results", "stats",
+        )
+        self.assertEqual(result["state"], "error")
+        self.assertFalse(result["records"][-1]["valid"])
+        self.assertEqual(result["error"], 263)
+        self.assertEqual(stats["deep_entries"], 0)
+        for failure in ["usb 1", "power_error 263", "init_error 263"]:
+            with self.subTest(failure=failure):
+                _, result, stats = self.run_commands(
+                    arm(matrix="sleep"), "usb 0", "advance 180000", failure,
+                    "deep_resume 2000 5 4", ">ptest.results", "stats",
+                )
+                self.assertFalse(result["complete"])
+                self.assertFalse(result["records"][-1]["valid"])
+                self.assertEqual(result["resume_count"], 0)
+                self.assertEqual(stats["deep_entries"], 1)
+
+    def test_fresh_arm_retains_status_epoch_and_uncertainty(self):
+        _, before, ack = self.run_commands(
+            arm(matrix="sleep"), "usb 0", "advance 180000",
+            "deep_resume 2000 5 4", "deep_resume 2000 5 4",
+            "usb 1", ">ptest.status", arm(run_id="next"),
+        )
+        self.assertEqual(ack["ack_us"], before["now_us"])
+        self.assertEqual(ack["timeline_offset_us"], before["timeline_offset_us"])
+        self.assertEqual(ack["timeline_uncertainty_us"], before["timeline_uncertainty_us"])
+
+    def test_board_knob_source_contracts_and_cpu_veto_release(self):
+        board = (ROOT / "components/muse/boards/board_sensecap_watcher.c").read_text()
+        apply = board.split("esp_err_t muse_watcher_ptest_apply(", 1)[1].split("static esp_err_t ptest_codec_byte", 1)[0]
+        self.assertLess(apply.index("ptest_revert_knobs()"), apply.index("ptest_audio_initialize()"))
+        self.assertLess(apply.index("audio conflicts with parked pins"), apply.index("ptest_revert_knobs()"))
+        self.assertIn("codec register transport", board)
+        self.assertIn("ptest_codec_snapshot()", board)
+        self.assertNotIn("value == expected ? ESP_OK : ESP_FAIL", board)
+        self.assertIn("gpio_deep_sleep_hold_en();", board)
+        self.assertTrue("gpio_sleep_sel_dis(lcd[i])" in board)
+        self.assertTrue("I2C_SDA, I2C_SCL, EXP_INT, KNOB_A, KNOB_B" in board)
+        self.assertTrue("CAM_SCLK, CAM_MOSI, CAM_MISO, CAM_CS, GPIO_NUM_46, GPIO_NUM_17, GPIO_NUM_18" in board)
+        source = SOURCE.read_text()
+        self.assertTrue("esp_sleep_pd_config(ESP_PD_DOMAIN_CPU, veto ? ESP_PD_OPTION_ON : ESP_PD_OPTION_OFF)" in source)
+        self.assertNotIn("esp_sleep_pd_config(ESP_PD_DOMAIN_CPU, ESP_PD_OPTION_AUTO)", source)
+        self.assertIn("esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL)", source)
 
 
 if __name__ == "__main__":
