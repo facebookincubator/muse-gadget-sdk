@@ -49,8 +49,10 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
     endif()
     list(APPEND srcs "muse_chat_text.c")
-    if(CONFIG_MUSE_CJK_FONT)
-        list(APPEND srcs "fonts/muse_font_cjk_16.c")   # captions' CJK fallback
+    if(CONFIG_MUSE_CJK_FONT_NOTO)
+        list(APPEND srcs "fonts/muse_font_cjk_noto_16.c")   # captions' CJK fallback
+    elseif(CONFIG_MUSE_CJK_FONT)
+        list(APPEND srcs "fonts/muse_font_cjk_16.c")
     endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
