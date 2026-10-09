@@ -345,14 +345,31 @@ class LinkSession:
         timeout_ms = message.get("timeout_ms") or None
         if not invoke_id:
             return
+        if not isinstance(command, str):
+            await self.send({"method": "link.result", "id": invoke_id,
+                             "ok": False, "error": "command must be a string"})
+            return
         shown = printable(command)
         log.info("invoke %s", shown)
         async with self._invokes:
             started = time.monotonic()
-            result = await asyncio.get_running_loop().run_in_executor(
-                None, self._run_command, command, params, timeout_ms,
-            )
-            log.info("%s %s in %d ms", shown, describe_result(result),
+            try:
+                result = await asyncio.get_running_loop().run_in_executor(
+                    None, self._run_command, command, params, timeout_ms,
+                )
+                summary = describe_result(result)
+                # Validate JSON before leaving the callback boundary. Sending
+                # remains outside so a broken transport is never retried as a
+                # command error.
+                encode_message({"method": "link.result", "id": invoke_id, **result})
+            except Exception:
+                # Callback failures belong to this invocation. Never include
+                # exception text, which can contain parameters or credentials.
+                # Cancellation and other BaseExceptions still propagate, and
+                # transport failures remain outside this boundary.
+                result = {"ok": False, "error": "command failed"}
+                summary = "failed"
+            log.info("%s %s in %d ms", shown, summary,
                      (time.monotonic() - started) * 1000)
         await self.send({"method": "link.result", "id": invoke_id, **result})
 

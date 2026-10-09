@@ -22,7 +22,7 @@ import pytest
 
 from musegadget.link_client import (
     DeviceDescription, LinkSession, MessageDecoder, Outcome, describe_result, encode_message,
-    noise_url, printable,
+    MAX_CONCURRENT_INVOKES, noise_url, printable,
 )
 from musegadget.noise import (
     ApplicationResponse, BodyChunk, NoiseFrameDecoder, NoiseXXResponder, ServiceFrame,
@@ -279,3 +279,102 @@ def test_describe_result(result, described):
 def test_printable_replaces_control_characters():
     assert printable("system.run") == "system.run"
     assert printable("a\nb\x1b[2Jc") == "a?b?[2Jc"
+
+
+@pytest.mark.parametrize("command", [42, ["system.run"], {"name": "system.run"}])
+def test_non_string_invocation_gets_correlated_failure(command):
+    asyncio.run(_failed_invoke_then_healthy(command, "invalid-command"))
+
+
+@pytest.mark.parametrize("failure", ["raise", "invalid-result", "unserializable-result"])
+def test_callback_failure_gets_correlated_result_and_session_stays_usable(failure, caplog):
+    caplog.set_level("INFO", logger="musegadget.link_client")
+    asyncio.run(_failed_invoke_then_healthy("fixture.fail", failure))
+    assert "secret callback details" not in caplog.text
+    assert "secret parameter" not in caplog.text
+
+
+async def _failed_invoke_then_healthy(command, failure):
+    calls = []
+    unhandled = []
+
+    def run_command(name, params, timeout):
+        calls.append(name)
+        if name == "fixture.fail":
+            if failure == "raise":
+                raise RuntimeError("secret callback details")
+            if failure == "unserializable-result":
+                return {"ok": True, "payload": b"secret callback details"}
+            return None
+        return {"ok": True}
+
+    session, vm = make_session(run_command, [])
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda loop, context: unhandled.append(context))
+    task = asyncio.ensure_future(session.run(asyncio.Event()))
+    try:
+        await vm.handshake()
+        await vm.accept_control_stream()
+        await vm.next_message()
+        await vm.send_message({"method": "link.invoke", "id": "failed-id", "command": command,
+                               "params": {"value": "secret parameter"}})
+        result = await asyncio.wait_for(vm.next_message(), 2)
+        assert result == {"method": "link.result", "id": "failed-id", "ok": False,
+                          "error": "command must be a string" if failure == "invalid-command"
+                          else "command failed"}
+        if failure == "invalid-command":
+            assert calls == []
+        await vm.send_message({"method": "link.invoke", "id": "healthy-id",
+                               "command": "fixture.ok"})
+        assert await asyncio.wait_for(vm.next_message(), 2) == {
+            "method": "link.result", "id": "healthy-id", "ok": True}
+        await vm.send_message({"event": "link.unpaired"})
+        assert await asyncio.wait_for(task, 2) is Outcome.UNPAIRED
+        assert not unhandled
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        loop.set_exception_handler(previous)
+
+
+def test_invocation_transport_failure_propagates():
+    async def scenario():
+        session, _ = make_session(lambda *args: {"ok": True}, [])
+        async def fail_send(message):
+            raise ConnectionError("transport closed")
+        session.send = fail_send
+        with pytest.raises(ConnectionError, match="transport closed"):
+            await session._invoke({"id": "inv-1", "command": "fixture.ok"})
+    asyncio.run(scenario())
+
+
+def test_cancelled_invocation_does_not_send_failure_result():
+    async def scenario():
+        session, _ = make_session(lambda *args: {"ok": True}, [])
+        sent = []
+        async def send(message):
+            sent.append(message)
+        session.send = send
+        for _ in range(MAX_CONCURRENT_INVOKES):
+            await session._invokes.acquire()
+        task = asyncio.ensure_future(session._invoke({"id": "inv-1", "command": "fixture.ok"}))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not sent
+    asyncio.run(asyncio.wait_for(scenario(), 2))
+
+
+@pytest.mark.parametrize("failure_type", [KeyboardInterrupt, SystemExit])
+def test_invocation_does_not_swallow_process_control_exceptions(failure_type):
+    # Calling the coroutine directly keeps the process-control exception out
+    # of asyncio's task runner while exercising the real callback boundary.
+    async def scenario():
+        def stop_command(*args):
+            raise failure_type()
+        session, _ = make_session(stop_command, [])
+        with pytest.raises(failure_type):
+            await session._invoke({"id": "inv-1", "command": "fixture.stop"})
+    asyncio.run(scenario())
