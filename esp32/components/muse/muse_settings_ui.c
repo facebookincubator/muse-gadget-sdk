@@ -1230,7 +1230,7 @@ static void build_power_page(lv_obj_t *tile)
     button(list, "Cancel", COLOR_TEXT, on_back, NULL);
     char text[128];
     snprintf(text, sizeof(text), "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
-             muse_board->talk_button, muse_board->aux_button);
+             muse_board->wake_button ? muse_board->wake_button : muse_board->talk_button, muse_board->aux_button);
     note(list, text);
 }
 

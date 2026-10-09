@@ -354,7 +354,8 @@ static void show(view_t view)
     case VIEW_POWER: {
         char text[96];
         snprintf(text, sizeof(text), "Turn Muse off?\n\nPress the %s button to turn it back on.",
-                 muse_board->keyboard ? "GO" : muse_board->aux_button);
+                 muse_board->wake_button ? muse_board->wake_button
+                 : muse_board->keyboard ? "GO" : muse_board->aux_button);
         set_text(s_title, "POWER OFF");
         set_text(s_page, text);
         set_text(s_hint_down, muse_board->keyboard ? "Esc Cancel" : "Cancel");

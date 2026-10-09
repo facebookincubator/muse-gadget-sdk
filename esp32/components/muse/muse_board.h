@@ -64,6 +64,9 @@ typedef struct {
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */
     const char *aux_button;     /* "bottom" */
+    /* The button power_off() wakes on, where that isn't talk (touch boards)
+     * or aux (menu boards): "boot". */
+    const char *wake_button;
     muse_button_hint_t talk_hint;   /* mic icon; the menu's hints follow both */
     muse_button_hint_t aux_hint;    /* power or menu icon; left out, there's none */
     /* The menu turns a right-edge aux button's hint on end, which LVGL draws
