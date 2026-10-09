@@ -38,11 +38,12 @@ CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
 # leave BOOT available for setup. PWR also turns the board on from battery.
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 
-# 8 MB of embedded flash.
+# 8 MB of embedded flash; use the 8 MB partition table.
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"
 
 # The USB-C port goes straight to the chip's USB Serial/JTAG; UART0 (GPIO43
 # and 44) only reaches the expansion header. Make that the console, with
