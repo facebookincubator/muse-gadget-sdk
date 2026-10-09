@@ -56,6 +56,9 @@
 #include "muse_board.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
+#if CONFIG_MUSE_WATCHER_POWER_TEST
+#include "boards/board_sensecap_watcher_power_test.h"
+#endif
 #include "hal/i2c_periph.h"
 #include "soc/spi_periph.h"
 #if CONFIG_MUSE_WATCHER_CAMERA
@@ -274,7 +277,14 @@ static esp_err_t init(void)
     s_exp_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_exp_lock, ESP_ERR_NO_MEM, TAG, "expander lock");
     /* Outputs start low, then the system rail, then the rails Muse uses (Seeed's order). */
+#if CONFIG_MUSE_WATCHER_POWER_TEST
+    /* Isolated diagnostic: preserve the system latch even on a USB-induced
+     * reset. Do not briefly drop it or energize all production BSP loads. */
+    s_exp_out = EXP_PWR_SYSTEM;
+    ESP_RETURN_ON_ERROR(exp_write(EXP_REG_OUTPUT, s_exp_out), TAG, "system latch");
+#else
     ESP_RETURN_ON_ERROR(exp_write(EXP_REG_OUTPUT, 0), TAG, "expander outputs");
+#endif
     ESP_RETURN_ON_ERROR(exp_write(EXP_REG_CONFIG, EXP_INPUTS), TAG, "expander config");
     uint16_t in;
     ESP_RETURN_ON_ERROR(exp_read(&in), TAG, "expander inputs");
@@ -284,6 +294,11 @@ static esp_err_t init(void)
     }
     ESP_RETURN_ON_ERROR(exp_set(EXP_PWR_SYSTEM, true), TAG, "system rail");
     vTaskDelay(pdMS_TO_TICKS(100));
+#if CONFIG_MUSE_WATCHER_POWER_TEST
+    /* No PCNT PM locks, touch polling, camera worker, ADC, or UI tasks. The
+     * diagnostic owns optional peripheral initialization lazily. */
+    return ESP_OK;
+#endif
     ESP_RETURN_ON_ERROR(exp_set(EXP_RAILS, true), TAG, "rails");
     vTaskDelay(pdMS_TO_TICKS(50));
 #if CONFIG_MUSE_WATCHER_CAMERA
@@ -716,6 +731,11 @@ static void audio_power(bool on)
     }
 }
 
+#if CONFIG_MUSE_WATCHER_POWER_TEST
+static i2s_chan_handle_t s_ptest_tx, s_ptest_rx;
+static int s_ptest_adc_addr;
+#endif
+
 /* ES8311 plays and a separate ES7243(E) ADC records, on one duplex I2S bus with MCLK. */
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)
 {
@@ -723,6 +743,12 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
     ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &tx, &rx), TAG, "i2s channel");
+#if CONFIG_MUSE_WATCHER_POWER_TEST
+    /* Publish ownership BEFORE init/enable: partial TX/RX failures must still
+     * be tracked and stopped by the standalone diagnostic cleanup path. */
+    s_ptest_tx = tx;
+    s_ptest_rx = rx;
+#endif
     const i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(MUSE_AUDIO_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
@@ -745,6 +771,11 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     const audio_codec_ctrl_if_t *dac_ctrl = audio_codec_new_i2c_ctrl(&dac_i2c);
     /* Seeed probes for the older ES7243 first. */
     bool es7243 = i2c_master_probe(s_i2c, ES7243_ADDR, 50) == ESP_OK;
+#if CONFIG_MUSE_WATCHER_POWER_TEST
+    s_ptest_adc_addr = es7243 ? ES7243_ADDR : ES7243E_ADDR;
+    ESP_RETURN_ON_ERROR(i2c_master_probe(s_i2c, s_ptest_adc_addr, 50), TAG, "mic probe");
+    ESP_RETURN_ON_ERROR(i2c_master_probe(s_i2c, ES8311_CODEC_DEFAULT_ADDR >> 1, 50), TAG, "speaker probe");
+#endif
     audio_codec_i2c_cfg_t adc_i2c = {
         .port = I2C_NUM_0,
         .addr = (es7243 ? ES7243_ADDR : ES7243E_ADDR) << 1,
@@ -921,6 +952,315 @@ static esp_err_t power_off(void)
     sleep_until_wheel();
     return ESP_FAIL;
 }
+
+#if CONFIG_MUSE_WATCHER_POWER_TEST
+/* Diagnostic-only hooks. Reference: Seeed SenseCAP-Watcher-Firmware
+ * 8e37f7c components/sensecap-watcher/{sensecap-watcher.c,include/sensecap-watcher.h}:
+ * PCA9535 input mask 0x20ff; P1.1 LCD+touch, P1.4 PA enable (NOT codec rail),
+ * P1.7 battery divider. Schematic names and normal board pin map agree.
+ * Do not switch SD/Grove, drive GPIO3 (ADC), or reflash the Himax.
+ */
+#include <math.h>
+
+static bool s_ptest_lcd_on, s_ptest_pwm, s_ptest_audio_attempted;
+static bool s_ptest_spk_open, s_ptest_mic_open;
+static esp_codec_dev_handle_t s_ptest_spk, s_ptest_mic;
+static SemaphoreHandle_t s_ptest_draw_done;
+static int s_ptest_volume, s_ptest_battery_mv, s_ptest_expected_duty;
+static uint32_t s_ptest_frames, s_ptest_adc_samples;
+static int64_t s_ptest_next_adc_us;
+static muse_ptest_load_t s_ptest_load;
+
+static esp_err_t ptest_reg(uint8_t reg, uint16_t *out)
+{
+    uint8_t b[2];
+    esp_err_t e = i2c_master_transmit_receive(s_exp, &reg, 1, b, sizeof(b), 50);
+    if (!e) { *out = b[0] | b[1] << 8; }
+    return e;
+}
+
+/* Only owned safe output bits. Shadow updates AFTER success, and readback
+ * checks actual output + direction + input register, not just a cache. */
+static esp_err_t ptest_set(uint16_t mask, bool on)
+{
+    const uint16_t allowed = EXP_PWR_SYSTEM | EXP_PWR_LCD | EXP_PWR_CODEC_PA | EXP_PWR_BAT_ADC;
+    if (mask & ~allowed) { return ESP_ERR_INVALID_ARG; }
+    uint16_t next = on ? s_exp_out | mask : s_exp_out & ~mask;
+    esp_err_t e = exp_write(EXP_REG_OUTPUT, next);
+    if (!e) { s_exp_out = next; }
+    return e;
+}
+
+esp_err_t muse_watcher_ptest_init(void)
+{
+    return init();
+}
+
+esp_err_t muse_watcher_ptest_power(muse_ptest_readback_t *out)
+{
+    if (!out || !s_exp) { return ESP_ERR_INVALID_STATE; }
+    uint16_t in;
+    esp_err_t e = exp_read(&in);
+    if (e) { return e; }
+    out->input = in;
+    out->usb = !(in & EXP_VBUS);
+    out->charging = out->usb && (in & EXP_STDBY);
+    /* ADC-independent, so gating works with rail off and without eFuse cal. */
+    return ESP_OK;
+}
+
+static bool ptest_draw_complete(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *event, void *ctx)
+{
+    (void)io; (void)event; (void)ctx;
+    BaseType_t wake = pdFALSE;
+    xSemaphoreGiveFromISR(s_ptest_draw_done, &wake);
+    return wake == pdTRUE;
+}
+
+static esp_err_t ptest_lcd_lines_low(void)
+{
+    /* Only the vendor's LCD/touch outputs, never a blanket pin loop. GPIO
+     * config disconnects the peripheral output matrices before rail-off. */
+    const gpio_config_t cfg = {
+        .pin_bit_mask = BIT64(TP_SDA) | BIT64(TP_SCL) | BIT64(LCD_PCLK) | BIT64(LCD_D0) |
+                        BIT64(LCD_D1) | BIT64(LCD_D2) | BIT64(LCD_D3) | BIT64(LCD_CS) | BIT64(LCD_BL),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&cfg), TAG, "diagnostic LCD GPIO");
+    const gpio_num_t pins[] = { TP_SDA, TP_SCL, LCD_PCLK, LCD_D0, LCD_D1, LCD_D2, LCD_D3, LCD_CS, LCD_BL };
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+        ESP_RETURN_ON_ERROR(gpio_set_level(pins[i], 0), TAG, "diagnostic LCD low");
+    }
+    return ESP_OK;
+}
+
+static esp_err_t ptest_lcd_off(void)
+{
+    if (s_ptest_pwm) {
+        ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0), TAG, "backlight zero");
+        ESP_RETURN_ON_ERROR(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0), TAG, "backlight update");
+    }
+    if (s_ptest_lcd_on && s_panel) {
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, false), TAG, "panel off");
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, (0x02 << 24) | (0x10 << 8), NULL, 0), TAG, "panel sleep");
+        vTaskDelay(pdMS_TO_TICKS(120));
+    }
+    ESP_RETURN_ON_ERROR(ptest_lcd_lines_low(), TAG, "LCD lines");
+    ESP_RETURN_ON_ERROR(ptest_set(EXP_PWR_LCD, false), TAG, "LCD rail off");
+    s_ptest_lcd_on = false;
+    return ESP_OK;
+}
+
+static esp_err_t ptest_lcd(int percent)
+{
+    if (!s_ptest_lcd_on) {
+        ESP_RETURN_ON_ERROR(ptest_set(EXP_PWR_LCD, true), TAG, "LCD rail on");
+        s_ptest_lcd_on = true; /* Cleanup must run even if setup fails. */
+        vTaskDelay(pdMS_TO_TICKS(LCD_POWER_UP_MS));
+        if (!s_panel) {
+            const spi_bus_config_t bus = SPD2010_PANEL_BUS_QSPI_CONFIG(LCD_PCLK, LCD_D0, LCD_D1, LCD_D2, LCD_D3, LCD_CHUNK_BYTES);
+            ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_HOST, &bus, SPI_DMA_CH_AUTO), TAG, "diagnostic LCD SPI");
+            s_ptest_draw_done = xSemaphoreCreateBinary();
+            ESP_RETURN_ON_FALSE(s_ptest_draw_done, ESP_ERR_NO_MEM, TAG, "LCD done semaphore");
+            esp_lcd_panel_io_spi_config_t io = SPD2010_PANEL_IO_QSPI_CONFIG(LCD_CS, ptest_draw_complete, NULL);
+            io.pclk_hz = 40 * 1000 * 1000;
+            ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi(LCD_HOST, &io, &s_io), TAG, "diagnostic LCD IO");
+            spd2010_vendor_config_t vendor = { .flags.use_qspi_interface = 1 };
+            const esp_lcd_panel_dev_config_t cfg = {
+                .reset_gpio_num = GPIO_NUM_NC, .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+                .bits_per_pixel = 16, .vendor_config = &vendor,
+            };
+            ESP_RETURN_ON_ERROR(esp_lcd_new_panel_spd2010(s_io, &cfg, &s_panel), TAG, "diagnostic panel");
+        } else {
+            bool spi = true;
+            lcd_bus(&spi);
+        }
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(s_panel), TAG, "panel reset");
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_panel), TAG, "panel init");
+        uint8_t *black = heap_caps_calloc(1, LCD_CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        ESP_RETURN_ON_FALSE(black, ESP_ERR_NO_MEM, TAG, "black stripe");
+        esp_err_t e = ESP_OK;
+        for (int y = 0; y < LCD_RES; y += 8) {
+            e = esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_RES, y + 8 < LCD_RES ? y + 8 : LCD_RES, black);
+            if (e) { break; }
+            if (xSemaphoreTake(s_ptest_draw_done, pdMS_TO_TICKS(1000)) != pdTRUE) { e = ESP_ERR_TIMEOUT; break; }
+        }
+        /* IO timeout may mean a DMA buffer is still in flight. Keep it alive
+         * on failure (a bounded 6.6KiB diagnostic-only leak) rather than UAF. */
+        if (!e) { free(black); }
+        ESP_RETURN_ON_ERROR(e, TAG, "black draw");
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "panel display on");
+    }
+    if (!s_ptest_pwm) {
+        const ledc_timer_config_t timer = {
+            .speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = LEDC_TIMER_10_BIT,
+            .timer_num = LEDC_TIMER_0, .freq_hz = 5000, .clk_cfg = LEDC_USE_XTAL_CLK,
+        };
+        ESP_RETURN_ON_ERROR(ledc_timer_config(&timer), TAG, "diagnostic PWM");
+        s_ptest_pwm = true;
+    }
+    /* Rebind after rail-off GPIO matrix disconnect. No LVGL or touch bus. */
+    const ledc_channel_config_t ch = {
+        .gpio_num = LCD_BL, .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_0, .timer_sel = LEDC_TIMER_0,
+        .duty = percent * 1023 / 100,
+    };
+    return ledc_channel_config(&ch);
+}
+
+static esp_err_t ptest_audio_close(void)
+{
+    esp_err_t first = ptest_set(EXP_PWR_CODEC_PA, false);
+    if (s_ptest_spk_open) {
+        int e = esp_codec_dev_close(s_ptest_spk);
+        if (!first && e != ESP_CODEC_DEV_OK) { first = ESP_FAIL; }
+        if (e == ESP_CODEC_DEV_OK) { s_ptest_spk_open = false; }
+    }
+    if (s_ptest_mic_open) {
+        int e = esp_codec_dev_close(s_ptest_mic);
+        if (!first && e != ESP_CODEC_DEV_OK) { first = ESP_FAIL; }
+        if (e == ESP_CODEC_DEV_OK) { s_ptest_mic_open = false; }
+    }
+    /* Both codecs share an I2S data interface. Explicitly ensure both DMA
+     * directions are stopped; INVALID_STATE means already stopped, not IO
+     * failure. Do not treat other errors as a successful resting state. */
+    const i2s_chan_handle_t channels[] = { s_ptest_tx, s_ptest_rx };
+    for (size_t i = 0; i < 2; i++) {
+        if (channels[i]) {
+            esp_err_t e = i2s_channel_disable(channels[i]);
+            if (!first && e != ESP_OK && e != ESP_ERR_INVALID_STATE) { first = e; }
+        }
+    }
+    return first;
+}
+
+static esp_err_t ptest_audio_open(void)
+{
+    if (!s_ptest_spk || !s_ptest_mic) {
+        /* Do not retry a partially-created shared I2S bus on later commands. */
+        ESP_RETURN_ON_FALSE(!s_ptest_audio_attempted, ESP_ERR_INVALID_STATE, TAG, "partial audio init");
+        s_ptest_audio_attempted = true;
+        ESP_RETURN_ON_ERROR(audio_init(&s_ptest_spk, &s_ptest_mic), TAG, "diagnostic codecs");
+    }
+    esp_codec_dev_sample_info_t fs = { .sample_rate = 16000, .channel = 2, .bits_per_sample = 16 };
+    if (!s_ptest_spk_open) {
+        ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_ptest_spk, &fs) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "speaker open");
+        s_ptest_spk_open = true;
+    }
+    if (!s_ptest_mic_open) {
+        ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_ptest_mic, &fs) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "mic open");
+        s_ptest_mic_open = true;
+    }
+    ESP_RETURN_ON_FALSE(esp_codec_dev_set_out_vol(s_ptest_spk, 25) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "bounded volume");
+    s_ptest_volume = 25;
+    ESP_RETURN_ON_FALSE(esp_codec_dev_set_in_gain(s_ptest_mic, 0.0f) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "mic gain");
+    /* Opening a codec may skip re-enabling an already-open shared data IF.
+     * Ensure clocks, but accept already-enabled as the documented state. */
+    const i2s_chan_handle_t channels[] = { s_ptest_tx, s_ptest_rx };
+    for (size_t i = 0; i < 2; i++) {
+        esp_err_t e = i2s_channel_enable(channels[i]);
+        ESP_RETURN_ON_FALSE(e == ESP_OK || e == ESP_ERR_INVALID_STATE, e, TAG, "I2S enable");
+    }
+    return ESP_OK;
+}
+
+static esp_err_t ptest_adc_init(void)
+{
+    if (!s_adc) {
+        const adc_oneshot_unit_init_cfg_t unit = { .unit_id = ADC_UNIT_1 };
+        ESP_RETURN_ON_ERROR(adc_oneshot_new_unit(&unit, &s_adc), TAG, "diagnostic ADC");
+        const adc_oneshot_chan_cfg_t channel = { .atten = ADC_ATTEN_DB_2_5, .bitwidth = ADC_BITWIDTH_DEFAULT };
+        ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(s_adc, BATT_ADC, &channel), TAG, "diagnostic ADC channel");
+    }
+    if (!s_cali) {
+        const adc_cali_curve_fitting_config_t cfg = {
+            .unit_id = ADC_UNIT_1, .chan = BATT_ADC, .atten = ADC_ATTEN_DB_2_5, .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        esp_err_t e = adc_cali_create_scheme_curve_fitting(&cfg, &s_cali);
+        if (e == ESP_ERR_NOT_SUPPORTED) { return e; }
+        ESP_RETURN_ON_ERROR(e, TAG, "ADC calibration");
+    }
+    return ESP_OK;
+}
+
+esp_err_t muse_watcher_ptest_apply(const muse_ptest_state_t *state)
+{
+    if (!state || !s_exp) { return ESP_ERR_INVALID_STATE; }
+    if (state->load == MUSE_PTEST_UNSUPPORTED) { return ESP_ERR_NOT_SUPPORTED; }
+    s_ptest_load = state->load;
+    s_ptest_frames = s_ptest_adc_samples = 0;
+    s_ptest_battery_mv = 0;
+    s_ptest_next_adc_us = 0;
+    ESP_RETURN_ON_ERROR(ptest_set(EXP_PWR_SYSTEM, true), TAG, "system latch retained");
+    /* Amp goes off before closing/reprogramming codecs, no power-up pop. */
+    ESP_RETURN_ON_ERROR(ptest_set(EXP_PWR_CODEC_PA, false), TAG, "amp off");
+    bool audio = state->load == MUSE_PTEST_CODECS_IDLE || state->load == MUSE_PTEST_MIC || state->load == MUSE_PTEST_SINE;
+    ESP_RETURN_ON_ERROR(audio ? ptest_audio_open() : ptest_audio_close(), TAG, "diagnostic audio state");
+    ESP_RETURN_ON_ERROR(state->backlight_pct < 0 ? ptest_lcd_off() : ptest_lcd(state->backlight_pct), TAG, "diagnostic LCD state");
+    s_ptest_expected_duty = state->backlight_pct < 0 ? 0 : state->backlight_pct * 1023 / 100;
+    bool adc = state->load == MUSE_PTEST_ADC_RAIL || state->load == MUSE_PTEST_ADC_SAMPLE;
+    ESP_RETURN_ON_ERROR(ptest_set(EXP_PWR_BAT_ADC, adc), TAG, "ADC divider rail");
+    if (state->load == MUSE_PTEST_ADC_SAMPLE) { ESP_RETURN_ON_ERROR(ptest_adc_init(), TAG, "ADC sampling available"); }
+    if (state->amplifier) {
+        ESP_RETURN_ON_ERROR(ptest_set(EXP_PWR_CODEC_PA, true), TAG, "amp on");
+        vTaskDelay(pdMS_TO_TICKS(AMP_ON_MS));
+    }
+    return ESP_OK;
+}
+
+esp_err_t muse_watcher_ptest_readback(muse_ptest_readback_t *out)
+{
+    if (!out) { return ESP_ERR_INVALID_ARG; }
+    ESP_RETURN_ON_ERROR(muse_watcher_ptest_power(out), TAG, "diagnostic VBUS read");
+    ESP_RETURN_ON_ERROR(ptest_reg(EXP_REG_OUTPUT, &out->output), TAG, "output readback");
+    ESP_RETURN_ON_ERROR(ptest_reg(EXP_REG_CONFIG, &out->direction), TAG, "direction readback");
+    const uint16_t outputs = (uint16_t)~EXP_INPUTS;
+    ESP_RETURN_ON_FALSE(out->direction == EXP_INPUTS && out->output == s_exp_out &&
+                        (out->input & outputs) == (out->output & outputs), ESP_FAIL, TAG, "expander mismatch");
+    out->backlight_duty = s_ptest_pwm ? (int)ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0) : -1;
+    ESP_RETURN_ON_FALSE(!s_ptest_pwm || out->backlight_duty == s_ptest_expected_duty, ESP_FAIL, TAG, "backlight duty mismatch");
+    out->codecs_open = s_ptest_spk_open && s_ptest_mic_open;
+    out->configured_volume = s_ptest_volume;
+    out->battery_mv = s_ptest_battery_mv;
+    out->io_frames = s_ptest_frames;
+    out->adc_samples = s_ptest_adc_samples;
+    return ESP_OK;
+}
+
+esp_err_t muse_watcher_ptest_service(muse_ptest_load_t load)
+{
+    if (load != s_ptest_load) { return ESP_ERR_INVALID_STATE; }
+    if (load == MUSE_PTEST_MIC || load == MUSE_PTEST_SINE) {
+        /* A 10ms chunk, bounded 100ms DMA timeout. No voice/network task and
+         * no buffers saved. Sine is -18dBFS PEAK, not RMS, on both slots. */
+        int16_t pcm[160 * 2];
+        size_t transferred = 0;
+        esp_err_t e;
+        if (load == MUSE_PTEST_MIC) {
+            e = i2s_channel_read(s_ptest_rx, pcm, sizeof(pcm), &transferred, 100);
+        } else {
+            /* 16 samples/period at 16kHz. Fixed table avoids per-sample libm
+             * load: +/-4125 ~= 32767 * 10^(-18/20). */
+            static const int16_t tone[16] = { 0,1579,2917,3811,4125,3811,2917,1579,0,-1579,-2917,-3811,-4125,-3811,-2917,-1579 };
+            for (size_t i = 0; i < 160; i++) { pcm[2*i] = pcm[2*i+1] = tone[i % 16]; }
+            e = i2s_channel_write(s_ptest_tx, pcm, sizeof(pcm), &transferred, 100);
+        }
+        if (e) { return e; }
+        if (transferred != sizeof(pcm)) { return ESP_FAIL; }
+        s_ptest_frames += transferred / (2 * sizeof(int16_t));
+    } else if (load == MUSE_PTEST_ADC_SAMPLE && esp_timer_get_time() >= s_ptest_next_adc_us) {
+        muse_power_t p = {0};
+        ESP_RETURN_ON_ERROR(read_power(&p), TAG, "calibrated ADC samples");
+        s_ptest_battery_mv = p.battery_mv;
+        s_ptest_adc_samples += 8;
+        s_ptest_next_adc_us = esp_timer_get_time() + 1000000;
+    }
+    return ESP_OK;
+}
+#endif
 
 static const muse_board_t s_board = {
     .name = "Seeed SenseCAP Watcher",

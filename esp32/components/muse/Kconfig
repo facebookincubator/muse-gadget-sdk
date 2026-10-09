@@ -142,6 +142,19 @@ menu "Muse"
         range 0 100
         default 70
 
+    config MUSE_WATCHER_POWER_TEST
+        bool "Isolated SenseCAP Watcher BSP power-characterization firmware"
+        depends on MUSE_BOARD_SENSECAP_WATCHER && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        default n
+        help
+            DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
+            at app_main. USB UART arms a timed autonomous VBUS-free BSP-load
+            sweep. No credentials, production NVS, BLE provisioning or OTA.
+            Results are retained in RAM/RTC until read back after USB reconnect.
+            This characterizes isolated BSP loads, NOT production power.
+            Optional camera support is not required and unsupported matrix
+            features are explicitly skipped. Never enable in a release profile.
+
     config MUSE_WATCHER_CAMERA
         bool "SenseCAP Watcher camera capture and live preview"
         depends on MUSE_BOARD_SENSECAP_WATCHER && SPIRAM

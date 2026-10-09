@@ -77,6 +77,9 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_waveshare_c6_206.c")
     elseif(CONFIG_MUSE_BOARD_SENSECAP_WATCHER)
         list(APPEND srcs "boards/board_sensecap_watcher.c" "boards/muse_lcd_bands.c")
+        if(CONFIG_MUSE_WATCHER_POWER_TEST)
+            list(APPEND srcs "muse_watcher_power_test.c")
+        endif()
         if(CONFIG_MUSE_WATCHER_CAMERA)
             list(APPEND srcs "boards/watcher_camera.c")
         endif()
@@ -111,7 +114,7 @@ elseif(CONFIG_HOMEHUB_VOICE)
 endif()
 
 set(muse_priv_requires
-    esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash
+    esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
     bt esp-tls mbedtls esp_app_format esp_http_client
     noise_core minimp3
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
