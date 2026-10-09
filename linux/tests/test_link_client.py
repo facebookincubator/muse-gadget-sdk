@@ -15,8 +15,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import struct
+import wave
 
 import pytest
 
@@ -279,3 +282,108 @@ def test_describe_result(result, described):
 def test_printable_replaces_control_characters():
     assert printable("system.run") == "system.run"
     assert printable("a\nb\x1b[2Jc") == "a?b?[2Jc"
+
+
+async def registered_session():
+    session, vm = make_session(lambda *args: {"ok": True}, [])
+    stop = asyncio.Event()
+    task = asyncio.ensure_future(session.run(stop))
+    await vm.handshake()
+    await vm.accept_control_stream()
+    register = await vm.next_message()
+    assert not session.registered.is_set()
+    await vm.send_message({"type": "res", "id": register["id"], "ok": True})
+    await session.registered.wait()
+    return session, vm, stop, task
+
+
+async def bounded_scenario(scenario):
+    await asyncio.wait_for(scenario, 5)
+
+
+@pytest.mark.parametrize("rejection", [{"error": "unauthorized"}, {"ok": False}])
+def test_register_rejection_never_reports_ready(rejection):
+    async def scenario():
+        session, vm = make_session(lambda *args: {"ok": True}, [])
+        task = asyncio.ensure_future(session.run(asyncio.Event()))
+        await vm.handshake()
+        await vm.accept_control_stream()
+        register = await vm.next_message()
+        await vm.send_message({"type": "res", "id": register["id"], **rejection})
+        assert await task is Outcome.FORBIDDEN
+        assert not session.registered.is_set()
+        assert session.registered_at is None
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
+def test_twenty_second_voice_note_uploads_in_bounded_chunks():
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        recording = io.BytesIO()
+        with wave.open(recording, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(b"\x01\x00" * 320000)
+        audio = recording.getvalue()
+        reply = asyncio.ensure_future(session.send_voice(audio, "robot-chat"))
+        request = await vm.next_frame()
+        assert (request.value.verb, request.value.path, request.value.end_body) == (
+            "POST", "/chat/stream", False)
+        body = bytearray(request.value.body)
+        chunks = 0
+        while True:
+            frame = await vm.next_frame()
+            assert frame.kind == "body_chunk"
+            assert frame.stream_id == request.stream_id
+            assert len(frame.value.data) <= 16384
+            body += frame.value.data
+            chunks += 1
+            if frame.value.end_body:
+                break
+        assert chunks > 40
+        uploaded = json.loads(body)
+        assert {key: uploaded[key] for key in ("message", "device_id", "session_id")} == {
+            "message": "", "device_id": "homelink-abcdef",
+            "session_id": "robot-chat",
+        }
+        assert "output_modality" not in uploaded
+        item, = uploaded["items"]
+        assert (item["type"], item["mime_type"], item["filename"]) == (
+            "file", "audio/wav", "voice_note.wav")
+        assert base64.b64decode(item["data_base64"]) == audio
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b'{"result":{"message_id":"user-1"}}', end_body=True,
+        )))
+        assert await reply == {"ok": True, "status": 200, "response": {"result": {"message_id": "user-1"}}}
+        stop.set()
+        assert await task is Outcome.STOPPED
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
+@pytest.mark.parametrize("send, body", [
+    (lambda session: session.send_chat("Hello", output_modality="voice"),
+     {"message": "Hello", "device_id": "homelink-abcdef", "output_modality": "voice"}),
+    (lambda session: session.send_voice(
+        b"WAV", "existing-chat", message="Use concise robot replies.", output_modality="voice"),
+     {"message": "Use concise robot replies.", "device_id": "homelink-abcdef",
+      "session_id": "existing-chat", "output_modality": "voice",
+      "items": [{"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+                 "data_base64": "V0FW"}]}),
+], ids=["send_chat", "send_voice"])
+def test_request_can_ask_for_a_spoken_reply(send, body):
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        reply = asyncio.ensure_future(send(session))
+        request = await vm.next_frame()
+        assert json.loads(request.value.body) == body
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b"{}", end_body=True,
+        )))
+        assert (await reply)["ok"] is True
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))

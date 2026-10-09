@@ -31,6 +31,7 @@ separate ``POST /chat/stream`` requests on the same session.
 from __future__ import annotations
 
 import asyncio
+import base64
 import enum
 import json
 import logging
@@ -38,7 +39,7 @@ import struct
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 from urllib.parse import quote
 
 from musegadget.muse_api import user_agent
@@ -56,6 +57,9 @@ HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
 MAX_INBOUND_MESSAGE = 4 * 1024 * 1024
+MAX_VOICE_BYTES = 2 * 1024 * 1024
+REQUEST_CHUNK_BYTES = 16 * 1024
+MAX_INLINE_REQUEST_BYTES = 64 * 1024
 # Matches JavaScript's encodeURIComponent, as the firmware does.
 _URI_COMPONENT_SAFE = "-_.!~*'()"
 
@@ -151,17 +155,22 @@ class LinkSession:
         self._stream_id = 0
         self._register_id = ""
         self._requests: dict[int, _Request] = {}
+        self._running = False
+        self.registered = asyncio.Event()
         self.registered_at: float | None = None
 
     async def run(self, stop: asyncio.Event) -> Outcome:
+        self.registered.clear()
         try:
             ws = await self._open()
         except _UpgradeRejected as rejected:
             log.warning("VM refused connection: HTTP %d", rejected.status)
             return Outcome.AUTH_REJECTED if rejected.status == 401 else Outcome.FORBIDDEN
+        reader = stopper = None
         try:
             self._ws = ws
             self._transport = await asyncio.wait_for(self._handshake(ws), HANDSHAKE_TIMEOUT_S)
+            self._running = True
             await self._open_control_stream()
             reader = asyncio.ensure_future(self._read_loop())
             stopper = asyncio.ensure_future(stop.wait())
@@ -172,13 +181,24 @@ class LinkSession:
             stopper.cancel()
             return reader.result()
         finally:
+            self._running = False
+            self.registered.clear()
+            background = []
+            for pending in (reader, stopper):
+                if pending is not None:
+                    pending.cancel()
+                    background.append(pending)
             for task in self._tasks:
                 task.cancel()
+                background.append(task)
             for request in self._requests.values():
                 if not request.done.done():
                     request.done.set_exception(ConnectionError("session ended"))
             self._requests.clear()
+            # Closing the socket wakes writers stalled by network backpressure.
             await ws.close()
+            if background:
+                await asyncio.gather(*background, return_exceptions=True)
 
     # -- Connection setup -----------------------------------------------------
 
@@ -236,34 +256,88 @@ class LinkSession:
 
     # -- Device-originated requests -------------------------------------------
 
-    async def send_chat(self, message: str, session_id: str | None = None) -> dict:
+    async def send_chat(
+        self, message: str, session_id: str | None = None, *, output_modality: str = "text",
+    ) -> dict:
         """Post a user message to the Muse as coming from this device.
 
         Sent on this session, so the VM attributes the turn to the device
         registered on it (``device_id``) and routes any follow-up device
         commands back here. ``session_id`` targets a side chat; an id the Muse
         has not seen before starts a new one. Without it the message goes to
-        the main chat.
+        the main chat. Pass ``output_modality="voice"`` to ask for a reply
+        that Muse can speak.
         """
         request_body = {
             "message": message,
-            "output_modality": "text",
+            "output_modality": output_modality,
             "device_id": self._device.node_id,
         }
         if session_id:
             request_body["session_id"] = session_id
-        body = json.dumps(request_body).encode()
-        headers = [
-            Header("Content-Type", "application/json"),
+        return await self._post_chat(request_body)
+
+    async def send_voice(
+        self, wav_bytes: bytes, session_id: str | None = None, *, message: str = "",
+        output_modality: str | None = None,
+    ) -> dict:
+        """Post a WAV voice note, optionally including instructions in ``message``.
+
+        Muse chooses its usual reply format unless ``output_modality`` is set.
+        Its TTS endpoint requires a voice-modality assistant reply.
+        """
+        if not wav_bytes or len(wav_bytes) > MAX_VOICE_BYTES:
+            raise ValueError("voice note must contain at most 2 MiB of WAV audio")
+        request_body = {
+            "message": message,
+            "device_id": self._device.node_id,
+            "items": [{
+                "type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+                "data_base64": base64.b64encode(wav_bytes).decode("ascii"),
+            }],
+        }
+        if session_id:
+            request_body["session_id"] = session_id
+        if output_modality is not None:
+            request_body["output_modality"] = output_modality
+        return await self._post_chat(request_body)
+
+    @staticmethod
+    def _http_headers(headers: Sequence[Header] = ()) -> list[Header]:
+        return [
+            *headers,
             Header("x-request-id", str(uuid.uuid4())),
             Header("x-app-id", APP_ID),
         ]
-        encrypted = self._transport.encrypt_http_request("POST", CHAT_PATH, body, headers=headers)
+
+    async def _post_chat(self, request_body: dict) -> dict:
+        if not self._running:
+            raise ConnectionError("Muse session is not connected")
+        body = json.dumps(request_body).encode()
+        headers = self._http_headers([
+            Header("Content-Type", "application/json"),
+        ])
+        upload_in_parts = len(body) > MAX_INLINE_REQUEST_BYTES
+        if upload_in_parts:
+            encrypted = self._transport.start_stream_request("POST", CHAT_PATH, headers=headers)
+        else:
+            encrypted = self._transport.encrypt_http_request("POST", CHAT_PATH, body, headers=headers)
         request = _Request(asyncio.get_running_loop().create_future())
         self._requests[encrypted.stream_id] = request
         try:
             await self._send_frames(encrypted.frames)
+            if upload_in_parts:
+                for offset in range(0, len(body), REQUEST_CHUNK_BYTES):
+                    part = body[offset:offset + REQUEST_CHUNK_BYTES]
+                    frames = self._transport.encrypt_body_chunk(
+                        encrypted.stream_id, part, end_body=offset + len(part) == len(body),
+                    )
+                    await self._send_frames(frames)
             status, response = await asyncio.wait_for(request.done, REQUEST_TIMEOUT_S)
+        except BaseException:
+            request.done.cancel()
+            await self._reset_stream(encrypted.stream_id)
+            raise
         finally:
             self._requests.pop(encrypted.stream_id, None)
         try:
@@ -272,6 +346,14 @@ class LinkSession:
             decoded = response.decode("utf-8", errors="replace")[:2000]
         return {"ok": 200 <= status < 300, "status": status, "response": decoded}
 
+    async def _reset_stream(self, stream_id: int) -> None:
+        if not self._running:
+            return
+        try:
+            await self._send_frames(self._transport.encrypt_reset(stream_id, reason="consumer closed"))
+        except Exception:
+            log.debug("could not cancel closed Muse stream", exc_info=True)
+
     # -- Sending --------------------------------------------------------------
 
     async def send(self, message: dict) -> None:
@@ -279,6 +361,28 @@ class LinkSession:
         await self._send_frames(frames)
 
     async def _send_frames(self, frames) -> None:
+        # Encryption has already advanced the Noise nonce. Finish this batch
+        # before cancellation so the next sender cannot leave a nonce gap.
+        sender = asyncio.ensure_future(self._write_frames(frames))
+        cancelled = False
+        while True:
+            try:
+                await asyncio.shield(sender)
+                break
+            except asyncio.CancelledError:
+                cancelled = True
+                if sender.done():
+                    break
+            except Exception:
+                if not cancelled:
+                    raise
+                break
+        if cancelled:
+            if not sender.cancelled():
+                sender.exception()
+            raise asyncio.CancelledError
+
+    async def _write_frames(self, frames) -> None:
         async with self._send_lock:
             for frame in frames:
                 await self._ws.send(frame)
@@ -322,10 +426,12 @@ class LinkSession:
 
     def _handle(self, message: dict) -> Outcome | None:
         if message.get("id") == self._register_id and message.get("method") is None:
-            if message.get("error"):
-                log.error("link.register rejected: %s", message["error"])
+            if message.get("error") or message.get("ok") is False:
+                log.error("link.register rejected")
+                return Outcome.FORBIDDEN
             else:
                 self.registered_at = time.monotonic()
+                self.registered.set()
                 log.info("registered with the Muse")
             return None
         event = message.get("event")
