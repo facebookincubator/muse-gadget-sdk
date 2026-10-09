@@ -85,6 +85,16 @@ size_t muse_hatch_base64(const uint8_t *in, size_t n, char *out);
 void muse_hatch_tail_words(const char *src, char *out, size_t cap);
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap);
 
+/* A reply without Markdown's marks (muse_chat_text.c), so captions show and
+ * speech says only the words. Strips a piece of the reply in place as it
+ * streams in and returns the piece's new length; `plain` carries over from
+ * piece to piece and starts zeroed for each message. */
+typedef struct {
+    bool mid_line;   /* past the marks a line starts with */
+    bool cell;       /* after a table's |: the next cell starts with ", " */
+} muse_hatch_plain_t;
+size_t muse_hatch_plain(char *text, muse_hatch_plain_t *plain);
+
 #ifdef __cplusplus
 }
 #endif

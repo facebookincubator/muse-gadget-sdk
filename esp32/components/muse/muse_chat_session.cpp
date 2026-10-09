@@ -202,6 +202,7 @@ struct msg_t {
     tts_t tts;
     uint32_t pcm_start;      /* where its speech starts in the reply audio */
     uint32_t pcm_frames;     /* how long it is; 0 until the MP3 has all arrived */
+    muse_hatch_plain_t plain;   /* its Markdown's marks, dropped as the text streams in */
 };
 
 struct resampler_t {
@@ -1324,9 +1325,10 @@ static int bind_msg(const char *id, cJSON *payload)
     return s_turn.nmsgs++;
 }
 
-static void append_text(msg_t &m, const char *text)
+/* Adds a piece of the message's text, without its Markdown (in place: text is the event's). */
+static void append_text(msg_t &m, char *text)
 {
-    size_t add = strlen(text);
+    size_t add = muse_hatch_plain(text, &m.plain);
     if (s_turn.texts) {
         char *full = s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX;
         if (!m.len) {
@@ -1368,7 +1370,7 @@ static void show_reply_start(const msg_t &m)
     }
 }
 
-static void message_done(int i, const char *final_text)
+static void message_done(int i, char *final_text)
 {
     msg_t &m = s_turn.msgs[i];
     if (m.done) {
@@ -1457,7 +1459,7 @@ static void on_event(cJSON *line)
     s_turn.last_event_us = s_turn.last_content_us = now_us();
     msg_t &m = s_turn.msgs[i];
     if (append) {
-        const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "text"));
+        char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "text"));
         if (text && text[0] && s_turn.text) {
             mark(M_TEXT);
             m.len += strlen(text);
@@ -1468,7 +1470,7 @@ static void on_event(cJSON *line)
             show_reply_start(m);   /* ignored once the speech starts */
         }
     } else if (done || full) {
-        const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
+        char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
         if (!text) {
             text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
         }

@@ -15,7 +15,8 @@
 """How reply captions wrap to the screen's page (muse_chat_text.c): words stay
 whole, and CJK, which has no spaces, breaks between characters but never puts
 closing punctuation at the start of a line. Letters the ASCII fonts lack show
-as their plain ones (muse_text.c)."""
+as their plain ones (muse_text.c), and Markdown's marks are dropped as the
+reply streams in."""
 
 from __future__ import annotations
 
@@ -114,6 +115,36 @@ class CaptionWrapTest(unittest.TestCase):
 
     def test_mixed_text_breaks_at_spaces_or_between_cjk(self) -> None:
         self.assertEqual(self.wrap("Muse 说 hello world", 8), ["Muse 说", "hello", "world"])
+
+    def plain(self, *pieces: str) -> str:
+        proc = subprocess.run(
+            [str(self.binary), "plain"], input="\x1f".join(pieces).encode(), capture_output=True, check=True
+        )
+        return proc.stdout.decode()
+
+    def test_markdown_marks_are_dropped(self) -> None:
+        self.assertEqual(self.plain("**Hà Nội** hôm nay *nắng*, `30°C`."), "Hà Nội hôm nay nắng, 30°C.")
+        self.assertEqual(self.plain("## Dự báo\n> Trích dẫn"), "Dự báo\nTrích dẫn")
+        self.assertEqual(self.plain("Mang theo:\n- nước\n* mũ\n  + kem chống nắng\n1. Đi sớm"),
+                         "Mang theo:\nnước\nmũ\nkem chống nắng\n1. Đi sớm")
+        # Marks inside a line stay: only a line's start has them.
+        self.assertEqual(self.plain("Tỷ số 2-1, kênh #1: hay > dở"), "Tỷ số 2-1, kênh #1: hay > dở")
+
+    def test_a_table_reads_as_rows_of_cells(self) -> None:
+        table = "| Ngày | Trời |\n|---|:---:|\n| Thứ hai | Nắng, 30° |\n| Thứ ba|Mưa|"
+        self.assertEqual(self.plain(table), "Ngày, Trời\n\nThứ hai, Nắng, 30°\nThứ ba, Mưa")
+
+    def test_pieces_strip_as_the_whole_does(self) -> None:
+        text = "### Thời tiết\n**Sáng**: trời *mát*.\n- Chiều: `mưa` rào\n\n> Nhớ mang ô!"
+        whole = self.plain(text)
+        data = text.encode()
+        for at in range(1, len(data)):
+            with self.subTest(at=at):
+                # Split between bytes, as a stream may, even inside a letter.
+                proc = subprocess.run(
+                    [str(self.binary), "plain"], input=data[:at] + b"\x1f" + data[at:], capture_output=True, check=True
+                )
+                self.assertEqual(proc.stdout.decode(), whole)
 
     def shown(self, text: str) -> str:
         proc = subprocess.run(

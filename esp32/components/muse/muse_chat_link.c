@@ -664,7 +664,10 @@ static void on_row(row_t *r)
         }
         strlcpy(s_turn.seen[s_turn.seen_count++], r->msg, sizeof(s_turn.seen[0]));
         if (s_turn.text[0]) text_append(s_turn.text, sizeof(s_turn.text), " ");
+        size_t at = strlen(s_turn.text);
+        muse_hatch_plain_t plain = { 0 };
         text_append(s_turn.text, sizeof(s_turn.text), r->text);
+        muse_hatch_plain(s_turn.text + at, &plain);
         ESP_LOGI(TAG, "reply after %.2fs: %.80s", (esp_timer_get_time() - s_turn.t_end) / 1e6, r->text);
         if (!s_turn.replied) {
             s_turn.t_show = esp_timer_get_time();

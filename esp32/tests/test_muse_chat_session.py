@@ -50,6 +50,7 @@ static void emit(muse_hatch_ev_t type, const char *) {
 }
 void muse_hatch_console(const char *, const char *, const char *, ...) { console_events++; }
 void muse_hatch_tail_words(const char *text, char *out, size_t cap) { strlcpy(out, text, cap); }
+size_t muse_hatch_plain(char *text, muse_hatch_plain_t *) { return strlen(text); }
 bool muse_hatch_caption_at(const char *text, size_t, char *out, size_t cap) {
     strlcpy(out, text, cap); return text[0];
 }
