@@ -209,9 +209,9 @@ class Service:
         """Accept messages for the Muse from programs on this device.
 
         Each connection sends one JSON line, ``{"message": "..."}`` plus an
-        optional ``"session_id"`` naming a side chat, and gets one JSON line
-        back. Only root and the command account's group can
-        connect.
+        optional ``"session_id"`` naming a side chat. Set ``"wait_for_reply"``
+        to true to wait for the assistant's text reply. Only root and the
+        command account's group can connect.
         """
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if path.exists():
@@ -250,6 +250,12 @@ class Service:
         if session is None or session.registered_at is None:
             return {"ok": False, "error": "not connected to the Muse"}
         log.info("forwarding a %d-character message to the Muse", len(message))
+        if request.get("wait_for_reply") is True:
+            try:
+                response = await session.ask_chat(message, session_id)
+            except Exception as exc:
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            return {"ok": True, "response": response}
         return await session.send_chat(message, session_id)
 
     async def _sleep(self, seconds: float) -> None:

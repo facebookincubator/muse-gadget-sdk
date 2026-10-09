@@ -21,8 +21,8 @@ import struct
 import pytest
 
 from musegadget.link_client import (
-    DeviceDescription, LinkSession, MessageDecoder, Outcome, describe_result, encode_message,
-    noise_url, printable,
+    DeviceDescription, LinkSession, MessageDecoder, Outcome, _ChatSubscription, describe_result,
+    encode_message, noise_url, printable,
 )
 from musegadget.noise import (
     ApplicationResponse, BodyChunk, NoiseFrameDecoder, NoiseXXResponder, ServiceFrame,
@@ -210,7 +210,7 @@ def test_vm_id_is_escaped_like_encode_uri_component():
     assert noise_url("h", "a-b_c.d!~*'()?&=") == "wss://h/v1/noise?vm_id=a-b_c.d!~*'()%3F%26%3D"
 
 
-def test_send_chat_posts_a_device_attributed_message_on_the_same_session():
+def test_send_chat_posts_a_message_on_the_authenticated_session():
     async def scenario():
         session, vm = make_session(lambda *a: {"ok": True}, [])
         task = asyncio.ensure_future(session.run(asyncio.Event()))
@@ -279,3 +279,145 @@ def test_describe_result(result, described):
 def test_printable_replaces_control_characters():
     assert printable("system.run") == "system.run"
     assert printable("a\nb\x1b[2Jc") == "a?b?[2Jc"
+def test_ask_chat_subscribes_and_returns_only_the_related_assistant_reply():
+    async def scenario():
+        session, vm = make_session(lambda *a: {"ok": True}, [])
+        task = asyncio.ensure_future(session.run(asyncio.Event()))
+        await vm.handshake()
+        await vm.accept_control_stream()
+        await vm.next_message()
+
+        ask = asyncio.ensure_future(session.ask_chat("How are you?", "side-1"))
+        subscription = await vm.next_frame()
+        assert (subscription.kind, subscription.value.verb, subscription.value.path) == (
+            "request", "POST", "/chat/subscribe")
+        assert subscription.value.body == b"{}"
+        headers = {h.key.lower(): h.value for h in subscription.value.headers}
+        assert headers["accept"] == "application/x-ndjson"
+
+        message = await vm.next_frame()
+        assert (message.kind, message.value.verb, message.value.path) == (
+            "request", "POST", "/chat/stream")
+        assert json.loads(message.value.body)["message"] == "How are you?"
+        await vm.send_frame(ServiceFrame.response(
+            subscription.stream_id, ApplicationResponse(status=200),
+        ))
+        await vm.send_frame(ServiceFrame.response(
+            message.stream_id,
+            ApplicationResponse(
+                status=200,
+                body=b'{"result":{"message_id":"note-1","reply_to_message_id":"parent"}}',
+                end_body=True,
+            ),
+        ))
+        events = (
+            b'{"type":"event","event":"delta.text_append","message_id":"reply-1",'
+            b'"parent_message_id":"note-1","payload":{"text":"Hello "}}\n'
+            b'{"type":"event","event":"delta.text_append","message_id":"unrelated",'
+            b'"parent_message_id":"other","payload":{"text":"Ignored"}}\n'
+            b'{"type":"event","event":"delta.text_append","message_id":"reply-1",'
+            b'"parent_message_id":"reply-1","payload":{"text":"there"}}\n'
+            b'{"type":"event","event":"delta.message_done","message_id":"reply-1",'
+            b'"parent_message_id":"note-1","payload":{}}\n'
+        )
+        await vm.send_frame(ServiceFrame.body_chunk(
+            subscription.stream_id, BodyChunk(data=events),
+        ))
+        assert await asyncio.wait_for(ask, 2) == "Hello there"
+        task.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_ask_chat_rejects_message_ids_with_an_unrelated_first_parent():
+    async def scenario():
+        session, vm = make_session(lambda *a: {"ok": True}, [])
+        task = asyncio.ensure_future(session.run(asyncio.Event()))
+        await vm.handshake()
+        await vm.accept_control_stream()
+        await vm.next_message()
+
+        ask = asyncio.ensure_future(session.ask_chat("How are you?", "side-1"))
+        subscription = await vm.next_frame()
+        message = await vm.next_frame()
+        await vm.send_frame(ServiceFrame.response(
+            subscription.stream_id, ApplicationResponse(status=200),
+        ))
+        await vm.send_frame(ServiceFrame.response(
+            message.stream_id,
+            ApplicationResponse(
+                status=200,
+                body=b'{"result":{"message_id":"note-1","reply_to_message_id":"parent"}}',
+                end_body=True,
+            ),
+        ))
+        events = (
+            b'{"type":"event","event":"delta.text_append","message_id":"wrong",'
+            b'"parent_message_id":"other-chat","payload":{"text":"Wrong "}}\n'
+            b'{"type":"event","event":"delta.text_append","message_id":"wrong",'
+            b'"payload":{"text":"answer"}}\n'
+            b'{"type":"event","event":"delta.message_done","message_id":"wrong",'
+            b'"parent_message_id":"wrong","payload":{}}\n'
+            b'{"type":"event","event":"delta.text_append","message_id":"right",'
+            b'"parent_message_id":"note-1","payload":{"text":"Right answer"}}\n'
+            b'{"type":"event","event":"delta.message_done","message_id":"right",'
+            b'"parent_message_id":"right","payload":{}}\n'
+        )
+        await vm.send_frame(ServiceFrame.body_chunk(
+            subscription.stream_id, BodyChunk(data=events),
+        ))
+        assert await asyncio.wait_for(ask, 2) == "Right answer"
+        task.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_chat_subscription_caps_total_buffered_event_bytes():
+    async def scenario():
+        subscription = _ChatSubscription()
+        line = (
+            b'{"type":"event","event":"delta.text_append","message_id":"reply",'
+            b'"payload":{"text":"' + b"x" * (700 * 1024) + b'"}}\n'
+        )
+        assert len(line) < 1024 * 1024
+        subscription.on_frame(ServiceFrame.body_chunk(
+            1, BodyChunk(data=line + line + line),
+        ))
+        error = await subscription.next_event()
+        assert isinstance(error, ValueError)
+        assert "buffer is full" in str(error)
+        assert subscription._queued_bytes == 0
+
+    asyncio.run(scenario())
+
+
+def test_ask_chat_fails_promptly_when_the_live_session_ends():
+    async def scenario():
+        session, vm = make_session(lambda *a: {"ok": True}, [])
+        task = asyncio.ensure_future(session.run(asyncio.Event()))
+        await vm.handshake()
+        await vm.accept_control_stream()
+        await vm.next_message()
+
+        ask = asyncio.ensure_future(session.ask_chat("Tell me something.", "side-1"))
+        subscription = await vm.next_frame()
+        message = await vm.next_frame()
+        await vm.send_frame(ServiceFrame.response(
+            subscription.stream_id, ApplicationResponse(status=200),
+        ))
+        await vm.send_frame(ServiceFrame.response(
+            message.stream_id,
+            ApplicationResponse(
+                status=200,
+                body=b'{"result":{"message_id":"note-1"}}',
+                end_body=True,
+            ),
+        ))
+        await asyncio.sleep(0)
+        await vm.ws.send(None)
+
+        assert await asyncio.wait_for(task, 2) is Outcome.CLOSED
+        with pytest.raises(ConnectionError, match="subscription failed"):
+            await asyncio.wait_for(ask, 2)
+
+    asyncio.run(scenario())

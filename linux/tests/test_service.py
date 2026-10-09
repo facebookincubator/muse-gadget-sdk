@@ -40,6 +40,10 @@ class FakeSession:
         self.sent.append((message, session_id))
         return {"ok": True, "status": 200, "response": None}
 
+    async def ask_chat(self, message: str, session_id: str | None = None) -> str:
+        self.sent.append((message, session_id))
+        return "Muse reply"
+
 
 async def ask(path: Path, payload: bytes) -> dict:
     reader, writer = await asyncio.open_unix_connection(str(path))
@@ -86,6 +90,20 @@ def test_local_message_can_target_a_side_chat():
         assert session.sent == [("ring", sid)]
         bad = await ask(path, b'{"message": "ring", "session_id": "../x"}\n')
         assert not bad["ok"] and len(session.sent) == 1
+
+    run_with_socket(check)
+
+
+def test_local_ask_waits_for_and_returns_the_muse_reply():
+    async def check(service, path):
+        session = FakeSession()
+        service._current = session
+        payload = json.dumps({
+            "message": "What is the weather?", "session_id": "side-1", "wait_for_reply": True,
+        }).encode() + b"\n"
+        reply = await ask(path, payload)
+        assert reply == {"ok": True, "response": "Muse reply"}
+        assert session.sent == [("What is the weather?", "side-1")]
 
     run_with_socket(check)
 
