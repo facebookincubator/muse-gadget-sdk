@@ -29,5 +29,11 @@ if(NOT CMAKE_SOURCE_DIR STREQUAL GADGET_SOURCE_DIR)
     )
 endif()
 
+# When the component manager is off, CMake still needs managed dependencies on the
+# component search path (they are normally injected by idf_component_manager).
+if(DEFINED ENV{IDF_COMPONENT_MANAGER} AND "$ENV{IDF_COMPONENT_MANAGER}" STREQUAL "0")
+    list(APPEND EXTRA_COMPONENT_DIRS "${GADGET_SOURCE_DIR}/managed_components")
+endif()
+
 # ESP-IDF reads version.txt from the active project root unless PROJECT_VER is set.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

@@ -178,6 +178,7 @@ status screen.
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
+| KSDIY P4XC5 | 4.3 inch touch UI, voice, settings, Wi-Fi/BLE via C5 | [P4XC5 setup](devices/ksdiy-p4xc5.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | UI, touch, push-to-talk with text replies | `tools/muse/board.sh build c6-206` |

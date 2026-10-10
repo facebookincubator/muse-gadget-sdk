@@ -35,6 +35,9 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.75 (not the 1.75C)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_KSDIY_P4XC5
+            bool "KSDIY P4XC5 (ESP32-P4 + C5, 4.3 inch MIPI touch)"
+            depends on IDF_TARGET_ESP32P4
         config MUSE_BOARD_WAVESHARE_S3_216
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16"
             depends on IDF_TARGET_ESP32S3
@@ -121,6 +124,7 @@ menu "Muse"
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
+        default "ksdiy_p4xc5" if MUSE_BOARD_KSDIY_P4XC5
         default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
         default "fnk0104b" if MUSE_BOARD_FNK0104B
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535

@@ -26,7 +26,10 @@
 
 #include "esp_log.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
+#if __has_include("esp_bt.h")
 #include "esp_bt.h"
+#endif
 #include "esp_app_desc.h"
 #include "mbedtls/platform_util.h"
 #include "freertos/FreeRTOS.h"
@@ -42,6 +45,14 @@
 #include "host/ble_gatt.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
+
+#if __has_include("esp_hosted_bt_host_stack.h")
+#include "esp_hosted_bt_host_stack.h"
+#define LINK_BLE_USE_HOSTED_BT_STACK 1
+#elif defined(CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE) && CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE
+#include "esp_hosted_misc.h"
+#define LINK_BLE_USE_HOSTED_BT_LEGACY 1
+#endif
 
 #include "cJSON.h"
 #include "config_store.h"
@@ -791,10 +802,12 @@ void ble_server_full_shutdown(void) {
     s_synced = false;
     s_advertising_active = false;
 
+#if __has_include("esp_bt.h")
     err = esp_bt_mem_release(ESP_BT_MODE_BLE);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "esp_bt_mem_release: %s", esp_err_to_name(err));
     }
+#endif
 
     ESP_LOGI(TAG, "BLE shut down, memory released");
 }
@@ -952,6 +965,26 @@ void ble_server_start(const char *device_name, const ble_callbacks_t *cb) {
     s_synced = false;
     s_advertising_enabled = false;
     s_advertising_active = false;
+
+#if defined(LINK_BLE_USE_HOSTED_BT_STACK)
+    esp_hosted_bt_host_stack_cfg_t bt_stack_cfg = ESP_HOSTED_BT_HOST_STACK_CONFIG_DEFAULT();
+    esp_err_t bt_stack_err = esp_hosted_bt_host_stack_setup(&bt_stack_cfg);
+    if (bt_stack_err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_hosted_bt_host_stack_setup: %s", esp_err_to_name(bt_stack_err));
+        return;
+    }
+#elif defined(LINK_BLE_USE_HOSTED_BT_LEGACY)
+    esp_err_t hosted_bt_err = esp_hosted_bt_controller_init();
+    if (hosted_bt_err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_hosted_bt_controller_init: %s", esp_err_to_name(hosted_bt_err));
+        return;
+    }
+    hosted_bt_err = esp_hosted_bt_controller_enable();
+    if (hosted_bt_err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_hosted_bt_controller_enable: %s", esp_err_to_name(hosted_bt_err));
+        return;
+    }
+#endif
 
     nimble_port_init();
     ble_svc_gap_init();

@@ -17,7 +17,7 @@ dependencies:
     version: ">=5.5"
   espressif/cjson: "~1.7"
   lvgl/lvgl:
-    version: "9.5.0"
+    version: "9.6.0"
     public: true
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} != \"none\""
@@ -29,6 +29,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\", \"ksdiy_p4xc5\"]"
       - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\"]"
   78/esp_lcd_nv3023:
     version: "1.0.1"
@@ -78,6 +79,16 @@ dependencies:
     version: "^2.2.0"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"m5stack_stopwatch\""
+  kevincoooool/ksdiy_p4c5_bsp:
+    version: "1.3.2"
+    public: true
+    rules:
+      - if: '$CONFIG{MUSE_BOARD_ID} == "ksdiy_p4xc5"'
+  kevincoooool/ksdiy_p4c5_audio:
+    version: "1.0.2"
+    public: true
+    rules:
+      - if: '$CONFIG{MUSE_BOARD_ID} == "ksdiy_p4xc5"'
   espressif/m5stack_core_2:
     version: "^3.0.3"
     rules:

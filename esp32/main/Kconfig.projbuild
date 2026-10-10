@@ -318,7 +318,7 @@ menu "ESP32 Device SDK"
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
-        default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM
+        default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM && !IDF_TARGET_ESP32P4
         help
             Set when display.draw_url can draw a downloaded image: the
             display backends, and boards with the full UI and PSRAM for the image.

@@ -65,6 +65,8 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_175)
         # One driver: the 1.75 differs only in pins (its BSP's) and its PWR key.
         list(APPEND srcs "boards/board_waveshare_s3_175c.c" "boards/muse_lcd_bands.c")
+    elseif(CONFIG_MUSE_BOARD_KSDIY_P4XC5)
+        list(APPEND srcs "boards/board_ksdiy_p4xc5.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_216)
         list(APPEND srcs "boards/board_waveshare_s3_216.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_AIPI)
@@ -128,11 +130,19 @@ idf_component_register(
 )
 
 if(CONFIG_MUSE_ENABLED)
+    # LVGL 9.6 deprecates includes from src/; Muse still uses a few private headers.
+    target_compile_options(${COMPONENT_LIB} PRIVATE "-Wno-error=cpp")
     # LVGL spins forever on a failed assert unless LV_ASSERT_HANDLER is set,
     # which its Kconfig can't do. Abort, so the panic handler prints a backtrace
     # and reboots. PUBLIC reaches LVGL and every file that includes lvgl.h.
     idf_component_get_property(lvgl_lib lvgl__lvgl COMPONENT_LIB)
+    target_include_directories(${lvgl_lib} PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
     target_compile_definitions(${lvgl_lib} PUBLIC
-        "LV_ASSERT_HANDLER_INCLUDE=<stdlib.h>"
-        "LV_ASSERT_HANDLER=abort()\;")
+        LV_ASSERT_USE_CUSTOM_INCLUDE=1
+        "LV_ASSERT_CUSTOM_INCLUDE=\"muse_lv_assert_override.h\"")
+    # esp_lvgl_adapter 0.6.x still includes LVGL src/ headers; LVGL 9.6 treats that as -Werror=cpp.
+    if(TARGET idf::espressif__esp_lvgl_adapter)
+        idf_component_get_property(lvgl_adapter_lib espressif__esp_lvgl_adapter COMPONENT_LIB)
+        target_compile_options(${lvgl_adapter_lib} PRIVATE "-Wno-error=cpp")
+    endif()
 endif()

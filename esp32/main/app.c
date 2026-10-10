@@ -75,6 +75,7 @@
 #include "boards/watcher_camera.h"
 #endif
 #if CONFIG_MUSE_ENABLED
+#include "muse_ble.h"
 #include "muse_glue.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
@@ -469,9 +470,11 @@ static app_wifi_join_t join_saved_networks(int timeout_ms, join_mode_t mode,
         tries = 1;   // nothing to join: a failure, not a network out of range
         goto done;
     }
-    // Stops wifi_mgr's own reconnect attempts, which would take the radio
-    // from the scans below and churn while no network is in range.
-    if (!wifi_mgr_is_connected()) wifi_mgr_disconnect();
+    // Tear down an active association only. esp_wifi_disconnect while idle
+    // still hits the coprocessor on ESP-Hosted and can abort an in-flight scan.
+    if (wifi_mgr_is_connected()) {
+        wifi_mgr_disconnect();
+    }
 
     if (mode == JOIN_FIRST) {
         restore_wifi_channel_hint(list->nets[0].ssid);
@@ -2491,8 +2494,12 @@ void app_run(void) {
     config_store_init();
     wifi_known_init();
 
+    /* Hosted Wi-Fi (P4+C5): STA MAC and country live on the coprocessor; init
+     * before identity so BLE names and pairing IDs use the real MAC. */
+    wifi_mgr_init();
     identity_init();
 #if CONFIG_MUSE_ENABLED
+    muse_ble_set_name(identity_ble_name());
     muse_glue_storage_ready();
 #endif
 
@@ -2523,10 +2530,7 @@ void app_run(void) {
     }
     led_status_set_state(LED_STATE_BOOT);
 
-    heap_snapshot("after config+id");
-
-    wifi_mgr_init();
-    heap_snapshot("after wifi_mgr_init");
+    heap_snapshot("after config+id+wifi");
 
     noise_ctrl_init(identity_node_id(), identity_ble_name(), on_ws_control_status);
     noise_ctrl_set_command_cb(on_ws_command);
@@ -2610,7 +2614,7 @@ void app_run(void) {
     }
 
     if (setup_complete) {
-        if (!skip_boot_scan) {
+        if (!skip_boot_scan && !CONFIG_HOMEHUB_WIFI_SSID[0]) {
             vTaskDelay(pdMS_TO_TICKS(500));
             int n = wifi_mgr_scan_and_cache();
             ESP_LOGI(TAG, "boot scan cached %d APs", n);
@@ -2648,9 +2652,19 @@ void app_run(void) {
         // to become discoverable. Pairing enforces the configured confirmation policy.
         open_setup_window("boot: unpaired");
         ESP_LOGI(TAG, "BLE advertising; press the button to confirm pairing");
-        vTaskDelay(pdMS_TO_TICKS(500));
-        if (!schedule_scan_refresh(false, NULL)) {
-            ESP_LOGW(TAG, "background boot scan unavailable");
+        // On ESP-Hosted, a background scan races menuconfig Wi-Fi override connect
+        // and floods the co-processor with scan_stop RPCs. Scan when provisioning only.
+        char boot_ssid[33] = {0};
+        bool boot_wifi = CONFIG_HOMEHUB_WIFI_SSID[0]
+                         || (config_get_str("ssid", boot_ssid, sizeof(boot_ssid))
+                             && config_key_lookup("password") == CONFIG_KEY_FOUND);
+        if (!boot_wifi) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            if (!schedule_scan_refresh(false, NULL)) {
+                ESP_LOGW(TAG, "background boot scan unavailable");
+            }
+        } else {
+            ESP_LOGI(TAG, "skipping boot scan (will connect saved wifi)");
         }
     } else {
         ui_set_ble("off");
@@ -2699,12 +2713,14 @@ void app_run(void) {
         led_status_set_state(LED_STATE_WIFI_CONNECTING);
         char joined[WIFI_KNOWN_SSID_MAX + 1] = {0};
         bool wifi_joined;
-        if (ovr_ssid[0]) {
+        if (ovr_ssid[0] || !setup_complete) {
+            /* Menuconfig override, or Link NVS creds before Muse setup is
+             * marked complete: connect directly instead of scanning first. */
             wifi_joined = wifi_mgr_connect(wifi_ssid, wifi_pwd, WIFI_CONNECT_TIMEOUT_MS);
             snprintf(joined, sizeof(joined), "%s", wifi_ssid);
         } else {
             // The boot scan, when it ran, already shows which are in range.
-            join_mode_t mode = setup_complete && !skip_boot_scan ? JOIN_ANY_CACHED : JOIN_ANY;
+            join_mode_t mode = !skip_boot_scan ? JOIN_ANY_CACHED : JOIN_ANY;
             wifi_joined = join_saved_networks(WIFI_CONNECT_TIMEOUT_MS, mode, false,
                                               joined) == APP_WIFI_JOINED;
         }

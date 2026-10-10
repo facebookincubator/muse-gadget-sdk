@@ -17,12 +17,15 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 // Both buffers must be at least 32 bytes. XXXXXX = last 3 WiFi STA MAC octets.
 // node_id "homelink-XXXXXX" (lower) is the backend device identifier (used by
 // device-token mint/refresh); ble_name "MuseGadget-XXXXXX" (upper) is the
 // advertised BLE name.
 void identity_init(void);
+// Rebuild BLE/node ids from a Wi-Fi STA MAC (e.g. after Hosted bring-up).
+void identity_set_sta_mac(const uint8_t mac[6]);
 const char *identity_node_id(void);
 const char *identity_ble_name(void);
 const char *identity_mac(void);
