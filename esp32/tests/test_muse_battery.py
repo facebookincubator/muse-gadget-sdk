@@ -247,6 +247,63 @@ class BatteryTest(unittest.TestCase):
         bad, = self.run_harness(f"load {rtc}", "k")
         self.assertEqual(bad, None)
 
+    def test_kept_in_flash(self) -> None:
+        flash = str(Path(self.tmp.name) / "flash")
+        Path(flash).unlink(missing_ok=True)
+        # Not the start: each boot on battery would replace the run with an empty one.
+        self.run_harness(f"flash {flash}", "t 10000000", START, "p 0 100 4190")
+        none, = self.run_harness(f"flash {flash}", "k")
+        self.assertEqual(none, None)
+        # A periodic save, then the battery runs flat: the RTC memory is gone, the flash isn't.
+        self.run_harness(f"flash {flash}", "t 10000000", START, "p 0 100 4190", "t 1810000000", END,
+                         "p 0 98 4100")
+        saved, = self.run_harness(f"flash {flash}", "t 2000000", "p 1 100 4200", "k")
+        self.assertEqual((saved["secs"], saved["battery_pct"], saved["running"]), (1800, [100, 98], True))
+        self.assertEqual(self.booted_with, [saved])
+        # USB back saves it too, and power.reset clears it.
+        stopped, = self.run_harness(f"flash {flash}", "t 10000000", START, "p 0 100 4190", "t 110000000", END,
+                                    "p 0 99 4100", "p 1 99 4150", "j")
+        kept, = self.run_harness(f"flash {flash}", "k")
+        self.assertEqual(kept, stopped)
+        self.run_harness(f"flash {flash}", "x")
+        cleared, = self.run_harness(f"flash {flash}", "k")
+        self.assertEqual(cleared, None)
+
+    def test_boots_on_battery(self) -> None:
+        flash = str(Path(self.tmp.name) / "flash")
+        Path(flash).unlink(missing_ok=True)
+        # Counted in flash, until a boot that sees USB power.
+        on_battery = ("t 3000000", START, "p 0 50 3900", "j")
+        first, = self.run_harness(f"flash {flash}", *on_battery)
+        brownout, = self.run_harness(f"flash {flash}", "boot 9", *on_battery)
+        unplugged, = self.run_harness(f"flash {flash}", "p 1 50 4000", *on_battery)
+        self.assertEqual([j["battery_boots"] for j in (first, brownout, unplugged)], [1, 2, 0])
+        text = power.report({**brownout, "secs": 600, "uptime": 603})
+        self.assertIn("The board restarted (brownout) on battery", text)
+        self.assertIn("Booted 2 times on battery since USB power was last seen.", text)
+        self.assertNotIn("Booted", power.report({**first, "secs": 600, "uptime": 603}))
+
+    def test_boots_not_counted_by_reset(self) -> None:
+        flash = str(Path(self.tmp.name) / "flash")
+        Path(flash).unlink(missing_ok=True)
+        # power.reset restarts the run, but it isn't a boot.
+        reset, = self.run_harness(f"flash {flash}", "t 3000000", START, "p 0 50 3900", "x", "x", "j")
+        self.assertEqual(reset["battery_boots"], 1)
+        again, = self.run_harness(f"flash {flash}", "t 3000000", START, "p 0 50 3900", "j")
+        self.assertEqual(again["battery_boots"], 2)
+
+    def test_boots_cleared_when_usb_is_seen(self) -> None:
+        flash = str(Path(self.tmp.name) / "flash")
+        Path(flash).unlink(missing_ok=True)
+        on_battery = ("t 3000000", START, "p 0 50 3900", "j")
+        self.run_harness(f"flash {flash}", *on_battery)
+        self.run_harness(f"flash {flash}", *on_battery)
+        # Charged on USB and switched off without unplugging: no run starts, but the count clears.
+        charged, = self.run_harness(f"flash {flash}", "p 1 80 4100", "j")
+        self.assertEqual(charged["battery_boots"], 0)
+        woke, = self.run_harness(f"flash {flash}", *on_battery)
+        self.assertEqual(woke["battery_boots"], 1)
+
     def test_report_reads_the_json(self) -> None:
         j, = self.measure("j")
         text = power.report(j)

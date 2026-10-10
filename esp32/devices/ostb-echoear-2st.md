@@ -133,7 +133,7 @@ free.
 
 Repository checks passed with ESP-IDF v6.0.1: the EchoEar profile, the existing
 AIPI full-UI board and the default ESP32-C5 build. All EchoEar overlay settings
-were applied. The host suite passed 199 tests without skips; the desktop UI
+were applied. The host suite passed 223 tests without skips; the desktop UI
 simulator built with warnings treated as errors and passed its headless CTest.
 The focused host test exercises touch packet bounds, press/release/lost-touch
 callbacks, rapid taps, and pairing confirmation without recording.

@@ -79,7 +79,7 @@ are documented separately; this is not a generic ESP-VoCat profile.
 | Touch | — | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | ✅ |
 | Battery status | — | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — | Percent only | — | No charging state | Unverified |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On | On | Off | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | BOOT, PWR (talk), KEY (talk) on top | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | OK (talk), UP/DOWN (menu) | Touch; bottom power button |
+| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | BOOT, PWR (talk), KEY (talk) on top | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | OK (talk), UP/DOWN (menu) | Touch; bottom power button |
 
 *EchoEar-2ST entries describe configured capabilities. The prototype was checked
 for display, touch pairing, recording and local playback; the cleaned branch
@@ -183,18 +183,37 @@ python -m esptool --chip esp32s3 -p PORT write-flash 0 sticks3.bin
 ```
 
 The M5Stack StopWatch has the same CO5300 round AMOLED as the Waveshare S3
-1.75C, with a CST820 touch controller and the StickS3's ES8311 audio. The
-yellow button (upper left) is push-to-talk and the blue one (upper right) puts
-the screen to sleep; settings are on the touch screen. Powering off from Muse
-turns off the screen, touch, audio and the expander's L3B rail and puts the
-ESP32-S3 in deep sleep; either button wakes it. Double-click the power button
-for a full power-off, and click it to turn back on. M5's IO expander (M5IOE1)
-switches the panel and touch resets, audio power and the amp; its power chip
-(M5PM1) reads the battery and the charger. The IMU, RTC, vibration motor and
-Grove port aren't used yet. [M5Unified](https://github.com/m5stack/M5Unified)
-and M5's [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo)
+1.75C, with a CST820 touch controller and the StickS3's ES8311 audio. With USB
+at the bottom, **blue top-right is PTT/pairing confirmation**, **yellow
+top-left toggles speaker on/off**, and **red bottom-left is POWER**. A short
+POWER press sleeps/wakes the screen; a 1.5 s hold while awake shows goodbye
+and shuts down the M5PM1 (click red to power back on). A waking press is
+consumed, not interpreted as another action. Hardware double-click power-off
+and download access remain available; Muse disables single-click reset, as
+the factory does, and extends the PMIC long delay to 4 s. Settings are one
+swipe left from Muse. Icon-only physical hints (microphone, speaker/mute and
+power) stay beside the rim on the face, reply and pairing views, but are hidden
+in settings so they don't cover controls. Speaker/mute follows the saved
+speaker setting; the microphone brightens while recording. The green PMIC
+power LED is off on battery and on with USB power, updated at boot and with
+the normal battery readings (including while the screen sleeps). This changes
+only M5PM1 `PWR_CFG` (`0x06`) bit 4, preserving charging and the power rails.
+M5's IO expander (M5IOE1) switches the panel and touch resets, audio power
+and the amp; its power chip (M5PM1) reads the battery, charger and red key's
+live state (register `0x48`, bit 0). The IMU, RTC, vibration motor and Grove
+port aren't used yet. [M5Unified](https://github.com/m5stack/M5Unified),
+M5's [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo)
+and its [M5PM1 1.0.6 driver](https://github.com/m5stack/M5PM1/tree/1.0.6)
 are the references. It enumerates as the chip's own USB serial port, so
 flashing needs nothing special: `tools/muse/board.sh flash stopwatch`.
+
+Bench builds also accept `>ui=settings` and `>ui=face` for touch-tile
+screenshots (`a/s` only navigate non-touch menus). `>face=boot`, `idle`,
+`listening`, `thinking`, `speaking`, `error` or `off` selects the face state;
+`>speaker=0` / `>speaker=1` exercises both speaker indications. For privacy-safe
+unpaired captures, `>ui.demo=1` shows `MuseGadget-DEMO` instead of the hardware
+name; `>ui.demo=0` restores it. This changes only the screen, not BLE identity,
+pairing, Wi-Fi or tokens.
 
 The M5Stack CoreS3 runs on Espressif's
 [BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3),

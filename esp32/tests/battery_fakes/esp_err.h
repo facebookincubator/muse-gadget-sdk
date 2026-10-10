@@ -16,22 +16,13 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <stdio.h>
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_ERR_NVS_NOT_INITIALIZED 0x1101
+#define ESP_ERR_NVS_NOT_FOUND 0x1102
+#define ESP_ERR_NVS_INVALID_LENGTH 0x110c
 
-#include "esp_err.h"
-
-typedef esp_err_t (*esp_pm_light_sleep_cb_t)(int64_t sleep_time_us, void *arg);
-
-typedef struct {
-    esp_pm_light_sleep_cb_t enter_cb;
-    esp_pm_light_sleep_cb_t exit_cb;
-    void *enter_cb_user_arg;
-    void *exit_cb_user_arg;
-    uint32_t enter_cb_prior;
-    uint32_t exit_cb_prior;
-} esp_pm_sleep_cbs_register_config_t;
-
-// The harness keeps the callback and writes the dump.
-esp_err_t esp_pm_light_sleep_register_cbs(esp_pm_sleep_cbs_register_config_t *cbs_conf);
-esp_err_t esp_pm_dump_locks(FILE *stream);
+static inline const char *esp_err_to_name(esp_err_t err) {
+    (void)err;
+    return "error";
+}

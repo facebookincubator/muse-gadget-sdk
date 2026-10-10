@@ -56,6 +56,8 @@ def report(p, mah=None):
               "Ran on battery for %s; stopped when USB came back.") % duration(secs)]
     if p.get("boot") not in (None, "power on", "usb", "jtag") and p.get("uptime", 0) <= secs + 60:
         lines.append(f"The board restarted ({p['boot']}) on battery; this counts from then.")
+    if p.get("battery_boots", 0) > 1:
+        lines.append(f"Booted {p['battery_boots']} times on battery since USB power was last seen.")
 
     (pct0, pct1), (mv0, mv1) = p["battery_pct"], p["battery_mv"]
     batt = f"Battery   {pct0}% -> {pct1}%"

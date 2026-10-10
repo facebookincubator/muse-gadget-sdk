@@ -249,7 +249,7 @@ flash size and status backend.
 
    | Hint | Board |
    |---|---|
-   | `yellow` | M5Stack StopWatch |
+   | `top-right` (`yellow` on older firmware) | M5Stack StopWatch |
    | `power` | M5Stack CoreS3 |
    | `front` | M5Stack StickS3, or StickC Plus2 — tell them apart by the port: the StickS3 is native USB, the Plus2 is a CH9102 `usbserial` |
    | `top` | Waveshare ESP32-S3-Touch-AMOLED-1.75C |
@@ -428,7 +428,9 @@ for the whole name shows the `XXXXXX` tail on its own, and a square 128 px
 screen (AIPI Lite) leaves it out, the same as it leaves out the state. Once it's
 paired (or has a token set by hand), the name goes, and the mic icon and the
 touch boards' speaker button appear. They're hidden until then, since a press
-can't reach Muse and there are no replies to mute.
+can't reach Muse and there are no replies to mute. The StopWatch is an exception:
+its dedicated microphone, speaker/mute and power rim icons stay visible before
+pairing as well, identifying its three physical controls.
 
 To skip BLE Wi-Fi provisioning while you iterate, set
 `CONFIG_HOMEHUB_WIFI_SSID` and `CONFIG_HOMEHUB_WIFI_PASSWORD` in `menuconfig`.

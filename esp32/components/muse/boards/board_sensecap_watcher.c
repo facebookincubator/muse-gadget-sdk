@@ -44,6 +44,7 @@
 #include "esp_lcd_spd2010.h"
 #include "esp_lcd_touch_spd2010.h"
 #include "esp_log.h"
+#include "esp_rom_gpio.h"
 #include "esp_lv_adapter.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -55,6 +56,8 @@
 #include "muse_board.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
+#include "hal/i2c_periph.h"
+#include "soc/spi_periph.h"
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #include "camera.h"
@@ -74,6 +77,7 @@ static const char *TAG = "board";
 #define LCD_BL GPIO_NUM_8
 #define DRAW_BUF_LINES 104      /* four bands to the screen (muse_lcd_bands.h) */
 #define LCD_CHUNK_BYTES (LCD_RES * 8 * 2)
+#define LCD_POWER_UP_MS 200   /* the LCD rail on before the panel's setup (lcd_power) */
 
 #define TP_SDA GPIO_NUM_39     /* touch has its own I2C bus */
 #define TP_SCL GPIO_NUM_38
@@ -87,6 +91,7 @@ static const char *TAG = "board";
 #define I2S_DOUT GPIO_NUM_16
 #define ES7243_ADDR 0x13       /* 7-bit; newer units have an ES7243E at 0x14 */
 #define ES7243E_ADDR 0x14
+#define AMP_ON_MS 20           /* the speaker amp starting up before the first sound */
 
 #define KNOB_A GPIO_NUM_41
 #define KNOB_B GPIO_NUM_42
@@ -534,13 +539,121 @@ static void panel_sleep(bool sleep)
 }
 
 /*
+ * The LCD rail is off while paused. Idle, the SPI holds the clock (mode 3) and
+ * CS high, which would feed the unpowered panel, so the lines go to plain
+ * GPIOs driven low first, as init() holds them before the rail is up.
+ */
+static void lcd_bus(void *spi)
+{
+    const spi_signal_conn_t *sig = &spi_periph_signal[LCD_HOST];
+    const struct {
+        gpio_num_t pin;
+        int in, out;
+    } lines[] = {
+        { LCD_PCLK, -1, sig->spiclk_out },
+        { LCD_D0, sig->spid_in, sig->spid_out },
+        { LCD_D1, sig->spiq_in, sig->spiq_out },
+        { LCD_D2, sig->spiwp_in, sig->spiwp_out },
+        { LCD_D3, sig->spihd_in, sig->spihd_out },
+        { LCD_CS, -1, sig->spics_out[0] },
+    };
+    for (int i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
+        if (*(bool *)spi) {
+            gpio_set_direction(lines[i].pin, lines[i].in >= 0 ? GPIO_MODE_INPUT_OUTPUT : GPIO_MODE_OUTPUT);
+            if (lines[i].in >= 0) {
+                esp_rom_gpio_connect_in_signal(lines[i].pin, lines[i].in, false);
+            }
+            esp_rom_gpio_connect_out_signal(lines[i].pin, lines[i].out, false, false);
+        } else {
+            gpio_set_level(lines[i].pin, 0);
+            gpio_set_direction(lines[i].pin, GPIO_MODE_OUTPUT);
+        }
+    }
+}
+
+/*
+ * Powered again, the panel has lost its setup and what it showed. Its reset
+ * line follows the chip's, so a software reset. Its memory comes up random,
+ * and the backlight goes on before LVGL's redraw has reached the panel, so it
+ * is cleared to black first. Runs on the send task between bands, so its
+ * chunk buffers are idle; the clearing takes a buffer of its own for a moment.
+ */
+static void panel_setup(void *arg)
+{
+    bool spi = true;
+    lcd_bus(&spi);
+    esp_lcd_panel_reset(s_panel);
+    esp_lcd_panel_init(s_panel);   /* ends with SLPOUT */
+    uint8_t *black = heap_caps_calloc(1, LCD_CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (black) {
+        for (int y = 0; y < LCD_RES; y += 8) {
+            esp_lcd_panel_draw_bitmap(s_panel, 0, y, LCD_RES, y + 8 < LCD_RES ? y + 8 : LCD_RES, black);
+        }
+    }
+    esp_lcd_panel_disp_on_off(s_panel, true);   /* waits for the queued draws first */
+    free(black);
+}
+
+/*
+ * The touch controller shares the rail, and its bus's pull-ups would feed it
+ * too, so its lines are held low as well, as init() holds them. The touch task
+ * is parked while paused. The I2C peripheral sees an idle (high) bus meanwhile.
+ */
+static void tp_bus(bool on)
+{
+    const i2c_signal_conn_t *sig = &i2c_periph_signal[I2C_NUM_1];
+    const struct {
+        gpio_num_t pin;
+        int in, out;
+    } lines[] = {
+        { TP_SDA, sig->sda_in_sig, sig->sda_out_sig },
+        { TP_SCL, sig->scl_in_sig, sig->scl_out_sig },
+    };
+    for (int i = 0; i < 2; i++) {
+        if (on) {
+            gpio_set_level(lines[i].pin, 1);
+            gpio_set_direction(lines[i].pin, GPIO_MODE_INPUT_OUTPUT_OD);
+            gpio_pullup_en(lines[i].pin);
+            esp_rom_gpio_connect_out_signal(lines[i].pin, lines[i].out, false, false);
+            esp_rom_gpio_connect_in_signal(lines[i].pin, lines[i].in, false);
+        } else {
+            esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, lines[i].in, false);
+            gpio_pullup_dis(lines[i].pin);
+            gpio_set_level(lines[i].pin, 0);
+            gpio_set_direction(lines[i].pin, GPIO_MODE_OUTPUT);
+        }
+    }
+}
+
+static void lcd_power(bool on)
+{
+    if (!on) {
+        bool spi = false;
+        muse_lcd_bands_run(lcd_bus, &spi);
+        tp_bus(false);
+        exp_set(EXP_PWR_LCD, false);
+        ESP_LOGI(TAG, "LCD rail off");
+        return;
+    }
+    exp_set(EXP_PWR_LCD, true);
+    /* The SPD2010 runs firmware of its own, which takes a while to start: at
+     * boot ~150 ms pass between the rail and its setup, and after only 50 ms
+     * some of the setup was lost and the panel showed garbage. */
+    vTaskDelay(pdMS_TO_TICKS(LCD_POWER_UP_MS));
+    tp_bus(true);
+    muse_lcd_bands_run(panel_setup, NULL);
+    ESP_LOGI(TAG, "LCD rail on, panel set up");
+}
+
+/*
  * Screen off: LVGL stops and the chip light-sleeps in wait_buttons(). PCNT has
  * to stop too: it holds the APB clock up, and light sleep would stop it
  * anyway. Instead each wheel line wakes the chip, and interrupts, at the level
- * it isn't at now. The panel sleeps: left scanning with its backlight off, its
- * touch interrupt reached the expander about six times a second, and each one
- * woke the chip. Touch doesn't wake it while paused, so nothing is lost; the
- * touch driver restarts the controller on its first read after.
+ * it isn't at now. The panel sleeps, then loses its rail: left scanning with
+ * its backlight off, its touch interrupt reached the expander about six times
+ * a second, and each one woke the chip. Touch doesn't wake it while paused, so
+ * nothing is lost; the touch driver restarts the controller on its first read
+ * after. LVGL redraws the whole screen on resume, since the panel forgot it.
  */
 static void display_pause(bool pause)
 {
@@ -550,6 +663,7 @@ static void display_pause(bool pause)
         s_waiter = xTaskGetCurrentTaskHandle();   /* the input task, before a line can fire */
         esp_lv_adapter_pause(-1);
         panel_sleep(true);
+        lcd_power(false);
         pcnt_unit_stop(s_knob);
         pcnt_unit_disable(s_knob);
         s_wheel_moved = false;
@@ -568,9 +682,13 @@ static void display_pause(bool pause)
         pcnt_unit_enable(s_knob);
         pcnt_unit_clear_count(s_knob);
         pcnt_unit_start(s_knob);
-        panel_sleep(false);
+        lcd_power(true);
         xTaskNotifyGive(s_tp_task);
         esp_lv_adapter_resume();
+        if (esp_lv_adapter_lock(-1) == ESP_OK) {
+            lv_obj_invalidate(lv_screen_active());
+            esp_lv_adapter_unlock();
+        }
     }
 }
 
@@ -583,6 +701,19 @@ static void set_brightness(int pct)
 {
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, pct * 1023 / 100);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+}
+
+/*
+ * EXP_PWR_CODEC_PA is the speaker amp's enable. The amp runs straight from the
+ * battery, so left enabled while resting it idles all night. The codecs have
+ * a rail of their own, always on, and keep their setup.
+ */
+static void audio_power(bool on)
+{
+    exp_set(EXP_PWR_CODEC_PA, on);
+    if (on) {
+        vTaskDelay(pdMS_TO_TICKS(AMP_ON_MS));
+    }
 }
 
 /* ES8311 plays and a separate ES7243(E) ADC records, on one duplex I2S bus with MCLK. */
@@ -812,6 +943,7 @@ static const muse_board_t s_board = {
     .set_brightness = set_brightness,
     .display_pause = display_pause,
     .audio_init = audio_init,
+    .audio_power = audio_power,
     .mic_slot = 1,              /* one mic, on the right slot */
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,

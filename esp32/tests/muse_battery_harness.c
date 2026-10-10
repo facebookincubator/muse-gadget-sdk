@@ -27,6 +27,7 @@
  *   save <file>            writes the RTC memory, for a later run to boot with
  * and before any of those, a boot:
  *   load <file>            the RTC memory a run saved
+ *   flash <file>           the NVS, kept in the file as it's committed (none: no NVS)
  *   boot <reason>          esp_reset_reason(), ESP_RST_POWERON by default */
 #include <stdbool.h>
 #include <stdio.h>
@@ -66,6 +67,105 @@ esp_err_t esp_pm_dump_locks(FILE *stream)
     return ESP_OK;
 }
 
+/* One namespace, a few keys; a u16 is a two-byte blob. */
+typedef struct {
+    char key[16];
+    size_t len;
+    char value[SAVED_MAX];
+} nvs_key_t;
+static nvs_key_t s_nvs_keys[4];
+static char s_flash[512];
+
+static nvs_key_t *nvs_find(const char *key, bool add)
+{
+    nvs_key_t *unused = NULL;
+    for (size_t i = 0; i < sizeof(s_nvs_keys) / sizeof(s_nvs_keys[0]); i++) {
+        if (!strcmp(s_nvs_keys[i].key, key)) {
+            return &s_nvs_keys[i];
+        }
+        if (!unused && !s_nvs_keys[i].key[0]) {
+            unused = &s_nvs_keys[i];
+        }
+    }
+    if (!add || !unused) {
+        return NULL;
+    }
+    strlcpy(unused->key, key, sizeof(unused->key));
+    return unused;
+}
+
+esp_err_t nvs_open(const char *name, nvs_open_mode_t mode, nvs_handle_t *handle)
+{
+    (void)name;
+    (void)mode;
+    *handle = 1;
+    return s_flash[0] ? ESP_OK : ESP_ERR_NVS_NOT_INITIALIZED;
+}
+
+esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *value, size_t *length)
+{
+    (void)handle;
+    nvs_key_t *k = nvs_find(key, false);
+    if (!k) {
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+    if (value && *length < k->len) {
+        return ESP_ERR_NVS_INVALID_LENGTH;
+    }
+    if (value) {
+        memcpy(value, k->value, k->len);
+    }
+    *length = k->len;
+    return ESP_OK;
+}
+
+esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value, size_t length)
+{
+    (void)handle;
+    nvs_key_t *k = nvs_find(key, true);
+    if (!k || length > sizeof(k->value)) {
+        return ESP_ERR_NVS_INVALID_LENGTH;
+    }
+    memcpy(k->value, value, length);
+    k->len = length;
+    return ESP_OK;
+}
+
+esp_err_t nvs_get_u16(nvs_handle_t handle, const char *key, uint16_t *value)
+{
+    size_t length = sizeof(*value);
+    return nvs_get_blob(handle, key, value, &length);
+}
+
+esp_err_t nvs_set_u16(nvs_handle_t handle, const char *key, uint16_t value)
+{
+    return nvs_set_blob(handle, key, &value, sizeof(value));
+}
+
+esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key)
+{
+    (void)handle;
+    nvs_key_t *k = nvs_find(key, false);
+    if (!k) {
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+    memset(k, 0, sizeof(*k));
+    return ESP_OK;
+}
+
+/* Only what's committed is there for the next run. */
+esp_err_t nvs_commit(nvs_handle_t handle)
+{
+    (void)handle;
+    FILE *f = fopen(s_flash, "wb");
+    if (!f || fwrite(s_nvs_keys, sizeof(s_nvs_keys), 1, f) != 1) {
+        fprintf(stderr, "can't write %s\n", s_flash);
+        exit(2);
+    }
+    fclose(f);
+    return ESP_OK;
+}
+
 int main(void)
 {
     char line[512];
@@ -79,6 +179,18 @@ int main(void)
                 return 2;
             }
             fclose(f);
+            continue;
+        }
+        if (!booted && !strncmp(line, "flash ", 6)) {
+            strlcpy(s_flash, line + 6, sizeof(s_flash));
+            FILE *f = fopen(s_flash, "rb");   /* none yet: blank */
+            if (f && fread(s_nvs_keys, sizeof(s_nvs_keys), 1, f) != 1) {
+                fprintf(stderr, "can't read %s\n", s_flash);
+                return 2;
+            }
+            if (f) {
+                fclose(f);
+            }
             continue;
         }
         if (!booted && !strncmp(line, "boot ", 5)) {

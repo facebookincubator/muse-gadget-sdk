@@ -53,7 +53,11 @@ static esp_err_t open_codecs(void)
         .bits_per_sample = 16,
     };
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_spk, &fs) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "open speaker");
-    ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_mic, &fs) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "open mic");
+    if (esp_codec_dev_open(s_mic, &fs) != ESP_CODEC_DEV_OK) {
+        esp_codec_dev_close(s_spk);   /* none open on failure */
+        ESP_LOGE(TAG, "open mic");
+        return ESP_FAIL;
+    }
     s_open = true;
     return ESP_OK;
 }
@@ -84,12 +88,20 @@ void muse_audio_power(bool on)
      * harmless error. */
     esp_log_level_t lvl = esp_log_level_get("i2s_common");
     esp_log_level_set("i2s_common", ESP_LOG_NONE);
+    /* The amp goes on once the codecs are open and set, and off before they
+     * close, so it never passes on their power-up or power-down. */
     if (on) {
         if (open_codecs() == ESP_OK) {
             muse_audio_set_volume(muse_settings_volume());
             muse_audio_set_mic_gain(muse_settings_mic_gain());
+            if (muse_board->audio_power) {
+                muse_board->audio_power(true);
+            }
         }
     } else {
+        if (muse_board->audio_power) {
+            muse_board->audio_power(false);
+        }
         esp_codec_dev_close(s_spk);
         esp_codec_dev_close(s_mic);
         s_open = false;
