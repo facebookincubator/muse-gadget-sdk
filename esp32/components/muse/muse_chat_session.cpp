@@ -67,6 +67,8 @@ extern "C" {
 #include "cJSON.h"
 #include "minimp3.h"
 #include "muse_account_api.h"
+#include "muse_ha_tts.h"
+#include "muse_ha_tts_text.h"
 #include "muse_link.h"
 #include "muse_settings.h"
 #include "muse_wifi.h"
@@ -102,6 +104,7 @@ static const char *TAG = "muse_chat_session";
 #define SPEECH_CHARS_PER_S 14              /* until the speech's length is known */
 #define TEXT_CHARS_PER_S 16                /* speaker off: reading pace, a little over speech */
 #define TEXT_HOLD_S 2                      /* speaker off: how long a message's last lines stay up */
+#define SPEECH_MAX (8 * 1024)              /* HA TTS: a message's text, about SPEAKING_CAP_US of speech */
 
 #define PING_US (20 * 1000000LL)
 #define DEAD_US (60 * 1000000LL)           /* nothing from the server, pongs included */
@@ -111,6 +114,8 @@ static const char *TAG = "muse_chat_session";
 #define FINAL_TIMEOUT_US (15 * 1000000LL)  /* release -> final transcript */
 #define REPLY_TIMEOUT_US (60 * 1000000LL)  /* chat posted -> first assistant message */
 #define TURN_CAP_US (180 * 1000000LL)
+#define SPEAKING_CAP_US (10 * 60 * 1000000LL)   /* HA TTS: a turn that has started speaking */
+#define HA_STALL_US (15 * 1000000LL)       /* HA TTS: no MP3 for this long gives up on the fetch */
 #define SETTLE_US (3 * 1000000LL)          /* quiet period that ends a turn */
 #define BUSY_HOLD_US (20 * 1000000LL)      /* how long a busy agent keeps it open */
 #define TEXT_REPLY_TIMEOUT_US (5 * 60 * 1000000LL)   /* typed turns: agents can work a while */
@@ -244,6 +249,14 @@ struct turn_t {
     resampler_t down;
     int kbps;
     int down_rate;
+#if CONFIG_HA_TTS
+    muse_ha_tts_speech_t speech[MAX_MSGS];   /* each message's whole text, for HA to speak */
+    bool spoke;              /* HA's audio has started arriving: SPEAKING_CAP_US applies */
+    bool ha_spoke_before;    /* preserve earlier speech if this message decodes to no PCM */
+    bool ha_waiting;         /* this message waits on HA's first audio: SPEAKING_CAP_US, for now */
+    int64_t ha_progress_us;  /* when the fetch last made progress, for HA_STALL_US */
+    bool ha_rest;            /* the fetch was cut off: show the rest at reading pace */
+#endif
 };
 
 /* 10 KB, most of it the MP3 decoder: in PSRAM on boards that let static data go
@@ -292,6 +305,20 @@ static void *psram_alloc(size_t n)
 {
     return heap_caps_malloc_prefer(n, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_DEFAULT);
 }
+
+#if CONFIG_HA_TTS
+static void *psram_realloc(void *p, size_t n)
+{
+    return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static void free_speech(void)
+{
+    for (auto &sp : s_turn.speech) {
+        muse_ha_tts_speech_free(&sp, heap_caps_free);
+    }
+}
+#endif
 
 static void *json_alloc(size_t n)
 {
@@ -954,6 +981,10 @@ static void turn_reset_streams(void)
 static void turn_finish(void)
 {
     turn_reset_streams();
+#if CONFIG_HA_TTS
+    muse_ha_tts_cancel();
+    free_speech();
+#endif
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
     s_turn.tts_msg = -1;
@@ -994,6 +1025,9 @@ static bool turn_start(uint32_t gen, bool text)
     }
     uint8_t *chunk = s_turn.chunk, *mp3 = s_turn.mp3, *note = s_turn.note;
     char *texts = s_turn.texts;
+#if CONFIG_HA_TTS
+    free_speech();
+#endif
     s_turn = turn_t{};
     s_turn.chunk = chunk;
     s_turn.mp3 = mp3;
@@ -1335,6 +1369,11 @@ static void append_text(msg_t &m, const char *text)
         strlcat(full, text, TEXT_MAX);
     }
     m.len += add;
+#if CONFIG_HA_TTS
+    if (!s_turn.text) {
+        muse_ha_tts_speech_append(&s_turn.speech[&m - s_turn.msgs], text, SPEECH_MAX, psram_realloc);
+    }
+#endif
     size_t have = strlen(m.tail);
     if (add >= sizeof(m.tail) - 1) {
         strlcpy(m.tail, text + add - (sizeof(m.tail) - 1), sizeof(m.tail));
@@ -1526,6 +1565,41 @@ static void start_tts(void)
          * end. decode() plays it at the speaker's volume, captions following,
          * and finishes the message once it's drained.
          */
+#if CONFIG_HA_TTS
+        const muse_ha_tts_speech_t &sp = s_turn.speech[i];
+        if (!muse_settings_speaker_on()) {
+            /* Speaker off: shown, not spoken, so there's nothing to fetch. */
+        } else if (sp.buf && muse_ha_tts_state() == MUSE_HA_TTS_RUNNING) {
+            /* An abandoned fetch is still unwinding: rather than wait on it, show
+             * this one at reading pace, as without TTS. */
+            ESP_LOGW(TAG, "HA TTS is busy; showing message %s unspoken", m.id);
+        } else if (sp.buf) {
+            if (sp.cut) {
+                ESP_LOGW(TAG, "message %s is %u chars; speaking the first %u", m.id, (unsigned)m.len,
+                         (unsigned)sp.len);
+            }
+            if (muse_ha_tts_fetch(sp.buf)) {
+                m.pcm_start = s_turn.pcm_out;
+                m.pcm_frames = 0;
+                m.tts = TTS_ACTIVE;
+                s_turn.tts_msg = i;
+                s_turn.silent = false;
+                s_turn.mp3_len = 0;
+                s_turn.mp3_ended = false;
+                s_turn.kbps = 0;
+                s_turn.down_rate = 0;
+                mp3dec_init(&s_turn.dec);
+                s_turn.ha_progress_us = now_us();
+                s_turn.ha_rest = false;
+                s_turn.ha_spoke_before = s_turn.spoke;
+                s_turn.ha_waiting = true;
+                mark(M_TTS);
+                ESP_LOGI(TAG, "speaking message %s (%u chars) with HA", m.id, (unsigned)m.len);
+                show_reply_start(m);
+                return;
+            }
+        }
+#endif
         m.pcm_start = s_turn.pcm_out;
         m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
@@ -1563,6 +1637,60 @@ static void tts_end(stream_t *s, bool ok)
     }
 }
 
+#if CONFIG_HA_TTS
+/* Moves MP3 from HA's fetch into the decode buffer; ends the stream with it. */
+static void ha_tts_pump(void)
+{
+    if (s_turn.mp3_ended) {
+        return;
+    }
+    /* Read the state first: once the fetch is over, what's left is all of it. */
+    muse_ha_tts_state_t state = muse_ha_tts_state();
+    static uint8_t buf[2048];
+    bool drained = false;
+    size_t room;
+    while ((room = MP3_BUF - s_turn.mp3_len) > 0) {
+        size_t n = muse_ha_tts_read(buf, room < sizeof(buf) ? room : sizeof(buf));
+        if (!n) {
+            drained = true;
+            break;
+        }
+        tts_data(buf, n);
+        s_turn.spoke = true;
+        s_turn.ha_waiting = false;
+        s_turn.ha_progress_us = now_us();
+    }
+    if (!drained) {
+        s_turn.ha_progress_us = now_us();   /* MP3 is waiting on the decoder, not on HA */
+    }
+    bool stalled = false;
+    if (state == MUSE_HA_TTS_RUNNING) {
+        if (now_us() - s_turn.ha_progress_us < HA_STALL_US) {
+            return;   /* more to come */
+        }
+        /* HA has gone quiet (or is trickling): give up on it rather than hold
+         * the reply. The cancel wakes the fetch, which unwinds on its own. */
+        ESP_LOGW(TAG, "HA TTS stalled; giving up on it");
+        muse_ha_tts_cancel();
+        stalled = true;
+    }
+    if (!drained) {
+        return;   /* the decode buffer filled before HA's emptied */
+    }
+    msg_t &m = s_turn.msgs[s_turn.tts_msg];
+    s_turn.ha_waiting = false;   /* the fetch is over, one way or another */
+    if ((stalled || state == MUSE_HA_TTS_FAILED) && !muse_ha_tts_bytes()) {
+        /* Nothing came: show it at reading pace, as without TTS. */
+        m.pcm_start = s_turn.pcm_out;
+        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        s_turn.silent = true;
+        return;
+    }
+    s_turn.ha_rest = stalled || state == MUSE_HA_TTS_FAILED;   /* cut off partway */
+    s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
+}
+#endif
+
 /* Speaker off: queues the shown message's silence while the reply buffer has room. */
 static void pace_silently(void)
 {
@@ -1591,6 +1719,12 @@ static void decode(void)
         pace_silently();
         return;
     }
+#if CONFIG_HA_TTS
+    ha_tts_pump();
+    if (s_turn.silent) {
+        return;
+    }
+#endif
     /*
      * minimp3 only takes a frame once it can see the next one's header. Given
      * less, it resets and says to skip all of it, which drops speech and clicks.
@@ -1642,6 +1776,32 @@ static void decode(void)
     }
     if (s_turn.mp3_ended && !s_turn.mp3_len) {
         m.pcm_frames = s_turn.pcm_out - m.pcm_start;
+#if CONFIG_HA_TTS
+        if (!m.pcm_frames) {
+            /* HTTP success and sync bits do not guarantee playable MP3 (AAC
+             * ADTS shares the sync bits). Nothing decoded: pace the whole text. */
+            ESP_LOGW(TAG, "HA's audio for message %s decoded to no PCM; showing it unspoken", m.id);
+            s_turn.ha_waiting = false;
+            s_turn.ha_rest = false;
+            s_turn.spoke = s_turn.ha_spoke_before;
+            m.pcm_start = s_turn.pcm_out;
+            m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+            s_turn.silent = true;
+            return;
+        }
+        if (s_turn.ha_rest) {
+            /* HA's audio stopped partway (Wi-Fi dropped, say): show the rest at
+             * reading pace, from about where its length says the speech got to. */
+            s_turn.ha_rest = false;
+            uint32_t said = (uint32_t)((uint64_t)m.pcm_frames * SPEECH_CHARS_PER_S / MIC_RATE);
+            if (said < m.len) {
+                ESP_LOGW(TAG, "HA's audio for message %s stopped partway; showing the rest", m.id);
+                m.pcm_frames += (uint32_t)((m.len - said) * MIC_RATE / TEXT_CHARS_PER_S);
+                s_turn.silent = true;
+                return;
+            }
+        }
+#endif
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
     }
@@ -1659,7 +1819,20 @@ static void check_turn(void)
         return;
     }
     bool text = s_turn.text;
-    if (t - s_turn.start_us > (text ? TEXT_TURN_CAP_US : TURN_CAP_US)) {
+    int64_t cap = text ? TEXT_TURN_CAP_US : TURN_CAP_US;
+#if CONFIG_HA_TTS
+    /* A long reply takes minutes to speak: once it's speaking, let the turn
+     * finish (a press still stops it) rather than cut it off mid-sentence.
+     * While this message waits on HA's first audio the cap stretches too, so a
+     * reply that comes late isn't cut off just before it's spoken; HA_STALL_US
+     * bounds that wait. If the fetch fails instead, the cap goes back to
+     * TURN_CAP_US, and a turn already past it ends then: it's a hard cap, so
+     * text shown in place of speech doesn't get time of its own. */
+    if (s_turn.spoke || s_turn.ha_waiting) {
+        cap = SPEAKING_CAP_US;
+    }
+#endif
+    if (t - s_turn.start_us > cap) {
         ESP_LOGW(TAG, "turn hit the time cap");
         /* A voice turn that waited out the cap on a busy agent got no reply at all. */
         if (!text && !s_turn.nmsgs) {
@@ -1839,10 +2012,15 @@ static bool poll_socket(void)
 {
     static HeaderView hdrs[16];
     for (int budget = 0; budget < 8; budget++) {
-        /* Hold off while the MP3 buffer is nearly full: TCP pushes back on the VM. */
+        /* Hold off while the MP3 buffer is nearly full: TCP pushes back on the VM.
+         * Not with HA TTS: the MP3 comes from HA, not this socket, and a long
+         * reply keeps the buffer full while it plays, so holding off would
+         * leave the server's pongs unread until DEAD_US calls it gone. */
+#if !CONFIG_HA_TTS
         if (s_turn.tts_msg >= 0 && MP3_BUF - s_turn.mp3_len < MP3_POLL_ROOM) {
             return true;
         }
+#endif
         ssize_t n = ws_recv(s_conn.tls, s_conn.rx, SCRATCH, false);
         if (n == -2) {
             return true;
@@ -2062,6 +2240,7 @@ extern "C" void muse_hatch_start(void)
         s.cap = NDJSON_LINE_MAX;
     }
     s_turn.tts_msg = -1;
+    muse_ha_tts_start();
     /* Stack in PSRAM: TLS, Noise and the MP3 decoder (~16 KB of scratch) all run here. */
     if (!s_cmds || !s_events || !s_in || !s_out || !s_turn.chunk || !s_turn.mp3 || (VOICE_NOTE && !s_turn.note) || !s_pcm || !s_pcm16 ||
         xTaskCreatePinnedToCoreWithCaps(hatch_task, "muse_chat", 48 * 1024, nullptr, 5, nullptr, 0,
