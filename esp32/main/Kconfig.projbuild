@@ -234,6 +234,10 @@ menu "ESP32 Device SDK"
             bool "Muse display"
             depends on MUSE_ENABLED
 
+        config HOMEHUB_LED_BACKEND_C3_SSD1306
+            bool "ESP32-C3 0.42 inch SSD1306 OLED (72x40 text status)"
+            depends on IDF_TARGET_ESP32C3
+
         config HOMEHUB_LED_BACKEND_NONE
             bool "No status LED"
     endchoice

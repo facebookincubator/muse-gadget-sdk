@@ -463,6 +463,7 @@ board's overlays, in order:
 | ESP32-C6 devkit without PSRAM | `esp32c6` | [`devices/sdkconfig.c6-nopsram`](sdkconfig.c6-nopsram) | `tools/board.sh c6-nopsram build` |
 | ESP32-S3-DevKitC-1 | `esp32s3` | [`devices/sdkconfig.espressif-s3-devkitc-1`](sdkconfig.espressif-s3-devkitc-1) | `tools/board.sh espressif-s3-devkitc-1 build` |
 | ideaspark ESP32 | `esp32` | [`devices/sdkconfig.ideaspark`](sdkconfig.ideaspark) | `tools/board.sh ideaspark build` |
+| ESP32-C3 + 0.42" SSD1306 OLED | `esp32c3` | [`devices/sdkconfig.muse-c3-oled042`](sdkconfig.muse-c3-oled042) | `tools/board.sh c3oled build` |
 | Waveshare C6 LCD 1.47 | `esp32c6` | [`devices/sdkconfig.waveshare-c6-lcd-147`](sdkconfig.waveshare-c6-lcd-147) | `tools/board.sh waveshare-c6-lcd-147 build` |
 | Seeed SenseCAP Indicator | `esp32s3` | [`devices/sdkconfig.sensecap-indicator`](sdkconfig.sensecap-indicator) | `tools/board.sh sensecap-indicator build` |
 | Waveshare S3 ePaper 1.54 | `esp32s3` | [`devices/sdkconfig.waveshare-s3-epaper-154`](sdkconfig.waveshare-s3-epaper-154) | `tools/board.sh waveshare-s3-epaper-154 build` |
