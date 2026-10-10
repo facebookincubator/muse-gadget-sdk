@@ -29,6 +29,7 @@ extern "C" {
  * ASCII stand-ins for what they lack: curly quotes become straight ones, an em
  * dash "--", accented letters their plain ones. Emoji go; anything else stays,
  * and with CONFIG_MUSE_CJK_FONT the captions draw CJK from a fallback font.
+ * With CONFIG_MUSE_LATIN_FONT, captions keep their accented letters too.
  */
 
 /* The stand-in for the UTF-8 character at s into out, and its length (0 drops
@@ -52,6 +53,16 @@ bool muse_text_has_cjk(const char *s);
 /* Puts the stand-ins into s, which has room for cap bytes. If one doesn't fit,
  * the text ends there. */
 void muse_text_to_ascii(char *s, size_t cap);
+
+/* The caption has a font for accented letters (CONFIG_MUSE_LATIN_FONT): from
+ * now on muse_text_to_caption() keeps them and muse_text_has_latin() sees them. */
+void muse_text_keep_latin(void);
+
+/* muse_text_to_ascii() for a caption, which may keep accented letters. */
+void muse_text_to_caption(char *s, size_t cap);
+
+/* Whether s has accented letters a caption keeps. */
+bool muse_text_has_latin(const char *s);
 
 /* text, or if it needs stand-ins and fits in cap bytes, a copy with them in buf. */
 const char *muse_text_showable(const char *text, char *buf, size_t cap);

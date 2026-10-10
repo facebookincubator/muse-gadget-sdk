@@ -248,7 +248,7 @@ static void mark(mark_t) {}
 static int64_t now_us(void) { return 4242; }
 static const char *failed = "-";
 static void turn_fail(const char *why) { failed = why; s_turn.phase = P_IDLE; }
-extern "C" void muse_state_page(bool, int *cols, int *lines) { *cols = 16; *lines = 2; }
+extern "C" void muse_state_page(const char *, int *cols, int *lines) { *cols = 16; *lines = 2; }
 '''
 
 HATCH_MAIN = r'''

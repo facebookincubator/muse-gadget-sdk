@@ -38,6 +38,10 @@ CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+# Vietnamese captions keep their tones (fonts/muse_font_latin_16.c).
+CONFIG_MUSE_LATIN_FONT=y
+# The screen's own text in Vietnamese too (components/muse/muse_lang.c).
+CONFIG_MUSE_UI_LANG_VI=y
 CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Static buffers in PSRAM: Wi-Fi's, lwIP's and BT's, and those marked

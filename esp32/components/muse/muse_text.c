@@ -138,6 +138,8 @@ static const char VIETNAMESE[] =
     "AaAaAaAaAaAaAaAaAaAaAaAaEeEeEeEeEeEeEeEeIiIiOoOoOoOoOoOoOoOoOoOoOoOo"
     "UuUuUuUuUuUuUuYyYyYyYy";
 
+static bool s_keep_latin;   /* muse_text_keep_latin() */
+
 /* The code point at s, and its length in *len; -1 if it's broken. */
 static int32_t decode(const unsigned char *s, size_t *len)
 {
@@ -243,13 +245,37 @@ bool muse_text_has_cjk(const char *s)
     return false;
 }
 
-void muse_text_to_ascii(char *s, size_t cap)
+/* The letters the caption's accented font has (fonts/muse_font_latin_16.c). */
+static bool latin_letter(int32_t cp)
+{
+    return (cp >= 0xC0 && cp <= 0x17F) || (cp >= 0x1A0 && cp <= 0x1B0) || (cp >= 0x1EA0 && cp <= 0x1EF9);
+}
+
+void muse_text_keep_latin(void)
+{
+    s_keep_latin = true;
+}
+
+bool muse_text_has_latin(const char *s)
+{
+    while (s_keep_latin && *s) {
+        size_t len;
+        if (latin_letter(decode((const unsigned char *)s, &len))) {
+            return true;
+        }
+        s += len;
+    }
+    return false;
+}
+
+static void fold(char *s, size_t cap, bool keep_latin)
 {
     size_t n = strlen(s);
     for (char *p = s; *p;) {
         size_t len;
         char a[4];
-        int alen = muse_text_ascii(p, &len, a);
+        int alen = keep_latin && latin_letter(decode((const unsigned char *)p, &len)) ? -1
+                                                                                     : muse_text_ascii(p, &len, a);
         if (alen < 0) {
             p += len;
             continue;
@@ -263,6 +289,16 @@ void muse_text_to_ascii(char *s, size_t cap)
         n = n - len + alen;
         p += alen;
     }
+}
+
+void muse_text_to_ascii(char *s, size_t cap)
+{
+    fold(s, cap, false);
+}
+
+void muse_text_to_caption(char *s, size_t cap)
+{
+    fold(s, cap, s_keep_latin);
 }
 
 const char *muse_text_showable(const char *text, char *buf, size_t cap)

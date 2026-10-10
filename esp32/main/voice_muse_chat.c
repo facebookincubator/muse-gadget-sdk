@@ -92,8 +92,8 @@ bool muse_settings_speaker_on(void) {
 }
 
 // No screen either, so reply text is never shown; Muse's default page.
-void muse_state_page(bool cjk, int *cols, int *lines) {
-    (void)cjk;
+void muse_state_page(const char *text, int *cols, int *lines) {
+    (void)text;
     *cols = 16;
     *lines = 2;
 }

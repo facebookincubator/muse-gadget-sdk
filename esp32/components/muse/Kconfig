@@ -165,6 +165,37 @@ menu "Muse"
             Without it those characters show as boxes. Hangul isn't
             included.
 
+    config MUSE_LATIN_FONT
+        bool "Show Vietnamese and other accented letters in captions"
+        depends on MUSE_ENABLED
+        default n
+        help
+            Without it, captions show accented Latin letters as their plain
+            ones. With it, a caption with any in it (Latin-1, Latin
+            Extended-A, the horned O and U, and Vietnamese's U+1EA0-1EF9)
+            shows in GNU Unifont's 8x16 bitmaps, the whole caption in that
+            one font. Small screens show such a caption one 16 px line at a
+            time. Takes about 10 KB of flash and no RAM.
+
+    choice MUSE_UI_LANGUAGE
+        prompt "Language of the screen's own text"
+        depends on MUSE_ENABLED
+        default MUSE_UI_LANG_EN
+        help
+            The state label ("READY") and the captions the firmware shows
+            itself ("CAN'T REACH MUSE"). Muse's replies are in whatever
+            language you speak to it, and the serial console stays in
+            English for the tools that read it. Menus and settings aren't
+            translated yet.
+
+        config MUSE_UI_LANG_EN
+            bool "English"
+
+        config MUSE_UI_LANG_VI
+            bool "Vietnamese"
+            select MUSE_LATIN_FONT
+    endchoice
+
     config MUSE_JC3248W535_MIC_GPIO
         int "JC3248W535: GPIO for an external I2S mic's data (SD) line"
         depends on MUSE_BOARD_GUITION_JC3248W535

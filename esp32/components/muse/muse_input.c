@@ -125,7 +125,7 @@ static void toggle_phone_setup(void)
     if (on && b.name[0]) {
         muse_state_set_caption("PHONE SETUP: %s", b.name);
     } else {
-        muse_state_set_caption("PHONE SETUP %s", on ? "ON" : "OFF");
+        muse_state_set_caption(on ? "PHONE SETUP ON" : "PHONE SETUP OFF");
     }
 }
 

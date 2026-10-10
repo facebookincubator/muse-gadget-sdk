@@ -30,6 +30,7 @@
 #include "muse_board.h"
 #include "muse_chat.h"
 #include "muse_input.h"
+#include "muse_lang.h"
 #include "muse_link.h"
 #include "muse_settings.h"
 #include "muse_state.h"
@@ -149,19 +150,27 @@ static lv_obj_t *s_page;        /* status and power-off confirmation text */
 static lv_obj_t *s_hint_down;
 static lv_obj_t *s_hint_select;
 static const char *s_down_text;
+static const lv_font_t *s_fine;   /* the title's and pages' unscii */
 
 static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, const char *text)
 {
+    text = muse_lang_menu(text);
     lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_font(l, font == s_fine ? muse_lang_label_font(text, font) : font, 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
     lv_label_set_text(l, text);
     return l;
 }
 
+/* In the screen's language; the title and pages take the caption font for
+ * accented letters, which their unscii lacks. */
 static void set_text(lv_obj_t *l, const char *text)
 {
+    text = muse_lang_menu(text);
     if (strcmp(lv_label_get_text(l), text) != 0) {
+        if (l == s_title || l == s_page) {
+            lv_obj_set_style_text_font(l, muse_lang_label_font(text, s_fine), 0);
+        }
         lv_label_set_text(l, text);
     }
 }
@@ -169,7 +178,7 @@ static void set_text(lv_obj_t *l, const char *text)
 static void select_hint(const char *action)
 {
     char text[40];
-    snprintf(text, sizeof(text), "%s%s", muse_board->keyboard ? "Enter " : "", action);
+    snprintf(text, sizeof(text), "%s%s", muse_board->keyboard ? "Enter " : "", muse_lang_menu(action));
     set_text(s_hint_select, text);
 }
 
@@ -250,13 +259,14 @@ static void status_text(char *buf, size_t n)
     if (p.battery_pct >= 0) {
         snprintf(batt, sizeof(batt), "%d%%%s", p.battery_pct, p.charging ? " +" : "");
     }
-    const char *phone = b.state == MUSE_BLE_OFF ? "Off" : (b.state == MUSE_BLE_CONNECTED ? "Connected" : b.name);
-    snprintf(buf, n, "Wi-Fi %s\nIP    %s\nLink  %s\nMuse  %s\nPhone %s\nPower %s\nVer   %s",
-             w.state == MUSE_WIFI_CONNECTED ? w.ssid : (w.state == MUSE_WIFI_OFF ? "off" : "offline"),
-             w.state == MUSE_WIFI_CONNECTED ? w.ip : "-", muse_link_state_name(muse_link_state()),
-             muse_hatch_state_name(h.state), phone, batt,
+    const char *phone = b.state == MUSE_BLE_OFF ? muse_lang_menu("Off")
+                      : (b.state == MUSE_BLE_CONNECTED ? muse_lang_menu("Connected") : b.name);
+    snprintf(buf, n, muse_lang_menu("Wi-Fi %s\nIP    %s\nLink  %s\nMuse  %s\nPhone %s\nPower %s\nVer   %s"),
+             w.state == MUSE_WIFI_CONNECTED ? w.ssid : muse_lang_menu(w.state == MUSE_WIFI_OFF ? "off" : "offline"),
+             w.state == MUSE_WIFI_CONNECTED ? w.ip : "-", muse_lang_menu(muse_link_state_name(muse_link_state())),
+             muse_lang_menu(muse_hatch_state_name(h.state)), phone, batt,
              esp_app_get_description()->version);
-    muse_text_to_ascii(buf, n);   /* network and phone names can have curly quotes */
+    muse_text_to_caption(buf, n);   /* network and phone names can have curly quotes */
 }
 
 static void pm_text(char out[24], int pm)
@@ -295,8 +305,9 @@ static void battery_text(char *buf, size_t n)
     pm_text(off, b.screen_off_pm);
     pm_text(slept, b.slept_pm);
     pm_text(busy, b.busy_pm);
-    snprintf(buf, n, "%s %s\nBatt  %d>%d%%\nRate  %s\nFull  %s\nOff   %s\nSleep %s\nWakes %s\nBusy  %s",
-             b.running ? "On batt" : "Last run", t, b.pct_start, b.pct_now, rate, full, off, slept, wakes, busy);
+    snprintf(buf, n, muse_lang_menu("%s %s\nBatt  %d>%d%%\nRate  %s\nFull  %s\nOff   %s\nSleep %s\nWakes %s\nBusy  %s"),
+             muse_lang_menu(b.running ? "On batt" : "Last run"), t, b.pct_start, b.pct_now, rate, full, off, slept,
+             wakes, busy);
 }
 
 static void refresh(void)
@@ -353,7 +364,7 @@ static void show(view_t view)
         break;
     case VIEW_POWER: {
         char text[96];
-        snprintf(text, sizeof(text), "Turn Muse off?\n\nPress the %s button to turn it back on.",
+        snprintf(text, sizeof(text), muse_lang_menu("Turn Muse off?\n\nPress the %s button to turn it back on."),
                  muse_board->keyboard ? "GO" : muse_board->aux_button);
         set_text(s_title, "POWER OFF");
         set_text(s_page, text);
@@ -512,8 +523,9 @@ static void align_on_bar(lv_obj_t *l, lv_align_t icon, int pad)
 void muse_menu_build(lv_obj_t *parent, int w, int h)
 {
     bool small = h < 200 || w < 200;
-    const lv_font_t *font = small ? FONT_COMPACT : &lv_font_montserrat_20;
+    const lv_font_t *font = muse_lang_montserrat(small ? FONT_COMPACT : &lv_font_montserrat_20);
     const lv_font_t *fine = small ? &lv_font_unscii_8 : &lv_font_unscii_16;
+    s_fine = fine;
     int pad = small ? 2 : 8;
     int title_h = small ? 13 : 40;
     int hint_h = small ? 17 : 44;
