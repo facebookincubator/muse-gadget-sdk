@@ -110,5 +110,5 @@ typedef struct {
     uint32_t sleep_count;
 } muse_ptest_readback_t;
 
-/* Never returns to app_run/muse_glue. Compiled only in opt-in Watcher builds. */
-void muse_watcher_power_test_run(void);
+/* Never returns to app_run/muse_glue. Compiled only in opt-in power-test builds. */
+void muse_power_test_run(void);

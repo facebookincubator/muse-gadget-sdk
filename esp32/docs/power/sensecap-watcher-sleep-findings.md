@@ -67,7 +67,7 @@ fully usable.
 ### A/B/A comparisons
 
 Each variant is compared against the count-weighted mean of the nearest
-reference before and after it (`watcher_power.py compare`). "Drift" is
+reference before and after it (`power_sweep.py compare`). "Drift" is
 |A_after − A_before|; a delta within the drift is unresolved. Above-drift is a
 diagnostic, not a significance test, and there is one repeat.
 

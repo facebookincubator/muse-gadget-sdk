@@ -9,15 +9,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Arm a USB-free Watcher sweep without interrupting the existing PPK2 owner.
+"""Arm a USB-free board power sweep without interrupting the existing PPK2 owner.
 
 Start tools/power/ppk2_profile.py hold first. This tool only controls that
 owner through a private host FIFO; it NEVER opens the PPK2 serial port.
 arm -> unplug USB -> wait the conservative bound -> reconnect USB -> collect
 -> analyze. A failed arm/collect leaves the PPK2 owner powered and alive.
-The separate dryrun command uses Watcher USB only, never the PPK2 owner;
+The separate dryrun command uses board USB only, never the PPK2 owner;
 it is a functional diagnostic, not a PM/timing/current measurement.
-See docs/power/sensecap-watcher.md for electrical prerequisites and limitations.
+See docs/power/README.md for porting and electrical prerequisites; the
+Watcher-specific conformance guide is docs/power/sensecap-watcher.md.
 """
 
 import argparse
@@ -32,11 +33,16 @@ import time
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent))
 sys.path.insert(0, str(HERE))
+# Reuse the board-neutral USB transport and its sibling ports module; keep
+# the power CLI beside the PPK owner/receiver, without moving application tools.
+sys.path.insert(0, str(HERE.parent / "muse"))
 from tools.power.ppk2_control import send_command  # noqa: E402
 from tools.power.ppk2_receiver import MAX_BATCH_BYTES  # noqa: E402
 
 MAX_JSON_BYTES = 128 * 1024
 MATRIX_VERSIONS = {"peripheral": 1, "sleep": 2}
+SWEEP_LABEL = "power-sweep"
+SWEEP_LABELS = (SWEEP_LABEL, "watcher-sweep")  # Legacy captures remain analyzable.
 
 
 def matrix_echo(frame, expected):
@@ -242,12 +248,12 @@ def request(board, command, kind, timeout_s=5.0, *, observe=None):
         if type(frame.get("schema")) is not int or frame["schema"] != 1:
             raise ValueError("unsupported PTEST schema")
         if frame.get("type") == "error":
-            raise RuntimeError(f"Watcher rejected command: {frame}")
+            raise RuntimeError(f"board rejected command: {frame}")
         if frame.get("type") == kind:
             if request_id is not None and frame.get("request_id") != request_id:
                 continue  # stale/late response is not this request's clock evidence
             return frame
-    raise TimeoutError("Watcher did not acknowledge; command outcome UNKNOWN. Query ptest.status; do not re-arm blindly")
+    raise TimeoutError("board did not acknowledge; command outcome UNKNOWN. Query ptest.status; do not re-arm blindly")
 
 
 def clock_observation(status, start, end, *, require_timeline=False):
@@ -272,10 +278,10 @@ def synchronize(board, count=3):
         status = request(board, "ptest.status", "status")
         end = time.monotonic()
         if status.get("usb") is not True:
-            raise ValueError("Watcher must report actual USB power before arming")
+            raise ValueError("board must report actual USB power before arming")
         observations.append(clock_observation(status, start, end))
     if len({x["boot_id"] for x in observations}) != 1:
-        raise ValueError("Watcher rebooted during synchronization")
+        raise ValueError("board rebooted during synchronization")
     best = min(observations, key=lambda x: x["uncertainty_s"])
     return {"best": best, "observations": observations,
             "clock": "same-host monotonic seconds mapped to firmware virtual microseconds by UART RTT plus firmware timeline uncertainty"}
@@ -320,7 +326,7 @@ def _arm(args, chat, stream):
     with chat.Board(args.port) as board:
         sync = synchronize(board)
         # No OFF, mode change, serial close, or reconnect occurs here.
-        recording = send_command(args.ppk_control_dir, {"op": "begin", "label": "watcher-sweep"})
+        recording = send_command(args.ppk_control_dir, {"op": "begin", "label": SWEEP_LABEL})
         config = {"run_id": args.run_id or secrets.token_hex(8),
                   "settle_ms": args.settle_ms, "capture_ms": args.capture_ms,
                   "repeats": args.repeats}
@@ -350,7 +356,7 @@ def _arm(args, chat, stream):
     persist_metadata(stream, metadata)
     print(json.dumps({"ready_to_unplug": True, "run_id": ack["run_id"], "matrix": matrix,
                       "ppk_holding": True, "minimum_wait_after_unplug_s": bound / 1000 + 10,
-                      "next": "Remove ALL Watcher USB power connections, leave PPK2 USB/source connected. Wait the bound, reconnect Watcher USB, then collect. Completion is not proven until firmware results are retrieved."}, indent=2))
+                      "next": "Remove ALL board USB power connections, leave PPK2 USB/source connected. Wait the bound, reconnect board USB, then collect. Completion is not proven until firmware results are retrieved."}, indent=2))
 
 
 def collect(args):
@@ -370,7 +376,7 @@ def collect(args):
         status = request(board, "ptest.status", "status")
         status_end = time.monotonic()
         if status.get("usb") is not True:
-            raise ValueError("Watcher does not confirm actual USB reconnection; PPK2 remains ON")
+            raise ValueError("board does not confirm actual USB reconnection; PPK2 remains ON")
         results = request(board, "ptest.results", "results")
     if results.get("run_id") != acquisition["arm"].get("run_id"):
         raise ValueError("results do not belong to this acquisition")
@@ -384,7 +390,7 @@ def collect(args):
                      "clock": "post-run virtual timeline; UART RTT plus firmware timeline uncertainty"}
     if results.get("state") in ("idle", "armed", "running"):
         raise ValueError("sweep is not finished; do not release PPK2 or publish a profile")
-    if owner.get("active_label") == "watcher-sweep":
+    if owner.get("active_label") in SWEEP_LABELS:
         send_command(args.ppk_control_dir, {"op": "end"})
     final_status = send_command(args.ppk_control_dir, {"op": "status"})
     save_json(args.output, {"schema": 1, "acquisition": acquisition,
@@ -434,7 +440,7 @@ def dryrun(args):
 
     def live_status(frame):
         if frame.get("usb") is not True:
-            raise ValueError("dryrun requires live Watcher USB power")
+            raise ValueError("dryrun requires live board USB power")
         if "power_error" in frame and (type(frame["power_error"]) is not int or frame["power_error"] != 0):
             raise ValueError("dryrun USB readback failed")
         if nonnegative_int(frame.get("boot_id"), "dryrun boot_id") == 0:
@@ -447,9 +453,9 @@ def dryrun(args):
             raise ValueError("unsupported dryrun schema")
         matrix_echo(frame, "sleep")
         if type(frame.get("boot_id")) is not int or frame["boot_id"] != data["status_before"]["boot_id"]:
-            raise ValueError("Watcher rebooted during dryrun")
+            raise ValueError("board rebooted during dryrun")
         if frame.get("usb") is not True:
-            errors.append("Watcher lost USB power during dryrun")
+            errors.append("board lost USB power during dryrun")
         if "pm_exercised" in frame and frame["pm_exercised"] is not False:
             raise ValueError("dryrun must not exercise PM")
         log = frame.get("last_error_log")
@@ -522,7 +528,7 @@ def dryrun(args):
                             data["status_after"] = request(board, "ptest.status", "status", observe=observe)
                             live_status(data["status_after"])
                             if data["status_after"]["boot_id"] != data["status_before"]["boot_id"]:
-                                raise ValueError("Watcher rebooted after dryrun")
+                                raise ValueError("board rebooted after dryrun")
                         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
                             errors.append(str(exc))
         except Exception as exc:
@@ -602,10 +608,25 @@ def transport_fault_cutoff(final, origin, guard_s):
             "rows_before_cutoff": 0, "byte_accounting": proof}
 
 
-DEFAULT_DEVICE = "Seeed SenseCAP Watcher"
+DEFAULT_DEVICE = "Seeed SenseCAP Watcher"  # Only bundles without board identity.
 
 
-def analyze_frames(bundle, frames, *, guard_s=0.5, clock_drift_ppm=100, pre_fault_prefix=False, device=DEFAULT_DEVICE):
+def report_device(bundle, override):
+    if override is None:
+        frames = (bundle.get("firmware", {}), bundle.get("acquisition", {}).get("arm", {}),
+                  bundle.get("live_status", {}))
+        for frame in frames:
+            if "board" in frame:
+                override = frame["board"]
+                break
+        else:
+            override = DEFAULT_DEVICE
+    if not isinstance(override, str) or not override.strip() or len(override) > 80:
+        raise ValueError("device name must be 1..80 characters")
+    return override.strip()
+
+
+def analyze_frames(bundle, frames, *, guard_s=0.5, clock_drift_ppm=100, pre_fault_prefix=False, device=None):
     """Conservative receive-window estimates, NEVER exact hardware timing.
 
     Complete aggregate windows only, after guard on both ends. Reject invalid
@@ -645,23 +666,24 @@ def analyze_frames(bundle, frames, *, guard_s=0.5, clock_drift_ppm=100, pre_faul
             or header.get("port_descriptor", {}).get("port") != owner["owner_port"]):
         raise ValueError("sample capture does not match the armed owner/clock/voltage")
     rate = 100_000
-    beginnings = [x for x in frames if x.get("type") == "begin" and x.get("label") == "watcher-sweep"]
+    beginnings = [x for x in frames if x.get("type") == "begin" and x.get("label") in SWEEP_LABELS]
     if len(beginnings) != 1:
-        raise ValueError("capture must contain exactly one watcher-sweep begin anchor")
+        raise ValueError("capture must contain exactly one power-sweep (or legacy watcher-sweep) begin anchor")
     beginning = beginnings[0]
+    recording_label = beginning["label"]
     anchor_host = beginning.get("host_offset_s")
     processed_at_begin = beginning.get("first_valid_received_index")
     anchor_index = beginning.get("window_sample_index_start", processed_at_begin)
     if (not finite_number(anchor_host) or anchor_host < 0
             or type(processed_at_begin) is not int or processed_at_begin < 0
             or type(anchor_index) is not int or anchor_index < processed_at_begin):
-        raise ValueError("invalid watcher-sweep begin clock/sample anchor")
+        raise ValueError("invalid power-sweep begin clock/sample anchor")
     # Retain the lifetime prefix as evidence, but judge this recording against
     # its own immutable boundary. Earlier failed preflight is not test data.
     transport_anchor = {"host_offset_s": anchor_host, "sample_index": anchor_index,
                         "processed_samples_at_begin": processed_at_begin,
                         "excluded_preflight_sample_vs_host_drift_s": anchor_index / rate - anchor_host}
-    windows = [x for x in frames if x.get("type") == "window" and x.get("label") == "watcher-sweep"]
+    windows = [x for x in frames if x.get("type") == "window" and x.get("label") == recording_label]
     previous_end = anchor_host
     previous_index = anchor_index
     for window in windows:
@@ -806,9 +828,8 @@ def analyze_frames(bundle, frames, *, guard_s=0.5, clock_drift_ppm=100, pre_faul
                     "power_mW_source_setpoint": mean * owner["voltage_mv"] / 1e6,
                     "sampled_charge_mAh": math.fsum(x["sampled_charge_mAh"] for x in selected),
                     "sampled_energy_mWh_source_setpoint": math.fsum(x["sampled_energy_mWh"] for x in selected)})
-    if not isinstance(device, str) or not device.strip() or len(device) > 80:
-        raise ValueError("device name must be 1..80 characters")
-    report = {"schema": 1, "device": device.strip(), "profile_kind": "isolated BSP characterization, NOT production runtime",
+    device = report_device(bundle, device)
+    report = {"schema": 1, "device": device, "profile_kind": "isolated BSP characterization, NOT production runtime",
             "run_state": bundle["firmware"].get("state"), "source_voltage_mv": owner["voltage_mv"],
             "matrix": matrix, "matrix_version": MATRIX_VERSIONS[matrix], "plan": plan,
             "requested_guard_s": guard_s, "assumed_clock_drift_ppm": clock_drift_ppm,
@@ -840,7 +861,7 @@ def analyze(args):
                 raise ValueError("aggregate report exceeds bounded window budget")
     report = analyze_frames(bundle, frames, guard_s=args.guard_s, clock_drift_ppm=args.clock_drift_ppm,
                             pre_fault_prefix=getattr(args, "pre_fault_prefix", False),
-                            device=getattr(args, "device", None) or DEFAULT_DEVICE)
+                            device=getattr(args, "device", None))
     save_json(args.output, report)
     print(json.dumps({"saved": args.output, "states": len(report["rows"]),
                       "accepted_estimates": sum(x["quality"] == "receive_window_estimate" for x in report["rows"])}, indent=2))
@@ -1004,14 +1025,14 @@ def parser():
     c.add_argument("--ppk-control-dir", required=True)
     c.add_argument("--acquisition", required=True)
     c.add_argument("--output", required=True)
-    c.add_argument("--usb-reconnected", action="store_true", help="release source ONLY after live Watcher reports USB")
+    c.add_argument("--usb-reconnected", action="store_true", help="release source ONLY after live board reports USB")
     r = sub.add_parser("analyze", help="offline guarded aggregate estimates")
     r.add_argument("--results", required=True)
     r.add_argument("--samples", required=True)
     r.add_argument("--output", required=True)
     r.add_argument("--guard-s", type=float, default=0.5)
     r.add_argument("--clock-drift-ppm", type=float, default=100)
-    r.add_argument("--device", default=DEFAULT_DEVICE, help="board name recorded in the report (default: %(default)s)")
+    r.add_argument("--device", help="override firmware-reported board name; only legacy bundles default to Seeed SenseCAP Watcher")
     r.add_argument("--pre-fault-prefix", action="store_true", help="opt-in whole rows before an evidenced raw receiver fault; never validates post-fault continuation")
     c = sub.add_parser("compare", help="offline matched count-weighted A/B/A differences; no pooled quantiles")
     c.add_argument("--profile", required=True)
@@ -1030,5 +1051,5 @@ if __name__ == "__main__":
     try:
         {"arm": arm, "collect": collect, "analyze": analyze, "compare": compare, "dryrun": dryrun}[options.action](options)
     except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
-        suffix = "" if options.action == "dryrun" else "\nPPK2 owner is NOT automatically stopped. Reconnect Watcher USB before explicit finish."
+        suffix = "" if options.action == "dryrun" else "\nPPK2 owner is NOT automatically stopped. Reconnect board USB before explicit finish."
         sys.exit(str(exc) + suffix)

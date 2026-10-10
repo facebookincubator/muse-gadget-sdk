@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../components/muse/muse_watcher_power_test.h"
+#include "../components/muse/muse_power_test.h"
 #define ESP_CODEC_DEV_OK 0
 #define RTC_NOINIT_ATTR
 #define ESP_RETURN_ON_ERROR(call, tag, msg) do { esp_err_t err_ = (call); if (err_) return err_; } while (0)
@@ -136,11 +136,11 @@ static uint64_t s_ptest_held_mask;
 static int hold_error_nth, release_error_nth;
 static unsigned hold_calls, release_calls;
 static bool deep_hold;
-bool muse_watcher_ptest_deep_holds_owned(void);
+bool muse_ptest_board_deep_holds_owned(void);
 static int gpio_hold_en(gpio_num_t pin)
 {
     (void)pin;
-    assert(muse_watcher_ptest_deep_holds_owned()); /* committed BEFORE acquisition */
+    assert(muse_ptest_board_deep_holds_owned()); /* committed BEFORE acquisition */
     hold_calls++;
     return hold_error_nth == (int)hold_calls ? ESP_FAIL : 0;
 }
@@ -155,7 +155,7 @@ static void gpio_deep_sleep_hold_en(void) { deep_hold = true; }
 static void gpio_deep_sleep_hold_dis(void) { deep_hold = false; }
 
 /* Generated from the actual BSP function bodies, not a second implementation. */
-#include "watcher_power_bsp_functions.inc"
+#include "power_test_bsp_functions.inc"
 
 int main(int argc, char **argv)
 {
@@ -221,32 +221,32 @@ int main(int argc, char **argv)
         else { assert(operation == 263 && !(s_ptest_codec_regs.dac_mask & 8)); }
     } else if (mode == 8) {
         operation = ptest_audio_initialize();
-        assert(!operation && muse_watcher_ptest_warm_seen());
+        assert(!operation && muse_ptest_board_warm_seen());
         for (int reset = 0; reset < 2; reset++) {
             /* reset inside constructor or after held-pad marker is cleared */
             s_ptest_spk = s_ptest_mic = s_ptest_tx = s_ptest_rx = NULL;
             s_ptest_dac_if = s_ptest_adc_if = NULL;
             s_ptest_spk_open = s_ptest_mic_open = s_ptest_audio_attempted = s_ptest_audio_failed = s_ptest_audio_poisoned = false;
-            assert(muse_watcher_ptest_warm_seen());
+            assert(muse_ptest_board_warm_seen());
             s_ptest_codec_state = MUSE_PTEST_CODEC_SUSPENDED;
             cleanup = ptest_audio_close();
-            assert(!cleanup && !hw_active && muse_watcher_ptest_warm_seen());
+            assert(!cleanup && !hw_active && muse_ptest_board_warm_seen());
         }
         assert(force_calls == 2);
     } else if (mode >= 6) {
         s_ptest_knobs = MUSE_PTEST_I2S_LOW | MUSE_PTEST_RGB_LOW;
         if (mode == 6) { hold_error_nth = 1; }
-        operation = muse_watcher_ptest_prepare_deep(true);
-        assert(muse_watcher_ptest_deep_holds_owned());
+        operation = muse_ptest_board_prepare_deep(true);
+        assert(muse_ptest_board_deep_holds_owned());
         s_ptest_held_mask = 0; /* reset/torn large journal: only tiny ownership survives */
         if (mode == 7) { release_error_nth = 3; }
-        cleanup = muse_watcher_ptest_release_deep_holds();
+        cleanup = muse_ptest_board_release_deep_holds();
         if (mode == 7) {
-            assert(cleanup && muse_watcher_ptest_deep_holds_owned());
+            assert(cleanup && muse_ptest_board_deep_holds_owned());
             release_error_nth = 0;
-            cleanup = muse_watcher_ptest_release_deep_holds();
+            cleanup = muse_ptest_board_release_deep_holds();
         }
-        assert(!cleanup && !muse_watcher_ptest_deep_holds_owned() && muse_watcher_ptest_warm_seen() && !deep_hold && release_calls >= 5);
+        assert(!cleanup && !muse_ptest_board_deep_holds_owned() && muse_ptest_board_warm_seen() && !deep_hold && release_calls >= 5);
     }
     printf("{\"operation\":%d,\"cleanup\":%d,\"retry\":%d,\"close_calls\":%u,\"force_calls\":%u}\n", operation, cleanup, retry, close_calls, force_calls);
     return 0;

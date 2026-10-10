@@ -19,9 +19,10 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from power_test_fixture import prepare_board_matrix
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "components/muse/muse_watcher_power_test.c"
+SOURCE = ROOT / "components/muse/muse_power_test.c"
 
 
 def arm(**changes):
@@ -30,15 +31,17 @@ def arm(**changes):
     return ">ptest.arm=" + json.dumps(values)
 
 
-class WatcherPowerTest(unittest.TestCase):
+class PowerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory(prefix="watcher-power-test-")
+        cls.tmp = tempfile.TemporaryDirectory(prefix="power-test-")
         cls.binary = Path(cls.tmp.name) / "harness"
+        prepare_board_matrix(cls.tmp.name, ROOT)
         subprocess.run(
             [os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
-             "-I", str(ROOT / "tests/watcher_power_test_fakes"),
-             str(ROOT / "tests/watcher_power_test_harness.c"), "-o", str(cls.binary)],
+             "-I", str(ROOT / "tests/power_test_fakes"),
+             "-I", str(ROOT / "components/muse"), "-I", cls.tmp.name,
+             str(ROOT / "tests/power_test_harness.c"), "-o", str(cls.binary)],
             check=True, capture_output=True, text=True,
         )
 
@@ -76,6 +79,50 @@ class WatcherPowerTest(unittest.TestCase):
         self.assertFalse(after["usb"])
         self.assertEqual(before["boot_id"], after["boot_id"])
         self.assertGreater(after["now_us"], before["now_us"])
+
+    def test_board_identity_is_additive_in_status_ack_and_results(self):
+        status, ack, results = self.run_commands(
+            ">ptest.status", arm(), "usb 0", "advance 180000", ">ptest.results",
+        )
+        for frame in (status, ack, results):
+            self.assertEqual(frame["board"], "Seeed SenseCAP Watcher")
+            self.assertEqual(frame["schema"], 1)
+        self.assertEqual(ack["rtc_bytes"], 7680)
+
+    def test_core_uses_other_board_matrix_and_rejects_unavailable_matrix(self):
+        ack, results = self.run_commands(
+            "generic_board 1", arm(), "usb 0", "advance 180000", ">ptest.results",
+        )
+        self.assertEqual(ack["board"], "Generic test board")
+        self.assertEqual([p["id"] for p in ack["plan"]], ["other_board_ref", "other_board_rest"])
+        self.assertEqual([r["name"] for r in results["records"]], ["other_board_ref", "other_board_rest"])
+        self.assertTrue(results["complete"])
+        error = self.run_commands("generic_board 1", arm(matrix="sleep"))[0]
+        self.assertEqual(error["type"], "error")
+        self.assertIn("matrix_unavailable", error["message"])
+        error = self.run_commands("generic_board 1", '>ptest.dryrun={"matrix":"sleep"}')[0]
+        self.assertEqual(error["message"], "matrix_unavailable")
+
+    def test_board_name_is_json_escaped_and_unknown_board_matrix_is_null(self):
+        frame = self.run_commands("generic_board 2", ">ptest.status")[0]
+        self.assertEqual(frame["board"], 'Test "quoted" board\\name')
+        unknown = self.run_commands("matrix_unknown")[0]
+        self.assertEqual(unknown["count"], 0)
+        self.assertFalse(unknown["supported"])
+
+    def test_watcher_descriptor_block_is_unchanged(self):
+        import hashlib
+        board = (ROOT / "components/muse/boards/board_sensecap_watcher.c").read_text()
+        start = board.index("#define STATE(")
+        end = board.index("_Static_assert(SLEEP_MATRIX_COUNT", start)
+        # Exact descriptor block from the pre-refactor 09dc31d tree: IDs,
+        # notes, ordering, loads and every knob/role/poll field stay identical.
+        self.assertEqual(hashlib.sha256(board[start:end].encode()).hexdigest(),
+                         "eafd80cb3432294891d5689600d96fcff686be4873cae96111cf3c7d483a8ac8")
+        source = SOURCE.read_text()
+        self.assertNotIn("board_sensecap_watcher", source)
+        self.assertNotIn("s_sleep_matrix", source)
+        self.assertIn("muse_ptest_board_matrix", source)
 
     def test_status_nonce_echo_and_rejection(self):
         plain, first, second = self.run_commands(
@@ -372,9 +419,9 @@ class WatcherPowerTest(unittest.TestCase):
         self.assertIn("s_usb_lock_held", source)
         self.assertIn("uart_read_bytes", source)
         main = (ROOT / "main/main.c").read_text()
-        self.assertLess(main.index("muse_watcher_power_test_run();"), main.index("diagnostic_log_init()"))
-        self.assertLess(main.index("muse_watcher_power_test_run();"), main.index("muse_glue_start();"))
-        config = (ROOT / "components/muse/Kconfig").read_text().split("config MUSE_WATCHER_POWER_TEST", 1)[1].split("config MUSE_WATCHER_CAMERA", 1)[0]
+        self.assertLess(main.index("muse_power_test_run();"), main.index("diagnostic_log_init()"))
+        self.assertLess(main.index("muse_power_test_run();"), main.index("muse_glue_start();"))
+        config = (ROOT / "components/muse/Kconfig").read_text().split("config MUSE_POWER_TEST", 1)[1].split("config MUSE_WATCHER_CAMERA", 1)[0]
         self.assertIn("default n", config)
         self.assertIn("MUSE_BOARD_SENSECAP_WATCHER", config)
 
@@ -703,7 +750,7 @@ class WatcherPowerTest(unittest.TestCase):
 
     def test_board_knob_source_contracts_and_cpu_veto_release(self):
         board = (ROOT / "components/muse/boards/board_sensecap_watcher.c").read_text()
-        apply = board.split("esp_err_t muse_watcher_ptest_apply(", 1)[1].split("static esp_err_t ptest_codec_byte", 1)[0]
+        apply = board.split("esp_err_t muse_ptest_board_apply(", 1)[1].split("static esp_err_t ptest_codec_byte", 1)[0]
         self.assertLess(apply.index("ptest_revert_knobs()"), apply.index("ptest_audio_initialize()"))
         self.assertLess(apply.index("audio conflicts with parked pins"), apply.index("ptest_revert_knobs()"))
         self.assertIn("codec register transport", board)

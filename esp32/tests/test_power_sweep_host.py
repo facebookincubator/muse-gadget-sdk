@@ -13,15 +13,18 @@ import contextlib
 import copy
 import importlib.util
 import io
+import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from power_test_fixture import prepare_board_matrix
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "tools/muse/watcher_power.py"
-spec = importlib.util.spec_from_file_location("watcher_power", SOURCE)
+SOURCE = Path(__file__).resolve().parents[1] / "tools/power/power_sweep.py"
+spec = importlib.util.spec_from_file_location("power_sweep", SOURCE)
 power = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(power)
 
@@ -192,9 +195,57 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(self.report()["device"], "Seeed SenseCAP Watcher")
         report = self.report(device="  Other Board  ")
         self.assertEqual(report["device"], "Other Board")
-        for bad in ("", "   ", "x" * 81, None):
+        for bad in ("", "   ", "x" * 81):
             with self.assertRaisesRegex(ValueError, "device name"):
                 self.report(device=bad)
+
+    def test_report_uses_firmware_board_and_explicit_override(self):
+        self.bundle["firmware"]["board"] = "Other supported board"
+        self.assertEqual(self.report()["device"], "Other supported board")
+        self.assertEqual(self.report(device="Override name")["device"], "Override name")
+        self.bundle["acquisition"]["arm"] = {"board": "Arm-reported board"}
+        del self.bundle["firmware"]["board"]
+        self.assertEqual(self.report()["device"], "Arm-reported board")
+        self.assertEqual(self.report(device=None)["device"], "Arm-reported board")
+
+    def test_reported_invalid_board_is_not_silently_a_watcher(self):
+        for bad in (None, "", "   ", "x" * 81, 3, {}):
+            with self.subTest(board=bad):
+                self.bundle["firmware"]["board"] = bad
+                with self.assertRaisesRegex(ValueError, "device name"):
+                    self.report()
+
+    def test_power_sweep_label_matches_legacy_analysis_without_merging_labels(self):
+        legacy = self.report()["rows"]
+        self.begin["label"] = "power-sweep"
+        for frame in self.frames:
+            frame["label"] = "power-sweep"
+        self.assertEqual(self.report()["rows"], legacy)
+        unrelated = dict(self.frames[20], label="watcher-sweep", mean_uA=99999)
+        self.assertEqual(self.report(frames=self.frames + [unrelated])["rows"], legacy)
+
+    def test_both_legacy_and_new_begin_anchors_are_ambiguous(self):
+        other = dict(self.begin, label="power-sweep")
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            self.report(frames=self.frames + [other])
+
+    def test_device_cli_defaults_to_firmware_and_can_override(self):
+        self.bundle["firmware"]["board"] = "CLI fixture board"
+        for override in (None, "CLI override"):
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                results, samples, output = (Path(directory) / name for name in ("results.json", "samples.jsonl", "profile.json"))
+                power.save_json(results, self.bundle)
+                header = {"type": "session", "schema_version": 1, "sample_rate_hz": 100000,
+                          "host_monotonic_origin_s": 100, "voltage_mv": 3872,
+                          "port_descriptor": {"port": "fake-ppk"}}
+                samples.write_text("\n".join(json.dumps(f) for f in [header, self.begin] + self.frames) + "\n")
+                command = [sys.executable, str(SOURCE), "analyze", "--results", str(results),
+                           "--samples", str(samples), "--output", str(output)]
+                if override:
+                    command += ["--device", override]
+                process = subprocess.run(command, capture_output=True, text=True, timeout=10)
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertEqual(power.load_json(output)["device"], override or "CLI fixture board")
 
     def test_skipped_and_failed_firmware_never_quantified(self):
         for state in ("skipped", "error"):
@@ -520,6 +571,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_arm_correct_ack_saves_without_finish(self):
         commands = self.run_arm()
+        self.assertEqual(commands.call_args_list[1].args[1], {"op": "begin", "label": "power-sweep"})
         self.assertEqual([x.args[1]["op"] for x in commands.call_args_list], ["status", "begin"])
         self.assertEqual(power.load_json(self.output)["arm"]["run_id"], "test-run")
 
@@ -687,6 +739,11 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(sync["device_us"], 9_000_000)
         self.assertEqual(sync["timeline_uncertainty_us"], 100_000)
         self.assertAlmostEqual(sync["uncertainty_s"], sync["uart_rtt_uncertainty_s"] + 0.1)
+
+    def test_collect_new_power_sweep_label_preserves_ordered_release(self):
+        self.owner["active_label"] = "power-sweep"
+        self.collect_fake(*sleep_evidence())
+        self.assertEqual(self.observed_ops, ["status", "end", "status", "finish"])
 
     def test_collect_holds_without_explicit_finish(self):
         self.collect_fake(*sleep_evidence(), release=False)
@@ -1383,9 +1440,11 @@ class FirmwareProtocolIntegrationTests(unittest.TestCase):
                     "ptest.status=" + nonces[1]]
         with tempfile.TemporaryDirectory(prefix="watcher-host-dryrun-") as directory:
             binary = Path(directory) / "harness"
+            prepare_board_matrix(directory, root)
             subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                            "-I", str(root / "tests/watcher_power_test_fakes"),
-                            str(root / "tests/watcher_power_test_harness.c"), "-o", str(binary)],
+                            "-I", str(root / "tests/power_test_fakes"),
+                             "-I", str(root / "components/muse"), "-I", directory,
+                            str(root / "tests/power_test_harness.c"), "-o", str(binary)],
                            check=True, capture_output=True, text=True, timeout=30)
             process = subprocess.run([str(binary)], input="\n".join(">" + command for command in commands) + "\n",
                                      capture_output=True, text=True, check=True, timeout=10)
@@ -1436,9 +1495,11 @@ class FirmwareProtocolIntegrationTests(unittest.TestCase):
         root = SOURCE.parents[2]
         with tempfile.TemporaryDirectory(prefix="watcher-host-protocol-") as directory:
             binary = Path(directory) / "harness"
+            prepare_board_matrix(directory, root)
             subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                            "-I", str(root / "tests/watcher_power_test_fakes"),
-                            str(root / "tests/watcher_power_test_harness.c"), "-o", str(binary)],
+                            "-I", str(root / "tests/power_test_fakes"),
+                             "-I", str(root / "components/muse"), "-I", directory,
+                            str(root / "tests/power_test_harness.c"), "-o", str(binary)],
                            check=True, capture_output=True, text=True, timeout=30)
             config = {"run_id": "bench-host", "settle_ms": 1000, "capture_ms": 5000,
                       "repeats": 1, "matrix": "sleep"}

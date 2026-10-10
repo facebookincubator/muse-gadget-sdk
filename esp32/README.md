@@ -217,7 +217,12 @@ output is enabled. Diagnostic figures are not production application profiles.
 
 To profile another board or device, follow the
 [porting recipe](docs/power/README.md): labelled PPK2 capture for anything the
-PPK2 can power, or the autonomous USB-free sweep ported to a new board.
+PPK2 can power, or the board-neutral `CONFIG_MUSE_POWER_TEST` autonomous sweep.
+Implement the [board hook header](components/muse/boards/muse_power_test_board.h)
+and board-owned matrices; no core rename is needed. The shared host CLI is
+[`tools/power/power_sweep.py`](tools/power/power_sweep.py). Its analyzer uses the
+firmware-reported board name, with `--device` as an override and Watcher as the
+legacy-only fallback.
 
 Repository engineering skills live in `../.claude/skills/ppk2-power-profile/`,
 `../.claude/skills/sensecap-watcher-power-tests/` and

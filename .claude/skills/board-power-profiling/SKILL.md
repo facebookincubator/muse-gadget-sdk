@@ -29,14 +29,16 @@ Read the recipe before acting. This skill is the decision and safety outline.
 1. **Labelled source capture, any device, no firmware change.** `ppk2_profile.py
    hold` plus `control begin/end` labels; drive states over BLE, buttons or a
    device-side timer. Good for a first look and for non-ESP32 hardware.
-2. **Autonomous sweep on another ESP32 board in this repo.** First port: make
-   the Watcher harness board-neutral (rename `muse_watcher_ptest_*` hooks and
-   the Kconfig option), keep Watcher tests green, then implement the board
-   hooks, a state matrix with A/B/A references, an overlay and host-test fakes.
+2. **Autonomous sweep on another ESP32 board in this repo.** The shared core
+   is already board-neutral: `muse_power_test.{c,h}`, `CONFIG_MUSE_POWER_TEST`
+   and `boards/muse_power_test_board.h` are the porting surface. Implement
+   `muse_ptest_board_*` hooks (including `name` and board-owned `matrix` tables
+   with A/B/A references), extend the supported-board Kconfig list, add an
+   overlay and host-test fakes. Keep the Watcher conformance tests green.
    Dry-run on USB before any PPK2 run.
 3. **Autonomous sweep on another platform.** Port the core's `fw_*` platform
    boundary or speak the PTEST line protocol natively; the host-compiled C core
-   is the conformance reference for `watcher_power.py`.
+   is the conformance reference for `power_sweep.py`.
 
 ## Run and report
 
@@ -45,8 +47,11 @@ Read the recipe before acting. This skill is the decision and safety outline.
   loss, backlog plus consumer delay < 0.5 s) before USB removal; FIFO-only
   health checks while USB is out.
 - Power-cycle before any "cold" state; a dry run consumes cold state.
-- Analyze with `watcher_power.py analyze --guard-s 1.0 --clock-drift-ppm 250
-  --device "<board>"` and `compare`. Report conditional receive-window
+- Analyze with `esp32/tools/power/power_sweep.py analyze --guard-s 1.0
+  --clock-drift-ppm 250` and `compare`. Firmware's `board` names the report;
+  `--device "<board>"` overrides it (Watcher is the fallback for legacy bundles
+  only). New captures use `power-sweep`; legacy `watcher-sweep` is accepted.
+  Report conditional receive-window
   estimates, A/B/A deltas with reference drift, one-repeat and
   source-setpoint caveats.
 - Publish only scrubbed CSV/findings: no serial numbers, boot/run IDs, host

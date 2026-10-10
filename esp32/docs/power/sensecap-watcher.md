@@ -104,8 +104,8 @@ Activate ESP-IDF, then build in a separate directory:
 
 ```sh
 . "$HOME/.espressif/esp-idf-v6.0.1/export.sh"
-idf.py -B build-watcher-power-test -DIDF_TARGET=esp32s3 \
-  -DSDKCONFIG=build-watcher-power-test/sdkconfig \
+idf.py -B build-muse-watcher-power-test -DIDF_TARGET=esp32s3 \
+  -DSDKCONFIG=build-muse-watcher-power-test/sdkconfig \
   -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test" build
 ```
 
@@ -120,7 +120,7 @@ data.
 packets. Flash only the ESP32 console with the maintained paced tool:
 
 ```sh
-cd build-watcher-power-test
+cd build-muse-watcher-power-test
 python ../tools/muse/paced_esptool.py --chip esp32s3 -p "$DUT_PORT" -b 115200 \
   --before default-reset --after hard-reset write-flash "@flash_args"
 ```
@@ -155,7 +155,7 @@ session; this skill does not grant permission or disable a sandbox.
 Arm the actual USB-gated firmware sequence without reopening PPK:
 
 ```sh
-tools/power/.venv/bin/python tools/muse/watcher_power.py arm \
+tools/power/.venv/bin/python tools/power/power_sweep.py arm \
   --port "$DUT_PORT" --ppk-control-dir "$RUN/control" \
   --settle-ms 5000 --capture-ms 20000 --repeats 1 \
   --output "$RUN/acquisition.json"
@@ -176,7 +176,7 @@ Only after both the PPK owner and firmware acknowledge readiness:
    the armed run/boot, and live firmware must confirm USB has returned:
 
 ```sh
-tools/power/.venv/bin/python tools/muse/watcher_power.py collect \
+tools/power/.venv/bin/python tools/power/power_sweep.py collect \
   --port "$DUT_PORT" --ppk-control-dir "$RUN/control" \
   --acquisition "$RUN/acquisition.json" --output "$RUN/results.json" \
   --usb-reconnected
@@ -200,7 +200,7 @@ restore a peripheral or hysteresis.
 
 ### Matrix selection and protocol
 
-`watcher_power.py arm --matrix peripheral` (or omission) selects the unchanged
+`power_sweep.py arm --matrix peripheral` (or omission) selects the unchanged
 27-state peripheral matrix, version 1, with one or two repeats. The strict
 firmware arm JSON accepts only the four required keys `run_id`, `settle_ms`,
 `capture_ms`, `repeats`, plus optional `matrix:"peripheral"|"sleep"`.
@@ -220,7 +220,13 @@ matrix **26 states**, explicitly added to bracket both late variants for A/B/A.
 The ACK is authoritative for the complete order and conservative runtime;
 5000 ms settling + 20000 ms capture gives a **940000 ms** maximum duration.
 
-ACK/status/results carry `matrix`, `matrix_version`, `resume_count`,
+ACK/status/results also carry the additive `board` name from
+`muse_ptest_board_name()`. The core is `muse_power_test.{c,h}` under
+`CONFIG_MUSE_POWER_TEST`; the Watcher owns both unchanged matrices and all
+hardware hooks in `board_sensecap_watcher.c`, implementing
+`boards/muse_power_test_board.h`. Wire schema 1, retained-journal version 3, its layout and its budget are
+unchanged by this refactor. ACK/status/results carry
+`matrix`, `matrix_version`, `resume_count`,
 `timeline_offset_us`, and `timeline_uncertainty_us` (including zero). Plan
 entries add `knobs`, `deep_sleep`, `poll_ms`, `role` (`ref`, `variant`, `other`)
 and `ref_group` (`cold`, `warm`, or empty). Records preserve index/id/name and
@@ -293,7 +299,7 @@ This changes the private retained-journal version to 3, not wire schema 1 or
 matrix versions. ERROR logs are captured without forwarding to UART, reset
 per state, truncated to 96 printable ASCII characters, stripped of ANSI/CR/LF,
 and quote/backslash/nonprintable characters sanitized. Wildcard logging is
-NONE; only `board` and `watcher_ptest` ERROR tags use the capture-only hook.
+NONE; only `board` and `power_test` ERROR tags use the capture-only hook.
 Both ROM printf sinks are disconnected after init so EARLY/DRAM output cannot
 interleave with UART protocol bytes. Successful rows/readbacks/restoration
 clear ignored component errors; log fields describe failures only. The first fatal
@@ -305,7 +311,7 @@ Logs are evidence, not a substitute for error codes.
 With operator-authorized console access and USB present, before any PPK run:
 
 ```sh
-python3 tools/muse/watcher_power.py dryrun --port "$DUT_PORT" \
+python3 tools/power/power_sweep.py dryrun --port "$DUT_PORT" \
   --matrix sleep --output "$RUN/dryrun.json" --timeout-s 60
 ```
 
@@ -407,10 +413,15 @@ Do not transfer diagnostic figures into production battery-life estimates.
 ## Reporting and acceptance criteria
 
 ```sh
-tools/power/.venv/bin/python tools/muse/watcher_power.py analyze \
+tools/power/.venv/bin/python tools/power/power_sweep.py analyze \
   --results "$RUN/results.json" --samples "$RUN/ppk.jsonl" \
   --output "$RUN/profile.json" --guard-s 1.0 --clock-drift-ppm 250
 ```
+
+The arm helper uses the `power-sweep` PPK label. Analyzer label matching also
+accepts legacy `watcher-sweep` captures, without merging different label
+windows. Report identity uses firmware's `board` field; `--device` overrides
+it. Only bundles without firmware board identity default to Watcher.
 
 Those arguments are the model assumptions used for the committed example,
 not universal validated clock bounds. Choose and report a justified timing
@@ -443,11 +454,11 @@ an otherwise clean sweep is followed by a timestamped raw receiver
 `queue_overflow` or `read_error`, analyze a **new** prefix report:
 
 ```sh
-tools/power/.venv/bin/python tools/muse/watcher_power.py analyze \
+tools/power/.venv/bin/python tools/power/power_sweep.py analyze \
   --results "$RUN/results.json" --samples "$RUN/ppk.jsonl" \
   --output "$RUN/profile-prefix.json" --guard-s 1.0 --clock-drift-ppm 250 \
   --pre-fault-prefix
-tools/power/.venv/bin/python tools/muse/watcher_power.py compare \
+tools/power/.venv/bin/python tools/power/power_sweep.py compare \
   --profile "$RUN/profile-prefix.json" --output "$RUN/compare-prefix.json"
 ```
 

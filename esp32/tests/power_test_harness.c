@@ -12,7 +12,28 @@
 #include <assert.h>
 #include <setjmp.h>
 #define MUSE_PTEST_HOST 1
-#include "../components/muse/muse_watcher_power_test.c"
+#include "../components/muse/muse_power_test.c"
+#include "power_test_board_matrix.inc"
+
+static unsigned generic_board;
+static const muse_ptest_state_t generic_matrix[] = {
+    STATE("other_board_ref", "generic board reference", MUSE_PTEST_IDLE, 0, -1, false),
+    STATE("other_board_rest", "generic board resting", MUSE_PTEST_IDLE, 0, -1, false),
+};
+const char *muse_ptest_board_name(void)
+{
+    return generic_board == 2 ? "Test \"quoted\" board\\name" : generic_board ? "Generic test board" : reference_board_name();
+}
+const muse_ptest_state_t *muse_ptest_board_matrix(const char *name, size_t *count)
+{
+    if (!generic_board) { return reference_board_matrix(name, count); }
+    if (count) { *count = 0; }
+    if (name && !strcmp(name, "peripheral")) {
+        if (count) { *count = sizeof(generic_matrix) / sizeof(generic_matrix[0]); }
+        return generic_matrix;
+    }
+    return NULL;
+}
 
 static int64_t now_us = 1000000, rtc_us = 1000000;
 static bool usb_present = true, deep_entered;
@@ -80,8 +101,10 @@ static esp_err_t fw_power(muse_ptest_readback_t *out)
 static int current_index(void)
 {
     if (!active) { return -1; }
-    for (unsigned i = 0; i < MATRIX_COUNT; i++) { if (active == &s_matrix[i]) { return (int)i; } }
-    for (unsigned i = 0; i < SLEEP_MATRIX_COUNT; i++) { if (active == &s_sleep_matrix[i]) { return (int)i; } }
+    for (matrix_t m = MATRIX_PERIPHERAL; m <= MATRIX_SLEEP; m++) {
+        const muse_ptest_state_t *states = matrix_states(m);
+        for (unsigned i = 0; i < matrix_count(m); i++) { if (active == &states[i]) { return (int)i; } }
+    }
     return -1;
 }
 static bool audio_load(muse_ptest_load_t load)
@@ -236,6 +259,12 @@ int main(void)
         else if (sscanf(line, "knob_apply %u", &value) == 1 && value < SLEEP_MATRIX_COUNT) {
             esp_err_t e = fw_apply(&s_sleep_matrix[value]);
             printf("PTEST {\"type\":\"knob_apply\",\"error\":%d,\"knobs\":%u,\"codec_state\":%u,\"uart_parked\":%s}\n", e, applied_knobs, codec_history, uart_parked ? "true" : "false");
+        }
+        else if (sscanf(line, "generic_board %u", &value) == 1) { generic_board = value; }
+        else if (!strcmp(line, "matrix_unknown")) {
+            size_t count = 999;
+            const muse_ptest_state_t *states = muse_ptest_board_matrix("unknown", &count);
+            printf("PTEST {\"type\":\"matrix_unknown\",\"count\":%zu,\"supported\":%s}\n", count, states ? "true" : "false");
         }
         else if (sscanf(line, "codec_mismatch %u", &value) == 1) { codec_mismatch = value != 0; }
         else if (sscanf(line, "flush_nth %u", &value) == 1) { fail_flush_nth = value; }

@@ -44,7 +44,7 @@ class WatcherPowerBspTest(unittest.TestCase):
         directory = Path(cls.tmp.name)
         source = BSP.read_text()
         marker_start = source.index("#define PTEST_HOLD_MAGIC")
-        _, marker_end = function_body(source, "bool muse_watcher_ptest_deep_holds_owned(void)")
+        _, marker_end = function_body(source, "bool muse_ptest_board_deep_holds_owned(void)")
         pieces = [source[marker_start:marker_end]]
         for signature in (
             "static esp_err_t ptest_codec_read(",
@@ -54,16 +54,16 @@ class WatcherPowerBspTest(unittest.TestCase):
             "static esp_err_t ptest_audio_close(void)",
             "static esp_err_t ptest_audio_initialize(void)",
             "static esp_err_t ptest_audio_open(void)",
-            "esp_err_t muse_watcher_ptest_prepare_deep(bool held)",
-            "esp_err_t muse_watcher_ptest_release_deep_holds(void)",
+            "esp_err_t muse_ptest_board_prepare_deep(bool held)",
+            "esp_err_t muse_ptest_board_release_deep_holds(void)",
         ):
             pieces.append(function_body(source, signature)[0])
-        (directory / "watcher_power_bsp_functions.inc").write_text("\n\n".join(pieces))
+        (directory / "power_test_bsp_functions.inc").write_text("\n\n".join(pieces))
         cls.binary = directory / "harness"
         compilation = subprocess.run(
             [os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
-             "-I", str(ROOT / "tests/watcher_power_test_fakes"), "-I", str(directory),
-             str(ROOT / "tests/watcher_power_bsp_harness.c"), "-o", str(cls.binary)],
+             "-I", str(ROOT / "tests/power_test_fakes"), "-I", str(directory),
+             str(ROOT / "tests/power_test_bsp_harness.c"), "-o", str(cls.binary)],
             capture_output=True, text=True,
         )
         if compilation.returncode:
@@ -118,12 +118,12 @@ class WatcherPowerBspTest(unittest.TestCase):
         self.assertEqual(self.scenario(8)["force_calls"], 2)
 
     def test_hold_release_precedes_uart_and_restoration_has_readback(self):
-        source = (ROOT / "components/muse/muse_watcher_power_test.c").read_text()
-        startup, _ = function_body(source, "void muse_watcher_power_test_run(void)")
-        self.assertLess(startup.index("muse_watcher_ptest_release_deep_holds()"), startup.index("uart_driver_install("))
+        source = (ROOT / "components/muse/muse_power_test.c").read_text()
+        startup, _ = function_body(source, "void muse_power_test_run(void)")
+        self.assertLess(startup.index("muse_ptest_board_release_deep_holds()"), startup.index("uart_driver_install("))
         finish, _ = function_body(source, "static void finish_run(")
         self.assertIn("s_run.restore_error = fw_readback(&restored)", finish)
-        readback, _ = function_body(BSP.read_text(), "esp_err_t muse_watcher_ptest_readback(")
+        readback, _ = function_body(BSP.read_text(), "esp_err_t muse_ptest_board_readback(")
         self.assertIn("ptest_codec_snapshot()", readback)
         self.assertNotIn("s_ptest_audio_attempted && s_ptest_codec_state == MUSE_PTEST_CODEC_SUSPENDED", readback)
 

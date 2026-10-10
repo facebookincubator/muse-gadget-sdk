@@ -142,9 +142,11 @@ menu "Muse"
         range 0 100
         default 70
 
-    config MUSE_WATCHER_POWER_TEST
-        bool "Isolated SenseCAP Watcher BSP power-characterization firmware"
-        depends on MUSE_BOARD_SENSECAP_WATCHER && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+    config MUSE_POWER_TEST
+        bool "Isolated board BSP power-characterization firmware"
+        # Boards implementing boards/muse_power_test_board.h; extend this list
+        # only after the new board's diagnostic hooks and matrix pass tests.
+        depends on (MUSE_BOARD_SENSECAP_WATCHER) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
         default n
         help
             DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application

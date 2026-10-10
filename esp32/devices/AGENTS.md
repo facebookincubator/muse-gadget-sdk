@@ -294,5 +294,10 @@ If you don't have the board, say that the port was only built, not run.
 
 For a battery-powered board, `../docs/power/README.md` is the recipe for
 measuring it with a Nordic PPK2 on the battery input: labelled captures need
-no firmware changes, and the SenseCAP Watcher's USB-free diagnostic sweep can
-be ported to the new board. Fixture checks and owner authorization come first.
+no firmware changes. The shared `CONFIG_MUSE_POWER_TEST` diagnostic is already
+board-neutral: implement `muse_ptest_board_*` from
+`../components/muse/boards/muse_power_test_board.h`, including the board name
+and immutable state matrices, then extend its supported-board Kconfig list.
+Use `../tools/power/power_sweep.py`; do not fork or rename the shared core.
+Keep Watcher conformance tests green. Fixture checks and owner authorization
+come first.

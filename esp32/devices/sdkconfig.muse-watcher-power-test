@@ -13,7 +13,7 @@
 # CH342 UART USB bridge. Pins/rails follow Seeed SenseCAP-Watcher-Firmware
 # components/sensecap-watcher at 8e37f7ccd3d836bb99f483e0f6e74e8252406644.
 # Characterizes isolated BSP loads, not the production application profile.
-CONFIG_MUSE_WATCHER_POWER_TEST=y
+CONFIG_MUSE_POWER_TEST=y
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y

@@ -12,8 +12,8 @@ Pick the lowest level that answers your question:
 | Level | You get | Device changes | Reuses |
 |---|---|---|---|
 | 1. Labelled source capture | Continuous source power and per-label mean/min/max/percentiles/charge | None | `tools/power/` (PPK2 owner) |
-| 2. Autonomous sweep on another ESP32 board here | Device-timestamped USB-free states, firmware evidence, guarded analysis, A/B/A comparisons, timer deep sleep | Board hooks and a state matrix for the diagnostic image | Level 1, `tools/muse/watcher_power.py`, the C state machine |
-| 3. Autonomous sweep on another platform (Zephyr, other MCUs) | As level 2 | Port the state machine's platform boundary, or speak its line protocol natively | Level 1, `tools/muse/watcher_power.py` |
+| 2. Autonomous sweep on another ESP32 board here | Device-timestamped USB-free states, firmware evidence, guarded analysis, A/B/A comparisons, timer deep sleep | Board hooks and a state matrix for the diagnostic image | Level 1, `tools/power/power_sweep.py`, the C state machine |
+| 3. Autonomous sweep on another platform (Zephyr, other MCUs) | As level 2 | Port the state machine's platform boundary, or speak its line protocol natively | Level 1, `tools/power/power_sweep.py` |
 
 None of this authorizes hardware access. Flashing, opening serial ports and
 enabling PPK2 output each need the board owner's explicit go-ahead.
@@ -101,37 +101,45 @@ report the drift between them.
 
 ## 2. Another ESP32 board in this repo
 
-The diagnostic image (`CONFIG_MUSE_WATCHER_POWER_TEST`) splits into a
+The diagnostic image (`CONFIG_MUSE_POWER_TEST`) splits into a
 board-neutral core and board hooks:
 
-- `components/muse/muse_watcher_power_test.{c,h}`: line protocol, arm/run state
+- `components/muse/muse_power_test.{c,h}`: line protocol, arm/run state
   machine, RTC journal, light-sleep accounting, deep-sleep resume chain, dry
   run. It compiles on the host against fakes (`MUSE_PTEST_HOST`), which is how
-  `tests/test_watcher_power_test.py` tests it.
-- `components/muse/boards/board_sensecap_watcher.c` (the
-  `CONFIG_MUSE_WATCHER_POWER_TEST` block) and
-  `boards/board_sensecap_watcher_power_test.h`: everything that touches Watcher
-  hardware.
-- `tools/muse/watcher_power.py`: arm/collect/analyze/compare/dryrun. It reads
-  the plan from the firmware's arm acknowledgment and has no Watcher
-  knowledge beyond names; pass `analyze --device "<board name>"` for the
-  report.
+  `tests/test_power_test.py` tests it.
+- `components/muse/boards/muse_power_test_board.h`: the board-neutral porting
+  surface, `muse_ptest_board_*`. The Watcher implementation and its unchanged
+  peripheral/sleep descriptor tables stay in `board_sensecap_watcher.c` under
+  `CONFIG_MUSE_POWER_TEST`; the core contains no Watcher board include or tables.
+- `tools/power/power_sweep.py`: arm/collect/analyze/compare/dryrun. It lives with
+  the PPK owner/receiver because it coordinates their captures; the existing
+  `tools/muse/chat.py` USB transport (and sibling `ports.py`) is reused via an
+  explicit import path, not moved or duplicated. The plan and `board` name
+  come from firmware. `analyze --device "<board name>"` overrides the name;
+  Watcher is the default only for legacy bundles without board identity.
+  New captures use `power-sweep`; legacy `watcher-sweep` captures remain
+  accepted. Legacy acquisition/dryrun type tags remain unchanged for bundle
+  compatibility. Acquisition/collect provenance, wire schema 1, matrix versions,
+  journal layout/budget, prefix analysis and comparison semantics are unchanged.
 
 ### Steps
 
 1. **Gather the power facts** (section 0) plus, per peripheral, which rail,
    expander bit or GPIO powers it and which pins it drives. Cite the
    schematic and vendor BSP as `devices/AGENTS.md` asks for any board work.
-2. **Make the core board-neutral (first port only).** The hooks and Kconfig are
-   still named for the Watcher. Rename `muse_watcher_ptest_*` to
-   `muse_ptest_board_*` (header `muse_power_test_board.h`), rename the option
-   to `CONFIG_MUSE_POWER_TEST` with a `depends on` list of supported boards,
-   and keep the Watcher build and every existing test green before adding
-   your board.
+2. **Board-neutral core: done.** `CONFIG_MUSE_POWER_TEST`,
+   `muse_power_test.{c,h}` / `muse_power_test_run()` and
+   `boards/muse_power_test_board.h` are shared already. Do not rename or fork
+   the core for another board. Extend the supported-board `depends on` list
+   in `components/muse/Kconfig` after implementing that board's hooks/matrices;
+   CMake includes the common core independently of the selected BSP. Keep the
+   Watcher conformance tests green.
 3. **Implement the board hooks** for your board:
 
    | Hook | Contract |
    |---|---|
+   | `name()`, `matrix(name,count)` | Stable board name for status/ACK/results; immutable board-owned descriptor table for `peripheral` or `sleep`. Unknown/unsupported matrix returns NULL and count zero; rejected strictly. No allocation. |
    | `init` | Bring up only what the diagnostic needs (I2C, expander/PMU, power latch held). No production app, NVS or radios. |
    | `power(out)` | Read USB presence (and charging if known) without the ADC. Called often; must be cheap and must not change state. |
    | `apply(state)` | Put every owned peripheral into the state's configuration and revert anything the previous state changed (knobs, rails, codecs). Return `ESP_ERR_NOT_SUPPORTED` for an unsupported state, other errors for real failures. |
@@ -139,10 +147,12 @@ board-neutral core and board hooks:
    | `service(load)` | Per-tick work for active loads (stream audio, sample an ADC). Bounded time. |
    | `uart_restore` | Reconnect console pins if a state parked them; called as soon as USB reappears. |
    | `prepare_deep(held)`, `release_deep_holds`, `deep_holds_owned` | Pad holds for deep-sleep states, and their recovery after any reset. Only needed for deep-sleep states. |
-   | `codec_*`, `warm_seen` | Watcher-specific codec history; replace with your own "has a reset-surviving peripheral been touched" evidence, or drop. |
+   | `codec_regs`, `codec_history`, `restore_codec_history`, `warm_seen` | Retained evidence for reset-surviving peripheral history. Boards without codecs return zeroed/unknown snapshots and cold history; do not remove the shared hooks or claim unknown registers are verified. |
+   | `usb_dryrun(on)` | Allow diagnostic USB rehearsal where board-safe, without changing PM or quantitative run state; clear on exit. |
 
-4. **Define the matrix** (`s_matrix` / `s_sleep_matrix` in the core, or a
-   board-supplied table after step 2). Each entry is a `muse_ptest_state_t`:
+4. **Define the board-owned matrix** in your BSP, returned by
+   `muse_ptest_board_matrix`; never insert board tables in the core. Each entry
+   is a `muse_ptest_state_t`:
    load, CPU policy (0 = DFS + automatic light sleep), knobs, poll interval,
    `role` (`ref`/`variant`/`other`) and `ref_group`. Rules:
    - Put every variant between two references of the same group, so `compare`
@@ -160,12 +170,12 @@ board-neutral core and board hooks:
    `CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND` off unless you measure it: GPIO sleep
    isolation cost +0.10 mA on the Watcher.
 6. **Extend the host tests.** Add your board's fakes beside
-   `tests/watcher_power_test_harness.c` and `tests/watcher_power_bsp_harness.c`,
+   `tests/power_test_harness.c` and `tests/power_test_bsp_harness.c`,
    cover apply/revert, readback and USB-return paths, then run the full suite
    (`python3 -m unittest discover -s tests -p 'test_*.py'`).
 7. **Build and flash** in its own build directory, the way `../../AGENTS.md`
    describes for your board.
-8. **Rehearse on USB.** `watcher_power.py dryrun --port … --matrix sleep` applies
+8. **Rehearse on USB.** `power_sweep.py dryrun --port … --matrix sleep` applies
    and reads back every non-deep state with USB connected and reports
    per-state errors. Fix everything it reports before using the PPK2. It
    consumes cold state, so power-cycle afterwards.
@@ -185,15 +195,15 @@ there are two routes; neither has been done yet for a non-ESP32 device.
 
 - **Port the core.** The state machine depends on `esp_err_t` codes and a small
   platform boundary of static `fw_*` functions at the top of
-  `muse_watcher_power_test.c`: clocks (`fw_timer_now`, `fw_rtc_now`), USB and
+  `muse_power_test.c`: clocks (`fw_timer_now`, `fw_rtc_now`), USB and
   state hooks (`fw_power`, `fw_apply`, `fw_readback`, `fw_service`), console
   output (`fw_write`, `fw_flush`) and deep sleep (`fw_timer_reset`,
   `fw_prepare_deep`, `fw_enter_deep`). The host build supplies these with fakes
-  and an `esp_err.h` shim (`tests/watcher_power_test_fakes/`); a Zephyr port
+  and an `esp_err.h` shim (`tests/power_test_fakes/`); a Zephyr port
   would supply them from Zephyr APIs and keep the journal in retained RAM
   (`__noinit` / a retained-memory region).
-- **Speak the protocol natively.** `watcher_power.py` only needs the line
-  protocol documented in `muse_watcher_power_test.h` and the guide's "State
+- **Speak the protocol natively.** `power_sweep.py` only needs the line
+  protocol documented in `muse_power_test.h` and the guide's "State
   matrix and evidence" section: `>ptest.status=<nonce>` echoing the nonce with
   `boot_id`, `now_us` and `usb`; `>ptest.arm=…` acknowledged with the plan; a
   sweep that starts on USB absence; `>ptest.results` with per-record

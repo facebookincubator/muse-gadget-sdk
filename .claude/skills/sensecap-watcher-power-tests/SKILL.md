@@ -8,7 +8,10 @@ description: Run USB-free Nordic PPK2 power profiling on a Seeed SenseCAP Watche
 Use this for Watcher power characterization or power-fix validation. Read
 `esp32/docs/power/sensecap-watcher.md` first; it is the setup, wiring,
 measurement-boundary and CLI reference. For PPK source ownership, also read
-`.claude/skills/ppk2-power-profile/SKILL.md`.
+`.claude/skills/ppk2-power-profile/SKILL.md`. The diagnostic core is now
+`muse_power_test.{c,h}` under `CONFIG_MUSE_POWER_TEST`; board-owned hooks and
+matrices implement `boards/muse_power_test_board.h`. Other boards use the
+porting recipe in `esp32/docs/power/README.md` without renaming this core.
 
 ## Safety gates
 
@@ -38,7 +41,7 @@ ports, with no credentials in commands or committed results.
 1. Identify the CH342 Watcher and its ESP32 console (second serial interface).
    The first is the Himax coprocessor; do not flash it. Verify the running
    firmware's board name using `tools/muse/chat.py --status` when available.
-2. Build `build-watcher-power-test` using ESP-IDF v6.0.1 and the defaults chain
+2. Build `build-muse-watcher-power-test` using ESP-IDF v6.0.1 and the defaults chain
    `sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test`.
    Run host tests and check partition sizes. Preserve NVS and existing factory
    backups. This isolated image needs no account/SDK token.
@@ -50,8 +53,8 @@ ports, with no credentials in commands or committed results.
    acknowledgments, `--output RUN/ppk.jsonl --control-dir RUN/control`.
    Its READY and a fault-free `control ... status` prove software ownership,
    not correct electrical wiring.
-5. Run `tools/muse/watcher_power.py arm --port DUT_PORT --ppk-control-dir RUN/control --output RUN/acquisition.json`.
-   It begins recording via the existing owner, bounds the UART clock mapping,
+5. Run `tools/power/power_sweep.py arm --port DUT_PORT --ppk-control-dir RUN/control --output RUN/acquisition.json`.
+   It begins a `power-sweep` recording via the existing owner, bounds the UART clock mapping,
    and requires the Watcher's actual VBUS-present acknowledgment. Do not
    re-arm blindly after a timeout: command outcome may be unknown. Omission
    of `--matrix` keeps peripheral v1 (27 states, repeats 1–2). Use
@@ -66,10 +69,10 @@ ports, with no credentials in commands or committed results.
 7. Hold the task for the bounded duration reported by `arm`, measured from
    unplugging. Do not call it successful just because time elapsed. Prompt
    the operator to reconnect Watcher USB when the bound has elapsed.
-8. Run `watcher_power.py collect --port DUT_PORT --ppk-control-dir RUN/control --acquisition RUN/acquisition.json --output RUN/results.json --usb-reconnected`.
+8. Run `power_sweep.py collect --port DUT_PORT --ppk-control-dir RUN/control --acquisition RUN/acquisition.json --output RUN/results.json --usb-reconnected`.
    It verifies live USB, run/boot identity, and retrieves the retained result
    journal before allowing the owner to release source power.
-9. Run `watcher_power.py analyze --results RUN/results.json --samples RUN/ppk.jsonl --output RUN/profile.json`.
+9. Run `power_sweep.py analyze --results RUN/results.json --samples RUN/ppk.jsonl --output RUN/profile.json`.
    Preserve raw acquisition locally; publish only reviewed, scrubbed results.
 
 On failure, reconnect Watcher USB safely before explicit PPK finish. Never
@@ -79,7 +82,7 @@ restart source mode, auto-reset hardware, or erase NVS as generic recovery.
 ## USB-only diagnostic preflight
 
 After authorized console access, run
-`python3 tools/muse/watcher_power.py dryrun --port DUT_PORT --matrix sleep --output RUN/dryrun.json --timeout-s 60`
+`python3 tools/power/power_sweep.py dryrun --port DUT_PORT --matrix sleep --output RUN/dryrun.json --timeout-s 60`
 while USB remains connected and no sweep is active. It strictly applies/reads
 sleep indices 0–23, skips deep entry, holds the USB awake lock, exercises no PM
 or timing dwell, restores resting configuration, and emits per-state evidence

@@ -13,7 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "muse_watcher_power_test.h"
+#include "muse_power_test.h"
+#include "boards/muse_power_test_board.h"
 
 #include <ctype.h>
 #include <inttypes.h>
@@ -83,76 +84,15 @@ static int capture_error_log(const char *format, va_list args)
     return n;
 }
 
-#define STATE(id, note, load, mhz, bl, amp) { id, note, load, mhz, bl, amp, 0, 1000, MUSE_PTEST_CODEC_KEEP, "other", "" }
-static const muse_ptest_state_t s_matrix[] = {
-    STATE("baseline_pre", "radio-off, codecs uninitialized/closed, LCD+ADC rail off, DFS + automatic light sleep", MUSE_PTEST_IDLE, 0, -1, false),
-    STATE("cpu_fixed_40_idle", "fixed CPU clock, idle (not a busy loop)", MUSE_PTEST_IDLE, 40, -1, false),
-    STATE("cpu_fixed_80_idle", "fixed CPU clock, idle", MUSE_PTEST_IDLE, 80, -1, false),
-    STATE("cpu_fixed_160_idle", "fixed CPU clock, idle", MUSE_PTEST_IDLE, 160, -1, false),
-    STATE("cpu_fixed_240_idle", "fixed CPU clock, idle", MUSE_PTEST_IDLE, 240, -1, false),
-    STATE("baseline_cpu_post", "paired DFS baseline after fixed clocks", MUSE_PTEST_IDLE, 0, -1, false),
-    STATE("lcd_rail_off_pre", "LCD and touch rail off, fixed 80MHz", MUSE_PTEST_IDLE, 80, -1, false),
-    STATE("lcd_black_bl_0", "LCD rail on, static black, backlight 0%, no LVGL/touch task", MUSE_PTEST_LCD, 80, 0, false),
-    STATE("lcd_black_bl_25", "LCD rail on, static black, backlight 25%", MUSE_PTEST_LCD, 80, 25, false),
-    STATE("lcd_black_bl_50", "LCD rail on, static black, backlight 50%", MUSE_PTEST_LCD, 80, 50, false),
-    STATE("lcd_black_bl_100", "LCD rail on, static black, backlight 100%", MUSE_PTEST_LCD, 80, 100, false),
-    STATE("lcd_rail_off_post", "paired LCD rail-off after brightness sequence", MUSE_PTEST_IDLE, 80, -1, false),
-    STATE("codecs_closed_pre", "always-powered codec rail, no initialized I2S yet or codecs closed", MUSE_PTEST_IDLE, 80, -1, false),
-    STATE("codecs_open_amp_off", "16kHz stereo-slot codecs open, I2S clocks on, no drain, amp off", MUSE_PTEST_CODECS_IDLE, 80, -1, false),
-    STATE("codecs_open_amp_on", "same codecs and I2S, amp enabled, no playback", MUSE_PTEST_CODECS_IDLE, 80, -1, true),
-    STATE("mic_capture_16k", "16kHz stereo I2S drained/discarded, right-slot mic, 0dB gain, amp off", MUSE_PTEST_MIC, 80, -1, false),
-    STATE("sine_1k_minus18dbfs", "1kHz sine -18dBFS peak, volume 25/100, 16kHz stereo slots", MUSE_PTEST_SINE, 80, -1, true),
-    STATE("codecs_closed_post", "paired baseline after codec close and I2S stop", MUSE_PTEST_IDLE, 80, -1, false),
-    STATE("adc_divider_rail_on", "battery divider enabled, no ADC sampling", MUSE_PTEST_ADC_RAIL, 80, -1, false),
-    STATE("adc_sample_1hz", "battery divider enabled, calibrated 8-sample reading once/second", MUSE_PTEST_ADC_SAMPLE, 80, -1, false),
-    STATE("adc_divider_off_post", "paired ADC rail-off baseline", MUSE_PTEST_IDLE, 80, -1, false),
-    STATE("wifi_scanning", "unassociated active scans, no credentials/NVS; completed scans counted", MUSE_PTEST_WIFI_SCAN, 80, -1, false),
-    STATE("wifi_associated_idle", "skipped: no known AP credentials; never load production NVS", MUSE_PTEST_UNSUPPORTED, 80, -1, false),
-    STATE("ble_advertising", "skipped: standalone NimBLE lifecycle not characterized; controller never initialized", MUSE_PTEST_UNSUPPORTED, 80, -1, false),
-    STATE("camera_capture", "skipped: coprocessor/SSCMA lifecycle excluded from minimum sweep; AI rail stays off", MUSE_PTEST_UNSUPPORTED, 80, -1, false),
-    STATE("deep_sleep_timer", "skipped: no deep-sleep reset or auto-resume in this sweep; use measured automatic light sleep", MUSE_PTEST_UNSUPPORTED, 0, -1, false),
-    STATE("baseline_post", "radio-off resting, LCD+ADC+amp+AI off, codecs closed, DFS + automatic light sleep", MUSE_PTEST_IDLE, 0, -1, false),
-};
-#define MATRIX_COUNT (sizeof(s_matrix) / sizeof(s_matrix[0]))
-_Static_assert(MATRIX_COUNT * MUSE_PTEST_MAX_REPEATS <= MUSE_PTEST_MAX_RECORDS, "result capacity");
-
-#define SLEEP_STATE(id, note, knobs, codec, role, group, poll, load) \
-    { id, note, load, 0, -1, false, knobs, poll, codec, role, group }
-#define BEST_KNOBS (MUSE_PTEST_I2S_LOW | MUSE_PTEST_UART_HIZ | MUSE_PTEST_RGB_LOW | MUSE_PTEST_PULLS_OFF | MUSE_PTEST_UNUSED_HIZ | MUSE_PTEST_GPIO_ISOLATE | MUSE_PTEST_CPU_PD)
-static const muse_ptest_state_t s_sleep_matrix[] = {
-    SLEEP_STATE("cold_ref", "untouched codec and I2S state; cold means no audio constructor has run", 0, MUSE_PTEST_CODEC_COLD, "other", "", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("cold_i2s_low", "cold codec, I2S outputs low and DIN pulldown; reference for hiz", MUSE_PTEST_I2S_LOW, MUSE_PTEST_CODEC_COLD, "ref", "cold", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("cold_i2s_hiz", "cold codec, I2S pads floating", MUSE_PTEST_I2S_HIZ, MUSE_PTEST_CODEC_COLD, "variant", "cold", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("cold_i2s_low_b", "paired cold I2S-low reference", MUSE_PTEST_I2S_LOW, MUSE_PTEST_CODEC_COLD, "ref", "cold", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("codec_initialized", "audio constructors only, never stream-opened; ADC constructor powers ADC; I2S stopped", 0, MUSE_PTEST_CODEC_INITIALIZED, "other", "", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("codec_suspended", "16kHz codecs opened then closed; shutdown registers checked; always-on codec rail", 0, MUSE_PTEST_CODEC_SUSPENDED, "other", "", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("warm_ref", "warm baseline_post policy; no parking knobs", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("uart_hiz", "UART0 floating only without VBUS; rerouted immediately on USB", MUSE_PTEST_UART_HIZ, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("warm_ref_2", "paired warm reference", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("rgb_low", "GPIO40 DIN driven low; powered LED is not rail-off", MUSE_PTEST_RGB_LOW, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("warm_ref_3", "paired warm reference", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("pulls_off", "internal I2C0/EXP_INT pulls off; external pulls retained; knob pads hiz, no wake", MUSE_PTEST_PULLS_OFF, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("warm_ref_4", "paired warm reference", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("unused_hiz", "unowned Himax/shared SD pads floating, both rails off", MUSE_PTEST_UNUSED_HIZ, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("warm_ref_5", "paired warm reference", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("gpio_isolate", "sleep-pad isolation, LCD/touch rail-off outputs stay low", MUSE_PTEST_GPIO_ISOLATE, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("warm_ref_6", "paired warm reference", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("cpu_pd", "CPU retention power-down permitted; other vetoes/eligibility still apply", MUSE_PTEST_CPU_PD, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("warm_ref_7", "paired warm reference", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("best_combined", "all safe sleep knobs, I2S low", BEST_KNOBS, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("warm_ref_8", "paired warm reference", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("best_combined_b", "repeat best-combined variant", BEST_KNOBS, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("best_poll_5s", "best-combined with five-second VBUS poll; boundary timers remain", BEST_KNOBS, MUSE_PTEST_CODEC_KEEP, "variant", "warm", 5000, MUSE_PTEST_IDLE),
-    /* Final A closes both late B variants; explicitly requested for A/B/A. */
-    SLEEP_STATE("warm_ref_9", "final paired warm reference for best-combined-b and five-second polling", 0, MUSE_PTEST_CODEC_KEEP, "ref", "warm", 1000, MUSE_PTEST_IDLE),
-    SLEEP_STATE("deep_sleep_timer", "timer-only reset, sleep-pad isolation; no held I2S/RGB outputs", MUSE_PTEST_GPIO_ISOLATE, MUSE_PTEST_CODEC_SUSPENDED, "other", "", 0, MUSE_PTEST_DEEP_SLEEP),
-    SLEEP_STATE("deep_sleep_timer_held", "timer-only reset; I2S outputs and RGB low held across deep sleep", MUSE_PTEST_GPIO_ISOLATE | MUSE_PTEST_I2S_LOW | MUSE_PTEST_RGB_LOW | MUSE_PTEST_GPIO_HOLD, MUSE_PTEST_CODEC_SUSPENDED, "other", "", 0, MUSE_PTEST_DEEP_SLEEP),
-};
-#define SLEEP_MATRIX_COUNT (sizeof(s_sleep_matrix) / sizeof(s_sleep_matrix[0]))
 typedef enum { MATRIX_PERIPHERAL, MATRIX_SLEEP } matrix_t;
-static const muse_ptest_state_t *matrix_states(matrix_t m) { return m == MATRIX_SLEEP ? s_sleep_matrix : s_matrix; }
-static size_t matrix_count(matrix_t m) { return m == MATRIX_SLEEP ? SLEEP_MATRIX_COUNT : MATRIX_COUNT; }
 static const char *matrix_name(matrix_t m) { return m == MATRIX_SLEEP ? "sleep" : "peripheral"; }
+static const muse_ptest_state_t *matrix_states(matrix_t m) { return muse_ptest_board_matrix(matrix_name(m), NULL); }
+static size_t matrix_count(matrix_t m)
+{
+    size_t count = 0;
+    muse_ptest_board_matrix(matrix_name(m), &count);
+    return count;
+}
 static unsigned matrix_version(matrix_t m) { return m == MATRIX_SLEEP ? 2 : 1; }
 
 typedef enum { RUN_IDLE, RUN_ARMED, RUN_RUNNING, RUN_COMPLETE, RUN_ABORTED, RUN_ERROR, RUN_REBOOT } run_status_t;
@@ -244,7 +184,7 @@ static void start_next(void);
 static int64_t fw_now(void) { return fw_timer_now() + s_timeline_offset_us; }
 static int64_t rtc_uncertainty(int64_t us) { return (us + 99) / 100 + 50000; }
 static const muse_ptest_state_t *run_state(unsigned index) { return &matrix_states(s_run.matrix)[index]; }
-static const muse_ptest_state_t *resting_state(void) { return &s_matrix[MATRIX_COUNT - 1]; }
+static const muse_ptest_state_t *resting_state(void) { return &matrix_states(MATRIX_PERIPHERAL)[matrix_count(MATRIX_PERIPHERAL) - 1]; }
 static deep_info_t *deep_for(unsigned pos)
 {
     for (unsigned i = 0; i < s_run.deep_count; i++) { if (s_run.deep[i].record_pos == pos) { return &s_run.deep[i]; } }
@@ -405,6 +345,14 @@ static void emit_actual(const muse_ptest_readback_t *a)
 
 static void emit_timeline(void)
 {
+    emit("\"board\":\"");
+    const unsigned char *name = (const unsigned char *)muse_ptest_board_name();
+    for (; *name; name++) {
+        if (*name == '"' || *name == '\\') { emit("\\%c", *name); }
+        else if (*name < 32) { emit("\\u%04x", (unsigned)*name); }
+        else { emit("%c", *name); }
+    }
+    emit("\",");
     emit("\"matrix\":\"%s\",\"matrix_version\":%u,\"resume_count\":%" PRIu32 ",\"timeline_offset_us\":%" PRId64 ",\"timeline_uncertainty_us\":%" PRId64 ",",
          matrix_name(s_run.matrix), matrix_version(s_run.matrix), s_run.resume_count,
          s_timeline_offset_us, s_timeline_uncertainty_us);
@@ -644,6 +592,7 @@ static void dryrun(const char *json)
     if (valid) { ws(&p); valid = *p++ == ':' && quoted(&p, matrix, sizeof(matrix)) && !strcmp(matrix, "sleep"); }
     if (valid) { ws(&p); valid = *p == '}'; if (valid) { p++; ws(&p); valid = !*p; } }
     if (!valid) { emit_error("invalid_dryrun_json_sleep_only", ESP_ERR_INVALID_ARG); return; }
+    if (!matrix_count(MATRIX_SLEEP)) { emit_error("matrix_unavailable", ESP_ERR_NOT_SUPPORTED); return; }
     if (s_run.status == RUN_ARMED || s_run.status == RUN_RUNNING) { emit_error("dryrun_requires_no_active_run", ESP_ERR_INVALID_STATE); return; }
     if (s_init_error) { emit_error("board_initialization_failed", s_init_error); return; }
     muse_ptest_readback_t power = {0};
@@ -654,8 +603,8 @@ static void dryrun(const char *json)
     unsigned errors = 0, states = 0;
     esp_err_t tx_error = ESP_OK;
     char tx_log[MUSE_PTEST_ERROR_LOG_MAX + 1] = {0};
-    for (unsigned i = 0; i < SLEEP_MATRIX_COUNT; i++) {
-        const muse_ptest_state_t *state = &s_sleep_matrix[i];
+    for (unsigned i = 0; i < matrix_count(MATRIX_SLEEP); i++) {
+        const muse_ptest_state_t *state = &matrix_states(MATRIX_SLEEP)[i];
         if (state->load == MUSE_PTEST_DEEP_SLEEP) { continue; }
         log_reset();
         muse_ptest_readback_t actual = {0}, before = {0};
@@ -731,6 +680,9 @@ static void command(const char *line)
     if (!parse_arm(line + 11, &a)) { emit_error("invalid_arm_json_or_bounds", ESP_ERR_INVALID_ARG); return; }
     unsigned timed = 0, deep = 0;
     if (a.matrix == MATRIX_SLEEP && a.repeats != 1) { emit_error("sleep_requires_one_repeat_cold_not_reversible", ESP_ERR_INVALID_ARG); return; }
+    if (!matrix_count(a.matrix) || matrix_count(a.matrix) > MUSE_PTEST_MAX_RECORDS / a.repeats) {
+        emit_error("matrix_unavailable_or_exceeds_capacity", ESP_ERR_NOT_SUPPORTED); return;
+    }
     for (size_t i = 0; i < matrix_count(a.matrix); i++) {
         timed += matrix_states(a.matrix)[i].load != MUSE_PTEST_UNSUPPORTED;
         deep += matrix_states(a.matrix)[i].load == MUSE_PTEST_DEEP_SLEEP;
@@ -970,7 +922,6 @@ static void tick(void)
 }
 
 #ifndef MUSE_PTEST_HOST
-#include "boards/board_sensecap_watcher_power_test.h"
 #include "driver/uart.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -1065,7 +1016,7 @@ static esp_err_t wifi_scan(void)
 static int64_t fw_timer_now(void) { return esp_timer_get_time(); }
 static int64_t fw_rtc_now(void) { return esp_rtc_get_time_us(); }
 static bool fw_timer_reset(int reason) { return reason == ESP_RST_DEEPSLEEP && esp_sleep_get_wakeup_causes() == (UINT32_C(1) << ESP_SLEEP_WAKEUP_TIMER); }
-static unsigned fw_codec_history(void) { return muse_watcher_ptest_codec_history(); }
+static unsigned fw_codec_history(void) { return muse_ptest_board_codec_history(); }
 static bool s_cpu_pd_veto_held;
 
 static esp_err_t fw_prepare_deep(const muse_ptest_state_t *state, int64_t us)
@@ -1089,15 +1040,15 @@ static esp_err_t fw_prepare_deep(const muse_ptest_state_t *state, int64_t us)
     }
 #endif
     if ((e = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL))) { return e; }
-    if ((e = muse_watcher_ptest_prepare_deep((state->knobs & MUSE_PTEST_GPIO_HOLD) != 0))) { return e; }
+    if ((e = muse_ptest_board_prepare_deep((state->knobs & MUSE_PTEST_GPIO_HOLD) != 0))) { return e; }
     return esp_sleep_enable_timer_wakeup((uint64_t)us);
 }
 static void fw_enter_deep(void) { esp_deep_sleep_start(); }
 static esp_err_t fw_power(muse_ptest_readback_t *out)
 {
-    esp_err_t e = muse_watcher_ptest_power(out);
+    esp_err_t e = muse_ptest_board_power(out);
     if (s_dryrun || e || out->usb) {
-        esp_err_t uart_error = muse_watcher_ptest_uart_restore();
+        esp_err_t uart_error = muse_ptest_board_uart_restore();
         if (!e) { e = uart_error; }
     }
     /* VBUS, not UART 'connection' (the CH342 has no connection API). Keep
@@ -1115,7 +1066,7 @@ static esp_err_t fw_apply(const muse_ptest_state_t *state)
 {
     esp_err_t e = wifi_off();
     if (e) { return e; }
-    if (s_dryrun) { return muse_watcher_ptest_apply(state); } /* USB lock held; no PM changes */
+    if (s_dryrun) { return muse_ptest_board_apply(state); } /* USB lock held; no PM changes */
     bool veto = !(state->knobs & MUSE_PTEST_CPU_PD);
     if (veto != s_cpu_pd_veto_held) {
         /* IDF v6.0.1 sleep_modes.c uses ON refs. OFF releases ours; AUTO
@@ -1139,13 +1090,13 @@ static esp_err_t fw_apply(const muse_ptest_state_t *state)
         if ((e = esp_pm_lock_acquire(s_cpu_lock))) { return e; }
         s_cpu_lock_held = true;
     }
-    if ((e = muse_watcher_ptest_apply(state))) { return e; }
+    if ((e = muse_ptest_board_apply(state))) { return e; }
     return state->load == MUSE_PTEST_WIFI_SCAN ? wifi_scan() : ESP_OK;
 }
 static esp_err_t fw_readback(muse_ptest_readback_t *out)
 {
     if (s_run.status == RUN_RUNNING && s_usb_lock_held) { return ESP_ERR_INVALID_STATE; }
-    esp_err_t e = muse_watcher_ptest_readback(out);
+    esp_err_t e = muse_ptest_board_readback(out);
     if (out->usb) {
         muse_ptest_readback_t p = {0};
         esp_err_t power_error = fw_power(&p); /* UART restore/USB lock immediately. */
@@ -1182,35 +1133,35 @@ static esp_err_t fw_service(muse_ptest_load_t load)
         wifi_scan_config_t scan = { .scan_type = WIFI_SCAN_TYPE_ACTIVE, .scan_time.active = { .min = 20, .max = 40 } };
         return esp_wifi_scan_start(&scan, false);
     }
-    return muse_watcher_ptest_service(load);
+    return muse_ptest_board_service(load);
 }
-static void fw_codec_regs(muse_ptest_codec_regs_t *out) { muse_watcher_ptest_codec_regs(out); }
-static void fw_dryrun_mode(bool on) { muse_watcher_ptest_usb_dryrun(on); }
+static void fw_codec_regs(muse_ptest_codec_regs_t *out) { muse_ptest_board_codec_regs(out); }
+static void fw_dryrun_mode(bool on) { muse_ptest_board_usb_dryrun(on); }
 static esp_err_t fw_flush(void)
 {
     esp_err_t e = uart_wait_tx_done(CONFIG_ESP_CONSOLE_UART_NUM, pdMS_TO_TICKS(1000));
-    if (e) { ESP_LOGE("watcher_ptest", "UART TX drain failed: %d", e); }
+    if (e) { ESP_LOGE("power_test", "UART TX drain failed: %d", e); }
     return e;
 }
 static void fw_write(const char *buf, size_t n) { uart_write_bytes(CONFIG_ESP_CONSOLE_UART_NUM, buf, n); }
 
-void muse_watcher_power_test_run(void)
+void muse_power_test_run(void)
 {
     boot_results(esp_random(), esp_reset_reason());
     /* No muse_console RX wake lock/timer, no LVGL, voice, reconnect, BLE,
      * credentials, NVS, or production app initialization. UART is the bridge
-     * console selected by the Watcher overlay; no serial-JTAG assumption. */
+     * console selected by the board overlay; no serial-JTAG assumption. */
     esp_log_set_vprintf(capture_error_log);
     esp_log_level_set("*", ESP_LOG_NONE);
     esp_log_level_set("board", ESP_LOG_ERROR); /* BSP returns use capture-only hook */
-    esp_log_level_set("watcher_ptest", ESP_LOG_ERROR);
-    bool held_recovery = s_release_deep_holds || muse_watcher_ptest_deep_holds_owned();
-    s_init_error = held_recovery ? muse_watcher_ptest_release_deep_holds() : ESP_OK;
+    esp_log_level_set("power_test", ESP_LOG_ERROR);
+    bool held_recovery = s_release_deep_holds || muse_ptest_board_deep_holds_owned();
+    s_init_error = held_recovery ? muse_ptest_board_release_deep_holds() : ESP_OK;
     /* Recover owned pads even if UART allocation subsequently fails. */
     esp_err_t uart_error = uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM, 1024, 0, 0, NULL, 0);
     if (!s_init_error) { s_init_error = uart_error; }
-    if (!s_init_error) { s_init_error = muse_watcher_ptest_init(); }
-    muse_watcher_ptest_restore_codec_history((held_recovery || muse_watcher_ptest_warm_seen()) ? MUSE_PTEST_CODEC_SUSPENDED : s_run.codec_history);
+    if (!s_init_error) { s_init_error = muse_ptest_board_init(); }
+    muse_ptest_board_restore_codec_history((held_recovery || muse_ptest_board_warm_seen()) ? MUSE_PTEST_CODEC_SUSPENDED : s_run.codec_history);
     if (!s_init_error) { s_init_error = esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "ptest_fixed", &s_cpu_lock); }
     if (!s_init_error) { s_init_error = esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "ptest_usb", &s_usb_lock); }
     if (!s_init_error) {

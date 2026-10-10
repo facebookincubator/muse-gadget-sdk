@@ -139,7 +139,7 @@ For an agent/runner, send blocking host FIFO commands to the same process:
 
 ```sh
 /tmp/ppk-profile-venv/bin/python esp32/tools/power/ppk2_profile.py control \
-  --control-dir "$CAPTURE_DIR/control" begin --label watcher-sweep
+  --control-dir "$CAPTURE_DIR/control" begin --label power-sweep
 /tmp/ppk-profile-venv/bin/python esp32/tools/power/ppk2_profile.py control \
   --control-dir "$CAPTURE_DIR/control" end
 /tmp/ppk-profile-venv/bin/python esp32/tools/power/ppk2_profile.py control \
