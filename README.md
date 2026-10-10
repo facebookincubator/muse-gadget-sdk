@@ -63,6 +63,7 @@ upstream licenses:
 | Path | Upstream | License |
 |---|---|---|
 | [`esp32/components/minimp3/include/minimp3.h`](esp32/components/minimp3) | [lieff/minimp3](https://github.com/lieff/minimp3) | CC0-1.0, see [`LICENSE`](esp32/components/minimp3/LICENSE) |
+| [`esp32/components/viewesmart__smartring_plus/`](esp32/components/viewesmart__smartring_plus) | [VIEWESMART/smartring_plus](https://github.com/VIEWESMART/smartring_plus) | Apache-2.0, see [`LICENSE`](esp32/components/viewesmart__smartring_plus/LICENSE) |
 | [`esp32/main/pixel_font.c`](esp32/main/pixel_font.c) | Adafruit GFX `glcdfont.c` | BSD-2-Clause, in the file header |
 
 Dependencies fetched at build time are under their own licenses: ESP-IDF

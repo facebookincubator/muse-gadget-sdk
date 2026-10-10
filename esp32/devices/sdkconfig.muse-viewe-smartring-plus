@@ -1,0 +1,49 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# VIEWESMART SmartRing-Plus: ESP32-S3-N16R8, 360x360 round ST77916 display with
+# CST816 touch, ES8311 speaker/mic, 16 MB flash, 8 MB octal PSRAM.
+# Native USB Serial/JTAG (303a:1001). BOOT is GPIO0 and is inside the case;
+# the on-screen mic is the talk button. Power-off is the hardware switch only.
+# BSP viewesmart/smartring_plus 1.1.2 is vendored at
+# components/viewesmart__smartring_plus. Load last, after sdkconfig.defaults
+# and sdkconfig.muse.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_VIEWE_SMARTRING_PLUS=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# 8 MB octal PSRAM required for UI, images, voice session and tunnel.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# Static buffers in PSRAM: Wi-Fi's, lwIP's and BT's, and those marked
+# EXT_RAM_BSS_ATTR (Muse's chat turn, the tunnel batch).
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
+# Forces Wi-Fi TX buffers static, in internal RAM: 8 (not 16) at 1.6 KB each.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8

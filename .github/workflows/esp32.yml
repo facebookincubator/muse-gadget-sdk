@@ -188,6 +188,9 @@ jobs:
           - board: muse-ai-passport
             target: esp32c3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport"
+          - board: muse-viewe-smartring-plus
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-viewe-smartring-plus"
     defaults:
       run:
         shell: bash

@@ -72,6 +72,7 @@ before adding a feature to one.
 | VN ESP32-S3 1.83-inch NV3023 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-vn-s3-183` | `tools/muse/board.sh build vn183` |
 | Guition JC3248W535 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535` | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd7` | `tools/muse/board.sh build lcd7` |
+| VIEWE SmartRing-Plus | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-viewe-smartring-plus` | `tools/muse/board.sh build smartring-plus` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
 | M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
 | FoloToy AI Passport (experimental) | `esp32c3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport` | `tools/muse/board.sh build ai-passport` |
@@ -131,7 +132,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-216|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7|vn183|ai-passport> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-216|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7|vn183|ai-passport|smartring-plus> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -389,10 +390,11 @@ The status LED (or the edge bars or avatar on display boards) shows the state:
 | purple | unpaired |
 | red, blinking | error |
 
-Button (BOOT on the dev boards):
+Button (BOOT on the dev boards; inside the case on SmartRing-Plus):
 
 - **short press**: confirm a pending pairing, or reopen the setup window if
-  setup isn't complete
+  setup isn't complete. On boards with the full UI (SmartRing-Plus, CoreS3, etc.),
+  the on-screen mic button is also push-to-talk once paired.
 - **hold for 5 s**: reset setup (unpair and forget Wi-Fi)
 
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the

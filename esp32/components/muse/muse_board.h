@@ -113,6 +113,12 @@ typedef struct {
     /* Called every 10 ms from the input task (50 ms while the display is
      * paused, unless wait_buttons is set); returns MUSE_BTN_* edges. */
     unsigned (*poll_buttons)(void);
+    /* Touch boards whose talk button is out of reach: non-NULL turns the mic
+     * icon into an on-screen talk button, and the Muse app's pairing card into
+     * a tap target while it asks for the talk button. Called from LVGL's task
+     * as either is pressed (true) and let go (false); poll_buttons() reports
+     * it as MUSE_BTN_TALK_* edges. NULL: the icon is only a hint. */
+    void (*touch_talk)(bool down);
     /* Display paused: returns once a button changes (waking the chip from
      * light sleep), the task is notified or timeout_ms passes, so the
      * buttons needn't be polled. NULL: polled. */

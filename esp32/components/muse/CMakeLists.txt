@@ -102,6 +102,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_vn_s3_183.c")
     elseif(CONFIG_MUSE_BOARD_AI_PASSPORT)
         list(APPEND srcs "boards/board_ai_passport.c")
+    elseif(CONFIG_MUSE_BOARD_VIEWE_SMARTRING_PLUS)
+        list(APPEND srcs "boards/board_viewe_smartring_plus.c")
     endif()
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
@@ -135,4 +137,12 @@ if(CONFIG_MUSE_ENABLED)
     target_compile_definitions(${lvgl_lib} PUBLIC
         "LV_ASSERT_HANDLER_INCLUDE=<stdlib.h>"
         "LV_ASSERT_HANDLER=abort()\;")
+    
+    # SmartRing-Plus does not call bsp_audio_init(). This only overrides the
+    # unused BSP default of 48 kHz if that code is linked. The board file opens
+    # its own 16 kHz duplex I2S.
+    if(CONFIG_MUSE_BOARD_VIEWE_SMARTRING_PLUS)
+        idf_component_get_property(bsp_lib viewesmart__smartring_plus COMPONENT_LIB)
+        target_compile_definitions(${bsp_lib} PRIVATE "BOARD_AUDIO_SAMPLE_RATE=16000")
+    endif()
 endif()
