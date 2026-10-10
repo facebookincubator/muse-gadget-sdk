@@ -28,8 +28,9 @@ and the Apache License doesn't grant rights to it.
 
 Your avatar goes in `components/muse/avatar/muse_pixel.c`. When that file
 exists, the firmware build and the preview tools use it in place of the default avatar.
-The directory is gitignored, so your avatar stays on your machine. Delete
-the file to go back to the default avatar.
+The directory is gitignored, so your avatar stays on your machine. To go
+back to the default avatar, run `python3 tools/muse/avatar.py --restore default`
+(see below).
 
 ## The quick way
 
@@ -58,19 +59,57 @@ What it does, step by step:
 2. Sends your Muse `tools/muse/avatar_prompt.md` with the current renderer
    attached, as a typed message through the board (`tools/muse/chat.py`).
    Muse replies with a new `muse_pixel.c`.
-3. Saves the reply as `components/muse/avatar/last_reply.md` and the file
-   as `components/muse/avatar/muse_pixel.c`. The file it replaces becomes
-   `muse_pixel.c.prev`. The first comment in the file says what Muse drew,
-   and the tool prints it.
-4. Builds the file on your computer with warnings as errors, then runs every
-   animation with the address sanitizer. If either fails, it sends the errors
-   back to Muse and asks for a fixed file, twice at most. It also renders one
-   GIF per animation to `components/muse/avatar/gifs/`.
-5. Builds the firmware with `tools/muse/board.sh build` and flashes it.
+3. Saves the reply as `components/muse/avatar/last_reply.md`, and checks the
+   file in it before touching your avatar. A reply cut off on the way is never
+   used. It builds the file on your computer with warnings as errors, runs every
+   animation with the address sanitizer, and renders one GIF per animation.
+   Then it builds the firmware with the file, with `tools/muse/board.sh build`
+   in a copy of this tree, reusing your own build's configuration for that board
+   (`build-muse-*/sdkconfig`), or the defaults if you have no build of it yet.
+   If a check finds an error in the avatar, it sends the errors back to Muse
+   and asks for a fixed file, twice at most. Any failure leaves your avatar as
+   it was. The first comment in the
+   file says what Muse drew, and the tool prints it.
+4. Only once it all passes, saves the file as
+   `components/muse/avatar/muse_pixel.c` (the file it replaces becomes
+   `muse_pixel.c.prev`) and its GIFs in `components/muse/avatar/gifs/`.
+5. Flashes the firmware it built and checked. With `--no-flash`, that build
+   stays in `components/muse/avatar/firmware-BOARD/`, with the hashes of its
+   avatar and app image in `VERIFIED`, and the tool prints the command that
+   flashes it. A later run that fails leaves it; a new avatar replaces it.
 
-Options: `--no-flash` stops after the build, `--port` picks the board when
+Options: `--no-flash` stops after the build and keeps it, `--port` picks the board when
 more than one is plugged in, and `--reply FILE` skips asking Muse and uses a
 reply you saved yourself.
+
+### Going back, and what's where
+
+```sh
+python3 tools/muse/avatar.py --status
+python3 tools/muse/avatar.py --restore previous
+python3 tools/muse/avatar.py --restore default
+```
+
+`--restore previous` goes back to `muse_pixel.c.prev`, and the avatar you
+have becomes the previous one, so running it again goes forward.
+`--restore default` goes back to the default avatar, keeping yours as
+`muse_pixel.c.prev`. Either one checks the avatar it goes back to like a new
+one (on your computer, and with `--board` in a firmware build), changes
+nothing if a check fails, and then builds and flashes like a new avatar
+(`--no-flash` and `--board` work the same). For the default avatar, it
+checks `avatar/muse_pixel.c` as it is when the check starts, and stops if
+that file has changed by the time the firmware is built and the switch is
+made. It doesn't lock the file against editors.
+
+`--status` needs no board. It says which avatar the next firmware build on
+this computer uses, the previous one, and any checked build kept for
+flashing. It also says what this tool last flashed to each board, from its
+record in `components/muse/avatar/flashed`. That record says what was written,
+not what the board runs now. The board doesn't report which image it runs,
+and it may have been flashed since, by `board.sh`, another tool or another
+computer. Likewise, after flashing, the tool reports that the flash finished
+and whether the board answered after booting. To see your avatar, look at the
+board.
 
 It needs Python 3 with `pyserial` and `pillow`, a C compiler, and ESP-IDF
 (see `../../AGENTS.md`). An agent in a sandbox needs the sandbox off to open
