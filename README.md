@@ -48,6 +48,12 @@ prefixed with "MuseGadget".
 Each directory has a `README.md` to get started and an `AGENTS.md` for coding
 agents like [Muse Code](https://developer.meta.com/ai/lp/muse-code/).
 
+For battery-input power profiling, see the [porting recipe](esp32/docs/power/README.md).
+The opt-in diagnostic core is board-neutral; boards supply its hooks and state
+matrices, and [power_sweep.py](esp32/tools/power/power_sweep.py) drives the
+USB-free sweep. The isolated diagnostic does not pair or need an SDK token;
+fixture safety and explicit hardware authorization still come first.
+
 ## Community
 
 Meet other hackers who are building and customizing Muse gadgets in our

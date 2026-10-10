@@ -1,0 +1,35 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# DIAGNOSTIC ONLY. Load after sdkconfig.defaults;devices/sdkconfig.muse;
+# devices/sdkconfig.muse-sensecap-watcher. ESP32-S3, 32MB flash, octal PSRAM,
+# CH342 UART USB bridge. Pins/rails follow Seeed SenseCAP-Watcher-Firmware
+# components/sensecap-watcher at 8e37f7ccd3d836bb99f483e0f6e74e8252406644.
+# Characterizes isolated BSP loads, not the production application profile.
+CONFIG_MUSE_POWER_TEST=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
+CONFIG_PM_PROFILING=y
+# Diagnostic capability only: every state without cpu_pd holds a balanced
+# ESP_PD_DOMAIN_CPU ON veto so the peripheral policy remains CPU-powered.
+CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP=y
+# Optional camera excluded from minimum sweep (explicit skipped record).
+CONFIG_MUSE_WATCHER_CAMERA=n
+# No credentials/NVS/normal app initialization. Signing and secure-boot /
+# encryption / eFuse policy intentionally untouched from existing defaults.
+CONFIG_HOMEHUB_OTA_ENABLED=n
+CONFIG_HOMEHUB_SUPPORT_BUG_REPORT=n
+# Diagnostic is on the CH342 UART, not the unwired native USB block. Avoid
+# a stray USB Serial/JTAG connection vetoing automatic light sleep.
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=n
+# Hold pins in light sleep; never broadly float reset/amp/rail lines.
+CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND=n

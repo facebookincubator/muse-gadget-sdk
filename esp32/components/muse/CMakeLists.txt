@@ -103,6 +103,11 @@ if(CONFIG_MUSE_ENABLED)
     elseif(CONFIG_MUSE_BOARD_AI_PASSPORT)
         list(APPEND srcs "boards/board_ai_passport.c")
     endif()
+    # Shared core, independent of board selection. Keep it after the BSP so
+    # Watcher's independently retained recovery markers keep their link order.
+    if(CONFIG_MUSE_POWER_TEST)
+        list(APPEND srcs "muse_power_test.c")
+    endif()
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
     # voice_muse_chat.c stands in for the Muse settings, Wi-Fi and Link hooks.
@@ -111,7 +116,7 @@ elseif(CONFIG_HOMEHUB_VOICE)
 endif()
 
 set(muse_priv_requires
-    esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash
+    esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
     bt esp-tls mbedtls esp_app_format esp_http_client
     noise_core minimp3
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi

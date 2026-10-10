@@ -17,11 +17,20 @@
 #include "app.h"
 #include "esp_log.h"
 #include "diagnostic_log.h"
+#if CONFIG_MUSE_POWER_TEST
+#include "muse_power_test.h"
+#endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
 #endif
 
 void app_main(void) {
+#if CONFIG_MUSE_POWER_TEST
+    /* Opt-in standalone BSP diagnostic: no support-log persistence, normal
+     * UI/voice/radio/credential or reconnect initialization may run. */
+    muse_power_test_run();
+    return;
+#endif
 #if CONFIG_HOMEHUB_SUPPORT_BUG_REPORT
     if (!diagnostic_log_init()) {
         ESP_LOGW("link.main",
