@@ -149,7 +149,11 @@ connected.
 
 To reset the device and set it up again, hold the button for 5 seconds.
 
-Pairing requires a press of the button on the device, and every setup creates
+On the experimental EchoEar-2ST, press the screen to confirm pairing; after
+pairing, hold the screen microphone to record and release it to send. See
+[EchoEar setup](devices/ostb-echoear-2st.md) for its controls and validation limits.
+
+Pairing requires an explicit press on the device, and every setup creates
 a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
@@ -177,6 +181,7 @@ status screen.
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
@@ -295,6 +300,9 @@ their upstream licenses:
   decoder, is CC0-1.0. See [`components/minimp3/LICENSE`](components/minimp3/LICENSE).
 - [`main/pixel_font.c`](main/pixel_font.c), the Adafruit GFX font, is
   BSD-2-Clause, as its header says.
+- [`components/muse/boards/ostb_echoear_display_init.h`](components/muse/boards/ostb_echoear_display_init.h),
+  the ST77916 panel initialization table from 78/xiaozhi-esp32, is MIT, as its
+  retained upstream notice says.
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.

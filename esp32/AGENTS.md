@@ -59,6 +59,7 @@ before adding a feature to one.
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216` | `tools/muse/board.sh build s3-216` |
+| OSTB EchoEar-2ST (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ostb-echoear-2st` | `tools/muse/board.sh build echoear` |
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-box-3` | `tools/muse/board.sh build box3` |
 | AIPI Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-aipi` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18` | manual |
@@ -131,7 +132,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-216|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7|vn183|ai-passport> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-216|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7|vn183|ai-passport|echoear> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -170,6 +171,20 @@ more, except the StickS3, StickC Plus2, Cardputer ADV and AI Passport, which hav
 All boards share `managed_components/` and `dependencies.lock` in this
 directory. If the component manager fails after you switch between a board
 with the full UI and one without (lvgl is the usual offender), delete both and build again.
+
+### OSTB EchoEar-2ST (experimental)
+
+`tools/muse/board.sh build echoear` uses the measured ESP32-S3 rev 0.2 unit
+with 16 MB DIO flash and 8 MB octal PSRAM at 80 MHz. Native USB Serial/JTAG
+(`303a:1001`) is shared by several boards, so it does not identify the model
+on its own. [EchoEar setup](devices/ostb-echoear-2st.md) records its pin map
+and limits. The bottom button controls physical power; GPIO0 is not a talk
+button. Talking and pairing confirmation use the touch screen. Software
+power-off returns `ESP_ERR_NOT_SUPPORTED`.
+
+Prototype hardware checks covered the display, touch pairing, recording,
+codec initialization and local playback. The final cleaned port has not been
+flashed and awaits hardware validation.
 
 ### A new board
 
@@ -367,9 +382,10 @@ The default avatar is in `avatar/`: its renderer (`muse_pixel.c`) and
 its animation (`jollybot.gif`, and `happy_anim.c/.h` made from it by
 `tools/gen_happy_anim.py`).
 
-Third-party code keeps its upstream license and header: `minimp3.h` (CC0) and
-`main/pixel_font.c` (BSD-2-Clause, Adafruit). Don't restyle them or replace
-their headers with the Apache one; `components/minimp3/README.md` says how to
+Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
+`main/pixel_font.c` (BSD-2-Clause, Adafruit), and
+`components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32).
+Don't restyle them or replace their headers with the Apache one; `components/minimp3/README.md` says how to
 update minimp3.
 
 The Apache License doesn't cover the Jollybot avatar in `avatar/`. Its files
@@ -382,7 +398,7 @@ The status LED (or the edge bars or avatar on display boards) shows the state:
 | Colour | Meaning |
 |---|---|
 | orange, breathing | BLE advertising, waiting for setup |
-| blue, breathing | pairing needs a physical button press |
+| blue, breathing | pairing needs an explicit device press (screen on EchoEar-2ST) |
 | blue | Wi-Fi or VM session coming up |
 | green | connected (tunnel up, or control session up when the tunnel is off) |
 | yellow, blinking | VM switching or connection lost |
@@ -395,11 +411,15 @@ Button (BOOT on the dev boards):
   setup isn't complete
 - **hold for 5 s**: reset setup (unpair and forget Wi-Fi)
 
+EchoEar-2ST confirms pending pairing with an explicit screen press; hold the
+on-screen microphone to record and release it to send once paired. It has no
+physical talk/setup button, so the GPIO button reset gesture does not apply.
+
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
 ideaspark, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite). It uses
 **community pairing v5**, so the phone app must support v5
-and list community devices. Community pairing needs the button press but has no
+and list community devices. Community pairing needs the explicit device press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.
 
 Until it's paired, a board with the full UI shows that name on its screen, dim under the

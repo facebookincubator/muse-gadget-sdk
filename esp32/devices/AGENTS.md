@@ -34,6 +34,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | [waveshareteam/ESP32-S3-Touch-AMOLED-2.16](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16) | `schematic/`. `examples/esp-idf/` for the AXP2101 power chip (`01_AXP2101`) and the QMI8658 IMU (`04_Immersive_block`). Muse drives the display, touch and codec through its BSP, `waveshare/esp32_s3_touch_amoled_2_16`. |
 | Seeed SenseCAP Watcher | [Seeed-Studio/SenseCAP-Watcher-Firmware](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware) | `components/sensecap-watcher/` is Seeed's BSP. `include/sensecap-watcher.h` has the pins for the LCD, touch, knob, IO expander, audio, battery, SD card and the Himax camera chip (driven through `components/sscma_client/`). `examples/factory_firmware/` is the firmware it ships with. xiaozhi-esp32's [sensecap-watcher board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/sensecap-watcher) is a second reference. |
 | Every M5Stack board (StickS3, StickC Plus2, Cardputer ADV, StopWatch, CoreS3, Core2) | [m5stack/M5Unified](https://github.com/m5stack/M5Unified), and [M5GFX](https://github.com/m5stack/M5GFX) for the panels | `src/M5Unified.inl` for pins, buttons and audio. `src/utility/` for power and the battery (`Power_Class.inl`), the IMU, RTC, mic, speaker and LEDs. `src/M5GFX.cpp` in M5GFX for the panel. Search both for the model's `board_M5...` name. For the StopWatch, M5's factory firmware [m5stack/M5StopWatch-UserDemo](https://github.com/m5stack/M5StopWatch-UserDemo): `main/hal/` for the power chip, IO expander, buttons and audio, and `main/apps/app_stopwatch/view/view.cpp` for where the buttons sit. For the Core2, Espressif's BSP [esp-bsp/bsp/m5stack_core_2](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_2): `m5stack_core_2.c` for the AXP rail setup, display, touch and speaker init. |
+| OSTB EchoEar-2ST (experimental) | [Official product](https://docs.yishierniao.cn/details/ai/echoear-2st/product.html), [user guide](https://docs.yishierniao.cn/details/ai/echoear-2st/user_guide.html), xiaozhi-esp32 [ESP-VoCat reference](https://github.com/78/xiaozhi-esp32/blob/0d576d3d4c049c6f55eaf879725dc23e516511b4/main/boards/espressif/esp-vocat/esp_vocat.cc) | The public ST77916 panel sequence is reused with its MIT notice. Stock ESP-VoCat pins differ from the measured EchoEar unit; use [the variant pin map](ostb-echoear-2st.md), not its generic pin configuration or an N32R8 box label. |
 | Espressif ESP32-S3-BOX-3 | [espressif/esp-bsp](https://github.com/espressif/esp-bsp) | `bsp/esp-box-3/`: pins in `include/bsp/esp-box-3.h`, LCD/touch revision detection and codecs in `esp-box-3.c`, duplex I2S in `esp-box-3_idf5.c`. |
 | M5Stack CoreS3 | [espressif/esp-bsp](https://github.com/espressif/esp-bsp) | `bsp/m5stack_core_s3/`: pins in `include/bsp/m5stack_core_s3.h`, the AXP2101 rails and AW9523 lines each part needs in `src/bsp_feature_en.c` and `src/bsp_io_expander.c`, codecs in `src/bsp_audio.c`. Muse drives it through that BSP, `espressif/m5stack_core_s3`. |
 | FoloToy AI Passport | [FoloToy/ai-passport](https://github.com/FoloToy/ai-passport) | `components/bsp/include/bsp_pins.h` for every pin, the button ladder's windows and the I2C addresses. `components/bsp/src/` for the ST7789P3's init table (`bsp_display.c`), the ES8311 setup (`bsp_audio.c`, keep `no_dac_ref`) and the CW2017 gauge (`bsp_battery.c`). `docs/hardware-design/` has the hardware guide. |
@@ -106,7 +107,7 @@ settings grouped under short comments saying why. Set:
 
 - `CONFIG_IDF_TARGET="esp32xx"`.
 - `CONFIG_HOMEHUB_BUTTON_GPIO`. The button is active low with an internal
-  pull-up. Boards with the full UI ignore it, because their talk button confirms pairing.
+  pull-up. Boards with the full UI ignore it, because their talk button or touch control confirms pairing.
 - The status backend, `CONFIG_HOMEHUB_LED_BACKEND_*=y` (`..._NONE` for no
   light). `sdkconfig.muse` sets `..._MUSE` for you.
 - Flash: `CONFIG_ESPTOOLPY_FLASHSIZE_<N>MB=y` and
@@ -212,6 +213,7 @@ The fields of `muse_board_t`:
 |---|---|
 | `name`, `width`, `height` | The panel as the UI draws it |
 | `round`, `touch` | Round panel; `touch` only if `display_start` returns an input device |
+| `touch_talk` | Optional touch-only push-to-talk: the LVGL microphone sends press/release edges through the existing input handler, and an explicit screen press confirms pending pairing. Defaults to false; requires `touch`. |
 | `keyboard` | Dedicated navigation keys: `poll_buttons` emits `MUSE_BTN_UP/DOWN/LEFT/RIGHT/ENTER/ESCAPE` presses. Enter selects and confirms pairing; Talk is not repurposed as Select while the menu is open. Defaults to false for two-button boards. |
 | `talk_button`, `aux_button` | On-screen captions ("boot", "pwr"). `talk_hint` and `aux_hint` place them next to the physical button |
 | `flat_menu_hints` | With `aux_hint` on `LV_ALIGN_RIGHT_MID` the menu turns that button's hint on end, drawn through a ~14 KB layer. Set it on a board that can't spare the RAM (the ESP32-C3): the hint lies flat on the menu's bar instead |
@@ -227,7 +229,7 @@ The fields of `muse_board_t`:
 | `poll_buttons` | Called every 10 ms, or 50 ms while the display is paused and `wait_buttons` is NULL. Returns `MUSE_BTN_*` edges. Use `muse_gpio_button_*` for GPIO buttons, or `muse_pmu_poll_key()` for an AXP2101 PWR key |
 | `wait_buttons` | While the display is paused: blocks until a button changes, so the chip light-sleeps instead of waking to poll. `muse_gpio_buttons_wait()` for GPIO buttons; a key only the PMU sees has to be polled. May be NULL: polled every 50 ms |
 | `read_power` | May be NULL (no battery). `muse_pmu_read_power` on an AXP2101. Leave `battery_mv` 0 if the board can't measure the voltage in millivolts. The battery meter (`muse_battery.h`: Settings → Battery, `tools/muse/power.py`) reads it |
-| `power_off` | Required. Returns only if it fails |
+| `power_off` | Required. Returns only if it fails; return `ESP_ERR_NOT_SUPPORTED` when no software power mechanism is verified (EchoEar-2ST). Do not guess a latch GPIO. |
 
 On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
 
