@@ -1,9 +1,13 @@
 ---
 name: ppk2-power-profile
-description: Safely profile SenseCAP Watcher source current with one continuous PPK2 owner, bounded host capture, and a blocking control handshake. Use for PPK2 host setup, profiling, and capture validation; never for firmware flashing or implicit hardware authorization.
+description: Safely power a battery-input board from a Nordic PPK2 with one continuous owner, bounded host capture, and a blocking control handshake (worked example: SenseCAP Watcher). Use for PPK2 host setup, profiling, and capture validation on any board; never for firmware flashing or implicit hardware authorization.
 ---
 
-# PPK2 power profiling for SenseCAP Watcher
+# PPK2 power profiling
+
+The owner, receiver and control tools are board-agnostic; Watcher specifics
+below are the worked example. For another board or device, read
+`esp32/docs/power/README.md` and the `board-power-profiling` skill first.
 
 ## Safety is a prerequisite, not a flag
 

@@ -602,7 +602,10 @@ def transport_fault_cutoff(final, origin, guard_s):
             "rows_before_cutoff": 0, "byte_accounting": proof}
 
 
-def analyze_frames(bundle, frames, *, guard_s=0.5, clock_drift_ppm=100, pre_fault_prefix=False):
+DEFAULT_DEVICE = "Seeed SenseCAP Watcher"
+
+
+def analyze_frames(bundle, frames, *, guard_s=0.5, clock_drift_ppm=100, pre_fault_prefix=False, device=DEFAULT_DEVICE):
     """Conservative receive-window estimates, NEVER exact hardware timing.
 
     Complete aggregate windows only, after guard on both ends. Reject invalid
@@ -803,7 +806,9 @@ def analyze_frames(bundle, frames, *, guard_s=0.5, clock_drift_ppm=100, pre_faul
                     "power_mW_source_setpoint": mean * owner["voltage_mv"] / 1e6,
                     "sampled_charge_mAh": math.fsum(x["sampled_charge_mAh"] for x in selected),
                     "sampled_energy_mWh_source_setpoint": math.fsum(x["sampled_energy_mWh"] for x in selected)})
-    report = {"schema": 1, "device": "Seeed SenseCAP Watcher", "profile_kind": "isolated BSP characterization, NOT production runtime",
+    if not isinstance(device, str) or not device.strip() or len(device) > 80:
+        raise ValueError("device name must be 1..80 characters")
+    report = {"schema": 1, "device": device.strip(), "profile_kind": "isolated BSP characterization, NOT production runtime",
             "run_state": bundle["firmware"].get("state"), "source_voltage_mv": owner["voltage_mv"],
             "matrix": matrix, "matrix_version": MATRIX_VERSIONS[matrix], "plan": plan,
             "requested_guard_s": guard_s, "assumed_clock_drift_ppm": clock_drift_ppm,
@@ -834,7 +839,8 @@ def analyze(args):
             if len(frames) > 50_000:
                 raise ValueError("aggregate report exceeds bounded window budget")
     report = analyze_frames(bundle, frames, guard_s=args.guard_s, clock_drift_ppm=args.clock_drift_ppm,
-                            pre_fault_prefix=getattr(args, "pre_fault_prefix", False))
+                            pre_fault_prefix=getattr(args, "pre_fault_prefix", False),
+                            device=getattr(args, "device", None) or DEFAULT_DEVICE)
     save_json(args.output, report)
     print(json.dumps({"saved": args.output, "states": len(report["rows"]),
                       "accepted_estimates": sum(x["quality"] == "receive_window_estimate" for x in report["rows"])}, indent=2))
@@ -1005,6 +1011,7 @@ def parser():
     r.add_argument("--output", required=True)
     r.add_argument("--guard-s", type=float, default=0.5)
     r.add_argument("--clock-drift-ppm", type=float, default=100)
+    r.add_argument("--device", default=DEFAULT_DEVICE, help="board name recorded in the report (default: %(default)s)")
     r.add_argument("--pre-fault-prefix", action="store_true", help="opt-in whole rows before an evidenced raw receiver fault; never validates post-fault continuation")
     c = sub.add_parser("compare", help="offline matched count-weighted A/B/A differences; no pooled quantiles")
     c.add_argument("--profile", required=True)

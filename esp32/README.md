@@ -215,8 +215,13 @@ is removed; one PPK2 process keeps source power continuous through reconnect.
 Battery isolation and USB-charger backfeed protection are required before
 output is enabled. Diagnostic figures are not production application profiles.
 
-Repository engineering skills live in `../.claude/skills/ppk2-power-profile/`
-and `../.claude/skills/sensecap-watcher-power-tests/`.
+To profile another board or device, follow the
+[porting recipe](docs/power/README.md): labelled PPK2 capture for anything the
+PPK2 can power, or the autonomous USB-free sweep ported to a new board.
+
+Repository engineering skills live in `../.claude/skills/ppk2-power-profile/`,
+`../.claude/skills/sensecap-watcher-power-tests/` and
+`../.claude/skills/board-power-profiling/`.
 
 ## Hack and extend it
 

@@ -289,3 +289,10 @@ On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
    scan should show `<prefix>-XXXXXX`.
 
 If you don't have the board, say that the port was only built, not run.
+
+## 9. Optional: measure its power
+
+For a battery-powered board, `../docs/power/README.md` is the recipe for
+measuring it with a Nordic PPK2 on the battery input: labelled captures need
+no firmware changes, and the SenseCAP Watcher's USB-free diagnostic sweep can
+be ported to the new board. Fixture checks and owner authorization come first.

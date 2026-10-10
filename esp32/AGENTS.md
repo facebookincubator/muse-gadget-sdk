@@ -96,7 +96,8 @@ characterization harness, not a pairing application, and needs no SDK token or
 network credentials. Its separate build, electrical safety gates, continuous
 PPK2 ownership, and USB unplug/replug procedure are documented in
 `docs/power/sensecap-watcher.md`. Never enable source output with unknown
-wiring, a connected battery, or USB-charger backfeed into PPK2.
+wiring, a connected battery, or USB-charger backfeed into PPK2. To profile
+another board, follow `docs/power/README.md`.
 
 ### DevKitC-1 (default)
 

@@ -188,6 +188,14 @@ class ReportTests(unittest.TestCase):
             report = power.load_json(output_path)
             self.assertEqual(report["rows"][0]["quality"], "receive_window_estimate")
 
+    def test_report_device_name_defaults_and_overrides(self):
+        self.assertEqual(self.report()["device"], "Seeed SenseCAP Watcher")
+        report = self.report(device="  Other Board  ")
+        self.assertEqual(report["device"], "Other Board")
+        for bad in ("", "   ", "x" * 81, None):
+            with self.assertRaisesRegex(ValueError, "device name"):
+                self.report(device=bad)
+
     def test_skipped_and_failed_firmware_never_quantified(self):
         for state in ("skipped", "error"):
             self.bundle["firmware"]["records"][0]["status"] = state

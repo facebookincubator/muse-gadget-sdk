@@ -1,5 +1,8 @@
 # SenseCAP Watcher: USB-free PPK2 power profiling
 
+For other boards and devices, start with the [porting recipe](README.md);
+this page is its worked example.
+
 ## Measurement status
 
 The USB-free diagnostic sweep completed: **23 measured states, four explicit
