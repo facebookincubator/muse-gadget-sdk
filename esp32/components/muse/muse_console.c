@@ -34,9 +34,21 @@ bool muse_console_getc(uint8_t *c)
     return usb_serial_jtag_read_bytes(c, 1, portMAX_DELAY) == 1;
 }
 
-void muse_console_write(const void *buf, size_t n)
+/* A stalled host must not keep the UI snapshot timer holding its lock.
+ * Each chunk fits the default TX ring; abort when room is unavailable. */
+bool muse_console_write(const void *buf, size_t n)
 {
-    usb_serial_jtag_write_bytes(buf, n, portMAX_DELAY);
+    const uint8_t *p = buf;
+    while (n) {
+        size_t chunk = n > 128 ? 128 : n;
+        int written = usb_serial_jtag_write_bytes(p, chunk, pdMS_TO_TICKS(200));
+        if (written <= 0 || (size_t)written > chunk) {
+            return false;
+        }
+        p += written;
+        n -= written;
+    }
+    return true;
 }
 
 bool muse_console_host(void)
@@ -141,9 +153,9 @@ bool muse_console_getc(uint8_t *c)
     return true;
 }
 
-void muse_console_write(const void *buf, size_t n)
+bool muse_console_write(const void *buf, size_t n)
 {
-    uart_write_bytes(PORT, buf, n);
+    return uart_write_bytes(PORT, buf, n) == (int)n;
 }
 
 bool muse_console_host(void)
