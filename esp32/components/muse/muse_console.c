@@ -35,7 +35,7 @@ bool muse_console_getc(uint8_t *c)
 }
 
 /* A stalled host must not keep the UI snapshot timer holding its lock.
- * Keep each line in one driver call so USB console logs cannot split it. */
+ * Queue each line in one driver call: the ring takes all of it or none. */
 bool muse_console_write(const void *buf, size_t n)
 {
     if (!n) {
