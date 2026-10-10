@@ -16,7 +16,7 @@ datapoint schema, prefer [Tuya Wi-Fi devices](../gadget-tuya-wifi-devices/SKILL.
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - A user-supplied end-user API key, applied for at https://tuya.ai/. Treat it as a credential:
   pass it in a header, never log or echo it.
