@@ -28,6 +28,7 @@
 #include "sdkconfig.h"
 #if CONFIG_PM_ENABLE
 #include "esp_pm.h"
+#include "esp_sleep.h"
 #endif
 
 #include "muse_battery.h"
@@ -72,6 +73,11 @@ static TaskHandle_t s_input;
 static bool s_talk_down;
 static bool s_cpu_low;      /* display stopped and the CPU allowed to sleep */
 static volatile bool s_power_off_requested;
+static bool s_cpu_pd;       /* muse_input_power_init() holds the CPU's retention memory */
+#if CONFIG_PM_ENABLE
+static esp_pm_lock_handle_t s_awake;   /* with s_cpu_pd: held whenever !s_cpu_low */
+static bool s_awake_held;
+#endif
 static volatile bool s_nap_now;   /* ">nap": asleep, as if on battery, nap without waiting WIFI_NAP_MS */
 
 static void post(muse_ptt_t type, bool wake)
@@ -93,6 +99,11 @@ static void power_off(void)
     muse_state_set_mode(MUSE_MODE_OFF);
     muse_state_set_caption("GOODBYE!");
     vTaskDelay(pdMS_TO_TICKS(GOODBYE_MS));
+#if CONFIG_PM_ENABLE
+    /* Automatic light sleep leaves the timer armed, and a deep sleep would
+     * wake on it at once (with s_cpu_pd light sleep stays configured). */
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+#endif
     esp_err_t err = muse_board->power_off();
     /* Only reached if the board couldn't power off. */
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -318,13 +329,68 @@ static void set_cpu_low(bool low)
         .min_freq_mhz = low ? CONFIG_XTAL_FREQ : CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
         .light_sleep_enable = low,
     };
+    if (s_cpu_pd) {
+        /* Light sleep stays configured: turning it off would free the
+         * retention memory. The lock keeps the chip out of it instead, taken
+         * before the full clock and let go only after the low one. */
+        pm.light_sleep_enable = true;
+        if (!low && !s_awake_held) {
+            esp_pm_lock_acquire(s_awake);
+            s_awake_held = true;
+        }
+    }
     esp_err_t err = esp_pm_configure(&pm);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "power management: %s", esp_err_to_name(err));
     }
+    if (s_cpu_pd && low && s_awake_held && err == ESP_OK) {
+        esp_pm_lock_release(s_awake);
+        s_awake_held = false;
+    }
 #else
     (void)low;
 #endif
+}
+
+void muse_input_power_init(void)
+{
+#if CONFIG_PM_ENABLE && CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP
+    esp_err_t err = esp_sleep_cpu_retention_init();
+    if (err == ESP_OK) {
+        err = esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "muse_awake", &s_awake);
+    }
+    if (err == ESP_OK) {
+        esp_pm_lock_acquire(s_awake);
+        s_awake_held = true;
+        const esp_pm_config_t pm = {
+            .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+            .min_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+            .light_sleep_enable = true,
+        };
+        err = esp_pm_configure(&pm);
+    }
+    s_cpu_pd = err == ESP_OK;
+    if (!s_cpu_pd) {
+        if (s_awake) {
+            if (s_awake_held) {
+                esp_pm_lock_release(s_awake);
+                s_awake_held = false;
+            }
+            esp_pm_lock_delete(s_awake);
+            s_awake = NULL;
+        }
+        esp_sleep_cpu_retention_deinit();
+        ESP_LOGW(TAG, "CPU stays powered in light sleep: no retention memory (%s)", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "CPU powers down in light sleep: retention memory held");
+    }
+#endif
+    muse_battery_note_cpu_pd(s_cpu_pd);
+}
+
+bool muse_input_cpu_pd(void)
+{
+    return s_cpu_pd;
 }
 
 /*

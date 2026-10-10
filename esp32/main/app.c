@@ -76,6 +76,7 @@
 #endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
+#include "muse_input.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
 #else
@@ -2803,13 +2804,23 @@ void app_run(void) {
 
         size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        size_t min_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+        // Where light sleep's CPU retention memory comes from (not the
+        // reserved DMA pool), and whether the CPU powers down in it.
+        char retention[48] = "";
+#if CONFIG_MUSE_ENABLED && CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP
+        snprintf(retention, sizeof(retention), " ret=%uK/%uK cpu_pd=%s",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_RETENTION) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_RETENTION) / 1024),
+                 muse_input_cpu_pd() ? "on" : "off");
+#endif
         size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA);
         size_t largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
         size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
         tunnel_stats_t tun;
         tunnel_netif_get_stats(&tun);
         ESP_LOGI(HEARTBEAT_TAG, "hb t=%llds setup=%s wifi=%s ws=%s raw=%s ble=%s "
-                       "int=%uK/%uK dma=%uK/%uK psram=%uK "
+                       "int=%uK/%uK min=%uK%s dma=%uK/%uK psram=%uK "
                        "tun rx+%lu/%luB tx+%lu/%luB drop+%lu",
                  esp_timer_get_time() / 1000000,
                  s_setup_stage,
@@ -2819,6 +2830,8 @@ void app_run(void) {
                  s_ui_ble,
                  (unsigned)(free_int / 1024),
                  (unsigned)(largest_int / 1024),
+                 (unsigned)(min_int / 1024),
+                 retention,
                  (unsigned)(free_dma / 1024),
                  (unsigned)(largest_dma / 1024),
                  (unsigned)(free_psram / 1024),

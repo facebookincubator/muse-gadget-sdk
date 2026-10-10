@@ -304,6 +304,42 @@ class BatteryTest(unittest.TestCase):
         woke, = self.run_harness(f"flash {flash}", *on_battery)
         self.assertEqual(woke["battery_boots"], 1)
 
+    def test_internal_ram(self) -> None:
+        rtc = str(Path(self.tmp.name) / "rtc")
+        # Free now, largest block and lowest since boot are live; resting_min is the lowest
+        # free internal RAM seen resting this run (CPU light-sleep retention allocated).
+        before, resting, awake, stopped = self.run_harness(
+            "h 90000 50000 40000", "t 10000000", START, "p 0 100 4190", "j",
+            "t 30000000", "h 70000 50000 30000", "s 1 1",           # on entry
+            "t 40000000", "h 65000 45000 30000", "p 0 100 4180",    # a reading while resting
+            "j", "h 60000 45000 31000", "s 0 0",
+            "t 50000000", "h 52000 44000 31000", "p 0 100 4170",    # awake: not counted
+            "j", "p 1 100 4200", "j", f"save {rtc}")
+        ret = {"retention_free": 20000, "retention_largest": 12000, "cpu_pd": False}
+        self.assertEqual(before["heap"], {"free": 90000, "largest": 40000, "min": 50000, "resting_min": None, **ret})
+        self.assertEqual(resting["heap"], {"free": 65000, "largest": 30000, "min": 45000, "resting_min": 65000, **ret})
+        self.assertEqual(awake["heap"], {"free": 52000, "largest": 31000, "min": 44000, "resting_min": 65000, **ret})
+        self.assertEqual(stopped["heap"]["resting_min"], 65000)
+        # Saved with the run, for a Watcher that resets as its port opens.
+        saved, = self.run_harness(f"load {rtc}", "boot 11", "k")
+        self.assertEqual(saved["heap"], stopped["heap"])
+        self.assertIn("Memory    internal RAM 50.8 KB free (largest block 30.3 KB), 43.0 KB lowest since boot, "
+                      "63.5 KB lowest while resting", power.report(saved))
+        # A new run starts over.
+        again, = self.run_harness("t 10000000", START, "p 0 100 4190", "x", "j")
+        self.assertIsNone(again["heap"]["resting_min"])
+        self.assertIn("Memory    internal RAM 58.6 KB free", power.report({"started": False, "heap": again["heap"]}))
+
+    def test_cpu_power_down(self) -> None:
+        # Noted before init (muse_input_power_init runs first), with the retention-capable heap.
+        j, = self.run_harness("c 1", "h 56000 46000 38000 9000 4000", "j")
+        self.assertEqual(j["heap"]["cpu_pd"], True)
+        self.assertEqual((j["heap"]["retention_free"], j["heap"]["retention_largest"]), (9000, 4000))
+        text = power.report(j)
+        self.assertIn("retention-capable 8.8 KB free (largest block 3.9 KB); CPU powers down in light sleep", text)
+        off, = self.run_harness("c 0", "j")
+        self.assertIn("CPU stays powered in light sleep", power.report(off))
+
     def test_report_reads_the_json(self) -> None:
         j, = self.measure("j")
         text = power.report(j)

@@ -20,6 +20,9 @@
  *   p <usb> <pct> <mv>     a battery reading
  *   s <off> <resting>      the screen and CPU state
  *   w <us>                 a wake from light sleep, after <us> asleep
+ *   h <free> <min> <largest> [<ret_free> <ret_largest>]   internal RAM: free now, lowest since boot,
+ *                          largest block; retention-capable free and largest block
+ *   c <0|1>                muse_battery_note_cpu_pd()
  *   x                      muse_battery_reset()
  *   j                      prints muse_battery_json()
  *   r                      prints muse_battery_read() as JSON
@@ -48,6 +51,23 @@ esp_reset_reason_t esp_reset_reason(void)
     return s_boot_reason;
 }
 static char s_dump_text[4096];
+static size_t s_heap_free = 60000, s_heap_min = 40000, s_heap_largest = 30000;
+static size_t s_ret_free = 20000, s_ret_largest = 12000;
+
+size_t heap_caps_get_free_size(int caps)
+{
+    return caps == MALLOC_CAP_INTERNAL ? s_heap_free : caps == MALLOC_CAP_RETENTION ? s_ret_free : 0;
+}
+
+size_t heap_caps_get_minimum_free_size(int caps)
+{
+    return caps == MALLOC_CAP_INTERNAL ? s_heap_min : 0;
+}
+
+size_t heap_caps_get_largest_free_block(int caps)
+{
+    return caps == MALLOC_CAP_INTERNAL ? s_heap_largest : caps == MALLOC_CAP_RETENTION ? s_ret_largest : 0;
+}
 static esp_pm_light_sleep_cb_t s_wake_cb;
 
 int64_t esp_timer_get_time(void)
@@ -220,6 +240,11 @@ int main(void)
             muse_battery_note_state(off, resting);
         } else if (!strncmp(line, "w ", 2)) {
             s_wake_cb(strtoll(line + 2, NULL, 10), NULL);
+        } else if (!strncmp(line, "h ", 2)) {
+            sscanf(line + 2, "%zu %zu %zu %zu %zu", &s_heap_free, &s_heap_min, &s_heap_largest, &s_ret_free,
+                   &s_ret_largest);
+        } else if (!strncmp(line, "c ", 2)) {
+            muse_battery_note_cpu_pd(atoi(line + 2));
         } else if (!strcmp(line, "x")) {
             muse_battery_reset();
         } else if (!strcmp(line, "j")) {
