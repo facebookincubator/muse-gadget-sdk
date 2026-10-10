@@ -1,0 +1,23 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Experiment: 128 KiB TCP send buffer and receive window, with window scaling
+# (load after sdkconfig.tx-by-ref: lwIP only offers scaling when PSRAM is
+# required). Receive mailboxes sized for a full window of MSS segments.
+CONFIG_LWIP_WND_SCALE=y
+CONFIG_LWIP_TCP_RCV_SCALE=2
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=131072
+CONFIG_LWIP_TCP_WND_DEFAULT=131072
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=128
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=128

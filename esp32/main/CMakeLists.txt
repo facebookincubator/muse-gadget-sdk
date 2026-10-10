@@ -16,6 +16,11 @@ set(GADGET_SRCS
     "main.c"
     "app.c"
     "ble_server.c"
+    "ble_basic.c"
+    "ble_central.c"
+    "pipeline_bench.cpp"
+    "ghash32.c"
+    "fast_gcm.c"
     "wifi_mgr.c"
     "wifi_known.c"
     "identity.c"
@@ -115,3 +120,15 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}
 )
+
+# fast_gcm.c takes over ESP-IDF's one-shot AES-GCM entry points (PSA's AES-GCM
+# driver calls them across archives, so the linker can redirect them).
+if(CONFIG_HOMEHUB_FAST_GCM)
+    # -u pulls fast_gcm.o out of libmain: nothing else in main references it,
+    # and the references the wrap creates come from later archives.
+    target_link_libraries(${COMPONENT_LIB} INTERFACE
+        "-Wl,--wrap=esp_aes_gcm_crypt_and_tag"
+        "-Wl,--wrap=esp_aes_gcm_auth_decrypt"
+        "-Wl,-u,__wrap_esp_aes_gcm_crypt_and_tag"
+        "-Wl,-u,__wrap_esp_aes_gcm_auth_decrypt")
+endif()

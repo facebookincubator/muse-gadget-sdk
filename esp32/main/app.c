@@ -82,6 +82,10 @@
 #define WIFI_WITHOUT_PAIRING 0
 #endif
 
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+#include "ble_basic.h"
+#endif
+
 static const char *TAG = "link.app";
 static const char *HEARTBEAT_TAG = "link.heartbeat";
 
@@ -652,9 +656,15 @@ static void shutdown_ble_task(void *arg) {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(1000));
     ui_set_ble("off");
-#if CONFIG_MUSE_ENABLED
-    // Muse's phone-setup service shares the server: stop setup advertising only.
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
+    // A companion service shares the server (Muse's phone setup, or the
+    // basic service that keeps BLE up beside Wi-Fi): stop setup advertising
+    // only, and let the companion advertise slowly.
     ble_server_stop_advertising(false);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    ble_server_set_companion_advertising(true);
+    ui_set_ble("companion");
+#endif
 #else
     ble_server_full_shutdown();
 #endif
@@ -679,8 +689,11 @@ static bool complete_setup_and_stop_ble(const char *reason, uint32_t session_gen
         ESP_LOGW(TAG, "failed to start BLE stop task");
         vTaskDelay(pdMS_TO_TICKS(1000));
         ui_set_ble("off");
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
         ble_server_stop_advertising(false);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        ble_server_set_companion_advertising(true);
+#endif
 #else
         ble_server_full_shutdown();
 #endif
@@ -2532,6 +2545,9 @@ void app_run(void) {
     noise_ctrl_set_command_cb(on_ws_command);
     noise_ctrl_set_agent_name_cb(led_status_set_title);
     heap_snapshot("after noise_ctrl_init");
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    ble_basic_register();
+#endif
 
     // Arm OTA rollback verification. If the running image was just installed
     // by device.ota it boots as PENDING_VERIFY and must reach the control WS
@@ -2655,6 +2671,13 @@ void app_run(void) {
     } else {
         ui_set_ble("off");
         ESP_LOGI(TAG, "BLE setup disabled; long-press reset to pair again");
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        // BLE stays up beside Wi-Fi: bring the stack up before the VM session
+        // fragments internal RAM, and advertise the basic service slowly.
+        start_ble_setup_server_if_needed();
+        ble_server_set_companion_advertising(true);
+        ui_set_ble("companion");
+#endif
 #if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
@@ -2828,6 +2851,9 @@ void app_run(void) {
                  (unsigned long)(tun.tx_bytes - prev_tun.tx_bytes),
                  (unsigned long)(tun.tx_dropped - prev_tun.tx_dropped));
         prev_tun = tun;
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        ble_basic_notify_status();
+#endif
         stack_monitor_record(&stack);
 #if CONFIG_MUSE_ENABLED
         muse_heartbeat_pause();

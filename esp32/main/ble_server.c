@@ -865,6 +865,15 @@ static void start_advertising(void) {
     struct ble_gap_adv_params advp = {0};
     advp.conn_mode = BLE_GAP_CONN_MODE_UND;
     advp.disc_mode = BLE_GAP_DISC_MODE_GEN;
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    // When only the companion service is advertising (after setup), advertise
+    // slowly: each advertising event takes the shared radio from Wi-Fi. Setup
+    // keeps NimBLE's fast 30-60 ms default.
+    if (config_setup_complete() || !s_advertising_enabled) {
+        advp.itvl_min = BLE_GAP_ADV_ITVL_MS(CONFIG_HOMEHUB_BLE_PERSISTENT_ADV_INTERVAL_MS);
+        advp.itvl_max = advp.itvl_min + BLE_GAP_ADV_ITVL_MS(20);
+    }
+#endif
 
     // Adv packet: flags + 128-bit service UUID + manufacturer data (~26 bytes).
     // Manufacturer data: 0xFFFF (test/unassigned company ID) + 1 byte paired flag.

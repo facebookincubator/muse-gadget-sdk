@@ -1,0 +1,33 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ESP32-C5 only. ESP-IDF loads this after sdkconfig.defaults (and before any
+# board overlay) whenever the target is esp32c5, so other chips keep the
+# shared 16 KiB, internal-RAM TCP configuration.
+#
+# lwIP pbufs and TCP segments, and the Wi-Fi driver's heap allocations, prefer
+# the 8 MB PSRAM, so TCP windows stop costing scarce internal RAM: on the C5
+# DevKitC-1 this left 11 KiB more internal RAM free at idle and 12-32 KiB more
+# under load. That pays for 32 KiB windows in each direction, which double the
+# per-flow ceiling (~5.2 Mbit/s at 50 ms RTT, from ~2.6). Wi-Fi DMA buffers
+# stay in internal RAM. Measured with tools/coexist/bench, including a soak
+# with BLE active (tools/coexist/README.md).
+#
+# 64 KiB windows were faster still on the bench but drove free DMA-capable RAM
+# to ~1 KiB under bulk TX, so they need fewer Wi-Fi TX buffers first.
+# If PSRAM fails to initialize (CONFIG_SPIRAM_IGNORE_NOTFOUND), lwIP falls
+# back to internal RAM and the larger windows cost it there.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_WND_DEFAULT=32768

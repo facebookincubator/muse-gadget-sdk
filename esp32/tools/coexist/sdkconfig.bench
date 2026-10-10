@@ -1,0 +1,28 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Bench build (load last): boots into main/pipeline_bench.cpp. Set
+# CONFIG_HOMEHUB_WIFI_SSID/PASSWORD in the build's own sdkconfig, never here.
+CONFIG_HOMEHUB_PIPELINE_BENCH=y
+CONFIG_HOMEHUB_BLE_THROUGHPUT_TEST=y
+# The bench host uses a throwaway self-signed certificate.
+CONFIG_ESP_TLS_INSECURE=y
+CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
+# CPU share per phase, from the idle task's run-time counter.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+# A/B the fast GCM at run time, and offer ChaCha20-Poly1305 in TLS.
+CONFIG_HOMEHUB_FAST_GCM=y
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
