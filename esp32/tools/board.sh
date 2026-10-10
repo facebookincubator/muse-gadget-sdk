@@ -20,6 +20,7 @@
 #
 #   devkit     ESP32-C5 DevKitC-1 (status LED, no display)
 #   ideaspark  ideaspark ESP32 with a 1.9 inch ST7789 display
+#   cyd        ESP32-2432S028 Cheap Yellow Display (status display)
 #   sensecap-indicator
 #              Seeed SenseCAP Indicator (ESP32-S3) with a 4 inch display
 #   home-assistant-voice
@@ -68,6 +69,12 @@ case "$BOARD" in
     [ "$BOARD" = ideaspark ] && TARGET=esp32 || TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # CH340 bridge. The SenseCAP Indicator's RP2040 shows up as a usbmodem, not here.
+    PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
+    ;;
+  cyd)
+    TARGET=esp32
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.muse-cyd-2432s028"
+    # CH340 bridge.
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
     ;;
   reterminal-e1001|reterminal-e1002)

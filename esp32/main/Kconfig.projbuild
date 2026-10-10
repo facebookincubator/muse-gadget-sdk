@@ -182,8 +182,9 @@ menu "ESP32 Device SDK"
             ESP32-C5 DevKitC-1 has a single addressable RGB LED on GPIO27;
             other boards with one set HOMEHUB_LED_STRIP_GPIO.
             The always-on red power LED on the DevKitC-1 is not firmware
-            controlled. The ideaspark ESP32 board and the SenseCAP Indicator
-            have no status LED; their displays show the status colour in bars
+            controlled. The ideaspark ESP32 board, the SenseCAP Indicator and
+            the ESP32-2432S028 Cheap Yellow Display have no status LED;
+            their displays show the status colour in bars
             along the top and bottom edges, with an animation in between. The
             Home Assistant Voice PE shows the status colour on its LED ring.
             Seeed reSpeaker Lite shows it on a single RGB LED.
@@ -205,6 +206,9 @@ menu "ESP32 Device SDK"
         config HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
             bool "Waveshare ESP32-C6-LCD-1.47 inch ST7789 display (status bars)"
             depends on IDF_TARGET_ESP32C6
+        config HOMEHUB_LED_BACKEND_CYD_ILI9341
+            bool "ESP32-2432S028 Cheap Yellow Display ILI9341 (status bars)"
+            depends on IDF_TARGET_ESP32
 
         config HOMEHUB_LED_BACKEND_SENSECAP_ST7701
             bool "SenseCAP Indicator 4 inch ST7701S RGB display (status bars)"
@@ -262,6 +266,7 @@ menu "ESP32 Device SDK"
         bool
         default y if HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+        default y if HOMEHUB_LED_BACKEND_CYD_ILI9341
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
