@@ -276,6 +276,20 @@ python -m esptool --chip esp32 -p PORT -b 230400 read-flash 0 0x800000 plus2.bin
 To go back, write the backup with `write-flash 0 plus2.bin`, using the same
 chip, port and baud.
 
+## ESP32-S3-DevKitC-1
+
+The [S3 DevKitC-1 overlay](sdkconfig.espressif-s3-devkitc-1) defaults to
+GPIO38 for genuine Espressif v1.1 boards. GPIO48 was verified on an Aideepen
+ESP32-S3 N16R8 DevKitC-1 clone. For this clone, set
+`CONFIG_HOMEHUB_LED_STRIP_GPIO=48` in the build directory's `sdkconfig`
+and then rebuild and flash.
+
+In the hardware check, a standalone WS2812 blink sketch blinked blue three
+times on GPIO48 and produced no light on GPIO38. With the override, Muse
+Gadget breathed orange while advertising. Serial logged
+`LED status ready: addressable RGB (GPIO=48)` and heartbeats with
+`ble=advertising`, with no panic.
+
 ## M5Stack Core2 port
 
 Core2 v1.0 (AXP192 PMU), using Espressif's `m5stack_core_2` BSP.

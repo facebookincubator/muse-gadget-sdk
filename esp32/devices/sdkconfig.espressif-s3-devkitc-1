@@ -22,7 +22,9 @@
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# The onboard addressable LED. v1.0 boards have it on GPIO48 instead.
+# The onboard addressable LED. v1.0 boards have it on GPIO48 instead, as does
+# the Aideepen N16R8 clone: set CONFIG_HOMEHUB_LED_STRIP_GPIO=48 in
+# the build directory's sdkconfig (see README.md).
 CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27=y
 CONFIG_HOMEHUB_LED_STRIP_GPIO=38
 # Green first, as WS2812s usually are; unlike the C5 DevKitC-1's LED.
