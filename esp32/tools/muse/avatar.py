@@ -23,15 +23,28 @@
 1. Finds the board on USB and checks it's connected to your Muse.
 2. Sends Muse the prompt (tools/muse/avatar_prompt.md) and the current renderer
    through the board (tools/muse/chat.py), so this machine needs no token.
-3. Saves the C file Muse sends back as components/muse/avatar/muse_pixel.c.
-   That directory is gitignored; the build uses the file in place of the default avatar.
-4. Builds and runs it here, and renders one GIF per animation to
-   components/muse/avatar/gifs/. Errors go back to Muse to fix, twice at most.
-5. Builds the firmware for the board and flashes it.
+3. Checks the C file Muse sends back before it touches the avatar you have: it
+   builds and runs it here and renders one GIF per animation, then builds the
+   firmware for the board from a copy of this tree. Errors go back to Muse to
+   fix, twice at most. A reply cut off on the way is never used.
+4. Only once it all passes, saves it as components/muse/avatar/muse_pixel.c (the
+   one it replaces becomes muse_pixel.c.prev), with its GIFs in
+   components/muse/avatar/gifs/. That directory is gitignored; the build uses the
+   file in place of the default avatar.
+5. Flashes the firmware it built and checked. With --no-flash, that build stays
+   in components/muse/avatar/firmware-BOARD/ (the hashes of its avatar and app
+   image in VERIFIED there) and it says how to flash it.
 
 Exit status: 0 done, 1 failed, 2 no usable board, 3 the board isn't set up.
 """
 import argparse
+import collections
+import contextlib
+import fcntl
+import fnmatch
+import glob
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -50,6 +63,13 @@ ROOT = make_gifs.ROOT
 AVATAR_DIR = os.path.join(ROOT, "components", "muse", "avatar")
 AVATAR_SRC = make_gifs.CUSTOM_SRC
 LAST_REPLY = os.path.join(AVATAR_DIR, "last_reply.md")
+BUILD_LOG = "/tmp/muse_build_{}.log"   # where board.sh build logs
+LOCK = ".lock"
+TMP_SUFFIX = ".tmp"
+# What a copy of the tree for a firmware build leaves out: builds, downloads, and
+# your avatar (the candidate goes there instead).
+COPY_IGNORE = ("build", "build-*", "managed_components", "dependencies.lock", "sdkconfig", "sdkconfig.old",
+               "__pycache__", ".git")
 PROMPT = os.path.join(HERE, "avatar_prompt.md")
 BOARD_SH = os.path.join(HERE, "board.sh")
 API = ("muse_pixel_accent", "muse_pixel_render", "muse_pixel_set_size", "muse_pixel_scale")
@@ -179,10 +199,13 @@ def ask(board, text, what):
     finally:
         if got[0]:
             sys.stderr.write("\n")
-    if not reply.intact():
-        say(f"  warning: {reply.lost} console line(s) went missing on the way")
-    if not reply.complete:
-        say("  warning: the reply was cut off before Muse finished")
+    if not reply.intact() or not reply.complete:
+        save_reply(reply.text)
+        why = (f"{reply.lost} console line(s) went missing on the way" if not reply.intact()
+               else "it was cut off before Muse finished")
+        raise Stop(f"Muse's reply didn't arrive whole ({why}), so it isn't used and your avatar is as it was. "
+                   f"It's saved in {rel(LAST_REPLY)}. Run this again; if you're sure the file in it is "
+                   "complete, pass it with --reply.")
     return reply.text
 
 
@@ -215,11 +238,12 @@ def clip(out, n=ERROR_LINES):
     return "\n".join([l for l in out.replace(ROOT + os.sep, "").splitlines() if l.strip()][:n])
 
 
-def host_check(src):
+def host_check(src, gifs_dir=None):
     """Builds `src` against tools/muse/anim.c and runs it through every animation.
 
     Returns (errors, gifs): the compiler's or sanitizer's complaints (None if it's
-    fine) and the GIF previews made from it.
+    fine) and the GIF previews made from it, in `gifs_dir` (components/muse/avatar/gifs/
+    if not given).
     """
     cc = ["cc", "-O1", "-g", "-Wall", "-Werror", "-I", "components/muse", "tools/muse/anim.c", src, "-lm"]
     with tempfile.TemporaryDirectory() as tmp:
@@ -235,7 +259,7 @@ def host_check(src):
             if p.returncode:
                 return "It crashed while drawing the animations:\n" + clip(p.stderr, 30), None
     try:
-        return None, make_gifs.render(src, os.path.join(AVATAR_DIR, "gifs"))
+        return None, make_gifs.render(src, gifs_dir or os.path.join(AVATAR_DIR, "gifs"))
     except ImportError:
         say("  (no GIF previews without Pillow: python3 -m pip install pillow)")
     except subprocess.CalledProcessError as e:
@@ -246,7 +270,7 @@ def host_check(src):
 def build_errors(key):
     """What in the firmware build log is about the avatar, or None if the failure is elsewhere."""
     try:
-        with open(f"/tmp/muse_build_{key}.log", encoding="utf-8", errors="replace") as f:
+        with open(BUILD_LOG.format(key), encoding="utf-8", errors="replace") as f:
             lines = f.read().splitlines()
     except OSError:
         return None
@@ -257,68 +281,291 @@ def build_errors(key):
     return clip("\n".join(keep)) or None
 
 
-def board_sh(*args):
-    """Runs tools/muse/board.sh; returns (ok, output)."""
-    p = subprocess.run([BOARD_SH, *args], cwd=ROOT, capture_output=True, text=True)
+def board_sh(*args, root=ROOT):
+    """Runs tools/muse/board.sh of the tree at `root`; returns (ok, output)."""
+    p = subprocess.run([os.path.join(root, "tools", "muse", "board.sh"), *args], cwd=root, capture_output=True,
+                       text=True)
     return p.returncode == 0, (p.stdout + p.stderr).strip()
 
 
-def build(key):
-    say(f"Building the {key} firmware (a few minutes; log in /tmp/muse_build_{key}.log)")
-    return board_sh("build", key)
+def build(key, root=ROOT):
+    say(f"Building the {key} firmware (a few minutes; log in {BUILD_LOG.format(key)})")
+    return board_sh("build", key, root=root)
 
 
-def flash(key, port):
+def copy_tree(dest):
+    """This tree, without builds or your avatar, at `dest`: a candidate builds there, leaving yours alone."""
+    shutil.copytree(ROOT, dest, symlinks=True, ignore=lambda d, names: [
+        n for n in names if any(fnmatch.fnmatch(n, pat) for pat in COPY_IGNORE)
+        or os.path.join(d, n) in (AVATAR_DIR, os.path.join(ROOT, "components", "muse", "avatar"))])
+    return dest
+
+
+def build_dir(key, root=ROOT):
+    """board.sh's build directory for `key` (build-muse-PROFILE, with -bench under MUSE_BENCH)."""
+    with open(os.path.join(root, "tools", "muse", "board.sh"), encoding="utf-8") as f:
+        m = re.search(rf"^\s*{re.escape(key)}\)\s+profile=([\w.-]+);", f.read(), re.M)
+    if not m:
+        raise Stop(f"tools/muse/board.sh has no board {key}.", 2)
+    return f"build-muse-{m.group(1)}" + ("-bench" if os.environ.get("MUSE_BENCH") else "")
+
+
+def build_candidate(src, key, work):
+    """Builds the firmware for `key` with `src` as the avatar, in a copy of this tree under `work`.
+
+    It reuses the configuration of your own build for that board (build-muse-*/sdkconfig: your
+    SDK token, Wi-Fi and options); without one, it's configured from the defaults, as a first
+    build of yours would be.
+    Returns (ok, output, root): root is the copy, whose build is the one to flash.
+    """
+    root = copy_tree(os.path.join(work, "esp32"))
+    b = build_dir(key)
+    mine = os.path.join(ROOT, b, "sdkconfig")
+    if os.path.exists(mine):
+        os.makedirs(os.path.join(root, b), mode=0o700)
+        shutil.copy2(mine, os.path.join(root, b, "sdkconfig"))   # never printed: it can hold your token
+        say(f"  with the configuration of your {b} build")
+    else:
+        say(f"  no {b} build here yet: configured from the defaults")
+    os.makedirs(os.path.join(root, "components", "muse", "avatar"))
+    shutil.copyfile(src, os.path.join(root, "components", "muse", "avatar", "muse_pixel.c"))
+    ok, out = build(key, root)
+    return ok, out, root
+
+
+def flash_command(key, port, root=ROOT):
+    return f"{rel(os.path.join(root, 'tools', 'muse', 'board.sh'))} flash {key} {port or 'PORT'}"
+
+
+def flash(key, port, root=ROOT):
     say(f"Flashing {port}")
-    ok, out = board_sh("flash", key, port)
+    ok, out = board_sh("flash", key, port, root=root)
     if not ok:
         raise Stop(out + "\n\nFlashing failed. Close anything else using the port, or hold BOOT, tap RESET, "
-                   f"release BOOT, and run: tools/muse/board.sh flash {key} {port}")
+                   f"release BOOT, and run: {flash_command(key, port, root)}")
 
 
-def save(code, reply):
-    os.makedirs(AVATAR_DIR, exist_ok=True)
-    with open(LAST_REPLY, "w", encoding="utf-8") as f:
-        f.write(reply)
-    if code is None:
+# ---- Your avatar's files ----
+#
+# A file changes by writing a new one beside it and renaming it into place, so a
+# crash leaves the old file or the new one, never part of either. The rename gives
+# it a fresh time, so a build never mistakes it for the one it replaced.
+
+def sync_dir(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def write_atomic(path, text):
+    d = os.path.dirname(path)
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix="." + os.path.basename(path) + ".", suffix=TMP_SUFFIX)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    sync_dir(d)
+
+
+def recover():
+    """Clears what an interrupted run left half written. Your avatar files are whole either way."""
+    if not os.path.isdir(AVATAR_DIR):
         return
+    for name in os.listdir(AVATAR_DIR):
+        if name.startswith(".") and name.endswith(TMP_SUFFIX):
+            path = os.path.join(AVATAR_DIR, name)
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)   # a candidate's GIFs
+            else:
+                os.unlink(path)
+
+
+@contextlib.contextmanager
+def lock():
+    """One avatar.py at a time works on components/muse/avatar/ (a lock the system drops if it dies)."""
+    os.makedirs(AVATAR_DIR, exist_ok=True)
+    fd = os.open(os.path.join(AVATAR_DIR, LOCK), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Stop(f"Another avatar.py is working on {rel(AVATAR_DIR)}. Let it finish, then run this again.",
+                       2) from None
+        recover()
+        yield
+    finally:
+        os.close(fd)
+
+
+def sha256(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def image_path(key, root):
+    """The app image board.sh flashes from the build of `key` in the tree at `root`, if built."""
+    b = os.path.join(root, build_dir(key, root))
+    try:
+        with open(os.path.join(b, "project_description.json"), encoding="utf-8") as f:
+            path = os.path.join(b, json.load(f)["app_bin"])
+    except (OSError, ValueError, KeyError):
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def kept_dir(key):
+    """Where the firmware checked with your avatar stays until it's flashed (gitignored)."""
+    return os.path.join(AVATAR_DIR, f"firmware-{key}")
+
+
+def checked_build(root, key, src):
+    """The hashes of the candidate `src` and of the app image built with it in `root`, or None if
+    that build doesn't have this candidate or made no image to flash."""
+    built = os.path.join(root, "components", "muse", "avatar", "muse_pixel.c")
+    image = image_path(key, root)
+    if image is None or not os.path.exists(built) or sha256(built) != sha256(src):
+        return None
+    return {"board": key, "renderer_sha256": sha256(src), "image_sha256": sha256(image)}
+
+
+def kept_record(dest):
+    try:
+        with open(os.path.join(dest, "VERIFIED"), encoding="utf-8") as f:
+            return dict(line.split(" ", 1) for line in f.read().splitlines() if " " in line)
+    except OSError:
+        return None
+
+
+def drop_kept():
+    """Removes kept builds of an avatar other than the one you have now: they'd flash that one."""
+    now = sha256(AVATAR_SRC) if os.path.exists(AVATAR_SRC) else None
+    for d in sorted(glob.glob(os.path.join(AVATAR_DIR, "firmware-*"))):
+        if (kept_record(d) or {}).get("renderer_sha256") != now:
+            shutil.rmtree(d, ignore_errors=True)
+            say(f"  removed {rel(d)}: it was built with the avatar before")
+
+
+def keep_build(root, record):
+    """Keeps the checked build `root` of your avatar, now promoted, as kept_dir(board), with its
+    hashes in VERIFIED there, in place of an older one. Other boards' builds of an older avatar go."""
+    dest = kept_dir(record["board"])
+    shutil.rmtree(dest, ignore_errors=True)
+    drop_kept()
+    os.replace(root, dest)   # same filesystem: the work was under components/muse/avatar/ too
+    write_atomic(os.path.join(dest, "VERIFIED"), "".join(f"{k} {v}\n" for k, v in record.items()))
+    return dest
+
+
+def verify_kept(key):
+    """Checks, just before flashing, that the kept build of `key` is still the one checked with
+    the avatar you have: same renderer, same app image. Returns its directory."""
+    dest = kept_dir(key)
+    record = kept_record(dest)
+    if record is None:
+        raise Stop(f"There's no checked build in {rel(dest)}. Run this again with --board {key}.")
+    image = image_path(key, dest)
+    now = {"board": key,
+           "renderer_sha256": sha256(AVATAR_SRC) if os.path.exists(AVATAR_SRC) else None,
+           "image_sha256": sha256(image) if image else None}
+    kept_src = os.path.join(dest, "components", "muse", "avatar", "muse_pixel.c")
+    if (record != now or not os.path.exists(kept_src)
+            or sha256(kept_src) != now["renderer_sha256"]):
+        raise Stop(f"The build in {rel(dest)} isn't the one checked with your avatar any more, so it "
+                   f"isn't flashed. Run this again with --board {key}.")
+    return dest
+
+
+def new_work():
+    """A scratch directory beside your avatar, cleared by recover() if a run dies."""
+    os.makedirs(AVATAR_DIR, exist_ok=True)
+    return tempfile.mkdtemp(dir=AVATAR_DIR, prefix=".work-", suffix=TMP_SUFFIX)
+
+
+def save_reply(reply):
+    write_atomic(LAST_REPLY, reply)
+
+
+def promote(code, gifs_dir):
+    """Makes the checked `code` your avatar, keeping the one it replaces as muse_pixel.c.prev."""
     if os.path.exists(AVATAR_SRC):
-        shutil.copyfile(AVATAR_SRC, AVATAR_SRC + ".prev")
-    with open(AVATAR_SRC, "w", encoding="utf-8") as f:
-        f.write(code)
+        with open(AVATAR_SRC, encoding="utf-8") as f:
+            write_atomic(AVATAR_SRC + ".prev", f.read())
+    write_atomic(AVATAR_SRC, code)
+    if gifs_dir and os.path.isdir(gifs_dir):
+        gifs = os.path.join(AVATAR_DIR, "gifs")
+        shutil.rmtree(gifs, ignore_errors=True)
+        os.replace(gifs_dir, gifs)
 
 
-def make_avatar(board, key, reply):
-    """Saves the avatar in `reply` and checks that it builds (for `key`'s board too, if
-    given), sending errors back to Muse through `board`, if any. Returns the GIF previews."""
-    for attempt in range(FIX_ROUNDS + 1):
-        if reply.strip().startswith("NO AVATAR"):
-            save(None, reply)
-            raise Stop("Muse couldn't find your avatar: " + reply.strip()[len("NO AVATAR"):].lstrip(": ") +
-                       "\nSet one in Muse, then run this again.")
-        code = extract_c(reply)
-        save(code, reply)
-        if code is None:
-            raise Stop(f"Muse's reply has no muse_pixel.c in it. It's saved in {rel(LAST_REPLY)}.")
-        say(f"Saved {rel(AVATAR_SRC)} ({len(code.encode())} bytes)")
-        if attempt == 0 and description(code):
-            say(f"  Muse drew: {description(code)[:300]}")
-        errors, gifs = host_check(AVATAR_SRC)
-        if not errors and key:
-            ok, out = build(key)
-            if not ok:
-                errors = build_errors(key)
-                if not errors:
-                    raise Stop(out + f"\n\nThe firmware build failed, but not in the avatar. See "
-                               f"/tmp/muse_build_{key}.log.")
-        if not errors:
-            return gifs
-        if board is None or attempt == FIX_ROUNDS:
-            raise Stop(errors + f"\n\n{rel(AVATAR_SRC)} doesn't build or run. Ask Muse to fix it, or go back "
-                       "to the last one: it's muse_pixel.c.prev, in the same directory.")
-        say("It doesn't work yet; sending the errors back to Muse")
-        reply = ask(board, "That muse_pixel.c doesn't work:\n\n```\n" + errors + "\n```\n\nFix it and send "
-                    "the whole file again, the same way: one ```c block and nothing after it.", "fix")
+Made = collections.namedtuple("Made", "gifs root")   # root: the tree whose firmware build has it, or None
+
+
+def make_avatar(board, key, reply, work=None):
+    """Checks the avatar in `reply` (and builds the firmware for `key`'s board with it, in a copy
+    of this tree under `work`, if given), sending errors back to Muse through `board`, if any.
+    Only once it passes does it become your avatar. Returns Made(GIF previews, built tree)."""
+    own = work is None
+    work = work or new_work()
+    try:
+        for attempt in range(FIX_ROUNDS + 1):
+            save_reply(reply)
+            if reply.strip().startswith("NO AVATAR"):
+                raise Stop("Muse couldn't find your avatar: " + reply.strip()[len("NO AVATAR"):].lstrip(": ") +
+                           "\nSet one in Muse, then run this again.")
+            code = extract_c(reply)
+            if code is None:
+                raise Stop(f"Muse's reply has no muse_pixel.c in it. It's saved in {rel(LAST_REPLY)}.")
+            say(f"Checking the muse_pixel.c Muse sent ({len(code.encode())} bytes)")
+            if attempt == 0 and description(code):
+                say(f"  Muse drew: {description(code)[:300]}")
+            round_dir = tempfile.mkdtemp(prefix=f"round{attempt}-", dir=work)
+            src = os.path.join(round_dir, "muse_pixel.c")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write(code)
+            gifs_dir = os.path.join(AVATAR_DIR, f".gifs-{os.path.basename(round_dir)}{TMP_SUFFIX}")
+            errors, gifs = host_check(src, gifs_dir)
+            root = record = None
+            if not errors and key:
+                ok, out, root = build_candidate(src, key, round_dir)
+                if not ok:
+                    errors = build_errors(key)
+                    if not errors:
+                        raise Stop(out + f"\n\nThe firmware build failed, but not in the avatar. See "
+                                   f"{BUILD_LOG.format(key)}. Your avatar is as it was.")
+                else:
+                    record = checked_build(root, key, src)
+                    if record is None:
+                        raise Stop("The firmware built, but there's no app image of it with this avatar "
+                                   "to flash, so it isn't used. Your avatar is as it was.")
+            if not errors:
+                promote(code, gifs_dir)
+                say(f"Saved {rel(AVATAR_SRC)}" + (f" (the one before is {rel(AVATAR_SRC + '.prev')})"
+                                                  if os.path.exists(AVATAR_SRC + ".prev") else ""))
+                gifs = [(os.path.join(AVATAR_DIR, "gifs", os.path.basename(p)), n) for p, n in gifs or []]
+                if record is None:
+                    drop_kept()
+                    return Made(gifs, None)
+                return Made(gifs, keep_build(root, record))
+            shutil.rmtree(gifs_dir, ignore_errors=True)
+            if board is None or attempt == FIX_ROUNDS:
+                raise Stop(errors + "\n\nThe muse_pixel.c Muse sent doesn't build or run, so your avatar is as it "
+                           f"was. Muse's reply is in {rel(LAST_REPLY)}.")
+            say("It doesn't work yet; sending the errors back to Muse")
+            reply = ask(board, "That muse_pixel.c doesn't work:\n\n```\n" + errors + "\n```\n\nFix it and send "
+                        "the whole file again, the same way: one ```c block and nothing after it.", "fix")
+    finally:
+        if own:
+            shutil.rmtree(work, ignore_errors=True)
+
 
 
 def main():
@@ -329,12 +576,18 @@ def main():
                          "chat first, or with --reply, the firmware to build")
     ap.add_argument("--edit", metavar="CHANGE", help="ask Muse to change the avatar you have, not redraw it")
     ap.add_argument("--reply", metavar="FILE", help="use this reply from Muse instead of asking through the board")
-    ap.add_argument("--no-flash", action="store_true", help="stop after building the firmware")
+    ap.add_argument("--no-flash", action="store_true", help="stop after building the firmware, and keep the build to flash")
     args = ap.parse_args()
     if args.edit and not os.path.exists(AVATAR_SRC):
         raise Stop(f"You have no avatar to change yet ({rel(AVATAR_SRC)}). Run this without --edit first.", 2)
 
+    with lock():
+        run(args)
+
+
+def run(args):
     board, key, port = None, args.board, args.port
+    work = new_work()
     try:
         if not (args.reply and args.no_flash):
             port = port or chat.pick_port()
@@ -361,22 +614,25 @@ def main():
 
         if args.reply:
             with open(args.reply, encoding="utf-8") as f:
-                gifs = make_avatar(None, key, f.read())
+                made = make_avatar(None, key, f.read(), work)
         else:
             say("Asking your Muse for your avatar (this takes a few minutes)")
-            gifs = make_avatar(board, key, ask(board, request(args.edit), "reply"))
-        for path, n in gifs:
+            made = make_avatar(board, key, ask(board, request(args.edit), "reply"), work)
+        for path, n in made.gifs:
             say(f"  preview: {rel(path)} ({n} frames)")
         if not key:
             say("Built and checked here. Pass --board to build the firmware too.")
             return
         if args.no_flash:
-            say(f"Firmware built. Flash it with: tools/muse/board.sh flash {key} {port or 'PORT'}")
+            say(f"Firmware built and checked, kept in {rel(made.root)}. Flash it with: "
+                f"{flash_command(key, port, made.root)}\n(Running this again replaces it; "
+                f"rm -r {rel(made.root)} removes it.)")
             return
         if board:
             board.close()
             board = None
-        flash(key, port)
+        flash(key, port, verify_kept(key))   # a failure keeps it, and says how to flash it
+        shutil.rmtree(made.root, ignore_errors=True)
         time.sleep(6)
         try:
             with chat.Board(port) as b:
@@ -388,6 +644,7 @@ def main():
     finally:
         if board:
             board.close()
+        shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":
