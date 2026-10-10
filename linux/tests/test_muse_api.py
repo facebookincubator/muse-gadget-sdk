@@ -14,8 +14,10 @@
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -60,3 +62,19 @@ def test_a_rejected_refresh_reports_401(monkeypatch):
 
     monkeypatch.setattr(muse_api.urllib.request, "urlopen", urlopen)
     assert muse_api.refresh_device_token("r", "homelink-abcdef") == (None, 401)
+
+
+@pytest.mark.parametrize("operation", ["fetch", "refresh"])
+def test_short_http_body_is_a_retryable_failure(monkeypatch, operation):
+    def urlopen(req, timeout):
+        wire = b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{"partial":'
+        sock = SimpleNamespace(makefile=lambda mode: io.BytesIO(wire))
+        response = http.client.HTTPResponse(sock)
+        response.begin()
+        return response
+
+    monkeypatch.setattr(muse_api.urllib.request, "urlopen", urlopen)
+    if operation == "fetch":
+        assert muse_api.fetch_vms_with_status("a") == ([], None)
+    else:
+        assert muse_api.refresh_device_token("r", "homelink-abcdef") == (None, None)
