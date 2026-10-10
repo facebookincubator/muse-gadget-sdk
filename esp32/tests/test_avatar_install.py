@@ -126,7 +126,8 @@ class Installing(unittest.TestCase):
         self.active = os.path.join(self.dir, "muse_pixel.c")
         for name, value in (("AVATAR_DIR", self.dir), ("AVATAR_SRC", self.active),
                             ("LAST_REPLY", os.path.join(self.dir, "last_reply.md")),
-                            ("BUILD_LOG", os.path.join(self.tmp, "build_{}.log"))):   # not your real log
+                            ("BUILD_LOG", os.path.join(self.tmp, "build_{}.log")),   # not your real log
+                            ("DEFAULT_SRC", os.path.join(self.tmp, "default_muse_pixel.c"))):
             patcher = mock.patch.object(avatar, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -134,6 +135,7 @@ class Installing(unittest.TestCase):
         quiet.start()
         self.addCleanup(quiet.stop)
         Path(self.active).write_text(GOOD_A)
+        shutil.copyfile(ROOT / "avatar" / "muse_pixel.c", avatar.DEFAULT_SRC)   # a copy builds with it
 
     def active_text(self):
         return Path(self.active).read_text() if os.path.exists(self.active) else None
@@ -342,7 +344,10 @@ DRIVER = textwrap.dedent("""
             mock.patch.object(avatar, "AVATAR_SRC", os.path.join(d, "muse_pixel.c")), \\
             mock.patch.object(avatar, "LAST_REPLY", os.path.join(d, "last_reply.md")), \\
             mock.patch.object(avatar, "say", lambda m: None), mock.patch.object(os, kind, hit):
-        avatar.make_avatar(None, None, t.fenced(t.GOOD_B))
+        if sys.argv[6] == "default":
+            avatar.restore("default", None, avatar.new_work())
+        else:
+            avatar.make_avatar(None, None, t.fenced(t.GOOD_B))
 """)
 
 
@@ -364,10 +369,13 @@ class KeptBuild(unittest.TestCase):
             p = mock.patch.object(avatar.chat, name, value)
             p.start()
             self.addCleanup(p.stop)
-        for name, value in (("open_board", self.no_answer), ("time", mock.Mock()), ("board_sh", self.board_sh)):
+        for name, value in (("open_board", self.no_answer), ("board_sh", self.board_sh)):
             p = mock.patch.object(avatar, name, value)
             p.start()
             self.addCleanup(p.stop)
+        nap = mock.patch.object(avatar.time, "sleep")   # waits for a board to boot
+        nap.start()
+        self.addCleanup(nap.stop)
         self.reply = os.path.join(self.tmp, "reply.md")
         Path(self.reply).write_text(fenced(GOOD_B))
 
@@ -385,7 +393,7 @@ class KeptBuild(unittest.TestCase):
         raise avatar.chat.BoardError("no answer")
 
     def run_tool(self, *argv):
-        ap = argparse.Namespace(port=None, board="s3", edit=None, reply=self.reply, no_flash=False)
+        ap = argparse.Namespace(port=None, board="s3", edit=None, reply=self.reply, restore=None, no_flash=False)
         for a in argv:
             setattr(ap, a, True)
         avatar.run(ap)
@@ -434,12 +442,12 @@ class KeptBuild(unittest.TestCase):
     def test_a_new_avatar_without_a_build_drops_the_old_build(self):
         self.run_tool("no_flash")
         Path(self.reply).write_text(fenced(GOOD_A))
-        avatar.run(argparse.Namespace(port=None, board=None, edit=None, reply=self.reply, no_flash=True))
+        avatar.run(argparse.Namespace(port=None, board=None, edit=None, reply=self.reply, restore=None, no_flash=True))
         self.assertFalse(os.path.exists(avatar.kept_dir("s3")))
 
     def test_another_boards_build_of_the_same_avatar_stays(self):
         self.run_tool("no_flash")
-        avatar.run(argparse.Namespace(port=None, board="c6", edit=None, reply=self.reply, no_flash=True))
+        avatar.run(argparse.Namespace(port=None, board="c6", edit=None, reply=self.reply, restore=None, no_flash=True))
         self.assertEqual(avatar.verify_kept("s3"), avatar.kept_dir("s3"))
         self.assertEqual(avatar.verify_kept("c6"), avatar.kept_dir("c6"))
 
@@ -473,6 +481,181 @@ class KeptBuild(unittest.TestCase):
         self.assertNotIn("run: tools/muse/board.sh", str(stop.exception))
 
 
+class Restore(unittest.TestCase):
+    """--restore goes back through the same checks, and --status tells host state from the board's."""
+
+    setUp = KeptBuild.setUp
+    board_sh = FirmwareBuild.board_sh
+    image = True
+    flash_result = (True, "flashed")
+    active_text = Installing.active_text
+    no_answer = KeptBuild.__dict__["no_answer"]
+    no_status = KeptBuild.__dict__["no_status"]
+
+    def restore(self, which, board="s3", no_flash=True):
+        avatar.run(argparse.Namespace(port=None, board=board, edit=None, reply=None, restore=which,
+                                      no_flash=no_flash))
+
+    def run_tool(self, *argv):
+        ap = argparse.Namespace(port=None, board="s3", edit=None, reply=self.reply, restore=None, no_flash=False)
+        for a in argv:
+            setattr(ap, a, True)
+        avatar.run(ap)
+
+    def status(self):
+        del self.out[:]
+        avatar.status()
+        return "\n".join(self.out)
+
+    def test_previous_comes_back_checked_and_built(self):
+        self.run_tool("no_flash")                       # GOOD_A -> GOOD_B
+        self.calls.clear()
+        self.restore("previous")
+        self.assertEqual(self.active_text(), GOOD_A)
+        self.assertEqual(Path(self.active + ".prev").read_text().strip(), GOOD_B.strip())   # one more goes back
+        (args, root, built), = self.calls
+        self.assertEqual((args, built), (("build", "s3"), GOOD_A))
+        self.assertEqual(avatar.verify_kept("s3"), avatar.kept_dir("s3"))
+
+    def test_a_previous_that_no_longer_builds_is_not_restored(self):
+        Path(self.active + ".prev").write_text(NO_BUILD)
+        with self.assertRaises(avatar.Stop):
+            self.restore("previous")
+        self.assertEqual(self.active_text(), GOOD_A)
+
+    def test_without_a_previous_it_stops(self):
+        with self.assertRaises(avatar.Stop):
+            self.restore("previous")
+        self.assertEqual(self.active_text(), GOOD_A)
+
+    def test_default_keeps_yours_as_the_previous(self):
+        self.restore("default")
+        self.assertFalse(os.path.exists(self.active))
+        self.assertEqual(Path(self.active + ".prev").read_text(), GOOD_A)
+        (args, root, built), = self.calls
+        self.assertEqual((args, built), (("build", "s3"), None))      # built without an avatar of yours
+        self.assertEqual(avatar.verify_kept("s3"), avatar.kept_dir("s3"))
+
+    def test_default_whose_build_fails_leaves_yours(self):
+        self.result = (False, "failed")
+        with self.assertRaises(avatar.Stop):
+            self.restore("default")
+        self.assertEqual(self.active_text(), GOOD_A)
+
+    def test_default_drops_builds_of_yours(self):
+        self.run_tool("no_flash")
+        self.restore("default", board=None)
+        self.assertFalse(os.path.exists(avatar.kept_dir("s3")))
+
+    def test_a_flash_is_recorded_and_reported_without_claiming_the_screen(self):
+        self.run_tool()
+        said = "\n".join(self.out)
+        self.assertNotIn("your avatar is on the board", said)
+        self.assertIn("Flashed PORT0", said)
+        self.assertIn("hasn't answered", said)
+        rec = avatar.last_flashes()["s3"]
+        self.assertEqual((rec["renderer"], rec["renderer_sha256"]), ("custom", sha(self.active)))
+        self.assertEqual(rec["port"], "PORT0")
+
+    def test_an_answer_after_booting_is_not_taken_for_the_screen(self):
+        answering = mock.MagicMock()
+        answering.return_value.__enter__.return_value.status.return_value = {"board": "s3", "device": {}}
+        with mock.patch.object(avatar.chat, "Board", answering):
+            self.run_tool()
+        said = "\n".join(self.out)
+        self.assertIn("answered after booting", said)
+        self.assertNotIn("your avatar is on the board", said)
+
+    def test_a_failed_flash_is_not_recorded(self):
+        self.flash_result = (False, "port busy")
+        with self.assertRaises(avatar.Stop):
+            self.run_tool()
+        self.assertEqual(avatar.last_flashes(), {})
+
+    def test_status_keeps_this_computer_and_the_board_apart(self):
+        self.run_tool()                                  # flashed GOOD_B
+        self.restore("previous", board=None)             # GOOD_A here, not flashed
+        said = self.status()
+        here, flashed = said.split("Last flashed by this tool")
+        self.assertIn(avatar.short(sha(self.active)), here)
+        self.assertIn("not the avatar here now", flashed)
+        self.assertIn("can't tell what the board plugged in shows", flashed)
+
+    def test_status_says_when_a_kept_build_is_stale(self):
+        self.run_tool("no_flash")
+        Path(self.active).write_text(GOOD_A)
+        self.assertIn("doesn't match the avatar here any more", self.status())
+
+    def test_a_default_that_does_not_build_keeps_yours_and_the_previous(self):
+        Path(self.active + ".prev").write_text(GOOD_B)
+        Path(avatar.DEFAULT_SRC).write_text(NO_BUILD)
+        with self.assertRaises(avatar.Stop):
+            self.restore("default", board=None)
+        self.assertEqual(self.active_text(), GOOD_A)
+        self.assertEqual(Path(self.active + ".prev").read_text(), GOOD_B)
+
+    def test_a_changed_default_is_not_flashed(self):
+        self.restore("default")
+        record = avatar.kept_record(avatar.kept_dir("s3"))
+        self.assertEqual((record["renderer"], record["renderer_sha256"]), ("default", sha(avatar.DEFAULT_SRC)))
+        with open(avatar.DEFAULT_SRC, "a") as f:
+            f.write("/* changed since */\n")
+        with self.assertRaises(avatar.Stop):
+            avatar.verify_kept("s3")
+        self.assertIn("doesn't match the avatar here any more", self.status())
+
+    def test_a_default_changed_after_its_check_is_not_used(self):
+        Path(self.active + ".prev").write_text(GOOD_B)
+        real = self.board_sh
+
+        def edited_while_building(*args, root=avatar.ROOT):
+            with open(avatar.DEFAULT_SRC, "a") as f:     # someone edits it after the host check
+                f.write("/* edited */\n")
+            return real(*args, root=root)
+        with mock.patch.object(avatar, "board_sh", edited_while_building):
+            with self.assertRaises(avatar.Stop):
+                self.restore("default")
+        self.assertEqual(self.active_text(), GOOD_A)
+        self.assertEqual(Path(self.active + ".prev").read_text(), GOOD_B)
+        self.assertFalse(os.path.exists(avatar.kept_dir("s3")))
+
+    def test_status_waits_for_a_run(self):
+        holder = subprocess.Popen([sys.executable, "-c", textwrap.dedent(f"""
+            import fcntl, os, time
+            fd = os.open({os.path.join(self.dir, avatar.LOCK)!r}, os.O_CREAT | os.O_RDWR)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            print("held", flush=True)
+            time.sleep(30)
+        """)], stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            for argv in (["--status"], ["--edit", "bigger ears"]):
+                with mock.patch.object(sys, "argv", ["avatar.py", *argv]), \
+                        mock.patch.object(avatar, "run", mock.Mock(side_effect=AssertionError("ran"))):
+                    with self.assertRaises(avatar.Stop) as stop:
+                        avatar.main()
+                    self.assertEqual(stop.exception.code, 2)
+            self.assertEqual(self.out, [])               # nothing read while the run holds it
+        finally:
+            holder.kill()
+            holder.wait()
+            holder.stdout.close()
+
+    def test_one_of_the_ways_at_a_time(self):
+        for argv in (["--status", "--restore", "default"], ["--restore", "previous", "--reply", self.reply],
+                     ["--edit", "x", "--restore", "default"]):
+            with mock.patch.object(sys, "argv", ["avatar.py", *argv]):
+                with self.assertRaises(avatar.Stop) as stop:
+                    avatar.main()
+                self.assertEqual(stop.exception.code, 2)
+        self.assertEqual(self.active_text(), GOOD_A)
+
+    def test_status_needs_no_board(self):
+        with mock.patch.object(avatar.chat, "Board", mock.Mock(side_effect=AssertionError("opened a board"))), \
+                mock.patch.object(avatar.chat, "pick_port", mock.Mock(side_effect=AssertionError("looked"))):
+            self.status()
+
+
 class Interrupted(unittest.TestCase):
     """A run killed at any write leaves your avatar whole, and the next run carries on."""
 
@@ -483,7 +666,7 @@ class Interrupted(unittest.TestCase):
                 active = Path(d, "muse_pixel.c")
                 active.write_text(GOOD_A)
                 p = subprocess.run([sys.executable, "-c", DRIVER, str(ROOT / "tools" / "muse"), str(ROOT / "tests"),
-                                    d, str(crash_at), kind], capture_output=True, text=True, timeout=120)
+                                    d, str(crash_at), kind, "install"], capture_output=True, text=True, timeout=120)
                 self.assertIn(p.returncode, (0, 70), p.stderr)
                 now = active.read_text().strip()
                 self.assertIn(now, (GOOD_A.strip(), GOOD_B.strip()))           # whole, old or new
@@ -507,6 +690,31 @@ class Interrupted(unittest.TestCase):
         outcomes = self.run_until("fsync")
         self.assertGreater(len(outcomes), 2)
         self.assertTrue(outcomes[-1])
+
+
+class RestoringDefaultInterrupted(unittest.TestCase):
+    """Going back to the default avatar, killed at any write, loses neither avatar."""
+
+    def test_killed_at_any_write(self):
+        for kind in ("replace", "fsync"):
+            for crash_at in range(1, 20):
+                with tempfile.TemporaryDirectory() as d:
+                    active = Path(d, "muse_pixel.c")
+                    active.write_text(GOOD_A)
+                    p = subprocess.run([sys.executable, "-c", DRIVER, str(ROOT / "tools" / "muse"),
+                                        str(ROOT / "tests"), d, str(crash_at), kind, "default"],
+                                       capture_output=True, text=True, timeout=60)
+                    self.assertIn(p.returncode, (0, 70), p.stderr)
+                    prev = Path(d, "muse_pixel.c.prev")
+                    if active.exists():
+                        self.assertEqual(active.read_text(), GOOD_A)        # still yours, whole
+                    else:
+                        self.assertEqual(prev.read_text(), GOOD_A)          # gone only once it's kept
+                    if p.returncode == 0:
+                        self.assertFalse(active.exists())
+                        break
+            else:
+                self.fail("never finished")
 
 
 class OneAtATime(unittest.TestCase):
