@@ -123,6 +123,11 @@ A few other ways to build on it:
 - **Change the SDK token.** `bash install.sh --sdk-token mgst_…` replaces it.
   It's saved in `/var/lib/musegadget/sdk_token`, readable only by root.
 
+## Community device notes
+
+- [RDK X5](docs/rdk-x5.md): Ubuntu ARM64 deployment notes and an optional
+  community touchscreen UI, with its tested configuration and limitations.
+
 ## Manage it
 
 ```sh
