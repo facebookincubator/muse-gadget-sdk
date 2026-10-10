@@ -899,6 +899,11 @@ esp_err_t muse_voice_start(QueueHandle_t queue)
     /* Stack in PSRAM if there is any (this task never writes flash) to spare internal RAM for Wi-Fi/BLE. */
     if (xTaskCreatePinnedToCoreWithCaps(voice_task, "muse_voice", 6144, NULL, 6, NULL, MUSE_AUDIO_CORE,
                                         MUSE_BIG_CAPS) != pdPASS) {
+        /* Without the task nothing would ever rest the codecs, which
+         * muse_audio_init() left open: on the Watcher that's ~33 mA. */
+        muse_audio_power(false);
+        muse_state_set_mode(MUSE_MODE_ERROR);
+        muse_state_set_caption("AUDIO INIT FAILED");
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

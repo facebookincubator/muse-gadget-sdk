@@ -57,9 +57,21 @@ CONFIG_BT_CTRL_MODEM_SLEEP_MODE_1=y
 CONFIG_BT_CTRL_LPCLK_SEL_MAIN_XTAL=y
 CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP=y
 CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
-# The CPU stays powered in light sleep: saving its state takes 8.5 KB of
-# internal RAM, more than Wi-Fi can spare here.
-# CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set
+# The CPU powers down in light sleep too: 0.44 mA less resting on battery
+# (2.96 -> 2.52 mA on a PPK2, PR #168). Its retention memory, about 15 KB of
+# internal RAM (8.8 KB of CPU state, 6 KB of cache tags), is taken once at
+# boot, before Wi-Fi and BLE fragment the heap (muse_input_power_init); by the
+# first rest only the reserved DMA pool, which can't hold it, was left. Light
+# sleep then stays configured, and a power lock keeps the chip out of it
+# except while resting. If the memory isn't there, the chip light-sleeps with
+# the CPU powered, as before. Keeping the cache tags keeps code and data in
+# PSRAM cached across each sleep, as measured.
+CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP=y
+CONFIG_PM_RESTORE_CACHE_TAGMEM_AFTER_LIGHT_SLEEP=y
+# That memory comes from the avatar's and audio's static buffers (about
+# 17 KB), moved to PSRAM, so Wi-Fi, BLE and the tunnel keep about 2 KB more
+# internal RAM than before, awake and resting.
+CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y
 # Pins keep their state in light sleep. This workaround would float them all,
 # panel and touch reset and the amp enable included.
 # CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND is not set

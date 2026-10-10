@@ -117,6 +117,8 @@ static bool s_started, s_running;
 static int s_pct_start, s_pct_now, s_mv_start, s_mv_now;
 static int64_t s_off_us, s_rest_us, s_last_us;   /* screen off, resting, and when last added to */
 static bool s_screen_off, s_resting;
+static size_t s_rest_free_min;   /* lowest free internal RAM seen resting this run; 0 none */
+static bool s_cpu_pd;            /* the CPU powers down in light sleep (muse_input_power_init) */
 static muse_power_t s_power = { .battery_pct = -1 };
 
 #if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
@@ -243,6 +245,21 @@ static void accrue(int64_t now)
 
 static void persist(bool flash);
 
+/*
+ * Resting is when IDF holds its light-sleep retention memory (CPU power-down),
+ * so the lowest free internal RAM then is the headroom Wi-Fi, BLE and the
+ * tunnel had left. Sampled on entry and with each battery reading.
+ */
+static void note_rest_heap(void)
+{
+    if (s_running && s_resting) {
+        size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        if (!s_rest_free_min || free_int < s_rest_free_min) {
+            s_rest_free_min = free_int;
+        }
+    }
+}
+
 static void save_boots(uint16_t n)
 {
     s_boots = n;
@@ -259,6 +276,7 @@ static void start(void)
     s_pct_start = s_pct_now = s_power.battery_pct;
     s_mv_start = s_mv_now = s_power.battery_mv;
     s_off_us = s_rest_us = 0;
+    s_rest_free_min = 0;
     s_last_us = s_start->at_us;
     ESP_LOGI(TAG, "on battery at %d%% (%d mV): measuring", s_pct_start, s_mv_start);
     persist(false);
@@ -424,6 +442,7 @@ void muse_battery_note_power(const muse_power_t *p, bool on_battery)
     if (s_running) {
         s_pct_now = p->battery_pct;
         s_mv_now = p->battery_mv;
+        note_rest_heap();
         if (esp_timer_get_time() - s_saved_us >= SAVE_MS * 1000LL) {
             persist(true);
         }
@@ -440,6 +459,7 @@ void muse_battery_note_state(bool screen_off, bool resting)
     accrue(esp_timer_get_time());
     s_screen_off = screen_off;
     s_resting = resting;
+    note_rest_heap();
     xSemaphoreGive(s_lock);
 }
 
@@ -532,6 +552,20 @@ static int json(char *buf, size_t cap)
         m.started ? "true" : "false", m.running ? "true" : "false", (long long)m.secs, m.pct_start, m.pct_now,
         m.mv_start, m.mv_now, pct(a, m.screen_off_pm), pct(b, m.resting_pm), pct(c, m.slept_pm),
         (unsigned long)m.sleeps, pct(d, m.busy_pm));
+    /* Internal RAM, in bytes: free and largest block now, lowest since boot,
+     * and lowest while resting on battery this run; the part light sleep's
+     * retention memory can come from (the reserved DMA pool can't); and
+     * whether the CPU powers down in light sleep. Before the locks, so a long
+     * lock list can't cut it off. */
+    snprintf(a, sizeof(a), "%u", (unsigned)s_rest_free_min);
+    add(buf, cap, &len,
+        ",\"heap\":{\"free\":%u,\"largest\":%u,\"min\":%u,\"resting_min\":%s,"
+        "\"retention_free\":%u,\"retention_largest\":%u,\"cpu_pd\":%s}",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), s_rest_free_min ? a : "null",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_RETENTION),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_RETENTION), s_cpu_pd ? "true" : "false");
 #if CONFIG_PM_PROFILING
     int64_t pm_span = end ? end->pm.at_us - s_start->pm.at_us : 0;
     if (end && s_start->pm.at_us && end->pm.at_us && pm_span > 0) {
@@ -573,6 +607,11 @@ int muse_battery_json(char *buf, size_t cap)
     int len = json(buf, cap);
     xSemaphoreGive(s_lock);
     return len;
+}
+
+void muse_battery_note_cpu_pd(bool on)
+{
+    s_cpu_pd = on;
 }
 
 const char *muse_battery_saved_json(void)

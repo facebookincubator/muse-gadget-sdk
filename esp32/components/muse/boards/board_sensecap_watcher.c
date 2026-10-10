@@ -194,6 +194,9 @@ static void sleep_until_wheel(void)
     rtc_gpio_pullup_en(EXP_INT);
     rtc_gpio_pulldown_dis(EXP_INT);
     esp_sleep_enable_ext0_wakeup(EXP_INT, 0);
+    /* Light sleep stays configured for CPU power-down (muse_input_power_init)
+     * and leaves the timer armed: only the wheel may wake this. */
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
     esp_deep_sleep_start();
 }
 

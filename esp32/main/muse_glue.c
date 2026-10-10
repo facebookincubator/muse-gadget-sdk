@@ -38,6 +38,7 @@
 
 #include "muse_ble.h"
 #include "muse_board.h"
+#include "muse_input.h"
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_settings.h"
@@ -616,6 +617,9 @@ static void boot_task(void *arg) {
 }
 
 void muse_glue_start(void) {
+    // First, before Link's Wi-Fi, BLE and tunnel and Muse's display take and
+    // fragment internal RAM: the CPU's light-sleep retention memory.
+    muse_input_power_init();
     s_ready = xEventGroupCreate();
     muse_link_register(&s_ops);
     muse_ble_set_name(identity_ble_name());
