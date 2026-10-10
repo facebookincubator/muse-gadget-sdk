@@ -194,6 +194,11 @@ static bool ws_send_binary(esp_tls_t *, const uint8_t *data, size_t len) {
     if (pressure_after_chunk) dma_largest = 1;
     return true;
 }
+// Production masks the payload in place and writes the header in front of
+// it; the harness decodes the unmasked payload, so it skips the masking.
+static bool ws_send_frame_inplace(esp_tls_t *tls, uint8_t *data, size_t len) {
+    return ws_send_binary(tls, data, len);
+}
 
 // Instrument allocations/copies in the production sender without changing
 // their behavior. A reintroduced whole-payload prepend must fail the test.

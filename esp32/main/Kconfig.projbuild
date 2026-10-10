@@ -122,6 +122,138 @@ menu "ESP32 Device SDK"
             the classic ESP32) should disable this. The control API to the VM
             keeps working; the status turns green once the control session is up.
 
+    config HOMEHUB_BLE_PERSISTENT
+        bool "Keep BLE running next to Wi-Fi and the Noise session"
+        depends on BT_NIMBLE_ENABLED && !MUSE_ENABLED
+        default n
+        help
+            By default the NimBLE stack is shut down and its memory released
+            once setup completes, so BLE never shares the radio or internal RAM
+            with Wi-Fi and the VM session. With this on, the stack stays up
+            after setup: setup advertising stops, and a basic GATT service
+            (main/ble_basic.c) is advertised slowly so a phone or hub can
+            still find and connect to the gadget. Re-pairing still needs the
+            long-press reset. Costs the NimBLE controller and host heap
+            (roughly 40 KB of internal RAM with the default buffers) for as
+            long as the device runs.
+
+    config HOMEHUB_BLE_PERSISTENT_ADV_INTERVAL_MS
+        int "Advertising interval after setup (ms)"
+        depends on HOMEHUB_BLE_PERSISTENT
+        range 100 10240
+        default 1000
+        help
+            Interval for the slow, connectable advertising that keeps the
+            device visible after setup. Setup advertising uses NimBLE's fast
+            30-60 ms default; every advertising event takes the shared radio
+            from Wi-Fi, so a slow interval keeps BLE's share of airtime small.
+
+    config HOMEHUB_BLE_THROUGHPUT_TEST
+        bool "BLE throughput test characteristic"
+        depends on HOMEHUB_BLE_PERSISTENT
+        default n
+        help
+            Add a characteristic to the basic service for measuring BLE
+            throughput beside Wi-Fi: writes without response are counted
+            and dropped, and writing a 4-byte little-endian count to it makes
+            the device notify that many bytes back. Bench builds only.
+
+    config HOMEHUB_FAST_GCM
+        bool "Faster AES-GCM GHASH (chips without a GCM engine)"
+        depends on MBEDTLS_HARDWARE_AES && !MBEDTLS_HARDWARE_GCM
+        default y if IDF_TARGET_ESP32C5 && SPIRAM
+        default n
+        help
+            Measured on the C5 DevKitC-1: AES-256-GCM seal of an 8 KB tunnel
+            frame in PSRAM 3.5 ms -> 2.0 ms, and tunnel TX through TLS +30 to
+            +66% (tools/coexist/README.md). Validated against IDF's GCM by the
+            bench's gcm_verify and tests/test_ghash32.py.
+            Wrap ESP-IDF's one-shot AES-GCM (used by TLS records and Noise
+            transport messages through PSA) with main/fast_gcm.c: CTR on the
+            AES DMA engine as before, GHASH with 32-bit tables cached per key
+            instead of IDF's 64-bit 4-bit tables rebuilt on every call.
+
+    config HOMEHUB_FAST_GCM_DEFAULT_MODE
+        int "Fast GCM mode at boot (0 off, 1 4-bit tables, 2 8-bit tables)"
+        depends on HOMEHUB_FAST_GCM
+        range 0 2
+        default 2
+        help
+            8-bit tables take 4 KB of internal RAM per cached key (up to four
+            keys, allocated on first use) and halve GHASH's work again.
+
+    config HOMEHUB_FAST_GCM_G8_TABLES
+        int "8-bit GHASH tables to keep (4 KB internal RAM each)"
+        depends on HOMEHUB_FAST_GCM
+        range 0 4
+        default 4 if SPIRAM
+        default 0
+        help
+            One per AES key in use: the VM session's TLS link and its Noise
+            transport use two each. Keys beyond this use 4-bit tables.
+
+    config HOMEHUB_FAST_GCM_BOUNCE_BYTES
+        int "Internal staging buffer for PSRAM data (bytes)"
+        depends on HOMEHUB_FAST_GCM
+        range 256 16384
+        default 2048
+        help
+            Static internal RAM that PSRAM plaintext and ciphertext pass
+            through on their way to the AES engine. Multiple of 16.
+
+    config HOMEHUB_PIPELINE_BENCH
+        bool "Data-path and BLE coexistence bench (replaces the app)"
+        depends on HOMEHUB_BLE_PERSISTENT
+        default n
+        help
+            Boot into main/pipeline_bench.cpp instead of the gadget: memory
+            and AES-GCM micro-benchmarks, then (with HOMEHUB_WIFI_SSID set)
+            TCP, TLS and tunnel-pipeline throughput to a host found by UDP
+            beacon, and BLE scan/connect/peripheral tests beside Wi-Fi.
+            Results print as "BENCH ..." lines. Never ship this.
+
+    config HOMEHUB_BENCH_SECONDS
+        int "Seconds per bench phase"
+        depends on HOMEHUB_PIPELINE_BENCH
+        default 8
+
+    config HOMEHUB_BENCH_QUICK
+        bool "Short bench (before/after pipelines only)"
+        depends on HOMEHUB_PIPELINE_BENCH
+        default n
+
+    config HOMEHUB_BENCH_SOAK_MINUTES
+        int "Soak for this many minutes instead of the one-shot bench (0 off)"
+        depends on HOMEHUB_PIPELINE_BENCH
+        range 0 1440
+        default 0
+
+    config HOMEHUB_BENCH_RX_DELAY_MS
+        int "Emulated extra round-trip time on the bench's Wi-Fi link (ms)"
+        depends on HOMEHUB_PIPELINE_BENCH
+        range 0 500
+        default 0
+        help
+            Delays every inbound packet on the station interface, so a LAN
+            bench sees a WAN-like round trip (the VM is ~50 ms away). TCP
+            window sizes only matter once the round trip is long.
+
+    config HOMEHUB_BENCH_BAND
+        int "Wi-Fi band for the bench (0 auto, 1 2.4 GHz, 2 5 GHz)"
+        depends on HOMEHUB_PIPELINE_BENCH
+        range 0 2
+        default 0
+
+    config HOMEHUB_BENCH_BEACON_PORT
+        int "UDP port the bench host announces itself on"
+        depends on HOMEHUB_PIPELINE_BENCH
+        default 5200
+
+    config HOMEHUB_BENCH_BLE_PEER
+        string "BLE peripheral name the central test connects to"
+        depends on HOMEHUB_PIPELINE_BENCH
+        default "MuseGadget-A7F5B4"
+
     config HOMEHUB_DEV_BUILD
         bool "Dev build (dev signing key + dev-only affordances)"
         default y

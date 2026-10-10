@@ -182,6 +182,45 @@ extern "C" bool noise_tunnel_send_packet(const uint8_t *data, size_t len) {
     return true;
 }
 
+static tx_slot *slot_for(uint8_t *buf) {
+    for (int i = 0; i < TX_POOL_SIZE; i++) {
+        if (s_slots[i].buf == buf) return &s_slots[i];
+    }
+    return nullptr;
+}
+
+extern "C" uint8_t *noise_tunnel_acquire_batch(size_t *cap) {
+    if (!s_connected.load(std::memory_order_acquire)
+        || !s_work_q || !s_free_q) return nullptr;
+    tx_slot *slot = nullptr;
+    if (xQueueReceive(s_free_q, &slot, 0) != pdTRUE) return nullptr;  // pool full
+    slot->len = 0;
+    if (cap) *cap = TUN_MAX_MSG_BYTES;
+    return slot->buf;
+}
+
+extern "C" bool noise_tunnel_commit_batch(uint8_t *buf, size_t len) {
+    tx_slot *slot = slot_for(buf);
+    if (!slot) return false;
+    // A batch committed after the stream dropped is stale: return it.
+    if (len == 0 || len > TUN_MAX_MSG_BYTES
+        || !s_connected.load(std::memory_order_acquire)) {
+        xQueueSend(s_free_q, &slot, 0);
+        return false;
+    }
+    slot->len = len;
+    if (xQueueSend(s_work_q, &slot, 0) != pdTRUE) {
+        xQueueSend(s_free_q, &slot, 0);
+        return false;
+    }
+    return true;
+}
+
+extern "C" void noise_tunnel_abort_batch(uint8_t *buf) {
+    tx_slot *slot = slot_for(buf);
+    if (slot) xQueueSend(s_free_q, &slot, 0);
+}
+
 extern "C" bool noise_tunnel_is_connected(void) {
     return s_connected.load(std::memory_order_relaxed);
 }
