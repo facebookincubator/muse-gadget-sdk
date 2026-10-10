@@ -35,20 +35,14 @@ bool muse_console_getc(uint8_t *c)
 }
 
 /* A stalled host must not keep the UI snapshot timer holding its lock.
- * Each chunk fits the default TX ring; abort when room is unavailable. */
+ * Keep each line in one driver call so USB console logs cannot split it. */
 bool muse_console_write(const void *buf, size_t n)
 {
-    const uint8_t *p = buf;
-    while (n) {
-        size_t chunk = n > 128 ? 128 : n;
-        int written = usb_serial_jtag_write_bytes(p, chunk, pdMS_TO_TICKS(200));
-        if (written <= 0 || (size_t)written > chunk) {
-            return false;
-        }
-        p += written;
-        n -= written;
+    if (!n) {
+        return true;
     }
-    return true;
+    int written = usb_serial_jtag_write_bytes(buf, n, pdMS_TO_TICKS(200));
+    return written > 0 && (size_t)written == n;
 }
 
 bool muse_console_host(void)

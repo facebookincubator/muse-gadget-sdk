@@ -59,8 +59,9 @@ int usb_serial_jtag_read_bytes(void *p,unsigned n,unsigned t) {(void)p;(void)n;(
 int usb_serial_jtag_is_connected(void) {return 1;}
 static int write_fake(const void *p,unsigned n,unsigned t) {
     calls++; if(t>maxwait)maxwait=t; if(n>maxchunk)maxchunk=n;
-    if(scenario==1 && calls==2)return 0;
+    if(scenario==1)return 0;
     if(scenario==2 && n>7)n=7;
+    if(scenario==6 && n>256)return 0;
     if(scenario==3)return -1;
     if(scenario==4)return (int)n+1;
     memcpy(captured+bytes,p,n);bytes+=n;return (int)n;
@@ -73,7 +74,7 @@ void uart_vfs_dev_use_driver(int p) {(void)p;}
 int main(int argc,char **argv) {
     (void)argc;scenario=atoi(argv[1]);unsigned char input[300];
     for(unsigned i=0;i<sizeof(input);i++)input[i]=(unsigned char)i;
-    bool ok=muse_console_write(input,scenario==5?0:sizeof(input));
+    bool ok=muse_console_write(input,scenario==5?0:(scenario==6?sizeof(input):193));
     printf("%d %u %u %u %u %d\n",ok,calls,bytes,maxwait,maxchunk,memcmp(input,captured,bytes)==0);
 }
 '''
@@ -84,11 +85,13 @@ int main(int argc,char **argv) {
             return list(map(int,r.stdout.split()))
 
     def test_usb_complete_and_bounded(self):
-        self.assertEqual(self.run_writer(False,0),[1,3,300,200,128,1])
+        self.assertEqual(self.run_writer(False,0),[1,1,193,200,193,1])
     def test_usb_stall_aborts(self):
-        self.assertEqual(self.run_writer(False,1),[0,2,128,200,128,1])
-    def test_usb_partial_write_preserves_bytes(self):
-        r=self.run_writer(False,2);self.assertEqual(r[0],1);self.assertEqual(r[2],300);self.assertEqual(r[5],1)
+        self.assertEqual(self.run_writer(False,1),[0,1,0,200,193,1])
+    def test_usb_partial_write_aborts_instead_of_splitting_a_line(self):
+        r=self.run_writer(False,2);self.assertEqual(r[0],0);self.assertEqual(r[1],1);self.assertEqual(r[2],7);self.assertEqual(r[5],1)
+    def test_usb_oversized_buffer_fails(self):
+        self.assertEqual(self.run_writer(False,6)[0],0)
     def test_usb_driver_error(self):
         self.assertEqual(self.run_writer(False,3)[0],0)
     def test_usb_invalid_count(self):
@@ -96,7 +99,7 @@ int main(int argc,char **argv) {
     def test_usb_empty(self):
         self.assertEqual(self.run_writer(False,5),[1,0,0,0,0,1])
     def test_uart_complete(self):
-        self.assertEqual(self.run_writer(True,0),[1,1,300,0,300,1])
+        self.assertEqual(self.run_writer(True,0),[1,1,193,0,193,1])
     def test_uart_short_write_is_failure(self):
         self.assertEqual(self.run_writer(True,2)[0],0)
     def test_uart_driver_error(self):
