@@ -1526,7 +1526,9 @@ static void send_snapshot(void)
     enum { RAW = 144 };   /* lines must fit the driver's 256-byte TX ring */
     char hdr[48];
     int n = snprintf(hdr, sizeof(hdr), "\nSNAP BEGIN %d %d %d\n", (int)buf->header.w, (int)buf->header.h, RAW);
-    muse_console_write(hdr, n);
+    if (!muse_console_write(hdr, n)) {
+        goto done;
+    }
     static unsigned char b64[4 * RAW / 3 + 4];
     for (uint32_t y = 0; y < buf->header.h; y++) {
         const unsigned char *p = buf->data + y * buf->header.stride;
@@ -1535,12 +1537,15 @@ static void send_snapshot(void)
             size_t chunk = left > RAW ? RAW : left, olen;
             mbedtls_base64_encode(b64, sizeof(b64), &olen, p, chunk);
             b64[olen++] = '\n';
-            muse_console_write(b64, olen);
+            if (!muse_console_write(b64, olen)) {
+                goto done;
+            }
             p += chunk;
             left -= chunk;
         }
     }
     muse_console_write("SNAP END\n", 9);
+done:
     lv_draw_buf_destroy(buf);
 #else
     muse_console_write("\nSNAP OFF\n", 10);   /* so snap.py can say why */
