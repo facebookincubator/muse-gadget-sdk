@@ -24,9 +24,21 @@
 #include "apps/app_debugger.h"
 #include "apps/app_demo.h"
 #include "esp_log.h"
+#include "muse_ui.h"
 
 static const char *TAG = "app_manager";
 static app_id_t s_current_app = APP_LAUNCHER;
+
+/*
+ * Pet World (room swipe) and the hardware demo (particle fling) use horizontal
+ * drags, which would otherwise slide the framework's tileview to the settings
+ * page mid-gesture. Disable that swipe for them; the launcher and the debugger
+ * are tap-only, so swipe-left to settings stays available there.
+ */
+static void apply_swipe(app_id_t app)
+{
+    muse_ui_set_swipe_enabled(app == APP_LAUNCHER || app == APP_DEBUGGER);
+}
 
 void app_manager_init(void)
 {
@@ -36,6 +48,7 @@ void app_manager_init(void)
     app_debugger_init();
     app_demo_init();
     s_current_app = APP_LAUNCHER;
+    apply_swipe(s_current_app);
 }
 
 void app_manager_set_app(app_id_t app)
@@ -43,6 +56,7 @@ void app_manager_set_app(app_id_t app)
     if (app < APP_COUNT) {
         ESP_LOGI(TAG, "Switching to App %d", (int)app);
         s_current_app = app;
+        apply_swipe(app);
     }
 }
 
@@ -55,6 +69,7 @@ void app_manager_open_launcher(void)
 {
     ESP_LOGI(TAG, "Returning to App Launcher");
     s_current_app = APP_LAUNCHER;
+    apply_swipe(s_current_app);
 }
 
 void app_manager_update(uint32_t now_ms, int mode, float audio_level, const char *caption)

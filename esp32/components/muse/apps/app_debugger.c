@@ -34,29 +34,35 @@
 #include <string.h>
 #include "esp_timer.h"
 
+#define ACTION_HOLD_MS 3000   /* keep a button's own message up this long */
+
 static float s_dbg_level = 0.0f;
-static char s_dbg_caption[128] = "Ready for test. Tap Ping or Hold Button B.";
-static char s_last_action[48] = "System Idle";
-static uint32_t s_action_timer = 0;
+static char s_dbg_caption[128] = "Ready. Tap TEST CLOUD or hold B to talk.";
+static char s_last_action[48] = "Idle";
+static uint32_t s_action_until = 0;   /* while now_ms < this, hold the action message */
 static int s_pressed_btn = -1;
 
 void app_debugger_init(void)
 {
     s_dbg_level = 0.0f;
     s_pressed_btn = -1;
-    strlcpy(s_dbg_caption, "Ready for test. Tap Ping or Hold Button B.", sizeof(s_dbg_caption));
-    strlcpy(s_last_action, "Debugger Started", sizeof(s_last_action));
+    s_action_until = 0;
+    strlcpy(s_dbg_caption, "Ready. Tap TEST CLOUD or hold B to talk.", sizeof(s_dbg_caption));
+    strlcpy(s_last_action, "Ready", sizeof(s_last_action));
 }
 
 void app_debugger_update(uint32_t now_ms, int mode, float audio_level, const char *caption)
 {
     (void)mode;
     s_dbg_level += (audio_level - s_dbg_level) * 0.4f;
+    /* While a button's own message is showing, don't let the (persistent)
+     * session caption overwrite it. After it expires, mirror the caption. */
+    if (s_action_until && now_ms < s_action_until) {
+        return;
+    }
+    s_action_until = 0;
     if (caption && caption[0]) {
         strlcpy(s_dbg_caption, caption, sizeof(s_dbg_caption));
-    }
-    if (s_action_timer && now_ms > s_action_timer) {
-        s_action_timer = 0;
     }
 }
 
@@ -204,7 +210,9 @@ void app_debugger_touch_up(void)
     if (s_pressed_btn == 0) {
         app_manager_open_launcher();
     } else if (s_pressed_btn == 1) {
-        strlcpy(s_last_action, "Beeping Speaker...", sizeof(s_last_action));
+        strlcpy(s_last_action, "Beeping", sizeof(s_last_action));
+        strlcpy(s_dbg_caption, "Beeping the speaker...", sizeof(s_dbg_caption));
+        s_action_until = (uint32_t)(esp_timer_get_time() / 1000) + ACTION_HOLD_MS;
         /* The voice task owns the mic/speaker I2S channels (shared GPIO 0):
          * play the chirp there, never from the UI task. */
         muse_voice_request_chirp();
@@ -212,8 +220,9 @@ void app_debugger_touch_up(void)
         /* A connectivity test: (re)connects to the VM and reports the result in
          * the status. Not a chat turn, so it spends no assistant quota and
          * can't interrupt or speak over an in-progress session. */
-        strlcpy(s_last_action, "Testing connection...", sizeof(s_last_action));
+        strlcpy(s_last_action, "Testing", sizeof(s_last_action));
         strlcpy(s_dbg_caption, "Testing connection to Muse...", sizeof(s_dbg_caption));
+        s_action_until = (uint32_t)(esp_timer_get_time() / 1000) + ACTION_HOLD_MS;
         muse_hatch_test();
     }
     s_pressed_btn = -1;

@@ -40,11 +40,16 @@ housekeeping, then calls the demo to draw the face. Concretely:
   after its housekeeping. The pairing prompt and settings menu live on the top
   LVGL layer, so they still draw over the demo canvas.
 
-Because of this, **pairing, the settings menu, screen sleep and brightness keep
-working** while the demo is on, and push-to-talk (Button B) drives the pet's
+Because of this, the framework's screen sleep, brightness and pairing prompt
+keep running while the demo is on, and push-to-talk (Button B) drives the pet's
 speech bubbles. The apps read `muse_state` only, so the voice session, Link and
 cloud connection are untouched. If the framebuffer can't be allocated the demo
 is skipped and the avatar is shown instead.
+
+Swipe-left to the settings page stays available on the launcher and the
+diagnostics app (both tap-only). It is disabled on Pet World and the hardware
+demo, whose own horizontal drags (room switching, particle flinging) would
+otherwise fight the tileview and slide to settings mid-gesture.
 
 ## The apps
 
@@ -56,7 +61,7 @@ is skipped and the avatar is shown instead.
 | Diagnostics | Hardware showcase |
 |---|---|
 | ![Debugger](screenshots/03-debugger.png) | ![Hardware demo](screenshots/04-hardware-demo.png) |
-| Live Wi-Fi state (`muse_wifi_status`), the real Noise/session state (`muse_hatch_status`), a signal-level meter, a speaker beep, and a connection test (`muse_hatch_test`, not a chat turn). | Battery/power from `muse_state_power`, chip/PSRAM/flash read from the running chip, a touch physics canvas, and an audio-level meter. |
+| Live Wi-Fi state (`muse_wifi_status`), the real Noise/session state (`muse_hatch_status`), a signal-level meter, a speaker beep, and a connection test (`muse_hatch_test`, not a chat turn). | Battery/power from `muse_state_power`, CPU/PSRAM read from the running chip (flash size from the build config), a touch physics canvas, and an audio-level meter. |
 
 ## Build
 
