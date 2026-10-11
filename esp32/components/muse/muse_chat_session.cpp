@@ -1503,11 +1503,16 @@ static void on_chat_ack(stream_t *s)
 /* ---- Turn: speech ---- */
 
 static void tts_data(const uint8_t *data, size_t len);
+static void decode(void);
 
 /* Spoken replies: POST the message text to the configured TTS service
- * and buffer the MP3 it returns, ready for decode(). False on any
- * failure; the caller falls back to silent pacing. */
-static bool tts_fetch(const char *text)
+ * and feed the MP3 it returns to tts_data() as it arrives, pumping
+ * decode() between chunks so playback starts while the rest is still
+ * downloading. The message is only activated once the service has
+ * accepted the request, so a failure before that point still falls
+ * back to silent pacing; a failure mid-stream just ends the audio
+ * early. */
+static bool tts_speak(msg_t &m, int i, const char *text)
 {
     const char *url = CONFIG_MUSE_TTS_URL;
     if (!url[0] || !text || !text[0]) {
@@ -1530,32 +1535,35 @@ static bool tts_fetch(const char *text)
     esp_http_client_set_header(cli, "Content-Type", "text/plain; charset=utf-8");
     int tlen = strlen(text);
     esp_http_client_set_post_field(cli, text, tlen);
-    bool ok = false;
+    bool live = false;
     if (esp_http_client_open(cli, tlen) == ESP_OK &&
         esp_http_client_write(cli, text, tlen) == tlen) {
         esp_http_client_fetch_headers(cli);
         if (esp_http_client_get_status_code(cli) == 200) {
+            m.pcm_start = s_turn.pcm_out;
+            m.pcm_frames = 0;
+            m.tts = TTS_ACTIVE;
+            s_turn.tts_msg = i;
+            s_turn.silent = false;
+            ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
+            show_reply_start(m);
+            live = true;
             char buf[2048];
             int rd;
-            ok = true;
             while ((rd = esp_http_client_read(cli, buf, sizeof(buf))) > 0) {
-                tts_data((const uint8_t *)buf, rd);
+                tts_data((const uint8_t *)buf, (size_t)rd);
+                decode();
             }
-            if (rd < 0) {
-                ok = false;
-            }
+            s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
         }
     }
     esp_http_client_close(cli);
     esp_http_client_cleanup(cli);
-    if (ok && s_turn.mp3_len > 0) {
-        s_turn.mp3_ended = true;
-        return true;
+    if (!live) {
+        s_turn.mp3_len = 0;
     }
-    s_turn.mp3_len = 0;
-    return false;
+    return live;
 }
-
 
 static void start_tts(void)
 {
@@ -1582,14 +1590,7 @@ static void start_tts(void)
          * end. decode() plays it at the speaker's volume, captions following,
          * and finishes the message once it's drained.
          */
-        if (s_turn.texts && tts_fetch(s_turn.texts + i * TEXT_MAX)) {
-            m.pcm_start = s_turn.pcm_out;
-            m.pcm_frames = 0;
-            m.tts = TTS_ACTIVE;
-            s_turn.tts_msg = i;
-            s_turn.silent = false;
-            ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
-            show_reply_start(m);
+        if (s_turn.texts && tts_speak(m, i, s_turn.texts + i * TEXT_MAX)) {
             return;
         }
         m.pcm_start = s_turn.pcm_out;
