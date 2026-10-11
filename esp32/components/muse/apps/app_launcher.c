@@ -1,10 +1,26 @@
 /*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * App Selection Menu / Launcher for M5Stack Core2
  */
 
 #include "app_launcher.h"
 #include "../app_manager.h"
-#include "../avatar/gfx_primitives.h"
+#include "gfx_primitives.h"
 #include "muse_battery.h"
 #include "muse_wifi.h"
 #include "muse_state.h"
@@ -175,10 +191,9 @@ void app_launcher_render(uint16_t *fb, uint32_t now_ms)
     // 4. Bottom Navigation Hint (y: 206..240)
     gfx_fill_rect(fb, 0, 206, SCREEN_W, 34, 0x0841);
     gfx_draw_fast_hline(fb, 0, 206, SCREEN_W, 0x2104);
-    gfx_draw_string(fb, 16, 214, "[A] APP MENU", GFX_ACCENT_CYAN);
-    gfx_draw_string(fb, 114, 214, "[B] HOLD TO TALK", GFX_ACCENT_ROSE);
-    gfx_draw_string(fb, 230, 214, "[C] SETTINGS", GFX_ACCENT_GOLD);
-    gfx_draw_string(fb, 36, 227, "Touch any card to launch | Button A returns here", GFX_TEXT_DIM);
+    gfx_draw_string(fb, 20, 214, "TAP A CARD TO OPEN", GFX_ACCENT_CYAN);
+    gfx_draw_string(fb, 184, 214, "HOLD B TO TALK", GFX_ACCENT_ROSE);
+    gfx_draw_string(fb, 30, 227, "In an app, tap [< APPS] to come back here", GFX_TEXT_DIM);
 }
 
 void app_launcher_touch_down(int x, int y)
@@ -210,4 +225,9 @@ void app_launcher_touch_up(void)
         app_manager_set_app(APP_DEMO);
     }
     s_touched_card = -1;
+}
+
+void app_launcher_touch_cancel(void)
+{
+    s_touched_card = -1;   /* finger left a card without releasing on it: no launch */
 }

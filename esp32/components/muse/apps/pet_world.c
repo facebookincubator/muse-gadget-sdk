@@ -1,4 +1,20 @@
 /*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * Pet World & 3-Room House Implementation
  * High-Resolution Native 320x240 Graphics Engine
  */
@@ -17,7 +33,6 @@
 #include <time.h>
 #include "muse_state.h"
 #include "muse_wifi.h"
-#include "muse_ble.h"
 
 static const char *TAG = "pet_world";
 
@@ -161,6 +176,10 @@ static const uint8_t font5x7[] = {
     0x44, 0x28, 0x10, 0x28, 0x44, // x
     0x0C, 0x50, 0x50, 0x50, 0x3C, // y
     0x44, 0x64, 0x54, 0x4C, 0x44, // z
+    0x00, 0x08, 0x36, 0x41, 0x00, // {
+    0x00, 0x00, 0x7F, 0x00, 0x00, // |
+    0x00, 0x41, 0x36, 0x08, 0x00, // }
+    0x08, 0x04, 0x08, 0x10, 0x08, // ~
 };
 
 // --- Fast 2D Drawing Primitives on 320x240 RGB565 Buffer ---
@@ -371,17 +390,17 @@ static inline void blend_pixel(uint16_t *dst, uint16_t src, uint8_t a)
     if (a == 0) return;
     if (a >= 250) {
         *dst = src;
-    } else {
-        uint32_t d = *dst;
-        uint32_t s = src;
-        uint32_t d_rb = d & 0xF81F;
-        uint32_t d_g  = d & 0x07E0;
-        uint32_t s_rb = s & 0xF81F;
-        uint32_t s_g  = s & 0x07E0;
-        uint32_t rb = (d_rb + (((s_rb - d_rb) * a) >> 8)) & 0xF81F;
-        uint32_t g  = (d_g  + (((s_g  - d_g ) * a) >> 8)) & 0x07E0;
-        *dst = (uint16_t)(rb | g);
+        return;
     }
+    /* Per-channel blend. Combining R and B into one lane (the usual 0xF81F
+     * trick) underflows when a source channel is darker than the destination,
+     * bleeding colour between channels; this keeps each channel independent. */
+    uint32_t ia = 256u - a;
+    uint16_t d = *dst;
+    uint32_t r = ((((uint32_t)src >> 11) & 0x1F) * a + (((uint32_t)d >> 11) & 0x1F) * ia) >> 8;
+    uint32_t g = ((((uint32_t)src >> 5) & 0x3F) * a + (((uint32_t)d >> 5) & 0x3F) * ia) >> 8;
+    uint32_t b = (((uint32_t)src & 0x1F) * a + ((uint32_t)d & 0x1F) * ia) >> 8;
+    *dst = (uint16_t)((r << 11) | (g << 5) | b);
 }
 
 // Render 52x62 sprite with full alpha blending

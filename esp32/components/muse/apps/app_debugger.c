@@ -1,10 +1,26 @@
 /*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * Step-by-Step Diagnostics & Debugger App for M5Stack Core2
  */
 
 #include "app_debugger.h"
 #include "../app_manager.h"
-#include "../avatar/gfx_primitives.h"
+#include "gfx_primitives.h"
 #include "muse_audio.h"
 #include "muse_battery.h"
 #include "muse_voice.h"
@@ -92,20 +108,19 @@ void app_debugger_render(uint16_t *fb, uint32_t now_ms)
 
     muse_hatch_status_t hatch_st;
     muse_hatch_status(&hatch_st);
-    if (hatch_st.state == MUSE_HATCH_REACHABLE) {
-        gfx_draw_string(fb, 170, 46, "Host: metaaivm.com", GFX_TEXT_MAIN);
-        gfx_draw_string(fb, 170, 58, "TLS Noise: OK (200)", GFX_GREEN);
-    } else {
-        snprintf(buf, sizeof(buf), "State: %s", hatch_st.detail[0] ? hatch_st.detail : "Connecting");
-        buf[22] = '\0';
-        gfx_draw_string(fb, 170, 46, buf, GFX_YELLOW);
-        gfx_draw_string(fb, 170, 58, "Noise: Handshake...", GFX_TEXT_MUTED);
-    }
+    bool hatch_ok = hatch_st.state == MUSE_HATCH_REACHABLE;
+    const char *hatch_name = muse_hatch_state_name(hatch_st.state);
+    snprintf(buf, sizeof(buf), "State: %s", hatch_name ? hatch_name : "?");
+    buf[22] = '\0';
+    gfx_draw_string(fb, 170, 46, buf, hatch_ok ? GFX_GREEN : GFX_YELLOW);
+    snprintf(buf, sizeof(buf), "%s", hatch_st.detail[0] ? hatch_st.detail : "(no detail)");
+    buf[22] = '\0';
+    gfx_draw_string(fb, 170, 58, buf, GFX_TEXT_MUTED);
 
     // 4. Step 3: Microphone Sound Meter Box (x=6, y=82, w=308, h=46)
     gfx_fill_round_rect(fb, 6, 82, 308, 46, 4, GFX_CARD_BG);
     gfx_draw_round_rect(fb, 6, 82, 308, 46, 4, GFX_CARD_BORDER);
-    gfx_draw_string(fb, 12, 86, "STEP 3: MIC SPM1423 VU METER", GFX_ACCENT_LIME);
+    gfx_draw_string(fb, 12, 86, "STEP 3: SIGNAL LEVEL (MIC/SPK)", GFX_ACCENT_LIME);
 
     snprintf(buf, sizeof(buf), "Gain: %ddB", muse_settings_mic_gain());
     gfx_draw_string(fb, 240, 86, buf, GFX_TEXT_MUTED);
@@ -132,13 +147,13 @@ void app_debugger_render(uint16_t *fb, uint32_t now_ms)
     bool spk_down = (s_pressed_btn == 1);
     gfx_fill_round_rect(fb, 6, 132, 150, 26, 4, spk_down ? GFX_ACCENT_GOLD : 0x2A45);
     gfx_draw_round_rect(fb, 6, 132, 150, 26, 4, GFX_ACCENT_GOLD);
-    gfx_draw_string(fb, 16, 140, "▶ BEEP SPEAKER", spk_down ? GFX_BLACK : GFX_WHITE);
+    gfx_draw_string(fb, 16, 140, "BEEP SPEAKER", spk_down ? GFX_BLACK : GFX_WHITE);
 
     // Button 2: [💬 PING CLOUD] (x=164, y=132, w=150, h=26)
     bool ping_down = (s_pressed_btn == 2);
     gfx_fill_round_rect(fb, 164, 132, 150, 26, 4, ping_down ? GFX_ACCENT_CYAN : 0x2A45);
     gfx_draw_round_rect(fb, 164, 132, 150, 26, 4, GFX_ACCENT_CYAN);
-    gfx_draw_string(fb, 178, 140, "💬 PING CLOUD", ping_down ? GFX_BLACK : GFX_WHITE);
+    gfx_draw_string(fb, 178, 140, "TEST CLOUD", ping_down ? GFX_BLACK : GFX_WHITE);
 
     // 6. Live Response Box (y: 162..234)
     gfx_fill_round_rect(fb, 6, 162, 308, 72, 4, 0x0821);
@@ -194,9 +209,17 @@ void app_debugger_touch_up(void)
          * play the chirp there, never from the UI task. */
         muse_voice_request_chirp();
     } else if (s_pressed_btn == 2) {
-        strlcpy(s_last_action, "Sending Ping...", sizeof(s_last_action));
-        strlcpy(s_dbg_caption, "Sending 'Ping' to Muse Spark...", sizeof(s_dbg_caption));
-        muse_hatch_text_turn(strdup("Ping"));
+        /* A connectivity test: (re)connects to the VM and reports the result in
+         * the status. Not a chat turn, so it spends no assistant quota and
+         * can't interrupt or speak over an in-progress session. */
+        strlcpy(s_last_action, "Testing connection...", sizeof(s_last_action));
+        strlcpy(s_dbg_caption, "Testing connection to Muse...", sizeof(s_dbg_caption));
+        muse_hatch_test();
     }
     s_pressed_btn = -1;
+}
+
+void app_debugger_touch_cancel(void)
+{
+    s_pressed_btn = -1;   /* finger left a button without releasing on it */
 }
