@@ -54,6 +54,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_http_client.h"
 #include "esp_timer.h"
 #include "esp_tls.h"
 #include "freertos/FreeRTOS.h"
@@ -1501,6 +1502,61 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+static void tts_data(const uint8_t *data, size_t len);
+
+/* Spoken replies: POST the message text to the configured TTS service
+ * and buffer the MP3 it returns, ready for decode(). False on any
+ * failure; the caller falls back to silent pacing. */
+static bool tts_fetch(const char *text)
+{
+    const char *url = CONFIG_MUSE_TTS_URL;
+    if (!url[0] || !text || !text[0]) {
+        return false;
+    }
+    s_turn.mp3_len = 0;
+    s_turn.mp3_ended = false;
+    s_turn.kbps = 0;
+    s_turn.down_rate = 0;
+    mp3dec_init(&s_turn.dec);
+    esp_http_client_config_t cfg = {};
+    cfg.url = url;
+    cfg.method = HTTP_METHOD_POST;
+    cfg.timeout_ms = 20000;
+    cfg.buffer_size = 2048;
+    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+    if (!cli) {
+        return false;
+    }
+    esp_http_client_set_header(cli, "Content-Type", "text/plain; charset=utf-8");
+    int tlen = strlen(text);
+    esp_http_client_set_post_field(cli, text, tlen);
+    bool ok = false;
+    if (esp_http_client_open(cli, tlen) == ESP_OK &&
+        esp_http_client_write(cli, text, tlen) == tlen) {
+        esp_http_client_fetch_headers(cli);
+        if (esp_http_client_get_status_code(cli) == 200) {
+            char buf[2048];
+            int rd;
+            ok = true;
+            while ((rd = esp_http_client_read(cli, buf, sizeof(buf))) > 0) {
+                tts_data((const uint8_t *)buf, rd);
+            }
+            if (rd < 0) {
+                ok = false;
+            }
+        }
+    }
+    esp_http_client_close(cli);
+    esp_http_client_cleanup(cli);
+    if (ok && s_turn.mp3_len > 0) {
+        s_turn.mp3_ended = true;
+        return true;
+    }
+    s_turn.mp3_len = 0;
+    return false;
+}
+
+
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1526,6 +1582,16 @@ static void start_tts(void)
          * end. decode() plays it at the speaker's volume, captions following,
          * and finishes the message once it's drained.
          */
+        if (s_turn.texts && tts_fetch(s_turn.texts + i * TEXT_MAX)) {
+            m.pcm_start = s_turn.pcm_out;
+            m.pcm_frames = 0;
+            m.tts = TTS_ACTIVE;
+            s_turn.tts_msg = i;
+            s_turn.silent = false;
+            ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
+            show_reply_start(m);
+            return;
+        }
         m.pcm_start = s_turn.pcm_out;
         m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;

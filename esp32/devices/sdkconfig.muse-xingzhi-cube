@@ -30,3 +30,4 @@ CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
 # Chinese captions and replies, via the Unifont CJK fallback.
 CONFIG_MUSE_CJK_FONT=y
+CONFIG_MUSE_TTS_URL="http://192.168.31.240:18765/tts"

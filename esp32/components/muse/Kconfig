@@ -106,6 +106,14 @@ menu "Muse"
         bool
         default y if !MUSE_BOARD_NONE
 
+    config MUSE_TTS_URL
+        string "TTS service URL for spoken replies (empty: captions only)"
+        default ""
+        help
+            Each reply text is POSTed to this URL as UTF-8 and the MP3 it
+            returns is played through the speaker. Empty keeps the stock
+            behaviour: captions paced by silence.
+
     config MUSE_BOARD_ID
         string
         default "waveshare_s3_175c" if MUSE_BOARD_WAVESHARE_S3_175C
