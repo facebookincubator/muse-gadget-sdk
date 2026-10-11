@@ -61,6 +61,9 @@ static const char *TAG = "muse_ui";
 #define RING_RANGE 1000
 #define CAPTION_W 256           /* 16 columns of unscii_16, the width reply captions wrap to */
 #define CAPTION_LINE_SPACE 2
+#define LONG_MUSE_TOP 44        /* long layout: Muse's top, under the state and name rows, while a reply shows */
+#define LONG_HINTS_H 135        /* long layout: the bottom strip, for the key hints, speaker and page dots */
+#define LONG_LINE_SPACE 4
 #define ART_BLANK_ROWS 3        /* Muse's art never reaches the grid's bottom rows */
 #define MINI_CELL_PX 2          /* Muse's grid cells over a reply that's read */
 #define ANSWER_MS 300           /* Muse making room for a reply, and back */
@@ -92,6 +95,7 @@ static const char *TAG = "muse_ui";
 static int s_w, s_h;
 static bool s_small;
 static bool s_tall;         /* compact, with room above and below Muse (StickS3) */
+static bool s_long;         /* tall enough for a page of the reply under Muse */
 static int s_canvas_px;     /* Muse's size on screen */
 static int s_dy;            /* full layout: offset from a 466 px tall screen */
 static lv_indev_t *s_indev;
@@ -197,6 +201,7 @@ static int s_answer = -1;       /* the layout showing, or -1 */
 static int s_page_for = -1;     /* the layout the reply's page is sized for */
 static int s_big_y;             /* Muse's centre at full size */
 static int s_muse_y;            /* and now */
+static bool s_muse_up;          /* long layout: up out of the reply's way */
 static int s_from_px, s_from_y, s_to_px, s_to_y;
 
 static const char *const MODE_NAMES[MUSE_MODE_COUNT] = {
@@ -1019,6 +1024,38 @@ static void build_screen(void)
         muse_state_set_cjk_page((s_w - 2 * CJK_BAND_PAD) / lv_font_get_glyph_width(caption_font(), 'M', ' '),
                                 s_cjk_lines);
 #endif
+        if (s_long) {
+            /* Not a band over Muse but a page of the reply under it. Montserrat's
+             * letters differ in width, so the pager counts an average one and the
+             * page keeps two spare lines for lines of wide ones. */
+            const lv_font_t *font = &lv_font_montserrat_16;
+            int top = LONG_MUSE_TOP + s_canvas_px - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W) + 14;
+            int pitch = lv_font_get_line_height(font) + LONG_LINE_SPACE;
+            int lines = (s_h - LONG_HINTS_H - top + LONG_LINE_SPACE) / pitch;
+            int w = s_w - 24;
+            int cols = w / lv_font_get_glyph_width(font, 'n', ' ');
+            int page = lines - 2;
+            /* A third of the caption spare for characters wider than a byte. */
+            while ((cols + 1) * page > MUSE_CAPTION_MAX * 2 / 3) {
+                page--;
+            }
+            lv_obj_set_style_text_font(s_caption_lbl, font, 0);
+            lv_obj_set_style_text_line_space(s_caption_lbl, LONG_LINE_SPACE, 0);
+            lv_obj_set_style_pad_ver(s_caption_lbl, 0, 0);
+            lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_text_align(s_caption_lbl, LV_TEXT_ALIGN_LEFT, 0);
+            lv_obj_set_size(s_caption_lbl, w, lines * pitch - LONG_LINE_SPACE);
+            lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, top);
+            muse_state_set_page(cols, page);
+#if CONFIG_MUSE_CJK_FONT
+            int cjk_pitch = lv_font_get_line_height(caption_font()) + LONG_LINE_SPACE;
+            muse_state_set_cjk_page(w / lv_font_get_glyph_width(caption_font(), 'M', ' '),
+                                    (lines * pitch) / cjk_pitch - 2);
+#endif
+            if (muse_board->touch) {
+                build_speaker(face, s_w / 2 - 96, s_h / 2 - 75);   /* in the bottom strip, left of the key hints */
+            }
+        }
 
         s_bar = lv_obj_create(face);
         lv_obj_remove_style_all(s_bar);
@@ -1613,11 +1650,18 @@ static void update_status(muse_mode_t mode, float now)
     if (fresh) {
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
 #if CONFIG_MUSE_CJK_FONT
-        if (s_small) {
+        if (s_long) {
+            lv_obj_set_style_text_font(s_caption_lbl, muse_text_has_cjk(caption) ? caption_font()
+                                                      : &lv_font_montserrat_16, 0);
+        } else if (s_small) {
             set_caption_font(muse_text_has_cjk(caption));
         }
 #endif
         lv_label_set_text(lbl, caption);
+        if (s_long && s_muse_up != (caption[0] != '\0')) {
+            s_muse_up = caption[0] != '\0';
+            move_muse(s_canvas_px, s_muse_up ? LONG_MUSE_TOP + s_canvas_px / 2 - s_h / 2 : s_big_y);
+        }
         lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !caption[0]);
         if (s_reply_lbl) {
             lv_obj_add_flag(answer >= 0 ? s_caption_lbl : s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
@@ -1762,6 +1806,7 @@ esp_err_t muse_ui_start(void)
     bool short_landscape = s_w > s_h && s_h < 320;
     s_small = s_h < 200 || s_w < 200 || short_landscape || s_w < 300;
     s_tall = s_small && s_h >= s_w + 64;
+    s_long = s_tall && s_h >= 3 * s_w;
     /* Small screens keep room for the status line and button icons. A narrow
      * one is as wide as Muse gets, in whole pixels. */
     s_canvas_px = s_small ? s_h * 3 / 4 : MUSE_PX_W * 5;
