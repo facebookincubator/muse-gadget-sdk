@@ -8,7 +8,8 @@ The side buttons are BOOT, RESET and PWR. BOOT (GPIO35) is push-to-talk. PWR is 
 a press turns the screen off or on, two quick presses toggle phone setup, a 1.5 s hold powers the board
 off, and a press turns it back on. RESET restarts the P4.
 
-Images from Muse (`display.draw_url`) are off: the P4's ROM has no JPEG decoder.
+The P4's ROM has no JPEG decoder, so images from Muse (`display.draw_url`) go through its JPEG peripheral.
+They need to be baseline JPEGs, as on the other boards.
 
 ## Build
 
