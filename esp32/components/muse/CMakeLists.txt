@@ -59,7 +59,7 @@ if(CONFIG_MUSE_ENABLED)
             "apps/app_launcher.c"
             "apps/app_debugger.c"
             "apps/app_demo.c"
-            "avatar/pet_world.c")
+            "apps/pet_world.c")
     endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The

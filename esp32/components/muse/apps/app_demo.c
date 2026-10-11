@@ -1,17 +1,37 @@
 /*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * Hardware & M5Stack Core2 Showcase Demo App
  * Showcases capacitive touch, physics particle engine, AXP192 power telemetry, and audio visualizer.
  */
 
 #include "app_demo.h"
 #include "../app_manager.h"
-#include "../avatar/gfx_primitives.h"
+#include "gfx_primitives.h"
 #include "muse_battery.h"
 #include "muse_state.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+#include "sdkconfig.h"
+#include "esp_chip_info.h"
+#include "esp_psram.h"
 
 #define MAX_BALLS 8
 
@@ -30,14 +50,31 @@ static int s_demo_touch_y = -1;
 static bool s_demo_touching = false;
 static bool s_back_pressed = false;
 
+static char s_core_str[28];   /* real chip/memory info, read once at init */
+static char s_mem_str[32];
+
 static const uint16_t BALL_COLORS[] = {
     GFX_CYAN, GFX_YELLOW, GFX_PINK, GFX_GREEN, GFX_ORANGE, GFX_ACCENT_BLUE, GFX_WHITE
 };
+
+static void read_specs(void)
+{
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+    const char *model = chip.model == CHIP_ESP32 ? "ESP32" : chip.model == CHIP_ESP32S3 ? "ESP32-S3"
+                        : chip.model == CHIP_ESP32C6 ? "ESP32-C6" : "ESP32-family";
+    snprintf(s_core_str, sizeof(s_core_str), "CORE: %s x%d", model, chip.cores);
+
+    size_t psram = esp_psram_get_size();   /* physical PSRAM on the chip */
+    snprintf(s_mem_str, sizeof(s_mem_str), "PSRAM:%uMB FLASH:%s",
+             (unsigned)(psram >> 20), CONFIG_ESPTOOLPY_FLASHSIZE);
+}
 
 void app_demo_init(void)
 {
     s_demo_touching = false;
     s_back_pressed = false;
+    read_specs();
     for (int i = 0; i < MAX_BALLS; i++) {
         s_balls[i].x = 40.0f + (float)(i * 35);
         s_balls[i].y = 80.0f + (float)((i % 3) * 20);
@@ -108,23 +145,27 @@ void app_demo_render(uint16_t *fb, uint32_t now_ms)
     gfx_draw_string(fb, 72, 9, "HARDWARE SHOWCASE DEMO", GFX_ACCENT_LIME);
 
     // 2. Telemetry Bar (y: 30..62)
-    // Card 1: AXP192 Battery & Power
+    // Card 1: Battery & Power (from muse_state_power)
     gfx_fill_round_rect(fb, 6, 30, 150, 32, 4, GFX_CARD_BG);
     gfx_draw_round_rect(fb, 6, 30, 150, 32, 4, GFX_CARD_BORDER);
 
     char buf[32];
     muse_power_t pwr = muse_state_power();
-    int pct = pwr.battery_pct >= 0 ? pwr.battery_pct : 100;
-    snprintf(buf, sizeof(buf), "BATTERY: %d%%", pct);
+    if (pwr.battery_pct >= 0) {
+        snprintf(buf, sizeof(buf), "BATTERY: %d%%", pwr.battery_pct);
+    } else {
+        snprintf(buf, sizeof(buf), "BATTERY: N/A");   /* no battery connected */
+    }
     gfx_draw_string(fb, 12, 34, buf, GFX_ACCENT_LIME);
-    snprintf(buf, sizeof(buf), "STATUS: %s", muse_state_on_battery() ? "BATTERY" : "CHARGING");
+    const char *pwr_src = pwr.charging ? "CHARGING" : pwr.usb ? "USB POWER" : "ON BATTERY";
+    snprintf(buf, sizeof(buf), "STATUS: %s", pwr_src);
     gfx_draw_string(fb, 12, 46, buf, GFX_TEXT_MAIN);
 
-    // Card 2: Memory & Platform Specs
+    // Card 2: Memory & Platform Specs (read from the chip at init)
     gfx_fill_round_rect(fb, 164, 30, 150, 32, 4, GFX_CARD_BG);
     gfx_draw_round_rect(fb, 164, 30, 150, 32, 4, GFX_CARD_BORDER);
-    gfx_draw_string(fb, 170, 34, "CORE: ESP32-D0WD", GFX_ACCENT_CYAN);
-    gfx_draw_string(fb, 170, 46, "PSRAM: 8MB | FLASH: 16MB", GFX_TEXT_MAIN);
+    gfx_draw_string(fb, 170, 34, s_core_str, GFX_ACCENT_CYAN);
+    gfx_draw_string(fb, 170, 46, s_mem_str, GFX_TEXT_MAIN);
 
     // 3. Physics Sandbox Canvas (y: 66..192)
     gfx_fill_round_rect(fb, 6, 66, 308, 126, 6, 0x0821);
@@ -150,16 +191,17 @@ void app_demo_render(uint16_t *fb, uint32_t now_ms)
         gfx_draw_string(fb, 12, 176, buf, GFX_YELLOW);
     }
 
-    // 4. Audio Spectrum Visualizer (y: 196..236)
+    // 4. Audio level meter (y: 196..236). This is the single session audio
+    // level (muse_state_level: mic while listening, playback while speaking),
+    // animated across bars for a VU look. It is not a per-frequency spectrum.
     gfx_fill_round_rect(fb, 6, 196, 308, 40, 4, GFX_CARD_BG);
     gfx_draw_round_rect(fb, 6, 196, 308, 40, 4, GFX_CARD_BORDER);
-    gfx_draw_string(fb, 12, 199, "REAL-TIME AUDIO SPECTRUM (SPM1423 MIC)", GFX_ACCENT_GOLD);
+    gfx_draw_string(fb, 12, 199, "AUDIO LEVEL (MIC WHILE LISTENING / SPK)", GFX_ACCENT_GOLD);
 
-    // 16 animated equalizer bars
+    // 16 bars driven by the live level, with a travelling-wave animation.
     int num_bars = 16;
     for (int b = 0; b < num_bars; b++) {
         int bx = 14 + b * 18;
-        // Pseudo-spectrum variance based on live audio level and time
         float wave = sinf((float)(now_ms) * 0.008f + (float)b * 0.7f) * 0.3f + 0.7f;
         int bar_h = (int)(s_demo_audio * 28.0f * wave);
         if (bar_h > 24) bar_h = 24;
@@ -205,5 +247,11 @@ void app_demo_touch_up(void)
         s_back_pressed = false;
         return;
     }
+    s_demo_touching = false;
+}
+
+void app_demo_touch_cancel(void)
+{
+    s_back_pressed = false;   /* finger left the back button without releasing on it */
     s_demo_touching = false;
 }
