@@ -146,13 +146,13 @@ menu "Muse"
         bool "Isolated board BSP power-characterization firmware"
         # Boards implementing boards/muse_power_test_board.h; extend this list
         # only after the new board's diagnostic hooks and matrix pass tests.
-        depends on (MUSE_BOARD_SENSECAP_WATCHER) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
         default n
         help
             DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
-            at app_main. USB UART arms a timed autonomous VBUS-free BSP-load
+            at app_main. USB console arms a timed autonomous or USB-powered BSP-load
             sweep. No credentials, production NVS, BLE provisioning or OTA.
-            Results are retained in RAM/RTC until read back after USB reconnect.
+            Results are retained in RAM/RTC for USB readback.
             This characterizes isolated BSP loads, NOT production power.
             Optional camera support is not required and unsupported matrix
             features are explicitly skipped. Never enable in a release profile.
