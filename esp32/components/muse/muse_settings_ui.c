@@ -46,6 +46,7 @@
 #define LIST_W 330
 #define LIST_TOP 84
 #define ROW_H 58
+#define LONG_FIELD_H 37        /* Montserrat 20's 22 px line, padding and border */
 #define MAX_APS 12
 
 #define COLOR_TEXT 0xf2efff
@@ -61,6 +62,7 @@ typedef void (*text_done_cb_t)(const char *text);
 
 /* The screen size the text page is scaled to (see text_px). */
 static int s_text_scale = 466;
+static bool s_long;     /* at least three times as tall as wide */
 static lv_obj_t *s_tile;
 static lv_obj_t *s_current;
 static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text;
@@ -252,7 +254,27 @@ static lv_obj_t *card(lv_obj_t *list, bool clickable)
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(c, 12, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    if (s_long) {
+        lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_set_height(c, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_hor(c, 12, 0);
+        lv_obj_set_style_pad_ver(c, 16, 0);
+        lv_obj_set_style_pad_column(c, 8, 0);
+    }
     return c;
+}
+
+/* On a long screen a value or switch takes the line under its name. The name
+ * grows to fill its line, so flex wrapping alone would only squeeze it. */
+static void under_if_long(lv_obj_t *o)
+{
+    if (s_long) {
+        lv_obj_add_flag(o, LV_OBJ_FLAG_FLEX_IN_NEW_TRACK);
+        if (lv_obj_check_type(o, &lv_label_class)) {
+            lv_obj_set_width(o, lv_pct(100));   /* wrapped to the line, so its height counts every line */
+            lv_obj_set_style_max_width(o, lv_pct(100), 0);
+        }
+    }
 }
 
 /* Tappable row: icon, text, right-aligned value. */
@@ -271,6 +293,15 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
         lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_DIM, "");
         lv_obj_set_style_max_width(v, 130, 0);
         lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);
+        /* Beside an icon the name leaves a long screen's row no room for a value;
+         * without one, a short value (a tick, "Not set") fits on its line. */
+        if (icon) {
+            under_if_long(v);
+        } else if (s_long) {
+            lv_obj_set_style_max_width(v, lv_pct(50), 0);
+            lv_obj_set_style_text_font(t, &lv_font_montserrat_16, 0);
+            lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_WRAP);
+        }
         *value_out = v;
     }
     if (cb) {
@@ -291,6 +322,7 @@ static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_
     if (on) {
         lv_obj_add_state(sw, LV_STATE_CHECKED);
     }
+    under_if_long(sw);
     lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, NULL);
     return sw;
 }
@@ -300,6 +332,11 @@ static lv_obj_t *button(lv_obj_t *list, const char *text, uint32_t color, lv_eve
     lv_obj_t *b = card(list, true);
     lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *l = label(b, &lv_font_montserrat_20, color, text);
+    if (s_long) {
+        lv_obj_set_width(l, lv_pct(100));
+        lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    }
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     if (label_out) {
         *label_out = l;
@@ -318,8 +355,9 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_set_style_pad_ver(c, 6, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
 
-    label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
-    lv_obj_t *v = label(c, &lv_font_montserrat_20, COLOR_ACCENT, "");
+    const lv_font_t *font = s_long ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
+    label(c, font, COLOR_TEXT, text);
+    lv_obj_t *v = label(c, font, COLOR_ACCENT, "");
     lv_obj_align(v, LV_ALIGN_TOP_RIGHT, 0, 0);
     *value_out = v;
 
@@ -360,10 +398,14 @@ static lv_obj_t *column(lv_obj_t *list)
 static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 {
     lv_obj_t *c = card(list, false);
-    lv_obj_set_height(c, 44);
+    if (!s_long) {
+        lv_obj_set_height(c, 44);
+    }
     lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
-    return label(c, &lv_font_montserrat_16, COLOR_ACCENT, "");
+    lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_ACCENT, "");
+    under_if_long(v);
+    return v;
 }
 
 /* ---------- navigation ---------- */
@@ -434,6 +476,9 @@ static int text_px(int v)
 
 static int text_y(int y)
 {
+    if (s_long) {
+        return y;   /* from the top, at full height: the keys take the rest */
+    }
     return muse_board->height / 2 + text_px(y - 233);
 }
 
@@ -541,7 +586,7 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 40);
 
     const lv_font_t *font = &lv_font_montserrat_20;
-    int h = text_px(48), border = 2;
+    int h = s_long ? LONG_FIELD_H : text_px(48), border = 2;
     int pad = (h - 2 * border - lv_font_get_line_height(font)) / 2;
     s_text_ta = lv_textarea_create(s_text);
     lv_textarea_set_one_line(s_text_ta, true);
@@ -564,8 +609,8 @@ static void build_text_page(lv_obj_t *tile)
     }
     lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, 0, text_y(76));
 
-    /* A full keyboard's keys are too small to hit on a screen under 2". */
-    if (muse_board->diagonal_in >= 2.0f) {
+    /* A full keyboard's keys are too small to hit on a screen under 2", or a long one. */
+    if (muse_board->diagonal_in >= 2.0f && !s_long) {
         build_keyboard();
         return;
     }
@@ -1407,8 +1452,11 @@ static void tick_home(void)
 
 void muse_settings_ui_build(lv_obj_t *tile)
 {
+    s_long = muse_board->height >= 3 * muse_board->width;
     if (muse_board->round && muse_board->height < 466) {
         s_text_scale = muse_board->height;
+    } else if (s_long) {
+        s_text_scale = 466 * (muse_board->width - 16) / 300;   /* the field and back arrow across the screen */
     }
     s_tile = tile;
     build_home(tile);
