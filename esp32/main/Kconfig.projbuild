@@ -507,11 +507,11 @@ menu "ESP32 Device SDK"
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
-        default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM && ESP_ROM_HAS_JPEG_DECODE
+        default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM && (ESP_ROM_HAS_JPEG_DECODE || SOC_JPEG_DECODE_SUPPORTED)
         help
             Set when display.draw_url and display.draw_file can draw an
             image: the display backends, and boards with the full UI, PSRAM
-            for the image and the ROM's JPEG decoder.
+            for the image and a JPEG decoder in ROM or hardware.
 
     config HOMEHUB_PRE_DVT_GPIO
         bool "Use pre-DVT GPIO assignments"

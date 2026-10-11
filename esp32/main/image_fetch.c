@@ -38,7 +38,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+// The P4's ROM has no TJpgDec; it decodes with the JPEG peripheral instead.
+#define JPEG_PERIPHERAL (CONFIG_SOC_JPEG_DECODE_SUPPORTED && !CONFIG_ESP_ROM_HAS_JPEG_DECODE)
+#if JPEG_PERIPHERAL
+#include "driver/jpeg_decode.h"
+#else
 #include "rom/tjpgd.h"
+#endif
 
 static const char *TAG = "link.image";
 
@@ -95,10 +101,18 @@ static const char *TAG = "link.image";
 #define VM_REQUEST_BYTES    64
 // Raw RGB565 is read and drawn this many rows at a time.
 #define RAW_ROWS            4
+#if !JPEG_PERIPHERAL
 // Work pool for the ROM JPEG decoder, the size its documentation asks for.
 #define JPEG_POOL_BYTES     3100
 // Largest block the decoder emits: a 16x16 MCU.
 #define JPEG_MCU_PIXELS     (16 * 16)
+#else
+// The JPEG peripheral decodes a whole file at once, from PSRAM.
+#define JPEG_MAX_BYTES      (4 * 1024 * 1024)
+#define JPEG_FIRST_BYTES    (64 * 1024)
+// Rows drawn per call, within led_status_draw_rect's limit.
+#define JPEG_BAND_ROWS      16
+#endif
 
 typedef struct {
     char *url;  // or, for a file from the VM, the request path
@@ -128,7 +142,11 @@ typedef struct {
     bool scheme_changed;
     // JPEG output placement and one MCU converted for the panel.
     int x0, y0;
+#if !JPEG_PERIPHERAL
     uint16_t mcu[JPEG_MCU_PIXELS];
+#else
+    char err[48];
+#endif
 } fetch_t;
 
 // Boards with the full UI also take IMAGE_FETCH_CENTRE, which centres a JPEG down the
@@ -247,6 +265,8 @@ static const char *draw_raw(fetch_t *f, int *rows_drawn) {
 
 // ---- JPEG --------------------------------------------------------------------
 
+#if !JPEG_PERIPHERAL
+
 static UINT jpeg_in(JDEC *jd, BYTE *buf, UINT len) {
     fetch_t *f = jd->device;
     if (buf) {
@@ -313,6 +333,227 @@ static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale)
     free(pool);
     return err;
 }
+
+#else
+
+// The whole body, in PSRAM.
+static const char *read_jpeg(fetch_t *f, uint8_t **out, size_t *out_len) {
+    // A file from the VM has no length up front, and its last range is still
+    // in f->body once eof is set.
+    int64_t total = f->vm ? -1 : esp_http_client_get_content_length(f->http);
+    if (total > JPEG_MAX_BYTES) return "JPEG is too large to download";
+    size_t cap = total > 0 ? (size_t)total : JPEG_FIRST_BYTES, len = 0;
+    uint8_t *buf = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+    const char *err = buf ? NULL : "out of memory";
+    while (!err && !(f->eof && f->body_pos == f->body_len)
+           && (total <= 0 || len < (size_t)total)) {
+        if (len == cap && cap == JPEG_MAX_BYTES) {
+            uint8_t probe;
+            int n = fetch_read(f, &probe, 1);
+            if (n < 0) err = f->low_memory ? "memory ran low" : "download failed";
+            else if (n > 0) err = "JPEG is too large to download";
+            break;
+        }
+        if (len == cap) {
+            size_t bigger_cap = cap * 2 < JPEG_MAX_BYTES ? cap * 2 : JPEG_MAX_BYTES;
+            uint8_t *bigger = heap_caps_realloc(buf, bigger_cap, MALLOC_CAP_SPIRAM);
+            if (!bigger) {
+                err = "out of memory";
+                break;
+            }
+            buf = bigger;
+            cap = bigger_cap;
+        }
+        int n = fetch_read(f, buf + len, cap - len);
+        if (n < 0) {
+            err = f->low_memory ? "memory ran low" : "download failed";
+            break;
+        }
+        len += (size_t)n;
+    }
+    if (!err && total > 0 && len < (size_t)total) err = "download failed";
+    if (err && strcmp(err, "out of memory") == 0) f->low_memory = true;
+    if (err) {
+        free(buf);
+        return err;
+    }
+    *out = buf;
+    *out_len = len;
+    return NULL;
+}
+
+// Checks every header segment up to the scan, because the IDF 6.0.1 driver
+// indexes its tables with the file's table numbers and counts unchecked. Only
+// segments the driver reads or skips by their length pass, so that both walk
+// the same bytes. It also widens the frame size to whole MCUs: the size the
+// peripheral writes out, and width x height must divide by 8 for it.
+static const char *jpeg_frame(uint8_t *p, size_t len, int *w, int *h, int *stride,
+                              int *rows, bool *grey) {
+    const char *bad = "not a valid JPEG";
+    int tables = 0;
+    bool frame = false;
+    size_t i = 2;
+    while (i + 4 <= len && p[i] == 0xFF) {
+        uint8_t m = p[i + 1];
+        if (m == 0xFF) {
+            i++;
+            continue;
+        }
+        size_t seg = (size_t)p[i + 2] << 8 | p[i + 3];
+        if (seg < 2 || i + 2 + seg > len) return bad;
+        uint8_t *at = p + i + 4, *end = p + i + 2 + seg;
+        if (m == 0xDB) {   // quantisation tables, at most 4
+            while (at < end) {
+                size_t n = 1 + 64 * ((*at >> 4) ? 2 : 1);
+                if ((*at >> 4) > 1 || (*at & 15) > 3 || ++tables > 4 || (size_t)(end - at) < n) return bad;
+                at += n;
+            }
+        } else if (m == 0xC4) {   // Huffman tables: DC or AC, number 0 or 1
+            while (at < end) {
+                if (end - at < 17 || (*at >> 4) > 1 || (*at & 15) > 1) return bad;
+                size_t n = 0;
+                for (int k = 1; k <= 16; k++) n += at[k];
+                if (n > ((*at >> 4) ? 162u : 12u) || (size_t)(end - at) < 17 + n) return bad;
+                at += 17 + n;
+            }
+        } else if (m == 0xC0) {   // baseline frame
+            if (frame || seg < 11) return bad;
+            int nf = at[5], hv = at[7];
+            if ((nf != 1 && nf != 3) || seg != 8 + 3 * (size_t)nf || at[0] != 8) return bad;
+            for (int k = 0; k < nf; k++) {
+                if (at[8 + 3 * k] > 3) return bad;
+            }
+            frame = true;
+            *h = at[1] << 8 | at[2];
+            *w = at[3] << 8 | at[4];
+            *grey = nf == 1;
+            if (!*w || !*h) return bad;
+            bool chroma_full = nf == 1 || (at[10] == 0x11 && at[13] == 0x11);
+            if (!chroma_full || (nf == 1 ? hv != 0x11 : hv != 0x11 && hv != 0x21 && hv != 0x22)) {
+                return "unsupported JPEG: use 4:4:4, 4:2:2 or 4:2:0 sampling";
+            }
+            int mw = (hv >> 4) * 8, mh = (hv & 15) * 8;
+            *stride = (*w + mw - 1) / mw * mw;
+            *rows = (*h + mh - 1) / mh * mh;
+            at[1] = *rows >> 8;
+            at[2] = *rows & 0xFF;
+            at[3] = *stride >> 8;
+            at[4] = *stride & 0xFF;
+        } else if (m == 0xC2) {
+            return "unsupported JPEG: use baseline, not progressive";
+        } else if (m == 0xDD) {   // restart interval
+            if (seg != 4) return bad;
+        } else if (m == 0xDA) {   // start of scan: DC and AC tables 0 or 1
+            if (!frame || !tables || seg < 8) return bad;
+            int ns = at[0];
+            if (ns < 1 || ns > 3 || seg != 6 + 2 * (size_t)ns) return bad;
+            for (int k = 0; k < ns; k++) {
+                if ((at[2 + 2 * k] >> 4) > 1 || (at[2 + 2 * k] & 15) > 1) return bad;
+            }
+            return NULL;
+        } else if ((m & 0xF0) != 0xE0 && m != 0xFE) {
+            return bad;   // the driver skips only APPn and COM by their length
+        }
+        i += 2 + seg;
+    }
+    return bad;
+}
+
+// The mean of the s x s block at (x, y), as RGB565.
+static uint16_t jpeg_block(const uint8_t *px, int stride, bool grey, int x, int y, int s) {
+    uint32_t r = 0, g = 0, b = 0;
+    for (int dy = 0; dy < s; dy++) {
+        for (int dx = 0; dx < s; dx++) {
+            size_t at = (size_t)(y + dy) * stride + x + dx;
+            if (grey) {
+                r += px[at] >> 3;
+                g += px[at] >> 2;
+                b += px[at] >> 3;
+            } else {
+                uint16_t v = px[2 * at] << 8 | px[2 * at + 1];
+                r += v >> 11;
+                g += (v >> 5) & 63;
+                b += v & 31;
+            }
+        }
+    }
+    int n = s * s;
+    return (uint16_t)((r / n) << 11 | (g / n) << 5 | (b / n));
+}
+
+static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale) {
+    uint8_t *in = NULL, *px = NULL, *band = NULL;
+    size_t in_len = 0;
+    jpeg_decoder_handle_t dec = NULL;
+    const char *err = read_jpeg(f, &in, &in_len);
+    int w = 0, h = 0, stride = 0, rows = 0;
+    bool grey = false;
+    if (!err) err = jpeg_frame(in, in_len, &w, &h, &stride, &rows, &grey);
+    // Shrink by the smallest power of two that fits below `row`.
+    int avail = f->height - TOP_ROW(f), scale = 0;
+    if (!err) {
+        while (scale < 3 && ((w >> scale) > f->width || (h >> scale) > avail)) scale++;
+        *out_w = w >> scale;
+        *out_h = h >> scale;
+        *out_scale = 1 << scale;
+        if (*out_w > f->width || *out_h > avail) err = "JPEG is too large even at 1/8 scale";
+    }
+    if (!err) {
+        const jpeg_decode_engine_cfg_t eng = { .timeout_ms = 1000 };
+        const jpeg_decode_memory_alloc_cfg_t mem = { .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER };
+        size_t px_cap = 0;
+        px = jpeg_alloc_decoder_mem((size_t)stride * rows * (grey ? 1 : 2), &mem, &px_cap);
+        band = malloc((size_t)*out_w * JPEG_BAND_ROWS * sizeof(uint16_t));
+        esp_err_t e = px && band ? jpeg_new_decoder_engine(&eng, &dec) : ESP_ERR_NO_MEM;
+        if (e != ESP_OK) {
+            f->low_memory = e == ESP_ERR_NO_MEM;
+            snprintf(f->err, sizeof(f->err), "JPEG decoder: %s", esp_err_to_name(e));
+            err = f->low_memory ? "out of memory" : f->err;
+        } else {
+            const jpeg_decode_cfg_t cfg = {
+                .output_format = grey ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565,
+                .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_RGB,   /* high byte first */
+                .conv_std = JPEG_YUV_RGB_CONV_STD_BT601,
+            };
+            uint32_t got = 0;
+            e = jpeg_decoder_process(dec, &cfg, in, in_len, px, px_cap, &got);
+            if (e == ESP_ERR_NO_MEM) {
+                f->low_memory = true;
+                err = "out of memory";
+            } else if (e == ESP_ERR_TIMEOUT) {
+                err = "JPEG decode timed out";
+            } else if (e != ESP_OK || got != (uint32_t)stride * rows * (grey ? 1 : 2)) {
+                err = "not a valid JPEG";
+            }
+        }
+    }
+    free(in);
+    if (!err) {
+        int s = 1 << scale;
+        f->x0 = (f->width - *out_w) / 2;
+        f->y0 = CENTRED(f) ? (f->height - *out_h) / 2 : f->row;
+        for (int y = 0; y < *out_h && !err; y += JPEG_BAND_ROWS) {
+            int n = *out_h - y < JPEG_BAND_ROWS ? *out_h - y : JPEG_BAND_ROWS;
+            uint8_t *o = band;
+            for (int r = 0; r < n; r++) {
+                for (int x = 0; x < *out_w; x++, o += 2) {
+                    uint16_t v = jpeg_block(px, stride, grey, x * s, (y + r) * s, s);
+                    o[0] = v >> 8;
+                    o[1] = v & 0xFF;
+                }
+            }
+            if (!led_status_draw_rect(f->x0, f->y0 + y, *out_w, n, (const uint16_t *)band)) {
+                err = "display write failed";
+            }
+        }
+    }
+    if (dec) jpeg_del_decoder_engine(dec);
+    free(px);
+    free(band);
+    return err;
+}
+
+#endif
 
 // ---- File from the VM --------------------------------------------------------
 
@@ -628,7 +869,12 @@ static char *vm_request_path(const char *path) {
 // TX margin: the task stack, either decoder or raw rows, and the queued GET.
 static bool vm_allocate_body(fetch_t *f, size_t stack, int width) {
     size_t draw_bytes = (size_t)width * RAW_ROWS * sizeof(uint16_t);
-    if (draw_bytes < JPEG_POOL_BYTES) draw_bytes = JPEG_POOL_BYTES;
+#if JPEG_PERIPHERAL
+    size_t jpeg_bytes = (size_t)width * JPEG_BAND_ROWS * sizeof(uint16_t);
+#else
+    size_t jpeg_bytes = JPEG_POOL_BYTES;
+#endif
+    if (draw_bytes < jpeg_bytes) draw_bytes = jpeg_bytes;
     size_t request_bytes = strlen(f->url) + VM_REQUEST_BYTES;
     size_t keep = NOISE_TX_DMA_RESERVE_BYTES + stack + draw_bytes
                   + request_bytes + FETCH_RESERVE_BYTES;
