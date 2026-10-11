@@ -139,6 +139,12 @@ board-neutral core and board hooks:
   compatibility. Acquisition/collect provenance, wire schema 1, matrix versions,
   journal layout/budget, prefix analysis and comparison semantics are unchanged.
 
+Waveshare ESP32-S3-Touch-AMOLED-1.75C, 2.16 and AIPI Lite are ported through
+one shared backend, `boards/board_power_test_generic.c` on `muse_board_t`, with
+an overlay per board. With `"usb_powered":1` a sweep runs with USB attached, so
+the board can be measured on its 5 V input with a POWER-Z KM003C: see
+[km003c.md](km003c.md).
+
 ### Steps
 
 1. **Gather the power facts** (section 0) plus, per peripheral, which rail,
