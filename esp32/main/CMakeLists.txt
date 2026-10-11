@@ -99,6 +99,12 @@ if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
 endif()
 
+# image_fetch.c: the P4 has no JPEG decoder in ROM, so it uses the peripheral.
+# Kconfig is not loaded yet when requirements expand.
+if(IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND GADGET_REQUIRES esp_driver_jpeg)
+endif()
+
 if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING OR CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
     list(APPEND GADGET_REQUIRES led_strip)
 endif()
