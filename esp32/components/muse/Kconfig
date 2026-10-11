@@ -119,6 +119,9 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD128
             bool "Waveshare ESP32-S3-Touch-LCD-1.28 (240x240 round touch LCD, no audio)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_WAVESHARE_S3_LCD349
+            bool "Waveshare ESP32-S3-Touch-LCD-3.49 V2 (172x640 touch LCD, ES8311 and ES7210)"
+            depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_VN_S3_183
             bool "VN ESP32-S3 board (1.83\" 284x240 NV3023 LCD, ES8311 and ES7210)"
             depends on IDF_TARGET_ESP32S3
@@ -160,6 +163,7 @@ menu "Muse"
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
         default "waveshare_s3_lcd7" if MUSE_BOARD_WAVESHARE_S3_LCD7
         default "waveshare_s3_lcd128" if MUSE_BOARD_WAVESHARE_S3_LCD128
+        default "waveshare_s3_lcd349" if MUSE_BOARD_WAVESHARE_S3_LCD349
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
