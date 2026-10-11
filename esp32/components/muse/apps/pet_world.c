@@ -276,7 +276,6 @@ static void draw_circle(uint16_t *fb, int cx, int cy, int r, uint16_t col)
 static void fill_ellipse(uint16_t *fb, int cx, int cy, int rx, int ry, uint16_t col)
 {
     if (rx <= 0 || ry <= 0) return;
-    float rx2 = (float)(rx * rx);
     float ry2 = (float)(ry * ry);
     for (int dy = -ry; dy <= ry; dy++) {
         int py = cy + dy;
@@ -448,7 +447,7 @@ static void draw_string(uint16_t *fb, int x, int y, const char *str, uint16_t co
 
 // --- House & 3-Room World Drawing ---
 
-static void draw_walls(uint16_t *fb, float cam_x, int hour)
+static void draw_walls(uint16_t *fb, float cam_x)
 {
     int wall_h = 142 - WORLD_STATUS_BAR_H;
 
@@ -1278,7 +1277,7 @@ void pet_world_render(uint16_t *fb, uint32_t now_ms)
     float cam_x = s_world.cam_x;
 
     // 1. Draw 3-room walls and floors
-    draw_walls(fb, cam_x, s_world.cur_hour);
+    draw_walls(fb, cam_x);
     draw_floors(fb, cam_x);
     draw_props(fb, cam_x, s_world.cur_hour, s_world.food_amount, now_ms);
     draw_toy_ball(fb, &s_world.ball, cam_x);
