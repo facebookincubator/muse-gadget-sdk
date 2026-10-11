@@ -555,10 +555,18 @@ def promote(code, gifs_dir):
     """Makes the checked `code` your avatar (None: the default one), keeping the one it replaces
     as muse_pixel.c.prev."""
     if os.path.exists(AVATAR_SRC):
+        if os.path.exists(AVATAR_SRC + ".prev-default"):
+            os.remove(AVATAR_SRC + ".prev-default")
         with open(AVATAR_SRC, encoding="utf-8") as f:
             old = f.read()
         if old != code:
             write_atomic(AVATAR_SRC + ".prev", old)
+    elif code is not None:
+        # What it replaces is the default avatar, so that's the previous one now, not an older one of yours.
+        write_atomic(AVATAR_SRC + ".prev-default", "")
+        if os.path.exists(AVATAR_SRC + ".prev"):
+            os.remove(AVATAR_SRC + ".prev")
+        sync_dir(AVATAR_DIR)
     if code is None:
         if os.path.exists(AVATAR_SRC):
             os.remove(AVATAR_SRC)
@@ -670,7 +678,10 @@ def make_avatar(board, key, reply, work=None):
 def restore(which, key, work):
     """Goes back to your previous avatar (muse_pixel.c.prev, checked like a new one; the one you
     have becomes the previous) or to the default one. Returns Made."""
-    if which == "previous":
+    if which == "previous" and os.path.exists(AVATAR_SRC + ".prev-default"):
+        code = None
+        say("Going back to your previous avatar, the default one")
+    elif which == "previous":
         if not os.path.exists(AVATAR_SRC + ".prev"):
             raise Stop(f"There's no previous avatar ({rel(AVATAR_SRC + '.prev')}) to go back to.")
         with open(AVATAR_SRC + ".prev", encoding="utf-8") as f:
@@ -730,7 +741,8 @@ def status():
         what = description(f.read())
     say(f"  {described(now)}, {rel(src)}" + (f": {what[:120]}" if what else ""))
     prev = AVATAR_SRC + ".prev"
-    say(f"  previous: {rel(prev)} (sha256 {short(sha256(prev))})" if os.path.exists(prev) else "  no previous avatar")
+    say("  previous: the default avatar" if os.path.exists(AVATAR_SRC + ".prev-default") else
+        f"  previous: {rel(prev)} (sha256 {short(sha256(prev))})" if os.path.exists(prev) else "  no previous avatar")
     for d in sorted(glob.glob(os.path.join(AVATAR_DIR, "firmware-*"))):
         key = os.path.basename(d)[len("firmware-"):]
         try:

@@ -633,6 +633,7 @@ class Restore(unittest.TestCase):
         self.assertEqual(self.active_text(), GOOD_A)
 
     def test_without_a_previous_it_stops(self):
+        os.unlink(self.active + ".prev")
         with self.assertRaises(avatar.Stop):
             self.restore("previous")
         self.assertEqual(self.active_text(), GOOD_A)
@@ -644,6 +645,20 @@ class Restore(unittest.TestCase):
         (args, root, built), = self.calls
         self.assertEqual((args, built), (("build", "s3"), None))      # built without an avatar of yours
         self.assertEqual(avatar.verify_kept("s3"), avatar.kept_dir("s3"))
+
+    def test_after_the_default_a_new_avatar_has_the_default_as_previous(self):
+        self.restore("default")                        # A -> default
+        self.run_tool("no_flash")                      # default -> B
+        self.restore("previous")                       # back to what you had: the default, not A
+        self.assertFalse(os.path.exists(self.active))
+        self.assertEqual(Path(self.active + ".prev").read_text().strip(), GOOD_B.strip())
+
+    def test_previous_after_the_default_keeps_the_default_as_previous(self):
+        self.restore("default")                        # A -> default
+        self.restore("previous")                       # default -> A
+        self.assertEqual(self.active_text(), GOOD_A)
+        self.assertFalse(os.path.exists(self.active + ".prev"))
+        self.assertIn("previous: the default avatar", self.status())
 
     def test_default_whose_build_fails_leaves_yours(self):
         self.result = (False, "failed")
