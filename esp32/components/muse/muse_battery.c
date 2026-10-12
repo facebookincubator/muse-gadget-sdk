@@ -93,9 +93,9 @@ typedef struct {
 #define NVS_NS "muse_battery"
 #define SAVED_MAGIC 0x4d424154   /* "MBAT" */
 #if CONFIG_PM_PROFILING
-#define SAVED_MAX 2048           /* two dozen power locks */
+#define SAVED_MAX 2048           /* the head and 18 locks at their longest; typically two dozen */
 #else
-#define SAVED_MAX 384
+#define SAVED_MAX 512            /* the whole record at its longest is 380 bytes */
 #endif
 
 typedef struct {
@@ -577,8 +577,10 @@ static const char *reset_name(esp_reset_reason_t r)
 }
 
 /* With s_lock held. Never longer than cap - 1, and valid JSON even when cut
- * short (from cap 3, "{}"): the head first, the lock list last. */
-static int json(char *buf, size_t cap)
+ * short (from cap 3, "{}"): the head first, the lock list last. The saved
+ * record leaves out the retention-capable RAM, which says nothing after the
+ * fact that cpu_pd doesn't: the retention memory is taken at boot or never. */
+static int json(char *buf, size_t cap, bool saved)
 {
     char a[16], b[16], c[16], d[16];
     out_t o = { .buf = buf, .cap = cap };
@@ -605,14 +607,17 @@ static int json(char *buf, size_t cap)
      * at boot; and whether it got it, so the CPU powers down in light sleep.
      * Before the locks, so a long lock list can't cut it off. */
     snprintf(a, sizeof(a), "%u", (unsigned)s_rest_free_min);
-    add(&o, 1,
-        ",\"heap\":{\"free\":%u,\"largest\":%u,\"min\":%u,\"resting_min\":%s,"
-        "\"retention_free\":%u,\"retention_largest\":%u,\"cpu_pd\":%s}",
+    char ret[64] = "";
+    if (!saved) {
+        snprintf(ret, sizeof(ret), ",\"retention_free\":%u,\"retention_largest\":%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_RETENTION),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_RETENTION));
+    }
+    add(&o, 1, ",\"heap\":{\"free\":%u,\"largest\":%u,\"min\":%u,\"resting_min\":%s%s,\"cpu_pd\":%s}",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), s_rest_free_min ? a : "null",
-        (unsigned)heap_caps_get_free_size(MALLOC_CAP_RETENTION),
-        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_RETENTION), s_cpu_pd ? "true" : "false");
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), s_rest_free_min ? a : "null", ret,
+        s_cpu_pd ? "true" : "false");
 #if CONFIG_PM_PROFILING
     int64_t pm_span = end ? end->pm.at_us - s_start->pm.at_us : 0;
     if (end && s_start->pm.at_us && end->pm.at_us && pm_span > 0) {
@@ -642,7 +647,7 @@ static int json(char *buf, size_t cap)
 /* With s_lock held. Written in place: a reset partway leaves a bad checksum. */
 static void persist(bool flash)
 {
-    s_saved.len = json(s_saved.json, sizeof(s_saved.json));
+    s_saved.len = json(s_saved.json, sizeof(s_saved.json), true);
     s_saved.sum = checksum(s_saved.json, s_saved.len);
     s_saved.magic = SAVED_MAGIC;
     s_saved_us = esp_timer_get_time();
@@ -655,7 +660,7 @@ static void persist(bool flash)
 int muse_battery_json(char *buf, size_t cap)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    int len = json(buf, cap);
+    int len = json(buf, cap, false);
     xSemaphoreGive(s_lock);
     return len;
 }

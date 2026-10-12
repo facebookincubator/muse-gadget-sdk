@@ -58,9 +58,11 @@ def memory(heap):
     if heap.get("resting_min") is not None:
         mem += f", {kb(heap['resting_min'])} lowest while resting"
     if "cpu_pd" in heap:
-        mem += (f"\n          retention-capable RAM left {kb(heap['retention_free'])} (largest block "
-                f"{kb(heap['retention_largest'])}); CPU {'powers down' if heap['cpu_pd'] else 'stays powered'}"
-                " in light sleep")
+        cpu = f"CPU {'powers down' if heap['cpu_pd'] else 'stays powered'} in light sleep"
+        if "retention_free" in heap:   # a saved record leaves them out
+            cpu = (f"retention-capable RAM left {kb(heap['retention_free'])} (largest block "
+                   f"{kb(heap['retention_largest'])}); " + cpu)
+        mem += "\n          " + cpu
     return mem
 
 

@@ -78,5 +78,6 @@ int muse_battery_json(char *buf, size_t cap);
 
 /* The JSON last saved before this boot, kept in RTC memory across resets (not
  * power loss) until muse_battery_reset(); NULL if none. It survives a board
- * that resets when its port opens, or one that crashed on battery. */
+ * that resets when its port opens, or one that crashed on battery. It's
+ * muse_battery_json() without "retention_free" and "retention_largest". */
 const char *muse_battery_saved_json(void);
