@@ -161,7 +161,14 @@ static const char *TAG = "board";
 #define PMIC_IRQ_BTN_ALL 0x07
 #define PMIC_CLICK_DELAY_MASK 0x06 /* BTN_CFG1 [2:1] */
 #define PMIC_CLICK_DELAY_125MS 0x00
-#define CLICK_CREDIT_US 1500000    /* a click this soon after a release the poll saw was that press */
+#define PMIC_DBL_DELAY_MASK 0x60   /* BTN_CFG1 [6:5], the double-click gap */
+#define PMIC_DBL_DELAY_250MS 0x20  /* the chip's reset value (BTN_CFG1 = 0x2A); M5's firmware keeps it */
+/* The latest a click can follow its release, as pmic_irq_setup programs the
+ * PM1: the 125 ms click delay, plus the 250 ms double-click gap it may wait
+ * out for a second press, plus 125 ms for the wake, the I2C read and the
+ * poll's 30 ms debounce. A release the poll saw earns a credit for this long
+ * (poll_power_button). */
+#define CLICK_CREDIT_US ((125 + 250 + 125) * 1000)
 #define REST_KEY_POLL_MS 50        /* the red key down or settling while paused: poll it, as before */
 #define REST_FALLBACK_MS 200       /* no PM1 interrupt: the longest a paused wait may last */
 #define IRQ_SETTLE_MS 10           /* the line just fell: the next poll takes the event */
@@ -208,7 +215,11 @@ static muse_gpio_button_t s_talk, s_speaker;
 static muse_gpio_button_t s_irq_line;   /* GPIO12, only ever waited on: idle high */
 static bool s_power_pressed, s_power_candidate, s_power_armed, s_power_long;
 static int64_t s_power_changed_at, s_power_held_at;
-static int64_t s_power_released_at;     /* last debounced release the poll saw */
+/* Clicks against the releases the poll saw (poll_power_button): one credit
+ * per release, spent by the PM1's click for that press; clicks with none to
+ * spend wait to be reported as taps. */
+static unsigned s_click_credits, s_click_pending;
+static int64_t s_click_credit_at;       /* the latest release that earned one */
 static bool s_pmic_irq;                 /* the PM1's IRQ output is set up */
 static bool s_irq_stuck;                /* the line stayed low after clearing */
 static unsigned poll_power_button(void);
@@ -285,6 +296,8 @@ static esp_err_t pmic_irq_clear(void)
  *   Nothing is reported for a press or a hold: the paused wait's timeout
  *   (1 s, 10 s napping) still polls the live key, and poll_power_button
  *   turns a click no poll saw into a press and release.
+ *   The double-click gap is set to the chip's default, 250 ms, so the
+ *   longest wait for a click is known (CLICK_CREDIT_US).
  * - WAKEUP (bit 1) stays masked: it's the power-on event, and the manual says
  *   it stays set (holding the line low) until WAKE_SRC is cleared. GPIO level
  *   changes (the charger's CHG_STAT on GPIO2) and 5VIN/battery events stay
@@ -297,7 +310,8 @@ static esp_err_t pmic_irq_setup(void)
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_IRQ_MASK1, PMIC_IRQ_GPIO_ALL, PMIC_IRQ_GPIO_ALL), TAG, "mask gpio irqs");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_IRQ_MASK2, PMIC_IRQ_SYS_ALL, PMIC_IRQ_SYS_ALL), TAG, "mask system irqs");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_IRQ_MASK3, PMIC_IRQ_BTN_ALL, PMIC_IRQ_BTN_WAKE), TAG, "unmask clicks");
-    ESP_RETURN_ON_ERROR(pmic_update(PMIC_BTN_CFG1, PMIC_CLICK_DELAY_MASK, PMIC_CLICK_DELAY_125MS), TAG, "click delay");
+    ESP_RETURN_ON_ERROR(pmic_update(PMIC_BTN_CFG1, PMIC_CLICK_DELAY_MASK | PMIC_DBL_DELAY_MASK,
+                                   PMIC_CLICK_DELAY_125MS | PMIC_DBL_DELAY_250MS), TAG, "click timing");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_GPIO_OD, PMIC_IRQ_PIN, PMIC_IRQ_PIN), TAG, "irq open drain");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_GPIO_FUNC0, PMIC_FUNC_GPIO1_MASK, PMIC_FUNC_GPIO1_IRQ), TAG, "gpio1 irq");
     return pmic_irq_clear();
@@ -305,24 +319,28 @@ static esp_err_t pmic_irq_setup(void)
 
 /*
  * The line is low: read which key event it was, then clear every status.
- * Returns true for a click. Still low afterwards (a failed transfer, or an
- * event that won't clear), the paused wait stops trusting the line and polls
- * every REST_FALLBACK_MS until it reads high again.
+ * Returns the presses it reported: 1 for a single click, 2 for a double.
+ * Still low afterwards (a failed transfer, or an event that won't clear), the
+ * paused wait stops trusting the line and polls every REST_FALLBACK_MS until
+ * it reads high again.
  */
-static bool take_power_irq(void)
+static unsigned take_power_irq(void)
 {
     if (!s_pmic_irq) {
-        return false;
+        return 0;
     }
     if (gpio_get_level(PMIC_IRQ_GPIO)) {
         s_irq_stuck = false;
-        return false;
+        return 0;
     }
     uint8_t st = 0;
     bool read = reg_read(s_pmic, PMIC_IRQ_STATUS3, &st, 1) == ESP_OK;
     pmic_irq_clear();
     s_irq_stuck = gpio_get_level(PMIC_IRQ_GPIO) == 0;
-    return read && (st & (PMIC_IRQ_BTN_CLICK | PMIC_IRQ_BTN_DOUBLE));
+    if (!read) {
+        return 0;
+    }
+    return (st & PMIC_IRQ_BTN_CLICK ? 1 : 0) + (st & PMIC_IRQ_BTN_DOUBLE ? 2 : 0);
 }
 
 /* The expander's registers come in pairs, IO1-8 then IO9-14. The amp (audio
@@ -915,9 +933,8 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
  * transfers never create edges or count towards a shutdown hold. */
 static unsigned poll_power_button(void)
 {
-    static bool click_pending;
     int64_t now = esp_timer_get_time();
-    click_pending |= take_power_irq();
+    s_click_pending += take_power_irq();
     uint8_t status;
     if (reg_read(s_pmic, PMIC_BTN_STATUS, &status, 1) != ESP_OK) {
         s_power_changed_at = now;
@@ -935,7 +952,8 @@ static unsigned poll_power_button(void)
         s_power_pressed = pressed;
         s_power_long = false;
         if (!pressed) {
-            s_power_released_at = now;
+            s_click_credits++;      /* the PM1's click for this press is coming */
+            s_click_credit_at = now;
         }
         if (!pressed && !s_power_armed) {
             s_power_armed = true;   /* release after boot: not an input event */
@@ -951,15 +969,26 @@ static unsigned poll_power_button(void)
         }
     }
     /* A tap at rest: the PM1 reports it once the key is up again, so the
-     * poll it woke sees no press. Report the press and release together
-     * (a latched short, as the 1.75's PMU key gives), unless a release the
-     * poll saw just now was this click, or the key is down again. */
-    if (click_pending) {
-        click_pending = false;
-        if (!pressed && !s_power_pressed && !ev && s_power_armed &&
-            now - s_power_released_at >= CLICK_CREDIT_US) {
-            ev = MUSE_BTN_POWER_PRESS | MUSE_BTN_POWER_RELEASE;
-        }
+     * poll it woke sees no press. Each click spends a credit from a release
+     * the poll saw (that press, already reported); a click with none left
+     * is a tap the poll missed. Report it as a press and release together
+     * (a latched short, as the 1.75's PMU key gives), one a poll, once the
+     * key is up and this poll has reported nothing else. A credit the PM1
+     * never spends (a long press: no click) runs out after CLICK_CREDIT_US,
+     * so it can't swallow a later tap. Clicks before the arming release
+     * belong to the press that turned the board on. */
+    if (s_click_credits && now - s_click_credit_at >= CLICK_CREDIT_US) {
+        s_click_credits = 0;
+    }
+    while (s_click_pending && s_click_credits) {
+        s_click_pending--;
+        s_click_credits--;
+    }
+    if (!s_power_armed) {
+        s_click_pending = 0;
+    } else if (s_click_pending && !pressed && !s_power_pressed && !ev) {
+        s_click_pending--;
+        ev = MUSE_BTN_POWER_PRESS | MUSE_BTN_POWER_RELEASE;
     }
     return ev;
 }
@@ -984,6 +1013,10 @@ static void wait_buttons(int timeout_ms)
 {
     if (s_power_pressed || s_power_candidate) {
         vTaskDelay(pdMS_TO_TICKS(REST_KEY_POLL_MS));
+        return;
+    }
+    if (s_click_pending) {
+        vTaskDelay(pdMS_TO_TICKS(IRQ_SETTLE_MS));   /* a tap still to report */
         return;
     }
     muse_gpio_button_t *const lines[] = { &s_talk, &s_speaker, &s_irq_line };

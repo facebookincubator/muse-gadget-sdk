@@ -56,8 +56,10 @@ typedef int esp_err_t;
 #define ESP_RETURN_ON_ERROR(expr, tag, msg) do { int e = (expr); if(e) return e; } while(0)
 static void *s_pmic;
 static bool s_power_pressed = true, s_power_candidate = true, s_power_armed, s_power_long;
-static int64_t s_power_changed_at, s_power_held_at, s_power_released_at, now = 10000;
-static bool take_power_irq(void) { return false; } /* no PM1 click: test_stopwatch_power covers it */
+static int64_t s_power_changed_at, s_power_held_at, now = 10000;
+static unsigned s_click_credits, s_click_pending;
+static int64_t s_click_credit_at;
+static unsigned take_power_irq(void) { return 0; } /* no PM1 click: test_stopwatch_power covers it */
 static int read_error, write_error, writes;
 static uint8_t key;
 static int64_t esp_timer_get_time(void) { return now; }

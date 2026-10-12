@@ -86,7 +86,7 @@ class StopWatchPower(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_power_key_interrupt(self):
-        """PM1 IRQ setup, click to tap, credit for a seen press, stuck line and paused waits."""
+        """PM1 IRQ setup, clicks to taps, credits for seen presses, stuck line and paused waits."""
         code = COMMON + self.flags + "\n" + defines(self.board, r"PMIC_\w+|POWER_\w+|CLICK_\w+|REST_\w+|IRQ_\w+") + r'''
 #define GPIO_NUM_12 12
 static uint8_t regs[256];
@@ -117,12 +117,21 @@ static void muse_gpio_buttons_wait(muse_gpio_button_t *const *b, int n, int ms) 
     waited_n = n; waited_ms = ms;
 }
 static bool s_power_pressed, s_power_candidate, s_power_armed = true, s_power_long;
-static int64_t s_power_changed_at, s_power_held_at, s_power_released_at;
+static int64_t s_power_changed_at, s_power_held_at;
+static unsigned s_click_credits, s_click_pending;
+static int64_t s_click_credit_at;
 static bool s_pmic_irq = true, s_irq_stuck;
 ''' + "\n".join(function(self.board, n) for n in (
             "pmic_update", "pmic_irq_clear", "pmic_irq_setup", "take_power_irq", "poll_power_button", "wait_buttons")) + r'''
 static unsigned sample(uint8_t k, int us) { key = k; now += us; return poll_power_button(); }
 static void reset_wait(void) { delayed = waited_n = waited_ms = -1; }
+/* A press and release the poll sees, 50 ms polls as at rest. */
+static void seen_tap(int hold_us) {
+    assert(sample(1, 10000) == 0); assert(sample(1, 30000) == MUSE_BTN_POWER_PRESS);
+    for (int t = 30000; t < hold_us; t += 50000) assert((sample(1, 50000) & ~MUSE_BTN_POWER_LONG) == 0);
+    assert(sample(0, 10000) == 0); assert(sample(0, 30000) == MUSE_BTN_POWER_RELEASE);
+}
+#define TAP (MUSE_BTN_POWER_PRESS | MUSE_BTN_POWER_RELEASE)
 int main(int argc, char **argv) {
     assert(argc == 2);
     int test = atoi(argv[1]);
@@ -130,7 +139,8 @@ int main(int argc, char **argv) {
         regs[0x49] = 0x1F; regs[0x42] = 0x03; regs[0x40] = 0x04; regs[0x16] = 0x00; regs[0x13] = 0x00;
         assert(pmic_irq_setup() == ESP_OK);
         assert(regs[0x43] == 0x1F && regs[0x44] == 0x3F && regs[0x45] == 0x02);
-        assert(regs[0x49] == 0x19);              /* click delay 125 ms; reset-disable and long delay kept */
+        assert(regs[0x49] == 0x39);              /* click 125 ms, double gap 250 ms; reset-disable and long delay kept */
+        assert(CLICK_CREDIT_US == 500000);       /* 125 + 250 ms, plus 125 ms margin */
         assert(regs[0x13] == 0x02 && regs[0x16] == 0x04);
         assert(regs[0x40] == 0 && regs[0x41] == 0 && regs[0x42] == 0 && line());
         fail_reg = 0x45; assert(pmic_irq_setup() == -7);
@@ -143,7 +153,8 @@ int main(int argc, char **argv) {
         assert(sample(1, 10000) == 0); assert(sample(1, 30000) == MUSE_BTN_POWER_PRESS);
         assert(sample(0, 10000) == 0); assert(sample(0, 30000) == MUSE_BTN_POWER_RELEASE);
         regs[0x42] = 0x01; assert(sample(0, 125000) == 0 && line());
-        regs[0x42] = 0x01; assert(sample(0, 1500000) == (MUSE_BTN_POWER_PRESS | MUSE_BTN_POWER_RELEASE));
+        regs[0x42] = 0x01; assert(sample(0, 1500000) == TAP);
+        assert(s_click_credits == 0 && s_click_pending == 0);
     } else if (test == 3) {   /* key down again, not armed, or wake-only events: no fabricated tap */
         regs[0x42] = 0x01; assert(sample(1, 10000) == 0);
         assert(sample(1, 30000) == MUSE_BTN_POWER_PRESS);
@@ -169,6 +180,33 @@ int main(int argc, char **argv) {
         s_power_pressed = false; s_pmic_irq = false; reset_wait(); wait_buttons(1000);
         assert(waited_n == 2 && waited_ms == 200); /* no interrupt: capped */
         reset_wait(); wait_buttons(150); assert(waited_n == 2 && waited_ms == 150);
+    } else if (test == 6) {   /* tap to wake (seen, then its late click), a second tap 0.3 s later only as a click */
+        seen_tap(30000);
+        regs[0x42] = 0x01; assert(sample(0, 125000) == 0);   /* the wake tap's own click: spent */
+        regs[0x42] = 0x01; assert(sample(0, 300000) == TAP); /* well within 1.5 s: still a press */
+        assert(sample(0, 10000) == 0);
+    } else if (test == 7) {   /* a credit no click spends (a long press) runs out: a later tap isn't swallowed */
+        seen_tap(1600000);
+        now += CLICK_CREDIT_US;
+        regs[0x42] = 0x01; assert(sample(0, 0) == TAP && s_click_credits == 0);
+        seen_tap(30000);   /* just inside the window, its click is still that press's */
+        now += CLICK_CREDIT_US - 10001;
+        regs[0x42] = 0x01; assert(sample(0, 10000) == 0);
+    } else if (test == 8) {   /* a double click is two presses: one a poll, quick waits until both are out */
+        regs[0x42] = 0x04; assert(sample(0, 10000) == TAP && line() && s_click_pending == 1);
+        reset_wait(); wait_buttons(1000); assert(waited_n == -1 && delayed == 10);
+        assert(sample(0, 10000) == TAP);
+        assert(sample(0, 10000) == 0);
+        reset_wait(); wait_buttons(1000); assert(waited_n == 3);
+        seen_tap(30000);   /* one press seen, then a double: its credit covers one */
+        regs[0x42] = 0x04; assert(sample(0, 125000) == TAP);
+        assert(sample(0, 10000) == 0);
+    } else if (test == 9) {   /* a missed tap's click while the next press is down: counted once that press is up */
+        regs[0x42] = 0x01; assert(sample(1, 10000) == 0);
+        assert(sample(1, 30000) == MUSE_BTN_POWER_PRESS);
+        assert(sample(0, 10000) == 0); assert(sample(0, 30000) == MUSE_BTN_POWER_RELEASE);
+        regs[0x42] = 0x01; assert(sample(0, 125000) == TAP);   /* the second press's own click */
+        assert(sample(0, 10000) == 0);
     } else {   /* a line that won't clear is distrusted until it reads high again */
         stuck = 1; assert(sample(0, 10000) == 0 && s_irq_stuck);
         reset_wait(); wait_buttons(1000); assert(waited_n == 2 && waited_ms == 200);
@@ -178,7 +216,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 '''
-        self.run_cases(self.build("irq", code), 7)
+        self.run_cases(self.build("irq", code), 11)
 
     def test_oled_rail(self):
         """The OLED's rail goes off while paused and its state comes back with it."""
