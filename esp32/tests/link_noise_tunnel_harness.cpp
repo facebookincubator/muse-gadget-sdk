@@ -921,6 +921,54 @@ int main(int argc, char **argv) {
     assert(control_tx_turn());
     assert(!session_alive);
 
+    // Inbound pongs keep keepalive satisfied, so a DMA gate that never reopens
+    // would blackhole outbound forever. The loop tears the session down once
+    // queued batches make no progress for the stall timeout, without a seal.
+    reopen();
+    enqueue(61);
+    dma_free = 0;
+    const uint8_t pong = 0;
+    const uint64_t stall_start = now_us;
+    while (now_us < stall_start + TUN_TX_STALL_TIMEOUT_US) {
+        noise_tunnel_on_inbound(&pong, 1);
+        assert(!control_tx_turn());
+        assert(noise_tunnel_is_connected() && session_alive && sent.empty());
+        now_us += 1000000;
+    }
+    assert(control_tx_turn());
+    assert(sent.empty() && pings == 0 && crypto.seals == 0);
+    assert(logs.back().find("tunnel TX stalled 30s on DMA headroom") != std::string::npos);
+
+    // Any progress restarts the clock, even if the gate closes again mid-turn.
+    reopen();
+    enqueue(71);
+    enqueue(72);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += TUN_TX_STALL_TIMEOUT_US - 1;
+    dma_free = 64 * 1024;
+    exhaust_after_send = true;
+    assert(noise_tunnel_pump_tx(&emit) == 1);
+    exhaust_after_send = false;
+    now_us += TUN_TX_STALL_TIMEOUT_US - 1;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    ++now_us;
+    assert(noise_tunnel_pump_tx(&emit) == -1);
+    assert((sent == std::vector<uint8_t>{71}));
+
+    // A reopen drops the stale queue and the stall with it.
+    reopen();
+    enqueue(81);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += TUN_TX_STALL_TIMEOUT_US;
+    reopen();
+    enqueue(82);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    dma_free = 64 * 1024;
+    assert(noise_tunnel_pump_tx(&emit) == 1);
+
     // Any future ungated seal failure is caught even with both TX queues empty.
     reopen();
     session_alive = false;

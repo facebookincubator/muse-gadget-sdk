@@ -97,6 +97,14 @@ extern "C" bool noise_tx_has_contiguous_dma_headroom(void) {
 #define TUN_KEEPALIVE_INTERVAL_US (20 * 1000 * 1000)  // ping after 20s idle
 #define TUN_KEEPALIVE_TIMEOUT_US  (65 * 1000 * 1000)  // dead after ~3 missed
 
+// Outbound stall. Keepalive only watches inbound frames, so while the VM keeps
+// sending (e.g. TCP retransmits) a tunnel whose batches never leave because the
+// DMA gate stays shut looks alive forever. If queued batches make no progress
+// for this long, tear the session down: reopening the stream would itself wait
+// on the gate and frees nothing, while a teardown releases the TLS buffers and
+// socket pbufs held in DMA-capable RAM.
+#define TUN_TX_STALL_TIMEOUT_US (30 * 1000 * 1000)
+
 #if CONFIG_SPIRAM
 #define TX_POOL_SIZE 8
 #else
@@ -126,6 +134,11 @@ static bool s_needs_reset = false;
 // emit a ping.
 static uint64_t s_last_rx_us = 0;
 static uint64_t s_last_ping_us = 0;
+
+// Start of the current outbound stall (batches queued, DMA-gated, none sent).
+// Session-task-owned, cleared by any send, an empty queue or a stream open.
+static bool s_tx_stalled = false;
+static uint64_t s_tx_stalled_since_us = 0;
 
 // Outbound batch pool: send_packet (any task) fills a free slot and posts it
 // to s_work_q; the session task drains s_work_q and returns slots to s_free_q.
@@ -246,6 +259,7 @@ static bool try_open_stream(const noise_tunnel_emit_t *emit) {
             xQueueSend(s_free_q, &stale, 0);
         }
     }
+    s_tx_stalled = false;
     s_connected.store(true, std::memory_order_release);
     // Arm keepalive liveness from the open: treat the successful open as the
     // first "rx" so we don't immediately time out or ping before any traffic.
@@ -314,13 +328,26 @@ extern "C" int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit) {
 
     int sent = 0;
     tx_slot *slot = nullptr;
+    UBaseType_t pending = uxQueueMessagesWaiting(s_work_q);
+    if (pending == 0) s_tx_stalled = false;
     // Bound this turn even if producers keep refilling the pool. Returning on
     // pressure leaves queued batches intact and lets the session loop service
     // control traffic, RX and keepalives; never sleep or retry a failed seal.
-    for (UBaseType_t pending = uxQueueMessagesWaiting(s_work_q); pending > 0; --pending) {
+    for (; pending > 0; --pending) {
         size_t dma_free;
         if (!noise_tx_has_dma_headroom(&dma_free)) {
             uint64_t now = esp_timer_get_time();
+            if (!s_tx_stalled) {
+                s_tx_stalled = true;
+                s_tx_stalled_since_us = now;
+            } else if (now - s_tx_stalled_since_us >= TUN_TX_STALL_TIMEOUT_US) {
+                ESP_LOGW(TAG, "tunnel TX stalled %llus on DMA headroom; tearing down session "
+                         "(dma_free=%u dma_largest=%u)",
+                         (unsigned long long)((now - s_tx_stalled_since_us) / 1000000),
+                         (unsigned)dma_free,
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+                return -1;
+            }
             if (now >= s_next_tx_heap_log_us) {
                 s_next_tx_heap_log_us = now + TUN_TX_HEAP_LOG_INTERVAL_US;
                 ESP_LOGW(TAG, "tunnel TX paused: DMA headroom (dma_free=%u dma_largest=%u)",
@@ -341,6 +368,7 @@ extern "C" int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit) {
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
             return -1;
         }
+        s_tx_stalled = false;
         sent++;
     }
     return sent;

@@ -112,7 +112,9 @@ void noise_tunnel_on_inbound(const uint8_t *data, size_t len);
 
 // Send batches queued at entry while DMA headroom permits. Queued batches stay
 // pending under pressure; return promptly so control/RX/keepalives can run.
-// Returns the number sent (0 if empty or gated), or -1 on send error.
+// Returns the number sent (0 if empty or gated), or -1 on send error or when
+// queued batches have been gated with no progress for TUN_TX_STALL_TIMEOUT_US;
+// either way the caller must tear the session down.
 int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit);
 
 // Tunnel-stream keepalive. Call periodically from the session loop while the
