@@ -107,6 +107,10 @@ bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit);
 // Session torn down: mark the tunnel down and forget the emit context.
 void noise_tunnel_on_session_down(void);
 
+// The server reset the tunnel stream or refused POST /link-tunnel: mark the
+// tunnel down (control stays up) and record `why` in the connectivity history.
+void noise_tunnel_on_server_drop(const char *why);
+
 // Deliver an inbound BodyChunk received on TUNNEL_STREAM_ID to the packet cb.
 void noise_tunnel_on_inbound(const uint8_t *data, size_t len);
 

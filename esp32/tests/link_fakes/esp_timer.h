@@ -18,6 +18,10 @@
 
 #include <stdint.h>
 
+#ifdef LINK_FAKE_CUSTOM_TIMER
+int64_t esp_timer_get_time(void);
+#else
 static inline int64_t esp_timer_get_time(void) {
     return 0;
 }
+#endif

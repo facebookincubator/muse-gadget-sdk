@@ -335,6 +335,28 @@ cJSON *cJSON_CreateNumber(double number) {
     return item;
 }
 
+cJSON *cJSON_CreateArray(void) {
+    return new_item(cJSON_Array);
+}
+
+cJSON *cJSON_CreateString(const char *string) {
+    if (!string) return NULL;
+    cJSON *item = new_item(cJSON_String);
+    if (!item) return NULL;
+    item->valuestring = xstrdup(string);
+    if (!item->valuestring) {
+        cJSON_Delete(item);
+        return NULL;
+    }
+    return item;
+}
+
+int cJSON_AddItemToArray(cJSON *array, cJSON *item) {
+    if (!cJSON_IsArray(array) || !item) return 0;
+    append_child(array, item);
+    return 1;
+}
+
 cJSON *cJSON_AddItemToObject(cJSON *object, const char *name, cJSON *item) {
     if (!cJSON_IsObject(object) || !name || !item || item->string) return NULL;
     item->string = xstrdup(name);
@@ -386,6 +408,14 @@ static bool print_value(out_t *out, const cJSON *item) {
         char number[64];
         int n = snprintf(number, sizeof(number), "%.17g", item->valuedouble);
         return n > 0 && (size_t)n < sizeof(number) && append_str(out, number);
+    }
+    if (cJSON_IsArray(item)) {
+        if (!append_char(out, '[')) return false;
+        for (const cJSON *child = item->child; child; child = child->next) {
+            if (child != item->child && !append_char(out, ',')) return false;
+            if (!print_value(out, child)) return false;
+        }
+        return append_char(out, ']');
     }
     if (cJSON_IsObject(item)) {
         if (!append_char(out, '{')) return false;

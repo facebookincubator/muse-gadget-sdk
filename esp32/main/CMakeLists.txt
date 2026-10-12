@@ -31,6 +31,7 @@ set(GADGET_SRCS
     "config_store.c"
     "vm_api.c"
     "diagnostic_log.c"
+    "link_events.c"
     "stack_monitor.c"
     "bug_report.c"
     "ota.c"

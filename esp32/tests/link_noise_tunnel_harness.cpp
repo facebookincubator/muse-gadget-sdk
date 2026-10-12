@@ -95,6 +95,19 @@ static void log_message(const char *, const char *fmt, ...) {
 #define ESP_LOGI log_message
 #include "noise_tunnel.inc"
 
+// Connectivity history double: "<kind>: <detail>" in record order.
+static std::vector<std::string> events;
+extern "C" void link_events_record(link_event_kind_t kind, const char *fmt, ...) {
+    static const char *const names[] = {"wifi_down", "wifi_up", "session_up", "session_down",
+                                        "tunnel_up", "tunnel_down", "tunnel_tx_blocked"};
+    char buf[LINK_EVENTS_DETAIL_MAX];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    events.push_back(std::string(names[kind]) + ": " + buf);
+}
+
 static std::vector<uint8_t> sent;
 static bool exhaust_after_send, fail_send, refill, fail_open, fail_reset;
 // A failed Reset seal poisons Noise; encode/precondition failures do not.
@@ -284,9 +297,11 @@ static bool control_tx_turn(bool tunnel_opened = true,
     esp_tls_t *tls = nullptr;
     void *stack = nullptr;
     bool error = false, did = false;
+    const char *end_reason = nullptr;
     do {
 #include "control_tx_turn.inc"
     } while (false);
+    (void)end_reason;
     return error;
 }
 static void cleanup_control() {
@@ -968,6 +983,64 @@ int main(int argc, char **argv) {
     assert(noise_tunnel_pump_tx(&emit) == 0);
     dma_free = 64 * 1024;
     assert(noise_tunnel_pump_tx(&emit) == 1);
+
+    // Connectivity history: one outage is one tunnel_down/tunnel_up pair. A
+    // DMA-gated and a refused reopen add no entries; recovery summarizes them.
+    reopen();
+    const uint8_t first_pong = 0;
+    noise_tunnel_on_inbound(&first_pong, 1);
+    events.clear();
+    stream_ops.clear();
+    now_us += TUN_KEEPALIVE_TIMEOUT_US;
+    noise_tunnel_tick(&emit);
+    assert(!noise_tunnel_is_connected());
+    assert((events == std::vector<std::string>{
+        "tunnel_down: keepalive timeout, last ping 65s ago"}));
+    dma_free = 0;
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit) && stream_ops.empty());
+    now_us += 10 * 1000 * 1000;
+    dma_free = 64 * 1024;
+    assert(noise_tunnel_maybe_reopen(&emit) && stream_ops == "RO");
+    noise_tunnel_on_server_drop("server reset stream, code=3");
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit) && stream_ops == "ROO");
+    assert(events.size() == 1);
+    noise_tunnel_on_inbound(&first_pong, 1);
+    assert((events == std::vector<std::string>{
+        "tunnel_down: keepalive timeout, last ping 65s ago",
+        "tunnel_up: back after 20s: 2 reopens, 10s DMA wait, last fail: server reset stream, code=3"}));
+    assert(logs.back() == "tunnel restored after 20s down (2 reopen attempts)");
+
+    // A TX block that clears on its own is recorded once it lasts 5s.
+    events.clear();
+    enqueue(91);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += 6 * 1000 * 1000;
+    dma_free = 64 * 1024;
+    assert(noise_tunnel_pump_tx(&emit) == 1);
+    assert((events == std::vector<std::string>{
+        "tunnel_tx_blocked: outbound blocked 6s on DMA headroom (min dma_free=0); resumed"}));
+    events.clear();
+    enqueue(92);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += 4 * 1000 * 1000;
+    dma_free = 64 * 1024;
+    assert(noise_tunnel_pump_tx(&emit) == 1);
+    assert(events.empty());
+
+    // A stall teardown records once; the session teardown that follows doesn't.
+    enqueue(93);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += TUN_TX_STALL_TIMEOUT_US;
+    assert(noise_tunnel_pump_tx(&emit) == -1);
+    noise_tunnel_on_session_down();
+    assert((events == std::vector<std::string>{
+        "tunnel_tx_blocked: outbound blocked 30s on DMA headroom (min dma_free=0); "
+        "tearing down session"}));
 
     // Any future ungated seal failure is caught even with both TX queues empty.
     reopen();

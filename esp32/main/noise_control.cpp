@@ -18,7 +18,9 @@
 #include "noise_control.h"
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
+#include "noise_tunnel.h"
 #include "noise_tunnel_internal.h"
+#include "link_events.h"
 #include "ws_mask.h"
 #if CONFIG_HOMEHUB_FAST_GCM
 #include "fast_gcm.h"
@@ -1425,9 +1427,11 @@ static char *build_register_json(void) {
 
     cJSON *commands = cJSON_CreateObject();
     add_command(commands, "device.health",
-                "Report basic Link health, including battery level (percent), "
-                "voltage, and whether it is charging or on USB power; each is "
-                "null when the device has no battery or can't measure it",
+                "Report Link health, including battery level (percent), "
+                "voltage, and whether it is charging or on USB power (each "
+                "null when the device has no battery or can't measure it), and "
+                "connectivity_events: recent Wi-Fi, session and tunnel outages "
+                "with causes, as \"<N>s ago\" lines",
                 nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
@@ -1760,6 +1764,10 @@ static void send_device_health(
     cJSON_AddItemToObject(metrics, "usb_power",
                           usb_power ? usb_power : cJSON_CreateNull());
     cJSON_AddItemToObject(health, "metrics", metrics);
+#if CONFIG_HOMEHUB_TUNNEL
+    cJSON_AddBoolToObject(health, "tunnel_connected", noise_tunnel_is_connected());
+#endif
+    link_events_add_json(health, "connectivity_events");
     if (wifi_ssid[0]) {
         cJSON_AddStringToObject(health, "network_ssid", wifi_ssid);
     }
@@ -2063,8 +2071,21 @@ static void idle_wait(esp_tls_t *tls, uint64_t last_busy_us) {
     lwip_select(fd + 1, &rd, nullptr, nullptr, &tv);
 }
 
+// Connectivity history: failed attempts between sessions are summarized in
+// the next session_up rather than recorded one by one. noise_ctrl_task-owned.
+static uint32_t s_failed_attempts = 0;
+static const char *s_last_attempt_failure = "";
+static uint64_t s_session_down_us = 0;
+
+static void note_attempt_failed(const char *reason) {
+    ++s_failed_attempts;
+    s_last_attempt_failure = reason;
+}
+
 static session_result_t run_session(stack_monitor_t *stack) {
     session_result_t result = SESSION_FAILED;
+    const char *end_reason = "stopped";
+    uint64_t session_up_us = 0;
     uint8_t *ws_buf = nullptr, *rx_buf = nullptr;
     uint8_t *svc_scratch = nullptr, *env_scratch = nullptr;
     uint8_t *tf_scratch = nullptr, *sr_scratch = nullptr;
@@ -2076,6 +2097,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     esp_tls_t *tls = esp_tls_init();
     if (!tls) {
         ESP_LOGE(TAG, "esp_tls_init failed");
+        note_attempt_failed("TLS init failed");
         return SESSION_FAILED;
     }
     esp_tls_cfg_t cfg = {};
@@ -2087,6 +2109,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     if (r != 1) {
         ESP_LOGE(TAG, "TLS connect failed: %d", r);
         esp_tls_conn_destroy(tls);
+        note_attempt_failed("TLS connect failed");
         return SESSION_FAILED;
     }
     ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s)", s_noise_host, NOISE_PORT, s_vm_id);
@@ -2115,6 +2138,9 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // blip. Saying so takes the 60s auth backoff instead of the 15s
         // network cap, and raises ws_auth_failed so app.c re-fetches the
         // token from fetch_vms — the only thing that can actually fix it.
+        note_attempt_failed(upgrade == NOISE_UPGRADE_AUTH_REJECTED
+                                ? "WebSocket upgrade auth rejected"
+                                : "WebSocket upgrade failed");
         return upgrade == NOISE_UPGRADE_AUTH_REJECTED ? SESSION_AUTH_FAILED
                                                      : SESSION_FAILED;
     }
@@ -2156,6 +2182,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     if (!ws_buf || !rx_buf || !svc_scratch || !env_scratch
         || !tf_scratch || !sr_scratch) {
         ESP_LOGE(TAG, "session buffer alloc failed");
+        end_reason = "session buffer alloc failed";
         goto cleanup;
     }
 
@@ -2165,6 +2192,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     if (!noise_handshake(tls, session, ws_buf, ws_buf_size)) {
         ESP_LOGE(TAG, "Noise handshake failed");
         result = SESSION_AUTH_FAILED;
+        end_reason = "Noise handshake failed";
         goto cleanup;
     }
     session_generation = noise_ctrl_next_session_generation(
@@ -2185,9 +2213,13 @@ static session_result_t run_session(stack_monitor_t *stack) {
         if (!open_sws.ok()) {
             ESP_LOGE(TAG, "StartOutboundApplicationRequest failed: %s",
                      open_sws.status().str());
+            end_reason = "control stream open failed";
             goto cleanup;
         }
-        if (!flush_outbound(tls, session, ws_buf)) goto cleanup;
+        if (!flush_outbound(tls, session, ws_buf)) {
+            end_reason = "control stream open failed";
+            goto cleanup;
+        }
         ESP_LOGI(TAG, "opened POST /link-control stream");
     }
 
@@ -2213,6 +2245,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+            end_reason = "link.register build failed";
             goto cleanup;
         }
         control_tx = {reg_json, strlen(reg_json), 0, false, session_generation};
@@ -2224,6 +2257,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
         int sockfd = -1;
         if (esp_tls_get_conn_sockfd(tls, &sockfd) != ESP_OK || sockfd < 0) {
             ESP_LOGE(TAG, "get_conn_sockfd failed");
+            end_reason = "socket setup failed";
             goto cleanup;
         }
         int flags = lwip_fcntl(sockfd, F_GETFL, 0);
@@ -2232,6 +2266,16 @@ static session_result_t run_session(stack_monitor_t *stack) {
 
     s_connected = true;
     notify_status("ws_connected");
+    session_up_us = esp_timer_get_time();
+    if (s_failed_attempts) {
+        link_events_record(LINK_EVENT_SESSION_UP,
+                           "established after %us: %u failed attempts, last: %s",
+                           (unsigned)((session_up_us - s_session_down_us) / 1000000),
+                           (unsigned)s_failed_attempts, s_last_attempt_failure);
+    } else {
+        link_events_record(LINK_EVENT_SESSION_UP, "established");
+    }
+    s_failed_attempts = 0;
 
     HeaderView hdr_storage[16];
     bool error = false;
@@ -2261,6 +2305,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
         if (SHOW_AGENT_NAME && !identity.requested && s_register_acked) {
             identity.requested = true;
             if (!identity_request(tls, session, svc_scratch, env_scratch, ws_buf)) {
+                end_reason = "identity request failed";
                 error = true;
                 break;
             }
@@ -2304,6 +2349,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                         static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
                         s_req_too_large = true;
                     }
+                    end_reason = "inbound frame rejected";
                     error = true;
                     break;
                 }
@@ -2327,11 +2373,17 @@ static session_result_t run_session(stack_monitor_t *stack) {
                         if (is_tunnel) {
                             // Tunnel stream reset is non-fatal for the control
                             // session; drop the tunnel and keep control alive.
-                            ESP_LOGW(TAG, "server reset tunnel stream");
-                            noise_tunnel_on_session_down();
+                            // Code only: reason text is bytes off the wire.
+                            ESP_LOGW(TAG, "server reset tunnel stream: code=%d",
+                                     (int)frame.reset.code);
+                            char why[48];
+                            snprintf(why, sizeof(why), "server reset stream, code=%d",
+                                     (int)frame.reset.code);
+                            noise_tunnel_on_server_drop(why);
                         } else {
                             ESP_LOGW(TAG, "server reset stream %lld",
                                      (long long)frame.stream_id);
+                            end_reason = "server reset control stream";
                             error = true;
                             break;
                         }
@@ -2342,10 +2394,14 @@ static session_result_t run_session(stack_monitor_t *stack) {
                             if (is_tunnel) {
                                 ESP_LOGW(TAG, "server rejected /link-tunnel: %d",
                                          frame.response.status);
-                                noise_tunnel_on_session_down();
+                                char why[48];
+                                snprintf(why, sizeof(why), "server rejected open: %d",
+                                         (int)frame.response.status);
+                                noise_tunnel_on_server_drop(why);
                             } else {
                                 ESP_LOGE(TAG, "server rejected /link-control: %d",
                                          frame.response.status);
+                                end_reason = "server rejected /link-control";
                                 error = true;
                                 break;
                             }
@@ -2354,10 +2410,12 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 }
             } else if (n == 0) {
                 ESP_LOGI(TAG, "peer closed");
+                end_reason = "server closed connection";
                 error = true;
                 break;
             } else if (n == -1) {
                 ESP_LOGW(TAG, "rx error");
+                end_reason = "socket read error";
                 error = true;
                 break;
             } else if (n == -3) {
@@ -2417,6 +2475,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 if (control_tx.is_heartbeat) {
                     ESP_LOGW(TAG, "heartbeat send failed");
                 }
+                end_reason = "control send failed";
                 error = true;
                 break;
             }
@@ -2457,6 +2516,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // (e.g. transient backend 503). Rate-limited internally. Only after the
         // initial post-register open, so we never race registration.
         if (tunnel_opened && !noise_tunnel_maybe_reopen(&tun_emit)) {
+            end_reason = "tunnel stream reset failed";
             error = true;
             break;
         }
@@ -2467,6 +2527,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
             did = true;
             last_activity_us = esp_timer_get_time();
         } else if (tun_sent < 0) {
+            end_reason = "tunnel TX failed or stalled";
             error = true;
             break;
         }
@@ -2484,6 +2545,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // WS pings can still succeed and otherwise keep a dead session alive.
         if (!session.isEstablished()) {
             ESP_LOGW(TAG, "Noise session no longer established; reconnecting");
+            end_reason = "Noise session broke";
             error = true;
             break;
         }
@@ -2497,6 +2559,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
             if (idle_us >= static_cast<uint64_t>(KEEPALIVE_INTERVAL_MS) * 1000) {
                 if (!ws_send_ping(tls)) {
                     ESP_LOGW(TAG, "keepalive ping failed");
+                    end_reason = "WebSocket ping failed";
                     error = true;
                     break;
                 }
@@ -2519,6 +2582,11 @@ static session_result_t run_session(stack_monitor_t *stack) {
     noise_tunnel_on_session_down();
     ESP_LOGI(TAG, "session ending (rx idle %llus at teardown)",
              (unsigned long long)((esp_timer_get_time() - last_rx_us) / 1000000));
+    s_session_down_us = esp_timer_get_time();
+    link_events_record(LINK_EVENT_SESSION_DOWN, "%s after %us up, rx idle %us",
+                       end_reason,
+                       (unsigned)((s_session_down_us - session_up_us) / 1000000),
+                       (unsigned)((s_session_down_us - last_rx_us) / 1000000));
     notify_status("ws_disconnected");
     // Clean exit (s_running went false) — no backoff needed.
     if (!error) result = SESSION_OK;
@@ -2537,6 +2605,7 @@ cleanup:
 #if CONFIG_HOMEHUB_FAST_GCM
     fast_gcm_forget_all();   // this session's TLS and Noise keys
 #endif
+    if (!session_up_us) note_attempt_failed(end_reason);
     return result;
 }
 

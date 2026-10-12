@@ -17,7 +17,9 @@
 #include "noise_tunnel.h"
 #include "noise_tunnel_internal.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -27,6 +29,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "link_events.h"
 
 static const char *TAG = "link.noise_tun";
 
@@ -104,6 +107,9 @@ extern "C" bool noise_tx_has_contiguous_dma_headroom(void) {
 // on the gate and frees nothing, while a teardown releases the TLS buffers and
 // socket pbufs held in DMA-capable RAM.
 #define TUN_TX_STALL_TIMEOUT_US (30 * 1000 * 1000)
+// Shorter outbound stalls that recover on their own still go in the
+// connectivity history once they last this long.
+#define TUN_TX_BLOCKED_RECORD_US (5 * 1000 * 1000)
 
 #if CONFIG_SPIRAM
 #define TX_POOL_SIZE 8
@@ -139,6 +145,62 @@ static uint64_t s_last_ping_us = 0;
 // Session-task-owned, cleared by any send, an empty queue or a stream open.
 static bool s_tx_stalled = false;
 static uint64_t s_tx_stalled_since_us = 0;
+static size_t s_tx_stall_min_dma = 0;
+
+// Connectivity history (link_events), session-task-owned. An outage runs from
+// the first mark-down to the first inbound frame on a reopened stream: a
+// refused reopen is reset milliseconds after the open, so the open proves
+// nothing. A reopen loop thus records one tunnel_down/tunnel_up pair, with the
+// attempts, DMA wait and last failure summarized on recovery.
+static uint64_t s_outage_since_us = 0;  // 0: no outage in progress
+static bool s_rx_since_open = false;
+static uint32_t s_outage_reopens = 0;
+static uint64_t s_outage_dma_wait_us = 0;
+static uint64_t s_reopen_gated_since_us = 0;
+static char s_outage_last_failure[48] = "";
+
+// `why` is null when the session ended; its session_down event says why.
+static void note_tunnel_down(const char *why) {
+    if (s_outage_since_us) {
+        if (why) snprintf(s_outage_last_failure, sizeof(s_outage_last_failure), "%s", why);
+        return;
+    }
+    s_outage_since_us = std::max<uint64_t>(esp_timer_get_time(), 1);
+    s_outage_reopens = 0;
+    s_outage_dma_wait_us = 0;
+    s_reopen_gated_since_us = 0;
+    s_outage_last_failure[0] = '\0';
+    if (why) link_events_record(LINK_EVENT_TUNNEL_DOWN, "%s", why);
+}
+
+static void note_tunnel_up(uint64_t now) {
+    if (!s_outage_since_us) {
+        link_events_record(LINK_EVENT_TUNNEL_UP, "opened");
+        return;
+    }
+    unsigned down_s = (unsigned)((now - s_outage_since_us) / 1000000);
+    ESP_LOGI(TAG, "tunnel restored after %us down (%u reopen attempts)",
+             down_s, (unsigned)s_outage_reopens);
+    link_events_record(LINK_EVENT_TUNNEL_UP,
+                       "back after %us: %u reopens, %us DMA wait%s%s",
+                       down_s, (unsigned)s_outage_reopens,
+                       (unsigned)(s_outage_dma_wait_us / 1000000),
+                       s_outage_last_failure[0] ? ", last fail: " : "",
+                       s_outage_last_failure);
+    s_outage_since_us = 0;
+}
+
+static void end_tx_stall(uint64_t now, const char *outcome) {
+    if (s_tx_stalled && now - s_tx_stalled_since_us >= TUN_TX_BLOCKED_RECORD_US) {
+        unsigned blocked_s = (unsigned)((now - s_tx_stalled_since_us) / 1000000);
+        ESP_LOGI(TAG, "tunnel TX blocked %us on DMA headroom (min dma_free=%u); %s",
+                 blocked_s, (unsigned)s_tx_stall_min_dma, outcome);
+        link_events_record(LINK_EVENT_TUNNEL_TX_BLOCKED,
+                           "outbound blocked %us on DMA headroom (min dma_free=%u); %s",
+                           blocked_s, (unsigned)s_tx_stall_min_dma, outcome);
+    }
+    s_tx_stalled = false;
+}
 
 // Outbound batch pool: send_packet (any task) fills a free slot and posts it
 // to s_work_q; the session task drains s_work_q and returns slots to s_free_q.
@@ -259,11 +321,12 @@ static bool try_open_stream(const noise_tunnel_emit_t *emit) {
             xQueueSend(s_free_q, &stale, 0);
         }
     }
-    s_tx_stalled = false;
+    uint64_t now = esp_timer_get_time();
+    end_tx_stall(now, "queue dropped by reopen");
+    s_rx_since_open = false;
     s_connected.store(true, std::memory_order_release);
     // Arm keepalive liveness from the open: treat the successful open as the
     // first "rx" so we don't immediately time out or ping before any traffic.
-    uint64_t now = esp_timer_get_time();
     s_last_rx_us = now;
     s_last_ping_us = now;
     ESP_LOGI(TAG, "tunnel stream open (stream %d)", TUNNEL_STREAM_ID);
@@ -285,7 +348,15 @@ extern "C" bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit) {
     // Reset + Request seal through the AES DMA path; a failed seal would turn
     // a tunnel blip into a full reconnect. Retry next turn once pressure clears.
     if (!noise_tx_has_dma_headroom(nullptr)
-        || !noise_tx_has_contiguous_dma_headroom()) return true;
+        || !noise_tx_has_contiguous_dma_headroom()) {
+        if (!s_reopen_gated_since_us) s_reopen_gated_since_us = now;
+        return true;
+    }
+    if (s_reopen_gated_since_us) {
+        s_outage_dma_wait_us += now - s_reopen_gated_since_us;
+        s_reopen_gated_since_us = 0;
+    }
+    ++s_outage_reopens;
     ESP_LOGI(TAG, "retrying tunnel stream open");
     s_last_open_attempt_us = now;
     // The daemon dispatcher never reaps a stream we abandoned locally, so
@@ -305,12 +376,24 @@ extern "C" bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit) {
 
 extern "C" void noise_tunnel_on_session_down(void) {
     s_connected.store(false, std::memory_order_relaxed);
+    end_tx_stall(esp_timer_get_time(), "session ended");
+    s_reopen_gated_since_us = 0;
+    note_tunnel_down(nullptr);
+}
+
+extern "C" void noise_tunnel_on_server_drop(const char *why) {
+    s_connected.store(false, std::memory_order_relaxed);
+    note_tunnel_down(why);
 }
 
 extern "C" void noise_tunnel_on_inbound(const uint8_t *data, size_t len) {
     // Any inbound tunnel frame — a real packet batch OR a keepalive pong —
     // proves the VM backend is alive, so refresh liveness first.
     s_last_rx_us = esp_timer_get_time();
+    if (!s_rx_since_open) {
+        s_rx_since_open = true;
+        note_tunnel_up(s_last_rx_us);
+    }
     // A single sentinel byte is the keepalive pong, not a packet batch — its
     // liveness is already recorded above; do not forward it to the netif (a real
     // batch is always >= 2 bytes: [u16-LE len][pkt]...).
@@ -329,7 +412,7 @@ extern "C" int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit) {
     int sent = 0;
     tx_slot *slot = nullptr;
     UBaseType_t pending = uxQueueMessagesWaiting(s_work_q);
-    if (pending == 0) s_tx_stalled = false;
+    if (pending == 0) end_tx_stall(esp_timer_get_time(), "queue drained");
     // Bound this turn even if producers keep refilling the pool. Returning on
     // pressure leaves queued batches intact and lets the session loop service
     // control traffic, RX and keepalives; never sleep or retry a failed seal.
@@ -340,13 +423,23 @@ extern "C" int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit) {
             if (!s_tx_stalled) {
                 s_tx_stalled = true;
                 s_tx_stalled_since_us = now;
+                s_tx_stall_min_dma = dma_free;
             } else if (now - s_tx_stalled_since_us >= TUN_TX_STALL_TIMEOUT_US) {
                 ESP_LOGW(TAG, "tunnel TX stalled %llus on DMA headroom; tearing down session "
                          "(dma_free=%u dma_largest=%u)",
                          (unsigned long long)((now - s_tx_stalled_since_us) / 1000000),
                          (unsigned)dma_free,
                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+                // The warning above already logs it; only record the event.
+                link_events_record(LINK_EVENT_TUNNEL_TX_BLOCKED,
+                                   "outbound blocked %us on DMA headroom (min dma_free=%u); "
+                                   "tearing down session",
+                                   (unsigned)((now - s_tx_stalled_since_us) / 1000000),
+                                   (unsigned)std::min(s_tx_stall_min_dma, dma_free));
+                s_tx_stalled = false;
                 return -1;
+            } else {
+                s_tx_stall_min_dma = std::min(s_tx_stall_min_dma, dma_free);
             }
             if (now >= s_next_tx_heap_log_us) {
                 s_next_tx_heap_log_us = now + TUN_TX_HEAP_LOG_INTERVAL_US;
@@ -368,7 +461,7 @@ extern "C" int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit) {
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
             return -1;
         }
-        s_tx_stalled = false;
+        end_tx_stall(esp_timer_get_time(), "resumed");
         sent++;
     }
     return sent;
@@ -391,6 +484,11 @@ extern "C" void noise_tunnel_tick(const noise_tunnel_emit_t *emit) {
                  (unsigned long long)((now - s_last_rx_us) / 1000000));
         s_needs_reset = true;
         s_connected.store(false, std::memory_order_relaxed);
+        // A last ping long ago means pings were DMA-gated, not unanswered.
+        char why[48];
+        snprintf(why, sizeof(why), "keepalive timeout, last ping %us ago",
+                 (unsigned)((now - s_last_ping_us) / 1000000));
+        note_tunnel_down(why);
         return;
     }
 
@@ -416,6 +514,7 @@ extern "C" void noise_tunnel_tick(const noise_tunnel_emit_t *emit) {
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
             s_needs_reset = true;
             s_connected.store(false, std::memory_order_relaxed);
+            note_tunnel_down("keepalive ping send failed");
         }
     }
 }
