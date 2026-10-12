@@ -168,13 +168,28 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
     import socket
 
     message = sys.stdin.read() if args.message == ["-"] else " ".join(args.message)
+    request = {"message": message}
+    if args.session_id:
+        request["session_id"] = args.session_id
+    if args.image:
+        import base64
+        import mimetypes
+
+        try:
+            with open(args.image, "rb") as f:
+                data = f.read()
+        except OSError as exc:
+            print(f"Could not read {args.image}: {exc}", file=sys.stderr)
+            return 1
+        request["attachments"] = [{
+            "filename": os.path.basename(args.image),
+            "mime_type": mimetypes.guess_type(args.image)[0] or "image/jpeg",
+            "data_base64": base64.b64encode(data).decode(),
+        }]
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(90)
             sock.connect(str(config.socket_path()))
-            request = {"message": message}
-            if args.session_id:
-                request["session_id"] = args.session_id
             sock.sendall(json.dumps(request).encode() + b"\n")
             reply = json.loads(sock.makefile("rb").readline())
     except (OSError, ValueError) as exc:
@@ -226,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("message", nargs="+", help="the message, or - to read it from stdin")
     send.add_argument("--session-id",
                      help="send to this side chat (a new id starts one) instead of the main chat")
+    send.add_argument("--image", metavar="FILE",
+                     help="attach a picture for the Muse to look at (about 180 KB at most)")
     send.set_defaults(func=cmd_send_user_msg)
 
     sub.add_parser("info", help="show device identity").set_defaults(func=cmd_info)

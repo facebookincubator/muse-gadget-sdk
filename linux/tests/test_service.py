@@ -36,8 +36,9 @@ class FakeSession:
     def __init__(self) -> None:
         self.sent: list[str] = []
 
-    async def send_chat(self, message: str, session_id: str | None = None) -> dict:
-        self.sent.append((message, session_id))
+    async def send_chat(self, message: str, session_id: str | None = None,
+                        attachments: list | None = None) -> dict:
+        self.sent.append((message, session_id, attachments) if attachments else (message, session_id))
         return {"ok": True, "status": 200, "response": None}
 
 
@@ -86,6 +87,23 @@ def test_local_message_can_target_a_side_chat():
         assert session.sent == [("ring", sid)]
         bad = await ask(path, b'{"message": "ring", "session_id": "../x"}\n')
         assert not bad["ok"] and len(session.sent) == 1
+
+    run_with_socket(check)
+
+
+def test_local_message_can_carry_a_picture():
+    async def check(service, path):
+        session = FakeSession()
+        service._current = session
+        # Larger than the old 64 KiB line limit.
+        picture = {"filename": "porch.jpg", "mime_type": "image/jpeg", "data_base64": "A" * 100_000}
+        request = {"message": "who is it?", "attachments": [picture]}
+        assert (await ask(path, json.dumps(request).encode() + b"\n"))["ok"]
+        assert session.sent == [("who is it?", None, [picture])]
+        for bad in ([], "porch.jpg", [{"filename": "porch.jpg"}], [{**picture, "data_base64": 1}]):
+            reply = await ask(path, json.dumps({"message": "hi", "attachments": bad}).encode() + b"\n")
+            assert not reply["ok"] and "attachments" in reply["error"]
+        assert len(session.sent) == 1
 
     run_with_socket(check)
 
