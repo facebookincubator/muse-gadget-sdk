@@ -307,9 +307,17 @@ static const snap_t *measure_end(void)
     return s_now;
 }
 
+/* 0 to 1000, so a JSON percentage is never longer than "100.0" (and nothing
+ * overflows, however long the run). */
 static int per_mille(int64_t part, int64_t whole)
 {
-    return whole > 0 && part > 0 ? (int)(part * 1000 / whole) : 0;
+    if (whole <= 0 || part <= 0) {
+        return 0;
+    }
+    if (part >= whole) {
+        return 1000;
+    }
+    return (int)(whole > INT64_MAX / 1000 ? part / (whole / 1000) : part * 1000 / whole);
 }
 
 static void summarize(const snap_t *end, muse_battery_t *out)
@@ -502,13 +510,43 @@ bool muse_battery_drain(const muse_battery_t *b, int *rate10, int *full_h)
     return true;
 }
 
-static void add(char *buf, size_t cap, size_t *len, const char *fmt, ...)
+/* JSON going into a buffer that may be too small for it. */
+typedef struct {
+    char *buf;
+    size_t cap, len;
+    bool cut;   /* a piece didn't fit: nothing more goes in but the closing brackets */
+} out_t;
+
+/*
+ * Appends one piece, whole or not at all, leaving room for the `keep` closing
+ * brackets still to come (and the NUL), so a record too long for its buffer
+ * loses its last pieces but stays valid JSON. Once a piece is left out, so
+ * is every later one, or a comma would follow nothing.
+ */
+static void add(out_t *o, size_t keep, const char *fmt, ...)
 {
+    if (o->cut) {
+        return;
+    }
     va_list ap;
     va_start(ap, fmt);
-    int n = vsnprintf(buf + *len, cap - *len, fmt, ap);
+    int n = vsnprintf(o->buf + o->len, o->cap - o->len, fmt, ap);
     va_end(ap);
-    *len = n < 0 ? *len : (*len + n < cap ? *len + n : cap - 1);
+    if (n < 0 || o->len + n + keep >= o->cap) {
+        o->buf[o->len] = '\0';
+        o->cut = true;
+    } else {
+        o->len += n;
+    }
+}
+
+/* A closing bracket, in the room add() kept for it. */
+static void close_with(out_t *o, char c)
+{
+    if (o->len + 1 < o->cap) {
+        o->buf[o->len++] = c;
+        o->buf[o->len] = '\0';
+    }
 }
 
 /* A per-mille figure as a JSON percentage. */
@@ -538,17 +576,22 @@ static const char *reset_name(esp_reset_reason_t r)
     }
 }
 
-/* With s_lock held. */
+/* With s_lock held. Never longer than cap - 1, and valid JSON even when cut
+ * short (from cap 3, "{}"): the head first, the lock list last. */
 static int json(char *buf, size_t cap)
 {
     char a[16], b[16], c[16], d[16];
-    size_t len = 0;
+    out_t o = { .buf = buf, .cap = cap };
+    if (cap) {
+        buf[0] = '\0';
+    }
     const snap_t *end = s_started ? measure_end() : NULL;
     muse_battery_t m;
     summarize(end, &m);
+    add(&o, 1, "{");
     /* How this boot began and how long ago: a panic or brownout on battery shows here. */
-    add(buf, cap, &len,
-        "{\"boot\":\"%s\",\"uptime\":%lld,\"battery_boots\":%u,"
+    add(&o, 1,
+        "\"boot\":\"%s\",\"uptime\":%lld,\"battery_boots\":%u,"
         "\"started\":%s,\"running\":%s,\"secs\":%lld,\"battery_pct\":[%d,%d],\"battery_mv\":[%d,%d],"
         "\"screen_off\":%s,\"resting\":%s,\"slept\":%s,\"sleeps\":%lu,\"busy\":%s",
         reset_name(esp_reset_reason()), (long long)(esp_timer_get_time() / 1000000), s_boots,
@@ -562,7 +605,7 @@ static int json(char *buf, size_t cap)
      * at boot; and whether it got it, so the CPU powers down in light sleep.
      * Before the locks, so a long lock list can't cut it off. */
     snprintf(a, sizeof(a), "%u", (unsigned)s_rest_free_min);
-    add(buf, cap, &len,
+    add(&o, 1,
         ",\"heap\":{\"free\":%u,\"largest\":%u,\"min\":%u,\"resting_min\":%s,"
         "\"retention_free\":%u,\"retention_largest\":%u,\"cpu_pd\":%s}",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -573,23 +616,27 @@ static int json(char *buf, size_t cap)
 #if CONFIG_PM_PROFILING
     int64_t pm_span = end ? end->pm.at_us - s_start->pm.at_us : 0;
     if (end && s_start->pm.at_us && end->pm.at_us && pm_span > 0) {
-        add(buf, cap, &len, ",\"modes\":{");
-        for (int i = 0; i < MODE_COUNT; i++) {
-            add(buf, cap, &len, "%s\"%s\":%s", i ? "," : "", MODE_NAMES[i],
-                pct(a, per_mille(end->pm.mode_us[i] - s_start->pm.mode_us[i], pm_span)));
-        }
-        add(buf, cap, &len, "},\"sleep_rejects\":%ld,\"locks\":[", end->pm.rejects - s_start->pm.rejects);
+        const int64_t *e = end->pm.mode_us, *s = s_start->pm.mode_us;
+        add(&o, 1, ",\"modes\":{\"%s\":%s,\"%s\":%s,\"%s\":%s,\"%s\":%s}",
+            MODE_NAMES[0], pct(a, per_mille(e[0] - s[0], pm_span)), MODE_NAMES[1], pct(b, per_mille(e[1] - s[1], pm_span)),
+            MODE_NAMES[2], pct(c, per_mille(e[2] - s[2], pm_span)), MODE_NAMES[3], pct(d, per_mille(e[3] - s[3], pm_span)));
+        add(&o, 2, ",\"sleep_rejects\":%ld,\"locks\":[", end->pm.rejects - s_start->pm.rejects);
+        bool listed = !o.cut;
         int n = lock_deltas(&end->pm);
         for (int i = 0; i < n; i++) {
             const lock_delta_t *l = &s_deltas[i];
-            add(buf, cap, &len, "%s{\"name\":\"%s\",\"type\":\"%s\",\"held\":%s,\"taken\":%d}", i ? "," : "",
+            add(&o, 2, "%s{\"name\":\"%s\",\"type\":\"%s\",\"held\":%s,\"taken\":%d}", i ? "," : "",
                 l->lock->name, l->lock->type, pct(a, per_mille(l->held_us, pm_span)), l->taken);
         }
-        add(buf, cap, &len, "]");
+        if (listed) {
+            close_with(&o, ']');
+        }
     }
 #endif
-    add(buf, cap, &len, "}");
-    return (int)len;
+    if (o.len) {   /* the "{" went in */
+        close_with(&o, '}');
+    }
+    return (int)o.len;
 }
 
 /* With s_lock held. Written in place: a reset partway leaves a bad checksum. */

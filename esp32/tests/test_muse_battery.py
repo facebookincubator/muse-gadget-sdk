@@ -79,65 +79,77 @@ END = dump(110 * S, [
     rejects=7)
 
 
+def build_harness(out: Path, *defines: str) -> Path:
+    """The harness, for a board with power management and profiling unless `defines` say
+    otherwise (MUSE_TEST_NO_PM_PROFILING, MUSE_TEST_NO_PM: see battery_fakes/sdkconfig.h)."""
+    cc = shlex.split(os.environ.get("CC", "cc"))
+    if not cc or shutil.which(cc[0]) is None:
+        raise unittest.SkipTest("C compiler not available")
+    proc = subprocess.run(
+        [
+            *cc,
+            "-include",
+            str(ROOT / "tests" / "host_compat.h"),
+            "-std=gnu11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            *[f"-D{d}" for d in defines],
+            "-I",
+            str(ROOT / "tests" / "battery_fakes"),
+            "-I",
+            str(ROOT / "components" / "muse"),
+            str(ROOT / "tests" / "muse_battery_harness.c"),   # includes muse_battery.c
+            "-o",
+            str(out),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode:
+        raise AssertionError(proc.stdout + proc.stderr)
+    return out
+
+
 class BatteryTest(unittest.TestCase):
     binary: Path
 
     @classmethod
     def setUpClass(cls) -> None:
-        cc = shlex.split(os.environ.get("CC", "cc"))
-        if not cc or shutil.which(cc[0]) is None:
-            raise unittest.SkipTest("C compiler not available")
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.binary = Path(cls.tmp.name) / "muse_battery_harness"
-        proc = subprocess.run(
-            [
-                *cc,
-                "-include",
-                str(ROOT / "tests" / "host_compat.h"),
-                "-std=gnu11",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-I",
-                str(ROOT / "tests" / "battery_fakes"),
-                "-I",
-                str(ROOT / "components" / "muse"),
-                str(ROOT / "tests" / "muse_battery_harness.c"),   # includes muse_battery.c
-                "-o",
-                str(cls.binary),
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-        )
-        if proc.returncode:
-            raise AssertionError(proc.stdout + proc.stderr)
+        cls.binary = build_harness(Path(cls.tmp.name) / "muse_battery_harness")
 
     @classmethod
     def tearDownClass(cls) -> None:
         cls.tmp.cleanup()
 
-    def run_harness(self, *commands: str) -> list[dict]:
+    def run_harness_raw(self, *commands: str, binary: Path | None = None) -> list[str]:
+        """The lines the commands print, as text; boot's own "@power.saved" in self.booted_with."""
         script = "".join(f"dump\n{c}end\n" if c.startswith("Time since") else c + "\n" for c in commands)
-        proc = subprocess.run([str(self.binary)], input=script, text=True, capture_output=True)
+        proc = subprocess.run([str(binary or self.binary)], input=script, text=True, capture_output=True)
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         lines = proc.stdout.splitlines()
         # What boot prints unasked, for a console that takes no commands.
         tag = "@power.saved "
         self.booted_with = [json.loads(line[len(tag):]) for line in lines if line.startswith(tag)]
-        return [json.loads(line) for line in lines if not line.startswith(tag)]
+        return [line for line in lines if not line.startswith(tag)]
+
+    def run_harness(self, *commands: str, binary: Path | None = None) -> list[dict]:
+        return [json.loads(line) for line in self.run_harness_raw(*commands, binary=binary)]
+
+    # On battery from 10 s to 110 s: the screen off from 20 s, resting from 30 s,
+    # 60 s of light sleep in 400 wakes.
+    MEASURE = (
+        "t 10000000", START, "p 0 100 4190",
+        "t 20000000", "s 1 0",
+        "t 30000000", "s 1 1",
+        *["w 150000"] * 400, "w 0",
+        "t 110000000", END, "p 0 99 4100",
+    )
 
     def measure(self, *after: str) -> list[dict]:
-        """On battery from 10 s to 110 s: the screen off from 20 s, resting from 30 s,
-        60 s of light sleep in 400 wakes."""
-        return self.run_harness(
-            "t 10000000", START, "p 0 100 4190",
-            "t 20000000", "s 1 0",
-            "t 30000000", "s 1 1",
-            *["w 150000"] * 400, "w 0",
-            "t 110000000", END, "p 0 99 4100",
-            *after,
-        )
+        return self.run_harness(*self.MEASURE, *after)
 
     def test_waits_for_battery(self) -> None:
         read, j = self.run_harness("t 5000000", START, "p 1 100 4200", "r", "j")
@@ -350,6 +362,28 @@ class BatteryTest(unittest.TestCase):
         locks = [line.split()[0] for line in text.splitlines()[-7:]]
         self.assertEqual(locks, ["rtos0", "rtos1", "wifi", "usb_serial_jtag", "bt", "i2s_driver", "i2s_driver"])
 
+
+    def test_cut_short_stays_valid(self) -> None:
+        # Into any buffer too small for it, the JSON loses whole pieces from the end (the
+        # lock list first) but stays valid: never a field cut in half or a bracket left open.
+        full, = self.measure("j")
+        caps = range(0, len(json.dumps(full, separators=(",", ":"))) + 2)
+        outputs = self.run_harness_raw(*self.MEASURE, *[f"j {cap}" for cap in caps])
+        for cap, text in zip(caps, outputs):
+            with self.subTest(cap=cap):
+                self.assertLess(len(text), max(cap, 1))
+                if cap < 3:
+                    self.assertEqual(text, "")   # no room for "{}"
+                    continue
+                cut = json.loads(text)
+                for key, value in cut.items():
+                    if key == "locks":
+                        self.assertEqual(value, full["locks"][:len(value)])
+                    else:
+                        self.assertEqual(value, full[key], key)
+        self.assertEqual(json.loads(outputs[-1]), full)
+        # The head goes in before any lock, so only the lock list is short of room in the end.
+        self.assertIn("heap", json.loads(outputs[len(caps) // 2]))
 
 class ReportTest(unittest.TestCase):
     def test_drain(self) -> None:
