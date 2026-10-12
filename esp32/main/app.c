@@ -2805,8 +2805,9 @@ void app_run(void) {
         size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
         size_t min_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-        // Where light sleep's CPU retention memory comes from (not the
-        // reserved DMA pool), and whether the CPU powers down in it.
+        // What's left of the RAM light sleep's CPU retention memory comes
+        // from (not the reserved DMA pool), after muse_input_power_init()
+        // took it at boot for good, and whether it got it (cpu_pd).
         char retention[48] = "";
 #if CONFIG_MUSE_ENABLED && CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP
         snprintf(retention, sizeof(retention), " ret=%uK/%uK cpu_pd=%s",

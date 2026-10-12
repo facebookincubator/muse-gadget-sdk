@@ -189,7 +189,8 @@ menu "Muse"
             CPU touches them: the avatar is scaled into LVGL's draw buffer,
             and the I2S driver copies to and from its own DMA buffers. Turn
             it on where internal RAM is short, as the SenseCAP Watcher does
-            to hold the CPU's light-sleep retention memory.
+            to pay for the CPU's light-sleep retention memory, which it
+            takes at boot and keeps.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

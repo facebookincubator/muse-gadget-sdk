@@ -168,10 +168,12 @@ the avatar's and audio's static buffers, which this profile keeps in PSRAM
 (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`). `tools/muse/power.py` shows the last
 run on battery, with the time actually slept, the power locks that kept the
 chip awake (`muse_awake` is Muse itself, whenever it isn't resting), and
-internal RAM: free, lowest since boot, lowest while resting, the part the
-retention memory can use, and whether the CPU powers down. The heartbeat log
-(`link.heartbeat`) prints the same as `int=free/largest min=lowest
-ret=free/largest cpu_pd=on|off`.
+internal RAM: free, lowest since boot, lowest while resting, what's left of
+the RAM retention memory can use, and whether the CPU powers down. The
+retention memory is already out of all of these, so resting shows no dip of
+its own: its lowest is the headroom Wi-Fi, BLE and the tunnel had while the
+board rested. The heartbeat log (`link.heartbeat`) prints the same as
+`int=free/largest min=lowest ret=free/largest cpu_pd=on|off`.
 
 The M5Stack StickS3 has 8 MB of flash, so it uses its own partition table with
 two smaller app slots. The front button is push-to-talk and the side button

@@ -246,9 +246,12 @@ static void accrue(int64_t now)
 static void persist(bool flash);
 
 /*
- * Resting is when IDF holds its light-sleep retention memory (CPU power-down),
- * so the lowest free internal RAM then is the headroom Wi-Fi, BLE and the
- * tunnel had left. Sampled on entry and with each battery reading.
+ * The lowest free internal RAM seen resting (display stopped, CPU free to
+ * light-sleep) this run, sampled on entry and with each battery reading. With
+ * CPU power-down, muse_input_power_init() takes the retention memory at boot
+ * and keeps it, so it's out of the free figure awake and resting alike and
+ * resting shows no dip of its own: this is the headroom Wi-Fi, BLE and the
+ * tunnel had while the board rested, beside "min", the lowest at any time.
  */
 static void note_rest_heap(void)
 {
@@ -553,10 +556,11 @@ static int json(char *buf, size_t cap)
         m.mv_start, m.mv_now, pct(a, m.screen_off_pm), pct(b, m.resting_pm), pct(c, m.slept_pm),
         (unsigned long)m.sleeps, pct(d, m.busy_pm));
     /* Internal RAM, in bytes: free and largest block now, lowest since boot,
-     * and lowest while resting on battery this run; the part light sleep's
-     * retention memory can come from (the reserved DMA pool can't); and
-     * whether the CPU powers down in light sleep. Before the locks, so a long
-     * lock list can't cut it off. */
+     * and lowest while resting on battery this run (note_rest_heap); what's
+     * left of the RAM light sleep's retention memory can come from (the
+     * reserved DMA pool can't), after muse_input_power_init() took its share
+     * at boot; and whether it got it, so the CPU powers down in light sleep.
+     * Before the locks, so a long lock list can't cut it off. */
     snprintf(a, sizeof(a), "%u", (unsigned)s_rest_free_min);
     add(buf, cap, &len,
         ",\"heap\":{\"free\":%u,\"largest\":%u,\"min\":%u,\"resting_min\":%s,"

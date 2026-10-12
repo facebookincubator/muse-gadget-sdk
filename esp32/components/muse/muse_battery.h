@@ -68,8 +68,10 @@ bool muse_battery_drain(const muse_battery_t *b, int *rate10, int *full_h);
 
 /* The same with every lock and CPU mode, as one line of JSON, and internal RAM
  * ("heap": free, largest block and lowest since boot now, the lowest seen
- * resting on battery in this run, the retention-capable free and largest
- * block, and "cpu_pd"). */
+ * resting on battery in this run, what's left of the retention-capable RAM,
+ * free and largest block, and "cpu_pd"). With cpu_pd the CPU's retention
+ * memory was taken at boot and kept, so it's out of all of them, and
+ * "resting_min" is the headroom while resting rather than a dip for it. */
 int muse_battery_json(char *buf, size_t cap);
 
 /* The JSON last saved before this boot, kept in RTC memory across resets (not

@@ -307,7 +307,8 @@ class BatteryTest(unittest.TestCase):
     def test_internal_ram(self) -> None:
         rtc = str(Path(self.tmp.name) / "rtc")
         # Free now, largest block and lowest since boot are live; resting_min is the lowest
-        # free internal RAM seen resting this run (CPU light-sleep retention allocated).
+        # free internal RAM seen resting this run (the headroom then: CPU retention memory,
+        # where there is any, was taken at boot and is out of every figure).
         before, resting, awake, stopped = self.run_harness(
             "h 90000 50000 40000", "t 10000000", START, "p 0 100 4190", "j",
             "t 30000000", "h 70000 50000 30000", "s 1 1",           # on entry
@@ -336,7 +337,7 @@ class BatteryTest(unittest.TestCase):
         self.assertEqual(j["heap"]["cpu_pd"], True)
         self.assertEqual((j["heap"]["retention_free"], j["heap"]["retention_largest"]), (9000, 4000))
         text = power.report(j)
-        self.assertIn("retention-capable 8.8 KB free (largest block 3.9 KB); CPU powers down in light sleep", text)
+        self.assertIn("retention-capable RAM left 8.8 KB (largest block 3.9 KB); CPU powers down in light sleep", text)
         off, = self.run_harness("c 0", "j")
         self.assertIn("CPU stays powered in light sleep", power.report(off))
 
