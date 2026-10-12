@@ -104,6 +104,11 @@ typedef struct {
 
     /* Codec handles for one duplex, 2-slot I2S bus, not yet opened. */
     esp_err_t (*audio_init)(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic);
+    /* Optional format adapters for boards whose physical duplex bus differs
+     * from Muse's interleaved s16 stereo PCM. NULL keeps existing codecs. */
+    esp_err_t (*audio_open)(esp_codec_dev_handle_t spk, esp_codec_dev_handle_t mic);
+    int (*audio_read)(esp_codec_dev_handle_t mic, void *pcm, int bytes);
+    int (*audio_write)(esp_codec_dev_handle_t spk, void *pcm, int bytes);
     int mic_slot;           /* slot carrying the mic (0/1), or -1 to mix both */
     void (*set_mic_gain)(esp_codec_dev_handle_t mic, int db);   /* NULL: esp_codec_dev_set_in_gain */
     /* Audio power the board can switch, such as an amp's enable: on once

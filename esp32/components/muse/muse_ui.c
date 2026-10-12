@@ -28,7 +28,7 @@
 #include "freertos/semphr.h"
 #include "lvgl.h"
 #include "mbedtls/base64.h"
-#include "src/draw/lv_image_decoder_private.h"   /* custom decoder */
+#include "src/image/lv_image_decoder_private.h" /* custom decoder (LVGL 9.6+) */
 #include "src/misc/lv_area_private.h"            /* lv_area_intersect, for the ring */
 
 #include "muse_ble.h"

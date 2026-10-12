@@ -23,6 +23,10 @@
 #include "esp_app_desc.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
+#if CONFIG_ESP_HOSTED
+#include "esp_wifi.h"
+#endif
 
 #include "muse_audio.h"
 #include "muse_battery.h"
@@ -765,7 +769,13 @@ static void build_wifi_page(lv_obj_t *tile)
     row(list, LV_SYMBOL_EDIT, "Other network...", NULL, on_wifi_other, NULL);
     lv_obj_t *mac = info_row(list, "MAC address");
     uint8_t m[6];
-    if (esp_read_mac(m, ESP_MAC_WIFI_STA) == ESP_OK) {
+    esp_err_t mac_ok = ESP_FAIL;
+#if CONFIG_ESP_HOSTED
+    mac_ok = esp_wifi_get_mac(WIFI_IF_STA, m);
+#else
+    mac_ok = esp_read_mac(m, ESP_MAC_WIFI_STA);
+#endif
+    if (mac_ok == ESP_OK) {
         char buf[18];
         snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
         lv_label_set_text(mac, buf);

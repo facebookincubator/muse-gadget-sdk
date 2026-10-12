@@ -58,6 +58,7 @@ ERROR_LINES = 60
 
 # muse_board->name, as "@status" reports it -> tools/muse/board.sh's name
 BOARDS = {
+    "KSDIY P4XC5": "p4xc5",
     "Espressif ESP32-S3-BOX-3": "box3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75C": "s3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75": "s3n",

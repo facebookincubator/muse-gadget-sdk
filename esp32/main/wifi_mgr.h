@@ -30,6 +30,9 @@ typedef struct {
 
 void wifi_mgr_init(void);
 
+// Cached STA MAC from wifi_mgr_init (Hosted targets). Returns false before init.
+bool wifi_mgr_get_sta_mac(uint8_t mac[6]);
+
 // Returns the STA esp_netif handle (NULL before wifi_mgr_init()). The pointer
 // is stable for the lifetime of the process.
 esp_netif_t *wifi_mgr_get_netif(void);

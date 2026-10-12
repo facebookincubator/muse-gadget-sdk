@@ -18,3 +18,12 @@ dependencies:
   espressif/led_strip: "~3.0"
   idf:
     version: ">=5.1"
+
+  espressif/esp_hosted:
+    version: "~2.12.6"
+    rules:
+      - if: '$CONFIG{MUSE_BOARD_ID} == "ksdiy_p4xc5"'
+  espressif/esp_wifi_remote:
+    version: "~1.4.0"
+    rules:
+      - if: '$CONFIG{MUSE_BOARD_ID} == "ksdiy_p4xc5"'

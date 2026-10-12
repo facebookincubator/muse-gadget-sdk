@@ -45,8 +45,24 @@ static int16_t s_out_stereo[MUSE_AUDIO_CHUNK * CHANNELS];
 static float s_hpf_a;
 static float s_hpf_x1, s_hpf_y1;
 
+static int codec_read(esp_codec_dev_handle_t dev, void *pcm, int bytes)
+{
+    return muse_board->audio_read ? muse_board->audio_read(dev, pcm, bytes)
+                                  : esp_codec_dev_read(dev, pcm, bytes);
+}
+static int codec_write(esp_codec_dev_handle_t dev, void *pcm, int bytes)
+{
+    return muse_board->audio_write ? muse_board->audio_write(dev, pcm, bytes)
+                                   : esp_codec_dev_write(dev, pcm, bytes);
+}
+
 static esp_err_t open_codecs(void)
 {
+    if (muse_board->audio_open) {
+        ESP_RETURN_ON_ERROR(muse_board->audio_open(s_spk, s_mic), TAG, "open board codecs");
+        s_open = true;
+        return ESP_OK;
+    }
     esp_codec_dev_sample_info_t fs = {
         .sample_rate = MUSE_AUDIO_RATE,
         .channel = CHANNELS,
@@ -139,13 +155,13 @@ void muse_audio_selftest(void)
 
     /* Capture: drop the DMA backlog, then time a known number of frames. */
     for (int n = 0; n < FLUSH; n += MUSE_AUDIO_CHUNK) {
-        esp_codec_dev_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
+        codec_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
     }
     double sl = 0, sr = 0, slr = 0, ml = 0, mr = 0;
     int pl = 0, pr = 0;
     int64_t t0 = esp_timer_get_time();
     for (int n = 0; n < MEASURE; n += MUSE_AUDIO_CHUNK) {
-        esp_codec_dev_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
+        codec_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
         for (int i = 0; i < MUSE_AUDIO_CHUNK; i++) {
             int l = s_in_stereo[2 * i], r = s_in_stereo[2 * i + 1];
             ml += l;
@@ -166,11 +182,11 @@ void muse_audio_selftest(void)
     /* Playback: fill the DMA queue with silence, then time more silence. */
     memset(s_out_stereo, 0, sizeof(s_out_stereo));
     for (int n = 0; n < FLUSH; n += MUSE_AUDIO_CHUNK) {
-        esp_codec_dev_write(s_spk, s_out_stereo, sizeof(s_out_stereo));
+        codec_write(s_spk, s_out_stereo, sizeof(s_out_stereo));
     }
     t0 = esp_timer_get_time();
     for (int n = 0; n < MEASURE; n += MUSE_AUDIO_CHUNK) {
-        esp_codec_dev_write(s_spk, s_out_stereo, sizeof(s_out_stereo));
+        codec_write(s_spk, s_out_stereo, sizeof(s_out_stereo));
     }
     float play_hz = MEASURE * 1e6f / (float)(esp_timer_get_time() - t0);
 
@@ -228,8 +244,8 @@ void muse_audio_loopback_test(int volume)
                     phase += 2.0f * (float)M_PI * f / MUSE_AUDIO_RATE;
                     s_out_stereo[2 * i] = s_out_stereo[2 * i + 1] = v;
                 }
-                esp_codec_dev_write(s_spk, s_out_stereo, sizeof(s_out_stereo));
-                esp_codec_dev_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
+                codec_write(s_spk, s_out_stereo, sizeof(s_out_stereo));
+                codec_read(s_mic, s_in_stereo, sizeof(s_in_stereo));
                 /* Skip the first SKIP*2 frames: DMA latency plus the previous tone's tail. */
                 if (n >= 2 * SKIP && got + MUSE_AUDIO_CHUNK <= MEAS) {
                     memcpy(cap + got * CHANNELS, s_in_stereo, sizeof(s_in_stereo));
@@ -263,7 +279,7 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 {
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
-        if (esp_codec_dev_read(s_mic, s_in_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
+        if (codec_read(s_mic, s_in_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
             return ESP_FAIL;
         }
         for (size_t i = 0; i < n; i++) {
@@ -291,7 +307,7 @@ esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
             s_out_stereo[2 * i] = mute ? 0 : mono[i];
             s_out_stereo[2 * i + 1] = mute ? 0 : mono[i];
         }
-        if (esp_codec_dev_write(s_spk, s_out_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
+        if (codec_write(s_spk, s_out_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
             return ESP_FAIL;
         }
         mono += n;

@@ -16,6 +16,7 @@
 
 #include "wifi_mgr.h"
 
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -24,6 +25,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include "soc/soc_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -42,11 +44,109 @@ static const char *TAG = "link.wifi";
 // than the unique-SSID cap to avoid dropping a network whose BSSIDs are dense.
 #define SCAN_MAX_RECORDS 40
 
+#if CONFIG_MUSE_BOARD_KSDIY_P4XC5
+#define WIFI_MGR_COUNTRY_CODE "CN"
+#else
+#define WIFI_MGR_COUNTRY_CODE "US"
+#endif
+
+static wifi_country_t s_wifi_country;
+static bool s_wifi_country_applied;
+
+static void wifi_country_default(wifi_country_t *out)
+{
+    *out = (wifi_country_t){
+        .cc = WIFI_MGR_COUNTRY_CODE,
+        .schan = 1,
+        .nchan = 13,
+        .policy = WIFI_COUNTRY_POLICY_MANUAL,
+    };
+}
+
+static bool wifi_country_valid(const wifi_country_t *c)
+{
+    if (!c || !isupper((unsigned char)c->cc[0]) || !isupper((unsigned char)c->cc[1])) {
+        return false;
+    }
+    if (c->nchan == 0 || c->nchan > 14 || c->schan < 1 || c->schan > 14) {
+        return false;
+    }
+    return (c->schan + c->nchan - 1) <= 14;
+}
+
+static esp_err_t wifi_country_apply(void)
+{
+    wifi_country_default(&s_wifi_country);
+    esp_err_t err = esp_wifi_set_country(&s_wifi_country);
+    if (err == ESP_OK) {
+        s_wifi_country_applied = true;
+        ESP_LOGI(TAG, "WiFi country %c%c channels %u-%u",
+                 s_wifi_country.cc[0], s_wifi_country.cc[1],
+                 (unsigned)s_wifi_country.schan,
+                 (unsigned)(s_wifi_country.schan + s_wifi_country.nchan - 1));
+    }
+    return err;
+}
+
+static const wifi_country_t *wifi_country_for_scan(void)
+{
+    if (s_wifi_country_applied && wifi_country_valid(&s_wifi_country)) {
+        return &s_wifi_country;
+    }
+#if !CONFIG_ESP_HOSTED
+    wifi_country_t probe;
+    wifi_country_default(&probe);
+    if (esp_wifi_get_country(&probe) == ESP_OK && wifi_country_valid(&probe)) {
+        s_wifi_country = probe;
+        s_wifi_country_applied = true;
+        return &s_wifi_country;
+    }
+#endif
+    wifi_country_default(&s_wifi_country);
+    return &s_wifi_country;
+}
+
+#if CONFIG_ESP_HOSTED
+#define HOSTED_WIFI_READY_TIMEOUT_MS 10000
+#define HOSTED_ACTIVE_SCAN_MAX_MS 100
+#define HOSTED_HOME_CHAN_DWELL_MS 30
+
+static bool wifi_hosted_wait_sta_ready(uint32_t timeout_ms)
+{
+    TickType_t start = xTaskGetTickCount();
+    TickType_t limit = pdMS_TO_TICKS(timeout_ms);
+    while ((xTaskGetTickCount() - start) < limit) {
+        wifi_mode_t mode;
+        if (esp_wifi_get_mode(&mode) == ESP_OK && mode == WIFI_MODE_STA) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    return false;
+}
+
+static void wifi_fill_scan_config(wifi_scan_config_t *sc, uint8_t channel,
+                                  const char *target_ssid)
+{
+    memset(sc, 0, sizeof(*sc));
+    sc->ssid = (uint8_t *)target_ssid;
+    sc->channel = channel;
+    sc->show_hidden = false;
+    sc->scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    sc->scan_time.active.min = 0;
+    sc->scan_time.active.max = HOSTED_ACTIVE_SCAN_MAX_MS;
+    sc->home_chan_dwell_time = HOSTED_HOME_CHAN_DWELL_MS;
+
+}
+#endif
+
 static EventGroupHandle_t s_events;
 static SemaphoreHandle_t s_scan_mutex = NULL;
 static SemaphoreHandle_t s_cache_mutex = NULL;
 static esp_netif_t *s_sta_netif;
 static bool s_inited = false;
+static bool s_sta_mac_valid = false;
+static uint8_t s_sta_mac[6];
 static bool s_connecting = false;        // true during initial wifi_mgr_connect() call
 // The network wifi_mgr_connect() is joining, for status screens.
 static portMUX_TYPE s_join_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -214,25 +314,48 @@ void wifi_mgr_init(void) {
 
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    wifi_country_t country = {
-        .cc = "US", .schan = 1, .nchan = 13,
-        .policy = WIFI_COUNTRY_POLICY_MANUAL,
-    };
-    ESP_ERROR_CHECK(esp_wifi_set_country(&country));
     ESP_ERROR_CHECK(esp_wifi_start());
 #if SOC_WIFI_SUPPORT_5G
     ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO));
 #endif
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+#if CONFIG_ESP_HOSTED
+    if (!wifi_hosted_wait_sta_ready(HOSTED_WIFI_READY_TIMEOUT_MS)) {
+        ESP_LOGW(TAG, "C5 WiFi STA not ready within %d ms",
+                 HOSTED_WIFI_READY_TIMEOUT_MS);
+    }
+#endif
+    for (int i = 0; i < 5; i++) {
+        if (wifi_country_apply() == ESP_OK) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(400));
+    }
+    if (!s_wifi_country_applied) {
+        ESP_LOGW(TAG, "esp_wifi_set_country failed; scans use %s 1-13 locally",
+                 WIFI_MGR_COUNTRY_CODE);
+        wifi_country_default(&s_wifi_country);
+    }
     s_inited = true;
 
     uint8_t mac[6] = {0};
     if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+        memcpy(s_sta_mac, mac, sizeof(s_sta_mac));
+        s_sta_mac_valid = true;
         ESP_LOGI(TAG, "WIFI STA MAC: %02X:%02X:%02X:%02X:%02X:%02X",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     } else {
         ESP_LOGW(TAG, "esp_wifi_get_mac failed");
     }
+}
+
+bool wifi_mgr_get_sta_mac(uint8_t mac[6])
+{
+    if (!mac || !s_sta_mac_valid) {
+        return false;
+    }
+    memcpy(mac, s_sta_mac, 6);
+    return true;
 }
 
 bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
@@ -248,12 +371,13 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
     s_keep_connected = false;
     if (s_reconnect_timer) xTimerStop(s_reconnect_timer, 0);
     atomic_store_explicit(&s_connect_pending, true, memory_order_release);
-    bool scan_cancelled = false;
-    while (xSemaphoreTake(s_scan_mutex, 0) != pdTRUE) {
+    for (;;) {
+        if (xSemaphoreTake(s_scan_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+            break;
+        }
         esp_err_t stop_err = esp_wifi_scan_stop();
-        if (stop_err == ESP_OK && !scan_cancelled) {
+        if (stop_err == ESP_OK) {
             ESP_LOGI(TAG, "cancelled background scan for wifi connect");
-            scan_cancelled = true;
         }
         if (xTaskGetTickCount() - started >= timeout_ticks) {
             ESP_LOGW(TAG, "wifi connect timed out waiting for radio");
@@ -261,8 +385,9 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
                                   memory_order_release);
             return false;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
     }
+
+    ESP_LOGI(TAG, "connecting to \"%s\" (timeout %d ms)", ssid, timeout_ms);
 
     wifi_config_t wc = {0};
     // The driver reads these arrays without a terminator, so a 32-byte SSID
@@ -449,21 +574,34 @@ int wifi_mgr_scan(wifi_scan_entry_t *out, int max_entries, uint8_t channel,
         return -1;
     }
 
+#if CONFIG_ESP_HOSTED
+    if (!wifi_hosted_wait_sta_ready(HOSTED_WIFI_READY_TIMEOUT_MS)) {
+        ESP_LOGW(TAG, "WiFi coprocessor not ready, skipping scan");
+        xSemaphoreGive(s_scan_mutex);
+        return -1;
+    }
+#endif
+
     // A probe that names the network is answered by one that hides it too.
-    wifi_scan_config_t sc = {
+    wifi_scan_config_t sc;
+#if CONFIG_ESP_HOSTED
+    wifi_fill_scan_config(&sc, channel, target_ssid);
+#else
+    sc = (wifi_scan_config_t){
         .ssid = (uint8_t *)target_ssid,
         .channel = channel,
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
         .scan_time.active = { .min = 0, .max = 0 },
     };
+#endif
     const char *which = target_ssid ? ", one network" : "";
     if (channel) {
         ESP_LOGI(TAG, "starting wifi scan (ch=%u%s)...", channel, which);
     } else {
-        wifi_country_t cc;
-        esp_wifi_get_country(&cc);
-        ESP_LOGI(TAG, "starting wifi scan (country=%s ch=%d-%d%s)...",
-                 cc.cc, cc.schan, cc.schan + cc.nchan - 1, which);
+        const wifi_country_t *cc = wifi_country_for_scan();
+        ESP_LOGI(TAG, "starting wifi scan (country=%c%c ch=%u-%u%s)...",
+                 cc->cc[0], cc->cc[1], (unsigned)cc->schan,
+                 (unsigned)(cc->schan + cc->nchan - 1), which);
     }
     esp_err_t err = esp_wifi_scan_start(&sc, true);
     if (atomic_load_explicit(&s_connect_pending, memory_order_acquire)) {

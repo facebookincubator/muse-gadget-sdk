@@ -16,12 +16,18 @@
 
 #include "identity.h"
 
+#include "wifi_mgr.h"
+
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
 
 #include "esp_mac.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
+#if CONFIG_ESP_HOSTED
+#include "esp_wifi.h"
+#endif
 
 static const char *TAG = "link.identity";
 
@@ -39,10 +45,10 @@ static char s_ble_name[32];
 static char s_mac[18];
 static char s_device_id[48];
 
-void identity_init(void) {
-    uint8_t mac[6] = {0};
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
-        ESP_LOGW(TAG, "esp_read_mac failed; using zeros");
+void identity_set_sta_mac(const uint8_t mac[6])
+{
+    if (!mac) {
+        return;
     }
     snprintf(s_node_id, sizeof(s_node_id),
              NODE_ID_PREFIX "-%02x%02x%02x", mac[3], mac[4], mac[5]);
@@ -52,6 +58,26 @@ void identity_init(void) {
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     snprintf(s_device_id, sizeof(s_device_id), "hatch-link:%s", s_mac);
     ESP_LOGI(TAG, "node_id=%s ble_name=%s", s_node_id, s_ble_name);
+}
+
+void identity_init(void) {
+    uint8_t mac[6] = {0};
+    bool have_mac = false;
+#if CONFIG_ESP_HOSTED
+    if (wifi_mgr_get_sta_mac(mac)) {
+        have_mac = true;
+    } else if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+        have_mac = true;
+    }
+#else
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        have_mac = true;
+    }
+#endif
+    if (!have_mac) {
+        ESP_LOGW(TAG, "WiFi STA MAC unavailable; using zeros");
+    }
+    identity_set_sta_mac(mac);
 }
 
 const char *identity_node_id(void) { return s_node_id; }
