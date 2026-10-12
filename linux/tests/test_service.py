@@ -90,6 +90,24 @@ def test_local_message_can_target_a_side_chat():
     run_with_socket(check)
 
 
+def test_local_message_can_wait_for_the_reply():
+    async def check(service, path):
+        class Waiting(FakeSession):
+            async def send_chat(self, message, session_id=None, wait_reply=None):
+                self.sent.append((message, session_id, wait_reply))
+                return {"ok": True, "reply": "done"}
+
+        session = Waiting()
+        service._current = session
+        reply = await ask(path, b'{"message": "hi", "wait": 30}\n')
+        assert reply["reply"] == "done" and session.sent == [("hi", None, 30)]
+        for bad in (b'{"message": "hi", "wait": 0}\n', b'{"message": "hi", "wait": "x"}\n',
+                    b'{"message": "hi", "wait": 99999}\n'):
+            assert not (await ask(path, bad))["ok"]
+
+    run_with_socket(check)
+
+
 def test_local_message_fails_cleanly_when_not_connected():
     async def check(service, path):
         reply = await ask(path, b'{"message": "hi"}\n')

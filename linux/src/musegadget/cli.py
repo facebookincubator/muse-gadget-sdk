@@ -170,11 +170,13 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
     message = sys.stdin.read() if args.message == ["-"] else " ".join(args.message)
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(90)
+            sock.settimeout(args.wait + 30 if args.wait else 90)
             sock.connect(str(config.socket_path()))
             request = {"message": message}
             if args.session_id:
                 request["session_id"] = args.session_id
+            if args.wait:
+                request["wait"] = args.wait
             sock.sendall(json.dumps(request).encode() + b"\n")
             reply = json.loads(sock.makefile("rb").readline())
     except (OSError, ValueError) as exc:
@@ -183,6 +185,12 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
     if not reply.get("ok"):
         print(f"Not delivered: {reply.get('error') or reply}", file=sys.stderr)
         return 1
+    if args.wait:
+        if reply.get("reply") is None:
+            print("Sent to your Muse; no answer within the wait.", file=sys.stderr)
+            return 2
+        print(reply["reply"])
+        return 0
     print("Sent to your Muse.")
     return 0
 
@@ -226,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("message", nargs="+", help="the message, or - to read it from stdin")
     send.add_argument("--session-id",
                      help="send to this side chat (a new id starts one) instead of the main chat")
+    send.add_argument("--wait", type=int, metavar="SECONDS",
+                     help="wait up to this long for the Muse's answer and print it")
     send.set_defaults(func=cmd_send_user_msg)
 
     sub.add_parser("info", help="show device identity").set_defaults(func=cmd_info)

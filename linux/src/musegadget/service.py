@@ -47,6 +47,7 @@ AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
 UNPAIRED_POLL_S = 30.0
 MAX_LOCAL_REQUEST = 64 * 1024
+MAX_WAIT_S = 600
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 # Device access tokens live about 4 hours; rotate at 3.
 TOKEN_REFRESH_AGE_S = 3 * 3600
@@ -209,9 +210,10 @@ class Service:
         """Accept messages for the Muse from programs on this device.
 
         Each connection sends one JSON line, ``{"message": "..."}`` plus an
-        optional ``"session_id"`` naming a side chat, and gets one JSON line
-        back. Only root and the command account's group can
-        connect.
+        optional ``"session_id"`` naming a side chat and ``"wait"`` (seconds) to
+        hold the connection open for the Muse's answer, and gets one JSON line
+        back (with ``"reply"`` when it waited). Only root and the command
+        account's group can connect.
         """
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if path.exists():
@@ -249,7 +251,14 @@ class Service:
         session = self._current
         if session is None or session.registered_at is None:
             return {"ok": False, "error": "not connected to the Muse"}
+        wait = request.get("wait")
+        if wait is not None and not (
+            isinstance(wait, (int, float)) and not isinstance(wait, bool) and 0 < wait <= MAX_WAIT_S
+        ):
+            return {"ok": False, "error": f"wait must be 1..{MAX_WAIT_S} seconds"}
         log.info("forwarding a %d-character message to the Muse", len(message))
+        if wait:
+            return await session.send_chat(message, session_id, wait_reply=wait)
         return await session.send_chat(message, session_id)
 
     async def _sleep(self, seconds: float) -> None:

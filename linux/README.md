@@ -106,6 +106,9 @@ musegadget send-user-msg "The garage door has been open for an hour."
 musegadget send-user-msg --session-id 6f1c2d4e-0b7a-4c3e-9f5d-2a8b1e0c7d93 "Posted to a side chat"
 ```
 
+`--wait SECONDS` holds on for the Muse's answer and prints it, read from the
+same `/chat/subscribe` stream the ESP32 firmware uses.
+
 `--session-id` posts into a side chat: a new id starts one, and reusing it
 keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_ring_bridge.py)
 is a complete example: a webhook listener that sends every note from a Pebble
