@@ -223,10 +223,11 @@ live state (register `0x48`, bit 0). Asleep on battery, the OLED's rail
 (3V3_L3B) and the audio rail (AU_L3B: codec and mic) are off and the chip
 light-sleeps until a rim key, or the M5PM1's click interrupt on GPIO12, wakes
 it. The red key's click arrives once it's released (about 125 ms later), and a
-press held at rest is found within a second. Waking, the panel takes about
-half a second longer to come back, and the first recording after a rest starts
-about 0.1 s later while the codec is set up again. The IMU is put back in
-suspend at boot; it, the RTC, vibration motor and Grove port aren't used yet.
+press held at rest is found within a second, also while Wi-Fi naps. Waking,
+the panel takes about half a second longer to come back, and the first
+recording after a rest starts about 0.1 s later while the codec is set up
+again. The IMU is put back in suspend at boot; it, the RTC, vibration motor
+and Grove port aren't used yet.
 [M5Unified](https://github.com/m5stack/M5Unified),
 M5's [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo)
 and its [M5PM1 1.0.6 driver](https://github.com/m5stack/M5PM1/tree/1.0.6)

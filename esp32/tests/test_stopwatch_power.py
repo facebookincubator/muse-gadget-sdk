@@ -169,7 +169,6 @@ int main(int argc, char **argv) {
         fail_reg = -1; assert(sample(0, 10000) == (MUSE_BTN_POWER_PRESS | MUSE_BTN_POWER_RELEASE));
     } else if (test == 5) {   /* paused waits */
         reset_wait(); wait_buttons(1000); assert(waited_n == 3 && waited_ms == 1000 && delayed == -1);
-        reset_wait(); wait_buttons(10000); assert(waited_n == 3 && waited_ms == 10000);
         regs[0x42] = 0x01; reset_wait(); wait_buttons(1000);
         assert(waited_n == -1 && delayed == 10);   /* fell since the poll: take it first */
         regs[0x42] = 0;
@@ -207,6 +206,11 @@ int main(int argc, char **argv) {
         assert(sample(0, 10000) == 0); assert(sample(0, 30000) == MUSE_BTN_POWER_RELEASE);
         regs[0x42] = 0x01; assert(sample(0, 125000) == TAP);   /* the second press's own click */
         assert(sample(0, 10000) == 0);
+    } else if (test == 10) {   /* napping waits are capped at 1 s: a held red key is found that soon */
+        reset_wait(); wait_buttons(10000); assert(waited_n == 3 && waited_ms == 1000);
+        reset_wait(); wait_buttons(1000); assert(waited_n == 3 && waited_ms == 1000);
+        reset_wait(); wait_buttons(400); assert(waited_n == 3 && waited_ms == 400);
+        s_pmic_irq = false; reset_wait(); wait_buttons(10000); assert(waited_n == 2 && waited_ms == 200);
     } else {   /* a line that won't clear is distrusted until it reads high again */
         stuck = 1; assert(sample(0, 10000) == 0 && s_irq_stuck);
         reset_wait(); wait_buttons(1000); assert(waited_n == 2 && waited_ms == 200);
@@ -216,7 +220,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 '''
-        self.run_cases(self.build("irq", code), 11)
+        self.run_cases(self.build("irq", code), 12)
 
     def test_oled_rail(self):
         """The OLED's rail goes off while paused and its state comes back with it."""

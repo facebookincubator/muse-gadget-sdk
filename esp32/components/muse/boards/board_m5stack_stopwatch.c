@@ -171,6 +171,7 @@ static const char *TAG = "board";
 #define CLICK_CREDIT_US ((125 + 250 + 125) * 1000)
 #define REST_KEY_POLL_MS 50        /* the red key down or settling while paused: poll it, as before */
 #define REST_FALLBACK_MS 200       /* no PM1 interrupt: the longest a paused wait may last */
+#define REST_KEY_FIND_MS 1000      /* the longest any paused wait lasts: a held red key is found this soon */
 #define IRQ_SETTLE_MS 10           /* the line just fell: the next poll takes the event */
 
 #define IMU_ADDR 0x68              /* BMI270 on 3V3_L1, sheet 5 (the BMM150 isn't fitted) */
@@ -294,8 +295,9 @@ static esp_err_t pmic_irq_clear(void)
  *   (BTN_CFG1 [2:1]) has passed. M5's firmware leaves it at 1 s; 125 ms here,
  *   so a tap at rest wakes the screen about that long after it's let go.
  *   Nothing is reported for a press or a hold: the paused wait's timeout
- *   (1 s, 10 s napping) still polls the live key, and poll_power_button
- *   turns a click no poll saw into a press and release.
+ *   (at most 1 s, also while napping: wait_buttons) still polls the live
+ *   key, and poll_power_button turns a click no poll saw into a press and
+ *   release.
  *   The double-click gap is set to the chip's default, 250 ms, so the
  *   longest wait for a click is known (CLICK_CREDIT_US).
  * - WAKEUP (bit 1) stays masked: it's the power-on event, and the manual says
@@ -1008,6 +1010,17 @@ static unsigned poll_buttons(void)
  * settling it's polled every REST_KEY_POLL_MS as before, so its debounce and
  * 1.5 s hold work unchanged. Without a working interrupt line, waits are
  * capped at REST_FALLBACK_MS.
+ *
+ * The PM1 has no interrupt for a press, only for a click once the key is up
+ * again (its BTN_STATUS bit 7 latches a press but raises no IRQ, and WAKEUP
+ * is the power-on event), so every wait is capped at REST_KEY_FIND_MS, the
+ * input task's own rest timeout: a held red key is found within about a
+ * second while Wi-Fi naps too, not after muse_input's 10 s NAP_WAIT_MS.
+ * Estimated cost, napping only (not measured): about 0.9 more wakes a
+ * second (every 1 s instead of 10 s; the battery run averaged 1.33 a second
+ * in all), each a GPIO12 check and one 100 kHz I2C read of the key, roughly
+ * 2 ms awake at the crystal clock. That is about 0.2% more time awake, some
+ * 0.05 mA on average at ~25 mA awake.
  */
 static void wait_buttons(int timeout_ms)
 {
@@ -1029,6 +1042,8 @@ static void wait_buttons(int timeout_ms)
     }
     if (n == 2 && timeout_ms > REST_FALLBACK_MS) {
         timeout_ms = REST_FALLBACK_MS;
+    } else if (timeout_ms > REST_KEY_FIND_MS) {
+        timeout_ms = REST_KEY_FIND_MS;
     }
     muse_gpio_buttons_wait(lines, n, timeout_ms);
 }
