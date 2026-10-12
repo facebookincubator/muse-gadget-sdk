@@ -117,11 +117,22 @@ esp_err_t muse_audio_init(int volume, int mic_gain_db)
 {
     s_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_lock, ESP_ERR_NO_MEM, TAG, "audio lock");
+    /* A board-switched supply goes off again on any failure: nothing will
+     * open the codecs, and the setters skip them while closed. */
     codec_power(true);
-    ESP_RETURN_ON_ERROR(muse_board->audio_init(&s_spk, &s_mic), TAG, "codec init failed");
-    ESP_RETURN_ON_FALSE(s_spk && s_mic, ESP_FAIL, TAG, "codec init failed");
-
-    ESP_RETURN_ON_ERROR(open_codecs(), TAG, "open codecs");
+    esp_err_t err = muse_board->audio_init(&s_spk, &s_mic);
+    if (err == ESP_OK && !(s_spk && s_mic)) {
+        err = ESP_FAIL;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "codec init failed");
+    } else {
+        err = open_codecs();   /* logs its own failure */
+    }
+    if (err != ESP_OK) {
+        codec_power(false);
+        return err;
+    }
     muse_audio_set_volume(volume);
     muse_audio_set_mic_gain(mic_gain_db);
 
@@ -155,6 +166,11 @@ void muse_audio_power(bool on)
             if (muse_board->audio_power) {
                 muse_board->audio_power(true);
             }
+        } else {
+            /* Still closed (open_codecs closes the speaker if the mic fails)
+             * and the amp still off: take the supply down again too. The
+             * next wake tries again. */
+            codec_power(false);
         }
     } else {
         if (muse_board->audio_power) {

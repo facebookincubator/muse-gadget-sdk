@@ -313,7 +313,8 @@ int main(int argc, char **argv) {
         self.run_cases(self.build("oled", code), 3)
 
     def test_codec_supply_in_muse_audio(self):
-        """muse_audio powers a board-switched codec around open and close, and never touches it off."""
+        """muse_audio powers a board-switched codec around open and close, never touches it off, and
+        takes the supply down again when bringing the codecs up fails, at a wake or at init."""
         audio = (MUSE / "muse_audio.c").read_text()
         code = COMMON + r'''
 #define ESP_ERR_NO_MEM 0x101
@@ -328,7 +329,7 @@ typedef struct { int sample_rate, channel, bits_per_sample; } esp_codec_dev_samp
 typedef int *esp_codec_dev_handle_t;
 static int spk_dev, mic_dev;
 static char ev[2048];
-static int locked, lock_ops, mic_fail;
+static int locked, lock_ops, mic_fail, spk_fail, init_err, init_null;
 static void note(const char *e) { strcat(ev, e); strcat(ev, " "); }
 static const char *who(esp_codec_dev_handle_t h) { return h == &spk_dev ? "spk" : "mic"; }
 typedef void *SemaphoreHandle_t;
@@ -337,7 +338,7 @@ static int xSemaphoreTake(SemaphoreHandle_t s, unsigned t) { (void)s; (void)t; a
 static int xSemaphoreGive(SemaphoreHandle_t s) { (void)s; assert(locked); locked = 0; return 1; }
 static int esp_codec_dev_open(esp_codec_dev_handle_t h, esp_codec_dev_sample_info_t *fs) {
     (void)fs; char b[16]; snprintf(b, sizeof(b), "open-%s", who(h)); note(b);
-    return h == &mic_dev && mic_fail ? -1 : ESP_CODEC_DEV_OK;
+    return (h == &mic_dev && mic_fail) || (h == &spk_dev && spk_fail) ? -1 : ESP_CODEC_DEV_OK;
 }
 static int esp_codec_dev_close(esp_codec_dev_handle_t h) { char b[16]; snprintf(b, sizeof(b), "close-%s", who(h)); note(b); return 0; }
 static int esp_codec_dev_set_out_vol(esp_codec_dev_handle_t h, int v) { assert(h == &spk_dev); char b[16]; snprintf(b, sizeof(b), "vol%d", v); note(b); return 0; }
@@ -346,22 +347,27 @@ static int muse_settings_volume(void) { return 70; }
 static int muse_settings_mic_gain(void) { return 24; }
 static void board_codec_power(bool on) { assert(locked || !lock_ops); note(on ? "rail-on" : "rail-off"); }
 static void board_audio_power(bool on) { note(on ? "amp-on" : "amp-off"); }
-static int board_audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic) { note("audio-init"); *spk = &spk_dev; *mic = &mic_dev; return ESP_OK; }
+static int board_audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic) {
+    note("audio-init"); *spk = &spk_dev; *mic = init_null ? NULL : &mic_dev; return init_err;
+}
 static struct {
     int (*audio_init)(esp_codec_dev_handle_t *, esp_codec_dev_handle_t *);
     void (*set_mic_gain)(esp_codec_dev_handle_t, int);
     void (*audio_power)(bool);
     void (*codec_power)(bool);
 } board = { board_audio_init, NULL, board_audio_power, board_codec_power }, *muse_board = &board;
+#include <math.h>
 #define CHANNELS 2
+#define HPF_HZ 80.0f
 #define MUSE_AUDIO_RATE 16000
+static float s_hpf_a;
 static esp_codec_dev_handle_t s_spk;
 static esp_codec_dev_handle_t s_mic;
 static bool s_open;
 static SemaphoreHandle_t s_lock;
 ''' + "\n".join(function(audio, n) for n in (
             "lock", "unlock", "codec_power", "codecs_reachable", "apply_volume", "apply_mic_gain", "open_codecs",
-            "muse_audio_power", "muse_audio_set_volume", "muse_audio_set_mic_gain")) + r'''
+            "muse_audio_set_volume", "muse_audio_set_mic_gain", "muse_audio_init", "muse_audio_power")) + r'''
 static void expect(const char *want) {
     if (strcmp(ev, want)) { printf("got:  %s\nwant: %s\n", ev, want); exit(1); }
     ev[0] = 0;
@@ -384,10 +390,31 @@ int main(int argc, char **argv) {
     } else if (test == 1) {   /* a failed open leaves it closed: setters still skip, the next wake retries */
         muse_audio_power(false); ev[0] = 0; mic_fail = 1;
         muse_audio_power(true);
-        expect("rail-on open-spk open-mic close-spk ");
+        expect("rail-on open-spk open-mic close-spk rail-off ");   /* supply off again, amp never on */
+        assert(!s_open && !locked);
         muse_audio_set_volume(40); expect("");
-        mic_fail = 0; muse_audio_power(true);
+        mic_fail = 0; spk_fail = 1; muse_audio_power(true);
+        expect("rail-on open-spk rail-off ");
+        assert(!s_open);
+        spk_fail = 0; muse_audio_power(true);
         expect("rail-on open-spk open-mic vol70 gain24 amp-on ");
+        assert(s_open);
+    } else if (test == 3) {   /* init: rail first, codecs opened and set */
+        s_spk = s_mic = NULL; s_open = false; s_lock = NULL; lock_ops = 0;
+        assert(muse_audio_init(50, 20) == ESP_OK);
+        expect("rail-on audio-init open-spk open-mic vol50 gain20 ");
+        assert(s_open && !locked);
+    } else if (test == 4) {   /* init failures after the rail went on: each takes it down again */
+        int cases[][4] = { { -5, 0, 0, -5 }, { 0, 1, 0, ESP_FAIL }, { 0, 0, 1, ESP_FAIL } };
+        const char *want[] = { "rail-on audio-init rail-off ", "rail-on audio-init rail-off ",
+                               "rail-on audio-init open-spk open-mic close-spk rail-off " };
+        for (int i = 0; i < 3; i++) {
+            s_spk = s_mic = NULL; s_open = false; s_lock = NULL; lock_ops = 0;
+            init_err = cases[i][0]; init_null = cases[i][1]; mic_fail = cases[i][2];
+            assert(muse_audio_init(50, 20) == cases[i][3]);
+            expect(want[i]);
+            assert(!s_open && !locked);
+        }
     } else {   /* other boards (no codec_power): unchanged, setters reach a closed codec as before */
         board.codec_power = NULL;
         muse_audio_power(false); expect("amp-off close-spk close-mic ");
@@ -397,7 +424,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 '''
-        self.run_cases(self.build("audio", code), 3)
+        self.run_cases(self.build("audio", code), 5)
         init = function(audio, "muse_audio_init")
         self.assertLess(init.index("codec_power(true)"), init.index("muse_board->audio_init("))
 
