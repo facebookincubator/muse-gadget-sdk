@@ -38,6 +38,7 @@ import json
 import logging
 import struct
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from typing import Callable
@@ -57,6 +58,10 @@ REQUEST_TIMEOUT_S = 60
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_EVENT_LINE = 1024 * 1024
 MAX_REPLY_WAIT_S = 600
+# Subscribe events are untrusted input: bound what one waiting caller holds.
+MAX_PENDING_EVENTS = 256
+MAX_REPLY_CHARS = 64 * 1024
+MAX_FOREIGN_REPLIES = 64
 SUBSCRIBE_RETRY_S = 5
 HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
@@ -154,9 +159,15 @@ def parse_chat_event(line: bytes) -> dict | None:
         # empty and sets parent_message_id to the message's own id.
         "reply_to": (fields["reply_to_message_id"] if isinstance(fields.get("reply_to_message_id"), str)
                      else fields.get("parent_message_id") or ""),
+        "parent": fields["parent_message_id"] if isinstance(fields.get("parent_message_id"), str) else "",
         "text": text,
         "seq": fields.get("seq") if isinstance(fields.get("seq"), int) else None,
     }
+
+
+def _printable(text: str) -> str:
+    """Drop control characters (escape sequences and the like), keeping tab and newline."""
+    return "".join(c for c in text if c in "\t\n" or unicodedata.category(c) != "Cc")
 
 
 class ReplyCollector:
@@ -166,6 +177,11 @@ class ReplyCollector:
     assistant message after the ``message.user`` event for our note. Events
     before it (history replayed on subscribe) are ignored. An assistant event
     that does name the note is accepted wherever it falls.
+
+    A message whose first event names some other message is another request's
+    answer: it stays dropped, including its later events that name nothing.
+    Order cannot tell two requests apart when another device talks to the same
+    chat at the same moment; the events carry no id for that.
     """
 
     def __init__(self) -> None:
@@ -173,7 +189,8 @@ class ReplyCollector:
         self._after_note = False
         self._owner = ""
         self._text: dict[str, str] = {}
-        self._buffered: list[dict] = []
+        self._buffered: collections.deque = collections.deque(maxlen=MAX_PENDING_EVENTS)
+        self._foreign: collections.deque = collections.deque(maxlen=MAX_FOREIGN_REPLIES)
 
     def feed(self, event: dict) -> str | None:
         """Returns the finished reply text, or None while it is still coming."""
@@ -189,22 +206,28 @@ class ReplyCollector:
         if name not in ("delta.message_start", "delta.text_append",
                         "delta.message_done", "message.assistant"):
             return None
-        if event["reply_to"] == self.note_id:
+        if mid in self._foreign:
+            return None
+        named = {event["reply_to"], event.get("parent", "")} - {"", mid}
+        if self.note_id in named:
             self._after_note = True
+        elif named and mid != self._owner:
+            self._foreign.append(mid)
+            return None
         elif not self._after_note or (self._owner and mid != self._owner):
             return None
         self._owner = self._owner or mid
         if name == "delta.text_append":
-            self._text[mid] = self._text.get(mid, "") + event["text"]
-        elif name == "message.assistant":
-            return event["text"] or self._text.get(mid, "")
-        elif name == "delta.message_done":
-            return event["text"] or self._text.get(mid, "")
+            self._text[mid] = (self._text.get(mid, "") + event["text"])[:MAX_REPLY_CHARS]
+            return None
+        if name in ("message.assistant", "delta.message_done"):
+            return _printable((event["text"] or self._text.get(mid, ""))[:MAX_REPLY_CHARS])
         return None
 
     def set_note_id(self, note_id: str) -> str | None:
         self.note_id = note_id
-        buffered, self._buffered = self._buffered, []
+        buffered = list(self._buffered)
+        self._buffered.clear()
         for event in buffered:
             done = self.feed(event)
             if done is not None:
@@ -336,7 +359,7 @@ class LinkSession:
         """
         if not wait_reply:
             return await self._post_chat(message, session_id)
-        events: asyncio.Queue = asyncio.Queue()
+        events: asyncio.Queue = asyncio.Queue(maxsize=MAX_PENDING_EVENTS)
         side = None
         if session_id:
             # Only the main chat is on the session-wide subscription.
@@ -619,6 +642,8 @@ class _Subscription:
                 continue
             self._seen.append(key)
             for queue in self.listeners:
+                if queue.full():
+                    queue.get_nowait()  # a caller that is not reading loses its oldest event
                 queue.put_nowait(event)
         if ended:
             self.closed.set()

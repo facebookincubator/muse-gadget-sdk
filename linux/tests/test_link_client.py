@@ -20,6 +20,7 @@ import struct
 
 import pytest
 
+from musegadget import link_client
 from musegadget.link_client import (
     DeviceDescription, LinkSession, MessageDecoder, Outcome, ReplyCollector, describe_result,
     encode_message, noise_url, parse_chat_event, printable,
@@ -417,7 +418,8 @@ def test_a_refused_subscription_is_retried_without_hammering(monkeypatch):
 def test_chat_events_are_flattened_from_the_payload():
     row = _event("message.assistant", "m", "n", display_text="shown", content="raw")
     assert parse_chat_event(row) == {
-        "event": "message.assistant", "message_id": "m", "reply_to": "n", "text": "shown", "seq": 1}
+        "event": "message.assistant", "message_id": "m", "reply_to": "n", "parent": "",
+        "text": "shown", "seq": 1}
     assert parse_chat_event(b"not json") is None
     assert parse_chat_event(b'{"type": "heartbeat"}') is None
 
@@ -435,6 +437,44 @@ def test_reply_collector_follows_the_note_not_reply_to_and_skips_replayed_histor
     assert feed("delta.text_append", "a1", "", parent_message_id="a1", text="Reply ") is None
     assert feed("delta.text_append", "a1", "", parent_message_id="a1", text="works.") is None
     assert feed("delta.message_done", "a1", "", parent_message_id="a1") == "Reply works."
+
+
+def test_reply_collector_keeps_dropping_a_reply_first_seen_answering_another_note():
+    collector = ReplyCollector()
+    collector.set_note_id("n1")
+    feed = lambda *a, **k: collector.feed(parse_chat_event(_event(*a, **k)))
+    assert feed("message.user", "n1", "") is None
+    # Another request's answer starts after our note; its later events name nothing.
+    assert feed("delta.message_start", "x", "other") is None
+    assert feed("delta.text_append", "x", "", parent_message_id="x", text="not ours") is None
+    assert feed("delta.message_done", "x", "", parent_message_id="x") is None
+    assert feed("delta.message_start", "y", "", parent_message_id="other") is None
+    assert feed("delta.message_done", "y", "", text="not ours either") is None
+    assert feed("delta.text_append", "a1", "", parent_message_id="a1", text="ours") is None
+    assert feed("delta.message_done", "a1", "", parent_message_id="a1") == "ours"
+
+
+def test_reply_collector_strips_control_characters_and_caps_the_reply():
+    collector = ReplyCollector()
+    collector.set_note_id("n1")
+    feed = lambda *a, **k: collector.feed(parse_chat_event(_event(*a, **k)))
+    assert feed("message.user", "n1", "") is None
+    assert feed("message.assistant", "a1", "", text="ok\x1b[2J\x07\tdone\nnext\x00") == "ok[2J\tdone\nnext"
+
+    collector = ReplyCollector()
+    collector.set_note_id("n1")
+    feed = lambda *a, **k: collector.feed(parse_chat_event(_event(*a, **k)))
+    assert feed("message.user", "n1", "") is None
+    for _ in range(3):
+        assert feed("delta.text_append", "a1", "", text="x" * link_client.MAX_REPLY_CHARS) is None
+    assert len(feed("delta.message_done", "a1", "")) == link_client.MAX_REPLY_CHARS
+
+
+def test_reply_collector_holds_a_bounded_number_of_events_before_the_ack():
+    collector = ReplyCollector()
+    for i in range(link_client.MAX_PENDING_EVENTS * 2):
+        assert collector.feed(parse_chat_event(_event("message.user", f"old-{i}", ""))) is None
+    assert len(collector._buffered) == link_client.MAX_PENDING_EVENTS
 
 
 def test_reply_collector_ignores_an_answer_that_names_another_note():
