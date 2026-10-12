@@ -56,6 +56,7 @@ HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
 MAX_INBOUND_MESSAGE = 4 * 1024 * 1024
+MAX_CHAT_BODY = 256 * 1024
 # Matches JavaScript's encodeURIComponent, as the firmware does.
 _URI_COMPONENT_SAFE = "-_.!~*'()"
 
@@ -236,7 +237,8 @@ class LinkSession:
 
     # -- Device-originated requests -------------------------------------------
 
-    async def send_chat(self, message: str, session_id: str | None = None) -> dict:
+    async def send_chat(self, message: str, session_id: str | None = None,
+                        attachments: list[dict] | None = None) -> dict:
         """Post a user message to the Muse as coming from this device.
 
         Sent on this session, so the VM attributes the turn to the device
@@ -244,6 +246,10 @@ class LinkSession:
         commands back here. ``session_id`` targets a side chat; an id the Muse
         has not seen before starts a new one. Without it the message goes to
         the main chat.
+
+        ``attachments`` are files for the Muse to look at, such as a picture:
+        each ``{"filename": ..., "mime_type": ..., "data_base64": ...}``. The
+        whole request must stay under 256 KB.
         """
         request_body = {
             "message": message,
@@ -252,7 +258,15 @@ class LinkSession:
         }
         if session_id:
             request_body["session_id"] = session_id
+        if attachments:
+            # The Muse ignores "message" when files are attached, so the text
+            # goes along as an item too.
+            request_body["items"] = [{"type": "text", "text": message}] + [
+                {"type": "file", "mime_type": a["mime_type"], "filename": a["filename"],
+                 "data_base64": a["data_base64"]} for a in attachments]
         body = json.dumps(request_body).encode()
+        if len(body) > MAX_CHAT_BODY:
+            raise ValueError(f"message with attachments is over {MAX_CHAT_BODY // 1024} KB")
         headers = [
             Header("Content-Type", "application/json"),
             Header("x-request-id", str(uuid.uuid4())),

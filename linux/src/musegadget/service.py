@@ -46,7 +46,7 @@ BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
 UNPAIRED_POLL_S = 30.0
-MAX_LOCAL_REQUEST = 64 * 1024
+MAX_LOCAL_REQUEST = 512 * 1024  # room for an attached picture
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 # Device access tokens live about 4 hours; rotate at 3.
 TOKEN_REFRESH_AGE_S = 3 * 3600
@@ -209,9 +209,9 @@ class Service:
         """Accept messages for the Muse from programs on this device.
 
         Each connection sends one JSON line, ``{"message": "..."}`` plus an
-        optional ``"session_id"`` naming a side chat, and gets one JSON line
-        back. Only root and the command account's group can
-        connect.
+        optional ``"session_id"`` naming a side chat and ``"attachments"``
+        (files, see ``LinkSession.send_chat``), and gets one JSON line back.
+        Only root and the command account's group can connect.
         """
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if path.exists():
@@ -246,10 +246,21 @@ class Service:
             isinstance(session_id, str) and _SESSION_ID_RE.fullmatch(session_id)
         ):
             return {"ok": False, "error": "session_id must be letters, digits and dashes"}
+        attachments = request.get("attachments")
+        if attachments is not None and not (
+            isinstance(attachments, list) and attachments and all(
+                isinstance(a, dict) and all(
+                    isinstance(a.get(k), str) and a[k] for k in ("filename", "mime_type", "data_base64"))
+                for a in attachments)
+        ):
+            return {"ok": False,
+                    "error": "attachments must be a list of {filename, mime_type, data_base64}"}
         session = self._current
         if session is None or session.registered_at is None:
             return {"ok": False, "error": "not connected to the Muse"}
         log.info("forwarding a %d-character message to the Muse", len(message))
+        if attachments:
+            return await session.send_chat(message, session_id, attachments)
         return await session.send_chat(message, session_id)
 
     async def _sleep(self, seconds: float) -> None:

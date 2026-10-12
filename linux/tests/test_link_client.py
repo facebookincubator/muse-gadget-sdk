@@ -210,6 +210,32 @@ def test_vm_id_is_escaped_like_encode_uri_component():
     assert noise_url("h", "a-b_c.d!~*'()?&=") == "wss://h/v1/noise?vm_id=a-b_c.d!~*'()%3F%26%3D"
 
 
+def test_send_chat_sends_attachments_and_repeats_the_text_as_an_item():
+    async def scenario():
+        session, vm = make_session(lambda *a: {"ok": True}, [])
+        task = asyncio.ensure_future(session.run(asyncio.Event()))
+        await vm.handshake()
+        await vm.accept_control_stream()
+        await vm.next_message()  # link.register
+
+        picture = {"filename": "porch.jpg", "mime_type": "image/jpeg", "data_base64": "/9j/AA=="}
+        reply = asyncio.ensure_future(session.send_chat("who is it?", attachments=[picture]))
+        request = await vm.next_frame()
+        assert json.loads(request.value.body) == {
+            "message": "who is it?", "output_modality": "text", "device_id": "homelink-abcdef",
+            "items": [{"type": "text", "text": "who is it?"}, {"type": "file", **picture}]}
+        await vm.send_frame(ServiceFrame.response(
+            request.stream_id, ApplicationResponse(status=200, body=b"{}", end_body=True)))
+        assert (await asyncio.wait_for(reply, 2))["ok"]
+
+        too_big = {**picture, "data_base64": "A" * (256 * 1024)}
+        with pytest.raises(ValueError, match="256 KB"):
+            await session.send_chat("who is it?", attachments=[too_big])
+        task.cancel()
+
+    asyncio.run(scenario())
+
+
 def test_send_chat_posts_a_device_attributed_message_on_the_same_session():
     async def scenario():
         session, vm = make_session(lambda *a: {"ok": True}, [])
