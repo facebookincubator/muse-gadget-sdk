@@ -93,9 +93,9 @@ typedef struct {
 #define NVS_NS "muse_battery"
 #define SAVED_MAGIC 0x4d424154   /* "MBAT" */
 #if CONFIG_PM_PROFILING
-#define SAVED_MAX 2048           /* two dozen power locks */
+#define SAVED_MAX 2048           /* the head and 18 locks at their longest; typically two dozen */
 #else
-#define SAVED_MAX 384
+#define SAVED_MAX 512            /* the whole record at its longest is 380 bytes */
 #endif
 
 typedef struct {
@@ -117,6 +117,8 @@ static bool s_started, s_running;
 static int s_pct_start, s_pct_now, s_mv_start, s_mv_now;
 static int64_t s_off_us, s_rest_us, s_last_us;   /* screen off, resting, and when last added to */
 static bool s_screen_off, s_resting;
+static size_t s_rest_free_min;   /* lowest free internal RAM seen resting this run; 0 none */
+static bool s_cpu_pd;            /* the CPU powers down in light sleep (muse_input_power_init) */
 static muse_power_t s_power = { .battery_pct = -1 };
 
 #if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
@@ -243,6 +245,24 @@ static void accrue(int64_t now)
 
 static void persist(bool flash);
 
+/*
+ * The lowest free internal RAM seen resting (display stopped, CPU free to
+ * light-sleep) this run, sampled on entry and with each battery reading. With
+ * CPU power-down, muse_input_power_init() takes the retention memory at boot
+ * and keeps it, so it's out of the free figure awake and resting alike and
+ * resting shows no dip of its own: this is the headroom Wi-Fi, BLE and the
+ * tunnel had while the board rested, beside "min", the lowest at any time.
+ */
+static void note_rest_heap(void)
+{
+    if (s_running && s_resting) {
+        size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        if (!s_rest_free_min || free_int < s_rest_free_min) {
+            s_rest_free_min = free_int;
+        }
+    }
+}
+
 static void save_boots(uint16_t n)
 {
     s_boots = n;
@@ -259,6 +279,7 @@ static void start(void)
     s_pct_start = s_pct_now = s_power.battery_pct;
     s_mv_start = s_mv_now = s_power.battery_mv;
     s_off_us = s_rest_us = 0;
+    s_rest_free_min = 0;
     s_last_us = s_start->at_us;
     ESP_LOGI(TAG, "on battery at %d%% (%d mV): measuring", s_pct_start, s_mv_start);
     persist(false);
@@ -286,9 +307,17 @@ static const snap_t *measure_end(void)
     return s_now;
 }
 
+/* 0 to 1000, so a JSON percentage is never longer than "100.0" (and nothing
+ * overflows, however long the run). */
 static int per_mille(int64_t part, int64_t whole)
 {
-    return whole > 0 && part > 0 ? (int)(part * 1000 / whole) : 0;
+    if (whole <= 0 || part <= 0) {
+        return 0;
+    }
+    if (part >= whole) {
+        return 1000;
+    }
+    return (int)(whole > INT64_MAX / 1000 ? part / (whole / 1000) : part * 1000 / whole);
 }
 
 static void summarize(const snap_t *end, muse_battery_t *out)
@@ -424,6 +453,7 @@ void muse_battery_note_power(const muse_power_t *p, bool on_battery)
     if (s_running) {
         s_pct_now = p->battery_pct;
         s_mv_now = p->battery_mv;
+        note_rest_heap();
         if (esp_timer_get_time() - s_saved_us >= SAVE_MS * 1000LL) {
             persist(true);
         }
@@ -440,6 +470,7 @@ void muse_battery_note_state(bool screen_off, bool resting)
     accrue(esp_timer_get_time());
     s_screen_off = screen_off;
     s_resting = resting;
+    note_rest_heap();
     xSemaphoreGive(s_lock);
 }
 
@@ -479,13 +510,43 @@ bool muse_battery_drain(const muse_battery_t *b, int *rate10, int *full_h)
     return true;
 }
 
-static void add(char *buf, size_t cap, size_t *len, const char *fmt, ...)
+/* JSON going into a buffer that may be too small for it. */
+typedef struct {
+    char *buf;
+    size_t cap, len;
+    bool cut;   /* a piece didn't fit: nothing more goes in but the closing brackets */
+} out_t;
+
+/*
+ * Appends one piece, whole or not at all, leaving room for the `keep` closing
+ * brackets still to come (and the NUL), so a record too long for its buffer
+ * loses its last pieces but stays valid JSON. Once a piece is left out, so
+ * is every later one, or a comma would follow nothing.
+ */
+static void add(out_t *o, size_t keep, const char *fmt, ...)
 {
+    if (o->cut) {
+        return;
+    }
     va_list ap;
     va_start(ap, fmt);
-    int n = vsnprintf(buf + *len, cap - *len, fmt, ap);
+    int n = vsnprintf(o->buf + o->len, o->cap - o->len, fmt, ap);
     va_end(ap);
-    *len = n < 0 ? *len : (*len + n < cap ? *len + n : cap - 1);
+    if (n < 0 || o->len + n + keep >= o->cap) {
+        o->buf[o->len] = '\0';
+        o->cut = true;
+    } else {
+        o->len += n;
+    }
+}
+
+/* A closing bracket, in the room add() kept for it. */
+static void close_with(out_t *o, char c)
+{
+    if (o->len + 1 < o->cap) {
+        o->buf[o->len++] = c;
+        o->buf[o->len] = '\0';
+    }
 }
 
 /* A per-mille figure as a JSON percentage. */
@@ -515,49 +576,78 @@ static const char *reset_name(esp_reset_reason_t r)
     }
 }
 
-/* With s_lock held. */
-static int json(char *buf, size_t cap)
+/* With s_lock held. Never longer than cap - 1, and valid JSON even when cut
+ * short (from cap 3, "{}"): the head first, the lock list last. The saved
+ * record leaves out the retention-capable RAM, which says nothing after the
+ * fact that cpu_pd doesn't: the retention memory is taken at boot or never. */
+static int json(char *buf, size_t cap, bool saved)
 {
     char a[16], b[16], c[16], d[16];
-    size_t len = 0;
+    out_t o = { .buf = buf, .cap = cap };
+    if (cap) {
+        buf[0] = '\0';
+    }
     const snap_t *end = s_started ? measure_end() : NULL;
     muse_battery_t m;
     summarize(end, &m);
+    add(&o, 1, "{");
     /* How this boot began and how long ago: a panic or brownout on battery shows here. */
-    add(buf, cap, &len,
-        "{\"boot\":\"%s\",\"uptime\":%lld,\"battery_boots\":%u,"
+    add(&o, 1,
+        "\"boot\":\"%s\",\"uptime\":%lld,\"battery_boots\":%u,"
         "\"started\":%s,\"running\":%s,\"secs\":%lld,\"battery_pct\":[%d,%d],\"battery_mv\":[%d,%d],"
         "\"screen_off\":%s,\"resting\":%s,\"slept\":%s,\"sleeps\":%lu,\"busy\":%s",
         reset_name(esp_reset_reason()), (long long)(esp_timer_get_time() / 1000000), s_boots,
         m.started ? "true" : "false", m.running ? "true" : "false", (long long)m.secs, m.pct_start, m.pct_now,
         m.mv_start, m.mv_now, pct(a, m.screen_off_pm), pct(b, m.resting_pm), pct(c, m.slept_pm),
         (unsigned long)m.sleeps, pct(d, m.busy_pm));
+    /* Internal RAM, in bytes: free and largest block now, lowest since boot,
+     * and lowest while resting on battery this run (note_rest_heap); what's
+     * left of the RAM light sleep's retention memory can come from (the
+     * reserved DMA pool can't), after muse_input_power_init() took its share
+     * at boot; and whether it got it, so the CPU powers down in light sleep.
+     * Before the locks, so a long lock list can't cut it off. */
+    snprintf(a, sizeof(a), "%u", (unsigned)s_rest_free_min);
+    char ret[64] = "";
+    if (!saved) {
+        snprintf(ret, sizeof(ret), ",\"retention_free\":%u,\"retention_largest\":%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_RETENTION),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_RETENTION));
+    }
+    add(&o, 1, ",\"heap\":{\"free\":%u,\"largest\":%u,\"min\":%u,\"resting_min\":%s%s,\"cpu_pd\":%s}",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), s_rest_free_min ? a : "null", ret,
+        s_cpu_pd ? "true" : "false");
 #if CONFIG_PM_PROFILING
     int64_t pm_span = end ? end->pm.at_us - s_start->pm.at_us : 0;
     if (end && s_start->pm.at_us && end->pm.at_us && pm_span > 0) {
-        add(buf, cap, &len, ",\"modes\":{");
-        for (int i = 0; i < MODE_COUNT; i++) {
-            add(buf, cap, &len, "%s\"%s\":%s", i ? "," : "", MODE_NAMES[i],
-                pct(a, per_mille(end->pm.mode_us[i] - s_start->pm.mode_us[i], pm_span)));
-        }
-        add(buf, cap, &len, "},\"sleep_rejects\":%ld,\"locks\":[", end->pm.rejects - s_start->pm.rejects);
+        const int64_t *e = end->pm.mode_us, *s = s_start->pm.mode_us;
+        add(&o, 1, ",\"modes\":{\"%s\":%s,\"%s\":%s,\"%s\":%s,\"%s\":%s}",
+            MODE_NAMES[0], pct(a, per_mille(e[0] - s[0], pm_span)), MODE_NAMES[1], pct(b, per_mille(e[1] - s[1], pm_span)),
+            MODE_NAMES[2], pct(c, per_mille(e[2] - s[2], pm_span)), MODE_NAMES[3], pct(d, per_mille(e[3] - s[3], pm_span)));
+        add(&o, 2, ",\"sleep_rejects\":%ld,\"locks\":[", end->pm.rejects - s_start->pm.rejects);
+        bool listed = !o.cut;
         int n = lock_deltas(&end->pm);
         for (int i = 0; i < n; i++) {
             const lock_delta_t *l = &s_deltas[i];
-            add(buf, cap, &len, "%s{\"name\":\"%s\",\"type\":\"%s\",\"held\":%s,\"taken\":%d}", i ? "," : "",
+            add(&o, 2, "%s{\"name\":\"%s\",\"type\":\"%s\",\"held\":%s,\"taken\":%d}", i ? "," : "",
                 l->lock->name, l->lock->type, pct(a, per_mille(l->held_us, pm_span)), l->taken);
         }
-        add(buf, cap, &len, "]");
+        if (listed) {
+            close_with(&o, ']');
+        }
     }
 #endif
-    add(buf, cap, &len, "}");
-    return (int)len;
+    if (o.len) {   /* the "{" went in */
+        close_with(&o, '}');
+    }
+    return (int)o.len;
 }
 
 /* With s_lock held. Written in place: a reset partway leaves a bad checksum. */
 static void persist(bool flash)
 {
-    s_saved.len = json(s_saved.json, sizeof(s_saved.json));
+    s_saved.len = json(s_saved.json, sizeof(s_saved.json), true);
     s_saved.sum = checksum(s_saved.json, s_saved.len);
     s_saved.magic = SAVED_MAGIC;
     s_saved_us = esp_timer_get_time();
@@ -570,9 +660,14 @@ static void persist(bool flash)
 int muse_battery_json(char *buf, size_t cap)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    int len = json(buf, cap);
+    int len = json(buf, cap, false);
     xSemaphoreGive(s_lock);
     return len;
+}
+
+void muse_battery_note_cpu_pd(bool on)
+{
+    s_cpu_pd = on;
 }
 
 const char *muse_battery_saved_json(void)

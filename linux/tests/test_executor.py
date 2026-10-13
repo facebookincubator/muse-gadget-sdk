@@ -20,10 +20,11 @@ import json
 import os
 import stat
 import time
+from types import SimpleNamespace
 
 import pytest
 
-from musegadget import executor
+from musegadget import executor, fileops
 from musegadget.executor import Account, Executor
 
 
@@ -152,6 +153,19 @@ def test_file_write_rejects_a_bad_checksum(ex, tmp_path, monkeypatch):
     result = ex.run("file.write", {"path": target, "data_b64": "aGk=", "final": True, "sha256": "00"})
     assert not result["ok"] and "sha256" in result["error"]
     assert not os.path.exists(target)
+
+
+@pytest.mark.parametrize("reported_size", [0, 4096])
+def test_file_read_eof_uses_content_not_stat_size(tmp_path, monkeypatch, reported_size):
+    path = tmp_path / "attribute"
+    path.write_bytes(b"abcdef")
+    # procfs reports zero bytes; sysfs attributes often report a whole page.
+    monkeypatch.setattr(fileops.os, "fstat", lambda fd: SimpleNamespace(st_size=reported_size))
+    for offset, data, eof in [(0, b"abcd", False), (4, b"ef", True), (6, b"", True)]:
+        payload = fileops.read({"path": str(path), "offset": offset, "limit": 4})
+        assert base64.b64decode(payload["data_b64"]) == data
+        assert payload["next_offset"] == offset + len(data)
+        assert payload["eof"] is eof
 
 
 def test_file_write_rejects_out_of_order_chunks(ex, tmp_path, monkeypatch):

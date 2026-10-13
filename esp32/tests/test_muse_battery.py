@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -79,65 +80,85 @@ END = dump(110 * S, [
     rejects=7)
 
 
-class BatteryTest(unittest.TestCase):
+def as_saved(p: dict) -> dict:
+    """The live JSON as the saved record has it: without the retention-capable RAM."""
+    heap = {k: v for k, v in p["heap"].items() if k not in ("retention_free", "retention_largest")}
+    return {**p, "heap": heap}
+
+
+def build_harness(out: Path, *defines: str) -> Path:
+    """The harness, for a board with power management and profiling unless `defines` say
+    otherwise (MUSE_TEST_NO_PM_PROFILING, MUSE_TEST_NO_PM: see battery_fakes/sdkconfig.h)."""
+    cc = shlex.split(os.environ.get("CC", "cc"))
+    if not cc or shutil.which(cc[0]) is None:
+        raise unittest.SkipTest("C compiler not available")
+    proc = subprocess.run(
+        [
+            *cc,
+            "-include",
+            str(ROOT / "tests" / "host_compat.h"),
+            "-std=gnu11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            *[f"-D{d}" for d in defines],
+            "-I",
+            str(ROOT / "tests" / "battery_fakes"),
+            "-I",
+            str(ROOT / "components" / "muse"),
+            str(ROOT / "tests" / "muse_battery_harness.c"),   # includes muse_battery.c
+            "-o",
+            str(out),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode:
+        raise AssertionError(proc.stdout + proc.stderr)
+    return out
+
+
+class HarnessCase(unittest.TestCase):
     binary: Path
 
     @classmethod
     def setUpClass(cls) -> None:
-        cc = shlex.split(os.environ.get("CC", "cc"))
-        if not cc or shutil.which(cc[0]) is None:
-            raise unittest.SkipTest("C compiler not available")
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.binary = Path(cls.tmp.name) / "muse_battery_harness"
-        proc = subprocess.run(
-            [
-                *cc,
-                "-include",
-                str(ROOT / "tests" / "host_compat.h"),
-                "-std=gnu11",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-I",
-                str(ROOT / "tests" / "battery_fakes"),
-                "-I",
-                str(ROOT / "components" / "muse"),
-                str(ROOT / "tests" / "muse_battery_harness.c"),   # includes muse_battery.c
-                "-o",
-                str(cls.binary),
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-        )
-        if proc.returncode:
-            raise AssertionError(proc.stdout + proc.stderr)
+        cls.binary = build_harness(Path(cls.tmp.name) / "muse_battery_harness")
 
     @classmethod
     def tearDownClass(cls) -> None:
         cls.tmp.cleanup()
 
-    def run_harness(self, *commands: str) -> list[dict]:
+    def run_harness_raw(self, *commands: str, binary: Path | None = None) -> list[str]:
+        """The lines the commands print, as text; boot's own "@power.saved" in self.booted_with."""
         script = "".join(f"dump\n{c}end\n" if c.startswith("Time since") else c + "\n" for c in commands)
-        proc = subprocess.run([str(self.binary)], input=script, text=True, capture_output=True)
+        proc = subprocess.run([str(binary or self.binary)], input=script, text=True, capture_output=True)
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         lines = proc.stdout.splitlines()
         # What boot prints unasked, for a console that takes no commands.
         tag = "@power.saved "
         self.booted_with = [json.loads(line[len(tag):]) for line in lines if line.startswith(tag)]
-        return [json.loads(line) for line in lines if not line.startswith(tag)]
+        return [line for line in lines if not line.startswith(tag)]
+
+    def run_harness(self, *commands: str, binary: Path | None = None) -> list[dict]:
+        return [json.loads(line) for line in self.run_harness_raw(*commands, binary=binary)]
+
+
+class BatteryTest(HarnessCase):
+    # On battery from 10 s to 110 s: the screen off from 20 s, resting from 30 s,
+    # 60 s of light sleep in 400 wakes.
+    MEASURE = (
+        "t 10000000", START, "p 0 100 4190",
+        "t 20000000", "s 1 0",
+        "t 30000000", "s 1 1",
+        *["w 150000"] * 400, "w 0",
+        "t 110000000", END, "p 0 99 4100",
+    )
 
     def measure(self, *after: str) -> list[dict]:
-        """On battery from 10 s to 110 s: the screen off from 20 s, resting from 30 s,
-        60 s of light sleep in 400 wakes."""
-        return self.run_harness(
-            "t 10000000", START, "p 0 100 4190",
-            "t 20000000", "s 1 0",
-            "t 30000000", "s 1 1",
-            *["w 150000"] * 400, "w 0",
-            "t 110000000", END, "p 0 99 4100",
-            *after,
-        )
+        return self.run_harness(*self.MEASURE, *after)
 
     def test_waits_for_battery(self) -> None:
         read, j = self.run_harness("t 5000000", START, "p 1 100 4200", "r", "j")
@@ -219,8 +240,8 @@ class BatteryTest(unittest.TestCase):
         self.assertEqual((stopped["boot"], stopped["running"]), ("power on", False))
         # USB_UART_CHIP_RESET as the port opens: the next boot has it, and nothing of its own.
         saved, now = self.run_harness(f"load {rtc}", "boot 11", "t 2000000", "p 1 100 4200", "k", "j")
-        self.assertEqual(saved, stopped)
-        self.assertEqual(self.booted_with, [stopped])
+        self.assertEqual(saved, as_saved(stopped))
+        self.assertEqual(self.booted_with, [as_saved(stopped)])
         self.assertEqual((now["boot"], now["uptime"], now["started"]), ("usb", 2, False))
         # Until power.reset.
         cleared, = self.run_harness(f"load {rtc}", "x", "k")
@@ -264,7 +285,7 @@ class BatteryTest(unittest.TestCase):
         stopped, = self.run_harness(f"flash {flash}", "t 10000000", START, "p 0 100 4190", "t 110000000", END,
                                     "p 0 99 4100", "p 1 99 4150", "j")
         kept, = self.run_harness(f"flash {flash}", "k")
-        self.assertEqual(kept, stopped)
+        self.assertEqual(kept, as_saved(stopped))
         self.run_harness(f"flash {flash}", "x")
         cleared, = self.run_harness(f"flash {flash}", "k")
         self.assertEqual(cleared, None)
@@ -304,6 +325,44 @@ class BatteryTest(unittest.TestCase):
         woke, = self.run_harness(f"flash {flash}", *on_battery)
         self.assertEqual(woke["battery_boots"], 1)
 
+    def test_internal_ram(self) -> None:
+        rtc = str(Path(self.tmp.name) / "rtc")
+        # Free now, largest block and lowest since boot are live; resting_min is the lowest
+        # free internal RAM seen resting this run (the headroom then: CPU retention memory,
+        # where there is any, was taken at boot and is out of every figure).
+        before, resting, awake, stopped = self.run_harness(
+            "h 90000 50000 40000", "t 10000000", START, "p 0 100 4190", "j",
+            "t 30000000", "h 70000 50000 30000", "s 1 1",           # on entry
+            "t 40000000", "h 65000 45000 30000", "p 0 100 4180",    # a reading while resting
+            "j", "h 60000 45000 31000", "s 0 0",
+            "t 50000000", "h 52000 44000 31000", "p 0 100 4170",    # awake: not counted
+            "j", "p 1 100 4200", "j", f"save {rtc}")
+        ret = {"retention_free": 20000, "retention_largest": 12000, "cpu_pd": False}
+        self.assertEqual(before["heap"], {"free": 90000, "largest": 40000, "min": 50000, "resting_min": None, **ret})
+        self.assertEqual(resting["heap"], {"free": 65000, "largest": 30000, "min": 45000, "resting_min": 65000, **ret})
+        self.assertEqual(awake["heap"], {"free": 52000, "largest": 31000, "min": 44000, "resting_min": 65000, **ret})
+        self.assertEqual(stopped["heap"]["resting_min"], 65000)
+        # Saved with the run, for a Watcher that resets as its port opens.
+        saved, = self.run_harness(f"load {rtc}", "boot 11", "k")
+        self.assertEqual(saved["heap"], {"free": 52000, "largest": 31000, "min": 44000, "resting_min": 65000,
+                                         "cpu_pd": False})   # without the retention fields
+        self.assertIn("Memory    internal RAM 50.8 KB free (largest block 30.3 KB), 43.0 KB lowest since boot, "
+                      "63.5 KB lowest while resting", power.report(saved))
+        # A new run starts over.
+        again, = self.run_harness("t 10000000", START, "p 0 100 4190", "x", "j")
+        self.assertIsNone(again["heap"]["resting_min"])
+        self.assertIn("Memory    internal RAM 58.6 KB free", power.report({"started": False, "heap": again["heap"]}))
+
+    def test_cpu_power_down(self) -> None:
+        # Noted before init (muse_input_power_init runs first), with the retention-capable heap.
+        j, = self.run_harness("c 1", "h 56000 46000 38000 9000 4000", "j")
+        self.assertEqual(j["heap"]["cpu_pd"], True)
+        self.assertEqual((j["heap"]["retention_free"], j["heap"]["retention_largest"]), (9000, 4000))
+        text = power.report(j)
+        self.assertIn("retention-capable RAM left 8.8 KB (largest block 3.9 KB); CPU powers down in light sleep", text)
+        off, = self.run_harness("c 0", "j")
+        self.assertIn("CPU stays powered in light sleep", power.report(off))
+
     def test_report_reads_the_json(self) -> None:
         j, = self.measure("j")
         text = power.report(j)
@@ -314,6 +373,123 @@ class BatteryTest(unittest.TestCase):
         self.assertEqual(locks, ["rtos0", "rtos1", "wifi", "usb_serial_jtag", "bt", "i2s_driver", "i2s_driver"])
 
 
+    def test_cut_short_stays_valid(self) -> None:
+        # Into any buffer too small for it, the JSON loses whole pieces from the end (the
+        # lock list first) but stays valid: never a field cut in half or a bracket left open.
+        full, = self.measure("j")
+        caps = range(0, len(json.dumps(full, separators=(",", ":"))) + 2)
+        outputs = self.run_harness_raw(*self.MEASURE, *[f"j {cap}" for cap in caps])
+        for cap, text in zip(caps, outputs):
+            with self.subTest(cap=cap):
+                self.assertLess(len(text), max(cap, 1))
+                if cap < 3:
+                    self.assertEqual(text, "")   # no room for "{}"
+                    continue
+                cut = json.loads(text)
+                for key, value in cut.items():
+                    if key == "locks":
+                        self.assertEqual(value, full["locks"][:len(value)])
+                    else:
+                        self.assertEqual(value, full[key], key)
+        self.assertEqual(json.loads(outputs[-1]), full)
+        # The head goes in before any lock, so only the lock list is short of room in the end.
+        self.assertIn("heap", json.loads(outputs[len(caps) // 2]))
+
+# The longest value each field of the JSON can take on the chip: unsigned and size_t are 32 bits
+# there, and so is long (sleep_rejects). Uptime and secs are microseconds since boot / 10^6.
+I32_MIN, I32_MAX, U32_MAX, I64_MAX = -2**31, 2**31 - 1, 2**32 - 1, 2**63 - 1
+# Two dozen locks (MAX_LOCKS), names and types as long as lock_stat_t holds (dump() cuts names to 15).
+WORST_LOCKS = [(f"lock{i:02d}_" + "n" * 15, "NO_LIGHT_SLEEPX", I32_MIN, 2 * 10**9) for i in range(24)]
+VARIANTS = {   # harness defines; the boards built that way
+    "PM profiling": (),                                  # every board with PM (Watcher, AIPI, ...)
+    "PM, no profiling": ("MUSE_TEST_NO_PM_PROFILING",),  # none today, but allowed
+    "no PM": ("MUSE_TEST_NO_PM",),                       # the other boards with the full UI
+}
+
+
+def saved_max(profiling: bool) -> int:
+    """SAVED_MAX in muse_battery.c, with or without CONFIG_PM_PROFILING."""
+    source = (ROOT / "components" / "muse" / "muse_battery.c").read_text()
+    block = source[source.index("#if CONFIG_PM_PROFILING\n#define SAVED_MAX"):]
+    values = [int(v) for v in re.findall(r"#define SAVED_MAX (\d+)", block[:block.index("#endif")])]
+    return values[0] if profiling else values[1]
+
+
+class RecordSizeTest(HarnessCase):
+    """The record saved in RTC memory and flash (and printed as "@power.saved") at its longest,
+    for every build and CPU power-down state, against its SAVED_MAX buffer."""
+
+    binaries: dict[str, Path]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.binaries = {name: build_harness(Path(cls.tmp.name) / f"harness{i}", *defines)
+                        for i, (name, defines) in enumerate(VARIANTS.items())}
+
+    def worst(self, variant: str, cpu_pd: bool) -> tuple[str, str]:
+        """The saved record and the live JSON with every field at its longest."""
+        callbacks = variant != "no PM"
+        script = [
+            "boot 8",                     # "deep sleep", the longest reset name; 65535 boots once counted
+            "b 65534", f"c {int(cpu_pd)}", f"h {U32_MAX} {U32_MAX} {U32_MAX} {U32_MAX} {U32_MAX}",
+            "t 0", dump(1, [], {"SLEEP": (40, 0), "APB_MIN": (40, 0), "APB_MAX": (80, 0), "CPU_MAX": (240, 0)}),
+            f"p 0 {I32_MAX} {I32_MIN}",   # a negative percentage means no battery: it wouldn't start
+            "s 1 1",                      # resting, so resting_min isn't null
+            *([f"w {I64_MAX}", f"n {U32_MAX}"] if callbacks else []),
+            f"t {I64_MAX}",
+            dump(2 * 10**9 + 1, WORST_LOCKS, {m: (240, 2 * 10**9) for m in ("SLEEP", "APB_MIN", "APB_MAX", "CPU_MAX")},
+                 rejects=I32_MIN),
+            f"p 0 {I32_MAX} {I32_MIN}",   # saved: SAVE_MS since the last save
+            "rtc", "j",
+        ]
+        saved, live = self.run_harness_raw(*script, binary=self.binaries[variant])
+        return saved, live
+
+    def test_worst_case_fits(self) -> None:
+        for variant in VARIANTS:
+            profiling = variant == "PM profiling"
+            cap = saved_max(profiling)
+            for cpu_pd in (False, True):
+                with self.subTest(variant=variant, cpu_pd=cpu_pd):
+                    saved, live = self.worst(variant, cpu_pd)
+                    record, now = json.loads(saved), json.loads(live)
+                    self.assertLess(len(saved), cap)
+                    # Every field at its longest, so this is the worst case.
+                    self.assertEqual((record["boot"], record["battery_boots"], record["secs"]),
+                                     ("deep sleep", 65535, I64_MAX // 10**6))
+                    self.assertEqual(record["battery_mv"], [I32_MIN, I32_MIN])
+                    self.assertEqual(record["screen_off"], 100.0)
+                    self.assertEqual(record["heap"], {"free": U32_MAX, "largest": U32_MAX, "min": U32_MAX,
+                                                      "resting_min": U32_MAX, "cpu_pd": cpu_pd})
+                    sleep = (None, 0) if variant == "no PM" else (100.0, U32_MAX)
+                    self.assertEqual((record["slept"], record["sleeps"]), sleep)
+                    # Live, the retention fields too.
+                    self.assertEqual((now["heap"]["retention_free"], now["heap"]["retention_largest"]),
+                                     (U32_MAX, U32_MAX))
+                    if profiling:
+                        # The head always fits; the lock list takes what's left, whole locks only.
+                        self.assertEqual(record["modes"], {"SLEEP": 100.0, "APB_MIN": 100.0, "APB_MAX": 100.0,
+                                                           "CPU_MAX": 100.0})
+                        self.assertEqual(record["sleep_rejects"], I32_MIN)
+                        self.assertGreaterEqual(len(record["locks"]), 18)   # SAVED_MAX's comment
+                        self.assertEqual(record["locks"][0], {"name": "lock00_nnnnnnnn", "type": "NO_LIGHT_SLEEPX",
+                                                              "held": 100.0, "taken": I32_MIN})
+                        self.assertLessEqual(len(now["locks"]), len(record["locks"]))   # also 2048 B, with retention
+                    else:
+                        # The whole record, with room to spare.
+                        self.assertEqual(json.dumps(record, separators=(",", ":")), saved)
+                        self.assertLessEqual(len(saved), (cap - 1) * 9 // 10, f"{len(saved)} of {cap - 1} bytes")
+                        self.assertNotIn("modes", record)
+                        self.assertEqual(record["busy"], None)
+                        self.assertEqual({**now, "heap": None}, {**record, "heap": None})
+
+    def test_power_reads_the_worst_case(self) -> None:
+        for variant in VARIANTS:
+            saved, live = self.worst(variant, True)
+            for p in (json.loads(saved), json.loads(live)):
+                self.assertIn("CPU powers down in light sleep", power.report(p))
+
 class ReportTest(unittest.TestCase):
     def test_drain(self) -> None:
         p = {"started": True, "running": False, "secs": 7200, "battery_pct": [100, 96], "battery_mv": [4190, 4050],
@@ -322,6 +498,21 @@ class ReportTest(unittest.TestCase):
         self.assertIn("Ran on battery for 2 h 0 min", text)
         self.assertIn("2.0%/h, about 50 h from full, 9 mA average", text)
         self.assertIn("in light sleep 90.0%, 7200 wakes (1.0/s); a core busy 1.0%", text)
+
+    def test_saved_records_old_and_new(self) -> None:
+        run = {"started": True, "running": False, "secs": 7200, "battery_pct": [100, 96],
+               "battery_mv": [4190, 4050], "screen_off": 95.0, "resting": 94.0, "slept": 90.0, "sleeps": 7200,
+               "busy": 1.0}
+        heap = {"free": 52000, "largest": 31000, "min": 44000, "resting_min": 65000}
+        # Firmware before "heap": no memory line.
+        self.assertNotIn("Memory", power.report(run))
+        # The first with it saved the retention fields too; now only cpu_pd.
+        full = power.report({**run, "heap": {**heap, "retention_free": 9000, "retention_largest": 4000,
+                                             "cpu_pd": True}})
+        self.assertIn("retention-capable RAM left 8.8 KB (largest block 3.9 KB); CPU powers down", full)
+        saved = power.report({**run, "heap": {**heap, "cpu_pd": True}})
+        self.assertIn("63.5 KB lowest while resting\n          CPU powers down in light sleep", saved)
+        self.assertNotIn("retention", saved)
 
     def test_not_started(self) -> None:
         self.assertIn("No measurement yet", power.report({"started": False}))

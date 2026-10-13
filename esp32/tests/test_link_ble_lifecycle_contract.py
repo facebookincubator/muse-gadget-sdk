@@ -278,12 +278,27 @@ int main(void) {
 
     def test_ble_shutdown_stops_nimble_and_blocks_advertising_restart(self) -> None:
         source = BLE_SERVER_C.read_text()
-        shutdown = _function_body(source, "void ble_server_full_shutdown(")
+        full_shutdown = _function_body(source, "void ble_server_full_shutdown(")
+        self.assertIn("shutdown_stack(true)", full_shutdown)
+        # ble_server_power_off() stops the same way but keeps the controller's
+        # memory so BLE can come back.
+        self.assertIn("shutdown_stack(false)", _function_body(source, "bool ble_server_power_off("))
+        shutdown = _function_body(source, "static void shutdown_stack(bool release_memory) {")
         start_adv = _function_body(source, "static void start_advertising(void) {")
         gap = _function_body(source, "static int gap_event_cb(")
         begin_adv = _function_body(source, "void ble_server_begin_advertising(")
         stop_adv = _function_body(source, "void ble_server_stop_advertising(")
 
+        # Companion events are hidden while shutting down, so the companion
+        # (ble_basic) is told the phone's link is gone once the stack stops;
+        # otherwise it keeps notifying a dead handle after ble.power off.
+        self.assertIn("ev.type = BLE_GAP_EVENT_DISCONNECT", shutdown)
+        self.assertIn("s_companion.on_gap_event(&ev)", shutdown)
+        self.assertLess(shutdown.index("nimble_port_deinit()"),
+                        shutdown.index("s_companion.on_gap_event(&ev)"))
+        basic = (BLE_SERVER_C.parent / "ble_basic.c").read_text()
+        self.assertIn("if (!ble_hs_synced()) return;",
+                      _function_body(basic, "void ble_basic_notify_status("))
         self.assertIn("s_shutting_down = true", shutdown)
         self.assertIn("s_advertising_enabled = false", shutdown)
         self.assertIn("ble_gap_adv_stop()", shutdown)

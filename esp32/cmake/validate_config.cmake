@@ -25,13 +25,47 @@ endif()
 # during tunnel bursts even when sdkconfig.defaults has been updated.
 # TCP limits: the no-PSRAM Cardputer and AI Passport have no tunnel and use
 # four-MSS windows.
+# The C5 may use up to 64 KiB (sdkconfig.defaults.esp32c5), and only with the
+# setup that was measured: PSRAM with lwIP and Wi-Fi buffers preferring it, a
+# receive path that takes a whole window (at least 64 dynamic RX buffers) and
+# a bounded out-of-order queue (1 to 12 segments; 0 means unlimited).
+# The data-path bench (CONFIG_HOMEHUB_PIPELINE_BENCH, never shipped) may try
+# any window.
 if((NOT CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 16384 OR
     NOT CONFIG_LWIP_TCP_WND_DEFAULT EQUAL 16384) AND
+   NOT CONFIG_HOMEHUB_PIPELINE_BENCH AND
+   NOT (CONFIG_IDF_TARGET_ESP32C5 AND CONFIG_SPIRAM AND CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP AND
+        CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM GREATER_EQUAL 64 AND
+        CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS GREATER 0 AND
+        CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS LESS_EQUAL 12 AND
+        CONFIG_LWIP_TCP_SND_BUF_DEFAULT GREATER_EQUAL 16384 AND
+        CONFIG_LWIP_TCP_SND_BUF_DEFAULT LESS_EQUAL 65535 AND
+        CONFIG_LWIP_TCP_WND_DEFAULT GREATER_EQUAL 16384 AND
+        CONFIG_LWIP_TCP_WND_DEFAULT LESS_EQUAL 65535) AND
    NOT ((CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV OR CONFIG_MUSE_BOARD_AI_PASSPORT) AND NOT CONFIG_SPIRAM AND
         NOT CONFIG_HOMEHUB_TUNNEL AND CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 5760 AND
         CONFIG_LWIP_TCP_WND_DEFAULT EQUAL 5760))
     message(FATAL_ERROR
-        "ESP32 Device SDK requires TCP send buffer and receive window 16384 (5760 on the no-tunnel Cardputer ADV and AI Passport) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
+        "ESP32 Device SDK requires TCP send buffer and receive window 16384 (up to 65535 on the C5 with sdkconfig.defaults.esp32c5: PSRAM, CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP, 64+ dynamic RX buffers and 1-12 out-of-order segments; 5760 on the no-tunnel Cardputer ADV and AI Passport) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
+endif()
+
+# With BLE kept up after setup, the gadget keeps advertising a connectable
+# service. Any nearby device may connect to it and hold the connection, so a
+# single NimBLE connection would let it lock out everything else on BLE (the
+# Link's own central connections). Peripheral links stay at one (advertising
+# stops while one is up), so two or more leave room.
+if(CONFIG_HOMEHUB_BLE_PERSISTENT AND CONFIG_BT_NIMBLE_MAX_CONNECTIONS LESS 2)
+    message(FATAL_ERROR
+        "CONFIG_HOMEHUB_BLE_PERSISTENT needs CONFIG_BT_NIMBLE_MAX_CONNECTIONS of at least 2, so a device holding the advertised service can't take the only BLE connection (tools/coexist/sdkconfig.ble-persist sets it). ${GADGET_CONFIG_REGEN_HINT}")
+endif()
+
+# Skipping TLS server verification is only for the data-path bench, whose
+# LAN host has a throwaway self-signed certificate (tools/coexist/sdkconfig.bench).
+# Anywhere else it would let anyone on the path impersonate the VM.
+if((CONFIG_ESP_TLS_INSECURE OR CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY) AND
+   NOT CONFIG_HOMEHUB_PIPELINE_BENCH)
+    message(FATAL_ERROR
+        "CONFIG_ESP_TLS_INSECURE / CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY are only allowed in the data-path bench (CONFIG_HOMEHUB_PIPELINE_BENCH). ${GADGET_CONFIG_REGEN_HINT}")
 endif()
 
 # A token from gadgets.muse.ai is mgst_ plus 43 canonical base64url characters.

@@ -16,6 +16,13 @@
 
 #pragma once
 
+/* A board with power management and profiling, unless the build asks for one
+ * without profiling (-DMUSE_TEST_NO_PM_PROFILING) or without power management
+ * at all (-DMUSE_TEST_NO_PM), like most boards with the full UI. */
+#ifndef MUSE_TEST_NO_PM
 #define CONFIG_PM_ENABLE 1
-#define CONFIG_PM_PROFILING 1
 #define CONFIG_PM_LIGHT_SLEEP_CALLBACKS 1
+#ifndef MUSE_TEST_NO_PM_PROFILING
+#define CONFIG_PM_PROFILING 1
+#endif
+#endif

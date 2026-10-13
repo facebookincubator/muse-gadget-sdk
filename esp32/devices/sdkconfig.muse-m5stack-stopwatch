@@ -47,7 +47,8 @@ CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 
 # As on the Waveshare 1.75C, the same chip and panel. Screen off on battery: the CPU drops to the crystal clock and light-sleeps
-# between button polls (muse_input.c). BLE has to allow that with modem sleep;
+# until a rim key or the M5PM1's click interrupt (GPIO12) wakes it, with the
+# OLED and audio rails off (board_m5stack_stopwatch.c). BLE has to allow that with modem sleep;
 # there's no 32 kHz crystal, so its sleep clock is the main crystal, kept
 # powered. On USB power the chip stays awake at full speed.
 CONFIG_PM_ENABLE=y
@@ -61,7 +62,7 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # internal RAM, more than Wi-Fi can spare here.
 # CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set
 # Pins keep their state in light sleep. This workaround would float them all,
-# panel and touch reset and the amp enable included.
+# the parked panel and I2S lines and GPIO12's pull-up included.
 # CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND is not set
 # For the battery meter (muse_battery.h, ">power" on the console): time
 # actually slept, and how long each power lock kept the chip awake.
