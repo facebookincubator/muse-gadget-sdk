@@ -49,9 +49,13 @@ log = logging.getLogger(__name__)
 NOISE_PATH = "/v1/noise"
 CONTROL_PATH = "/link-control"
 CHAT_PATH = "/chat/stream"
+CHAT_SUBSCRIBE_PATH = "/chat/subscribe"
 APP_ID = "musegadget"
 REQUEST_TIMEOUT_S = 60
+CHAT_REPLY_TIMEOUT_S = 120
 MAX_RESPONSE_BYTES = 1024 * 1024
+MAX_CHAT_EVENT_BYTES = 1024 * 1024
+MAX_CHAT_BUFFERED_BYTES = 2 * 1024 * 1024
 HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
@@ -150,7 +154,8 @@ class LinkSession:
         self._tasks: set[asyncio.Task] = set()
         self._stream_id = 0
         self._register_id = ""
-        self._requests: dict[int, _Request] = {}
+        self._requests: dict[int, _Request | _ChatSubscription] = {}
+        self._chat_lock = asyncio.Lock()
         self.registered_at: float | None = None
 
     async def run(self, stop: asyncio.Event) -> Outcome:
@@ -175,8 +180,10 @@ class LinkSession:
             for task in self._tasks:
                 task.cancel()
             for request in self._requests.values():
-                if not request.done.done():
+                if isinstance(request, _Request) and not request.done.done():
                     request.done.set_exception(ConnectionError("session ended"))
+                elif isinstance(request, _ChatSubscription):
+                    request.fail(ConnectionError("session ended"))
             self._requests.clear()
             await ws.close()
 
@@ -237,14 +244,49 @@ class LinkSession:
     # -- Device-originated requests -------------------------------------------
 
     async def send_chat(self, message: str, session_id: str | None = None) -> dict:
-        """Post a user message to the Muse as coming from this device.
+        """Post a user message on this device's authenticated session.
 
-        Sent on this session, so the VM attributes the turn to the device
-        registered on it (``device_id``) and routes any follow-up device
-        commands back here. ``session_id`` targets a side chat; an id the Muse
-        has not seen before starts a new one. Without it the message goes to
-        the main chat.
+        The VM attributes the turn to the device registered on this session
+        and routes any follow-up device commands back here. ``session_id``
+        targets a side chat; an id the Muse has not seen before starts a new
+        one. Without it the message goes to the main chat.
         """
+        return await self._post_chat(message, session_id)
+
+    async def ask_chat(self, message: str, session_id: str | None = None) -> str:
+        """Post a user message and wait for the related assistant reply."""
+        async with self._chat_lock:
+            subscription = await self._subscribe_chat()
+            try:
+                result = await self._post_chat(message, session_id)
+                if not result["ok"]:
+                    raise RuntimeError(f"Muse rejected the message (HTTP {result['status']})")
+                response = result.get("response")
+                if not isinstance(response, dict):
+                    raise RuntimeError("Muse returned an invalid chat acknowledgement")
+                acknowledgement = response.get("result", response)
+                if not isinstance(acknowledgement, dict):
+                    raise RuntimeError("Muse returned an invalid chat acknowledgement")
+                message_id = acknowledgement.get("message_id")
+                if not isinstance(message_id, str) or not message_id:
+                    raise RuntimeError("Muse acknowledgement did not include a message id")
+                parent_id = acknowledgement.get("reply_to_message_id")
+                if not isinstance(parent_id, str):
+                    parent_id = ""
+                try:
+                    return await asyncio.wait_for(
+                        self._wait_for_chat_reply(subscription, message_id, parent_id),
+                        CHAT_REPLY_TIMEOUT_S,
+                    )
+                except asyncio.TimeoutError:
+                    seen = "; ".join(subscription.seen_events) or "no event messages received"
+                    raise TimeoutError(
+                        f"timed out waiting for a related Muse reply; events received: {seen}"
+                    ) from None
+            finally:
+                await self._close_chat_subscription(subscription)
+
+    async def _post_chat(self, message: str, session_id: str | None) -> dict:
         request_body = {
             "message": message,
             "output_modality": "text",
@@ -271,6 +313,113 @@ class LinkSession:
         except json.JSONDecodeError:
             decoded = response.decode("utf-8", errors="replace")[:2000]
         return {"ok": 200 <= status < 300, "status": status, "response": decoded}
+
+    async def _subscribe_chat(self) -> "_ChatSubscription":
+        headers = [
+            Header("Content-Type", "application/json"),
+            Header("Accept", "application/x-ndjson"),
+            Header("x-request-id", str(uuid.uuid4())),
+            Header("x-app-id", APP_ID),
+        ]
+        encrypted = self._transport.encrypt_http_request(
+            "POST", CHAT_SUBSCRIBE_PATH, b"{}", headers=headers,
+        )
+        subscription = _ChatSubscription()
+        subscription.stream_id = encrypted.stream_id
+        self._requests[encrypted.stream_id] = subscription
+        try:
+            await self._send_frames(encrypted.frames)
+        except Exception:
+            self._requests.pop(encrypted.stream_id, None)
+            raise
+        return subscription
+
+    async def _wait_for_chat_reply(
+        self, subscription: "_ChatSubscription", message_id: str, parent_id: str,
+    ) -> str:
+        messages: dict[str, dict] = {}
+        rejected_replies: set[str] = set()
+        while True:
+            event = await subscription.next_event()
+            if isinstance(event, Exception):
+                raise ConnectionError(f"Muse chat subscription failed: {event}") from event
+            if event.get("type") != "event":
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                payload = event
+            event_name = event.get("event") or payload.get("event_name") or payload.get("event")
+            if event_name not in (
+                "delta.message_start", "delta.text_append", "delta.message_done",
+                "message.assistant",
+            ):
+                continue
+            reply_id = (
+                payload.get("message_id") or payload.get("id")
+                or event.get("message_id") or event.get("id")
+            )
+            if not isinstance(reply_id, str) or not reply_id:
+                continue
+            if reply_id in rejected_replies:
+                continue
+            reply_to = (
+                payload.get("reply_to_message_id") or payload.get("parent_message_id")
+                or event.get("reply_to_message_id") or event.get("parent_message_id") or ""
+            )
+            if not isinstance(reply_to, str):
+                reply_to = ""
+            if reply_to and reply_to not in (message_id, parent_id, reply_id):
+                rejected_replies.add(reply_id)
+                messages.pop(reply_id, None)
+                continue
+            state = messages.setdefault(reply_id, {"text": "", "reply_to": reply_to, "bytes": 0})
+            if reply_to:
+                state["reply_to"] = reply_to
+            if event_name == "delta.message_start":
+                state["text"] = ""
+            elif event_name == "delta.text_append":
+                text = payload.get("text")
+                if not isinstance(text, str):
+                    text = event.get("text")
+                if isinstance(text, str):
+                    state["bytes"] += len(text.encode("utf-8"))
+                    if state["bytes"] > MAX_RESPONSE_BYTES:
+                        raise ValueError("Muse reply too large")
+                    state["text"] += text
+            elif event_name == "delta.message_done":
+                if state["text"]:
+                    return state["text"]
+            elif event_name == "message.assistant":
+                if payload.get("display_text_ready", event.get("display_text_ready", True)) is False:
+                    continue
+                text = payload.get("display_text")
+                if not isinstance(text, str):
+                    text = event.get("display_text")
+                if not isinstance(text, str):
+                    text = payload.get("content")
+                if not isinstance(text, str):
+                    text = event.get("content")
+                if not isinstance(text, str):
+                    text = payload.get("text")
+                if not isinstance(text, str):
+                    text = event.get("text")
+                if isinstance(text, str) and text:
+                    if len(text.encode("utf-8")) > MAX_RESPONSE_BYTES:
+                        raise ValueError("Muse reply too large")
+                    return text
+                if state["text"]:
+                    return state["text"]
+
+    async def _close_chat_subscription(self, subscription: "_ChatSubscription") -> None:
+        stream_id = subscription.stream_id
+        if stream_id is None:
+            return
+        self._requests.pop(stream_id, None)
+        try:
+            frames = self._transport.encrypt_reset(stream_id, reason="chat reply received")
+            await self._send_frames(frames)
+        except Exception as exc:
+            log.warning("could not close Muse chat subscription: %s", exc)
 
     # -- Sending --------------------------------------------------------------
 
@@ -398,6 +547,116 @@ class _Request:
             self.done.set_exception(ValueError("response too large"))
         elif ended:
             self.done.set_result((self.status, bytes(self.body)))
+
+
+class _ChatSubscription:
+    """Collect bounded NDJSON events from a live Muse chat subscription."""
+
+    def __init__(self) -> None:
+        self.events: asyncio.Queue[tuple[dict | Exception, int]] = asyncio.Queue(maxsize=128)
+        self.status = 0
+        self.stream_id: int | None = None
+        self._line = bytearray()
+        self._failed = False
+        self._queued_bytes = 0
+        self.seen_events: list[str] = []
+
+    async def next_event(self) -> dict | Exception:
+        event, size = await self.events.get()
+        self._queued_bytes -= size
+        return event
+
+    def on_frame(self, frame) -> None:
+        if frame.kind == "reset":
+            self._fail(ConnectionError(f"stream reset: {frame.value.reason}"))
+            return
+        if frame.kind == "response":
+            self.status = frame.value.status
+            data, ended = frame.value.body, frame.value.end_body
+            if self.status >= 400:
+                self._fail(ConnectionError(f"HTTP {self.status}"))
+                return
+        else:
+            data, ended = frame.value.data, frame.value.end_body
+        if self._failed:
+            return
+        offset = 0
+        while offset < len(data):
+            newline = data.find(b"\n", offset)
+            if newline < 0:
+                self._line.extend(data[offset:])
+                if len(self._line) > MAX_CHAT_EVENT_BYTES:
+                    self._fail(ValueError("Muse chat event too large"))
+                break
+            self._line.extend(data[offset:newline])
+            if len(self._line) > MAX_CHAT_EVENT_BYTES:
+                self._fail(ValueError("Muse chat event too large"))
+                return
+            line = bytes(self._line)
+            self._line.clear()
+            offset = newline + 1
+            if not self._queue_event_line(line):
+                return
+        if ended:
+            if self._line.strip():
+                self._fail(ConnectionError("Muse chat subscription ended mid-event"))
+            else:
+                self._fail(ConnectionError("Muse chat subscription ended"))
+
+    def _fail(self, error: Exception) -> None:
+        if self._failed:
+            return
+        self._failed = True
+        while not self.events.empty():
+            self.events.get_nowait()
+        self._queued_bytes = 0
+        self.events.put_nowait((error, 0))
+
+    def _queue_event_line(self, line: bytes) -> bool:
+        if not line.strip():
+            return True
+        try:
+            event = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self._fail(ValueError(f"invalid Muse chat event: {exc}"))
+            return False
+        if not isinstance(event, dict):
+            return True
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            payload = event
+        event_name = event.get("event") or payload.get("event_name") or payload.get("event")
+        if event.get("type") == "event":
+            message_id = payload.get("message_id") or payload.get("id")
+            if not isinstance(message_id, str):
+                message_id = event.get("message_id") or event.get("id")
+            parent_id = (
+                payload.get("reply_to_message_id") or payload.get("parent_message_id")
+                or event.get("reply_to_message_id") or event.get("parent_message_id")
+            )
+            self.seen_events.append(
+                f"{event_name or 'unknown'}(id={message_id or '-'}, parent={parent_id or '-'})"
+            )
+            del self.seen_events[:-8]
+        if event.get("type") != "event" or event_name not in (
+            "delta.message_start", "delta.text_append", "delta.message_done",
+            "message.assistant",
+        ):
+            return True
+        event_size = len(line)
+        if self._queued_bytes + event_size > MAX_CHAT_BUFFERED_BYTES:
+            self._fail(ValueError("Muse chat reply buffer is full"))
+            return False
+        try:
+            self.events.put_nowait((event, event_size))
+        except asyncio.QueueFull:
+            self._fail(ValueError("Muse chat event queue is full"))
+            return False
+        self._queued_bytes += event_size
+        return True
+
+    def fail(self, error: Exception) -> None:
+        self._fail(error)
 
 
 class _NoRequest:
