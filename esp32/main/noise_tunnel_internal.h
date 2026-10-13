@@ -48,7 +48,20 @@ typedef struct {
     // Send a BodyChunk on the tunnel stream carrying `data`/`len` (the
     // [u16-LE len][pkt]... batch). Returns true on success.
     bool (*send_body)(void *ctx, const uint8_t *data, size_t len);
+
+    // Optional: the same, encoding and encrypting the batch where it sits.
+    // The batch is buf[headroom, +len); the bytes before it (at least
+    // NOISE_TUNNEL_TX_HEADROOM) and after it (NOISE_TUNNEL_TX_TAILROOM) are
+    // scratch for the frame headers and the tag. NULL: send_body is used.
+    bool (*send_body_inplace)(void *ctx, uint8_t *buf, size_t headroom,
+                              size_t len, size_t tailroom);
 } noise_tunnel_emit_t;
+
+// Room around each outbound batch for in-place encoding: the WebSocket header
+// (up to 14 bytes) and the Noise frame headers (at most 64) in front, the AEAD
+// tag behind.
+#define NOISE_TUNNEL_TX_HEADROOM 96
+#define NOISE_TUNNEL_TX_TAILROOM 16
 
 // ---- Called by the session owner (noise_control.cpp) ------------------------
 

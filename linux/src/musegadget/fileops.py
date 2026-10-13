@@ -29,6 +29,7 @@ import base64
 import hashlib
 import json
 import os
+import stat
 import sys
 
 MAX_CHUNK_BYTES = 64 * 1024
@@ -58,14 +59,18 @@ def read(request: dict) -> dict:
     with open(path, "rb") as f:
         size = os.fstat(f.fileno()).st_size
         f.seek(offset)
-        data = f.read(limit)
+        # procfs reports zero and sysfs often reports a page, regardless of
+        # the content length. Look ahead one byte to find the actual EOF.
+        data = f.read(limit + 1)
+    eof = len(data) <= limit
+    data = data[:limit]
     next_offset = offset + len(data)
     return {
         "path": path,
         "size": size,
         "offset": offset,
         "next_offset": next_offset,
-        "eof": next_offset >= size,
+        "eof": eof,
         "data_b64": base64.b64encode(data).decode("ascii"),
     }
 
@@ -80,7 +85,10 @@ def write(request: dict) -> dict:
     if offset == 0:
         if request.get("create_parents"):
             os.makedirs(os.path.dirname(path), exist_ok=True)
-        fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        # Keep the content private while it arrives: the final mode, which
+        # may be wider, is applied just before the rename.
+        fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)  # a partial left by an earlier write keeps its mode
     else:
         try:
             fd = os.open(partial, os.O_WRONLY)
@@ -106,6 +114,16 @@ def write(request: dict) -> dict:
     if os.path.exists(path) and not request.get("overwrite", True):
         os.unlink(partial)
         raise FileOpError("file exists and overwrite is false")
+    # Keep the permission bits of the file being replaced, such as 0600 or
+    # 0755, but not its setuid, setgid or sticky bits. A new file gets 0644,
+    # less the umask.
+    try:
+        mode = stat.S_IMODE(os.stat(path).st_mode) & 0o777
+    except OSError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o644 & ~umask
+    os.chmod(partial, mode)
     os.replace(partial, path)
     return {"path": path, "size": written, "sha256": digest.hexdigest(), "complete": True}
 

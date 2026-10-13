@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 /*
  * Bring up the display and build the UI: the avatar on the first tile,
@@ -52,3 +53,10 @@ void muse_ui_camera_hint(bool visible);
 
 /* Bench testing, from any task: streams the screen over USB serial. */
 void muse_ui_request_snapshot(void);
+#if CONFIG_LV_USE_SNAPSHOT
+/* Bench-only, from any task: select the touch tile without pretending a/s
+ * are touch-menu navigation. No effect on non-touch boards. */
+void muse_ui_bench_page(bool settings);
+/* Display-only demo name for privacy-safe screenshots; no provisioning changes. */
+void muse_ui_bench_demo(bool enabled);
+#endif

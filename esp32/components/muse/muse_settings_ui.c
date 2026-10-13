@@ -1229,8 +1229,10 @@ static void build_power_page(lv_obj_t *tile)
     button(list, LV_SYMBOL_POWER "  Power off", COLOR_DANGER, on_power_off, NULL);
     button(list, "Cancel", COLOR_TEXT, on_back, NULL);
     char text[128];
+    const char *power = muse_board->power_button ? muse_board->power_button : muse_board->talk_button;
+    const char *sleep = muse_board->power_button ? muse_board->power_button : muse_board->aux_button;
     snprintf(text, sizeof(text), "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
-             muse_board->talk_button, muse_board->aux_button);
+             power, sleep);
     note(list, text);
 }
 
@@ -1254,7 +1256,9 @@ static void build_home(lv_obj_t *tile)
     row(list, LV_SYMBOL_VOLUME_MAX, "Sound", &s_home_sound, on_nav, (void *)&SOUND);
     row(list, LV_SYMBOL_EYE_CLOSE, "Sleep", &s_home_sleep, on_nav, (void *)&SLEEP);
     row(list, LV_SYMBOL_BATTERY_FULL, "Battery", &s_home_battery, on_nav, (void *)&BATTERY);
-    row(list, LV_SYMBOL_POWER, "Power off", NULL, on_nav, (void *)&POWER);
+    if (muse_board->power_off) {
+        row(list, LV_SYMBOL_POWER, "Power off", NULL, on_nav, (void *)&POWER);
+    }
     s_about = note(list, "");
 }
 

@@ -169,8 +169,9 @@ CONFIG_ESP_WIFI_RX_BA_WIN=32
 # of 64 KiB, leaving DMA headroom for AES and WiFi bursts. Per-direction TCP
 # window ceiling is ~16 KiB / RTT (2.62 Mbit/s at 50 ms), before protocol costs.
 # Camera-relevant ceiling: ~2.6 Mbit/s at 50 ms RTT, with lower usable goodput.
-# Keep receive mboxes and IRAM hot paths for throughput. Moving WiFi/lwIP to
-# PSRAM via SPIRAM_TRY_ALLOCATE_WIFI_LWIP needs a separate hardware soak test.
+# Keep receive mboxes and IRAM hot paths for throughput. The C5 moves lwIP and
+# Wi-Fi heap allocations to PSRAM and doubles these windows in
+# sdkconfig.defaults.esp32c5.
 CONFIG_LWIP_TCP_WND_DEFAULT=16384
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
 CONFIG_LWIP_IP_FORWARD=y

@@ -18,6 +18,8 @@
 Keys are the serial bench hooks in muse_input.c ('a' menu Down, 's' menu Select, ...),
 sent 350 ms apart. A '>' starts a console command that runs to the end of the keys,
 sent as one line: '>face=thinking' puts the avatar in a mode, '>face=happy' pets it.
+Bench touch boards use '>ui=settings' / '>ui=face' to select the tile;
+'a/s' are non-touch menu keys, not touch-settings navigation.
 Screenshots are off by default; build and flash with MUSE_BENCH=1 tools/muse/board.sh.
 With reset_wait_s the board is reset first and given that long to boot.
 The PNG is scaled 3x so small screens are readable.

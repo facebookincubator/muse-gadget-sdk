@@ -51,6 +51,9 @@ static const char *TAG = "muse_chat_link";
 #define ROW_MAX 12288                   /* maximum subscription line gathered across frames */
 #define TEXT_MAX 1024                   /* reply text kept for the captions */
 #define EV_TEXT 72
+/* A reply frame bigger than this board's session buffers: the session
+ * reconnects, and the reply is in the Muse app. */
+#define TOO_LONG "REPLY TOO LONG: SEE MUSE APP"
 #define SEND_WAIT_MS 200               /* the press queues the pre-roll all at once */
 #define SETTLE_US 3000000               /* quiet after a reply before the turn ends */
 #define REPLY_TIMEOUT_US 60000000
@@ -592,7 +595,8 @@ static void on_ack(void)
     rx_t *rx = &s_rx[RX_NOTE];
     if (rx->status != 200 || rx->overflow) {
         ESP_LOGW(TAG, "chat/stream: %d", rx->status);
-        fail(rx->status < 0 ? "LOST CONNECTION TO MUSE" : "MUSE DIDN'T TAKE IT");
+        fail(rx->status == MUSE_LINK_REQ_TOO_LARGE ? TOO_LONG
+             : rx->status < 0 ? "LOST CONNECTION TO MUSE" : "MUSE DIDN'T TAKE IT");
         return;
     }
     cJSON *root = cJSON_Parse(rx->body);
@@ -675,6 +679,7 @@ static void subscription_error(int status)
 {
     if (status == 403) fail("MUSE REPLY ACCESS DENIED (403)");
     else if (status == 401) fail("MUSE REPLY AUTH REQUIRED (401)");
+    else if (status == MUSE_LINK_REQ_TOO_LARGE) fail(TOO_LONG);
     else if (status <= 0 || status == 200) fail("LOST CONNECTION TO MUSE");
     else {
         char why[EV_TEXT];
