@@ -102,6 +102,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_vn_s3_183.c")
     elseif(CONFIG_MUSE_BOARD_AI_PASSPORT)
         list(APPEND srcs "boards/board_ai_passport.c")
+    elseif(CONFIG_MUSE_BOARD_DEOTALAND_ROROLEE)
+        list(APPEND srcs "boards/board_deotaland_rorolee.c")
     endif()
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/

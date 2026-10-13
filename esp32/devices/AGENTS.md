@@ -214,6 +214,7 @@ The fields of `muse_board_t`:
 | `round`, `touch` | Round panel; `touch` only if `display_start` returns an input device |
 | `keyboard` | Dedicated navigation keys: `poll_buttons` emits `MUSE_BTN_UP/DOWN/LEFT/RIGHT/ENTER/ESCAPE` presses. Enter selects and confirms pairing; Talk is not repurposed as Select while the menu is open. Defaults to false for two-button boards. |
 | `talk_button`, `aux_button` | On-screen captions ("boot", "pwr"). `talk_hint` and `aux_hint` place them next to the physical button |
+| `wake_button` | The power-off page's caption for the button that turns the board back on, when that isn't talk (touch boards) or aux (menu boards). May be NULL |
 | `flat_menu_hints` | With `aux_hint` on `LV_ALIGN_RIGHT_MID` the menu turns that button's hint on end, drawn through a ~14 KB layer. Set it on a board that can't spare the RAM (the ESP32-C3): the hint lies flat on the menu's bar instead |
 | `frame_ms` | Avatar frame period: 40 on the S3 boards, 50 on the C6 |
 | `avatar_px` | Optional avatar canvas size in pixels; 0 uses the layout default |
