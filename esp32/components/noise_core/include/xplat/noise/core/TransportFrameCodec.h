@@ -110,9 +110,37 @@ class OrderedTransportFramer {
 
   [[nodiscard]] StatusWithSize EncodeNextOutboundFrame(ByteSpan out) noexcept;
 
+  // Where an in-place encode put its frame within the caller's buffer.
+  struct InPlaceFrame {
+    Status status{OkStatus()};
+    size_t offset{0};
+    size_t size{0};
+  };
+
+  // Encodes a whole outbound message that fits one transport frame around
+  // the message where it already sits (`buffer[messageOffset, +messageSize)`):
+  // the frame's fields go in the bytes just before it, so nothing is copied.
+  // The result is byte for byte what StartOutboundMessage and one
+  // EncodeNextOutboundFrame produce. Fails without changing state if another
+  // outbound message is in progress, the message does not fit one frame, or
+  // there is no room for the fields in front of it.
+  [[nodiscard]] InPlaceFrame EncodeSingleFrameInPlace(
+      ByteSpan buffer,
+      size_t messageOffset,
+      size_t messageSize) noexcept;
+
   [[nodiscard]] InboundFrameResult DecodeAndAppendInboundFrame(
       ConstByteSpan frameBytes,
       ByteSpan messageOut) noexcept;
+
+  // As DecodeAndAppendInboundFrame, and on Complete `message` views the whole
+  // message. A message that arrives in one frame is not copied: `message`
+  // points into `frameBytes`. Otherwise it is reassembled in `messageOut` and
+  // `message` points there.
+  [[nodiscard]] InboundFrameResult DecodeInboundFrame(
+      ConstByteSpan frameBytes,
+      ByteSpan messageOut,
+      ConstByteSpan& message) noexcept;
 
   struct InboundStateSnapshot {
     uint64_t chunk_id{0};
@@ -143,6 +171,10 @@ class OrderedTransportFramer {
  private:
   [[nodiscard]] Status GenerateChunkId(uint64_t& chunkId) noexcept;
   [[nodiscard]] InboundFrameResult PoisonInbound(Status status) noexcept;
+  [[nodiscard]] InboundFrameResult DecodeInbound(
+      ConstByteSpan frameBytes,
+      ByteSpan messageOut,
+      ConstByteSpan* view) noexcept;
 
   CryptoBackend* backend_{nullptr};
 

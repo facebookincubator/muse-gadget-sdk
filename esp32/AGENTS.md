@@ -86,11 +86,23 @@ like most WS2812s: turn the option off in `idf.py menuconfig`, or in
 
 ## Build
 
-Every build needs the user's SDK token (`mgst_…`, from gadgets.muse.ai >
+Every application build needs the user's SDK token (`mgst_…`, from gadgets.muse.ai >
 Account > SDK tokens). Ask for it, then set `CONFIG_GADGET_SDK_TOKEN="mgst_…"`
 in that build directory's `sdkconfig` (or with `idf.py menuconfig`) before
 building. Without it the build warns, and the gadget will stop pairing once
 Muse requires tokens. Never commit the token or print it in full.
+
+The opt-in `CONFIG_MUSE_POWER_TEST` image is an isolated board-load
+characterization harness, not a pairing application, and needs no SDK token or
+network credentials. Power measurement starts at `docs/power/README.md`. Read
+`docs/power/ppk2.md` before any PPK2 use (authorization and fixture gates,
+continuous source ownership, USB unplug/replug), and
+`docs/power/sensecap-watcher.md` for the Watcher's build and procedure. Never
+enable source output with unknown wiring, a connected battery, or
+USB-charger backfeed into PPK2. Other boards reuse the shared
+`muse_power_test_run()` core through `boards/muse_power_test_board.h` hooks
+and board-owned matrices, driven by `tools/power/power_sweep.py`; do not fork
+or rename the core for the next board.
 
 ### DevKitC-1 (default)
 
@@ -235,7 +247,7 @@ flash size and status backend.
 
    | Hint | Board |
    |---|---|
-   | `yellow` | M5Stack StopWatch |
+   | `top-right` (`yellow` on older firmware) | M5Stack StopWatch |
    | `power` | M5Stack CoreS3 |
    | `front` | M5Stack StickS3, or StickC Plus2 — tell them apart by the port: the StickS3 is native USB, the Plus2 is a CH9102 `usbserial` |
    | `top` | Waveshare ESP32-S3-Touch-AMOLED-1.75C |
@@ -410,7 +422,9 @@ for the whole name shows the `XXXXXX` tail on its own, and a square 128 px
 screen (AIPI Lite) leaves it out, the same as it leaves out the state. Once it's
 paired (or has a token set by hand), the name goes, and the mic icon and the
 touch boards' speaker button appear. They're hidden until then, since a press
-can't reach Muse and there are no replies to mute.
+can't reach Muse and there are no replies to mute. The StopWatch is an exception:
+its dedicated microphone, speaker/mute and power rim icons stay visible before
+pairing as well, identifying its three physical controls.
 
 To skip BLE Wi-Fi provisioning while you iterate, set
 `CONFIG_HOMEHUB_WIFI_SSID` and `CONFIG_HOMEHUB_WIFI_PASSWORD` in `menuconfig`.
@@ -418,6 +432,12 @@ The device still needs to be paired once for its token.
 
 ## Configuration gotchas
 
+- `sdkconfig.defaults.esp32c5` is loaded after `sdkconfig.defaults` for C5
+  builds only (ESP-IDF's target-specific defaults): it moves lwIP and Wi-Fi
+  heap buffers to PSRAM, raises the TCP windows to 64 KiB and deepens the
+  receive path to match (64 dynamic RX buffers, 12 queued out-of-order
+  segments). Other chips keep 16 KiB windows in internal RAM;
+  `cmake/validate_config.cmake` enforces both.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides
   later edits to `sdkconfig.defaults` or the overlays. After changing those,
@@ -429,6 +449,31 @@ The device still needs to be paired once for its token.
 - OTA is off by default (`CONFIG_HOMEHUB_OTA_ENABLED=n`, version `999.0.0`),
   except on boards with the full UI. Set a version with `-DPROJECT_VER=1.0.0` or
   `version.txt`.
+- BLE is shut down and its memory released once setup completes, except on
+  boards with the full UI. `CONFIG_HOMEHUB_BLE_PERSISTENT` keeps NimBLE up
+  beside Wi-Fi with a basic GATT service (`main/ble_basic.c`) advertised
+  slowly; it costs roughly 40 KB of internal RAM for as long as the device
+  runs (`tools/coexist/sdkconfig.ble-mem` wins most of it back on the C5).
+  On the C5, `CONFIG_HOMEHUB_BLE_COEX` (`main/ble_coex.c`) keeps BLE
+  advertising and connections from reserving half the radio's airtime once
+  setup is complete, which doubles Wi-Fi throughput with BLE up. It relies
+  on ESP-IDF's private coexistence status bits, so it builds on IDF v6.0.x
+  only until the bits are rechecked on another version.
+  `tools/coexist/` holds the overlays used to size it, and the data-path
+  bench (`CONFIG_HOMEHUB_PIPELINE_BENCH`) with its results.
+- With BLE persistent, `CONFIG_HOMEHUB_BLE_COMMANDS` (default on) lets Muse
+  drive the Link's BLE: `ble.state`, `ble.power`, `ble.advertise`,
+  `ble.scan`, `ble.connect`, `ble.disconnect`, `ble.discover`, `ble.read`,
+  `ble.write` and `ble.subscribe` (`main/ble_commands.c` over the central in
+  `main/ble_client.c`). They run one at a time on their own task. `ble.power`
+  off stops the stack without releasing the controller's memory, so it can
+  come back; the default build, which releases BLE after setup, can't.
+  `tests/test_ble_commands.py` runs them against a fake client.
+- On the C5 with PSRAM, `CONFIG_HOMEHUB_FAST_GCM` (default on there) wraps
+  ESP-IDF's one-shot AES-GCM with `main/fast_gcm.c` for TLS and Noise. It
+  takes about 19 KB of internal RAM (8-bit GHASH tables and the PSRAM staging
+  buffer; see its Kconfig help). Turn it off to compare against IDF's;
+  `tests/test_ghash32.py` checks the tables and its failure handling.
 - Don't move offsets in `partitions.csv`. `prod_data` and `prod_bak` are fixed
   manufacturing locations, and the table offset of `0x10000` leaves room for a
   larger Secure Boot bootloader. Check the `check_sizes` line in the build

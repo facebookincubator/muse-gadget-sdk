@@ -207,6 +207,25 @@ Boards without PSRAM, like the classic ESP32 and the ESP32-C6, run without the
 home-network tunnel, which needs more memory than they have. Muse can still
 reach the device and control it.
 
+## Power characterization
+
+Start at [Power profiling](docs/power/README.md). Read the
+[PPK2 rules](docs/power/ppk2.md) before any PPK2 use; the SenseCAP Watcher has
+its own [USB-free procedure](docs/power/sensecap-watcher.md). The opt-in
+power-test image runs an autonomous, timestamped peripheral sweep after USB
+is removed; one PPK2 process keeps source power continuous through reconnect.
+Battery isolation and USB-charger backfeed protection are required before
+output is enabled. Diagnostic figures are not production application profiles.
+
+To profile another board or device, follow the
+[porting recipe](docs/power/README.md): labelled PPK2 capture for anything the
+PPK2 can power, or the board-neutral `CONFIG_MUSE_POWER_TEST` autonomous sweep.
+Implement the [board hook header](components/muse/boards/muse_power_test_board.h)
+and board-owned matrices; no core rename is needed. The shared host CLI is
+[`tools/power/power_sweep.py`](tools/power/power_sweep.py). Its analyzer uses the
+firmware-reported board name, with `--device` as an override and Watcher as the
+legacy-only fallback.
+
 ## Hack and extend it
 
 Every board's settings live in a small `devices/sdkconfig.<board>` file loaded

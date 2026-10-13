@@ -75,7 +75,8 @@ session to Muse. The rest depends on the hardware.
 | Touch | — | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | — |
 | Battery status | — | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — | Percent only | — | No charging state | — |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On | On | Off | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | BOOT, PWR (talk), KEY (talk) on top | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Yellow (talk), blue (sleep), PWR | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | OK (talk), UP/DOWN (menu) | A (talk), B (menu) |
+| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | Green | Green | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | BOOT, PWR (talk), KEY (talk) on top | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | OK (talk), UP/DOWN (menu) | A (talk), B (menu) |
+
 
 Boards without PSRAM (the ideaspark, the C6 boards, the Cardputer ADV and the AI Passport) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
@@ -132,6 +133,22 @@ arrives at once, so plain esptool can't upload its stub or write flash
 invalid`). `tools/muse/paced_esptool.py` takes esptool's arguments and sends 64
 bytes at a time at the line rate; `tools/muse/board.sh flash watcher` uses it.
 
+On battery with the screen off and voice resting, the Watcher cuts the LCD
+rail, suspends both codecs and the speaker amp, and lets the ESP32-S3
+light-sleep with its CPU powered down until the wheel or an expander input
+wakes it. CPU power-down saves about 0.44 mA of a 2.96 mA rest. Its retention
+memory, about 15 KB of internal RAM, is taken at boot and kept, and comes from
+the avatar's and audio's static buffers, which this profile keeps in PSRAM
+(`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`). `tools/muse/power.py` shows the last
+run on battery, with the time actually slept, the power locks that kept the
+chip awake (`muse_awake` is Muse itself, whenever it isn't resting), and
+internal RAM: free, lowest since boot, lowest while resting, what's left of
+the RAM retention memory can use, and whether the CPU powers down. The
+retention memory is already out of all of these, so resting shows no dip of
+its own: its lowest is the headroom Wi-Fi, BLE and the tunnel had while the
+board rested. The heartbeat log (`link.heartbeat`) prints the same as
+`int=free/largest min=lowest ret=free/largest cpu_pd=on|off`.
+
 The M5Stack StickS3 has 8 MB of flash, so it uses its own partition table with
 two smaller app slots. The front button is push-to-talk and the side button
 steps through the menu, as on the AIPI. Powering off from Muse turns off the
@@ -175,18 +192,45 @@ python -m esptool --chip esp32s3 -p PORT write-flash 0 sticks3.bin
 ```
 
 The M5Stack StopWatch has the same CO5300 round AMOLED as the Waveshare S3
-1.75C, with a CST820 touch controller and the StickS3's ES8311 audio. The
-yellow button (upper left) is push-to-talk and the blue one (upper right) puts
-the screen to sleep; settings are on the touch screen. Powering off from Muse
-turns off the screen, touch, audio and the expander's L3B rail and puts the
-ESP32-S3 in deep sleep; either button wakes it. Double-click the power button
-for a full power-off, and click it to turn back on. M5's IO expander (M5IOE1)
-switches the panel and touch resets, audio power and the amp; its power chip
-(M5PM1) reads the battery and the charger. The IMU, RTC, vibration motor and
-Grove port aren't used yet. [M5Unified](https://github.com/m5stack/M5Unified)
-and M5's [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo)
+1.75C, with a CST820 touch controller and the StickS3's ES8311 audio. With USB
+at the bottom, **blue top-right is PTT/pairing confirmation**, **yellow
+top-left toggles speaker on/off**, and **red bottom-left is POWER**. A short
+POWER press sleeps/wakes the screen; a 1.5 s hold while awake shows goodbye
+and shuts down the M5PM1 (click red to power back on). A waking press is
+consumed, not interpreted as another action. Hardware double-click power-off
+and download access remain available; Muse disables single-click reset, as
+the factory does, and extends the PMIC long delay to 4 s. Settings are one
+swipe left from Muse. Icon-only physical hints (microphone, speaker/mute and
+power) stay beside the rim on the face, reply and pairing views, but are hidden
+in settings so they don't cover controls. Speaker/mute follows the saved
+speaker setting; the microphone brightens while recording. The green PMIC
+power LED is off on battery and on with USB power, updated at boot and with
+the normal battery readings (including while the screen sleeps). This changes
+only M5PM1 `PWR_CFG` (`0x06`) bit 4, preserving charging and the power rails.
+M5's IO expander (M5IOE1) switches the panel and touch resets, audio power
+and the amp; its power chip (M5PM1) reads the battery, charger and red key's
+live state (register `0x48`, bit 0). Asleep on battery, the OLED's rail
+(3V3_L3B) and the audio rail (AU_L3B: codec and mic) are off and the chip
+light-sleeps until a rim key, or the M5PM1's click interrupt on GPIO12, wakes
+it. The red key's click arrives once it's released (about 125 ms later), and a
+press held at rest is found within a second, also while Wi-Fi naps. Waking,
+the panel takes about half a second longer to come back, and the first
+recording after a rest starts about 0.1 s later while the codec is set up
+again. The IMU is put back in suspend at boot; it, the RTC, vibration motor
+and Grove port aren't used yet.
+[M5Unified](https://github.com/m5stack/M5Unified),
+M5's [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo)
+and its [M5PM1 1.0.6 driver](https://github.com/m5stack/M5PM1/tree/1.0.6)
 are the references. It enumerates as the chip's own USB serial port, so
 flashing needs nothing special: `tools/muse/board.sh flash stopwatch`.
+
+Bench builds also accept `>ui=settings` and `>ui=face` for touch-tile
+screenshots (`a/s` only navigate non-touch menus). `>face=boot`, `idle`,
+`listening`, `thinking`, `speaking`, `error` or `off` selects the face state;
+`>speaker=0` / `>speaker=1` exercises both speaker indications. For privacy-safe
+unpaired captures, `>ui.demo=1` shows `MuseGadget-DEMO` instead of the hardware
+name; `>ui.demo=0` restores it. This changes only the screen, not BLE identity,
+pairing, Wi-Fi or tokens.
 
 The M5Stack CoreS3 runs on Espressif's
 [BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3),
@@ -229,6 +273,20 @@ python -m esptool --chip esp32 -p PORT -b 230400 read-flash 0 0x800000 plus2.bin
 
 To go back, write the backup with `write-flash 0 plus2.bin`, using the same
 chip, port and baud.
+
+## ESP32-S3-DevKitC-1
+
+The [S3 DevKitC-1 overlay](sdkconfig.espressif-s3-devkitc-1) defaults to
+GPIO38 for genuine Espressif v1.1 boards. GPIO48 was verified on an Aideepen
+ESP32-S3 N16R8 DevKitC-1 clone. For this clone, set
+`CONFIG_HOMEHUB_LED_STRIP_GPIO=48` in the build directory's `sdkconfig`
+and then rebuild and flash.
+
+In the hardware check, a standalone WS2812 blink sketch blinked blue three
+times on GPIO48 and produced no light on GPIO38. With the override, Muse
+Gadget breathed orange while advertising. Serial logged
+`LED status ready: addressable RGB (GPIO=48)` and heartbeats with
+`ble=advertising`, with no panic.
 
 ## M5Stack Core2 port
 

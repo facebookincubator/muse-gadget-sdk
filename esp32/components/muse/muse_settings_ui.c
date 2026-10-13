@@ -1229,8 +1229,10 @@ static void build_power_page(lv_obj_t *tile)
     button(list, LV_SYMBOL_POWER "  Power off", COLOR_DANGER, on_power_off, NULL);
     button(list, "Cancel", COLOR_TEXT, on_back, NULL);
     char text[128];
+    const char *power = muse_board->power_button ? muse_board->power_button : muse_board->talk_button;
+    const char *sleep = muse_board->power_button ? muse_board->power_button : muse_board->aux_button;
     snprintf(text, sizeof(text), "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
-             muse_board->talk_button, muse_board->aux_button);
+             power, sleep);
     note(list, text);
 }
 

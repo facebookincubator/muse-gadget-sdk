@@ -223,10 +223,12 @@ The fields of `muse_board_t`:
 | `display_lock`, `display_unlock` | LVGL's lock |
 | `set_brightness` | 0 to 100 |
 | `panel_sleep` | Puts the panel to sleep when the screen goes off. May be NULL: then only the backlight turns off |
-| `display_pause` | Once the screen is dark on battery: stops LVGL (`esp_lv_adapter_pause`), sleeps the touch controller and stops anything else holding a PM lock, so the chip can light-sleep. Only buttons wake it. With a USB host attached the CPU stays at full speed anyway. May be NULL: LVGL keeps running and the CPU stays at full speed. Needs the PM block in the overlay (see `sdkconfig.muse-aipi`), and with PSRAM its static-buffers block too: light sleep's code takes internal RAM Link needs |
+| `display_pause` | Once the screen is dark on battery: stops LVGL (`esp_lv_adapter_pause`), sleeps the touch controller and stops anything else holding a PM lock, so the chip can light-sleep. Only buttons wake it. With a USB host attached the CPU stays at full speed anyway. May be NULL: LVGL keeps running and the CPU stays at full speed. Needs the PM block in the overlay (see `sdkconfig.muse-aipi`), and with PSRAM its static-buffers block too: light sleep's code takes internal RAM Link needs. CPU power-down in light sleep (`CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP`) saves more but takes about 15 KB of internal RAM for good on an S3 with PSRAM (`muse_input_power_init()` takes it at boot, before the radios fragment the heap): the Watcher pays for it with `CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM` |
 | `audio_init` | `esp_codec_dev` speaker and mic. `mic_slot` is 0 or 1, or -1 to mix. `set_mic_gain` may be NULL |
+| `audio_power` | Audio power such as an amp's enable: on once the codecs are open, off before they close to rest. May be NULL |
+| `codec_power` | The codecs' own supply, where the board switches it: on before they open (the first time too, before `audio_init`), off once both have closed to rest. While it's off, `muse_audio` sends them nothing and reapplies volume and gain on the next open. Park the I2S lines so they don't feed the unpowered codec, and redo any codec setup a power-on reset loses (see `board_m5stack_stopwatch.c`). May be NULL: always powered |
 | `poll_buttons` | Called every 10 ms, or 50 ms while the display is paused and `wait_buttons` is NULL. Returns `MUSE_BTN_*` edges. Use `muse_gpio_button_*` for GPIO buttons, or `muse_pmu_poll_key()` for an AXP2101 PWR key |
-| `wait_buttons` | While the display is paused: blocks until a button changes, so the chip light-sleeps instead of waking to poll. `muse_gpio_buttons_wait()` for GPIO buttons; a key only the PMU sees has to be polled. May be NULL: polled every 50 ms |
+| `wait_buttons` | While the display is paused: blocks until a button changes, so the chip light-sleeps instead of waking to poll. `muse_gpio_buttons_wait()` for GPIO buttons; a key only the PMU sees has to be polled, unless the PMU can interrupt (the StopWatch's M5PM1 pulls GPIO12 low on a click). May be NULL: polled every 50 ms |
 | `read_power` | May be NULL (no battery). `muse_pmu_read_power` on an AXP2101. Leave `battery_mv` 0 if the board can't measure the voltage in millivolts. The battery meter (`muse_battery.h`: Settings → Battery, `tools/muse/power.py`) reads it |
 | `power_off` | Required. Returns only if it fails |
 
@@ -290,3 +292,22 @@ On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
    scan should show `<prefix>-XXXXXX`.
 
 If you don't have the board, say that the port was only built, not run.
+
+## 9. Power measurement
+
+Optional, for battery-powered boards. Measuring with a Nordic PPK2 on the
+battery input is documented in `docs/power/`; read the doc that matches the
+job before touching hardware:
+
+| When | Read |
+|---|---|
+| Before any PPK2 use: authorization and fixture gates, host setup, the single continuous source owner, the control handshake, accepting a capture | [`docs/power/ppk2.md`](../docs/power/ppk2.md) |
+| Profiling a new board or device: choosing a level, the fixture checklist, porting the `CONFIG_MUSE_POWER_TEST` diagnostic | [`docs/power/README.md`](../docs/power/README.md) |
+| Running or extending the SenseCAP Watcher sweep | [`docs/power/sensecap-watcher.md`](../docs/power/sensecap-watcher.md) |
+
+The diagnostic core is already board-neutral: implement `muse_ptest_board_*`
+from `components/muse/boards/muse_power_test_board.h`, including the board
+name and immutable state matrices, and extend its supported-board Kconfig
+list. Use `tools/power/power_sweep.py`; do not fork or rename the core, and
+keep the Watcher conformance tests green. The board owner's authorization and
+the fixture checks come before any hardware step.

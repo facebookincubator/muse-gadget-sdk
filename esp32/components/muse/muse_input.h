@@ -43,6 +43,19 @@ typedef struct {
     bool wake;   /* a press that woke the screen: a tap only wakes */
 } muse_input_event_t;
 
+/*
+ * With CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP: takes the CPU's light-sleep
+ * retention memory (about 15 KB of internal RAM on an S3) for good, before
+ * Wi-Fi, BLE and the display fragment internal RAM, and turns light sleep on
+ * for the rest of the boot behind a power lock that set_cpu_low() lets go of
+ * only while resting. If the memory isn't there it logs once and light sleep
+ * keeps the CPU powered, as without the option. Call once, early in boot.
+ */
+void muse_input_power_init(void);
+
+/* Whether the CPU powers down in light sleep (muse_input_power_init() got its memory). */
+bool muse_input_cpu_pd(void);
+
 /* PTT events are posted to `queue` (items are muse_input_event_t). */
 esp_err_t muse_input_start(QueueHandle_t queue);
 

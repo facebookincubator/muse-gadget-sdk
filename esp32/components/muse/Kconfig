@@ -147,6 +147,21 @@ menu "Muse"
         range 0 100
         default 70
 
+    config MUSE_POWER_TEST
+        bool "Isolated board BSP power-characterization firmware"
+        # Boards implementing boards/muse_power_test_board.h; extend this list
+        # only after the new board's diagnostic hooks and matrix pass tests.
+        depends on (MUSE_BOARD_SENSECAP_WATCHER) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        default n
+        help
+            DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
+            at app_main. USB UART arms a timed autonomous VBUS-free BSP-load
+            sweep. No credentials, production NVS, BLE provisioning or OTA.
+            Results are retained in RAM/RTC until read back after USB reconnect.
+            This characterizes isolated BSP loads, NOT production power.
+            Optional camera support is not required and unsupported matrix
+            features are explicitly skipped. Never enable in a release profile.
+
     config MUSE_WATCHER_CAMERA
         bool "SenseCAP Watcher camera capture and live preview"
         depends on MUSE_BOARD_SENSECAP_WATCHER && SPIRAM
@@ -181,6 +196,21 @@ menu "Muse"
             to GPIO2), L/R to GND, power to 3.3 V, and its SD line to a free
             GPIO, and set that GPIO here. -1 leaves push-to-talk recording
             silence.
+
+    config MUSE_STATIC_BUFFERS_IN_PSRAM
+        bool "Keep the avatar's and audio's static buffers in PSRAM"
+        depends on MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+        default n
+        help
+            Places the zero-initialized statics of the avatar renderer
+            (muse_pixel.c: its frame, mask and lookup tables) and the audio
+            path (muse_audio.c: the I2S staging and chirp buffers), about
+            17 KB, in PSRAM instead of internal RAM (linker.lf). Only the
+            CPU touches them: the avatar is scaled into LVGL's draw buffer,
+            and the I2S driver copies to and from its own DMA buffers. Turn
+            it on where internal RAM is short, as the SenseCAP Watcher does
+            to pay for the CPU's light-sleep retention memory, which it
+            takes at boot and keeps.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

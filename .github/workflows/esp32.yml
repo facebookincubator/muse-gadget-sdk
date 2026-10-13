@@ -155,6 +155,9 @@ jobs:
           - board: muse-sensecap-watcher
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher"
+          - board: muse-watcher-power-test
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test"
           - board: muse-m5stack-cardputer-adv
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv"

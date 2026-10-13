@@ -103,6 +103,14 @@ static lv_obj_t *s_pair_title;
 static lv_obj_t *s_pair_hint;
 static lv_obj_t *s_canvas;
 static lv_obj_t *s_mic_icon;
+static lv_obj_t *s_ptt_hint, *s_spk_hint, *s_pwr_hint;
+#if LV_USE_SNAPSHOT
+static volatile bool s_bench_demo;
+void muse_ui_bench_demo(bool enabled)
+{
+    s_bench_demo = enabled;   /* display-only: never changes BLE identity/setup */
+}
+#endif
 static lv_obj_t *s_ring;
 static lv_obj_t *s_bar;     /* compact layout's stand-in for the ring */
 static lv_obj_t *s_state_lbl;
@@ -410,18 +418,25 @@ static lv_obj_t *make_mic(lv_obj_t *parent, int size)
     return box;
 }
 
-static void set_mic_color(uint32_t color)
+static void color_mic(lv_obj_t *icon, uint32_t color)
 {
-    for (uint32_t i = 0; i < lv_obj_get_child_count(s_mic_icon); i++) {
-        lv_obj_t *part = lv_obj_get_child(s_mic_icon, i);
+    if (!icon) return;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(icon); i++) {
+        lv_obj_t *part = lv_obj_get_child(icon, i);
         lv_obj_set_style_bg_color(part, lv_color_hex(color), 0);
         lv_obj_set_style_arc_color(part, lv_color_hex(color), LV_PART_MAIN);
     }
 }
 
+static void set_mic_color(uint32_t color)
+{
+    color_mic(s_mic_icon, color);   /* legacy face icon only */
+}
+
 /* Icons beside the physical buttons, in place of an instruction caption. */
 static void build_button_icons(lv_obj_t *face)
 {
+    if (muse_board->rim_controls) return;   /* dedicated rim hints below */
     const muse_button_hint_t *t = &muse_board->talk_hint, *a = &muse_board->aux_hint;
     s_mic_icon = make_mic(face, s_tall ? 24 : s_small ? 12 : 26);
     lv_obj_align(s_mic_icon, t->align, t->x, t->y);
@@ -711,15 +726,17 @@ static void build_answer(lv_obj_t *face, int ring_in)
     }
 
     l = &s_answers[ANSWER_READ];
-    int status_bottom = 20 + s_dy + 16 - s_h / 2;
+    int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 - s_h / 2;
     l->px = MUSE_PX_W * MINI_CELL_PX;
     l->y = status_bottom + 2 + l->px / 2;   /* its sparkles clear of the status line */
     l->align = LV_TEXT_ALIGN_LEFT;
     art_bottom = l->y + l->px / 2 - ART_BLANK_ROWS * MINI_CELL_PX;
     int top = (art_bottom > spk_y + spk_r ? art_bottom : spk_y + spk_r) + 8;
-    set_reply_box(l, 16, 2, top, cw, pitch);
+    set_reply_box(l, muse_board->rim_controls ? 13 : 16, 2, top, cw, pitch);
     /* The widest page isn't the biggest: a round screen narrows towards the bottom. */
-    for (int c = 12; c <= 24 && fits_across(c * cw, top, ring_in); c++) {
+    /* Keep read replies in a central column clear of dedicated rim hints. */
+    int max_cols = muse_board->rim_controls ? 13 : 24;
+    for (int c = 12; c <= max_cols && fits_across(c * cw, top, ring_in); c++) {
         int n = (reply_bottom(c * cw, ring_in) - top + CAPTION_LINE_SPACE) / pitch;
         /* A third of the caption spare for characters wider than a byte. */
         while ((c + 1) * n > MUSE_CAPTION_MAX * 2 / 3) {
@@ -739,7 +756,7 @@ static void build_answer(lv_obj_t *face, int ring_in)
     lv_obj_remove_flag(s_reply_lbl, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
 
-    if (muse_board->touch) {
+    if (muse_board->touch && !muse_board->rim_controls) {
         build_speaker(face, spk_x, spk_y);
     }
 
@@ -872,7 +889,7 @@ static void build_screen(void)
     lv_obj_set_flex_flow(status, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(status, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(status, s_small ? 4 : 8, 0);
-    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, s_small ? 1 : 20 + s_dy);
+    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 40 : s_small ? 1 : 20 + s_dy);
     s_wifi_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_ble_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_power_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
@@ -881,7 +898,7 @@ static void build_screen(void)
      * unless the screen is tall enough to fit it in small type above Muse. */
     s_state_lbl = make_label(face, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16, 0xffffff);
     lv_obj_set_style_text_letter_space(s_state_lbl, s_small ? 1 : 2, 0);
-    lv_obj_align(s_state_lbl, LV_ALIGN_TOP_MID, 0, s_small ? 22 : 40 + s_dy);
+    lv_obj_align(s_state_lbl, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 64 : s_small ? 22 : 40 + s_dy);
     lv_obj_set_flag(s_state_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
 
     /* This gadget's own name, dim under the state while it's unpaired: with
@@ -889,7 +906,14 @@ static void build_screen(void)
      * Muse app. update_chrome() fills it in, shortens it to the hex tail on a
      * screen too narrow for the whole thing, and empties it once paired. */
     s_name_lbl = make_label(face, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16, COLOR_DIM);
-    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, s_small ? 32 : 60 + s_dy);
+    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 88 : s_small ? 32 : 60 + s_dy);
+    if (muse_board->rim_controls) {
+        /* Safe chord below the round panel's top, not the full 466 px width. */
+        lv_obj_set_size(s_state_lbl, 280, lv_font_get_line_height(&lv_font_unscii_16));
+        lv_obj_set_size(s_name_lbl, 280, lv_font_get_line_height(&lv_font_unscii_16));
+        lv_label_set_long_mode(s_state_lbl, LV_LABEL_LONG_MODE_DOTS);
+        lv_label_set_long_mode(s_name_lbl, LV_LABEL_LONG_MODE_DOTS);
+    }
     /* Same rule as the state label: a square 128 px screen centres Muse over
      * these rows, so there's nowhere to put this without covering the face. */
     lv_obj_set_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
@@ -1020,6 +1044,43 @@ static void on_any_press(lv_event_t *e)
     muse_state_poke();
 }
 
+static lv_obj_t *make_control_icon(lv_obj_t *scr, const muse_button_hint_t *pos,
+                                   const char *symbol, uint32_t color)
+{
+    lv_obj_t *icon = make_label(scr, &lv_font_montserrat_28, color);
+    lv_obj_set_size(icon, 36, 36);
+    lv_obj_set_style_bg_color(icon, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(icon, 6, 0);
+    lv_label_set_long_mode(icon, LV_LABEL_LONG_MODE_CLIP);
+    lv_label_set_text(icon, symbol);
+    lv_obj_remove_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(icon, pos->align, pos->x, pos->y);
+    return icon;
+}
+
+/* Icons only beside the physical controls, including before pairing. */
+static void update_control_hints(muse_mode_t mode)
+{
+    if (!s_ptt_hint) return;
+    /* Don't obscure settings rows/keyboards with floating physical icons. */
+    bool settings = s_tv && lv_tileview_get_tile_active(s_tv) == s_settings;
+    lv_obj_set_flag(s_ptt_hint, LV_OBJ_FLAG_HIDDEN, settings);
+    lv_obj_set_flag(s_spk_hint, LV_OBJ_FLAG_HIDDEN, settings);
+    lv_obj_set_flag(s_pwr_hint, LV_OBJ_FLAG_HIDDEN, settings);
+    static int last_mode = -1;
+    if ((int)mode != last_mode) {
+        color_mic(s_ptt_hint, mode == MUSE_MODE_LISTENING ? 0x64d4ff : 0x80bfff);
+        last_mode = (int)mode;
+    }
+    bool speaker_on = muse_settings_speaker_on();
+    const char *speaker = speaker_on ? LV_SYMBOL_VOLUME_MID : LV_SYMBOL_MUTE;
+    if (strcmp(speaker, lv_label_get_text(s_spk_hint))) {
+        lv_label_set_text(s_spk_hint, speaker);
+        lv_obj_set_style_text_color(s_spk_hint, lv_color_hex(speaker_on ? 0xffd060 : 0x8b7845), 0);
+    }
+}
+
 static void build_overlays(void)
 {
     lv_obj_t *scr = lv_screen_active();
@@ -1058,6 +1119,15 @@ static void build_overlays(void)
     lv_obj_center(hint_text);
     lv_obj_add_event_cb(s_camera_hint, on_camera_hint_clicked, LV_EVENT_CLICKED, NULL);
 #endif
+
+    if (muse_board->rim_controls) {
+        /* Dedicated ownership: legacy chrome/reply hides must never claim it. */
+        s_ptt_hint = make_mic(scr, 26);
+        lv_obj_align(s_ptt_hint, muse_board->talk_hint.align, muse_board->talk_hint.x, muse_board->talk_hint.y);
+        s_spk_hint = make_control_icon(scr, &muse_board->speaker_hint, LV_SYMBOL_VOLUME_MID, 0xffd060);
+        s_pwr_hint = make_control_icon(scr, &muse_board->power_hint, LV_SYMBOL_POWER, 0xff8080);
+        update_control_hints(MUSE_MODE_BOOT);
+    }
 
     /* BLE pairing code, or the Muse app's ask for the talk button: a centred
      * column in one typeface, the code large. The small card grows with the hint. */
@@ -1226,7 +1296,10 @@ static void update_chrome(float now)
     const lv_font_t *name_font = s_small ? &lv_font_unscii_8 : &lv_font_unscii_16;
     int name_cw = lv_font_get_glyph_width(name_font, 'M', ' ');
     const char *shown = paired ? "" : b.name;
-    if (name_cw > 0 && (int)strlen(shown) * name_cw > s_w) {
+#if LV_USE_SNAPSHOT
+    if (!paired && s_bench_demo) shown = "MuseGadget-DEMO";
+#endif
+    if (name_cw > 0 && (int)strlen(shown) * name_cw > (muse_board->rim_controls ? 280 : s_w)) {
         const char *tail = strrchr(shown, '-');
         if (tail && tail[1]) {
             shown = tail + 1;
@@ -1270,7 +1343,7 @@ static void update_chrome(float now)
     }
     /* Unpaired, a press only says "SET UP MUSE FIRST", so the mic goes too.
      * While a reply's layout is up it decides; that's only ever paired. */
-    if (s_answer < 0 && (paired && muse_board->audio_init) == lv_obj_has_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN)) {
+    if (s_mic_icon && !muse_board->rim_controls && s_answer < 0 && (paired && muse_board->audio_init) == lv_obj_has_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_set_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN, !paired || !muse_board->audio_init);
     }
 }
@@ -1343,7 +1416,7 @@ static void update_status(muse_mode_t mode, float now)
         } else {
             lv_obj_set_style_bg_color(s_bar, lv_color_hex(accent), 0);
         }
-        set_mic_color(mode == MUSE_MODE_LISTENING ? accent : COLOR_DIM);   /* lights up while recording */
+        set_mic_color(mode == MUSE_MODE_LISTENING ? accent : COLOR_DIM);   /* legacy face icon */
         s_shown_state = (int)mode;
         s_shown_lit = -1;
     }
@@ -1433,6 +1506,13 @@ static void update_status(muse_mode_t mode, float now)
 }
 
 static volatile bool s_snapshot;
+#if LV_USE_SNAPSHOT
+static volatile int s_bench_page = -1;
+void muse_ui_bench_page(bool settings)
+{
+    s_bench_page = settings ? 1 : 0;   /* applied in the LVGL task */
+}
+#endif
 
 /* Streams the screen over the USB cable as base64 RGB565 (bench testing; needs
  * LV_USE_SNAPSHOT, which devices/sdkconfig.muse-bench turns on). */
@@ -1474,6 +1554,14 @@ void muse_ui_request_snapshot(void)
 
 static void frame_tick(lv_timer_t *timer)
 {
+#if LV_USE_SNAPSHOT
+    if (s_bench_page >= 0) {
+        bool settings = s_bench_page != 0;
+        s_bench_page = -1;
+        if (s_tv) lv_tileview_set_tile(s_tv, settings ? s_settings : s_face, LV_ANIM_OFF);
+    }
+#endif
+    update_control_hints(muse_state_mode(NULL));
     if (s_snapshot) {
         s_snapshot = false;
         send_snapshot();
