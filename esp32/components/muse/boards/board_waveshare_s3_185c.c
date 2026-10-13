@@ -27,6 +27,7 @@
 #include "es7210_adc.h"
 #include "driver/ledc.h"
 #include "driver/spi_master.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_check.h"
@@ -456,11 +457,13 @@ static esp_err_t read_power(muse_power_t *out)
      * V_bat = V_adc * (200 + 100) / 100 = V_adc * 3.
      * Matches the proven xiaozhi/Jarvis AdcBatteryMonitor (200000, 100000). */
     out->battery_mv = mv * 3;
-    /* Rough Li-ion window: 3.3 V empty, 4.2 V full. */
+    /* Rough Li-ion window: 3.3 V empty, 4.2 V full. Far below empty, no
+     * cell is fitted: report no battery rather than 0%. */
     int pct = (out->battery_mv - 3300) * 100 / (4200 - 3300);
-    out->battery_pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    out->battery_pct = out->battery_mv < 2500 ? -1 : pct < 0 ? 0 : pct > 100 ? 100 : pct;
     out->charging = false;   /* no charge-state line on this board */
-    out->usb = false;
+    /* No VBUS sense either: a USB host on the chip's own port is the closest. */
+    out->usb = usb_serial_jtag_is_connected();
     return ESP_OK;
 }
 
@@ -483,7 +486,7 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .diagonal_in = 1.85f,
-    .talk_button = "screen",
+    .talk_button = "BOOT",
     /* BOOT is on the side edge, toward the top of the puck. */
     .talk_hint = { LV_ALIGN_TOP_LEFT, 20, 16 },
     .frame_ms = 40,

@@ -1231,8 +1231,13 @@ static void build_power_page(lv_obj_t *tile)
     char text[128];
     const char *power = muse_board->power_button ? muse_board->power_button : muse_board->talk_button;
     const char *sleep = muse_board->power_button ? muse_board->power_button : muse_board->aux_button;
-    snprintf(text, sizeof(text), "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
-             power, sleep);
+    if (sleep) {
+        snprintf(text, sizeof(text), "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
+                 power, sleep);
+    } else {
+        /* No button turns the screen off (the 1.85C's BOOT talks). */
+        snprintf(text, sizeof(text), "Press the %s button to turn it back on.", power);
+    }
     note(list, text);
 }
 
