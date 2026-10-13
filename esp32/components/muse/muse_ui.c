@@ -426,6 +426,59 @@ static void color_mic(lv_obj_t *icon, uint32_t color)
         lv_obj_set_style_bg_color(part, lv_color_hex(color), 0);
         lv_obj_set_style_arc_color(part, lv_color_hex(color), LV_PART_MAIN);
     }
+    if (muse_board->touch && muse_board->touch_talk) {
+        lv_obj_set_style_border_color(s_mic_icon, lv_color_hex(color), 0);   /* the talk button's rim */
+    }
+}
+
+#define TALK_BUTTON_PAD 10      /* touch_talk: the disc around the mic icon, and as much again to hit */
+
+/* touch_talk: one press at a time, each let go once (a press can end in both
+ * PRESS_LOST and RELEASED). The pairing card only takes presses while the
+ * Muse app asks for the talk button. */
+static void on_touch_talk(lv_event_t *e)
+{
+    static bool held;
+    if (lv_event_get_code(e) == LV_EVENT_PRESSED) {
+        bool card = lv_event_get_target(e) == (void *)s_pair;
+        if (!held && (!card || muse_link_state() == MUSE_LINK_CONFIRM)) {
+            held = true;
+            muse_board->touch_talk(true);
+        }
+    } else if (held) {
+        held = false;
+        muse_board->touch_talk(false);
+    }
+}
+
+static void add_touch_talk_events(lv_obj_t *obj)
+{
+    lv_obj_add_event_cb(obj, on_touch_talk, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(obj, on_touch_talk, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(obj, on_touch_talk, LV_EVENT_PRESS_LOST, NULL);
+}
+
+/* The mic icon as an on-screen talk button: a disc behind it, a fingertip's
+ * hit area of its own (over Muse's), and a drag that starts on it doesn't
+ * swipe to settings. The icon keeps its size inside the padding. */
+static void make_talk_button(lv_obj_t *mic, int size)
+{
+    lv_obj_set_size(mic, size + 2 * TALK_BUTTON_PAD, size + 2 * TALK_BUTTON_PAD);
+    lv_obj_set_style_pad_all(mic, TALK_BUTTON_PAD, 0);
+    lv_obj_set_style_radius(mic, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(mic, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(mic, lv_color_hex(COLOR_METER_OFF), 0);
+    lv_obj_set_style_bg_color(mic, lv_color_hex(COLOR_DOT_OFF), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(mic, 2, 0);
+    lv_obj_set_style_border_width(mic, 4, LV_STATE_PRESSED);
+    for (uint32_t i = 0; i < lv_obj_get_child_count(mic); i++) {
+        lv_obj_remove_flag(lv_obj_get_child(mic, i), LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_obj_add_flag(mic, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_remove_flag(mic, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER
+                                | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_ext_click_area(mic, TALK_BUTTON_PAD);
+    add_touch_talk_events(mic);
 }
 
 static void set_mic_color(uint32_t color)
@@ -438,7 +491,11 @@ static void build_button_icons(lv_obj_t *face)
 {
     if (muse_board->rim_controls) return;   /* dedicated rim hints below */
     const muse_button_hint_t *t = &muse_board->talk_hint, *a = &muse_board->aux_hint;
-    s_mic_icon = make_mic(face, s_tall ? 24 : s_small ? 12 : 26);
+    int mic_px = s_tall ? 24 : s_small ? 12 : 26;
+    s_mic_icon = make_mic(face, mic_px);
+    if (muse_board->touch && muse_board->touch_talk) {
+        make_talk_button(s_mic_icon, mic_px);
+    }
     lv_obj_align(s_mic_icon, t->align, t->x, t->y);
     set_mic_color(COLOR_DIM);
 
@@ -1147,6 +1204,11 @@ static void build_overlays(void)
     lv_obj_set_style_border_width(s_pair, 2, 0);
     lv_obj_remove_flag(s_pair, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_pair, LV_OBJ_FLAG_HIDDEN);
+    if (muse_board->touch && muse_board->touch_talk) {
+        /* No talk button to reach: a tap on the card confirms pairing. */
+        lv_obj_add_flag(s_pair, LV_OBJ_FLAG_CLICKABLE);
+        add_touch_talk_events(s_pair);
+    }
     s_pair_title = make_label(s_pair, font_pick(&lv_font_montserrat_20, FONT_COMPACT), COLOR_LIT);
     lv_label_set_text(s_pair_title, "Pairing code");
     s_pair_code = make_label(s_pair, font_pick(&lv_font_montserrat_28, &lv_font_montserrat_20), COLOR_ACCENT);
@@ -1314,7 +1376,10 @@ static void update_chrome(float now)
     if (b.passkey || confirm) {
         char code[24], hint[40];
         if (confirm) {
-            if (!muse_board->audio_init) {
+            if (muse_board->touch && muse_board->touch_talk) {
+                strlcpy(code, "Tap here", sizeof(code));
+                strlcpy(hint, "Tap to confirm pairing", sizeof(hint));
+            } else if (!muse_board->audio_init) {
                 strlcpy(code, "Tap screen", sizeof(code));
                 strlcpy(hint, "Tap to confirm pairing", sizeof(hint));
             } else {
