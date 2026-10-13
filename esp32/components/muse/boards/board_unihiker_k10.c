@@ -30,7 +30,7 @@
  * The XL9535/TCA9555 at 0x20 matches a board I2C scan (IN port map in
  * MicroPythonOS unihiker_k10). ES7243E is the ADC at 0x11 (chip id 0x7A43
  * on that scan); DFRobot's libmodules.a calls es7243e_adc_init. The speaker
- * amp enable is expander pin 15, driven high while audio plays
+ * amp enable is expander pin 15, driven high while the I2S clocks run
  * (digital_write(eAmp_Gain, 1) in unihiker_k10.cpp).
  *
  * Not driven here: GC2145 camera (pins are in who_camera.h; Muse's
@@ -38,6 +38,8 @@
  * SC7A20H, and the battery connector. There is no confirmed battery-sense
  * pin in the vendor headers.
  */
+#include <string.h>
+
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
@@ -104,7 +106,6 @@ static uint16_t s_cfg = 0xFFFF;
 static esp_lcd_panel_handle_t s_panel;
 static led_strip_handle_t s_leds;
 static i2s_chan_handle_t s_tx, s_rx;
-static const audio_codec_data_if_t *s_i2s_if;
 
 typedef struct {
     int pin;
@@ -115,13 +116,26 @@ typedef struct {
 static exp_btn_t s_talk = { .pin = PIN_BTN_A };
 static exp_btn_t s_aux = { .pin = PIN_BTN_B };
 
+/* One register per transfer: a combined write only updates port 0. */
+static esp_err_t exp_wr(uint8_t reg, uint8_t val)
+{
+    uint8_t buf[2] = { reg, val };
+    return i2c_master_transmit(s_exp, buf, sizeof(buf), 50);
+}
+
 static esp_err_t exp_commit_locked(void)
 {
-    uint8_t cfg[3] = { 0x06, (uint8_t)s_cfg, (uint8_t)(s_cfg >> 8) };
-    uint8_t out[3] = { 0x02, (uint8_t)s_out, (uint8_t)(s_out >> 8) };
-    esp_err_t err = i2c_master_transmit(s_exp, cfg, sizeof(cfg), 50);
+    /* Latch the output level before making the pin an output. The other
+     * order pulses the amp enable low while the pin becomes an output. */
+    esp_err_t err = exp_wr(0x02, (uint8_t)s_out);
     if (err == ESP_OK) {
-        err = i2c_master_transmit(s_exp, out, sizeof(out), 50);
+        err = exp_wr(0x03, (uint8_t)(s_out >> 8));
+    }
+    if (err == ESP_OK) {
+        err = exp_wr(0x06, (uint8_t)s_cfg);
+    }
+    if (err == ESP_OK) {
+        err = exp_wr(0x07, (uint8_t)(s_cfg >> 8));
     }
     return err;
 }
@@ -222,10 +236,10 @@ static esp_err_t init(void)
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(s_i2c, &exp_cfg, &s_exp), TAG, "expander");
     s_exp_mu = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_exp_mu, ESP_ERR_NO_MEM, TAG, "expander mutex");
-    /* Backlight off, camera held in reset, amp off. Other pins stay inputs. */
+    /* Backlight off, camera held in reset. Pin 15 (amp) stays an input
+     * until audio_init, so the expander does not pulse it low at boot. */
     ESP_RETURN_ON_ERROR(exp_set(PIN_BL, false), TAG, "backlight off");
     ESP_RETURN_ON_ERROR(exp_set(PIN_CAM_RST, false), TAG, "camera reset");
-    ESP_RETURN_ON_ERROR(exp_set(PIN_AMP, false), TAG, "amp off");
 
     led_strip_config_t strip_cfg = {
         .strip_gpio_num = LED_GPIO,
@@ -343,66 +357,44 @@ static void panel_sleep(bool sleep)
     (void)exp_set(PIN_BL, !sleep);
 }
 
-static int wrap_open(const audio_codec_data_if_t *h, void *data_cfg, int cfg_size)
+/* Leave both I2S channels running: on the ESP32-S3, disabling the mic side
+ * also stops the speaker. Do not touch the amp here. Codec open/close calls
+ * this with on=false, and a low pulse on expander pin 15 is shutdown. */
+static int data_enable(const audio_codec_data_if_t *h, esp_codec_dev_type_t type, bool on)
 {
     (void)h;
-    return s_i2s_if->open(s_i2s_if, data_cfg, cfg_size);
+    (void)type;
+    (void)on;
+    return ESP_CODEC_DEV_OK;
 }
 
-static bool wrap_is_open(const audio_codec_data_if_t *h)
+static int spk_write(const audio_codec_data_if_t *h, uint8_t *data, int size)
 {
     (void)h;
-    return s_i2s_if->is_open && s_i2s_if->is_open(s_i2s_if);
+    size_t wrote = 0;
+    return i2s_channel_write(s_tx, data, size, &wrote, portMAX_DELAY) == ESP_OK ? ESP_CODEC_DEV_OK
+                                                                                : ESP_CODEC_DEV_WRITE_FAIL;
 }
 
-static int wrap_enable(const audio_codec_data_if_t *h, esp_codec_dev_type_t type, bool on)
+/* A hung i2s_channel_read blocks the voice task, so button A never enters
+ * listen. Timeout and return zeros; the next call tries again. */
+static int mic_read(const audio_codec_data_if_t *h, uint8_t *data, int size)
 {
     (void)h;
-    if (type == ESP_CODEC_DEV_TYPE_OUT) {
-        if (exp_set(PIN_AMP, on) != ESP_OK) {
-            ESP_LOGW(TAG, "amp %s failed", on ? "on" : "off");
-        }
+    size_t got = 0;
+    if (i2s_channel_read(s_rx, data, size, &got, pdMS_TO_TICKS(100)) != ESP_OK || got != (size_t)size) {
+        memset(data, 0, size);
+        return ESP_CODEC_DEV_OK;
     }
-    return s_i2s_if->enable ? s_i2s_if->enable(s_i2s_if, type, on) : ESP_CODEC_DEV_OK;
+    return ESP_CODEC_DEV_OK;
 }
 
-static int wrap_set_fmt(const audio_codec_data_if_t *h, esp_codec_dev_type_t type,
-                        esp_codec_dev_sample_info_t *fs)
-{
-    (void)h;
-    return s_i2s_if->set_fmt ? s_i2s_if->set_fmt(s_i2s_if, type, fs) : ESP_CODEC_DEV_OK;
-}
-
-static int wrap_read(const audio_codec_data_if_t *h, uint8_t *data, int size)
-{
-    (void)h;
-    return s_i2s_if->read(s_i2s_if, data, size);
-}
-
-static int wrap_write(const audio_codec_data_if_t *h, uint8_t *data, int size)
-{
-    (void)h;
-    return s_i2s_if->write(s_i2s_if, data, size);
-}
-
-static int wrap_close(const audio_codec_data_if_t *h)
-{
-    (void)h;
-    return s_i2s_if->close ? s_i2s_if->close(s_i2s_if) : ESP_CODEC_DEV_OK;
-}
-
-static const audio_codec_data_if_t s_data_if = {
-    .open = wrap_open,
-    .is_open = wrap_is_open,
-    .enable = wrap_enable,
-    .set_fmt = wrap_set_fmt,
-    .read = wrap_read,
-    .write = wrap_write,
-    .close = wrap_close,
-};
+static const audio_codec_data_if_t s_spk_if = { .enable = data_enable, .write = spk_write };
+static const audio_codec_data_if_t s_mic_if = { .enable = data_enable, .read = mic_read };
 
 /* Duplex I2S as DFRobot's initI2S(): Philips, 16-bit stereo, MCLK on GPIO3.
- * The speaker has no I2C codec (amp bit only). The ES7243E is the mic ADC. */
+ * The speaker has no I2C codec (amp bit only). The ES7243E is the mic ADC.
+ * TX and RX keep their own data_if so closing the mic does not stop TX. */
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)
 {
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
@@ -421,23 +413,24 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     };
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_tx, &std_cfg), TAG, "i2s tx");
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_rx, &std_cfg), TAG, "i2s rx");
+    ESP_RETURN_ON_ERROR(exp_set(PIN_AMP, true), TAG, "amp on");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(s_tx), TAG, "i2s tx on");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(s_rx), TAG, "i2s rx on");
 
-    audio_codec_i2s_cfg_t i2s_cfg = { .port = I2S_NUM_0, .rx_handle = s_rx, .tx_handle = s_tx };
-    s_i2s_if = audio_codec_new_i2s_data(&i2s_cfg);
-    ESP_RETURN_ON_FALSE(s_i2s_if, ESP_ERR_NO_MEM, TAG, "i2s data");
-
-    audio_codec_i2c_cfg_t i2c_cfg = { .port = I2C_NUM_0, .addr = ES7243E_ADDR, .bus_handle = s_i2c };
+    /* esp_codec_dev shifts this address right by one. 0x11 is the 7-bit
+     * address from the board scan, so the value it wants is 0x22. */
+    audio_codec_i2c_cfg_t i2c_cfg = {
+        .port = I2C_NUM_0, .addr = ES7243E_ADDR << 1, .bus_handle = s_i2c,
+    };
     const audio_codec_ctrl_if_t *ctrl = audio_codec_new_i2c_ctrl(&i2c_cfg);
     ESP_RETURN_ON_FALSE(ctrl, ESP_ERR_NO_MEM, TAG, "es7243e ctrl");
     es7243e_codec_cfg_t adc_cfg = { .ctrl_if = ctrl };
     const audio_codec_if_t *adc = es7243e_codec_new(&adc_cfg);
     ESP_RETURN_ON_FALSE(adc, ESP_FAIL, TAG, "ES7243E at 0x11 not responding");
 
-    esp_codec_dev_cfg_t out_cfg = { .dev_type = ESP_CODEC_DEV_TYPE_OUT, .data_if = &s_data_if };
+    esp_codec_dev_cfg_t out_cfg = { .dev_type = ESP_CODEC_DEV_TYPE_OUT, .data_if = &s_spk_if };
     esp_codec_dev_cfg_t in_cfg = {
-        .dev_type = ESP_CODEC_DEV_TYPE_IN, .codec_if = adc, .data_if = &s_data_if,
+        .dev_type = ESP_CODEC_DEV_TYPE_IN, .codec_if = adc, .data_if = &s_mic_if,
     };
     *spk = esp_codec_dev_new(&out_cfg);
     *mic = esp_codec_dev_new(&in_cfg);

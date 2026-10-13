@@ -5,27 +5,27 @@ This is a community port of the Muse Gadgets ESP32 firmware to the
 made or endorsed by Meta. The code is under the Apache 2.0
 [LICENSE](LICENSE) in this repository.
 
-Muse runs in the cloud. The K10 is the screen, the buttons, and the status
-lights. Each person needs their own SDK token. Do not put a token in a file
-you commit, and do not flash someone else's token.
+Muse runs in the cloud. The K10 is the screen, the buttons, the mics, and
+the status lights. Replies are text on the avatar; Muse does not send
+spoken audio. Each person needs their own SDK token. Do not put a token in
+a file you commit, and do not flash someone else's token.
 
 ## What works
 
 - ESP32-S3, 16 MB flash, 8 MB octal PSRAM
 - 2.8" 240×320 ILI9341 screen and the Muse avatar
 - BLE advertising as `MuseGadget-XXXXXX`, then Wi-Fi after pairing
-- Button A: push-to-talk and pairing confirm
+- Dual ES7243E mics (I2C `0x11`) and push-to-talk on A
+- Button A: pairing confirm and push-to-talk
 - Button B: menu
 - Three dim WS2812 LEDs that follow the link state (orange while advertising,
   blue while connecting or waiting for the confirm press, green when connected)
 
-## What does not work yet
+## What is not in this port
 
-- Speaker and microphones. The ES7243E ADC at I2C address `0x11` does not
-  answer, so voice is unavailable.
-- Camera capture, microSD, the AHT20, LTR303ALS, and SC7A20H sensors, and
-  battery voltage. Those parts are on the board and are not wired in this
-  port.
+- Talk-back. Muse Hatch replies are captions, not speaker audio.
+- GC2145 camera capture, microSD, the AHT20, LTR303ALS, and SC7A20H sensors,
+  and battery voltage. Those parts are on the board and are not wired here.
 
 ## What you need
 

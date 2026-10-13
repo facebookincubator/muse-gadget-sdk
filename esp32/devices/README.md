@@ -414,7 +414,9 @@ confirmation. Button B steps through the menu. There is no touch screen.
 The three WS2812s follow the link state in the same colours as a status
 light (orange while advertising, blue while connecting or waiting for the
 pairing press, green when Muse is connected). They stay dim and do not
-breathe. The avatar on the 240×320 panel is the status display.
+breathe. The avatar on the 240×320 panel is the status display. Dual
+ES7243E mics at I2C `0x11` feed push-to-talk; replies are captions. Muse
+does not send spoken audio.
 
 The backlight is on or off. It does not dim. Menu power-off turns the
 screen and speaker amp off and deep-sleeps the chip. The BOOT button
