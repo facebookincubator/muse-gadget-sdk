@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "muse_console.h"
+#include "muse_input.h"
 #include "muse_menu.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
@@ -237,4 +238,9 @@ void muse_console_write(const void *buf, size_t n)
         (void)fwrite(buf, 1, n, stdout);
         (void)fflush(stdout);
     }
+}
+
+void muse_input_touch_talk(bool pressed)
+{
+    (void)pressed;
 }

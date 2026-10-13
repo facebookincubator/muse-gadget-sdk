@@ -65,6 +65,8 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_175)
         # One driver: the 1.75 differs only in pins (its BSP's) and its PWR key.
         list(APPEND srcs "boards/board_waveshare_s3_175c.c" "boards/muse_lcd_bands.c")
+    elseif(CONFIG_MUSE_BOARD_OSTB_ECHOEAR_2ST)
+        list(APPEND srcs "boards/board_ostb_echoear_2st.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_216)
         list(APPEND srcs "boards/board_waveshare_s3_216.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_AIPI)

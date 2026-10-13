@@ -68,6 +68,7 @@ typedef struct {
     bool round;             /* circular panel: keep content inside the circle */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
+    bool touch_talk;        /* on-screen mic supplies talk edges; no physical talk button */
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */
     const char *aux_button;     /* "bottom" */
@@ -124,7 +125,8 @@ typedef struct {
      * buttons needn't be polled. NULL: polled. */
     void (*wait_buttons)(int timeout_ms);
     esp_err_t (*read_power)(muse_power_t *out);
-    /* Turns the board off; returns only on failure. */
+    /* Turns the board off; returns only on failure. NULL: it can't from
+     * software (a physical switch does), and Settings has no Power off. */
     esp_err_t (*power_off)(void);
 } muse_board_t;
 
