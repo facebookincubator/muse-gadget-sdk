@@ -127,11 +127,19 @@ static esp_err_t init(void)
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(s_i2c, &xl_cfg, &s_xl), TAG, "xl9555");
     s_xl_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_xl_lock, ESP_ERR_NO_MEM, TAG, "xl9555 lock");
+    /* Read as an input, the speaker enable is pulled high on boxes with the
+     * ES8311 and low on those with an NS4168 amplifier and no codec, as
+     * xiaozhi-esp32 checks. This profile drives only the ES8311. */
+    uint8_t dir, in;
+    ESP_RETURN_ON_ERROR(xl_read(XL9555_CFG0, &dir), TAG, "xl9555 dir");
+    ESP_RETURN_ON_ERROR(xl_write(XL9555_CFG0, dir | XL_SPK_EN), TAG, "xl9555 dir");
+    ESP_RETURN_ON_ERROR(xl_read(XL9555_IN0, &in), TAG, "xl9555 read");
+    if (!(in & XL_SPK_EN)) {
+        ESP_LOGW(TAG, "speaker enable reads low: an NS4168 box, whose audio this profile doesn't drive");
+    }
     /* Backlight and amplifier off until the display and audio start. */
     ESP_RETURN_ON_ERROR(xl_read(XL9555_OUT0, &s_xl_out), TAG, "xl9555 read");
     ESP_RETURN_ON_ERROR(xl_set(XL_BL | XL_SPK_EN, false), TAG, "xl9555 outputs");
-    uint8_t dir;
-    ESP_RETURN_ON_ERROR(xl_read(XL9555_CFG0, &dir), TAG, "xl9555 dir");
     dir = (dir | XL_K1 | XL_K2) & ~(XL_BL | XL_SPK_EN);
     ESP_RETURN_ON_ERROR(xl_write(XL9555_CFG0, dir), TAG, "xl9555 dir");
     return muse_gpio_button_init(&s_talk, TALK_GPIO);
@@ -346,6 +354,7 @@ static const muse_board_t s_board = {
     .diagonal_in = 2.4f,
     .talk_button = "K0",
     .aux_button = "K1",
+    .wake_button = "K0",        /* K1 is on the expander, which can't wake it */
     /* The keys run along the top edge, K2, K1, K0 from the left. K1's icon
      * sits right of centre, clear of the status line's Wi-Fi icon. */
     .talk_hint = { LV_ALIGN_TOP_RIGHT, -8, 8 },
