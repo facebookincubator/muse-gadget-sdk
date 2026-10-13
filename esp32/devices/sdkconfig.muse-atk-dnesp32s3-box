@@ -1,0 +1,49 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ALIENTEK ATK-DNESP32S3-BOX V1.1: ATK-MWS3S N16R8 module (16 MB flash, 8 MB
+# octal PSRAM), native USB Serial/JTAG (303a:1001), 320x240 ST7789 on an 8-bit
+# i80 bus, ES8311 codec with one mic, keys K0 (GPIO0), K1 and K2 (XL9555), no
+# touch. Pins: xiaozhi-esp32's alientek/atk-dnesp32s3-box board, checked on a
+# real unit by Vibe Buddy (https://github.com/second-state/vibebuddy,
+# docs/hardware.md). Load last, after sdkconfig.muse.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_ATK_DNESP32S3_BOX=y
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# Static buffers in PSRAM, as on the AIPI Lite: without it BLE setup can't
+# find the internal RAM for its task. The module always has PSRAM.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+# Two-key menu.
+CONFIG_LV_FONT_MONTSERRAT_12=y
+# Sold mostly to Chinese speakers: captions fall back to Unifont's CJK
+# (850 KB) instead of showing boxes.
+CONFIG_MUSE_CJK_FONT=y

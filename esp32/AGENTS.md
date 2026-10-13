@@ -61,6 +61,7 @@ before adding a feature to one.
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216` | `tools/muse/board.sh build s3-216` |
 | OSTB EchoEar-2ST (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ostb-echoear-2st` | `tools/muse/board.sh build echoear` |
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-box-3` | `tools/muse/board.sh build box3` |
+| ALIENTEK ATK-DNESP32S3-BOX V1.1 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-atk-dnesp32s3-box` | `tools/muse/board.sh build atk-box` |
 | AIPI Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-aipi` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-206` | `tools/muse/board.sh build c6-206` |
@@ -144,7 +145,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-216|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7|vn183|ai-passport|echoear> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-216|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|jc3248w535|lcd7|vn183|ai-passport|echoear> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
