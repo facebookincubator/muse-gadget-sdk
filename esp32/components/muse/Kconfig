@@ -43,6 +43,10 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_WAVESHARE_S3_185C
+            bool "Waveshare ESP32-S3-Touch-LCD-1.85C"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_AIPI
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
@@ -120,6 +124,7 @@ menu "Muse"
         default "waveshare_s3_175" if MUSE_BOARD_WAVESHARE_S3_175
         default "ostb_echoear_2st" if MUSE_BOARD_OSTB_ECHOEAR_2ST
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
+        default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
         default "aipi" if MUSE_BOARD_AIPI
         default "atk_dnesp32s3_box" if MUSE_BOARD_ATK_DNESP32S3_BOX
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3

@@ -31,6 +31,9 @@ esp_err_t muse_ui_start(void);
 /* From any task: the screen has gone dark for sleep (and not yet woken). */
 bool muse_ui_dark(void);
 
+/* From any task: the face tile is the currently visible tile. */
+bool muse_ui_face_active(void);
+
 /* The functions below run in the LVGL task (or with the display lock held). */
 
 /* Slide back to the face (e.g. when a talk starts). */
