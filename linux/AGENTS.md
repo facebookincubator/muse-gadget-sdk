@@ -39,6 +39,7 @@ pairing and control protocols, so the same app pairs either.
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream` |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
+| `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |
 | `noise/` | Noise XX handshake, framing and service envelopes |
 | `data/` | The systemd unit and the hash-pinned `requirements.lock`, shipped in the package |
 
@@ -163,6 +164,14 @@ never has a command's parameters, output or error message.
   is cut at 96 KB per stream.
 
 ## Adding a command
+
+A device's owner adds commands without changing the package: one JSON file
+per command in `/etc/musegadget/commands.d/` (`MUSEGADGET_COMMANDS_DIR`
+overrides it), read when the service starts. `commands.py` documents the
+format and validates it, including the directory trust check;
+`Executor.run_drop_in` runs them. `Executor.specs` takes the actual device
+metadata to admit whole definitions under the serialized registration budget. See "Add your own
+commands" in `README.md`. To add a built-in command to the package itself:
 
 1. Add a spec to `COMMAND_SPECS` in `executor.py`: `description`, `required`
    and `optional` parameters (each with `type` and `description`), and

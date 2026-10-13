@@ -137,6 +137,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    from musegadget import commands
     from musegadget.executor import Account, Executor
     from musegadget.service import run_service
 
@@ -159,7 +160,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         log.warning("running without an SDK token: %s", exc)
         sdk_token = None
     log.info("musegadget %s: commands run as %s", __version__, account.name)
-    run_service(identity.load_or_create(), Executor(account), sdk_token)
+    drop_ins = commands.load(config.commands_dir())
+    run_service(identity.load_or_create(), Executor(account, drop_ins), sdk_token)
     return 0
 
 
