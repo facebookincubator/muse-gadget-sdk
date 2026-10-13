@@ -460,8 +460,6 @@ menu "ESP32 Device SDK"
     config HOMEHUB_VOICE_BOARD_ID
         string
         default "waveshare_s3_audio_board" if HOMEHUB_LED_BACKEND_WAVESHARE_AUDIO
-        default "respeaker_lite" if HOMEHUB_LED_BACKEND_RESPEAKER_LITE
-        default "home_assistant_voice" if HOMEHUB_LED_BACKEND_VOICE_RING
         default "none"
         help
             Stable board identifier for managed audio dependencies. Unlike a

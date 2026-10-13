@@ -171,6 +171,8 @@ const audio_codec_ctrl_if_t *audio_codec_new_i2c_ctrl(audio_codec_i2c_cfg_t *c) 
 }
 const audio_codec_gpio_if_t *audio_codec_new_gpio(void) { return &gpio; }
 const audio_codec_if_t *es8311_codec_new(es8311_codec_cfg_t *c) {
+ // 32-bit stereo BCLK is 64 * fs: the driver's BCLK x8 path is unsuitable.
+ assert(c->use_mclk);
  assert(c->pa_pin==-1 && c->ctrl_if==&ctrl1); dac=(audio_codec_if_t){enable,set_fs,vol,mute,mic_gain}; return &dac;
 }
 const audio_codec_if_t *es7210_codec_new(es7210_codec_cfg_t *c) {

@@ -39,7 +39,7 @@
 #define IO_INPUT_HIGH       0x01
 #define IO_OUTPUT_HIGH      0x03
 #define IO_CONFIG_HIGH      0x07
-#define IO_AMP              (1U << 0) /* EXIO8: PA_CTRL */
+#define IO_AMP              (1U << 0) /* EXIO8 = P1.0: PA_CTRL */
 #define IO_MUTE             (1U << 1) /* EXIO9: K1, active low */
 #define IO_VOLUME_DOWN      (1U << 2) /* EXIO10: K2 */
 #define IO_VOLUME_UP        (1U << 3) /* EXIO11: K3 */
@@ -236,7 +236,9 @@ esp_err_t voice_board_init(void) {
     es8311_codec_cfg_t dac = {
         .ctrl_if = s_dac_ctrl, .gpio_if = s_gpio,
         .codec_mode = ESP_CODEC_DEV_WORK_MODE_DAC, .pa_pin = -1,
-        .use_mclk = false, // factory_01 uses BCLK as the ES8311 clock source.
+        // GPIO12 supplies 256 * fs MCLK. With 32-bit stereo slots, BCLK is
+        // 64 * fs; the codec driver's BCLK x8 path would double its clock.
+        .use_mclk = true,
     };
     s_dac = es8311_codec_new(&dac);
     es7210_codec_cfg_t adc = {

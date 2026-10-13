@@ -28,6 +28,8 @@ unused, second mic. This profile selects the first microphone for Muse;
 it does not implement echo cancellation or combine the two microphones.
 Both codecs share the ESP32's clocks. Playback converts the shared player's
 48 kHz stereo PCM32 to the board's 16 kHz bus; the clock rate stays fixed.
+The ES8311 uses GPIO12's 256×fs MCLK (4.096 MHz), rather than deriving its
+internal clock from the 64×fs BCLK of the two 32-bit slots.
 The amplifier stays off until playback, and microphone capture starts only
 on a talk press.
 
@@ -79,6 +81,21 @@ prove a voice turn succeeded.
   SD card, camera or external-display support. OTA is off by default.
 
 ## Verification
+
+Review update, 2026-10-13: rebased onto main at `8e613f7` and switched the
+ES8311 to MCLK. Fresh ESP-IDF v6.0.1 builds pass for Audio Board, C5
+DevKitC-1, Voice PE and reSpeaker Lite. All Audio Board overlay options
+reach the generated config, with 28% free in the 2 MB app partition.
+The current host suite runs 592 tests: 591 pass and the optional synthetic
+PPK2 benchmark skips because `ppk2-api==0.9.2` is not installed. The Audio
+Board sanitizer harness rejects the former BCLK configuration. Python
+tests pass Black and Ruff; the build helper passes bash syntax checking.
+No Audio Board is connected for this revision's physical tests. Audible
+playback with MCLK, K1/K2/K3 and clearing setup remain required before
+leaving draft. The earlier hardware results below apply to the original
+2026-10-05 revision, not to this MCLK change.
+
+Initial validation, 2026-10-05:
 
 Built with ESP-IDF v6.0.1, with 28% free in the 2 MB app partition.
 The complete host suite passes (187 tests). Regression builds pass for the
