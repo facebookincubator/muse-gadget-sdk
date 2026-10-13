@@ -1,0 +1,28 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The Matter forwarder on 8 MB boards (devices/sdkconfig.chip-tool-forwarder): the
+# default layout's offsets for prod_data/prod_bak, two app slots, and a
+# matter NVS partition for CHIP's data and the forwarder's own (the fabric, its
+# devices, the forwarder secret), which an OTA update keeps and a setup reset
+# erases.
+# Name,    Type, SubType, Offset,   Size,     Flags
+nvs,       data, nvs,     0x11000,  0x6000,
+otadata,   data, ota,     0x17000,  0x2000,
+phy_init,  data, phy,     0x19000,  0x1000,
+ota_0,     app,  ota_0,   0x20000,  0x400000,
+prod_data, data, 0x40,    0x420000, 0x1000,
+prod_bak,  data, 0x41,    0x421000, 0x1000,
+ota_1,     app,  ota_1,   0x430000, 0x380000,
+matter,    data, nvs,     0x7B0000, 0x50000,
