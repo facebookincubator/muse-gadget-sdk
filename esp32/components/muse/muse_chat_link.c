@@ -900,6 +900,15 @@ muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
     return ev.type;
 }
 
+bool muse_hatch_turn_reply(char *out, size_t cap)
+{
+    if (!out || !cap) return false;
+    out[0] = '\0';
+    if (!s_turn.replied || !s_turn.text[0]) return false;
+    strlcpy(out, s_turn.text, cap);
+    return true;
+}
+
 bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
 {
     (void)played;   /* no speech: the reply's page follows the reading pace */

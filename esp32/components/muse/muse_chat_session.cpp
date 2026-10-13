@@ -2156,6 +2156,27 @@ extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
     return MUSE_HATCH_EV_NONE;
 }
 
+extern "C" bool muse_hatch_turn_reply(char *out, size_t cap)
+{
+    if (!out || !cap) {
+        return false;
+    }
+    out[0] = '\0';
+    for (int i = s_turn.nmsgs - 1; i >= 0; i--) {
+        const msg_t &m = s_turn.msgs[i];
+        if (!m.len) {
+            continue;
+        }
+        if (s_turn.texts) {
+            strlcpy(out, s_turn.texts + i * TEXT_MAX, cap);
+        } else {
+            muse_hatch_tail_words(m.tail, out, cap);
+        }
+        return true;
+    }
+    return false;
+}
+
 extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
 {
     /* The message being spoken: the last one whose speech has started. */

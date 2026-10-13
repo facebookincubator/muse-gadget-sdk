@@ -37,12 +37,14 @@
 #              Waveshare ESP32-C6-LCD-1.47 with a 172x320 status screen
 #   waveshare-s3-epaper-154
 #              Waveshare ESP32-S3-1.54inch-ePaper V2 with a 200x200 e-paper
+#   waveshare-s3-epaper-154g
+#              Waveshare ESP32-S3-ePaper-1.54G with a 1.54 inch colour e-paper
 #
 # The action defaults to build. Without PORT, flash and monitor use the only
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,42p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -74,6 +76,13 @@ case "$BOARD" in
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
+    ;;
+  waveshare-s3-epaper-154g)
+    TARGET=esp32s3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    # The S3's own USB-Serial-JTAG, which looks like a DevKitC-1's; check
+    # which board is on the port before flashing.
+    PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
   home-assistant-voice|seeed-respeaker-lite)
     TARGET=esp32s3

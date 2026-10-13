@@ -57,6 +57,10 @@ static atomic_bool s_connect_pending = ATOMIC_VAR_INIT(false);
 static atomic_bool s_sta_idle = ATOMIC_VAR_INIT(true);
 static int s_retry = 0;
 static int s_reconnect_backoff_ms = 1000;  // grows on consecutive failures
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+static SemaphoreHandle_t s_transfer_mutex;
+static unsigned s_transfers;
+#endif
 #define MAX_INITIAL_RETRY        3
 #define RECONNECT_BACKOFF_MIN_MS 1000
 #define RECONNECT_BACKOFF_MAX_MS 60000
@@ -223,7 +227,13 @@ void wifi_mgr_init(void) {
 #if SOC_WIFI_SUPPORT_5G
     ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO));
 #endif
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+    s_transfer_mutex = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(s_transfer_mutex ? ESP_OK : ESP_ERR_NO_MEM);
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MAX_MODEM));
+#else
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+#endif
     s_inited = true;
 
     uint8_t mac[6] = {0};
@@ -276,7 +286,7 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
     }
     wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
     wc.sta.pmf_cfg.capable = true;
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
     // Beacons between wakes in max modem sleep (Muse asleep on battery):
     // about 1 s at the usual 102.4 ms interval, a third of the wakes of the
     // default 3. Min modem sleep (awake between turns) wakes every DTIM.
@@ -618,3 +628,17 @@ int wifi_mgr_scan_and_merge_cache(void) {
     ESP_LOGI(TAG, "merged scan: %d fresh, %d cached total", n, total);
     return total;
 }
+
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+void wifi_mgr_transfer(bool active) {
+    if (!s_transfer_mutex) return;
+    xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
+    unsigned before = s_transfers;
+    s_transfers = active ? before + 1 : before ? before - 1 : 0;
+    if (!before != !s_transfers) {
+        esp_err_t err = esp_wifi_set_ps(s_transfers ? WIFI_PS_MIN_MODEM : WIFI_PS_MAX_MODEM);
+        if (err != ESP_OK) ESP_LOGW(TAG, "modem sleep change failed: %s", esp_err_to_name(err));
+    }
+    xSemaphoreGive(s_transfer_mutex);
+}
+#endif

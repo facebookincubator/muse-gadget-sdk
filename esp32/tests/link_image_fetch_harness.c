@@ -18,6 +18,7 @@
 // must keep the scheme the fetch was sized for, and the whole download must
 // finish within its deadline however slowly the server sends.
 
+#include <assert.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -116,7 +117,18 @@ static void spend(esp_http_client_handle_t c, int64_t us) {
     }
 }
 
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+static int transfers;
+void wifi_mgr_transfer(bool active) {
+    if (active) { assert(transfers == 0); transfers++; }
+    else { assert(transfers == 1); transfers--; }
+}
+#endif
+
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config) {
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+    assert(transfers == 1);
+#endif
     esp_http_client_handle_t c = calloc(1, sizeof(*c));
     CHECK(c, "calloc");
     snprintf(c->url, sizeof(c->url), "%s", config->url);
@@ -226,6 +238,9 @@ BaseType_t xTaskCreate(TaskFunction_t task, const char *name, unsigned stack_dep
 }
 
 void vTaskDelete(TaskHandle_t task) {
+#if CONFIG_HOMEHUB_WIFI_IDLE_MAX_MODEM
+    assert(transfers == 0);
+#endif
     (void)task;
 }
 

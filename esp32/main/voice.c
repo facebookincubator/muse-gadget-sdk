@@ -35,6 +35,7 @@
 #include "voice_board.h"
 #include "voice_muse_chat.h"
 #include "voice_player.h"
+#include "wifi_mgr.h"
 
 static const char *TAG = "link.voice";
 
@@ -247,8 +248,10 @@ static void voice_task(void *arg) {
 
     for (;;) {
         if (!pressed_again(portMAX_DELAY)) continue;
+        wifi_mgr_transfer(true);
         while (run_turn()) {
         }
+        wifi_mgr_transfer(false);
     }
 }
 

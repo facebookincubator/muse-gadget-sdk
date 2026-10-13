@@ -17,6 +17,7 @@
 #include "ota.h"
 #include "esp_app_desc.h"
 #include "sdkconfig.h"
+#include "wifi_mgr.h"
 
 #include <stddef.h>
 
@@ -177,6 +178,7 @@ static void ota_task(void *arg) {
         .http_config = &http_cfg,
     };
 
+    wifi_mgr_transfer(true);
     esp_https_ota_handle_t handle = NULL;
     esp_err_t err = esp_https_ota_begin(&ota_cfg, &handle);
     if (err != ESP_OK || !handle) {
@@ -247,6 +249,7 @@ static void ota_task(void *arg) {
     esp_restart();
 
 done:
+    wifi_mgr_transfer(false);
     free(ctx->url);
     free(ctx);
     stack_monitor_record(NULL);

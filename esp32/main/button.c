@@ -16,6 +16,9 @@
 
 #include "button.h"
 #include "stack_monitor.h"
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+#include "epaper_154g_rotation.h"
+#endif
 
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -55,6 +58,9 @@ static void button_task(void *arg) {
 
     while (1) {
         bool pressed = (gpio_get_level(BTN_GPIO) == 0);
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        epaper_154g_power_button_poll(pressed);
+#endif
 
         if (pressed && !was_pressed) {
             press_start = esp_timer_get_time();
