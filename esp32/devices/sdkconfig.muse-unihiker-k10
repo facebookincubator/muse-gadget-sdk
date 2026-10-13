@@ -1,0 +1,54 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# DFRobot UNIHIKER K10 (DFR0992): ESP32-S3 N16R8, 16 MB flash, 8 MB octal
+# PSRAM, 2.8" 240x320 ILI9341, no touch. Native USB Serial/JTAG
+# (303a:1001). Buttons A and B are on the I/O expander, not a GPIO.
+# GPIO0 is the I2S bit clock (and the ROM BOOT strap), so it is not the
+# Link button. Link does not claim this GPIO on a Muse board.
+# Pins: DFRobot/framework-arduinounihiker (who_lcd.h, unihiker_k10.h,
+# pins_arduino.h, initBoard.h). Flash mode DIO matches the other Muse S3
+# overlays and a CircuitPython port of this board; DFRobot's PlatformIO
+# file boards/unihiker_k10.json says qio — switch this line if the chip
+# boots the ROM but not the app.
+# Load last, after sdkconfig.defaults and sdkconfig.muse.
+# Do not put an SDK token in this file. Set it with idf.py menuconfig.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_UNIHIKER_K10=y
+CONFIG_HOMEHUB_BUTTON_GPIO=1
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_CODEC_ES7243E_SUPPORT=y
+
+# PSRAM is required for the UI, images, voice session and tunnel.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+# Two-button menu.
+CONFIG_LV_FONT_MONTSERRAT_12=y

@@ -98,6 +98,10 @@ menu "Muse"
         config MUSE_BOARD_AI_PASSPORT
             bool "FoloToy AI Passport (ESP32-C3, three buttons, no touch)"
             depends on IDF_TARGET_ESP32C3
+
+        config MUSE_BOARD_UNIHIKER_K10
+            bool "DFRobot UNIHIKER K10 (ESP32-S3, 240x320 LCD, speaker and mics)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -127,6 +131,7 @@ menu "Muse"
         default "waveshare_s3_lcd7" if MUSE_BOARD_WAVESHARE_S3_LCD7
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
+        default "unihiker_k10" if MUSE_BOARD_UNIHIKER_K10
         default "none"
 
     # The Muse tools' serial port: the console UART behind the board's USB
