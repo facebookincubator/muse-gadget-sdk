@@ -28,6 +28,10 @@
  * xiaozhi-ai-iot-vietnam-1st.cc and power_manager.h. The same table drives the
  * Xingzhi Cube 1.83" in xingzhi-cube-1.83tft-wifi.
  *
+ * The NV3023 takes the MIPI DCS commands the ST7789 does, so ESP-IDF's own
+ * ST7789 driver draws to it, and the panel's init table follows that driver's
+ * init.
+ *
  * xiaozhi reads the ES7210's first channel as the voice and its second as the
  * speaker reference for echo cancelling, so Muse takes slot 0.
  */
@@ -39,9 +43,9 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
-#include "esp_lcd_nv3023.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_st7789.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
 #include "esp_sleep.h"
@@ -85,7 +89,14 @@ static const char *TAG = "board";
 #define CHARGING_GPIO GPIO_NUM_47   /* LOW while charging */
 #define BATT_ADC ADC_CHANNEL_6      /* ADC2: GPIO17 */
 
-static const nv3023_lcd_init_cmd_t s_lcd_init[] = {
+typedef struct {
+    uint8_t cmd;
+    const uint8_t *data;
+    uint8_t len;
+    uint8_t delay_ms;
+} lcd_cmd_t;
+
+static const lcd_cmd_t s_lcd_init[] = {
     {0xfd, (uint8_t[]){0x06, 0x08}, 2, 0},
     {0x61, (uint8_t[]){0x07, 0x04}, 2, 0},
     {0x62, (uint8_t[]){0x00, 0x44, 0x45}, 3, 0},
@@ -186,25 +197,34 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (spi_bus_initialize(LCD_HOST, &bus, SPI_DMA_CH_AUTO) != ESP_OK) {
         return NULL;
     }
-    const esp_lcd_panel_io_spi_config_t io_cfg = NV3023_PANEL_IO_SPI_CONFIG(LCD_CS, LCD_DC, NULL, NULL);
+    const esp_lcd_panel_io_spi_config_t io_cfg = {
+        .cs_gpio_num = LCD_CS,
+        .dc_gpio_num = LCD_DC,
+        .spi_mode = 0,
+        .pclk_hz = 40 * 1000 * 1000,
+        .trans_queue_depth = 10,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+    };
     if (esp_lcd_new_panel_io_spi(LCD_HOST, &io_cfg, &s_io) != ESP_OK) {
         return NULL;
     }
-    const nv3023_vendor_config_t vendor = {
-        .init_cmds = s_lcd_init,
-        .init_cmds_size = sizeof(s_lcd_init) / sizeof(s_lcd_init[0]),
-    };
     const esp_lcd_panel_dev_config_t panel_cfg = {
         .reset_gpio_num = LCD_RST,
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
         .bits_per_pixel = 16,
-        .vendor_config = (void *)&vendor,
     };
-    if (esp_lcd_new_panel_nv3023(s_io, &panel_cfg, &s_panel) != ESP_OK) {
+    if (esp_lcd_new_panel_st7789(s_io, &panel_cfg, &s_panel) != ESP_OK) {
         return NULL;
     }
     esp_lcd_panel_reset(s_panel);
     esp_lcd_panel_init(s_panel);
+    for (size_t i = 0; i < sizeof(s_lcd_init) / sizeof(s_lcd_init[0]); i++) {
+        esp_lcd_panel_io_tx_param(s_io, s_lcd_init[i].cmd, s_lcd_init[i].data, s_lcd_init[i].len);
+        if (s_lcd_init[i].delay_ms) {
+            vTaskDelay(pdMS_TO_TICKS(s_lcd_init[i].delay_ms));
+        }
+    }
     esp_lcd_panel_swap_xy(s_panel, true);
     esp_lcd_panel_mirror(s_panel, false, true);
     esp_lcd_panel_set_gap(s_panel, LCD_X_GAP, 0);
