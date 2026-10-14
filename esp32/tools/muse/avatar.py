@@ -58,6 +58,7 @@ ERROR_LINES = 60
 
 # muse_board->name, as "@status" reports it -> tools/muse/board.sh's name
 BOARDS = {
+    "DFRobot UNIHIKER K10": "k10",
     "Espressif ESP32-S3-BOX-3": "box3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75C": "s3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75": "s3n",
@@ -80,7 +81,7 @@ BOARDS = {
     "VN ESP32-S3 1.83-inch NV3023": "vn183",
     "FoloToy AI Passport": "ai-passport",
 }
-CHAT_BOARDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "vn183", "echoear")
+CHAT_BOARDS = ("k10", "s3", "s3n", "s3-216", "185c", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "vn183", "echoear")
 
 
 class Stop(Exception):

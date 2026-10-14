@@ -45,6 +45,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Freenove FNK0104B | [Freenove/Freenove_ESP32_S3_Display](https://github.com/Freenove/Freenove_ESP32_S3_Display) | `Tutorial_With_Touch/Sketches/`: `Sketch_07.1_Music` (ES8311 + I2S pins), `Sketch_11.1_Touch` (FT6336U), `Sketch_05.1_Battery_Voltage` (battery divider), `Sketch_02.1_LedPixel` (WS2812 pin). `Libraries/FNK0104AB/` has the TFT_eSPI setup with the display pins. |
 | Waveshare ESP32-S3-Touch-LCD-7 | [waveshareteam/ESP32-S3-Touch-LCD-7](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-7), [waveshareteam/waveshare_boards](https://github.com/waveshareteam/waveshare_boards) | `examples/ESP-IDF/09_lvgl_v9_demo/components/waveshare_rgb_lcd_port.[ch]` for RGB timing, GT911 reset and CH422G output; `boards/esp32_s3_touch_lcd_7/` for the pin map. |
 | Seeed reSpeaker Lite | [respeaker/reSpeaker_Lite](https://github.com/respeaker/reSpeaker_Lite) | `doc/images/pinout.png`, the I2C examples, `xmos_firmwares/`. |
+| DFRobot UNIHIKER K10 | [DFRobot/framework-arduinounihiker](https://github.com/DFRobot/framework-arduinounihiker) | `libraries/unihiker_k10/src/`, `libraries/TFT_eSPI/User_Setup.h`, `variants/unihiker_k10/pins_arduino.h`, and the [schematic](https://www.unihiker.com/wiki/K10/HardwareReference/img/hardwarereference_onboard/UnihikerK10Schematic.pdf). |
 
 For the Cardputer ADV keyboard, also read [m5stack/M5Cardputer](https://github.com/m5stack/M5Cardputer), especially `src/utility/Keyboard/KeyboardReader/TCA8418.cpp` and `src/utility/Adafruit_TCA8418/`.
 
