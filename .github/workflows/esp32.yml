@@ -154,6 +154,9 @@ jobs:
           - board: muse-waveshare-s3-216
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216"
+          - board: muse-waveshare-s3-206
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-206"
           - board: muse-aipi
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-aipi"
