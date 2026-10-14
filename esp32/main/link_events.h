@@ -29,7 +29,7 @@ extern "C" {
 // reboot; device.health and bug.report expose it so the agent can explain
 // past outages ("123s ago tunnel_down: keepalive timeout ...").
 #define LINK_EVENTS_CAPACITY 40
-#define LINK_EVENTS_DETAIL_MAX 88
+#define LINK_EVENTS_DETAIL_MAX 112
 
 typedef enum {
     LINK_EVENT_WIFI_DOWN,

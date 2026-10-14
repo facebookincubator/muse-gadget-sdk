@@ -280,6 +280,10 @@ static void handle_invoke_request(const char *, size_t,
 #include "control_inbound.inc"
 static unsigned ws_pings, delays, stack_polls;
 static uint64_t last_activity_us;
+// Inbound liveness for the extracted loop. Existing cases don't model pongs, so
+// by default every turn sees fresh RX; rx_silent_since_us opts a case into it.
+static bool rx_silent;
+static uint64_t rx_silent_since_us, last_ws_ping_us;
 static bool ws_send_ping(esp_tls_t *) { ++ws_pings; return true; }
 static void vTaskDelay(int ticks) { assert(ticks == 1); ++delays; }
 static uint64_t last_busy_us;
@@ -289,6 +293,7 @@ static void stack_monitor_poll(void *) { ++stack_polls; }
 static void req_end_all() {}
 #define ESP_LOGD log_message
 #define KEEPALIVE_INTERVAL_MS 60000
+static const char *last_end_reason;
 static bool control_tx_turn(bool tunnel_opened = true,
                             noise_ctrl_session_generation_t session_generation = 1) {
     ClientSession &session = *noise_session;
@@ -298,10 +303,11 @@ static bool control_tx_turn(bool tunnel_opened = true,
     void *stack = nullptr;
     bool error = false, did = false;
     const char *end_reason = nullptr;
+    const uint64_t last_rx_us = rx_silent ? rx_silent_since_us : now_us;
     do {
 #include "control_tx_turn.inc"
     } while (false);
-    (void)end_reason;
+    last_end_reason = end_reason;
     return error;
 }
 static void cleanup_control() {
@@ -337,6 +343,8 @@ static void reset_control() {
     heartbeat_sent = false;
     last_heartbeat_us = 0;
     last_activity_us = now_us;
+    rx_silent = false;
+    last_ws_ping_us = 0;
 }
 static std::string payload(size_t len) {
     std::string json(len, ' ');
@@ -728,6 +736,49 @@ static void test_heartbeat() {
     reset_control();
 }
 
+static void test_rx_idle() {
+    // A half-open connection accepts every write, so only silence reveals it:
+    // ping after 60s idle, reconnect once nothing has come back for 150s.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    now_us += 59999999;
+    assert(!control_tx_turn() && ws_pings == 0);
+    now_us += 1;
+    assert(!control_tx_turn() && ws_pings == 1);
+    now_us += 60000000;
+    assert(!control_tx_turn() && ws_pings == 2);
+    now_us = rx_silent_since_us + 149999999;
+    assert(!control_tx_turn());
+    now_us += 1;
+    assert(control_tx_turn());
+    assert(strcmp(last_end_reason, "no response from VM") == 0);
+    assert(logs.back() == "nothing received for 150s; reconnecting");
+
+    // Sending doesn't hide silence: RX idle pings even while TX is active,
+    // at most once per interval.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    now_us += 60000000;
+    last_activity_us = now_us;
+    assert(!control_tx_turn() && ws_pings == 1);
+    now_us += 30000000;
+    last_activity_us = now_us;
+    assert(!control_tx_turn() && ws_pings == 1);
+    now_us += 30000000;
+    last_activity_us = now_us;
+    assert(!control_tx_turn() && ws_pings == 2);
+
+    // Inbound traffic keeps an idle session alive indefinitely.
+    reset_control();
+    for (int i = 0; i < 20; ++i) {
+        now_us += 60000000;
+        assert(!control_tx_turn());
+    }
+    assert(ws_pings == 20);
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     if (strcmp(argv[1], "inplace") == 0) {
@@ -756,6 +807,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[1], "ping_fragmentation") == 0) test_ping_fragmentation();
         else if (strcmp(argv[1], "lifecycle") == 0) test_control_lifecycle();
         else if (strcmp(argv[1], "failures") == 0) test_control_failures();
+        else if (strcmp(argv[1], "rx_idle") == 0) test_rx_idle();
         else assert(false);
         cleanup_control();
         drain_stale_results();

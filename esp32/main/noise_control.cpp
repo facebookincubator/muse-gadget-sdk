@@ -88,6 +88,11 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define RECONNECT_AUTH_FAILED_MS  60000
 #define RECONNECT_DELAY_STEP_MS   250
 #define KEEPALIVE_INTERVAL_MS     60000
+// A half-open TCP connection (the WAN drops, then comes back with the NAT
+// mapping gone) keeps accepting our writes, so a send failure can take lwIP's
+// whole retransmit budget (15+ minutes) to surface. Only inbound traffic proves
+// the VM can still reach us: give up after two unanswered keepalive pings.
+#define RX_IDLE_TIMEOUT_MS        150000
 #define POWER_SAVE_QUIET_MS       1000    // noise_ctrl_set_power_save(): quiet this long,
 #define POWER_SAVE_POLL_MS        100     // then poll this often
 #define IDLE_QUIET_MS             50      // otherwise quiet this long,
@@ -2283,6 +2288,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     // last_rx_us tracks inbound liveness (app frames + keepalive pongs),
     // distinct from last_activity_us which also counts our TX.
     uint64_t last_rx_us = last_activity_us;
+    uint64_t last_ws_ping_us = 0;
     bool heartbeat_sent = false;
     uint64_t last_heartbeat_us = 0;
 
@@ -2554,9 +2560,22 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // directions see traffic and middlebox idle timers (which drop the
         // idle server→device path otherwise) stay reset. This keeps the whole
         // WebSocket transport alive; Noise session health is checked above.
-        if (!did) {
-            uint64_t idle_us = esp_timer_get_time() - last_activity_us;
-            if (idle_us >= static_cast<uint64_t>(KEEPALIVE_INTERVAL_MS) * 1000) {
+        // Ping when we've sent nothing for the interval, or when nothing has
+        // come back for it even while we keep sending (pong proves the path).
+        {
+            const uint64_t now_us = esp_timer_get_time();
+            const uint64_t interval_us = static_cast<uint64_t>(KEEPALIVE_INTERVAL_MS) * 1000;
+            const uint64_t rx_idle_us = now_us - last_rx_us;
+            if (rx_idle_us >= static_cast<uint64_t>(RX_IDLE_TIMEOUT_MS) * 1000) {
+                ESP_LOGW(TAG, "nothing received for %llus; reconnecting",
+                         (unsigned long long)(rx_idle_us / 1000000));
+                end_reason = "no response from VM";
+                error = true;
+                break;
+            }
+            bool tx_idle = !did && now_us - last_activity_us >= interval_us;
+            bool rx_idle = rx_idle_us >= interval_us && now_us - last_ws_ping_us >= interval_us;
+            if (tx_idle || rx_idle) {
                 if (!ws_send_ping(tls)) {
                     ESP_LOGW(TAG, "keepalive ping failed");
                     end_reason = "WebSocket ping failed";
@@ -2564,7 +2583,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                     break;
                 }
                 ESP_LOGD(TAG, "keepalive ping sent");
-                last_activity_us = esp_timer_get_time();
+                last_activity_us = last_ws_ping_us = now_us;
                 did = true;
             }
         }
