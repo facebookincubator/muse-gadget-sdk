@@ -20,6 +20,7 @@
 #
 #   devkit     ESP32-C5 DevKitC-1 (status LED, no display)
 #   ideaspark  ideaspark ESP32 with a 1.9 inch ST7789 display
+#   c3oled     ESP32-C3 with 0.42" OLED (status text)
 #   sensecap-indicator
 #              Seeed SenseCAP Indicator (ESP32-S3) with a 4 inch display
 #   home-assistant-voice
@@ -69,6 +70,11 @@ case "$BOARD" in
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # CH340 bridge. The SenseCAP Indicator's RP2040 shows up as a usbmodem, not here.
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
+  c3oled)
+    TARGET=esp32c3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.muse-c3-oled042"
+    # The C3's USB Serial/JTAG (no UART bridge on this board).
+    PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
   reterminal-e1001|reterminal-e1002)
     TARGET=esp32s3
