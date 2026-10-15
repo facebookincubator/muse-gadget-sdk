@@ -30,6 +30,7 @@ import sys
 USJ = (0x303A, 0x1001)      # the chip's own USB Serial/JTAG
 CH342 = (0x1A86, 0x55D2)    # WCH dual UART bridge: two ports per device
 CH9102 = (0x1A86, 0x55D4)   # WCH single UART bridge
+CH340 = (0x1A86, 0x7522)    # WCH USB-UART bridge
 CH343 = (0x1A86, 0x55D3)    # WCH single UART bridge on Waveshare 7-inch LCD
 CP210X = (0x10C4, 0xEA60)   # Silicon Labs CP2104 bridge
 
@@ -58,6 +59,7 @@ USB = {
     "cardputer-adv": USJ,
     "stopwatch": USJ,
     "cores3": USJ,
+    "crowpanel-43": CH340,
     "fnk0104b": USJ,
     "jc3248w535": USJ,
     "lcd7": CH343,
@@ -69,7 +71,14 @@ USB = {
 }
 # Boards whose console takes Muse's serial commands (tools/muse/chat.py). The
 # Watcher reads them on its CH342 port with MUSE_CONSOLE_UART.
-COMMANDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "vn183", "ai-passport", "echoear")
+COMMANDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2",
+            "cardputer-adv", "stopwatch", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535",
+            "lcd7", "vn183", "ai-passport", "echoear")
+# Bridges that drop bytes when a whole packet arrives at once, so writes to them
+# go 64 bytes at a time at the line rate (paced_esptool.py, chat.Board.write).
+PACED = (CH342,)
+KINDS = {USJ: "Espressif USB Serial/JTAG", CH342: "CH342 bridge", CH9102: "CH9102 bridge", CH343: "CH343 bridge",
+         CH340: "CH340 bridge", CP210X: "CP2104 bridge"}
 # Bridges that drop bytes when a whole packet arrives at once, so writes to them
 # go 64 bytes at a time at the line rate (paced_esptool.py, chat.Board.write).
 PACED = (CH342,)

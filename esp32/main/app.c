@@ -25,14 +25,14 @@
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#if CONFIG_SPIRAM || CONFIG_MUSE_WATCHER_CAMERA
+#include "freertos/idf_additions.h"
+#endif
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "cJSON.h"
 
 #include "esp_heap_caps.h"
-#if CONFIG_MUSE_WATCHER_CAMERA
-#include "freertos/idf_additions.h"
-#endif
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_attr.h"
@@ -236,8 +236,13 @@ static BaseType_t start_confirm_timeout(TaskFunction_t task, const char *name,
     if (s_confirm_generation == generation
         && link_pairing_session_is_current(session_generation)) {
         s_confirm_session_generation = session_generation;
+#if CONFIG_SPIRAM
+        rc = xTaskCreateWithCaps(task, name, 4096, (void *)(uintptr_t)generation, 4,
+                                 &s_confirm_timeout_task, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
         rc = xTaskCreate(task, name, 4096, (void *)(uintptr_t)generation, 4,
                          &s_confirm_timeout_task);
+#endif
     }
     setup_window_lock_give();
     return rc;
@@ -1325,8 +1330,13 @@ static bool schedule_scan_refresh(bool reply_requested, bool *joined) {
         return true;
     }
 
-    if (xTaskCreate(scan_refresh_task, "scan_rfsh", 4096, NULL, 4, NULL)
-        != pdPASS) {
+#if CONFIG_SPIRAM
+    BaseType_t task_rc = xTaskCreateWithCaps(scan_refresh_task, "scan_rfsh", 4096, NULL, 4,
+                                             NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    BaseType_t task_rc = xTaskCreate(scan_refresh_task, "scan_rfsh", 4096, NULL, 4, NULL);
+#endif
+    if (task_rc != pdPASS) {
         atomic_store_explicit(&s_scan_refresh_flags, 0, memory_order_release);
         ESP_LOGE(TAG, "failed to start wifi scan task");
         return false;
@@ -2749,7 +2759,9 @@ void app_run(void) {
     } else {
         ui_set_ble("off");
         ESP_LOGI(TAG, "BLE setup disabled; long-press reset to pair again");
-#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        // A provisioned Muse device starts its optional BLE companion lazily,
+        // after muse_app_run() has reserved the internal I2S DMA buffers.
+#if CONFIG_HOMEHUB_BLE_PERSISTENT && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
         // BLE stays up beside Wi-Fi: bring the stack up before the VM session
         // fragments internal RAM, and advertise the basic service slowly.
         start_ble_setup_server_if_needed();
@@ -2757,7 +2769,7 @@ void app_run(void) {
         ble_coex_set_active(true);
         ui_set_ble("companion");
 #endif
-#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
         // so bring the stack up now; it stays silent until advertising is on.

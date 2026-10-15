@@ -69,6 +69,7 @@ BOARDS = {
     "Waveshare ESP32-C6-Touch-AMOLED-2.06": "c6-206",
     "Seeed SenseCAP Watcher": "watcher",
     "M5Stack StickS3": "sticks3",
+    "Elecrow CrowPanel Advance 4.3 V1.3": "crowpanel-43",
     "M5Stack Cardputer ADV": "cardputer-adv",
     "M5Stack StickC Plus2": "plus2",
     "M5Stack StopWatch": "stopwatch",
@@ -80,7 +81,7 @@ BOARDS = {
     "VN ESP32-S3 1.83-inch NV3023": "vn183",
     "FoloToy AI Passport": "ai-passport",
 }
-CHAT_BOARDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "vn183", "echoear")
+CHAT_BOARDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "vn183", "echoear")
 
 
 class Stop(Exception):
