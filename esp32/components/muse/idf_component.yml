@@ -77,7 +77,7 @@ dependencies:
   espressif/esp_lcd_touch_gt911:
     version: "^1.2.1"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"crowpanel_advance_43\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"crowpanel_advance_43\", \"waveshare_s3_lcd7\"]"
   espressif/esp_lcd_co5300:
     version: "^2.2.0"
     rules:
@@ -90,10 +90,6 @@ dependencies:
     version: "^2.1.1"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"guition_jc3248w535\""
-  espressif/esp_lcd_touch_gt911:
-    version: "1.2.1"
-    rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_lcd7\""
   espressif/esp_lcd_touch:
     version: "^1.2.0"
     rules:
