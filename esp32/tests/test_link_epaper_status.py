@@ -44,6 +44,254 @@ class LinkEpaperStatusTest(unittest.TestCase):
         result = subprocess.run([str(self.out / "epaper")], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_sticky_board_wiring(self):
+        overlay = (ROOT / "devices/sdkconfig.reterminal-sticky").read_text()
+        for setting in ('CONFIG_IDF_TARGET="esp32s3"',
+                        'CONFIG_MUSE_BOARD_RETERMINAL_STICKY=y',
+                        'CONFIG_HOMEHUB_LED_BACKEND_MUSE=y',
+                        'CONFIG_HOMEHUB_BUTTON_GPIO=4',
+                        'CONFIG_MUSE_CJK_FONT=y',
+                        'CONFIG_SPIRAM_MODE_OCT=y'):
+            self.assertIn(setting, overlay)
+        kconfig = (ROOT / "main/Kconfig.projbuild").read_text()
+        self.assertIn("config HOMEHUB_LED_BACKEND_STICKY_SSD1677", kconfig)
+        self.assertIn("default y if HOMEHUB_LED_BACKEND_STICKY_SSD1677", kconfig)
+        self.assertIn('"epaper_status.c" "epd_ssd1677.c"', (ROOT / "main/CMakeLists.txt").read_text())
+        helper = (ROOT / "tools/board.sh").read_text()
+        self.assertIn("reterminal-sticky)", helper)
+        self.assertIn('DEFAULTS="$DEFAULTS;devices/sdkconfig.muse;devices/sdkconfig.$BOARD"', helper)
+        self.assertIn('build-$BOARD-full', helper)
+        workflow = (ROOT.parent / ".github/workflows/esp32.yml").read_text()
+        self.assertIn('board: reterminal-sticky\n            target: esp32s3\n'
+                      '            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"',
+                      workflow)
+        self.assertIn('"boards/board_reterminal_sticky.c" "../../main/epd_ssd1677.c"',
+                      (ROOT / "components/muse/CMakeLists.txt").read_text())
+        board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
+        for part in ('esp_lcd_touch_new_i2c_gt911', 'i2s_channel_init_pdm_rx_mode',
+                     'esp_vfs_fat_sdspi_mount', 'gauge_read(0x2c', 'epd_panel_get',
+                     'gpio_set_level(GPIO_NUM_45, 0)', '.display_pause = display_pause',
+                     '.x_max = SCREEN_W', 'data->point.x = point.x',
+                     'data->point.y = sticky_touch_y(point.y);'):
+            self.assertIn(part, board)
+        main = (ROOT / "main/main.c").read_text()
+        self.assertLess(main.index("sticky_power_hold();"), main.index("diagnostic_log_init()"))
+        self.assertIn("gpio_set_level(GPIO_NUM_45, 1)", main)
+        self.assertIn("gpio_set_level(GPIO_NUM_46, 1)", main)
+        sensor = (ROOT / "main/reterminal_sht4x.c").read_text()
+        self.assertIn("SHT4X_SDA_GPIO 1", sensor)
+        self.assertIn("SHT4X_SCL_GPIO 0", sensor)
+        self.assertIn("SHT4X_I2C_PORT I2C_NUM_1", sensor)
+        self.assertIn("CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677 || CONFIG_MUSE_BOARD_RETERMINAL_STICKY", sensor)
+        self.assertIn("reTerminal Sticky*", (ROOT / "devices/README.md").read_text())
+        ui = (ROOT / "components/muse/muse_ui.c").read_text()
+        self.assertIn("font.fallback = &muse_font_cjk_16;", ui)
+        self.assertIn("s_reply_lbl = make_label(face, font, COLOR_CAPTION);", ui)
+
+    def test_sticky_link_profile_is_independent(self):
+        overlay = (ROOT / "devices/sdkconfig.reterminal-sticky-link").read_text()
+        self.assertIn("CONFIG_MUSE_BOARD_NONE=y", overlay)
+        self.assertIn("CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677=y", overlay)
+        self.assertIn("CONFIG_HOMEHUB_RETERMINAL_SHT4X=y", overlay)
+        self.assertNotIn("CONFIG_MUSE_BOARD_RETERMINAL_STICKY=y", overlay)
+        helper = (ROOT / "tools/board.sh").read_text()
+        self.assertIn("reterminal-sticky-link)", helper)
+        self.assertIn('DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"', helper)
+        workflow = (ROOT.parent / ".github/workflows/esp32.yml").read_text()
+        self.assertIn('board: reterminal-sticky-link\n            target: esp32s3\n'
+                      '            overlays: ";devices/sdkconfig.reterminal-sticky-link"', workflow)
+
+    def test_sticky_features_table_preserves_other_boards(self):
+        docs = (ROOT / "devices/README.md").read_text()
+        table = docs.split("## Features\n", 1)[1].split("*Sticky entries", 1)[0]
+        rows = [line for line in table.splitlines() if line.startswith("|")]
+        self.assertIn("reTerminal Sticky*", rows[0])
+        self.assertIn("Waveshare LCD 1.28", rows[0])
+        for row in rows[1:]:
+            self.assertEqual(row.count("|"), rows[0].count("|"), row.split("|", 2)[1])
+        columns = [[cell.strip() for cell in row.split("|")[1:-1]] for row in rows]
+        features = {row[0]: row for row in columns[2:]}
+        self.assertEqual(features["Buttons"][columns[0].index("Waveshare LCD 1.28")], "Screen only")
+        self.assertEqual(features["Battery status"][columns[0].index("Waveshare LCD 1.28")],
+                         "Voltage only (unverified)")
+        self.assertEqual(features["UI and settings"][columns[0].index("reTerminal Sticky*")],
+                         "Basic navigation checked")
+
+    def test_sticky_settings_flash_uses_internal_stack(self):
+        board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
+        settings = (ROOT / "components/muse/muse_settings.c").read_text()
+        self.assertIn('nvs_set_u16(s_nvs, "sleep_s", s.sleep_s)', settings)
+        self.assertRegex(board, r'xTaskCreatePinnedToCoreWithCaps\(lvgl_task, "sticky_ui", 8192, NULL, '
+                                r'MUSE_UI_PRIORITY,\s*&s_ui_task,\s*MUSE_UI_CORE,\s*'
+                                r'MALLOC_CAP_INTERNAL\s*\|\s*MALLOC_CAP_8BIT\)')
+
+    def test_sticky_settings_refreshes_are_epaper_safe(self):
+        ui = (ROOT / "components/muse/muse_settings_ui.c").read_text()
+        wifi = ui[ui.index("static void tick_wifi(void)"):ui.index("/* ---------- Hatch ---------- */")]
+        sleep = ui[ui.index("static void on_sleep_choice("):ui.index("/* ---------- Battery ---------- */")]
+        self.assertIn('if (muse_board->epaper)', wifi)
+        self.assertIn('"Connected to %s\\n%s"', wifi)
+        self.assertIn('tick_sleep();', sleep)
+        self.assertIn('s_sleep_rows', sleep)
+        self.assertIn('muse_board->epaper ? 30000000 : 1000000', ui)
+        self.assertIn('sleep option selected:', sleep)
+
+    def test_sticky_panel(self):
+        panel = (ROOT / "main/epd_ssd1677.c").read_text()
+        for name, pin in (("SCLK", 13), ("MOSI", 14), ("CS", 15), ("DC", 16),
+                          ("RST", 17), ("BUSY", 18), ("EN", 47)):
+            self.assertRegex(panel, rf"#define EPD_PIN_{name}\s+{pin}\b")
+        self.assertIn("while (gpio_get_level(EPD_PIN_BUSY) == 1)", panel)
+        self.assertIn(".bits_per_pixel  = 1,", panel)
+        self.assertIn(".width           = EPD_LOGICAL_W,", panel)
+        self.assertIn(".height          = EPD_LOGICAL_H,", panel)
+        self.assertIn("#define EPD_SPI_HZ      (20 * 1000 * 1000)", panel)
+        self.assertIn("epd_cmd(0x21, update_control, sizeof(update_control))", panel)
+        self.assertIn("s_partial_prepared", panel)
+        self.assertIn("if (err == ESP_OK && !full) err = epd_frame(0x26, frame)", panel)
+        self.assertIn("if (err == ESP_OK && !full) err = epd_frame(0x24, frame)", panel)
+        self.assertIn("full ? 0xF7 : 0xFF", panel)
+        for command in ("0x26", "0x24", "0x22", "0x20"):
+            self.assertIn(command, panel)
+
+    def test_sticky_portrait_mapping(self):
+        source = (ROOT / "main/epd_ssd1677.c").read_text()
+        start = source.index("static void ssd1677_transpose_rows(")
+        end = source.index("static void ssd1677_gray4_plane_rows(", start)
+        harness = (self.out / "sticky_mapping.c")
+        harness.write_text("#include <assert.h>\n#include <stdint.h>\n#include <stddef.h>\n"
+                           "#include <string.h>\n" + source[start:end] + """
+int main(void) {
+    uint8_t src[16], dst[16];
+    memset(src, 0xFF, sizeof(src));
+    src[0] &= 0x7F;
+    src[9] &= 0xEF;
+    src[15] &= 0xFE;
+    ssd1677_transpose_rows(dst, src, 0, 4, 8, 16);
+    ssd1677_transpose_rows(dst + 8, src, 4, 4, 8, 16);
+    assert(dst[0] == 0x7F && dst[1] == 0xFF);
+    assert(dst[6] == 0xFF && dst[7] == 0xBF);
+    assert(dst[14] == 0xFF && dst[15] == 0xFE);
+    static uint8_t full_src[480 * 800 / 8], full_dst[480 * 800 / 8];
+    memset(full_src, 0xFF, sizeof(full_src));
+    full_src[0] &= 0x7F;
+    full_src[799 * 60 + 59] &= 0xFE;
+    full_src[200 * 60 + 2] &= 0xEF;
+    for (int row = 0; row < 480; row += 40) {
+        ssd1677_transpose_rows(full_dst + row * 100, full_src, row, 40, 480, 800);
+    }
+    assert(full_dst[0] == 0x7F);
+    assert(full_dst[479 * 100 + 99] == 0xFE);
+    assert(full_dst[19 * 100 + 25] == 0x7F);
+    return 0;
+}
+""")
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        binary = self.out / "sticky_mapping"
+        compiled = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                                   str(harness), "-o", str(binary)], capture_output=True, text=True)
+        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+        result = subprocess.run([str(binary)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_sticky_gray4_planes(self):
+        source = (ROOT / "main/epd_ssd1677.c").read_text()
+        start = source.index("static void ssd1677_gray4_plane_rows(")
+        end = source.index("static esp_err_t epd_frame(", start)
+        harness = self.out / "sticky_gray4.c"
+        harness.write_text("#include <assert.h>\n#include <stdint.h>\n#include <stddef.h>\n"
+                           "#include <string.h>\n" + source[start:end] + """
+int main(void) {
+    uint8_t src[16] = {0xD8};
+    uint8_t high[8], low[8];
+    ssd1677_gray4_plane_rows(high, src, 0, 8, 8, 8, 1);
+    ssd1677_gray4_plane_rows(low, src, 0, 8, 8, 8, 0);
+    assert(high[0] == 0x7F && low[0] == 0x7F);
+    assert(high[1] == 0xFF && low[1] == 0x7F);
+    assert(high[2] == 0x7F && low[2] == 0xFF);
+    assert(high[3] == 0xFF && low[3] == 0xFF);
+    memset(src, 0, sizeof(src));
+    ssd1677_gray4_plane_rows(high, src, 0, 8, 8, 8, 1);
+    ssd1677_gray4_plane_rows(low, src, 0, 8, 8, 8, 0);
+    for (int i = 0; i < 8; i++) assert(high[i] == 0xFF && low[i] == 0xFF);
+    memset(src, 0xFF, sizeof(src));
+    ssd1677_gray4_plane_rows(high, src, 0, 8, 8, 8, 1);
+    ssd1677_gray4_plane_rows(low, src, 0, 8, 8, 8, 0);
+    for (int i = 0; i < 8; i++) assert(high[i] == 0 && low[i] == 0);
+    return 0;
+}
+""")
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        binary = self.out / "sticky_gray4"
+        compiled = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                                   str(harness), "-o", str(binary)], capture_output=True, text=True)
+        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+        result = subprocess.run([str(binary)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("epd_gray4_frame(0x24, frame, 1)", source)
+        self.assertIn("epd_gray4_frame(0x26, frame, 0)", source)
+        self.assertIn("const uint8_t refresh = 0xD7", source)
+        status = (ROOT / "main/epaper_status.c").read_text()
+        self.assertIn("s_panel->update_gray4(s_gray4_frame)", status)
+        self.assertIn("return s_panel->update_gray4 ? 2 : s_panel->bits_per_pixel", status)
+
+    def test_sticky_touch_maps_screen_edges(self):
+        board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
+        self.assertIn("static uint16_t sticky_touch_y(", board)
+        start = board.index("static uint16_t sticky_touch_y(")
+        end = board.index("static void touch_read(", start)
+        harness = self.out / "sticky_touch_y.c"
+        harness.write_text("#include <assert.h>\n#include <stdint.h>\n#define SCREEN_H 800\n"
+                           + board[start:end] + """
+int main(void) {
+    assert(sticky_touch_y(0) == 799);
+    assert(sticky_touch_y(12) == 787);
+    assert(sticky_touch_y(399) == 400);
+    assert(sticky_touch_y(766) == 33);
+    assert(sticky_touch_y(799) == 0);
+    assert(sticky_touch_y(800) == 0);
+    return 0;
+}
+""")
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        binary = self.out / "sticky_touch_y"
+        compiled = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                                   str(harness), "-o", str(binary)], capture_output=True, text=True)
+        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+        result = subprocess.run([str(binary)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("data->point.x = point.x < SCREEN_W ? point.x : SCREEN_W - 1;", board)
+        self.assertIn("data->point.y = sticky_touch_y(point.y);", board)
+
+    def test_sticky_ui_gray4_pixels(self):
+        source = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
+        start = source.index("static void rgb565_to_gray4(")
+        end = source.index("static void epd_task(", start)
+        harness = self.out / "sticky_ui_gray4.c"
+        harness.write_text("#include <assert.h>\n#include <stdbool.h>\n#include <stdint.h>\n"
+                           "#include <stddef.h>\n#include <string.h>\n" + source[start:end] + """
+int main(void) {
+    uint16_t src[] = {0x0000, 0x4208, 0x8410, 0xffff,
+                      0xffff, 0xffff, 0xffff, 0xffff};
+    uint8_t dst[2], shown[2];
+    rgb565_to_gray4(dst, src, 4, 2);
+    assert(dst[0] == 0x1b && dst[1] == 0xff);
+    assert(gray4_needs_refresh(dst, shown, sizeof(dst), false));
+    memcpy(shown, dst, sizeof(dst));
+    assert(!gray4_needs_refresh(dst, shown, sizeof(dst), true));
+    shown[1] = 0;
+    assert(gray4_needs_refresh(dst, shown, sizeof(dst), true));
+    return 0;
+}
+""")
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        binary = self.out / "sticky_ui_gray4"
+        compiled = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                                   str(harness), "-o", str(binary)], capture_output=True, text=True)
+        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+        result = subprocess.run([str(binary)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_draw_url_states_the_bit_depth(self):
         noise = (ROOT / "main/noise_control.cpp").read_text()
         start = noise.index("#if CONFIG_HOMEHUB_DISPLAY_COMMANDS")
@@ -67,8 +315,9 @@ class LinkEpaperStatusTest(unittest.TestCase):
         for r, g, b, name in inks:
             self.assertIn(f"{name} #{int(r):02x}{int(g):02x}{int(b):02x}", text)
         self.assertIn("led_status_display_bits", driver)
-        self.assertIn("return s_panel->bits_per_pixel;", driver)
-        for panel, bits in (("epd_spectra6.c", 4), ("epd_uc8179.c", 1), ("epd_ssd1681.c", 1)):
+        self.assertIn("return s_panel->update_gray4 ? 2 : s_panel->bits_per_pixel;", driver)
+        for panel, bits in (("epd_spectra6.c", 4), ("epd_uc8179.c", 1),
+                            ("epd_ssd1681.c", 1), ("epd_ssd1677.c", 1)):
             self.assertRegex((ROOT / "main" / panel).read_text(),
                              rf"\.bits_per_pixel\s*=\s*{bits},", panel)
 
@@ -79,6 +328,8 @@ class LinkEpaperStatusTest(unittest.TestCase):
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c"\)\s*'
+                                r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1681.c"\)\s*'
                                 r'else\(\)\s*'

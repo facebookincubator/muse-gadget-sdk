@@ -78,7 +78,7 @@ void muse_app_run(const muse_board_t *board)
 
     /* Let the boot animation (flame ignites, eyes open) play out. */
     vTaskDelay(pdMS_TO_TICKS(1400));
-    if (!board->audio_init) {
+    if (!board->audio_init && !board->mic_init) {
         ESP_LOGI(TAG, "display-only board: no microphone or speaker");
         muse_state_set_mode(MUSE_MODE_IDLE);
         muse_state_set_caption("%s", "");

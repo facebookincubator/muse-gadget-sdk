@@ -39,6 +39,10 @@ menu "Muse"
             bool "OSTB EchoEar-2ST (360px round touch LCD, experimental)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_RETERMINAL_STICKY
+            bool "Seeed reTerminal Sticky (480x800 touch e-paper, experimental)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_S3_216
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16"
             depends on IDF_TARGET_ESP32S3
@@ -122,6 +126,7 @@ menu "Muse"
         default "waveshare_s3_175c" if MUSE_BOARD_WAVESHARE_S3_175C
         default "waveshare_s3_175" if MUSE_BOARD_WAVESHARE_S3_175
         default "ostb_echoear_2st" if MUSE_BOARD_OSTB_ECHOEAR_2ST
+        default "reterminal_sticky" if MUSE_BOARD_RETERMINAL_STICKY
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
         default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
         default "aipi" if MUSE_BOARD_AIPI

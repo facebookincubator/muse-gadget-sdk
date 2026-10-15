@@ -127,6 +127,12 @@ jobs:
           - board: reterminal-e1002
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-e1002"
+          - board: reterminal-sticky
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"
+          - board: reterminal-sticky-link
+            target: esp32s3
+            overlays: ";devices/sdkconfig.reterminal-sticky-link"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"

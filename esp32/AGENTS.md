@@ -54,6 +54,8 @@ before adding a feature to one.
 | Seeed SenseCAP Indicator | `esp32s3` | `devices/sdkconfig.sensecap-indicator` | `tools/board.sh sensecap-indicator` |
 | Seeed reTerminal E1001 | `esp32s3` | `devices/sdkconfig.reterminal-e1001` | `tools/board.sh reterminal-e1001` |
 | Seeed reTerminal E1002 | `esp32s3` | `devices/sdkconfig.reterminal-e1002` | `tools/board.sh reterminal-e1002` |
+| Seeed reTerminal Sticky (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky` | `tools/board.sh reterminal-sticky` |
+| Seeed reTerminal Sticky Link status (experimental) | `esp32s3` | `devices/sdkconfig.reterminal-sticky-link` | `tools/board.sh reterminal-sticky-link` |
 | Home Assistant Voice Preview Edition | `esp32s3` | `devices/sdkconfig.home-assistant-voice` | `tools/board.sh home-assistant-voice` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-lite` | `tools/board.sh seeed-respeaker-lite` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
@@ -115,7 +117,8 @@ idf.py build                    # -> build/muse-gadget.bin, config in build/sdkc
 
 `tools/board.sh BOARD [build|flash|monitor|flash-monitor] [PORT]` sets the
 target and overlays and gives each board its own `build-<board>/` directory
-and `build-<board>/sdkconfig`:
+and `build-<board>/sdkconfig` (Sticky's full UI uses
+`build-reterminal-sticky-full/` to avoid an older Link sdkconfig):
 
 ```sh
 tools/board.sh sensecap-indicator build
@@ -125,6 +128,11 @@ tools/board.sh ideaspark flash-monitor /dev/cu.usbserial-110
 Without a port it uses the only matching serial port, and fails if it finds
 none or more than one. If `idf.py` is not on `PATH`, it sources `export.sh`
 from `$IDF_PATH`, `~/esp/esp-idf-v6.0.1`, `~/esp/esp-idf-v6` or `~/esp/esp-idf`.
+The Sticky Muse and Link status profiles have separate build directories:
+`build-reterminal-sticky-full/` and `build-reterminal-sticky-link/`. An older
+`build-reterminal-sticky/` may still contain a generated Link sdkconfig: do not
+reuse it for Muse. Set the SDK token in the chosen build directory through
+`idf.py -B <dir> menuconfig`.
 
 ### Home Assistant Voice Preview Edition
 
@@ -465,6 +473,10 @@ The device still needs to be paired once for its token.
   TCP buffer sizes or cJSON nesting limit.
 - Edit per-build settings with `idf.py -B <dir> menuconfig` (under "ESP32
   Device SDK"). Don't commit a generated `sdkconfig`: it's gitignored for a reason.
+- Sticky's LVGL task stack must be in internal RAM: touch settings callbacks
+  write NVS synchronously, and flash writes disable the cache. A PSRAM UI task
+  stack asserts in `esp_task_stack_is_sane_cache_disabled()` when changing a
+  setting. The RGB565 framebuffer can remain in PSRAM.
 - OTA is off by default (`CONFIG_HOMEHUB_OTA_ENABLED=n`, version `999.0.0`),
   except on boards with the full UI. Set a version with `-DPROJECT_VER=1.0.0` or
   `version.txt`.

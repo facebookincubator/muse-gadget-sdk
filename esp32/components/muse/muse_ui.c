@@ -168,6 +168,7 @@ static int s_preview_brightness = -1;
 static int s_shown_page = -1;
 static int s_shown_speaker = -1;
 static muse_mode_t s_last_mode = MUSE_MODE_COUNT;
+static muse_mode_t s_last_epaper_pose = MUSE_MODE_COUNT;
 
 /*
  * While Muse is thinking or speaking it shrinks to make room for the reply:
@@ -1314,7 +1315,8 @@ static void update_chrome(float now)
     muse_wifi_status_t w;
     muse_wifi_status(&w);
     bool joining = w.state == MUSE_WIFI_CONNECTING || w.state == MUSE_WIFI_FAILED;
-    const char *wifi = w.state == MUSE_WIFI_CONNECTED || (joining && (int)(now * 2) % 2 == 0) ? LV_SYMBOL_WIFI : "";
+    const char *wifi = w.state == MUSE_WIFI_CONNECTED ||
+                       (joining && (muse_board->epaper || (int)(now * 2) % 2 == 0)) ? LV_SYMBOL_WIFI : "";
     if (strcmp(wifi, lv_label_get_text(s_wifi_icon)) != 0) {
         lv_label_set_text(s_wifi_icon, wifi);
     }
@@ -1520,7 +1522,7 @@ static void update_status(muse_mode_t mode, float now)
     int answer = -1;
     if (s_reply_lbl) {
         /* The speaker picks the layout, even mid-reply: the voice task pages to fit. */
-        int layout = muse_settings_speaker_on() ? ANSWER_HEARD : ANSWER_READ;
+        int layout = muse_board->audio_init && muse_settings_speaker_on() ? ANSWER_HEARD : ANSWER_READ;
         if (layout != s_page_for) {
             muse_state_set_page(s_answers[layout].cols, s_answers[layout].lines);
             s_page_for = layout;
@@ -1651,8 +1653,11 @@ static void frame_tick(lv_timer_t *timer)
         .level = s_level,
         .happy = muse_state_happiness(),
     };
-    muse_pixel_render(&pose);
-    invalidate_muse();
+    if (!muse_board->epaper || mode != s_last_epaper_pose) {
+        muse_pixel_render(&pose);
+        invalidate_muse();
+        s_last_epaper_pose = mode;
+    }
 
     update_status(mode, now);
 }
@@ -1718,7 +1723,7 @@ void muse_ui_show_face(void)
         return;
     }
     lv_obj_add_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE);
-    lv_tileview_set_tile(s_tv, s_face, LV_ANIM_ON);
+    lv_tileview_set_tile(s_tv, s_face, muse_board->epaper ? LV_ANIM_OFF : LV_ANIM_ON);
 }
 
 void muse_ui_set_swipe_enabled(bool enabled)
