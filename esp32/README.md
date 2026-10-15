@@ -262,7 +262,11 @@ for how it works and for boards that need the manual steps.
 
 To give Muse a command of its own, such as reading a sensor or switching a
 relay, advertise it in `link.register` and handle it in `main/app.c`.
-[`AGENTS.md`](AGENTS.md#adding-a-command) walks through it.
+[`AGENTS.md`](AGENTS.md#adding-a-command) walks through it. Going the other
+way, your code can ask the VM for the chat history, or read and write files
+in the user's home on the VM, over Link's session, on every board:
+[`AGENTS.md`](AGENTS.md#requests-to-muses-vm-from-your-code) has the routes
+and limits.
 
 To show your phone's camera on a board's screen, build it with
 `MUSE_VIDEO=1 tools/muse/board.sh build <board>` and run Muse Gadgets Test
@@ -288,6 +292,34 @@ things you can change:
   [`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
   is the spot: it has the reply text, and the MP3 decoder, speaker and volume
   are already wired up there.
+
+To talk with Muse live instead (experimental), turn on "Live voice calls with
+Muse" under Muse in `idf.py menuconfig` (`CONFIG_MUSE_REALTIME_VOICE`). It's
+offered on boards with the full UI and PSRAM and on the Voice PE and reSpeaker
+Lite. The DevKitC-1 and other boards without a mic and speaker don't have it,
+and builds without it don't change. With it on:
+
+- **StopWatch:** hold yellow to talk or interrupt playback; release to let Muse
+  answer without ending the call. A capture tail of up to 120 ms preserves the
+  last syllable. Tap blue to hang up. With calls built in, yellow is the talk
+  button and blue the speaker button (mute outside a call), the other way round
+  from builds without them; red stays power. Use **Settings > Sound > Voice notes** for
+  the old note-and-text mode. Interrupting playback does not cancel detached
+  background work, whose results may arrive later.
+- **Other boards:** tap the talk button to start a call, press again to hang up;
+  holding still sends a voice note. The mic is off while Muse talks, except on
+  the Voice PE when its audio chip reports echo cancellation.
+- A call also ends when Muse ends it, after 45 seconds of quiet (not counting
+  time Muse is still working on something), or after 15 minutes. Muse may not
+  hang up by itself when it says goodbye: press to end the call. If the
+  connection drops mid-call, the gadget ends that call on Muse when it
+  reconnects (not after a power loss or restart: Muse ends it a minute or so
+  later).
+- On the Voice PE, the mute switch hangs up, and nothing the mic picked up
+  after it went on is sent.
+- Muse doesn't say hello unless you turn that on
+  (`CONFIG_MUSE_REALTIME_VOICE_GREETING`).
+- The Muse VM has to accept voice calls from the gadget.
 
 A few things worth knowing:
 

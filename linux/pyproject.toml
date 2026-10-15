@@ -32,6 +32,7 @@ musegadget = "musegadget.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest"]
+voice = ["sounddevice>=0.5,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

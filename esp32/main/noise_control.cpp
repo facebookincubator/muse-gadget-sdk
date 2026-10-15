@@ -76,13 +76,6 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #else
 #define SHOW_AGENT_NAME 0
 #endif
-// Extra daemon requests (noise_ctrl_req_*): Muse's chat, and display.draw_file
-// reading an image from the VM.
-#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_DISPLAY_COMMANDS
-#define NOISE_REQUESTS 1
-#else
-#define NOISE_REQUESTS 0
-#endif
 
 #define RECONNECT_MIN_MS          1000
 #define RECONNECT_MAX_MS          15000
@@ -1019,9 +1012,9 @@ static bool tunnel_send_body_inplace(void *vctx, uint8_t *buf, size_t headroom,
 
 // ---- Extra daemon requests (noise_ctrl_req_*) --------------------------------
 
-// Only Muse and display.draw_file open these; other Link-only gateways get the
-// empty stubs below.
-#if NOISE_REQUESTS
+// Opened by Muse and by an app's own code (CONFIG_HOMEHUB_DAEMON_REQUESTS);
+// builds without it get the empty stubs below.
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
 
 // Stream ids from here up belong to these requests; lower ids are Link's own.
 #define REQ_STREAM_BASE 16
@@ -1029,8 +1022,14 @@ static bool tunnel_send_body_inplace(void *vctx, uint8_t *buf, size_t headroom,
 #define REQ_QUEUE_LEN   6
 #define REQ_MAX_HEADERS 6
 // Body bytes queued at once. Without PSRAM a larger backlog leaves no block big
-// enough for mbedTLS's per-write record buffer, and the session drops.
-#define REQ_QUEUE_BYTES (SMALL_CONTROL_SESSION ? 4096 : 16384)
+// enough for mbedTLS's per-write record buffer, and the session drops: on any
+// board without it, Muse or not.
+#if SMALL_CONTROL_SESSION || !CONFIG_SPIRAM
+#define REQ_LOW_RAM 1
+#else
+#define REQ_LOW_RAM 0
+#endif
+#define REQ_QUEUE_BYTES (REQ_LOW_RAM ? 4096 : 16384)
 // Largest free block a request send needs: the TLS record plus overhead.
 #define REQ_TLS_BLOCK   (CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN + 512)
 
@@ -1156,7 +1155,7 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
     int32_t queued = s_req_queued_bytes;
     if (!noise_tx_has_dma_headroom_reclaiming(queued > 0 ? (size_t)queued : 0)
         || !noise_tx_has_contiguous_dma_headroom()) return true;
-    if (SMALL_CONTROL_SESSION
+    if (REQ_LOW_RAM
         && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < REQ_TLS_BLOCK) return true;
     req_op op;
     if (!req_take(&op)) return true;
@@ -1223,7 +1222,7 @@ static void req_init(void) {
 static void req_init(void) {}
 static void req_end_all(void) {}
 static bool req_on_frame(const DecodedServiceFrame &) { return false; }
-#endif  // NOISE_REQUESTS
+#endif  // CONFIG_HOMEHUB_DAEMON_REQUESTS
 
 // ---- Agent identity ----------------------------------------------------------
 
@@ -2218,7 +2217,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 auto &frame = inbound.frame;
                 bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
                 if (req_on_frame(frame)) {
-                    // One of the extra requests (Muse, display.draw_file).
+                    // One of the extra daemon requests.
                 } else if (frame.stream_id == IDENTITY_STREAM_ID) {
                     identity_on_frame(identity, frame);
                 } else if (frame.kind == ServiceFrameKind::BodyChunk) {
@@ -2342,7 +2341,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
             }
         }
 
-#if NOISE_REQUESTS
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
         {
             bool sent = false;
             if (!req_pump_tx(tls, session, svc_scratch, env_scratch, ws_buf, &sent)) {
@@ -2590,7 +2589,7 @@ extern "C" void noise_ctrl_send_command_result(
     queue_result(session_generation, request_id, result);
 }
 
-#if NOISE_REQUESTS
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
 extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
                                        const char *const *headers, bool end_body,
                                        noise_ctrl_req_cb cb, void *ctx) {
@@ -2661,4 +2660,4 @@ extern "C" void noise_ctrl_req_cancel(int64_t id) {
 extern "C" size_t noise_ctrl_req_max_body(void) {
     return SVC_FRAME_SCRATCH - REQ_FRAME_OVERHEAD;
 }
-#endif  // NOISE_REQUESTS
+#endif  // CONFIG_HOMEHUB_DAEMON_REQUESTS

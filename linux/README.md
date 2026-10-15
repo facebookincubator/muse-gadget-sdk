@@ -96,6 +96,170 @@ Ask Muse things like:
 
 > Every morning at 7, check if my Pi's backups ran and tell me if they didn't.
 
+## Realtime voice (WAV first)
+
+On an already paired host, run a call against an **exact leased VM ID**:
+
+```sh
+musegadget voice-call --vm-id YOUR_VM_ID --in-wav question.wav --out-wav reply.wav
+```
+
+Input is uncompressed **PCM16LE, mono, 24 kHz**. The client sends up to 960
+samples every 40 ms and writes played reply audio to the output WAV. Initial
+all-zero media keepalives are omitted; once playback starts, silence is kept to
+preserve pauses without extending call activity. It does not resample. Input EOF
+continues a quiet microphone stream (one 960-sample zero frame every 40 ms) so
+automatic speech endpointing can finish; it sends neither a manual commit nor end-call.
+Quiet input neither renews activity nor bypasses hold/playback gates. The client
+keeps receiving until remote hang-up, Ctrl-C, or a
+45-second inactivity / 300-second overall timeout. Adjust these with
+`--idle-timeout` and `--overall-timeout`. The VM has one active call: a new
+call can replace a phone or another device's call. These timers are client
+behavior, not server-enforced limits for a paired device. Treat output WAVs as
+private recordings.
+
+Credentials come only from the existing host-local pairing store and the
+normal VM lookup. `--vm-id` never changes your account's default VM and never
+falls back to it. If lookup rejects an expired device token, let the normal
+`musegadget run` service refresh it first. Do not copy tokens into command-line
+arguments. The voice connection uses a **voice-only Noise transport**: it never
+opens `/link-control` or sends `link.register`, so it cannot replace the normal
+run service's live transport for the same persistent device identity. That
+identity is used only for call attribution. Use `--thread-id` when targeting a
+particular conversation. Every invocation admits a fresh call; resume/session-ID
+targeting is not supported.
+
+`--app-id` defaults to the protocol's `hatch-web` identity; a configured positive
+signed 64-bit integer is also accepted. It is sent in the **Noise upgrade query**,
+not a per-request header, and stays fixed for that connection. Other SDK sessions
+keep their existing behavior. The server must admit paired devices to both
+`/voice/realtime` and `/voice/end-call`; a client cannot bypass server admission.
+
+For a microphone and speaker, install the optional extra (and the system
+PortAudio library), then use `--live` instead of WAV flags:
+
+```sh
+python -m pip install 'musegadget[voice]'
+musegadget voice-call --vm-id YOUR_VM_ID --live
+```
+
+Half duplex is the default: microphone input is gated during audible playback
+and a short settling tail. Silent media does not mute the mic or extend idle
+life. `--full-duplex` disables this echo protection; use headphones or your own
+AEC. `--mic-threshold 500` optionally filters quiet microphone input by RMS level
+(0 disables it; range 0–32767). After a 400 ms speech tail, filtered frames become
+paced zeros, not missing audio, so speech detection still receives silence. The
+provider owns turn boundaries: neither threshold muting nor EOF sends a manual
+commit that could detach the final transcript from its speech-start identity.
+Quiet frames do not extend inactivity. Live capture buffers only the newest 320 ms;
+input captured while held/gated is discarded rather than replayed later. WAV
+input pauses instead. Server input-hold events pause appends.
+Speech-start and `VoiceCall.barge_in()` flush playback and fence interrupted
+provider response IDs for the rest of the call. A new caller input and matching
+turn admit the next reply; a bounded prefix waits for that confirmation. After
+interruption, missing provider/input lineage stays muted, with no timer-based
+unmute. ID or audio-buffer exhaustion ends the call rather than forgetting IDs.
+`barge_in()` also best-effort cancels a known open mapper response; new speech,
+not that cancellation, preempts the server's speech model. A delayed background
+reply without lineage after a confirmed turn cannot be distinguished from that
+turn's continuation.
+
+The client validates HTTP success and call readiness before uploading audio.
+It handles both continuous audio and legacy audio-delta records, ignores unknown
+events, and never treats a cancelled response or a settled turn as call EOF.
+End-call carries the client call ID, start/end timestamps and admitted thread ID,
+including on cancellation and remote close. Cleanup has a deadline, and cleanup
+failures never replace the original call error. A broken connection can prevent
+an end-call acknowledgment; the SDK does not claim otherwise. This one-shot
+voice client does not reconnect: the VM may retain the call through its grace
+windows or another client's takeover until the owner ends it or a new call
+replaces it.
+
+**Limits:** response queue 2 MiB / 256 chunks, NDJSON line 1 MiB, one decoded
+audio event 4 seconds, playback and unconfirmed-reply queues 5 seconds each,
+upload chunk 64 KiB. Exceeding a bound fails the Linux call instead of
+accumulating unbounded latency; ESP32 can instead drop an unconfirmed reply
+and show REPLY MISSED. File and
+protocol tests are hardware-free. Live sound-device behavior still needs testing
+on your audio setup.
+
+**Server compatibility:** this client does not advertise `ui.set.voice.end_call`,
+so a spoken goodbye is not guaranteed to hang up. Use explicit hang-up or the
+client timers. The SDK still honors the existing
+`conversation.item.added` / `session_control` / `stop` shape
+on the admitted call's realtime response stream. The item's `call_id` is a
+**control ID**, not the voice call ID; the dedicated stream provides the call
+boundary. Stops are terminal and processed once, and cleanup ignores subsequent
+records. On a stop or remote EOF the client drains queued
+speech for at most 5.2 seconds, then explicitly ends the call. Without that
+server support, use explicit hang-up or the client idle timer. The SDK adds no
+server events or permissions itself.
+
+### Lifecycle diagnostics
+
+Operation-level server errors after readiness are advisory; they increment
+`VoiceCall.advisory_error_count` without logging the server's message or ending
+the call. Admission errors and explicit `session_dead` remain fatal. An active
+`hatch.voice.turn_started` pauses the idle timer during silent asynchronous work,
+including Companion work. Settlement must match a known submission ID and caller
+input item; stale or unidentified settlements cannot clear newer work. A matched
+settlement gives the idle timer a fresh window. The overall timeout always applies,
+and tracking is bounded to 64 active and 1,024 settled submissions. Settled
+identities remain for the whole call; exhaustion fails closed rather than
+forgetting lineage.
+
+`end_call_acknowledged` reports a validated end-call response. If media EOF then
+stalls, a successful bounded stream reset preserves the acknowledged hangup;
+`media_drain_incomplete` records that fallback. A missing end-call ACK is still a
+cleanup failure.
+
+### Streaming API
+
+`LinkSession.stream_request()` exposes independent request and response bodies:
+
+```python
+stream = await session.stream_request("POST", "/your-stream")
+async with stream:
+    await stream.send_body(b'{"message":"hello"}\n')
+    await stream.wait_response()  # raises HTTPStatusError on non-2xx
+    # Consume response chunks now, before finishing the upload if needed.
+    chunk = await stream.read()   # bytes, or None at EOF
+    await stream.half_close()     # upload EOF only
+    async for chunk in stream:
+        consume(chunk)
+```
+
+Use `musegadget.streaming.read_ndjson(stream)` for bounded fragmented records.
+Callers own their deadlines (for example `asyncio.wait_for`) and must close
+abandoned streams. A slow consumer fails only its stream, not the multiplexed
+control channel. `send_chat()` still returns its buffered acknowledgment.
+
+### History and user-VM files
+
+On servers that enable these device-token operations, the existing
+`LinkSession.request()` API can use `GET /chat/history?limit=1` and
+`POST /fs/read` / `POST /fs/write`. File paths follow the server's existing
+home-relative rules; they are not limited to `workspace/`. No list, stat,
+upload, or deletion API is implied by this access.
+
+Send file requests with `Content-Type: application/json`. For example:
+
+```json
+{"path":"gadget-data/example.txt","offset":0,"len":4096}
+```
+
+```json
+{"path":"gadget-data/example.txt","text":"hello","overwrite":false,"append":false,"create_parent":true}
+```
+
+`read` returns `data_base64`, optional UTF-8 `text`, and `eof` under the
+existing `{ok,result}` response envelope. Read until `eof`, not a guessed file
+size. `write` accepts exactly one of `text` or `data_base64`; the three booleans
+are required. `append` supports chunked writes, but several requests are not one
+atomic upload. Buffered SDK replies are limited to 1 MiB, so use modest read
+lengths and history pages. Keep the acknowledgment from `send_chat()` when
+correlating history entries with your request.
+
 ## Hack and extend it
 
 Programs on the machine can send messages to Muse, with no credentials of

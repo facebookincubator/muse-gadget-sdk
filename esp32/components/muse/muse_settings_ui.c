@@ -23,6 +23,7 @@
 #include "esp_app_desc.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
 
 #include "muse_audio.h"
 #include "muse_battery.h"
@@ -102,6 +103,9 @@ static int64_t s_sdk_token_bad_us;   /* when an invalid SDK token was entered */
 static lv_obj_t *s_ble_sw, *s_ble_status;
 
 /* Sound page. */
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+static lv_obj_t *s_notes_sw;
+#endif
 static lv_obj_t *s_spk_sw, *s_vol_val, *s_vol_sl, *s_gain_val, *s_gain_sl, *s_bright_val, *s_bright_sl, *s_mic_bar, *s_mic_val;
 
 /* Sleep page. */
@@ -1042,6 +1046,13 @@ static void on_speaker_sw(lv_event_t *e)
     muse_settings_set_speaker_on(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
 
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+static void on_notes_sw(lv_event_t *e)
+{
+    muse_settings_set_voice_notes(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+#endif
+
 static void on_volume(lv_event_t *e)
 {
     int v = lv_slider_get_value(s_vol_sl);
@@ -1080,6 +1091,11 @@ static void build_sound_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_sound = page(tile, "SOUND", true, &list);
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+    s_notes_sw = switch_row(list, "Voice notes", muse_settings_voice_notes(), on_notes_sw);
+    note(list, "Off: hold yellow to talk live, release to listen; blue ends the call. "
+               "On: hold yellow to send a voice note. Applies to the next call.");
+#endif
     if (muse_board->audio_init) {
         s_spk_sw = switch_row(list, "Speaker", muse_settings_speaker_on(), on_speaker_sw);
         s_vol_sl = slider(list, "Volume", 0, 100, muse_settings_volume(), &s_vol_val, on_volume);
@@ -1116,6 +1132,9 @@ static void build_sound_page(lv_obj_t *tile)
 
 static void tick_sound(void)
 {
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+    lv_obj_set_state(s_notes_sw, LV_STATE_CHECKED, muse_settings_voice_notes());
+#endif
     bool on = muse_settings_speaker_on();   /* also toggled from the face */
     if (s_spk_sw && on != lv_obj_has_state(s_spk_sw, LV_STATE_CHECKED)) {
         lv_obj_set_state(s_spk_sw, LV_STATE_CHECKED, on);
