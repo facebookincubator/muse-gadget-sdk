@@ -25,6 +25,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 
+#include "muse_lang.h"
 #include "muse_text.h"
 
 #define HAPPY_SECS 1.6f
@@ -47,6 +48,7 @@ static SemaphoreHandle_t s_format_lock;
 static EventGroupHandle_t s_wake;
 static volatile int s_page_cols = 16, s_page_lines = 2;
 static volatile int s_cjk_cols, s_cjk_lines;
+static volatile int s_latin_cols, s_latin_lines;
 static muse_power_t s_power = { .battery_pct = -1 };
 static volatile bool s_as_if_battery;
 
@@ -114,9 +116,15 @@ void muse_state_set_caption(const char *fmt, ...)
     xSemaphoreTake(s_format_lock, portMAX_DELAY);
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
+    /* A format the screen's language has ("LISTENING %.1fs"), then a caption
+     * passed whole as "%s" (a turn's failure). */
+    vsnprintf(buf, sizeof(buf), muse_lang_message(fmt), ap);
     va_end(ap);
-    muse_text_to_ascii(buf, sizeof(buf));   /* replies have curly quotes and dashes */
+    const char *shown = muse_lang_message(buf);
+    if (shown != buf) {
+        strlcpy(buf, shown, sizeof(buf));
+    }
+    muse_text_to_caption(buf, sizeof(buf));   /* replies have curly quotes and dashes */
 
     portENTER_CRITICAL(&s_lock);
     if (strcmp(buf, s_caption) != 0) {
@@ -152,11 +160,24 @@ void muse_state_set_cjk_page(int cols, int lines)
     s_cjk_lines = lines;
 }
 
-void muse_state_page(bool cjk, int *cols, int *lines)
+void muse_state_set_latin_page(int cols, int lines)
 {
-    bool own = cjk && s_cjk_cols > 0;
-    *cols = own ? s_cjk_cols : s_page_cols;
-    *lines = own ? s_cjk_lines : s_page_lines;
+    s_latin_cols = cols;
+    s_latin_lines = lines;
+}
+
+void muse_state_page(const char *text, int *cols, int *lines)
+{
+    if (s_cjk_cols > 0 && muse_text_has_cjk(text)) {
+        *cols = s_cjk_cols;
+        *lines = s_cjk_lines;
+    } else if (s_latin_cols > 0 && muse_text_has_latin(text)) {
+        *cols = s_latin_cols;
+        *lines = s_latin_lines;
+    } else {
+        *cols = s_page_cols;
+        *lines = s_page_lines;
+    }
 }
 
 void muse_state_set_power(const muse_power_t *power)
