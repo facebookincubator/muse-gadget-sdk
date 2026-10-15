@@ -1,0 +1,75 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ESP32-2432S028 "Cheap Yellow Display": classic ESP32 with a 240x320 ILI9341
+# display (status backend), 4 MB flash, no PSRAM and a CH340 USB-UART bridge.
+# Load last, after sdkconfig.defaults (see README.md in this directory).
+#
+# Status-backend port (ideaspark pattern): the display shows pairing status,
+# status bars, animation and agent name. The XPT2046 resistive touch controller
+# is not used by the status backend. 4 MB flash leaves no room for OTA: single
+# factory app slot (see partitions_cyd_4mb.csv).
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# CYD ILI9341 status display; no status LED: the display shows the status
+# colour in edge bars.
+CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341=y
+# Advertise as <prefix>-Disp-XXXXXX to tell this board apart from real devices:
+# MuseGadget-Disp in the open-source build, HomeLink-Disp in the internal one.
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# BOOT button, active low.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+
+# 4 MB flash with a custom single-app partition table (no OTA).
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_cyd_4mb.csv"
+# DIO is the safe mode for the unknown flash part on this board.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# Signed apps without Secure Boot use the Secure Boot V2 (RSA) scheme, which
+# the ESP32 supports from chip revision 3.0 (ESP32-D0WD-V3).
+CONFIG_ESP32_REV_MIN_3=y
+
+# No PSRAM. mbedtls and every PSRAM-preferred buffer fall back to internal RAM.
+CONFIG_SPIRAM=n
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
+# 16 KB TLS records in both directions would cost 32 KB of internal RAM per
+# connection. Servers may still send 16 KB records, so only shrink outbound.
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+
+# Release the classic Bluetooth controller memory; pairing is BLE only.
+CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
+CONFIG_BTDM_CTRL_MODE_BTDM=n
+
+# Fewer static Wi-Fi RX buffers (1.6 KB each, always resident). The RX block-ack
+# window may be at most twice the static buffer count.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_RX_BA_WIN=16
+CONFIG_ESP_WIFI_TX_BA_WIN=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+
+# The ESP32 has far less IRAM than the C5; keep lwIP and Wi-Fi hot paths in
+# flash so the image links.
+CONFIG_LWIP_IRAM_OPTIMIZATION=n
+CONFIG_LWIP_EXTRA_IRAM_OPTIMIZATION=n
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+
+# No PSRAM: the home-network tunnel and network discovery do not fit next to
+# the control session. Only the control API to the VM is available.
+CONFIG_HOMEHUB_TUNNEL=n

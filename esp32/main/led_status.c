@@ -46,7 +46,11 @@
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_st7789.h"
-#else
+#elif CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+#include "driver/spi_master.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_ili9341.h"
+#elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701
 #include "driver/i2c_master.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_rom_sys.h"
@@ -129,6 +133,26 @@ static const char *TAG = "link.led";
 #define LCD_DOT_MARGIN   4
 // Draw buffers are sent by SPI DMA.
 #define LCD_BUF_CAPS     MALLOC_CAP_DMA
+#elif CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+// ESP32-2432S028 "Cheap Yellow Display": 240x320 ILI9341 panel on SPI2.
+// The XPT2046 resistive touch controller is not used by the status backend.
+// RST is tied to EN; the backlight is GPIO21 on most revisions.
+#define LCD_NAME         "CYD ILI9341"
+#define LCD_HOST         SPI2_HOST
+#define LCD_PIN_SCLK     14
+#define LCD_PIN_MOSI     13
+#define LCD_PIN_CS       15
+#define LCD_PIN_DC       2
+#define LCD_PIN_RST      -1
+#define LCD_PIN_BL       21
+#define LCD_PCLK_HZ      (40 * 1000 * 1000)
+#define LCD_H_RES        240
+#define LCD_V_RES        320
+#define LCD_BAR_ROWS     10
+#define LCD_ANIM_SCALE   4
+#define LCD_DOT_MARGIN   6
+// Draw buffers are sent by SPI DMA.
+#define LCD_BUF_CAPS     MALLOC_CAP_DMA
 #elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701
 // SenseCAP Indicator: 480x480 ST7701S panel on a 16-bit RGB bus, refreshed
 // from a frame buffer in PSRAM. The panel is set up once over 3-wire SPI
@@ -203,7 +227,7 @@ static const char *TAG = "link.led";
 #define LCD_DOT_X        (LCD_H_RES - LCD_DOT_MARGIN - LCD_DOT_SIZE)
 #define LCD_DOT_Y        LCD_DOT_MARGIN
 // Title: one line of pixel font, in the animation's pixel size when it fits.
-#define LCD_TITLE_MAX_SCALE LCD_ANIM_SCALE
+#define LCD_TITLE_MAX_SCALE 2
 #define LCD_TITLE_ROWS   (PIXEL_FONT_HEIGHT * LCD_TITLE_MAX_SCALE)
 #define LCD_TITLE_Y      (LCD_ANIM_Y - LCD_TITLE_ROWS - 16)
 // Rows rendered per panel write; must fit s_bar_buf.
@@ -404,7 +428,7 @@ static bool s_dot_drawn = false;
 static bool s_image_mode = false;
 static const uint8_t s_dot_rows[LCD_DOT_CELLS] = {0x6, 0xf, 0xf, 0x6};
 
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
 static SemaphoreHandle_t s_draw_done = NULL;
 
 static bool lcd_draw_done(esp_lcd_panel_io_handle_t io,
@@ -426,7 +450,7 @@ static bool lcd_draw(int x0, int y0, int x1, int y1, const uint16_t *buf) {
 static uint16_t lcd_from_be(uint16_t px) {
     return px;
 }
-#else
+#elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701
 // The copy into the frame buffer is done when this returns. Caller holds
 // s_lcd_lock.
 static bool lcd_draw(int x0, int y0, int x1, int y1, const uint16_t *buf) {
@@ -617,7 +641,7 @@ static void anim_task(void *arg) {
     }
 }
 
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
 static esp_err_t lcd_panel_init(void) {
     s_draw_done = xSemaphoreCreateBinary();
     if (!s_draw_done) return ESP_ERR_NO_MEM;
@@ -649,18 +673,30 @@ static esp_err_t lcd_panel_init(void) {
     if (err == ESP_OK) {
         err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &io);
     }
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
     if (err == ESP_OK) err = esp_lcd_new_panel_st7789(io, &panel_cfg, &s_panel);
+#else
+    if (err == ESP_OK) err = esp_lcd_new_panel_ili9341(io, &panel_cfg, &s_panel);
+#endif
     if (err == ESP_OK) err = esp_lcd_panel_reset(s_panel);
     if (err == ESP_OK) err = esp_lcd_panel_init(s_panel);
+#if CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+    // This glass needs the column order mirrored (MADCTL MX=1) to match the
+    // orientation TFT_eSPI uses; without it the image is flipped left-right
+    // (e.g. the connected dot lands top-left instead of top-right).
+    if (err == ESP_OK) err = esp_lcd_panel_mirror(s_panel, true, false);
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
     if (err == ESP_OK) err = esp_lcd_panel_invert_color(s_panel, true);
     if (err == ESP_OK) err = esp_lcd_panel_set_gap(s_panel, LCD_X_GAP, 0);
+#endif
     return err;
 }
 
 static esp_err_t lcd_panel_on(void) {
     return esp_lcd_panel_disp_on_off(s_panel, true);
 }
-#else
+#elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701
 typedef struct {
     uint8_t cmd, len;
     uint16_t delay_ms;
@@ -1216,10 +1252,10 @@ static bool lcd_draw_image_rect(int x, int y, int w, int h, const void *pixels) 
         s_image_mode = true;
         lcd_clear_rows(0, LCD_V_RES);
     }
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
     // Already in the panel's format; copied only to reach DMA memory.
     memcpy(s_anim_buf, pixels, (size_t)w * h * sizeof(uint16_t));
-#else
+#elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701
     const uint8_t *src = pixels;
     for (int i = 0; i < w * h; i++) s_anim_buf[i] = (uint16_t)(src[2 * i] << 8 | src[2 * i + 1]);
 #endif
