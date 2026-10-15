@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+*.xcodeproj/
+Tests/.fake_vm.log
