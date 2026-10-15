@@ -17,7 +17,7 @@ Use this skill when fresh discovery identifies a compatible stock Sonoff RF Brid
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - The bridge must already have LAN operation configured and its device ID/devicekey supplied through approved credential storage; no cloud key retrieval is part of this procedure.
 - Maintain a private, user-confirmed channel-to-action mapping. Use channels 0–15; the bridge does not provide a reliable local learned-channel inventory.

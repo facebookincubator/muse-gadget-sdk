@@ -32,6 +32,15 @@ menu "ESP32 Device SDK"
             app inside the encrypted pairing session and includes it when it
             refreshes its device token.
 
+    config GADGET_SDK_TOKEN_WARN
+        bool "Warn on every build when no SDK token is set"
+        default y
+        help
+            Print a prominent warning during each build while
+            CONFIG_GADGET_SDK_TOKEN is empty. The build still succeeds.
+            Internal builds that intentionally ship without an SDK token
+            turn this off.
+
     config HOMEHUB_WIFI_SSID
         string "WiFi SSID override (dev iteration)"
         default ""
@@ -113,6 +122,187 @@ menu "ESP32 Device SDK"
             the classic ESP32) should disable this. The control API to the VM
             keeps working; the status turns green once the control session is up.
 
+    config HOMEHUB_BLE_PERSISTENT
+        bool "Keep BLE running next to Wi-Fi and the Noise session"
+        depends on BT_NIMBLE_ENABLED && !MUSE_ENABLED
+        default n
+        help
+            By default the NimBLE stack is shut down and its memory released
+            once setup completes, so BLE never shares the radio or internal RAM
+            with Wi-Fi and the VM session. With this on, the stack stays up
+            after setup: setup advertising stops, and a basic GATT service
+            (main/ble_basic.c) is advertised slowly so a phone or hub can
+            still find and connect to the gadget. Re-pairing still needs the
+            long-press reset (which restarts the gadget, dropping any BLE
+            connection). Costs the NimBLE controller and host heap (roughly
+            40 KB of internal RAM with the default buffers) for as long as the
+            device runs. Needs CONFIG_BT_NIMBLE_MAX_CONNECTIONS >= 2: the
+            service accepts one connection at a time (advertising stops while
+            it is held), and the rest stay free for the gadget's own BLE use.
+
+    config HOMEHUB_BLE_PERSISTENT_ADV_INTERVAL_MS
+        int "Advertising interval after setup (ms)"
+        depends on HOMEHUB_BLE_PERSISTENT
+        range 100 10240
+        default 1000
+        help
+            Interval for the slow, connectable advertising that keeps the
+            device visible after setup. Setup advertising uses NimBLE's fast
+            30-60 ms default; every advertising event takes the shared radio
+            from Wi-Fi, so a slow interval keeps BLE's share of airtime small.
+
+    config HOMEHUB_BLE_COEX
+        bool "Wi-Fi first radio sharing while BLE stays up"
+        depends on HOMEHUB_BLE_PERSISTENT && ESP_COEX_SW_COEXIST_ENABLE
+        default y if IDF_TARGET_ESP32C5
+        help
+            The chip has one radio path for Wi-Fi and BLE, and ESP-IDF's
+            coexistence scheduler gives BLE half of every Wi-Fi beacon period
+            whenever BLE advertises, scans or is connected, even with nothing
+            to send. Once setup is complete, this keeps BLE advertising (and,
+            with the option below, BLE connections) from reserving that
+            airtime: BLE events still get the radio when they need it, one at
+            a time. Measured on the C5 DevKitC-1 with BLE advertising, tunnel
+            throughput rose from about 2.1 to 4.1 Mbit/s each way, and a
+            connected central's reads kept working. Scanning still takes its
+            share. Main/ble_coex.h describes it; validated on the C5 only.
+
+    config HOMEHUB_BLE_COEX_WIFI_FIRST_CONNECTED
+        bool "Also while a BLE peer is connected"
+        depends on HOMEHUB_BLE_COEX
+        default y
+        help
+            Keep Wi-Fi first while a BLE connection is up too. Light BLE
+            traffic (a phone reading the status characteristic) is unaffected;
+            turn this off for a sustained BLE stream that needs its slots.
+
+    config HOMEHUB_BLE_COMMANDS
+        bool "Muse commands for the Link's Bluetooth LE"
+        depends on HOMEHUB_BLE_PERSISTENT && BT_NIMBLE_ROLE_CENTRAL && BT_NIMBLE_ROLE_OBSERVER && BT_NIMBLE_GATT_CLIENT
+        default y
+        help
+            Lets Muse turn BLE on and off, control the Link's own advertising,
+            scan for nearby devices, connect to them (up to three at once),
+            list their GATT services and characteristics, and read, write and
+            subscribe to characteristics: ble.state, ble.power, ble.advertise,
+            ble.scan, ble.connect, ble.disconnect, ble.discover, ble.read,
+            ble.write and ble.subscribe (main/ble_commands.c). Needs the
+            central, observer and GATT client roles
+            (tools/coexist/sdkconfig.nimble-tuned keeps them).
+
+    config HOMEHUB_BLE_THROUGHPUT_TEST
+        bool "BLE throughput test characteristic"
+        depends on HOMEHUB_BLE_PERSISTENT
+        default n
+        help
+            Add a characteristic to the basic service for measuring BLE
+            throughput beside Wi-Fi: writes without response are counted
+            and dropped, and writing a 4-byte little-endian count to it makes
+            the device notify that many bytes back. Bench builds only.
+
+    config HOMEHUB_FAST_GCM
+        bool "Faster AES-GCM GHASH (chips without a GCM engine)"
+        depends on MBEDTLS_HARDWARE_AES && !MBEDTLS_HARDWARE_GCM
+        default y if IDF_TARGET_ESP32C5 && SPIRAM
+        default n
+        help
+            Wrap ESP-IDF's one-shot AES-GCM (used by TLS records and Noise
+            transport messages through PSA) with main/fast_gcm.c: CTR on the
+            AES DMA engine as before, GHASH with 32-bit tables cached per key
+            instead of IDF's 64-bit 4-bit tables rebuilt on every call, and
+            PSRAM data staged through internal RAM for the AES DMA.
+
+            Measured on the C5 DevKitC-1: AES-256-GCM seal of an 8 KB frame
+            in PSRAM 3.5 ms -> 2.0 ms. Checked against IDF's GCM by
+            tests/test_ghash32.py and the bench's gcm_verify.
+
+            Internal RAM: up to CONFIG_HOMEHUB_FAST_GCM_G8_TABLES 8-bit tables
+            of 4 KB, allocated on first use, plus the static staging buffer
+            (CONFIG_HOMEHUB_FAST_GCM_BOUNCE_BYTES) and ~1.3 KB of per-key
+            state: about 19 KB with the defaults.
+
+    config HOMEHUB_FAST_GCM_DEFAULT_MODE
+        int "Fast GCM mode at boot (0 off, 1 4-bit tables, 2 8-bit tables)"
+        depends on HOMEHUB_FAST_GCM
+        range 0 2
+        default 2
+        help
+            8-bit tables take 4 KB of internal RAM per cached key (up to four
+            keys, allocated on first use) and halve GHASH's work again.
+
+    config HOMEHUB_FAST_GCM_G8_TABLES
+        int "8-bit GHASH tables to keep (4 KB internal RAM each)"
+        depends on HOMEHUB_FAST_GCM
+        range 0 4
+        default 4 if SPIRAM
+        default 0
+        help
+            One per AES key in use: the VM session's TLS link and its Noise
+            transport use two each. Keys beyond this use 4-bit tables.
+
+    config HOMEHUB_FAST_GCM_BOUNCE_BYTES
+        int "Internal staging buffer for PSRAM data (bytes)"
+        depends on HOMEHUB_FAST_GCM
+        range 256 16384
+        default 2048
+        help
+            Static internal RAM that PSRAM plaintext and ciphertext pass
+            through on their way to the AES engine. Must be a multiple of 16
+            (whole AES blocks); the build checks.
+
+    config HOMEHUB_PIPELINE_BENCH
+        bool "Data-path and BLE coexistence bench (replaces the app)"
+        depends on HOMEHUB_BLE_PERSISTENT
+        default n
+        help
+            Boot into main/pipeline_bench.cpp instead of the gadget: memory
+            and AES-GCM micro-benchmarks, then (with HOMEHUB_WIFI_SSID set)
+            TCP, TLS and tunnel-pipeline throughput to a host found by UDP
+            beacon, and BLE scan/connect/peripheral tests beside Wi-Fi.
+            Results print as "BENCH ..." lines. Never ship this.
+
+    config HOMEHUB_BENCH_SECONDS
+        int "Seconds per bench phase"
+        depends on HOMEHUB_PIPELINE_BENCH
+        default 8
+
+    config HOMEHUB_BENCH_QUICK
+        bool "Short bench (before/after pipelines only)"
+        depends on HOMEHUB_PIPELINE_BENCH
+        default n
+
+    config HOMEHUB_BENCH_SOAK_MINUTES
+        int "Soak for this many minutes instead of the one-shot bench (0 off)"
+        depends on HOMEHUB_PIPELINE_BENCH
+        range 0 1440
+        default 0
+
+    config HOMEHUB_BENCH_RX_DELAY_MS
+        int "Emulated extra round-trip time on the bench's Wi-Fi link (ms)"
+        depends on HOMEHUB_PIPELINE_BENCH
+        range 0 500
+        default 0
+        help
+            Delays every inbound packet on the station interface, so a LAN
+            bench sees a WAN-like round trip (the VM is ~50 ms away). TCP
+            window sizes only matter once the round trip is long.
+
+    config HOMEHUB_BENCH_BAND
+        int "Wi-Fi band for the bench (0 auto, 1 2.4 GHz, 2 5 GHz)"
+        depends on HOMEHUB_PIPELINE_BENCH
+        range 0 2
+        default 0
+
+    config HOMEHUB_BENCH_BEACON_PORT
+        int "UDP port the bench host announces itself on"
+        depends on HOMEHUB_PIPELINE_BENCH
+        default 5200
+
+    config HOMEHUB_BENCH_BLE_PEER
+        string "BLE peripheral name the central test connects to"
+        depends on HOMEHUB_PIPELINE_BENCH
+        default "MuseGadget-A7F5B4"
+
     config HOMEHUB_DEV_BUILD
         bool "Dev build (dev signing key + dev-only affordances)"
         default y
@@ -156,18 +346,28 @@ menu "ESP32 Device SDK"
             Uses an internal pull-up and treats a low level as pressed.
             Muse Home Link and the ESP32-C5 DevKitC-1 BOOT button both use GPIO28.
 
+    config HOMEHUB_BUTTON_LABEL
+        string "Button label shown in status prompts"
+        default "BOOT"
+        help
+            The name shown in prompts like "Press <label> to confirm".
+            Board overlays override this when the physical button has
+            its own name.
+
     choice HOMEHUB_LED_BACKEND
         prompt "Status LED hardware"
         default HOMEHUB_LED_BACKEND_PWM_RGB
         help
             Select the physical status LED implementation for this build. The
             Muse Home Link board uses a 3-channel PWM RGB LED. A stock
-            ESP32-C5 DevKitC-1 has a single addressable RGB LED on GPIO27.
+            ESP32-C5 DevKitC-1 has a single addressable RGB LED on GPIO27;
+            other boards with one set HOMEHUB_LED_STRIP_GPIO.
             The always-on red power LED on the DevKitC-1 is not firmware
             controlled. The ideaspark ESP32 board and the SenseCAP Indicator
             have no status LED; their displays show the status colour in bars
             along the top and bottom edges, with an animation in between. The
             Home Assistant Voice PE shows the status colour on its LED ring.
+            Seeed reSpeaker Lite shows it on a single RGB LED.
             The reTerminal E1001 and E1002 show a still status screen on
             their e-paper instead (black and white on the E1001, six colours
             on the E1002).
@@ -178,10 +378,14 @@ menu "ESP32 Device SDK"
             bool "Muse Home Link PWM RGB LED"
 
         config HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
-            bool "ESP32-C5 DevKitC-1 GPIO27 addressable RGB LED"
+            bool "Addressable RGB LED (ESP32-C5 DevKitC-1 GPIO27 by default)"
 
         config HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
             bool "ideaspark ESP32 1.9 inch ST7789 display (status bars)"
+
+        config HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+            bool "Waveshare ESP32-C6-LCD-1.47 inch ST7789 display (status bars)"
+            depends on IDF_TARGET_ESP32C6
 
         config HOMEHUB_LED_BACKEND_SENSECAP_ST7701
             bool "SenseCAP Indicator 4 inch ST7701S RGB display (status bars)"
@@ -195,8 +399,16 @@ menu "ESP32 Device SDK"
             bool "reTerminal E1002 7.3 inch Spectra 6 colour e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
+        config HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
+            bool "Waveshare ESP32-S3-1.54inch-ePaper SSD1681 e-paper (status screen)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
         config HOMEHUB_LED_BACKEND_VOICE_RING
             bool "Home Assistant Voice PE 12-LED ring"
+            depends on IDF_TARGET_ESP32S3
+
+        config HOMEHUB_LED_BACKEND_RESPEAKER_LITE
+            bool "Seeed reSpeaker Lite single RGB LED (experimental)"
             depends on IDF_TARGET_ESP32S3
 
         config HOMEHUB_LED_BACKEND_MUSE
@@ -216,24 +428,38 @@ menu "ESP32 Device SDK"
             red first, unlike the usual WS2812 green first (GRB). Turn this
             off if your board shows green as red and amber as green.
 
+    config HOMEHUB_LED_STRIP_GPIO
+        int "Addressable LED data GPIO"
+        depends on HOMEHUB_LED_BACKEND_DEVKIT_GPIO27
+        range 0 28 if IDF_TARGET_ESP32C5
+        range 0 48
+        default 27
+        help
+            GPIO driving the single addressable status LED. The ESP32-C5
+            DevKitC-1 uses GPIO27. The build stops if the pin is one the chip
+            uses for its SPI flash or PSRAM.
+
     config HOMEHUB_DISPLAY
         bool
         default y if HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
         help
             Set for backends with a display: the status bars, animation and
             agent name (a still status screen on e-paper), and the display.*
             commands.
 
     config HOMEHUB_VOICE
-        bool "Push-to-talk voice chat (Home Assistant Voice PE)"
-        depends on HOMEHUB_LED_BACKEND_VOICE_RING && SPIRAM
+        bool "Push-to-talk voice chat"
+        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE) && SPIRAM
         default y
         help
-            Hold the centre button, speak, release: the audio goes to the
-            agent's chat as a voice note, which the VM transcribes, and the
+            Hold the centre button (XIAO BOOT on reSpeaker Lite), speak,
+            release: the audio goes to the agent's chat as a voice note,
+            which the VM transcribes, and the
             reply appears in the Muse app as text. To speak it, plug a TTS
             API of your own into start_tts in muse_chat_session.cpp. This
             uses a second Noise session (Muse's voice session) with Link's
@@ -251,6 +477,24 @@ menu "ESP32 Device SDK"
             humidity. The D1S and D1Pro have CO2 and tVOC built in;
             temperature and humidity need the Grove AHT20. Needs Seeed's stock
             RP2040 firmware.
+
+    config HOMEHUB_RETERMINAL_SHT4X
+        bool "reTerminal E100x onboard SHT4x sensor (sensors.read)"
+        depends on HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default y
+        help
+            Poll the onboard Sensirion SHT4x temperature and humidity sensor
+            over I2C (SDA GPIO19, SCL GPIO20, address 0x44) and answer
+            sensors.read with the latest temperature and humidity.
+
+    config HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET
+        int "SHT4x temperature offset, in tenths of a degree Celsius"
+        depends on HOMEHUB_RETERMINAL_SHT4X
+        default -33
+        help
+            Calibration offset added to the SHT4x temperature reading, in
+            tenths of a degree Celsius. The onboard sensor reads warm from
+            board heat; -33 (-3.3 C, about -6 F) is a starting point.
 
     config HOMEHUB_DISPLAY_COMMANDS
         bool

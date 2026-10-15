@@ -29,15 +29,17 @@ pairing and control protocols, so the same app pairs either.
 
 | Module | Role |
 |---|---|
-| `cli.py` | `musegadget pair`, `run`, `say`, `info`, `unpair` |
+| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `info`, `unpair` |
+| `pair.py` | `pair()`: opens BLE setup, checks and saves the pairing, prints nothing |
 | `pairing.py` | Community pairing v5: P-256 ECDH, HKDF-SHA256, AES-256-GCM, `confirm_app` |
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
 | `ble_setup.py` | Setup commands behind the GATT characteristics (no BlueZ dependency) |
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
-| `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream` |
+| `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
+| `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
 | `noise/` | Noise XX handshake, framing and service envelopes |
 | `data/` | The systemd unit and the hash-pinned `requirements.lock`, shipped in the package |
@@ -91,19 +93,20 @@ For a quicker loop, build a wheel and install it into the existing venv:
 ```sh
 uv build --wheel
 # on the device:
-sudo /opt/musegadget/venv/bin/pip install --no-deps --force-reinstall musegadget-*.whl
+sudo /opt/musegadget/bin/uv pip install --python /opt/musegadget/venv/bin/python --no-deps --reinstall musegadget-*.whl
 sudo systemctl restart musegadget
 ```
 
-Installer flags: `--run-as USER`, `--no-pair`, `--yes`, `--from SOURCE`,
-`--uninstall`, `--purge`. The installer is ShellCheck-clean; keep it that way.
+Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
+`--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
+keep it that way.
 
 ## Run and debug
 
 ```sh
 sudo journalctl -u musegadget -f     # service log
 sudo musegadget -v pair              # pairing, verbose
-musegadget info                      # identity and pairing state
+sudo musegadget info                 # identity and pairing state
 ```
 
 State lives in `/var/lib/musegadget` (mode 0700): `identity.json` survives
@@ -112,6 +115,9 @@ unpairing, `pairing.json` holds the device tokens. The local socket is
 
 A healthy start logs `commands run as <user>`, `Noise session established`,
 `sent link.register` and `registered with the Muse`.
+Each command the Muse runs logs `invoke <command>`, then how it ended, such as
+`system.run ok, exit 0 in 41 ms` or `file.read failed in 3 ms`. The log
+never has a command's parameters, output or error message.
 
 ## Pairing
 

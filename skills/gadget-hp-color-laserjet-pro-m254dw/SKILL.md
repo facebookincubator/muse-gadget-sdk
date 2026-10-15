@@ -16,7 +16,7 @@ Use this skill when fresh discovery identifies an HP Color LaserJet Pro M254dw w
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An authorized printer endpoint, any required print credentials, and a user-approved document and print options.
 - A client that encodes binary IPP, such as an IPP library or CUPS tooling, with transport routed through HomeLink. An ordinary JSON HTTP request is not IPP.

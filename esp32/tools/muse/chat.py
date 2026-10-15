@@ -22,9 +22,9 @@
 The board posts the text to your Muse as a typed turn and streams the reply
 back over its console (muse_hatch_text_turn in components/muse/muse_chat.h),
 so this machine needs no token or network setup. Boards with PSRAM (s3,
-aipi, sticks3, stopwatch, cores3, watcher, plus2) can do it; the C6 can't. The Watcher needs
-firmware with MUSE_CONSOLE_UART, and its CH342 drops bytes from whole
-packets, so writes to it are paced.
+s3-216, aipi, sticks3, stopwatch, cores3, watcher, plus2, jc3248w535, lcd7) can
+do it; the C6 can't. The Watcher needs firmware with MUSE_CONSOLE_UART, and its
+CH342 drops bytes from whole packets, so writes to it are paced.
 
 As a library: Board(port) opens the board, Board.status() and Board.chat()
 do the rest. tools/muse/avatar.py uses them. Needs pyserial.

@@ -44,8 +44,8 @@ static const char *TAG = "muse_voice";
 #define TAIL_FRAMES (MUSE_AUDIO_RATE * 12 / 100)   /* capture lag + poll interval, stops before the release click */
 #define MAX_FRAMES (MUSE_AUDIO_RATE * MAX_SECS)
 #define MIN_HELD_FRAMES (MUSE_AUDIO_RATE * 3 / 10)   /* shorter presses are taps, not speech */
-#if CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV
-#define PRE_CHUNKS 6                                   /* 120 ms; a 320 ms upload burst stalls on the ADV */
+#if CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT
+#define PRE_CHUNKS 6                                   /* 120 ms; a 320 ms upload burst stalls on the ADV and C3 */
 #else
 #define PRE_CHUNKS 16                                  /* 320 ms of audio kept from before the press */
 #endif
@@ -530,6 +530,11 @@ static void hold_rec(bool tried)
         go_idle("COULDN'T SAVE THE NOTE");
         return;
     }
+    if (!s_rec_n) {   /* nothing captured: realloc to 0 would free s_rec and return NULL */
+        drop_rec();
+        go_idle("HOLD LONGER TO TALK");
+        return;
+    }
     int16_t *pcm = heap_caps_realloc(s_rec, s_rec_n * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_held[s_held_count++] = (held_note_t){
         .pcm = pcm ? pcm : s_rec,
@@ -894,6 +899,11 @@ esp_err_t muse_voice_start(QueueHandle_t queue)
     /* Stack in PSRAM if there is any (this task never writes flash) to spare internal RAM for Wi-Fi/BLE. */
     if (xTaskCreatePinnedToCoreWithCaps(voice_task, "muse_voice", 6144, NULL, 6, NULL, MUSE_AUDIO_CORE,
                                         MUSE_BIG_CAPS) != pdPASS) {
+        /* Without the task nothing would ever rest the codecs, which
+         * muse_audio_init() left open: on the Watcher that's ~33 mA. */
+        muse_audio_power(false);
+        muse_state_set_mode(MUSE_MODE_ERROR);
+        muse_state_set_caption("AUDIO INIT FAILED");
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

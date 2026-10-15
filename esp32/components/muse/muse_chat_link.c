@@ -51,6 +51,9 @@ static const char *TAG = "muse_chat_link";
 #define ROW_MAX 12288                   /* maximum subscription line gathered across frames */
 #define TEXT_MAX 1024                   /* reply text kept for the captions */
 #define EV_TEXT 72
+/* A reply frame bigger than this board's session buffers: the session
+ * reconnects, and the reply is in the Muse app. */
+#define TOO_LONG "REPLY TOO LONG: SEE MUSE APP"
 #define SEND_WAIT_MS 200               /* the press queues the pre-roll all at once */
 #define SETTLE_US 3000000               /* quiet after a reply before the turn ends */
 #define REPLY_TIMEOUT_US 60000000
@@ -99,6 +102,7 @@ static unsigned s_pending_count;
 static uint64_t s_last_seq;
 static bool s_early_evicted, s_skipped_big;
 static char s_note_id[80], s_parent_id[80]; /* ACK IDs shared under s_rx_lock */
+static muse_chat_rejected_t s_rejected;   /* under s_rx_lock */
 
 /* Voice task only. */
 static struct {
@@ -339,8 +343,16 @@ static bool related(const row_t *row)
     if (!strcmp(row->event, "message.user")) {
         return !s_note_id[0] || !strcmp(row->msg, s_note_id) || !strcmp(row->msg, s_parent_id);
     }
-    return !s_note_id[0] || !row->reply_to[0]
-        || !strcmp(row->reply_to, s_note_id) || !strcmp(row->reply_to, s_parent_id);
+    if (muse_chat_is_rejected(&s_rejected, row->msg)) return false;
+    if (!s_note_id[0]) return true;
+    if (!row->reply_to[0]) {
+        /* After overflow, parentless events must match a correlated delta. */
+        return !s_rejected.overflow || (!strcmp(row->msg, s_delta.msg) && s_delta.reply_to[0]
+            && (!strcmp(s_delta.reply_to, s_note_id) || !strcmp(s_delta.reply_to, s_parent_id)));
+    }
+    if (!strcmp(row->reply_to, s_note_id) || !strcmp(row->reply_to, s_parent_id)) return true;
+    muse_chat_reject(&s_rejected, row->msg);
+    return false;
 }
 
 /* Append whole UTF-8 characters even when the caption is already nearly full. */
@@ -462,6 +474,7 @@ static void rx_clear(rx_t *rx)
         s_last_seq = 0;
         s_early_evicted = false;
         s_note_id[0] = s_parent_id[0] = 0;
+        memset(&s_rejected, 0, sizeof(s_rejected));
         memset(&s_delta, 0, sizeof(s_delta));
     }
 }
@@ -582,7 +595,8 @@ static void on_ack(void)
     rx_t *rx = &s_rx[RX_NOTE];
     if (rx->status != 200 || rx->overflow) {
         ESP_LOGW(TAG, "chat/stream: %d", rx->status);
-        fail(rx->status < 0 ? "LOST CONNECTION TO MUSE" : "MUSE DIDN'T TAKE IT");
+        fail(rx->status == MUSE_LINK_REQ_TOO_LARGE ? TOO_LONG
+             : rx->status < 0 ? "LOST CONNECTION TO MUSE" : "MUSE DIDN'T TAKE IT");
         return;
     }
     cJSON *root = cJSON_Parse(rx->body);
@@ -665,6 +679,7 @@ static void subscription_error(int status)
 {
     if (status == 403) fail("MUSE REPLY ACCESS DENIED (403)");
     else if (status == 401) fail("MUSE REPLY AUTH REQUIRED (401)");
+    else if (status == MUSE_LINK_REQ_TOO_LARGE) fail(TOO_LONG);
     else if (status <= 0 || status == 200) fail("LOST CONNECTION TO MUSE");
     else {
         char why[EV_TEXT];

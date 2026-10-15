@@ -18,6 +18,9 @@ import base64
 import hashlib
 import hmac
 import json
+import os
+import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -25,6 +28,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS = json.loads((ROOT / "tests/vectors/link_pairing_v5.json").read_text())["vectors"]
+
+
+def _cc_command() -> list[str]:
+    cmd = shlex.split(os.environ.get("CC", "cc"))
+    # Fail rather than skip: a missing compiler must not let the pairing
+    # security checks pass silently.
+    if not cmd or shutil.which(cmd[0]) is None:
+        raise RuntimeError("C compiler not available; set CC")
+    return cmd
 
 
 def decode(value: str) -> bytes:
@@ -37,7 +49,7 @@ class LinkPairingTranscriptTest(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.binary = Path(cls.tmp.name) / "transcript"
         subprocess.run([
-            "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "main"),
+            *_cc_command(), "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "main"),
             str(ROOT / "main/pairing_transcript.c"),
             str(ROOT / "tests/link_pairing_transcript_harness.c"),
             "-o", str(cls.binary),

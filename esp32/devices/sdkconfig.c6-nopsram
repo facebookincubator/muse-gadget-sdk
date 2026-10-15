@@ -1,0 +1,55 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Generic ESP32-C6 devkit without PSRAM (e.g. ESP32-C6-N16 modules, or
+# Espressif's ESP32-C6-DevKitC-1), native USB. A status light board, without
+# the full UI. Load last, after sdkconfig.defaults.
+#
+# The defaults are tuned for the ESP32-C5 with 8 MB PSRAM (full NimBLE pools,
+# 16 KB TLS buffers routed to PSRAM, home-network tunnel). On a PSRAM-less C6
+# that config starves internal SRAM: the device stalls silently during BLE
+# bring-up (the log stops after "HEAP after noise_ctrl_init", no advertising,
+# and both watchdogs are off so it never resets). This overlay trims everything
+# to fit internal SRAM. Modeled on devices/sdkconfig.muse-waveshare-c6-18,
+# minus the Waveshare board/display selection.
+CONFIG_IDF_TARGET="esp32c6"
+CONFIG_SPIRAM=n
+# TLS: keep allocations in internal SRAM and shrink outbound records; dynamic
+# input buffers are sized to each record instead of a fixed 16 KB.
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+# The home-network tunnel needs ~60 KB more internal RAM than the control
+# session; without it the device still pairs and Muse reaches it once the
+# control session is up (same tradeoff as the other no-PSRAM boards).
+CONFIG_HOMEHUB_TUNNEL=n
+# Fewer Wi-Fi TX buffers and lwIP mailboxes.
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=32
+# Halve the NimBLE pools: one phone at a time is all pairing needs, and this
+# gives the pairing TLS handshake back ~9 KB of internal RAM.
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=15
+# On ESP32-C6 devkits the BOOT button is GPIO9 (the default 28 is the C5
+# DevKitC-1). Needed to confirm pairing and to long-press-reset setup.
+CONFIG_HOMEHUB_BUTTON_GPIO=9
+# The addressable RGB LED is on GPIO8 on the ESP32-C6-DevKitC-1 and most C6
+# devkits (GPIO27 is the C5 DevKitC-1's). Change it here if yours differs.
+CONFIG_HOMEHUB_LED_STRIP_GPIO=8

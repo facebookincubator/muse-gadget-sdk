@@ -59,7 +59,10 @@ class Backoff:
     floor: float = 0.0
 
     def next_delay(self) -> float:
-        delay = min(BACKOFF_BASE_S * (2 ** self.failures), BACKOFF_MAX_S)
+        # The delay saturates at BACKOFF_MAX_S after a handful of failures, so
+        # cap the exponent: 2 ** failures stops converting to a float at 1024,
+        # about 17 hours into an outage at the 60 s ceiling.
+        delay = min(BACKOFF_BASE_S * 2.0 ** min(self.failures, 16), BACKOFF_MAX_S)
         self.failures += 1
         return max(delay, self.floor)
 

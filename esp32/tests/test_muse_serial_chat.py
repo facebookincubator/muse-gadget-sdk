@@ -221,6 +221,31 @@ class PacingTest(unittest.TestCase):
         self.assertTrue(chat.ports.paced(self.WATCHER[1].device, self.WATCHER))
         self.assertFalse(chat.ports.paced(self.STICKS3.device, [self.STICKS3]))
 
+    def test_core2_takes_either_usb_bridge(self) -> None:
+        cp2104 = SimpleNamespace(device="/dev/cu.usbserial-01", vid=0x10C4, pid=0xEA60,
+                                 serial_number="0242")
+        ch9102 = SimpleNamespace(device="/dev/cu.wchusbserial-01", vid=0x1A86, pid=0x55D4,
+                                 serial_number="5413")
+        self.assertEqual(chat.ports.find("core2", ports=[cp2104]), cp2104.device)
+        self.assertEqual(chat.ports.find("core2", ports=[ch9102]), ch9102.device)
+        self.assertEqual(chat.ports.command_ports([cp2104, self.STICKS3]),
+                         [self.STICKS3.device, cp2104.device])
+        with self.assertRaises(chat.ports.NotFound):
+            chat.ports.find("core2", ports=[])
+        with self.assertRaises(chat.ports.NotFound):
+            chat.ports.find("core2", ports=[cp2104, ch9102])
+
+    def test_lcd7_uses_ch343_for_chat_and_flash(self) -> None:
+        lcd7 = SimpleNamespace(device="/dev/cu.usbmodem12345", vid=0x1A86, pid=0x55D3,
+                               serial_number="12345")
+        self.assertEqual(chat.ports.find("lcd7", ports=[lcd7]), lcd7.device)
+        self.assertIn(lcd7.device, chat.ports.command_ports([lcd7]))
+        self.assertFalse(chat.ports.paced(lcd7.device, [lcd7]))
+
+    def test_usbs_keeps_single_pairs_single(self) -> None:
+        self.assertEqual(chat.ports._usbs(chat.ports.USJ), (chat.ports.USJ,))
+        self.assertEqual(chat.ports._usbs(chat.ports.USB["core2"]), chat.ports.USB["core2"])
+
     def test_paced_writes_are_small_and_whole(self) -> None:
         line = chat.split_message("x" * 2000)[0][0]
         b = self.board(True)

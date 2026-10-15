@@ -16,12 +16,25 @@
 
 #include "app.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
+#if CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
+#include "esp_psram.h"
+#endif
 #include "diagnostic_log.h"
+#if CONFIG_MUSE_POWER_TEST
+#include "muse_power_test.h"
+#endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
 #endif
 
 void app_main(void) {
+#if CONFIG_MUSE_POWER_TEST
+    /* Opt-in standalone BSP diagnostic: no support-log persistence, normal
+     * UI/voice/radio/credential or reconnect initialization may run. */
+    muse_power_test_run();
+    return;
+#endif
 #if CONFIG_HOMEHUB_SUPPORT_BUG_REPORT
     if (!diagnostic_log_init()) {
         ESP_LOGW("link.main",
@@ -29,6 +42,20 @@ void app_main(void) {
     }
 #endif
     ESP_LOGI("link.main", CONFIG_GADGET_PRODUCT_NAME " starting");
+#if CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
+    // The C5's TCP windows are sized for lwIP buffers in PSRAM
+    // (sdkconfig.defaults.esp32c5). Without it they fall back to internal RAM.
+    if (!esp_psram_is_initialized()) {
+        ESP_LOGE("link.main", "PSRAM did not start: network buffers fall back to internal RAM");
+    }
+#endif
+#if CONFIG_HOMEHUB_PIPELINE_BENCH
+    // Bench builds measure the data path and BLE coexistence instead of
+    // running the gadget.
+    extern void pipeline_bench_main(void);
+    pipeline_bench_main();
+    return;
+#endif
 #if CONFIG_MUSE_ENABLED
     muse_glue_start();
 #endif

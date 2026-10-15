@@ -458,8 +458,8 @@ static void handle(muse_menu_key_t key)
         break;
     case VIEW_STATUS:
     case VIEW_BATTERY:
-        if (key == MUSE_MENU_BACK || key == MUSE_MENU_LEFT ||
-            key == MUSE_MENU_SELECT || key == MUSE_MENU_DOWN) show(VIEW_LIST);
+        if (key == MUSE_MENU_BACK || key == MUSE_MENU_LEFT || key == MUSE_MENU_SELECT ||
+            key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) show(VIEW_LIST);
         break;
     case VIEW_POWER:
     case VIEW_RESET:
@@ -520,9 +520,10 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     s_row_h = small ? 16 : 36;
     s_visible_rows = (h - title_h - hint_h) / s_row_h;
     /* A button on the right edge (StickS3) gets its hint turned on end in a
-     * strip beside it, clear of the list. */
+     * strip beside it, clear of the list, unless the board can't spare the
+     * RAM to draw it turned. */
     const muse_button_hint_t *talk = &muse_board->talk_hint, *aux = &muse_board->aux_hint;
-    bool aux_side = aux->align == LV_ALIGN_RIGHT_MID;
+    bool aux_side = aux->align == LV_ALIGN_RIGHT_MID && !muse_board->flat_menu_hints;
     int strip = aux_side ? lv_font_get_line_height(font) + 2 : 0;
 
     s_keys = xQueueCreate(8, sizeof(uint8_t));
@@ -587,7 +588,7 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
         lv_obj_align(s_hint_down, LV_ALIGN_CENTER, (w - strip) / 2, aux->y);
     } else {
         s_down_text = muse_board->keyboard ? "Esc Back" : LV_SYMBOL_DOWN " Down";
-        align_on_bar(s_hint_down, aux->align, pad);
+        align_on_bar(s_hint_down, aux->align == LV_ALIGN_RIGHT_MID ? LV_ALIGN_BOTTOM_LEFT : aux->align, pad);
     }
     s_hint_select = label(s_root, font, COLOR_TEXT, "");
     align_on_bar(s_hint_select, talk->align, pad);

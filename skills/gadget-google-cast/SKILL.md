@@ -30,7 +30,7 @@ their model-specific restrictions still apply.
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 The device must already be provisioned and available as a Cast receiver.
 Ordinary local Cast control normally needs no sender account or pairing code;
 service-specific authentication and content entitlements are separate.

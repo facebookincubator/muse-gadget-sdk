@@ -19,6 +19,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "sdkconfig.h"
+
 typedef void (*ble_provision_cb)(const char *ssid, const char *password,
                                  const char *access_token,
                                  const char *refresh_token,
@@ -59,6 +61,20 @@ void ble_server_set_companion(const ble_companion_t *companion);
 // Keep advertising for the companion service even after setup is complete.
 void ble_server_set_companion_advertising(bool enabled);
 bool ble_server_is_started(void);
+// Host and controller synced (ready for GAP and GATT calls).
+bool ble_server_is_synced(void);
+bool ble_server_is_advertising(void);
+// The public address, little-endian. False while BLE is down.
+bool ble_server_own_address(uint8_t addr[6]);
+// Stop the stack and free its heap but keep the controller's static memory,
+// so ble_server_start() can bring it back (ble_server_full_shutdown()
+// releases that too, for good).
+bool ble_server_power_off(void);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+// Advertising interval after setup (20-10240 ms); applies at once.
+void ble_server_set_companion_interval_ms(int interval_ms);
+int ble_server_companion_interval_ms(void);
+#endif
 
 void ble_server_start(const char *device_name, const ble_callbacks_t *cb);
 void ble_server_begin_advertising(void);

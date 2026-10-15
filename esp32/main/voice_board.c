@@ -64,6 +64,10 @@ static const char *TAG = "link.voice_board";
 #define DIAL_COUNTS       4
 // Recentre the counter well before its limits.
 #define DIAL_LIMIT        1000
+// The hardware counter wraps to zero at its limits. Keep them far past the
+// recentre point: voice.c polls every 20 ms, and a quick turn moves a whole
+// detent between two polls, which would skip a limit only one detent away.
+#define DIAL_HW_LIMIT     INT16_MAX
 
 static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_xmos;
@@ -199,8 +203,8 @@ void voice_board_set_volume(int percent) {
 // every edge of both phases: up clockwise, down anticlockwise.
 static esp_err_t dial_init(void) {
     pcnt_unit_config_t unit_cfg = {
-        .low_limit = -DIAL_LIMIT - DIAL_COUNTS,
-        .high_limit = DIAL_LIMIT + DIAL_COUNTS,
+        .low_limit = -DIAL_HW_LIMIT,
+        .high_limit = DIAL_HW_LIMIT,
     };
     pcnt_unit_handle_t unit;
     esp_err_t err = pcnt_new_unit(&unit_cfg, &unit);

@@ -47,6 +47,10 @@
 #include "wifi_mgr.h"
 #include "wifi_known.h"
 #include "customer_product_info.h"
+#include "ble_coex.h"
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+#include "ble_commands.h"
+#endif
 #include "ble_server.h"
 #include "factory_test.h"
 #include "vm_api.h"
@@ -68,15 +72,23 @@
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
 #include "sensecap_sensors.h"
 #endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+#include "reterminal_sht4x.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
+#include "muse_input.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
 #else
 #define WIFI_WITHOUT_PAIRING 0
+#endif
+
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+#include "ble_basic.h"
 #endif
 
 static const char *TAG = "link.app";
@@ -590,7 +602,9 @@ static void setup_disconnect_to_clean(void) {
     wifi_mgr_disconnect();
     ui_set_vm(NULL);
     ui_set_wifi(NULL);
+#if CONFIG_HOMEHUB_SUPPORT_BUG_REPORT
     diagnostic_log_clear();
+#endif
 }
 
 static bool setup_wipe_to_clean(void) {
@@ -652,9 +666,16 @@ static void shutdown_ble_task(void *arg) {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(1000));
     ui_set_ble("off");
-#if CONFIG_MUSE_ENABLED
-    // Muse's phone-setup service shares the server: stop setup advertising only.
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
+    // A companion service shares the server (Muse's phone setup, or the
+    // basic service that keeps BLE up beside Wi-Fi): stop setup advertising
+    // only, and let the companion advertise slowly.
     ble_server_stop_advertising(false);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    ble_server_set_companion_advertising(true);
+    ble_coex_set_active(true);
+    ui_set_ble("companion");
+#endif
 #else
     ble_server_full_shutdown();
 #endif
@@ -679,8 +700,12 @@ static bool complete_setup_and_stop_ble(const char *reason, uint32_t session_gen
         ESP_LOGW(TAG, "failed to start BLE stop task");
         vTaskDelay(pdMS_TO_TICKS(1000));
         ui_set_ble("off");
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
         ble_server_stop_advertising(false);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        ble_server_set_companion_advertising(true);
+        ble_coex_set_active(true);
+#endif
 #else
         ble_server_full_shutdown();
 #endif
@@ -1507,17 +1532,26 @@ static void discover_task(void *arg) {
     discover_task_args_t *args = (discover_task_args_t *)arg;
     ESP_LOGI(TAG, "starting network discovery scan");
     cJSON *result = net_discovery_run(args->params);
-    if (result) {
-        cJSON *wrapper = cJSON_CreateObject();
-        if (!wrapper || !cJSON_AddBoolToObject(wrapper, "ok", true)
-            || !cJSON_AddItemToObject(wrapper, "payload", result)) {
+    cJSON *wrapper = result ? cJSON_CreateObject() : NULL;
+    if (!wrapper || !cJSON_AddBoolToObject(wrapper, "ok", true)
+        || !cJSON_AddItemToObject(wrapper, "payload", result)) {
+        // Out of memory. Answer anyway, so the Muse isn't left waiting out
+        // the command's timeout.
+        ESP_LOGW(TAG, "network discovery ran out of memory");
+        cJSON_Delete(wrapper);
+        cJSON_Delete(result);
+        wrapper = cJSON_CreateObject();
+        cJSON *failure = cJSON_AddObjectToObject(wrapper, "error");
+        if (!cJSON_AddBoolToObject(wrapper, "ok", false)
+            || !cJSON_AddStringToObject(failure, "code", "out_of_memory")
+            || !cJSON_AddStringToObject(failure, "message",
+                                        "not enough memory for the discovery results")) {
             cJSON_Delete(wrapper);
-            cJSON_Delete(result);
-        } else {
-            noise_ctrl_send_command_result(
-                args->session_generation, args->request_id, wrapper);
+            wrapper = NULL;
         }
     }
+    noise_ctrl_send_command_result(
+        args->session_generation, args->request_id, wrapper);
     if (args->params) cJSON_Delete(args->params);
     free(args);
     stack_monitor_record(NULL);
@@ -1836,9 +1870,19 @@ static cJSON *bug_report_command(
 }
 #endif
 
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+// ---- BLE commands' hooks (main/ble_commands.c) ----
+
+#endif  // CONFIG_HOMEHUB_BLE_COMMANDS
+
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+    if (ble_commands_handles(command)) {
+        return ble_commands_handle(command, params, request_id, session_generation);
+    }
+#endif
     if (strcmp(command, "device.list_vms") == 0) {
         return list_vms_command();
     }
@@ -1901,6 +1945,11 @@ static cJSON *on_ws_command(
         return sensecap_sensors_command();
     }
 #endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    if (strcmp(command, "sensors.read") == 0) {
+        return reterminal_sht4x_command();
+    }
+#endif
     if (strcmp(command, "device.reset_vm") == 0) {
         return queue_ws_control(WS_CONTROL_RESET_VM, NULL);
     }
@@ -1946,6 +1995,7 @@ static void enter_advertising_state(const char *reason) {
     ui_set_ble("advertising");
     ui_set_status("pairing_advertising");
     led_status_set_state(LED_STATE_BLE_ADVERTISING);
+    ble_coex_set_active(false);  // setup keeps ESP-IDF's balanced sharing
     ble_server_begin_advertising();
 }
 
@@ -2071,6 +2121,7 @@ static void on_client_disconnected(void) {
     ui_set_status("pairing_advertising");
     led_status_set_state(LED_STATE_BLE_ADVERTISING);
     setup_window_lock_give();
+    ble_coex_set_active(false);
     ble_server_begin_advertising();
 }
 
@@ -2091,6 +2142,59 @@ static void start_ble_setup_server_if_needed(void) {
     s_ble_started = true;
     heap_snapshot("after ble_start");
 }
+
+
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+// Muse drives the Link's BLE through ble.* commands (main/ble_commands.c).
+static bool ble_cmd_power(bool on) {
+    if (!on) {
+        if (!s_ble_started) return true;
+        if (!ble_server_power_off()) return false;
+        s_ble_started = false;
+        ui_set_ble("off");
+        return true;
+    }
+    if (!s_ble_started) start_ble_setup_server_if_needed();
+    if (!ble_server_is_started()) return false;
+    if (config_setup_complete()) {
+        ble_server_set_companion_advertising(true);
+        ui_set_ble("companion");
+    }
+    for (int i = 0; i < 30 && !ble_server_is_synced(); i++) vTaskDelay(pdMS_TO_TICKS(100));
+    return ble_server_is_synced();
+}
+
+static bool ble_cmd_is_on(void) {
+    return s_ble_started && ble_server_is_started();
+}
+
+static void ble_cmd_advertise(bool on, int interval_ms) {
+    if (interval_ms) ble_server_set_companion_interval_ms(interval_ms);
+    ble_server_set_companion_advertising(on);
+    if (config_setup_complete()) ui_set_ble(on ? "companion" : "on");
+}
+
+static void ble_cmd_set_wifi_first(bool on) {
+    ble_coex_set_withheld(on ? (BLE_COEX_ADV | BLE_COEX_CONN) : 0);
+}
+
+static bool ble_cmd_wifi_first(void) {
+    return ble_coex_active() && ble_coex_withheld() != 0;
+}
+
+static const ble_commands_ops_t s_ble_cmd_ops = {
+    .power = ble_cmd_power,
+    .is_on = ble_cmd_is_on,
+    .advertise = ble_cmd_advertise,
+    .is_advertising = ble_server_is_advertising,
+    .adv_interval_ms = ble_server_companion_interval_ms,
+    .own_address = ble_server_own_address,
+    .name = identity_ble_name,
+    .peripheral_connected = ble_server_has_connection,
+    .set_wifi_first = ble_cmd_set_wifi_first,
+    .wifi_first = ble_cmd_wifi_first,
+};
+#endif
 
 static void open_setup_window(const char *reason) {
     if (config_setup_complete()) {
@@ -2383,6 +2487,9 @@ static void on_ws_control_status(const char *status) {
         ESP_LOGI(TAG, "control WebSocket disconnected");
         led_status_set_state(LED_STATE_WS_DISCONNECTED);
         tunnel_netif_set_link(false);
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+        ble_commands_session_ended();   // close what Muse's BLE commands opened
+#endif
     } else if (strcmp(status, "ws_unpaired") == 0) {
         strcpy(s_ui_ws, "down");
         ESP_LOGW(TAG, "server sent node.unpaired — clearing credentials and restarting");
@@ -2523,6 +2630,12 @@ void app_run(void) {
     noise_ctrl_set_command_cb(on_ws_command);
     noise_ctrl_set_agent_name_cb(led_status_set_title);
     heap_snapshot("after noise_ctrl_init");
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+    ble_commands_init(&s_ble_cmd_ops);
+#endif
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    ble_basic_register();
+#endif
 
     // Arm OTA rollback verification. If the running image was just installed
     // by device.ota it boots as PENDING_VERIFY and must reach the control WS
@@ -2630,6 +2743,9 @@ void app_run(void) {
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
     sensecap_sensors_init();
 #endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    reterminal_sht4x_init();
+#endif
 
     if (!setup_complete) {
         // Unpaired devices advertise automatically — no button press is needed
@@ -2645,6 +2761,20 @@ void app_run(void) {
         ESP_LOGI(TAG, "BLE setup disabled; long-press reset to pair again");
         // A provisioned Muse device starts its optional BLE companion lazily,
         // after muse_app_run() has reserved the internal I2S DMA buffers.
+#if CONFIG_HOMEHUB_BLE_PERSISTENT && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
+        // BLE stays up beside Wi-Fi: bring the stack up before the VM session
+        // fragments internal RAM, and advertise the basic service slowly.
+        start_ble_setup_server_if_needed();
+        ble_server_set_companion_advertising(true);
+        ble_coex_set_active(true);
+        ui_set_ble("companion");
+#endif
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
+        // Muse may turn on its BLE companion later. The controller needs a
+        // 30 KB internal block that TLS and the VM session leave fragmented,
+        // so bring the stack up now; it stays silent until advertising is on.
+        start_ble_setup_server_if_needed();
+#endif
     }
 
     // Dev override: CONFIG_HOMEHUB_WIFI_SSID lets us skip BLE provisioning
@@ -2787,13 +2917,24 @@ void app_run(void) {
 
         size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        size_t min_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+        // What's left of the RAM light sleep's CPU retention memory comes
+        // from (not the reserved DMA pool), after muse_input_power_init()
+        // took it at boot for good, and whether it got it (cpu_pd).
+        char retention[48] = "";
+#if CONFIG_MUSE_ENABLED && CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP
+        snprintf(retention, sizeof(retention), " ret=%uK/%uK cpu_pd=%s",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_RETENTION) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_RETENTION) / 1024),
+                 muse_input_cpu_pd() ? "on" : "off");
+#endif
         size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA);
         size_t largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
         size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
         tunnel_stats_t tun;
         tunnel_netif_get_stats(&tun);
         ESP_LOGI(HEARTBEAT_TAG, "hb t=%llds setup=%s wifi=%s ws=%s raw=%s ble=%s "
-                       "int=%uK/%uK dma=%uK/%uK psram=%uK "
+                       "int=%uK/%uK min=%uK%s dma=%uK/%uK psram=%uK "
                        "tun rx+%lu/%luB tx+%lu/%luB drop+%lu",
                  esp_timer_get_time() / 1000000,
                  s_setup_stage,
@@ -2803,6 +2944,8 @@ void app_run(void) {
                  s_ui_ble,
                  (unsigned)(free_int / 1024),
                  (unsigned)(largest_int / 1024),
+                 (unsigned)(min_int / 1024),
+                 retention,
                  (unsigned)(free_dma / 1024),
                  (unsigned)(largest_dma / 1024),
                  (unsigned)(free_psram / 1024),
@@ -2812,6 +2955,9 @@ void app_run(void) {
                  (unsigned long)(tun.tx_bytes - prev_tun.tx_bytes),
                  (unsigned long)(tun.tx_dropped - prev_tun.tx_dropped));
         prev_tun = tun;
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        ble_basic_notify_status();
+#endif
         stack_monitor_record(&stack);
 #if CONFIG_MUSE_ENABLED
         muse_heartbeat_pause();

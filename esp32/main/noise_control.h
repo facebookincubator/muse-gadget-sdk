@@ -104,7 +104,9 @@ void noise_ctrl_send_command_result(
 // The callback runs on the session task and must return quickly. status is the
 // HTTP status on the response head (with any inline body), 0 on a later body
 // chunk, and -1 once the stream is gone (reset, or the session ended); the
-// stream is done after end or -1.
+// stream is done after end or -1. NOISE_CTRL_REQ_TOO_LARGE in place of -1:
+// the session ended because a frame was larger than this board's buffers.
+#define NOISE_CTRL_REQ_TOO_LARGE (-2)
 typedef void (*noise_ctrl_req_cb)(void *ctx, int status, const uint8_t *data,
                                   size_t len, bool end);
 

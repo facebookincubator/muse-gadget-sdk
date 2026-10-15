@@ -23,15 +23,16 @@
 
 #include "esp_err.h"
 
-// Home Assistant Voice PE audio hardware. The XMOS XU316 runs the two-mic
-// array (echo cancellation, noise suppression, gain) and is the I2S clock
+// Home Assistant Voice PE and Seeed reSpeaker Lite audio hardware.
+// The XMOS XU316 runs the two-mic array (echo cancellation, noise suppression,
+// gain) and is the I2S clock
 // master for both directions; the ESP32-S3 follows. Speaker audio goes
 // through the XMOS to an AIC3204 codec and an amplifier.
 
 #define VOICE_MIC_RATE      16000
 #define VOICE_SPEAKER_RATE  48000
 
-// Reset the XMOS, set up the codec and both I2S channels. Takes about 4 s.
+// Reset the XMOS and set up the board's codec and both I2S channels.
 esp_err_t voice_board_init(void);
 
 // Microphone: 16 kHz mono PCM16 from the XMOS's processed channel.
@@ -47,8 +48,8 @@ void voice_board_amp(bool on);
 // 0 to 100.
 void voice_board_set_volume(int percent);
 
-// The mute switch on the side: true when the microphones are off.
+// Hardware mute state: true when the microphones are off or unreadable.
 bool voice_board_muted(void);
 
-// Detents the dial on top has turned since the last call: positive clockwise.
+// Dial detents since the last call: positive clockwise, zero without a dial.
 int voice_board_dial_steps(void);
