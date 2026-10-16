@@ -110,6 +110,11 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_vn_s3_183.c")
     elseif(CONFIG_MUSE_BOARD_AI_PASSPORT)
         list(APPEND srcs "boards/board_ai_passport.c")
+    elseif(CONFIG_MUSE_BOARD_WAVESHARE_P4_LCD35)
+        list(APPEND srcs "boards/board_waveshare_p4_lcd35.c")
+        if(CONFIG_MUSE_P4_CSI_CAMERA)
+            list(APPEND srcs "boards/p4_csi_camera.c")
+        endif()
     endif()
     # Shared core, independent of board selection. Keep it after the BSP so
     # Watcher's independently retained recovery markers keep their link order.
@@ -130,6 +135,10 @@ set(muse_priv_requires
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt efuse)
 list(APPEND muse_priv_requires camera)
+# The P4 camera's JPEG encoder; Kconfig is not loaded yet when requirements expand.
+if(IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND muse_priv_requires esp_driver_jpeg)
+endif()
 
 idf_component_register(
     SRCS ${srcs}
