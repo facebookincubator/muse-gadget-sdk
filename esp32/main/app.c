@@ -2494,6 +2494,14 @@ static void on_ws_control_status(const char *status) {
         tunnel_netif_set_link(false);
         ESP_LOGW(TAG, "control WebSocket needs fresh VM credentials: %s", status);
         schedule_vm_auth_refresh();
+    } else if (strcmp(status, "ws_cvm_locked") == 0) {
+        strcpy(s_ui_ws, "down");
+        strcpy(s_ui_raw, "down");
+        led_status_set_state(LED_STATE_WS_DISCONNECTED);
+        tunnel_netif_set_link(false);
+        // Not a credential problem: do not re-fetch the token. The VM's
+        // encrypted volume is closed and only the owner can open it.
+        ESP_LOGW(TAG, "VM is a locked CVM: Unlock your CVM in the Muse app first");
     }
 }
 

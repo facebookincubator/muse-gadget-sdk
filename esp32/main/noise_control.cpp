@@ -17,6 +17,7 @@
 #include "ble_commands.h"
 #include "noise_control.h"
 #include "stack_monitor.h"
+#include "noise_cvm.h"
 #include "noise_upgrade.h"
 #include "noise_tunnel_internal.h"
 #include "ws_mask.h"
@@ -763,18 +764,28 @@ static noise_upgrade_result_t ws_upgrade(esp_tls_t *tls) {
 
 // ---- Noise handshake --------------------------------------------------------
 
-static bool noise_handshake(esp_tls_t *tls, ClientSession &session,
+enum noise_handshake_result_t {
+    NOISE_HANDSHAKE_OK,
+    NOISE_HANDSHAKE_FAILED,
+    // The VM is a confidential VM whose RV is not open (locked or never
+    // enrolled). Only the owner can open it, from the Muse app; this
+    // device holds no RV key and must not retry as if it were a network
+    // or credential fault.
+    NOISE_HANDSHAKE_CVM_LOCKED,
+};
+
+static noise_handshake_result_t noise_handshake(esp_tls_t *tls, ClientSession &session,
                             uint8_t *scratch, size_t scratch_len) {
     // msg1: initiator → responder
     ByteSpan out_span(scratch, scratch_len);
     auto msg1 = session.WriteHandshakeMessage1(out_span);
     if (!msg1.ok()) {
         ESP_LOGE(TAG, "WriteHandshakeMessage1 failed: %s", msg1.status().str());
-        return false;
+        return NOISE_HANDSHAKE_FAILED;
     }
     if (!ws_send_binary(tls, scratch, msg1.size())) {
         ESP_LOGE(TAG, "failed to send handshake msg1");
-        return false;
+        return NOISE_HANDSHAKE_FAILED;
     }
     ESP_LOGI(TAG, "handshake msg1 sent (%u bytes)", (unsigned)msg1.size());
 
@@ -782,19 +793,43 @@ static bool noise_handshake(esp_tls_t *tls, ClientSession &session,
     ssize_t msg2_len = ws_recv_frame(tls, scratch, scratch_len);
     if (msg2_len <= 0) {
         ESP_LOGE(TAG, "failed to receive handshake msg2: %d", (int)msg2_len);
-        return false;
+        return NOISE_HANDSHAKE_FAILED;
     }
     ESP_LOGI(TAG, "handshake msg2 received (%d bytes)", (int)msg2_len);
 
-    uint8_t peer_extra[256];
+    // The msg2 payload is decrypted into a heap buffer sized to the frame:
+    // a CVM's RV-auth payload wraps the SEV-SNP attestation bundle and is
+    // far larger than the 256 bytes the legacy (empty) payload ever needed.
+    // The payload is inspected only to spot that CVM shape (noise_cvm.h);
+    // its contents are otherwise unused, matching the old 256-byte sink.
+    uint8_t *peer_extra = static_cast<uint8_t *>(malloc(static_cast<size_t>(msg2_len)));
+    if (!peer_extra) {
+        ESP_LOGE(TAG, "handshake msg2 payload alloc failed");
+        return NOISE_HANDSHAKE_FAILED;
+    }
     size_t peer_extra_written = 0;
     auto status2 = session.ReadHandshakeMessage2(
         ConstByteSpan(scratch, static_cast<size_t>(msg2_len)),
-        ByteSpan(peer_extra, sizeof(peer_extra)),
+        ByteSpan(peer_extra, static_cast<size_t>(msg2_len)),
         peer_extra_written);
     if (!status2.ok()) {
         ESP_LOGE(TAG, "ReadHandshakeMessage2 failed: %s", status2.str());
-        return false;
+        free(peer_extra);
+        return NOISE_HANDSHAKE_FAILED;
+    }
+
+    // A CVM with its RV closed answers with the RV-auth msg2 and then
+    // requires an RV-key exchange in msg3 that this device cannot perform
+    // (it holds no RV key). Sending the empty msg3 below would complete
+    // the crypto handshake only for the server to drop the session, which
+    // the retry loop would repeat forever. Fail distinctly instead, so
+    // the session loop can tell the user to unlock the CVM.
+    noise_cvm_msg2_t msg2_kind =
+        noise_cvm_classify_msg2(peer_extra, peer_extra_written);
+    free(peer_extra);
+    if (noise_cvm_unlock_required(msg2_kind)) {
+        ESP_LOGE(TAG, "VM is a locked CVM: Unlock your CVM in the Muse app first");
+        return NOISE_HANDSHAKE_CVM_LOCKED;
     }
 
     // msg3: initiator → responder.
@@ -818,15 +853,15 @@ static bool noise_handshake(esp_tls_t *tls, ClientSession &session,
     auto msg3 = session.WriteHandshakeMessage3(auth_payload, out_span);
     if (!msg3.ok()) {
         ESP_LOGE(TAG, "WriteHandshakeMessage3 failed: %s", msg3.status().str());
-        return false;
+        return NOISE_HANDSHAKE_FAILED;
     }
     if (!ws_send_binary(tls, scratch, msg3.size())) {
         ESP_LOGE(TAG, "failed to send handshake msg3");
-        return false;
+        return NOISE_HANDSHAKE_FAILED;
     }
     ESP_LOGI(TAG, "handshake msg3 sent (%u bytes), session established",
              (unsigned)msg3.size());
-    return session.isEstablished();
+    return session.isEstablished() ? NOISE_HANDSHAKE_OK : NOISE_HANDSHAKE_FAILED;
 }
 
 // ---- Session: send Noise-encrypted WS frames --------------------------------
@@ -1826,6 +1861,10 @@ enum session_result_t {
     SESSION_OK,
     SESSION_FAILED,
     SESSION_AUTH_FAILED,
+    // The VM is a locked CVM. Not a credential fault — the token is fine
+    // and re-fetching it cannot help — so it gets the long backoff and its
+    // own status, but no ws_auth_failed / token refresh.
+    SESSION_CVM_LOCKED,
 };
 
 static bool update_reconnect_policy(session_result_t result,
@@ -1833,6 +1872,13 @@ static bool update_reconnect_policy(session_result_t result,
                                     uint32_t *backoff_ms,
                                     uint8_t *short_failures) {
     if (result == SESSION_AUTH_FAILED) {
+        *short_failures = 0;
+        *backoff_ms = RECONNECT_AUTH_FAILED_MS;
+        return false;
+    }
+    if (result == SESSION_CVM_LOCKED) {
+        // Same long backoff as an auth failure (retrying sooner cannot
+        // help), but no token refresh: the credential is not the problem.
         *short_failures = 0;
         *backoff_ms = RECONNECT_AUTH_FAILED_MS;
         return false;
@@ -2035,7 +2081,12 @@ static session_result_t run_session(stack_monitor_t *stack) {
     {  // Scoped block for event loop — avoids goto crossing variable init.
 
     // 3. Noise handshake
-    if (!noise_handshake(tls, session, ws_buf, ws_buf_size)) {
+    noise_handshake_result_t handshake = noise_handshake(tls, session, ws_buf, ws_buf_size);
+    if (handshake == NOISE_HANDSHAKE_CVM_LOCKED) {
+        result = SESSION_CVM_LOCKED;
+        goto cleanup;
+    }
+    if (handshake != NOISE_HANDSHAKE_OK) {
         ESP_LOGE(TAG, "Noise handshake failed");
         result = SESSION_AUTH_FAILED;
         goto cleanup;
@@ -2419,6 +2470,9 @@ static void noise_ctrl_task(void *arg) {
         }
         if (result == SESSION_AUTH_FAILED) {
             notify_status("ws_auth_failed");
+        }
+        if (result == SESSION_CVM_LOCKED) {
+            notify_status("ws_cvm_locked");
         }
         ESP_LOGI(TAG, "reconnect in %u ms (last session %llu ms)",
                  (unsigned)backoff, (unsigned long long)up_ms);
