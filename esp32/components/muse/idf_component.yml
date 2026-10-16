@@ -89,7 +89,7 @@ dependencies:
   espressif/esp_lcd_axs15231b:
     version: "^2.1.1"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"guition_jc3248w535\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"guition_jc3248w535\", \"waveshare_s3_lcd349\"]"
   espressif/esp_lcd_touch_gt911:
     version: "1.2.1"
     rules:
