@@ -89,6 +89,7 @@ class Service:
 
     async def run(self) -> None:
         backoff = Backoff()
+        token_rejected = False
         while not self._stop.is_set():
             pairing = config.load_json(config.PAIRING_FILE)
             if not pairing:
@@ -108,7 +109,14 @@ class Service:
                 log.warning("device token rejected by the API; refreshing")
                 if await self._maybe_refresh(pairing, force=True) is None:
                     await self._sleep(TOKEN_RETRY_S)
+                elif token_rejected:
+                    # Allow one immediate retry with the first refreshed token.
+                    # Repeated rejection must not spin through successful refreshes.
+                    backoff.floor = AUTH_BACKOFF_MIN_S
+                    await self._sleep(backoff.next_delay())
+                token_rejected = True
                 continue
+            token_rejected = False
             vm = next((v for v in vms if v["is_default"]), vms[0] if vms else None)
             if vm is None:
                 await self._sleep(backoff.next_delay())
