@@ -51,7 +51,7 @@
 
 typedef struct {
     uint8_t dac[7], adc[4];
-    uint8_t dac_mask, adc_mask, adc_variant; /* 0 unknown, 1 ES7243, 2 ES7243E */
+    uint8_t dac_mask, adc_mask, adc_variant; /* 0 unknown, 1 ES7243, 2 ES7243E, 3 ES7210 */
     bool expected; /* value evidence only; transport failures are separate errors */
 } muse_ptest_codec_regs_t;
 
