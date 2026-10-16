@@ -80,8 +80,9 @@ BOARDS = {
     "Waveshare ESP32-S3-Touch-LCD-1.28": "lcd128",
     "VN ESP32-S3 1.83-inch NV3023": "vn183",
     "FoloToy AI Passport": "ai-passport",
+    "Waveshare ESP32-P4 3.5": "p4lcd35",
 }
-CHAT_BOARDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "echoear")
+CHAT_BOARDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "echoear", "p4lcd35")
 
 
 class Stop(Exception):

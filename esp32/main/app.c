@@ -2574,6 +2574,9 @@ void app_run(void) {
     config_store_init();
     wifi_known_init();
 
+#if CONFIG_ESP_HOSTED_ENABLED
+    wifi_mgr_init();   /* identity_init() reads the STA MAC from the coprocessor */
+#endif
     identity_init();
 #if CONFIG_MUSE_ENABLED
     muse_glue_storage_ready();
