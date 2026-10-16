@@ -1,6 +1,9 @@
 ---
 name: gadget-roku-tvs-and-players
-description: Use through Muse Home Link when a confirmed Roku TV, streaming stick/box or Roku-powered display answers the local External Control Protocol (ECP) on TCP 8060. Covers discovery, device info, installed apps, remote keys, text entry, app launch and deep links, search, and Roku TV volume, input and power.
+description: >-
+  Control Roku TVs, streaming sticks/boxes and Roku-powered displays that answer the local
+  External Control Protocol (ECP) on TCP 8060 through Muse Home Link. Covers discovery, device
+  info, apps, remote keys, text entry, deep links, search, and Roku TV volume, input and power.
 ---
 
 # Roku TVs and Players (ECP)
@@ -40,10 +43,17 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 
 ## Workflow
 
+1. Confirm the device and read `ecp-setting-mode` (see Identify the Device and Prerequisites).
+2. Read the state the request depends on: `/query/active-app`, `/query/apps`, `/query/media-player`
+   or `power-mode`.
+3. Get user confirmation for anything with side effects, then send one request per call.
+   For menu navigation, keys about 170 ms apart worked reliably.
+4. Re-query the affected state, because an accepted request does not prove the screen changed.
+
+Common cases:
+
 - **What's playing?** `/query/active-app`, then `/query/media-player`.
 - **Open an app by name:** `/query/apps`, match the name, `POST /launch/<id>`.
-- **Navigate a menu:** one key per call. Keys sent about 170 ms apart worked reliably; re-query
-  `active-app` when state matters.
 - **Type a search string:** `Search` key, then `Lit_` per character. Then stop and tell the user
   what is on screen. Do not send `Select` right after typing: focus is usually still on the
   on-screen keyboard, so `Select` may type the highlighted letter instead of opening a result.
