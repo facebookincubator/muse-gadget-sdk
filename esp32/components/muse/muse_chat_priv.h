@@ -41,6 +41,10 @@ void muse_hatch_chat_connect(void);
 /* Drops the connection and the cached VM credentials (settings changed). */
 void muse_hatch_chat_forget(void);
 
+/* True only for a backend whose current turn needs the voice task to keep
+ * calling muse_hatch_turn_event(). The full session has its own task. */
+bool muse_hatch_needs_voice_poll(void);
+
 /* Keep rejected IDs for the turn: later events may omit their parent.
  * On overflow, require a known parent for new messages. */
 #define MUSE_CHAT_REJECTED_MAX 8
@@ -68,13 +72,28 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
     }
     memcpy(rejected->ids[rejected->count++], id, len + 1);
 }
-
 /* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
 #define MUSE_HATCH_NOTE_HEAD \
     "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
     "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44
+
+/* /chat/stream JPEG body. The caption is serialized in both `message` and the
+ * text item, followed by an image/jpeg file item containing base64 data. */
+#define MUSE_HATCH_IMAGE_HEAD_1 "{\"message\":\""
+#define MUSE_HATCH_IMAGE_HEAD_2 "\",\"output_modality\":\"text\",\"items\":[{\"type\":\"text\",\"text\":\""
+#define MUSE_HATCH_IMAGE_HEAD_3 \
+    "\"},{\"type\":\"file\",\"mime_type\":\"image/jpeg\",\"filename\":\"camera.jpg\",\"data_base64\":\""
+#define MUSE_HATCH_IMAGE_TAIL "\"}]}"
+#define MUSE_HATCH_CHAT_BODY_MAX (256u * 1024u)
+
+/* Exact request sizing/escaping shared by both transports (muse_chat_image.c).
+ * UTF-8 is kept as UTF-8; JSON syntax and control bytes are escaped. */
+bool muse_hatch_image_body_size(const char *caption, size_t jpeg_base64_len,
+                                size_t *escaped_caption_len, size_t *body_len);
+bool muse_hatch_json_escape(const char *text, char *out, size_t cap);
+bool muse_hatch_is_jpeg_base64(const char *data, size_t len);
 
 /* Voice note helpers (muse_chat_text.c). The note's length isn't known until
  * the release, so the WAV header gives the streaming "unknown" size. */

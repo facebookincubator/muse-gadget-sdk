@@ -32,6 +32,7 @@
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_chat.h"
+#include "muse_chat_priv.h"
 #include "muse_input.h"
 #include "muse_mem.h"
 #include "muse_settings.h"
@@ -786,6 +787,19 @@ static bool can_record(void)
     return true;
 }
 
+/* The Link-backed chat has no task of its own: while the voice task is idle it
+ * still owns ACK, timeout and terminal-error progress for an image turn. */
+static bool poll_idle_chat(void)
+{
+    if (!muse_hatch_needs_voice_poll()) {
+        return false;
+    }
+    char text[96];
+    while (muse_hatch_turn_event(text, sizeof(text)) != MUSE_HATCH_EV_NONE) {
+    }
+    return muse_hatch_needs_voice_poll();
+}
+
 static void voice_task(void *arg)
 {
     bool pending_down = false;
@@ -796,7 +810,8 @@ static void voice_task(void *arg)
             muse_input_event_t ev;
             bool asleep = muse_state_asleep();
             bool battery = muse_state_on_battery();
-            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback;
+            bool chat_pending = poll_idle_chat();
+            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && !chat_pending;
 #if HOLD_NOTES
             /* A press goes first: send_held() leaves it queued and returns
              * without backing off, so retrying before it's read would spin. */
