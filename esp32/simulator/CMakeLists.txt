@@ -146,6 +146,16 @@ endif()
 
 set(MUSE_COMPONENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../components/muse")
 
+# Match the firmware's custom avatar override, including additions/removals
+# after configure. Keep exactly one renderer in the executable.
+file(GLOB MUSE_SIM_CUSTOM_AVATAR CONFIGURE_DEPENDS
+     "${MUSE_COMPONENT_DIR}/avatar/muse_pixel.c")
+if(MUSE_SIM_CUSTOM_AVATAR)
+    set(MUSE_SIM_AVATAR_SOURCE "${MUSE_COMPONENT_DIR}/avatar/muse_pixel.c")
+else()
+    set(MUSE_SIM_AVATAR_SOURCE "${MUSE_COMPONENT_DIR}/../../avatar/muse_pixel.c")
+endif()
+
 add_executable(muse_simulator
     src/main.c
     src/sim_board.c
@@ -154,7 +164,7 @@ add_executable(muse_simulator
     "${MUSE_COMPONENT_DIR}/muse_ui.c"
     "${MUSE_COMPONENT_DIR}/muse_state.c"
     "${MUSE_COMPONENT_DIR}/muse_text.c"
-    "${MUSE_COMPONENT_DIR}/../../avatar/muse_pixel.c"
+    "${MUSE_SIM_AVATAR_SOURCE}"
 )
 
 target_include_directories(muse_simulator PRIVATE
