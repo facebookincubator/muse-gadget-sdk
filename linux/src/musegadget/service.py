@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from musegadget import __version__, config, muse_api
 from musegadget.executor import COMMAND_SPECS, Executor
 from musegadget.identity import Identity
-from musegadget.link_client import DeviceDescription, LinkSession, Outcome
+from musegadget.link_client import MAX_CONCURRENT_INVOKES, DeviceDescription, LinkSession, Outcome
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +81,9 @@ class Service:
     _last_refresh_attempt: float = float("-inf")
     _sdk_token_change_warned: bool = False
     _current: LinkSession | None = None
+    _invoke_slots: asyncio.Semaphore = field(
+        default_factory=lambda: asyncio.Semaphore(MAX_CONCURRENT_INVOKES), init=False, repr=False,
+    )
 
     def stop(self) -> None:
         self._stop.set()
@@ -141,6 +144,7 @@ class Service:
             vm_auth_token=vm["vm_auth_token"],
             device=device,
             run_command=self.executor.run,
+            invoke_slots=self._invoke_slots,
         )
         log.info("connecting to %s", vm["vm_name"] or vm["vm_id"])
         started = time.monotonic()

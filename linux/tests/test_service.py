@@ -183,3 +183,37 @@ def test_the_token_pairing_used_or_an_older_pairing_says_nothing(caplog):
 def test_api_root_uses_api_url_v2_or_the_muse_api():
     assert muse_api.api_root("https://api.example/") == "https://api.example"
     assert muse_api.api_root() == "https://api.muse.ai"
+
+
+def test_reconnected_sessions_share_command_slots(monkeypatch):
+    from musegadget.link_client import MAX_CONCURRENT_INVOKES, Outcome
+
+    sessions = []
+
+    class Session:
+        registered_at = None
+
+        def __init__(self, **options):
+            sessions.append(options)
+
+        async def run(self, stop):
+            return Outcome.CLOSED
+
+    monkeypatch.setattr("musegadget.service.LinkSession", Session)
+
+    async def scenario():
+        service = Service(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current()))
+        vm = {"vm_id": "test", "vm_name": "test", "vm_auth_token": "unused"}
+        await service._session(vm, {})
+        await service._session(vm, {})
+        slots = sessions[0]["invoke_slots"]
+        assert slots is sessions[1]["invoke_slots"]
+        other = Service(identity=service.identity, executor=service.executor)
+        assert other._invoke_slots is not slots
+        for _ in range(MAX_CONCURRENT_INVOKES):
+            await asyncio.wait_for(slots.acquire(), 1)
+        assert slots.locked()
+        for _ in range(MAX_CONCURRENT_INVOKES):
+            slots.release()
+
+    asyncio.run(scenario())

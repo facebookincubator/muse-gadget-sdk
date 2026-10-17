@@ -107,7 +107,7 @@ class FakeVm:
         ))
 
 
-def make_session(run_command, connect_log: list):
+def make_session(run_command, connect_log: list, **options):
     to_device, to_vm = asyncio.Queue(), asyncio.Queue()
     device_ws, vm_ws = Pipe(to_device, to_vm), Pipe(to_vm, to_device)
 
@@ -117,7 +117,7 @@ def make_session(run_command, connect_log: list):
 
     session = LinkSession(
         noise_host="gw.example", vm_id="vm 1&x", vm_auth_token="tok",
-        device=DEVICE, run_command=run_command, connect=connect,
+        device=DEVICE, run_command=run_command, connect=connect, **options,
     )
     return session, FakeVm(vm_ws)
 
@@ -642,3 +642,221 @@ def test_cancelled_multiframe_send_preserves_noise_nonces_for_next_request():
         await task
 
     asyncio.run(bounded_scenario(scenario()))
+
+
+@pytest.mark.parametrize("worker_raises", [False, True])
+def test_cancelled_invoke_holds_slot_until_worker_finishes(worker_raises):
+    import threading
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        waiting = asyncio.Event()
+        release = threading.Event()
+        sent = []
+        calls = []
+
+        class Slots(asyncio.Semaphore):
+            async def acquire(self):
+                if self.locked():
+                    waiting.set()
+                return await super().acquire()
+
+        slots = Slots(1)
+
+        def command(name, *_):
+            calls.append(name)
+            if name == "first":
+                loop.call_soon_threadsafe(started.set)
+                if not release.wait(5):
+                    raise AssertionError("test worker was not released")
+                if worker_raises:
+                    raise RuntimeError("disconnected command failed")
+            return {"ok": True}
+
+        first, _ = make_session(command, [])
+        second, _ = make_session(command, [])
+        first._invokes = second._invokes = slots
+
+        async def send(message):
+            sent.append(message["id"])
+
+        first.send = second.send = send
+        old = asyncio.create_task(first._invoke({"id": "old", "command": "first"}))
+        new = None
+        try:
+            await asyncio.wait_for(started.wait(), 2)
+            old.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await old
+            assert slots.locked(), "disconnect released a slot while its thread was still running"
+            new = asyncio.create_task(second._invoke({"id": "new", "command": "second"}))
+            await asyncio.wait_for(waiting.wait(), 2)
+            assert calls == ["first"]
+            release.set()
+            await asyncio.wait_for(new, 2)
+            assert calls == ["first", "second"]
+            assert sent == ["new"]
+            assert not slots.locked()
+        finally:
+            release.set()
+            for task in (old, new):
+                if task is not None:
+                    task.cancel()
+            await asyncio.gather(*(t for t in (old, new) if t is not None), return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_cancelling_queued_invoke_does_not_start_command_or_release_slot():
+    async def scenario():
+        calls = []
+        session, _ = make_session(lambda *args: calls.append(args), [])
+        slots = asyncio.Semaphore(0)
+        session._invokes = slots
+        task = asyncio.create_task(session._invoke({"id": "queued", "command": "unused"}))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert calls == []
+        assert slots.locked()
+
+    asyncio.run(scenario())
+
+
+def test_failed_executor_submission_releases_invoke_slot(monkeypatch):
+    async def scenario():
+        session, _ = make_session(lambda *args: {"ok": True}, [])
+        session._invokes = asyncio.Semaphore(1)
+
+        def fail(*args):
+            raise RuntimeError("executor unavailable")
+
+        monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", fail)
+        with pytest.raises(RuntimeError, match="executor unavailable"):
+            await session._invoke({"id": "failed", "command": "unused"})
+        assert not session._invokes.locked()
+
+    asyncio.run(scenario())
+
+
+def test_reconnect_waits_for_disconnected_commands_to_finish():
+    import threading
+    from musegadget.link_client import MAX_CONCURRENT_INVOKES
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        all_started = asyncio.Event()
+        waiting = asyncio.Event()
+        release = threading.Event()
+        calls = []
+        lock = threading.Lock()
+
+        class Slots(asyncio.Semaphore):
+            async def acquire(self):
+                if self.locked():
+                    waiting.set()
+                return await super().acquire()
+
+        slots = Slots(MAX_CONCURRENT_INVOKES)
+
+        def command(name, *_):
+            with lock:
+                calls.append(name)
+                if len(calls) == MAX_CONCURRENT_INVOKES:
+                    loop.call_soon_threadsafe(all_started.set)
+            if name == "old" and not release.wait(5):
+                raise AssertionError("test workers were not released")
+            return {"ok": True}
+
+        tasks = []
+        vms = []
+        try:
+            for cycle in range(2):
+                session, vm = make_session(command, [], invoke_slots=slots)
+                vms.append(vm)
+                task = asyncio.create_task(session.run(asyncio.Event()))
+                tasks.append(task)
+                await asyncio.wait_for(vm.handshake(), 2)
+                await asyncio.wait_for(vm.accept_control_stream(), 2)
+                register = await asyncio.wait_for(vm.next_message(), 2)
+                await vm.send_message({"type": "res", "id": register["id"], "ok": True})
+                if cycle == 0:
+                    for index in range(MAX_CONCURRENT_INVOKES):
+                        await vm.send_message({"method": "link.invoke", "id": str(index), "command": "old"})
+                    await asyncio.wait_for(all_started.wait(), 2)
+                    await vm.ws.close()
+                    assert await asyncio.wait_for(task, 2) is Outcome.CLOSED
+                else:
+                    await vm.send_message({"method": "link.invoke", "id": "new", "command": "new"})
+                    await asyncio.wait_for(waiting.wait(), 2)
+                    assert calls == ["old"] * MAX_CONCURRENT_INVOKES
+                    release.set()
+                    result = await asyncio.wait_for(vm.next_message(), 2)
+                    assert result == {"method": "link.result", "id": "new", "ok": True}
+                    assert calls == ["old"] * MAX_CONCURRENT_INVOKES + ["new"]
+        finally:
+            release.set()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", ["command", "send"])
+def test_invoke_failure_releases_slot_for_later_commands(failure):
+    async def scenario():
+        def command(*args):
+            if failure == "command":
+                raise RuntimeError("command failed")
+            return {"ok": True}
+
+        slots = asyncio.Semaphore(1)
+        session, _ = make_session(command, [], invoke_slots=slots)
+
+        async def send(message):
+            raise ConnectionError("send failed")
+
+        session.send = send
+        expected = RuntimeError if failure == "command" else ConnectionError
+        with pytest.raises(expected, match=f"{failure} failed"):
+            await session._invoke({"id": "failed", "command": "test"})
+        await asyncio.wait_for(slots.acquire(), 1)
+        assert slots.locked()
+        slots.release()
+
+    asyncio.run(scenario())
+
+
+def test_worker_completion_and_waiter_cancellation_release_slot_once(monkeypatch):
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        worker = loop.create_future()
+        submitted = asyncio.Event()
+        slots = asyncio.Semaphore(1)
+        session, _ = make_session(lambda *args: {"ok": True}, [], invoke_slots=slots)
+        sent = []
+
+        def submit(*args):
+            submitted.set()
+            return worker
+
+        async def send(message):
+            sent.append(message)
+
+        monkeypatch.setattr(loop, "run_in_executor", submit)
+        session.send = send
+        task = asyncio.create_task(session._invoke({"id": "race", "command": "test"}))
+        await asyncio.wait_for(submitted.wait(), 1)
+        worker.set_result({"ok": True})
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert sent == []
+        await asyncio.wait_for(slots.acquire(), 1)
+        assert slots.locked(), "the same slot was released twice"
+        slots.release()
+
+    asyncio.run(scenario())
