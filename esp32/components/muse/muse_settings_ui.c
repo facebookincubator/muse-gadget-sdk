@@ -430,6 +430,26 @@ static int text_y(int y)
     return muse_board->height / 2 + text_px(y - 233);
 }
 
+/* Flat screens too short for the scaled layout (320x240): the back arrow and
+ * title in one row, the field below, the keyboard under it. */
+#define TEXT_COMPACT_FIELD_Y 44
+#define TEXT_COMPACT_FIELD_H 40
+
+static bool text_compact(void)
+{
+    return !muse_board->round && muse_board->height < 300;
+}
+
+static int text_field_y(void)
+{
+    return text_compact() ? TEXT_COMPACT_FIELD_Y : text_y(76);
+}
+
+static int text_field_w(void)
+{
+    return text_compact() ? muse_board->width - 16 : text_px(300);
+}
+
 static void close_text(void)
 {
     lv_textarea_set_text(s_text_ta, "");   /* don't leave secrets in the widget */
@@ -468,10 +488,10 @@ static void on_text_show(lv_event_t *e)
 /* Beside the keyboard's field, a button to show a password. */
 static void fit_show_button(bool password)
 {
-    int w = text_px(300), show_w = 70, gap = 8;
+    int w = text_field_w(), y = text_field_y(), show_w = 70, gap = 8;
     lv_obj_set_width(s_text_ta, password ? w - show_w - gap : w);
-    lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, password ? -(show_w + gap) / 2 : 0, text_y(76));
-    lv_obj_align(s_text_show, LV_ALIGN_TOP_MID, (w - show_w) / 2, text_y(76));
+    lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, password ? -(show_w + gap) / 2 : 0, y);
+    lv_obj_align(s_text_show, LV_ALIGN_TOP_MID, (w - show_w) / 2, y);
     lv_label_set_text(lv_obj_get_child(s_text_show, 0), "Show");
     if (password) {
         lv_obj_remove_flag(s_text_show, LV_OBJ_FLAG_HIDDEN);
@@ -484,7 +504,7 @@ static void build_keyboard(void)
 {
     s_text_show = lv_button_create(s_text);
     lv_obj_remove_style_all(s_text_show);
-    lv_obj_set_size(s_text_show, 70, text_px(48));
+    lv_obj_set_size(s_text_show, 70, lv_obj_get_height(s_text_ta));
     lv_obj_set_style_radius(s_text_show, 14, 0);
     lv_obj_set_style_bg_opa(s_text_show, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(s_text_show, lv_color_hex(COLOR_CARD), 0);
@@ -493,7 +513,7 @@ static void build_keyboard(void)
 
     /* Inside the circle, or across the rest of the screen. */
     s_text_kb = lv_keyboard_create(s_text);
-    int y = text_y(136);
+    int y = text_compact() ? TEXT_COMPACT_FIELD_Y + TEXT_COMPACT_FIELD_H + 6 : text_y(136);
     if (muse_board->round) {
         lv_obj_set_size(s_text_kb, text_px(384), text_px(206));
     } else {
@@ -534,11 +554,11 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 40);
 
     const lv_font_t *font = &lv_font_montserrat_20;
-    int h = text_px(48), border = 2;
+    int h = text_compact() ? TEXT_COMPACT_FIELD_H : text_px(48), border = 2;
     int pad = (h - 2 * border - lv_font_get_line_height(font)) / 2;
     s_text_ta = lv_textarea_create(s_text);
     lv_textarea_set_one_line(s_text_ta, true);
-    lv_obj_set_size(s_text_ta, text_px(300), h);
+    lv_obj_set_size(s_text_ta, text_field_w(), h);
     lv_obj_set_style_text_font(s_text_ta, font, 0);
     lv_obj_set_style_pad_ver(s_text_ta, pad > 0 ? pad : 0, 0);
     lv_obj_set_style_pad_hor(s_text_ta, 14, 0);
@@ -550,7 +570,13 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_set_style_text_font(s_text_ta, &lv_font_montserrat_16, LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_set_style_text_color(s_text_ta, lv_color_hex(COLOR_DIM), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_add_state(s_text_ta, LV_STATE_FOCUSED);
-    lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, 0, text_y(76));
+    lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, 0, text_field_y());
+    if (text_compact()) {
+        lv_obj_set_size(back, 48, TEXT_COMPACT_FIELD_H);
+        lv_obj_align(back, LV_ALIGN_TOP_LEFT, 4, 0);
+        lv_obj_set_width(s_text_title, muse_board->width - 120);
+        lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 10);
+    }
 
     /* A full keyboard's keys are too small to hit on a screen under 2". */
     if (muse_board->diagonal_in >= 2.0f) {
