@@ -21,7 +21,7 @@ import logging
 import os
 import sys
 
-from musegadget import __version__, config, identity
+from musegadget import __version__, config, doctor, identity
 from musegadget.pair import SETUP_WINDOW_S, PairOutcome, SetupWindow, pair
 
 log = logging.getLogger("musegadget")
@@ -127,6 +127,14 @@ def cmd_unpair(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    print(f"Muse Gadget doctor (version {__version__})")
+    results: tuple[doctor.CheckResult, ...] = doctor.run_checks()
+    for result in results:
+        print(doctor.format_check(result))
+    return 1 if any(result["status"] == "FAIL" for result in results) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="musegadget")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -154,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("info", help="show device identity").set_defaults(func=cmd_info)
     sub.add_parser("unpair", help="forget the saved pairing").set_defaults(func=cmd_unpair)
+    sub.add_parser("doctor", help="check setup and suggest troubleshooting steps").set_defaults(func=cmd_doctor)
 
     args = parser.parse_args(argv)
     logging.basicConfig(
