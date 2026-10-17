@@ -491,6 +491,7 @@ static void keeper_task(void *arg) {
     int64_t away_backoff = AWAY_MIN_US;
     uint32_t pending = KEEP_BLE;
     bool napped = false;
+    bool wifi_stopped = false;
     bool setup_done = config_setup_complete();
     if (setup_done && muse_settings_ble_on()) {
         // Registered devices boot with the phone companion off; the settings
@@ -538,10 +539,15 @@ static void keeper_task(void *arg) {
 
         bool have = s_ssid[0] != '\0';
         napped = napped && s_nap;
-        if (!muse_settings_wifi_on() || !have) {
-            if (wifi_mgr_is_connected()) {
+        bool stop_wifi = !muse_settings_wifi_on() || !have;
+        wifi_stopped = wifi_stopped && stop_wifi;
+        if (stop_wifi) {
+            // A dropped connection may still have a reconnect timer pending.
+            // Cancel it once on entry, even without an IP address. Retry if a
+            // setup operation owns the gate, as for the nap below.
+            if ((!wifi_stopped || wifi_mgr_is_connected()) && app_wifi_nap()) {
                 ESP_LOGI(TAG, "wifi %s; disconnecting", have ? "off" : "forgotten");
-                wifi_mgr_disconnect();
+                wifi_stopped = true;
             }
             joined_gen = s_creds_gen;
             s_away = false;
