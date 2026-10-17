@@ -351,7 +351,14 @@ class MuseTurn:
         parent = payload.get("reply_to_message_id") or payload.get("parent_message_id")
         message_id = payload.get("message_id")
         reply = self._replies.get(message_id) if isinstance(message_id, str) else None
-        explicitly_linked = parent in self._user_ids or (reply is not None and reply.bound)
+        parent_reply = self._replies.get(parent) if isinstance(parent, str) else None
+        parent_linked = parent in self._user_ids or (parent_reply is not None and parent_reply.bound)
+        # Shared chats also carry statuses for other requests. Reject an explicit
+        # foreign parent before it can change completion, activity or follow-ups.
+        # Parentless statuses retain the existing compatibility behavior.
+        if not scoped and parent and not parent_linked:
+            return []
+        explicitly_linked = parent_linked or (reply is not None and reply.bound)
         terminal = isinstance(status, str) and status in _TERMINAL_TASK_STATUSES
         was_finished = self.task_finished
         task_id = payload.get("task_id")
