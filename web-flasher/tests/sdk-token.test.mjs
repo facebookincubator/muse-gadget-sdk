@@ -81,3 +81,83 @@ test("an acknowledged token write still succeeds and closes the port", async () 
   assert.equal(port.readable.locked, false);
   assert.equal(port.writable.locked, false);
 });
+
+function port(failures = 0, errorName = "InvalidStateError") {
+  let controller;
+  const p = {
+    calls: 0, writes: [], signals: [], closes: 0,
+    readable: null, writable: null,
+    async open() {
+      this.calls++;
+      if (this.calls <= failures) {
+        throw new DOMException("The port is already open.", errorName);
+      }
+      this.readable = new ReadableStream({ start(c) { controller = c; } });
+      this.writable = new WritableStream({
+        write(value) {
+          p.writes.push(new TextDecoder().decode(value));
+          controller.enqueue(new TextEncoder().encode("@sdk_token ok\n"));
+        },
+      });
+    },
+    async setSignals(signals) { this.signals.push(signals); },
+    async close() {
+      this.closes++;
+      this.readable = this.writable = null;
+    },
+  };
+  return p;
+}
+
+test("waits for closing to finish even when both streams are already null", async () => {
+  const p = port(2);
+  await sendSdkToken(p, token, { retryMs: 10, openRetryMs: 1 });
+  assert.equal(p.calls, 3);
+  assert.deepEqual(p.writes, [`\n>sdk_token=${token}\n`]);
+  assert.equal(p.closes, 1);
+  assert.deepEqual(p.signals, [{ dataTerminalReady: false, requestToSend: false }]);
+});
+
+test("does not retry permission or I/O failures or close another owner", async () => {
+  for (const name of ["SecurityError", "NetworkError"]) {
+    const p = port(1, name);
+    await assert.rejects(sendSdkToken(p, token), (error) => error.i18n?.key === "token.openFailed");
+    assert.equal(p.calls, 1);
+    assert.equal(p.closes, 0);
+    assert.equal(p.writes.length, 0);
+  }
+});
+
+test("does not wait for an already open port owned by another send", async () => {
+  const p = port();
+  await p.open();
+  p.open = async () => {
+    p.calls++;
+    throw new DOMException("The port is already open.", "InvalidStateError");
+  };
+  await assert.rejects(sendSdkToken(p, token), (error) => error.i18n?.key === "token.openFailed");
+  assert.equal(p.calls, 2);
+  assert.equal(p.closes, 0);
+  assert.equal(p.writes.length, 0);
+  assert.ok(p.readable);
+  assert.ok(p.writable);
+  await p.readable.cancel();
+  await p.writable.close();
+});
+
+test("fails within a bounded deadline when the port stays busy", async () => {
+  const p = port(Infinity);
+  const started = Date.now();
+  await assert.rejects(sendSdkToken(p, token, { openTimeoutMs: 30, openRetryMs: 5 }), (error) => error.i18n?.key === "token.openFailed");
+  assert.ok(p.calls > 1);
+  assert.ok(Date.now() - started >= 30);
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(p.closes, 0);
+  assert.equal(p.writes.length, 0);
+});
+
+test("rejects an invalid token before opening the port", async () => {
+  const p = port();
+  await assert.rejects(sendSdkToken(p, "invalid"), (error) => error.i18n?.key === "token.invalid");
+  assert.equal(p.calls, 0);
+});
