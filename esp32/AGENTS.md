@@ -455,6 +455,45 @@ To skip BLE Wi-Fi provisioning while you iterate, set
 `CONFIG_HOMEHUB_WIFI_SSID` and `CONFIG_HOMEHUB_WIFI_PASSWORD` in `menuconfig`.
 The device still needs to be paired once for its token.
 
+## Video from a phone
+
+`MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
+`devices/sdkconfig.muse-video`) adds video streaming (`CONFIG_MUSE_VIDEO`,
+`CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Camera (`../android/camstream`) on a phone on
+the same Wi-Fi streams its camera, or a clip, as H.264, and
+the board decodes it and draws it full screen. `../protocols/VIDEO.md` has
+the design, the Wi-Fi protocol and the numbers.
+
+- **Boards:** those whose panel driver has `draw_frame` and that have PSRAM:
+  the Waveshare S3 1.75C (tested) and 1.75, the StopWatch and the
+  ESP-Mosaico. Another QSPI AMOLED driven by `boards/muse_lcd_bands.c` gets
+  it with `.draw_frame = muse_lcd_bands_frame` and its panel gap
+  (`muse_lcd_bands_set_gap`); `muse_lcd_bands_set_te` if the TE line is wired.
+- **Pieces:** `components/tinyh264` (the decoder),
+  `components/muse_vstream` (the receive ring and frame format any transport
+  shares), `components/muse/muse_video.c` (decode and show tasks, pacing,
+  bands, the view), `muse_yuv*.c/.S` (colour conversion and scaling),
+  `muse_video_wifi.c` (TCP on port 7766, mDNS `_musevideo._tcp`) and
+  `muse_video_wire.c` (its messages). A new transport fills a
+  `muse_video_transport_t` and calls `muse_video_begin()`.
+- **Using it:** Phone camera in Settings (touch boards) or the menu opens the
+  view and asks the phone for a stream; any button closes it. The console's
+  `>video` / `>video=0` do the same. Stats every 2 s on `muse_video`: decode
+  time, received-to-shown, kb/s, shown/dropped/skipped, each core's load.
+- **Radio:** while a stream is on, Wi-Fi stays out of modem sleep and BLE
+  stops advertising (`muse_wifi_keep_awake`, `muse_link_ble_quiet`): with BLE
+  advertising, the radio's scheduler gives BLE half of every beacon period
+  and the stream's packets wait out that half (50 ms round trips instead of
+  15, and the phone's bitrate falls to its floor).
+- **Memory:** the ring (128 KB) and the decoder's pictures are in PSRAM; the
+  decode and show tasks take about 10 KB of internal RAM once the first
+  stream starts. `CONFIG_MUSE_VIDEO_DECODER_IRAM` (off) puts the decoder's
+  hot code in IRAM: 44 KB that a Wi-Fi + BLE + UI build on the S3 can't spare
+  (LVGL's task then fails to start).
+- **Test** with `tests/test_muse_video.py` (the ring and the Wi-Fi messages,
+  and the wiring under the options) and `tests/test_tinyh264_pie.py`; on a
+  board, with Muse Gadgets Camera (`adb logcat -s MuseCam`).
+
 ## Configuration gotchas
 
 - `sdkconfig.defaults.esp32c5` is loaded after `sdkconfig.defaults` for C5

@@ -31,6 +31,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VIDEO_WIFI
+#include "muse_video_wifi.h"
+#endif
 
 static const char *TAG = "muse";
 
@@ -90,6 +93,9 @@ void muse_app_run(const muse_board_t *board)
     }
 
     muse_hatch_start();
+#if CONFIG_MUSE_VIDEO_WIFI
+    muse_video_wifi_start();   /* waits for Wi-Fi itself */
+#endif
     /* Home Link owns the radios; these just hand it the saved settings. */
     muse_wifi_apply();
     muse_ble_apply();

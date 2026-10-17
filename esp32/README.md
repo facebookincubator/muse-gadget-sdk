@@ -264,6 +264,13 @@ To give Muse a command of its own, such as reading a sensor or switching a
 relay, advertise it in `link.register` and handle it in `main/app.c`.
 [`AGENTS.md`](AGENTS.md#adding-a-command) walks through it.
 
+To show your phone's camera on a board's screen, build it with
+`MUSE_VIDEO=1 tools/muse/board.sh build <board>` and run
+[Muse Gadgets Camera](../android/camstream) on a phone on the same Wi-Fi: the phone
+encodes H.264, the board decodes and draws it, 30 fps on the round 466 px
+boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and
+[`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
+
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
@@ -342,6 +349,9 @@ their upstream licenses:
 - [`main/epd_ssd1677.c`](main/epd_ssd1677.c), the reTerminal Sticky SSD1677
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence, is MIT
   and retains the source's copyright and license notice.
+- [`components/tinyh264/src`](components/tinyh264), the H.264 decoder, is the
+  Android Open Source Project's (via udevbe/tinyh264), Apache-2.0 under its
+  copyright. See [`components/tinyh264/LICENSE`](components/tinyh264/LICENSE).
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.

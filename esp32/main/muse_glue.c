@@ -418,6 +418,7 @@ static const muse_link_ops_t s_ops = {
     .req_cancel = noise_ctrl_req_cancel,
     .power_save = noise_ctrl_set_power_save,
     .wifi_nap = op_wifi_nap,
+    .ble_quiet = ble_server_set_quiet,
     .wifi_saved = op_wifi_saved,
     .wifi_forget = op_wifi_forget,
 };
