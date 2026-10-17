@@ -126,6 +126,11 @@ A few other ways to build on it:
   `sudo musegadget pair --force`. Do the same if you revoke the token the device
   paired with: it can't reach Muse until it pairs with a new one.
 
+## Community device notes
+
+- [RDK X5](docs/rdk-x5.md): Ubuntu ARM64 deployment notes and an optional
+  community touchscreen UI, with its tested configuration and limitations.
+
 ## Manage it
 
 ```sh
