@@ -411,6 +411,20 @@ int main(void) {
         self.assertIn("1 bit per pixel", block)
         self.assertIn("16 bits per pixel (RGB565)", block)
 
+    def test_draw_url_states_the_four_colour_inks(self):
+        noise = (ROOT / "main/noise_control.cpp").read_text()
+        start = noise.index("#if CONFIG_HOMEHUB_DISPLAY_COMMANDS")
+        block = noise[start:noise.index('"display.show_animation"', start)]
+        self.assertIn("bool epaper = bits == 1 || bits == 2 || bits == 4;", block)
+        # Four inks only on the 1.54G; elsewhere 2 bits stay four grays.
+        self.assertIn("#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G\n        bool inks4 = bits == 2;", block)
+        self.assertIn("four-level grayscale e-paper screen, 2 bits per pixel", block)
+        self.assertIn('inks4 ? "four-colour e-paper screen, 2 bits per pixel"', block)
+        start = block.index('inks4 ? " The screen has only four inks:')
+        text = re.sub(r'"\s*"', "", block[start:block.index("bits == 4", start)])
+        for ink in ("black #000000", "white #ffffff", "yellow #ffff00", "red #ff0000"):
+            self.assertIn(ink, text)
+
     def test_draw_url_states_the_six_colour_inks(self):
         noise = (ROOT / "main/noise_control.cpp").read_text()
         start = noise.index("#if CONFIG_HOMEHUB_DISPLAY_COMMANDS")
