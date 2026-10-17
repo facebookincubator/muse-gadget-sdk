@@ -18,3 +18,10 @@ dependencies:
   espressif/led_strip: "~3.0"
   idf:
     version: ">=5.1"
+  # The Matter gateway (HOMEHUB_MATTER_GATEWAY), which brings esp-matter.
+  dhavalgujar/esp32_matter_gateway:
+    git: "https://github.com/dhavalgujar/esp32-matter-gateway.git"
+    path: "components/esp32_matter_gateway"
+    version: "v0.1.0"
+    rules:
+      - if: "$CONFIG{HOMEHUB_MATTER_GATEWAY} == True"

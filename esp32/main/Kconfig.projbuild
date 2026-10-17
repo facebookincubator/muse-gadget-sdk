@@ -498,6 +498,33 @@ menu "ESP32 Device SDK"
             tenths of a degree Celsius. The onboard sensor reads warm from
             board heat; -33 (-3.3 C, about -6 F) is a starting point.
 
+    config HOMEHUB_MATTER_GATEWAY
+        bool "Matter devices through chip-tool-gw in Muse's VM"
+        default n
+        help
+            Run a Matter gateway on the device, through which chip-tool-gw in
+            Muse's VM controls the home's Matter devices (Wi-Fi, and Thread
+            through the home's border router) over the home-network tunnel. The
+            gateway is the esp32-matter-gateway component, fetched only when
+            this is on. Load devices/sdkconfig.matter-gateway; see "Matter
+            devices through chip-tool-gw" in esp32/AGENTS.md.
+
+    choice HOMEHUB_MATTER_GATEWAY_LISTEN
+        prompt "chip-tool-gw connects from"
+        depends on HOMEHUB_MATTER_GATEWAY
+        default HOMEHUB_MATTER_GATEWAY_LISTEN_TUNNEL
+        help
+            Where chip-tool-gw connects from: the home-network tunnel (how Muse
+            reaches the gateway; the port isn't open on the home network), or
+            the local network, for development only (the port is then open to
+            the home network, and each client still needs the gateway's secret).
+
+        config HOMEHUB_MATTER_GATEWAY_LISTEN_TUNNEL
+            bool "The home-network tunnel"
+        config HOMEHUB_MATTER_GATEWAY_LISTEN_LAN
+            bool "The local network (development)"
+    endchoice
+
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY

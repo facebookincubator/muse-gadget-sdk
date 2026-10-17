@@ -28,6 +28,16 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "cJSON.h"
+#if CONFIG_HOMEHUB_MATTER_GATEWAY
+// The esp32-matter-gateway component (main/idf_component.yml)
+#include "esp32_matter_gateway.h"
+#if !CONFIG_HOMEHUB_TUNNEL
+#error "The Matter gateway needs the home-network tunnel (CONFIG_HOMEHUB_TUNNEL)"
+#endif
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
+#error "The Matter gateway can't be combined with MUSE_ENABLED or HOMEHUB_BLE_PERSISTENT: both keep NimBLE after setup, and CHIP's Bluetooth commissioning needs it to itself"
+#endif
+#endif
 
 #include "esp_heap_caps.h"
 #if CONFIG_MUSE_WATCHER_CAMERA
@@ -687,6 +697,10 @@ static bool complete_setup_and_stop_ble(const char *reason, uint32_t session_gen
     setup_window_lock_take();
     advance_confirm_generation_locked();
     setup_window_lock_give();
+#if CONFIG_HOMEHUB_MATTER_GATEWAY
+    // Matter starts on a paired boot: restart shortly.
+    esp32_matter_gateway_setup_done();
+#endif
     if (!s_ble_started) return true;
     ESP_LOGI(TAG, "setup complete via %s; stopping BLE", reason);
     if (xTaskCreate(shutdown_ble_task, "ble_stop", 4096, NULL, 4, NULL) != pdPASS) {
@@ -1396,6 +1410,11 @@ static void finish_setup_reset_with_gate_held(void) {
     led_status_set_state(LED_STATE_UNPAIRED);
     ble_server_send_status("unpaired");
     link_pairing_reset();
+#if CONFIG_HOMEHUB_MATTER_GATEWAY
+    // Every reset (button, menu, BLE or server unpair) ends here: the next
+    // owner doesn't get this home's Matter devices.
+    esp32_matter_gateway_erase();
+#endif
 }
 
 static bool reset_setup_with_gate_held(const char *source) {
@@ -1866,6 +1885,12 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_BLE_COMMANDS
     if (ble_commands_handles(command)) {
         return ble_commands_handle(command, params, request_id, session_generation);
+    }
+#endif
+#if CONFIG_HOMEHUB_MATTER_GATEWAY
+    // chip-tool-gw does the rest, over the gateway's stream.
+    if (strcmp(command, "matter.connect") == 0) {
+        return esp32_matter_gateway_connect(params);
     }
 #endif
     if (strcmp(command, "device.list_vms") == 0) {
@@ -2719,6 +2744,22 @@ void app_run(void) {
     }
 
     s_setup_stage = setup_complete ? "done" : "idle";
+#if CONFIG_HOMEHUB_MATTER_GATEWAY
+    {
+        // chip-tool-gw connects through the home-network tunnel
+        // (main/tunnel_netif.c's netif, "tn"), or from the local network for
+        // development.
+        const esp32_matter_gateway_config_t gateway = {
+            .setup_complete = setup_complete,
+#if CONFIG_HOMEHUB_MATTER_GATEWAY_LISTEN_LAN
+            .listen_netif = NULL,
+#else
+            .listen_netif = "tn",
+#endif
+        };
+        esp32_matter_gateway_init(&gateway);
+    }
+#endif
 #if CONFIG_MUSE_ENABLED
     // Muse's talk button confirms pairing and its menu resets setup; the Link
     // button GPIO may be a display or codec pin on these boards.

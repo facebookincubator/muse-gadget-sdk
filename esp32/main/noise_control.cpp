@@ -1308,6 +1308,15 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
+#if CONFIG_HOMEHUB_MATTER_GATEWAY
+static cJSON *typed_param(const char *type, const char *description) {
+    cJSON *param = cJSON_CreateObject();
+    cJSON_AddStringToObject(param, "type", type);
+    cJSON_AddStringToObject(param, "description", description);
+    return param;
+}
+#endif
+
 static void add_command(cJSON *commands, const char *name,
                         const char *description,
                         cJSON *required, cJSON *optional) {
@@ -1484,6 +1493,19 @@ static char *build_register_json(void) {
                 "and relative humidity in percent. Each reading has its age "
                 "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
+#endif
+
+#if CONFIG_HOMEHUB_MATTER_GATEWAY
+    {
+        // Matter devices through chip-tool-gw (the esp32_matter_gateway component):
+        // the rest of the gateway's commands go over its stream.
+        cJSON *connect_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(connect_optional, "rotate",
+                              typed_param("boolean", "Replace the secret first, closing every connection."));
+        add_command(commands, "matter.connect",
+                    "Matter devices: the endpoint and secret chip-tool-gw connects with (never print the secret).",
+                    nullptr, connect_optional);
+    }
 #endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA
