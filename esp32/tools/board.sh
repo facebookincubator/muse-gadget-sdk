@@ -31,6 +31,7 @@
 #   reterminal-e1002
 #              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
 #   c6-nopsram ESP32-C6 devkit without PSRAM (status LED on GPIO8, no display)
+#   c3-devkit  ESP32-C3 devkit, 4 MB flash (status LED on GPIO8)
 #   espressif-s3-devkitc-1
 #              ESP32-S3-DevKitC-1 v1.1 N8R8 (status LED, no display)
 #   waveshare-c6-lcd-147
@@ -42,7 +43,7 @@
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,41p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -63,6 +64,12 @@ case "$BOARD" in
     TARGET=esp32c6
     DEFAULTS="$DEFAULTS;devices/sdkconfig.c6-nopsram"
     PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
+    ;;
+  c3-devkit)
+    TARGET=esp32c3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.c3-devkit"
+    # Most C3 devkits have a CP210x or CH343 USB-UART bridge.
+    PORTS="/dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART* /dev/cu.wchusbserial* /dev/ttyUSB* /dev/ttyACM*"
     ;;
   ideaspark|sensecap-indicator)
     [ "$BOARD" = ideaspark ] && TARGET=esp32 || TARGET=esp32s3

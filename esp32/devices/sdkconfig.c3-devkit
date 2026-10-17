@@ -1,0 +1,62 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+# Generic ESP32-C3 devkit (the C3 has no PSRAM), 4 MB flash (e.g. Espressif's
+# ESP32-C3-DevKitM-1 or DevKitC-02). A status light board, without the full UI.
+# Load last, after sdkconfig.defaults. Modeled on devices/sdkconfig.c6-nopsram:
+# the C3 has 400 KB of SRAM for code and data together, so Wi-Fi, lwIP and the
+# BLE controller's code also move out of IRAM, which leaves that RAM as heap.
+CONFIG_IDF_TARGET="esp32c3"
+CONFIG_SPIRAM=n
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_c3_4mb.csv"
+# TLS: keep allocations in internal SRAM and shrink outbound records; dynamic
+# input buffers are sized to each record instead of a fixed 16 KB.
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+# No home-network tunnel (as on the other no-PSRAM boards): the device pairs
+# and Muse reaches it once the control session is up.
+CONFIG_HOMEHUB_TUNNEL=n
+# Code out of IRAM, so that RAM is heap.
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=n
+CONFIG_LWIP_IRAM_OPTIMIZATION=n
+CONFIG_LWIP_EXTRA_IRAM_OPTIMIZATION=n
+CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
+CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y
+# Fewer Wi-Fi buffers and lwIP mailboxes.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=32
+# Halve the NimBLE pools: one phone at a time is all pairing needs.
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=15
+# The BOOT button is GPIO9 on ESP32-C3 devkits. Needed to confirm pairing and
+# to long-press-reset setup.
+CONFIG_HOMEHUB_BUTTON_GPIO=9
+# The addressable RGB LED is on GPIO8 on Espressif's C3 devkits. Change it
+# here if yours differs.
+CONFIG_HOMEHUB_LED_STRIP_GPIO=8
