@@ -36,6 +36,7 @@ warranties, brownouts, or bankruptcies. Proceed at your own risk!
 |---|---|
 | [**ESP32 Device SDK**](esp32) | Connect your ESP32 board to Muse through our open source SDK. Throw in a screen to show images, add audio in and out, or wire up other sensors. |
 | [**Linux Device SDK**](linux) | Turn that spare Raspberry Pi or Linux box into a Muse gadget. Hack in your own commands to let Muse handle sysadmin chores or your Home Assistant setup. |
+| [**Muse Gadgets Camera**](android/camstream) | Stream your phone's camera, or a clip, to an ESP32 gadget's screen over Wi-Fi: H.264 decoded on the board, 30 fps on the round 466 px boards. [`protocols/VIDEO.md`](protocols/VIDEO.md) explains how. |
 
 Before you flash or pair a gadget, get an
 [SDK token](https://gadgets.muse.ai/settings/sdk-tokens) and review the
@@ -72,9 +73,18 @@ upstream licenses:
 | [`esp32/components/minimp3/include/minimp3.h`](esp32/components/minimp3) | [lieff/minimp3](https://github.com/lieff/minimp3) | CC0-1.0, see [`LICENSE`](esp32/components/minimp3/LICENSE) |
 | [`esp32/components/muse/boards/ostb_echoear_display_init.h`](esp32/components/muse/boards/ostb_echoear_display_init.h) | [78/xiaozhi-esp32 ESP-VoCat panel sequence](https://github.com/78/xiaozhi-esp32/blob/0d576d3d4c049c6f55eaf879725dc23e516511b4/main/boards/espressif/esp-vocat/esp_vocat.cc) | MIT, retained in the file header |
 | [`esp32/main/pixel_font.c`](esp32/main/pixel_font.c) | Adafruit GFX `glcdfont.c` | BSD-2-Clause, in the file header |
+| [`esp32/components/tinyh264/src`](esp32/components/tinyh264) | the Android Open Source Project's H.264 decoder, via [udevbe/tinyh264](https://github.com/udevbe/tinyh264) | Apache-2.0, AOSP's copyright, see [`LICENSE`](esp32/components/tinyh264/LICENSE) |
 
 Dependencies fetched at build time are under their own licenses: ESP-IDF
 components (into `esp32/managed_components/`), and the simulator's LVGL and
 SDL (listed in [`esp32/simulator/THIRD_PARTY.md`](esp32/simulator/THIRD_PARTY.md)).
 
 The Apache License does not cover the [Jollybot avatar](esp32/avatar).
+
+Muse Gadgets Camera's sample clips aren't in this repository: the app fetches a few
+seconds of the Blender Foundation's open movies (CC BY 3.0) when one is
+played, and shows their credits.
+
+Muse Gadgets Camera can use x264 (GPL-2.0) on the phone; this repository carries none
+of its code. An APK you build with it is under the GPL
+([`android/camstream/README.md`](android/camstream/README.md)).
