@@ -27,10 +27,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // again until it answers, for up to `timeoutMs`.
 export async function sendSdkToken(port, token, { timeoutMs = 25000, retryMs = 3000 } = {}) {
   if (!isSdkToken(token)) throw new Error("That isn't an SDK token. Copy it again from gadgets.muse.ai.");
-  try {
-    await port.open({ baudRate: 115200 });
-  } catch (e) {
-    throw new Error(`Couldn't open the port (${e.message}). Close the installer's dialog first.`);
+  // Web Serial clears the streams before an asynchronous close has finished.
+  // ESP Web Tools starts that close from its closed listener, so opening once
+  // can race it even when readable/writable are already null.
+  const openingDeadline = Date.now() + 3000;
+  for (;;) {
+    try {
+      await port.open({ baudRate: 115200 });
+      break;
+    } catch (e) {
+      if (e.name === "InvalidStateError" && !port.readable && !port.writable && Date.now() < openingDeadline) {
+        await sleep(100);
+        continue;
+      }
+      throw new Error(`Couldn't open the port (${e.message}). Close the installer's dialog first.`);
+    }
   }
   // Leave EN and BOOT alone on boards whose bridge drives them.
   await port.setSignals({ dataTerminalReady: false, requestToSend: false }).catch(() => {});
