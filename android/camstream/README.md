@@ -30,12 +30,21 @@ with the measurements behind them. The gadget side is
 `../../esp32/components/muse/muse_video*.c` (`MUSE_VIDEO=1
 tools/muse/board.sh build <board>`).
 
-Plain Java on framework APIs, built without Gradle:
+Plain Java on framework APIs, no libraries. **Android Studio:** open this
+directory (`android/camstream`) and run it; Gradle downloads what it needs
+the first time. From the command line, either the Gradle wrapper or
+`build.sh`, which needs only the Android SDK (no Gradle):
 
 ```sh
-./build.sh install          # javac + d8 + aapt2 + apksigner, adb install, grants the camera
+./gradlew installDebug      # or: ./build.sh install (javac + d8 + aapt2 + apksigner, grants the camera)
 adb shell am start -n com.musegadgets.camstream/.MainActivity
 ```
+
+Both make a debug build signed with your debug key. The intent extras below
+(`--es host`, `--ez auto`, ...) work in debug builds only: the activity is
+exported, so in a release build any app could otherwise send the camera to
+a server of its choosing. An iPhone version of the same app is in
+[`../../ios/camstream`](../../ios/camstream).
 
 The phone and the gadget must be on the same Wi-Fi network. The app finds
 gadgets over mDNS (`_musevideo._tcp`) and connects to the first one, the
@@ -43,8 +52,9 @@ one whose name contains `--es target`, the address given with `--es host`
 (no mDNS: `192.168.1.20` or `192.168.1.20:7766`), or the one picked with
 the Device button (the choice is remembered). Then it waits: picking Phone
 camera on the gadget (Settings on the touch boards, the menu on the others)
-starts the stream, leaving it stops it; `--ez auto true` streams as soon as
-it's connected.
+starts the stream, leaving it stops it. The gadget takes a stream only
+while that view is open (`../../protocols/VIDEO.md`, Trust); with `--ez auto
+true` the app starts as soon as it is, without waiting for a button.
 
 ### x264 (better live quality; not in this repository)
 
@@ -58,7 +68,7 @@ includes it is under the GPL**: keep such builds for testing. To build one:
 ```sh
 git clone https://code.videolan.org/videolan/x264.git ~/x264
 NDK=~/Library/Android/sdk/ndk/27.2.12479018 X264_SRC=~/x264 OUT_LIB=~/x264-lib ./jni/build.sh
-LIB_DIR=~/x264-lib ./build.sh install
+LIB_DIR=~/x264-lib ./gradlew installDebug    # or ./build.sh install
 ```
 
 `jni/build.sh` builds x264 (static, NEON) and `jni/mgx264.c`, our JNI
@@ -66,8 +76,9 @@ wrapper, into `libmgx264.so`. It builds a copy of `X264_SRC` with
 `jni/x264_mvcheap.py`'s `mv-cheap` option (decoder-friendly motion vectors,
 used past 240 px: a fifth less decode time on the ESP-Mosaico; see
 `VIDEO.md`); `MV_CHEAP=0` leaves x264 as it is, and the app then goes on
-without it. `build.sh` packs `LIB_DIR` (default `lib/`, git-ignored) into
-the APK when it exists. With the library in the APK the app uses x264
+without it. Gradle and `build.sh` pack `LIB_DIR` (default `lib/`, git-ignored; in
+Android Studio set `camstream.libDir` in `local.properties`) into the APK
+when it exists. With the library in the APK the app uses x264
 (`fast`, zerolatency, baseline, one reference, no deblocking) and does the
 panel scaling in C; `--es sw hw` goes back to the hardware encoder.
 
@@ -84,7 +95,7 @@ same `LIB_DIR`:
 ```sh
 git clone -b v1.16.0 https://chromium.googlesource.com/webm/libvpx ~/libvpx
 NDK=~/Library/Android/sdk/ndk/27.2.12479018 VPX_SRC=~/libvpx OUT_LIB=~/x264-lib ./jni/build_vpx.sh
-LIB_DIR=~/x264-lib ./build.sh install
+LIB_DIR=~/x264-lib ./gradlew installDebug    # or ./build.sh install
 ```
 
 The **H.264 / VP8** button (or `--es codec vp8`) picks the codec for the

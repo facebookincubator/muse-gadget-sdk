@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Builds Muse Gadgets Camera without Gradle: javac, d8, aapt2, zipalign, apksigner
+# Builds Muse Gadgets Camera without Gradle (Android Studio: open this directory,
+# or ./gradlew installDebug): javac, d8, aapt2, zipalign, apksigner
 # from the Android SDK (ANDROID_HOME, or ~/Library/Android/sdk), signed with
 # the debug key. ./build.sh [install]
 set -euo pipefail
@@ -31,7 +32,13 @@ javac -source 17 -target 17 -nowarn -Xlint:-options -classpath "$jar" -d "$out/c
 "$bt/d8" --min-api 33 --lib "$jar" --output "$out/dex" $(find "$out/classes" -name '*.class')
 assets=()
 [ -d "$here/assets" ] && assets=(-A "$here/assets" -0 mp4 -0 264)
-"$bt/aapt2" link -o "$out/base.apk" -I "$jar" --manifest "$here/AndroidManifest.xml" ${assets[@]+"${assets[@]}"}
+# The same package, versions and SDK levels as build.gradle.kts; debuggable
+# (a test build, like Gradle's debug variant).
+sed 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.musegadgets.camstream">|' \
+    "$here/AndroidManifest.xml" > "$out/AndroidManifest.xml"
+"$bt/aapt2" link -o "$out/base.apk" -I "$jar" --manifest "$out/AndroidManifest.xml" \
+    --min-sdk-version 33 --target-sdk-version 34 --version-code 1 --version-name 0.1 --debug-mode \
+    ${assets[@]+"${assets[@]}"}
 (cd "$out/dex" && zip -q "$out/base.apk" classes.dex)
 # the software encoder's native library (jni/build.sh), when built
 if [ -d "${LIB_DIR:-$here/lib}" ]; then

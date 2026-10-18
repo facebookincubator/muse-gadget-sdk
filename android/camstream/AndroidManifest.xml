@@ -16,12 +16,8 @@ limitations under the License.
 -->
 <!-- Muse Gadgets Camera: streams the phone's camera to a Muse gadget's display over
      Wi-Fi (protocols/VIDEO.md). A sample app. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.musegadgets.camstream"
-    android:versionCode="1"
-    android:versionName="0.1">
-
-    <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="34" />
+<!-- Package, versions and SDK levels: build.gradle.kts (build.sh passes the same to aapt2). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
     <uses-feature android:name="android.hardware.wifi" android:required="true" />
@@ -36,8 +32,7 @@ limitations under the License.
 
     <application
         android:label="Muse Gadgets Camera"
-        android:allowBackup="false"
-        android:debuggable="true">
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"
