@@ -16,6 +16,7 @@
 
 #include "muse_lcd_bands.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -52,6 +53,17 @@ static uint8_t *s_chunk[2];
 static size_t s_chunk_bytes;
 static int s_chunks_out;                 /* of the band being sent */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+static SemaphoreHandle_t s_band_done;    /* the band LVGL waits on has gone */
+static uint32_t s_recovered;             /* waits given up on (flush_wait) */
+static int64_t s_warned_us;
+
+/*
+ * Longest a band or a piece may take before its completion is taken as lost.
+ * A band is a few ms on the wire; a panel call queued ahead of it (sleep
+ * waits 120 ms to settle) can hold it up, so allow well past that. The
+ * tearing-effect hold below is capped so it can't use this up itself.
+ */
+#define BAND_TIMEOUT_MS 500
 
 /* Tearing effect (muse_lcd_bands_set_te): the last scan's start, the period, the blanking. */
 static bool s_te_on;
@@ -75,6 +87,28 @@ static int64_t s_band_start, s_band_fall, s_band_p, s_band_scan;
 static int s_band_y1, s_band_y2;
 static size_t s_band_bytes;
 
+/* Rate-limited: a stuck panel would otherwise log every frame. */
+static void warn_lost(const char *what)
+{
+    int64_t now = esp_timer_get_time();
+    if (s_warned_us == 0 || now - s_warned_us > 10 * 1000 * 1000) {
+        s_warned_us = now;
+        ESP_LOGW(TAG, "%s: no completion in %d ms, carrying on (%" PRIu32 " recovered)", what,
+                 BAND_TIMEOUT_MS, s_recovered);
+    }
+}
+
+/* A piece's buffer, waiting no longer than a lost completion could take. */
+static bool take_chunk(void)
+{
+    if (xSemaphoreTake(s_chunk_free, pdMS_TO_TICKS(BAND_TIMEOUT_MS)) == pdTRUE) {
+        return true;
+    }
+    s_recovered++;
+    warn_lost("piece");
+    return false;
+}
+
 /* A piece has gone, or failed to; true if it was the band's last. */
 static bool IRAM_ATTR chunk_done(void)
 {
@@ -94,6 +128,7 @@ static bool IRAM_ATTR on_chunk_sent(esp_lcd_panel_io_handle_t io, esp_lcd_panel_
     bool last = chunk_done();
     if (last) {
         s_band_end = esp_timer_get_time();
+        xSemaphoreGiveFromISR(s_band_done, &woken);
     }
     bool yield = last && esp_lv_adapter_display_notify_color_trans_done_from_isr(s_disp);
     /* esp_lcd's SPI IO ignores this callback's return value, so the send
@@ -116,11 +151,15 @@ static bool IRAM_ATTR on_chunk_sent(esp_lcd_panel_io_handle_t io, esp_lcd_panel_
  * and the send task, the video and the UI hang for good. Acquiring only
  * with nothing in flight never takes that path. It costs the gap between
  * pieces (the next one is filled while the last is on the wire either way).
+ * Each take is capped at BAND_TIMEOUT_MS. On a lost completion the count is
+ * put back, so the send task can't sit here forever.
  */
 static void wire_idle(int held)
 {
     for (int i = held; i < 2; i++) {
-        xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+        if (!take_chunk()) {
+            break;   /* lost completion: the gives below put the count back */
+        }
     }
     for (int i = held; i < 2; i++) {
         xSemaphoreGive(s_chunk_free);
@@ -134,7 +173,30 @@ static esp_err_t queue_band(lv_display_t *disp, esp_lcd_panel_handle_t panel, in
     (void)panel;
     (void)ctx;
     band_t b = { data, x1, y1, x2, y2 };
-    return xQueueSend(s_bands, &b, 0) == pdTRUE ? ESP_OK : ESP_FAIL;
+    /* This band's completion is the next one band_wait() sees. */
+    xSemaphoreTake(s_band_done, 0);
+    /* On failure the adapter calls lv_display_flush_ready() itself. */
+    return xQueueSend(s_bands, &b, pdMS_TO_TICKS(BAND_TIMEOUT_MS)) == pdTRUE ? ESP_OK : ESP_FAIL;
+}
+
+/*
+ * LVGL's flush_wait_cb, called while a band is out. Without one LVGL spins
+ * on the flushing flag (lv_refr.c wait_for_flushing), forever if the
+ * completion is lost, and the screen freezes with the rest of the device
+ * still running. Waiting on a semaphore also frees the core meanwhile.
+ * Returning lets LVGL clear the flag and carry on.
+ */
+static void band_wait(lv_display_t *disp)
+{
+    (void)disp;
+    if (xSemaphoreTake(s_band_done, pdMS_TO_TICKS(BAND_TIMEOUT_MS)) == pdTRUE) {
+        return;
+    }
+    portENTER_CRITICAL(&s_lock);
+    s_chunks_out = 0;   /* a late completion now counts for nothing */
+    portEXIT_CRITICAL(&s_lock);
+    s_recovered++;
+    warn_lost("band");
 }
 
 /*
@@ -171,7 +233,13 @@ static bool te_now(int64_t *fall, int64_t *p, int64_t *scan)
     *fall = f;
     *p = q;
     *scan = q - s_te_blank;
-    return s_te_on && s_rows && q && esp_timer_get_time() - f < 4 * q;   /* else no TE: the panel is asleep */
+    /* A live refresh is ~17 ms; one missed edge still lands under 40. Far
+     * outside that, the "period" is the gap across sleep, and waiting it
+     * out would spend BAND_TIMEOUT_MS and look like a lost completion. */
+    if (q < 4000 || q > 50000 || *scan <= 0) {
+        return false;
+    }
+    return s_te_on && s_rows && esp_timer_get_time() - f < 4 * q;   /* else no TE: the panel is asleep */
 }
 
 /*
@@ -182,6 +250,7 @@ static bool te_now(int64_t *fall, int64_t *p, int64_t *scan)
  */
 static void te_hold(te_stats_t *st, int y1, int y2, int64_t w, int spread)
 {
+    int64_t spent = 0;
     for (int tries = 0; tries < 3; tries++) {
         int64_t fall, p, scan, now = esp_timer_get_time();
         if (!te_now(&fall, &p, &scan)) {
@@ -190,15 +259,26 @@ static void te_hold(te_stats_t *st, int y1, int y2, int64_t w, int spread)
         /* The write starts a little after this (the first piece is copied
          * first) and may take more or less than w: clear for all of it. */
         int64_t lo = w * (100 - spread) / 100 + 400, hi = w * (100 + spread) / 100 + 400, d = 0;
-        while (d < 2 * p && (te_meets(now + d - 300, lo, y1, y2, fall, p, scan) ||
-                             te_meets(now + d - 300, (lo + hi) / 2, y1, y2, fall, p, scan) ||
-                             te_meets(now + d - 300, hi, y1, y2, fall, p, scan))) {
+        /* The flush wait is only BAND_TIMEOUT_MS, and a panel call queued
+         * ahead of the band may already have used 120 ms of it. */
+        int64_t horizon = 2 * p;
+        int64_t room = 150 * 1000 - spent;
+        if (room < 1000) {
+            return;   /* budget gone: send, don't look like a lost flush */
+        }
+        if (horizon > room) {
+            horizon = room;
+        }
+        while (d < horizon && (te_meets(now + d - 300, lo, y1, y2, fall, p, scan) ||
+                               te_meets(now + d - 300, (lo + hi) / 2, y1, y2, fall, p, scan) ||
+                               te_meets(now + d - 300, hi, y1, y2, fall, p, scan))) {
             d += 500;
         }
-        if (d == 0 || d >= 2 * p) {
-            return;   /* clear now, or never */
+        if (d == 0 || d >= horizon) {
+            return;   /* clear now, or not within two refreshes / the budget */
         }
         vTaskDelay(pdMS_TO_TICKS((d + 999) / 1000));   /* then check again */
+        spent += d;
         st->held += tries == 0;
     }
 }
@@ -280,16 +360,21 @@ static void send_bands(void *arg)
         int rows = s_chunk_bytes / row & ~1;
         /* LVGL sends no more until this band is done, so nothing is still
          * counting down. */
+        portENTER_CRITICAL(&s_lock);
         s_chunks_out = (b.y2 - b.y1 + rows - 1) / rows;
+        portEXIT_CRITICAL(&s_lock);
         for (int y = b.y1; y < b.y2; y += rows) {
             int h = b.y2 - y < rows ? b.y2 - y : rows;
-            xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+            /* On a lost completion, reuse the buffer anyway: this piece's
+             * completion then makes up the one that never came. */
+            take_chunk();
             memcpy(s_chunk[k], b.data + (size_t)(y - b.y1) * row, h * row);
             wire_idle(1);
             esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, b.x1, y, b.x2, y + h, s_chunk[k]);
             if (err != ESP_OK) {
                 xSemaphoreGive(s_chunk_free);
                 if (chunk_done()) {
+                    xSemaphoreGive(s_band_done);
                     lv_display_flush_ready(s_disp);
                 }
             }
@@ -310,10 +395,11 @@ lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int l
     s_call_lock = xSemaphoreCreateMutex();
     s_call_done = xSemaphoreCreateBinary();
     s_chunk_free = xSemaphoreCreateCounting(2, 2);
+    s_band_done = xSemaphoreCreateBinary();
     /* 16-byte aligned: video fills them with the S3's SIMD stores (muse_lcd_bands_frame). */
     s_chunk[0] = heap_caps_aligned_alloc(16, chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     s_chunk[1] = heap_caps_aligned_alloc(16, chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!s_bands || !s_call_lock || !s_call_done || !s_chunk_free || !s_chunk[0] || !s_chunk[1] ||
+    if (!s_bands || !s_call_lock || !s_call_done || !s_chunk_free || !s_band_done || !s_chunk[0] || !s_chunk[1] ||
         xTaskCreatePinnedToCore(send_bands, "lcd_send", 2560, NULL, MUSE_UI_PRIORITY + 1, NULL, MUSE_UI_CORE) != pdPASS) {
         return NULL;
     }
@@ -330,6 +416,7 @@ lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int l
     }
     s_rows = cfg.profile.ver_res;
     lv_display_set_color_format(s_disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
+    lv_display_set_flush_wait_cb(s_disp, band_wait);
     const esp_lv_adapter_draw_bitmap_callbacks_t draw_cbs = { .custom_draw_bitmap = queue_band };
     esp_lv_adapter_set_draw_bitmap_callbacks(s_disp, &draw_cbs, NULL);
     return s_disp;
@@ -381,10 +468,7 @@ static void send_frame(void *arg)
     const frame_job_t *j = arg;
     /* Let LVGL's last band finish first, so its count of pieces in flight
      * (chunk_done) never sees ours. */
-    xSemaphoreTake(s_chunk_free, portMAX_DELAY);
-    xSemaphoreTake(s_chunk_free, portMAX_DELAY);
-    xSemaphoreGive(s_chunk_free);
-    xSemaphoreGive(s_chunk_free);
+    wire_idle(0);
     /* A whole frame is slower to write than the panel scans (26 ms on the
      * 1.75C): it stays clear started within a few ms of a scan's start. */
     static int64_t avg;
@@ -405,7 +489,8 @@ static void send_frame(void *arg)
     int k = 0;
     for (int y = j->y1; ok && y < j->y2; y += rows) {
         int h = j->y2 - y < rows ? j->y2 - y : rows;
-        xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+        /* On a lost completion, reuse the buffer anyway. */
+        take_chunk();
         j->fill(s_chunk[k], (int)row, y - j->y1, h, j->arg);
         wire_idle(1);
         if (esp_lcd_panel_io_tx_color(s_io, QSPI_PIXELS(y == j->y1 ? 0x2C : 0x3C), s_chunk[k], (size_t)h * row) !=
@@ -416,10 +501,7 @@ static void send_frame(void *arg)
         k ^= 1;
     }
     /* Both buffers back: the caller's picture is no longer read. */
-    xSemaphoreTake(s_chunk_free, portMAX_DELAY);
-    xSemaphoreTake(s_chunk_free, portMAX_DELAY);
-    xSemaphoreGive(s_chunk_free);
-    xSemaphoreGive(s_chunk_free);
+    wire_idle(0);
     int64_t w = esp_timer_get_time() - t_start;
     avg = avg ? (avg * 7 + (w > avg ? 2 * w - avg : w)) / 8 : w;   /* quick to rise */
     if (timed) {
