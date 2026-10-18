@@ -460,8 +460,9 @@ The device still needs to be paired once for its token.
 `MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
 `devices/sdkconfig.muse-video`) adds video streaming (`CONFIG_MUSE_VIDEO`,
 `CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Camera (`../android/camstream`) on a phone on
-the same Wi-Fi streams its camera, or a clip, as H.264, and
-the board decodes it and draws it full screen. `../protocols/VIDEO.md` has
+the same Wi-Fi streams its camera, or a clip, as H.264 or VP8
+(`CONFIG_MUSE_VIDEO_VP8`, on by default), and the board decodes it and
+draws it full screen. `../protocols/VIDEO.md` has
 the design, the Wi-Fi protocol and the numbers.
 
 - **Boards:** those whose panel driver has `draw_frame` and that have PSRAM:
@@ -469,7 +470,8 @@ the design, the Wi-Fi protocol and the numbers.
   ESP-Mosaico. Another QSPI AMOLED driven by `boards/muse_lcd_bands.c` gets
   it with `.draw_frame = muse_lcd_bands_frame` and its panel gap
   (`muse_lcd_bands_set_gap`); `muse_lcd_bands_set_te` if the TE line is wired.
-- **Pieces:** `components/tinyh264` (the decoder),
+- **Pieces:** `components/tinyh264` and `components/libvpx_vp8` (the
+  decoders, behind `muse_vdec.c`),
   `components/muse_vstream` (the receive ring and frame format any transport
   shares), `components/muse/muse_video.c` (decode and show tasks, pacing,
   bands, the view), `muse_yuv*.c/.S` (colour conversion and scaling),
@@ -487,11 +489,13 @@ the design, the Wi-Fi protocol and the numbers.
   15, and the phone's bitrate falls to its floor).
 - **Memory:** the ring (128 KB) and the decoder's pictures are in PSRAM; the
   decode and show tasks take about 10 KB of internal RAM once the first
-  stream starts. `CONFIG_MUSE_VIDEO_DECODER_IRAM` (off) puts the decoder's
-  hot code in IRAM: 44 KB that a Wi-Fi + BLE + UI build on the S3 can't spare
+  stream starts. `CONFIG_MUSE_VIDEO_DECODER_IRAM` (off) puts the decoders'
+  hot code in IRAM: 44 KB (and 28 KB for VP8) that a Wi-Fi + BLE + UI build
+  on the S3 can't spare
   (LVGL's task then fails to start).
 - **Test** with `tests/test_muse_video.py` (the ring and the Wi-Fi messages,
-  and the wiring under the options) and `tests/test_tinyh264_pie.py`; on a
+  and the wiring under the options), `tests/test_tinyh264_pie.py` and
+  `tests/test_libvpx_vp8.py`; on a
   board, with Muse Gadgets Camera (`adb logcat -s MuseCam`).
 
 ## Configuration gotchas

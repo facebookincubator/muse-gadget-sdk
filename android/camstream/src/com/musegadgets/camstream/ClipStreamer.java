@@ -67,6 +67,8 @@ final class ClipStreamer {
         final List<byte[]> keyed = new ArrayList<>(), steady = new ArrayList<>();
         /* A closed loop: every loop starts on its own IDR (keyed and steady are the same frames). */
         boolean closed;
+        /* VP8 frames (Vpx.java), else H.264 access units. */
+        boolean vp8;
         String info = "";
 
         Clip(String name, int size, int fps, int kbps) {
@@ -129,17 +131,28 @@ final class ClipStreamer {
      */
     static Clip encode(String name, Source src, int size, int fps, int kbps, boolean round, long startUs, int maxFrames)
             throws Exception {
+        return encode(name, src, size, fps, kbps, round, startUs, maxFrames, false);
+    }
+
+    /** vp8: encoded with libvpx (Vpx.java, which the build must have). */
+    static Clip encode(String name, Source src, int size, int fps, int kbps, boolean round, long startUs, int maxFrames,
+            boolean vp8) throws Exception {
         long t0 = SystemClock.elapsedRealtime();
         List<byte[]> frames = decodeScaled(src, size, round, startUs, maxFrames);
         long t1 = SystemClock.elapsedRealtime();
         Clip c = new Clip(name, size, fps, kbps);
-        encodeLoops(frames, c);
+        c.vp8 = vp8;
+        if (vp8) {
+            encodeLoopsVp8(frames, c);
+        } else {
+            encodeLoops(frames, c);
+        }
         c.measure();
         long keyBytes = c.keyed.get(0).length;
         c.info = String.format(java.util.Locale.US,
-                "%s: %d frames @%d fps (%.1f s), keyframe %d B, loop %.0f kb/s; decode+scale %d ms, encode %d ms",
+                "%s: %d frames @%d fps (%.1f s), keyframe %d B, loop %.0f kb/s; decode+scale %d ms, encode %d ms (%s)",
                 name, c.steady.size(), c.fps, c.steady.size() / (float) c.fps, keyBytes, (float) c.steadyKbps(),
-                t1 - t0, SystemClock.elapsedRealtime() - t1);
+                t1 - t0, SystemClock.elapsedRealtime() - t1, vp8 ? "VP8" : "H.264");
         Log.i(TAG, "clip: " + c.info);
         if (saveDir != null) {
             save(c);
@@ -500,6 +513,36 @@ final class ClipStreamer {
             if (isIdr(au)) {
                 throw new IllegalStateException("encoder put a keyframe in the steady loop");
             }
+        }
+    }
+
+    /*
+     * The same with libvpx's VP8 encoder: the camera's settings for the
+     * size (CameraStreamer.vp8Params), but VBR inside a 300 ms buffer, since
+     * the whole loop is known. No lag, so one frame out for each in (no
+     * hidden alt-ref frames to keep in step), and keyframes only when asked:
+     * the keyed loop's first frame.
+     */
+    private static void encodeLoopsVp8(List<byte[]> frames, Clip c) {
+        int n = frames.size();
+        long h = Vpx.open(c.size, c.size, c.fps, c.kbps, null, CameraStreamer.vp8Params(null, c.size) + ":vbr=1:vbv-ms=300");
+        if (h == 0) {
+            throw new IllegalStateException("libvpx open failed");
+        }
+        int[] info = new int[2];
+        try {
+            for (int i = 0; i < 2 * n; i++) {
+                byte[] f = Vpx.encode(h, frames.get(i % n), i, i == 0, info);
+                if (f == null || f.length == 0) {
+                    throw new IllegalStateException("libvpx gave no frame for picture " + i);
+                }
+                if (i >= n && (f[0] & 1) == 0) {
+                    throw new IllegalStateException("encoder put a keyframe in the steady loop");
+                }
+                (i < n ? c.keyed : c.steady).add(f);
+            }
+        } finally {
+            Vpx.close(h);
         }
     }
 

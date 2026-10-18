@@ -27,7 +27,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "h264bsd_decoder.h"
+#include "muse_vdec.h"
 #if CONFIG_MUSE_VIDEO_SIMD_MC
 #include "h264bsd_reconstruct.h"   /* h264bsdPieState() */
 #endif
@@ -84,6 +84,8 @@ typedef struct {
      * top band's and these the bottom's, decoded on the other core. */
     const uint8_t *volatile pic1;
     volatile int rows1;
+    /* Each band's planes and strides (pic and pic1 are their luma). */
+    muse_pic_t p0, p1;
     int bands;
     volatile int h0;                   /* two bands: the top band's rows (each band's SPS gives its own) */
     uint16_t number;                   /* its frame number (the header's), echoed to the client once shown */
@@ -243,6 +245,7 @@ const muse_video_caps_t *muse_video_caps(void)
          * colour conversion. With equal bands the bottom took 28 ms a frame
          * at 480 px and the top 20: 60% on top evens them out. */
         .tile_split_pct = MAX_BANDS > 1 ? TILE_SPLIT_PCT : 0,
+        .vp8 = muse_vdec_has(MUSE_VIDEO_CODEC_VP8),
     };
     return &s_caps;
 }
@@ -257,6 +260,7 @@ static void fill(uint8_t *dst, int stride, int row, int rows, void *arg)
      * band, as if it were a picture of its own (pieces never straddle). */
     int vis_h = a->vis_h, out_h = a->out_h;
     const uint8_t *pic = sl->pic;
+    const muse_pic_t *pp = &sl->p0;
     volatile int *have = &sl->rows;
     int w = sl->w, h = sl->h;
     if (sl->bands == 2) {
@@ -279,6 +283,7 @@ static void fill(uint8_t *dst, int stride, int row, int rows, void *arg)
                 vTaskDelay(1);
             }
             pic = sl->pic1;
+            pp = &sl->p1;
             have = &sl->rows1;
         } else {
             vis_h = vis0;
@@ -296,19 +301,20 @@ static void fill(uint8_t *dst, int stride, int row, int rows, void *arg)
     if (!pic) {
         return;
     }
-    const uint8_t *y = pic + (size_t)sr * w;
-    const uint8_t *u = pic + (size_t)w * h + (size_t)(sr / 2) * (w / 2);
-    const uint8_t *v = u + (size_t)(w / 2) * (h / 2);
+    (void)w;
+    (void)h;
+    const int ys = pp->y_stride, cs = pp->c_stride;
+    const uint8_t *y = pp->y + (size_t)sr * ys;
+    const uint8_t *u = pp->u + (size_t)(sr / 2) * cs;
+    const uint8_t *v = pp->v + (size_t)(sr / 2) * cs;
     if (a->scale == 3) {
-        muse_yuv_up32(pic, pic + (size_t)w * h, pic + (size_t)w * h + (size_t)(w / 2) * (h / 2), w, w / 2,
-                      a->vis_w, vis_h, row, rows, dst, stride);
+        muse_yuv_up32(pp->y, pp->u, pp->v, ys, cs, a->vis_w, vis_h, row, rows, dst, stride);
     } else if (a->scale == 0) {
-        muse_yuv_scaled(pic, pic + (size_t)w * h, pic + (size_t)w * h + (size_t)(w / 2) * (h / 2), w, w / 2,
-                        a->vis_w, vis_h, a->out_w, out_h, row, rows, dst, stride);
+        muse_yuv_scaled(pp->y, pp->u, pp->v, ys, cs, a->vis_w, vis_h, a->out_w, out_h, row, rows, dst, stride);
     } else if (a->scale == 2) {
-        muse_yuv_up2(y, u, v, w, w / 2, a->vis_w, rows / 2, dst, stride);
+        muse_yuv_up2(y, u, v, ys, cs, a->vis_w, rows / 2, dst, stride);
     } else {
-        muse_yuv_1x(y, u, v, w, w / 2, a->vis_w, rows, dst, stride);
+        muse_yuv_1x(y, u, v, ys, cs, a->vis_w, rows, dst, stride);
     }
 }
 
@@ -551,29 +557,29 @@ static void cpu_report(void) {}
 
 /* ---- decoding (first core) ---------------------------------------------- */
 
-static void on_progress(void *ctx, const u8 *pic, u32 width_mbs, u32 height_mbs, u32 rows)
+static void on_progress(void *ctx, const muse_pic_t *pic, int rows)
 {
     slot_t *sl = ctx;
-    sl->w = (int)width_mbs * 16;
+    sl->w = pic->w;
     if (sl->bands == 2) {
         /* The whole picture: the stream's height (the bottom band's own
          * size comes with its picture). */
-        sl->h0 = (int)height_mbs * 16;
+        sl->h0 = pic->h;
         sl->h = (s_params.height + 15) & ~15;
     } else {
-        sl->h = (int)height_mbs * 16;
+        sl->h = pic->h;
     }
-    sl->pic = pic;
-    sl->rows = (int)rows;
+    sl->p0 = *pic;
+    sl->pic = pic->y;
+    sl->rows = rows;
 }
 
-static void on_progress1(void *ctx, const u8 *pic, u32 width_mbs, u32 height_mbs, u32 rows)
+static void on_progress1(void *ctx, const muse_pic_t *pic, int rows)
 {
     slot_t *sl = ctx;
-    (void)width_mbs;
-    (void)height_mbs;
-    sl->pic1 = pic;
-    sl->rows1 = (int)rows;
+    sl->p1 = *pic;
+    sl->pic1 = pic->y;
+    sl->rows1 = rows;
 }
 
 /*
@@ -584,46 +590,36 @@ static void on_progress1(void *ctx, const u8 *pic, u32 width_mbs, u32 height_mbs
 static void band_task(void *arg)
 {
     (void)arg;
-    storage_t *dec = NULL;
+    muse_vdec_t *dec = NULL;
     uint32_t gen = 0;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         band_job_t *j = &s_band;
         if (!j->sl) {   /* close */
-            if (dec) {
-                h264bsdShutdown(dec);
-                h264bsdFree(dec);
-                dec = NULL;
-            }
+            muse_vdec_close(dec);
+            dec = NULL;
             xSemaphoreGive(s_band_done);
             continue;
         }
         if (!dec || gen != j->gen) {
-            if (dec) {
-                h264bsdShutdown(dec);
-                h264bsdFree(dec);
-            }
+            muse_vdec_close(dec);
             gen = j->gen;
-            dec = h264bsdAlloc();
-            if (dec && h264bsdInit(dec, 1) != 0) {
-                h264bsdFree(dec);
-                dec = NULL;
-            }
+            dec = muse_vdec_open(s_params.codec);
         }
         j->ok = j->got = false;
         if (dec) {
-            h264bsdSetProgress(dec, on_progress1, j->sl);
-            u8 *pic = NULL;
-            u32 w = 0, h = 0;
+            muse_vdec_set_progress(dec, on_progress1, j->sl);
+            muse_pic_t pic;
             int64_t t0 = esp_timer_get_time();
-            u32 rc = h264bsdDecode(dec, (u8 *)j->au, j->len, &pic, &w, &h);
+            muse_vdec_result_t rc = muse_vdec_decode(dec, j->au, j->len, &pic);
             j->us = (uint32_t)(esp_timer_get_time() - t0);
-            j->got = rc == H264BSD_PIC_RDY && pic;
-            j->ok = rc == H264BSD_PIC_RDY || rc == H264BSD_RDY;
-            j->h = (int)h;
+            j->got = rc == MUSE_VDEC_PICTURE;
+            j->ok = rc != MUSE_VDEC_ERROR;
+            j->h = j->got ? pic.h : 0;
             if (j->got) {
-                j->sl->pic1 = pic;
-                j->sl->rows1 = (int)h;
+                j->sl->p1 = pic;
+                j->sl->pic1 = pic.y;
+                j->sl->rows1 = pic.h;
             }
         }
         xSemaphoreGive(s_band_done);
@@ -695,7 +691,7 @@ static int64_t pace_decoded(int64_t due)
 static void decode_task(void *arg)
 {
     (void)arg;
-    storage_t *dec = NULL;
+    muse_vdec_t *dec = NULL;
     uint32_t gen = 0;
     bool need_key = true;
     int next_slot = 0;
@@ -710,8 +706,7 @@ static void decode_task(void *arg)
                 xSemaphoreTake(s_slots, portMAX_DELAY);
                 xSemaphoreGive(s_slots);
                 xSemaphoreGive(s_slots);
-                h264bsdShutdown(dec);
-                h264bsdFree(dec);
+                muse_vdec_close(dec);
                 dec = NULL;
                 band_close();
                 ESP_LOGI(TAG, "decoder closed: %u shown, %u dropped", s_shown, s_dropped);
@@ -720,18 +715,11 @@ static void decode_task(void *arg)
             continue;
         }
         if (!dec || gen != s_gen) {
-            if (dec) {
-                h264bsdShutdown(dec);
-                h264bsdFree(dec);
-            }
+            muse_vdec_close(dec);
             gen = s_gen;
-            dec = h264bsdAlloc();
-            if (!dec || h264bsdInit(dec, 1) != 0) {
+            dec = muse_vdec_open(s_params.codec);
+            if (!dec) {
                 ESP_LOGE(TAG, "no memory for the decoder");
-                if (dec) {
-                    h264bsdFree(dec);
-                    dec = NULL;
-                }
                 if (s_tp && s_tp->stop) {
                     s_tp->stop();
                 }
@@ -743,7 +731,8 @@ static void decode_task(void *arg)
             dec_us_sum = dec_us_max = dec_n = bytes = 0;
             rx_last = 0;
             stat_t = esp_timer_get_time();
-            ESP_LOGI(TAG, "decoder open: %ux%u %u fps %u kb/s%s (decoding on core %d)", s_params.width, s_params.height,
+            ESP_LOGI(TAG, "decoder open: %s %ux%u %u fps %u kb/s%s (decoding on core %d)",
+                     s_params.codec == MUSE_VIDEO_CODEC_VP8 ? "VP8" : "H.264", s_params.width, s_params.height,
                      s_params.fps, s_params.kbps, s_params.tiles == 2 ? ", two bands (one per core)" : "",
                      (int)xTaskGetCoreID(NULL));
         }
@@ -810,14 +799,13 @@ static void decode_task(void *arg)
         sl->t_whole = t_whole;
         sl->due = due;
         sl->number = fr.number;
-        h264bsdSetProgress(dec, on_progress, sl);
+        muse_vdec_set_progress(dec, on_progress, sl);
         xQueueSend(s_frames, &next_slot, portMAX_DELAY);
         next_slot ^= 1;
 
         /* The whole access unit at once: parameter sets and the picture's
          * slices; h264bsdDecode works through its NAL units in turn. */
-        u8 *pic = NULL;
-        u32 w = 0, h = 0;
+        muse_pic_t pic;
         int64_t t0 = esp_timer_get_time();
         if (bands == 2) {
             s_band.au = s_au + 4 + len0;
@@ -826,12 +814,13 @@ static void decode_task(void *arg)
             s_band.gen = gen;
             xTaskNotifyGive(s_band_task);
         }
-        u32 rc = h264bsdDecode(dec, bands == 2 ? s_au + 4 : s_au, len0, &pic, &w, &h);
+        muse_vdec_result_t rc = muse_vdec_decode(dec, bands == 2 ? s_au + 4 : s_au, len0, &pic);
         if (bands == 2) {
             s_top_us += (uint32_t)(esp_timer_get_time() - t0);
         }
-        bool got = rc == H264BSD_PIC_RDY && pic;
-        bool ok = rc == H264BSD_PIC_RDY || rc == H264BSD_RDY;
+        bool got = rc == MUSE_VDEC_PICTURE;
+        bool ok = rc != MUSE_VDEC_ERROR;
+        int h = got ? pic.h : 0;
         if (bands == 2) {
             xSemaphoreTake(s_band_done, portMAX_DELAY);   /* the bottom band */
             s_bot_us += s_band.us;
@@ -840,20 +829,21 @@ static void decode_task(void *arg)
             ok = ok && s_band.ok;
         }
         uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
-        if (got && bands == 2 && (int)h + s_band.h != (int)((s_params.height + 15) & ~15)) {
+        if (got && bands == 2 && h + s_band.h != (int)((s_params.height + 15) & ~15)) {
             static int64_t told_h;
             if (now - told_h > 5000000) {
                 told_h = now;
-                ESP_LOGW(TAG, "bands of %u and %d rows don't make the stream's %u", (unsigned)h, s_band.h, s_params.height);
+                ESP_LOGW(TAG, "bands of %d and %d rows don't make the stream's %u", h, s_band.h, s_params.height);
             }
             got = false;
         }
         if (got) {
-            sl->w = (int)w;
-            sl->h0 = (int)h;
-            sl->h = bands == 2 ? (int)h + s_band.h : (int)h;
-            sl->pic = pic;   /* the same buffer progress reported, with no output reordering */
-            sl->rows = (int)h;
+            sl->w = pic.w;
+            sl->h0 = h;
+            sl->h = bands == 2 ? h + s_band.h : h;
+            sl->p0 = pic;
+            sl->pic = pic.y;   /* the same buffer progress reported, with no output reordering */
+            sl->rows = h;
         } else {
             sl->failed = true;
         }
@@ -903,6 +893,17 @@ static void decode_task(void *arg)
             s_gap_max = s_gap_late = 0;
             rx_last = rx;
             cpu_report();
+#if CONFIG_MUSE_VIDEO_VP8_PROF
+            if (s_params.codec == MUSE_VIDEO_CODEC_VP8) {
+                /* libvpx_vp8 built with MGX_PROF: CPU cycles per stage */
+                extern unsigned vp8_mgx_prof[6];
+                unsigned f = vp8_mgx_prof[5] ? vp8_mgx_prof[5] : 1, mhz = 240;
+                ESP_LOGI(TAG, "vp8 stages (us/frame): tokens %u, prediction %u, residual %u, extend %u, modes %u",
+                         vp8_mgx_prof[0] / f / mhz, vp8_mgx_prof[1] / f / mhz, vp8_mgx_prof[2] / f / mhz,
+                         vp8_mgx_prof[3] / f / mhz, vp8_mgx_prof[4] / f / mhz);
+                memset(vp8_mgx_prof, 0, sizeof(vp8_mgx_prof));
+            }
+#endif
             if (s_band_n) {
                 ESP_LOGI(TAG, "bands: top %u ms (core %d), bottom %u ms (core %d)", (unsigned)(s_top_us / s_band_n / 1000),
                          DECODE_CORE, (unsigned)(s_bot_us / s_band_n / 1000), MUSE_UI_CORE);
@@ -1014,6 +1015,7 @@ bool muse_video_begin(const muse_video_transport_t *t, const muse_video_params_t
     s_refusals = 0;
     s_tp = t;
     s_params = *vp;
+    t->ring->codec = vp->codec;   /* how the ring tells a frame from noise */
     s_gen++;
     s_shown = s_dropped = 0;
     s_last_shown_t = 0;

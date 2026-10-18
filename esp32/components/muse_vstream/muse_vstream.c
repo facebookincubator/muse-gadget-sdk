@@ -127,6 +127,45 @@ static bool start_code_at(const muse_vstream_t *s, uint32_t i)
     return c == 1 || (c == 0 && peek(s, i + 3) == 1);
 }
 
+/* A VP8 frame tag at offset i that fits a frame of n bytes: version 0-3, its
+ * first partition inside it, and for a keyframe the sync code 9d 01 2a
+ * (RFC 6386 9.1). Checked as far as the bytes are in. */
+static bool vp8_tag_ok(const muse_vstream_t *s, uint32_t avail, uint32_t i, uint32_t n, bool key)
+{
+    if (avail < i + 3) {
+        return true;
+    }
+    uint32_t tag = (uint32_t)peek(s, i) | (uint32_t)peek(s, i + 1) << 8 | (uint32_t)peek(s, i + 2) << 16;
+    bool is_key = !(tag & 1);
+    if (((tag >> 1) & 7) > 3 || (tag >> 5) > n || is_key != key) {
+        return false;
+    }
+    if (key && avail >= i + 6 && (peek(s, i + 3) != 0x9d || peek(s, i + 4) != 0x01 || peek(s, i + 5) != 0x2a)) {
+        return false;
+    }
+    return true;
+}
+
+/* A VP8 frame, or two bands of them (the top band's u32 length first): which
+ * one is told by whether a frame tag fits at the start. */
+static bool vp8_frame_ok(const muse_vstream_t *s, uint32_t avail, const muse_vframe_t *f)
+{
+    bool key = f->flags & MUSE_VIDEO_FRAME_KEY;
+    const uint32_t at = MUSE_VIDEO_FRAME_HEADER_LEN;
+    if (f->len >= 3 && vp8_tag_ok(s, avail, at, f->len, key)) {
+        return true;
+    }
+    if (f->len < 10 || avail < at + 4) {
+        return avail < at + 4 && f->len >= 10;
+    }
+    uint32_t len0 = (uint32_t)peek(s, at) | (uint32_t)peek(s, at + 1) << 8 | (uint32_t)peek(s, at + 2) << 16 |
+                    (uint32_t)peek(s, at + 3) << 24;
+    if (len0 < 3 || len0 > f->len - 4 - 3) {
+        return false;
+    }
+    return vp8_tag_ok(s, avail, at + 4, len0, key) && vp8_tag_ok(s, avail, at + 4 + len0, f->len - 4 - len0, key);
+}
+
 static bool header_at(const muse_vstream_t *s, uint32_t avail, muse_vframe_t *f)
 {
     if (peek(s, 0) != MUSE_VIDEO_FRAME_MAGIC) {
@@ -138,6 +177,9 @@ static bool header_at(const muse_vstream_t *s, uint32_t avail, muse_vframe_t *f)
              (uint32_t)peek(s, 7) << 24;
     if (f->len < 4 || f->len > s->max_frame) {
         return false;
+    }
+    if (s->codec == MUSE_VIDEO_CODEC_VP8) {
+        return vp8_frame_ok(s, avail, f);
     }
     if (avail >= MUSE_VIDEO_FRAME_HEADER_LEN + 4 && !start_code_at(s, 8)) {
         /* Two bands (muse_video_params_t.tiles): the top band's u32

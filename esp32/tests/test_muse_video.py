@@ -55,7 +55,8 @@ class MuseVideoTest(unittest.TestCase):
         cmake = (MUSE / "CMakeLists.txt").read_text()
         self.assertIn("if(CONFIG_MUSE_VIDEO)", cmake)
         self.assertIn('"muse_video_wifi.c" "muse_video_wire.c"', cmake)
-        self.assertIn("muse_vstream tinyh264", cmake)
+        self.assertIn("muse_vstream tinyh264 libvpx_vp8", cmake)
+        self.assertIn('"muse_video.c" "muse_vdec.c" "muse_yuv.c"', cmake)
         manifest = (MUSE / "idf_component.yml").read_text()
         # Keyed on a symbol every build defines: a rule on one a build lacks
         # (MUSE_VIDEO_WIFI without video) stops the component manager.
@@ -77,6 +78,11 @@ class MuseVideoTest(unittest.TestCase):
         self.assertIn("s_transports[i]->request(false);", video)
         tiny = (ROOT / "components/tinyh264/CMakeLists.txt").read_text()
         self.assertIn("if(CONFIG_MUSE_VIDEO)", tiny)
+        vpx = (ROOT / "components/libvpx_vp8/CMakeLists.txt").read_text()
+        self.assertIn("if(CONFIG_MUSE_VIDEO_VP8)", vpx)
+        self.assertIn("if MUSE_VIDEO_DECODER_IRAM = y:", (ROOT / "components/libvpx_vp8/linker.lf").read_text())
+        # The ring resyncs by the stream's codec, whatever the transport.
+        self.assertIn("t->ring->codec = vp->codec;", video)
 
     def test_radio_held_for_a_stream(self) -> None:
         """A stream keeps Wi-Fi out of modem sleep and BLE quiet, and gives both back once."""

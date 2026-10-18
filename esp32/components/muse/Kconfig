@@ -274,8 +274,9 @@ menu "Muse"
         default n
         help
             A phone (Muse Gadgets Camera, android/camstream) streams its camera, or
-            a clip, as H.264 constrained baseline; the board decodes it
-            (components/tinyh264) and shows it full screen, scaled to fit.
+            a clip, as H.264 constrained baseline (or VP8, MUSE_VIDEO_VP8);
+            the board decodes it (components/tinyh264) and shows it full
+            screen, scaled to fit.
             The menu gets a Phone camera item that asks the phone for a
             stream. Needs a board whose panel driver has draw_frame (the
             Waveshare S3 1.75 and 1.75C, the StopWatch, the ESP-Mosaico),
@@ -308,12 +309,34 @@ menu "Muse"
         range 1024 65535
         default 7766
 
+    config MUSE_VIDEO_VP8
+        bool "VP8 as well as H.264"
+        depends on MUSE_VIDEO
+        default y
+        help
+            Decode VP8 streams too (components/libvpx_vp8, libvpx's decoder:
+            BSD-3-Clause with the WebM project's patent grant, no
+            royalty-charging patent pool). The board lists it in hello's
+            codecs and the client picks. About 45 KB of flash; on the S3 it
+            decodes a 232 px stream at 1000 kb/s in 24 ms a frame against
+            tinyh264's 33, for the same picture. protocols/VIDEO.md has the
+            numbers.
+
+    config MUSE_VIDEO_VP8_PROF
+        bool "Log VP8 decode time per stage (bench)"
+        depends on MUSE_VIDEO_VP8
+        default n
+        help
+            Times the VP8 decoder's stages with the CPU cycle counter and logs
+            them with the video stats. Costs a little decode time.
+
     config MUSE_VIDEO_DECODER_IRAM
         bool "Decoder's hot code in IRAM"
         depends on MUSE_VIDEO
         default n
         help
-            tinyh264's per-macroblock code and tables in IRAM (about 44 KB),
+            tinyh264's per-macroblock code and tables in IRAM (about 44 KB;
+            with MUSE_VIDEO_VP8, libvpx_vp8's too, about 28 KB more),
             so the decoder never waits on the instruction cache. On the S3
             that comes out of the heap; a board running Wi-Fi, BLE and the
             UI can't spare it. Measured on the Waveshare S3 1.75C: see

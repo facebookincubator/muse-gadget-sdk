@@ -16,8 +16,8 @@ limitations under the License.
 
 # Video streaming to a gadget: how it works and why
 
-A phone streams H.264 to a gadget with a display; the gadget decodes it and
-draws it. This is the design note for anyone changing that path: the phone
+A phone streams H.264 (or VP8, below) to a gadget with a display; the
+gadget decodes it and draws it. This is the design note for anyone changing that path: the phone
 side (`../android/camstream`, Muse Gadgets Camera), the wire (the frame format and,
 for Wi-Fi, the messages below) and the ESP32 side
 (`../esp32/components/tinyh264`, `components/muse/muse_video.c` and its
@@ -29,6 +29,7 @@ check a change.
 | this file, Wi-Fi | the Wi-Fi protocol: discovery, messages, credits |
 | `../android/camstream/README.md` | the phone app, its extras and flow control |
 | `../esp32/components/tinyh264/README.md` | the decoder and its bit-exact optimizations |
+| `../esp32/components/libvpx_vp8/README.md` | the VP8 decoder, the same |
 | `../esp32/components/muse_vstream` | the receive ring and frame format every transport shares |
 | `../esp32/components/muse/muse_video.c` | decode, pacing and drawing on the ESP32 |
 | `../esp32/components/muse/muse_video_wifi.c` | the Wi-Fi transport (TCP and mDNS) |
@@ -71,7 +72,8 @@ counted as latency.
 
 Every transport carries the same stream: frames, each an 8-byte header
 then one access unit in Annex B form (start codes; SPS and PPS before every
-keyframe):
+keyframe), or for VP8 one frame as libvpx writes it (what an IVF file holds,
+without IVF's headers):
 
 | Bytes | Field |
 |---|---|
@@ -89,7 +91,9 @@ IDR picture.
 
 The gadget's ring (`muse_vstream.c`) takes the bytes as they come and
 hands the decoder one whole frame at a time. A damaged header makes it
-search for the next one; the frame after a gap is marked so the decoder
+search for the next one (a header is believed when a start code follows it,
+or for VP8 a frame tag that fits the frame and, on a keyframe, the sync
+code); the frame after a gap is marked so the decoder
 drops it unless it's a keyframe, and asks for one.
 
 ## Wi-Fi
@@ -113,9 +117,9 @@ Messages, in the order they usually come:
 
 | Type | From | Fields | Meaning |
 |---|---|---|---|
-| `hello` | gadget, on connect | `version` (1), `name`, `codecs` (`["h264"]`), `display` {`width`, `height`, `round`}, `max` {`width`, `height`, `fps`}, `suggested` {`width`, `height`, `fps`, `kbps`}, `buffer` (ring bytes), `max_playout_ms`, `max_bands`, `band_split_pct` | what it decodes and shows, and the stream it suggests |
+| `hello` | gadget, on connect | `version` (1), `name`, `codecs` (`["h264"]`, `["h264","vp8"]` with `CONFIG_MUSE_VIDEO_VP8`), `display` {`width`, `height`, `round`}, `max` {`width`, `height`, `fps`}, `suggested` {`width`, `height`, `fps`, `kbps`}, `buffer` (ring bytes), `max_playout_ms`, `max_bands`, `band_split_pct` | what it decodes and shows, and the stream it suggests |
 | `want` | gadget | `on` | the user opened (true) or left (false) the Phone camera view; sent again after `hello` while the view is open. A client that can stream answers true with `start`, false by stopping |
-| `start` | client | `codec` (`"h264"`), `width`, `height` (the picture after cropping), `fps`, `kbps`, optional `playout_ms`, `bands` | starts a stream (replacing one that's on) |
+| `start` | client | `codec` (`"h264"` or, where hello lists it, `"vp8"`), `width`, `height` (the picture after cropping), `fps`, `kbps`, optional `playout_ms`, `bands` | starts a stream (replacing one that's on) |
 | `buffer` | gadget | `free`, `received`, `shown`, `dropped`, `decode_ms`, optional `last_frame`, `last_age_ms` | credits and progress: after a start, and after each frame the decoder takes |
 | `error` | gadget | `for` (`"start"`), `reason` (`busy`, `invalid`, `unsupported`) | the start was refused; on busy (the screen still waking, another stream on) try again in a second |
 | `keyframe` | gadget | | make the next frame a keyframe (a frame lost, damaged or too big) |
@@ -253,6 +257,50 @@ and UI build needs, so it's off there and the decoder runs from cache.
   first; the gadget asks for uneven bands (`band_split_pct` 60) because the
   UI core also converts and sends.
 
+## VP8
+
+VP8 is the second codec: no patent pool charges royalties for it, and
+libvpx, its reference code, is BSD-3-Clause with the WebM project's patent
+grant. A gadget built with `CONFIG_MUSE_VIDEO_VP8` (on with
+`CONFIG_MUSE_VIDEO`) lists it in hello, and the client picks it in start
+(Muse Gadgets Camera: the Codec button, or `--es codec vp8`). Frames, bands, credits
+and keyframe requests work as with H.264; two bands are two VP8 streams.
+
+- **Decoder:** libvpx v1.16.0's (`../esp32/components/libvpx_vp8`), C only
+  and trimmed, with bit-exact speed-ups (one-pass sub-pixel prediction,
+  early-out loop filters, skipped zero DC blocks, an inlined bool decoder,
+  and on the S3 bilinear prediction on its SIMD) and the same row progress
+  as tinyh264, so drawing starts before the frame is done. It matches stock
+  libvpx byte for byte on 933 test streams. Four frame buffers in PSRAM
+  (0.55 MB at 240 px, 1.8 MB at 480), about 45 KB of flash.
+- **Encoder:** libvpx on the phone (`jni/build_vpx.sh`, not in this
+  repository: it builds your libvpx checkout), its good-quality mode with no
+  lag, version 1 (bilinear prediction: cheap to decode), no loop filter, one
+  thread (two cost 4-15% more bits at 232 px). Up to 240 px cpu-used 1 and
+  every motion vector, about 19 ms a frame on a Galaxy S22 core; past it
+  cpu-used 2 and motion vectors with at most one fractional component
+  (`jni/libvpx_mg.py`), two bands encoded side by side. Clips: the same, VBR
+  inside a 300 ms buffer.
+- **Against H.264** (the x264 settings above), bench clips (xiph.org's crew,
+  soccer, city, ice), BD-rate at the same PSNR: at 480 px -37%, -10%, +1%,
+  -20%; at 232 px -24%, -4%, +14%, -5%. Decode in QEMU (S31 base ISA, 480 px,
+  600 kb/s): 6.0 M instructions a frame against tinyh264's 7.5 M; 1.8 M
+  against 2.7 M at 240 px.
+- **On the Waveshare S3 1.75C over Wi-Fi** (the default build: decoders
+  from flash; 232 px at the suggested 1000 kb/s, fixed; the same clips
+  through `tools/livebench`, two passes each, Galaxy S22):
+
+  | | H.264 (x264) | VP8 |
+  |---|---|---|
+  | decode, mean of crew / soccer / city / ice | 34 / 33 / 32 / 23 ms | 24 / 24 / 25 / 20 ms |
+  | capture to shown, median | 146 / 110 / 129 / 69 ms | 77 / 75 / 82 / 67 ms |
+  | encoded picture (PSNR at the panel's size) | 37.18 / 35.65 / 32.25 / 39.07 dB | 37.43 / 35.61 / 32.15 / 39.08 dB |
+
+  At the same bitrate the pictures match (within 0.25 dB), but tinyh264
+  needs more than a frame period at 1000 kb/s, so frames queue and the
+  latency doubles; VP8 decodes inside it. At 350 kb/s (decoders in IRAM)
+  VP8 took 13-15 ms against tinyh264's 13-20.
+
 ## Sizes and bitrates
 
 **ESP32-S3** (Waveshare S3 1.75C, 240 MHz, octal PSRAM, the decoder from
@@ -317,7 +365,8 @@ experimental.
 ## Checking a change
 
 - **Host tests:** `esp32/tests/test_muse_video.py` (the ring and the Wi-Fi
-  messages), `test_tinyh264_pie.py` (the S31 SIMD model).
+  messages, H.264 and VP8), `test_tinyh264_pie.py` (the S31 SIMD model),
+  `test_libvpx_vp8.py` (the VP8 decoder against libvpx's output).
 - **Live:** Muse Gadgets Camera's screen and logcat (`adb logcat -s MuseCam`) show
   each second the send rate, frames in flight and queued, camera-to-encoder
   time, the gate and stall time, the gadget's shown/dropped/decode from its

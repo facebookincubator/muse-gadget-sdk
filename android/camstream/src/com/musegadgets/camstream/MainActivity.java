@@ -59,6 +59,14 @@ public final class MainActivity extends Activity
     private static final String PREFS = "camstream", PREF_ADDR = "wifi_addr", PREF_NAME = "wifi_name";
     private int fps = 30, kbps = 450, size = 0;
     private boolean noBands;   /* --ez nobands true: one stream even where the gadget takes two bands */
+    /* The Codec button (or --es codec h264|vp8): VP8 for the camera and the
+     * clips where the gadget lists it and this build has libmgvpx
+     * (jni/build_vpx.sh), else H.264. Remembered. */
+    private boolean wantVp8, wantVp8Set;
+    private android.widget.Button codecButton;
+    private String baseSw;      /* the H.264 encoder: x264, or null for the phone's */
+    private boolean camVp8;     /* the camera stream that's on is VP8 */
+    private static final String PREF_CODEC = "codec";
     private boolean auto, front, pattern, intraRefresh = true, adaptive = true;
     /* What streams: "camera", "pattern" or "clip:<name>" (--es source, or the buttons). */
     private String source = "camera";
@@ -124,7 +132,7 @@ public final class MainActivity extends Activity
             row1.add(new String[] {c.label, CLIP + c.name});
         }
         for (String[][] specs : new String[][][] {row1.toArray(new String[0][]),
-                {{"Device", "device"}, {"Rate", "rate"}, {"Stop", "stop"}}}) {
+                {{"Device", "device"}, {"Rate", "rate"}, {"H.264", "codec"}, {"Stop", "stop"}}}) {
             android.widget.LinearLayout bar = new android.widget.LinearLayout(this);
             bar.setOrientation(android.widget.LinearLayout.HORIZONTAL);
             for (String[] spec : specs) {
@@ -134,6 +142,9 @@ public final class MainActivity extends Activity
                 btn.setOnClickListener(v -> pick(spec[1]));
                 if ("rate".equals(spec[1])) {
                     rateButton = btn;
+                }
+                if ("codec".equals(spec[1])) {
+                    codecButton = btn;
                 }
                 bar.addView(btn, new android.widget.LinearLayout.LayoutParams(0, -2, 1));
             }
@@ -200,6 +211,10 @@ public final class MainActivity extends Activity
         kbps = i.getIntExtra("kbps", kbps);
         size = i.getIntExtra("size", size);
         noBands = i.getBooleanExtra("nobands", false);
+        if (i.hasExtra("codec") || "vp8".equals(i.getStringExtra("sw"))) {
+            wantVp8 = "vp8".equalsIgnoreCase(i.getStringExtra("codec")) || "vp8".equals(i.getStringExtra("sw"));
+            wantVp8Set = true;
+        }
         auto = i.getBooleanExtra("auto", auto);
         front = i.getBooleanExtra("front", front);
         dumpLeft = i.getIntExtra("dump", 0);
@@ -266,6 +281,10 @@ public final class MainActivity extends Activity
             showRatePicker();
             return;
         }
+        if ("codec".equals(what) || "h264".equals(what) || "vp8".equals(what)) {
+            setCodec("codec".equals(what) ? !wantVp8 : "vp8".equals(what));
+            return;
+        }
         if (what.startsWith(CLIP) && isClip() && link.streaming()) {
             source = what;   /* one clip to another: the stream goes on, the clip switches */
             startClip(lastSize, link.caps());
@@ -303,6 +322,10 @@ public final class MainActivity extends Activity
             setCamRate(in.getIntExtra("ratec", 0));
         }
         updateRateButton();
+        if (!wantVp8Set) {
+            wantVp8 = rp.getBoolean(PREF_CODEC, false);
+        }
+        updateCodecButton();
         if (target == null && deviceAddr == null) {
             android.content.SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
             deviceAddr = p.getString(PREF_ADDR, null);
@@ -323,7 +346,8 @@ public final class MainActivity extends Activity
             /* The software encoder when this build has it (jni/build.sh;
              * --es sw hw: the phone's hardware encoder regardless). */
             String sw = getIntent().getStringExtra("sw");
-            cam.swEncoder = sw != null ? ("hw".equals(sw) ? null : sw) : (X264.available() ? "x264" : null);
+            cam.swEncoder = sw != null && !"vp8".equals(sw) ? ("hw".equals(sw) ? null : sw) : (X264.available() ? "x264" : null);
+            baseSw = cam.swEncoder;
             String pre = getIntent().getStringExtra("swpreset");
             if (pre != null) {
                 cam.swPreset = pre;
@@ -378,14 +402,20 @@ public final class MainActivity extends Activity
             maxKbps = c.sugKbps > 0 && c.sugKbps < 450 ? Math.max(kbps, c.sugKbps * 11 / 10)
                     : c.sugKbps >= 600 ? c.sugKbps * 5 / 4 : 650;
         }
+        /* VP8 where it was picked, the gadget decodes it and the build has libvpx. */
+        camVp8 = wantVp8 && c.vp8 && Vpx.available();
+        if (wantVp8 && !camVp8) {
+            Log.i(TAG, "VP8 picked, but " + (c.vp8 ? "this build has no libmgvpx" : "the gadget doesn't decode it") + ": H.264");
+        }
+        cam.swEncoder = camVp8 ? "vp8" : baseSw;
         /* Past 240 px on a gadget that decodes bands in parallel (one per
-         * core), send two: x264 only (one encoder per band). */
+         * core), send two: x264 or VP8 only (one encoder per band). */
         int bands = c.maxTiles >= 2 && s > 240 && s % 32 == 0 && cam.swEncoder != null && !noBands ? 2 : 1;
         cam.bands = bands;
         cam.bandSplitPct = c.tileSplitPct > 0 ? c.tileSplitPct : 50;
         Log.i(TAG, "starting " + s + "x" + s + " @" + f + " " + kbps + " kb/s (adaptive up to " + maxKbps + ")"
                 + (bands > 1 ? ", two bands" : ""));
-        link.startStreaming(s, s, f, kbps, 0, bands);
+        link.startStreaming(s, s, f, kbps, 0, bands, camVp8);
         setLiveBudget();
         try {
             cam.pattern = "pattern".equals(source);
@@ -407,7 +437,33 @@ public final class MainActivity extends Activity
     }
 
     private String clipKey(String name, int size, int kbps) {
-        return name + "|" + size + "|" + kbps;
+        return name + "|" + size + "|" + kbps + (clipVp8() ? "|vp8" : "");
+    }
+
+    /* Clips as VP8: picked, the gadget decodes it, and the build has libvpx. */
+    private boolean clipVp8() {
+        return wantVp8 && link != null && link.caps().vp8 && Vpx.available();
+    }
+
+    /* The Codec button: H.264 or VP8 from now on, for whatever streams; the stream starts over in it. */
+    private void setCodec(boolean vp8) {
+        wantVp8 = vp8;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_CODEC, vp8).apply();
+        updateCodecButton();
+        Log.i(TAG, "codec: " + (vp8 ? "VP8" : "H.264"));
+        if (link != null && link.streaming()) {
+            String src = source;
+            stopStream();
+            source = src;
+            auto = true;
+            ui.postDelayed(this::startStream, 300);
+        }
+    }
+
+    private void updateCodecButton() {
+        if (codecButton != null) {
+            codecButton.setText(wantVp8 ? "VP8" : "H.264");
+        }
     }
 
     /* The device shows clips evenly this long after they start, so a keyframe that takes a few frame times on the link doesn't stutter. */
@@ -517,7 +573,7 @@ public final class MainActivity extends Activity
             return exact;
         }
         for (ClipStreamer.Clip c : clips.values()) {
-            if (!c.name.equals(name) || c.size != s) {
+            if (!c.name.equals(name) || c.size != s || c.vp8 != clipVp8()) {
                 continue;
             }
             if (c.kbps < clipKbps && (below == null || c.kbps > below.kbps)) {
@@ -560,7 +616,7 @@ public final class MainActivity extends Activity
                 throw new IllegalArgumentException("no clip called " + name);
             }
             clip = ClipStreamer.encode(name, sample.source(), s, sample.fps, kbps, round, sample.startS * 1_000_000L,
-                    sample.seconds * sample.fps);
+                    sample.seconds * sample.fps, clipVp8());
             clips.put(key, clip);
             return clip;
         } catch (Exception e) {
@@ -574,14 +630,15 @@ public final class MainActivity extends Activity
     private void playClip(ClipStreamer.Clip clip) {
         ClipStreamer.Clip cur = player.clip();
         boolean same = link.streaming() && cur != null && cur.size == clip.size && cur.fps == clip.fps
-                && curFps == clip.fps;
+                && curFps == clip.fps && cur.vp8 == clip.vp8;
         if (!same) {
             if (link.streaming()) {
                 player.stop();
                 link.stopStreaming();
             }
             curFps = clip.fps;
-            link.startStreaming(clip.size, clip.size, clip.fps, Math.max(clip.kbps, clip.steadyKbps()), playoutMs);
+            link.startStreaming(clip.size, clip.size, clip.fps, Math.max(clip.kbps, clip.steadyKbps()), playoutMs, 1,
+                    clip.vp8);
         }
         player.play(clip);
         SampleClips.Sample sample = SampleClips.get(clip.name);
@@ -815,11 +872,12 @@ public final class MainActivity extends Activity
             }
             if (isClip() && player != null && player.clip() != null) {
                 ClipStreamer.Clip clip = player.clip();
-                link.startStreaming(clip.size, clip.size, clip.fps, Math.max(clip.kbps, clip.steadyKbps()), playoutMs);
+                link.startStreaming(clip.size, clip.size, clip.fps, Math.max(clip.kbps, clip.steadyKbps()), playoutMs, 1,
+                        clip.vp8);
                 player.requestKeyframe();
             } else if (!isClip() && cam.running()) {
                 /* The camera and encoder keep going: just ask again and start on a keyframe. */
-                link.startStreaming(lastSize, lastSize, curFps, kbps, 0, cam.bands);   /* the same bands as the frames */
+                link.startStreaming(lastSize, lastSize, curFps, kbps, 0, cam.bands, camVp8);   /* the same bands and codec as the frames */
                 cam.requestKeyframe();
             } else {
                 startStream();
@@ -998,12 +1056,14 @@ public final class MainActivity extends Activity
             if (c == null) {
                 return "Preparing clip";
             }
-            return String.format(us, "Sending %d×%d · %d fps\n%d kb/s (%s) · link %.0f kb/s\n%s", c.size, c.size, c.fps,
+            return String.format(us, "Sending %s %d×%d · %d fps\n%d kb/s (%s) · link %.0f kb/s\n%s", c.vp8 ? "VP8" : "H.264",
+                    c.size, c.size, c.fps,
                     c.kbps, fixedClipKbps > 0 ? "fixed" : "auto", sentKbps, clipLabel(c.name));
         }
         String src = "pattern".equals(source) ? "Bars" : source != null && source.startsWith("file:") ? "Clip " + source.substring(5)
                 : "Camera";
-        return String.format(us, "Sending %d×%d · %d fps%s\n%d kb/s (%s) · link %.0f kb/s\n%s · %s", lastSize, lastSize, curFps,
+        return String.format(us, "Sending %s %d×%d · %d fps%s\n%d kb/s (%s) · link %.0f kb/s\n%s · %s", camVp8 ? "VP8" : "H.264",
+                lastSize, lastSize, curFps,
                 cam.bands == 2 ? " · 2 bands" : "", kbps, fixedCamKbps > 0 ? "fixed" : "auto", sentKbps, src,
                 cam.encoderName.isEmpty() ? "encoder starting" : cam.encoderName.split(" ")[0]);
     }

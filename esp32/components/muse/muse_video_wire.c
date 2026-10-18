@@ -44,10 +44,11 @@ muse_video_msg_t muse_video_wire_parse(const char *json, size_t n, muse_video_pa
                 const cJSON *codec = cJSON_GetObjectItemCaseSensitive(o, "codec");
                 memset(p, 0, sizeof(*p));
                 bool h264 = !codec || (cJSON_IsString(codec) && !strcmp(codec->valuestring, "h264"));
+                bool vp8 = cJSON_IsString(codec) && !strcmp(codec->valuestring, "vp8");
                 int w = get_int(o, "width", 0), h = get_int(o, "height", 0);
                 int fps = get_int(o, "fps", 0), kbps = get_int(o, "kbps", 0);
                 int playout = get_int(o, "playout_ms", 0), tiles = get_int(o, "bands", 1);
-                p->codec = h264 ? MUSE_VIDEO_CODEC_H264 : 0;
+                p->codec = h264 ? MUSE_VIDEO_CODEC_H264 : vp8 ? MUSE_VIDEO_CODEC_VP8 : 0;
                 p->width = w > 0 && w <= 0xffff ? (uint16_t)w : 0;
                 p->height = h > 0 && h <= 0xffff ? (uint16_t)h : 0;
                 p->fps = fps > 0 && fps <= 255 ? (uint8_t)fps : 0;
@@ -67,7 +68,7 @@ muse_video_msg_t muse_video_wire_parse(const char *json, size_t n, muse_video_pa
 
 muse_video_start_check_t muse_video_wire_check(const muse_video_params_t *p, const muse_video_caps_t *c)
 {
-    if (p->codec != MUSE_VIDEO_CODEC_H264) {
+    if (p->codec != MUSE_VIDEO_CODEC_H264 && !(p->codec == MUSE_VIDEO_CODEC_VP8 && c->vp8)) {
         return MUSE_VIDEO_START_UNSUPPORTED;
     }
     uint8_t bands = p->tiles ? p->tiles : 1;
@@ -111,12 +112,12 @@ size_t muse_video_wire_hello(uint8_t *out, size_t cap, const char *name, const m
     }
     safe[k] = 0;
     return frame(out, cap,
-                 "{\"type\":\"hello\",\"version\":%d,\"name\":\"%s\",\"codecs\":[\"h264\"],"
+                 "{\"type\":\"hello\",\"version\":%d,\"name\":\"%s\",\"codecs\":[\"h264\"%s],"
                  "\"display\":{\"width\":%u,\"height\":%u,\"round\":%s},"
                  "\"max\":{\"width\":%u,\"height\":%u,\"fps\":%u},"
                  "\"suggested\":{\"width\":%u,\"height\":%u,\"fps\":%u,\"kbps\":%u},"
                  "\"buffer\":%u,\"max_playout_ms\":%u,\"max_bands\":%u,\"band_split_pct\":%u}",
-                 MUSE_VIDEO_WIRE_VERSION, safe, c->display_w, c->display_h, c->round ? "true" : "false", c->max_w,
+                 MUSE_VIDEO_WIRE_VERSION, safe, c->vp8 ? ",\"vp8\"" : "", c->display_w, c->display_h, c->round ? "true" : "false", c->max_w,
                  c->max_h, c->max_fps, c->sug_w, c->sug_h, c->sug_fps, c->sug_kbps, (unsigned)buffer,
                  c->max_playout_ms, c->max_tiles ? c->max_tiles : 1, c->tile_split_pct);
 }

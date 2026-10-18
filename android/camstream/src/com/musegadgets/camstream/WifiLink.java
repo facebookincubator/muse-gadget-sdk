@@ -466,6 +466,11 @@ final class WifiLink extends VideoLink {
         caps.maxPlayoutMs = m.optInt("max_playout_ms");
         caps.maxTiles = Math.max(1, m.optInt("max_bands", 1));
         caps.tileSplitPct = m.optInt("band_split_pct");
+        org.json.JSONArray codecs = m.optJSONArray("codecs");
+        caps.vp8 = false;
+        for (int i = 0; codecs != null && i < codecs.length(); i++) {
+            caps.vp8 |= "vp8".equals(codecs.optString(i));
+        }
         caps.video = true;
     }
 
@@ -491,15 +496,15 @@ final class WifiLink extends VideoLink {
     }
 
     @Override
-    void startStreaming(int w, int h, int fps, int kbps, int playoutMs, int bands) {
+    void startStreaming(int w, int h, int fps, int kbps, int playoutMs, int bands, boolean vp8) {
         playoutMs = Math.min(playoutMs, caps.maxPlayoutMs);
-        Log.i(TAG, "start " + w + "x" + h + "@" + fps + " " + kbps + " kb/s, playout " + playoutMs + " ms"
+        Log.i(TAG, "start " + (vp8 ? "VP8 " : "H.264 ") + w + "x" + h + "@" + fps + " " + kbps + " kb/s, playout " + playoutMs + " ms"
                 + (bands > 1 ? ", " + bands + " bands" : "") + " (was streaming: " + streaming + ")");
         /* The device holds the playout delay's worth unread on top. */
         maxAhead = Math.max(12288, kbps * 1000L / 8 * (150 + playoutMs) / 1000);
         JSONObject m = new JSONObject();
         try {
-            m.put("type", "start").put("codec", "h264").put("width", w).put("height", h).put("fps", fps)
+            m.put("type", "start").put("codec", vp8 ? "vp8" : "h264").put("width", w).put("height", h).put("fps", fps)
                     .put("kbps", kbps);
             if (playoutMs > 0) {
                 m.put("playout_ms", playoutMs);

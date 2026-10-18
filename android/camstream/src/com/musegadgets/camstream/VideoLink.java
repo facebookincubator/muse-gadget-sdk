@@ -51,12 +51,13 @@ abstract class VideoLink {
         boolean video;
         int maxTiles = 1;   /* bands it decodes in parallel */
         int tileSplitPct;   /* two bands: the top band's share of the height, %; 0: equal */
+        boolean vp8;        /* decodes VP8 as well as H.264 (hello's codecs) */
 
         @Override
         public String toString() {
             return "display " + dispW + "x" + dispH + (round ? " round" : "") + ", max " + maxW + "x" + maxH + "@"
                     + maxFps + ", buffer " + buffer + ", suggests " + sugW + "x" + sugH + "@" + sugFps + " "
-                    + sugKbps + " kb/s" + (maxTiles > 1 ? ", " + maxTiles + " bands" : "");
+                    + sugKbps + " kb/s" + (maxTiles > 1 ? ", " + maxTiles + " bands" : "") + (vp8 ? ", VP8" : "");
         }
     }
 
@@ -80,8 +81,12 @@ abstract class VideoLink {
     /** One line about the link for the stats (address, signal, ...). */
     abstract String describe();
 
-    /** bands: the picture as that many horizontal bands, each its own H.264 stream. */
-    abstract void startStreaming(int w, int h, int fps, int kbps, int playoutMs, int bands);
+    /** bands: the picture as that many horizontal bands, each its own stream; vp8: VP8 frames, else H.264. */
+    abstract void startStreaming(int w, int h, int fps, int kbps, int playoutMs, int bands, boolean vp8);
+
+    void startStreaming(int w, int h, int fps, int kbps, int playoutMs, int bands) {
+        startStreaming(w, h, fps, kbps, playoutMs, bands, false);
+    }
     abstract void stopStreaming();
     abstract boolean streaming();
     /** Queues one frame (header included). */

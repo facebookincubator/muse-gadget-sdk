@@ -71,6 +71,32 @@ the APK when it exists. With the library in the APK the app uses x264
 (`fast`, zerolatency, baseline, one reference, no deblocking) and does the
 panel scaling in C; `--es sw hw` goes back to the hardware encoder.
 
+### VP8 (royalty-free; not in this repository)
+
+VP8 is the second codec, for gadgets that list it (`CONFIG_MUSE_VIDEO_VP8`).
+libvpx is BSD-3-Clause with the WebM project's patent grant, but like x264
+it is built from your own checkout: `jni/build_vpx.sh` builds its VP8
+encoder (static, NEON) and `jni/mgvpx.c`, our JNI wrapper, into
+`libmgvpx.so`, from a copy of `VPX_SRC` with `jni/libvpx_mg.py`'s two
+switches (no loop filter; decoder-friendly motion vectors). Put it in the
+same `LIB_DIR`:
+
+```sh
+git clone -b v1.16.0 https://chromium.googlesource.com/webm/libvpx ~/libvpx
+NDK=~/Library/Android/sdk/ndk/27.2.12479018 VPX_SRC=~/libvpx OUT_LIB=~/x264-lib ./jni/build_vpx.sh
+LIB_DIR=~/x264-lib ./build.sh install
+```
+
+The **H.264 / VP8** button (or `--es codec vp8`) picks the codec for the
+camera and the clips; the choice is remembered, and the line above the
+buttons names what streams. VP8 needs the gadget to list it and the
+library in the APK, else the app streams H.264 and logs why. Settings
+(`Vpx.java`): libvpx's good-quality mode with no lag, version 1, no loop
+filter, one thread; cpu-used 1 up to 240 px, cpu-used 2 with
+decoder-friendly motion vectors past it; clips VBR. `--es swparams` with a
+`profile=` takes Vpx's options instead. `../../protocols/VIDEO.md` has the
+numbers.
+
 ### Using it
 
 The buttons pick what streams: the camera, colour bars, a sample clip
@@ -82,8 +108,8 @@ camera automatic). `--ei rateclip N` / `--ei ratec N` set the same from
 the command line (0: auto). On a gadget that decodes more than 240 px (the
 ESP-Mosaico, up to 480), Rate also picks the picture size (240, 320 or 480
 px, or the gadget's suggestion; `--ei size N`). Past 240 px on a gadget
-that decodes two bands, x264 sends the top and bottom as two streams, one
-per gadget core (`--ez nobands true`: one).
+that decodes two bands, x264 (or VP8) sends the top and bottom as two
+streams, one per gadget core (`--ez nobands true`: one).
 
 The sample clips are 8 s excerpts of the Blender Foundation's open movies
 *Big Buck Bunny* and *Sintel* (CC BY 3.0; credits on screen while they
@@ -122,7 +148,8 @@ button.
 | `--ei dump` | 0 | save the first N frames sent as `files/dump.au` (u32 length + access unit) |
 | `--ez ir` | true | intra refresh (every 3 s) instead of a keyframe every 4 s |
 | `--ei aefps`, `--ei sensorfps` | 30 | the lowest frame rate auto exposure may stretch to in dim light, and the sensor's rate |
-| `--es sw` | `x264` if built in | `hw`: the phone's hardware encoder even when x264 is in the APK |
+| `--es codec` | the Codec button's | `h264` or `vp8` (VP8 where the gadget lists it and the APK has libmgvpx) |
+| `--es sw` | `x264` if built in | `hw`: the phone's hardware encoder even when x264 is in the APK (H.264) |
 | `--es swpreset`, `--es swparams` | `fast`, `no-deblock=1` (plus `mv-cheap=2` past 240 px unless swparams names it) | x264's preset and options (`name=value:...`, as on its command line; `vbv-ms=N` sets the VBV) |
 | `--ei pf` | 1 | 0: downscale with the 2x2 box instead of `PanelScaler` |
 | `--ei live` | 1 | 0: buffering sized for clips (12 KB ahead of the gadget, 2 frames queued) |

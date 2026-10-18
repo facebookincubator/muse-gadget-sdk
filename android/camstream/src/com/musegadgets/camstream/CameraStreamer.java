@@ -117,9 +117,11 @@ final class CameraStreamer {
     volatile LatencyMeter meter;
     /* --es venc "key=int,...": extra MediaFormat integers for the encoder (experiments). */
     volatile String encParams;
-    /* Software encoder (libx264, X264.java) instead of MediaCodec: "x264"
-     * with swPreset and swParams; null: the phone's hardware encoder. */
+    /* Software encoder instead of MediaCodec: "x264" (libx264, X264.java)
+     * with swPreset and swParams, or "vp8" (libvpx, Vpx.java; swParams are
+     * Vpx's); null: the phone's hardware encoder. */
     volatile String swEncoder;
+    private volatile boolean swVp8;
     volatile String swPreset = "fast", swParams;   /* fast: the same quality as medium here (one reference, no B), less CPU */
     private long sw;
     private volatile boolean swKey;
@@ -200,10 +202,14 @@ final class CameraStreamer {
         }
         if (sw != 0) {
             synchronized (this) {
-                X264.close(sw);
+                encClose(sw);
                 sw = 0;
+                if (bandPool != null) {
+                    bandPool.shutdown();
+                    bandPool = null;
+                }
                 if (sw1 != 0) {
-                    X264.close(sw1);
+                    encClose(sw1);
                     sw1 = 0;
                 }
             }
@@ -262,10 +268,10 @@ final class CameraStreamer {
             synchronized (this) {
                 int k0 = sw1 != 0 ? kbps * band0Rows / Math.max(1, outH) : kbps;
                 if (sw != 0) {
-                    X264.setBitrate(sw, k0);
+                    encSetBitrate(sw, k0);
                 }
                 if (sw1 != 0) {
-                    X264.setBitrate(sw1, kbps - k0);
+                    encSetBitrate(sw1, kbps - k0);
                 }
             }
             return;
@@ -319,25 +325,72 @@ final class CameraStreamer {
         return p;
     }
 
+    /* The software encoder in use: x264 or VP8, the same calls. */
+    private long encOpen(int w, int h, int k, String params) {
+        return swVp8 ? Vpx.open(w, h, fps, k, swPreset, params) : X264.open(w, h, fps, k, swPreset, params);
+    }
+
+    private byte[] encEncode(long h, byte[] in, boolean key, int[] info) {
+        return swVp8 ? Vpx.encode(h, in, statFed, key, info) : X264.encode(h, in, statFed, key, info);
+    }
+
+    private void encSetBitrate(long h, int k) {
+        if (swVp8) {
+            Vpx.setBitrate(h, k);
+        } else {
+            X264.setBitrate(h, k);
+        }
+    }
+
+    private void encClose(long h) {
+        if (swVp8) {
+            Vpx.close(h);
+        } else {
+            X264.close(h);
+        }
+    }
+
+    /**
+     * VP8 settings for a picture this wide, unless swParams names its own:
+     * libvpx's good mode with no lag, version 1 (bilinear), no loop filter,
+     * one thread (two threads cost 4-15% more bits at 232 px). Up to 240 px
+     * (an S3, two times upscaled) cpu-used 1, about 19 ms a frame on an S22
+     * core, and every motion vector; past it (bands, one encoder each, run
+     * side by side) cpu-used 2 and decoder-friendly motion vectors, which the
+     * ESP-Mosaico's 480 px needs.
+     */
+    static String vp8Params(String params, int width) {
+        if (params != null && params.contains("profile=")) {
+            return params;
+        }
+        return width <= 240 ? "cpu=1:deadline=good:profile=1:lf=0:mvcheap=0:threads=1"
+                : "cpu=2:deadline=good:profile=1:lf=0:mvcheap=1:threads=1";
+    }
+
+    /* VP8 bands encode side by side (x264 is quick enough one after the other). */
+    private java.util.concurrent.ExecutorService bandPool;
+
     private void startEncoder() throws Exception {
-        if ("x264".equals(swEncoder)) {
-            if (!X264.available()) {
-                throw new IllegalStateException("libmgx264 is not in this build (jni/build.sh)");
+        swVp8 = "vp8".equals(swEncoder);
+        if ("x264".equals(swEncoder) || swVp8) {
+            if (swVp8 ? !Vpx.available() : !X264.available()) {
+                throw new IllegalStateException(swVp8 ? "libmgvpx is not in this build (jni/build_vpx.sh)"
+                        : "libmgx264 is not in this build (jni/build.sh)");
             }
             boolean two = bands == 2 && outH % 32 == 0;
             int h0 = two ? Math.max(16, Math.min(outH - 16, (outH * bandSplitPct / 100 + 8) / 16 * 16)) : outH;
             band0Rows = h0;
             int k0 = two ? kbps * h0 / outH : kbps;
-            String params = withMvCheap(swParams, outW);
-            sw = X264.open(outW, h0, fps, k0, swPreset, params);
-            sw1 = two ? X264.open(outW, outH - h0, fps, kbps - k0, swPreset, params) : 0;
+            String params = swVp8 ? vp8Params(swParams, outW) : withMvCheap(swParams, outW);
+            sw = encOpen(outW, h0, k0, params);
+            sw1 = two ? encOpen(outW, outH - h0, kbps - k0, params) : 0;
             if (sw == 0 || (two && sw1 == 0)) {
-                throw new IllegalStateException("x264 open failed");
+                throw new IllegalStateException(swEncoder + " open failed");
             }
             swIn = new byte[outW * h0 * 3 / 2];
             swIn1 = two ? new byte[outW * (outH - h0) * 3 / 2] : null;
             swKey = true;
-            encoderName = "x264 " + swPreset + (params != null ? " " + params : "")
+            encoderName = (swVp8 ? "VP8 " : "x264 " + swPreset) + (params != null ? " " + params : "")
                     + (two ? ", two bands of " + h0 + " and " + (outH - h0) + " rows" : "");
             Log.i(TAG, "encoder " + encoderName + " " + outW + "x" + outH + " " + kbps + " kb/s");
             return;
@@ -1097,7 +1150,7 @@ final class CameraStreamer {
                 System.arraycopy(outY, 0, swIn, 0, ys);
                 System.arraycopy(outU, 0, swIn, ys, cs);
                 System.arraycopy(outV, 0, swIn, ys + cs, cs);
-                au = X264.encode(sw, swIn, statFed, idr, swInfo);
+                au = encEncode(sw, swIn, idr, swInfo);
             }
         }
         statFed++;
@@ -1120,8 +1173,23 @@ final class CameraStreamer {
             System.arraycopy(outU, outW * r0 / 4, in, ys, cs);
             System.arraycopy(outV, outW * r0 / 4, in, ys + cs, cs);
         }
-        byte[] a0 = X264.encode(sw, swIn, statFed, idr, swInfo);
-        byte[] a1 = X264.encode(sw1, swIn1, statFed, idr, swInfo1);
+        byte[] a0, a1;
+        if (swVp8) {
+            if (bandPool == null) {
+                bandPool = java.util.concurrent.Executors.newSingleThreadExecutor();
+            }
+            final boolean key = idr;
+            java.util.concurrent.Future<byte[]> f1 = bandPool.submit(() -> encEncode(sw1, swIn1, key, swInfo1));
+            a0 = encEncode(sw, swIn, idr, swInfo);
+            try {
+                a1 = f1.get();
+            } catch (Exception e) {
+                a1 = null;
+            }
+        } else {
+            a0 = encEncode(sw, swIn, idr, swInfo);
+            a1 = encEncode(sw1, swIn1, idr, swInfo1);
+        }
         if (a0 == null || a1 == null || a0.length == 0 || a1.length == 0) {
             return null;
         }

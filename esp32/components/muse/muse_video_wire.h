@@ -49,7 +49,7 @@ typedef enum {
 
 typedef enum {
     MUSE_VIDEO_START_OK = 0,
-    MUSE_VIDEO_START_UNSUPPORTED,   /* a codec other than h264 */
+    MUSE_VIDEO_START_UNSUPPORTED,   /* a codec the board doesn't decode */
     MUSE_VIDEO_START_INVALID,       /* size, rate, bands or playout out of the caps */
 } muse_video_start_check_t;
 
