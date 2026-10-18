@@ -111,6 +111,9 @@ endif()
 if(CONFIG_HOMEHUB_RETERMINAL_SHT4X)
     list(APPEND GADGET_SRCS "reterminal_sht4x.c")
 endif()
+if(CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3)
+    list(APPEND GADGET_SRCS "waveshare_154g_shtc3.c")
+endif()
 
 if(CONFIG_HOMEHUB_VOICE)
     list(APPEND GADGET_SRCS

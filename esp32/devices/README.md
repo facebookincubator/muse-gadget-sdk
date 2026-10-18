@@ -80,7 +80,7 @@ are documented separately; this is not a generic ESP-VoCat profile.
 | UI and settings | — | — | — | — | — | — | — | — | — | Basic navigation checked | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | Experimental | Experimental |
 | Push-to-talk | — | — | — | — | — | — | — | — | — | AI voice note checked; screen mic unverified | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | ✅ | ✅ | Text replies | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ | ✅ | — | With an added I2S mic | ✅ | — | — | Text replies (experimental) | Screen mic |
 | Speaker and mic | — | — | — | — | — | — | — | — | — | PDM voice note checked, no speaker | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | ES8311, ES7210 | — | — | ES8311 (experimental) | ES8311 / ES7210 |
-| Air sensors | — | — | — | — | D1S, D1Pro | — | — | Temperature, humidity | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Air sensors | — | — | — | — | D1S, D1Pro | — | Temperature, humidity | Temperature, humidity | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | Video from a phone (`MUSE_VIDEO=1`) | — | — | — | — | — | — | — | — | — | — | — | — | ✅ | Built, not run | — | — | — | — | — | — | — | — | — | — | Built, not run | — | — | — | — | — | — | — | — | — | — |
 | Touch | — | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | — | ✅ |
 | Battery status | — | — | — | — | — | — | — | — | — | BQ27220 %/mV and charging checked | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | No charging state | Unverified |
@@ -141,6 +141,11 @@ Both reTerminals have an SHT4x temperature and humidity sensor on board,
 which Muse reads with `sensors.read`. The board warms the sensor a little, so
 the temperature is corrected by `CONFIG_HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET`
 (in tenths of a degree, -3.3 °C by default).
+
+The Waveshare ESP32-S3-ePaper-1.54G has an SHTC3 temperature and humidity
+sensor on board, which Muse reads with `sensors.read` too. Its temperature is
+corrected by `CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3_TEMP_OFFSET` (-4 °C by
+default, as in Waveshare's example).
 
 The experimental reTerminal Sticky Muse profile follows Seeed's `factory_fw`
 source: SSD1677 panel, GPIO45/46 power latch, GT911 touch (I2C0), PDM mic,
