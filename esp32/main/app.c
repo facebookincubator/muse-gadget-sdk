@@ -76,6 +76,10 @@
 #if CONFIG_HOMEHUB_RETERMINAL_SHT4X
 #include "reterminal_sht4x.h"
 #endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+#include "reterminal_battery.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -2739,6 +2743,10 @@ void app_run(void) {
 #endif
 #if CONFIG_HOMEHUB_RETERMINAL_SHT4X
     reterminal_sht4x_init();
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+    reterminal_battery_init();
 #endif
 
     if (!setup_complete) {

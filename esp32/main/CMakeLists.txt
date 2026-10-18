@@ -69,6 +69,7 @@ set(GADGET_REQUIRES
     esp_driver_ledc
     esp_driver_spi
     esp_driver_uart
+    esp_adc
     esp_driver_usb_serial_jtag
     esp_lcd
     lwip
@@ -84,9 +85,9 @@ set(GADGET_REQUIRES
 # E-paper has its own status screen in place of led_status.c, with
 # a per-panel driver behind epd_panel.h.
 if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "reterminal_battery.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "reterminal_battery.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1681.c")
 else()
