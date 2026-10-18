@@ -1,0 +1,24 @@
+# With CONFIG_MUSE_VIDEO_DECODER_IRAM the per-macroblock code runs from IRAM
+# (about 28 KB on the S3), as tinyh264's does: from flash it shares the
+# instruction cache with Wi-Fi, BLE and the panel.
+[mapping:libvpx_vp8]
+archive: liblibvpx_vp8.a
+entries:
+    if MUSE_VIDEO_DECODER_IRAM = y:
+        decodeframe (noflash)
+        decodemv (noflash)
+        detokenize (noflash)
+        dboolhuff (noflash)
+        filter (noflash)
+        reconinter (noflash)
+        reconintra (noflash)
+        reconintra4x4 (noflash)
+        intrapred (noflash)
+        idct_blk (noflash)
+        idctllm (noflash)
+        dequantize (noflash)
+        findnearmv (noflash)
+        extend (noflash)
+        yv12extend (noflash)
+    else:
+        * (default)
