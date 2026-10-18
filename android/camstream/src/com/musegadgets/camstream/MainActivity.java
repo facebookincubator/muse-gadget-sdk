@@ -112,6 +112,7 @@ public final class MainActivity extends Activity
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        setIntent(benchOnly(getIntent()));
         readExtras(getIntent());
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -257,10 +258,26 @@ public final class MainActivity extends Activity
         begin();
     }
 
+    /*
+     * The extras (gadget address, source, auto start, ...) are for testing
+     * from adb: the activity is exported, so in a build that isn't debuggable
+     * any app could otherwise point the camera at a server of its choosing.
+     */
+    private Intent benchOnly(Intent i) {
+        if (i == null || (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            return i;
+        }
+        if (i.getExtras() != null) {
+            Log.w(TAG, "launch extras ignored: not a debuggable build");
+        }
+        return new Intent(i).replaceExtras((Bundle) null);
+    }
+
     /* `am start ... --es pick <what>` on the running app presses a button (what: as in pick()). */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        intent = benchOnly(intent);
         String what = intent.getStringExtra("pick");
         if (what != null) {
             pick(what);
@@ -420,7 +437,8 @@ public final class MainActivity extends Activity
         try {
             cam.pattern = "pattern".equals(source);
             cam.srcFile = source.startsWith("file:")
-                    ? new java.io.File(getExternalFilesDir(null), source.substring(5)).getPath() : null;
+                    ? new java.io.File(getExternalFilesDir(null), new java.io.File(source.substring(5)).getName()).getPath()
+                    : null;   /* a name in the app's files, never a path out of them */
             cam.setPreview(previewSurface);
             if (c.dispW > 0 && c.dispH > 0) {
                 cam.panelPx = Math.min(c.dispW, c.dispH);   /* what the gadget scales the picture to */
@@ -865,6 +883,12 @@ public final class MainActivity extends Activity
 
     @Override
     public void onStartRefused(String reason) {
+        if ("closed".equals(reason)) {
+            /* Phone camera isn't open on the gadget: its "want" starts the stream. */
+            Log.i(TAG, "gadget refused the stream: open Phone camera on it");
+            linkStatus = "Open Phone camera on the gadget";
+            return;
+        }
         Log.i(TAG, "gadget refused the stream (" + reason + "); trying again in 1 s");
         ui.postDelayed(() -> {
             if (!(auto || wanted) || !link.ready() || link.streaming()) {

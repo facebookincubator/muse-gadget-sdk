@@ -666,6 +666,12 @@ final class MainViewController: UIViewController, VideoLinkListener, CameraSink,
     }
 
     func onStartRefused(_ reason: String) {
+        if reason == "closed" {
+            /* Phone camera isn't open on the gadget: its "want" starts the stream. */
+            mlog("gadget refused the stream: open Phone camera on it")
+            DispatchQueue.main.async { self.linkStatus = "Open Phone camera on the gadget" }
+            return
+        }
         mlog("gadget refused the stream (\(reason)); trying again in 1 s")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
             if !(auto || wanted) || !link.ready() || link.streaming() {

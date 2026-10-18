@@ -45,6 +45,7 @@ final class WifiLink: VideoLink {
     /* Outgoing: control messages first, then frames within credits. */
     private let lock = NSCondition()
     private var controlQ: [Data] = []
+    private var lastCtlMs: Int64 = 0
     private var frameQ: [Data] = []
     private var cur: Data?
     private var curOff = 0
@@ -441,6 +442,7 @@ final class WifiLink: VideoLink {
         c.maxTiles = max(1, Self.i(m, "max_bands", 1))
         c.tileSplitPct = Self.i(m, "band_split_pct")
         c.vp8 = (m["codecs"] as? [String] ?? []).contains("vp8")
+        c.clamp()
         c.video = true
     }
 
@@ -544,9 +546,16 @@ final class WifiLink: VideoLink {
                     _ = lock.wait(until: Date().addingTimeInterval(0.05))
                     continue
                 }
+                /* While not streaming, a status request every few seconds:
+                 * the gadget turns away a new connection only while its
+                 * client is talking (VIDEO.md, Trust). */
+                if !isStreaming && nowMs() - lastCtlMs >= 4000 {
+                    controlQ.append(Self.message(["type": "status"]))
+                }
                 if !controlQ.isEmpty {
                     out = controlQ.removeFirst()
                     isCtl = true
+                    lastCtlMs = nowMs()
                     break
                 }
                 if isStreaming {

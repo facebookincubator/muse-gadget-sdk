@@ -53,6 +53,27 @@ abstract class VideoLink {
         int tileSplitPct;   /* two bands: the top band's share of the height, %; 0: equal */
         boolean vp8;        /* decodes VP8 as well as H.264 (hello's codecs) */
 
+        private static int clamp(int v, int lo, int hi) {
+            return Math.max(lo, Math.min(hi, v));
+        }
+
+        /** Keeps what a gadget claims in range: the app sizes encoders and buffers from it. */
+        void clamp() {
+            maxW = clamp(maxW, 64, 720);
+            maxH = clamp(maxH, 64, 720);
+            sugW = clamp(sugW, 64, maxW);
+            sugH = clamp(sugH, 64, maxH);
+            dispW = clamp(dispW, 0, 2048);
+            dispH = clamp(dispH, 0, 2048);
+            maxFps = clamp(maxFps, 1, 60);
+            sugFps = clamp(sugFps, 1, maxFps);
+            sugKbps = clamp(sugKbps, 0, 20000);
+            maxPlayoutMs = clamp(maxPlayoutMs, 0, 2000);
+            maxTiles = clamp(maxTiles, 1, 2);
+            tileSplitPct = clamp(tileSplitPct, 0, 90);
+            buffer = Math.max(16384, Math.min(1 << 20, buffer));
+        }
+
         @Override
         public String toString() {
             return "display " + dispW + "x" + dispH + (round ? " round" : "") + ", max " + maxW + "x" + maxH + "@"

@@ -22,6 +22,7 @@
  */
 #include <jni.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -203,8 +204,31 @@ JNIEXPORT void JNICALL Java_com_musegadgets_camstream_X264_scale(JNIEnv *env, jc
                                                                  jbyteArray jdst)
 {
     (void)cls;
+    /* Every index stays inside the arrays it reads and writes: the filter's
+     * taps (start[o] + len <= nIn), the source rows and columns, the output. */
+    if (nIn <= 0 || nOut <= 0 || len <= 0 || len > nIn || nIn > 4096 || nOut > 4096 || x0 < 0 || y0 < 0 ||
+        pixStride < 1 || rowStride < 1 || (*env)->GetArrayLength(env, jstart) < nOut ||
+        (*env)->GetArrayLength(env, jtaps) < nOut * len || (*env)->GetArrayLength(env, jdst) < nOut * nOut ||
+        (int64_t)(y0 + nIn - 1) * rowStride + (int64_t)(x0 + nIn - 1) * pixStride >= (*env)->GetArrayLength(env, jsrc)) {
+        return;
+    }
     int *t = malloc(sizeof(int) * nIn * nOut), *acc = malloc(sizeof(int) * nOut);
     jint *start = (*env)->GetIntArrayElements(env, jstart, NULL), *w = (*env)->GetIntArrayElements(env, jtaps, NULL);
+    bool ok = t && acc && start && w;
+    for (int o = 0; ok && o < nOut; o++) {
+        ok = start[o] >= 0 && start[o] + len <= nIn;
+    }
+    if (!ok) {
+        if (start) {
+            (*env)->ReleaseIntArrayElements(env, jstart, start, JNI_ABORT);
+        }
+        if (w) {
+            (*env)->ReleaseIntArrayElements(env, jtaps, w, JNI_ABORT);
+        }
+        free(t);
+        free(acc);
+        return;
+    }
     uint8_t *src = (*env)->GetPrimitiveArrayCritical(env, jsrc, NULL);
     for (int y = 0; y < nIn; y++) {
         const uint8_t *row = src + (y0 + y) * rowStride + x0 * pixStride;

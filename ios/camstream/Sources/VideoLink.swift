@@ -26,6 +26,25 @@ final class Caps: CustomStringConvertible {
     var tileSplitPct = 0   /* two bands: the top band's share of the height, %; 0: equal */
     var vp8 = false        /* decodes VP8 as well as H.264 (hello's codecs) */
 
+    /* Keeps what a gadget claims in range: the app sizes encoders and buffers
+     * from it, and anything on the network can answer as a gadget. */
+    func clamp() {
+        func c(_ v: Int, _ lo: Int, _ hi: Int) -> Int { max(lo, min(hi, v)) }
+        maxW = c(maxW, 64, 720)
+        maxH = c(maxH, 64, 720)
+        sugW = c(sugW, 64, maxW)
+        sugH = c(sugH, 64, maxH)
+        dispW = c(dispW, 0, 2048)
+        dispH = c(dispH, 0, 2048)
+        maxFps = c(maxFps, 1, 60)
+        sugFps = c(sugFps, 1, maxFps)
+        sugKbps = c(sugKbps, 0, 20000)
+        maxPlayoutMs = c(maxPlayoutMs, 0, 2000)
+        maxTiles = c(maxTiles, 1, 2)
+        tileSplitPct = c(tileSplitPct, 0, 90)
+        buffer = max(16384, min(1 << 20, buffer))
+    }
+
     var description: String {
         "display \(dispW)x\(dispH)\(round ? " round" : ""), max \(maxW)x\(maxH)@\(maxFps), buffer \(buffer), suggests \(sugW)x\(sugH)@\(sugFps) \(sugKbps) kb/s"
             + (maxTiles > 1 ? ", \(maxTiles) bands" : "") + (vp8 ? ", VP8" : "")

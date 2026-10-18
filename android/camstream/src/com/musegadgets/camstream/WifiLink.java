@@ -48,6 +48,10 @@ final class WifiLink extends VideoLink {
     /* Largest write: TCP splits it anyway; smaller keeps a frame from
      * holding the socket long when credits are short. */
     private static final int CHUNK = 16384;
+    /* While not streaming, a status request this often: the gadget turns away
+     * a new connection only while its client is talking (VIDEO.md, Trust). */
+    private static final long KEEPALIVE_MS = 4000;
+    private long lastCtlMs;
 
     private final Context ctx;
     private final Listener l;
@@ -466,6 +470,7 @@ final class WifiLink extends VideoLink {
         caps.maxPlayoutMs = m.optInt("max_playout_ms");
         caps.maxTiles = Math.max(1, m.optInt("max_bands", 1));
         caps.tileSplitPct = m.optInt("band_split_pct");
+        caps.clamp();   /* anything on the network can answer as a gadget */
         org.json.JSONArray codecs = m.optJSONArray("codecs");
         caps.vp8 = false;
         for (int i = 0; codecs != null && i < codecs.length(); i++) {
@@ -484,6 +489,8 @@ final class WifiLink extends VideoLink {
     }
 
     /* ---- outgoing ------------------------------------------------------ */
+
+    private static final byte[] STATUS = "J\u0011\u0000{\"type\":\"status\"}".getBytes(StandardCharsets.ISO_8859_1);
 
     private static byte[] message(JSONObject m) {
         byte[] t = m.toString().getBytes(StandardCharsets.UTF_8);
@@ -592,8 +599,12 @@ final class WifiLink extends VideoLink {
                         }
                         continue;
                     }
+                    if (!streaming && SystemClock.elapsedRealtime() - lastCtlMs >= KEEPALIVE_MS) {
+                        controlQ.add(STATUS);
+                    }
                     if (!controlQ.isEmpty()) {
                         ctl = controlQ.poll();
+                        lastCtlMs = SystemClock.elapsedRealtime();
                         break;
                     }
                     if (streaming) {

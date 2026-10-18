@@ -54,10 +54,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
+    /* Debug builds only: any app or web page can open a URL, and a pick can
+     * start streaming the camera. */
     private func open(_ url: URL) {
+        #if DEBUG
         if url.host == "pick", url.pathComponents.count > 1 {
             let what = url.pathComponents[1]
             DispatchQueue.main.async { self.main.pick(what) }
         }
+        #endif
     }
 }
