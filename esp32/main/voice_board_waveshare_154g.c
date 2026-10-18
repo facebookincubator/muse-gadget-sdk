@@ -17,7 +17,8 @@
 /* Waveshare ESP32-S3-ePaper-1.54G voice: one ES8311 codec with an analog
  * microphone and an NS4150B speaker amplifier, and the green LED on GPIO3 for
  * the voice states (the e-paper is too slow for them). The reply's first page
- * goes on the e-paper with the page count.
+ * goes on the e-paper with the page count, and a PWR tap shows the next. PWR
+ * taps and holds beep.
  * Pins: Waveshare's schematic and Example/ESP-IDF_5.5.1/07_Audio_Test
  * (github.com/waveshareteam/ESP32-S3-ePaper-1.54G).
  */
@@ -201,6 +202,35 @@ static void cue(bool end) {
     if (err != ESP_OK) ESP_LOGW(TAG, "cue failed: %s", esp_err_to_name(err));
 }
 
+// One cue at a time: a turn's cues and the PWR beeps. Under s_cue_lock.
+static SemaphoreHandle_t s_cue_lock;
+static TaskHandle_t s_cue_task;
+
+enum { BEEP_TAP = 1, BEEP_HOLD = 2 };
+
+// PWR beeps play here, so the PWR task keeps polling during the tone: the
+// higher tone for a tap, the lower for a hold.
+static void cue_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        uint32_t beep = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &beep, portMAX_DELAY);
+        // A turn has its own cues and its reply; no beep over either.
+        if (xSemaphoreTake(s_cue_lock, 0) != pdTRUE) continue;
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool recording = s_recording;
+        bool playing = s_playing;
+        xSemaphoreGive(s_lock);
+        if (!recording && !playing) cue(beep == BEEP_HOLD);
+        xSemaphoreGive(s_cue_lock);
+    }
+}
+
+// epd_154g.c calls this when a PWR hold turns the screen.
+void epd154g_turn_feedback(void) {
+    if (s_cue_task) xTaskNotify(s_cue_task, BEEP_HOLD, eSetValueWithOverwrite);
+}
+
 // ---- Reply on the e-paper ----------------------------------------------------
 
 // ---- Page rendering (host-tested) -------------------------------------------
@@ -271,9 +301,9 @@ static void render_page(const char *page, const char *count, uint8_t *strip, pag
 #define CACHE_PAGES 16
 
 // The page task does what was asked last: show the cached page s_cache_shown
-// with the page count, or go back to the status screen. Older requests are
-// dropped.
-typedef enum { PAGE_NONE, PAGE_SHOW, PAGE_STATUS } page_want_t;
+// with the page count, show the next one, or go back to the status screen.
+// Older requests are dropped; a PWR tap never replaces a pending request.
+typedef enum { PAGE_NONE, PAGE_SHOW, PAGE_NEXT, PAGE_STATUS } page_want_t;
 static portMUX_TYPE s_page_mux = portMUX_INITIALIZER_UNLOCKED;
 static page_want_t s_want;         // under s_page_mux
 static TaskHandle_t s_page_task;
@@ -317,10 +347,15 @@ static void page_task(void *arg) {
             led_status_show_animation();
             continue;
         }
-        if (want != PAGE_SHOW) continue;
+        if (want != PAGE_SHOW && want != PAGE_NEXT) continue;
         char count[COUNT_BYTES] = "";
         xSemaphoreTake(s_cache_lock, portMAX_DELAY);
         bool any = s_cache_pages > 0;
+        if (want == PAGE_NEXT) {
+            // Round to the first after the last; one page has nothing to turn.
+            any = s_cache_pages > 1;
+            if (any) s_cache_shown = (s_cache_shown + 1) % s_cache_pages;
+        }
         if (any) {
             memcpy(page, s_cache + (size_t)s_cache_shown * PAGE_BYTES, PAGE_BYTES);
             if (s_cache_pages > 1) {
@@ -332,6 +367,17 @@ static void page_task(void *arg) {
         render_page(page, count, s_strip, draw_band);
         led_status_draw_done();
     }
+}
+
+// epd_154g.c calls this on a PWR tap.
+void epd154g_pwr_tap(void) {
+    if (s_cue_task) xTaskNotify(s_cue_task, BEEP_TAP, eSetValueWithOverwrite);
+    if (!s_page_task) return;
+    taskENTER_CRITICAL(&s_page_mux);
+    bool idle = s_want == PAGE_NONE;
+    if (idle) s_want = PAGE_NEXT;
+    taskEXIT_CRITICAL(&s_page_mux);
+    if (idle) xTaskNotifyGive(s_page_task);
 }
 
 static void queue_page_request(page_want_t want) {
@@ -469,6 +515,7 @@ void led_status_show_volume(int percent) { (void)percent; }
 // and the codec warm-up take about 0.3 s after voice.c shows LISTENING; the
 // LED turns steady only once they are done.
 esp_err_t voice_board_mic_start(void) {
+    xSemaphoreTake(s_cue_lock, portMAX_DELAY);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     esp_err_t err = power_up();
     s_recording = err == ESP_OK;
@@ -481,6 +528,7 @@ esp_err_t voice_board_mic_start(void) {
         atomic_store(&s_mic_ready, true);
         if (s_led_task) xTaskNotifyGive(s_led_task);
     }
+    xSemaphoreGive(s_cue_lock);
     return err;
 }
 
@@ -491,11 +539,13 @@ void voice_board_mic_stop(void) {
     xSemaphoreGive(s_lock);
     if (!recording) return;
     atomic_store(&s_mic_ready, false);
+    xSemaphoreTake(s_cue_lock, portMAX_DELAY);
     if (long_enough) cue(true);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_recording = false;
     release();
     xSemaphoreGive(s_lock);
+    xSemaphoreGive(s_cue_lock);
     vTaskPrioritySet(NULL, s_priority);
 }
 
@@ -637,10 +687,12 @@ esp_err_t voice_board_init(void) {
         return ESP_ERR_NO_MEM;
     }
     s_cache_lock = xSemaphoreCreateMutex();
+    s_cue_lock = xSemaphoreCreateMutex();
     s_strip = heap_caps_malloc((size_t)PAGE_W * CELL_H * 2, MALLOC_CAP_SPIRAM);
     s_cache = heap_caps_malloc((size_t)CACHE_PAGES * PAGE_BYTES, MALLOC_CAP_SPIRAM);
-    if (!s_cache_lock || !s_strip || !s_cache) return ESP_ERR_NO_MEM;
-    if (xTaskCreate(page_task, "voice_page", 3072, NULL, 2, &s_page_task) != pdPASS) {
+    if (!s_cache_lock || !s_cue_lock || !s_strip || !s_cache) return ESP_ERR_NO_MEM;
+    if (xTaskCreate(cue_task, "voice_cue", 3072, NULL, 3, &s_cue_task) != pdPASS ||
+        xTaskCreate(page_task, "voice_page", 3072, NULL, 2, &s_page_task) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "ES8311 ready: 16000 Hz duplex; audio rail off until used");
