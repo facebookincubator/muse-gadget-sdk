@@ -15,6 +15,7 @@
  */
 #include "muse_vstream.h"
 
+#include <assert.h>
 #include <string.h>
 
 
@@ -26,6 +27,9 @@
 
 void muse_vstream_init(muse_vstream_t *s, uint8_t *buf, uint32_t size, uint32_t max_frame)
 {
+    /* Positions wrap with size - 1 as a mask. */
+    assert(size && (size & (size - 1)) == 0);
+    assert(max_frame <= size / 2);
     memset(s, 0, sizeof(*s));
     s->buf = buf;
     s->size = size;
@@ -201,6 +205,9 @@ int32_t muse_vstream_pop(muse_vstream_t *s, uint8_t *dst, uint32_t cap, muse_vfr
     bool damaged = false;
     f->after_gap = false;
     for (;;) {
+        if (!s->active) {
+            return damaged ? -1 : 0;   /* a stream ended or restarted under us */
+        }
         uint32_t avail = s->head - s->tail;
         BARRIER();
         if (avail < MUSE_VIDEO_FRAME_HEADER_LEN + 4) {

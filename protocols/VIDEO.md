@@ -18,7 +18,8 @@ limitations under the License.
 
 A phone streams H.264 (or VP8, below) to a gadget with a display; the
 gadget decodes it and draws it. This is the design note for anyone changing that path: the phone
-side (`../android/camstream`, Muse Gadgets Camera), the wire (the frame format and,
+side (Muse Gadgets Camera, for Android in `../android/camstream` and for iPhone in
+`../ios/camstream`: the same app, class for class), the wire (the frame format and,
 for Wi-Fi, the messages below) and the ESP32 side
 (`../esp32/components/tinyh264`, `components/muse/muse_video.c` and its
 transports). It says what each choice buys, how it was measured, and how to
@@ -27,7 +28,8 @@ check a change.
 | Where | What |
 |---|---|
 | this file, Wi-Fi | the Wi-Fi protocol: discovery, messages, credits |
-| `../android/camstream/README.md` | the phone app, its extras and flow control |
+| `../android/camstream/README.md` | the Android app (Android Studio or Gradle), its extras and flow control |
+| `../ios/camstream/README.md` | the iPhone app (Xcode), its launch arguments |
 | `../esp32/components/tinyh264/README.md` | the decoder and its bit-exact optimizations |
 | `../esp32/components/libvpx_vp8/README.md` | the VP8 decoder, the same |
 | `../esp32/components/muse_vstream` | the receive ring and frame format every transport shares |
@@ -103,9 +105,9 @@ Link has joined it already). The gadget (`CONFIG_MUSE_VIDEO_WIFI`) listens
 on TCP port 7766 (`CONFIG_MUSE_VIDEO_WIFI_PORT`) and announces itself over
 mDNS as `_musevideo._tcp`, instance name its BLE name
 (`MuseGadget-A1B2C3`), with TXT `version=1`, `width`, `height` and
-`round` (its display). One client at a time: a new connection replaces the
-old one, and a client that vanished is dropped by TCP keepalive (about
-11 s).
+`round` (its display). One client at a time; a client that vanished is
+dropped by TCP keepalive (about 11 s). See Trust below for who may
+connect and when.
 
 Each message on the connection is one of:
 
@@ -121,10 +123,10 @@ Messages, in the order they usually come:
 | `want` | gadget | `on` | the user opened (true) or left (false) the Phone camera view; sent again after `hello` while the view is open. A client that can stream answers true with `start`, false by stopping |
 | `start` | client | `codec` (`"h264"` or, where hello lists it, `"vp8"`), `width`, `height` (the picture after cropping), `fps`, `kbps`, optional `playout_ms`, `bands` | starts a stream (replacing one that's on) |
 | `buffer` | gadget | `free`, `received`, `shown`, `dropped`, `decode_ms`, optional `last_frame`, `last_age_ms` | credits and progress: after a start, and after each frame the decoder takes |
-| `error` | gadget | `for` (`"start"`), `reason` (`busy`, `invalid`, `unsupported`) | the start was refused; on busy (the screen still waking, another stream on) try again in a second |
+| `error` | gadget | `for` (`"start"`), `reason` (`closed`, `busy`, `invalid`, `unsupported`) | the start was refused. `closed`: the Phone camera view isn't open, wait for `want`; `busy` (the screen still waking, another stream on): try again in a second; `invalid`: a value out of range or past `max` |
 | `keyframe` | gadget | | make the next frame a keyframe (a frame lost, damaged or too big) |
 | `stop` | either | | the stream ends; the gadget stops decoding at once |
-| `status` | client | | asks for a `buffer` now |
+| `status` | client | | asks for a `buffer` now; the apps also send it every 4 s while not streaming, to show they're still there |
 
 Unknown types and fields are ignored, so either side can add some.
 
@@ -151,6 +153,39 @@ and moves the schedule. For pre-recorded clips; live sources leave it 0.
 **Power.** While a stream is on the gadget keeps Wi-Fi out of modem sleep
 (`muse_wifi_keep_awake()`): asleep, the access point holds every packet
 for the next beacon, up to 100 ms of extra latency and jitter.
+
+### Trust
+
+The port is not authenticated or encrypted: anything on the network can
+connect, and anything on the network can answer mDNS as a gadget. Both
+ends treat what they receive as untrusted and limit what a stranger gets:
+
+- **A stream only while someone is looking.** The gadget takes `start`
+  only while the Phone camera view is open on it (`error` `closed`
+  otherwise), so nobody else can wake its screen, draw on it, keep its
+  radio out of sleep or silence its BLE.
+  `CONFIG_MUSE_VIDEO_WIFI_START_ANYTIME` lifts this for automated benches.
+- **One client, kept.** A connection must send a whole message within
+  5 s; a new connection is turned away while the client has sent
+  something in the last 10 s (the apps' `status` every 4 s keeps their
+  place), and replaces it only once it has gone quiet. A client that
+  stops reading (a send gives up after 300 ms) is dropped.
+- **Sizes are the stream's.** `start` values out of range, or past
+  `max`, are `invalid`. A frame longer than 64 KB closes the connection.
+  The decoders are told the stream's size before they see a byte, and
+  refuse an H.264 sequence parameter set or a VP8 keyframe for a larger
+  picture (nothing is allocated for it), and tinyh264 refuses sizes whose
+  arithmetic would overflow. Drawing reads only what the decoded picture
+  holds, and pictures being drawn are never freed under the show task
+  (the decoder waits for both before new parameter sets or a keyframe).
+  `esp32/tests/test_video_untrusted.py` checks these.
+- **The apps** clamp what `hello` claims (sizes, rates, buffer) before
+  sizing encoders and buffers from it, and take launch options (Android
+  intent extras, iOS's `musegadgetscamera://` URLs) only in debug builds.
+
+What that leaves: someone on the network while the view is open can show
+their own video instead of the phone's, and anyone on it can see the
+video, which isn't encrypted. Use it on networks you trust.
 
 ## Encoding the camera (live)
 
@@ -263,7 +298,7 @@ VP8 is the second codec: no patent pool charges royalties for it, and
 libvpx, its reference code, is BSD-3-Clause with the WebM project's patent
 grant. A gadget built with `CONFIG_MUSE_VIDEO_VP8` (on with
 `CONFIG_MUSE_VIDEO`) lists it in hello, and the client picks it in start
-(Muse Gadgets Camera: the Codec button, or `--es codec vp8`). Frames, bands, credits
+(Muse Gadgets Camera: the H.264 / VP8 button, `--es codec vp8` on Android, `-codec vp8` on iPhone). Frames, bands, credits
 and keyframe requests work as with H.264; two bands are two VP8 streams.
 
 - **Decoder:** libvpx v1.16.0's (`../esp32/components/libvpx_vp8`), C only
@@ -365,9 +400,11 @@ experimental.
 ## Checking a change
 
 - **Host tests:** `esp32/tests/test_muse_video.py` (the ring and the Wi-Fi
-  messages, H.264 and VP8), `test_tinyh264_pie.py` (the S31 SIMD model),
+  messages, H.264 and VP8), `test_video_untrusted.py` (hostile sizes and
+  the port's guards), `test_tinyh264_pie.py` (the S31 SIMD model),
   `test_libvpx_vp8.py` (the VP8 decoder against libvpx's output).
-- **Live:** Muse Gadgets Camera's screen and logcat (`adb logcat -s MuseCam`) show
+- **Live:** Muse Gadgets Camera's screen and log (Android: `adb logcat -s
+  MuseCam`; iPhone: Xcode's console, or `MuseCam:` lines in the device log) show
   each second the send rate, frames in flight and queued, camera-to-encoder
   time, the gate and stall time, the gadget's shown/dropped/decode from its
   buffer messages, and capture-to-shown latency. The gadget logs its side

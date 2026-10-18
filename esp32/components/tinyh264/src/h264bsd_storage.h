@@ -129,6 +129,9 @@ typedef struct storage
     void (*progressFn)(void *ctx, const u8 *pic, u32 widthMbs, u32 heightMbs, u32 rowsFinal);
     void *progressCtx;
     u32 progressRows;
+    /* OPT: the largest picture a sequence parameter set may describe
+     * (h264bsdSetMaxSize), in macroblocks; 0: no limit but the overall one */
+    u32 maxWidthMbs, maxHeightMbs;
 
     /* last valid NAL unit header is stored here */
     nalUnit_t prevNalUnit[1];

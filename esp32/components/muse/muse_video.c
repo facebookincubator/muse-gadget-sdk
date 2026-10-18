@@ -301,6 +301,12 @@ static void fill(uint8_t *dst, int stride, int row, int rows, void *arg)
     if (!pic) {
         return;
     }
+    /* Only what the decoded picture holds: a stream whose pictures (or
+     * bands) are smaller than it said is drawn black, not read past. */
+    if (need > pp->h || a->vis_w > pp->w || sl->failed) {
+        memset(dst, 0, (size_t)rows * stride);
+        return;
+    }
     (void)w;
     (void)h;
     const int ys = pp->y_stride, cs = pp->c_stride;
@@ -604,7 +610,7 @@ static void band_task(void *arg)
         if (!dec || gen != j->gen) {
             muse_vdec_close(dec);
             gen = j->gen;
-            dec = muse_vdec_open(s_params.codec);
+            dec = muse_vdec_open(s_params.codec, s_params.width, s_params.height);
         }
         j->ok = j->got = false;
         if (dec) {
@@ -717,7 +723,7 @@ static void decode_task(void *arg)
         if (!dec || gen != s_gen) {
             muse_vdec_close(dec);
             gen = s_gen;
-            dec = muse_vdec_open(s_params.codec);
+            dec = muse_vdec_open(s_params.codec, s_params.width, s_params.height);
             if (!dec) {
                 ESP_LOGE(TAG, "no memory for the decoder");
                 if (s_tp && s_tp->stop) {
@@ -787,6 +793,14 @@ static void decode_task(void *arg)
                 continue;
             }
         }
+        /* An access unit that may make a decoder reallocate its pictures
+         * (new parameter sets, a keyframe) frees the one the show task may
+         * still be drawing: wait for that one first (both slots ours). */
+        bool reset = muse_vdec_may_realloc(dec, bands == 2 ? s_au + 4 : s_au, len0) ||
+                       (bands == 2 && muse_vdec_may_realloc(dec, s_au + 4 + len0, (uint32_t)n - 4 - len0));
+        if (reset) {
+            xSemaphoreTake(s_slots, portMAX_DELAY);
+        }
         slot_t *sl = &s_slot[next_slot];
         sl->pic = NULL;
         sl->rows = 0;
@@ -818,6 +832,9 @@ static void decode_task(void *arg)
         if (bands == 2) {
             s_top_us += (uint32_t)(esp_timer_get_time() - t0);
         }
+        if (reset && bands == 1) {
+            xSemaphoreGive(s_slots);
+        }
         bool got = rc == MUSE_VDEC_PICTURE;
         bool ok = rc != MUSE_VDEC_ERROR;
         int h = got ? pic.h : 0;
@@ -827,6 +844,9 @@ static void decode_task(void *arg)
             s_band_n++;
             got = got && s_band.got;
             ok = ok && s_band.ok;
+            if (reset) {
+                xSemaphoreGive(s_slots);
+            }
         }
         uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
         if (got && bands == 2 && h + s_band.h != (int)((s_params.height + 15) & ~15)) {

@@ -459,8 +459,9 @@ The device still needs to be paired once for its token.
 
 `MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
 `devices/sdkconfig.muse-video`) adds video streaming (`CONFIG_MUSE_VIDEO`,
-`CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Camera (`../android/camstream`) on a phone on
-the same Wi-Fi streams its camera, or a clip, as H.264 or VP8
+`CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Camera (`../android/camstream` for
+Android, `../ios/camstream` for iPhone) on a phone on the same Wi-Fi streams
+its camera, or a clip, as H.264 or VP8
 (`CONFIG_MUSE_VIDEO_VP8`, on by default), and the board decodes it and
 draws it full screen. `../protocols/VIDEO.md` has
 the design, the Wi-Fi protocol and the numbers.
@@ -480,8 +481,11 @@ the design, the Wi-Fi protocol and the numbers.
   `muse_video_transport_t` and calls `muse_video_begin()`.
 - **Using it:** Phone camera in Settings (touch boards) or the menu opens the
   view and asks the phone for a stream; any button closes it. The console's
-  `>video` / `>video=0` do the same. Stats every 2 s on `muse_video`: decode
-  time, received-to-shown, kb/s, shown/dropped/skipped, each core's load.
+  `>video` / `>video=0` do the same. The board takes a stream only while the
+  view is open: the port is unauthenticated (`../protocols/VIDEO.md`, Trust).
+  `CONFIG_MUSE_VIDEO_WIFI_START_ANYTIME` lifts that for automated benches;
+  never ship it. Stats every 2 s on `muse_video`: decode time,
+  received-to-shown, kb/s, shown/dropped/skipped, each core's load.
 - **Radio:** while a stream is on, Wi-Fi stays out of modem sleep and BLE
   stops advertising (`muse_wifi_keep_awake`, `muse_link_ble_quiet`): with BLE
   advertising, the radio's scheduler gives BLE half of every beacon period
@@ -494,9 +498,13 @@ the design, the Wi-Fi protocol and the numbers.
   on the S3 can't spare
   (LVGL's task then fails to start).
 - **Test** with `tests/test_muse_video.py` (the ring and the Wi-Fi messages,
-  and the wiring under the options), `tests/test_tinyh264_pie.py` and
-  `tests/test_libvpx_vp8.py`; on a
-  board, with Muse Gadgets Camera (`adb logcat -s MuseCam`).
+  and the wiring under the options), `tests/test_video_untrusted.py`
+  (hostile sizes, the port's guards), `tests/test_tinyh264_pie.py` and
+  `tests/test_libvpx_vp8.py`; on a board, with Muse Gadgets Camera (Android:
+  `adb logcat -s MuseCam`; iPhone: Xcode's console).
+- **Untrusted input:** everything from the network is. Keep the checks in
+  `../protocols/VIDEO.md`'s Trust section when changing the transport, the
+  decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
 
 ## Configuration gotchas
 

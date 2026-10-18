@@ -631,6 +631,13 @@ void h264bsdFree(storage_t *pStorage)
 }
 
 /* OPT: see h264bsd_decoder.h */
+void h264bsdSetMaxSize(storage_t *pStorage, u32 maxWidthMbs, u32 maxHeightMbs)
+{
+    pStorage->maxWidthMbs = maxWidthMbs;
+    pStorage->maxHeightMbs = maxHeightMbs;
+}
+
+/* OPT: see h264bsd_decoder.h */
 void h264bsdSetProgress(storage_t *pStorage,
     void (*fn)(void *ctx, const u8 *pic, u32 widthMbs, u32 heightMbs, u32 rowsFinal), void *ctx)
 {

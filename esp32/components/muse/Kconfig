@@ -309,6 +309,18 @@ menu "Muse"
         range 1024 65535
         default 7766
 
+    config MUSE_VIDEO_WIFI_START_ANYTIME
+        bool "Accept a Wi-Fi stream with the Phone camera view closed (bench builds only)"
+        depends on MUSE_VIDEO_WIFI
+        default n
+        help
+            The Wi-Fi port is unauthenticated: anyone on the network can
+            connect. By default the board takes a stream only while someone
+            has opened Phone camera on it (a client hears "closed" otherwise
+            and waits for "want"), so a stranger can't wake the screen, draw on
+            it or keep the radio busy. Turn this on only for automated
+            benches that start streams without touching the board.
+
     config MUSE_VIDEO_VP8
         bool "VP8 as well as H.264"
         depends on MUSE_VIDEO

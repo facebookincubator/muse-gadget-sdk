@@ -44,7 +44,14 @@ typedef void (*muse_vdec_progress_t)(void *ctx, const muse_pic_t *pic, int rows)
 
 /* codec: MUSE_VIDEO_CODEC_H264 or MUSE_VIDEO_CODEC_VP8 (muse_vstream.h). NULL: no memory
  * or a codec this build doesn't have. */
-muse_vdec_t *muse_vdec_open(uint8_t codec);
+/* A decoder for codec whose pictures are at most max_w x max_h (the
+ * stream's negotiated size): a stream that describes a larger one is an
+ * error, before anything is allocated for it. */
+muse_vdec_t *muse_vdec_open(uint8_t codec, int max_w, int max_h);
+/* True if the access unit may make the decoder reallocate its pictures (an
+ * H.264 sequence parameter set, a VP8 keyframe): pictures it handed out
+ * before may be freed by muse_vdec_decode, so wait for their readers first. */
+bool muse_vdec_may_realloc(const muse_vdec_t *d, const uint8_t *buf, uint32_t len);
 void muse_vdec_close(muse_vdec_t *d);
 bool muse_vdec_has(uint8_t codec);
 void muse_vdec_set_progress(muse_vdec_t *d, muse_vdec_progress_t cb, void *ctx);

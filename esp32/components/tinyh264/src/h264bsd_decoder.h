@@ -72,6 +72,11 @@ void h264bsdShutdown(storage_t *pStorage);
 void h264bsdSetProgress(storage_t *pStorage,
     void (*fn)(void *ctx, const u8 *pic, u32 widthMbs, u32 heightMbs, u32 rowsFinal), void *ctx);
 
+/* OPT: refuse sequence parameter sets for pictures wider or taller than
+ * this (macroblocks), before anything is allocated for them: a stream can't
+ * ask for more memory than its caller planned. Call after h264bsdInit. */
+void h264bsdSetMaxSize(storage_t *pStorage, u32 maxWidthMbs, u32 maxHeightMbs);
+
 storage_t* h264bsdAlloc();
 void h264bsdFree(storage_t *pStorage);
 

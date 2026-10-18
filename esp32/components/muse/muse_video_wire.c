@@ -55,6 +55,11 @@ muse_video_msg_t muse_video_wire_parse(const char *json, size_t n, muse_video_pa
                 p->kbps = kbps > 0 && kbps <= 0xffff ? (uint16_t)kbps : 0;
                 p->playout_ms = playout > 0 && playout <= 0xffff ? (uint16_t)playout : 0;
                 p->tiles = tiles >= 1 && tiles <= 255 ? (uint8_t)tiles : 0;
+                /* A value given but out of range makes the start invalid
+                 * (muse_video_wire_check), rather than meaning "not given". */
+                if (fps < 0 || fps > 255 || kbps < 0 || kbps > 0xffff || playout < 0 || playout > 0xffff) {
+                    p->width = 0;
+                }
             }
         } else if (!strcmp(t->valuestring, "stop")) {
             m = MUSE_VIDEO_MSG_STOP;

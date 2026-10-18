@@ -248,6 +248,11 @@ u32 h264bsdDecodeSeqParamSet(strmData_t *pStrmData, seqParamSet_t *pSeqParamSet)
         return(tmp);
     pSeqParamSet->picHeightInMbs = value + 1;
 
+    /* OPT: every size the decoder computes from these (macroblocks times
+     * 384 bytes, and so on) must fit in 32 bits: no level goes past 512 */
+    if (pSeqParamSet->picWidthInMbs > 512 || pSeqParamSet->picHeightInMbs > 512)
+        return(HANTRO_NOK);
+
     /* frame_mbs_only_flag, shall be 1 for baseline profile */
     tmp = h264bsdGetBits(pStrmData, 1);
     if (tmp == END_OF_STREAM)

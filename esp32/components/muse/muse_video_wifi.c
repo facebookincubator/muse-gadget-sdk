@@ -50,6 +50,12 @@ static const char *TAG = "muse_video_wifi";
 #define AU_MAX (64 * 1024)
 #define LISTEN_BACKLOG 2
 #define SCRATCH 1460                   /* bytes of an unwanted access unit taken at a time */
+/* The port is unauthenticated (protocols/VIDEO.md, Trust): a connection must
+ * send a whole message within FIRST_MSG_MS, and while the client has sent
+ * something within ACTIVE_MS a new connection is turned away rather than
+ * taking its place. */
+#define FIRST_MSG_MS 5000
+#define ACTIVE_MS 10000
 
 typedef enum {
     RX_TYPE,       /* the next message's first byte */
@@ -66,6 +72,8 @@ static muse_video_caps_t s_caps;
 static bool s_have_caps;
 static SemaphoreHandle_t s_tx_lock;
 static volatile int s_sock = -1;        /* the client's connection */
+static int64_t s_conn_us, s_last_rx_us; /* when it connected, and last sent a whole message */
+static volatile bool s_tx_failed;       /* a send gave up: the client isn't reading */
 static volatile bool s_want;            /* the view asks for a stream */
 static volatile bool s_streaming;   /* ended with take_stream() */
 static char s_name[40];
@@ -91,7 +99,10 @@ static void tx(const uint8_t *m, size_t n)
     while (sock >= 0 && off < n) {
         int k = send(sock, m + off, n - off, 0);
         if (k <= 0) {
-            break;   /* the receive side sees the connection go */
+            /* Gone, or not reading (SO_SNDTIMEO): the server task drops it,
+             * so a stalled client can't hold up the decoder's credits. */
+            s_tx_failed = true;
+            break;
         }
         off += (size_t)k;
     }
@@ -192,6 +203,14 @@ static void on_start(const muse_video_params_t *p)
 {
     uint8_t m[96];
     end_stream();   /* a new start replaces the stream that's on */
+#if !CONFIG_MUSE_VIDEO_WIFI_START_ANYTIME
+    /* Only while someone has the Phone camera view open on the board: the
+     * client waits for "want" (VIDEO.md, Trust). */
+    if (!s_want && !muse_video_is_open()) {
+        tx(m, muse_video_wire_error(m, sizeof(m), "start", "closed"));
+        return;
+    }
+#endif
     if (!s_have_caps) {
         tx(m, muse_video_wire_error(m, sizeof(m), "start", "unsupported"));
         return;
@@ -258,7 +277,16 @@ static void accept_client(int lsock)
     if (sock < 0) {
         return;
     }
+    char ip[16];
+    inet_ntoa_r(from.sin_addr, ip, sizeof(ip));
     if (s_sock >= 0) {
+        /* A client that's talking keeps its place (one that reconnected
+         * after its link dropped has gone quiet on the old connection). */
+        if ((esp_timer_get_time() - s_last_rx_us) / 1000 < ACTIVE_MS) {
+            ESP_LOGW(TAG, "connection from %s turned away: a client is connected", ip);
+            close(sock);
+            return;
+        }
         close_client("replaced by a new connection");
     }
     int one = 1;
@@ -272,9 +300,10 @@ static void accept_client(int lsock)
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     xSemaphoreTake(s_tx_lock, portMAX_DELAY);
     s_sock = sock;
+    s_tx_failed = false;
+    s_conn_us = esp_timer_get_time();
+    s_last_rx_us = 0;
     xSemaphoreGive(s_tx_lock);
-    char ip[16];
-    inet_ntoa_r(from.sin_addr, ip, sizeof(ip));
     ESP_LOGI(TAG, "client connected from %s", ip);
     greet();
 }
@@ -384,6 +413,14 @@ static void server_task(void *arg)
     int64_t told_full = 0;
     for (;;) {
         int sock = s_sock;
+        if (sock >= 0 && s_tx_failed) {
+            close_client("not reading");
+            continue;
+        }
+        if (sock >= 0 && !s_last_rx_us && (esp_timer_get_time() - s_conn_us) / 1000 > FIRST_MSG_MS) {
+            close_client("said nothing");
+            continue;
+        }
         if (sock < 0) {
             st = RX_TYPE;
             have = 0;
@@ -425,8 +462,8 @@ static void server_task(void *arg)
             }
             continue;
         }
-        uint8_t *dst;
-        size_t want;
+        uint8_t *dst = scratch;
+        size_t want = 0;
         switch (st) {
         case RX_TYPE:
             dst = hdr;
@@ -451,6 +488,9 @@ static void server_task(void *arg)
                 continue;
             }
             want = room < left ? room : left;
+            if (!want) {
+                continue;   /* the ring filled meanwhile: wait for room */
+            }
             break;
         }
         case RX_SKIP:
@@ -491,6 +531,7 @@ static void server_task(void *arg)
         case RX_JSON:
             have += (size_t)n;
             if (have == need) {
+                s_last_rx_us = esp_timer_get_time();
                 on_json(json, need);
                 st = RX_TYPE;
             }
@@ -499,7 +540,10 @@ static void server_task(void *arg)
             have += (size_t)n;
             if (have == sizeof(hdr)) {
                 left = (uint32_t)hdr[4] | (uint32_t)hdr[5] << 8 | (uint32_t)hdr[6] << 16 | (uint32_t)hdr[7] << 24;
-                if (!s_streaming) {
+                s_last_rx_us = esp_timer_get_time();
+                if (left > AU_MAX) {
+                    close_client("frame too long");   /* no client sends these */
+                } else if (!s_streaming) {
                     st = left ? RX_SKIP : RX_TYPE;
                 } else if (left > s_ring.max_frame) {
                     /* It would never fit: drop it and start again from a keyframe. */

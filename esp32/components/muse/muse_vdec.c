@@ -27,6 +27,7 @@
 
 struct muse_vdec {
     uint8_t codec;
+    int max_w, max_h;
     muse_vdec_progress_t cb;
     void *cb_ctx;
     storage_t *h264;
@@ -79,7 +80,7 @@ static void vp8_progress(void *ctx, const unsigned char *y, const unsigned char 
 }
 #endif
 
-muse_vdec_t *muse_vdec_open(uint8_t codec)
+muse_vdec_t *muse_vdec_open(uint8_t codec, int max_w, int max_h)
 {
     if (!muse_vdec_has(codec)) {
         return NULL;
@@ -89,6 +90,8 @@ muse_vdec_t *muse_vdec_open(uint8_t codec)
         return NULL;
     }
     d->codec = codec;
+    d->max_w = max_w;
+    d->max_h = max_h;
 #if CONFIG_MUSE_VIDEO_VP8
     if (codec == MUSE_VIDEO_CODEC_VP8) {
         vpx_codec_dec_cfg_t cfg = { .threads = 1 };
@@ -108,6 +111,7 @@ muse_vdec_t *muse_vdec_open(uint8_t codec)
         free(d);
         return NULL;
     }
+    h264bsdSetMaxSize(d->h264, (u32)(max_w + 15) / 16, (u32)(max_h + 15) / 16);
     return d;
 }
 
@@ -141,10 +145,41 @@ void muse_vdec_set_progress(muse_vdec_t *d, muse_vdec_progress_t cb, void *ctx)
     h264bsdSetProgress(d->h264, cb ? h264_progress : NULL, d);
 }
 
+/* A VP8 keyframe's size: its 3-byte tag, the start code, then 14-bit width and height. */
+static bool vp8_key_size(const uint8_t *buf, uint32_t len, int *w, int *h)
+{
+    if (len < 10 || (buf[0] & 1) || buf[3] != 0x9d || buf[4] != 0x01 || buf[5] != 0x2a) {
+        return false;
+    }
+    *w = (buf[6] | buf[7] << 8) & 0x3fff;
+    *h = (buf[8] | buf[9] << 8) & 0x3fff;
+    return true;
+}
+
+bool muse_vdec_may_realloc(const muse_vdec_t *d, const uint8_t *buf, uint32_t len)
+{
+#if CONFIG_MUSE_VIDEO_VP8
+    if (d->vp8_open) {
+        return len > 0 && !(buf[0] & 1);   /* a keyframe (a new size reallocates) */
+    }
+#endif
+    (void)d;
+    for (uint32_t i = 0; i + 3 < len; i++) {   /* any SPS NAL unit (type 7) */
+        if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1 && (buf[i + 3] & 0x1f) == 7) {
+            return true;
+        }
+    }
+    return false;
+}
+
 muse_vdec_result_t muse_vdec_decode(muse_vdec_t *d, const uint8_t *buf, uint32_t len, muse_pic_t *pic)
 {
 #if CONFIG_MUSE_VIDEO_VP8
     if (d->vp8_open) {
+        int kw, kh;
+        if (vp8_key_size(buf, len, &kw, &kh) && (kw > d->max_w || kh > d->max_h || !kw || !kh)) {
+            return MUSE_VDEC_ERROR;   /* larger than the stream: never allocated */
+        }
         if (vpx_codec_decode(&d->vp8, buf, len, NULL, 0) != VPX_CODEC_OK) {
             return MUSE_VDEC_ERROR;
         }

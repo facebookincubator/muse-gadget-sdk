@@ -234,6 +234,13 @@ static void test_wire(void)
     const char *big = "{\"type\":\"start\",\"width\":480,\"height\":480}";
     muse_video_wire_parse(big, strlen(big), &p);
     CHECK(muse_video_wire_check(&p, &c) == MUSE_VIDEO_START_INVALID);
+    /* A value given but out of range refuses the start (not "no fps"). */
+    const char *fast = "{\"type\":\"start\",\"width\":232,\"height\":232,\"fps\":1000}";
+    muse_video_wire_parse(fast, strlen(fast), &p);
+    CHECK(muse_video_wire_check(&p, &c) == MUSE_VIDEO_START_INVALID);
+    const char *neg = "{\"type\":\"start\",\"width\":232,\"height\":232,\"kbps\":-5}";
+    muse_video_wire_parse(neg, strlen(neg), &p);
+    CHECK(muse_video_wire_check(&p, &c) == MUSE_VIDEO_START_INVALID);
     const char *vp9 = "{\"type\":\"start\",\"codec\":\"vp9\",\"width\":240,\"height\":240}";
     muse_video_wire_parse(vp9, strlen(vp9), &p);
     CHECK(muse_video_wire_check(&p, &c) == MUSE_VIDEO_START_UNSUPPORTED);

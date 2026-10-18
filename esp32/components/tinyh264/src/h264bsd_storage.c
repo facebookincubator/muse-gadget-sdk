@@ -139,6 +139,17 @@ u32 h264bsdStoreSeqParamSet(storage_t *pStorage, seqParamSet_t *pSeqParamSet)
 
     id = pSeqParamSet->seqParameterSetId;
 
+    /* OPT: a picture larger than the caller allows (h264bsdSetMaxSize) */
+    if ( (pStorage->maxWidthMbs &&
+          pSeqParamSet->picWidthInMbs > pStorage->maxWidthMbs) ||
+         (pStorage->maxHeightMbs &&
+          pSeqParamSet->picHeightInMbs > pStorage->maxHeightMbs) )
+    {
+        FREE(pSeqParamSet->offsetForRefFrame);
+        FREE(pSeqParamSet->vuiParameters);
+        return(HANTRO_NOK);
+    }
+
     /* seq parameter set with id not used before -> allocate memory */
     if (pStorage->sps[id] == NULL)
     {
