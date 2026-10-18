@@ -24,9 +24,9 @@ limitations under the License.
     <key>CFBundleName</key>
     <string>Muse Gadgets Camera</string>
     <key>CFBundleExecutable</key>
-    <string>MuseGadgetsCamera</string>
+    <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
-    <string>@BUNDLE_ID@</string>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundlePackageType</key>
@@ -35,15 +35,11 @@ limitations under the License.
     <string>0.1</string>
     <key>CFBundleVersion</key>
     <string>1</string>
-    <key>CFBundleSupportedPlatforms</key>
-    <array>
-        <string>iPhoneOS</string>
-    </array>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.musegadgets.camstream</string>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>musegadgetscamera</string>
@@ -52,12 +48,6 @@ limitations under the License.
     </array>
     <key>LSRequiresIPhoneOS</key>
     <true/>
-    <key>MinimumOSVersion</key>
-    <string>17.0</string>
-    <key>UIDeviceFamily</key>
-    <array>
-        <integer>1</integer>
-    </array>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
         <string>arm64</string>

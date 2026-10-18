@@ -43,3 +43,4 @@ flags="-arch arm64 -miphoneos-version-min=17.0 -isysroot $sdk"
 "$cc" $flags -O2 -Wall -I"$work/x264/include" -c "$here/mgx264.c" -o "$work/mgx264.o"
 xcrun libtool -static -o "$out/libmgx264.a" "$work/x264/lib/libx264.a" "$work/mgx264.o" 2>/dev/null
 echo "$out/libmgx264.a"
+LIB_DIR="$out" "$here/codecs_xcconfig.sh"

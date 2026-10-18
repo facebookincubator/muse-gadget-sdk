@@ -27,9 +27,45 @@ Swift file is the Android class of the same name: `WifiLink` (Bonjour
 (sample clips as keyed and steady loops, a bitrate ladder),
 `LatencyMeter`, and `MainViewController` (Android's `MainActivity`).
 
-Swift and a little C (`native/`), built without an Xcode project. You need a
-Mac with Xcode, an iPhone on iOS 17 or later with Developer Mode on, and an
-Apple ID: a free one (Xcode's "Personal Team") is enough.
+Swift and a little C (`native/`). You need a Mac with Xcode 16 or later, an
+iPhone on iOS 17 or later with Developer Mode on, and an Apple ID: a free one
+(Xcode's "Personal Team") is enough.
+
+## In Xcode
+
+1. Open `MuseGadgetsCamera.xcodeproj`.
+2. Settings > Accounts: add your Apple ID if it isn't there.
+3. Pick your team and a bundle ID of your own (bundle IDs are unique across
+   all teams, so with a free team `com.musegadgets.camstream` is likely
+   taken): either in the target's Signing & Capabilities, or, to keep them
+   out of the project file, in `Local.xcconfig` next to `Config.xcconfig`
+   (git-ignored):
+
+   ```
+   DEVELOPMENT_TEAM = ABCDE12345
+   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.musegadgetscamera
+   ```
+4. Choose your iPhone and Run. The first launch may need Settings > General >
+   VPN & Device Management > your Apple ID > Trust on the phone. A free
+   team's app runs for 7 days; Run again to renew it.
+
+The app asks for Local Network and Camera access on first use. The phone and
+the gadget must be on the same Wi-Fi network. The scheme's launch arguments
+(Product > Scheme > Edit Scheme > Arguments: `-auto YES`, `-target`, `-codec
+vp8`, off until ticked) take the options under Using it. The Simulator runs
+it too, without a camera: Bars and the sample clips work.
+
+Every Swift file in `Sources/` is in the target (a synchronized folder):
+add a file there and it builds. Anything in a `Resources/` folder next to
+the project (absent here) is copied into the app as is.
+
+## From the command line
+
+`build.sh` builds the same project with `xcodebuild`, unsigned, then signs
+it with your own development certificate and a profile Xcode has already
+downloaded for it (`signing.py`: one whose app ID covers the bundle ID and
+that lists your iPhone, with its certificate in your keychain; if there's
+none, it says how to get one), and installs it:
 
 ```sh
 xcrun devicectl list devices                 # your iPhone's name or UDID
@@ -37,22 +73,9 @@ DEVICE=<udid> BUNDLE_ID=com.yourname.musegadgetscamera ./build.sh install
 xcrun devicectl device process launch --device <udid> com.yourname.musegadgetscamera -- -auto YES
 ```
 
-`build.sh` signs with your own development certificate: `signing.py` finds a
-development provisioning profile that Xcode has downloaded for `BUNDLE_ID`
-(or a wildcard) and your iPhone, with its certificate in your keychain. If you
-don't have one yet, it says how to get one: add your Apple ID in Xcode's
-settings, make an empty iOS App project with the same bundle identifier and
-your team, and run it on the iPhone once. Bundle IDs are unique across all
-teams, so with a free team pick your own (the default is
-`com.musegadgets.camstream`); a free team's profile lasts 7 days, after which
-running that project again renews it. The first launch may need Settings >
-General > VPN & Device Management > your Apple ID > Trust. `PROFILE` and
-`IDENTITY` choose a profile and certificate by hand. The app asks for Local
-Network and Camera access on first use. The phone and the gadget must be on
-the same Wi-Fi network.
-
-`SIM=1 ./build.sh install` builds for the iOS Simulator instead (no signing):
-Bars and the sample clips work there, the camera doesn't.
+`BUNDLE_ID` defaults to `Local.xcconfig`'s, then `Config.xcconfig`'s.
+`PROFILE` and `IDENTITY` choose a profile and certificate by hand; `SIM=1
+./build.sh install` builds for the booted Simulator.
 
 ## Encoders
 
@@ -80,8 +103,10 @@ VPX_SRC=~/libvpx LIB_DIR=~/mgcam-ios-lib ./native/build_vpx.sh
 DEVICE=<udid> LIB_DIR=~/mgcam-ios-lib ./build.sh install
 ```
 
-`build.sh` links whichever of the two it finds in `LIB_DIR` (default
-`lib/`, git-ignored) and stubs the other.
+The build scripts write `lib/codecs.xcconfig` (git-ignored), which the
+Xcode project includes: device builds link whichever of the two libraries
+exist and stub the other (`native/codecs_xcconfig.sh` rewrites it after you
+move them). The Simulator always gets the stubs.
 
 ## Using it
 
@@ -93,17 +118,20 @@ picture size and frame rate on gadgets past 240 px), H.264 / VP8, Stop. The
 yellow line names what streams, the top lines show the link, the encoder
 and the gadget's reports each second.
 
-Launch arguments take Android's intent extras (`-name value`): `-target`
-(part of a gadget's name), `-host` (an address, no Bonjour), `-auto YES`
-(stream once connected), `-front YES`, `-fps`, `-kbps`, `-maxkbps`,
+Launch arguments take Android's intent extras (`-name value`; only Xcode
+or `devicectl` can pass them): `-target` (part of a gadget's name), `-host`
+(an address, no Bonjour), `-auto YES` (stream as soon as the gadget's Phone
+camera view is open, without a button; the gadget takes a stream only
+then), `-front YES`, `-fps`, `-kbps`, `-maxkbps`,
 `-adaptive NO`, `-size`, `-source camera|pattern|clip:<name>`, `-clip`,
 `-clipkbps`, `-playout`, `-codec h264|vp8`, `-sw hw|x264`, `-swpreset`,
 `-swparams`, `-pf 0`, `-live 0`, `-ahead`, `-behind`, `-latlog YES`,
-`-rateclip`, `-ratec`. `musegadgetscamera://pick/<button>` presses a button
-on the running app (`camera`, `pattern`, `clip:bunny`, `codec`, `stop`; for
-`xcrun devicectl device process launch --payload-url`). The log (as
-Android's `MuseCam` tag) goes to stdout: `xcrun devicectl device process
-launch --console ...` shows it.
+`-rateclip`, `-ratec`. In Debug builds, `musegadgetscamera://pick/<button>`
+presses a button on the running app (`camera`, `pattern`, `clip:bunny`,
+`codec`, `stop`; for `xcrun devicectl device process launch --payload-url`);
+Release builds ignore it, since any app or web page can open a URL. The log
+(as Android's `MuseCam` tag) goes to Xcode's console, or to stdout with
+`xcrun devicectl device process launch --console ...`.
 
 Not ported: Android's raw-file test source and its bench dumps
 (`tools/livebench` drives the Android app).

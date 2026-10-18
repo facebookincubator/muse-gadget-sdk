@@ -40,3 +40,4 @@ xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=17.0 -O2 -Wall -isy
     -I"$work/src" -I"$work/build" -c "$here/mgvpx.c" -o "$work/mgvpx.o"
 xcrun libtool -static -o "$out/libmgvpx.a" "$work/build/libvpx.a" "$work/mgvpx.o" 2>/dev/null
 echo "$out/libmgvpx.a"
+LIB_DIR="$out" "$here/codecs_xcconfig.sh"
