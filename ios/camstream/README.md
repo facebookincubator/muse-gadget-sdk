@@ -16,6 +16,9 @@ limitations under the License.
 
 # Muse Gadgets Camera for iPhone
 
+<img src="../../.github/images/camstream/ios.png" width="300" align="right"
+ alt="The app on an iPhone: the clip's credits and the stats, the yellow line reading Sending H.264 232x232, 24 fps, Bunny, and the buttons">
+
 The iPhone version of [`../../android/camstream`](../../android/camstream):
 it streams the camera, colour bars or a sample clip to a Muse gadget's
 display over Wi-Fi ([`../../protocols/VIDEO.md`](../../protocols/VIDEO.md)),

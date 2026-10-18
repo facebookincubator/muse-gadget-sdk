@@ -16,6 +16,9 @@ limitations under the License.
 
 # Muse Gadgets Camera
 
+<img src="../../.github/images/camstream/android.jpg" width="300" align="right"
+ alt="The app on a Galaxy S22: the stats, the camera preview, the yellow line reading Sending VP8 232x232, 30 fps, and the buttons">
+
 An Android sample app that streams the phone's camera, colour bars, or a
 sample clip, to a Muse gadget's display over Wi-Fi
 ([`../../protocols/VIDEO.md`](../../protocols/VIDEO.md)): Camera2 frames,
