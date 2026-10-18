@@ -478,10 +478,11 @@ menu "ESP32 Device SDK"
 
     config HOMEHUB_VOICE
         bool "Push-to-talk voice chat"
-        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE) && SPIRAM
+        depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE || HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G) && SPIRAM
         default y
         help
-            Hold the centre button (XIAO BOOT on reSpeaker Lite), speak,
+            Hold the centre button (XIAO BOOT on reSpeaker Lite, BOOT on the
+            Waveshare ESP32-S3-ePaper-1.54G), speak,
             release: the audio goes to the agent's chat as a voice note,
             which the VM transcribes, and the
             reply appears in the Muse app as text. To speak it, plug a TTS
