@@ -90,7 +90,12 @@ void *mgvpx_open(int w, int h, int fps, int kbps, const char *params)
     c->g_threads = (unsigned)opt(params, "threads", 1);
     c->g_profile = (unsigned)opt(params, "profile", 1);
     c->g_lag_in_frames = 0;
-    c->g_error_resilient = 0;
+    /* er=1 for clip loops: every frame codes against the probabilities its
+     * last keyframe left, as each frame's updates are dropped after it. VP8
+     * otherwise carries them from frame to frame, and a steady loop played
+     * after another steady loop (ClipStreamer) would be parsed with the
+     * wrong ones: garbage until the next keyframe. About 2% more bits. */
+    c->g_error_resilient = opt(params, "er", 0) ? VPX_ERROR_RESILIENT_DEFAULT : 0;
     int vbr = opt(params, "vbr", 0);
     c->rc_end_usage = vbr ? VPX_VBR : VPX_CBR;
     set_rate(c, kbps, opt(params, "vbv-ms", 200));

@@ -61,7 +61,10 @@ final class Clip {
  * either, so a loop wraps without a keyframe; a keyed loop goes out again
  * every few loops, or when the gadget asks. Frames go out at the clip's
  * rate; when the link falls behind they wait (encoded frames can't be
- * skipped) and catch up on the clock.
+ * skipped) and catch up on the clock. VP8 loops are encoded error resilient
+ * (mgvpx.c er=1): VP8 otherwise carries its entropy probabilities from frame
+ * to frame, and the second steady loop in a row would be decoded with the
+ * first one's (garbage until the next keyframe).
  */
 final class ClipStreamer {
     private static let refreshLoops = 6
@@ -267,7 +270,7 @@ final class ClipStreamer {
     private static func encodeLoopsVp8(_ frames: [Data], _ c: Clip) throws {
         let n = frames.count
         guard let e = Vpx(w: c.size, h: c.size, fps: c.fps, kbps: c.kbps,
-                          params: CameraStreamer.vp8Params(nil, width: c.size) + ":vbr=1:vbv-ms=300") else {
+                          params: CameraStreamer.vp8Params(nil, width: c.size) + ":vbr=1:vbv-ms=300:er=1") else {
             throw NSError(domain: "MuseCam", code: 20, userInfo: [NSLocalizedDescriptionKey: "libvpx open failed"])
         }
         defer { e.close() }

@@ -43,7 +43,10 @@ import java.util.List;
  * REFRESH_LOOPS loops to clear any drift. That way a loop doesn't cost a
  * keyframe (a 10-20 KB burst the link takes a few frame periods to carry),
  * so the wrap is as smooth as any other frame. A keyframe request, or a
- * switch to another clip, starts the next keyed loop at once.
+ * switch to another clip, starts the next keyed loop at once. VP8 loops are
+ * encoded error resilient (mgvpx.c er=1): VP8 otherwise carries its entropy
+ * probabilities from frame to frame, and the second steady loop in a row
+ * would be decoded with the first one's (garbage until the next keyframe).
  */
 final class ClipStreamer {
     private static final String TAG = VideoLink.TAG;
@@ -525,7 +528,7 @@ final class ClipStreamer {
      */
     private static void encodeLoopsVp8(List<byte[]> frames, Clip c) {
         int n = frames.size();
-        long h = Vpx.open(c.size, c.size, c.fps, c.kbps, null, CameraStreamer.vp8Params(null, c.size) + ":vbr=1:vbv-ms=300");
+        long h = Vpx.open(c.size, c.size, c.fps, c.kbps, null, CameraStreamer.vp8Params(null, c.size) + ":vbr=1:vbv-ms=300:er=1");
         if (h == 0) {
             throw new IllegalStateException("libvpx open failed");
         }
