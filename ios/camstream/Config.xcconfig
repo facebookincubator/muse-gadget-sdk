@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Muse Gadgets Camera's build settings (the Xcode project's base
+// Muse Gadgets Test's build settings (the Xcode project's base
 // configuration; build.sh reads the bundle ID from here too).
 //
 // Your own settings go in Local.xcconfig next to this file (git-ignored),
 // so they stay out of the project:
 //   DEVELOPMENT_TEAM = ABCDE12345          // your team (Xcode > Settings > Accounts)
-//   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.musegadgetscamera
+//   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.musegadgetstest
 // Bundle IDs are unique across all teams: with a free Personal Team pick
 // your own. Choosing the team in Signing & Capabilities works too.
 
-PRODUCT_BUNDLE_IDENTIFIER = com.musegadgets.camstream
+PRODUCT_BUNDLE_IDENTIFIER = com.musegadgets.test
 DEVELOPMENT_TEAM =
 CODE_SIGN_STYLE = Automatic
 

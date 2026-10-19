@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Builds LIB_DIR/libmgvpx.a (VP8 for Muse Gadgets Camera, Vpx.swift): libvpx's
+# Builds LIB_DIR/libmgvpx.a (VP8 for Muse Gadgets Test, Vpx.swift): libvpx's
 # VP8 encoder from your checkout (VPX_SRC, https://chromium.googlesource.com/webm/libvpx
 # at v1.16.0) with android/camstream/jni/libvpx_mg.py's two switches, for
 # iPhone (arm64, NEON), and native/mgvpx.c, in one static library.

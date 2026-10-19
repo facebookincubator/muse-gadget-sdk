@@ -93,7 +93,7 @@ def main():
 with a certificate in your keychain. To get one with a free Apple ID:
   1. In Xcode: Settings > Accounts, add your Apple ID (a Personal Team is enough).
   2. File > New > Project > iOS App; set the bundle identifier to {bundle}
-     (or pick your own, e.g. com.yourname.musegadgetscamera, and build with
+     (or pick your own, e.g. com.yourname.musegadgetstest, and build with
      BUNDLE_ID set to it: bundle IDs are unique across all teams); choose your
      team under Signing & Capabilities.
   3. Connect your iPhone (Developer Mode on) and run that project on it once.

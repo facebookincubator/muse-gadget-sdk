@@ -46,7 +46,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
-    /* musegadgetscamera://pick/<what> presses a button, as Android's --es pick
+    /* musegadgetstest://pick/<what> (or the old musegadgetscamera://) does what tapping
+     * it does, as Android's --es pick
      * (xcrun devicectl device process launch --payload-url ...). */
     func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
         for c in contexts {

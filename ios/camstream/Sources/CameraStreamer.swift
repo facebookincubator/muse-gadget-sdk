@@ -23,7 +23,7 @@ protocol CameraSink: AnyObject {
 }
 
 /*
- * Camera frames (or colour bars), cropped square, upright, scaled down for
+ * Camera frames (or color bars), cropped square, upright, scaled down for
  * the panel (PanelScaler) and blacked out in the 4x4 blocks past the round
  * display's edge, into x264, VP8 or the phone's H.264 encoder; each encoded
  * frame goes out with its frame header (VideoFrame). Frames are paced to the
@@ -41,7 +41,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var timer: DispatchSourceTimer?
 
     var front = false
-    /* Colour bars and a moving box instead of the camera. */
+    /* Color bars and a moving box instead of the camera. */
     var pattern = false
     /* Downscale for the panel (PanelScaler) instead of the 2x2 box; panelPx:
      * the gadget's display, which it stretches the picture to. */
@@ -438,7 +438,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
 
     /*
-     * The centre square of a camera frame (already upright) into pic at the
+     * The center square of a camera frame (already upright) into pic at the
      * stream's size: PanelScaler on luma and on the interleaved chroma, then
      * the round mask. Without the panel filter, a 2x2 box.
      */
@@ -523,7 +523,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
     }
 
-    /* Colour bars (BT.601 limited), a grey ramp on top and a moving box. */
+    /* Color bars (BT.601 limited), a gray ramp on top and a moving box. */
     private func patternTick() {
         guard running else { return }
         if sink?.behind() ?? false {

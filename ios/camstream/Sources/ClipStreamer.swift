@@ -135,7 +135,7 @@ final class ClipStreamer {
     }
 
     /*
-     * Every frame of the excerpt as I420 at size x size, centre-cropped,
+     * Every frame of the excerpt as I420 at size x size, center-cropped,
      * area-averaged and circle-masked. The movie plays (muted, unseen) from
      * its URL and each new picture is taken as it comes: AVAssetReader
      * reads only local files, and the excerpt is a few MB of a large movie.
@@ -364,7 +364,7 @@ final class ClipStreamer {
 
 /*
  * Area-average downscaler for 4:2:0 biplanar pictures: each source pixel of
- * the centred square adds to the one destination pixel it falls in, then
+ * the centered square adds to the one destination pixel it falls in, then
  * each is divided by its count (keeps fur and edges crisp without aliasing).
  * Black only in the 4x4 blocks wholly outside the circle plus the margin.
  * A source square smaller than the clip (Big Buck Bunny's file is 640x360: a
@@ -391,7 +391,7 @@ final class AreaScaler {
             for v in m { c[v] += 1 }
             return c
         }
-        /* Bilinear taps per destination index, pixel centres aligned: the two
+        /* Bilinear taps per destination index, pixel centers aligned: the two
          * source indices and the second one's weight in 1/256. */
         func lerp(_ src: Int, _ dst: Int) -> ([Int], [Int], [Int]) {
             var i0 = [Int](repeating: 0, count: dst), i1 = i0, w = i0
@@ -486,7 +486,7 @@ final class AreaScaler {
         var out = Data(count: s * s * 3 / 2)
         out.withUnsafeMutableBytes { raw in
             let o = raw.bindMemory(to: UInt8.self).baseAddress!
-            /* plane(x, y) of the centred square, with the source's byte layout */
+            /* plane(x, y) of the centered square, with the source's byte layout */
             func pass(_ t: ([Int], [Int], [Int]), _ dw: Int, _ off: Int, _ inm: [Bool], _ fill: UInt8,
                       _ px: (Int, Int) -> Int) {
                 let (i0, i1, w) = t

@@ -15,9 +15,9 @@
             <BuildableReference
 				BuildableIdentifier = "primary"
 				BlueprintIdentifier = "42AEFBAE01D2DFD981F7DA7D"
-				BuildableName = "MuseGadgetsCamera.app"
-				BlueprintName = "MuseGadgetsCamera"
-				ReferencedContainer = "container:MuseGadgetsCamera.xcodeproj">
+				BuildableName = "MuseGadgetsTest.app"
+				BlueprintName = "MuseGadgetsTest"
+				ReferencedContainer = "container:MuseGadgetsTest.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -43,9 +43,9 @@
          <BuildableReference
 				BuildableIdentifier = "primary"
 				BlueprintIdentifier = "42AEFBAE01D2DFD981F7DA7D"
-				BuildableName = "MuseGadgetsCamera.app"
-				BlueprintName = "MuseGadgetsCamera"
-				ReferencedContainer = "container:MuseGadgetsCamera.xcodeproj">
+				BuildableName = "MuseGadgetsTest.app"
+				BlueprintName = "MuseGadgetsTest"
+				ReferencedContainer = "container:MuseGadgetsTest.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -74,9 +74,9 @@
          <BuildableReference
 				BuildableIdentifier = "primary"
 				BlueprintIdentifier = "42AEFBAE01D2DFD981F7DA7D"
-				BuildableName = "MuseGadgetsCamera.app"
-				BlueprintName = "MuseGadgetsCamera"
-				ReferencedContainer = "container:MuseGadgetsCamera.xcodeproj">
+				BuildableName = "MuseGadgetsTest.app"
+				BlueprintName = "MuseGadgetsTest"
+				ReferencedContainer = "container:MuseGadgetsTest.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

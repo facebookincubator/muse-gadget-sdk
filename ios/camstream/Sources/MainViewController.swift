@@ -17,7 +17,7 @@ import AVFoundation
 import UIKit
 
 /*
- * Muse Gadgets Camera: streams the phone's camera (or colour bars, or a
+ * Muse Gadgets Test: streams the phone's camera (or colour bars, or a
  * sample clip) to a gadget's display over Wi-Fi (protocols/VIDEO.md), as the
  * Android app does: the gadget's suggested size and bitrate, an adaptive
  * bitrate for the camera, a bitrate ladder for clips, H.264 or VP8, and the
@@ -229,7 +229,7 @@ final class MainViewController: UIViewController, VideoLinkListener, CameraSink,
         if let p = Extras.string("swpreset") { cam.swPreset = p }
         cam.swParams = Extras.string("swparams") ?? "no-deblock=1"
         cam.minAeFps = Extras.int("aefps", 30)
-        mlog("Muse Gadgets Camera: x264 \(X264.available ? "built in" : "not built in"), VP8 \(Vpx.available ? "built in" : "not built in")")
+        mlog("Muse Gadgets Test: x264 \(X264.available ? "built in" : "not built in"), VP8 \(Vpx.available ? "built in" : "not built in")")
         link.start()
     }
 

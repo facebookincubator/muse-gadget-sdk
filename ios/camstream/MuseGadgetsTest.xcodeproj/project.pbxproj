@@ -12,7 +12,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		D2A57DC1D883FD21FB995169 /* MuseGadgetsCamera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MuseGadgetsCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2A57DC1D883FD21FB995169 /* MuseGadgetsTest.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MuseGadgetsTest.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		479436D6E327F2C6940114B1 /* mgscale.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mgscale.c; sourceTree = "<group>"; };
 		7AC3416DF185FE3EF2447E66 /* stubs.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = stubs.c; sourceTree = "<group>"; };
 		6F6F06875908B7C83ADD4451 /* Bridging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Bridging.h; sourceTree = "<group>"; };
@@ -63,7 +63,7 @@
 		86024CAD1E83101D97359D73 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				D2A57DC1D883FD21FB995169 /* MuseGadgetsCamera.app */,
+				D2A57DC1D883FD21FB995169 /* MuseGadgetsTest.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -71,9 +71,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		42AEFBAE01D2DFD981F7DA7D /* MuseGadgetsCamera */ = {
+		42AEFBAE01D2DFD981F7DA7D /* MuseGadgetsTest */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 0B75B5ED9F0F81BE9205EAE9 /* Build configuration list for PBXNativeTarget "MuseGadgetsCamera" */;
+			buildConfigurationList = 0B75B5ED9F0F81BE9205EAE9 /* Build configuration list for PBXNativeTarget "MuseGadgetsTest" */;
 			buildPhases = (
 				78B9FD9EA24CAE7E052DA17C /* Sources */,
 				EB741EB20F8932ADC61B0107 /* Frameworks */,
@@ -87,9 +87,9 @@
 			fileSystemSynchronizedGroups = (
 				49812AA119E85AF8A7ECE39F /* Sources */,
 			);
-			name = MuseGadgetsCamera;
-			productName = MuseGadgetsCamera;
-			productReference = D2A57DC1D883FD21FB995169 /* MuseGadgetsCamera.app */;
+			name = MuseGadgetsTest;
+			productName = MuseGadgetsTest;
+			productReference = D2A57DC1D883FD21FB995169 /* MuseGadgetsTest.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -102,7 +102,7 @@
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 			};
-			buildConfigurationList = 79A3942D7190CC42AFC436BF /* Build configuration list for PBXProject "MuseGadgetsCamera" */;
+			buildConfigurationList = 79A3942D7190CC42AFC436BF /* Build configuration list for PBXProject "MuseGadgetsTest" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -116,7 +116,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				42AEFBAE01D2DFD981F7DA7D /* MuseGadgetsCamera */,
+				42AEFBAE01D2DFD981F7DA7D /* MuseGadgetsTest */,
 			);
 		};
 /* End PBXProject section */
@@ -218,7 +218,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_NAME = MuseGadgetsCamera;
+				PRODUCT_NAME = MuseGadgetsTest;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -241,7 +241,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_NAME = MuseGadgetsCamera;
+				PRODUCT_NAME = MuseGadgetsTest;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -254,7 +254,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		79A3942D7190CC42AFC436BF /* Build configuration list for PBXProject "MuseGadgetsCamera" */ = {
+		79A3942D7190CC42AFC436BF /* Build configuration list for PBXProject "MuseGadgetsTest" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				F6143EE2941E474EB4BAD052 /* Debug */,
@@ -263,7 +263,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		0B75B5ED9F0F81BE9205EAE9 /* Build configuration list for PBXNativeTarget "MuseGadgetsCamera" */ = {
+		0B75B5ED9F0F81BE9205EAE9 /* Build configuration list for PBXNativeTarget "MuseGadgetsTest" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1A9E10FAAD0A97FB97BCEC18 /* Debug */,

@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Builds Muse Gadgets Camera from the command line: the Xcode project, unsigned,
+# Builds Muse Gadgets Test from the command line: the Xcode project, unsigned,
 # then signed with your own Apple development certificate and a profile Xcode
 # has downloaded for it (signing.py; a free Personal Team works), and
 # optionally installed. Xcode itself needs none of this: open
-# MuseGadgetsCamera.xcodeproj. ./build.sh [install]
+# MuseGadgetsTest.xcodeproj. ./build.sh [install]
 #   BUNDLE_ID the app's bundle ID (default: Local.xcconfig's, else
-#             Config.xcconfig's, com.musegadgets.camstream; with a free team
-#             pick your own, e.g. com.yourname.musegadgetscamera)
+#             Config.xcconfig's, com.musegadgets.test; with a free team
+#             pick your own, e.g. com.yourname.musegadgetstest)
 #   DEVICE    the iPhone: xcrun devicectl list devices (needed for install,
 #             and picks a profile that lists it)
 #   PROFILE   a development .mobileprovision to use instead of looking
@@ -47,10 +47,10 @@ if [ -n "${LIB_DIR:-}" ]; then
 fi
 sdk=iphoneos
 [ -n "${SIM:-}" ] && sdk=iphonesimulator
-xcodebuild -project "$here/MuseGadgetsCamera.xcodeproj" -scheme MuseGadgetsCamera -configuration Release \
+xcodebuild -project "$here/MuseGadgetsTest.xcodeproj" -scheme MuseGadgetsTest -configuration Release \
     -sdk $sdk -derivedDataPath "$out" PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGNING_ALLOWED=NO \
     build > "$out.log" 2>&1 || { grep -E "error:" "$out.log" | sort -u >&2; echo "build failed: $out.log" >&2; exit 1; }
-app="$out/Build/Products/Release-$sdk/MuseGadgetsCamera.app"
+app="$out/Build/Products/Release-$sdk/MuseGadgetsTest.app"
 if [ -n "${SIM:-}" ]; then
     codesign -f -s - "$app" 2>/dev/null
     echo "$app (simulator)"

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * libx264 for Muse Gadgets Camera on iOS (the same settings as Android's
+ * libx264 for Muse Gadgets Test on iOS (the same settings as Android's
  * jni/mgx264.c): one I420 picture in, one Annex B access unit out, no delay
  * (zerolatency) unless the params ask for lookahead. Built by
  * native/build_x264.sh against your x264 checkout.

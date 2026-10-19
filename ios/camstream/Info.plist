@@ -20,9 +20,9 @@ limitations under the License.
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Muse Gadgets Camera</string>
+    <string>Muse Gadgets Test</string>
     <key>CFBundleName</key>
-    <string>Muse Gadgets Camera</string>
+    <string>Muse Gadgets Test</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -42,6 +42,7 @@ limitations under the License.
             <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
             <key>CFBundleURLSchemes</key>
             <array>
+                <string>musegadgetstest</string>
                 <string>musegadgetscamera</string>
             </array>
         </dict>

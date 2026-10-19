@@ -18,7 +18,7 @@ import os
 
 /* Logs go to stdout (xcrun devicectl device process launch --console shows
  * them, like adb logcat -s MuseCam) and to the unified log. */
-private let osLog = Logger(subsystem: "com.musegadgets.camstream", category: "MuseCam")
+private let osLog = Logger(subsystem: "com.musegadgets.test", category: "MuseCam")
 
 func mlog(_ s: String) {
     print("MuseCam: " + s)
@@ -36,7 +36,7 @@ func mlog(_ s: String) {
 
 /*
  * Launch arguments, as Android's intent extras: xcrun devicectl device
- * process launch --device ID com.musegadgets.camstream -- -target A1B2C3
+ * process launch --device ID com.musegadgets.test -- -target A1B2C3
  * -auto YES -codec vp8 (UserDefaults reads "-key value" pairs). Remembered
  * settings live under other keys (Prefs), so an argument never shadows one.
  */

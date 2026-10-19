@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * libvpx's VP8 encoder for Muse Gadgets Camera on iOS (the same settings as
+ * libvpx's VP8 encoder for Muse Gadgets Test on iOS (the same settings as
  * Android's jni/mgvpx.c): one I420 picture in, one VP8 frame out, no lag.
  * Built by native/build_vpx.sh against your libvpx checkout, with
  * android/camstream/jni/libvpx_mg.py's two encoder switches.

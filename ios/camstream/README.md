@@ -14,13 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# Muse Gadgets Camera for iPhone
+# Muse Gadgets Test for iPhone
 
 <img src="../../.github/images/camstream/ios.png" width="300" align="right"
  alt="The app on an iPhone: the clip's credits and the stats, the yellow line reading Sending H.264 232x232, 24 fps, Bunny, and the buttons">
 
 The iPhone version of [`../../android/camstream`](../../android/camstream):
-it streams the camera, colour bars or a sample clip to a Muse gadget's
+it streams the camera, color bars or a sample clip to a Muse gadget's
 display over Wi-Fi ([`../../protocols/VIDEO.md`](../../protocols/VIDEO.md)),
 with the same buttons, settings, flow control and bitrate adaptation. Each
 Swift file is the Android class of the same name: `WifiLink` (Bonjour
@@ -36,17 +36,17 @@ iPhone on iOS 17 or later with Developer Mode on, and an Apple ID: a free one
 
 ## In Xcode
 
-1. Open `MuseGadgetsCamera.xcodeproj`.
+1. Open `MuseGadgetsTest.xcodeproj`.
 2. Settings > Accounts: add your Apple ID if it isn't there.
 3. Pick your team and a bundle ID of your own (bundle IDs are unique across
-   all teams, so with a free team `com.musegadgets.camstream` is likely
+   all teams, so with a free team `com.musegadgets.test` is likely
    taken): either in the target's Signing & Capabilities, or, to keep them
    out of the project file, in `Local.xcconfig` next to `Config.xcconfig`
    (git-ignored):
 
    ```
    DEVELOPMENT_TEAM = ABCDE12345
-   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.musegadgetscamera
+   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.musegadgetstest
    ```
 4. Choose your iPhone and Run. The first launch may need Settings > General >
    VPN & Device Management > your Apple ID > Trust on the phone. A free
@@ -72,8 +72,8 @@ none, it says how to get one), and installs it:
 
 ```sh
 xcrun devicectl list devices                 # your iPhone's name or UDID
-DEVICE=<udid> BUNDLE_ID=com.yourname.musegadgetscamera ./build.sh install
-xcrun devicectl device process launch --device <udid> com.yourname.musegadgetscamera -- -auto YES
+DEVICE=<udid> BUNDLE_ID=com.yourname.musegadgetstest ./build.sh install
+xcrun devicectl device process launch --device <udid> com.yourname.musegadgetstest -- -auto YES
 ```
 
 `BUNDLE_ID` defaults to `Local.xcconfig`'s, then `Config.xcconfig`'s.
@@ -129,8 +129,8 @@ then), `-front YES`, `-fps`, `-kbps`, `-maxkbps`,
 `-adaptive NO`, `-size`, `-source camera|pattern|clip:<name>`, `-clip`,
 `-clipkbps`, `-playout`, `-codec h264|vp8`, `-sw hw|x264`, `-swpreset`,
 `-swparams`, `-pf 0`, `-live 0`, `-ahead`, `-behind`, `-latlog YES`,
-`-rateclip`, `-ratec`. In Debug builds, `musegadgetscamera://pick/<button>`
-presses a button on the running app (`camera`, `pattern`, `clip:bunny`,
+`-rateclip`, `-ratec`. In Debug builds, `musegadgetstest://pick/<what>` (or the old `musegadgetscamera://`)
+does on the running app what tapping it does (`camera`, `pattern`, `clip:bunny`,
 `codec`, `stop`; for `xcrun devicectl device process launch --payload-url`);
 Release builds ignore it, since any app or web page can open a URL. The log
 (as Android's `MuseCam` tag) goes to Xcode's console, or to stdout with
