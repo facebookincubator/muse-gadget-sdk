@@ -141,7 +141,7 @@ class LinkEpaperStatusTest(unittest.TestCase):
         self.assertIn('tick_sleep();', sleep)
         self.assertIn('s_sleep_rows', sleep)
         self.assertIn('muse_board->epaper ? 30000000 : 1000000', ui)
-        self.assertIn('sleep option selected:', sleep)
+        self.assertNotIn('ESP_LOGI(', sleep)   # no leftover debug log
         # No mic meter on e-paper, whether the Sound page opens or is ticked.
         self.assertIn('if (p == s_sound && !muse_board->epaper) {', ui)
         self.assertIn('visible && s_current == s_sound && !muse_board->epaper', ui)
@@ -320,6 +320,71 @@ int main(void) {
 """)
         cc = shlex.split(os.environ.get("CC", "cc"))
         binary = self.out / "sticky_ui_gray4"
+        compiled = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                                   str(harness), "-o", str(binary)], capture_output=True, text=True)
+        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+        result = subprocess.run([str(binary)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_sticky_epd_task_sleeps_unless_settling(self):
+        # Paused, or with nothing new, the panel task waits for the next flush
+        # instead of waking every 250 ms; it starts by looking, in case LVGL
+        # flushed before it existed.
+        board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
+        task = board[board.index("static void epd_task("):board.index("static void lvgl_task(")]
+        self.assertIn("bool settling = true;", task)
+        self.assertIn("ulTaskNotifyTake(pdTRUE, settling ? pdMS_TO_TICKS(250) : portMAX_DELAY);", task)
+        self.assertIn("settling = s_dirty && !s_paused;", task)
+        self.assertNotIn(".keyboard = true", board)   # touch boards have no button menu to label
+
+    def test_muse_images_dither_to_four_grays(self):
+        led = (ROOT / "main/led_status.c").read_text()
+        done = led[led.index("void led_status_draw_done(void) {"):]
+        self.assertIn("muse_ui_image_done();", done[:done.index("\n}\n")])
+        ui = (ROOT / "components/muse/muse_ui.c").read_text()
+        start = ui.index("static void dither_gray4_565(")
+        end = ui.index("void muse_ui_image_done(", start)
+        harness = self.out / "muse_dither_gray4.c"
+        harness.write_text("#include <assert.h>\n#include <stdint.h>\n#include <stddef.h>\n"
+                           "#include <string.h>\n" + ui[start:end] + """
+#define W 64
+#define H 32
+static int level(uint16_t p) {
+    for (int i = 0; i < 4; i++) {
+        static const uint16_t g[4] = {0x0000, 0x52AA, 0xAD55, 0xFFFF};
+        if (p == g[i]) return i;
+    }
+    return -1;
+}
+int main(void) {
+    static uint16_t px[W * H];
+    int16_t err[2 * (W + 2)];
+    /* The four grays come through exactly. */
+    const uint16_t exact[4] = {0x0000, 0x52AA, 0xAD55, 0xFFFF};
+    for (int i = 0; i < 4; i++) {
+        for (int k = 0; k < W * H; k++) px[k] = exact[i];
+        dither_gray4_565(px, W, H, err);
+        for (int k = 0; k < W * H; k++) assert(px[k] == exact[i]);
+    }
+    /* Mid gray (128) between two of them: a mix of 85 and 170 averaging 128. */
+    for (int k = 0; k < W * H; k++) px[k] = 0x8410;
+    dither_gray4_565(px, W, H, err);
+    long sum = 0;
+    int seen[4] = {0};
+    for (int k = 0; k < W * H; k++) {
+        int l = level(px[k]);
+        assert(l >= 0);
+        seen[l]++;
+        sum += l * 85;
+    }
+    assert(seen[1] > 0 && seen[2] > 0 && seen[0] == 0 && seen[3] == 0);
+    long avg = sum / (W * H);
+    assert(avg >= 120 && avg <= 136);
+    return 0;
+}
+""")
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        binary = self.out / "muse_dither_gray4"
         compiled = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
                                    str(harness), "-o", str(binary)], capture_output=True, text=True)
         self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)

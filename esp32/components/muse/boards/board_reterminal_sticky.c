@@ -302,8 +302,11 @@ static void epd_task(void *arg)
 {
     (void)arg;
     const epd_panel_t *panel = epd_panel_get();
+    bool settling = true;   /* LVGL may have flushed before this task existed */
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(250));
+        /* A change still settling needs a timer; otherwise (paused, or
+         * nothing new) the next flush wakes us, so the chip can sleep. */
+        ulTaskNotifyTake(pdTRUE, settling ? pdMS_TO_TICKS(250) : portMAX_DELAY);
         xSemaphoreTakeRecursive(s_lv_lock, portMAX_DELAY);
         bool update = s_dirty && !s_paused &&
                       gray4_refresh_due(esp_timer_get_time(), s_last_flush_us, s_dirty_since_us);
@@ -312,6 +315,7 @@ static void epd_task(void *arg)
             rgb565_to_gray4(s_gray, s_frame, SCREEN_W, SCREEN_H);
             update = gray4_needs_refresh(s_gray, s_shown, GRAY_BYTES, s_shown_valid);
         }
+        settling = s_dirty && !s_paused;
         xSemaphoreGiveRecursive(s_lv_lock);
         if (update) {
             esp_err_t err = panel->update_gray4(s_gray);
@@ -322,6 +326,7 @@ static void epd_task(void *arg)
                 xSemaphoreTakeRecursive(s_lv_lock, portMAX_DELAY);
                 s_dirty = true;
                 xSemaphoreGiveRecursive(s_lv_lock);
+                settling = true;   /* try again */
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
         }
@@ -523,7 +528,6 @@ static const muse_board_t s_board = {
     .touch = true,
     .touch_talk = true,
     .diagonal_in = 3.97f,
-    .keyboard = true,
     .talk_button = "AI button",
     .talk_hint = {LV_ALIGN_BOTTOM_MID, 0, -50},
     .frame_ms = 1000,

@@ -1205,6 +1205,9 @@ int led_status_display_bits(void) {
 }
 
 void led_status_draw_done(void) {
+#if CONFIG_HOMEHUB_LED_BACKEND_MUSE && CONFIG_HOMEHUB_DISPLAY_COMMANDS
+    muse_ui_image_done();
+#endif
 }
 
 #if CONFIG_HOMEHUB_DISPLAY

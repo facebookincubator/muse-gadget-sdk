@@ -22,7 +22,6 @@
 
 #include "esp_app_desc.h"
 #include "esp_mac.h"
-#include "esp_log.h"
 #include "esp_timer.h"
 
 #include "muse_audio.h"
@@ -1132,7 +1131,6 @@ static void tick_sleep(void);
 static void on_sleep_choice(lv_event_t *e)
 {
     int secs = SLEEP_CHOICES[(int)(intptr_t)lv_event_get_user_data(e)];
-    if (muse_board->epaper) ESP_LOGI("muse_ui", "sleep option selected: %d s", secs);
     muse_settings_set_sleep_s(secs);
     tick_sleep();
 }

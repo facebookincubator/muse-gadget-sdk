@@ -88,7 +88,7 @@ static void apply_volume(int volume)
 
 static void apply_mic_gain(int db)
 {
-    if (muse_board->mic_read) {
+    if (muse_board->mic_init) {
         s_mic_scale = powf(10.0f, (float)db / 20.0f);
         return;
     }
@@ -225,7 +225,7 @@ static float to_db(double mean_sq)
 
 void muse_audio_selftest(void)
 {
-    if (muse_board->mic_read) {
+    if (muse_board->mic_init) {
         int16_t mono[MUSE_AUDIO_CHUNK];
         if (muse_audio_read(mono, MUSE_AUDIO_CHUNK) == ESP_OK) {
             ESP_LOGI(TAG, "PDM mic capture: %.1f dBFS", muse_audio_dbfs(mono, MUSE_AUDIO_CHUNK));
@@ -298,7 +298,7 @@ static float tone_db(const int16_t *st, int ch, size_t frames, float f)
  */
 void muse_audio_loopback_test(int volume)
 {
-    if (muse_board->mic_read) {
+    if (muse_board->mic_init) {
         ESP_LOGW(TAG, "no speaker for loopback test");
         return;
     }
@@ -364,13 +364,13 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 {
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
-        if (muse_board->mic_read) {
+        if (muse_board->mic_init) {
             if (muse_board->mic_read(mono, n) != ESP_OK) return ESP_FAIL;
         } else if (esp_codec_dev_read(s_mic, s_in_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
             return ESP_FAIL;
         }
         for (size_t i = 0; i < n; i++) {
-            float x = muse_board->mic_read ? (float)mono[i] * s_mic_scale
+            float x = muse_board->mic_init ? (float)mono[i] * s_mic_scale
                      : muse_board->mic_slot < 0 ? 0.5f * ((float)s_in_stereo[2 * i] + (float)s_in_stereo[2 * i + 1])
                                                 : (float)s_in_stereo[2 * i + muse_board->mic_slot];
             float y = s_hpf_a * (s_hpf_y1 + x - s_hpf_x1);
@@ -386,7 +386,7 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 
 esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
 {
-    if (muse_board->mic_read) {
+    if (muse_board->mic_init) {
         (void)mono;
         vTaskDelay(pdMS_TO_TICKS((frames * 1000 + MUSE_AUDIO_RATE - 1) / MUSE_AUDIO_RATE));
         return ESP_OK;

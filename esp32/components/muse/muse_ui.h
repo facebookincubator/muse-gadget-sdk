@@ -51,6 +51,8 @@ void muse_ui_preview_brightness(int pct);
 bool muse_ui_image_size(int *w, int *h);
 /* What the panel shows of those pixels: 16 (colour), or 2 on a four-gray e-paper. */
 int muse_ui_image_bits(void);
+/* The image is complete: a four-gray e-paper dithers it to its grays. */
+void muse_ui_image_done(void);
 bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels);
 void muse_ui_image_hide(void);
 /* Watcher camera mode: shows an on-screen shutter hint over the live image. */
