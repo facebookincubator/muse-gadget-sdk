@@ -491,13 +491,15 @@ the design, the Wi-Fi protocol and the numbers.
   advertising, the radio's scheduler gives BLE half of every beacon period
   and the stream's packets wait out that half (50 ms round trips instead of
   15, and the phone's bitrate falls to its floor).
-- **Memory:** the ring (128 KB) and the decoder's pictures are in PSRAM; the
-  decode and show tasks take about 10 KB of internal RAM once the first
-  stream starts. `CONFIG_MUSE_VIDEO_DECODER_IRAM` (off) puts the decoders'
-  hot code in IRAM: 44 KB (and 33 KB for VP8; `CONFIG_MUSE_VP8_IRAM` picks
-  less or more) that a Wi-Fi + BLE + UI build
-  on the S3 can't spare
-  (LVGL's task then fails to start).
+- **Memory:** the ring (128 KB) and the decoders' memory are in PSRAM, and
+  the decode tasks' stacks in main SRAM (`MALLOC_CAP_DMA`): the S31 also
+  hands out LP RAM as heap once main SRAM runs low, several times slower, so
+  keep anything per-frame out of plain internal `malloc`. The decode and show
+  tasks take about 20 KB of internal RAM once the first stream starts.
+  `CONFIG_MUSE_VIDEO_DECODER_IRAM` (off) puts the decoders' hot code in IRAM:
+  44 KB (and 33 KB for VP8; `CONFIG_MUSE_VP8_IRAM` picks less or more) that a
+  Wi-Fi + BLE + UI build on the S3 can't spare (LVGL's task then fails to
+  start).
 - **Test** with `tests/test_muse_video.py` (the ring and the Wi-Fi messages,
   and the wiring under the options), `tests/test_video_untrusted.py`
   (hostile sizes, the port's guards), `tests/test_tinyh264_pie.py` and

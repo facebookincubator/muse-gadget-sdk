@@ -363,7 +363,8 @@ stream (before the radio hold above), the same 1000 kb/s run showed 22-26
 fps with 110-140 ms on the link, and the camera's adaptive bitrate fell to
 its 200 kb/s floor.
 
-**ESP-Mosaico** (ESP32-S31): one decoder can't keep 480 px at 30 fps
+**ESP-Mosaico** (ESP32-S31; build `MUSE_VIDEO=1 tools/muse/board.sh build
+mosaico`, `esp32/devices/README.md`): one decoder can't keep 480 px at 30 fps
 (QEMU instruction counts: 10.3 M instructions a frame at 600 kb/s, 12-13 M
 at the 95th percentile), so the picture goes as two bands, each its own
 480 px wide H.264 stream from its own x264 at a share of the bitrate. With
