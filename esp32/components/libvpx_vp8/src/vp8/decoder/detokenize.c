@@ -19,8 +19,11 @@ void vp8_reset_mb_tokens_context(MACROBLOCKD *x) {
   ENTROPY_CONTEXT *a_ctx = ((ENTROPY_CONTEXT *)x->above_context);
   ENTROPY_CONTEXT *l_ctx = ((ENTROPY_CONTEXT *)x->left_context);
 
-  memset(a_ctx, 0, sizeof(ENTROPY_CONTEXT_PLANES) - 1);
-  memset(l_ctx, 0, sizeof(ENTROPY_CONTEXT_PLANES) - 1);
+  /* Muse gadget port: the 8 y, u and v contexts, without memset calls */
+  a_ctx[0] = a_ctx[1] = a_ctx[2] = a_ctx[3] = 0;
+  a_ctx[4] = a_ctx[5] = a_ctx[6] = a_ctx[7] = 0;
+  l_ctx[0] = l_ctx[1] = l_ctx[2] = l_ctx[3] = 0;
+  l_ctx[4] = l_ctx[5] = l_ctx[6] = l_ctx[7] = 0;
 
   /* Clear entropy contexts for Y2 blocks */
   if (!x->mode_info_context->mbmi.is_4x4) {

@@ -36,14 +36,25 @@ segmentation, 240 to 480 px).
   the identity filter, so a block with one fractional component takes one
   pass instead of two; the 6-tap 2-D case keeps its first pass in bytes;
   the odd 6-tap positions (outer taps zero) use four taps; bilinear works
-  two pixels per 32-bit multiply.
+  two pixels per 32-bit multiply. Both filters slide a window along the row
+  or down the column (each source pixel loaded once), and the 6-tap filter
+  has one out-of-line copy per block width with its inner loop unrolled.
+  In the 2-D 6-tap case an odd vertical filter (four taps) needs two rows
+  fewer from the first pass.
 - Loop filters (`vp8/common/loopfilter_filters.c`): in int arithmetic, a
   pixel at a time, leaving early when its mask is off or the filter value
   rounds to no change.
 - Inverse transform (`vp8/common/idct_blk.c`): a DC-only block whose DC
-  rounds to zero is skipped.
+  rounds to zero is skipped. Clamps to 0..255 here and in the loop filter
+  take one rarely taken branch (a forward taken branch costs the C6 four
+  cycles) where the core has no min/max instructions.
 - The bool decoder is always inlined and normalises with a leading-zero
-  count instead of a table (`vp8/decoder/dboolhuff.h`).
+  count instead of a table (`vp8/decoder/dboolhuff.h`), except on RISC-V
+  cores without Zbb (the C6), where `__builtin_clz` is a libgcc call: the
+  table there.
+- Small per-row and per-block fills and copies (borders, entropy contexts,
+  full-pixel predictions, coefficient clears) are inline word or byte
+  stores instead of memset/memcpy calls (`vp8/common/mgx_mem.h`).
 - With segmentation, the dequantisation tables are rebuilt only when a
   macroblock's Q index changes (`vp8/decoder/decodeframe.c`).
 - On the ESP32-S3, bilinear prediction of 16x16 and 8x8 blocks runs on its

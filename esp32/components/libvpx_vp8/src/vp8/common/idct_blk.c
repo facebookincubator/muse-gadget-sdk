@@ -12,6 +12,11 @@
 #include "vp8_rtcd.h"
 #include "vpx_mem/vpx_mem.h"
 
+static inline unsigned char clamp255(int a) {
+  if ((unsigned)a > 255u) a = ~a >> 31 & 255; /* rarely taken */
+  return (unsigned char)a;
+}
+
 /* Muse gadget port: a DC-only block whose DC rounds to zero adds nothing
  * ((dc + 4) >> 3 == 0), so it is skipped; bit-exact with libvpx. */
 static inline void dc_add(int dc, unsigned char *dst, int stride) {
@@ -19,14 +24,14 @@ static inline void dc_add(int dc, unsigned char *dst, int stride) {
   if (!a1) return;
   for (r = 0; r < 4; ++r, dst += stride) {
     int a;
-    a = dst[0] + a1; dst[0] = (unsigned char)(a < 0 ? 0 : a > 255 ? 255 : a);
-    a = dst[1] + a1; dst[1] = (unsigned char)(a < 0 ? 0 : a > 255 ? 255 : a);
-    a = dst[2] + a1; dst[2] = (unsigned char)(a < 0 ? 0 : a > 255 ? 255 : a);
-    a = dst[3] + a1; dst[3] = (unsigned char)(a < 0 ? 0 : a > 255 ? 255 : a);
+    a = dst[0] + a1; dst[0] = clamp255(a);
+    a = dst[1] + a1; dst[1] = clamp255(a);
+    a = dst[2] + a1; dst[2] = clamp255(a);
+    a = dst[3] + a1; dst[3] = clamp255(a);
   }
 }
 
-static inline void blk(short *q, short *dq, unsigned char *dst, int stride,
+static inline __attribute__((always_inline)) void blk(short *q, short *dq, unsigned char *dst, int stride,
                        char eob) {
   if (eob > 1) {
     vp8_dequant_idct_add_c(q, dq, dst, stride);

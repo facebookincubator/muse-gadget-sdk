@@ -16,44 +16,25 @@
 #include "vpx/vpx_integer.h"
 #include "blockd.h"
 #include "reconinter.h"
+#include "mgx_mem.h"
 #if CONFIG_RUNTIME_CPU_DETECT
 #include "onyxc_int.h"
 #endif
 
+/* Muse gadget port: words when the reference is aligned (mgx_mem.h) */
 void vp8_copy_mem16x16_c(unsigned char *src, int src_stride, unsigned char *dst,
                          int dst_stride) {
-  int r;
-
-  for (r = 0; r < 16; ++r) {
-    memcpy(dst, src, 16);
-
-    src += src_stride;
-    dst += dst_stride;
-  }
+  mgx_copy(src, src_stride, dst, dst_stride, 16, 16);
 }
 
 void vp8_copy_mem8x8_c(unsigned char *src, int src_stride, unsigned char *dst,
                        int dst_stride) {
-  int r;
-
-  for (r = 0; r < 8; ++r) {
-    memcpy(dst, src, 8);
-
-    src += src_stride;
-    dst += dst_stride;
-  }
+  mgx_copy(src, src_stride, dst, dst_stride, 8, 8);
 }
 
 void vp8_copy_mem8x4_c(unsigned char *src, int src_stride, unsigned char *dst,
                        int dst_stride) {
-  int r;
-
-  for (r = 0; r < 4; ++r) {
-    memcpy(dst, src, 8);
-
-    src += src_stride;
-    dst += dst_stride;
-  }
+  mgx_copy(src, src_stride, dst, dst_stride, 8, 4);
 }
 
 /* Muse gadget port: edge emulation for a small frame border (VP8_MGX_BORDER).
@@ -65,19 +46,12 @@ void vp8_copy_mem8x4_c(unsigned char *src, int src_stride, unsigned char *dst,
  * past it is copied here first, each coordinate clamped into the picture,
  * which yields exactly the pixels the 32-pixel border would have held.
  * x is the macroblock being predicted; the copy goes to its decoder's
- * x->emu_buf_mgx (no shared state: several decoders can run at once). */
-static unsigned char *emu_block(MACROBLOCKD *x, unsigned char *ptr,
-                                int *stride, int uv, int bx, int by, int w,
-                                int h) {
-  unsigned char *const emu_buf = x->emu_buf_mgx;
-  const YV12_BUFFER_CONFIG *f = &x->pre;
-  int pw = uv ? f->uv_width : f->y_width, ph = uv ? f->uv_height : f->y_height;
-  int b = uv ? f->border >> 1 : f->border;
+ * x->emu_buf_mgx (no shared state: two decoders can run at once). */
+static unsigned char *__attribute__((noinline))
+emu_copy(unsigned char *emu_buf, unsigned char *ptr, int *stride, int pw,
+         int ph, int bx, int by, int w, int h) {
   int s = *stride, r, c, ew = w + 5;
   unsigned char *org;
-  if (bx - 2 >= -b && by - 2 >= -b && bx + w + 3 <= pw + b &&
-      by + h + 3 <= ph + b)
-    return ptr;
   org = ptr - by * s - bx;
   for (r = 0; r < h + 5; ++r) {
     int yy = by - 2 + r;
@@ -94,10 +68,25 @@ static unsigned char *emu_block(MACROBLOCKD *x, unsigned char *ptr,
   return emu_buf + 2 * ew + 2;
 }
 
+/* the common case, a block well inside the border, inlined (Muse gadget
+ * port: the check runs for every predicted block) */
+static inline __attribute__((always_inline)) unsigned char *emu_block(
+    MACROBLOCKD *x, unsigned char *ptr, int *stride, int uv, int bx, int by,
+    int w, int h) {
+  const YV12_BUFFER_CONFIG *f = &x->pre;
+  const int pw = uv ? f->uv_width : f->y_width;
+  const int ph = uv ? f->uv_height : f->y_height;
+  const int b = uv ? f->border >> 1 : f->border;
+  if ((unsigned)(bx - 2 + b) <= (unsigned)(pw + 2 * b - w - 5) &&
+      (unsigned)(by - 2 + b) <= (unsigned)(ph + 2 * b - h - 5))
+    return ptr;
+  return emu_copy(x->emu_buf_mgx, ptr, stride, pw, ph, bx, by, w, h);
+}
+
 /* Picture coordinates of a block's reference: macroblock position + the
  * block's place in it (d->offset, unambiguous: 0..15 rows and columns) + MV. */
-static unsigned char *emu_blockd(MACROBLOCKD *x, BLOCKD *d, unsigned char *ptr,
-                                 int *stride, int w, int h) {
+static inline __attribute__((always_inline)) unsigned char *emu_blockd(
+    MACROBLOCKD *x, BLOCKD *d, unsigned char *ptr, int *stride, int w, int h) {
   int uv = (d - x->block) >= 16;
   int sh = uv ? 4 : 3;
   int bx = -(x->mb_to_left_edge >> sh) + d->offset % *stride +

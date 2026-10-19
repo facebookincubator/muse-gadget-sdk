@@ -78,8 +78,14 @@ static inline __attribute__((always_inline)) VPX_NO_UNSIGNED_SHIFT_CHECK int vp8
   }
 
   {
-    /* Muse gadget port: vp8_norm[range] is the 8-bit leading-zero count */
+    /* Muse gadget port: vp8_norm[range] is the 8-bit leading-zero count;
+     * a clz instruction where there is one (on RISC-V without Zbb, like the
+     * C6, __builtin_clz is a libgcc call: the table instead). */
+#if defined(__riscv) && !defined(__riscv_zbb)
+    const unsigned char shift = vp8_norm[range];
+#else
     const unsigned char shift = (unsigned char)(__builtin_clz(range) - 24);
+#endif
     range <<= shift;
     value <<= shift;
     count -= shift;

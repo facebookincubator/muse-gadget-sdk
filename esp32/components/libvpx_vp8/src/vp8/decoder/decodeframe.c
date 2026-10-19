@@ -34,6 +34,7 @@
 #include "vp8/common/threading.h"
 #include "decoderthreading.h"
 #include "dboolhuff.h"
+#include "vp8/common/mgx_mem.h"
 #include "vpx_dsp/vpx_dsp_common.h"
 
 #include <assert.h>
@@ -199,7 +200,7 @@ static void decode_macroblock(VP8D_COMP *pbi, MACROBLOCKD *xd,
           } else {
             vp8_dc_only_idct_add(b->qcoeff[0] * DQC[0], dst, dst_stride, dst,
                                  dst_stride);
-            memset(b->qcoeff, 0, 2 * sizeof(b->qcoeff[0]));
+            b->qcoeff[0] = b->qcoeff[1] = 0;
           }
         }
       }
@@ -239,11 +240,11 @@ static void decode_macroblock(VP8D_COMP *pbi, MACROBLOCKD *xd,
           vp8_dequantize_b(b, xd->dequant_y2);
 
           vp8_short_inv_walsh4x4(&b->dqcoeff[0], xd->qcoeff);
-          memset(b->qcoeff, 0, 16 * sizeof(b->qcoeff[0]));
+          memset(b->qcoeff, 0, 16 * sizeof(b->qcoeff[0])); /* aligned, constant: inlined */
         } else {
           b->dqcoeff[0] = (short)(b->qcoeff[0] * xd->dequant_y2[0]);
           vp8_short_inv_walsh4x4_1(&b->dqcoeff[0], xd->qcoeff);
-          memset(b->qcoeff, 0, 2 * sizeof(b->qcoeff[0]));
+          b->qcoeff[0] = b->qcoeff[1] = 0;
         }
 
         /* override the dc dequant constant in order to preserve the
@@ -413,8 +414,8 @@ static void yv12_extend_frame_left_right_c(YV12_BUFFER_CONFIG *ybf,
   dest_ptr2 = src_ptr2 + 1;
 
   for (i = 0; i < plane_height; ++i) {
-    memset(dest_ptr1, src_ptr1[0], Border);
-    memset(dest_ptr2, src_ptr2[0], Border);
+    mgx_fill(dest_ptr1, src_ptr1[0], Border);
+    mgx_fill(dest_ptr2, src_ptr2[0], Border);
     src_ptr1 += plane_stride;
     src_ptr2 += plane_stride;
     dest_ptr1 += plane_stride;
@@ -436,8 +437,8 @@ static void yv12_extend_frame_left_right_c(YV12_BUFFER_CONFIG *ybf,
   dest_ptr2 = src_ptr2 + 1;
 
   for (i = 0; i < plane_height; ++i) {
-    memset(dest_ptr1, src_ptr1[0], Border);
-    memset(dest_ptr2, src_ptr2[0], Border);
+    mgx_fill(dest_ptr1, src_ptr1[0], Border);
+    mgx_fill(dest_ptr2, src_ptr2[0], Border);
     src_ptr1 += plane_stride;
     src_ptr2 += plane_stride;
     dest_ptr1 += plane_stride;
@@ -455,8 +456,8 @@ static void yv12_extend_frame_left_right_c(YV12_BUFFER_CONFIG *ybf,
   dest_ptr2 = src_ptr2 + 1;
 
   for (i = 0; i < plane_height; ++i) {
-    memset(dest_ptr1, src_ptr1[0], Border);
-    memset(dest_ptr2, src_ptr2[0], Border);
+    mgx_fill(dest_ptr1, src_ptr1[0], Border);
+    mgx_fill(dest_ptr2, src_ptr2[0], Border);
     src_ptr1 += plane_stride;
     src_ptr2 += plane_stride;
     dest_ptr1 += plane_stride;
@@ -689,9 +690,9 @@ static void lowmem_put(YV12_BUFFER_CONFIG *f, const YV12_BUFFER_CONFIG *rf,
       unsigned char *d = o + x * lines * st;
       int y;
       for (y = 0; y < lines; ++y, s += st, d += st) {
-        memcpy(d, s, w);
-        memset(d - bd, d[0], bd);
-        memset(d + w, d[w - 1], bd);
+        mgx_copy(s, 0, d, 0, w, 1);
+        mgx_fill(d - bd, d[0], bd);
+        mgx_fill(d + w, d[w - 1], bd);
       }
     }
   }

@@ -33,5 +33,7 @@ void vp8_dequant_idct_add_c(short *input, short *dq, unsigned char *dest,
 
   vp8_short_idct4x4llm_c(input, dest, stride, dest, stride);
 
-  memset(input, 0, 32);
+  /* Muse gadget port: qcoeff is 16-byte aligned; say so, so the clear is
+   * inlined instead of a memset call */
+  memset(__builtin_assume_aligned(input, 4), 0, 32);
 }

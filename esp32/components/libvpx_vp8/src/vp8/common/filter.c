@@ -39,55 +39,98 @@ DECLARE_ALIGNED(16, const short, vp8_sub_pel_filters[8][6]) = {
  * the odd sixtap positions have zero outer taps and use four. */
 
 static inline unsigned char clamp255(int v) {
-  return (unsigned char)(v < 0 ? 0 : v > 255 ? 255 : v);
+  if ((unsigned)v > 255u) v = ~v >> 31 & 255; /* rarely taken */
+  return (unsigned char)v;
 }
 
-/* 6-tap along step (1: horizontal, stride: vertical), w x h, into dst */
-static void sixtap_1d(const unsigned char *src, int src_stride, int step,
-                      unsigned char *dst, int dst_stride, int w, int h,
-                      const short *f) {
-  const int f1 = f[1], f2 = f[2], f3 = f[3], f4 = f[4];
+/* 6-tap along step (1: horizontal, stride: vertical), w x h, into dst.
+ * Sliding window: one new source pixel per output pixel, along the row
+ * (horizontal) or down the column (vertical); the same sums. Inlined per
+ * block size, so the inner loops unroll. */
+static inline __attribute__((always_inline)) void sixtap_1d(
+    const unsigned char *src, int src_stride, int step, unsigned char *dst,
+    int dst_stride, int w, int h, const short *f) {
+  const int f0 = f[0], f1 = f[1], f2 = f[2], f3 = f[3], f4 = f[4], f5 = f[5];
   int r, c;
-  if (f[0] == 0 && f[5] == 0) {
-    for (r = 0; r < h; ++r) {
-      for (c = 0; c < w; ++c) {
-        const unsigned char *p = src + c;
-        int t = p[-step] * f1 + p[0] * f2 + p[step] * f3 + p[2 * step] * f4 + 64;
-        dst[c] = clamp255(t >> 7);
+  if (step == 1) {
+    if (f0 == 0 && f5 == 0) {
+      for (r = 0; r < h; ++r, src += src_stride, dst += dst_stride) {
+        int a1 = src[-1], a2 = src[0], a3 = src[1];
+#pragma GCC unroll 16
+        for (c = 0; c < w; ++c) {
+          const int a4 = src[c + 2];
+          dst[c] = clamp255((a1 * f1 + a2 * f2 + a3 * f3 + a4 * f4 + 64) >> 7);
+          a1 = a2; a2 = a3; a3 = a4;
+        }
       }
-      src += src_stride;
-      dst += dst_stride;
+    } else {
+      for (r = 0; r < h; ++r, src += src_stride, dst += dst_stride) {
+        int a0 = src[-2], a1 = src[-1], a2 = src[0], a3 = src[1], a4 = src[2];
+#pragma GCC unroll 16
+        for (c = 0; c < w; ++c) {
+          const int a5 = src[c + 3];
+          dst[c] = clamp255((a0 * f0 + a1 * f1 + a2 * f2 + a3 * f3 + a4 * f4 +
+                             a5 * f5 + 64) >> 7);
+          a0 = a1; a1 = a2; a2 = a3; a3 = a4; a4 = a5;
+        }
+      }
     }
   } else {
-    const int f0 = f[0], f5 = f[5];
-    for (r = 0; r < h; ++r) {
-      for (c = 0; c < w; ++c) {
-        const unsigned char *p = src + c;
-        int t = p[-2 * step] * f0 + p[-step] * f1 + p[0] * f2 + p[step] * f3 +
-                p[2 * step] * f4 + p[3 * step] * f5 + 64;
-        dst[c] = clamp255(t >> 7);
+    for (c = 0; c < w; ++c) {
+      const unsigned char *p = src + c;
+      unsigned char *d = dst + c;
+      if (f0 == 0 && f5 == 0) {
+        int a1 = p[-step], a2 = p[0], a3 = p[step];
+        p += 2 * step;
+#pragma GCC unroll 4
+        for (r = 0; r < h; ++r, p += step, d += dst_stride) {
+          const int a4 = p[0];
+          *d = clamp255((a1 * f1 + a2 * f2 + a3 * f3 + a4 * f4 + 64) >> 7);
+          a1 = a2; a2 = a3; a3 = a4;
+        }
+      } else {
+        int a0 = p[-2 * step], a1 = p[-step], a2 = p[0], a3 = p[step],
+            a4 = p[2 * step];
+        p += 3 * step;
+#pragma GCC unroll 4
+        for (r = 0; r < h; ++r, p += step, d += dst_stride) {
+          const int a5 = p[0];
+          *d = clamp255((a0 * f0 + a1 * f1 + a2 * f2 + a3 * f3 + a4 * f4 +
+                         a5 * f5 + 64) >> 7);
+          a0 = a1; a1 = a2; a2 = a3; a3 = a4; a4 = a5;
+        }
       }
-      src += src_stride;
-      dst += dst_stride;
     }
   }
+}
+
+/* One out-of-line copy per block width, each with its inner loop unrolled. */
+static void __attribute__((noinline)) sixtap_1d_w(
+    const unsigned char *src, int src_stride, int step, unsigned char *dst,
+    int dst_stride, int w, int h, const short *f) {
+  if (w == 16) sixtap_1d(src, src_stride, step, dst, dst_stride, 16, h, f);
+  else if (w == 8) sixtap_1d(src, src_stride, step, dst, dst_stride, 8, h, f);
+  else sixtap_1d(src, src_stride, step, dst, dst_stride, 4, h, f);
 }
 
 static void sixtap_predict(unsigned char *src, int src_stride, int xoffset,
                            int yoffset, unsigned char *dst, int dst_stride,
                            int w, int h) {
   if (!yoffset) {
-    sixtap_1d(src, src_stride, 1, dst, dst_stride, w, h,
-              vp8_sub_pel_filters[xoffset]);
+    sixtap_1d_w(src, src_stride, 1, dst, dst_stride, w, h,
+                vp8_sub_pel_filters[xoffset]);
   } else if (!xoffset) {
-    sixtap_1d(src, src_stride, src_stride, dst, dst_stride, w, h,
-              vp8_sub_pel_filters[yoffset]);
+    sixtap_1d_w(src, src_stride, src_stride, dst, dst_stride, w, h,
+                vp8_sub_pel_filters[yoffset]);
   } else {
+    /* An odd yoffset has zero outer taps: the second pass reads rows -1 to
+     * h + 1 only, so the first pass skips rows -2 and h + 2. */
     unsigned char tmp[21 * 16];
-    sixtap_1d(src - 2 * src_stride, src_stride, 1, tmp, w, w, h + 5,
-              vp8_sub_pel_filters[xoffset]);
-    sixtap_1d(tmp + 2 * w, w, w, dst, dst_stride, w, h,
-              vp8_sub_pel_filters[yoffset]);
+    const int y4 = yoffset & 1;
+    sixtap_1d_w(src - (2 - y4) * src_stride, src_stride, 1, tmp + y4 * w, w,
+                w, h + 5 - 2 * y4, vp8_sub_pel_filters[xoffset]);
+    sixtap_1d_w(tmp + 2 * w, w, w, dst, dst_stride, w, h,
+                vp8_sub_pel_filters[yoffset]);
   }
 }
 
@@ -130,15 +173,38 @@ static inline __attribute__((always_inline)) void bil_1d(
     int dst_stride, int w, int h, int k) {
   const uint32_t w0 = 128 - 16 * k, w1 = 16 * k;
   int r, c;
-  for (r = 0; r < h; ++r) {
+  if (step == 1) {
+    /* each source pixel loaded once: the right pixel of a pair is the
+     * left one of the next */
+    for (r = 0; r < h; ++r) {
+      uint32_t a = src[0];
+#pragma GCC unroll 16
+      for (c = 0; c < w; c += 2) {
+        const uint32_t b = src[c + 1], n = src[c + 2];
+        const uint32_t v = ((a | b << 16) * w0 + (b | n << 16) * w1 + 0x00400040u) >> 7;
+        dst[c] = (unsigned char)v;
+        dst[c + 1] = (unsigned char)(v >> 16);
+        a = n;
+      }
+      src += src_stride;
+      dst += dst_stride;
+    }
+  } else {
+    /* down each pair of columns: a row's pair is the next row's top */
     for (c = 0; c < w; c += 2) {
       const unsigned char *p = src + c;
-      uint32_t v = (pair(p, 1) * w0 + pair(p + step, 1) * w1 + 0x00400040u) >> 7;
-      dst[c] = (unsigned char)v;
-      dst[c + 1] = (unsigned char)(v >> 16);
+      unsigned char *d = dst + c;
+      uint32_t t = pair(p, 1);
+#pragma GCC unroll 4
+      for (r = 0; r < h; ++r) {
+        const uint32_t u = pair(p += step, 1);
+        const uint32_t v = (t * w0 + u * w1 + 0x00400040u) >> 7;
+        d[0] = (unsigned char)v;
+        d[1] = (unsigned char)(v >> 16);
+        d += dst_stride;
+        t = u;
+      }
     }
-    src += src_stride;
-    dst += dst_stride;
   }
 }
 

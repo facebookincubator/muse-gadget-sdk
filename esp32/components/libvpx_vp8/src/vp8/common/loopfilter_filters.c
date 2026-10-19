@@ -17,7 +17,16 @@ typedef unsigned char uc;
 /* Muse gadget port: the libvpx C filters in int arithmetic, a pixel at a
  * time, leaving a pixel early when its mask is off or the filter rounds to
  * nothing. Bit-exact with libvpx. */
-static inline int sclamp(int t) { return t < -128 ? -128 : t > 127 ? 127 : t; }
+/* one rarely taken branch for the clamp (forward taken branches cost the
+ * C6 four cycles) */
+static inline int sclamp(int t) {
+#if defined(__riscv_zbb)
+  return t < -128 ? -128 : t > 127 ? 127 : t; /* min and max instructions */
+#else
+  if ((unsigned)(t + 128) > 255u) t = (t >> 31) ^ 127;
+  return t;
+#endif
+}
 static inline int iabs(int v) { return v < 0 ? -v : v; }
 
 /* one pixel across an inner (block) edge; s points at q0, d is the step across */

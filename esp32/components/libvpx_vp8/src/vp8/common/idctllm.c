@@ -90,9 +90,8 @@ void vp8_short_idct4x4llm_c(short *input, unsigned char *pred_ptr,
     for (c = 0; c < 4; ++c) {
       int a = ip[c] + pred_ptr[c];
 
-      if (a < 0) a = 0;
-
-      if (a > 255) a = 255;
+      /* Muse gadget port: one rarely taken branch for the clamp */
+      if ((unsigned)a > 255u) a = ~a >> 31 & 255;
 
       dst_ptr[c] = (unsigned char)a;
     }
