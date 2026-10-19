@@ -318,6 +318,14 @@ final class WifiLink: VideoLink {
         }
     }
 
+    override func kind() -> String { "Wi-Fi" }
+
+    override func gadgetName() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return isReady ? connectedName : nil
+    }
+
     override func connectedAddress() -> String? {
         lock.lock()
         defer { lock.unlock() }

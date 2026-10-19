@@ -22,7 +22,7 @@ limitations under the License.
 The iPhone version of [`../../android/camstream`](../../android/camstream):
 it streams the camera, color bars or a sample clip to a Muse gadget's
 display over Wi-Fi ([`../../protocols/VIDEO.md`](../../protocols/VIDEO.md)),
-with the same buttons, settings, flow control and bitrate adaptation. Each
+with the same screen, settings, flow control and bitrate adaptation. Each
 Swift file is the Android class of the same name: `WifiLink` (Bonjour
 `_musevideo._tcp` and TCP, frames inside the gadget's credits),
 `CameraStreamer` (AVFoundation frames, cropped, scaled for the panel by
@@ -95,7 +95,7 @@ xcrun devicectl device process launch --device <udid> com.yourname.musegadgetste
 - **VP8** (libvpx, BSD-3-Clause with a patent grant; not in this repository
   either): `native/build_vpx.sh` builds your libvpx checkout with
   `../../android/camstream/jni/libvpx_mg.py` and `native/mgvpx.c` into
-  `libmgvpx.a`. The **H.264 / VP8** button (or `-codec vp8`) picks it for
+  `libmgvpx.a`. **Codec** on the Video tab (or `-codec vp8`) picks it for
   gadgets that list it.
 
 ```sh
@@ -113,23 +113,32 @@ move them). The Simulator always gets the stubs.
 
 ## Using it
 
-The buttons are Android's: Camera, Bars, Bunny, Sintel (8 s of the Blender
-Foundation's open movies, CC BY 3.0, played from the Internet Archive when
-first picked; nothing is stored in the app), Device (gadgets found over
-Bonjour; the choice is remembered), Rate (fixed rates for clips and camera,
-picture size and frame rate on gadgets past 240 px), H.264 / VP8, Stop. The
-yellow line names what streams, the top lines show the link, the encoder
-and the gadget's reports each second.
+The screen is Android's: the preview on top (the camera, or the clip's
+still) with the stats over it, what's playing and its **Stop** at its
+bottom, and a tab per system below, each a settings-style list:
+
+- **Video**: what streams (Camera, Color bars, Bunny, Sintel: 8 s of the
+  Blender Foundation's open movies, CC BY 3.0, played from the Internet
+  Archive when first picked; nothing is stored in the app), the camera
+  (lens, frame rate), the encoding (codec, picture size, the camera's and
+  clips' bitrates, two bands) and advanced options (the H.264 encoder, the
+  panel filter, the stats overlay).
+- **Gadget**: which gadget (found over Bonjour; the choice is remembered),
+  Start automatically, and what the gadget reports.
+
+Tap the preview to switch the stats between compact (four numbers) and
+detailed (Link, Encoder, Gadget and Latency, problems in amber). The log's
+`stats:` lines are unchanged.
 
 Launch arguments take Android's intent extras (`-name value`; only Xcode
 or `devicectl` can pass them): `-target` (part of a gadget's name), `-host`
 (an address, no Bonjour), `-auto YES` (stream as soon as the gadget's Phone
-camera view is open, without a button; the gadget takes a stream only
+camera view is open, without waiting for it; the gadget takes a stream only
 then), `-front YES`, `-fps`, `-kbps`, `-maxkbps`,
 `-adaptive NO`, `-size`, `-source camera|pattern|clip:<name>`, `-clip`,
 `-clipkbps`, `-playout`, `-codec h264|vp8`, `-sw hw|x264`, `-swpreset`,
 `-swparams`, `-pf 0`, `-live 0`, `-ahead`, `-behind`, `-latlog YES`,
-`-rateclip`, `-ratec`. In Debug builds, `musegadgetstest://pick/<what>` (or the old `musegadgetscamera://`)
+`-rateclip`, `-ratec`, `-tab gadget` (open on that tab). In Debug builds, `musegadgetstest://pick/<what>` (or the old `musegadgetscamera://`)
 does on the running app what tapping it does (`camera`, `pattern`, `clip:bunny`,
 `codec`, `stop`; for `xcrun devicectl device process launch --payload-url`);
 Release builds ignore it, since any app or web page can open a URL. The log

@@ -87,6 +87,9 @@ class VideoLink: NSObject {
     /* Before start(): what to connect to (address wins when given); neither: list only. */
     func setTarget(address: String?, name: String?) {}
     func describe() -> String { "" }
+    /* What kind of link it is, for the screen ("Wi-Fi"), and the connected gadget's name. */
+    func kind() -> String { "" }
+    func gadgetName() -> String? { nil }
     /* bands: the picture as that many horizontal bands, each its own stream; vp8: VP8 frames, else H.264. */
     func startStreaming(w: Int, h: Int, fps: Int, kbps: Int, playoutMs: Int, bands: Int = 1, vp8: Bool = false) {}
     func stopStreaming() {}
