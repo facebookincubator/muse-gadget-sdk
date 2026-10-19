@@ -465,6 +465,10 @@ their upstream licenses:
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
   Medium (SIL OFL 1.1); see its README.
+- [`main/fonts/epaper_154g_caption_font.h`](main/fonts/epaper_154g_caption_font.h),
+  the Waveshare 1.54G's reply font, is a subset of GNU Unifont 16.0.04 (SIL OFL
+  1.1, or GPL-2.0+ with the font embedding exception); see
+  [`main/fonts/README.md`](main/fonts/README.md).
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.

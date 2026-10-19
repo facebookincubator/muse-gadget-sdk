@@ -44,7 +44,7 @@ class LinkWaveshare154gPageTest(unittest.TestCase):
         policy = [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(out), "-I", str(ROOT / "main"),
                   "-I", str(ROOT / "components/muse"),
                   str(ROOT / "tests/link_waveshare_154g_page_policy_harness.c"), str(ROOT / "main/pixel_font.c"),
-                  "-o", str(out / "policy")]
+                  str(ROOT / "components/muse/muse_text.c"), "-o", str(out / "policy")]
         compiled = subprocess.run(policy, capture_output=True, text=True)
         if compiled.returncode:
             raise AssertionError(compiled.stdout + compiled.stderr)
