@@ -17,8 +17,8 @@
 /* Waveshare ESP32-S3-ePaper-1.54G voice: one ES8311 codec with an analog
  * microphone and an NS4150B speaker amplifier, and the green LED on GPIO3 for
  * the voice states (the e-paper is too slow for them). The reply's first page
- * goes on the e-paper with the page count, and a PWR tap shows the next. PWR
- * taps and holds beep.
+ * goes on the e-paper with the page count, in GNU Unifont's 8x16 letters, and
+ * a PWR tap shows the next. PWR taps and holds beep.
  * Pins: Waveshare's schematic and Example/ESP-IDF_5.5.1/07_Audio_Test
  * (github.com/waveshareteam/ESP32-S3-ePaper-1.54G).
  */
@@ -43,6 +43,7 @@
 #include "link_pairing.h"
 #include "muse_chat.h"
 #include "muse_text.h"
+#include "fonts/epaper_154g_caption_font.h"
 #include "pixel_font.h"
 
 #define AUDIO_POWER 42  // active low
@@ -235,16 +236,15 @@ void epd154g_turn_feedback(void) {
 
 // ---- Page rendering (host-tested) -------------------------------------------
 
-// The 5x8 font at twice its size, 12 x 18 pixel cells with spacing: 16
-// columns and 10 lines on the 200 x 200 panel, with a margin all round. The
-// page count, at the font's own size, sits in the bottom margin at the right.
-#define PAGE_SCALE  2
-#define PAGE_COLS   16
-#define PAGE_LINES  10
+// GNU Unifont's 8x16 cells (fonts/epaper_154g_caption_font.h): 24 columns
+// and 11 lines on the 200 x 200 panel, with a margin all round. The page
+// count, in the 5x8 pixel font, sits in the bottom margin at the right.
+#define PAGE_COLS   24
+#define PAGE_LINES  11
 #define PAGE_LEFT   4
 #define PAGE_TOP    10
-#define CELL_W      ((PIXEL_FONT_WIDTH + 1) * PAGE_SCALE)
-#define CELL_H      ((PIXEL_FONT_HEIGHT + 1) * PAGE_SCALE)
+#define CELL_W      8
+#define CELL_H      16
 #define PAGE_W      200
 #define PAGE_BYTES  (PAGE_COLS * 4 * PAGE_LINES + PAGE_LINES)
 #define COUNT_BYTES 24
@@ -253,18 +253,48 @@ void epd154g_turn_feedback(void) {
 // first, starting at row `y`.
 typedef void (*page_band_fn)(int y, int height, const uint8_t *rgb565);
 
-static void strip_glyph(uint8_t *strip, int x, int y, int scale, unsigned char c) {
+// Invalid UTF-8 consumes one byte. Never inspect a byte beyond the terminating NUL.
+static uint32_t utf8_next(const char **cursor) {
+    const unsigned char *p = (const unsigned char *)*cursor;
+    if (!*p) return 0;
+    uint32_t code = *p;
+    unsigned count = 1;
+    if (code >= 0xc2 && code <= 0xdf) { count = 2; code &= 0x1f; }
+    else if (code >= 0xe0 && code <= 0xef) { count = 3; code &= 0x0f; }
+    else if (code >= 0xf0 && code <= 0xf4) { count = 4; code &= 7; }
+    else if (code >= 0x80) { (*cursor)++; return '?'; }
+    for (unsigned i = 1; i < count; i++) {
+        if (!p[i] || (p[i] & 0xc0) != 0x80) { (*cursor)++; return '?'; }
+        code = code << 6 | (p[i] & 0x3f);
+    }
+    if ((count == 3 && code < 0x800) || (count == 4 && code < 0x10000)
+        || (code >= 0xd800 && code <= 0xdfff) || code > 0x10ffff) {
+        (*cursor)++; return '?';
+    }
+    *cursor += count;
+    return code;
+}
+
+static void strip_letter(uint8_t *strip, int x, uint32_t code) {
+    const uint8_t *glyph = epaper_154g_caption_glyph(code);
+    if (!glyph) glyph = epaper_154g_caption_glyph('?');
+    for (int row = 0; row < CELL_H; row++) {
+        for (int col = 0; col < CELL_W; col++) {
+            if (!(glyph[row] >> (7 - col) & 1)) continue;
+            size_t at = ((size_t)row * PAGE_W + x + col) * 2;
+            strip[at] = strip[at + 1] = 0;
+        }
+    }
+}
+
+static void strip_small(uint8_t *strip, int x, int y, unsigned char c) {
     if (c < PIXEL_FONT_FIRST || c > PIXEL_FONT_LAST) c = '?';
     const uint8_t *glyph = pixel_font[c - PIXEL_FONT_FIRST];
     for (int col = 0; col < PIXEL_FONT_WIDTH; col++) {
         for (int row = 0; row < PIXEL_FONT_HEIGHT; row++) {
             if (!(glyph[col] >> row & 1)) continue;
-            for (int dy = 0; dy < scale; dy++) {
-                for (int dx = 0; dx < scale; dx++) {
-                    size_t at = ((size_t)(y + row * scale + dy) * PAGE_W + x + col * scale + dx) * 2;
-                    strip[at] = strip[at + 1] = 0;
-                }
-            }
+            size_t at = ((size_t)(y + row) * PAGE_W + x + col) * 2;
+            strip[at] = strip[at + 1] = 0;
         }
     }
 }
@@ -279,11 +309,9 @@ static void render_page(const char *page, const char *count, uint8_t *strip, pag
     const char *p = page;
     for (int line = 0; line < PAGE_LINES; line++) {
         memset(strip, 0xFF, strip_bytes);
-        for (int col = 0; *p && *p != '\n'; p++) {
-            unsigned char c = (unsigned char)*p;
-            if (c >= 0x80 && c < 0xC0) continue;  // UTF-8 continuation bytes
-            if (col < PAGE_COLS) strip_glyph(strip, PAGE_LEFT + col * CELL_W, 0, PAGE_SCALE, c);
-            col++;
+        for (int col = 0; *p && *p != '\n'; col++) {
+            uint32_t code = utf8_next(&p);
+            if (col < PAGE_COLS) strip_letter(strip, PAGE_LEFT + col * CELL_W, code);
         }
         if (*p == '\n') p++;
         band(PAGE_TOP + line * CELL_H, CELL_H, strip);
@@ -291,7 +319,7 @@ static void render_page(const char *page, const char *count, uint8_t *strip, pag
     memset(strip, 0xFF, strip_bytes);
     int x = PAGE_W - PAGE_LEFT - (int)strlen(count) * (PIXEL_FONT_WIDTH + 1);
     for (const char *c = count; *c; c++, x += PIXEL_FONT_WIDTH + 1) {
-        strip_glyph(strip, x, 1, 1, (unsigned char)*c);
+        strip_small(strip, x, 3, (unsigned char)*c);
     }
     band(PAGE_TOP + PAGE_LINES * CELL_H, PAGE_W - PAGE_TOP - PAGE_LINES * CELL_H, strip);
 }

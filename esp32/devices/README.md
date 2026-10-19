@@ -141,9 +141,9 @@ The Waveshare ESP32-S3-ePaper-1.54G has push-to-talk on BOOT once it is
 paired, through its ES8311 codec, microphone and speaker. Its green LED shows
 the turn, since the e-paper is too slow for it: steady while you talk,
 blinking while the agent works on the reply. Once the reply's text is in,
-its first page shows on the e-paper in ASCII, with "1/3" and so on at the
-bottom right when there are more, until the next turn; the Muse app has all of
-it. BOOT keeps its setup role while voice is not connected and while a pairing
+its first page shows on the e-paper in GNU Unifont's 8x16 letters (Latin,
+Greek, Cyrillic, Armenian and Georgian), with "1/3" and so on at the bottom
+right when there are more, until the next turn; the Muse app has all of it. BOOT keeps its setup role while voice is not connected and while a pairing
 waits for confirmation.
 
 On the Waveshare ESP32-S3-ePaper-1.54G, hold PWR for a second to turn the
