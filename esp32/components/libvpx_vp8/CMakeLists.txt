@@ -29,6 +29,12 @@ if(CONFIG_MUSE_VIDEO_VP8)
     if(CONFIG_IDF_TARGET_ESP32S3)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE MGX_PIE_S3=1)
     endif()
+    # Picture border (src/vpx_scale/yv12config.h): 16 pixels keeps rows
+    # 16-byte aligned for the SIMD code (the S3's bilinear prediction, the
+    # S31's color conversion); 8 elsewhere.
+    if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32S31)
+        target_compile_definitions(${COMPONENT_LIB} PUBLIC VP8_MGX_BORDER=16)
+    endif()
     if(CONFIG_MUSE_VIDEO_VP8_PROF)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE MGX_PROF=1)
     endif()

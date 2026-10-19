@@ -219,7 +219,7 @@ static void yuvconfig2image(vpx_image_t *img, const YV12_BUFFER_CONFIG *yv12,
    * initialize all the fields.*/
   img->fmt = VPX_IMG_FMT_I420;
   img->w = yv12->y_stride;
-  img->h = (yv12->y_height + 2 * VP8BORDERINPIXELS + 15) & ~15;
+  img->h = (yv12->y_height + 2 * yv12->border + 15) & ~15;
   img->d_w = img->r_w = yv12->y_width;
   img->d_h = img->r_h = yv12->y_height;
   img->x_chroma_shift = 1;

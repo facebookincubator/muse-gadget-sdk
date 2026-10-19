@@ -198,6 +198,11 @@ static int get_free_fb(VP8_COMMON *cm) {
 
   assert(i < NUM_YV12_BUFFERS);
   cm->fb_idx_ref_cnt[i] = 1;
+  /* Muse gadget port: pictures are allocated on first use */
+  if (vp8_alloc_fb(cm, i)) {
+    vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                       "Failed to allocate frame buffer");
+  }
   return i;
 }
 

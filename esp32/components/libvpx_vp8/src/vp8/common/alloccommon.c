@@ -58,14 +58,25 @@ int vp8_alloc_frame_buffers(VP8_COMMON *oci, int width, int height) {
 
   if ((height & 0xf) != 0) height += 16 - (height & 0xf);
 
+  /* Muse gadget port: pictures are allocated on first use (vp8_alloc_fb, from
+   * get_free_fb). A stream that refreshes golden and altref with every frame
+   * then never holds more than two. */
   for (i = 0; i < NUM_YV12_BUFFERS; ++i) {
+    YV12_BUFFER_CONFIG *f = &oci->yv12_fb[i];
     oci->fb_idx_ref_cnt[i] = 0;
-    oci->yv12_fb[i].flags = 0;
-    if (vp8_yv12_alloc_frame_buffer(&oci->yv12_fb[i], width, height,
-                                    VP8BORDERINPIXELS) < 0) {
-      goto allocation_fail;
-    }
+    f->flags = 0;
+    /* Geometry now (block offsets are computed from the strides before the
+     * first picture is allocated), memory later; as in yv12config.c. */
+    f->y_width = f->y_crop_width = width;
+    f->y_height = f->y_crop_height = height;
+    f->border = VP8_MGX_BORDER;
+    f->y_stride = VP8_MGX_STRIDE(width, VP8_MGX_BORDER);
+    f->uv_width = f->uv_crop_width = width >> 1;
+    f->uv_height = f->uv_crop_height = height >> 1;
+    f->uv_stride = f->y_stride >> 1;
   }
+  oci->fb_width = width;
+  oci->fb_height = height;
 
   oci->new_fb_idx = 0;
   oci->lst_fb_idx = 1;
@@ -77,10 +88,7 @@ int vp8_alloc_frame_buffers(VP8_COMMON *oci, int width, int height) {
   oci->fb_idx_ref_cnt[2] = 1;
   oci->fb_idx_ref_cnt[3] = 1;
 
-  if (vp8_yv12_alloc_frame_buffer(&oci->temp_scale_frame, width, 16,
-                                  VP8BORDERINPIXELS) < 0) {
-    goto allocation_fail;
-  }
+  /* Muse gadget port: temp_scale_frame is unused by the decoder; not allocated. */
 
   oci->mb_rows = height >> 4;
   oci->mb_cols = width >> 4;
@@ -125,6 +133,13 @@ int vp8_alloc_frame_buffers(VP8_COMMON *oci, int width, int height) {
 allocation_fail:
   vp8_de_alloc_frame_buffers(oci);
   return 1;
+}
+
+int vp8_alloc_fb(VP8_COMMON *oci, int i) {
+  YV12_BUFFER_CONFIG *f = &oci->yv12_fb[i];
+  if (f->buffer_alloc) return 0;
+  return vp8_yv12_alloc_frame_buffer(f, oci->fb_width, oci->fb_height,
+                                     VP8_MGX_BORDER) < 0;
 }
 
 void vp8_setup_version(VP8_COMMON *cm) {

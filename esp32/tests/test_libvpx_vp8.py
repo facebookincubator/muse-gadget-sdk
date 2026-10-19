@@ -16,8 +16,9 @@
 stock libvpx (MD5s of its output in tests/vectors/vp8/md5.txt, from libvpx
 v1.16.0's vpxdec) on streams covering versions 0 to 3, the normal, simple and
 no loop filter, segmentation, four token partitions, error resilience, an
-alt-ref (hidden) frame and repeated keyframes; and its row progress hook
-(tests/libvpx_vp8_harness.c). tests/vectors/vp8/make_vectors.py makes the
+alt-ref (hidden) frame and repeated keyframes; its row progress hook
+(tests/libvpx_vp8_harness.c); and several decoders at once, one thread each
+(tests/libvpx_vp8_threads_harness.c), as the gadget's two bands run. tests/vectors/vp8/make_vectors.py makes the
 streams from a synthetic picture."""
 
 from __future__ import annotations
@@ -62,6 +63,27 @@ class LibvpxVp8Test(unittest.TestCase):
                 self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
                 self.assertIn("progress ok", run.stdout)
                 self.assertEqual(hashlib.md5(out.read_bytes()).hexdigest(), md5)
+
+
+    def test_decoders_side_by_side(self) -> None:
+        """Every stream decoded on its own thread at once, as the gadget runs two bands
+        on two cores: each must match decoding it alone (no state shared between
+        decoder instances; tests/libvpx_vp8_threads_harness.c)."""
+        exe = Path(self.tmp.name, "vp8threads")
+        cc = os.environ.get("CC", "cc")
+        srcs = sorted(str(p) for p in SRC.rglob("*.c"))
+        for border in (8, 16):   # the S3 and S31 build with 16-pixel borders
+            with self.subTest(border=border):
+                build = subprocess.run(
+                    [cc, "-O2", "-w", f"-DVP8_MGX_BORDER={border}", f"-I{SRC}", "-o", str(exe),
+                     str(ROOT / "tests/libvpx_vp8_threads_harness.c"), *srcs, "-lm", "-lpthread"],
+                    capture_output=True, text=True)
+                self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+                streams = sorted(str(p) for p in VEC.glob("*.ivf"))
+                self.assertGreaterEqual(len(streams), 2)
+                run = subprocess.run([str(exe), "10", *streams[:8]], capture_output=True, text=True, timeout=300)
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                self.assertIn("threads ok", run.stdout)
 
 
 if __name__ == "__main__":

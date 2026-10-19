@@ -300,6 +300,11 @@ typedef struct macroblockd {
   DECLARE_ALIGNED(32, unsigned char, y_buf[22 * 32]);
 #endif
   int last_qindex_mgx; /* Muse gadget port: Q index the dequant tables hold */
+
+  /* Muse gadget port: edge emulation's copy of a reference block that
+   * reaches past the small picture border (reconinter.c); per decoder, as
+   * several decoders can run at once (a picture's bands, one per core). */
+  unsigned char emu_buf_mgx[(16 + 5) * (16 + 5)];
 } MACROBLOCKD;
 
 extern void vp8_build_block_doffsets(MACROBLOCKD *x);

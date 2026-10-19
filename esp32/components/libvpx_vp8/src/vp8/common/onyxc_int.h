@@ -80,6 +80,7 @@ typedef struct VP8Common {
   int new_fb_idx, lst_fb_idx, gld_fb_idx, alt_fb_idx;
 
   YV12_BUFFER_CONFIG temp_scale_frame;
+  int fb_width, fb_height; /* Muse gadget port: size for lazily allocated pictures */
 
 #if CONFIG_POSTPROC
   YV12_BUFFER_CONFIG post_proc_buffer;

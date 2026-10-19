@@ -21,6 +21,23 @@ extern "C" {
 #include "vpx/vpx_integer.h"
 
 #define VP8BORDERINPIXELS 32
+/* Muse gadget port: the VP8 decoder's frame border. libvpx uses 32 so that motion
+ * vectors clamped up to 19 pixels outside the picture still land in memory;
+ * a smaller border saves RAM and reconinter.c fetches such blocks through an
+ * edge-emulation buffer instead (same pixels, bit-exact). Must be >= 8:
+ * intra prediction writes x = -1..W+3 of the row above. */
+#ifndef VP8_MGX_BORDER
+#define VP8_MGX_BORDER 8
+#endif
+
+/* Muse gadget port: luma stride for a picture w pixels wide with border b:
+ * 16-byte aligned (C, and the S3/S31 SIMD code), and never a multiple of
+ * 256 bytes, whose rows (and chroma rows, half as far apart) would fall in
+ * the same cache sets (8-pixel borders made 480 px pictures 512 bytes
+ * wide; libvpx's are 544). */
+#define VP8_MGX_STRIDE16(w, b) ((((w) + 2 * (b)) + 15) & ~15)
+#define VP8_MGX_STRIDE(w, b) \
+  (VP8_MGX_STRIDE16(w, b) + ((VP8_MGX_STRIDE16(w, b) & 255) ? 0 : 32))
 #define VP9INNERBORDERINPIXELS 96
 #define VP9_INTERP_EXTEND 4
 #define VP9_ENC_BORDER_IN_PIXELS 160

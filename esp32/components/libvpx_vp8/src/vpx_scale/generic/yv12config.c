@@ -53,7 +53,8 @@ int vp8_yv12_realloc_frame_buffer(YV12_BUFFER_CONFIG *ybf, int width,
   if (ybf) {
     int aligned_width = (width + 15) & ~15;
     int aligned_height = (height + 15) & ~15;
-    int y_stride = ((aligned_width + 2 * border) + 31) & ~31;
+    /* Muse gadget port: 16-byte stride alignment (C code only; libvpx uses 32 for SIMD) */
+    int y_stride = VP8_MGX_STRIDE(aligned_width, border);
     int yplane_size = (aligned_height + 2 * border) * y_stride;
     int uv_width = aligned_width >> 1;
     int uv_height = aligned_height >> 1;
@@ -87,7 +88,8 @@ int vp8_yv12_realloc_frame_buffer(YV12_BUFFER_CONFIG *ybf, int width,
      * the start of the chroma rows without introducing an arbitrary gap
      * between planes, which would break the semantics of things like
      * vpx_img_set_rect(). */
-    if (border & 0x1f) return -3;
+    /* Muse gadget port: any border >= 8 (VP8_MGX_BORDER); alignment only matters to SIMD. */
+    if (border < 8 || (border & 7)) return -3;
 
     ybf->y_crop_width = width;
     ybf->y_crop_height = height;

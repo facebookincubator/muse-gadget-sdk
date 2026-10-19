@@ -21,6 +21,7 @@ void vp8_create_common(VP8_COMMON *oci);
 void vp8_remove_common(VP8_COMMON *oci);
 void vp8_de_alloc_frame_buffers(VP8_COMMON *oci);
 int vp8_alloc_frame_buffers(VP8_COMMON *oci, int width, int height);
+int vp8_alloc_fb(VP8_COMMON *oci, int i); /* Muse gadget port: lazy picture allocation */
 void vp8_setup_version(VP8_COMMON *cm);
 
 #ifdef __cplusplus

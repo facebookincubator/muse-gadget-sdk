@@ -50,6 +50,18 @@ segmentation, 240 to 480 px).
   SIMD (`src/vp8/common/xtensa/bilinear_pie.S`, `MGX_PIE_S3`): 16-bit lanes,
   the same arithmetic as the C; checked against the C on 4000 random blocks
   in Espressif's QEMU (esp32s3). About 2 ms a frame less at 232 px.
+- Memory (`vp8/common/alloccommon.c`, `vp8/common/reconinter.c`,
+  `vpx_scale/`): pictures are allocated when a frame first needs one, so a
+  stream holds only as many as its references use (libvpx allocates four up
+  front, plus a scratch picture the decoder never uses). Their border is 8
+  pixels (16 on the S3 and the S31, whose SIMD code wants 16-byte aligned
+  rows) instead of 32: a reference block that reaches past it is copied
+  through an edge-emulation buffer with its coordinates clamped into the
+  picture, which gives the pixels the wider border would have held. The
+  buffer is in each decoder's state, as two decoders run at once (a
+  picture's two bands, one per core). A stride that would be a multiple of
+  256 bytes gets 32 more, so a block's rows don't share cache sets (480 px:
+  544, as upstream).
 - Bench builds (`CONFIG_MUSE_VIDEO_VP8_PROF`, `MGX_PROF`) time each stage
   with the cycle counter; `mg.video` logs them.
 - Progress (`vp8dx_mgx_set_progress()`, `vpx/vp8dx.h`): the decoder reports
@@ -63,8 +75,10 @@ without the motion vector restriction; tinyh264 takes 7.5 M on the same
 clips at the same rate. At 240 px and 250 kb/s: 1.8 M against 2.7 M. The
 per-macroblock code can run from IRAM (`linker.lf`, about 28 KB on the S3,
 with `CONFIG_MUSE_VIDEO_DECODER_IRAM`).
-Memory: four frame buffers with 32-pixel borders, in PSRAM (1.8 MB at 480
-px, 0.55 MB at 240).
+Memory: one picture per reference the stream holds (two or three), with
+8-pixel borders (16 on the S3 and S31): 65 KB each at 180 px, 98 KB at 240,
+369 KB at 480 (libvpx's four with 32-pixel borders took 450 KB at 180 px,
+1.8 MB at 480).
 
 On the Waveshare ESP32-S3-Touch-AMOLED-1.75C (232 px, two times upscaled,
 350 kb/s, Muse Gadgets Test's live path on four xiph.org test clips, decoder in
