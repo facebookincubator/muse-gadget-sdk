@@ -38,6 +38,20 @@ DECLARE_ALIGNED(16, const short, vp8_sub_pel_filters[8][6]) = {
  * 2-D case keeps the first pass in bytes (it is clamped to 0..255 anyway);
  * the odd sixtap positions have zero outer taps and use four. */
 
+/* Loop unrolling and per-width copies of the 6-tap filter make it faster,
+ * and bigger: VP8_MGX_COMPACT (CONFIG_MUSE_VP8_IRAM_COMPACT) keeps the
+ * algorithm (same arithmetic) without them, for builds that keep this code
+ * in IRAM. */
+#ifndef VP8_MGX_COMPACT
+#define VP8_MGX_COMPACT 0
+#endif
+#if VP8_MGX_COMPACT
+#define MGX_UNROLL(n)
+#else
+#define MGX_PRAGMA(x) _Pragma(#x)
+#define MGX_UNROLL(n) MGX_PRAGMA(GCC unroll n)
+#endif
+
 static inline unsigned char clamp255(int v) {
   if ((unsigned)v > 255u) v = ~v >> 31 & 255; /* rarely taken */
   return (unsigned char)v;
@@ -56,7 +70,7 @@ static inline __attribute__((always_inline)) void sixtap_1d(
     if (f0 == 0 && f5 == 0) {
       for (r = 0; r < h; ++r, src += src_stride, dst += dst_stride) {
         int a1 = src[-1], a2 = src[0], a3 = src[1];
-#pragma GCC unroll 16
+MGX_UNROLL(16)
         for (c = 0; c < w; ++c) {
           const int a4 = src[c + 2];
           dst[c] = clamp255((a1 * f1 + a2 * f2 + a3 * f3 + a4 * f4 + 64) >> 7);
@@ -66,7 +80,7 @@ static inline __attribute__((always_inline)) void sixtap_1d(
     } else {
       for (r = 0; r < h; ++r, src += src_stride, dst += dst_stride) {
         int a0 = src[-2], a1 = src[-1], a2 = src[0], a3 = src[1], a4 = src[2];
-#pragma GCC unroll 16
+MGX_UNROLL(16)
         for (c = 0; c < w; ++c) {
           const int a5 = src[c + 3];
           dst[c] = clamp255((a0 * f0 + a1 * f1 + a2 * f2 + a3 * f3 + a4 * f4 +
@@ -82,7 +96,7 @@ static inline __attribute__((always_inline)) void sixtap_1d(
       if (f0 == 0 && f5 == 0) {
         int a1 = p[-step], a2 = p[0], a3 = p[step];
         p += 2 * step;
-#pragma GCC unroll 4
+MGX_UNROLL(4)
         for (r = 0; r < h; ++r, p += step, d += dst_stride) {
           const int a4 = p[0];
           *d = clamp255((a1 * f1 + a2 * f2 + a3 * f3 + a4 * f4 + 64) >> 7);
@@ -92,7 +106,7 @@ static inline __attribute__((always_inline)) void sixtap_1d(
         int a0 = p[-2 * step], a1 = p[-step], a2 = p[0], a3 = p[step],
             a4 = p[2 * step];
         p += 3 * step;
-#pragma GCC unroll 4
+MGX_UNROLL(4)
         for (r = 0; r < h; ++r, p += step, d += dst_stride) {
           const int a5 = p[0];
           *d = clamp255((a0 * f0 + a1 * f1 + a2 * f2 + a3 * f3 + a4 * f4 +
@@ -104,13 +118,18 @@ static inline __attribute__((always_inline)) void sixtap_1d(
   }
 }
 
-/* One out-of-line copy per block width, each with its inner loop unrolled. */
+/* One out-of-line copy per block width, each with its inner loop unrolled
+ * (one copy for all widths when compact). */
 static void __attribute__((noinline)) sixtap_1d_w(
     const unsigned char *src, int src_stride, int step, unsigned char *dst,
     int dst_stride, int w, int h, const short *f) {
+#if VP8_MGX_COMPACT
+  sixtap_1d(src, src_stride, step, dst, dst_stride, w, h, f);
+#else
   if (w == 16) sixtap_1d(src, src_stride, step, dst, dst_stride, 16, h, f);
   else if (w == 8) sixtap_1d(src, src_stride, step, dst, dst_stride, 8, h, f);
   else sixtap_1d(src, src_stride, step, dst, dst_stride, 4, h, f);
+#endif
 }
 
 static void sixtap_predict(unsigned char *src, int src_stride, int xoffset,
@@ -178,7 +197,7 @@ static inline __attribute__((always_inline)) void bil_1d(
      * left one of the next */
     for (r = 0; r < h; ++r) {
       uint32_t a = src[0];
-#pragma GCC unroll 16
+MGX_UNROLL(16)
       for (c = 0; c < w; c += 2) {
         const uint32_t b = src[c + 1], n = src[c + 2];
         const uint32_t v = ((a | b << 16) * w0 + (b | n << 16) * w1 + 0x00400040u) >> 7;
@@ -195,7 +214,7 @@ static inline __attribute__((always_inline)) void bil_1d(
       const unsigned char *p = src + c;
       unsigned char *d = dst + c;
       uint32_t t = pair(p, 1);
-#pragma GCC unroll 4
+MGX_UNROLL(4)
       for (r = 0; r < h; ++r) {
         const uint32_t u = pair(p += step, 1);
         const uint32_t v = (t * w0 + u * w1 + 0x00400040u) >> 7;

@@ -348,7 +348,8 @@ menu "Muse"
         default n
         help
             tinyh264's per-macroblock code and tables in IRAM (about 44 KB;
-            with MUSE_VIDEO_VP8, libvpx_vp8's too, about 28 KB more),
+            with MUSE_VIDEO_VP8, libvpx_vp8's too, by default its compact
+            set, about 33 KB more: MUSE_VP8_IRAM),
             so the decoder never waits on the instruction cache. On the S3
             that comes out of the heap; a board running Wi-Fi, BLE and the
             UI can't spare it. Measured on the Waveshare S3 1.75C: see

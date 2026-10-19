@@ -99,8 +99,18 @@ Cost, from instruction counts in QEMU (the S31's base ISA), per frame at
 (version 1, loop filter off, decoder-friendly motion vectors), 7.2 M
 without the motion vector restriction; tinyh264 takes 7.5 M on the same
 clips at the same rate. At 240 px and 250 kb/s: 1.8 M against 2.7 M. The
-per-macroblock code can run from IRAM (`linker.lf`, about 28 KB on the S3,
-with `CONFIG_MUSE_VIDEO_DECODER_IRAM`).
+per-macroblock code can run from IRAM (`linker.lf`, `CONFIG_MUSE_VP8_IRAM`):
+full (every per-macroblock object with the unrolled filters, about 45 KB on
+the S31), compact (the default with `CONFIG_MUSE_VIDEO_DECODER_IRAM`, about
+33 KB: the same objects compiled without loop unrolling or the 6-tap
+filter's per-width copies, `VP8_MGX_COMPACT`, bit-exact, and the low-memory
+mode's code left in flash), hot (tokens, inverse transforms, inter
+prediction and the bilinear filters, the bulk of the work for phone-style
+streams; about 12 KB) or none.
+All of the decoder's memory comes from PSRAM where the board has some, else
+from DMA-capable internal RAM (`vpx_mem/vpx_mem.c`): plain malloc() gave
+small blocks such as the entropy contexts internal RAM, and LP RAM once that
+ran low, which is many times slower.
 Memory: one picture per reference the stream holds (two or three), with
 8-pixel borders (16 on the S3 and S31): 65 KB each at 180 px, 98 KB at 240,
 369 KB at 480 (libvpx's four with 32-pixel borders took 450 KB at 180 px,

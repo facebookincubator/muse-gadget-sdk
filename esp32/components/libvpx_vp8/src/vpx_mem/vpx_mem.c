@@ -26,6 +26,27 @@
 #endif
 
 // Returns 0 in case of overflow of nmemb * size.
+/* Muse gadget port: on ESP-IDF every decoder block comes from PSRAM where
+ * the board has some, otherwise from internal RAM that DMA can reach. Never
+ * plain malloc(): under CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL it puts small
+ * blocks (the entropy contexts, the codec state) in internal RAM, and once
+ * that runs low the heap hands out LP RAM (CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_
+ * MEM_AS_HEAP), many times slower; LP RAM has no MALLOC_CAP_DMA. */
+#if defined(ESP_PLATFORM)
+#include "esp_heap_caps.h"
+#include "sdkconfig.h"
+static void *mgx_malloc(size_t n) {
+#if CONFIG_SPIRAM
+  void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (p) return p;
+#endif
+  return heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+}
+#define MGX_MALLOC(n) mgx_malloc(n)
+#else
+#define MGX_MALLOC(n) malloc(n)
+#endif
+
 static int check_size_argument_overflow(uint64_t nmemb, uint64_t size) {
   const uint64_t total_size = nmemb * size;
   if (nmemb == 0) return 1;
@@ -59,7 +80,7 @@ void *vpx_memalign(size_t align, size_t size) {
   const uint64_t aligned_size = get_aligned_malloc_size(size, align);
   if (!check_size_argument_overflow(1, aligned_size)) return NULL;
 
-  addr = malloc((size_t)aligned_size);
+  addr = MGX_MALLOC((size_t)aligned_size);
   if (addr) {
     x = align_addr((unsigned char *)addr + ADDRESS_STORAGE_SIZE, align);
     set_actual_malloc_address(x, addr);

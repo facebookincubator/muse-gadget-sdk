@@ -83,7 +83,10 @@ class MuseVideoTest(unittest.TestCase):
         self.assertIn("if(CONFIG_MUSE_VIDEO)", tiny)
         vpx = (ROOT / "components/libvpx_vp8/CMakeLists.txt").read_text()
         self.assertIn("if(CONFIG_MUSE_VIDEO_VP8)", vpx)
-        self.assertIn("if MUSE_VIDEO_DECODER_IRAM = y:", (ROOT / "components/libvpx_vp8/linker.lf").read_text())
+        # VP8's IRAM placement is a choice that follows the decoders' IRAM option.
+        self.assertIn("default MUSE_VP8_IRAM_COMPACT if MUSE_VIDEO_DECODER_IRAM",
+                      (ROOT / "components/libvpx_vp8/Kconfig").read_text())
+        self.assertIn("elif MUSE_VP8_IRAM_COMPACT = y:", (ROOT / "components/libvpx_vp8/linker.lf").read_text())
         # The ring resyncs by the stream's codec, whatever the transport.
         self.assertIn("t->ring->codec = vp->codec;", video)
         # A replaced stream waits for both pictures, as a stopped one does.

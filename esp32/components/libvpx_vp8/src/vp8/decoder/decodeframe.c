@@ -486,6 +486,11 @@ static void mgx_report(VP8D_COMP *pbi, YV12_BUFFER_CONFIG *fb, int rows) {
  * before any row decodes, so this is known in advance; a frame that would
  * need a deeper ring gets a picture of its own instead. Same reads of the
  * same values: bit-exact. */
+/* Low-memory mode's per-frame and per-row code: out of line, under its own
+ * name, so linker.lf can leave it in flash when the rest of this file is in
+ * IRAM (CONFIG_MUSE_VP8_IRAM_COMPACT). noclone keeps the names. */
+#define MGX_LOWMEM_FN __attribute__((noinline, noclone))
+
 static int lowmem_old_needed(const VP8_COMMON *pc, int b) {
   /* swap_frame_buffers() on indexes, -1 standing for the new picture */
   int lst = pc->lst_fb_idx, gld = pc->gld_fb_idx, alt = pc->alt_fb_idx;
@@ -507,7 +512,7 @@ static int lowmem_writable(const VP8D_COMP *pbi, int r) {
   return w;
 }
 
-static int lowmem_fits(VP8D_COMP *pbi, int b) {
+static int MGX_LOWMEM_FN lowmem_fits(VP8D_COMP *pbi, int b) {
   VP8_COMMON *const pc = &pbi->common;
   const int rows = pc->mb_rows, cols = pc->mb_cols, k = pbi->lowmem_k;
   const int hy = pc->yv12_fb[b].y_height, hc = pc->yv12_fb[b].uv_height;
@@ -577,7 +582,7 @@ static int lowmem_fits(VP8D_COMP *pbi, int b) {
 /* The ring: k macroblock rows (slots) with the pictures' strides and side
  * borders, and 4 guard lines above slot 0 (ring_guard()); nothing reads
  * below. */
-static int lowmem_ring_alloc(YV12_BUFFER_CONFIG *rf,
+static int MGX_LOWMEM_FN lowmem_ring_alloc(YV12_BUFFER_CONFIG *rf,
                              const YV12_BUFFER_CONFIG *g, int k) {
   const int ys = g->y_stride, uvs = g->uv_stride, bd = g->border;
   const size_t ysz = (size_t)(k * 16 + 4) * ys, uvsz = (size_t)(k * 8 + 4) * uvs;
@@ -602,7 +607,7 @@ static int lowmem_ring_alloc(YV12_BUFFER_CONFIG *rf,
 /* Picks the new picture's memory (low-memory mode; called once the modes
  * are known): B itself (key frames, which read nothing; inter frames through
  * the ring), else a picture of its own. */
-static void lowmem_plan(VP8D_COMP *pbi) {
+static void MGX_LOWMEM_FN lowmem_plan(VP8D_COMP *pbi) {
   VP8_COMMON *const pc = &pbi->common;
   const int b = pc->lst_fb_idx, nf = pc->new_fb_idx;
   int i;
@@ -662,7 +667,7 @@ static unsigned char *ring_row(const YV12_BUFFER_CONFIG *rf, int p, int x,
  * before (in the last slot) while the row in slot 0 decodes and filters
  * (intra prediction's top line, the loop filter's reach across the edge).
  * to_guard: row x's bottom lines into the guard; else back. */
-static void ring_guard(const YV12_BUFFER_CONFIG *rf, int k, int x,
+static void MGX_LOWMEM_FN ring_guard(const YV12_BUFFER_CONFIG *rf, int k, int x,
                        int to_guard) {
   int p;
   for (p = 0; p < 3; ++p) {
@@ -677,7 +682,7 @@ static void ring_guard(const YV12_BUFFER_CONFIG *rf, int k, int x,
 
 /* Ring rows [from, to) over picture f, with the left and right borders
  * yv12_extend_frame_left_right_c() gives. */
-static void lowmem_put(YV12_BUFFER_CONFIG *f, const YV12_BUFFER_CONFIG *rf,
+static void MGX_LOWMEM_FN lowmem_put(YV12_BUFFER_CONFIG *f, const YV12_BUFFER_CONFIG *rf,
                        int k, int from, int to) {
   int p, x;
   for (p = 0; p < 3; ++p) {
@@ -701,7 +706,7 @@ static void lowmem_put(YV12_BUFFER_CONFIG *f, const YV12_BUFFER_CONFIG *rf,
 /* The stashed macroblocks' predictions, made before the ring writes anything
  * back (the ring's first rows serve as their scratch: same strides, so the
  * block offsets hold). */
-static void lowmem_prestash(VP8D_COMP *pbi, unsigned char *ref[][3]) {
+static void MGX_LOWMEM_FN lowmem_prestash(VP8D_COMP *pbi, unsigned char *ref[][3]) {
   VP8_COMMON *const pc = &pbi->common;
   MACROBLOCKD *const xd = &pbi->mb;
   MODE_INFO *const saved_mi = xd->mode_info_context;
