@@ -68,6 +68,9 @@ class MuseVideoTest(unittest.TestCase):
         self.assertIn('default "n"', mdns)
         app = (MUSE / "muse_app.c").read_text()
         self.assertIn("#if CONFIG_MUSE_VIDEO_WIFI\n    muse_video_wifi_start();", app)
+        # The touch boards' settings decide the Phone camera row as they're
+        # built, so the transport has to be there before the UI.
+        self.assertLess(app.index("muse_video_wifi_start();"), app.index("muse_ui_start()"))
         # Any button leaves the view; the console opens and closes it.
         inp = (MUSE / "muse_input.c").read_text()
         self.assertIn("muse_video_close();\n            ev &= ~(presses | MUSE_BTN_POWER_LONG);", inp)
@@ -83,6 +86,10 @@ class MuseVideoTest(unittest.TestCase):
         self.assertIn("if MUSE_VIDEO_DECODER_IRAM = y:", (ROOT / "components/libvpx_vp8/linker.lf").read_text())
         # The ring resyncs by the stream's codec, whatever the transport.
         self.assertIn("t->ring->codec = vp->codec;", video)
+        # A replaced stream waits for both pictures, as a stopped one does.
+        swap = video[video.index("if (!dec || gen != s_gen) {"):]
+        swap = swap[:swap.index("muse_vdec_close(dec);")]
+        self.assertEqual(swap.count("xSemaphoreTake(s_slots, portMAX_DELAY);"), 2)
 
     def test_radio_held_for_a_stream(self) -> None:
         """A stream keeps Wi-Fi out of modem sleep and BLE quiet, and gives both back once."""

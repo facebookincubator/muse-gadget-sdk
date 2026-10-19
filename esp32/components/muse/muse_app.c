@@ -73,6 +73,11 @@ void muse_app_run(const muse_board_t *board)
     muse_state_init();
     muse_battery_init();
     muse_state_set_caption("WAKING UP...");
+    /* Before the UI: the touch boards' settings show Phone camera only when
+     * a transport is there as they're built. Its server waits for Wi-Fi. */
+#if CONFIG_MUSE_VIDEO_WIFI
+    muse_video_wifi_start();
+#endif
     ESP_ERROR_CHECK(muse_ui_start());
     ESP_LOGI(TAG, "UI built: free internal %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
@@ -93,9 +98,6 @@ void muse_app_run(const muse_board_t *board)
     }
 
     muse_hatch_start();
-#if CONFIG_MUSE_VIDEO_WIFI
-    muse_video_wifi_start();   /* waits for Wi-Fi itself */
-#endif
     /* Home Link owns the radios; these just hand it the saved settings. */
     muse_wifi_apply();
     muse_ble_apply();

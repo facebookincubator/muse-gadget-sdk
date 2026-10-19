@@ -429,6 +429,15 @@ static void show_task(void *arg)
         int pw = sl->w, ph = sl->h;
         int vis_w = (s_params.width && s_params.width <= pw ? s_params.width : pw) & ~1;
         int vis_h = (s_params.height && s_params.height <= ph ? s_params.height : ph) & ~3;
+        if (vis_w <= 0 || vis_h <= 0) {
+            /* Nothing to show, and nothing to divide by below. */
+            s_dropped++;
+            while (!sl->done) {
+                vTaskDelay(1);
+            }
+            xSemaphoreGive(s_slots);
+            continue;
+        }
         /* Two times upscaled when that fits the panel; one to one when the
          * picture is the panel's size or more; between the two (on the S31),
          * scaled up to fill the panel's width. */
@@ -721,6 +730,14 @@ static void decode_task(void *arg)
             continue;
         }
         if (!dec || gen != s_gen) {
+            if (dec) {
+                /* A new stream replaced this one: the show task may still
+                 * hold its pictures, as when the stream stops. */
+                xSemaphoreTake(s_slots, portMAX_DELAY);
+                xSemaphoreTake(s_slots, portMAX_DELAY);
+                xSemaphoreGive(s_slots);
+                xSemaphoreGive(s_slots);
+            }
             muse_vdec_close(dec);
             gen = s_gen;
             dec = muse_vdec_open(s_params.codec, s_params.width, s_params.height);

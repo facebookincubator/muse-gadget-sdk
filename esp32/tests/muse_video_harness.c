@@ -253,6 +253,16 @@ static void test_wire(void)
     const char *late = "{\"type\":\"start\",\"width\":240,\"height\":240,\"playout_ms\":900}";
     muse_video_wire_parse(late, strlen(late), &p);
     CHECK(muse_video_wire_check(&p, &c) == MUSE_VIDEO_START_INVALID);
+    /* Sizes the show task's rounding (width to 2, height to 4) leaves empty. */
+    const char *thin = "{\"type\":\"start\",\"width\":1,\"height\":232}";
+    muse_video_wire_parse(thin, strlen(thin), &p);
+    CHECK(muse_video_wire_check(&p, &c) == MUSE_VIDEO_START_INVALID);
+    const char *flat = "{\"type\":\"start\",\"width\":232,\"height\":3}";
+    muse_video_wire_parse(flat, strlen(flat), &p);
+    CHECK(muse_video_wire_check(&p, &c) == MUSE_VIDEO_START_INVALID);
+    const char *least = "{\"type\":\"start\",\"width\":2,\"height\":4}";
+    muse_video_wire_parse(least, strlen(least), &p);
+    CHECK(muse_video_wire_check(&p, &c) == MUSE_VIDEO_START_OK);
 
     CHECK(muse_video_wire_parse("{\"type\":\"stop\"}", 15, NULL) == MUSE_VIDEO_MSG_STOP);
     CHECK(muse_video_wire_parse("{\"type\":\"status\"}", 17, NULL) == MUSE_VIDEO_MSG_STATUS);

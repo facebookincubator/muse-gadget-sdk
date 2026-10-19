@@ -78,7 +78,9 @@ muse_video_start_check_t muse_video_wire_check(const muse_video_params_t *p, con
     }
     uint8_t bands = p->tiles ? p->tiles : 1;
     uint8_t max_bands = c->max_tiles ? c->max_tiles : 1;
-    if (!p->width || !p->height || p->width > c->max_w || p->height > c->max_h || !p->tiles ||
+    /* The show task rounds the width down to 2 and the height to 4: a size
+     * that rounds to nothing would leave it scaling a zero-sized picture. */
+    if (p->width < 2 || p->height < 4 || p->width > c->max_w || p->height > c->max_h || !p->tiles ||
         bands > max_bands || p->playout_ms > c->max_playout_ms || (p->fps && p->fps > c->max_fps)) {
         return MUSE_VIDEO_START_INVALID;
     }

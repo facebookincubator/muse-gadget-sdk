@@ -269,13 +269,14 @@ static void greet(void)
     }
 }
 
-static void accept_client(int lsock)
+/* True when the new connection took the client's place. */
+static bool accept_client(int lsock)
 {
     struct sockaddr_in from;
     socklen_t len = sizeof(from);
     int sock = accept(lsock, (struct sockaddr *)&from, &len);
     if (sock < 0) {
-        return;
+        return false;
     }
     char ip[16];
     inet_ntoa_r(from.sin_addr, ip, sizeof(ip));
@@ -285,7 +286,7 @@ static void accept_client(int lsock)
         if ((esp_timer_get_time() - s_last_rx_us) / 1000 < ACTIVE_MS) {
             ESP_LOGW(TAG, "connection from %s turned away: a client is connected", ip);
             close(sock);
-            return;
+            return false;
         }
         close_client("replaced by a new connection");
     }
@@ -306,6 +307,7 @@ static void accept_client(int lsock)
     xSemaphoreGive(s_tx_lock);
     ESP_LOGI(TAG, "client connected from %s", ip);
     greet();
+    return true;
 }
 
 /* Waits until the station has an address. */
@@ -445,8 +447,11 @@ static void server_task(void *arg)
             continue;
         }
         if (FD_ISSET(lsock, &rd)) {
-            accept_client(lsock);
-            st = RX_TYPE;
+            /* One turned away leaves the talking client mid-message. */
+            if (accept_client(lsock)) {
+                st = RX_TYPE;
+                have = 0;
+            }
             continue;
         }
         if (st == RX_VHDR_PUT && s_streaming && muse_vstream_available(&s_ring) >= MUSE_VIDEO_FRAME_HEADER_LEN) {

@@ -217,6 +217,10 @@ class UntrustedVideoTest(unittest.TestCase):
         self.assertIn('close_client("said nothing")', wifi)
         self.assertIn('close_client("not reading")', wifi)
         self.assertIn("turned away: a client is connected", wifi)
+        # Turning one away leaves the talking client's parser where it was.
+        self.assertIn("if (accept_client(lsock)) {\n                st = RX_TYPE;", wifi)
+        video = (MUSE / "muse_video.c").read_text()
+        self.assertIn("if (vis_w <= 0 || vis_h <= 0) {", video)
         kc = (MUSE / "Kconfig").read_text()
         opt = kc[kc.index("config MUSE_VIDEO_WIFI_START_ANYTIME"):]
         self.assertIn("default n", opt[:opt.index("help")])
