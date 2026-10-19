@@ -26,11 +26,10 @@ extern "C" {
 
 typedef enum { NORMAL_LOOPFILTER = 0, SIMPLE_LOOPFILTER = 1 } LOOPFILTERTYPE;
 
-#if VPX_ARCH_ARM
+/* Muse gadget port: the C filters read one byte of each threshold (as on
+ * ARM upstream); 16 copies of each were for x86 SIMD: 2.9 KB of decoder
+ * state. */
 #define SIMD_WIDTH 1
-#else
-#define SIMD_WIDTH 16
-#endif
 
 /* Need to align this structure so when it is declared and
  * passed it can be loaded into vector registers.
