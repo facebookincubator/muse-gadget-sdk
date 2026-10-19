@@ -640,7 +640,8 @@ public final class MainActivity extends Activity
         } catch (Exception e) {
             Log.e(TAG, "clip " + name + " failed", e);
             failedClips.add(key);
-            linkStatus = clipLabel(name) + " failed: " + e + (sample != null ? " (needs the Internet)" : "");
+            linkStatus = clipLabel(name) + " failed: " + e
+                    + (sample != null && e instanceof java.io.IOException ? " (needs the Internet)" : "");
             return null;
         }
     }

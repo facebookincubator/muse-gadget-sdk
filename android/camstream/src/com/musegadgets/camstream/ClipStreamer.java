@@ -270,6 +270,13 @@ final class ClipStreamer {
         final int[] accY, accU, accV;
         final byte[] row;
         final boolean[] inY, inC;
+        /* A source square smaller than the clip (Big Buck Bunny's file is
+         * 640x360: a 360 px square for a 480 px gadget) is scaled up
+         * bilinearly instead: the area average has no source pixel for
+         * some destination pixels. */
+        final boolean up;
+        final int[][] lerpY, lerpC;
+        final byte[] srcY, srcC;
 
         Scaler(int w, int h, int size, boolean round) {
             this.size = size & ~1;
@@ -290,6 +297,11 @@ final class ClipStreamer {
             row = new byte[Math.max(w, 2 * w)];
             inY = new boolean[s * s];
             inC = new boolean[cs * cs];
+            up = side < s;
+            lerpY = up ? lerp(side, s) : null;
+            lerpC = up ? lerp(side / 2, cs) : null;
+            srcY = up ? new byte[side * side] : null;
+            srcC = up ? new byte[(side / 2) * (side / 2)] : null;
             /* Black only in the 4x4 blocks wholly outside the circle plus
              * MASK_MARGIN pixels (as tools/clipenc's jpanel.py and the
              * camera): an edge on the transform grid costs fewer bits than
@@ -326,6 +338,20 @@ final class ClipStreamer {
             return m;
         }
 
+        /* Bilinear taps for each destination index, pixel centres aligned:
+         * the two source indices and the second one's weight in 1/256. */
+        private static int[][] lerp(int src, int dst) {
+            int[] i0 = new int[dst], i1 = new int[dst], w = new int[dst];
+            for (int i = 0; i < dst; i++) {
+                double f = Math.max(0.0, (i + 0.5) * src / dst - 0.5);
+                int a = Math.min((int) f, src - 1);
+                i0[i] = a;
+                i1[i] = Math.min(a + 1, src - 1);
+                w[i] = (int) Math.round((f - a) * 256);
+            }
+            return new int[][] { i0, i1, w };
+        }
+
         private static int[] counts(int[] m, int dst) {
             int[] c = new int[dst];
             for (int v : m) {
@@ -338,6 +364,16 @@ final class ClipStreamer {
             int s = size, cs = s / 2;
             Image.Plane[] p = img.getPlanes();
             int cropX = img.getCropRect().left + x0, cropY = img.getCropRect().top + y0;
+            if (up) {
+                byte[] out = new byte[s * s * 3 / 2];
+                load(p[0], cropX, cropY, side, srcY);
+                upscale(srcY, side, lerpY, s, out, 0, inY, 16);
+                load(p[1], cropX / 2, cropY / 2, side / 2, srcC);
+                upscale(srcC, side / 2, lerpC, cs, out, s * s, inC, 128);
+                load(p[2], cropX / 2, cropY / 2, side / 2, srcC);
+                upscale(srcC, side / 2, lerpC, cs, out, s * s + cs * cs, inC, 128);
+                return out;
+            }
             java.util.Arrays.fill(accY, 0);
             java.util.Arrays.fill(accU, 0);
             java.util.Arrays.fill(accV, 0);
@@ -362,6 +398,38 @@ final class ClipStreamer {
                 }
             }
             return out;
+        }
+
+        /* The n x n square at (ox, oy) of a plane, packed. */
+        private void load(Image.Plane plane, int ox, int oy, int n, byte[] dst) {
+            ByteBuffer b = plane.getBuffer();
+            int rs = plane.getRowStride(), ps = plane.getPixelStride();
+            int len = (n - 1) * ps + 1;
+            for (int y = 0; y < n; y++) {
+                b.position((oy + y) * rs + ox * ps);
+                b.get(row, 0, Math.min(len, b.remaining()));
+                for (int x = 0, k = 0; x < n; x++, k += ps) {
+                    dst[y * n + x] = row[k];
+                }
+            }
+        }
+
+        private static void upscale(byte[] src, int n, int[][] t, int dw, byte[] out, int off, boolean[] in, int fill) {
+            int[] i0 = t[0], i1 = t[1], w = t[2];
+            for (int y = 0; y < dw; y++) {
+                int r0 = i0[y] * n, r1 = i1[y] * n, wy = w[y];
+                for (int x = 0; x < dw; x++) {
+                    int i = y * dw + x;
+                    if (!in[i]) {
+                        out[off + i] = (byte) fill;
+                        continue;
+                    }
+                    int wx = w[x];
+                    int top = (src[r0 + i0[x]] & 0xff) * (256 - wx) + (src[r0 + i1[x]] & 0xff) * wx;
+                    int bot = (src[r1 + i0[x]] & 0xff) * (256 - wx) + (src[r1 + i1[x]] & 0xff) * wx;
+                    out[off + i] = (byte) ((top * (256 - wy) + bot * wy + 32768) >> 16);
+                }
+            }
         }
 
         private void accumulate(Image.Plane plane, int ox, int oy, int n, int[] xmap, int[] ymap, int[] acc, int dw) {

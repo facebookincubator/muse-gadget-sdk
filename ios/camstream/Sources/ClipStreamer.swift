@@ -367,9 +367,14 @@ final class ClipStreamer {
  * the centred square adds to the one destination pixel it falls in, then
  * each is divided by its count (keeps fur and edges crisp without aliasing).
  * Black only in the 4x4 blocks wholly outside the circle plus the margin.
+ * A source square smaller than the clip (Big Buck Bunny's file is 640x360: a
+ * 360 px square for a 480 px gadget) is scaled up bilinearly instead: the
+ * area average has no source pixel for some destination pixels.
  */
 final class AreaScaler {
     let size: Int, side: Int, x0: Int, y0: Int
+    private let up: Bool
+    private let lerpY: ([Int], [Int], [Int]), lerpC: ([Int], [Int], [Int])
     private let xmapY: [Int], xmapC: [Int], cntY: [Int], cntC: [Int]
     private var accY: [Int], accU: [Int], accV: [Int]
     private var inY: [Bool], inC: [Bool]
@@ -386,6 +391,22 @@ final class AreaScaler {
             for v in m { c[v] += 1 }
             return c
         }
+        /* Bilinear taps per destination index, pixel centres aligned: the two
+         * source indices and the second one's weight in 1/256. */
+        func lerp(_ src: Int, _ dst: Int) -> ([Int], [Int], [Int]) {
+            var i0 = [Int](repeating: 0, count: dst), i1 = i0, w = i0
+            for i in 0..<dst {
+                let f = max(0.0, (Double(i) + 0.5) * Double(src) / Double(dst) - 0.5)
+                let a = min(Int(f), src - 1)
+                i0[i] = a
+                i1[i] = min(a + 1, src - 1)
+                w[i] = Int((f - Double(a)) * 256 + 0.5)
+            }
+            return (i0, i1, w)
+        }
+        up = side < s
+        lerpY = up ? lerp(side, s) : ([], [], [])
+        lerpC = up ? lerp(side / 2, cs) : ([], [], [])
         xmapY = map(side, s)
         xmapC = map(side / 2, cs)
         cntY = counts(xmapY, s)
@@ -415,6 +436,9 @@ final class AreaScaler {
         let yb = CVPixelBufferGetBaseAddressOfPlane(pb, 0)!.assumingMemoryBound(to: UInt8.self)
         let cb = CVPixelBufferGetBaseAddressOfPlane(pb, 1)!.assumingMemoryBound(to: UInt8.self)
         let ys = CVPixelBufferGetBytesPerRowOfPlane(pb, 0), crs = CVPixelBufferGetBytesPerRowOfPlane(pb, 1)
+        if up {
+            return upscale(yb: yb, ys: ys, cb: cb, crs: crs)
+        }
         for i in accY.indices { accY[i] = 0 }
         for i in accU.indices { accU[i] = 0; accV[i] = 0 }
         accY.withUnsafeMutableBufferPointer { a in
@@ -453,6 +477,37 @@ final class AreaScaler {
                     o[vo + i] = inC[i] ? UInt8((accV[i] + n / 2) / n) : 128
                 }
             }
+        }
+        return out
+    }
+    /* The bilinear path for a source square smaller than the clip. */
+    private func upscale(yb: UnsafeMutablePointer<UInt8>, ys: Int, cb: UnsafeMutablePointer<UInt8>, crs: Int) -> Data {
+        let s = size, cs = s / 2
+        var out = Data(count: s * s * 3 / 2)
+        out.withUnsafeMutableBytes { raw in
+            let o = raw.bindMemory(to: UInt8.self).baseAddress!
+            /* plane(x, y) of the centred square, with the source's byte layout */
+            func pass(_ t: ([Int], [Int], [Int]), _ dw: Int, _ off: Int, _ inm: [Bool], _ fill: UInt8,
+                      _ px: (Int, Int) -> Int) {
+                let (i0, i1, w) = t
+                for y in 0..<dw {
+                    let wy = w[y]
+                    for x in 0..<dw {
+                        let i = y * dw + x
+                        if !inm[i] {
+                            o[off + i] = fill
+                            continue
+                        }
+                        let wx = w[x]
+                        let top = px(i0[x], i0[y]) * (256 - wx) + px(i1[x], i0[y]) * wx
+                        let bot = px(i0[x], i1[y]) * (256 - wx) + px(i1[x], i1[y]) * wx
+                        o[off + i] = UInt8((top * (256 - wy) + bot * wy + 32768) >> 16)
+                    }
+                }
+            }
+            pass(lerpY, s, 0, inY, 16) { x, y in Int(yb[(y0 + y) * ys + x0 + x]) }
+            pass(lerpC, cs, s * s, inC, 128) { x, y in Int(cb[(y0 / 2 + y) * crs + x0 + 2 * x]) }
+            pass(lerpC, cs, s * s + cs * cs, inC, 128) { x, y in Int(cb[(y0 / 2 + y) * crs + x0 + 2 * x + 1]) }
         }
         return out
     }
