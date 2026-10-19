@@ -274,7 +274,7 @@ jobs:
               exit 1
             }
           done
-          cp web-flasher/index.html web-flasher/boards.json site/
+          cp web-flasher/index.html web-flasher/*.js web-flasher/boards.json site/
           echo "{\"commit\": \"$GITHUB_SHA\"}" > site/build.json
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

@@ -68,6 +68,7 @@ typedef struct {
     int width, height;
     bool round;             /* circular panel: keep content inside the circle */
     bool epaper;
+    bool no_ring;           /* square panel: progress as a bar along the bottom edge, no ring around Muse */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
     bool touch_talk;        /* on-screen mic supplies talk edges; no physical talk button */

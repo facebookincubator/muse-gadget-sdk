@@ -30,7 +30,9 @@ menu "ESP32 Device SDK"
             Your mgst_ SDK token from gadgets.muse.ai (Account > SDK tokens).
             Every gadget needs one to pair. The device hands it to the Muse
             app inside the encrypted pairing session and includes it when it
-            refreshes its device token.
+            refreshes its device token. A token set over serial
+            (">sdk_token=mgst_..." on the console, as the web flasher does)
+            is stored in NVS and takes precedence over this one.
 
     config GADGET_SDK_TOKEN_WARN
         bool "Warn on every build when no SDK token is set"

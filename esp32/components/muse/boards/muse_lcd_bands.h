@@ -56,3 +56,13 @@ lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int l
  * this, whichever core it's called from.
  */
 void muse_lcd_bands_run(void (*fn)(void *arg), void *arg);
+
+/*
+ * The panel's tearing-effect output on `gpio` (high during vertical
+ * blanking; the panel sends it once told to, DCS 35h). Each band LVGL sends
+ * then goes out at a moment its write won't meet the panel's scan (usually
+ * at once): no tear line where the scan would have passed the write. Logs
+ * the refresh period, and how many bands it held or couldn't keep clear,
+ * every 1000 bands. Call it after muse_lcd_bands_register.
+ */
+void muse_lcd_bands_set_te(int gpio);

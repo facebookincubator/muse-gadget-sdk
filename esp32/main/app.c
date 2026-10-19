@@ -43,6 +43,7 @@
 #include "lwip/ip4_addr.h"
 
 #include "identity.h"
+#include "sdk_token_console.h"
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
@@ -138,9 +139,6 @@ static int64_t s_last_vm_auth_refresh_attempt_us = 0;
 // Uptime of the last proactive-refresh attempt. 0 = none this boot, so the
 // first one falls due once uptime alone exceeds the interval.
 static int64_t s_last_periodic_token_refresh_us = 0;
-// The SDK token reaches Muse only in refresh bodies until apps forward it at
-// mint, so each boot of a token-bearing build attempts one refresh to report it.
-static bool s_sdk_token_report_attempted = false;
 static int64_t s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
 static uint8_t s_vm_auth_refusals = 0;
 static bool s_vm_auth_refresh_pending = false;
@@ -791,6 +789,7 @@ static bool mint_and_store_device_tokens_unlocked(const char *source_token,
     int rc = vm_api_mint_device_token(source_token, identity_node_id(), &tokens);
     if (rc == 0) {
         bool ok = store_token_pair_unlocked(tokens.access_token, tokens.refresh_token);
+        if (ok) identity_note_paired_sdk_token();
         if (ok && username) store_pairing_username_unlocked(username);
         vm_device_tokens_free(&tokens);
         return ok;
@@ -812,7 +811,10 @@ static bool accept_pairing_credentials(const char *access_token,
     bool ok = false;
     if (refresh_token && *refresh_token) {
         ok = store_token_pair_unlocked(access_token, refresh_token);
-        if (ok) store_pairing_username_unlocked(username);
+        if (ok) {
+            identity_note_paired_sdk_token();
+            store_pairing_username_unlocked(username);
+        }
     } else if (!wifi_mgr_is_connected()) {
         ESP_LOGW(TAG, "cannot mint device token before WiFi is connected");
         ok = false;
@@ -898,9 +900,7 @@ static bool ensure_access_token_ready_with_gate_held(
                    >= TOKEN_PERIODIC_REFRESH_INTERVAL_US;
 #endif
 
-    bool sdk_token_report_due = identity_sdk_token() && !s_sdk_token_report_attempted;
-
-    if (!access_token_rejected && !periodic_due && !sdk_token_report_due) {
+    if (!access_token_rejected && !periodic_due) {
         // Nothing has complained about this token, so keep using it.
         ok = true;
         goto done;
@@ -913,12 +913,7 @@ static bool ensure_access_token_ready_with_gate_held(
         s_last_periodic_token_refresh_us = esp_timer_get_time();
         ESP_LOGI(TAG, "proactive device token refresh (every %d days of uptime)",
                  CONFIG_HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS);
-    } else if (sdk_token_report_due && !access_token_rejected) {
-        ESP_LOGI(TAG, "refreshing device token to report the SDK token");
     }
-    // Stamped on the attempt, like the periodic refresh, so failures don't
-    // retry on every fetch_vms.
-    if (sdk_token_report_due) s_sdk_token_report_attempted = true;
 
     vm_device_tokens_t tokens = {0};
     vm_token_refresh_method_t method = VM_TOKEN_REFRESH_NONE;
@@ -2600,11 +2595,20 @@ void app_run(void) {
     ESP_LOGI(TAG, "  Verify:   %s", link_pairing_sign_factory_test());
     // Only the hint gadgets.muse.ai displays; the full token is never logged.
     ESP_LOGI(TAG, "  SDK token:  %.12s", identity_sdk_token() ? identity_sdk_token() : "(none)");
+    char paired_sdk_hint[IDENTITY_SDK_TOKEN_HINT_LEN + 1];
+    if (identity_sdk_token_changed_since_pairing(paired_sdk_hint, sizeof(paired_sdk_hint))) {
+        ESP_LOGW(TAG, "  Paired with SDK token %s, not this one. Pair again in the "
+                      "Muse app to use it.", paired_sdk_hint);
+    }
     ESP_LOGI(TAG, "========================");
 
     link_pairing_init(identity_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
+#if !CONFIG_MUSE_ENABLED
+    // Muse boards' own console takes the command (muse_glue_start).
+    sdk_token_console_start();
+#endif
 
     if (!led_status_init()) {
         ESP_LOGW(TAG, "LED init failed — continuing without status LED");

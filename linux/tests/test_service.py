@@ -140,18 +140,11 @@ def fresh_pairing() -> dict:
     return {"access_token": "a", "refresh_token": "r", "access_token_saved_at": int(time.time())}
 
 
-def test_a_start_with_an_sdk_token_refreshes_once_to_report_it(tmp_path, monkeypatch):
-    monkeypatch.setenv("MUSEGADGET_STATE_DIR", str(tmp_path))
-    calls = []
-
-    def refresh(refresh_token, node_id, base_url, sdk_token):
-        calls.append(sdk_token)
-        return {"access_token": "new-a", "refresh_token": "new-r"}, 200
-
-    monkeypatch.setattr("musegadget.service.muse_api.refresh_device_token", refresh)
-    pairing = refresh_with({"sdk_token": "mgst_token"}, fresh_pairing(), calls=2)
-    assert calls == ["mgst_token"]
-    assert pairing["access_token"] == "new-a"
+def test_a_start_with_an_sdk_token_keeps_a_fresh_token(monkeypatch):
+    monkeypatch.setattr("musegadget.service.muse_api.refresh_device_token",
+                        lambda *args: pytest.fail("unexpected refresh"))
+    fresh = fresh_pairing()
+    assert refresh_with({"sdk_token": "mgst_token"}, fresh) is fresh
 
 
 def test_a_start_without_an_sdk_token_keeps_a_fresh_token(monkeypatch):
@@ -161,14 +154,30 @@ def test_a_start_without_an_sdk_token_keeps_a_fresh_token(monkeypatch):
     assert refresh_with({}, fresh) is fresh
 
 
-def test_a_rejected_sdk_token_report_keeps_the_pairing(tmp_path, monkeypatch):
-    monkeypatch.setenv("MUSEGADGET_STATE_DIR", str(tmp_path))
-    monkeypatch.setattr("musegadget.service.muse_api.refresh_device_token",
-                        lambda *args: (None, 401))
-    fresh = fresh_pairing()
-    (tmp_path / "pairing.json").write_text(json.dumps(fresh))
-    assert refresh_with({"sdk_token": "mgst_token"}, fresh) is fresh
-    assert (tmp_path / "pairing.json").exists()
+def warnings_for(sdk_token, pairing, caplog) -> list[str]:
+    """Warn twice on a Service built inside the loop (Python 3.9)."""
+    async def scenario():
+        service = Service(identity=Identity("02:00:00:00:00:01"),
+                          executor=Executor(Account.current()), sdk_token=sdk_token)
+        service._warn_if_sdk_token_changed(pairing)
+        service._warn_if_sdk_token_changed(pairing)
+
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="musegadget.service"):
+        asyncio.run(scenario())
+    return [r.getMessage() for r in caplog.records]
+
+
+def test_a_token_changed_since_pairing_says_to_pair_again_once(caplog):
+    pairing = {**fresh_pairing(), "sdk_token_hint": "mgst_AAAAAAA"}
+    assert warnings_for("mgst_BBBBBBBtoken", pairing, caplog) == [
+        "paired with SDK token mgst_AAAAAAA, not this one; run `musegadget pair --force` to use it"]
+
+
+def test_the_token_pairing_used_or_an_older_pairing_says_nothing(caplog):
+    assert warnings_for("mgst_AAAAAAAtoken", {"sdk_token_hint": "mgst_AAAAAAA"}, caplog) == []
+    assert warnings_for(None, {"sdk_token_hint": "none"}, caplog) == []
+    assert warnings_for("mgst_AAAAAAAtoken", fresh_pairing(), caplog) == []
 
 
 def test_api_root_uses_api_url_v2_or_the_muse_api():

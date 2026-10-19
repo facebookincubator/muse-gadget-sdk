@@ -79,9 +79,7 @@ class Service:
     display_name: str = field(default_factory=socket.gethostname)
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _last_refresh_attempt: float = float("-inf")
-    # The SDK token reaches Muse only in refresh bodies until apps forward it at
-    # mint, so each start with a token attempts one refresh to report it.
-    _sdk_token_report_attempted: bool = False
+    _sdk_token_change_warned: bool = False
     _current: LinkSession | None = None
 
     def stop(self) -> None:
@@ -95,6 +93,7 @@ class Service:
                 log.info("not paired; run `musegadget pair` to set up")
                 await self._sleep(UNPAIRED_POLL_S)
                 continue
+            self._warn_if_sdk_token_changed(pairing)
             pairing = await self._maybe_refresh(pairing)
             if pairing is None:
                 await self._sleep(TOKEN_RETRY_S)
@@ -157,6 +156,17 @@ class Service:
         log.info("session ended: %s after %.0fs", outcome.value, time.monotonic() - started)
         return outcome, lasted
 
+    def _warn_if_sdk_token_changed(self, pairing: dict) -> None:
+        """Muse records a device's SDK token only when it pairs, so a token set
+        afterwards takes effect only once the device pairs again."""
+        paired = pairing.get("sdk_token_hint")
+        if self._sdk_token_change_warned or paired is None:
+            return
+        if paired != config.sdk_token_hint(self.sdk_token):
+            self._sdk_token_change_warned = True
+            log.warning("paired with SDK token %s, not this one; run `musegadget pair --force` "
+                        "to use it", paired)
+
     async def _maybe_refresh(self, pairing: dict, force: bool = False) -> dict | None:
         """Return current pairing, rotating tokens first if they are due.
 
@@ -165,16 +175,11 @@ class Service:
         has been revoked.
         """
         age = time.time() - pairing.get("access_token_saved_at", 0)
-        report_due = bool(self.sdk_token) and not self._sdk_token_report_attempted
-        due = force or age >= TOKEN_REFRESH_AGE_S
-        if not due and not report_due:
+        if not force and age < TOKEN_REFRESH_AGE_S:
             return pairing
         if not force and time.monotonic() - self._last_refresh_attempt < TOKEN_RETRY_S:
             return pairing
         self._last_refresh_attempt = time.monotonic()
-        if report_due:
-            self._sdk_token_report_attempted = True
-            log.info("refreshing device token to report the SDK token")
         tokens, status = await asyncio.to_thread(
             muse_api.refresh_device_token,
             pairing["refresh_token"], self.identity.node_id,
@@ -190,11 +195,6 @@ class Service:
             }
             config.save_json(config.PAIRING_FILE, pairing)
             log.info("device token rotated")
-            return pairing
-        if not due:
-            # Only reporting the SDK token: nothing has rejected the current
-            # token, so a refusal here must never unpair the device.
-            log.warning("SDK token report refresh failed (HTTP %s); keeping the pairing", status)
             return pairing
         if status == 401:
             config.delete_json(config.PAIRING_FILE)

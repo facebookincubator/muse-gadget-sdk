@@ -27,6 +27,7 @@ set(GADGET_SRCS
     "wifi_mgr.c"
     "wifi_known.c"
     "identity.c"
+    "sdk_token_console.c"
     "config_store.c"
     "vm_api.c"
     "diagnostic_log.c"
@@ -68,6 +69,7 @@ set(GADGET_REQUIRES
     esp_driver_ledc
     esp_driver_spi
     esp_driver_uart
+    esp_driver_usb_serial_jtag
     esp_lcd
     lwip
     mbedtls

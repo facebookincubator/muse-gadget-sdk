@@ -36,6 +36,13 @@ import serial
 SCALE = 3
 port, keys, out = sys.argv[1], sys.argv[2], sys.argv[3]
 s = serial.Serial(port, 115200, timeout=0.2)
+try:   # closing drops DTR, and DTR low with RTS high resets the chip: keep them (as chat.py does)
+    import termios
+    attrs = termios.tcgetattr(s.fd)
+    attrs[2] &= ~termios.HUPCL
+    termios.tcsetattr(s.fd, termios.TCSANOW, attrs)
+except (ImportError, AttributeError, OSError):
+    pass
 
 
 def rd(t, *until):
@@ -56,7 +63,14 @@ for k in keys:
 if command:
     s.write(f'>{line}\n'.encode()); time.sleep(0.35)
 s.write(b'p')
-log = rd(20, b'SNAP END', b'SNAP OFF').decode('latin1')   # 20 s: a UART console at 115200 takes ~8 s for 135x240
+log = rd(10, b'SNAP END', b'SNAP OFF')
+if b'SNAP BEGIN' in log and b'SNAP END' not in log:
+    # Wait as long as the image takes on a UART console at 115200 (base64, a newline a
+    # line, 10 bits a byte): ~8 s for 135x240, ~40 s for the Watcher's 412x412.
+    m = re.search(rb'SNAP BEGIN (\d+) (\d+)', log)
+    size = int(m.group(1)) * int(m.group(2)) * 2 * 4 / 3 * 1.01 if m else 0
+    log += rd(10 + size * 10 / 115200, b'SNAP END')
+log = log.decode('latin1')
 if 'SNAP BEGIN' not in log:
     sys.exit('screenshots are off in this build: MUSE_BENCH=1 tools/muse/board.sh build|flash <board>'
              if 'SNAP OFF' in log else 'no screenshot: the board never answered')

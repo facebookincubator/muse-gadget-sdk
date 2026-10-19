@@ -664,7 +664,7 @@ static void set_answer(int which)
             lv_obj_add_flag(l->hides[i], LV_OBJ_FLAG_HIDDEN);
         }
     }
-    if (!muse_board->round) {
+    if (!muse_board->round && s_ring) {
         lv_obj_set_flag(s_ring, LV_OBJ_FLAG_HIDDEN, l != NULL);   /* the reply runs past a rectangle's ring */
     }
     if (l) {
@@ -873,7 +873,15 @@ static void build_screen(void)
         face = s_face;
     }
 
-    if (!s_small) {
+    if (!s_small && muse_board->no_ring) {
+        /* A square panel: progress along the bottom edge, as the compact
+         * layout has it, rather than a circle around Muse. */
+        s_bar = lv_obj_create(face);
+        lv_obj_remove_style_all(s_bar);
+        lv_obj_set_size(s_bar, 0, 6);
+        lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, 0);
+        lv_obj_align(s_bar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    } else if (!s_small) {
         /* Progress ring around the bezel. */
         int d = (s_w < s_h ? s_w : s_h) - 8;
         s_ring = lv_arc_create(face);

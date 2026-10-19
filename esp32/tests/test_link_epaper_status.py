@@ -292,6 +292,11 @@ int main(void) {
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_color_rect_decodes_big_endian_pixels(self):
+        source = (ROOT / "main/epaper_status.c").read_text()
+        color = source[source.index("if (EPD_COLOR) {", source.index("bool led_status_draw_rect(")):]
+        self.assertIn("rgb565_from_be(src)", color.split("} else {", 1)[0])
+
     def test_draw_url_states_the_bit_depth(self):
         noise = (ROOT / "main/noise_control.cpp").read_text()
         start = noise.index("#if CONFIG_HOMEHUB_DISPLAY_COMMANDS")

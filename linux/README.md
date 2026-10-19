@@ -121,12 +121,15 @@ A few other ways to build on it:
 - **Change the account.** `bash install.sh --run-as someone` gives Muse a
   different account, such as one without sudo.
 - **Change the SDK token.** `bash install.sh --sdk-token mgst_…` replaces it.
-  It's saved in `/var/lib/musegadget/sdk_token`, readable only by root.
+  It's saved in `/var/lib/musegadget/sdk_token`, readable only by root. Muse
+  records a device's token only when it pairs, so pair again afterwards with
+  `sudo musegadget pair --force`. Do the same if you revoke the token the device
+  paired with: it can't reach Muse until it pairs with a new one.
 
 ## Manage it
 
 ```sh
-sudo musegadget info                     # name, node id and pairing state
+sudo musegadget info                     # name, node id, SDK token and pairing state
 sudo systemctl status musegadget         # is it running?
 sudo journalctl -u musegadget -f         # follow the log
 sudo musegadget pair                     # pair again

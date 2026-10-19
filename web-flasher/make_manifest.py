@@ -26,6 +26,7 @@ settings on every update.
 
 import json
 import shutil
+import struct
 import sys
 from pathlib import Path
 
@@ -43,6 +44,18 @@ CHIP_FAMILIES = {
 }
 
 
+def partitions_end(table):
+    """Where the last partition in a binary partition table ends: the flash
+    the build needs."""
+    end = 0
+    for i in range(0, len(table) - 31, 32):
+        magic, _type, _subtype, offset, size = struct.unpack_from("<HBBII", table, i)
+        if magic != 0x50AA:   # 0xEBEB is the table's MD5, 0xFFFF the end
+            break
+        end = max(end, offset + size)
+    return end
+
+
 def main():
     if len(sys.argv) != 5:
         sys.exit(__doc__)
@@ -58,11 +71,14 @@ def main():
         shutil.copyfile(build / file, out / dest)
         parts.append({"path": dest, "offset": int(offset, 16)})
 
+    table = (build / args["partition-table"]["file"]).read_bytes()
     manifest = {
         "name": name,
         "version": version,
         # Offer to erase on first install; updates keep pairing and Wi-Fi.
         "new_install_prompt_erase": True,
+        # Not ESP Web Tools': the page refuses boards with less flash.
+        "min_flash_bytes": partitions_end(table),
         "builds": [{"chipFamily": CHIP_FAMILIES[chip], "parts": parts}],
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
