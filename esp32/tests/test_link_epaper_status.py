@@ -135,6 +135,25 @@ class LinkEpaperStatusTest(unittest.TestCase):
         self.assertIn('s_sleep_rows', sleep)
         self.assertIn('muse_board->epaper ? 30000000 : 1000000', ui)
         self.assertIn('sleep option selected:', sleep)
+        # A blinking cursor would keep the panel from ever settling to refresh.
+        text = ui[ui.index("s_text_ta = lv_textarea_create(s_text);"):]
+        self.assertIn("lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR);",
+                      text[:text.index("lv_obj_align(s_text_ta")])
+
+    def test_sticky_mic_only_board_shows_the_mic(self):
+        # Sticky has a PDM mic (mic_init) and no codec (audio_init): once
+        # paired, the on-screen mic carries its touch-to-talk.
+        ui = (ROOT / "components/muse/muse_ui.c").read_text()
+        self.assertIn("bool mic = paired && (muse_board->audio_init || muse_board->mic_init);", ui)
+        self.assertIn("lv_obj_set_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN, !mic);", ui)
+        # The speaker button stays a codec board's.
+        self.assertIn("lv_obj_set_flag(s_speaker, LV_OBJ_FLAG_HIDDEN, !paired || !muse_board->audio_init);", ui)
+
+    def test_sticky_reports_four_grays_to_muse(self):
+        ui = (ROOT / "components/muse/muse_ui.c").read_text()
+        self.assertIn("return muse_board->epaper ? 2 : 16;", ui)
+        led = (ROOT / "main/led_status.c").read_text()
+        self.assertIn("return muse_ui_image_size(&w, &h) ? muse_ui_image_bits() : 0;", led)
 
     def test_sticky_panel(self):
         panel = (ROOT / "main/epd_ssd1677.c").read_text()
@@ -281,6 +300,11 @@ int main(void) {
     assert(!gray4_needs_refresh(dst, shown, sizeof(dst), true));
     shown[1] = 0;
     assert(gray4_needs_refresh(dst, shown, sizeof(dst), true));
+    /* Still for 700 ms, or changing for 3 s without a pause. */
+    assert(!gray4_refresh_due(1000000, 900000, 900000));
+    assert(gray4_refresh_due(1600000, 900000, 900000));
+    assert(!gray4_refresh_due(3000000, 2800000, 400000));
+    assert(gray4_refresh_due(3400000, 3200000, 400000));
     return 0;
 }
 """)

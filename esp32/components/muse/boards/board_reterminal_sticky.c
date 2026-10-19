@@ -54,7 +54,7 @@ static esp_err_t s_start_err;
 static uint16_t *s_frame;
 static uint8_t *s_gray, *s_shown;
 static bool s_dirty, s_shown_valid, s_paused, s_was_pressed, s_mic_on;
-static int64_t s_last_flush_us, s_gauge_log_us;
+static int64_t s_last_flush_us, s_dirty_since_us, s_gauge_log_us;
 
 static esp_err_t gauge_connect(void)
 {
@@ -187,8 +187,10 @@ static void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 {
     (void)area;
     (void)px;
+    int64_t now = esp_timer_get_time();
+    if (!s_dirty) s_dirty_since_us = now;
     s_dirty = true;
-    s_last_flush_us = esp_timer_get_time();
+    s_last_flush_us = now;
     lv_display_flush_ready(disp);
     if (s_epd_task) xTaskNotifyGive(s_epd_task);
 }
@@ -279,6 +281,14 @@ static bool gray4_needs_refresh(const uint8_t *frame, const uint8_t *shown,
     return !shown_valid || memcmp(frame, shown, bytes) != 0;
 }
 
+/* Refresh once the screen has been still for 700 ms, so a burst of LVGL
+ * changes costs one panel refresh. Something that never stops changing
+ * (an animation) still gets one every 3 s rather than none. */
+static bool gray4_refresh_due(int64_t now_us, int64_t last_flush_us, int64_t dirty_since_us)
+{
+    return now_us - last_flush_us >= 700000 || now_us - dirty_since_us >= 3000000;
+}
+
 static void epd_task(void *arg)
 {
     (void)arg;
@@ -287,7 +297,7 @@ static void epd_task(void *arg)
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(250));
         xSemaphoreTakeRecursive(s_lv_lock, portMAX_DELAY);
         bool update = s_dirty && !s_paused &&
-                      esp_timer_get_time() - s_last_flush_us >= 700000;
+                      gray4_refresh_due(esp_timer_get_time(), s_last_flush_us, s_dirty_since_us);
         if (update) {
             s_dirty = false;
             rgb565_to_gray4(s_gray, s_frame, SCREEN_W, SCREEN_H);

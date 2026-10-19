@@ -1396,9 +1396,11 @@ static void update_chrome(float now)
         lv_obj_set_flag(s_speaker, LV_OBJ_FLAG_HIDDEN, !paired || !muse_board->audio_init);
     }
     /* Unpaired, a press only says "SET UP MUSE FIRST", so the mic goes too.
-     * While a reply's layout is up it decides; that's only ever paired. */
-    if (s_mic_icon && !muse_board->rim_controls && s_answer < 0 && (paired && muse_board->audio_init) == lv_obj_has_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_set_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN, !paired || !muse_board->audio_init);
+     * While a reply's layout is up it decides; that's only ever paired. A
+     * microphone without a speaker (mic_init) still talks. */
+    bool mic = paired && (muse_board->audio_init || muse_board->mic_init);
+    if (s_mic_icon && !muse_board->rim_controls && s_answer < 0 && mic == lv_obj_has_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_set_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN, !mic);
     }
 }
 
@@ -1758,6 +1760,11 @@ bool muse_ui_image_size(int *w, int *h)
     *w = s_w;
     *h = s_h;
     return true;
+}
+
+int muse_ui_image_bits(void)
+{
+    return muse_board->epaper ? 2 : 16;
 }
 
 bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels)
