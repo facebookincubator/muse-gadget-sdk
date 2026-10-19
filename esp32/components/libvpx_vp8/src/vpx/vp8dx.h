@@ -221,6 +221,18 @@ VPX_CTRL_USE_TYPE(VP9D_SET_LOOP_FILTER_OPT, int)
 /*!\endcond */
 /*! @} - end defgroup vp8_decoder */
 
+/* Muse gadget port (vp8_dx_iface.c): low-memory decoding. With rows > 0 an
+ * inter frame that replaces the last frame is decoded over it, through a
+ * ring of `rows` macroblock rows (at least 3), when its motion vectors allow
+ * (rows of the old picture are overwritten only once nothing later in the
+ * frame reads them); otherwise it gets a picture of its own as usual. A
+ * stream whose golden frame is its last frame then needs one picture plus
+ * the ring instead of two, otherwise two instead of three. The output is the
+ * same, but a shown picture stays valid only until the next
+ * vpx_codec_decode() starts (it is the picture that decode overwrites).
+ * Call before the first frame. 0: off (the default). */
+void vp8dx_mgx_set_lowmem(vpx_codec_ctx_t *ctx, int rows);
+
 /* Muse gadget port (vp8_dx_iface.c): row progress while a frame decodes. */
 void vp8dx_mgx_set_progress(vpx_codec_ctx_t *ctx,
                             void (*cb)(void *ctx, const unsigned char *y,

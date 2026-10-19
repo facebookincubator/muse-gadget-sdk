@@ -56,6 +56,11 @@ struct frame_buffers {
   struct VP8D_COMP *pbi[MAX_FB_MT_DEC];
 };
 
+/* Muse gadget port: low-memory mode's early predictions (384 bytes each) */
+#ifndef VP8_MGX_STASH
+#define VP8_MGX_STASH 8
+#endif
+
 typedef struct VP8D_COMP {
   DECLARE_ALIGNED(16, MACROBLOCKD, mb);
 
@@ -132,6 +137,22 @@ typedef struct VP8D_COMP {
                        const unsigned char *v, int y_stride, int uv_stride,
                        int width, int height, int rows);
   void *mgx_ctx;
+  /* Muse gadget port: low-memory decoding (vp8dx_mgx_set_lowmem). lowmem_k:
+   * ring rows (0 off). ring_on: this frame decodes through the ring over its
+   * last frame; ring_fb: the ring (lowmem_k macroblock rows, the pictures'
+   * geometry); top_y/top_c[r]: the first luma/chroma line of the old
+   * picture that rows r.. still read. */
+  int lowmem_k;
+  int ring_on;
+  YV12_BUFFER_CONFIG ring_fb;
+  short *top_y, *top_c;
+  int top_rows;
+  /* macroblocks predicted before any row is written back, because they read
+   * further up than the ring holds (their mb indexes, ascending, and their
+   * predictions: 16x16 luma then 8x8 u and v) */
+  int stash_n, stash_next;
+  int stash_mb[VP8_MGX_STASH];
+  unsigned char *stash;
 } VP8D_COMP;
 
 void vp8cx_init_de_quantizer(VP8D_COMP *pbi);

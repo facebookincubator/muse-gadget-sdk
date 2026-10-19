@@ -60,6 +60,9 @@ static void remove_decompressor(VP8D_COMP *pbi) {
   vp8_de_alloc_overlap_lists(pbi);
 #endif
   vp8_remove_common(&pbi->common);
+  vp8_yv12_de_alloc_frame_buffer(&pbi->ring_fb); /* Muse gadget port */
+  vpx_free(pbi->top_y);
+  vpx_free(pbi->stash);
   vpx_free(pbi);
 }
 
@@ -190,6 +193,16 @@ vpx_codec_err_t vp8dx_set_reference(VP8D_COMP *pbi,
   return pbi->common.error.error_code;
 }
 
+static int get_free_fb_index(VP8_COMMON *cm) {
+  int i;
+  for (i = 0; i < NUM_YV12_BUFFERS; ++i) {
+    if (cm->fb_idx_ref_cnt[i] == 0) break;
+  }
+  assert(i < NUM_YV12_BUFFERS);
+  cm->fb_idx_ref_cnt[i] = 1;
+  return i;
+}
+
 static int get_free_fb(VP8_COMMON *cm) {
   int i;
   for (i = 0; i < NUM_YV12_BUFFERS; ++i) {
@@ -316,7 +329,10 @@ int vp8dx_receive_compressed_data(VP8D_COMP *pbi) {
   retcode = check_fragments_for_errors(pbi);
   if (retcode <= 0) return retcode;
 
-  cm->new_fb_idx = get_free_fb(cm);
+  /* Muse gadget port: in low-memory mode the new picture's memory is
+   * decided in vp8_decode_frame, once its header and motion vectors are known
+   * (vp8_mgx_lowmem_plan). */
+  cm->new_fb_idx = pbi->lowmem_k ? get_free_fb_index(cm) : get_free_fb(cm);
 
   /* setup reference frames for vp8_decode_frame */
   pbi->dec_fb_ref[INTRA_FRAME] = &cm->yv12_fb[cm->new_fb_idx];

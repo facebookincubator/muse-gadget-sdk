@@ -62,6 +62,21 @@ segmentation, 240 to 480 px).
   picture's two bands, one per core). A stride that would be a multiple of
   256 bytes gets 32 more, so a block's rows don't share cache sets (480 px:
   544, as upstream).
+- Low-memory decoding (`vp8dx_mgx_set_lowmem()`, `vpx/vp8dx.h`;
+  `vp8/decoder/decodeframe.c`), opt-in: an inter frame that replaces the
+  last frame, and leaves no reference on its old content, is decoded over it
+  through a ring of a few macroblock rows (3 is enough for the phone's
+  streams). A row goes from the ring to the picture once it is final and no
+  row still to decode reads the old picture at or above it; VP8 parses a
+  frame's modes and motion vectors before its residual, so the decoder knows
+  that before the first row. The few macroblocks that read further up than
+  the ring can wait for (at most 6 a frame on our clips) are predicted
+  first into a stash of 8 (3 KB); a frame that needs more gets a picture of
+  its own, as before. A stream whose golden frame is its last frame then
+  needs one picture and the ring instead of two, otherwise two instead of
+  three: at 180 px, 157 KB -> 111 KB and 222 KB -> 176 KB. The shown
+  picture is valid only until the next decode starts, which the caller must
+  allow for (muse_vdec does not turn it on).
 - Bench builds (`CONFIG_MUSE_VIDEO_VP8_PROF`, `MGX_PROF`) time each stage
   with the cycle counter; `mg.video` logs them.
 - Progress (`vp8dx_mgx_set_progress()`, `vpx/vp8dx.h`): the decoder reports

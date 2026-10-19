@@ -204,6 +204,16 @@ static void decode_macroblock(VP8D_COMP *pbi, MACROBLOCKD *xd,
         }
       }
     }
+  } else if (pbi->ring_on && pbi->stash_next < pbi->stash_n &&
+             pbi->stash_mb[pbi->stash_next] == (int)mb_idx) {
+    /* Muse gadget port: predicted before the ring wrote anything back */
+    const unsigned char *o = pbi->stash + pbi->stash_next++ * 384;
+    int y;
+    for (y = 0; y < 16; ++y) memcpy(xd->dst.y_buffer + y * xd->dst.y_stride, o + y * 16, 16);
+    for (y = 0; y < 8; ++y) {
+      memcpy(xd->dst.u_buffer + y * xd->dst.uv_stride, o + 256 + y * 8, 8);
+      memcpy(xd->dst.v_buffer + y * xd->dst.uv_stride, o + 320 + y * 8, 8);
+    }
   } else {
     vp8_build_inter_predictors_mb(xd);
   }
@@ -463,6 +473,265 @@ static void mgx_report(VP8D_COMP *pbi, YV12_BUFFER_CONFIG *fb, int rows) {
                     fb->y_stride, fb->uv_stride, pc->Width, pc->Height, rows);
 }
 
+/* Muse gadget port: low-memory decoding (vp8dx_mgx_set_lowmem).
+ *
+ * An inter frame that replaces the last frame B (and leaves no reference on
+ * B's old content) is decoded into a ring of lowmem_k macroblock rows and
+ * copied over B row by row. Row x goes to B once it is final (rows below it
+ * were decoded and loop filtered) and no row still to decode reads B's lines
+ * at or above it: top_y/top_c hold, for each row r, the first old line rows
+ * r.. read (motion vector, the filter taps, clamped to the picture, which is
+ * what the borders and the edge emulation give). The frame's mode pass runs
+ * before any row decodes, so this is known in advance; a frame that would
+ * need a deeper ring gets a picture of its own instead. Same reads of the
+ * same values: bit-exact. */
+static int lowmem_old_needed(const VP8_COMMON *pc, int b) {
+  /* swap_frame_buffers() on indexes, -1 standing for the new picture */
+  int lst = pc->lst_fb_idx, gld = pc->gld_fb_idx, alt = pc->alt_fb_idx;
+  if (pc->copy_buffer_to_arf == 1) alt = lst;
+  else if (pc->copy_buffer_to_arf == 2) alt = gld;
+  if (pc->copy_buffer_to_gf == 1) gld = lst;
+  else if (pc->copy_buffer_to_gf == 2) gld = alt;
+  if (pc->refresh_golden_frame) gld = -1;
+  if (pc->refresh_alt_ref_frame) alt = -1;
+  if (pc->refresh_last_frame) lst = -1;
+  return lst == b || gld == b || alt == b;
+}
+
+/* The first row the ring can write back when row r starts, or -1. */
+static int lowmem_writable(const VP8D_COMP *pbi, int r) {
+  int w = pbi->top_y[r] >> 4, wc = pbi->top_c[r] >> 3;
+  if (wc < w) w = wc;
+  if (r - 2 < w) w = r - 2;
+  return w;
+}
+
+static int lowmem_fits(VP8D_COMP *pbi, int b) {
+  VP8_COMMON *const pc = &pbi->common;
+  const int rows = pc->mb_rows, cols = pc->mb_cols, k = pbi->lowmem_k;
+  const int hy = pc->yv12_fb[b].y_height, hc = pc->yv12_fb[b].uv_height;
+  int reads[MAX_REF_FRAMES], r, c, base;
+  if (pbi->top_rows < rows + 1) {
+    vpx_free(pbi->top_y);
+    pbi->top_y = vpx_malloc(sizeof(short) * 2 * (rows + 1));
+    pbi->top_rows = pbi->top_y ? rows + 1 : 0;
+    if (!pbi->top_y) return 0;
+  }
+  pbi->top_c = pbi->top_y + pbi->top_rows;
+  pbi->stash_n = 0;
+  reads[INTRA_FRAME] = 0;
+  reads[LAST_FRAME] = pc->lst_fb_idx == b;
+  reads[GOLDEN_FRAME] = pc->gld_fb_idx == b;
+  reads[ALTREF_FRAME] = pc->alt_fb_idx == b;
+  pbi->top_y[rows] = (short)hy;
+  pbi->top_c[rows] = (short)hc;
+  for (r = rows - 1; r >= 0; --r) {
+    const MODE_INFO *mi = pc->mi + r * pc->mode_info_stride;
+    int ty = pbi->top_y[r + 1], tc = pbi->top_c[r + 1];
+    for (c = 0; c < cols; ++c, ++mi) {
+      int mv, y, u;
+      if (!reads[mi->mbmi.ref_frame]) continue;
+      mv = mi->mbmi.mv.as_mv.row;
+      if (mi->mbmi.mode == SPLITMV) {
+        int i;
+        for (i = 0; i < 16; ++i) {
+          if (mi->bmi[i].mv.as_mv.row < mv) mv = mi->bmi[i].mv.as_mv.row;
+        }
+      }
+      y = r * 16 + (mv >> 3) - 2;
+      u = r * 8 + ((mv >> 1) >> 3) - 3; /* chroma vectors: half, rounded */
+      y = y < 0 ? 0 : y > hy - 1 ? hy - 1 : y;
+      u = u < 0 ? 0 : u > hc - 1 ? hc - 1 : u;
+      if (y < 16 * (r - k + 1) || u < 8 * (r - k + 1)) {
+        /* further up than the ring can wait for: predict it first */
+        if (pbi->stash_n == VP8_MGX_STASH) return 0;
+        pbi->stash_mb[pbi->stash_n++] = r * cols + c;
+        continue;
+      }
+      if (y < ty) ty = y;
+      if (u < tc) tc = u;
+    }
+    pbi->top_y[r] = (short)ty;
+    pbi->top_c[r] = (short)tc;
+  }
+  /* found bottom up: ascending order for decode_mb_rows() */
+  for (r = 1; r < pbi->stash_n; ++r) {
+    int t = pbi->stash_mb[r];
+    for (c = r; c > 0 && pbi->stash_mb[c - 1] > t; --c) {
+      pbi->stash_mb[c] = pbi->stash_mb[c - 1];
+    }
+    pbi->stash_mb[c] = t;
+  }
+  /* the ring schedule decode_mb_rows() follows */
+  for (base = 0, r = 1; r < rows; ++r) {
+    if (r - base == k) {
+      int w = lowmem_writable(pbi, r);
+      if (w <= base) return 0;
+      base = w;
+    }
+  }
+  return 1;
+}
+
+/* The ring: k macroblock rows (slots) with the pictures' strides and side
+ * borders, and 4 guard lines above slot 0 (ring_guard()); nothing reads
+ * below. */
+static int lowmem_ring_alloc(YV12_BUFFER_CONFIG *rf,
+                             const YV12_BUFFER_CONFIG *g, int k) {
+  const int ys = g->y_stride, uvs = g->uv_stride, bd = g->border;
+  const size_t ysz = (size_t)(k * 16 + 4) * ys, uvsz = (size_t)(k * 8 + 4) * uvs;
+  memset(rf, 0, sizeof(*rf));
+  rf->buffer_alloc = vpx_memalign(32, ysz + 2 * uvsz);
+  if (!rf->buffer_alloc) return -1;
+  rf->buffer_alloc_sz = ysz + 2 * uvsz;
+  rf->frame_size = rf->buffer_alloc_sz;
+  rf->y_width = rf->y_crop_width = g->y_width;
+  rf->uv_width = rf->uv_crop_width = g->uv_width;
+  rf->y_height = rf->y_crop_height = k * 16;
+  rf->uv_height = rf->uv_crop_height = k * 8;
+  rf->y_stride = ys;
+  rf->uv_stride = uvs;
+  rf->border = bd;
+  rf->y_buffer = rf->buffer_alloc + 4 * ys + bd;
+  rf->u_buffer = rf->buffer_alloc + ysz + 4 * uvs + bd / 2;
+  rf->v_buffer = rf->buffer_alloc + ysz + uvsz + 4 * uvs + bd / 2;
+  return 0;
+}
+
+/* Picks the new picture's memory (low-memory mode; called once the modes
+ * are known): B itself (key frames, which read nothing; inter frames through
+ * the ring), else a picture of its own. */
+static void lowmem_plan(VP8D_COMP *pbi) {
+  VP8_COMMON *const pc = &pbi->common;
+  const int b = pc->lst_fb_idx, nf = pc->new_fb_idx;
+  int i;
+  pbi->ring_on = 0;
+  if (b != nf && pc->yv12_fb[b].buffer_alloc && !lowmem_old_needed(pc, b) &&
+      (pc->frame_type == KEY_FRAME || lowmem_fits(pbi, b))) {
+    if (pc->frame_type != KEY_FRAME) {
+      YV12_BUFFER_CONFIG *rf = &pbi->ring_fb;
+      if (rf->buffer_alloc && (rf->y_width != pc->yv12_fb[b].y_width ||
+                               rf->y_height != pbi->lowmem_k * 16)) {
+        vp8_yv12_de_alloc_frame_buffer(rf);
+      }
+      if (!rf->buffer_alloc &&
+          lowmem_ring_alloc(rf, &pc->yv12_fb[b], pbi->lowmem_k) < 0) {
+        memset(rf, 0, sizeof(*rf));
+        goto own;
+      }
+      if (pbi->stash_n && !pbi->stash) {
+        pbi->stash = vpx_malloc(VP8_MGX_STASH * 384);
+        if (!pbi->stash) goto own;
+      }
+      pbi->ring_on = 1;
+    }
+    pc->fb_idx_ref_cnt[nf]--;
+    pc->new_fb_idx = b;
+    pc->fb_idx_ref_cnt[b]++;
+    pbi->dec_fb_ref[INTRA_FRAME] = &pc->yv12_fb[b];
+    /* pictures nothing refers to any more go back to the heap */
+    for (i = 0; i < NUM_YV12_BUFFERS; ++i) {
+      YV12_BUFFER_CONFIG *f = &pc->yv12_fb[i];
+      if (!pc->fb_idx_ref_cnt[i] && f->buffer_alloc) {
+        /* memory only: the geometry stays (vp8_alloc_frame_buffers) */
+        if (f->buffer_alloc_sz > 0) vpx_free(f->buffer_alloc);
+        f->buffer_alloc = NULL;
+        f->buffer_alloc_sz = 0;
+        f->y_buffer = f->u_buffer = f->v_buffer = NULL;
+      }
+    }
+    return;
+  }
+own:
+  if (vp8_alloc_fb(pc, nf)) {
+    vpx_internal_error(&pc->error, VPX_CODEC_MEM_ERROR,
+                       "Failed to allocate frame buffer");
+  }
+}
+
+/* Row x of the ring sits in slot x % k (plane p). */
+static unsigned char *ring_row(const YV12_BUFFER_CONFIG *rf, int p, int x,
+                               int k) {
+  const int st = p ? rf->uv_stride : rf->y_stride, lines = p ? 8 : 16;
+  unsigned char *b = p == 0 ? rf->y_buffer : p == 1 ? rf->u_buffer : rf->v_buffer;
+  return b + (x % k) * lines * st;
+}
+
+/* Slot 0's guard: the 4 lines above it stand for the bottom of the row
+ * before (in the last slot) while the row in slot 0 decodes and filters
+ * (intra prediction's top line, the loop filter's reach across the edge).
+ * to_guard: row x's bottom lines into the guard; else back. */
+static void ring_guard(const YV12_BUFFER_CONFIG *rf, int k, int x,
+                       int to_guard) {
+  int p;
+  for (p = 0; p < 3; ++p) {
+    const int st = p ? rf->uv_stride : rf->y_stride, lines = p ? 8 : 16;
+    const int bd = p ? rf->border >> 1 : rf->border;
+    unsigned char *g = ring_row(rf, p, 0, k) - 4 * st - bd;
+    unsigned char *r = ring_row(rf, p, x, k) + (lines - 4) * st - bd;
+    if (to_guard) memcpy(g, r, 4 * st);
+    else memcpy(r, g, 4 * st);
+  }
+}
+
+/* Ring rows [from, to) over picture f, with the left and right borders
+ * yv12_extend_frame_left_right_c() gives. */
+static void lowmem_put(YV12_BUFFER_CONFIG *f, const YV12_BUFFER_CONFIG *rf,
+                       int k, int from, int to) {
+  int p, x;
+  for (p = 0; p < 3; ++p) {
+    const int st = p ? f->uv_stride : f->y_stride, lines = p ? 8 : 16;
+    const int w = p ? f->uv_width : f->y_width;
+    const int bd = p ? f->border >> 1 : f->border;
+    unsigned char *o = (p == 0 ? f->y_buffer : p == 1 ? f->u_buffer : f->v_buffer);
+    for (x = from; x < to; ++x) {
+      const unsigned char *s = ring_row(rf, p, x, k);
+      unsigned char *d = o + x * lines * st;
+      int y;
+      for (y = 0; y < lines; ++y, s += st, d += st) {
+        memcpy(d, s, w);
+        memset(d - bd, d[0], bd);
+        memset(d + w, d[w - 1], bd);
+      }
+    }
+  }
+}
+
+/* The stashed macroblocks' predictions, made before the ring writes anything
+ * back (the ring's first rows serve as their scratch: same strides, so the
+ * block offsets hold). */
+static void lowmem_prestash(VP8D_COMP *pbi, unsigned char *ref[][3]) {
+  VP8_COMMON *const pc = &pbi->common;
+  MACROBLOCKD *const xd = &pbi->mb;
+  MODE_INFO *const saved_mi = xd->mode_info_context;
+  const YV12_BUFFER_CONFIG *rf = &pbi->ring_fb;
+  int i, p, y;
+  for (i = 0; i < pbi->stash_n; ++i) {
+    const int r = pbi->stash_mb[i] / pc->mb_cols, c = pbi->stash_mb[i] % pc->mb_cols;
+    const int yoff = r * rf->y_stride * 16 + c * 16, uvoff = r * rf->uv_stride * 8 + c * 8;
+    unsigned char *o = pbi->stash + i * 384;
+    xd->mode_info_context = pc->mi + r * pc->mode_info_stride + c;
+    xd->mb_to_left_edge = -((c * 16) << 3);
+    xd->mb_to_right_edge = ((pc->mb_cols - 1 - c) * 16) << 3;
+    xd->mb_to_top_edge = -((r * 16) << 3);
+    xd->mb_to_bottom_edge = ((pc->mb_rows - 1 - r) * 16) << 3;
+    xd->pre.y_buffer = ref[xd->mode_info_context->mbmi.ref_frame][0] + yoff;
+    xd->pre.u_buffer = ref[xd->mode_info_context->mbmi.ref_frame][1] + uvoff;
+    xd->pre.v_buffer = ref[xd->mode_info_context->mbmi.ref_frame][2] + uvoff;
+    xd->dst.y_buffer = rf->y_buffer;
+    xd->dst.u_buffer = rf->u_buffer;
+    xd->dst.v_buffer = rf->v_buffer;
+    vp8_build_inter_predictors_mb(xd);
+    for (y = 0; y < 16; ++y) memcpy(o + y * 16, rf->y_buffer + y * rf->y_stride, 16);
+    for (p = 0; p < 2; ++p) {
+      const unsigned char *s = p ? rf->v_buffer : rf->u_buffer;
+      for (y = 0; y < 8; ++y) memcpy(o + 256 + p * 64 + y * 8, s + y * rf->uv_stride, 8);
+    }
+  }
+  xd->mode_info_context = saved_mi;
+  pbi->stash_next = 0;
+}
+
 static void decode_mb_rows(VP8D_COMP *pbi) {
   VP8_COMMON *const pc = &pbi->common;
   MACROBLOCKD *const xd = &pbi->mb;
@@ -505,15 +774,44 @@ static void decode_mb_rows(VP8D_COMP *pbi) {
   eb_dst[1] = lf_dst[1] = dst_buffer[1] = yv12_fb_new->u_buffer;
   eb_dst[2] = lf_dst[2] = dst_buffer[2] = yv12_fb_new->v_buffer;
 
+  /* Muse gadget port: low-memory mode, rows decode in the ring (row x in
+   * slot x % lowmem_k, dst_buffer rebased for each row) and go to
+   * yv12_fb_new (the picture they replace) through lowmem_put(). */
+  YV12_BUFFER_CONFIG *const ring_fb = pbi->ring_on ? &pbi->ring_fb : NULL;
+  int ring_base = 0;
+  if (ring_fb) {
+    eb_dst[0] = lf_dst[0] = dst_buffer[0] = ring_fb->y_buffer;
+    eb_dst[1] = lf_dst[1] = dst_buffer[1] = ring_fb->u_buffer;
+    eb_dst[2] = lf_dst[2] = dst_buffer[2] = ring_fb->v_buffer;
+    lowmem_prestash(pbi, ref_buffer);
+  }
+
   xd->up_available = 0;
 
   /* Initialize the loop filter for this frame. */
   if (pc->filter_level) vp8_loop_filter_frame_init(pc, xd, pc->filter_level);
 
-  vp8_setup_intra_recon_top_line(yv12_fb_new);
+  vp8_setup_intra_recon_top_line(ring_fb ? ring_fb : yv12_fb_new);
 
   /* Decode the individual macro block */
   for (mb_row = 0; mb_row < pc->mb_rows; ++mb_row) {
+    if (ring_fb) {
+      const int k = pbi->lowmem_k;
+      int p;
+      if (mb_row - ring_base == k) {
+        /* Every slot is taken: rows ring_base..w-1 go to the picture
+         * (lowmem_fits checked w > ring_base), freeing their slots. */
+        const int w = lowmem_writable(pbi, mb_row);
+        lowmem_put(yv12_fb_new, ring_fb, k, ring_base, w);
+        ring_base = w;
+        mgx_report(pbi, yv12_fb_new, w * 16);
+      }
+      if (mb_row && mb_row % k == 0) ring_guard(ring_fb, k, mb_row - 1, 1);
+      for (p = 0; p < 3; ++p) {
+        dst_buffer[p] = ring_row(ring_fb, p, mb_row, k) -
+                        mb_row * (p ? 8 * recon_uv_stride : 16 * recon_y_stride);
+      }
+    }
     if (num_part > 1) {
       xd->current_bc = &pbi->mbc[ibc];
       ibc++;
@@ -635,6 +933,11 @@ static void decode_mb_rows(VP8D_COMP *pbi) {
 
     if (pc->filter_level) {
       if (mb_row > 0) {
+        if (ring_fb) {
+          lf_dst[0] = ring_row(ring_fb, 0, mb_row - 1, pbi->lowmem_k);
+          lf_dst[1] = ring_row(ring_fb, 1, mb_row - 1, pbi->lowmem_k);
+          lf_dst[2] = ring_row(ring_fb, 2, mb_row - 1, pbi->lowmem_k);
+        }
         if (pc->filter_type == NORMAL_LOOPFILTER) {
           vp8_loop_filter_row_normal(pc, lf_mic, mb_row - 1, recon_y_stride,
                                      recon_uv_stride, lf_dst[0], lf_dst[1],
@@ -643,7 +946,16 @@ static void decode_mb_rows(VP8D_COMP *pbi) {
           vp8_loop_filter_row_simple(pc, lf_mic, mb_row - 1, recon_y_stride,
                                      lf_dst[0]);
         }
+        if (ring_fb) {
+          const int k = pbi->lowmem_k;
+          /* the guard follows the row above slot 0 as it is filtered, and
+           * gives back what slot 0's row's filtering changed in it */
+          if (mb_row % k == 0) ring_guard(ring_fb, k, mb_row - 1, 1);
+          if (mb_row > 1 && (mb_row - 1) % k == 0)
+            ring_guard(ring_fb, k, mb_row - 2, 0);
+        }
         if (mb_row > 1) {
+          if (!ring_fb)
           yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1],
                                          eb_dst[2]);
 
@@ -658,12 +970,13 @@ static void decode_mb_rows(VP8D_COMP *pbi) {
         lf_mic += pc->mb_cols;
         lf_mic++; /* Skip border mb */
         /* row mb_row - 1 is filtered; its bottom edge waits for the next */
-        mgx_report(pbi, yv12_fb_new, (mb_row - 1) * 16);
+        if (!ring_fb) mgx_report(pbi, yv12_fb_new, (mb_row - 1) * 16);
       }
     } else {
-      mgx_report(pbi, yv12_fb_new, (mb_row + 1) * 16);
+      if (!ring_fb) mgx_report(pbi, yv12_fb_new, (mb_row + 1) * 16);
       if (mb_row > 0) {
         /**/
+        if (!ring_fb)
         yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1],
                                        eb_dst[2]);
         eb_dst[0] += recon_y_stride * 16;
@@ -675,6 +988,11 @@ static void decode_mb_rows(VP8D_COMP *pbi) {
   }
 
   if (pc->filter_level) {
+    if (ring_fb) {
+      lf_dst[0] = ring_row(ring_fb, 0, mb_row - 1, pbi->lowmem_k);
+      lf_dst[1] = ring_row(ring_fb, 1, mb_row - 1, pbi->lowmem_k);
+      lf_dst[2] = ring_row(ring_fb, 2, mb_row - 1, pbi->lowmem_k);
+    }
     if (pc->filter_type == NORMAL_LOOPFILTER) {
       vp8_loop_filter_row_normal(pc, lf_mic, mb_row - 1, recon_y_stride,
                                  recon_uv_stride, lf_dst[0], lf_dst[1],
@@ -683,15 +1001,21 @@ static void decode_mb_rows(VP8D_COMP *pbi) {
       vp8_loop_filter_row_simple(pc, lf_mic, mb_row - 1, recon_y_stride,
                                  lf_dst[0]);
     }
+    if (ring_fb && mb_row > 1 && (mb_row - 1) % pbi->lowmem_k == 0)
+      ring_guard(ring_fb, pbi->lowmem_k, mb_row - 2, 0);
 
+    if (!ring_fb)
     yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1],
                                    eb_dst[2]);
     eb_dst[0] += recon_y_stride * 16;
     eb_dst[1] += recon_uv_stride * 8;
     eb_dst[2] += recon_uv_stride * 8;
   }
+  if (ring_fb)
+    lowmem_put(yv12_fb_new, ring_fb, pbi->lowmem_k, ring_base, pc->mb_rows);
   mgx_report(pbi, yv12_fb_new, pc->Height);
   unsigned pf0 = PROF_T();
+  if (!ring_fb)
   yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
   yv12_extend_frame_top_c(yv12_fb_new);
   yv12_extend_frame_bottom_c(yv12_fb_new);
@@ -1235,6 +1559,13 @@ int vp8_decode_frame(VP8D_COMP *pbi) {
   memset(xd->qcoeff, 0, sizeof(xd->qcoeff));
 
   { unsigned pm0 = PROF_T(); vp8_decode_mode_mvs(pbi); PROF_ADD(4, pm0); }
+
+  /* Muse gadget port: the new picture's memory, once its modes are known */
+  if (pbi->lowmem_k) {
+    lowmem_plan(pbi);
+    yv12_fb_new = pbi->dec_fb_ref[INTRA_FRAME];
+    yv12_fb_new->corrupted = 0;
+  }
 
 #if CONFIG_ERROR_CONCEALMENT
   if (pbi->ec_active &&

@@ -65,6 +65,7 @@ struct vpx_codec_alg_priv {
   void (*mgx_progress)(void *, const unsigned char *, const unsigned char *,
                        const unsigned char *, int, int, int, int, int);
   void *mgx_ctx;
+  int mgx_lowmem; /* vp8dx_mgx_set_lowmem */
 };
 
 static int vp8_init_ctx(vpx_codec_ctx_t *ctx) {
@@ -514,6 +515,7 @@ static vpx_codec_err_t vp8_decode(vpx_codec_alg_priv_t *ctx,
     ctx->user_priv = user_priv;
     pbi->mgx_progress = ctx->mgx_progress;
     pbi->mgx_ctx = ctx->mgx_ctx;
+    pbi->lowmem_k = ctx->mgx_lowmem > 0 && ctx->mgx_lowmem < 3 ? 3 : ctx->mgx_lowmem;
     if (vp8dx_receive_compressed_data(pbi)) {
       res = update_error_state(ctx, &pbi->common.error);
     }
@@ -769,4 +771,10 @@ void vp8dx_mgx_set_progress(vpx_codec_ctx_t *ctx,
   if (!ctx || !ctx->priv) return;
   ((vpx_codec_alg_priv_t *)ctx->priv)->mgx_progress = cb;
   ((vpx_codec_alg_priv_t *)ctx->priv)->mgx_ctx = cb_ctx;
+}
+
+/* Muse gadget port: low-memory decoding (vpx/vp8dx.h). */
+void vp8dx_mgx_set_lowmem(vpx_codec_ctx_t *ctx, int rows) {
+  if (!ctx || !ctx->priv) return;
+  ((vpx_codec_alg_priv_t *)ctx->priv)->mgx_lowmem = rows;
 }
