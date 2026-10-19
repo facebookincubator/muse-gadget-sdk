@@ -30,14 +30,20 @@
  * straight after the previous one (RAMWRC). So LVGL renders in direct mode
  * into one full-screen buffer and every frame goes out whole, top to bottom.
  *
- * Push-to-talk needs an I2S MEMS mic (INMP441 or similar) wired to the
- * speaker's clocks, BCLK GPIO42 and WS GPIO2, with L/R to GND and SD on
- * CONFIG_MUSE_JC3248W535_MIC_GPIO. Without one the mic reads silence.
+ * Push-to-talk needs a mic added, picked by CONFIG_MUSE_JC3248W535_MIC:
+ * - PDM (MP34DT01, MP34DT05 or similar) on the 4-pin extension connector,
+ *   CLK on GPIO17 and DATA on GPIO18, SEL to GND. Only I2S0 takes PDM, so the
+ *   mic gets I2S0 and the speaker I2S1.
+ * - I2S (INMP441 or similar) on the speaker's clocks, BCLK GPIO42 and WS
+ *   GPIO2, with L/R to GND and SD on CONFIG_MUSE_JC3248W535_MIC_GPIO: one
+ *   duplex bus on I2S0.
+ * Without one the mic reads silence.
  */
 #include <math.h>
 #include <string.h>
 
 #include "driver/i2c_master.h"
+#include "driver/i2s_pdm.h"
 #include "driver/i2s_std.h"
 #include "driver/ledc.h"
 #include "driver/spi_master.h"
@@ -80,11 +86,18 @@ static const char *TAG = "board";
 #define I2S_BCLK GPIO_NUM_42
 #define I2S_WS GPIO_NUM_2
 #define I2S_DOUT GPIO_NUM_41       /* NS4168 */
+#define PDM_CLK GPIO_NUM_17        /* 4-pin extension connector */
+#define PDM_DATA GPIO_NUM_18
 #define TALK_GPIO GPIO_NUM_0       /* BOOT */
 
-/* An INMP441 is about -26 dBFS at 94 dB SPL; Muse's default 30 dB of gain
- * brings speech up to where the ES8311 boards have it. */
+/* An INMP441 and the MP34DT0x are both about -26 dBFS at 94 dB SPL; Muse's
+ * default 30 dB of gain brings speech up to where the ES8311 boards have it.
+ * The PDM path sums both slots, which doubles a mic that reaches both. */
+#if CONFIG_MUSE_JC3248W535_MIC_PDM
+#define MIC_GAIN_OFFSET_DB 6
+#else
 #define MIC_GAIN_OFFSET_DB 0
+#endif
 
 static const axs15231b_lcd_init_cmd_t s_lcd_init[] = {
     {0xBB, (uint8_t[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5A, 0xA5}, 8, 0},
@@ -376,12 +389,29 @@ static int mic_read(const audio_codec_data_if_t *h, uint8_t *data, int size)
         return ESP_CODEC_DEV_READ_FAIL;
     }
     int16_t *s = (int16_t *)data;
+#if CONFIG_MUSE_JC3248W535_MIC_PDM
+    /* The PDM filter fills both slots from the one data line. Which one
+     * carries the mic depends on SEL and the clock edge, and on this board
+     * both have; a loose DATA joint also made it hop between them. Sum the
+     * two and give both the result, so the mic gets through in either slot. */
+    for (int i = 0; i + 1 < size / 2; i += 2) {
+        int v = 0;
+        for (int k = 0; k < 2; k++) {
+            int32_t *dc = &s_mic_dc[k];
+            *dc += (s[i + k] * 256 - *dc) >> 8;
+            v += s[i + k] - (*dc >> 8);
+        }
+        v = v * s_mic_gain_q8 >> 8;
+        s[i] = s[i + 1] = v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v;
+    }
+#else
     for (int i = 0; i < size / 2; i++) {
         int32_t *dc = &s_mic_dc[i & 1];
         *dc += (s[i] * 256 - *dc) >> 8;
         int v = (s[i] - (*dc >> 8)) * s_mic_gain_q8 >> 8;
         s[i] = v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v;
     }
+#endif
     return ESP_CODEC_DEV_OK;
 }
 
@@ -393,13 +423,34 @@ static void set_mic_gain(esp_codec_dev_handle_t mic, int db)
 
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)
 {
+#if CONFIG_MUSE_JC3248W535_MIC_PDM
+    /* The mic on I2S0, the only port with the PDM-to-PCM filter. 16x down
+     * sampling clocks it at 2.048 MHz, inside the MP34DT01's and MP34DT05's
+     * range (8x would give 1.024 MHz, below the MP34DT05's). */
+    i2s_chan_config_t mic_chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    ESP_RETURN_ON_ERROR(i2s_new_channel(&mic_chan, NULL, &s_rx), TAG, "mic channel");
+    i2s_pdm_rx_config_t pdm_cfg = {
+        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(MUSE_AUDIO_RATE),
+        .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .gpio_cfg = { .clk = PDM_CLK, .din = PDM_DATA },
+    };
+    pdm_cfg.clk_cfg.dn_sample_mode = I2S_PDM_DSR_16S;
+    ESP_RETURN_ON_ERROR(i2s_channel_init_pdm_rx_mode(s_rx, &pdm_cfg), TAG, "mic pdm");
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+    chan_cfg.auto_clear = true;
+    ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &s_tx, NULL), TAG, "speaker channel");
+    const int din = -1;
+#else
+#if CONFIG_MUSE_JC3248W535_MIC_I2S
     const int din = CONFIG_MUSE_JC3248W535_MIC_GPIO;
-    if (din < 0) {
-        ESP_LOGW(TAG, "no mic (CONFIG_MUSE_JC3248W535_MIC_GPIO): push-to-talk records silence");
-    }
+#else
+    const int din = -1;
+    ESP_LOGW(TAG, "no mic (CONFIG_MUSE_JC3248W535_MIC): push-to-talk records silence");
+#endif
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
     ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &s_tx, &s_rx), TAG, "i2s channel");
+#endif
     i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(MUSE_AUDIO_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
@@ -416,7 +467,9 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
     std_cfg.slot_cfg.ws_width = 32;
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_tx, &std_cfg), TAG, "i2s tx");
+#if !CONFIG_MUSE_JC3248W535_MIC_PDM
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_rx, &std_cfg), TAG, "i2s rx");
+#endif
     ESP_RETURN_ON_ERROR(i2s_channel_enable(s_tx), TAG, "i2s tx on");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(s_rx), TAG, "i2s rx on");
 
@@ -454,10 +507,13 @@ static const muse_board_t s_board = {
     .round = false,
     .touch = true,
     .diagonal_in = 3.5f,
-    /* BOOT is the only button, so it also wakes the screen and the chip. */
+    /* BOOT is the only button, so it also wakes the screen and the chip. It
+     * sits on the back, out of reach in a case, so the on-screen mic is a
+     * talk button too: hold it to talk. */
     .talk_button = "boot",
     .aux_button = "boot",
     .talk_hint = { LV_ALIGN_BOTTOM_RIGHT, -16, -8 },
+    .touch_talk = true,
     .frame_ms = 40,
     .init = init,
     .display_start = display_start,
@@ -465,7 +521,7 @@ static const muse_board_t s_board = {
     .display_unlock = display_unlock,
     .set_brightness = set_brightness,
     .audio_init = audio_init,
-    .mic_slot = 0,              /* INMP441 with L/R to GND: the left slot */
+    .mic_slot = 0,              /* L/R or SEL to GND: the left slot */
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
     .power_off = power_off,
