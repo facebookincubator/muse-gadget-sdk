@@ -94,7 +94,7 @@ u32 h264bsdInit(storage_t *pStorage, u32 noOutputReordering)
      * specific NEON optimized "memset" for clearing the structure */
     size = (sizeof(macroblockLayer_t) + 63) & ~0x3F;
 
-    pStorage->mbLayer = (macroblockLayer_t*)malloc(size);
+    pStorage->mbLayer = (macroblockLayer_t*)h264bsdMallocHot(size);
     if (!pStorage->mbLayer)
         return HANTRO_NOK;
 
@@ -604,7 +604,7 @@ void h264bsdShutdown(storage_t *pStorage)
 
 storage_t* h264bsdAlloc()
 {
-    return (storage_t*)malloc(sizeof(storage_t));
+    return (storage_t*)h264bsdMalloc(sizeof(storage_t));
 }
 
 /*------------------------------------------------------------------------------

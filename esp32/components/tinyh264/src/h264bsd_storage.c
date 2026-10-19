@@ -356,7 +356,7 @@ u32 h264bsdActivateParamSets(storage_t *pStorage, u32 ppsId, u32 isIdr)
         FREE(pStorage->sliceGroupMap);
 
         ALLOCATE(pStorage->mb, pStorage->picSizeInMbs, mbStorage_t);
-        ALLOCATE(pStorage->sliceGroupMap, pStorage->picSizeInMbs, u32);
+        pStorage->sliceGroupMap = (u32 *)h264bsdMallocHot(pStorage->picSizeInMbs * sizeof(u32));
         if (pStorage->mb == NULL || pStorage->sliceGroupMap == NULL)
             return(MEMORY_ALLOCATION_ERROR);
 

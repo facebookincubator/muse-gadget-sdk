@@ -138,10 +138,42 @@
 /* macro to clip a value z, so that 0 <= z =< 255 */
 #define CLIP1(z) (((z) < 0) ? 0 : (((z) > 255) ? 255 : (z)))
 
+/* Muse gadget port: where the decoder's memory comes from. On ESP-IDF boards
+ * with PSRAM every block goes to PSRAM (behind the data cache). Through plain
+ * malloc the small ones would go to internal RAM (CONFIG_SPIRAM_MALLOC_
+ * ALWAYSINTERNAL) and, once main SRAM runs low, to LP RAM, which the heap
+ * also hands out (CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP) and which is
+ * several times slower: on the ESP32-S31 a 480 px stream with three such
+ * blocks in LP RAM took 170 ms a frame instead of 30. Falls back to main
+ * SRAM (MALLOC_CAP_DMA, which LP RAM lacks). Elsewhere plain malloc. Blocks
+ * are freed with free() either way. */
+#if defined(ESP_PLATFORM)
+#include "sdkconfig.h"
+#endif
+#if defined(ESP_PLATFORM) && CONFIG_SPIRAM
+#include "esp_heap_caps.h"
+static inline void *h264bsdMalloc(size_t n)
+{
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+}
+/* The two small blocks used for every macroblock (the macroblock layer and
+ * the slice group map): main SRAM when it has room, which is a little faster
+ * than PSRAM, else PSRAM; never LP RAM. */
+static inline void *h264bsdMallocHot(size_t n)
+{
+    void *p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+    return p ? p : heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+#else
+#define h264bsdMalloc(n) malloc(n)
+#define h264bsdMallocHot(n) malloc(n)
+#endif
+
 /* macro to allocate memory */
 #define ALLOCATE(ptr, count, type) \
 { \
-    (ptr) = malloc((count) * sizeof(type)); \
+    (ptr) = h264bsdMalloc((count) * sizeof(type)); \
 }
 
 /* macro to free allocated memory */

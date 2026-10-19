@@ -52,6 +52,14 @@ static const char *TAG = "muse_video";
 #else
 #define VIDEO_DEC_STACK 6144
 #endif
+/* The decode tasks' stacks: the decoder works in them all the time (its fill
+ * and prediction buffers), so they must be in main SRAM. Plain task creation
+ * takes internal memory that can be LP RAM, part of the heap on the S31
+ * (CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP) and many times slower: once
+ * SRAM ran low, a band decoding there took 250-450 ms instead of 15.
+ * MALLOC_CAP_DMA is what main SRAM has and LP RAM doesn't. The tasks live
+ * for good, so nothing deletes them. */
+#define VIDEO_DEC_STACK_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA)
 /* Bands decoded in parallel (muse_video_params_t.tiles): one per core,
  * where the picture is big enough to need both. */
 #define MAX_BANDS (MAX_SRC > 240 ? 2 : 1)
@@ -995,6 +1003,19 @@ static void stuck_check(void *arg)
     }
 }
 
+/* A decode task, its stack in main SRAM if there is a block that big, else
+ * anywhere internal (slow, but video still works), saying so. */
+static bool start_decode_task(TaskFunction_t fn, const char *name, TaskHandle_t *h, int core)
+{
+    if (xTaskCreatePinnedToCoreWithCaps(fn, name, VIDEO_DEC_STACK, NULL, 4, h, core, VIDEO_DEC_STACK_CAPS) == pdPASS) {
+        return true;
+    }
+    ESP_LOGW(TAG, "%s: no %d-byte block of main SRAM for its stack (largest %u): decoding will be slow", name,
+             VIDEO_DEC_STACK, (unsigned)heap_caps_get_largest_free_block(VIDEO_DEC_STACK_CAPS));
+    return xTaskCreatePinnedToCoreWithCaps(fn, name, VIDEO_DEC_STACK, NULL, 4, h, core,
+                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) == pdPASS;
+}
+
 static bool start_tasks(void)
 {
     if (s_dec_task) {
@@ -1013,14 +1034,14 @@ static bool start_tasks(void)
         return false;
     }
     if (xTaskCreatePinnedToCore(show_task, "video_show", 3072, NULL, MUSE_UI_PRIORITY, NULL, MUSE_UI_CORE) != pdPASS ||
-        xTaskCreatePinnedToCore(decode_task, "video_dec", VIDEO_DEC_STACK, NULL, 4, &s_dec_task, DECODE_CORE) != pdPASS) {
+        !start_decode_task(decode_task, "video_dec", &s_dec_task, DECODE_CORE)) {
         ESP_LOGE(TAG, "no memory for the tasks");
         return false;
     }
     /* Two bands at once on chips fast enough for 480 px (the S31). */
     s_band_done = MAX_BANDS > 1 ? xSemaphoreCreateBinary() : NULL;
     if (MAX_BANDS > 1 && s_band_done &&
-        xTaskCreatePinnedToCore(band_task, "video_band", VIDEO_DEC_STACK, NULL, 4, &s_band_task, MUSE_UI_CORE) != pdPASS) {
+        !start_decode_task(band_task, "video_band", &s_band_task, MUSE_UI_CORE)) {
         ESP_LOGE(TAG, "no memory for the tasks");
         return false;
     }

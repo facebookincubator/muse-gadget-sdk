@@ -20,6 +20,12 @@
 
 #include "h264bsd_decoder.h"
 #include "muse_vstream.h"
+#if defined(ESP_PLATFORM)
+#include "sdkconfig.h"
+#if CONFIG_SPIRAM
+#include "esp_heap_caps.h"
+#endif
+#endif
 #if CONFIG_MUSE_VIDEO_VP8
 #include "vpx/vp8dx.h"
 #include "vpx/vpx_decoder.h"
@@ -85,7 +91,16 @@ muse_vdec_t *muse_vdec_open(uint8_t codec, int max_w, int max_h)
     if (!muse_vdec_has(codec)) {
         return NULL;
     }
+    /* In PSRAM where there is some, like the decoders' own memory: small
+     * internal blocks can land in slow LP RAM (h264bsd_util.h). */
+#if defined(ESP_PLATFORM) && CONFIG_SPIRAM
+    muse_vdec_t *d = heap_caps_calloc(1, sizeof(*d), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!d) {
+        d = calloc(1, sizeof(*d));
+    }
+#else
     muse_vdec_t *d = calloc(1, sizeof(*d));
+#endif
     if (!d) {
         return NULL;
     }
