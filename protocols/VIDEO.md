@@ -298,7 +298,7 @@ VP8 is the second codec: no patent pool charges royalties for it, and
 libvpx, its reference code, is BSD-3-Clause with the WebM project's patent
 grant. A gadget built with `CONFIG_MUSE_VIDEO_VP8` (on with
 `CONFIG_MUSE_VIDEO`) lists it in hello, and the client picks it in start
-(Muse Gadgets Test: the H.264 / VP8 button, `--es codec vp8` on Android, `-codec vp8` on iPhone). Frames, bands, credits
+(Muse Gadgets Test: the Codec row, `--es codec vp8` on Android, `-codec vp8` on iPhone). Frames, bands, credits
 and keyframe requests work as with H.264; two bands are two VP8 streams.
 
 - **Decoder:** libvpx v1.16.0's (`../esp32/components/libvpx_vp8`), C only

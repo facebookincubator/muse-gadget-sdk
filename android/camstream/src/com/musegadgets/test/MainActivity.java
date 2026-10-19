@@ -26,18 +26,17 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
-import android.widget.TextView;
 
 /**
  * Muse Gadgets Test: finds the gadget on the local network, and streams the camera
  * (or an open sample clip) to it when the gadget's menu asks (its "want" message)
  * or, with auto on (a bench option), as soon as it's connected. Stats on
  * screen and in logcat (tag MuseCam), the gadget's decode stats included.
+ * The screen (AppScreen) is a preview with the stats over it, above tabs of
+ * settings-style lists (Tabs); this class runs the streams.
  *
  * Intent extras (adb shell am start -n com.musegadgets.test/.MainActivity
  * --es target A1B2C3 --ei fps 24 --ei kbps 1000 --ez auto true --ez front false;
@@ -47,14 +46,17 @@ public final class MainActivity extends Activity
         implements VideoLink.Listener, CameraStreamer.Sink, ClipStreamer.Sink {
     private static final String TAG = VideoLink.TAG;
 
-    private TextView status;
+    private AppScreen screen;
     private TextureView preview;
     private Surface previewSurface;
+    private SurfaceTexture previewTexture;
+    /* A clip's (or the bars') frames, decoded onto the preview. */
+    private final PreviewDecoder previewDecoder = new PreviewDecoder();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private VideoLink link;
     private CameraStreamer cam;
     /* What to connect to: --es target <name part> (first match), --es host
-     * <address[:port]>, else the gadget last picked in the Device dialog. */
+     * <address[:port]>, else the gadget last picked on the Gadget tab. */
     private String target, deviceAddr;
     private static final String PREFS = "camstream", PREF_ADDR = "wifi_addr", PREF_NAME = "wifi_name";
     private int fps = 30, kbps = 450, size = 0;
@@ -63,7 +65,6 @@ public final class MainActivity extends Activity
      * clips where the gadget lists it and this build has libmgvpx
      * (jni/build_vpx.sh), else H.264. Remembered. */
     private boolean wantVp8, wantVp8Set;
-    private android.widget.Button codecButton;
     private String baseSw;      /* the H.264 encoder: x264, or null for the phone's */
     private boolean camVp8;     /* the camera stream that's on is VP8 */
     private static final String PREF_CODEC = "codec";
@@ -71,7 +72,7 @@ public final class MainActivity extends Activity
     /* What streams: "camera", "pattern" or "clip:<name>" (--es source, or the buttons). */
     private String source = "camera";
     /* Sample clips (SampleClips): fetched, decoded and encoded for the gadget when first played. */
-    private static final String CLIP = "clip:";
+    static final String CLIP = "clip:";
     private ClipStreamer player;
     private final java.util.Map<String, ClipStreamer.Clip> clips = new java.util.concurrent.ConcurrentHashMap<>();
     /* The encoder thread (clipLoop): the wanted clip first, then any others to have ready. */
@@ -103,7 +104,6 @@ public final class MainActivity extends Activity
         link.liveAhead = live && !isClip() ? Math.max(1600, frame * aheadPct / 100) : 0;
     }
     private int benchLoops = 1;
-    private TextView sending;
     private long lastStatMs, lastBytes, lastCamEnc, lastEncUs, lastConv, lastGate;
     private int lastFed, lastEnc, lastShown;
     private volatile int curFps;
@@ -114,62 +114,27 @@ public final class MainActivity extends Activity
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setIntent(benchOnly(getIntent()));
         readExtras(getIntent());
-        FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
-        preview = new TextureView(this);
-        root.addView(preview, new FrameLayout.LayoutParams(1080, 1080, Gravity.CENTER));
-        status = new TextView(this);
-        status.setTextColor(Color.WHITE);
-        status.setTextSize(13);
-        status.setTypeface(android.graphics.Typeface.MONOSPACE);
-        status.setPadding(24, 120, 24, 24);
-        root.addView(status, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
-        android.widget.LinearLayout bars = new android.widget.LinearLayout(this);
-        bars.setOrientation(android.widget.LinearLayout.VERTICAL);
-        java.util.List<String[]> row1 = new java.util.ArrayList<>();
-        row1.add(new String[] {"Camera", "camera"});
-        row1.add(new String[] {"Bars", "pattern"});
-        for (SampleClips.Sample c : SampleClips.ALL) {
-            row1.add(new String[] {c.label, CLIP + c.name});
+        /* Edge to edge, dark: AppScreen pads the app bar and tab bar by the system bars. */
+        getWindow().setDecorFitsSystemWindows(false);
+        getWindow().setStatusBarColor(Color.TRANSPARENT);
+        getWindow().setNavigationBarColor(Ui.NAV);
+        android.content.SharedPreferences up = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (!getIntent().hasExtra("front")) {
+            front = up.getBoolean(PREF_FRONT, false);
         }
-        for (String[][] specs : new String[][][] {row1.toArray(new String[0][]),
-                {{"Device", "device"}, {"Rate", "rate"}, {"H.264", "codec"}, {"Stop", "stop"}}}) {
-            android.widget.LinearLayout bar = new android.widget.LinearLayout(this);
-            bar.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-            for (String[] spec : specs) {
-                android.widget.Button btn = new android.widget.Button(this);
-                btn.setText(spec[0]);
-                btn.setAllCaps(false);
-                btn.setOnClickListener(v -> pick(spec[1]));
-                if ("rate".equals(spec[1])) {
-                    rateButton = btn;
-                }
-                if ("codec".equals(spec[1])) {
-                    codecButton = btn;
-                }
-                bar.addView(btn, new android.widget.LinearLayout.LayoutParams(0, -2, 1));
-            }
-            bars.addView(bar, new android.widget.LinearLayout.LayoutParams(-1, -2));
+        screen = new AppScreen(this);
+        screen.overlay.setMode(up.getInt(PREF_OVERLAY, StatsOverlay.COMPACT));
+        preview = screen.preview;
+        setContentView(screen.root);
+        String tab = getIntent().getStringExtra("tab");   /* --es tab gadget: open on that tab */
+        if (tab != null && !tab.isEmpty()) {
+            screen.select(screen.tabIndex(Character.toUpperCase(tab.charAt(0)) + tab.substring(1).toLowerCase(java.util.Locale.US)));
         }
-        /* What goes to the gadget now, in big type above the buttons. */
-        sending = new TextView(this);
-        sending.setTextColor(0xFFFFD54F);
-        sending.setTextSize(18);
-        sending.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        sending.setGravity(Gravity.CENTER);
-        sending.setShadowLayer(6, 0, 0, Color.BLACK);
-        sending.setPadding(16, 8, 16, 16);
-        sending.setText("Not sending");
-        android.widget.LinearLayout bottom = new android.widget.LinearLayout(this);
-        bottom.setOrientation(android.widget.LinearLayout.VERTICAL);
-        bottom.addView(sending, new android.widget.LinearLayout.LayoutParams(-1, -2));
-        bottom.addView(bars, new android.widget.LinearLayout.LayoutParams(-1, -2));
-        root.addView(bottom, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
-        setContentView(root);
         preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) {
-                st.setDefaultBufferSize(640, 640);
+                st.setDefaultBufferSize(640, 480);
+                previewTexture = st;
                 previewSurface = new Surface(st);
             }
 
@@ -178,7 +143,9 @@ public final class MainActivity extends Activity
 
             @Override
             public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
+                previewDecoder.stop();
                 previewSurface = null;
+                previewTexture = null;
                 return true;
             }
 
@@ -251,7 +218,8 @@ public final class MainActivity extends Activity
     public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
         for (int r : res) {
             if (r != PackageManager.PERMISSION_GRANTED) {
-                status.setText("Needs camera permission");
+                connStatus = "Needs camera permission";
+                refreshUi();
                 return;
             }
         }
@@ -284,8 +252,8 @@ public final class MainActivity extends Activity
         }
     }
 
-    /* The debug buttons: switch what streams, or stop. */
-    private void pick(String what) {
+    /* What the lists and adb's "pick" do: switch what streams, or stop. */
+    void pick(String what) {
         if (link == null) {
             return;
         }
@@ -295,7 +263,7 @@ public final class MainActivity extends Activity
             return;
         }
         if ("rate".equals(what)) {
-            showRatePicker();
+            screen.show("Video", "Encoding");
             return;
         }
         if ("codec".equals(what) || "h264".equals(what) || "vp8".equals(what)) {
@@ -338,11 +306,11 @@ public final class MainActivity extends Activity
         if (in != null && in.hasExtra("ratec")) {
             setCamRate(in.getIntExtra("ratec", 0));
         }
-        updateRateButton();
+        refreshUi();
         if (!wantVp8Set) {
             wantVp8 = rp.getBoolean(PREF_CODEC, false);
         }
-        updateCodecButton();
+        refreshUi();
         if (target == null && deviceAddr == null) {
             android.content.SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
             deviceAddr = p.getString(PREF_ADDR, null);
@@ -382,6 +350,12 @@ public final class MainActivity extends Activity
 
     @Override
     protected void onDestroy() {
+        previewDecoder.stop();
+        synchronized (clipLock) {
+            if (clipThread != null) {
+                clipThread.interrupt();   /* else it outlives the activity, encoding for nobody */
+            }
+        }
         if (cam != null) cam.stop();
         if (link != null) {
             link.stopStreaming();
@@ -439,7 +413,24 @@ public final class MainActivity extends Activity
             cam.srcFile = source.startsWith("file:")
                     ? new java.io.File(getExternalFilesDir(null), new java.io.File(source.substring(5)).getName()).getPath()
                     : null;   /* a name in the app's files, never a path out of them */
-            cam.setPreview(previewSurface);
+            /* The camera draws its own preview; the bars (or a file) are shown as sent, decoded. */
+            if ("camera".equals(source)) {
+                previewDecoder.stop();
+                if (previewTexture != null) {
+                    int[] ps = previewSize();
+                    previewTexture.setDefaultBufferSize(ps[0], ps[1]);
+                }
+                screen.cameraTransform(true);
+                cam.setPreview(previewSurface);
+            } else {
+                cam.setPreview(null);
+                screen.cameraTransform(false);
+                if (bands == 1) {
+                    previewDecoder.start(previewSurface, s, camVp8);
+                } else {
+                    previewDecoder.stop();
+                }
+            }
             if (c.dispW > 0 && c.dispH > 0) {
                 cam.panelPx = Math.min(c.dispW, c.dispH);   /* what the gadget scales the picture to */
             }
@@ -464,10 +455,10 @@ public final class MainActivity extends Activity
     }
 
     /* The Codec button: H.264 or VP8 from now on, for whatever streams; the stream starts over in it. */
-    private void setCodec(boolean vp8) {
+    void setCodec(boolean vp8) {
         wantVp8 = vp8;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_CODEC, vp8).apply();
-        updateCodecButton();
+        refreshUi();
         Log.i(TAG, "codec: " + (vp8 ? "VP8" : "H.264"));
         if (link != null && link.streaming()) {
             String src = source;
@@ -478,9 +469,9 @@ public final class MainActivity extends Activity
         }
     }
 
-    private void updateCodecButton() {
-        if (codecButton != null) {
-            codecButton.setText(wantVp8 ? "VP8" : "H.264");
+    void refreshUi() {
+        if (screen != null) {
+            screen.refresh();
         }
     }
 
@@ -495,7 +486,7 @@ public final class MainActivity extends Activity
      * link that carries a little less than the top rate (the phone in a
      * pocket) should cost a little quality, not most of it.
      */
-    private int[] clipLevels() {
+    int[] clipLevels() {
         int[] l = clipSize > 320 ? new int[] {clipTopKbps, clipTopKbps * 90 / 100, clipTopKbps * 80 / 100, clipTopKbps * 70 / 100}
                 : new int[] {clipTopKbps, clipTopKbps * 78 / 100, clipTopKbps * 60 / 100, clipTopKbps * 45 / 100};
         for (int i = 0; i < l.length; i++) {
@@ -534,7 +525,7 @@ public final class MainActivity extends Activity
      * bitrate finds them ready.
      */
     private void clipLoop() {
-        while (true) {
+        while (!Thread.currentThread().isInterrupted()) {
             int s = clipSize, kbps = clipKbps;
             boolean round = clipRound;
             String next = null;
@@ -659,12 +650,18 @@ public final class MainActivity extends Activity
             link.startStreaming(clip.size, clip.size, clip.fps, Math.max(clip.kbps, clip.steadyKbps()), playoutMs, 1,
                     clip.vp8);
         }
+        if (!previewDecoder.running(clip.size, clip.vp8)) {
+            screen.cameraTransform(false);
+            previewDecoder.start(previewSurface, clip.size, clip.vp8);
+        }
         player.play(clip);
         SampleClips.Sample sample = SampleClips.get(clip.name);
         linkStatus = (sample != null ? sample.credit + "\n" : "") + clip.info;
+        refreshUi();
     }
 
     private void stopStream() {
+        previewDecoder.stop();
         cam.stop();
         if (player != null) {
             player.stop();
@@ -680,6 +677,7 @@ public final class MainActivity extends Activity
     @Override
     public void onFrame(byte[] frame, boolean key) {
         link.sendFrame(frame);
+        previewDecoder.feed(frame, key);
         if (dumpLeft > 0) {
             dump(frame);
         }
@@ -731,11 +729,29 @@ public final class MainActivity extends Activity
 
     /* Lists the gadgets found on the network; tapping one connects to it
      * (and drops the current link). The choice is remembered. */
-    private void showPicker() {
+    void showPicker() {
         if (picker != null && picker.isShowing()) {
             return;
         }
-        pickerRows = new android.widget.ArrayAdapter<>(this, android.R.layout.simple_list_item_1, new java.util.ArrayList<>());
+        /* Two lines a gadget: its name, then its address and signal, smaller and muted. */
+        pickerRows = new android.widget.ArrayAdapter<String>(this, android.R.layout.simple_list_item_1,
+                new java.util.ArrayList<>()) {
+            @Override
+            public android.view.View getView(int pos, android.view.View convert, android.view.ViewGroup parent) {
+                android.widget.TextView t = (android.widget.TextView) super.getView(pos, convert, parent);
+                String row = getItem(pos);
+                int nl = row.indexOf('\n');
+                android.text.SpannableString sp = new android.text.SpannableString(row);
+                if (nl > 0) {
+                    sp.setSpan(new android.text.style.RelativeSizeSpan(0.8f), nl, row.length(), 0);
+                    sp.setSpan(new android.text.style.ForegroundColorSpan(Ui.TEXT2), nl, row.length(), 0);
+                }
+                t.setText(sp);
+                t.setPadding(Ui.dp(MainActivity.this, 24), Ui.dp(MainActivity.this, 10), Ui.dp(MainActivity.this, 24),
+                        Ui.dp(MainActivity.this, 10));
+                return t;
+            }
+        };
         android.widget.ListView list = new android.widget.ListView(this);
         list.setAdapter(pickerRows);
         list.setOnItemClickListener((parent, v, pos, id) -> {
@@ -755,8 +771,8 @@ public final class MainActivity extends Activity
             link.select(addr, name);
             picker.dismiss();
         });
-        picker = new android.app.AlertDialog.Builder(this)
-                .setTitle("Connect to")
+        picker = new android.app.AlertDialog.Builder(this, Ui.DIALOG_THEME)
+                .setTitle("Choose a gadget")
                 .setView(list)
                 .setNegativeButton("Cancel", null)
                 .create();
@@ -787,11 +803,12 @@ public final class MainActivity extends Activity
         for (java.util.Map.Entry<String, Seen> e : rows) {
             boolean on = e.getKey().equalsIgnoreCase(cur);
             pickerAddrs.add(e.getKey());
-            pickerRows.add(String.format(java.util.Locale.US, "%s%s\n%s", e.getValue().name,
-                                         on ? "  (connected)" : "", e.getKey()));
+            int rssi = e.getValue().rssi;
+            pickerRows.add(String.format(java.util.Locale.US, "%s%s\n%s%s", e.getValue().name,
+                                         on ? "  (connected)" : "", e.getKey(), rssi != 0 ? " · " + rssi + " dBm" : ""));
         }
         if (rows.isEmpty()) {
-            pickerRows.add("Looking on this Wi-Fi network...");
+            pickerRows.add("Looking for gadgets…");
         }
     }
 
@@ -818,12 +835,14 @@ public final class MainActivity extends Activity
     @Override
     public void onStatus(String s) {
         linkStatus = s;
+        connStatus = s;
         Log.i(TAG, s);
     }
 
     @Override
     public void onReady(VideoLink.Caps caps) {
         linkStatus = "Connected: " + caps;
+        connStatus = "Connected over " + link.kind();
         clipSize = Math.min(size > 0 ? size : caps.sugW, Math.min(caps.maxW, caps.maxH)) & ~7;
         clipRound = caps.round;
         /* A gadget suggesting a high bitrate (a big picture, or Wi-Fi) gets
@@ -875,6 +894,7 @@ public final class MainActivity extends Activity
     public void onStreamStopped() {
         Log.i(TAG, "gadget stopped the stream");
         ui.post(() -> {
+            previewDecoder.stop();
             cam.stop();
             if (player != null) {
                 player.stop();
@@ -888,6 +908,7 @@ public final class MainActivity extends Activity
             /* Phone camera isn't open on the gadget: its "want" starts the stream. */
             Log.i(TAG, "gadget refused the stream: open Phone camera on it");
             linkStatus = "Open Phone camera on the gadget";
+            connStatus = linkStatus;
             return;
         }
         Log.i(TAG, "gadget refused the stream (" + reason + "); trying again in 1 s");
@@ -933,6 +954,7 @@ public final class MainActivity extends Activity
     public void onDisconnected() {
         Log.i(TAG, "disconnected");
         ui.post(() -> {
+            previewDecoder.stop();
             cam.stop();
             if (player != null) {
                 player.stop();
@@ -944,76 +966,16 @@ public final class MainActivity extends Activity
 
     private int maxKbps = 650, minKbps = 200;
     private boolean kbpsSet, maxKbpsSet;
-    /* The Rate button: a fixed bitrate for the clips and for the camera
-     * (0: automatic, the adaptive bitrate / the clips' ladder). Remembered. */
+    /* Camera bitrate and Clip bitrate (Video tab): a fixed bitrate for the clips
+     * and for the camera (0: automatic, the adaptive bitrate / the clips' ladder). Remembered. */
     private int fixedClipKbps, fixedCamKbps;
-    private android.widget.Button rateButton;
     private static final String PREF_CLIP_KBPS = "clip_kbps", PREF_CAM_KBPS = "cam_kbps";
-    private static final int[] CAM_RATES = {150, 200, 250, 300, 400, 500, 650, 800, 1000, 1200};
+    static final int[] CAM_RATES = {150, 200, 250, 300, 400, 500, 650, 800, 1000, 1200};
     /* Picture sizes for gadgets that decode more than 240 px (the ESP-Mosaico). */
-    private static final int[] SIZES = {240, 320, 480};   /* 2x, 3/2 and 1:1 on its 480 panel */
+    static final int[] SIZES = {240, 320, 480};   /* 2x, 3/2 and 1:1 on its 480 panel */
     private static final String PREF_SIZE = "size", PREF_FPS = "fps";
 
-    private void showRatePicker() {
-        int[] clips = clipLevels();
-        java.util.List<String> labels = new java.util.ArrayList<>();
-        java.util.List<int[]> picks = new java.util.ArrayList<>();   /* {0 clip / 1 camera, kb/s} */
-        labels.add("Clips: auto (step down when the link falls behind)");
-        picks.add(new int[] {0, 0});
-        for (int k : clips) {
-            labels.add("Clips: " + k + " kb/s");
-            picks.add(new int[] {0, k});
-        }
-        labels.add("Camera: auto (adaptive, up to " + maxKbps + ")");
-        picks.add(new int[] {1, 0});
-        for (int k : CAM_RATES) {
-            labels.add("Camera: " + k + " kb/s");
-            picks.add(new int[] {1, k});
-        }
-        VideoLink.Caps caps = link != null ? link.caps() : null;
-        int maxSize = caps != null ? Math.min(caps.maxW, caps.maxH) : 240;
-        if (maxSize > 240) {
-            labels.add("Size: auto (the gadget's " + (caps != null ? caps.sugW : 0) + " px)");
-            picks.add(new int[] {2, 0});
-            for (int k : SIZES) {
-                if (k <= maxSize) {
-                    labels.add("Size: " + k + " px");
-                    picks.add(new int[] {2, k});
-                }
-            }
-        }
-        /* The camera's frame rate: 24 fps puts a quarter more bits in each
-         * frame (about 0.8 dB at 480 px and 600 kb/s), 30 moves more smoothly. */
-        labels.add("Camera frame rate: 30 fps (smoothest)");
-        picks.add(new int[] {3, 30});
-        labels.add("Camera frame rate: 24 fps (sharper at the same bitrate)");
-        picks.add(new int[] {3, 24});
-        String[] items = new String[labels.size()];
-        for (int i = 0; i < items.length; i++) {
-            int[] p = picks.get(i);
-            boolean on = p[0] == 0 ? p[1] == fixedClipKbps : p[0] == 1 ? p[1] == fixedCamKbps : p[0] == 2 ? p[1] == size
-                    : p[1] == fps;
-            items[i] = (on ? "\u2713 " : "    ") + labels.get(i);
-        }
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("Bitrate")
-                .setItems(items, (d, which) -> {
-                    int[] p = picks.get(which);
-                    if (p[0] == 0) {
-                        setClipRate(p[1]);
-                    } else if (p[0] == 1) {
-                        setCamRate(p[1]);
-                    } else if (p[0] == 2) {
-                        setSize(p[1]);
-                    } else {
-                        setFps(p[1]);
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void setClipRate(int k) {
+    void setClipRate(int k) {
         fixedClipKbps = k;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(PREF_CLIP_KBPS, k).apply();
         Log.i(TAG, "clip bitrate " + (k > 0 ? k + " kb/s (fixed)" : "auto"));
@@ -1026,10 +988,10 @@ public final class MainActivity extends Activity
                 startClip(lastSize, link.caps());
             }
         }
-        updateRateButton();
+        refreshUi();
     }
 
-    private void setCamRate(int k) {
+    void setCamRate(int k) {
         fixedCamKbps = k;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(PREF_CAM_KBPS, k).apply();
         Log.i(TAG, "camera bitrate " + (k > 0 ? k + " kb/s (fixed)" : "auto"));
@@ -1040,11 +1002,11 @@ public final class MainActivity extends Activity
                 setLiveBudget();
             }
         }
-        updateRateButton();
+        refreshUi();
     }
 
     /* A new picture size restarts what streams (0: the gadget's suggestion). */
-    private void setFps(int f) {
+    void setFps(int f) {
         fps = f;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(PREF_FPS, f).apply();
         Log.i(TAG, "camera frame rate " + f + " fps");
@@ -1052,10 +1014,10 @@ public final class MainActivity extends Activity
             stopStream();
             ui.postDelayed(this::startStream, 300);
         }
-        updateRateButton();
+        refreshUi();
     }
 
-    private void setSize(int k) {
+    void setSize(int k) {
         size = k;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(PREF_SIZE, k).apply();
         Log.i(TAG, "picture size " + (k > 0 ? k + " px" : "auto"));
@@ -1063,34 +1025,7 @@ public final class MainActivity extends Activity
             stopStream();
             ui.postDelayed(this::startStream, 300);
         }
-        updateRateButton();
-    }
-
-    /*
-     * The picture going to the gadget: its size (the gadget may decode
-     * several), frame rate, bands, the bitrate aimed at and what the link
-     * carried, and its source.
-     */
-    private String sendingLine(double sentKbps) {
-        if (link == null || !link.streaming()) {
-            return "Not sending";
-        }
-        java.util.Locale us = java.util.Locale.US;
-        if (isClip()) {
-            ClipStreamer.Clip c = player != null ? player.clip() : null;
-            if (c == null) {
-                return "Preparing clip";
-            }
-            return String.format(us, "Sending %s %d×%d · %d fps\n%d kb/s (%s) · link %.0f kb/s\n%s", c.vp8 ? "VP8" : "H.264",
-                    c.size, c.size, c.fps,
-                    c.kbps, fixedClipKbps > 0 ? "fixed" : "auto", sentKbps, clipLabel(c.name));
-        }
-        String src = "pattern".equals(source) ? "Bars" : source != null && source.startsWith("file:") ? "Clip " + source.substring(5)
-                : "Camera";
-        return String.format(us, "Sending %s %d×%d · %d fps%s\n%d kb/s (%s) · link %.0f kb/s\n%s · %s", camVp8 ? "VP8" : "H.264",
-                lastSize, lastSize, curFps,
-                cam.bands == 2 ? " · 2 bands" : "", kbps, fixedCamKbps > 0 ? "fixed" : "auto", sentKbps, src,
-                cam.encoderName.isEmpty() ? "encoder starting" : cam.encoderName.split(" ")[0]);
+        refreshUi();
     }
 
     private static String clipLabel(String name) {
@@ -1098,17 +1033,6 @@ public final class MainActivity extends Activity
         return c != null ? c.label : name;
     }
 
-    private void updateRateButton() {
-        if (rateButton == null) {
-            return;
-        }
-        if (fixedClipKbps == 0 && fixedCamKbps == 0 && size == 0) {
-            rateButton.setText("Rate");
-        } else {
-            rateButton.setText((fixedClipKbps > 0 ? "Clip " + fixedClipKbps : "Clip -") + "\n"
-                    + (fixedCamKbps > 0 ? "Cam " + fixedCamKbps : "Cam -") + (size > 0 ? "\n" + size + "px" : ""));
-        }
-    }
     private int lastSkipped;
     private long lastGateUs;
     private int calmSeconds, gadgetBehindSeconds;
@@ -1240,9 +1164,10 @@ public final class MainActivity extends Activity
         int fed = av ? player.statSent : cam.statFed, enc = av ? player.statSent : cam.statEncoded, shown = devShown;
         int dEnc = Math.max(1, enc - lastEnc);
         long camEnc = cam.statCamToEncUs, encUs = cam.statEncUs, conv = cam.statConvUs;
+        double camEncMs = (camEnc - lastCamEnc) / 1000.0 / dEnc, convMs = (conv - lastConv) / 1000.0 / Math.max(1, fed - lastFed),
+                encMs = (encUs - lastEncUs) / 1000.0 / dEnc, gateMs = (link.statGateUs - lastGate) / 1000.0 * 1000 / dt;
         String lat = String.format(java.util.Locale.US, "cam->enc %.0f ms (convert %.1f, encoder %.1f)  gate %.0f ms/s",
-                (camEnc - lastCamEnc) / 1000.0 / dEnc, (conv - lastConv) / 1000.0 / Math.max(1, fed - lastFed),
-                (encUs - lastEncUs) / 1000.0 / dEnc, (link.statGateUs - lastGate) / 1000.0 * 1000 / dt);
+                camEncMs, convMs, encMs, gateMs);
         lastCamEnc = camEnc;
         lastEncUs = encUs;
         lastConv = conv;
@@ -1256,7 +1181,6 @@ public final class MainActivity extends Activity
                 (bytes - lastBytes) * 8.0 / dt, link.inFlight(), link.queuedBytes(),
                 (fed - lastFed) * 1000.0 / dt, (enc - lastEnc) * 1000.0 / dt, cam.statSkipped, cam.statKeys, lat,
                 (shown - lastShown) * 1000.0 / dt, devDropped, devMs, devAvail, deviceLine);
-        status.setText(s);
         if (link.streaming() && meter != null && !isClip()) {
             Log.i(TAG, meter.take());
         }
@@ -1264,12 +1188,323 @@ public final class MainActivity extends Activity
             Log.i(TAG, "stats: " + s.replace('\n', '|'));
         }
         adaptBitrate(dt, bytes - lastBytes, (enc - lastEnc) * 1000.0 / dt, (shown - lastShown) * 1000.0 / dt);
-        sending.setText(sendingLine((bytes - lastBytes) * 8.0 / dt));
         adaptClip();
+        StatsOverlay.Stats st = new StatsOverlay.Stats();
+        st.sendKbps = (bytes - lastBytes) * 8.0 / dt;
+        st.gateMsPerS = gateMs;
+        st.fedFps = (fed - lastFed) * 1000.0 / dt;
+        st.encFps = (enc - lastEnc) * 1000.0 / dt;
+        st.shownFps = (shown - lastShown) * 1000.0 / dt;
+        st.camToEncMs = camEncMs;
+        st.convertMs = convMs;
+        st.encodeMs = encMs;
+        fillStats(st);
+        screen.overlay.update(st);
+        refreshUi();
         lastStatMs = now;
         lastBytes = bytes;
         lastFed = fed;
         lastEnc = enc;
         lastShown = shown;
+    }
+
+    /* ---- for the screen (AppScreen, the tabs) --------------------------- */
+
+    private static final String PREF_FRONT = "front", PREF_OVERLAY = "overlay";
+    /* The link's state in a line, for the Gadget tab and the app bar. */
+    private String connStatus = "";
+    private int uiSkipped, uiDropped;
+
+    /** The rest of the overlay's numbers: what's being sent, the link, the gadget. */
+    private void fillStats(StatsOverlay.Stats st) {
+        ClipStreamer.Clip pc = isClip() && player != null ? player.clip() : null;
+        st.connected = connected();
+        st.streaming = link.streaming();
+        st.preparing = preparing();
+        st.clip = isClip();
+        st.codec = (isClip() ? pc != null && pc.vp8 : camVp8) ? "VP8" : "H.264";
+        st.size = pc != null ? pc.size : lastSize;
+        st.fps = curFps;
+        st.bands = isClip() ? 1 : cam.bands;
+        st.targetKbps = isClip() ? (pc != null ? pc.kbps : clipKbps) : kbps;
+        st.fixedRate = (isClip() ? fixedClipKbps : fixedCamKbps) > 0;
+        st.source = sourceLabel();
+        st.encoder = isClip() ? "" : cam.encoderName.isEmpty() ? "starting" : cam.encoderName.split(" ")[0];
+        st.linkName = gadgetName() != null ? gadgetName() : "";
+        st.linkKind = link.kind();
+        st.linkDetail = link.describe();
+        st.inFlight = link.inFlight();
+        st.queued = link.queuedBytes();
+        st.skipped = isClip() ? 0 : cam.statSkipped;
+        st.skippedNew = Math.max(0, cam.statSkipped - uiSkipped);
+        uiSkipped = cam.statSkipped;
+        st.keys = isClip() && player != null ? player.statKeys : cam.statKeys;
+        st.dropped = devDropped;
+        st.droppedNew = Math.max(0, devDropped - uiDropped);
+        uiDropped = devDropped;
+        st.decodeMs = devMs;
+        st.free = devAvail;
+        st.buffer = link.ready() ? link.caps().buffer : 0;
+        SampleClips.Sample sample = pc != null ? SampleClips.get(pc.name) : null;
+        st.note = sample != null ? sample.credit : "";
+    }
+
+    boolean connected() {
+        return link != null && link.ready();
+    }
+
+    /** The gadget connected to, else the one being looked for (null: any). */
+    String gadgetName() {
+        String n = link != null ? link.connectedName() : null;
+        return n != null ? n : target;
+    }
+
+    String connectionLine() {
+        return connStatus.isEmpty() ? (link != null ? link.describe() : "") : connStatus;
+    }
+
+    String linkDetail() {
+        return link != null ? link.describe() : "";
+    }
+
+    String deviceLine() {
+        return deviceLine;
+    }
+
+    String decodeLine() {
+        if (!connected()) {
+            return "-";
+        }
+        return String.format(java.util.Locale.US, "%d dropped, %d ms", devDropped, devMs);
+    }
+
+    VideoLink.Caps caps() {
+        return connected() ? link.caps() : null;
+    }
+
+    String source() {
+        return source;
+    }
+
+    boolean sourceIs(String what) {
+        return what.equals(source);
+    }
+
+    String sourceLabel() {
+        if (isClip()) {
+            return clipLabel(source.substring(CLIP.length()));
+        }
+        return "pattern".equals(source) ? "Color bars" : source.startsWith("file:") ? "File " + source.substring(5)
+                : (front ? "Front camera" : "Camera");
+    }
+
+    /** Streaming, or a clip being encoded to stream. */
+    boolean streamingOrPreparing() {
+        return link != null && (link.streaming() || preparing());
+    }
+
+    /** The wanted clip isn't encoded yet. */
+    boolean preparing() {
+        if (!isClip() || link == null || !link.ready() || !(auto || wanted)) {
+            return false;
+        }
+        String name = source.substring(CLIP.length());
+        return bestClip(name, clipSize) == null && !failedClips.contains(clipKey(name, clipSize, clipKbps));
+    }
+
+    /** How a clip stands, after its description: "" or " · ready at 480 px", "preparing", "failed". */
+    String clipState(String name) {
+        if (failedClips.contains(clipKey(name, clipSize, clipKbps))) {
+            return SampleClips.get(name) != null ? "\nFailed: it needs the Internet the first time" : "\nFailed";
+        }
+        ClipStreamer.Clip c = bestClip(name, clipSize);
+        if (c != null) {
+            return String.format(java.util.Locale.US, "\nReady · %d px · %d kb/s · %d KB loop", c.size, c.kbps,
+                    c.loopBytes() / 1024);
+        }
+        return sourceIs(CLIP + name) && preparing() ? "\nPreparing…" : "";
+    }
+
+    boolean cameraPreview() {
+        return "camera".equals(source) && cam != null && cam.running();
+    }
+
+    boolean decoderShown() {
+        return previewDecoder.shown();
+    }
+
+    /** A source row's tap: stream what (or switch to it). */
+    void play(String what) {
+        pick(what);
+        refreshUi();
+    }
+
+    /* A 4:3 size for the camera's preview (upright 3:4, cropped square by AppScreen). */
+    private int[] previewSize() {
+        try {
+            android.hardware.camera2.CameraManager cm = getSystemService(android.hardware.camera2.CameraManager.class);
+            for (String id : cm.getCameraIdList()) {
+                android.hardware.camera2.CameraCharacteristics ch = cm.getCameraCharacteristics(id);
+                Integer facing = ch.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING);
+                if (facing == null || (facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT) != front) {
+                    continue;
+                }
+                android.util.Size best = null;
+                for (android.util.Size z : ch.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                        .getOutputSizes(SurfaceTexture.class)) {
+                    if (z.getWidth() * 3 == z.getHeight() * 4 && z.getHeight() >= 720
+                            && (best == null || z.getHeight() < best.getHeight())) {
+                        best = z;
+                    }
+                }
+                if (best != null) {
+                    return new int[] {best.getWidth(), best.getHeight()};
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "preview size", e);
+        }
+        return new int[] {960, 720};
+    }
+
+    boolean frontCamera() {
+        return front;
+    }
+
+    /** Front or back camera; remembered, and a camera stream starts over on it. */
+    void setFront(boolean f) {
+        if (f == front) {
+            return;
+        }
+        front = f;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_FRONT, f).apply();
+        if (cam != null) {
+            cam.setFront(f);
+        }
+        Log.i(TAG, "camera: " + (f ? "front" : "back"));
+        if (link != null && link.streaming() && "camera".equals(source)) {
+            stopStream();
+            ui.postDelayed(this::startStream, 300);
+        }
+    }
+
+    int fps() {
+        return fps;
+    }
+
+    int size() {
+        return size;
+    }
+
+    boolean wantVp8() {
+        return wantVp8;
+    }
+
+    /** The Codec row's description: whether VP8 can be had. */
+    String codecNote() {
+        if (!Vpx.available()) {
+            return "This build has no VP8 encoder (jni/build_vpx.sh)";
+        }
+        VideoLink.Caps c = caps();
+        if (c == null) {
+            return "VP8 where the gadget decodes it";
+        }
+        return c.vp8 ? "The gadget decodes both" : "This gadget decodes H.264 only";
+    }
+
+    int fixedCamKbps() {
+        return fixedCamKbps;
+    }
+
+    int fixedClipKbps() {
+        return fixedClipKbps;
+    }
+
+    int maxKbps() {
+        return maxKbps;
+    }
+
+    boolean twoBands() {
+        return !noBands;
+    }
+
+    /** Two bands where the gadget takes them (session only, like --ez nobands); a camera stream starts over. */
+    void setTwoBands(boolean on) {
+        noBands = !on;
+        restartLive();
+    }
+
+    boolean x264Available() {
+        return X264.available();
+    }
+
+    boolean useX264() {
+        return baseSw != null;
+    }
+
+    /** x264 or the phone's encoder for H.264 (session only, like --es sw). */
+    void setUseX264(boolean on) {
+        baseSw = on && X264.available() ? "x264" : null;
+        restartLive();
+    }
+
+    boolean intraRefresh() {
+        return cam != null && cam.intraRefresh;
+    }
+
+    void setIntraRefresh(boolean on) {
+        if (cam != null) {
+            cam.intraRefresh = on;
+        }
+        restartLive();
+    }
+
+    boolean panelFilter() {
+        return cam != null && cam.panelFilter;
+    }
+
+    void setPanelFilter(boolean on) {
+        if (cam != null) {
+            cam.panelFilter = on;
+        }
+        restartLive();
+    }
+
+    /* A live stream (the camera, the bars) starts over with new settings. */
+    private void restartLive() {
+        if (link != null && link.streaming() && !isClip()) {
+            stopStream();
+            ui.postDelayed(this::startStream, 300);
+        }
+        refreshUi();
+    }
+
+    boolean autoStart() {
+        return auto;
+    }
+
+    void setAutoStart(boolean on) {
+        auto = on;
+        if (on && link != null && link.ready() && !link.streaming()) {
+            startStream();
+        }
+    }
+
+    int overlayMode() {
+        return screen != null ? screen.overlay.mode() : StatsOverlay.COMPACT;
+    }
+
+    void setOverlayMode(int m) {
+        screen.overlay.setMode(m);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(PREF_OVERLAY, m).apply();
+        refreshUi();
+    }
+
+    String versionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (PackageManager.NameNotFoundException e) {
+            return "";
+        }
     }
 }

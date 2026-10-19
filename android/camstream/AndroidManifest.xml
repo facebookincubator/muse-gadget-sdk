@@ -32,6 +32,7 @@ limitations under the License.
 
     <application
         android:label="Muse Gadgets Test"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:allowBackup="false">
         <activity
             android:name=".MainActivity"

@@ -62,7 +62,7 @@ final class CameraStreamer {
 
     private final Context ctx;
     private final Sink sink;
-    private final boolean front;
+    private volatile boolean front;
     private HandlerThread thread;
     private Handler handler;
     private CameraDevice camera;
@@ -158,6 +158,11 @@ final class CameraStreamer {
 
     void setPreview(Surface s) {
         preview = s;
+    }
+
+    /** The front camera instead of the back one, from the next start(). */
+    void setFront(boolean f) {
+        front = f;
     }
 
     synchronized void start(int w, int h, int fps, int kbps, boolean round) throws Exception {

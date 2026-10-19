@@ -101,6 +101,12 @@ abstract class VideoLink {
     abstract void setTarget(String address, String name);
     /** One line about the link for the stats (address, signal, ...). */
     abstract String describe();
+    /** What kind of link it is, for the screen ("Wi-Fi"). */
+    abstract String kind();
+    /** The connected gadget's name, or null. */
+    String connectedName() {
+        return null;
+    }
 
     /** bands: the picture as that many horizontal bands, each its own stream; vp8: VP8 frames, else H.264. */
     abstract void startStreaming(int w, int h, int fps, int kbps, int playoutMs, int bands, boolean vp8);

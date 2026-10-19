@@ -373,6 +373,16 @@ final class WifiLink extends VideoLink {
         return ready ? connected : null;
     }
 
+    @Override
+    String kind() {
+        return "Wi-Fi";
+    }
+
+    @Override
+    String connectedName() {
+        return ready ? connectedName : null;
+    }
+
     /* ---- incoming ------------------------------------------------------ */
 
     private void readLoop(DataInputStream in) throws IOException {

@@ -19,7 +19,7 @@ limitations under the License.
 <img src="../../.github/images/camstream/android.jpg" width="300" align="right"
  alt="The app on a Galaxy S22: the stats, the camera preview, the yellow line reading Sending VP8 232x232, 30 fps, and the buttons">
 
-An Android sample app that streams the phone's camera, colour bars, or a
+An Android sample app that streams the phone's camera, color bars, or a
 sample clip, to a Muse gadget's display over Wi-Fi
 ([`../../protocols/VIDEO.md`](../../protocols/VIDEO.md)): Camera2 frames,
 center-cropped, turned upright and scaled to the size the gadget suggests
@@ -53,11 +53,12 @@ The phone and the gadget must be on the same Wi-Fi network. The app finds
 gadgets over mDNS (`_musevideo._tcp`) and connects to the first one, the
 one whose name contains `--es target`, the address given with `--es host`
 (no mDNS: `192.168.1.20` or `192.168.1.20:7766`), or the one picked with
-the Device button (the choice is remembered). Then it waits: picking Phone
+the Gadget tab (the choice is remembered). Then it waits: picking Phone
 camera on the gadget (Settings on the touch boards, the menu on the others)
 starts the stream, leaving it stops it. The gadget takes a stream only
 while that view is open (`../../protocols/VIDEO.md`, Trust); with `--ez auto
-true` the app starts as soon as it is, without waiting for a button.
+true` (or Start automatically, on the Gadget tab) the app starts as soon as
+it is, without waiting for the gadget.
 
 ### x264 (better live quality; not in this repository)
 
@@ -101,9 +102,9 @@ NDK=~/Library/Android/sdk/ndk/27.2.12479018 VPX_SRC=~/libvpx OUT_LIB=~/x264-lib 
 LIB_DIR=~/x264-lib ./gradlew installDebug    # or ./build.sh install
 ```
 
-The **H.264 / VP8** button (or `--es codec vp8`) picks the codec for the
-camera and the clips; the choice is remembered, and the line above the
-buttons names what streams. VP8 needs the gadget to list it and the
+**Codec** on the Video tab (or `--es codec vp8`) picks the codec for the
+camera and the clips; the choice is remembered, and the stats over the
+preview name what streams. VP8 needs the gadget to list it and the
 library in the APK, else the app streams H.264 and logs why. Settings
 (`Vpx.java`): libvpx's good-quality mode with no lag, version 1, no loop
 filter, one thread; cpu-used 1 up to 240 px, cpu-used 2 with
@@ -113,17 +114,33 @@ numbers.
 
 ### Using it
 
-The buttons pick what streams: the camera, colour bars, a sample clip
-(Bunny, Sintel), or stop. **Rate** fixes the bitrate, for comparing them:
-the clips' levels or the camera's (150-1200 kb/s), each also "auto" (the
-clips' step-down ladder, the camera's adaptive bitrate). The choice is
-remembered; the button shows it (`Clip 414 / Cam -`: clips at 414 kb/s,
-camera automatic). `--ei rateclip N` / `--ei ratec N` set the same from
-the command line (0: auto). On a gadget that decodes more than 240 px (the
-ESP-Mosaico, up to 480), Rate also picks the picture size (240, 320 or 480
-px, or the gadget's suggestion; `--ei size N`). Past 240 px on a gadget
-that decodes two bands, x264 (or VP8) sends the top and bottom as two
-streams, one per gadget core (`--ez nobands true`: one).
+The screen is the preview on top (what's sent: the camera, or the clip
+decoded as the gadget gets it) with the stats over it, and below it a tab
+per system, each a scrolling list of settings:
+
+- **Video**: what streams (the camera, color bars, the sample clips: tap
+  one to stream it), the camera (lens, frame rate), the encoding (codec,
+  picture size, the camera's and the clips' bitrates, two bands) and
+  advanced options (the H.264 encoder, intra refresh, the panel filter,
+  the stats overlay).
+- **Gadget**: which gadget (the device picker), Start automatically, and
+  what the gadget reports: its display, the pictures it takes, its
+  suggestion, its codecs and buffer, and how it's decoding.
+
+What's playing, and its **Stop**, are at the bottom of the preview. Tap the
+preview to switch the stats between compact (four numbers) and detailed
+(Link, Encoder, Gadget and Latency, problems in amber). The logcat
+`stats:` lines are unchanged.
+
+**Camera bitrate** and **Clip bitrate** fix the bitrate, for comparing
+them: the clips' levels or the camera's (150-1200 kb/s), each also "auto"
+(the clips' step-down ladder, the camera's adaptive bitrate). The choice
+is remembered. `--ei rateclip N` / `--ei ratec N` set the same from the
+command line (0: auto). On a gadget that decodes more than 240 px (the
+ESP-Mosaico, up to 480), **Picture size** picks 240, 320 or 480 px, or the
+gadget's suggestion (`--ei size N`). Past 240 px on a gadget that decodes
+two bands, x264 (or VP8) sends the top and bottom as two streams, one per
+gadget core (**Two bands** off, or `--ez nobands true`: one).
 
 The sample clips are 8 s excerpts of the Blender Foundation's open movies
 *Big Buck Bunny* and *Sintel* (CC BY 3.0; credits on screen while they
@@ -139,21 +156,22 @@ behind the clips step down a ladder of four bitrates (each encoded when
 first needed; a tap plays the best version already made at once) and climb
 back after calm seconds, so the picture never slows down. Add your own to
 `SampleClips.ALL`: any video the phone decodes, by URL. `--es pick
-clip:<name>` (or `camera`, `pattern`, `stop`) on a running app presses a
-button.
+clip:<name>` (or `camera`, `pattern`, `stop`) on a running app does what
+tapping it does.
 
 | Extra | Default | |
 |---|---|---|
 | `--es target` | none (the first gadget found) | name substring to connect to |
 | `--es host` | | the gadget's address (`host` or `host:port`), without mDNS |
-| `--ei fps` | 30 (or the Rate menu's choice, 24 or 30) | the camera's frame rate (at most the gadget's max) |
+| `--ei fps` | 30 (or the Frame rate row's choice, 24 or 30) | the camera's frame rate (at most the gadget's max) |
 | `--ei kbps` | the gadget's suggestion | starting encoder bitrate |
 | `--ei maxkbps` | 5/4 of a suggestion of 600 or more, else 650 (1.1x a suggestion under 450) | ceiling for the adaptive bitrate |
 | `--ez adaptive` | true | back off when the link or the gadget's decoder falls behind, creep up when calm |
 | `--ei size` | the gadget's suggestion | square picture size (a multiple of 8, at most the gadget's max) |
+| `--es tab` | `video` | the tab to open on (`video`, `gadget`) |
 | `--ez auto` | false | stream as soon as connected, without the gadget asking |
-| `--ez front` | false | the front camera, mirrored |
-| `--ez pattern` | false | colour bars and a moving box instead of the camera |
+| `--ez front` | false (or the Lens row's choice) | the front camera, mirrored |
+| `--ez pattern` | false | color bars and a moving box instead of the camera |
 | `--es clip` | none | stream a sample clip (`bunny`, `sintel`) instead of the camera |
 | `--es source` | `camera` | what streams: `camera`, `pattern`, `clip:<name>`, or `file:<name>` (a raw 640x480 I420 30 fps clip from `files/`, through the camera's path: `tools/livebench`) |
 | `--ei clipkbps` | 450 (92% of the gadget's suggestion when it's 600 or more) | the clips' top bitrate |
@@ -162,7 +180,7 @@ button.
 | `--ei dump` | 0 | save the first N frames sent as `files/dump.au` (u32 length + access unit) |
 | `--ez ir` | true | intra refresh (every 3 s) instead of a keyframe every 4 s |
 | `--ei aefps`, `--ei sensorfps` | 30 | the lowest frame rate auto exposure may stretch to in dim light, and the sensor's rate |
-| `--es codec` | the Codec button's | `h264` or `vp8` (VP8 where the gadget lists it and the APK has libmgvpx) |
+| `--es codec` | the Codec row's | `h264` or `vp8` (VP8 where the gadget lists it and the APK has libmgvpx) |
 | `--es sw` | `x264` if built in | `hw`: the phone's hardware encoder even when x264 is in the APK (H.264) |
 | `--es swpreset`, `--es swparams` | `fast`, `no-deblock=1` (plus `mv-cheap=2` past 240 px unless swparams names it) | x264's preset and options (`name=value:...`, as on its command line; `vbv-ms=N` sets the VBV) |
 | `--ei pf` | 1 | 0: downscale with the 2x2 box instead of `PanelScaler` |
