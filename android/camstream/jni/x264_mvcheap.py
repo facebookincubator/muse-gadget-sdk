@@ -35,7 +35,7 @@ MARK = 'x264_mv_cheap_bad'
 
 HELPER = '''
 
-/* mv-cheap (added by Muse Gadgets Camera's jni/x264_mvcheap.py): whether a quarter-pel
+/* mv-cheap (added by Muse Gadgets Test's jni/x264_mvcheap.py): whether a quarter-pel
  * MV is one the decoder interpolates slowly. */
 static inline int x264_mv_cheap_bad( int mode, int mx, int my )
 {
@@ -49,7 +49,7 @@ static inline int x264_mv_cheap_bad( int mode, int mx, int my )
 }'''
 
 FIX = '''/* mv-cheap: a start point (the predictor's subpel part) may still be one the
- * decoder interpolates slowly: move to the best allowed neighbour. */
+ * decoder interpolates slowly: move to the best allowed neighbor. */
 #define MV_CHEAP_FIX() \\
 if( x264_mv_cheap_bad( h->param.analyse.i_mv_cheap, bmx, bmy ) ) \\
 { \\

@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Live-path bench: plays a raw clip through Muse Gadgets Camera's own camera path
+# Live-path bench: plays a raw clip through Muse Gadgets Test's own camera path
 # (crop/scale, encoder, buffering, the link) to a gadget, then reports
 # capture-to-shown latency and scores what the gadget showed.
 #
 #   tools/livebench/run.sh TAG CLIP SIZE [extras...]
 #
 # CLIP: files/CLIP.yuv on the phone, 640x480 I420 at 30 fps (push with
-#   adb push clip.yuv /sdcard/Android/data/com.musegadgets.camstream/files/CLIP.yuv)
+#   adb push clip.yuv /sdcard/Android/data/com.musegadgets.test/files/CLIP.yuv)
 #   and the same file as $CLIPS/CLIP_640x480.yuv here, for the score.
 # SIZE: the encoded size (--ei size). Extras go to the app (e.g. --es sw hw,
 #   --ei pf 0, --ei live 0, --ez adaptive false --ei kbps 250).
@@ -33,7 +33,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 loops=${LOOPS:-2}
 out=${OUT:-/tmp/livebench}/$tag
 CLIPS=${CLIPS:?set CLIPS to the directory holding CLIP_640x480.yuv}
-pkg=com.musegadgets.camstream
+pkg=com.musegadgets.test
 adb shell am force-stop $pkg
 adb logcat -c
 adb shell rm -rf /sdcard/Android/data/$pkg/files/bench

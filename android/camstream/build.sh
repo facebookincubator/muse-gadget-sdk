@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Builds Muse Gadgets Camera without Gradle (Android Studio: open this directory,
+# Builds Muse Gadgets Test without Gradle (Android Studio: open this directory,
 # or ./gradlew installDebug): javac, d8, aapt2, zipalign, apksigner
 # from the Android SDK (ANDROID_HOME, or ~/Library/Android/sdk), signed with
 # the debug key. ./build.sh [install]
@@ -34,7 +34,7 @@ assets=()
 [ -d "$here/assets" ] && assets=(-A "$here/assets" -0 mp4 -0 264)
 # The same package, versions and SDK levels as build.gradle.kts; debuggable
 # (a test build, like Gradle's debug variant).
-sed 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.musegadgets.camstream">|' \
+sed 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.musegadgets.test">|' \
     "$here/AndroidManifest.xml" > "$out/AndroidManifest.xml"
 "$bt/aapt2" link -o "$out/base.apk" -I "$jar" --manifest "$out/AndroidManifest.xml" \
     --min-sdk-version 33 --target-sdk-version 34 --version-code 1 --version-name 0.1 --debug-mode \
@@ -51,5 +51,5 @@ fi
 echo "$out/camstream.apk"
 if [ "${1:-}" = install ]; then
     adb install -r "$out/camstream.apk"
-    adb shell pm grant com.musegadgets.camstream android.permission.CAMERA
+    adb shell pm grant com.musegadgets.test android.permission.CAMERA
 fi

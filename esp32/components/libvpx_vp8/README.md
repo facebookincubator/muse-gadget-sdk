@@ -67,7 +67,7 @@ Memory: four frame buffers with 32-pixel borders, in PSRAM (1.8 MB at 480
 px, 0.55 MB at 240).
 
 On the Waveshare ESP32-S3-Touch-AMOLED-1.75C (232 px, two times upscaled,
-350 kb/s, Muse Gadgets Camera's live path on four xiph.org test clips, decoder in
+350 kb/s, Muse Gadgets Test's live path on four xiph.org test clips, decoder in
 IRAM): 13-15 ms a frame against tinyh264's 13-20 ms. Per stage
 (city): tokens 3.0 ms, prediction 6.5 (mostly reference reads from PSRAM),
 residual 3.1, border extension 0.9, modes 1.2.

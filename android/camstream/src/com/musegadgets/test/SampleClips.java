@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.musegadgets.camstream;
+package com.musegadgets.test;
 
 /**
  * Open sample videos for the clip buttons: short excerpts of the Blender
@@ -39,7 +39,7 @@ final class SampleClips {
 
         /** The movie on the network, read by the extractor with range requests (only the excerpt's part). */
         ClipStreamer.Source source() {
-            return ex -> ex.setDataSource(url, java.util.Collections.singletonMap("User-Agent", "MuseCamera"));
+            return ex -> ex.setDataSource(url, java.util.Collections.singletonMap("User-Agent", "MuseGadgetsTest"));
         }
     }
 

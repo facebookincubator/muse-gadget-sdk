@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.musegadgets.camstream;
+package com.musegadgets.test;
 
 import android.media.Image;
 import android.media.MediaCodec;
@@ -181,7 +181,7 @@ final class ClipStreamer {
 
     /* ---- decoding and scaling ------------------------------------------- */
 
-    /* Every frame of the clip (or its excerpt) as I420 at size x size: centre-cropped to a square, area-averaged, circle-masked. */
+    /* Every frame of the clip (or its excerpt) as I420 at size x size: center-cropped to a square, area-averaged, circle-masked. */
     private static List<byte[]> decodeScaled(Source src, int size, boolean round, long startUs, int maxFrames)
             throws Exception {
         MediaExtractor ex = new MediaExtractor();
@@ -259,7 +259,7 @@ final class ClipStreamer {
 
     /**
      * Area-average downscaler for YUV_420_888 images: each source pixel of
-     * the centred square adds to the one destination pixel it falls in, then
+     * the centered square adds to the one destination pixel it falls in, then
      * each destination pixel is divided by its count (a box filter that
      * keeps fur and edges crisp without aliasing).
      */
@@ -338,7 +338,7 @@ final class ClipStreamer {
             return m;
         }
 
-        /* Bilinear taps for each destination index, pixel centres aligned:
+        /* Bilinear taps for each destination index, pixel centers aligned:
          * the two source indices and the second one's weight in 1/256. */
         private static int[][] lerp(int src, int dst) {
             int[] i0 = new int[dst], i1 = new int[dst], w = new int[dst];

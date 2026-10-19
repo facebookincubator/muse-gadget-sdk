@@ -273,7 +273,7 @@ menu "Muse"
         depends on MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31)
         default n
         help
-            A phone (Muse Gadgets Camera, android/camstream) streams its camera, or
+            A phone (Muse Gadgets Test, android/camstream) streams its camera, or
             a clip, as H.264 constrained baseline (or VP8, MUSE_VIDEO_VP8);
             the board decodes it (components/tinyh264) and shows it full
             screen, scaled to fit.

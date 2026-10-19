@@ -36,7 +36,7 @@ warranties, brownouts, or bankruptcies. Proceed at your own risk!
 |---|---|
 | [**ESP32 Device SDK**](esp32) | Connect your ESP32 board to Muse through our open source SDK. Throw in a screen to show images, add audio in and out, or wire up other sensors. |
 | [**Linux Device SDK**](linux) | Turn that spare Raspberry Pi or Linux box into a Muse gadget. Hack in your own commands to let Muse handle sysadmin chores or your Home Assistant setup. |
-| [**Muse Gadgets Camera**](android/camstream) ([iPhone](ios/camstream)) | Stream your phone's camera, or a clip, to an ESP32 gadget's screen over Wi-Fi: H.264 or VP8 decoded on the board, 30 fps on the round 466 px boards. [`protocols/VIDEO.md`](protocols/VIDEO.md) explains how. |
+| [**Muse Gadgets Test**](android/camstream) ([iPhone](ios/camstream)) | Stream your phone's camera, or a clip, to an ESP32 gadget's screen over Wi-Fi: H.264 or VP8 decoded on the board, 30 fps on the round 466 px boards. [`protocols/VIDEO.md`](protocols/VIDEO.md) explains how. |
 
 Before you flash or pair a gadget, get an
 [SDK token](https://gadgets.muse.ai/settings/sdk-tokens) and review the
@@ -81,11 +81,11 @@ SDL (listed in [`esp32/simulator/THIRD_PARTY.md`](esp32/simulator/THIRD_PARTY.md
 
 The Apache License does not cover the [Jollybot avatar](esp32/avatar).
 
-Muse Gadgets Camera's sample clips aren't in this repository: the app fetches a few
+Muse Gadgets Test's sample clips aren't in this repository: the app fetches a few
 seconds of the Blender Foundation's open movies (CC BY 3.0) when one is
 played, and shows their credits.
 
-Muse Gadgets Camera can use x264 (GPL-2.0) on the phone; this repository carries none
+Muse Gadgets Test can use x264 (GPL-2.0) on the phone; this repository carries none
 of its code. An APK or iPhone app you build with it is under the GPL
 ([`android/camstream/README.md`](android/camstream/README.md),
 [`ios/camstream/README.md`](ios/camstream/README.md)).

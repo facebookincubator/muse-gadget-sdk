@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Muse Gadgets Camera: open this directory in Android Studio, or ./gradlew installDebug.
+// Muse Gadgets Test: open this directory in Android Studio, or ./gradlew installDebug.
 pluginManagement {
     repositories {
         google()
@@ -27,4 +27,4 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "MuseGadgetsCamera"
+rootProject.name = "MuseGadgetsTest"

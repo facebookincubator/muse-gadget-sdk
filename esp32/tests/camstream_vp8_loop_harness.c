@@ -15,7 +15,7 @@
  */
 
 /*
- * Muse Gadgets Camera's VP8 clip loops (ClipStreamer.encodeLoopsVp8 in both
+ * Muse Gadgets Test's VP8 clip loops (ClipStreamer.encodeLoopsVp8 in both
  * apps) through the apps' own encoder glue (ios/camstream/native/mgvpx.c,
  * the same code as Android's jni/mgvpx.c) and the host's libvpx, for
  * tests/test_camstream_vp8_loops.py.

@@ -15,8 +15,8 @@
  */
 
 /*
- * JNI wrapper around libx264 for Muse Gadgets Camera's software encoder
- * (com.musegadgets.camstream.X264): one I420 picture in, one Annex-B access
+ * JNI wrapper around libx264 for Muse Gadgets Test's software encoder
+ * (com.musegadgets.test.X264): one I420 picture in, one Annex-B access
  * unit out, no delay (zerolatency: no lookahead, no B frames, no frame
  * threads). Built by jni/build.sh against a static libx264.
  */
@@ -53,7 +53,7 @@ static void set_rate(x264_param_t *p, int kbps, int vbv_ms)
     p->rc.i_vbv_buffer_size = kbps * vbv_ms / 1000 > 1 ? kbps * vbv_ms / 1000 : 1;
 }
 
-JNIEXPORT jlong JNICALL Java_com_musegadgets_camstream_X264_open(JNIEnv *env, jclass cls, jint w, jint h, jint fps,
+JNIEXPORT jlong JNICALL Java_com_musegadgets_test_X264_open(JNIEnv *env, jclass cls, jint w, jint h, jint fps,
                                                                  jint kbps, jstring jpreset, jstring jparams)
 {
     (void)cls;
@@ -114,7 +114,7 @@ JNIEXPORT jlong JNICALL Java_com_musegadgets_camstream_X264_open(JNIEnv *env, jc
     return (jlong)(intptr_t)m;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_com_musegadgets_camstream_X264_encode(JNIEnv *env, jclass cls, jlong h,
+JNIEXPORT jbyteArray JNICALL Java_com_musegadgets_test_X264_encode(JNIEnv *env, jclass cls, jlong h,
                                                                         jbyteArray i420, jlong pts, jboolean idr,
                                                                         jintArray info)
 {
@@ -169,7 +169,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_musegadgets_camstream_X264_encode(JNIEnv *
     return r;
 }
 
-JNIEXPORT void JNICALL Java_com_musegadgets_camstream_X264_setBitrate(JNIEnv *env, jclass cls, jlong h, jint kbps)
+JNIEXPORT void JNICALL Java_com_musegadgets_test_X264_setBitrate(JNIEnv *env, jclass cls, jlong h, jint kbps)
 {
     (void)env;
     (void)cls;
@@ -182,7 +182,7 @@ JNIEXPORT void JNICALL Java_com_musegadgets_camstream_X264_setBitrate(JNIEnv *en
     x264_encoder_reconfig(m->enc, &m->p);
 }
 
-JNIEXPORT void JNICALL Java_com_musegadgets_camstream_X264_close(JNIEnv *env, jclass cls, jlong h)
+JNIEXPORT void JNICALL Java_com_musegadgets_test_X264_close(JNIEnv *env, jclass cls, jlong h)
 {
     (void)env;
     (void)cls;
@@ -198,7 +198,7 @@ JNIEXPORT void JNICALL Java_com_musegadgets_camstream_X264_close(JNIEnv *env, jc
  * builds that carry this library: about 10x faster than the Java loops.
  * taps: nOut x len Q12 weights from start[o]; tmp: nIn x nOut ints.
  */
-JNIEXPORT void JNICALL Java_com_musegadgets_camstream_X264_scale(JNIEnv *env, jclass cls, jbyteArray jsrc, jint rowStride,
+JNIEXPORT void JNICALL Java_com_musegadgets_test_X264_scale(JNIEnv *env, jclass cls, jbyteArray jsrc, jint rowStride,
                                                                  jint pixStride, jint x0, jint y0, jint nIn, jint nOut,
                                                                  jintArray jstart, jintArray jtaps, jint len,
                                                                  jbyteArray jdst)

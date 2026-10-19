@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.musegadgets.camstream;
+package com.musegadgets.test;
 
 import android.Manifest;
 import android.app.Activity;
@@ -34,12 +34,12 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 
 /**
- * Muse Gadgets Camera: finds the gadget on the local network, and streams the camera
+ * Muse Gadgets Test: finds the gadget on the local network, and streams the camera
  * (or an open sample clip) to it when the gadget's menu asks (its "want" message)
  * or, with auto on (a bench option), as soon as it's connected. Stats on
  * screen and in logcat (tag MuseCam), the gadget's decode stats included.
  *
- * Intent extras (adb shell am start -n com.musegadgets.camstream/.MainActivity
+ * Intent extras (adb shell am start -n com.musegadgets.test/.MainActivity
  * --es target A1B2C3 --ei fps 24 --ei kbps 1000 --ez auto true --ez front false;
  * --es host 192.168.1.20 skips mDNS).
  */

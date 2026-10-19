@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Muse Gadgets Camera's VP8 clip loops, as a gadget plays them: the keyed
+"""Muse Gadgets Test's VP8 clip loops, as a gadget plays them: the keyed
 loop, then steady loops back to back with no decoder reset. Each steady loop
 was encoded to follow the keyed loop, and VP8 carries its entropy
 probabilities from frame to frame unless the encoder is error resilient, so
@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 SRC = ROOT / "components/libvpx_vp8/src"
 APPS = {
-    "android": REPO / "android/camstream/src/com/musegadgets/camstream/ClipStreamer.java",
+    "android": REPO / "android/camstream/src/com/musegadgets/test/ClipStreamer.java",
     "ios": REPO / "ios/camstream/Sources/ClipStreamer.swift",
 }
 GLUE = [REPO / "android/camstream/jni/mgvpx.c", REPO / "ios/camstream/native/mgvpx.c"]

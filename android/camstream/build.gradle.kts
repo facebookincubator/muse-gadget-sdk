@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Muse Gadgets Camera, for Android Studio and Gradle. Plain Java on framework
+// Muse Gadgets Test, for Android Studio and Gradle. Plain Java on framework
 // APIs, no dependencies; the sources stay where build.sh (the Gradle-free
 // build) finds them. The optional encoders' native libraries (jni/build.sh,
 // jni/build_vpx.sh) are packed from LIB_DIR: the environment variable, or
@@ -34,11 +34,11 @@ val libDir: String = System.getenv("LIB_DIR")
     ?: "lib"
 
 android {
-    namespace = "com.musegadgets.camstream"
+    namespace = "com.musegadgets.test"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.musegadgets.camstream"
+        applicationId = "com.musegadgets.test"
         minSdk = 33
         targetSdk = 34
         versionCode = 1

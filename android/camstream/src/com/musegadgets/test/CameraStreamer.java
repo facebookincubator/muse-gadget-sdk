@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.musegadgets.camstream;
+package com.musegadgets.test;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -103,7 +103,7 @@ final class CameraStreamer {
     volatile long statEncBytes;
     volatile String encoderName = "";
 
-    /* A test pattern instead of the camera: colour bars, a moving box. */
+    /* A test pattern instead of the camera: color bars, a moving box. */
     volatile boolean pattern;
     /* A raw 640x480 I420 file instead of the camera (--es source file:<name>,
      * from files/): the same crop, filter and encoder, fed at the frame rate
@@ -314,7 +314,7 @@ final class CameraStreamer {
         if (!p.contains("mv-cheap")) {
             p += (p.isEmpty() ? "" : ":") + "mv-cheap=2";
         }
-        /* Trellis quantisation and the wider motion search: +0.05-0.09 dB at
+        /* Trellis quantization and the wider motion search: +0.05-0.09 dB at
          * 480 px, the same decode work, ~same encode time on an S22. */
         if (!p.contains("trellis")) {
             p += ":trellis=2";

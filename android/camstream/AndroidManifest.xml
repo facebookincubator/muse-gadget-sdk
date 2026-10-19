@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -->
-<!-- Muse Gadgets Camera: streams the phone's camera to a Muse gadget's display over
+<!-- Muse Gadgets Test: streams the phone's camera to a Muse gadget's display over
      Wi-Fi (protocols/VIDEO.md). A sample app. -->
 <!-- Package, versions and SDK levels: build.gradle.kts (build.sh passes the same to aapt2). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -31,7 +31,7 @@ limitations under the License.
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:label="Muse Gadgets Camera"
+        android:label="Muse Gadgets Test"
         android:allowBackup="false">
         <activity
             android:name=".MainActivity"

@@ -265,7 +265,7 @@ relay, advertise it in `link.register` and handle it in `main/app.c`.
 [`AGENTS.md`](AGENTS.md#adding-a-command) walks through it.
 
 To show your phone's camera on a board's screen, build it with
-`MUSE_VIDEO=1 tools/muse/board.sh build <board>` and run Muse Gadgets Camera
+`MUSE_VIDEO=1 tools/muse/board.sh build <board>` and run Muse Gadgets Test
 ([Android](../android/camstream), [iPhone](../ios/camstream)) on a phone on the
 same Wi-Fi, then open Phone camera on the board: the phone encodes H.264 or
 VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and

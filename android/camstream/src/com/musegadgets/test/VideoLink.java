@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.musegadgets.camstream;
+package com.musegadgets.test;
 
 /**
  * A connection to one gadget that shows video, whatever carries it: finding

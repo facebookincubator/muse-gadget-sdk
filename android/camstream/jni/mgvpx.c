@@ -15,8 +15,8 @@
  */
 
 /*
- * JNI wrapper around libvpx's VP8 encoder for Muse Gadgets Camera
- * (com.musegadgets.camstream.Vpx): one I420 picture in, one VP8 frame out,
+ * JNI wrapper around libvpx's VP8 encoder for Muse Gadgets Test
+ * (com.musegadgets.test.Vpx): one I420 picture in, one VP8 frame out,
  * no lag (no alt-ref, nothing held back). Built by jni/build_vpx.sh against
  * a static libvpx with jni/libvpx_mg.py's two encoder switches (the loop
  * filter off, decoder-friendly motion vectors). libvpx is BSD-3-Clause.
@@ -73,7 +73,7 @@ static void set_rate(vpx_codec_enc_cfg_t *c, int kbps, int vbv_ms)
     c->rc_buf_optimal_sz = (unsigned)vbv_ms;
 }
 
-JNIEXPORT jlong JNICALL Java_com_musegadgets_camstream_Vpx_open(JNIEnv *env, jclass cls, jint w, jint h, jint fps,
+JNIEXPORT jlong JNICALL Java_com_musegadgets_test_Vpx_open(JNIEnv *env, jclass cls, jint w, jint h, jint fps,
                                                                 jint kbps, jstring jpreset, jstring jparams)
 {
     (void)cls;
@@ -140,7 +140,7 @@ fail:
     return 0;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_com_musegadgets_camstream_Vpx_encode(JNIEnv *env, jclass cls, jlong h,
+JNIEXPORT jbyteArray JNICALL Java_com_musegadgets_test_Vpx_encode(JNIEnv *env, jclass cls, jlong h,
                                                                        jbyteArray i420, jlong pts, jboolean key,
                                                                        jintArray info)
 {
@@ -181,7 +181,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_musegadgets_camstream_Vpx_encode(JNIEnv *e
     return r;
 }
 
-JNIEXPORT void JNICALL Java_com_musegadgets_camstream_Vpx_setBitrate(JNIEnv *env, jclass cls, jlong h, jint kbps)
+JNIEXPORT void JNICALL Java_com_musegadgets_test_Vpx_setBitrate(JNIEnv *env, jclass cls, jlong h, jint kbps)
 {
     (void)env;
     (void)cls;
@@ -193,7 +193,7 @@ JNIEXPORT void JNICALL Java_com_musegadgets_camstream_Vpx_setBitrate(JNIEnv *env
     vpx_codec_enc_config_set(&m->enc, &m->cfg);
 }
 
-JNIEXPORT void JNICALL Java_com_musegadgets_camstream_Vpx_close(JNIEnv *env, jclass cls, jlong h)
+JNIEXPORT void JNICALL Java_com_musegadgets_test_Vpx_close(JNIEnv *env, jclass cls, jlong h)
 {
     (void)env;
     (void)cls;

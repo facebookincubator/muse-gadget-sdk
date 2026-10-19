@@ -459,7 +459,7 @@ The device still needs to be paired once for its token.
 
 `MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
 `devices/sdkconfig.muse-video`) adds video streaming (`CONFIG_MUSE_VIDEO`,
-`CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Camera (`../android/camstream` for
+`CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Test (`../android/camstream` for
 Android, `../ios/camstream` for iPhone) on a phone on the same Wi-Fi streams
 its camera, or a clip, as H.264 or VP8
 (`CONFIG_MUSE_VIDEO_VP8`, on by default), and the board decodes it and
@@ -500,7 +500,7 @@ the design, the Wi-Fi protocol and the numbers.
 - **Test** with `tests/test_muse_video.py` (the ring and the Wi-Fi messages,
   and the wiring under the options), `tests/test_video_untrusted.py`
   (hostile sizes, the port's guards), `tests/test_tinyh264_pie.py` and
-  `tests/test_libvpx_vp8.py`; on a board, with Muse Gadgets Camera (Android:
+  `tests/test_libvpx_vp8.py`; on a board, with Muse Gadgets Test (Android:
   `adb logcat -s MuseCam`; iPhone: Xcode's console).
 - **Untrusted input:** everything from the network is. Keep the checks in
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the

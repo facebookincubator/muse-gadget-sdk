@@ -18,7 +18,7 @@ limitations under the License.
 
 A phone streams H.264 (or VP8, below) to a gadget with a display; the
 gadget decodes it and draws it. This is the design note for anyone changing that path: the phone
-side (Muse Gadgets Camera, for Android in `../android/camstream` and for iPhone in
+side (Muse Gadgets Test, for Android in `../android/camstream` and for iPhone in
 `../ios/camstream`: the same app, class for class), the wire (the frame format and,
 for Wi-Fi, the messages below) and the ESP32 side
 (`../esp32/components/tinyh264`, `components/muse/muse_video.c` and its
@@ -232,7 +232,7 @@ video, which isn't encrypted. Use it on networks you trust.
 
 ## Encoding clips (pre-recorded video)
 
-A clip (Muse Gadgets Camera's samples: a few seconds of the Blender Foundation's
+A clip (Muse Gadgets Test's samples: a few seconds of the Blender Foundation's
 open movies, fetched when first played, `SampleClips.java`) is decoded
 once, area-averaged to the gadget's size, masked to its circle and encoded
 ahead of time (`ClipStreamer.java`): twice through one encoder, a keyed
@@ -298,7 +298,7 @@ VP8 is the second codec: no patent pool charges royalties for it, and
 libvpx, its reference code, is BSD-3-Clause with the WebM project's patent
 grant. A gadget built with `CONFIG_MUSE_VIDEO_VP8` (on with
 `CONFIG_MUSE_VIDEO`) lists it in hello, and the client picks it in start
-(Muse Gadgets Camera: the H.264 / VP8 button, `--es codec vp8` on Android, `-codec vp8` on iPhone). Frames, bands, credits
+(Muse Gadgets Test: the H.264 / VP8 button, `--es codec vp8` on Android, `-codec vp8` on iPhone). Frames, bands, credits
 and keyframe requests work as with H.264; two bands are two VP8 streams.
 
 - **Decoder:** libvpx v1.16.0's (`../esp32/components/libvpx_vp8`), C only
@@ -386,7 +386,7 @@ decoded in time over BLE (750 kb/s in 24 ms); not yet measured over Wi-Fi.
 
 **Decoder-friendly motion vectors.** Most of what's left is motion
 compensation, and the positions with both components fractional cost the
-most (6-tap filters both ways). Muse Gadgets Camera's x264 can keep its motion
+most (6-tap filters both ways). Muse Gadgets Test's x264 can keep its motion
 search off them (`mv-cheap=2`, added to x264 at build time by
 `../android/camstream/jni/x264_mvcheap.py`; on by default past 240 px):
 25% fewer decode instructions (10.3 -> 7.8 M at 480 px, 600 kb/s) for
@@ -403,7 +403,7 @@ experimental.
   messages, H.264 and VP8), `test_video_untrusted.py` (hostile sizes and
   the port's guards), `test_tinyh264_pie.py` (the S31 SIMD model),
   `test_libvpx_vp8.py` (the VP8 decoder against libvpx's output).
-- **Live:** Muse Gadgets Camera's screen and log (Android: `adb logcat -s
+- **Live:** Muse Gadgets Test's screen and log (Android: `adb logcat -s
   MuseCam`; iPhone: Xcode's console, or `MuseCam:` lines in the device log) show
   each second the send rate, frames in flight and queued, camera-to-encoder
   time, the gate and stall time, the gadget's shown/dropped/decode from its

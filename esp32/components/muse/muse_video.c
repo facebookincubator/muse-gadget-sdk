@@ -1171,7 +1171,7 @@ bool muse_video_tick(void)
     }
     const char *text = s_streaming          ? "Starting..."
                        : muse_video_has_client() ? "Waiting for the phone..."
-                                               : "Open Muse Gadgets Camera on your phone";
+                                               : "Open Muse Gadgets Test on your phone";
     if (strcmp(lv_label_get_text(s_caption), text) != 0) {
         lv_label_set_text(s_caption, text);
     }

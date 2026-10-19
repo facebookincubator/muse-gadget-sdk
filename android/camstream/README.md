@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# Muse Gadgets Camera
+# Muse Gadgets Test
 
 <img src="../../.github/images/camstream/android.jpg" width="300" align="right"
  alt="The app on a Galaxy S22: the stats, the camera preview, the yellow line reading Sending VP8 232x232, 30 fps, and the buttons">
@@ -40,7 +40,7 @@ the first time. From the command line, either the Gradle wrapper or
 
 ```sh
 ./gradlew installDebug      # or: ./build.sh install (javac + d8 + aapt2 + apksigner, grants the camera)
-adb shell am start -n com.musegadgets.camstream/.MainActivity
+adb shell am start -n com.musegadgets.test/.MainActivity
 ```
 
 Both make a debug build signed with your debug key. The intent extras below

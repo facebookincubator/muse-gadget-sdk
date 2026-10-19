@@ -16,7 +16,7 @@ limitations under the License.
 
 # livebench: latency and quality of the live camera path
 
-Measures what a viewer of the gadget gets from Muse Gadgets Camera's live path on
+Measures what a viewer of the gadget gets from Muse Gadgets Test's live path on
 repeatable, high-motion input, instead of whatever the camera happens to
 see:
 
@@ -44,7 +44,7 @@ see:
   sent and the frames skipped.
 
 ```sh
-adb push soccer_640x480.yuv /sdcard/Android/data/com.musegadgets.camstream/files/soccer.yuv
+adb push soccer_640x480.yuv /sdcard/Android/data/com.musegadgets.test/files/soccer.yuv
 tools/livebench/build.sh
 CLIPS=~/clips tools/livebench/run.sh x264 soccer 232 --ez adaptive false --ei kbps 1000
 CLIPS=~/clips tools/livebench/run.sh hw soccer 232 --ez adaptive false --ei kbps 1000 --es sw hw
@@ -54,6 +54,6 @@ Fix the bitrate (`--ez adaptive false --ei kbps N`) when comparing encoders
 or filters, or the link decides the bitrate. Keep the phone and gadget in
 the same place between runs; run each case twice (`LOOPS`).
 
-Not modelled: the gadget decodes but doesn't draw a frame when a newer one is
+Not modeled: the gadget decodes but doesn't draw a frame when a newer one is
 already waiting (late frames, live streams only): such a frame is scored as
 shown.

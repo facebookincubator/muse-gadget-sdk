@@ -15,7 +15,7 @@
 
 """score.py BENCHDIR CLIP.yuv W : what the gadget shows, scored at its panel.
 
-The reference is the source clip itself (640x480 I420): its centre 480x480,
+The reference is the source clip itself (640x480 I420): its center 480x480,
 area-scaled to the panel's size (PANEL, default 2 W: a picture shown two
 times upscaled), inside the panel's circle. The test is each decoded frame
 (the gadget's tinyh264, host build: tinyhost, built by build.sh)
