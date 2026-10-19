@@ -27,13 +27,14 @@
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|185c|mosaico|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear}
+cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|185c|146|mosaico|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
     s3n)     profile=waveshare-s3-175;     target=esp32s3 ;;
     s3-216)  profile=waveshare-s3-216;     target=esp32s3 ;;
     185c)    profile=waveshare-s3-185c;    target=esp32s3 ;;
+    146)     profile=waveshare-s3-146;     target=esp32s3 ;;
     # ESP-Mosaico: ESP-IDF master (IDF_EXPORT_S31, default ~/.espressif/esp-idf-s31).
     mosaico) profile=esp-mosaico;          target=esp32s31 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;
