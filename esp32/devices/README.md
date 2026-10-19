@@ -148,8 +148,9 @@ rather than animating continuously on slow e-paper. The AI button starts a
 voice note and confirms pairing; GT911 touch opens settings. Up/Down are
 not yet connected to the Muse settings UI. There is no speaker: replies are
 text on screen. The profile includes Muse's Chinese/Japanese CJK caption font
-for UTF-8 replies. SD cards are mounted at `/sdcard` without formatting; no SD
-file browser is provided. The SHT40 on
+for UTF-8 replies. The microSD slot is off by default (`CONFIG_MUSE_STICKY_SD`):
+turned on, an inserted card is mounted at `/sdcard` without formatting, though
+nothing reads it yet. The SHT40 on
 I2C1 answers `sensors.read` with an uncalibrated 0 °C temperature offset.
 The profile uses 16 MB of the physical 32 MB flash. Muse's battery sleep and
 Wi-Fi nap are enabled, but the touch and SD rails remain powered: standby

@@ -130,7 +130,10 @@ set(muse_priv_requires
     bt esp-tls mbedtls esp_app_format esp_http_client
     noise_core minimp3
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
-    esp_driver_pcnt efuse fatfs esp_driver_sdspi sdmmc)
+    esp_driver_pcnt efuse
+    # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
+    # before Kconfig values exist, so these can't depend on it; only the code does.
+    fatfs esp_driver_sdspi sdmmc)
 list(APPEND muse_priv_requires camera)
 
 idf_component_register(

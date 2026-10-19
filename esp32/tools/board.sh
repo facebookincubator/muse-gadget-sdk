@@ -154,7 +154,6 @@ if [ "$ACTION" != build ]; then
 fi
 
 BUILD_DIR="$PROJECT/build-$BOARD"
-[ "$BOARD" = reterminal-sticky ] && BUILD_DIR="$PROJECT/build-$BOARD-full"
 cd "$PROJECT"
 exec idf.py -B "$BUILD_DIR" \
   -DIDF_TARGET="$TARGET" \

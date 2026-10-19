@@ -14,7 +14,6 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_pdm.h"
-#include "driver/sdspi_host.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
@@ -23,7 +22,6 @@
 #include "esp_rom_sys.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
-#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
@@ -33,6 +31,10 @@
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "../../../main/epd_panel.h"
+#if CONFIG_MUSE_STICKY_SD
+#include "driver/sdspi_host.h"
+#include "esp_vfs_fat.h"
+#endif
 
 #define SCREEN_W 480
 #define SCREEN_H 800
@@ -45,10 +47,13 @@ static i2c_master_bus_handle_t s_sensor_bus, s_touch_bus;
 static i2c_master_dev_handle_t s_gauge;
 static esp_lcd_touch_handle_t s_touch;
 static i2s_chan_handle_t s_mic;
+#if CONFIG_MUSE_STICKY_SD
 static sdmmc_card_t *s_card;
+static SemaphoreHandle_t s_sd_lock;
+#endif
 static lv_display_t *s_disp;
 static lv_indev_t *s_indev;
-static SemaphoreHandle_t s_lv_lock, s_started, s_sd_lock;
+static SemaphoreHandle_t s_lv_lock, s_started;
 static TaskHandle_t s_ui_task, s_epd_task;
 static esp_err_t s_start_err;
 static uint16_t *s_frame;
@@ -84,13 +89,15 @@ static esp_err_t init(void)
         .pin_bit_mask = BIT64(9) | BIT64(40),
         .mode = GPIO_MODE_INPUT,
     };
+    ESP_RETURN_ON_ERROR(gpio_config(&inputs), TAG, "power inputs");
+#if CONFIG_MUSE_STICKY_SD
     const gpio_config_t sd_detect = {
         .pin_bit_mask = BIT64(11),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
-    ESP_RETURN_ON_ERROR(gpio_config(&inputs), TAG, "power inputs");
     ESP_RETURN_ON_ERROR(gpio_config(&sd_detect), TAG, "SD detect");
+#endif
     gpio_sleep_sel_dis(GPIO_NUM_45);
     gpio_sleep_sel_dis(GPIO_NUM_46);
     gpio_sleep_sel_dis(GPIO_NUM_47);
@@ -222,6 +229,7 @@ static esp_err_t display_init(void)
     return ESP_OK;
 }
 
+#if CONFIG_MUSE_STICKY_SD
 static void sd_task(void *arg)
 {
     (void)arg;
@@ -257,6 +265,7 @@ static void sd_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
+#endif
 
 static void rgb565_to_gray4(uint8_t *dst, const uint16_t *src, int width, int height)
 {
@@ -342,8 +351,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
 {
     s_lv_lock = xSemaphoreCreateRecursiveMutex();
     s_started = xSemaphoreCreateBinary();
-    s_sd_lock = xSemaphoreCreateMutex();
-    if (!s_lv_lock || !s_started || !s_sd_lock ||
+    if (!s_lv_lock || !s_started ||
         xTaskCreatePinnedToCoreWithCaps(lvgl_task, "sticky_ui", 8192, NULL, MUSE_UI_PRIORITY,
                                         &s_ui_task, MUSE_UI_CORE,
                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) != pdPASS) return NULL;
@@ -352,9 +360,12 @@ static lv_display_t *display_start(lv_indev_t **touch)
     *touch = s_indev;
     if (xTaskCreatePinnedToCore(epd_task, "sticky_epd", 4096, NULL, 3, &s_epd_task,
                                 MUSE_UI_CORE) != pdPASS) return NULL;
-    if (xTaskCreate(sd_task, "sticky_sd", 4096, NULL, 2, NULL) != pdPASS) {
+#if CONFIG_MUSE_STICKY_SD
+    s_sd_lock = xSemaphoreCreateMutex();
+    if (!s_sd_lock || xTaskCreate(sd_task, "sticky_sd", 4096, NULL, 2, NULL) != pdPASS) {
         ESP_LOGW(TAG, "SD hotplug monitor unavailable");
     }
+#endif
     return s_disp;
 }
 
@@ -483,12 +494,16 @@ static esp_err_t read_power(muse_power_t *out)
 static esp_err_t power_off(void)
 {
     if (gpio_get_level(GPIO_NUM_9)) return ESP_ERR_NOT_SUPPORTED;
-    xSemaphoreTake(s_sd_lock, portMAX_DELAY);
-    if (s_card) {
-        esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-        s_card = NULL;
+#if CONFIG_MUSE_STICKY_SD
+    if (s_sd_lock) {
+        xSemaphoreTake(s_sd_lock, portMAX_DELAY);
+        if (s_card) {
+            esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+            s_card = NULL;
+        }
+        xSemaphoreGive(s_sd_lock);
     }
-    xSemaphoreGive(s_sd_lock);
+#endif
     gpio_hold_dis(GPIO_NUM_45);
     gpio_set_level(GPIO_NUM_45, 0);
     gpio_set_level(GPIO_NUM_46, 0);

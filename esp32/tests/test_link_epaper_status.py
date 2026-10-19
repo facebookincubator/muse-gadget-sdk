@@ -60,7 +60,14 @@ class LinkEpaperStatusTest(unittest.TestCase):
         helper = (ROOT / "tools/board.sh").read_text()
         self.assertIn("reterminal-sticky)", helper)
         self.assertIn('DEFAULTS="$DEFAULTS;devices/sdkconfig.muse;devices/sdkconfig.$BOARD"', helper)
-        self.assertIn('build-$BOARD-full', helper)
+        self.assertNotIn('build-$BOARD-full', helper)   # one build directory per board, as for the rest
+        # The microSD mount is opt-in until something reads the card.
+        kc = (ROOT / "components/muse/Kconfig").read_text()
+        sd = kc[kc.index("config MUSE_STICKY_SD"):]
+        self.assertIn("default n", sd[:sd.index("help")])
+        sticky = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
+        task = sticky[:sticky.index("static void sd_task(")]
+        self.assertTrue(task.rstrip().endswith("#if CONFIG_MUSE_STICKY_SD"))
         workflow = (ROOT.parent / ".github/workflows/esp32.yml").read_text()
         self.assertIn('board: reterminal-sticky\n            target: esp32s3\n'
                       '            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"',

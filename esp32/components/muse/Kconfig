@@ -153,6 +153,17 @@ menu "Muse"
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
 
+    config MUSE_STICKY_SD
+        bool "Mount the reTerminal Sticky's microSD card at /sdcard"
+        depends on MUSE_BOARD_RETERMINAL_STICKY
+        default n
+        help
+            Watches the card-detect pin and mounts an inserted card's FAT
+            filesystem at /sdcard (never formatting it), on the panel's SPI
+            bus. Nothing in the firmware reads the card yet, so it's off: a
+            mount costs a task, time on the bus the e-paper shares, and parsing
+            whatever card is inserted. Turn it on for a feature that uses it.
+
     # The Muse tools' serial port: the console UART behind the board's USB
     # bridge, where the chip's own USB Serial/JTAG isn't wired to a connector
     # (the Watcher's USB-C goes to a CH342) or the chip has none.

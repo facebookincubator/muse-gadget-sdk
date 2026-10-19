@@ -118,8 +118,7 @@ idf.py build                    # -> build/muse-gadget.bin, config in build/sdkc
 
 `tools/board.sh BOARD [build|flash|monitor|flash-monitor] [PORT]` sets the
 target and overlays and gives each board its own `build-<board>/` directory
-and `build-<board>/sdkconfig` (Sticky's full UI uses
-`build-reterminal-sticky-full/` to avoid an older Link sdkconfig):
+and `build-<board>/sdkconfig`:
 
 ```sh
 tools/board.sh sensecap-indicator build
@@ -129,11 +128,9 @@ tools/board.sh ideaspark flash-monitor /dev/cu.usbserial-110
 Without a port it uses the only matching serial port, and fails if it finds
 none or more than one. If `idf.py` is not on `PATH`, it sources `export.sh`
 from `$IDF_PATH`, `~/esp/esp-idf-v6.0.1`, `~/esp/esp-idf-v6` or `~/esp/esp-idf`.
-The Sticky Muse and Link status profiles have separate build directories:
-`build-reterminal-sticky-full/` and `build-reterminal-sticky-link/`. An older
-`build-reterminal-sticky/` may still contain a generated Link sdkconfig: do not
-reuse it for Muse. Set the SDK token in the chosen build directory through
-`idf.py -B <dir> menuconfig`.
+The Sticky's Muse and Link status profiles build in `build-reterminal-sticky/`
+and `build-reterminal-sticky-link/`. Set the SDK token in the chosen build
+directory through `idf.py -B <dir> menuconfig`.
 
 ### Home Assistant Voice Preview Edition
 
