@@ -61,6 +61,13 @@ class LinkEpaperStatusTest(unittest.TestCase):
         self.assertIn("reterminal-sticky)", helper)
         self.assertIn('DEFAULTS="$DEFAULTS;devices/sdkconfig.muse;devices/sdkconfig.$BOARD"', helper)
         self.assertNotIn('build-$BOARD-full', helper)   # one build directory per board, as for the rest
+        # Its USB-C reaches the console UART through a bridge: the Muse tools'
+        # serial commands (>status, chat.py) read UART, as on the LCD7.
+        for setting in ("CONFIG_ESP_CONSOLE_UART_DEFAULT=y", "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n"):
+            self.assertIn(setting, overlay)
+        console = (ROOT / "components/muse/Kconfig").read_text()
+        console = console[console.index("config MUSE_CONSOLE_UART"):]
+        self.assertIn("MUSE_BOARD_RETERMINAL_STICKY", console[:console.index("\n\n")])
         # The microSD mount is opt-in until something reads the card.
         kc = (ROOT / "components/muse/Kconfig").read_text()
         sd = kc[kc.index("config MUSE_STICKY_SD"):]
