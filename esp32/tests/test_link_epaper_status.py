@@ -135,6 +135,9 @@ class LinkEpaperStatusTest(unittest.TestCase):
         self.assertIn('s_sleep_rows', sleep)
         self.assertIn('muse_board->epaper ? 30000000 : 1000000', ui)
         self.assertIn('sleep option selected:', sleep)
+        # No mic meter on e-paper, whether the Sound page opens or is ticked.
+        self.assertIn('if (p == s_sound && !muse_board->epaper) {', ui)
+        self.assertIn('visible && s_current == s_sound && !muse_board->epaper', ui)
         # A blinking cursor would keep the panel from ever settling to refresh.
         text = ui[ui.index("s_text_ta = lv_textarea_create(s_text);"):]
         self.assertIn("lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR);",

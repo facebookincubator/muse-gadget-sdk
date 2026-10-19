@@ -109,8 +109,8 @@ typedef struct {
     /* Codec handles for one duplex, 2-slot I2S bus, not yet opened. */
     esp_err_t (*audio_init)(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic);
     /* A microphone without a codec or speaker (a PDM mic), in place of
-     * audio_init: set up once, powered while recording, read as mono at
-     * MUSE_AUDIO_RATE.
+     * audio_init: set up once, powered on and off with the audio
+     * (muse_audio_power), read as mono at MUSE_AUDIO_RATE.
      * A board with mic_read has no speaker: replies are read, not heard. */
     esp_err_t (*mic_init)(void);
     esp_err_t (*mic_power)(bool on);

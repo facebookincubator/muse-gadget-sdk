@@ -388,7 +388,7 @@ static void show(lv_obj_t *p)
     }
     lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
     s_current = p;
-    if (p == s_sound) {
+    if (p == s_sound && !muse_board->epaper) {   /* as in the tick: no meter on e-paper */
         muse_voice_set_monitor(true);
     }
     muse_ui_set_swipe_enabled(p == s_home);
