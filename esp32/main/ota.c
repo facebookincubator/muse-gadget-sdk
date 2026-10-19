@@ -30,6 +30,10 @@ bool ota_is_enabled(void) {
 
 #if CONFIG_HOMEHUB_OTA_ENABLED
 #include "stack_monitor.h"
+#include "config_store.h"
+#include "esp_ota_ops.h"
+#include <inttypes.h>
+#include <stdint.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -147,6 +151,32 @@ static void log_request_headers(const char *phase, const char *method,
 }
 #endif
 
+// The record of an installed update (ota.h): "<partition address>:<ELF
+// SHA-256>" in hex.
+#define OTA_VERIFY_KEY "ota_verify"
+#define OTA_VERIFY_LEN (8 + 1 + 64)
+
+static void ota_verify_format(uint32_t address, const uint8_t sha[32], char out[OTA_VERIFY_LEN + 1]) {
+    int n = snprintf(out, OTA_VERIFY_LEN + 1, "%08" PRIx32 ":", address);
+    for (int i = 0; i < 32; i++) {
+        n += snprintf(out + n, (size_t)(OTA_VERIFY_LEN + 1 - n), "%02x", sha[i]);
+    }
+}
+
+bool ota_verify_recorded_for_running(void) {
+    const esp_partition_t *part = esp_ota_get_running_partition();
+    char want[OTA_VERIFY_LEN + 1], have[OTA_VERIFY_LEN + 2];
+    if (!part || !config_get_str(OTA_VERIFY_KEY, have, sizeof(have))) {
+        return false;
+    }
+    ota_verify_format(part->address, esp_app_get_description()->app_elf_sha256, want);
+    return strcmp(have, want) == 0;
+}
+
+void ota_verify_forget(void) {
+    config_erase_key(OTA_VERIFY_KEY);
+}
+
 // Streaming OTA on a dedicated task (callers are often on the WS event-handler
 // or BLE-host thread, which must not block). Reads the incoming descriptor,
 // applies the version gate, then downloads/verifies/installs and reboots.
@@ -228,10 +258,25 @@ static void ota_task(void *arg) {
         goto done;
     }
 
+    // The next boot holds this image to the health check (app.c), so record it
+    // before finish() can switch the boot partition.
+    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
+    char record[OTA_VERIFY_LEN + 1];
+    if (target) {
+        ota_verify_format(target->address, new_desc.app_elf_sha256, record);
+    }
+    if (!target || !config_set_str(OTA_VERIFY_KEY, record)) {
+        ESP_LOGE(TAG, "could not record the update for its health check");
+        esp_https_ota_abort(handle);
+        emit(ctx, OTA_RESULT_FAILED, "could not record the update", new_version, running);
+        goto done;
+    }
+
     // finish() validates SHA-256 + signature (when enabled) and sets the boot
     // partition. Do NOT abort after calling finish.
     err = esp_https_ota_finish(handle);
     if (err != ESP_OK) {
+        ota_verify_forget();
         char msg[96];
         snprintf(msg, sizeof(msg), "verify/finish failed: %s", esp_err_to_name(err));
         ESP_LOGE(TAG, "%s", msg);
@@ -286,6 +331,13 @@ void ota_start(const char *url, bool force, ota_status_cb cb, void *user) {
 }
 
 #else
+
+bool ota_verify_recorded_for_running(void) {
+    return false;
+}
+
+void ota_verify_forget(void) {
+}
 
 void ota_start(const char *url, bool force, ota_status_cb cb, void *user) {
     (void)url;

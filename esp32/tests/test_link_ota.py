@@ -140,6 +140,56 @@ int main(void) {
 ''')
             self.compile_and_run([source, ROOT / "main/ota.c"], tmp)
 
+    def test_boot_checks_only_recorded_updates(self) -> None:
+        # app_run's arming block: the health check (and its rollback) applies
+        # only to an image device.ota recorded; any other PENDING_VERIFY image
+        # (a local install) is marked valid at once.
+        app = (ROOT / "main/app.c").read_text()
+        start = app.index("    // Arm OTA rollback verification.")
+        block = app[start : app.index("    xTaskCreate(ota_verify_task", start)]
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            (tmp / "sdkconfig.h").write_text("")
+            source = tmp / "arm.c"
+            source.write_text("""
+#include <assert.h>
+#include <stdbool.h>
+#include "esp_ota_ops.h"
+#define TAG "test"
+#define ESP_LOGI(...) ((void)0)
+#define ESP_LOGW(...) ((void)0)
+static const esp_partition_t part = { .address = 0x20000 };
+static esp_ota_img_states_t state;
+static bool recorded, s_ota_pending_verify;
+static int marked, forgotten;
+const esp_partition_t *esp_ota_get_running_partition(void) { return &part; }
+esp_err_t esp_ota_get_state_partition(const esp_partition_t *p, esp_ota_img_states_t *s) {
+    assert(p == &part);
+    *s = state;
+    return ESP_OK;
+}
+esp_err_t esp_ota_mark_app_valid_cancel_rollback(void) { marked++; return ESP_OK; }
+static bool ota_verify_recorded_for_running(void) { return recorded; }
+static void ota_verify_forget(void) { forgotten++; }
+static void arm(esp_ota_img_states_t st, bool rec) {
+    state = st; recorded = rec;
+    s_ota_pending_verify = false; marked = forgotten = 0;
+""" + block + """
+}
+int main(void) {
+    arm(ESP_OTA_IMG_PENDING_VERIFY, true);    /* device.ota's update: checked */
+    assert(s_ota_pending_verify && !marked && !forgotten);
+    arm(ESP_OTA_IMG_PENDING_VERIFY, false);   /* a local install: valid now */
+    assert(!s_ota_pending_verify && marked == 1 && forgotten == 1);
+    arm(ESP_OTA_IMG_VALID, true);             /* an update that never booted */
+    assert(!s_ota_pending_verify && !marked && forgotten == 1);
+    arm(ESP_OTA_IMG_VALID, false);
+    assert(!s_ota_pending_verify && !marked);
+    return 0;
+}
+""")
+            self.compile_and_run([source], tmp)
+
     def test_registration_only_advertises_enabled_ota(self) -> None:
         noise = (ROOT / "main/noise_control.cpp").read_text()
         functions = "\n".join(function_source(noise, signature) for signature in (

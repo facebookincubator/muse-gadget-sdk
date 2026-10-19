@@ -118,8 +118,9 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 #define PAIRING_CONFIRM_WINDOW_MS   (60 * 1000)
 #define PAIRING_CONFIRMED_IDLE_TIMEOUT_MS (120 * 1000)
 
-// OTA rollback: how long a freshly-installed (PENDING_VERIFY) image has to
-// reach the authenticated control WebSocket before the bootloader reverts it.
+// OTA rollback: how long an image device.ota just installed (PENDING_VERIFY,
+// and recorded by ota.c) has to reach the authenticated control WebSocket
+// before the bootloader reverts it.
 // The control WS is the recovery channel — if a new image can't reach it,
 // no future device.ota could repair the device, so rolling back is correct.
 #define OTA_VERIFY_TIMEOUT_US (300LL * 1000000LL)
@@ -2511,6 +2512,7 @@ static void ota_verify_task(void *arg) {
         if (noise_ctrl_is_connected()) {
             if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
                 ESP_LOGI(TAG, "OTA image validated (control WS up)");
+                ota_verify_forget();
             } else {
                 ESP_LOGE(TAG, "esp_ota_mark_app_valid_cancel_rollback failed");
             }
@@ -2522,6 +2524,7 @@ static void ota_verify_task(void *arg) {
     }
     if (s_ota_pending_verify) {
         ESP_LOGE(TAG, "OTA verify timed out; rolling back to previous firmware");
+        ota_verify_forget();
         stack_monitor_record(NULL);
         esp_ota_mark_app_invalid_rollback_and_reboot();
         // Only returns when there is no valid partition to revert to.
@@ -2634,12 +2637,22 @@ void app_run(void) {
     // Arm OTA rollback verification. If the running image was just installed
     // by device.ota it boots as PENDING_VERIFY and must reach the control WS
     // within OTA_VERIFY_TIMEOUT_US, else the bootloader reverts it on reboot.
+    // Other tools can leave an image PENDING_VERIFY too (the ESP-Mosaico's
+    // Vibe Mode installs do), and those are nothing to roll back: only the
+    // image ota.c recorded is checked.
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
     if (running && esp_ota_get_state_partition(running, &ota_state) == ESP_OK
         && ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-        s_ota_pending_verify = true;
-        ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
+        if (ota_verify_recorded_for_running()) {
+            s_ota_pending_verify = true;
+            ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
+        } else if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+            ESP_LOGI(TAG, "PENDING_VERIFY image not installed by device.ota; marked valid");
+        }
+    }
+    if (!s_ota_pending_verify) {
+        ota_verify_forget();   // an update that never booted
     }
     xTaskCreate(ota_verify_task, "ota_verify", 4096, NULL, 4, NULL);
 
