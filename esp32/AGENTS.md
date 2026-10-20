@@ -79,6 +79,7 @@ before adding a feature to one.
 | Waveshare ESP32-S3-Touch-LCD-1.28 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd128` | `tools/muse/board.sh build lcd128` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
 | M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
+| M5Stack Core2 v1.1 (experimental) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2;devices/sdkconfig.muse-m5stack-core2-v11` | `tools/muse/board.sh build core2-v11` |
 | FoloToy AI Passport (experimental) | `esp32c3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport` | `tools/muse/board.sh build ai-passport` |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on

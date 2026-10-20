@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <s3|s3n|s3-216|mosaico|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear> [serial|port]
+#   tools/muse/board.sh build|flash <s3|s3n|s3-216|mosaico|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|core2-v11|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -27,7 +27,7 @@
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|185c|mosaico|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear}
+cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|185c|mosaico|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|core2-v11|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -57,6 +57,8 @@ case $board in
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.
     core2)   profile=m5stack-core2; target=esp32; baud=230400 ;;
+    # Core2 v1.1: the same profile with the AXP2101 PMU overlay on top.
+    core2-v11) profile=m5stack-core2; variant=v11; board=core2; target=esp32; baud=230400 ;;
     ai-passport) profile=ai-passport;      target=esp32c3 ;;
     *) echo "unknown board $board"; exit 2 ;;
 esac
@@ -82,6 +84,7 @@ command -v idf.py >/dev/null 2>&1 || { echo "idf.py not found; activate ESP-IDF 
 cd "$root"
 B=build-muse-$profile
 defaults="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-$profile"
+[ -n "${variant:-}" ] && { B=$B-$variant; defaults="$defaults;devices/sdkconfig.muse-$profile-$variant"; }
 if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"
 fi

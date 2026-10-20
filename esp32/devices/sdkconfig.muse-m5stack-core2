@@ -42,6 +42,7 @@ CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
 CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
 CONFIG_BTDM_CTRL_MODE_BTDM=n
 
-# Core2 v1.0 PMU is the AXP192. Core2 v1.1 (AXP2101) is not supported;
-# the board revision is printed on its back sticker or PCB.
+# Core2 v1.0 PMU is the AXP192. Core2 v1.1 (AXP2101) loads
+# sdkconfig.muse-m5stack-core2-v11 on top; the board revision is printed on
+# its back sticker or PCB.
 CONFIG_BSP_PMU_AXP192=y

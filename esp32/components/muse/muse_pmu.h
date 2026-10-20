@@ -48,5 +48,8 @@ unsigned muse_pmu_poll_key(void);
 
 esp_err_t muse_pmu_read_power(muse_power_t *out);
 
+/* System (VSYS) voltage in mV, or -1 on error. */
+int muse_pmu_vsys_mv(void);
+
 /* Soft power-off: the AXP2101 cuts every rail. PWR turns the board back on. */
 esp_err_t muse_pmu_power_off(void);
