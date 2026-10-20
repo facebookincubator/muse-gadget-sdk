@@ -122,6 +122,20 @@ static lv_obj_t *s_text_back;
 /* Network and phone names can have characters the fonts lack (muse_text.h). */
 #define SHOWN_MAX 96
 
+/* A 172 px portrait panel cannot fit an icon, name and status side by side. */
+static bool narrow_panel(void)
+{
+    return !muse_board->round && muse_board->width <= 200;
+}
+
+static void single_line(lv_obj_t *l, int width)
+{
+    lv_obj_set_width(l, width);
+    /* DOTS still wraps into an auto-height label unless both axes are bounded. */
+    lv_obj_set_height(l, lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
+    lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+}
+
 static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, const char *text)
 {
     char shown[SHOWN_MAX];
@@ -208,6 +222,11 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
     lv_obj_t *t = label(p, compact ? &lv_font_montserrat_16 : &lv_font_unscii_16, COLOR_ACCENT, title);
     lv_obj_set_style_text_letter_space(t, compact ? 0 : 2, 0);
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, compact ? (back ? 12 : 8) : 44);
+    if (narrow_panel() && back) {
+        single_line(t, muse_board->width - 56);
+        lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(t, LV_ALIGN_TOP_RIGHT, -4, 12);
+    }
 
     if (back) {
         lv_obj_t *b = back_button(p);
@@ -219,13 +238,15 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
 
     lv_obj_t *list = lv_obj_create(p);
     lv_obj_remove_style_all(list);
-    lv_obj_set_size(list, compact ? muse_board->width - 16 : LIST_W, muse_board->height - list_top);
+    /* Keep the scrolling viewport above the tile's fixed page indicators. */
+    lv_obj_set_size(list, compact ? muse_board->width - 16 : LIST_W,
+                    muse_board->height - list_top - (narrow_panel() ? 24 : 0));
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, list_top);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(list, 10, 0);
+    lv_obj_set_style_pad_row(list, narrow_panel() ? 6 : 10, 0);
     /* Clear the page dots on flat panels, or the bottom curve on round ones. */
-    lv_obj_set_style_pad_bottom(list, compact ? 32 : 110, 0);
+    lv_obj_set_style_pad_bottom(list, narrow_panel() ? 12 : (compact ? 32 : 110), 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     *list_out = list;
@@ -241,10 +262,10 @@ static lv_obj_t *card(lv_obj_t *list, bool clickable)
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD), 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD_PRESSED), LV_STATE_PRESSED);
-    lv_obj_set_style_pad_hor(c, 16, 0);
+    lv_obj_set_style_pad_hor(c, narrow_panel() ? 10 : 16, 0);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(c, 12, 0);
+    lv_obj_set_style_pad_column(c, narrow_panel() ? 8 : 12, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     return c;
 }
@@ -255,6 +276,28 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
                      lv_event_cb_t cb, void *user)
 {
     lv_obj_t *c = card(list, cb != NULL);
+    if (narrow_panel()) {
+        /* Explicit bounded lines: a changing value must never squeeze the name. */
+        lv_obj_set_layout(c, LV_LAYOUT_NONE);
+        lv_obj_set_height(c, value_out ? 60 : 48);
+        const int inset = icon ? 28 : 0;
+        const int text_w = muse_board->width - 16 - 20 - inset;
+        if (icon) {
+            lv_obj_t *i = label(c, &lv_font_montserrat_20, COLOR_ACCENT, icon);
+            lv_obj_align(i, LV_ALIGN_LEFT_MID, 0, 0);
+        }
+        lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_TEXT, text);
+        single_line(t, text_w);
+        lv_obj_align(t, LV_ALIGN_LEFT_MID, inset, value_out ? -11 : 0);
+        if (value_out) {
+            lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_DIM, "");
+            single_line(v, text_w);
+            lv_obj_align(v, LV_ALIGN_LEFT_MID, inset, 11);
+            *value_out = v;
+        }
+        if (cb) lv_obj_add_event_cb(c, cb, LV_EVENT_CLICKED, user);
+        return c;
+    }
     if (icon) {
         label(c, &lv_font_montserrat_20, COLOR_ACCENT, icon);
     }
@@ -276,10 +319,14 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
 static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_cb_t cb)
 {
     lv_obj_t *c = card(list, false);
-    lv_obj_t *t = label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
+    lv_obj_t *t = label(c, narrow_panel() ? &lv_font_montserrat_16 : &lv_font_montserrat_20, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
+    if (narrow_panel()) {
+        lv_obj_set_height(t, lv_font_get_line_height(&lv_font_montserrat_16));
+    }
     lv_obj_t *sw = lv_switch_create(c);
-    lv_obj_set_size(sw, 60, 32);
+    lv_obj_set_size(sw, narrow_panel() ? 44 : 60, 32);
     lv_obj_set_style_bg_color(sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
     lv_obj_set_style_bg_color(sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (on) {
@@ -293,7 +340,11 @@ static lv_obj_t *button(lv_obj_t *list, const char *text, uint32_t color, lv_eve
 {
     lv_obj_t *b = card(list, true);
     lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *l = label(b, &lv_font_montserrat_20, color, text);
+    lv_obj_t *l = label(b, narrow_panel() ? &lv_font_montserrat_16 : &lv_font_montserrat_20, color, text);
+    if (narrow_panel()) {
+        single_line(l, muse_board->width - 36);
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    }
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     if (label_out) {
         *label_out = l;
@@ -312,8 +363,9 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_set_style_pad_ver(c, 6, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
 
-    label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
-    lv_obj_t *v = label(c, &lv_font_montserrat_20, COLOR_ACCENT, "");
+    const lv_font_t *font = narrow_panel() ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
+    label(c, font, COLOR_TEXT, text);
+    lv_obj_t *v = label(c, font, COLOR_ACCENT, "");
     lv_obj_align(v, LV_ALIGN_TOP_RIGHT, 0, 0);
     *value_out = v;
 
@@ -354,6 +406,18 @@ static lv_obj_t *column(lv_obj_t *list)
 static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 {
     lv_obj_t *c = card(list, false);
+    if (narrow_panel()) {
+        lv_obj_set_layout(c, LV_LAYOUT_NONE);
+        lv_obj_set_height(c, 60);
+        const int text_w = muse_board->width - 36;
+        lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_DIM, text);
+        single_line(t, text_w);
+        lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, -11);
+        lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_TEXT, "");
+        single_line(v, text_w);
+        lv_obj_align(v, LV_ALIGN_LEFT_MID, 0, 11);
+        return v;
+    }
     lv_obj_set_height(c, 44);
     lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
@@ -1087,10 +1151,11 @@ static void build_sound_page(lv_obj_t *tile)
     lv_obj_remove_flag(meter, LV_OBJ_FLAG_SCROLLABLE);
     label(meter, &lv_font_montserrat_16, COLOR_DIM, "Mic level");
     s_mic_val = label(meter, &lv_font_montserrat_16, COLOR_DIM, "");
-    lv_obj_align(s_mic_val, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_align(s_mic_val, narrow_panel() ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_RIGHT,
+                 0, narrow_panel() ? 22 : 0);
     s_mic_bar = lv_bar_create(meter);
     lv_obj_set_size(s_mic_bar, lv_pct(94), 10);
-    lv_obj_align(s_mic_bar, LV_ALIGN_TOP_MID, 0, 26);
+    lv_obj_align(s_mic_bar, LV_ALIGN_TOP_MID, 0, narrow_panel() ? 48 : 26);
     lv_bar_set_range(s_mic_bar, 0, 60);   /* -70..-10 dBFS */
     lv_obj_set_style_bg_color(s_mic_bar, lv_color_hex(0x2a2345), LV_PART_MAIN);
     lv_obj_set_style_anim_duration(s_mic_bar, 80, 0);
@@ -1373,7 +1438,7 @@ static void tick_home(void)
     }
     set_text(s_home_battery, buf);
 
-    snprintf(buf, sizeof(buf), "Muse %s  -  %s", esp_app_get_description()->version,
+    snprintf(buf, sizeof(buf), narrow_panel() ? "Muse %s\n%s" : "Muse %s  -  %s", esp_app_get_description()->version,
              w.state == MUSE_WIFI_CONNECTED ? w.ip : "offline");
     set_text(s_about, buf);
 }
