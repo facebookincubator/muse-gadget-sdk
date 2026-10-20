@@ -81,6 +81,8 @@ public final class MainActivity extends Activity
     private volatile int clipSize = 232;
     private volatile boolean clipRound = true;
     private final java.util.Set<String> failedClips = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /* Why a clip failed, by name, for its row. */
+    private final java.util.Map<String, String> failReasons = new java.util.concurrent.ConcurrentHashMap<>();
     private int clipTopKbps = 450;
     private boolean clipKbpsSet;
     /* What the clips are encoded at now: clipTopKbps, or less while the link can't carry it. */
@@ -631,6 +633,8 @@ public final class MainActivity extends Activity
         } catch (Exception e) {
             Log.e(TAG, "clip " + name + " failed", e);
             failedClips.add(key);
+            failReasons.put(name, e instanceof java.io.IOException ? "it needs the Internet the first time"
+                    : String.valueOf(e.getMessage()));
             linkStatus = clipLabel(name) + " failed: " + e
                     + (sample != null && e instanceof java.io.IOException ? " (needs the Internet)" : "");
             return null;
@@ -1315,7 +1319,8 @@ public final class MainActivity extends Activity
     /** How a clip stands, after its description: "" or " · ready at 480 px", "preparing", "failed". */
     String clipState(String name) {
         if (failedClips.contains(clipKey(name, clipSize, clipKbps))) {
-            return SampleClips.get(name) != null ? "\nFailed: it needs the Internet the first time" : "\nFailed";
+            String why = failReasons.get(name);
+            return why != null ? "\nFailed: " + why : "\nFailed";
         }
         ClipStreamer.Clip c = bestClip(name, clipSize);
         if (c != null) {
