@@ -61,7 +61,7 @@ session to Muse. The rest depends on the hardware.
 | **Waveshare ESP32-S3-Touch-LCD-7** | ESP32-S3 | 7" 800×480 RGB LCD, touch | 16 MB / 8 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-7), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-7) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-7.htm) |
 | **FoloToy AI Passport (experimental)** | ESP32-C3 | 240×320 LCD, rounded corners | 8 MB / none | [FoloToy repo](https://github.com/FoloToy/ai-passport) | [FoloToy](https://ai-passport.folotoy.cn/en/) |
 | **M5Stack StickC Plus2** | ESP32 | 1.14" 135×240 LCD | 8 MB / 2 MB | [M5Stack docs](https://docs.m5stack.com/en/core/M5StickC%20PLUS2), [M5Unified](https://github.com/m5stack/M5Unified) | [M5Stack](https://shop.m5stack.com/products/m5stickc-plus2-esp32-mini-iot-development-kit) (end of life) |
-| **M5Stack Core2 (v1.0)** | ESP32 | 2.0" 320×240 touch LCD | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/Core2), [M5Unified](https://github.com/m5stack/M5Unified) | — |
+| **M5Stack Core2 (v1.0, v1.1 experimental)** | ESP32 | 2.0" 320×240 touch LCD | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/Core2), [M5Unified](https://github.com/m5stack/M5Unified) | — |
 | **Freenove FNK0104B** | ESP32-S3 | 2.8" 240×320 LCD, touch | 16 MB / 8 MB | [Freenove repo](https://github.com/Freenove/Freenove_ESP32_S3_Display) | — |
 | **VN ESP32-S3 1.83-inch NV3023** | ESP32-S3 | 1.83" 284×240 LCD (NV3023) | 16 MB / 8 MB | [xiaozhi-esp32_vietnam board](https://github.com/TienHuyIoT/xiaozhi-esp32_vietnam) | — |
 
@@ -350,7 +350,8 @@ Gadget breathed orange while advertising. Serial logged
 
 ## M5Stack Core2 port
 
-Core2 v1.0 (AXP192 PMU), using Espressif's `m5stack_core_2` BSP.
+Core2 v1.0 (AXP192 PMU) and, experimentally, v1.1 (AXP2101 PMU), using
+Espressif's `m5stack_core_2` BSP.
 The 2.0" touch LCD shows the avatar UI: hold the middle bottom touch zone (M5's BtnB) to talk, navigate
 the rest on screen. Holding PWR would cut the power in hardware past about
 4 s, so the side power button is aux instead: tap to sleep or wake, and
@@ -358,8 +359,15 @@ hold for a clean shutdown on the PMU long-press event. Pairing presses are
 confirmed by tapping the touch zone.
 Settings, battery telemetry, images and the home-network tunnel all work.
 Menu power-off shuts down through the PMU, and PWR turns the board back on.
-Core2 v1.1 uses the AXP2101 PMU and is not supported by this port; the board's
-back sticker or PCB identifies the revision. The IMU, RTC, vibration motor
+Core2 v1.1 swaps the AXP192 for an AXP2101 at the same I2C address with a
+different register map, so it has its own build: `tools/muse/board.sh build
+core2-v11` adds [`sdkconfig.muse-m5stack-core2-v11`](sdkconfig.muse-m5stack-core2-v11)
+(`CONFIG_BSP_PMU_AXP2101`). Never flash the v1.0 build on a v1.1: its AXP192
+writes land on AXP2101 rail registers. The board's back sticker or PCB
+identifies the revision. On v1.1 the PWR key, battery and shutdown go through
+`muse_pmu`, and the backlight (BLDO1, an LDO fed from VSYS) is capped below
+VSYS: on a near-empty battery VSYS sags to about 3.2 V, under the 3.3 V full
+brightness level, and the backlight flickered with the sag. The IMU, RTC, vibration motor
 and SD slot aren't used yet. [M5Unified](https://github.com/m5stack/M5Unified)
 and [M5GFX](https://github.com/m5stack/M5GFX) are M5Stack's reference drivers
 for the pins and peripherals, and the display, touch and speaker setup follows
@@ -609,6 +617,7 @@ board's overlays, in order:
 | Waveshare ESP32-S3-Touch-LCD-1.28 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-lcd128`](sdkconfig.muse-waveshare-s3-lcd128) | `tools/muse/board.sh build lcd128` |
 | M5Stack StickC Plus2 | `esp32` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stickc-plus2`](sdkconfig.muse-m5stack-stickc-plus2) | by hand |
 | M5Stack Core2 | `esp32` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-core2`](sdkconfig.muse-m5stack-core2) | `tools/muse/board.sh build core2` |
+| M5Stack Core2 v1.1 | `esp32` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-core2`](sdkconfig.muse-m5stack-core2), [`devices/sdkconfig.muse-m5stack-core2-v11`](sdkconfig.muse-m5stack-core2-v11) | `tools/muse/board.sh build core2-v11` |
 | Freenove FNK0104B | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-fnk0104b`](sdkconfig.muse-fnk0104b) | `tools/muse/board.sh build fnk0104b` |
 | VN ESP32-S3 1.83-inch NV3023 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-vn-s3-183`](sdkconfig.muse-vn-s3-183) | `tools/muse/board.sh build vn183` |
 | FoloToy AI Passport | `esp32c3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-ai-passport`](sdkconfig.muse-ai-passport) | `tools/muse/board.sh build ai-passport` |

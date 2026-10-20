@@ -33,15 +33,17 @@
  * port clocks, so one direction is configured at a time. Push-to-talk is
  * half-duplex anyway (record, then play).
  *
- * Core2 v1.1 units use the AXP2101 PMU and are not supported: the PEK,
- * battery, backlight and shutdown code below is specific to the AXP192.
+ * Core2 v1.1 units use the AXP2101 PMU (CONFIG_BSP_PMU_AXP2101): PWR, battery
+ * and shutdown go through muse_pmu, and the BSP owns its rails and backlight.
+ * The two PMUs share address 0x34 with different register maps, so the AXP192
+ * helpers below are compiled out on v1.1.
  */
 #include <math.h>
 
 #include "sdkconfig.h"
 
-#if !CONFIG_BSP_PMU_AXP192
-#error "The Muse Core2 port requires the Core2 v1.0 AXP192 PMU"
+#if !CONFIG_BSP_PMU_AXP192 && !CONFIG_BSP_PMU_AXP2101
+#error "The Muse Core2 port needs CONFIG_BSP_PMU_AXP192 (v1.0) or CONFIG_BSP_PMU_AXP2101 (v1.1)"
 #endif
 
 #include "bsp/esp-bsp.h"
@@ -51,6 +53,7 @@
 #include "esp_check.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -58,15 +61,18 @@
 #include "muse_board.h"
 #include "muse_input.h"
 #include "muse_mem.h"
+#include "muse_pmu.h"
 #include "muse_state.h"
 
 static const char *TAG = "board";
 
 #define DRAW_BUF_LINES 10       /* 320x10 px double-buffered, in internal RAM:
                                  * the classic ESP32's SPI DMA can't reach PSRAM */
+#if CONFIG_BSP_PMU_AXP192
 #define AXP_ADDR 0x34
 #define AXP_PEK_STATUS 0x46    /* bit 1: short press, bit 0: long press; write to clear */
 #define AXP_BATT_MV_LSB 1.1f   /* 12-bit battery ADC: 1.1 mV per step */
+#endif
 
 #define MIC_CLK GPIO_NUM_0
 #define MIC_DATA GPIO_NUM_34
@@ -76,7 +82,10 @@ static const char *TAG = "board";
 #define TP_Y_ZONE 240          /* controller rows at/above this are M5's buttons (tb_y) */
 #define TP_X_THIRD 107         /* 320/3: BtnB is the middle third (tb_k = 65536*3/320) */
 
-static i2c_master_dev_handle_t s_axp, s_tp;
+#if CONFIG_BSP_PMU_AXP192
+static i2c_master_dev_handle_t s_axp;
+#endif
+static i2c_master_dev_handle_t s_tp;
 static bool s_talk_pressed;
 static i2s_chan_handle_t s_mic_rx, s_spk_tx;
 static int s_dir;              /* I2S0's current direction: 0 none, 1 mic, 2 speaker */
@@ -84,6 +93,7 @@ static int s_mic_gain_q8 = 256;
 static int32_t s_mic_dc[2];    /* each slot's zero level, x256 */
 static bool s_mic_settled;     /* s_mic_dc set from a first read */
 
+#if CONFIG_BSP_PMU_AXP192
 static esp_err_t axp_read(uint8_t reg, uint8_t *buf, size_t len)
 {
     return i2c_master_transmit_receive(s_axp, &reg, 1, buf, len, 1000);
@@ -118,6 +128,7 @@ static int pek_read(void)
     }
     return val;
 }
+#endif /* CONFIG_BSP_PMU_AXP192 */
 
 /*
  * M5's BtnB: the middle third of the bottom touch strip. Reads the FT6336
@@ -147,18 +158,24 @@ static int tp_zone(void)
 static esp_err_t init(void)
 {
     ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c init");
+#if CONFIG_BSP_PMU_AXP2101
+    /* Latch PWR edges; the BSP owns the rails. */
+    ESP_RETURN_ON_ERROR(muse_pmu_init(bsp_i2c_get_handle(), true), TAG, "pmu init");
+#else
     const i2c_device_config_t axp_cfg = {
         .device_address = AXP_ADDR,
         .scl_speed_hz = 400000,
     };
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(bsp_i2c_get_handle(), &axp_cfg, &s_axp), TAG,
                         "axp init");
+#endif
     const i2c_device_config_t tp_cfg = {
         .device_address = TP_ADDR,
         .scl_speed_hz = 400000,
     };
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(bsp_i2c_get_handle(), &tp_cfg, &s_tp), TAG,
                         "touch init");
+#if CONFIG_BSP_PMU_AXP192
     /* Battery ADC on: the BSP's display init does this too, but power reads
      * must work even if the display never starts. */
     const uint8_t adc_on[2] = { 0x82, 0xff };
@@ -168,6 +185,7 @@ static esp_err_t init(void)
      * by the power-on press; an event bit cannot tell us whether PWR is held. */
     ESP_RETURN_ON_ERROR(axp_write_masked(0x42, 0x03, 0x03), TAG, "axp pek enable");
     ESP_RETURN_ON_ERROR(pek_read() < 0 ? ESP_FAIL : ESP_OK, TAG, "axp pek clear");
+#endif
     /* A finger resting on the screen through boot counts as already down too.
      * The touch controller may still be unpowered here; a failed read just
      * leaves the talk state clear for the first poll to set. */
@@ -226,8 +244,70 @@ static bool display_lock(int timeout_ms)
     return bsp_display_lock(timeout_ms < 0 ? 0 : (uint32_t)timeout_ms);
 }
 
+#if CONFIG_BSP_PMU_AXP2101
+/*
+ * BLDO1 (backlight) is an LDO fed from VSYS. On a near-empty battery VSYS
+ * sags to ~3.2 V, BLDO1 drops out and the backlight flickers with VSYS ripple.
+ * Keep BLDO1 BACKLIGHT_MARGIN_MV below the lowest VSYS over BACKLIGHT_WINDOW s.
+ */
+#define BACKLIGHT_MARGIN_MV 200
+#define BACKLIGHT_WINDOW 10
+static int s_bright_req = 100, s_bright_cap = 100, s_bright_set = -1;
+
+static void backlight_apply(void)
+{
+    int pct = s_bright_req < s_bright_cap ? s_bright_req : s_bright_cap;
+    if (s_bright_req > 0 && pct < 1) {
+        pct = 1;
+    }
+    if (pct == s_bright_set) {
+        return;
+    }
+    /* The BSP cuts BLDO1 at 0%, else sets it to 500 + 100 * (20 + 8 * pct / 100) mV. */
+    if (bsp_display_brightness_set(pct) != ESP_OK) {
+        ESP_LOGW(TAG, "backlight set failed");
+        return;
+    }
+    s_bright_set = pct;
+}
+
+/* Called from poll_buttons(); samples VSYS once a second. */
+static void backlight_track_vsys(void)
+{
+    static int64_t next_us;
+    static int n, min_mv = INT32_MAX;
+    int64_t now = esp_timer_get_time();
+    if (now < next_us) {
+        return;
+    }
+    next_us = now + 1000000;
+    int mv = muse_pmu_vsys_mv();
+    if (mv > 0 && mv < min_mv) {
+        min_mv = mv;
+    }
+    if (++n < BACKLIGHT_WINDOW) {
+        return;
+    }
+    if (min_mv != INT32_MAX) {
+        int reg = (min_mv - BACKLIGHT_MARGIN_MV - 500) / 100;
+        int cap = reg >= 28 ? 100 : reg <= 20 ? 0 : (reg - 20) * 100 / 8;
+        if (cap != s_bright_cap) {
+            ESP_LOGI(TAG, "backlight cap %d%% (VSYS min %d mV)", cap, min_mv);
+            s_bright_cap = cap;
+            backlight_apply();
+        }
+    }
+    n = 0;
+    min_mv = INT32_MAX;
+}
+#endif
+
 static void set_brightness(int pct)
 {
+#if CONFIG_BSP_PMU_AXP2101
+    s_bright_req = pct < 0 ? 0 : pct;
+    backlight_apply();
+#else
     if (pct <= 0) {
         /* The BSP only turns the backlight rail down, never off: cut DCDC3
          * (the backlight rail; LCD logic is LDO2) explicitly. */
@@ -239,6 +319,7 @@ static void set_brightness(int pct)
     if (bsp_display_brightness_set(pct) != ESP_OK) {
         ESP_LOGW(TAG, "backlight set failed");
     }
+#endif
 }
 
 /*
@@ -408,7 +489,7 @@ static int spk_write(const audio_codec_data_if_t *h, uint8_t *data, int size)
 
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)
 {
-    /* Power the amp: AXP192 GPIO2, through the BSP's rail setup. I2S channels
+    /* Power the amp (AXP192 GPIO2, AXP2101 ALDO3) through the BSP's rail setup. I2S channels
      * are created lazily by use_mic()/use_speaker(), one direction at a time. */
     ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_SPEAKER, true), TAG, "speaker rail");
 
@@ -437,6 +518,15 @@ static unsigned poll_buttons(void)
         }
         s_talk_pressed = pressed;
     }
+#if CONFIG_BSP_PMU_AXP2101
+    backlight_track_vsys();
+    unsigned key = muse_pmu_poll_key();
+    if (key & MUSE_PMU_KEY_LONG) {
+        muse_input_request_power_off();
+    } else if (key & MUSE_PMU_KEY_CLICK) {
+        out |= MUSE_BTN_AUX_PRESS | MUSE_BTN_AUX_RELEASE;
+    }
+#else
     int pek = pek_read();
     if (pek >= 0) {
         if (pek & 0x01) {
@@ -445,12 +535,16 @@ static unsigned poll_buttons(void)
             out |= MUSE_BTN_AUX_PRESS | MUSE_BTN_AUX_RELEASE;
         }
     }
+#endif
     return out;
 }
 
 /* Battery voltage (12-bit ADC, 1.1 mV steps), charger and USB state. */
 static esp_err_t read_power(muse_power_t *out)
 {
+#if CONFIG_BSP_PMU_AXP2101
+    return muse_pmu_read_power(out);
+#else
     uint8_t r00, r01, batt[2];
     ESP_RETURN_ON_ERROR(axp_read(0x00, &r00, 1), TAG, "axp status");
     ESP_RETURN_ON_ERROR(axp_read(0x01, &r01, 1), TAG, "axp mode");
@@ -472,6 +566,7 @@ static esp_err_t read_power(muse_power_t *out)
     int pct = (-v * v + 9016 * v - 19189000) / 10000;
     out->battery_pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
     return ESP_OK;
+#endif
 }
 
 /*
@@ -481,12 +576,20 @@ static esp_err_t read_power(muse_power_t *out)
 static esp_err_t power_off(void)
 {
     set_brightness(0);
+#if CONFIG_BSP_PMU_AXP2101
+    ESP_RETURN_ON_ERROR(muse_pmu_power_off(), TAG, "pmu shutdown");
+#else
     ESP_RETURN_ON_ERROR(axp_write_masked(0x32, 0x80, 0x80), TAG, "axp shutdown");
+#endif
     return ESP_FAIL;
 }
 
 static const muse_board_t s_board = {
+#if CONFIG_BSP_PMU_AXP2101
+    .name = "M5Stack Core2 v1.1",
+#else
     .name = "M5Stack Core2",
+#endif
     .width = BSP_LCD_H_RES,
     .height = BSP_LCD_V_RES,
     .round = false,

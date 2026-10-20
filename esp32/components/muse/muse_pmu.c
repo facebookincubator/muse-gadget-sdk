@@ -27,9 +27,11 @@ static const char *TAG = "muse_pmu";
 #define REG_STATUS2 0x01        /* bits[6:5] 01 = charging */
 #define REG_COMMON_CFG 0x10     /* bit0 = soft power-off */
 #define REG_IRQ_LEVEL 0x27      /* bits[3:2] power-key hold-to-off time */
-#define REG_ADC_ENABLE 0x30     /* bit0 = battery voltage */
+#define REG_ADC_ENABLE 0x30     /* bit0 = battery voltage, bit3 = system voltage */
 #define REG_VBAT_H 0x34         /* bits[4:0]; 1 mV per count with REG_VBAT_L */
 #define REG_VBAT_L 0x35
+#define REG_VSYS_H 0x3A        /* bits[5:0]; 1 mV per count with REG_VSYS_L */
+#define REG_VSYS_L 0x3B
 #define REG_INTEN1 0x40        /* three enable registers, then three status */
 #define REG_INTEN2 0x41
 #define REG_INTSTS1 0x48
@@ -179,4 +181,24 @@ esp_err_t muse_pmu_power_off(void)
     ESP_RETURN_ON_ERROR(rd(REG_COMMON_CFG, &v), TAG, "read common cfg");
     ESP_LOGI(TAG, "powering off");
     return wr(REG_COMMON_CFG, v | 0x01);
+}
+
+int muse_pmu_vsys_mv(void)
+{
+    static bool adc_on;
+    uint8_t v, hi, lo;
+    if (!s_dev) {
+        return -1;
+    }
+    /* Only boards that read VSYS pay for its ADC channel. */
+    if (!adc_on) {
+        if (rd(REG_ADC_ENABLE, &v) != ESP_OK || wr(REG_ADC_ENABLE, v | 0x08) != ESP_OK) {
+            return -1;
+        }
+        adc_on = true;
+    }
+    if (rd(REG_VSYS_H, &hi) != ESP_OK || rd(REG_VSYS_L, &lo) != ESP_OK) {
+        return -1;
+    }
+    return (hi & 0x3F) << 8 | lo;
 }
