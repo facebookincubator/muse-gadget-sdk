@@ -195,6 +195,7 @@ status screen.
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Waveshare ESP32-S3-Touch-LCD-1.46B (experimental) | UI, touch, push-to-talk, settings, images | `tools/muse/board.sh build 146b` |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
@@ -269,18 +270,16 @@ To work on the UI without a board, use the
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
 
-Replies from Muse are text: push-to-talk sends your voice note, Muse
-transcribes it and answers in writing, and boards with a screen show the
-answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app). Two
-things you can change:
-
-- **Shorter answers.** Ask for them in the message itself, such as "Answer in
-  one sentence."
-- **Spoken answers.** Send each reply's text to a text-to-speech API of your
-  choice and play the audio it returns. On boards with PSRAM, `start_tts` in
-  [`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
-  is the spot: it has the reply text, and the MP3 decoder, speaker and volume
-  are already wired up there.
+Push-to-talk sends your voice note; Muse transcribes it and answers. Boards
+with a screen show the answer as captions (Voice PE and reSpeaker Lite replies
+also show up in the Muse app). Muse's own TTS stream currently rejects
+gadget text replies (HTTP 400); spoken output uses [ElevenLabs](https://elevenlabs.io)
+streaming TTS from `start_tts` in
+[`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
+when `CONFIG_MUSE_ELEVENLABS_API_KEY` is set or you send `>elevenlabs.key=…`
+over USB. Speaker-off stays text-only at reading pace. Ask for shorter
+answers in the message itself if you want them brief (for example
+"Answer in one sentence.").
 
 A few things worth knowing:
 

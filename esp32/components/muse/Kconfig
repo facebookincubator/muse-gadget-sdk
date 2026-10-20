@@ -268,4 +268,29 @@ menu "Muse"
             (about 220 KB), which still covers a push-to-talk turn. Board
             overlays with 2 MB of PSRAM turn it on.
 
+    config MUSE_ELEVENLABS_API_KEY
+        string "ElevenLabs API key for spoken replies"
+        depends on MUSE_HATCH
+        default ""
+        help
+            With a key, each Muse reply is spoken via ElevenLabs streaming
+            TTS. Empty: set one later over USB with >elevenlabs.key=…, or
+            replies stay text / try Muse's own TTS stream. The key ships in
+            firmware if set here: never commit a generated sdkconfig.
+
+    config MUSE_ELEVENLABS_VOICE_ID
+        string "ElevenLabs voice ID"
+        depends on MUSE_HATCH
+        default "EXAVITQu4vr4xnSDxMaL"
+        help
+            Any voice in the account. Default is the premade "Sarah".
+
+    config MUSE_ELEVENLABS_MODEL
+        string "ElevenLabs model"
+        depends on MUSE_HATCH
+        default "eleven_flash_v2_5"
+        help
+            eleven_flash_v2_5 is fast and multilingual; eleven_multilingual_v2
+            sounds richer but starts later.
+
 endmenu

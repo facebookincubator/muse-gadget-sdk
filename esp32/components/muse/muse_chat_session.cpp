@@ -26,8 +26,9 @@
  *   2. POST /chat/stream with the transcript. The reply arrives as events on
  *      the connection's long-lived POST /chat/subscribe stream: one or more
  *      assistant messages, each delta.message_start / text_append / message_done.
- *   3. Each finished message is shown at reading pace (see start_tts to
- *      speak it with a TTS API of your own; Muse doesn't speak gadget replies).
+ *   3. Each finished message is spoken via GET /api/voice/tts-stream (MP3),
+ *      with captions paced to the audio. Speaker-off and console turns stay
+ *      text-only at reading pace.
  * A turn has no explicit end event; like Sidekick, it settles once every
  * message is done and nothing has arrived for a few seconds.
  *
@@ -52,6 +53,7 @@
 #include "esp_attr.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -67,6 +69,7 @@ extern "C" {
 #include "cJSON.h"
 #include "minimp3.h"
 #include "muse_account_api.h"
+#include "muse_audio.h"
 #include "muse_link.h"
 #include "muse_settings.h"
 #include "muse_wifi.h"
@@ -236,14 +239,18 @@ struct turn_t {
     uint32_t pcm_out;        /* reply audio frames handed to the voice task */
     char committed[512];     /* finals that arrived before the half-close */
     char partial[512];
+    char heard[1024];        /* voice-note transcript from message.user */
     char user_ids[2][80];
     muse_chat_rejected_t rejected;
     msg_t msgs[MAX_MSGS];
     int nmsgs;
     bool agent_busy;
+    bool note_failed;        /* assistant reply was empty or Muse's canned failure */
+    bool retried;            /* already POSTed the transcript as text */
     /* TTS */
     int tts_msg;             /* message being fetched (or shown, speaker off), or -1 */
     bool silent;             /* speaker off: tts_msg is paced by silence, not fetched */
+    bool tts_legacy;         /* true after falling back to /voice/tts-stream */
     uint8_t *mp3;            /* MP3_BUF */
     size_t mp3_len;
     bool mp3_ended;
@@ -266,6 +273,10 @@ static char s_reply_shown[EV_TEXT];   /* the pre-speech caption last sent */
 static void mark(mark_t m);
 static bool open_note(void);
 static void log_marks(void);
+static void tts_cancel(void);
+static void tts_data(const uint8_t *data, size_t len);
+static void send_chat(const char *text, const char *modality);
+static void retry_voice_as_text(void);
 static int16_t *s_pcm;       /* MINIMP3_MAX_SAMPLES_PER_FRAME */
 static int16_t *s_pcm16;     /* resampled output */
 static int64_t s_last_seq;
@@ -956,6 +967,7 @@ static void turn_reset_streams(void)
             send_reset(s.id);
         }
     }
+    tts_cancel();
 }
 
 static void turn_finish(void)
@@ -1224,6 +1236,40 @@ static void post_chat(const char *text)
     send_chat(text, "text");
 }
 
+/*
+ * Voice notes go up as a WAV with an empty `message`. Muse often transcribes
+ * that on message.user, then answers the file with a 0-char or canned-failure
+ * assistant turn. Typed /chat/stream with the transcript is the path that
+ * actually gets a real reply, so retry once that way.
+ */
+static void retry_voice_as_text(void)
+{
+    if (s_turn.retried || s_turn.text || !s_turn.heard[0]) {
+        return;
+    }
+    s_turn.retried = true;
+    s_turn.note_failed = false;
+    s_reply_shown[0] = '\0';
+    ESP_LOGW(TAG, "retrying voice note as text (%u chars)", (unsigned)strlen(s_turn.heard));
+    tts_cancel();
+    s_turn.tts_msg = -1;
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        if (s_turn.msgs[i].id[0]) {
+            muse_chat_reject(&s_turn.rejected, s_turn.msgs[i].id);
+        }
+        s_turn.msgs[i] = msg_t{};
+        if (s_turn.texts) {
+            s_turn.texts[i * TEXT_MAX] = '\0';
+        }
+    }
+    s_turn.nmsgs = 0;
+    send_reset(s_turn.chat_id);
+    s_turn.chat_id = 0;
+    s_turn.acked = false;
+    s_turn.user_ids[0][0] = s_turn.user_ids[1][0] = '\0';
+    send_chat(s_turn.heard, "text");
+}
+
 /* A typed turn: the text goes straight to the chat. */
 static void text_begin(const char *text)
 {
@@ -1354,6 +1400,18 @@ static void append_text(msg_t &m, const char *text)
     strlcat(m.tail, text, sizeof(m.tail));
 }
 
+/* Muse's canned failure when a gadget voice turn doesn't reach a live model. */
+static bool canned_fail(const char *text)
+{
+    static const char kFail[] = "Sorry, I ran into a problem while responding";
+    return text && !strncmp(text, kFail, sizeof(kFail) - 1);
+}
+
+static const char *msg_text(int i)
+{
+    return s_turn.texts ? s_turn.texts + i * TEXT_MAX : s_turn.msgs[i].tail;
+}
+
 /*
  * Shows a reply that hasn't started speaking: its opening lines, which the
  * speech starts with, so they can be read while the audio is on its way.
@@ -1392,12 +1450,24 @@ static void message_done(int i, const char *final_text)
         }
         muse_hatch_console("message_done", nullptr, "\"msg\":%d,\"bytes\":%u", i, (unsigned)n);
         ESP_LOGI(TAG, "message %s done (%u chars)", m.id, (unsigned)n);
-        return;
+        if (!muse_settings_speaker_on() || !m.id[0]) {
+            return;
+        }
+        /* Console still gets @chat lines; with a speaker, speak the reply too. */
     }
     if (!m.len && final_text && final_text[0]) {
         append_text(m, final_text);
     }
-    if (m.len && m.tts == TTS_NONE) {
+    /* A WAV-only voice note can come back empty or as Muse's canned failure.
+     * Don't speak that; check_turn retries with the transcript as text. */
+    if (!s_turn.text && (canned_fail(msg_text(i)) || !m.len)) {
+        s_turn.note_failed = true;
+        ESP_LOGW(TAG, "voice note reply unusable (%u chars)", (unsigned)m.len);
+        return;
+    }
+    /* Queue speech whenever we have a message id; voice-modality replies may
+     * carry no text. Empty + no id stays unspoken. */
+    if (m.tts == TTS_NONE && m.id[0] && (m.len || muse_settings_speaker_on())) {
         m.tts = TTS_QUEUED;
     }
     ESP_LOGI(TAG, "message %s done (%u chars)", m.id, (unsigned)m.len);
@@ -1449,6 +1519,29 @@ static void on_event(cJSON *line)
         s_turn.last_event_us = now_us();
         return;
     }
+    if (!strcmp(event, "message.user")) {
+        const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
+        if (!text) {
+            text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
+        }
+        if (text && text[0] && !s_turn.heard[0]) {
+            strlcpy(s_turn.heard, text, sizeof(s_turn.heard));
+            char *att = strstr(s_turn.heard, "\n[file:");
+            if (att) {
+                *att = '\0';
+            }
+            if (s_turn.heard[0] && strcmp(s_turn.heard, "[Voice note]")) {
+                emit(MUSE_HATCH_EV_HEARD, s_turn.heard);
+                if (s_turn.note_failed) {
+                    retry_voice_as_text();
+                }
+            } else {
+                s_turn.heard[0] = '\0';
+            }
+        }
+        s_turn.last_event_us = now_us();
+        return;
+    }
     bool start = !strcmp(event, "delta.message_start");
     bool append = !strcmp(event, "delta.text_append");
     bool done = !strcmp(event, "delta.message_done");
@@ -1472,7 +1565,9 @@ static void on_event(cJSON *line)
         } else if (text && text[0]) {
             mark(M_TEXT);
             append_text(m, text);
-            show_reply_start(m);   /* ignored once the speech starts */
+            if (!canned_fail(msg_text(i))) {
+                show_reply_start(m);   /* ignored once the speech starts */
+            }
         }
     } else if (done || full) {
         const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
@@ -1482,6 +1577,9 @@ static void on_event(cJSON *line)
         cJSON *ready = cJSON_GetObjectItem(payload, "display_text_ready");
         if (done || !cJSON_IsFalse(ready)) {
             message_done(i, text);
+            if (s_turn.note_failed) {
+                retry_voice_as_text();
+            }
         }
     }
 }
@@ -1508,6 +1606,209 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+/* RFC 3986 unreserved, plus hyphen already covered; message ids are UUIDs. */
+static size_t uri_encode(const char *in, char *out, size_t out_cap)
+{
+    static const char *hex = "0123456789ABCDEF";
+    size_t o = 0;
+    for (size_t i = 0; in[i] && o + 1 < out_cap; i++) {
+        unsigned char c = (unsigned char)in[i];
+        bool safe = isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~';
+        if (safe) {
+            out[o++] = (char)c;
+        } else if (o + 3 < out_cap) {
+            out[o++] = '%';
+            out[o++] = hex[c >> 4];
+            out[o++] = hex[c & 0xf];
+        } else {
+            break;
+        }
+    }
+    out[o] = '\0';
+    return o;
+}
+
+static void pace_as_text(msg_t &m)
+{
+    m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+    if (m.pcm_frames < MIC_RATE / 4) {
+        m.pcm_frames = MIC_RATE / 4;
+    }
+    s_turn.silent = true;
+}
+
+/* Opens Muse's MP3 TTS stream for message i. `legacy` uses the pre-/api path. */
+static bool open_tts_stream(int i, bool legacy)
+{
+    char enc[160];
+    char path[200];
+    uri_encode(s_turn.msgs[i].id, enc, sizeof(enc));
+    snprintf(path, sizeof(path), "%s?message_id=%s",
+             legacy ? "/voice/tts-stream" : "/api/voice/tts-stream", enc);
+    int64_t id = open_stream(K_TTS, "GET", path, nullptr, "audio/mpeg", nullptr, true);
+    if (!id) {
+        return false;
+    }
+    stream_t *s = find_stream(id);
+    if (s) {
+        s->msg = i;
+    }
+    s_turn.tts_legacy = legacy;
+    return true;
+}
+
+/*
+ * ElevenLabs streaming TTS. Muse's GET /api/voice/tts-stream returns HTTP 400
+ * for text-modality gadget replies, and output_modality=voice fails the turn
+ * on the server. Community forks (wupsbr) speak by POSTing the reply text here.
+ * Fetch runs on its own task; this task drains MP3 via tts_pump().
+ */
+#define TTS_RX_BYTES (64 * 1024)
+#define TTS_READ_BYTES 2048
+#define TTS_URL_MAX 192
+
+struct tts_job_t {
+    uint32_t job;
+    char text[TEXT_MAX];
+};
+
+static QueueHandle_t s_tts_jobs;
+static StreamBufferHandle_t s_tts_rx;
+static std::atomic<uint32_t> s_tts_job{0};
+static std::atomic<bool> s_tts_busy{false};
+static std::atomic<bool> s_tts_ok{false};
+static bool s_tts_pending;
+
+static bool tts_enabled(void)
+{
+    return muse_settings_elevenlabs_on();
+}
+
+static bool tts_send(uint32_t job, const uint8_t *data, size_t len)
+{
+    while (len) {
+        if (job != s_tts_job.load()) {
+            return false;
+        }
+        size_t n = xStreamBufferSend(s_tts_rx, data, len, pdMS_TO_TICKS(100));
+        data += n;
+        len -= n;
+    }
+    return true;
+}
+
+static bool tts_fetch(const tts_job_t &j)
+{
+    char key[MUSE_EL_KEY_MAX + 1];
+    muse_settings_elevenlabs_key(key);
+    if (!key[0]) {
+        return false;
+    }
+    char url[TTS_URL_MAX];
+    snprintf(url, sizeof(url),
+             "https://api.elevenlabs.io/v1/text-to-speech/%s/stream?output_format=mp3_22050_32",
+             CONFIG_MUSE_ELEVENLABS_VOICE_ID);
+    cJSON *req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "text", j.text);
+    cJSON_AddStringToObject(req, "model_id", CONFIG_MUSE_ELEVENLABS_MODEL);
+    char *body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!body) {
+        return false;
+    }
+    esp_http_client_config_t cfg = {};
+    cfg.url = url;
+    cfg.method = HTTP_METHOD_POST;
+    cfg.timeout_ms = 15000;
+    cfg.buffer_size = TTS_READ_BYTES;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    esp_http_client_handle_t c = esp_http_client_init(&cfg);
+    bool ok = false;
+    if (c) {
+        esp_http_client_set_header(c, "xi-api-key", key);
+        esp_http_client_set_header(c, "Content-Type", "application/json");
+        esp_http_client_set_header(c, "Accept", "audio/mpeg");
+        int len = (int)strlen(body);
+        int64_t t0 = now_us();
+        if (esp_http_client_open(c, len) != ESP_OK || esp_http_client_write(c, body, len) != len) {
+            ESP_LOGW(TAG, "speech: can't reach ElevenLabs");
+        } else {
+            esp_http_client_fetch_headers(c);
+            int status = esp_http_client_get_status_code(c);
+            static uint8_t buf[TTS_READ_BYTES];
+            if (status != 200) {
+                int n = esp_http_client_read(c, (char *)buf, sizeof(buf) - 1);
+                buf[n > 0 ? n : 0] = '\0';
+                ESP_LOGW(TAG, "speech: ElevenLabs HTTP %d %s", status, (char *)buf);
+            } else {
+                size_t total = 0;
+                int n;
+                ok = true;
+                while ((n = esp_http_client_read(c, (char *)buf, sizeof(buf))) > 0) {
+                    if (!total) {
+                        ESP_LOGI(TAG, "speech: first audio after %.2fs", (now_us() - t0) / 1e6);
+                    }
+                    total += (size_t)n;
+                    if (!tts_send(j.job, buf, (size_t)n)) {
+                        ok = false;
+                        break;
+                    }
+                }
+                ok = ok && n == 0 && total > 0 && esp_http_client_is_complete_data_received(c);
+                ESP_LOGI(TAG, "speech: %u bytes of MP3%s", (unsigned)total, ok ? "" : ", incomplete");
+            }
+        }
+        esp_http_client_close(c);
+        esp_http_client_cleanup(c);
+    }
+    cJSON_free(body);
+    return ok;
+}
+
+static void tts_task(void *arg)
+{
+    (void)arg;
+    static tts_job_t j;
+    for (;;) {
+        if (xQueueReceive(s_tts_jobs, &j, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        s_tts_ok = tts_fetch(j);
+        s_tts_busy = false;
+    }
+}
+
+static bool tts_start(const char *text)
+{
+    if (!s_tts_jobs) {
+        s_tts_jobs = xQueueCreateWithCaps(1, sizeof(tts_job_t), MALLOC_CAP_SPIRAM);
+        s_tts_rx = xStreamBufferCreateWithCaps(TTS_RX_BYTES, 1, MALLOC_CAP_SPIRAM);
+        if (!s_tts_jobs || !s_tts_rx ||
+            xTaskCreatePinnedToCoreWithCaps(tts_task, "muse_tts", 8 * 1024, nullptr, 4, nullptr, 1,
+                                            MALLOC_CAP_SPIRAM) != pdPASS) {
+            ESP_LOGE(TAG, "speech: no memory for the fetch task");
+            return false;
+        }
+    }
+    static tts_job_t j;
+    j.job = ++s_tts_job;
+    strlcpy(j.text, text, sizeof(j.text));
+    xStreamBufferReset(s_tts_rx);
+    s_tts_ok = false;
+    s_tts_busy = true;
+    if (xQueueSend(s_tts_jobs, &j, 0) != pdTRUE) {
+        s_tts_busy = false;
+        return false;
+    }
+    return true;
+}
+
+static void tts_cancel(void)
+{
+    ++s_tts_job;
+    s_tts_pending = false;
+}
+
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1518,30 +1819,77 @@ static void start_tts(void)
         if (m.tts != TTS_QUEUED) {
             continue;
         }
-        /*
-         * Replies are text, shown at reading pace: silence in place of speech
-         * paces the captions and ends the turn. To speak them instead, send
-         * the message's text (s_turn.texts + i * TEXT_MAX, if texts was
-         * allocated; up to TEXT_MAX - 1 bytes) to a TTS API of your choice and
-         * play the MP3 it returns. In place of the silence below: keep
-         * m.tts = TTS_ACTIVE and s_turn.tts_msg = i, set s_turn.silent = false,
-         * m.pcm_start = s_turn.pcm_out, m.pcm_frames = 0, s_turn.mp3_len = 0,
-         * s_turn.mp3_ended = false, s_turn.kbps = 0, s_turn.down_rate = 0 and
-         * mp3dec_init(&s_turn.dec). Then, on this task, pass the MP3 to
-         * tts_data() as it arrives (it buffers up to MP3_BUF and drops the
-         * rest, so hold off while it's full) and set s_turn.mp3_ended at the
-         * end. decode() plays it at the speaker's volume, captions following,
-         * and finishes the message once it's drained.
-         */
+        const char *text = s_turn.texts ? s_turn.texts + i * TEXT_MAX : "";
         m.pcm_start = s_turn.pcm_out;
-        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        m.pcm_frames = 0;
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
-        s_turn.silent = true;
-        ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+        s_turn.mp3_len = 0;
+        s_turn.mp3_ended = false;
+        s_turn.kbps = 0;
+        s_turn.down_rate = 0;
+        s_turn.tts_legacy = false;
         show_reply_start(m);
+
+        if (!muse_settings_speaker_on()) {
+            pace_as_text(m);
+            ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+            return;
+        }
+
+        if (tts_enabled() && text[0]) {
+            if (s_tts_busy.load()) {
+                s_turn.tts_msg = -1;
+                m.tts = TTS_QUEUED;
+                return;
+            }
+            if (tts_start(text)) {
+                s_turn.silent = false;
+                mp3dec_init(&s_turn.dec);
+                s_tts_pending = true;
+                mark(M_TTS);
+                ESP_LOGI(TAG, "speaking message %s (%u chars) via ElevenLabs", m.id, (unsigned)m.len);
+                return;
+            }
+        }
+
+        s_turn.silent = false;
+        mp3dec_init(&s_turn.dec);
+        if (m.id[0] && open_tts_stream(i, false)) {
+            mark(M_TTS);
+            ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
+            return;
+        }
+        pace_as_text(m);
+        ESP_LOGW(TAG, "TTS unavailable; showing %s as text", m.id);
         return;
     }
+}
+
+static void tts_pump(void)
+{
+    if (!s_tts_pending || s_turn.tts_msg < 0) {
+        return;
+    }
+    static uint8_t chunk[TTS_READ_BYTES];
+    while (MP3_BUF - s_turn.mp3_len >= sizeof(chunk)) {
+        size_t n = s_tts_rx ? xStreamBufferReceive(s_tts_rx, chunk, sizeof(chunk), 0) : 0;
+        if (!n) {
+            break;
+        }
+        tts_data(chunk, n);
+    }
+    if (s_tts_busy.load() || (s_tts_rx && !xStreamBufferIsEmpty(s_tts_rx))) {
+        return;
+    }
+    s_tts_pending = false;
+    msg_t &m = s_turn.msgs[s_turn.tts_msg];
+    if (s_tts_ok.load() || s_turn.pcm_out != m.pcm_start || s_turn.mp3_len) {
+        s_turn.mp3_ended = true;
+        return;
+    }
+    pace_as_text(m);
+    ESP_LOGW(TAG, "ElevenLabs failed; showing message %s as text", m.id);
 }
 
 static void tts_data(const uint8_t *data, size_t len)
@@ -1564,9 +1912,12 @@ static void tts_end(stream_t *s, bool ok)
     }
     if (ok) {
         s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
-    } else {
-        s_turn.msgs[i].tts = TTS_FINISHED;
-        s_turn.tts_msg = -1;
+    } else if (!s_turn.silent && s_turn.mp3_len == 0) {
+        /* No audio arrived: fall back to reading pace so captions still finish. */
+        pace_as_text(s_turn.msgs[i]);
+        ESP_LOGW(TAG, "TTS failed; showing message %s as text", s_turn.msgs[i].id);
+    } else if (!ok) {
+        s_turn.mp3_ended = true;   /* play whatever landed, then finish */
     }
 }
 
@@ -1632,7 +1983,12 @@ static void decode(void)
         size_t n = resample(&s_turn.down, s_pcm, samples, s_pcm16);
         if (s_turn.gen == s_gen.load()) {
             mark(M_AUDIO);
-            xStreamBufferSend(s_out, s_pcm16, n * sizeof(int16_t), 0);
+            if (s_turn.text) {
+                /* Typed turns have no voice-task consumer; play here. */
+                muse_audio_write(s_pcm16, n);
+            } else {
+                xStreamBufferSend(s_out, s_pcm16, n * sizeof(int16_t), 0);
+            }
         }
         s_turn.pcm_out += n;
         s_turn.kbps = info.bitrate_kbps;
@@ -1664,6 +2020,23 @@ static void check_turn(void)
     }
     if (s_turn.phase != P_WAIT_REPLY) {
         return;
+    }
+    if (s_turn.note_failed && !s_turn.retried) {
+        if (s_turn.heard[0]) {
+            retry_voice_as_text();
+            return;
+        }
+        /* Hold for the transcript; don't settle on the canned failure. */
+        if (t - s_turn.chat_us <= REPLY_TIMEOUT_US || s_turn.agent_busy) {
+            return;
+        }
+        s_turn.note_failed = false;
+        for (int i = 0; i < s_turn.nmsgs; i++) {
+            msg_t &m = s_turn.msgs[i];
+            if (m.done && m.tts == TTS_NONE && m.id[0] && m.len) {
+                m.tts = TTS_QUEUED;
+            }
+        }
     }
     bool text = s_turn.text;
     if (t - s_turn.start_us > (text ? TEXT_TURN_CAP_US : TURN_CAP_US)) {
@@ -1805,6 +2178,22 @@ static bool on_http_error(stream_t *s, const ApplicationResponseView &resp)
     memcpy(body, resp.body.data(), n);
     body[n] = '\0';
     ESP_LOGW(TAG, "stream %lld: HTTP %d %s", (long long)s->id, (int)resp.status, body);
+
+    /* Linux link_client: /api/voice/tts-stream 404 → retry /voice/tts-stream. */
+    if (s->kind == K_TTS && (int)resp.status == 404 && !s_turn.tts_legacy) {
+        int msg = s->msg;
+        close_stream(s);
+        if (msg >= 0 && msg == s_turn.tts_msg && open_tts_stream(msg, true)) {
+            ESP_LOGI(TAG, "TTS: trying legacy /voice/tts-stream");
+            return true;
+        }
+        if (msg >= 0 && msg == s_turn.tts_msg) {
+            pace_as_text(s_turn.msgs[msg]);
+            ESP_LOGW(TAG, "TTS fallback open failed; showing as text");
+        }
+        return true;
+    }
+
     return stream_end(s, false);
 }
 
@@ -1997,6 +2386,7 @@ static void hatch_task(void *arg)
         }
         if (s_turn.phase == P_WAIT_REPLY) {
             start_tts();
+            tts_pump();
             decode();
         }
         if (!s_connected) {

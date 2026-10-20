@@ -49,6 +49,7 @@ USB = {
     "s3n": USJ,
     "s3-216": USJ,
     "185c": USJ,
+    "146b": USJ,
     "aipi": USJ,
     "box3": USJ,
     "echoear": USJ,

@@ -69,7 +69,10 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
     memcpy(rejected->ids[rejected->count++], id, len + 1);
 }
 
-/* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
+/* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL.
+ * output_modality stays "text": requesting "voice" routes the turn to a model
+ * Muse no longer serves, and the assistant replies with the canned
+ * "Sorry, I ran into a problem while responding". */
 #define MUSE_HATCH_NOTE_HEAD \
     "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
     "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""

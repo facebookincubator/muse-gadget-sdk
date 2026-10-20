@@ -69,11 +69,11 @@ dependencies:
   espressif/esp_lcd_spd2010:
     version: "^2.0.0"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"sensecap_watcher\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"sensecap_watcher\", \"waveshare_s3_146b\"]"
   espressif/esp_lcd_touch_spd2010:
     version: "^2.0.1"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"sensecap_watcher\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"sensecap_watcher\", \"waveshare_s3_146b\"]"
   espressif/esp_lcd_co5300:
     version: "^2.2.0"
     rules:

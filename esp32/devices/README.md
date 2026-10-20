@@ -43,6 +43,7 @@ session to Muse. The rest depends on the hardware.
 | **Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental)** | ESP32-S3 | None (single RGB LED) | 8 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/xiao_respeaker/) | — |
 | **Waveshare ESP32-S3-Touch-AMOLED-1.75C** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 32 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.75C), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75C) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.75c.htm) |
 | **Waveshare ESP32-S3-Touch-LCD-1.85C** | ESP32-S3 | 1.85" 360x360 round LCD, touch | 16 MB / 8 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.85C) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-1-85c.htm) |
+| **Waveshare ESP32-S3-Touch-LCD-1.46B (experimental)** | ESP32-S3 | 1.46" 412×412 round LCD, touch | 16 MB / 8 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.46B), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.46) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-1.46b.htm) |
 | **Waveshare ESP32-S3-Touch-AMOLED-1.75** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.75), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm) |
 | **Waveshare ESP32-S3-Touch-AMOLED-2.16** | ESP32-S3 | 2.16" 480×480 AMOLED, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) |
 | **Espressif ESP-Mosaico (experimental)** | ESP32-S31 | 2.16" 480×480 AMOLED, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/esp-mosaico/esp-mosaico-bsp), [esp-mosaico-vibe](https://github.com/espressif2022/esp-mosaico-vibe) | — |
@@ -592,6 +593,7 @@ board's overlays, in order:
 | Seeed reSpeaker Lite (experimental) | `esp32s3` | [`devices/sdkconfig.seeed-respeaker-lite`](sdkconfig.seeed-respeaker-lite) | `tools/board.sh seeed-respeaker-lite build` |
 | Waveshare S3 1.75C | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175c`](sdkconfig.muse-waveshare-s3-175c) | by hand |
 | Waveshare S3 1.75 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175`](sdkconfig.muse-waveshare-s3-175) | by hand |
+| Waveshare S3 1.46B (experimental) | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-146b`](sdkconfig.muse-waveshare-s3-146b) | `tools/muse/board.sh build 146b` |
 | Waveshare S3 2.16 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-216`](sdkconfig.muse-waveshare-s3-216) | `tools/muse/board.sh build s3-216` |
 | Espressif ESP-Mosaico (experimental) | `esp32s31` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-esp-mosaico`](sdkconfig.muse-esp-mosaico), [`devices/sdkconfig.muse-esp-mosaico-iris`](sdkconfig.muse-esp-mosaico-iris) | `tools/muse/board.sh build mosaico` |
 | OSTB EchoEar-2ST (experimental) | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-ostb-echoear-2st`](sdkconfig.muse-ostb-echoear-2st) | `tools/muse/board.sh build echoear` |
@@ -653,6 +655,34 @@ python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 wavesh
 
 Restore with `write-flash 0 waveshare-s3-185c-backup.bin`, using the same
 chip, port and baud.
+
+## Waveshare ESP32-S3-Touch-LCD-1.46B
+
+This experimental profile also fits the 1.46 and 1.46C cover-glass variants.
+It drives the 412×412 SPD2010 round LCD and touch controller, PCM5101 speaker
+output, digital microphone, battery-voltage input, BOOT talk button and PWR
+button. The IMU, RTC and TF card are not integrated.
+
+Get an SDK token from `gadgets.muse.ai` → Account → SDK tokens. Build once,
+then put it in the generated (gitignored) config:
+
+```sh
+tools/muse/board.sh build 146b
+# Edit build-muse-waveshare-s3-146b/sdkconfig:
+# CONFIG_GADGET_SDK_TOKEN="mgst_..."
+tools/muse/board.sh build 146b
+tools/muse/board.sh flash 146b PORT
+```
+
+Back up the original 16 MB firmware before the first flash:
+
+```sh
+python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 waveshare-s3-146b-backup.bin
+```
+
+Restore it with `write-flash 0 waveshare-s3-146b-backup.bin`. This port has
+been build-tested only; display, touch, audio, battery and power behavior still
+need validation on the physical board.
 
 ## Add a board
 

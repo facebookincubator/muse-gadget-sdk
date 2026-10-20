@@ -23,6 +23,7 @@
 #include "freertos/semphr.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "sdkconfig.h"
 
 #include "muse_link.h"
 
@@ -44,6 +45,7 @@ static struct {
     char host[MUSE_HOST_MAX + 1];
     char vm[MUSE_VM_MAX + 1];
     char token[MUSE_TOKEN_MAX + 1];
+    char el_key[MUSE_EL_KEY_MAX + 1];
 } s = {
     .volume = CONFIG_MUSE_DEFAULT_VOLUME,
     .speaker_on = true,
@@ -132,6 +134,7 @@ esp_err_t muse_settings_init(void)
     load_str("host", s.host, sizeof(s.host));
     load_str("vm", s.vm, sizeof(s.vm));
     load_str("token", s.token, sizeof(s.token));
+    load_str("el_key", s.el_key, sizeof(s.el_key));
 
     s.volume = clampi(s.volume, 0, 100);
     s.mic_gain = clampi(s.mic_gain, 0, MUSE_MIC_GAIN_MAX);
@@ -294,4 +297,39 @@ esp_err_t muse_settings_set_hatch_token(const char *token, bool append)
         notify(MUSE_SETTING_HATCH);
     }
     return err;
+}
+
+void muse_settings_elevenlabs_key(char out[MUSE_EL_KEY_MAX + 1])
+{
+    LOCKED(strlcpy(out, s.el_key[0] ? s.el_key :
+#ifdef CONFIG_MUSE_ELEVENLABS_API_KEY
+                   CONFIG_MUSE_ELEVENLABS_API_KEY
+#else
+                   ""
+#endif
+                   , MUSE_EL_KEY_MAX + 1));
+}
+
+bool muse_settings_elevenlabs_on(void)
+{
+    bool on;
+    LOCKED(on = s.el_key[0] != '\0'
+#ifdef CONFIG_MUSE_ELEVENLABS_API_KEY
+                   || CONFIG_MUSE_ELEVENLABS_API_KEY[0] != '\0'
+#endif
+    );
+    return on;
+}
+
+esp_err_t muse_settings_set_elevenlabs_key(const char *key)
+{
+    if (key && strlen(key) > MUSE_EL_KEY_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    LOCKED({
+        strlcpy(s.el_key, key ? key : "", sizeof(s.el_key));
+        save_str("el_key", s.el_key);
+    });
+    ESP_LOGI(TAG, "elevenlabs key %s", s.el_key[0] ? "set" : "cleared");
+    return ESP_OK;
 }

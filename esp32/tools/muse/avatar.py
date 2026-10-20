@@ -62,6 +62,7 @@ BOARDS = {
     "Waveshare ESP32-S3-Touch-AMOLED-1.75C": "s3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75": "s3n",
     "Waveshare ESP32-S3-Touch-LCD-1.85C": "185c",
+    "Waveshare ESP32-S3-Touch-LCD-1.46B": "146b",
     "Waveshare ESP32-S3-Touch-AMOLED-2.16": "s3-216",
     "AIPI Lite": "aipi",
     "OSTB EchoEar-2ST": "echoear",

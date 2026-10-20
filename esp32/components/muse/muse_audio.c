@@ -392,13 +392,15 @@ esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
         return ESP_OK;
     }
     /* Speaker off still plays silence at the same pace, so captions timed to
-     * the audio scroll as if it were heard. */
+     * the audio scroll as if it were heard. Boards with no volume register
+     * (PCM5101 on the 1.46B) still honor the setting here. */
     bool mute = !muse_settings_speaker_on();
+    int vol = muse_settings_volume();
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
         for (size_t i = 0; i < n; i++) {
-            s_out_stereo[2 * i] = mute ? 0 : mono[i];
-            s_out_stereo[2 * i + 1] = mute ? 0 : mono[i];
+            int32_t s = mute ? 0 : (int32_t)mono[i] * vol / 100;
+            s_out_stereo[2 * i] = s_out_stereo[2 * i + 1] = (int16_t)s;
         }
         if (esp_codec_dev_write(s_spk, s_out_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
             return ESP_FAIL;

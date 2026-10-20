@@ -161,6 +161,8 @@ static void run_command(char *cmd)
         muse_hatch_test();
     } else if (!strcmp(cmd, "test.loopback")) {
         muse_voice_request_loopback();
+    } else if (!strcmp(cmd, "test.chirp")) {
+        muse_voice_request_chirp();
     } else if (!strcmp(cmd, "volume") && parse_int(v, 0, 100, &n)) {
         muse_settings_set_volume(n);
     } else if (!strcmp(cmd, "speaker") && parse_int(v, 0, 1, &n)) {
@@ -171,6 +173,10 @@ static void run_command(char *cmd)
         muse_settings_set_brightness(n);
     } else if (!strcmp(cmd, "sleep") && parse_int(v, 0, 3600, &n)) {
         muse_settings_set_sleep_s(n);
+    } else if (!strcmp(cmd, "elevenlabs.key")) {
+        if (muse_settings_set_elevenlabs_key(v) != ESP_OK) {
+            res = "error: key too long";
+        }
     } else {
         res = "error: unknown command or bad value";
     }
