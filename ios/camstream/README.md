@@ -16,8 +16,8 @@ limitations under the License.
 
 # Muse Gadgets Test for iPhone
 
-<img src="../../.github/images/camstream/ios.png" width="300" align="right"
- alt="The app on an iPhone: the clip's credits and the stats, the yellow line reading Sending H.264 232x232, 24 fps, Bunny, and the buttons">
+<img src="../../.github/images/camstream/ios.jpg" width="300" align="right"
+ alt="The app on an iPhone streaming color bars over Wi-Fi to an ESP-Mosaico as H.264 in two bands, 480x480 at 30 fps: the stats over the preview, what's playing with its Stop button, and the Video tab's list of sources">
 
 The iPhone version of [`../../android/camstream`](../../android/camstream):
 it streams the camera, color bars or a sample clip to a Muse gadget's
