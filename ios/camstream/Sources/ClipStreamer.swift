@@ -237,13 +237,15 @@ final class ClipStreamer {
     /*
      * x264 for pictures past 240 px: 40 frames of lookahead and
      * macroblock-tree rate control, peaks held to the clip's rate plus 2%
-     * over any 300 ms, no deblocking, decoder-friendly motion vectors.
+     * over any 300 ms, no deblocking, decoder-friendly motion vectors, and
+     * no scene-cut keyframes (the clip's wrap-around, where the steady loop
+     * starts, looks like a scene cut to x264).
      */
     private static func encodeLoopsX264(_ frames: [Data], _ c: Clip) throws {
         let n = frames.count
         let maxK = c.kbps * 102 / 100, buf = maxK * 300 / 1000
         guard let e = X264(w: c.size, h: c.size, fps: c.fps, kbps: c.kbps, preset: "fast",
-                           params: CameraStreamer.withMvCheap("no-deblock=1:intra-refresh=0:keyint=infinite:rc-lookahead=40:mbtree=1:vbv-maxrate=\(maxK):vbv-bufsize=\(buf)", width: c.size)) else {
+                           params: CameraStreamer.withMvCheap("no-deblock=1:intra-refresh=0:keyint=infinite:scenecut=0:rc-lookahead=40:mbtree=1:vbv-maxrate=\(maxK):vbv-bufsize=\(buf)", width: c.size)) else {
             throw NSError(domain: "MuseCam", code: 18, userInfo: [NSLocalizedDescriptionKey: "x264 open failed"])
         }
         defer { e.close() }

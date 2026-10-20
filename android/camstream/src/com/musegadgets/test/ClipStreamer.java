@@ -545,13 +545,16 @@ final class ClipStreamer {
      * the busiest part of a clip arrives in time for the
      * gadget's playout delay instead of queueing up and stalling the
      * picture. No deblocking and decoder-friendly motion vectors keep the
-     * decode within a frame time.
+     * decode within a frame time. No scene-cut keyframes: the steady loop
+     * starts where the clip wraps around, which x264 takes for a scene cut
+     * (as it does a cut inside the clip), and an IDR there would make every
+     * steady loop start with a keyframe.
      */
     private static void encodeLoopsX264(List<byte[]> frames, Clip c) throws Exception {
         int n = frames.size();
         int maxKbps = c.kbps * 102 / 100, bufKbit = maxKbps * 300 / 1000;
         long h = X264.open(c.size, c.size, c.fps, c.kbps, "fast", CameraStreamer.withMvCheap(
-                "no-deblock=1:intra-refresh=0:keyint=infinite:rc-lookahead=40:mbtree=1:vbv-maxrate=" + maxKbps
+                "no-deblock=1:intra-refresh=0:keyint=infinite:scenecut=0:rc-lookahead=40:mbtree=1:vbv-maxrate=" + maxKbps
                         + ":vbv-bufsize=" + bufKbit, c.size));
         if (h == 0) {
             throw new IllegalStateException("x264 open failed");
