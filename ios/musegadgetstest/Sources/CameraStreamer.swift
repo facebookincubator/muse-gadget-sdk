@@ -157,7 +157,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
     /*
      * Past 240 px, decoder-friendly motion vectors (x264 mv-cheap=2, from
-     * android/camstream/jni/x264_mvcheap.py), trellis and the wider motion
+     * android/musegadgetstest/jni/x264_mvcheap.py), trellis and the wider motion
      * search, as on Android. An explicit option in params wins.
      */
     static func withMvCheap(_ params: String?, width: Int) -> String? {

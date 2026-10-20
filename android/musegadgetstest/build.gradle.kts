@@ -16,7 +16,7 @@
 // APIs, no dependencies; the sources stay where build.sh (the Gradle-free
 // build) finds them. The optional encoders' native libraries (jni/build.sh,
 // jni/build_vpx.sh) are packed from LIB_DIR: the environment variable, or
-// camstream.libDir in local.properties or gradle.properties, default lib/.
+// musegadgetstest.libDir in local.properties or gradle.properties, default lib/.
 
 import java.util.Properties
 
@@ -29,8 +29,8 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 val libDir: String = System.getenv("LIB_DIR")
-    ?: localProps.getProperty("camstream.libDir")
-    ?: (findProperty("camstream.libDir") as String?)
+    ?: localProps.getProperty("musegadgetstest.libDir")
+    ?: (findProperty("musegadgetstest.libDir") as String?)
     ?: "lib"
 
 android {

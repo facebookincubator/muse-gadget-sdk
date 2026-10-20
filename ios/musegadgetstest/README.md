@@ -16,10 +16,10 @@ limitations under the License.
 
 # Muse Gadgets Test for iPhone
 
-<img src="../../.github/images/camstream/ios.jpg" width="300" align="right"
+<img src="../../.github/images/musegadgetstest/ios.jpg" width="300" align="right"
  alt="The app on an iPhone streaming color bars over Wi-Fi to an ESP-Mosaico as H.264 in two bands, 480x480 at 30 fps: the stats over the preview, what's playing with its Stop button, and the Video tab's list of sources">
 
-The iPhone version of [`../../android/camstream`](../../android/camstream):
+The iPhone version of [`../../android/musegadgetstest`](../../android/musegadgetstest):
 it streams the camera, color bars or a sample clip to a Muse gadget's
 display over Wi-Fi ([`../../protocols/VIDEO.md`](../../protocols/VIDEO.md)),
 with the same screen, settings, flow control and bitrate adaptation. Each
@@ -89,12 +89,12 @@ xcrun devicectl device process launch --device <udid> com.yourname.musegadgetste
   no intra refresh.
 - **x264** (GPL-2.0, not in this repository; an app that includes it is
   under the GPL, so keep such builds for testing): `native/build_x264.sh`
-  builds your checkout for iPhone with `../../android/camstream/jni/x264_mvcheap.py`
+  builds your checkout for iPhone with `../../android/musegadgetstest/jni/x264_mvcheap.py`
   and `native/mgx264.c` into `libmgx264.a`. Settings as on Android: `fast`,
   zerolatency, baseline, one reference, no deblocking, intra refresh.
 - **VP8** (libvpx, BSD-3-Clause with a patent grant; not in this repository
   either): `native/build_vpx.sh` builds your libvpx checkout with
-  `../../android/camstream/jni/libvpx_mg.py` and `native/mgvpx.c` into
+  `../../android/musegadgetstest/jni/libvpx_mg.py` and `native/mgvpx.c` into
   `libmgvpx.a`. **Codec** on the Video tab (or `-codec vp8`) picks it for
   gadgets that list it.
 

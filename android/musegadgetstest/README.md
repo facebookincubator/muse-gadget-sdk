@@ -16,7 +16,7 @@ limitations under the License.
 
 # Muse Gadgets Test
 
-<img src="../../.github/images/camstream/android.jpg" width="300" align="right"
+<img src="../../.github/images/musegadgetstest/android.jpg" width="300" align="right"
  alt="The app on a Galaxy S22 streaming color bars over Wi-Fi to an ESP-Mosaico as H.264 in two bands, 480x480 at 30 fps: the stats over the preview, what's playing with its Stop button, and the Video tab's list of sources">
 
 An Android sample app that streams the phone's camera, color bars, or a
@@ -34,7 +34,7 @@ with the measurements behind them. The gadget side is
 tools/muse/board.sh build <board>`).
 
 Plain Java on framework APIs, no libraries. **Android Studio:** open this
-directory (`android/camstream`) and run it; Gradle downloads what it needs
+directory (`android/musegadgetstest`) and run it; Gradle downloads what it needs
 the first time. From the command line, either the Gradle wrapper or
 `build.sh`, which needs only the Android SDK (no Gradle):
 
@@ -47,7 +47,7 @@ Both make a debug build signed with your debug key. The intent extras below
 (`--es host`, `--ez auto`, ...) work in debug builds only: the activity is
 exported, so in a release build any app could otherwise send the camera to
 a server of its choosing. An iPhone version of the same app is in
-[`../../ios/camstream`](../../ios/camstream).
+[`../../ios/musegadgetstest`](../../ios/musegadgetstest).
 
 The phone and the gadget must be on the same Wi-Fi network. The app finds
 gadgets over mDNS (`_musevideo._tcp`) and connects to the first one, the
@@ -81,7 +81,7 @@ wrapper, into `libmgx264.so`. It builds a copy of `X264_SRC` with
 used past 240 px: a fifth less decode time on the ESP-Mosaico; see
 `VIDEO.md`); `MV_CHEAP=0` leaves x264 as it is, and the app then goes on
 without it. Gradle and `build.sh` pack `LIB_DIR` (default `lib/`, git-ignored; in
-Android Studio set `camstream.libDir` in `local.properties`) into the APK
+Android Studio set `musegadgetstest.libDir` in `local.properties`) into the APK
 when it exists. With the library in the APK the app uses x264
 (`fast`, zerolatency, baseline, one reference, no deblocking) and does the
 panel scaling in C; `--es sw hw` goes back to the hardware encoder.

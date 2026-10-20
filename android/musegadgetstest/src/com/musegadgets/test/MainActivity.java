@@ -58,7 +58,7 @@ public final class MainActivity extends Activity
     /* What to connect to: --es target <name part> (first match), --es host
      * <address[:port]>, else the gadget last picked on the Gadget tab. */
     private String target, deviceAddr;
-    private static final String PREFS = "camstream", PREF_ADDR = "wifi_addr", PREF_NAME = "wifi_name";
+    private static final String PREFS = "musegadgetstest", PREF_ADDR = "wifi_addr", PREF_NAME = "wifi_name";
     private int fps = 30, kbps = 450, size = 0;
     private boolean noBands;   /* --ez nobands true: one stream even where the gadget takes two bands */
     /* The Codec button (or --es codec h264|vp8): VP8 for the camera and the

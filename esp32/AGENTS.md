@@ -459,8 +459,8 @@ The device still needs to be paired once for its token.
 
 `MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
 `devices/sdkconfig.muse-video`) adds video streaming (`CONFIG_MUSE_VIDEO`,
-`CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Test (`../android/camstream` for
-Android, `../ios/camstream` for iPhone) on a phone on the same Wi-Fi streams
+`CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Test (`../android/musegadgetstest` for
+Android, `../ios/musegadgetstest` for iPhone) on a phone on the same Wi-Fi streams
 its camera, or a clip, as H.264 or VP8
 (`CONFIG_MUSE_VIDEO_VP8`, on by default), and the board decodes it and
 draws it full screen. `../protocols/VIDEO.md` has

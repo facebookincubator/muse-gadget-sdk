@@ -18,8 +18,8 @@ limitations under the License.
 
 A phone streams H.264 (or VP8, below) to a gadget with a display; the
 gadget decodes it and draws it. This is the design note for anyone changing that path: the phone
-side (Muse Gadgets Test, for Android in `../android/camstream` and for iPhone in
-`../ios/camstream`: the same app, class for class), the wire (the frame format and,
+side (Muse Gadgets Test, for Android in `../android/musegadgetstest` and for iPhone in
+`../ios/musegadgetstest`: the same app, class for class), the wire (the frame format and,
 for Wi-Fi, the messages below) and the ESP32 side
 (`../esp32/components/tinyh264`, `components/muse/muse_video.c` and its
 transports). It says what each choice buys, how it was measured, and how to
@@ -28,8 +28,8 @@ check a change.
 | Where | What |
 |---|---|
 | this file, Wi-Fi | the Wi-Fi protocol: discovery, messages, credits |
-| `../android/camstream/README.md` | the Android app (Android Studio or Gradle), its extras and flow control |
-| `../ios/camstream/README.md` | the iPhone app (Xcode), its launch arguments |
+| `../android/musegadgetstest/README.md` | the Android app (Android Studio or Gradle), its extras and flow control |
+| `../ios/musegadgetstest/README.md` | the iPhone app (Xcode), its launch arguments |
 | `../esp32/components/tinyh264/README.md` | the decoder and its bit-exact optimizations |
 | `../esp32/components/libvpx_vp8/README.md` | the VP8 decoder, the same |
 | `../esp32/components/muse_vstream` | the receive ring and frame format every transport shares |
@@ -389,7 +389,7 @@ decoded in time over BLE (750 kb/s in 24 ms); not yet measured over Wi-Fi.
 compensation, and the positions with both components fractional cost the
 most (6-tap filters both ways). Muse Gadgets Test's x264 can keep its motion
 search off them (`mv-cheap=2`, added to x264 at build time by
-`../android/camstream/jni/x264_mvcheap.py`; on by default past 240 px):
+`../android/musegadgetstest/jni/x264_mvcheap.py`; on by default past 240 px):
 25% fewer decode instructions (10.3 -> 7.8 M at 480 px, 600 kb/s) for
 0.18-0.23 dB.
 
@@ -411,7 +411,7 @@ experimental.
   buffer messages, and capture-to-shown latency. The gadget logs its side
   every 2 s on `muse_video` (decode time, received-to-shown, kb/s, shown,
   dropped, skipped, each core's load).
-- **Repeatable input:** `../android/camstream/tools/livebench` plays a raw
+- **Repeatable input:** `../android/musegadgetstest/tools/livebench` plays a raw
   clip through the app's camera path and scores what the gadget shows.
 - A change that helps the bits but costs the decoder shows up as decode
   time near the frame period and frames dropped.

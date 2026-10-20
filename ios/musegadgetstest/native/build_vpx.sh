@@ -15,7 +15,7 @@
 
 # Builds LIB_DIR/libmgvpx.a (VP8 for Muse Gadgets Test, Vpx.swift): libvpx's
 # VP8 encoder from your checkout (VPX_SRC, https://chromium.googlesource.com/webm/libvpx
-# at v1.16.0) with android/camstream/jni/libvpx_mg.py's two switches, for
+# at v1.16.0) with android/musegadgetstest/jni/libvpx_mg.py's two switches, for
 # iPhone (arm64, NEON), and native/mgvpx.c, in one static library.
 #   VPX_SRC=~/libvpx LIB_DIR=~/mgcam-ios-lib ./native/build_vpx.sh
 # libvpx is BSD-3-Clause with a patent grant (its LICENSE and PATENTS).
@@ -26,7 +26,7 @@ out=${LIB_DIR:-$here/../lib}
 work=${WORK:-/tmp/mgvpx-ios}
 rm -rf "$work/src" "$work/build" && mkdir -p "$work/build" "$out"
 cp -R "$VPX_SRC" "$work/src"
-python3 "$here/../../../android/camstream/jni/libvpx_mg.py" "$work/src"
+python3 "$here/../../../android/musegadgetstest/jni/libvpx_mg.py" "$work/src"
 (
     cd "$work/build"
     "$work/src/configure" --target=arm64-darwin-gcc --enable-static --disable-shared \

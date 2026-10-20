@@ -21,8 +21,8 @@ scene cuts off (scenecut=0); without it they refused those clips ("encoder
 put a keyframe in the steady loop").
 
 Encodes with the apps' x264 parameters, read from their ClipStreamer
-sources, through the apps' x264 glue (ios/camstream/native/mgx264.c) and the
-host's libx264 (tests/camstream_x264_loop_harness.c; skipped without it)."""
+sources, through the apps' x264 glue (ios/musegadgetstest/native/mgx264.c) and the
+host's libx264 (tests/musegadgetstest_x264_loop_harness.c; skipped without it)."""
 
 from __future__ import annotations
 
@@ -37,8 +37,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 APPS = {
-    "android": REPO / "android/camstream/src/com/musegadgets/test/ClipStreamer.java",
-    "ios": REPO / "ios/camstream/Sources/ClipStreamer.swift",
+    "android": REPO / "android/musegadgetstest/src/com/musegadgets/test/ClipStreamer.java",
+    "ios": REPO / "ios/musegadgetstest/Sources/ClipStreamer.swift",
 }
 SIZE, FRAMES = 96, 48
 
@@ -58,7 +58,7 @@ def libx264_flags() -> list[str] | None:
     return run.stdout.split() if run.returncode == 0 else None
 
 
-class CamstreamX264LoopsTest(unittest.TestCase):
+class MuseGadgetsTestX264LoopsTest(unittest.TestCase):
     def test_apps_turn_scene_cuts_off(self) -> None:
         for app in APPS:
             with self.subTest(app=app):
@@ -72,8 +72,8 @@ class CamstreamX264LoopsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             enc = Path(tmp, "enc")
             build = subprocess.run(
-                [cc, "-O2", "-w", f"-I{REPO / 'ios/camstream/native'}", "-o", str(enc),
-                 str(ROOT / "tests/camstream_x264_loop_harness.c"), str(REPO / "ios/camstream/native/mgx264.c"),
+                [cc, "-O2", "-w", f"-I{REPO / 'ios/musegadgetstest/native'}", "-o", str(enc),
+                 str(ROOT / "tests/musegadgetstest_x264_loop_harness.c"), str(REPO / "ios/musegadgetstest/native/mgx264.c"),
                  *flags], capture_output=True, text=True)
             if build.returncode:
                 self.skipTest("can't build against the host's libx264: " + (build.stderr or build.stdout)[-300:])

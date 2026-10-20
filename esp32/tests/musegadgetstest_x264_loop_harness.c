@@ -17,13 +17,13 @@
 
 /*
  * Muse Gadgets Test's H.264 clip loops (ClipStreamer.encodeLoopsX264): the
- * apps' x264 glue (ios/camstream/native/mgx264.c, the same as the Android
+ * apps' x264 glue (ios/musegadgetstest/native/mgx264.c, the same as the Android
  * JNI's) and the host's libx264 encode a synthetic clip twice in a row, the
  * keyed loop then the steady loop, as the apps do. The clip has a hard cut in
  * the middle, and its end differs from its start, so its wrap-around is a
  * cut too. Prints the frames x264 made IDRs.
  *
- *   camstream_x264_loop_harness PARAMS SIZE FRAMES
+ *   musegadgetstest_x264_loop_harness PARAMS SIZE FRAMES
  *
  * Exit 0 when only the keyed loop's first frame is an IDR, 1 when the steady
  * loop has one (the apps refuse such a clip), 2 on errors.

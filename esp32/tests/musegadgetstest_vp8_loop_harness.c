@@ -16,11 +16,11 @@
 
 /*
  * Muse Gadgets Test's VP8 clip loops (ClipStreamer.encodeLoopsVp8 in both
- * apps) through the apps' own encoder glue (ios/camstream/native/mgvpx.c,
+ * apps) through the apps' own encoder glue (ios/musegadgetstest/native/mgvpx.c,
  * the same code as Android's jni/mgvpx.c) and the host's libvpx, for
- * tests/test_camstream_vp8_loops.py.
+ * tests/test_musegadgetstest_vp8_loops.py.
  *
- *   camstream_vp8_loop_harness PARAMS SIZE FRAMES STEADY_LOOPS out.ivf
+ *   musegadgetstest_vp8_loop_harness PARAMS SIZE FRAMES STEADY_LOOPS out.ivf
  *
  * Encodes a synthetic moving picture FRAMES frames long twice through one
  * encoder, as the apps do (the keyed loop, then the steady loop), and writes

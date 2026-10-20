@@ -15,7 +15,7 @@
 
 # Builds LIB_DIR/libmgx264.a (the software H.264 encoder, X264.swift): libx264
 # from your checkout (X264_SRC, https://code.videolan.org/videolan/x264) with
-# android/camstream/jni/x264_mvcheap.py's mv-cheap (unless MV_CHEAP=0), for
+# android/musegadgetstest/jni/x264_mvcheap.py's mv-cheap (unless MV_CHEAP=0), for
 # iPhone (arm64, NEON), and native/mgx264.c, in one static library.
 #   X264_SRC=~/x264 LIB_DIR=~/mgcam-ios-lib ./native/build_x264.sh
 # libx264 is GPL-2.0 (or a commercial license): an app with it is under the GPL.
@@ -27,7 +27,7 @@ work=${WORK:-/tmp/mgx264-ios}
 rm -rf "$work/src" "$work/x264" && mkdir -p "$work" "$out"
 cp -R "$X264_SRC" "$work/src"
 if [ "${MV_CHEAP:-1}" != 0 ]; then
-    python3 "$here/../../../android/camstream/jni/x264_mvcheap.py" "$work/src"
+    python3 "$here/../../../android/musegadgetstest/jni/x264_mvcheap.py" "$work/src"
 fi
 sdk=$(xcrun -sdk iphoneos --show-sdk-path)
 cc="$(xcrun -sdk iphoneos -f clang)"

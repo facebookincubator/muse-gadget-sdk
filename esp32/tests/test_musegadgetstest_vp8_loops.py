@@ -19,9 +19,9 @@ probabilities from frame to frame unless the encoder is error resilient, so
 without the apps' er=1 the second steady loop in a row is parsed with the
 wrong probabilities (garbage until the next keyframe, on any decoder).
 
-Encodes with the apps' encoder glue (ios/camstream/native/mgvpx.c, the same
-as android/camstream/jni/mgvpx.c) and the host's libvpx
-(tests/camstream_vp8_loop_harness.c; skipped without libvpx's encoder), and
+Encodes with the apps' encoder glue (ios/musegadgetstest/native/mgvpx.c, the same
+as android/musegadgetstest/jni/mgvpx.c) and the host's libvpx
+(tests/musegadgetstest_vp8_loop_harness.c; skipped without libvpx's encoder), and
 decodes with components/libvpx_vp8 (tests/libvpx_vp8_harness.c)."""
 
 from __future__ import annotations
@@ -38,10 +38,10 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 SRC = ROOT / "components/libvpx_vp8/src"
 APPS = {
-    "android": REPO / "android/camstream/src/com/musegadgets/test/ClipStreamer.java",
-    "ios": REPO / "ios/camstream/Sources/ClipStreamer.swift",
+    "android": REPO / "android/musegadgetstest/src/com/musegadgets/test/ClipStreamer.java",
+    "ios": REPO / "ios/musegadgetstest/Sources/ClipStreamer.swift",
 }
-GLUE = [REPO / "android/camstream/jni/mgvpx.c", REPO / "ios/camstream/native/mgvpx.c"]
+GLUE = [REPO / "android/musegadgetstest/jni/mgvpx.c", REPO / "ios/musegadgetstest/native/mgvpx.c"]
 # CameraStreamer.vp8Params at 480 px (both apps) plus ClipStreamer's clip settings.
 PARAMS = "cpu=2:deadline=good:profile=1:lf=0:mvcheap=1:threads=1:vbr=1:vbv-ms=300"
 SIZE, FRAMES, STEADY = 96, 24, 4
@@ -59,7 +59,7 @@ def psnr_y(a: bytes, b: bytes) -> float:
     return 99.0 if e == 0 else 10 * math.log10(255 * 255 * len(a) / e)
 
 
-class CamstreamVp8LoopsTest(unittest.TestCase):
+class MuseGadgetsTestVp8LoopsTest(unittest.TestCase):
     def test_apps_encode_clip_loops_error_resilient(self) -> None:
         for app, path in APPS.items():
             with self.subTest(app=app):
@@ -77,8 +77,8 @@ class CamstreamVp8LoopsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             enc, dec = Path(tmp, "enc"), Path(tmp, "dec")
             build = subprocess.run(
-                [cc, "-O2", "-w", f"-I{REPO / 'ios/camstream/native'}", "-o", str(enc),
-                 str(ROOT / "tests/camstream_vp8_loop_harness.c"), str(REPO / "ios/camstream/native/mgvpx.c"),
+                [cc, "-O2", "-w", f"-I{REPO / 'ios/musegadgetstest/native'}", "-o", str(enc),
+                 str(ROOT / "tests/musegadgetstest_vp8_loop_harness.c"), str(REPO / "ios/musegadgetstest/native/mgvpx.c"),
                  *flags], capture_output=True, text=True)
             if build.returncode:
                 self.skipTest("can't build against the host's libvpx: " + (build.stderr or build.stdout)[-300:])

@@ -25,7 +25,7 @@ jar=$(ls -d "$sdk"/platforms/android-* | sort -V | tail -1)/android.jar
 if ! javac -version >/dev/null 2>&1; then   # macOS has a javac stub without a JDK
     export PATH="/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin:$PATH"
 fi
-out=${OUT:-/tmp/camstream-build}
+out=${OUT:-/tmp/musegadgetstest-build}
 rm -rf "$out" && mkdir -p "$out/classes" "$out/dex"
 javac -source 17 -target 17 -nowarn -Xlint:-options -classpath "$jar" -d "$out/classes" \
     $(find "$here/src" -name '*.java')
@@ -47,9 +47,9 @@ if [ -d "${LIB_DIR:-$here/lib}" ]; then
 fi
 "$bt/zipalign" -f -p 4 "$out/base.apk" "$out/aligned.apk"
 "$bt/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android \
-    --out "$out/camstream.apk" "$out/aligned.apk"
-echo "$out/camstream.apk"
+    --out "$out/MuseGadgetsTest.apk" "$out/aligned.apk"
+echo "$out/MuseGadgetsTest.apk"
 if [ "${1:-}" = install ]; then
-    adb install -r "$out/camstream.apk"
+    adb install -r "$out/MuseGadgetsTest.apk"
     adb shell pm grant com.musegadgets.test android.permission.CAMERA
 fi
