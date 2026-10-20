@@ -102,7 +102,8 @@ static lv_obj_t *s_spk_sw, *s_vol_val, *s_vol_sl, *s_gain_val, *s_gain_sl, *s_br
 static const int SLEEP_CHOICES[] = { 0, 30, 60, 120, 300, 600 };
 static const char *const SLEEP_NAMES[] = { "Never", "30 seconds", "1 minute", "2 minutes", "5 minutes", "10 minutes" };
 #define SLEEP_COUNT (int)(sizeof(SLEEP_CHOICES) / sizeof(SLEEP_CHOICES[0]))
-static lv_obj_t *s_sleep_checks[SLEEP_COUNT];
+static lv_obj_t *s_sleep_checks[SLEEP_COUNT], *s_sleep_rows[SLEEP_COUNT];
+static int s_sleep_shown = -1;
 
 /* Battery page. */
 static lv_obj_t *s_batt_status, *s_batt_level, *s_batt_drain, *s_batt_full, *s_batt_off, *s_batt_slept, *s_batt_wakes,
@@ -386,7 +387,7 @@ static void show(lv_obj_t *p)
     }
     lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
     s_current = p;
-    if (p == s_sound) {
+    if (p == s_sound && !muse_board->epaper) {   /* as in the tick: no meter on e-paper */
         muse_voice_set_monitor(true);
     }
     muse_ui_set_swipe_enabled(p == s_home);
@@ -550,6 +551,11 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_set_style_text_font(s_text_ta, &lv_font_montserrat_16, LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_set_style_text_color(s_text_ta, lv_color_hex(COLOR_DIM), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_add_state(s_text_ta, LV_STATE_FOCUSED);
+    if (muse_board->epaper) {
+        /* The theme blinks the cursor every 400 ms, and an e-paper panel
+         * refreshes only once the screen has stopped changing. */
+        lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR);
+    }
     lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, 0, text_y(76));
 
     /* A full keyboard's keys are too small to hit on a screen under 2". */
@@ -743,7 +749,11 @@ static bool rebuild_scan_list(void)
         bool saved = is_saved(s_aps[i].ssid);
         saved_seen |= saved;
         char buf[24];
-        snprintf(buf, sizeof(buf), "%s%d dBm", saved ? "saved  " : (s_aps[i].secure ? "" : "open  "), s_aps[i].rssi);
+        if (muse_board->epaper) {
+            snprintf(buf, sizeof(buf), "%s", saved ? "saved" : s_aps[i].secure ? "secured" : "open");
+        } else {
+            snprintf(buf, sizeof(buf), "%s%d dBm", saved ? "saved  " : (s_aps[i].secure ? "" : "open  "), s_aps[i].rssi);
+        }
         lv_label_set_text(v, buf);
     }
     if (gen && !n) {
@@ -794,7 +804,11 @@ static void tick_wifi(void)
         snprintf(buf, sizeof(buf), "Joining %s\n%s", w.ssid, w.detail);
         break;
     case MUSE_WIFI_CONNECTED:
-        snprintf(buf, sizeof(buf), "Connected to %s\n%s  -  %d dBm", w.ssid, w.ip, w.rssi);
+        if (muse_board->epaper) {
+            snprintf(buf, sizeof(buf), "Connected to %s\n%s", w.ssid, w.ip);
+        } else {
+            snprintf(buf, sizeof(buf), "Connected to %s\n%s  -  %d dBm", w.ssid, w.ip, w.rssi);
+        }
         break;
     case MUSE_WIFI_NOT_NEARBY:
         strlcpy(buf, "No saved network nearby\nLooking again within a minute", sizeof(buf));
@@ -1060,8 +1074,10 @@ static void build_sound_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_sound = page(tile, "SOUND", true, &list);
-    s_spk_sw = switch_row(list, "Speaker", muse_settings_speaker_on(), on_speaker_sw);
-    s_vol_sl = slider(list, "Volume", 0, 100, muse_settings_volume(), &s_vol_val, on_volume);
+    if (muse_board->audio_init) {
+        s_spk_sw = switch_row(list, "Speaker", muse_settings_speaker_on(), on_speaker_sw);
+        s_vol_sl = slider(list, "Volume", 0, 100, muse_settings_volume(), &s_vol_val, on_volume);
+    }
     s_gain_sl = slider(list, "Mic gain", 0, MUSE_MIC_GAIN_MAX / 3, muse_settings_mic_gain() / 3, &s_gain_val, on_gain);
 
     lv_obj_t *meter = lv_obj_create(list);
@@ -1078,21 +1094,27 @@ static void build_sound_page(lv_obj_t *tile)
     lv_bar_set_range(s_mic_bar, 0, 60);   /* -70..-10 dBFS */
     lv_obj_set_style_bg_color(s_mic_bar, lv_color_hex(0x2a2345), LV_PART_MAIN);
     lv_obj_set_style_anim_duration(s_mic_bar, 80, 0);
-    note(list, "Talk at arm's length: the bar should reach green (-30 to -15 dBFS) without going orange.");
+    if (muse_board->epaper) {
+        lv_obj_add_flag(meter, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        note(list, "Talk at arm's length: the bar should reach green (-30 to -15 dBFS) without going orange.");
+    }
 
-    s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
-
-    set_val(s_vol_val, "%d%%", muse_settings_volume());
+    if (!muse_board->epaper) {
+        s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
+        set_val(s_bright_val, "%d%%", muse_settings_brightness());
+    }
+    if (s_vol_val) set_val(s_vol_val, "%d%%", muse_settings_volume());
     set_val(s_gain_val, "%d dB", muse_settings_mic_gain() / 3 * 3);
-    set_val(s_bright_val, "%d%%", muse_settings_brightness());
 }
 
 static void tick_sound(void)
 {
     bool on = muse_settings_speaker_on();   /* also toggled from the face */
-    if (on != lv_obj_has_state(s_spk_sw, LV_STATE_CHECKED)) {
+    if (s_spk_sw && on != lv_obj_has_state(s_spk_sw, LV_STATE_CHECKED)) {
         lv_obj_set_state(s_spk_sw, LV_STATE_CHECKED, on);
     }
+    if (muse_board->epaper) return;
     float db = muse_voice_monitor_db();
     int v = (int)(db + 70.0f);
     v = v < 0 ? 0 : (v > 60 ? 60 : v);
@@ -1104,9 +1126,13 @@ static void tick_sound(void)
 
 /* ---------- Sleep ---------- */
 
+static void tick_sleep(void);
+
 static void on_sleep_choice(lv_event_t *e)
 {
-    muse_settings_set_sleep_s(SLEEP_CHOICES[(int)(intptr_t)lv_event_get_user_data(e)]);
+    int secs = SLEEP_CHOICES[(int)(intptr_t)lv_event_get_user_data(e)];
+    muse_settings_set_sleep_s(secs);
+    tick_sleep();
 }
 
 static void on_sleep_now(lv_event_t *e)
@@ -1119,9 +1145,11 @@ static void build_sleep_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_sleep = page(tile, "AUTO-SLEEP", true, &list);
+    s_sleep_shown = -1;
     note(list, "Turn the screen off after Muse has been idle for:");
     for (int i = 0; i < SLEEP_COUNT; i++) {
-        row(list, NULL, SLEEP_NAMES[i], &s_sleep_checks[i], on_sleep_choice, (void *)(intptr_t)i);
+        s_sleep_rows[i] = row(list, NULL, SLEEP_NAMES[i], &s_sleep_checks[i], on_sleep_choice,
+                              (void *)(intptr_t)i);
         lv_obj_set_style_text_color(s_sleep_checks[i], lv_color_hex(COLOR_ACCENT), 0);
     }
     button(list, LV_SYMBOL_EYE_CLOSE "  Sleep now", COLOR_ACCENT, on_sleep_now, NULL);
@@ -1143,7 +1171,12 @@ static void tick_sleep(void)
     int cur = muse_settings_sleep_s();
     for (int i = 0; i < SLEEP_COUNT; i++) {
         set_text(s_sleep_checks[i], SLEEP_CHOICES[i] == cur ? LV_SYMBOL_OK : "");
+        if (muse_board->epaper && cur != s_sleep_shown) {
+            lv_obj_set_style_bg_color(s_sleep_rows[i],
+                                      lv_color_hex(SLEEP_CHOICES[i] == cur ? COLOR_CARD_PRESSED : COLOR_CARD), 0);
+        }
     }
+    s_sleep_shown = cur;
 }
 
 /* ---------- Battery ---------- */
@@ -1187,7 +1220,7 @@ static void set_pm(lv_obj_t *l, int pm)
 static void tick_battery(void)
 {
     int64_t now = esp_timer_get_time();
-    if (s_batt_shown_us && now - s_batt_shown_us < 1000000) {
+    if (s_batt_shown_us && now - s_batt_shown_us < (muse_board->epaper ? 30000000 : 1000000)) {
         return;
     }
     s_batt_shown_us = now;
@@ -1322,7 +1355,9 @@ static void tick_home(void)
     muse_ble_status(&b);
     set_text(s_home_ble, b.state == MUSE_BLE_OFF ? "Off" : (b.state == MUSE_BLE_CONNECTED ? "Connected" : "On"));
 
-    if (muse_settings_speaker_on()) {
+    if (!muse_board->audio_init) {
+        set_text(s_home_sound, muse_board->mic_init ? "Mic only" : "No audio");
+    } else if (muse_settings_speaker_on()) {
         set_val(s_home_sound, "Vol %d%%", muse_settings_volume());
     } else {
         set_text(s_home_sound, "Muted");
@@ -1361,7 +1396,7 @@ void muse_settings_ui_tick(bool visible)
     if (visible != was_visible) {
         was_visible = visible;
         /* Only listen to the mic while the Sound page is actually on screen. */
-        muse_voice_set_monitor(visible && s_current == s_sound);
+        muse_voice_set_monitor(visible && s_current == s_sound && !muse_board->epaper);
     }
     if (!visible) {
         return;

@@ -67,6 +67,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_waveshare_s3_175c.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_OSTB_ECHOEAR_2ST)
         list(APPEND srcs "boards/board_ostb_echoear_2st.c")
+    elseif(CONFIG_MUSE_BOARD_RETERMINAL_STICKY)
+        list(APPEND srcs "boards/board_reterminal_sticky.c" "../../main/epd_ssd1677.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_216)
         list(APPEND srcs "boards/board_waveshare_s3_216.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_206)
@@ -130,7 +132,10 @@ set(muse_priv_requires
     bt esp-tls mbedtls esp_app_format esp_http_client
     noise_core minimp3
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
-    esp_driver_pcnt efuse)
+    esp_driver_pcnt efuse
+    # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
+    # before Kconfig values exist, so these can't depend on it; only the code does.
+    fatfs esp_driver_sdspi sdmmc)
 list(APPEND muse_priv_requires camera)
 
 idf_component_register(

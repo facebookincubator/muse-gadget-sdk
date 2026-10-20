@@ -189,6 +189,8 @@ status screen.
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
+| Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
+| Seeed reTerminal Sticky Link status (experimental) | 3.97" e-paper status screen and SHT40 only; no Muse UI | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
@@ -338,6 +340,9 @@ their upstream licenses:
 - [`components/muse/boards/ostb_echoear_display_init.h`](components/muse/boards/ostb_echoear_display_init.h),
   the ST77916 panel initialization table from 78/xiaozhi-esp32, is MIT, as its
   retained upstream notice says.
+- [`main/epd_ssd1677.c`](main/epd_ssd1677.c), the reTerminal Sticky SSD1677
+  driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence, is MIT
+  and retains the source's copyright and license notice.
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.

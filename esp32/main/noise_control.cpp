@@ -1379,7 +1379,7 @@ static char *build_register_json(void) {
         // and, for e-paper, the exact inks.
         int bits = led_status_display_bits();
         bool mono = bits == 1;
-        bool epaper = bits == 1 || bits == 4;
+        bool epaper = bits == 1 || bits == 2 || bits == 4;
         char desc[1536];
         snprintf(desc, sizeof(desc),
                  "Download an image and draw it on the %dx%d %s. Takes a "
@@ -1400,7 +1400,8 @@ static char *build_register_json(void) {
                  mono ? "black and white e-paper screen, 1 bit per pixel"
                  : bits == 4 ? "six-colour e-paper screen (E Ink Spectra 6), "
                                "4 bits per pixel"
-                             : "colour screen, 16 bits per pixel (RGB565)",
+                             : bits == 2 ? "four-level grayscale e-paper screen, 2 bits per pixel"
+                                         : "colour screen, 16 bits per pixel (RGB565)",
                  disp_w * 2,
                  mono ? " The screen has no gray or colour: the device "
                         "dithers them to black and white dots, so photos "
@@ -1422,7 +1423,11 @@ static char *build_register_json(void) {
                                "screen rather than several parts, at most "
                                "about once a minute. The image stays on "
                                "screen without power."
-                             : ""
+                             : bits == 2 ? " Images are quantized to four gray levels. "
+                                           "The panel refreshes the whole image at once and retains "
+                                           "it without power; send one whole screen rather than "
+                                           "several parts."
+                                         : ""
 #if !CONFIG_HOMEHUB_LED_BACKEND_MUSE
                  , epaper ? "status screen" : "animation"
 #endif

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "driver/gpio.h"
@@ -66,6 +67,7 @@ typedef struct {
     const char *name;
     int width, height;
     bool round;             /* circular panel: keep content inside the circle */
+    bool epaper;            /* slow e-paper refresh: settings poll less often and skip live text */
     bool no_ring;           /* square panel: progress as a bar along the bottom edge, no ring around Muse */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
@@ -106,6 +108,13 @@ typedef struct {
 
     /* Codec handles for one duplex, 2-slot I2S bus, not yet opened. */
     esp_err_t (*audio_init)(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic);
+    /* A microphone without a codec or speaker (a PDM mic), in place of
+     * audio_init: set up once, powered on and off with the audio
+     * (muse_audio_power), read as mono at MUSE_AUDIO_RATE.
+     * A board with mic_init has no speaker: replies are read, not heard. */
+    esp_err_t (*mic_init)(void);
+    esp_err_t (*mic_power)(bool on);
+    esp_err_t (*mic_read)(int16_t *mono, size_t frames);
     int mic_slot;           /* slot carrying the mic (0/1), or -1 to mix both */
     void (*set_mic_gain)(esp_codec_dev_handle_t mic, int db);   /* NULL: esp_codec_dev_set_in_gain */
     /* Audio power the board can switch, such as an amp's enable: on once

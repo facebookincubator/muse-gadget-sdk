@@ -97,7 +97,7 @@ dependencies:
   espressif/esp_lcd_touch_gt911:
     version: "1.2.1"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_lcd7\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_lcd7\", \"reterminal_sticky\"]"
   espressif/esp_lcd_touch:
     version: "^1.2.0"
     rules:

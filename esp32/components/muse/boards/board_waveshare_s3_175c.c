@@ -44,6 +44,7 @@
 static const char *TAG = "board";
 
 #define DRAW_BUF_LINES 118      /* four bands to the screen (muse_lcd_bands.h) */
+#define LCD_TE GPIO_NUM_13      /* the panel's tearing effect, on both boards */
 #define LCD_CHUNK_BYTES (BSP_LCD_H_RES * 8 * 2)
 #if CONFIG_MUSE_BOARD_WAVESHARE_S3_175
 #define PMU_KEY_EVERY 2         /* poll the PMU over I2C every 20 ms */
@@ -135,6 +136,9 @@ static lv_display_t *display_start(lv_indev_t **touch)
         return NULL;
     }
     lv_display_add_event_cb(disp, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
+    /* Tearing effect on (V-blank only), as the 1.75C's BSP already asks. */
+    esp_lcd_panel_io_tx_param(s_io, (0x02 << 24) | (0x35 << 8), (uint8_t[]){ 0x00 }, 1);
+    muse_lcd_bands_set_te(LCD_TE);
 
     const bsp_display_cfg_t touch_cfg = {
         .touch_flags = { .mirror_x = 1, .mirror_y = 1 },
