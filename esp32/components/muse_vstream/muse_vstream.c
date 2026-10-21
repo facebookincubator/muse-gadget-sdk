@@ -19,10 +19,12 @@
 #include <string.h>
 
 
+#ifndef BARRIER   /* a test may stand in here, to interleave the two sides */
 #if defined(__GNUC__)
 #define BARRIER() __atomic_thread_fence(__ATOMIC_SEQ_CST)
 #else
 #define BARRIER()
+#endif
 #endif
 
 void muse_vstream_init(muse_vstream_t *s, uint8_t *buf, uint32_t size, uint32_t max_frame)
@@ -36,13 +38,19 @@ void muse_vstream_init(muse_vstream_t *s, uint8_t *buf, uint32_t size, uint32_t 
     s->max_frame = max_frame;
 }
 
+/* The producer's side of a start: tail is the consumer's, and it may be
+ * mid-pop, about to consume a frame of the old stream (which lies wholly
+ * before head). So nothing is reset here: the new stream begins at head, and
+ * the consumer skips to it at its next pop. */
 void muse_vstream_start(muse_vstream_t *s)
 {
     s->active = false;
     BARRIER();
-    s->head = s->tail = 0;
+    s->start_at = s->head;
     s->received = 0;
     s->resyncs = s->overruns = 0;
+    BARRIER();
+    s->starts++;
     BARRIER();
     s->active = true;
 }
@@ -212,6 +220,14 @@ int32_t muse_vstream_pop(muse_vstream_t *s, uint8_t *dst, uint32_t cap, muse_vfr
     for (;;) {
         if (!s->active) {
             return damaged ? -1 : 0;   /* a stream ended or restarted under us */
+        }
+        if (s->started != s->starts) {
+            /* A new stream: skip what's left of the old one. */
+            uint32_t starts = s->starts;
+            BARRIER();
+            s->tail = s->start_at;
+            s->started = starts;
+            damaged = false;
         }
         uint32_t avail = s->head - s->tail;
         BARRIER();

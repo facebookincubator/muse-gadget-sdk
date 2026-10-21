@@ -83,13 +83,17 @@ def sps(width_mbs, height_mbs):
     return nal(0x67, b)
 
 
-def pps():
+def pps(slice_groups=None):
+    """slice_groups(b) writes num_slice_groups_minus1 and what follows it."""
     b = Bits()
     b.ue(0)      # pic_parameter_set_id
     b.ue(0)      # seq_parameter_set_id
     b.u(1, 0)    # entropy_coding_mode_flag: CAVLC
     b.u(1, 0)    # pic_order_present_flag
-    b.ue(0)      # num_slice_groups_minus1
+    if slice_groups:
+        slice_groups(b)
+    else:
+        b.ue(0)  # num_slice_groups_minus1
     b.ue(0)      # num_ref_idx_l0_active_minus1
     b.ue(0)      # num_ref_idx_l1_active_minus1
     b.u(1, 0)    # weighted_pred_flag
@@ -124,8 +128,31 @@ def idr(mbs):
     return nal(0x65, b)
 
 
-def au(width_mbs, height_mbs, full=True):
-    return sps(width_mbs, height_mbs) + pps() + idr(width_mbs * height_mbs if full else 0)
+def au(width_mbs, height_mbs, full=True, slice_groups=None):
+    return sps(width_mbs, height_mbs) + pps(slice_groups) + idr(width_mbs * height_mbs if full else 0)
+
+
+LONGEST = 2**32 - 1   # the longest Exp-Golomb code: plus one wraps to 0
+
+
+def changing_groups(rate_minus1):
+    """Two slice groups, box-out (type 3), changing by rate_minus1 + 1."""
+    def write(b):
+        b.ue(1)              # num_slice_groups_minus1
+        b.ue(3)              # slice_group_map_type: box-out
+        b.u(1, 0)            # slice_group_change_direction_flag
+        b.ue(rate_minus1)    # slice_group_change_rate_minus1
+    return write
+
+
+def interleaved_groups(run_minus1):
+    """Two interleaved slice groups (type 0), each of run_minus1 + 1."""
+    def write(b):
+        b.ue(1)              # num_slice_groups_minus1
+        b.ue(0)              # slice_group_map_type: interleaved
+        b.ue(run_minus1)     # run_length_minus1, group 0
+        b.ue(run_minus1)     # run_length_minus1, group 1
+    return write
 
 
 HARNESS = r'''
@@ -206,6 +233,15 @@ class UntrustedVideoTest(unittest.TestCase):
         # which GetDpbSize divided by (a crash on the board, SIGFPE here).
         self.assertIsNone(self.decode(au(2**32, 1, full=False), 0, 0))
         self.assertIsNone(self.decode(au(1, 2**32, full=False), 0, 0))
+
+    def test_slice_group_sizes_that_would_wrap_are_refused(self):
+        # A change rate of 0 divided in NumSliceGroupChangeCycleBits; a run of
+        # 0 never ended the interleaved map (the harness's timeout catches it).
+        self.assertIsNone(self.decode(au(2, 2, full=False, slice_groups=changing_groups(LONGEST)), 0, 0))
+        self.assertIsNone(self.decode(au(2, 2, full=True, slice_groups=interleaved_groups(LONGEST)), 0, 0))
+        # ...and slice groups as such still parse (an in-range rate and run).
+        self.decode(au(2, 2, full=False, slice_groups=changing_groups(1)), 0, 0)
+        self.decode(au(2, 2, full=True, slice_groups=interleaved_groups(1)), 0, 0)
 
     def test_vp8_keyframes_larger_than_the_stream(self):
         vdec = (MUSE / "muse_vdec.c").read_text()

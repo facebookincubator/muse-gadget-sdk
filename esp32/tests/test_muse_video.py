@@ -51,6 +51,76 @@ class MuseVideoTest(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
             self.assertIn("PASS muse_video", run.stdout)
 
+    def test_restart_while_the_consumer_pops(self) -> None:
+        # The producer (a new start) can run while the consumer is between
+        # checking a frame and consuming it. The ring source is built with its
+        # barriers hooked, so the start lands exactly there.
+        harness = r'''
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+static void race(void);
+#define BARRIER() race()
+#include "muse_vstream.c"
+
+static muse_vstream_t s;
+static int countdown;   /* barriers until the producer restarts the stream */
+
+static void race(void)
+{
+    if (countdown > 0 && --countdown == 0) {
+        muse_vstream_start(&s);
+    }
+}
+
+static uint32_t frame(uint8_t *f, uint16_t number, uint32_t len)
+{
+    memset(f, 0x55, MUSE_VIDEO_FRAME_HEADER_LEN + len);
+    f[0] = MUSE_VIDEO_FRAME_MAGIC;
+    f[1] = 0;
+    f[2] = (uint8_t)number;
+    f[3] = (uint8_t)(number >> 8);
+    f[4] = (uint8_t)len;
+    f[5] = (uint8_t)(len >> 8);
+    f[6] = (uint8_t)(len >> 16);
+    f[7] = (uint8_t)(len >> 24);
+    f[8] = f[9] = f[10] = 0;   /* an access unit's start code */
+    f[11] = 1;
+    return MUSE_VIDEO_FRAME_HEADER_LEN + len;
+}
+
+int main(void)
+{
+    static uint8_t ring[4096], f[600], out[600];
+    muse_vframe_t fr;
+    muse_vstream_init(&s, ring, sizeof(ring), 1024);
+    muse_vstream_start(&s);
+    assert(muse_vstream_pop(&s, out, sizeof(out), &fr) == 0);   /* nothing yet */
+    muse_vstream_write(&s, f, frame(f, 1, 500));
+    /* Its second barrier is the one before the consume. */
+    countdown = 2;
+    assert(muse_vstream_pop(&s, out, sizeof(out), &fr) == 500);
+    /* The new stream starts clean all the same. */
+    muse_vstream_write(&s, f, frame(f, 7, 300));
+    assert(muse_vstream_pop(&s, out, sizeof(out), &fr) == 300 && fr.number == 7);
+    assert(muse_vstream_available(&s) == sizeof(ring));
+    puts("PASS restart");
+    return 0;
+}
+'''
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        with tempfile.TemporaryDirectory() as tmp:
+            src, exe = Path(tmp, "restart.c"), Path(tmp, "restart")
+            src.write_text(harness)
+            build = subprocess.run(
+                [*cc, "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
+                 f"-I{VSTREAM / 'include'}", f"-I{VSTREAM}", "-o", str(exe), str(src)],
+                capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+            run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertIn("PASS restart", run.stdout)
+
     def test_wired_under_the_option(self) -> None:
         cmake = (MUSE / "CMakeLists.txt").read_text()
         self.assertIn("if(CONFIG_MUSE_VIDEO)", cmake)

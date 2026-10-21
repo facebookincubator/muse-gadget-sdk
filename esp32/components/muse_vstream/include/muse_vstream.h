@@ -85,6 +85,12 @@ typedef struct {
     uint32_t size;            /* a power of two */
     volatile uint32_t head;   /* written by the producer: bytes ever written */
     volatile uint32_t tail;   /* written by the consumer: bytes ever taken */
+    /* A start (producer) leaves tail to the consumer, which may be mid-pop:
+     * it notes where the new stream begins and counts itself, and the
+     * consumer skips to there when it sees the count change. */
+    volatile uint32_t start_at;
+    volatile uint32_t starts;
+    uint32_t started;         /* the consumer's copy of starts */
     volatile uint32_t received;
     uint32_t max_frame;
     uint32_t resyncs;         /* times a bad header made the consumer search */

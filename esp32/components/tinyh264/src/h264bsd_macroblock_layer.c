@@ -159,13 +159,15 @@ u32 h264bsdDecodeMacroblockLayer(strmData_t *pStrmData,
 
     if (IS_I_SLICE(sliceType))
     {
-        if ((value + 6) > 31 || tmp != HANTRO_OK)
+        /* OPT: the value itself, not value + 6, which wraps for hostile
+         * codes near 2^32 into a small inter type in an I slice */
+        if (tmp != HANTRO_OK || value > 31 - 6)
             return(HANTRO_NOK);
         pMbLayer->mbType = (mbType_e)(value + 6);
     }
     else
     {
-        if ((value + 1) > 31 || tmp != HANTRO_OK)
+        if (tmp != HANTRO_OK || value > 31 - 1)
             return(HANTRO_NOK);
         pMbLayer->mbType = (mbType_e)(value + 1);
     }

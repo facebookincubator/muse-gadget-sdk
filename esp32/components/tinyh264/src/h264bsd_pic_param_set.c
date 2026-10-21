@@ -140,6 +140,13 @@ u32 h264bsdDecodePicParamSet(strmData_t *pStrmData, picParamSet_t *pPicParamSet)
     tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
     if (tmp != HANTRO_OK)
         return(tmp);
+    /* OPT: checked before the + 1 here and below: the Exp-Golomb decoder
+     * returns 2^32 - 1 for its longest code, which would wrap to 0 */
+    if (value >= MAX_NUM_SLICE_GROUPS)
+    {
+        EPRINT("num_slice_groups_minus1");
+        return(HANTRO_NOK);
+    }
     pPicParamSet->numSliceGroups = value + 1;
     if (pPicParamSet->numSliceGroups > MAX_NUM_SLICE_GROUPS)
     {
@@ -171,6 +178,9 @@ u32 h264bsdDecodePicParamSet(strmData_t *pStrmData, picParamSet_t *pPicParamSet)
                 tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
                 if (tmp != HANTRO_OK)
                     return(tmp);
+                /* OPT: a run of 0 (2^32 - 1 plus one) never ends the map */
+                if (value >= 512 * 512)
+                    return(HANTRO_NOK);
                 pPicParamSet->runLength[i] = value+1;
                 /* param values checked in CheckPps() */
             }
@@ -209,6 +219,10 @@ u32 h264bsdDecodePicParamSet(strmData_t *pStrmData, picParamSet_t *pPicParamSet)
             tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
             if (tmp != HANTRO_OK)
                 return(tmp);
+            /* OPT: a rate of 0 (2^32 - 1 plus one) divides by zero in
+             * NumSliceGroupChangeCycleBits */
+            if (value >= 512 * 512)
+                return(HANTRO_NOK);
             pPicParamSet->sliceGroupChangeRate = value + 1;
             /* param value checked in CheckPps() */
         }
@@ -217,6 +231,8 @@ u32 h264bsdDecodePicParamSet(strmData_t *pStrmData, picParamSet_t *pPicParamSet)
             tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
             if (tmp != HANTRO_OK)
                 return(tmp);
+            if (value >= 512 * 512)
+                return(HANTRO_NOK);
             pPicParamSet->picSizeInMapUnits = value + 1;
 
             ALLOCATE(pPicParamSet->sliceGroupId,
