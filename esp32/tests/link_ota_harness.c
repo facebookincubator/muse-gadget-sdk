@@ -39,9 +39,54 @@ static void on_result(const ota_event_t *event, void *user) {
     }
 }
 
+#define VIBE_MODE_BUILD (CONFIG_MUSE_BOARD_ESP_MOSAICO && CONFIG_ESP_IRIS_OTA_DEFAULT_VIA_RECOVERY)
+
+#if CONFIG_HOMEHUB_OTA_ENABLED || VIBE_MODE_BUILD
+#include "esp_ota_ops.h"
+static const esp_partition_t ota_0 = {
+    .type = ESP_PARTITION_TYPE_APP, .subtype = ESP_PARTITION_SUBTYPE_APP_OTA_0,
+    .address = 0x20000, .label = "ota_0" };
+static const esp_partition_t *running_part = &ota_0;
+const esp_partition_t *esp_ota_get_running_partition(void) { return running_part; }
+#endif
+
+#if VIBE_MODE_BUILD
+/* The ESP-Mosaico's retained layout (partitions_mosaico.csv): Vibe Mode in
+ * `factory`, its records in `sysmeta`. Each piece can go missing. */
+static const esp_partition_t factory_part = {
+    .type = ESP_PARTITION_TYPE_APP, .subtype = ESP_PARTITION_SUBTYPE_APP_FACTORY,
+    .address = 0x10000, .label = "factory" };
+static const esp_partition_t sysmeta_part = {
+    .type = ESP_PARTITION_TYPE_DATA, .subtype = ESP_PARTITION_SUBTYPE_DATA_NVS,
+    .address = 0xc000, .label = "sysmeta" };
+static bool has_factory = true, has_sysmeta = true, factory_app_valid = true;
+static esp_ota_img_states_t running_state = ESP_OTA_IMG_PENDING_VERIFY;
+const esp_partition_t *esp_partition_find_first(esp_partition_type_t type,
+                                                esp_partition_subtype_t subtype,
+                                                const char *label) {
+    if (type == ESP_PARTITION_TYPE_APP && subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY && !label) {
+        return has_factory ? &factory_part : NULL;
+    }
+    assert(type == ESP_PARTITION_TYPE_DATA && subtype == ESP_PARTITION_SUBTYPE_DATA_NVS);
+    assert(label && strcmp(label, "sysmeta") == 0);
+    return has_sysmeta ? &sysmeta_part : NULL;
+}
+esp_err_t esp_ota_get_partition_description(const esp_partition_t *partition,
+                                           esp_app_desc_t *app_desc) {
+    assert(partition == &factory_part);
+    memset(app_desc, 0, sizeof(*app_desc));
+    return factory_app_valid ? ESP_OK : -1;
+}
+esp_err_t esp_ota_get_state_partition(const esp_partition_t *partition,
+                                      esp_ota_img_states_t *state) {
+    assert(partition == running_part);
+    *state = running_state;
+    return ESP_OK;
+}
+#endif
+
 #if CONFIG_HOMEHUB_OTA_ENABLED
 #include "esp_https_ota.h"
-#include "esp_ota_ops.h"
 #include "freertos/task.h"
 #include "stack_monitor.h"
 
@@ -64,10 +109,9 @@ bool config_erase_key(const char *key) {
     record[0] = '\0';
     return true;
 }
-static const esp_partition_t ota_0 = { .address = 0x20000, .label = "ota_0" };
-static const esp_partition_t ota_1 = { .address = 0x620000, .label = "ota_1" };
-static const esp_partition_t *running_part = &ota_0;
-const esp_partition_t *esp_ota_get_running_partition(void) { return running_part; }
+static const esp_partition_t ota_1 = {
+    .type = ESP_PARTITION_TYPE_APP, .subtype = ESP_PARTITION_SUBTYPE_APP_OTA_1,
+    .address = 0x620000, .label = "ota_1" };
 const esp_partition_t *esp_ota_get_next_update_partition(const esp_partition_t *start_from) {
     assert(start_from == NULL);
     return running_part == &ota_0 ? &ota_1 : &ota_0;
@@ -187,6 +231,40 @@ static void check_record(void) {
 }
 #endif
 
+/* Only a Vibe Mode install, on the ESP-Mosaico's Vibe Mode build, passes. */
+static void check_vibe_mode(void) {
+#if VIBE_MODE_BUILD
+    running_part = &ota_0;
+    assert(ota_installed_by_vibe_mode());
+    has_factory = false;                       /* no Vibe Mode partition */
+    assert(!ota_installed_by_vibe_mode());
+    has_factory = true;
+    factory_app_valid = false;                 /* no app in it */
+    assert(!ota_installed_by_vibe_mode());
+    factory_app_valid = true;
+    has_sysmeta = false;                       /* not the retained layout */
+    assert(!ota_installed_by_vibe_mode());
+    has_sysmeta = true;
+    running_part = &factory_part;              /* Vibe Mode itself */
+    assert(!ota_installed_by_vibe_mode());
+    running_part = &ota_0;
+    running_state = ESP_OTA_IMG_VALID;         /* already accepted */
+    assert(!ota_installed_by_vibe_mode());
+    running_state = ESP_OTA_IMG_PENDING_VERIFY;
+#if CONFIG_HOMEHUB_OTA_ENABLED
+    /* device.ota's own update keeps its health check. */
+    assert(config_set_str("ota_verify", "00020000:"
+                          "0000000000000000000000000000000000000000000000000000000000000000"));
+    assert(ota_verify_recorded_for_running());
+    assert(!ota_installed_by_vibe_mode());
+    ota_verify_forget();
+#endif
+    assert(ota_installed_by_vibe_mode());
+#else
+    assert(!ota_installed_by_vibe_mode());
+#endif
+}
+
 int main(void) {
 #if CONFIG_HOMEHUB_OTA_ENABLED
     assert(ota_is_enabled());
@@ -215,6 +293,7 @@ int main(void) {
     assert(!ota_verify_recorded_for_running());
     ota_verify_forget();
 #endif
+    check_vibe_mode();
     puts("OTA harness passed");
     return 0;
 }

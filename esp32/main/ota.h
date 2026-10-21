@@ -55,3 +55,9 @@ void ota_start(const char *url, bool force, ota_status_cb cb, void *user);
 bool ota_verify_recorded_for_running(void);
 // Forgets the record, once the boot's health check has ended either way.
 void ota_verify_forget(void);
+
+// Whether the running image is a PENDING_VERIFY install by the ESP-Mosaico's
+// Vibe Mode firmware, which accepts its own installs: the one image the
+// health check leaves alone. False on every other board and build, and for an
+// image device.ota recorded.
+bool ota_installed_by_vibe_mode(void);

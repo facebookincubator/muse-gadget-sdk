@@ -76,7 +76,7 @@ class LinkEndpointLifecycleTest(unittest.TestCase):
 #define esp_ota_get_running_partition() NULL
 #define esp_ota_get_state_partition(p, s) ((void)(p), (void)(s), -1)
 #define esp_ota_mark_app_valid_cancel_rollback() ESP_OK
-#define ota_verify_recorded_for_running() false
+#define ota_installed_by_vibe_mode() false
 #define ota_verify_forget() ((void)0)
 #define ESP_LOGI(...) ((void)0)
 #define xTaskCreate(...) ((void)0)

@@ -118,9 +118,9 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 #define PAIRING_CONFIRM_WINDOW_MS   (60 * 1000)
 #define PAIRING_CONFIRMED_IDLE_TIMEOUT_MS (120 * 1000)
 
-// OTA rollback: how long an image device.ota just installed (PENDING_VERIFY,
-// and recorded by ota.c) has to reach the authenticated control WebSocket
-// before the bootloader reverts it.
+// OTA rollback: how long a freshly-installed (PENDING_VERIFY) image has to
+// reach the authenticated control WebSocket before the bootloader reverts it
+// (on every board; on the ESP-Mosaico, not for a Vibe Mode install).
 // The control WS is the recovery channel — if a new image can't reach it,
 // no future device.ota could repair the device, so rolling back is correct.
 #define OTA_VERIFY_TIMEOUT_US (300LL * 1000000LL)
@@ -2637,18 +2637,20 @@ void app_run(void) {
     // Arm OTA rollback verification. If the running image was just installed
     // by device.ota it boots as PENDING_VERIFY and must reach the control WS
     // within OTA_VERIFY_TIMEOUT_US, else the bootloader reverts it on reboot.
-    // Other tools can leave an image PENDING_VERIFY too (the ESP-Mosaico's
-    // Vibe Mode installs do), and those are nothing to roll back: only the
-    // image ota.c recorded is checked.
+    // The one exception is the ESP-Mosaico in Vibe Mode: its Vibe Mode
+    // firmware installs apps itself and leaves them PENDING_VERIFY, and that
+    // is nothing to roll back (ota_installed_by_vibe_mode checks the board,
+    // the build and the flash layout). Every other PENDING_VERIFY image, on
+    // every board, is checked.
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
     if (running && esp_ota_get_state_partition(running, &ota_state) == ESP_OK
         && ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-        if (ota_verify_recorded_for_running()) {
+        if (!ota_installed_by_vibe_mode()) {
             s_ota_pending_verify = true;
             ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
         } else if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
-            ESP_LOGI(TAG, "PENDING_VERIFY image not installed by device.ota; marked valid");
+            ESP_LOGI(TAG, "PENDING_VERIFY image installed by Vibe Mode; marked valid");
         }
     }
     if (!s_ota_pending_verify) {
