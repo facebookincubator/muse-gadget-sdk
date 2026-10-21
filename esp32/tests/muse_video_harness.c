@@ -113,6 +113,16 @@ static void test_ring(void)
     au[103] = 1;
     muse_vstream_write(&s, f, n);
     CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 200 && fr.number == 4 && !fr.after_gap);
+    /* The same, arriving in pieces as TCP may deliver it: with only the band
+     * length in (or part of the start code after it), it waits, not skipped. */
+    uint32_t resyncs = s.resyncs;
+    muse_vstream_write(&s, f, MUSE_VIDEO_FRAME_HEADER_LEN + 4);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 0);
+    muse_vstream_write(&s, f + MUSE_VIDEO_FRAME_HEADER_LEN + 4, 2);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 0);
+    muse_vstream_write(&s, f + MUSE_VIDEO_FRAME_HEADER_LEN + 6, n - MUSE_VIDEO_FRAME_HEADER_LEN - 6);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 200 && fr.number == 4);
+    CHECK(s.resyncs == resyncs);
 
     /* A client ignoring credits: the excess is counted, then the next frame resyncs. */
     n = make_frame(f, 5, 0, 1500, 0x66);

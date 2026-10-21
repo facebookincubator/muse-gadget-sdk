@@ -402,8 +402,13 @@ its animation (`jollybot.gif`, and `happy_anim.c/.h` made from it by
 `tools/gen_happy_anim.py`).
 
 Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
-`main/pixel_font.c` (BSD-2-Clause, Adafruit), and
-`components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32).
+`main/pixel_font.c` (BSD-2-Clause, Adafruit),
+`components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
+`main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
+`components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
+`components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
+Each third-party file is listed under License in `README.md` and the root
+`README.md`; add a new one to both.
 Don't restyle them or replace their headers with the Apache one; `components/minimp3/README.md` says how to
 update minimp3.
 

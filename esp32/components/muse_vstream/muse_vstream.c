@@ -187,13 +187,18 @@ static bool header_at(const muse_vstream_t *s, uint32_t avail, muse_vframe_t *f)
     }
     if (avail >= MUSE_VIDEO_FRAME_HEADER_LEN + 4 && !start_code_at(s, 8)) {
         /* Two bands (muse_video_params_t.tiles): the top band's u32
-         * length, then its access unit. */
-        if (f->len < 8 || avail < MUSE_VIDEO_FRAME_HEADER_LEN + 8 || !start_code_at(s, 12)) {
+         * length, then its access unit. Its start code is checked as far as
+         * the bytes are in, as for VP8: a frame that has only reached the
+         * length so far waits for the rest instead of being skipped. */
+        if (f->len < 8) {
             return false;
         }
         uint32_t len0 = (uint32_t)peek(s, 8) | (uint32_t)peek(s, 9) << 8 | (uint32_t)peek(s, 10) << 16 |
                         (uint32_t)peek(s, 11) << 24;
         if (len0 < 4 || len0 > f->len - 4) {
+            return false;
+        }
+        if (avail >= MUSE_VIDEO_FRAME_HEADER_LEN + 8 && !start_code_at(s, 12)) {
             return false;
         }
     }

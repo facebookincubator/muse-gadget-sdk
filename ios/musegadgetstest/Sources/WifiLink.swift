@@ -49,6 +49,9 @@ final class WifiLink: VideoLink {
     private var frameQ: [Data] = []
     private var cur: Data?
     private var curOff = 0
+    /* The rest of a frame cut short (cutFrame): sent before anything else. */
+    private var tail: Data?
+    private var tailOff = 0
     private var queued: Int64 = 0
     private var isStreaming = false
     private var sent: Int64 = 0                            /* stream bytes written since start */
@@ -279,6 +282,7 @@ final class WifiLink: VideoLink {
         frameQ.removeAll()
         controlQ.removeAll()
         cur = nil
+        tail = nil
         queued = 0
         lock.broadcast()
         lock.unlock()
@@ -458,9 +462,21 @@ final class WifiLink: VideoLink {
         lock.lock()
         isStreaming = false
         frameQ.removeAll()
-        cur = nil
+        cutFrame()
         queued = 0
         lock.unlock()
+    }
+
+    /* Under lock. The gadget reads a frame's whole length as video, whatever
+     * comes next, so a frame cut short (a stop, a restart) still goes out in
+     * full, before any control message: the stream's credits no longer apply,
+     * and TCP holds us back if its ring is full. */
+    private func cutFrame() {
+        if let f = cur, curOff > 0, curOff < f.count {
+            tail = f
+            tailOff = curOff
+        }
+        cur = nil
     }
 
     /* ---- outgoing ------------------------------------------------------ */
@@ -488,7 +504,7 @@ final class WifiLink: VideoLink {
         /* The device holds the playout delay's worth unread on top. */
         maxAhead = max(12288, Int64(kbps) * 1000 / 8 * Int64(150 + playout) / 1000)
         frameQ.removeAll()
-        cur = nil
+        cutFrame()
         queued = 0
         sent = 0
         creditAvail = 0   /* nothing until the device's first buffer message */
@@ -507,7 +523,7 @@ final class WifiLink: VideoLink {
         }
         isStreaming = false
         frameQ.removeAll()
-        cur = nil
+        cutFrame()
         queued = 0
         controlQ.append(Self.message(["type": "stop"]))
         lock.broadcast()
@@ -559,6 +575,16 @@ final class WifiLink: VideoLink {
                  * client is talking (VIDEO.md, Trust). */
                 if !isStreaming && nowMs() - lastCtlMs >= 4000 {
                     controlQ.append(Self.message(["type": "status"]))
+                }
+                if let t = tail {
+                    let s = t.startIndex + tailOff
+                    let k = min(Self.chunk, t.count - tailOff)
+                    out = t.subdata(in: s..<(s + k))
+                    tailOff += k
+                    if tailOff >= t.count {
+                        tail = nil
+                    }
+                    break
                 }
                 if !controlQ.isEmpty {
                     out = controlQ.removeFirst()

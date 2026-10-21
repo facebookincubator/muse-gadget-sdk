@@ -73,6 +73,9 @@ final class WifiLink extends VideoLink {
     private final ArrayDeque<byte[]> frameQ = new ArrayDeque<>();
     private byte[] cur;
     private int curOff;
+    /* The rest of a frame cut short (cutFrame): sent before anything else. */
+    private byte[] tail;
+    private int tailOff;
     private long queuedBytes;
     private volatile boolean streaming;
     private long sent;                       /* stream bytes written since start */
@@ -317,6 +320,7 @@ final class WifiLink extends VideoLink {
             frameQ.clear();
             controlQ.clear();
             cur = null;
+            tail = null;
             queuedBytes = 0;
             lock.notifyAll();
         }
@@ -493,9 +497,21 @@ final class WifiLink extends VideoLink {
         synchronized (lock) {
             streaming = false;
             frameQ.clear();
-            cur = null;
+            cutFrame();
             queuedBytes = 0;
         }
+    }
+
+    /* Under lock. The gadget reads a frame's whole length as video, whatever
+     * comes next, so a frame cut short (a stop, a restart) still goes out in
+     * full, before any control message: the stream's credits no longer apply,
+     * and TCP holds us back if its ring is full. */
+    private void cutFrame() {
+        if (cur != null && curOff > 0 && curOff < cur.length) {
+            tail = cur;
+            tailOff = curOff;
+        }
+        cur = null;
     }
 
     /* ---- outgoing ------------------------------------------------------ */
@@ -534,7 +550,7 @@ final class WifiLink extends VideoLink {
         }
         synchronized (lock) {
             frameQ.clear();
-            cur = null;
+            cutFrame();
             queuedBytes = 0;
             sent = 0;
             creditAvail = 0;   /* nothing until the device's first buffer message */
@@ -553,7 +569,7 @@ final class WifiLink extends VideoLink {
             }
             streaming = false;
             frameQ.clear();
-            cur = null;
+            cutFrame();
             queuedBytes = 0;
             try {
                 controlQ.add(message(new JSONObject().put("type", "stop")));
@@ -611,6 +627,16 @@ final class WifiLink extends VideoLink {
                     }
                     if (!streaming && SystemClock.elapsedRealtime() - lastCtlMs >= KEEPALIVE_MS) {
                         controlQ.add(STATUS);
+                    }
+                    if (tail != null) {
+                        n = Math.min(CHUNK, tail.length - tailOff);
+                        data = tail;
+                        off = tailOff;
+                        tailOff += n;
+                        if (tailOff >= tail.length) {
+                            tail = null;
+                        }
+                        break;
                     }
                     if (!controlQ.isEmpty()) {
                         ctl = controlQ.poll();

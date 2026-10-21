@@ -168,7 +168,10 @@ class UntrustedVideoTest(unittest.TestCase):
         cc = shlex.split(os.environ.get("CC", "cc"))
         srcs = [str(p) for p in sorted(TINY.glob("*.c"))]
         # With AddressSanitizer: a size that overflows shows as a crash, not a pass.
-        build = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", "-fsanitize=address", f"-I{TINY}", "-o",
+        # And a division by zero aborts, as on the board (arm64 hosts return 0).
+        build = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", "-fsanitize=address",
+                                "-fsanitize=integer-divide-by-zero",
+                                "-fno-sanitize-recover=integer-divide-by-zero", f"-I{TINY}", "-o",
                                 str(cls.exe), str(src), *srcs], capture_output=True, text=True)
         if build.returncode:
             raise AssertionError(build.stdout + build.stderr)
@@ -199,6 +202,10 @@ class UntrustedVideoTest(unittest.TestCase):
         # 2^30 macroblocks: every buffer size wraps to 0 in 32 bits.
         self.assertIsNone(self.decode(au(32768, 32768, full=False), 0, 0))
         self.assertIsNone(self.decode(au(513, 1, full=False), 0, 0))
+        # The longest Exp-Golomb code, 2^32 - 1: plus one wraps to 0 macroblocks,
+        # which GetDpbSize divided by (a crash on the board, SIGFPE here).
+        self.assertIsNone(self.decode(au(2**32, 1, full=False), 0, 0))
+        self.assertIsNone(self.decode(au(1, 2**32, full=False), 0, 0))
 
     def test_vp8_keyframes_larger_than_the_stream(self):
         vdec = (MUSE / "muse_vdec.c").read_text()

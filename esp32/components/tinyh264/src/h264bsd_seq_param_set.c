@@ -238,20 +238,24 @@ u32 h264bsdDecodeSeqParamSet(strmData_t *pStrmData, seqParamSet_t *pSeqParamSet)
     pSeqParamSet->gapsInFrameNumValueAllowedFlag = (tmp == 1) ?
                                         HANTRO_TRUE : HANTRO_FALSE;
 
+    /* OPT: every size the decoder computes from these (macroblocks times
+     * 384 bytes, and so on) must fit in 32 bits: no level goes past 512.
+     * Checked before the + 1: the Exp-Golomb decoder returns 2^32 - 1 for
+     * the longest code, which would wrap to 0 macroblocks and divide by zero
+     * in GetDpbSize (whose ASSERT is compiled out). */
     tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
     if (tmp != HANTRO_OK)
         return(tmp);
+    if (value >= 512)
+        return(HANTRO_NOK);
     pSeqParamSet->picWidthInMbs = value + 1;
 
     tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
     if (tmp != HANTRO_OK)
         return(tmp);
-    pSeqParamSet->picHeightInMbs = value + 1;
-
-    /* OPT: every size the decoder computes from these (macroblocks times
-     * 384 bytes, and so on) must fit in 32 bits: no level goes past 512 */
-    if (pSeqParamSet->picWidthInMbs > 512 || pSeqParamSet->picHeightInMbs > 512)
+    if (value >= 512)
         return(HANTRO_NOK);
+    pSeqParamSet->picHeightInMbs = value + 1;
 
     /* frame_mbs_only_flag, shall be 1 for baseline profile */
     tmp = h264bsdGetBits(pStrmData, 1);

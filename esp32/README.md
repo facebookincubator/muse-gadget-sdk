@@ -352,6 +352,11 @@ their upstream licenses:
 - [`components/tinyh264/src`](components/tinyh264), the H.264 decoder, is the
   Android Open Source Project's (via udevbe/tinyh264), Apache-2.0 under its
   copyright. See [`components/tinyh264/LICENSE`](components/tinyh264/LICENSE).
+- [`components/libvpx_vp8/src`](components/libvpx_vp8), the VP8 decoder, is
+  libvpx v1.16.0's, trimmed: BSD-3-Clause under the WebM Project authors'
+  copyright, with Google's patent grant. See
+  [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
+  [`PATENTS`](components/libvpx_vp8/PATENTS).
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.
