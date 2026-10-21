@@ -9,27 +9,21 @@
  * Copyright (c) 2026 JoJang2u). FreeInk drives the panel (its "sticky"
  * profile), and Muse's e-ink layer draws on it (eink/).
  */
-#include <string.h>
-
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_pdm.h"
 #include "esp_check.h"
-#include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
-#include "esp_sleep.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_link.h"
-#include "muse_mem.h"
 #include "eink/muse_eink.h"
 #if CONFIG_MUSE_STICKY_SD
 #include "driver/sdspi_host.h"
@@ -347,7 +341,6 @@ static const muse_board_t s_board = {
     .width = SCREEN_W,
     .height = SCREEN_H,
     .epaper = true,
-    .no_ring = true,
     .touch = true,
     .touch_talk = true,
     .diagonal_in = 3.97f,

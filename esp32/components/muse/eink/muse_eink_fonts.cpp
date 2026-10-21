@@ -46,7 +46,7 @@ using freeink::font::TtfFont;
 static const char *TAG = "muse_eink";
 
 #define ARENA_BYTES (96 * 1024)     /* each face's glyph cache, in PSRAM */
-#define INK_THRESHOLD 128
+#define INK_THRESHOLD 64     /* coverage that counts as ink: lower is bolder; 128 drew Montserrat too thin */
 
 /* Unifont is a 16 px pixel font: drawn at 16 or 32 px, whichever is nearer
  * the slot's size, so its pixels stay whole. */

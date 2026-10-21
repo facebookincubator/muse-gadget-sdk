@@ -56,7 +56,6 @@ int wrapped_lines(int w, FontId font, const char *text);
 #define LV_SYMBOL_OK "\xEF\x80\x8C"
 #define LV_SYMBOL_LEFT "\xEF\x81\x93"
 #define LV_SYMBOL_CHARGE "\xEF\x83\xA7"
-#define LV_SYMBOL_EYE_OPEN "\xEF\x81\xAE"
 #define LV_SYMBOL_EYE_CLOSE "\xEF\x81\xB0"
 #define LV_SYMBOL_POWER "\xEF\x80\x91"
 #define LV_SYMBOL_REFRESH "\xEF\x80\xA1"
@@ -74,7 +73,7 @@ void settings_screen(Screen &screen);
 bool settings_in_subpage(void);
 bool settings_back(void);           /* false at its home page */
 void settings_home(void);
-bool settings_tick(float now);      /* true when its page needs drawing again */
+bool settings_tick(void);           /* true when its page needs drawing again */
 bool settings_typing(void);         /* the keyboard is up: swipes don't leave */
 void settings_scroll(int dy);       /* a vertical swipe of dy px */
 

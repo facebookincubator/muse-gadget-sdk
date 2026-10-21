@@ -91,7 +91,7 @@ class LinkEpaperStatusTest(unittest.TestCase):
         for part in ('esp_lcd_touch_new_i2c_gt911', 'i2s_channel_init_pdm_rx_mode',
                      'esp_vfs_fat_sdspi_mount', 'gauge_read(0x2c',
                      'gpio_set_level(GPIO_NUM_45, 0)', '.display_pause = muse_eink_display_pause',
-                     '.touch_read = touch_read', '.no_ring = true', '.x_max = SCREEN_W',
+                     '.touch_read = touch_read', '.x_max = SCREEN_W',
                      '*x = point.x < SCREEN_W ? point.x : SCREEN_W - 1;',
                      '*y = sticky_touch_y(point.y);'):
             self.assertIn(part, board)

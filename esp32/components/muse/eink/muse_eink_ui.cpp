@@ -88,7 +88,6 @@ static const char *TAG = "muse_eink";
 #define MINI_CELL_PX 2
 #define MIC_PX 26
 #define MIC_HIT_PAD 12
-#define TOUCH_SWALLOW (-1)
 
 App *g_app;
 int g_w = 480, g_h = 800;
@@ -96,7 +95,6 @@ int g_w = 480, g_h = 800;
 static EInkDisplay s_display(0, 0, 0, 0, 0, 0);   /* pins come from FreeInk's board profile */
 static freeink::ui::DisplayTarget *s_target;
 static TaskHandle_t s_task, s_touch_task;
-static SemaphoreHandle_t s_lock;    /* the screen state shared with the API's callers */
 static volatile bool s_ready, s_paused, s_dark, s_draw_now, s_want_face;
 static volatile bool s_face_active = true;
 static int s_fast_count;
@@ -369,9 +367,8 @@ struct Face {
     char power[32];
     bool wifi, ble, ble_connected;
     bool mic;
-    int ring;               /* 0..1000; the thinking spinner's start in ring_start */
-    int ring_start;
-    int bar_x;              /* no_ring: where the thinking segment is */
+    int ring;               /* progress, 0..1000 */
+    int bar_x;              /* where the thinking segment is */
     int lit;                /* meter segments */
     bool answering;
     char caption[MUSE_CAPTION_MAX];
@@ -453,7 +450,6 @@ static void read_face(float now)
         f.ring = (int)(muse_state_progress() * 1000);
     } else if (f.mode == MUSE_MODE_THINKING) {
         f.ring = 1000 / 6;
-        f.ring_start = (int)(now * 300.0f) % 360;
         f.bar_x = (int)(now * g_w) % g_w;
     }
     float level = muse_state_level();
@@ -468,25 +464,6 @@ static void read_face(float now)
 /* ─── The face ──────────────────────────────────────────────────────────── */
 
 enum : freeink::ui::ActionId { ACTION_MUSE = 1, ACTION_IMAGE };
-
-static void draw_ring(int cx, int cy, int d, const Face &f)
-{
-    /* The LVGL UI's ring: a dim track and, for progress, a 6 px arc from the top. */
-    int r = d / 2 - 3;
-    for (int a = 0; a < 720; a++) {
-        float t = (float)a * (float)M_PI / 360.0f;
-        s_target->fill(Rect{(int16_t)(cx + (int)lroundf(r * sinf(t))), (int16_t)(cy - (int)lroundf(r * cosf(t))), 1, 1},
-                       Paint::solid(Color::Black));
-    }
-    if (f.ring <= 0) return;
-    int start = f.mode == MUSE_MODE_THINKING ? f.ring_start : 0;
-    int span = f.ring * 360 / 1000;
-    for (int a = 0; a <= span * 2; a++) {
-        float t = (float)(start * 2 + a) * (float)M_PI / 360.0f;
-        int x = cx + (int)lroundf(r * sinf(t)), y = cy - (int)lroundf(r * cosf(t));
-        s_target->fill(Rect{(int16_t)(x - 3), (int16_t)(y - 3), 6, 6}, Paint::solid(Color::Black));
-    }
-}
 
 static void draw_mic(int cx, int top, int size)
 {
@@ -541,15 +518,11 @@ static void face_screen(Screen &screen, const Face &f)
     const int muse_px = f.answering ? s_read.px : s_canvas_px;
     const int muse_y = cy + (f.answering ? s_read.y : s_big_y);
 
-    if (muse_board->no_ring) {
-        /* A square panel's progress, as muse_ui.c's: a 6 px bar along the
-         * bottom edge, and a sliding segment while thinking. */
-        int w = f.ring * g_w / 1000;
-        int x = f.mode == MUSE_MODE_THINKING ? f.bar_x : 0;
-        if (w > 0) s_target->fill(Rect{(int16_t)x, (int16_t)(g_h - 6), (int16_t)w, 6}, Paint::solid(Color::Black));
-    } else if (!f.answering) {
-        draw_ring(cx, cy, (g_w < g_h ? g_w : g_h) - 8, f);
-    }
+    /* Progress as muse_ui.c shows it on a rectangle (no_ring): a 6 px bar
+     * along the bottom edge, and a sliding segment while thinking. */
+    int bar = f.ring * g_w / 1000;
+    int bar_x = f.mode == MUSE_MODE_THINKING ? f.bar_x : 0;
+    if (bar > 0) s_target->fill(Rect{(int16_t)bar_x, (int16_t)(g_h - 6), (int16_t)bar, 6}, Paint::solid(Color::Black));
     draw_art(cx, muse_y);
     frame.hit(Rect{(int16_t)(cx - muse_px / 2), (int16_t)(muse_y - muse_px / 2), (int16_t)muse_px, (int16_t)muse_px},
               ACTION_MUSE);
@@ -899,7 +872,7 @@ static void ui_task(void *arg)
         }
         if (s_settings && now >= next_settings_tick) {
             next_settings_tick = now + (muse_board->frame_ms > 0 ? muse_board->frame_ms : 1000) / 1000.0f;
-            if (settings_tick(now)) s_draw_now = true;
+            if (settings_tick()) s_draw_now = true;
         }
 
         /* Muse moves a frame per frame_ms while the face shows. */
@@ -942,13 +915,12 @@ static void layout(void)
 
     const int cw = text_width(FONT_UNSCII16, "M");
     const int pitch = line_height(FONT_UNSCII16) + CAPTION_LINE_SPACE;
-    const int spk_r = (64 + 8) / 2, spk_y = -g_h / 2 + 8 + spk_r;
     ReplyBox &l = s_read;
     int status_bottom = 20 + s_dy + 16 - g_h / 2;
     l.px = MUSE_PX_W * MINI_CELL_PX;
     l.y = status_bottom + 2 + l.px / 2;
     int art_mini = l.y + l.px / 2 - ART_BLANK_ROWS * MINI_CELL_PX;
-    l.top = (art_mini > spk_y + spk_r ? art_mini : spk_y + spk_r) + 8;
+    l.top = art_mini + 8;
     l.cols = 16;
     l.lines = 2;
     int bottom = g_h / 2 - 28;
@@ -995,10 +967,9 @@ extern "C" esp_err_t muse_ui_start(void)
 
     s_art = (uint8_t *)heap_caps_malloc((size_t)(MUSE_PX_W * 5 + 7) / 8 * MUSE_PX_W * 5, MALLOC_CAP_SPIRAM);
     s_art_rows = (uint16_t *)heap_caps_malloc((size_t)MUSE_PX_W * 5 * ART_STRIP * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
-    s_lock = xSemaphoreCreateMutex();
     s_image_mutex = xSemaphoreCreateMutex();
     s_touch_q = xQueueCreate(32, sizeof(TouchEvent));
-    if (!s_art || !s_art_rows || !s_lock || !s_image_mutex || !s_touch_q) return ESP_ERR_NO_MEM;
+    if (!s_art || !s_art_rows || !s_image_mutex || !s_touch_q) return ESP_ERR_NO_MEM;
 
     layout();
     static App app(target, target.deviceContext());

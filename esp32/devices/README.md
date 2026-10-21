@@ -149,7 +149,7 @@ its `sticky` profile, and the layer draws the face, Settings and FreeInk's
 keyboard in black on white. Muse animates once a second on fast partial
 refreshes, with a clean refresh every 30 frames and on page changes, images and
 sleep; images show in four grays. Asleep, the panel keeps its last picture at
-no power. The board sets `no_ring`, so progress is a bar along the bottom edge.
+no power. Progress is a bar along the bottom edge, as on Muse's square panels.
 The AI button starts a voice note and confirms pairing; touch swipes to
 Settings and confirms pairing too. Up/Down only wake the screen. There is no
 speaker: replies are text on screen. Text uses the LVGL UI's fonts, drawn from

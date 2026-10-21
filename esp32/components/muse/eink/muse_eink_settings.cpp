@@ -55,16 +55,11 @@ using freeink::ui::ActionEvent;
 using freeink::ui::ActionId;
 
 #define LIST_W 330
-/* The header: muse_settings_ui.c's, for a 466 px round screen (title at 44,
- * back arrow at 28, inside the circle), or on a rectangle at the screen's
- * top-left corner, with the list right under it. */
-struct Header {
-    int title_y;
-    Rect back;
-    int list_top;
-};
-static Header s_hdr;
-#define LIST_TOP ((int16_t)s_hdr.list_top)
+/* The header in the screen's top-left corner, the list right under it:
+ * muse_settings_ui.c places them for a 466 px round screen instead. */
+static const Rect BACK = {8, 8, 56, 48};
+#define TITLE_Y (BACK.y + (BACK.height - line_height(FONT_UNSCII16)) / 2)
+#define LIST_TOP ((int16_t)(BACK.y + BACK.height + 12))
 #define ROW_H 58
 #define INFO_H 44
 #define GAP 10
@@ -383,7 +378,7 @@ static void show(Page p)
     } else if (p == BATTERY) {
         s_batt_shown_us = 0;
     }
-    settings_tick(0);   /* fill it in now, not at the next tick */
+    settings_tick();   /* fill it in now, not at the next tick */
 }
 
 static void close_text(void)
@@ -526,7 +521,7 @@ static void on_action(const ActionEvent &e, void *)
             s_forget_armed = e.value;
             s_forget_armed_us = now;
         }
-        settings_tick(0);
+        settings_tick();
         break;
     case ACT_WIFI_OTHER:
         g_app->clearTapFlash();
@@ -614,7 +609,7 @@ static void on_action(const ActionEvent &e, void *)
         break;
     default: break;
     }
-    settings_tick(0);
+    settings_tick();
 }
 
 /* ─── Ticks: muse_settings_ui.c's, into the strings above ───────────────── */
@@ -843,9 +838,8 @@ static void tick_battery(void)
     SET(s_batt_awake, buf);
 }
 
-bool settings_tick(float now)
+bool settings_tick(void)
 {
-    (void)now;
     switch (s_page) {
     case HOME: tick_home(); break;
     case WIFI: tick_wifi(); break;
@@ -865,10 +859,10 @@ bool settings_tick(float now)
 
 static void title(Screen &screen, const char *text, bool back)
 {
-    draw_text_centered(g_w / 2, s_hdr.title_y, FONT_UNSCII16, text, Color::Black, 2);
+    draw_text_centered(g_w / 2, TITLE_Y, FONT_UNSCII16, text, Color::Black, 2);
     if (back) {
         /* muse_settings_ui.c's back arrow: 56 x 48, left of the title. */
-        Rect r = s_hdr.back;
+        Rect r = BACK;
         bool pressed = screen.frame().stateFor(ACT_BACK, 0) & freeink::ui::StateFocused;
         if (pressed) screen.target().fill(r, Paint::solid(Color::Black), 12);
         draw_text_centered(r.x + r.width / 2, r.y + (r.height - line_height(FONT_M20)) / 2, FONT_M20, LV_SYMBOL_LEFT,
@@ -1003,11 +997,10 @@ static void page_text(Screen &screen)
     title(screen, "", true);
     char shown[SHOWN_MAX];
     fit(shown, sizeof(shown), s_text_title, FONT_M20, 150);
-    draw_text_centered(g_w / 2, s_hdr.back.y + (s_hdr.back.height - line_height(FONT_M20)) / 2, FONT_M20, shown);
+    draw_text_centered(g_w / 2, BACK.y + (BACK.height - line_height(FONT_M20)) / 2, FONT_M20, shown);
 
-    /* The field: where muse_settings_ui.c puts it on a round screen, else
-     * under the header, with the keyboard at the bottom. */
-    const int field_y = muse_board->round ? g_h / 2 + (76 - 233) : s_hdr.list_top;
+    /* The field under the header, the keyboard at the bottom. */
+    const int field_y = LIST_TOP;
     const int w = 300, show_w = 70, gap = 8, h = 48;
     int fx = g_w / 2 - w / 2, fw = s_text_password ? w - show_w - gap : w;
     Rect field{(int16_t)fx, (int16_t)field_y, (int16_t)fw, (int16_t)h};
@@ -1017,7 +1010,7 @@ static void page_text(Screen &screen)
         draw_text(fx + 14, field_y + (h - line_height(FONT_M16)) / 2, FONT_M16, s_text_hint, Color::DarkGray);
     }
     /* The end of the text, if it's longer than the field, then the cursor. */
-    char vis[TEXT_MAX < 128 ? TEXT_MAX : 128];
+    char vis[128];
     size_t len = strlen(s_text);
     if (s_text_password && !s_text_reveal) {
         /* A star a character, not a byte. */
@@ -1101,15 +1094,9 @@ void settings_screen(Screen &screen)
 
 void settings_setup(App &app)
 {
-    if (muse_board->round) {
-        s_hdr = {44, Rect{(int16_t)(g_w / 2 - 112 - 28), 28, 56, 48}, 84};
-    } else {
-        Rect back{8, 8, 56, 48};
-        s_hdr = {back.y + (back.height - line_height(FONT_UNSCII16)) / 2, back, back.y + back.height + 12};
-    }
     for (ActionId a = ACT_NAV; a < ACT_LAST; a++) app.on(a, on_action);
     show(HOME);
-    settings_tick(0);
+    settings_tick();
 }
 
 }  // namespace muse_eink
