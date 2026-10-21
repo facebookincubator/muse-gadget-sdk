@@ -239,9 +239,20 @@ class UntrustedVideoTest(unittest.TestCase):
         # 0 never ended the interleaved map (the harness's timeout catches it).
         self.assertIsNone(self.decode(au(2, 2, full=False, slice_groups=changing_groups(LONGEST)), 0, 0))
         self.assertIsNone(self.decode(au(2, 2, full=True, slice_groups=interleaved_groups(LONGEST)), 0, 0))
-        # ...and slice groups as such still parse (an in-range rate and run).
-        self.decode(au(2, 2, full=False, slice_groups=changing_groups(1)), 0, 0)
-        self.decode(au(2, 2, full=True, slice_groups=interleaved_groups(1)), 0, 0)
+        # Slice groups aren't taken at all (nothing that streams to a gadget
+        # makes them): an in-range rate and run are refused too, and the
+        # same stream with one slice group still decodes.
+        self.assertIsNone(self.decode(au(2, 2, full=True, slice_groups=changing_groups(1)), 0, 0))
+        self.assertIsNone(self.decode(au(2, 2, full=True, slice_groups=interleaved_groups(1)), 0, 0))
+        self.assertEqual(self.decode(au(2, 2), 0, 0), (32, 32))
+
+    def test_slice_group_maps_cannot_take_the_heap(self):
+        # A map of explicit slice group ids (type 6) was allocated at up to
+        # 512 x 512 entries and kept per PPS id: 256 of them, a megabyte each.
+        explicit = lambda b: (b.ue(1), b.ue(6), b.ue(512 * 512 - 1))
+        self.assertIsNone(self.decode(au(2, 2, full=False, slice_groups=explicit), 0, 0))
+        tiny = (ROOT / "components/tinyh264/src/h264bsd_pic_param_set.c").read_text()
+        self.assertIn("slice groups unsupported", tiny)
 
     def test_vp8_keyframes_larger_than_the_stream(self):
         vdec = (MUSE / "muse_vdec.c").read_text()

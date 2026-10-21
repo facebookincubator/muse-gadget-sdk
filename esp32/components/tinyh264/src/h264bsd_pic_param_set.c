@@ -147,6 +147,15 @@ u32 h264bsdDecodePicParamSet(strmData_t *pStrmData, picParamSet_t *pPicParamSet)
         EPRINT("num_slice_groups_minus1");
         return(HANTRO_NOK);
     }
+    /* OPT: one slice group only. Slice groups (FMO) come from the network
+     * and nothing that streams to a gadget makes them (MediaCodec,
+     * VideoToolbox and x264 can't), while their maps are the decoder's
+     * largest input-sized allocations, kept per PPS id until it closes. */
+    if (value > 0)
+    {
+        EPRINT("num_slice_groups_minus1: slice groups unsupported");
+        return(HANTRO_NOK);
+    }
     pPicParamSet->numSliceGroups = value + 1;
     if (pPicParamSet->numSliceGroups > MAX_NUM_SLICE_GROUPS)
     {

@@ -131,7 +131,8 @@ Messages, in the order they usually come:
 Unknown types and fields are ignored, so either side can add some.
 
 **Credits.** `received` counts the frame bytes that have reached the ring
-since the start, and `free` is the ring's room when the message was sent.
+since the start, modulo 2^32 (the client extends it against what it has
+sent), and `free` is the ring's room when the message was sent.
 The client keeps what it has sent but the gadget hasn't received under
 `free`: `sent - received + next <= free`. TCP would hold it back anyway
 (the gadget stops reading when the ring is full), but bytes waiting in

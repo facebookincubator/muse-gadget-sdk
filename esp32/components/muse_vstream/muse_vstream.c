@@ -62,7 +62,12 @@ void muse_vstream_stop(muse_vstream_t *s)
 
 uint32_t muse_vstream_available(const muse_vstream_t *s)
 {
-    return s->size - (s->head - s->tail);
+    /* After a start, what's left of the old stream is as good as gone, though
+     * the consumer only skips it at its next pop: count from start_at, or the
+     * credits the new stream starts with could be too few for its sender to
+     * begin, and the consumer, with nothing to pop, would never skip. */
+    uint32_t tail = s->started != s->starts ? s->start_at : s->tail;
+    return s->size - (s->head - tail);
 }
 
 uint32_t muse_vstream_received(const muse_vstream_t *s)

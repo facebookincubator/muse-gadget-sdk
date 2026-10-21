@@ -404,7 +404,10 @@ final class WifiLink: VideoLink {
             let avail = Int64(Self.i(m, "free")), recv = Int64(Self.i(m, "received"))
             lock.lock()
             creditAvail = avail
-            creditRecv = recv
+            /* The gadget counts in 32 bits: extend it against what's been
+             * sent (never 4 GiB ahead), or past 4 GiB the backlog would look
+             * like 4 GiB and sending would stop. */
+            creditRecv = sent - ((sent - recv) & 0xFFFF_FFFF)
             lock.broadcast()
             lock.unlock()
             l?.onBufferUpdate(avail: avail, received: recv, shown: Self.i(m, "shown", -1),

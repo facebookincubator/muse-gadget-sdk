@@ -104,6 +104,17 @@ int main(void)
     muse_vstream_write(&s, f, frame(f, 7, 300));
     assert(muse_vstream_pop(&s, out, sizeof(out), &fr) == 300 && fr.number == 7);
     assert(muse_vstream_available(&s) == sizeof(ring));
+    /* A start with the old stream unread: the new one's credits are the
+     * whole ring at once, before the consumer has popped (it may be waiting
+     * for those very credits to bring a frame). */
+    muse_vstream_write(&s, f, frame(f, 8, 500));
+    muse_vstream_write(&s, f, frame(f, 9, 500));
+    assert(muse_vstream_available(&s) < sizeof(ring));
+    muse_vstream_start(&s);
+    assert(muse_vstream_available(&s) == sizeof(ring));
+    muse_vstream_write(&s, f, frame(f, 1, 200));
+    assert(muse_vstream_pop(&s, out, sizeof(out), &fr) == 200 && fr.number == 1);
+    assert(muse_vstream_available(&s) == sizeof(ring));
     puts("PASS restart");
     return 0;
 }

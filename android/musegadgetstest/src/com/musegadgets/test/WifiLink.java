@@ -425,7 +425,10 @@ final class WifiLink extends VideoLink {
                 long avail = m.optLong("free"), recv = m.optLong("received");
                 synchronized (lock) {
                     creditAvail = avail;
-                    creditRecv = recv;
+                    /* The gadget counts in 32 bits: extend it against what's
+                     * been sent (never 4 GiB ahead), or past 4 GiB the backlog
+                     * would look like 4 GiB and sending would stop. */
+                    creditRecv = sent - ((sent - recv) & 0xFFFFFFFFL);
                     lock.notifyAll();
                 }
                 l.onBufferUpdate(avail, recv, m.optInt("shown", -1), m.optInt("dropped", -1), m.optInt("decode_ms", -1));
