@@ -40,6 +40,8 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_UI_FREEINK)
         # E-paper: FreeInk draws the face, Settings and the keyboard.
         list(APPEND srcs "eink/muse_eink_ui.cpp" "eink/muse_eink_settings.cpp" "eink/muse_eink_fonts.cpp")
+        # The LVGL UI's fonts, as the TTFs LVGL builds them from (eink/fonts/).
+        list(APPEND embed "eink/fonts/montserrat.ttf" "eink/fonts/symbols.ttf" "eink/fonts/unscii.ttf")
     else()
         list(APPEND srcs "muse_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c" "muse_lv_mem.c")
     endif()
@@ -50,7 +52,7 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
     endif()
     list(APPEND srcs "muse_chat_text.c")
-    if(CONFIG_MUSE_CJK_FONT AND NOT CONFIG_MUSE_UI_FREEINK)
+    if(CONFIG_MUSE_CJK_FONT)
         list(APPEND srcs "fonts/muse_font_cjk_16.c")   # captions' CJK fallback
     endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
@@ -131,7 +133,7 @@ set(muse_priv_requires
     bt esp-tls mbedtls esp_app_format esp_http_client
     noise_core minimp3
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
-    esp_driver_pcnt efuse esp_partition
+    esp_driver_pcnt efuse
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
     # before Kconfig values exist, so these can't depend on it; only the code does.
     fatfs esp_driver_sdspi sdmmc)
@@ -155,17 +157,10 @@ if(CONFIG_MUSE_UI_FREEINK)
     # the previous frame for fast refreshes (as FreeInk's samples build it).
     target_compile_definitions(${freeink_lib} PUBLIC "FREEINK_DEVICE_${CONFIG_MUSE_FREEINK_DEVICE}=1"
                                "EINK_DISPLAY_SINGLE_BUFFER_MODE=1")
-    # The fonts (eink/fonts/), packed for the `fonts` partition and flashed
-    # with the app (partitions_muse_eink.csv).
-    set(fonts "${COMPONENT_DIR}/eink/fonts/montserrat.ttf" "${COMPONENT_DIR}/eink/fonts/symbols.ttf"
-              "${COMPONENT_DIR}/eink/fonts/unscii.ttf" "${COMPONENT_DIR}/eink/fonts/unifont.otf")
-    set(font_pack "${CMAKE_BINARY_DIR}/eink_fonts.bin")
-    idf_build_get_property(python PYTHON)
-    add_custom_command(OUTPUT "${font_pack}"
-        COMMAND ${python} "${COMPONENT_DIR}/../../tools/muse/pack_eink_fonts.py" "${font_pack}" ${fonts}
-        DEPENDS ${fonts} "${COMPONENT_DIR}/../../tools/muse/pack_eink_fonts.py" VERBATIM)
-    add_custom_target(eink_fonts ALL DEPENDS "${font_pack}")
-    esptool_py_flash_to_partition(flash "fonts" "${font_pack}")
+    # Muse's CJK font is LVGL's format: the e-ink UI reads it with LVGL's font
+    # types only (eink/lvgl_font/lvgl.h), not LVGL.
+    set_source_files_properties("fonts/muse_font_cjk_16.c" PROPERTIES
+        COMPILE_OPTIONS "-I${COMPONENT_DIR}/eink/lvgl_font")
 elseif(CONFIG_MUSE_ENABLED)
     # LVGL spins forever on a failed assert unless LV_ASSERT_HANDLER is set,
     # which its Kconfig can't do. Abort, so the panic handler prints a backtrace

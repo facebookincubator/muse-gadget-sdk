@@ -86,7 +86,6 @@ class LinkEpaperStatusTest(unittest.TestCase):
         kc = (ROOT / "components/muse/Kconfig").read_text()
         self.assertIn('default y if MUSE_BOARD_RETERMINAL_STICKY', kc[kc.index("config MUSE_UI_FREEINK"):])
         self.assertIn('default "STICKY" if MUSE_BOARD_RETERMINAL_STICKY', kc[kc.index("config MUSE_FREEINK_DEVICE"):])
-        self.assertIn('CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_eink.csv"', overlay)
         board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
         for part in ('esp_lcd_touch_new_i2c_gt911', 'i2s_channel_init_pdm_rx_mode',
                      'esp_vfs_fat_sdspi_mount', 'gauge_read(0x2c',
@@ -305,35 +304,21 @@ int main(void) {
         self.assertIn("*x = point.x < SCREEN_W ? point.x : SCREEN_W - 1;", board)
         self.assertIn("*y = sticky_touch_y(point.y);", board)
 
-    def test_sticky_font_pack(self):
-        # The fonts partition: what tools/muse/pack_eink_fonts.py writes is
-        # what muse_eink_fonts.cpp reads, and the partition it reads is there.
-        import struct
-        fonts = ROOT / "components/muse/eink/fonts"
-        names = ["montserrat.ttf", "symbols.ttf", "unscii.ttf", "unifont.otf"]
-        pack = self.out / "fonts.bin"
-        subprocess.run(["python3", str(ROOT / "tools/muse/pack_eink_fonts.py"), str(pack),
-                        *[str(fonts / n) for n in names]], check=True)
-        data = pack.read_bytes()
-        self.assertEqual(data[:4], b"MFP1")
-        (count,) = struct.unpack_from("<I", data, 4)
-        self.assertEqual(count, len(names))
-        for i, n in enumerate(names):
-            name, off, size = struct.unpack_from("<16sII", data, 8 + 24 * i)
-            self.assertEqual(name.rstrip(b"\0").decode(), n.split(".")[0])
-            self.assertEqual(off % 4, 0)
-            self.assertEqual(data[off:off + size], (fonts / n).read_bytes())
+    def test_sticky_fonts(self):
+        # The LVGL UI's fonts, embedded as the TTFs LVGL builds them from, and
+        # its CJK font read as is, without LVGL.
+        cmake = (ROOT / "components/muse/CMakeLists.txt").read_text()
+        self.assertIn('list(APPEND embed "eink/fonts/montserrat.ttf" "eink/fonts/symbols.ttf" '
+                      '"eink/fonts/unscii.ttf")', cmake)
+        self.assertIn('COMPILE_OPTIONS "-I${COMPONENT_DIR}/eink/lvgl_font"', cmake)
         reader = (ROOT / "components/muse/eink/muse_eink_fonts.cpp").read_text()
-        for n in names:
-            self.assertIn('"%s")' % n.split(".")[0], reader)
-        self.assertIn('(esp_partition_subtype_t)0x42, "fonts"', reader)
-        table = (ROOT / "partitions_muse_eink.csv").read_text()
-        self.assertIn("fonts,     data, 0x42,    0x830000, 5M,", table)
-        # Muse's own table otherwise, so moving a board to it keeps NVS.
-        muse = [l for l in (ROOT / "partitions_muse.csv").read_text().splitlines() if l and not l.startswith("#")]
-        for line in muse:
-            self.assertIn(line, table)
-        self.assertLessEqual(len(data), 5 * 1024 * 1024)
+        for name in ("montserrat", "symbols", "unscii"):
+            self.assertTrue((ROOT / f"components/muse/eink/fonts/{name}.ttf").stat().st_size > 1000)
+            self.assertIn(f'asm("_binary_{name}_ttf_start")', reader)
+        self.assertIn("extern \"C\" const lv_font_t muse_font_cjk_16;", reader)
+        # Muse's own partition table: no fonts partition to flash.
+        self.assertNotIn("CONFIG_PARTITION_TABLE_CUSTOM_FILENAME",
+                         (ROOT / "devices/sdkconfig.reterminal-sticky").read_text())
 
     def test_sticky_ui_task_sleeps_when_nothing_moves(self):
         # Paused, the e-ink UI waits for display_pause(false); asleep, it looks

@@ -15,15 +15,15 @@
  */
 
 /*
- * The e-ink UI's fonts: the LVGL UI's, drawn by FreeInkFont from the files
- * LVGL builds its own from (eink/fonts/, tools/muse/gen_eink_fonts.sh), read
- * in place from the `fonts` partition (tools/muse/pack_eink_fonts.py).
+ * The e-ink UI's fonts: the LVGL UI's, drawn by FreeInkFont from the TTFs
+ * LVGL builds its own from (eink/fonts/, tools/muse/gen_eink_fonts.sh),
+ * embedded in the app.
  *
  * Each slot chains faces as LVGL's fonts do: Montserrat, then the FontAwesome
- * symbols LVGL builds into it (LV_SYMBOL_*), then GNU Unifont, the LVGL UI's
- * CJK fallback, for every script the others lack; unscii, then Unifont. Sizes
- * are em sizes, as lv_font_conv's are. Text is thresholded to 1 bit, which a
- * fast refresh shows crisply.
+ * symbols LVGL builds into it (LV_SYMBOL_*); unscii. With CONFIG_MUSE_CJK_FONT
+ * both end in the LVGL UI's CJK fallback, GNU Unifont's 16 px bitmaps
+ * (fonts/muse_font_cjk_16.c), as is. Sizes are em sizes, as lv_font_conv's
+ * are. Text is thresholded to 1 bit, which a fast refresh shows crisply.
  */
 
 #include <FreeInkUIRasterFont.h>
@@ -31,9 +31,19 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_partition.h"
 
 #include "muse_eink_priv.h"
+#if CONFIG_MUSE_CJK_FONT
+#include "lvgl_font/lvgl.h"
+extern "C" const lv_font_t muse_font_cjk_16;
+#endif
+
+extern const uint8_t montserrat_ttf_start[] asm("_binary_montserrat_ttf_start");
+extern const uint8_t montserrat_ttf_end[] asm("_binary_montserrat_ttf_end");
+extern const uint8_t symbols_ttf_start[] asm("_binary_symbols_ttf_start");
+extern const uint8_t symbols_ttf_end[] asm("_binary_symbols_ttf_end");
+extern const uint8_t unscii_ttf_start[] asm("_binary_unscii_ttf_start");
+extern const uint8_t unscii_ttf_end[] asm("_binary_unscii_ttf_end");
 
 namespace muse_eink {
 
@@ -48,61 +58,69 @@ static const char *TAG = "muse_eink";
 #define ARENA_BYTES (96 * 1024)     /* each face's glyph cache, in PSRAM */
 #define INK_THRESHOLD 64     /* coverage that counts as ink: lower is bolder; 128 drew Montserrat too thin */
 
-/* Unifont is a 16 px pixel font: drawn at 16 or 32 px, whichever is nearer
- * the slot's size, so its pixels stay whole. */
-class PixelFont final : public RasterFont {
+#if CONFIG_MUSE_CJK_FONT
+/* The LVGL UI's CJK font, a 1 bpp lv_font_conv font whose ranges are all
+ * FORMAT0_TINY, at its own 16 px whatever the slot's size. */
+class CjkFont final : public RasterFont {
  public:
-    explicit PixelFont(RasterFont &face, uint16_t cell) : face_(face), cell_(cell) {}
-    bool hasGlyph(uint32_t cp) const override { return face_.hasGlyph(cp); }
-    int16_t advance(uint32_t cp, uint16_t size, uint8_t style) override { return face_.advance(cp, at(size), style); }
-    int16_t lineHeight(uint16_t size) override { return face_.lineHeight(at(size)); }
-    int16_t ascent(uint16_t size) override { return face_.ascent(at(size)); }
-    const GlyphBitmap *rasterize(uint32_t cp, uint16_t size) override { return face_.rasterize(cp, at(size)); }
+    bool hasGlyph(uint32_t cp) const override { return id(cp) != 0; }
+    int16_t advance(uint32_t cp, uint16_t, uint8_t) override
+    {
+        int g = id(cp);
+        return g ? (int16_t)((dsc()->glyph_dsc[g].adv_w + 8) / 16) : 0;
+    }
+    int16_t lineHeight(uint16_t) override { return (int16_t)muse_font_cjk_16.line_height; }
+    int16_t ascent(uint16_t) override { return (int16_t)(muse_font_cjk_16.line_height - muse_font_cjk_16.base_line); }
+    const GlyphBitmap *rasterize(uint32_t cp, uint16_t) override
+    {
+        int g = id(cp);
+        if (!g) return nullptr;
+        const lv_font_fmt_txt_glyph_dsc_t &d = dsc()->glyph_dsc[g];
+        int n = d.box_w * d.box_h;
+        if (n > (int)sizeof(px_)) return nullptr;
+        const uint8_t *bits = dsc()->glyph_bitmap + d.bitmap_index;
+        for (int i = 0; i < n; i++) px_[i] = (bits[i >> 3] >> (7 - (i & 7))) & 1 ? 255 : 0;
+        out_ = GlyphBitmap{px_, d.box_w, d.box_h, d.ofs_x, (int16_t)-(d.ofs_y + d.box_h),
+                           (int16_t)((d.adv_w + 8) / 16)};
+        return &out_;
+    }
 
  private:
-    uint16_t at(uint16_t size) const { return size >= cell_ * 3 / 2 ? cell_ * 2 : cell_; }
-    RasterFont &face_;
-    uint16_t cell_;
+    static const lv_font_fmt_txt_dsc_t *dsc() { return (const lv_font_fmt_txt_dsc_t *)muse_font_cjk_16.dsc; }
+    static int id(uint32_t cp)
+    {
+        const lv_font_fmt_txt_dsc_t *d = dsc();
+        int lo = 0, hi = (int)d->cmap_num - 1;
+        while (lo <= hi) {
+            int mid = (lo + hi) / 2;
+            const lv_font_fmt_txt_cmap_t &c = d->cmaps[mid];
+            if (cp < c.range_start) hi = mid - 1;
+            else if (cp >= c.range_start + c.range_length) lo = mid + 1;
+            else return c.glyph_id_start + (int)(cp - c.range_start);
+        }
+        return 0;
+    }
+    uint8_t px_[16 * 17];
+    GlyphBitmap out_{};
 };
+static CjkFont s_cjk;
+#endif
 
-static TtfFont s_montserrat, s_symbols, s_unscii, s_unifont;
-static Arena s_arenas[4];
-static PixelFont s_unifont_px(s_unifont, 16);
+static TtfFont s_montserrat, s_symbols, s_unscii;
+static Arena s_arenas[3];
 static FontChain s_text, s_mono;
 static freeink::ui::RasterGlyphSource s_text_src(s_text, INK_THRESHOLD), s_mono_src(s_mono, INK_THRESHOLD);
 
-/* A font in the packed partition, by name, or NULL. */
-static const uint8_t *find(const uint8_t *pack, size_t pack_len, const char *name, uint32_t *len)
+static bool load(TtfFont &font, Arena &arena, const uint8_t *start, const uint8_t *end, const char *name)
 {
-    if (pack_len < 8 || memcmp(pack, "MFP1", 4)) return nullptr;
-    uint32_t n;
-    memcpy(&n, pack + 4, 4);
-    for (uint32_t i = 0; i < n && 8 + 24 * (i + 1) <= pack_len; i++) {
-        const uint8_t *e = pack + 8 + 24 * i;
-        uint32_t off, size;
-        memcpy(&off, e + 16, 4);
-        memcpy(&size, e + 20, 4);
-        if (!strncmp((const char *)e, name, 16) && off + size <= pack_len) {
-            *len = size;
-            return pack + off;
-        }
-    }
-    return nullptr;
-}
-
-static bool load(TtfFont &font, Arena &arena, const uint8_t *pack, size_t pack_len, const char *name)
-{
-    uint32_t len;
-    const uint8_t *data = find(pack, pack_len, name, &len);
     void *mem = heap_caps_malloc(ARENA_BYTES, MALLOC_CAP_SPIRAM);
-    if (!data || !mem) {
-        ESP_LOGE(TAG, "font %s: %s", name, data ? "no memory" : "not in the fonts partition");
-        heap_caps_free(mem);
+    if (!mem) {
+        ESP_LOGE(TAG, "font %s: no memory", name);
         return false;
     }
     arena.init(mem, ARENA_BYTES);
     font.setEmSizing(true);
-    if (!font.init(data, len, arena)) {
+    if (!font.init(start, (uint32_t)(end - start), arena)) {
         ESP_LOGE(TAG, "font %s: not a font", name);
         return false;
     }
@@ -111,25 +129,17 @@ static bool load(TtfFont &font, Arena &arena, const uint8_t *pack, size_t pack_l
 
 bool fonts_init(freeink::ui::DisplayTarget &target)
 {
-    const esp_partition_t *part =
-        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x42, "fonts");
-    const void *pack = nullptr;
-    esp_partition_mmap_handle_t handle;
-    if (!part || esp_partition_mmap(part, 0, part->size, ESP_PARTITION_MMAP_DATA, &pack, &handle) != ESP_OK) {
-        ESP_LOGE(TAG, "no fonts partition: flash the whole build (partitions_muse_eink.csv)");
-        return false;
-    }
-    const uint8_t *p = (const uint8_t *)pack;
-    bool ok = load(s_montserrat, s_arenas[0], p, part->size, "montserrat") &
-              load(s_symbols, s_arenas[1], p, part->size, "symbols") &
-              load(s_unscii, s_arenas[2], p, part->size, "unscii") &
-              load(s_unifont, s_arenas[3], p, part->size, "unifont");
+    bool ok = load(s_montserrat, s_arenas[0], montserrat_ttf_start, montserrat_ttf_end, "montserrat") &
+              load(s_symbols, s_arenas[1], symbols_ttf_start, symbols_ttf_end, "symbols") &
+              load(s_unscii, s_arenas[2], unscii_ttf_start, unscii_ttf_end, "unscii");
     if (!ok) return false;
     s_text.add(&s_montserrat);
     s_text.add(&s_symbols);
-    s_text.add(&s_unifont_px);
     s_mono.add(&s_unscii);
-    s_mono.add(&s_unifont_px);
+#if CONFIG_MUSE_CJK_FONT
+    s_text.add(&s_cjk);
+    s_mono.add(&s_cjk);
+#endif
 
     struct Slot {
         FontId id;

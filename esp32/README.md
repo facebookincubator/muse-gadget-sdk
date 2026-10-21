@@ -344,9 +344,8 @@ their upstream licenses:
   Sticky's Link status profile), is MIT and retains the source's copyright and
   license notice.
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
-  fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain),
-  Font Awesome 5 Free (SIL OFL 1.1) and GNU Unifont (SIL OFL 1.1, or GPL 2+
-  with the font embedding exception); see its README.
+  fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
+  Font Awesome 5 Free (SIL OFL 1.1); see its README.
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.
