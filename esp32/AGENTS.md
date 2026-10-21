@@ -471,10 +471,21 @@ The device still needs to be paired once for its token.
   TCP buffer sizes or cJSON nesting limit.
 - Edit per-build settings with `idf.py -B <dir> menuconfig` (under "ESP32
   Device SDK"). Don't commit a generated `sdkconfig`: it's gitignored for a reason.
-- Sticky's LVGL task stack must be in internal RAM: touch settings callbacks
-  write NVS synchronously, and flash writes disable the cache. A PSRAM UI task
-  stack asserts in `esp_task_stack_is_sane_cache_disabled()` when changing a
-  setting. The RGB565 framebuffer can remain in PSRAM.
+- The e-ink UI's task stack (`muse_eink`) must be in internal RAM: Settings'
+  handlers write NVS synchronously, and flash writes disable the cache. A PSRAM
+  UI task stack asserts in `esp_task_stack_is_sane_cache_disabled()` when
+  changing a setting. The framebuffer and font caches can remain in PSRAM.
+- E-paper boards with the full UI (`CONFIG_MUSE_UI_FREEINK`, the Sticky so
+  far) draw with [FreeInk](https://github.com/Free-Ink/freeink-sdk), not
+  LVGL, which they don't build at all. To bring up another panel: give it a
+  FreeInk board profile (or reuse one), select `MUSE_UI_FREEINK` and name the
+  profile in `MUSE_FREEINK_DEVICE` (`components/muse/Kconfig`), and write a
+  board file that supplies `touch_read`, buttons, audio and power and points
+  `display_pause` at `muse_eink_display_pause` (`eink/muse_eink.h`); leave
+  `display_start` and the other display hooks NULL. Use
+  `partitions_muse_eink.csv`: the UI's fonts are in its `fonts` partition,
+  flashed with the app. `tools/muse/gen_eink_fonts.sh` regenerates them.
+  FreeInk is pinned to a commit in `components/muse/idf_component.yml`.
 - OTA is off by default (`CONFIG_HOMEHUB_OTA_ENABLED=n`, version `999.0.0`),
   except on boards with the full UI. Set a version with `-DPROJECT_VER=1.0.0` or
   `version.txt`.

@@ -79,15 +79,24 @@ class LinkEpaperStatusTest(unittest.TestCase):
         self.assertIn('board: reterminal-sticky\n            target: esp32s3\n'
                       '            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"',
                       workflow)
-        self.assertIn('"boards/board_reterminal_sticky.c" "../../main/epd_ssd1677.c"',
+        # FreeInk drives the panel (its "sticky" profile); the board file
+        # supplies the rest.
+        self.assertIn('list(APPEND srcs "boards/board_reterminal_sticky.c")',
                       (ROOT / "components/muse/CMakeLists.txt").read_text())
+        kc = (ROOT / "components/muse/Kconfig").read_text()
+        self.assertIn('default y if MUSE_BOARD_RETERMINAL_STICKY', kc[kc.index("config MUSE_UI_FREEINK"):])
+        self.assertIn('default "STICKY" if MUSE_BOARD_RETERMINAL_STICKY', kc[kc.index("config MUSE_FREEINK_DEVICE"):])
+        self.assertIn('CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_eink.csv"', overlay)
         board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
         for part in ('esp_lcd_touch_new_i2c_gt911', 'i2s_channel_init_pdm_rx_mode',
-                     'esp_vfs_fat_sdspi_mount', 'gauge_read(0x2c', 'epd_panel_get',
-                     'gpio_set_level(GPIO_NUM_45, 0)', '.display_pause = display_pause',
-                     '.x_max = SCREEN_W', 'data->point.x = point.x',
-                     'data->point.y = sticky_touch_y(point.y);'):
+                     'esp_vfs_fat_sdspi_mount', 'gauge_read(0x2c',
+                     'gpio_set_level(GPIO_NUM_45, 0)', '.display_pause = muse_eink_display_pause',
+                     '.touch_read = touch_read', '.no_ring = true', '.x_max = SCREEN_W',
+                     '*x = point.x < SCREEN_W ? point.x : SCREEN_W - 1;',
+                     '*y = sticky_touch_y(point.y);'):
             self.assertIn(part, board)
+        for gone in ('lvgl', 'lv_', 'epd_panel', 'display_start'):
+            self.assertNotIn(gone, board)
         main = (ROOT / "main/main.c").read_text()
         self.assertLess(main.index("sticky_power_hold();"), main.index("diagnostic_log_init()"))
         self.assertIn("gpio_set_level(GPIO_NUM_45, 1)", main)
@@ -132,43 +141,40 @@ class LinkEpaperStatusTest(unittest.TestCase):
                          "Basic navigation checked")
 
     def test_sticky_settings_flash_uses_internal_stack(self):
-        board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
+        # Settings' handlers write NVS synchronously, which turns the cache
+        # off: the e-ink UI's task stack has to be in internal RAM.
+        ui = (ROOT / "components/muse/eink/muse_eink_ui.cpp").read_text()
         settings = (ROOT / "components/muse/muse_settings.c").read_text()
         self.assertIn('nvs_set_u16(s_nvs, "sleep_s", s.sleep_s)', settings)
-        self.assertRegex(board, r'xTaskCreatePinnedToCoreWithCaps\(lvgl_task, "sticky_ui", 8192, NULL, '
-                                r'MUSE_UI_PRIORITY,\s*&s_ui_task,\s*MUSE_UI_CORE,\s*'
-                                r'MALLOC_CAP_INTERNAL\s*\|\s*MALLOC_CAP_8BIT\)')
+        self.assertRegex(ui, r'xTaskCreatePinnedToCoreWithCaps\(ui_task, "muse_eink", 16384, NULL, '
+                             r'MUSE_UI_PRIORITY,\s*&s_task,\s*MUSE_UI_CORE,\s*'
+                             r'MALLOC_CAP_INTERNAL\s*\|\s*MALLOC_CAP_8BIT\)')
 
     def test_sticky_settings_refreshes_are_epaper_safe(self):
-        ui = (ROOT / "components/muse/muse_settings_ui.c").read_text()
-        wifi = ui[ui.index("static void tick_wifi(void)"):ui.index("/* ---------- Hatch ---------- */")]
-        sleep = ui[ui.index("static void on_sleep_choice("):ui.index("/* ---------- Battery ---------- */")]
-        self.assertIn('if (muse_board->epaper)', wifi)
-        self.assertIn('"Connected to %s\\n%s"', wifi)
-        self.assertIn('tick_sleep();', sleep)
-        self.assertIn('s_sleep_rows', sleep)
-        self.assertIn('muse_board->epaper ? 30000000 : 1000000', ui)
-        self.assertNotIn('ESP_LOGI(', sleep)   # no leftover debug log
-        # No mic meter on e-paper, whether the Sound page opens or is ticked.
-        self.assertIn('if (p == s_sound && !muse_board->epaper) {', ui)
-        self.assertIn('visible && s_current == s_sound && !muse_board->epaper', ui)
-        # A blinking cursor would keep the panel from ever settling to refresh.
-        text = ui[ui.index("s_text_ta = lv_textarea_create(s_text);"):]
-        self.assertIn("lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR);",
-                      text[:text.index("lv_obj_align(s_text_ta")])
+        # The e-ink Settings keep muse_settings_ui.c's e-paper choices.
+        ui = (ROOT / "components/muse/eink/muse_eink_settings.cpp").read_text()
+        wifi = ui[ui.index("static void tick_wifi(void)"):ui.index("static void tick_hatch(void)")]
+        self.assertIn('"Connected to %s\\n%s"', wifi)               # no dBm
+        self.assertIn('"saved" : s_aps[i].secure ? "secured" : "open"', wifi)
+        self.assertIn('now - s_batt_shown_us < 30000000', ui)   # battery every 30 s
+        self.assertNotIn('muse_voice_set_monitor', ui)          # no mic meter
+        self.assertNotIn('ESP_LOGI(', ui)                       # no leftover debug log
 
     def test_sticky_mic_only_board_shows_the_mic(self):
         # Sticky has a PDM mic (mic_init) and no codec (audio_init): once
-        # paired, the on-screen mic carries its touch-to-talk.
-        ui = (ROOT / "components/muse/muse_ui.c").read_text()
-        self.assertIn("bool mic = paired && (muse_board->audio_init || muse_board->mic_init);", ui)
-        self.assertIn("lv_obj_set_flag(s_mic_icon, LV_OBJ_FLAG_HIDDEN, !mic);", ui)
-        # The speaker button stays a codec board's.
-        self.assertIn("lv_obj_set_flag(s_speaker, LV_OBJ_FLAG_HIDDEN, !paired || !muse_board->audio_init);", ui)
+        # paired, the on-screen mic carries its touch-to-talk, and it stays
+        # while a reply is up unless the reply's page would cover it.
+        ui = (ROOT / "components/muse/eink/muse_eink_ui.cpp").read_text()
+        self.assertIn("f.mic = paired && (muse_board->audio_init || muse_board->mic_init);", ui)
+        self.assertIn("const bool covered = f.answering && cy + s_read.top + s_read.h > mic_top;", ui)
+        self.assertIn("if (f.mic && !covered) {", ui)
+        self.assertIn("muse_input_touch_talk(true);", ui)
+        self.assertIn("muse_input_touch_talk(false);", ui)
 
     def test_sticky_reports_four_grays_to_muse(self):
-        ui = (ROOT / "components/muse/muse_ui.c").read_text()
-        self.assertIn("return muse_board->epaper ? 2 : 16;", ui)
+        ui = (ROOT / "components/muse/eink/muse_eink_ui.cpp").read_text()
+        self.assertIn("return 2;   /* four grays */", ui)
+        self.assertIn("displayGrayscaleBase(freeink::GrayscaleMode::Absolute)", ui)
         led = (ROOT / "main/led_status.c").read_text()
         self.assertIn("return muse_ui_image_size(&w, &h) ? muse_ui_image_bits() : 0;", led)
 
@@ -275,7 +281,7 @@ int main(void) {
         board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
         self.assertIn("static uint16_t sticky_touch_y(", board)
         start = board.index("static uint16_t sticky_touch_y(")
-        end = board.index("static void touch_read(", start)
+        end = board.index("static bool touch_read(", start)
         harness = self.out / "sticky_touch_y.c"
         harness.write_text("#include <assert.h>\n#include <stdint.h>\n#define SCREEN_H 800\n"
                            + board[start:end] + """
@@ -296,52 +302,48 @@ int main(void) {
         self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("data->point.x = point.x < SCREEN_W ? point.x : SCREEN_W - 1;", board)
-        self.assertIn("data->point.y = sticky_touch_y(point.y);", board)
+        self.assertIn("*x = point.x < SCREEN_W ? point.x : SCREEN_W - 1;", board)
+        self.assertIn("*y = sticky_touch_y(point.y);", board)
 
-    def test_sticky_ui_gray4_pixels(self):
-        source = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
-        start = source.index("static void rgb565_to_gray4(")
-        end = source.index("static void epd_task(", start)
-        harness = self.out / "sticky_ui_gray4.c"
-        harness.write_text("#include <assert.h>\n#include <stdbool.h>\n#include <stdint.h>\n"
-                           "#include <stddef.h>\n#include <string.h>\n" + source[start:end] + """
-int main(void) {
-    uint16_t src[] = {0x0000, 0x4208, 0x8410, 0xffff,
-                      0xffff, 0xffff, 0xffff, 0xffff};
-    uint8_t dst[2], shown[2];
-    rgb565_to_gray4(dst, src, 4, 2);
-    assert(dst[0] == 0x1b && dst[1] == 0xff);
-    assert(gray4_needs_refresh(dst, shown, sizeof(dst), false));
-    memcpy(shown, dst, sizeof(dst));
-    assert(!gray4_needs_refresh(dst, shown, sizeof(dst), true));
-    shown[1] = 0;
-    assert(gray4_needs_refresh(dst, shown, sizeof(dst), true));
-    /* Still for 700 ms, or changing for 3 s without a pause. */
-    assert(!gray4_refresh_due(1000000, 900000, 900000));
-    assert(gray4_refresh_due(1600000, 900000, 900000));
-    assert(!gray4_refresh_due(3000000, 2800000, 400000));
-    assert(gray4_refresh_due(3400000, 3200000, 400000));
-    return 0;
-}
-""")
-        cc = shlex.split(os.environ.get("CC", "cc"))
-        binary = self.out / "sticky_ui_gray4"
-        compiled = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
-                                   str(harness), "-o", str(binary)], capture_output=True, text=True)
-        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
-        result = subprocess.run([str(binary)], capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    def test_sticky_font_pack(self):
+        # The fonts partition: what tools/muse/pack_eink_fonts.py writes is
+        # what muse_eink_fonts.cpp reads, and the partition it reads is there.
+        import struct
+        fonts = ROOT / "components/muse/eink/fonts"
+        names = ["montserrat.ttf", "symbols.ttf", "unscii.ttf", "unifont.otf"]
+        pack = self.out / "fonts.bin"
+        subprocess.run(["python3", str(ROOT / "tools/muse/pack_eink_fonts.py"), str(pack),
+                        *[str(fonts / n) for n in names]], check=True)
+        data = pack.read_bytes()
+        self.assertEqual(data[:4], b"MFP1")
+        (count,) = struct.unpack_from("<I", data, 4)
+        self.assertEqual(count, len(names))
+        for i, n in enumerate(names):
+            name, off, size = struct.unpack_from("<16sII", data, 8 + 24 * i)
+            self.assertEqual(name.rstrip(b"\0").decode(), n.split(".")[0])
+            self.assertEqual(off % 4, 0)
+            self.assertEqual(data[off:off + size], (fonts / n).read_bytes())
+        reader = (ROOT / "components/muse/eink/muse_eink_fonts.cpp").read_text()
+        for n in names:
+            self.assertIn('"%s")' % n.split(".")[0], reader)
+        self.assertIn('(esp_partition_subtype_t)0x42, "fonts"', reader)
+        table = (ROOT / "partitions_muse_eink.csv").read_text()
+        self.assertIn("fonts,     data, 0x42,    0x830000, 5M,", table)
+        # Muse's own table otherwise, so moving a board to it keeps NVS.
+        muse = [l for l in (ROOT / "partitions_muse.csv").read_text().splitlines() if l and not l.startswith("#")]
+        for line in muse:
+            self.assertIn(line, table)
+        self.assertLessEqual(len(data), 5 * 1024 * 1024)
 
-    def test_sticky_epd_task_sleeps_unless_settling(self):
-        # Paused, or with nothing new, the panel task waits for the next flush
-        # instead of waking every 250 ms; it starts by looking, in case LVGL
-        # flushed before it existed.
+    def test_sticky_ui_task_sleeps_when_nothing_moves(self):
+        # Paused, the e-ink UI waits for display_pause(false); asleep, it looks
+        # again every 200 ms, since a button wakes Muse without telling it; a
+        # waking touch tells it at once.
+        ui = (ROOT / "components/muse/eink/muse_eink_ui.cpp").read_text()
+        self.assertIn("ulTaskNotifyTake(pdTRUE, s_paused ? portMAX_DELAY : s_dark ? pdMS_TO_TICKS(200) : wait);", ui)
+        wake = ui[ui.index("if (muse_state_asleep() || s_dark) {"):]
+        self.assertIn("if (s_task) xTaskNotifyGive(s_task);", wake[:wake.index("}")])
         board = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
-        task = board[board.index("static void epd_task("):board.index("static void lvgl_task(")]
-        self.assertIn("bool settling = true;", task)
-        self.assertIn("ulTaskNotifyTake(pdTRUE, settling ? pdMS_TO_TICKS(250) : portMAX_DELAY);", task)
-        self.assertIn("settling = s_dirty && !s_paused;", task)
         self.assertNotIn(".keyboard = true", board)   # touch boards have no button menu to label
 
     def test_muse_images_dither_to_four_grays(self):

@@ -28,20 +28,21 @@ if(CONFIG_MUSE_ENABLED)
         "muse_console.c"
         "muse_state.c"
         "muse_battery.c"
-        "muse_ui.c"
         "muse_audio.c"
         "muse_pmu.c"
         "muse_input.c"
-        "muse_menu.c"
         "muse_voice.c"
         "muse_adpcm.c"
         "muse_settings.c"
-        "muse_settings_ui.c"
         "muse_text.c"
-        "muse_keypad.c"
-        "muse_lv_mem.c"
         "muse_link.c"
         "muse_ble.c")
+    if(CONFIG_MUSE_UI_FREEINK)
+        # E-paper: FreeInk draws the face, Settings and the keyboard.
+        list(APPEND srcs "eink/muse_eink_ui.cpp" "eink/muse_eink_settings.cpp" "eink/muse_eink_fonts.cpp")
+    else()
+        list(APPEND srcs "muse_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c" "muse_lv_mem.c")
+    endif()
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
@@ -49,7 +50,7 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
     endif()
     list(APPEND srcs "muse_chat_text.c")
-    if(CONFIG_MUSE_CJK_FONT)
+    if(CONFIG_MUSE_CJK_FONT AND NOT CONFIG_MUSE_UI_FREEINK)
         list(APPEND srcs "fonts/muse_font_cjk_16.c")   # captions' CJK fallback
     endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
@@ -68,7 +69,7 @@ if(CONFIG_MUSE_ENABLED)
     elseif(CONFIG_MUSE_BOARD_OSTB_ECHOEAR_2ST)
         list(APPEND srcs "boards/board_ostb_echoear_2st.c")
     elseif(CONFIG_MUSE_BOARD_RETERMINAL_STICKY)
-        list(APPEND srcs "boards/board_reterminal_sticky.c" "../../main/epd_ssd1677.c")
+        list(APPEND srcs "boards/board_reterminal_sticky.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_216)
         list(APPEND srcs "boards/board_waveshare_s3_216.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_185C)
@@ -130,7 +131,7 @@ set(muse_priv_requires
     bt esp-tls mbedtls esp_app_format esp_http_client
     noise_core minimp3
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
-    esp_driver_pcnt efuse
+    esp_driver_pcnt efuse esp_partition
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
     # before Kconfig values exist, so these can't depend on it; only the code does.
     fatfs esp_driver_sdspi sdmmc)
@@ -146,7 +147,26 @@ idf_component_register(
     PRIV_REQUIRES ${muse_priv_requires}
 )
 
-if(CONFIG_MUSE_ENABLED)
+if(CONFIG_MUSE_UI_FREEINK)
+    # FreeInk's board profile, for the panel and its pins. PUBLIC: FreeInk's
+    # headers read it too, in every file that includes them.
+    idf_component_get_property(freeink_lib freeink-sdk COMPONENT_LIB)
+    # One framebuffer, the e-ink UI's DisplayTarget's: the panel's RAM keeps
+    # the previous frame for fast refreshes (as FreeInk's samples build it).
+    target_compile_definitions(${freeink_lib} PUBLIC "FREEINK_DEVICE_${CONFIG_MUSE_FREEINK_DEVICE}=1"
+                               "EINK_DISPLAY_SINGLE_BUFFER_MODE=1")
+    # The fonts (eink/fonts/), packed for the `fonts` partition and flashed
+    # with the app (partitions_muse_eink.csv).
+    set(fonts "${COMPONENT_DIR}/eink/fonts/montserrat.ttf" "${COMPONENT_DIR}/eink/fonts/symbols.ttf"
+              "${COMPONENT_DIR}/eink/fonts/unscii.ttf" "${COMPONENT_DIR}/eink/fonts/unifont.otf")
+    set(font_pack "${CMAKE_BINARY_DIR}/eink_fonts.bin")
+    idf_build_get_property(python PYTHON)
+    add_custom_command(OUTPUT "${font_pack}"
+        COMMAND ${python} "${COMPONENT_DIR}/../../tools/muse/pack_eink_fonts.py" "${font_pack}" ${fonts}
+        DEPENDS ${fonts} "${COMPONENT_DIR}/../../tools/muse/pack_eink_fonts.py" VERBATIM)
+    add_custom_target(eink_fonts ALL DEPENDS "${font_pack}")
+    esptool_py_flash_to_partition(flash "fonts" "${font_pack}")
+elseif(CONFIG_MUSE_ENABLED)
     # LVGL spins forever on a failed assert unless LV_ASSERT_HANDLER is set,
     # which its Kconfig can't do. Abort, so the panic handler prints a backtrace
     # and reboots. PUBLIC reaches LVGL and every file that includes lvgl.h.
