@@ -466,9 +466,8 @@ menu "ESP32 Device SDK"
         help
             Hold the centre button (XIAO BOOT on reSpeaker Lite), speak,
             release: the audio goes to the agent's chat as a voice note,
-            which the VM transcribes, and the
-            reply appears in the Muse app as text. To speak it, plug a TTS
-            API of your own into start_tts in muse_chat_session.cpp. This
+            which the VM transcribes, and Muse speaks the reply through the
+            speaker; its text appears in the Muse app. This
             uses a second Noise session (Muse's voice session) with Link's
             account. While the mute
             switch is on, the button keeps its setup role (tap to confirm
