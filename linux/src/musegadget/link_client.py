@@ -26,6 +26,12 @@ each prefixed with its length as a little-endian u32:
 
 Messages the device sends to the Muse (:meth:`LinkSession.send_chat`) go as
 separate ``POST /chat/stream`` requests on the same session.
+
+Commands the Muse runs from a chat can also arrive as ``client.invoke`` events
+on the session's chat subscription (:meth:`LinkSession.subscribe_chat`) rather
+than as ``link.invoke`` on the control stream. They carry ``command_id``,
+``invoke_id``, ``params_json`` and ``timeout_ms``, and are answered the same
+way: a ``link.result`` for ``invoke_id`` on the control stream.
 """
 
 from __future__ import annotations
@@ -58,6 +64,7 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
+MAX_REMEMBERED_INVOKES = 64
 MAX_INBOUND_MESSAGE = 4 * 1024 * 1024
 MAX_CHAT_EVENT_BYTES = 256 * 1024
 MAX_STREAM_BUFFER_BYTES = 1024 * 1024
@@ -162,6 +169,7 @@ class LinkSession:
         self._register_id = ""
         self._requests: dict[int, _Request] = {}
         self._streams: dict[int, HttpStream] = {}
+        self._client_invokes: dict[str, None] = {}
         self._running = False
         self.registered = asyncio.Event()
         self.chat_subscribed = asyncio.Event()
@@ -410,14 +418,49 @@ class LinkSession:
                             continue
                         event = self._chat_event(bytes(buffered))
                         buffered.clear()
-                        if event is not None:
+                        if event is not None and not self._client_invoke(event):
                             yield event
                 if buffered:
                     event = self._chat_event(bytes(buffered))
-                    if event is not None:
+                    if event is not None and not self._client_invoke(event):
                         yield event
             finally:
                 self.chat_subscribed.clear()
+
+    def _client_invoke(self, event: dict) -> bool:
+        """Run a ``client.invoke`` chat event like a ``link.invoke``.
+
+        Returns True when the event was a command (handled here, not yielded).
+        """
+        if event.get("event") != "client.invoke":
+            return False
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        invoke_id = payload.get("invoke_id")
+        command = payload.get("command_id")
+        if not isinstance(invoke_id, str) or not invoke_id or not isinstance(command, str):
+            return True
+        if command not in self._device.commands:
+            log.info("client invoke for a command this device doesn't have: %s", printable(command[:64]))
+            return True
+        if invoke_id in self._client_invokes:
+            return True  # delivered again, e.g. to a second subscription
+        self._client_invokes[invoke_id] = None
+        if len(self._client_invokes) > MAX_REMEMBERED_INVOKES:
+            del self._client_invokes[next(iter(self._client_invokes))]
+        try:
+            params = json.loads(payload.get("params_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            params = {}
+        timeout_ms = payload.get("timeout_ms")
+        task = asyncio.ensure_future(self._invoke({
+            "id": invoke_id,
+            "command": command,
+            "params": params if isinstance(params, dict) else {},
+            "timeout_ms": timeout_ms if isinstance(timeout_ms, int) and timeout_ms > 0 else None,
+        }))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return True
 
     @staticmethod
     def _chat_event(raw: bytes) -> dict | None:

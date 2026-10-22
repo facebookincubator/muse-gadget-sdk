@@ -152,6 +152,12 @@ never has a command's parameters, output or error message.
   Both directions carry JSON messages, each prefixed with a little-endian u32
   length. The device sends `link.register`, then a `link.result` for each
   `link.invoke`. `link.unpaired` means the Muse removed the device.
+- Commands asked for in a chat can instead arrive as `client.invoke` events on
+  the session's newest `/chat/subscribe` stream (`command_id`, `invoke_id`,
+  `params_json`, `timeout_ms`). They're answered the same way, with a
+  `link.result` for `invoke_id` on `/link-control`. With no subscription open,
+  they're never delivered and time out, so the service keeps one open while
+  registered. A second subscription on the same session takes them over.
 - Register as `platform: "linux"`, `device_family: "homehub"`. Never use family
   `link` or advertise `device.ota`: the server pushes ESP32 firmware updates to
   every `link` device.

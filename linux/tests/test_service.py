@@ -27,6 +27,7 @@ import pytest
 from musegadget import muse_api
 from musegadget.executor import Account, Executor
 from musegadget.identity import Identity
+from musegadget import service as service_module
 from musegadget.service import Backoff, Service
 
 
@@ -183,3 +184,39 @@ def test_the_token_pairing_used_or_an_older_pairing_says_nothing(caplog):
 def test_api_root_uses_api_url_v2_or_the_muse_api():
     assert muse_api.api_root("https://api.example/") == "https://api.example"
     assert muse_api.api_root() == "https://api.muse.ai"
+
+
+def test_a_chat_subscription_stays_open_for_commands(monkeypatch):
+    # Commands asked for in a chat can arrive as client.invoke events on the newest chat
+    # subscription; LinkSession answers them, so the service just keeps one open.
+    monkeypatch.setattr(service_module, "RESUBSCRIBE_S", 0)
+
+    class Subscribing:
+        def __init__(self) -> None:
+            self.registered = asyncio.Event()
+            self.opened = 0
+            self.reopened = asyncio.Event()
+
+        async def subscribe_chat(self, session_id=None):
+            self.opened += 1
+            if self.opened == 2:
+                self.reopened.set()
+            if self.opened == 1:
+                yield {"type": "event", "event": "delta.text_append"}
+                return  # the subscription ended: it should be reopened
+            await asyncio.Event().wait()
+
+    async def scenario():
+        service = Service(identity=Identity("02:00:00:00:00:01"),
+                          executor=Executor(Account.current()))
+        session = Subscribing()
+        listener = asyncio.ensure_future(service._listen_for_commands(session))
+        await asyncio.sleep(0)
+        assert session.opened == 0  # not before the session is registered
+        session.registered.set()
+        await asyncio.wait_for(session.reopened.wait(), 2)
+        listener.cancel()
+        await asyncio.gather(listener, return_exceptions=True)
+        assert session.opened == 2
+
+    asyncio.run(scenario())

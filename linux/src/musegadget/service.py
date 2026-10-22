@@ -51,6 +51,8 @@ _SESSION_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 # Device access tokens live about 4 hours; rotate at 3.
 TOKEN_REFRESH_AGE_S = 3 * 3600
 TOKEN_RETRY_S = 300
+# Pause before reopening a chat subscription that ended or failed.
+RESUBSCRIBE_S = 5.0
 
 
 @dataclass
@@ -145,6 +147,7 @@ class Service:
         log.info("connecting to %s", vm["vm_name"] or vm["vm_id"])
         started = time.monotonic()
         self._current = session
+        listener = asyncio.ensure_future(self._listen_for_commands(session))
         try:
             outcome = await session.run(self._stop)
         except Exception as exc:
@@ -152,9 +155,32 @@ class Service:
             outcome = Outcome.CLOSED
         finally:
             self._current = None
+            listener.cancel()
+            await asyncio.gather(listener, return_exceptions=True)
         lasted = time.monotonic() - (session.registered_at or time.monotonic())
         log.info("session ended: %s after %.0fs", outcome.value, time.monotonic() - started)
         return outcome, lasted
+
+    async def _listen_for_commands(self, session) -> None:
+        """Keep one chat subscription open while the session is registered.
+
+        The Muse can deliver commands asked for in a chat as ``client.invoke``
+        events on the session's newest chat subscription instead of as
+        ``link.invoke`` on the control stream. Without a subscription they are
+        never delivered and time out. :meth:`LinkSession.subscribe_chat` runs
+        and answers them; this loop just keeps a subscription open.
+        """
+        while True:
+            await session.registered.wait()
+            try:
+                async for _event in session.subscribe_chat():
+                    pass
+                log.info("chat subscription ended; reopening")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("chat subscription failed: %s: %s", type(exc).__name__, exc)
+            await asyncio.sleep(RESUBSCRIBE_S)
 
     def _warn_if_sdk_token_changed(self, pairing: dict) -> None:
         """Muse records a device's SDK token only when it pairs, so a token set

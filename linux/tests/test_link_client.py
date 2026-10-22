@@ -424,6 +424,66 @@ def test_subscription_ready_on_headers_and_parses_split_utf8_events():
     asyncio.run(bounded_scenario(scenario()))
 
 
+def test_client_invoke_on_the_chat_subscription_runs_and_answers_on_the_control_stream():
+    async def scenario():
+        calls = []
+
+        def run_command(command, params, timeout_ms):
+            calls.append((command, params, timeout_ms))
+            return {"ok": True, "payload": {"stdout": "hi\n", "exit_code": 0}}
+
+        session, vm = make_session(run_command, [])
+        stop = asyncio.Event()
+        task = asyncio.ensure_future(session.run(stop))
+        await vm.handshake()
+        await vm.accept_control_stream()
+        register = await vm.next_message()
+        await vm.send_message({"type": "res", "id": register["id"], "ok": True})
+        await session.registered.wait()
+
+        subscription = session.subscribe_chat()
+        first = asyncio.ensure_future(subscription.__anext__())
+        request = await vm.next_frame()
+        assert request.value.path == "/chat/subscribe"
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, headers=[Header("Content-Type", "application/x-ndjson")], end_body=False,
+        )))
+
+        def invoke(invoke_id, command="system.run", params_json='{"command": "echo hi"}'):
+            return json.dumps({"type": "event", "event": "client.invoke", "payload": {
+                "command_id": command, "invoke_id": invoke_id,
+                "params_json": params_json, "timeout_ms": 30000,
+            }}).encode() + b"\n"
+
+        other = {"type": "event", "event": "delta.text_append", "payload": {"text": "hi"}}
+        await vm.send_frame(ServiceFrame.body_chunk(request.stream_id, BodyChunk(
+            # Delivered twice (e.g. a replay), one for a command this device doesn't have,
+            # then an ordinary chat event.
+            data=invoke("inv-1") + invoke("inv-1") + invoke("inv-2", command="robot.dance")
+            + json.dumps(other).encode() + b"\n",
+        )))
+        # Commands are answered, not passed on: the first event the caller sees is the chat one.
+        assert await first == other
+        result = await vm.next_message()
+        assert result == {"method": "link.result", "id": "inv-1", "ok": True,
+                          "payload": {"stdout": "hi\n", "exit_code": 0}}
+        assert calls == [("system.run", {"command": "echo hi"}, 30000)]
+
+        # Unparseable params_json still runs the command, with no params.
+        nxt = asyncio.ensure_future(subscription.__anext__())
+        await vm.send_frame(ServiceFrame.body_chunk(request.stream_id, BodyChunk(
+            data=invoke("inv-3", params_json="not json"), end_body=True,
+        )))
+        assert (await vm.next_message())["id"] == "inv-3"
+        assert calls[-1] == ("system.run", {}, 30000)
+        with pytest.raises(StopAsyncIteration):
+            await nxt
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
 def test_tts_yields_before_the_response_finishes_and_escapes_message_id():
     async def scenario():
         session, vm, stop, task = await registered_session()
