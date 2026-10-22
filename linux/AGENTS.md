@@ -187,11 +187,14 @@ never has a command's parameters, output or error message.
 - Half duplex is the default, with playback flush on barge-in and server hold
   respected. Response completion/cancellation and turn settlement are not call
   termination or proof that all PCM has arrived.
-- A compatible server can deliver model goodbye through the existing
-  `session_control/stop` event on this call's realtime response stream. Its
-  `item.call_id` is a control ID, not the admission call ID. Handle it once,
-  drain queued playback within a bound, then explicitly end the call. Do not
-  add a device capability, invent a server event or widen permissions.
+- Right after the admission record, the client sends
+  `{"type":"hatch.voice.capability.offer","end_call_stop":1}`: it ends the
+  call on a `session_control/stop`, so Muse may hang up that way when the
+  caller says goodbye. A VM that doesn't know the key ignores it. The stop
+  arrives on this call's realtime response stream. Its `item.call_id` is a
+  control ID, not the admission call ID. Handle it once, drain queued playback
+  within a bound, then explicitly end the call. Don't add other capabilities,
+  invent server events or widen the device's permissions.
 - Post-readiness operation errors are advisory unless the peer explicitly
   reports `session_dead`; admission errors remain fatal. Never log error text.
 - Idle suspension follows identified active turns, including delayed aliases.

@@ -468,8 +468,11 @@ class VoiceCallSession(unittest.TestCase):
         self.assertTrue(media['path'].startswith('/voice/realtime?call_id='))
         call_id = media['path'].split('=', 1)[1]
         self.assertFalse(media['end'])   # the body stays open
-        self.assertTrue(media['body'].endswith('\n') and media['body'].count('\n') == 1)
-        record = json.loads(media['body'])
+        # The admission record, then the capability offer: end_call_stop.
+        self.assertTrue(media['body'].endswith('\n') and media['body'].count('\n') == 2)
+        first, offer = media['body'].splitlines()
+        self.assertEqual(json.loads(offer), {'type': 'hatch.voice.capability.offer', 'end_call_stop': 1})
+        record = json.loads(first)
         self.assertEqual(record['call_id'], call_id)
         self.assertEqual((record['type'], record['device'], record['device_id']),
                          ('hatch.voice.call.start', 'mcu-wearable', 'homelink-00a1b2'))

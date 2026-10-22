@@ -50,6 +50,7 @@ def test_cli_uses_host_pairing_exact_vm_and_noise_upgrade_app_id(tmp_path, monke
             assert media.value.path.startswith("/voice/realtime?")
             assert self._register_device is False
             start = json.loads((await vm.next_frame()).value.data)
+            assert json.loads((await vm.next_frame()).value.data)["type"] == "hatch.voice.capability.offer"
             assert start["device_id"] == ident.node_id
             await response(vm, media.stream_id, line({"type": "hatch.voice.session",
                            "call_id": start["call_id"], "session_id": "synthetic-session"}))

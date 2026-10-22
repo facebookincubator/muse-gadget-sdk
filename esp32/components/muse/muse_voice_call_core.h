@@ -464,6 +464,12 @@ uint32_t muse_vc_call_poll(muse_vc_call_t *c, int64_t now_us);
 
 /* The admission record line (newline-terminated). device_id may be empty. */
 bool muse_vc_admission(const char *call_id, const char *device_id, bool greeting, char *out, size_t cap);
+/* The capability offer that follows the admission record: the gadget ends the
+ * call on a session_control stop (it drains playback, then sends end-call), so
+ * Muse may end a call that way when the caller says goodbye, instead of a
+ * ui.set.voice.end_call command the gadget has no channel for. A VM that
+ * doesn't know the key ignores it, and the call goes on as before. */
+#define MUSE_VC_CAPABILITY_OFFER "{\"type\":\"hatch.voice.capability.offer\",\"end_call_stop\":1}\n"
 /* The end-call body. ended_wall_ms is the wall clock now; the call started
  * (now_us - start_us) before it, and always ends at least 1 ms after its start. */
 bool muse_vc_end_call_body(const muse_vc_call_t *c, int64_t ended_wall_ms, int64_t now_us, char *out, size_t cap);

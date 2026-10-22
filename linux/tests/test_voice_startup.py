@@ -28,6 +28,7 @@ async def initial_media(vm, event):
     request = await vm.next_frame()
     assert request.value.path.startswith("/voice/realtime?")
     start = json.loads((await vm.next_frame()).value.data)
+    assert (await next_event(vm))["type"] == "hatch.voice.capability.offer"
     raw = line(event)
     # The first response record is fragmented media, not session.created/ready.
     await response(vm, request.stream_id, raw[:17])

@@ -529,9 +529,13 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   outputs at start-up.
 - The VM must accept calls from the gadget's credentials. A `session_control`
   stop on this call's realtime stream ends the call: the client drains queued
-  playback and explicitly ends it. There's no guarantee Muse sends one when it
-  says goodbye, so a press, the idle limit or the length limit is what reliably
-  ends a call.
+  playback and explicitly ends it. The admission body's second line,
+  `MUSE_VC_CAPABILITY_OFFER` (`hatch.voice.capability.offer` with
+  `end_call_stop: 1`), tells Muse the gadget ends calls that way, so it can
+  hang up when the caller says goodbye; the gadget has no channel for
+  `ui.set.voice.end_call`. A VM that doesn't support the offer ignores it and
+  sends no stop on goodbye, so a press, the idle limit or the length limit is
+  what reliably ends a call there.
 
 ## Requests to Muse's VM from your code
 

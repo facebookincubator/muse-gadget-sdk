@@ -1032,7 +1032,8 @@ static bool begin_call(uint32_t gen)
     muse_vc_uuid(rnd, id);
     char admission[MUSE_VC_ADMISSION_MAX];
     const char *device = muse_voice_call_device_id();
-    if (!muse_vc_admission(id, device ? device : "", GREETING, admission, sizeof(admission))) {
+    if (!muse_vc_admission(id, device ? device : "", GREETING, admission, sizeof(admission)) ||
+        strlcat(admission, MUSE_VC_CAPABILITY_OFFER, sizeof(admission)) >= sizeof(admission)) {
         emit(MUSE_VOICE_CALL_EV_ENDED, "CALL FAILED");
         return true;
     }

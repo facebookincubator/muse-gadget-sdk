@@ -74,6 +74,8 @@ async def admit(vm, *, extra=(), ready=True, wrong_id=False, device_id="homelink
     assert start["device_id"] == device_id
     assert parse_qs(urlsplit(request.value.path).query) == {"call_id": [start["call_id"]]}
     assert start["type"] == "hatch.voice.call.start"
+    offer = await next_event(vm)
+    assert offer == {"type": "hatch.voice.capability.offer", "end_call_stop": 1}
     records = [FIXTURE["events"][0]]
     if ready:
         records.append({"type": "hatch.voice.session",

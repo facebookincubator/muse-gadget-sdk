@@ -183,9 +183,12 @@ and show REPLY MISSED. File and
 protocol tests are hardware-free. Live sound-device behavior still needs testing
 on your audio setup.
 
-**Server compatibility:** this client does not advertise `ui.set.voice.end_call`,
-so a spoken goodbye is not guaranteed to hang up. Use explicit hang-up or the
-client timers. The SDK still honors the existing
+**Server compatibility:** this client has no channel for `ui.set.voice.end_call`.
+Instead it offers `end_call_stop` (`hatch.voice.capability.offer`, right after
+admission), telling Muse it ends the call on a `session_control` stop, so Muse
+can hang up when you say goodbye. A VM that doesn't support that yet ignores the
+offer, and a spoken goodbye doesn't hang up: use explicit hang-up or the client
+timers. The SDK honors the existing
 `conversation.item.added` / `session_control` / `stop` shape
 on the admitted call's realtime response stream. The item's `call_id` is a
 **control ID**, not the voice call ID; the dedicated stream provides the call

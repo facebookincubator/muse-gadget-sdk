@@ -48,6 +48,7 @@ MAX_PLAYBACK_BYTES = SAMPLE_RATE * 2 * 5
 SETTLE_SECONDS = 0.2
 MAX_TRACKED_TURNS = 64
 MAX_SETTLED_TURNS = 1024
+END_CALL_STOP_OFFER = {"type": "hatch.voice.capability.offer", "end_call_stop": 1}
 
 
 def positive_seconds(value) -> float:
@@ -234,6 +235,10 @@ class VoiceCall:
         # admission side effects; cleanup uses our own call id, never the peer's.
         self._admission_sent = True
         await self._event(start)
+        # This client ends the call on a session_control stop (drain, then
+        # end-call), so Muse may end a call that way when the caller says
+        # goodbye. A VM that doesn't know the key ignores the offer.
+        await self._event(END_CALL_STOP_OFFER)
         await self._stream.wait_response()
 
     async def _event(self, event: dict) -> None:
