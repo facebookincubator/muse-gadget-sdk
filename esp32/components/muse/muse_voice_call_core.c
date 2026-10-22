@@ -1007,7 +1007,10 @@ static bool take_id(muse_vc_span_t s, char *out, size_t cap)
 
 /* ---- Push-to-talk reply gate ---- */
 
-enum { GATE_STALE, GATE_WAITING, GATE_PLAYING, GATE_CONTINUING };
+/* GATE_TAIL: a reply whose response.done came. Its audio, queued or still
+ * arriving, plays; it never takes over from, or is flushed for, the reply
+ * after it. A press or new speech still makes it stale. */
+enum { GATE_STALE, GATE_WAITING, GATE_PLAYING, GATE_CONTINUING, GATE_TAIL };
 
 void muse_vc_reply_gate_init(muse_vc_reply_gate_t *g)
 {
@@ -1039,9 +1042,15 @@ bool muse_vc_reply_gate_waiting(const muse_vc_reply_gate_t *g)
     return gate_any(g, GATE_WAITING);
 }
 
-bool muse_vc_reply_gate_playing(const muse_vc_reply_gate_t *g)
+/* A reply that takes audio now. */
+static bool gate_live(const muse_vc_reply_gate_t *g)
 {
     return gate_any(g, GATE_PLAYING) || gate_any(g, GATE_CONTINUING);
+}
+
+bool muse_vc_reply_gate_playing(const muse_vc_reply_gate_t *g)
+{
+    return gate_live(g) || gate_any(g, GATE_TAIL);
 }
 
 uint8_t muse_vc_reply_gate_take_flush(muse_vc_reply_gate_t *g)
@@ -1072,7 +1081,7 @@ static void gate_silence(muse_vc_reply_gate_t *g)
     for (int i = 0; i < g->n_ids; i++) {
         g->ids[i].state = GATE_STALE;
     }
-    g->confirmed = g->blocked = g->want_response = g->turn_fresh = g->response_open = false;
+    g->confirmed = g->blocked = g->want_response = g->turn_fresh = g->response_open = g->reply_played = false;
     g->turn[0] = g->response[0] = '\0';
 }
 
@@ -1080,6 +1089,20 @@ void muse_vc_reply_gate_press(muse_vc_reply_gate_t *g)
 {
     gate_silence(g);
     g->item[0] = '\0';
+    g->n_hold = 0;
+    g->hold_full = false;
+    g->hold_last[0] = '\0';
+}
+
+/* Whether `item` started in the current hold (since the last press). */
+static bool gate_in_hold(const muse_vc_reply_gate_t *g, const char *item)
+{
+    for (int i = 0; i < g->n_hold; i++) {
+        if (!strcmp(g->hold[i], item)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void gate_set(muse_vc_reply_gate_t *g, uint8_t from, uint8_t to)
@@ -1117,7 +1140,11 @@ muse_vc_gate_verdict_t muse_vc_reply_gate_audio(muse_vc_reply_gate_t *g, const m
     }
     muse_vc_gate_id_t *known = gate_find(g, id);
     if (known) {
-        return known->state == GATE_PLAYING || known->state == GATE_CONTINUING ? MUSE_VC_GATE_PLAY :
+        if (known->state == GATE_PLAYING || known->state == GATE_CONTINUING) {
+            g->reply_played = true;
+            return MUSE_VC_GATE_PLAY;
+        }
+        return known->state == GATE_TAIL ? MUSE_VC_GATE_PLAY :
                known->state == GATE_WAITING ? MUSE_VC_GATE_HOLD : MUSE_VC_GATE_DROP;
     }
     if (!g->item[0] || g->blocked) {
@@ -1126,14 +1153,20 @@ muse_vc_gate_verdict_t muse_vc_reply_gate_audio(muse_vc_reply_gate_t *g, const m
     }
     if (g->confirmed) {
         /* The newest reply takes over: the one playing goes stale, flushed. */
-        if (muse_vc_reply_gate_playing(g)) {
+        if (gate_live(g)) {
             gate_set(g, GATE_PLAYING, GATE_STALE);
             gate_set(g, GATE_CONTINUING, GATE_STALE);
             g->flush |= MUSE_VC_GATE_FLUSH_PLAYING;
         }
+        /* A finished reply stops where its queue ends, never under this one. */
+        gate_set(g, GATE_TAIL, GATE_STALE);
         uint8_t state = g->turn_fresh ? GATE_PLAYING : GATE_CONTINUING;
         g->turn_fresh = false;
-        return gate_add(g, id, state) ? MUSE_VC_GATE_PLAY : MUSE_VC_GATE_DROP;
+        if (!gate_add(g, id, state)) {
+            return MUSE_VC_GATE_DROP;
+        }
+        g->reply_played = true;
+        return MUSE_VC_GATE_PLAY;
     }
     if (gate_any(g, GATE_WAITING)) {
         gate_set(g, GATE_WAITING, GATE_STALE);   /* the newer one waits instead */
@@ -1153,12 +1186,49 @@ void muse_vc_reply_gate_event(muse_vc_reply_gate_t *g, const muse_vc_event_t *ev
         gate_silence(g);
         if (!take_id(ev->item_id, g->item, sizeof(g->item))) {
             g->item[0] = '\0';
+        } else {
+            strcpy(g->hold_last, g->item);
+            if (gate_in_hold(g, g->item)) {
+                /* already listed */
+            } else if (g->n_hold < MUSE_VC_GATE_HOLD_ITEMS) {
+                strcpy(g->hold[g->n_hold++], g->item);
+            } else {
+                g->hold_full = true;
+            }
         }
         break;
     case MUSE_VC_EV_TURN_STARTED: {
         char turn[MUSE_VC_TURN_ID_MAX];
         if (!g->item[0] || !take_id(ev->item_id, item, sizeof(item)) || !take_id(ev->submission_id, turn, sizeof(turn))) {
             break;   /* no current item, or no whole identity */
+        }
+        if (strcmp(item, g->item) != 0 && g->hold_last[0] && !strcmp(item, g->hold_last)) {
+            /* The latest hold's item again (its own continuation, after older
+             * work was adopted): it's current again, as below, and the
+             * adopted reply stops. No flush: the playback queue isn't kept
+             * per reply, and this item's own finished reply may be queued
+             * ahead of it. */
+            gate_set(g, GATE_PLAYING, GATE_STALE);
+            gate_set(g, GATE_CONTINUING, GATE_STALE);
+            strcpy(g->item, item);
+        } else if (strcmp(item, g->item) != 0 && g->confirmed && !g->blocked && g->response[0] &&
+                   !g->response_open && g->reply_played && !gate_any(g, GATE_WAITING) && !g->hold_full &&
+                   !gate_in_hold(g, item)) {
+            /* The current reply has finished, and older work reports back:
+             * a delegated task's result, the outcome of a spoken approval.
+             * It speaks next, as on the phone: interrupting a reply doesn't
+             * cancel that work. The finished reply's audio plays out, never
+             * taking over; a continuation that played without a turn of its
+             * own was this work's. */
+            bool early = gate_any(g, GATE_CONTINUING) || gate_any(g, GATE_PLAYING);
+            gate_set(g, GATE_CONTINUING, GATE_PLAYING);
+            strcpy(g->item, item);
+            g->turn_fresh = !early;
+            g->reply_played = early;
+            strcpy(g->turn, turn);
+            g->response[0] = '\0';
+            g->want_response = true;
+            break;
         }
         if (strcmp(item, g->item) != 0) {
             /* Older work speaks up: whatever waits, a continuation playing
@@ -1179,12 +1249,13 @@ void muse_vc_reply_gate_event(muse_vc_reply_gate_t *g, const muse_vc_event_t *ev
         /* The current item's turn: what waits plays, a continuation playing
          * is confirmed (this is its alias), and if neither, the next new id
          * is this turn's own. */
-        bool had = gate_any(g, GATE_WAITING) || muse_vc_reply_gate_playing(g);
+        bool had = gate_any(g, GATE_WAITING) || gate_live(g);
         gate_set(g, GATE_WAITING, GATE_PLAYING);
         gate_set(g, GATE_CONTINUING, GATE_PLAYING);
         g->turn_fresh = !had;
         g->confirmed = true;
         g->blocked = false;
+        g->reply_played = gate_live(g);
         strcpy(g->turn, turn);
         g->response[0] = '\0';
         g->want_response = true;
@@ -1199,6 +1270,11 @@ void muse_vc_reply_gate_event(muse_vc_reply_gate_t *g, const muse_vc_event_t *ev
     case MUSE_VC_EV_RESPONSE_DONE:
         if (g->response_open && take_id(ev->mapper_response_id, item, sizeof(item)) && !strcmp(item, g->response)) {
             g->response_open = false;
+            /* Its audio still plays as it arrives, but an id first seen
+             * from here on is new work (a continuation, or older work's
+             * reply ahead of its turn). */
+            gate_set(g, GATE_PLAYING, GATE_TAIL);
+            gate_set(g, GATE_CONTINUING, GATE_TAIL);
         }
         break;
     case MUSE_VC_EV_INPUT_SUPPRESSED:

@@ -338,7 +338,7 @@ class VoiceCallSession(unittest.TestCase):
              'cleanup_4xx_then_lost', 'ptt_startup', 'ptt_overflow', 'ptt_press_during_reply',
              'ptt_silent_press', 'ptt_rapid_edges', 'ptt_edges_while_opening', 'ptt_disconnect',
              'ptt_end_and_generations', 'ptt_waiting', 'ptt_server_hold', 'ptt_gate_capacity',
-             'ptt_gate_latest_item', 'ptt_stale_completion', 'ptt_hold_clock_gap', 'ptt_abandoned_start',
+             'ptt_gate_latest_item', 'ptt_gate_follow_up', 'ptt_stale_completion', 'ptt_hold_clock_gap', 'ptt_abandoned_start',
              'ptt_quiet_after_early_audio', 'ptt_cutover', 'ptt_many_edges_while_connecting',
              'ptt_bad_turn_identity', 'ptt_playing_while_waiting', 'ptt_captions', 'ptt_end_while_held_reply',
              'ptt_end_mid_pump']
@@ -419,6 +419,9 @@ class VoiceCallSession(unittest.TestCase):
 
     def test_ptt_only_the_latest_items_turn_opens_a_reply(self):
         self.run_case('ptt_gate_latest_item')
+
+    def test_ptt_older_work_reports_back_after_the_current_reply(self):
+        self.run_case('ptt_gate_follow_up')
 
     def test_ptt_reply_done_is_the_current_replys_own(self):
         self.run_case('ptt_stale_completion')

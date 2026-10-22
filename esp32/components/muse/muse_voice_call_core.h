@@ -246,9 +246,32 @@ bool muse_vc_gate_mic_open(const muse_vc_gate_t *g, int64_t now_us);
  *    not all of them get an alias turn_started).
  *  - One id plays (or waits) at a time: a newer one takes over, the older
  *    goes stale, and what's queued of it is flushed (FLUSH), so two replies
- *    never interleave.
- *  - A turn_started naming any other item (a late reply to older work) marks
- *    stale what waits and what plays without a turn of its own (a
+ *    never interleave. Once the current reply's response.done has come, its
+ *    ids play what still arrives until a new id plays; then they stop
+ *    without a flush, so what they queued plays first.
+ *  - A turn_started naming an older item, one from before the last press,
+ *    once the current item's reply has played and finished (its
+ *    response.created came, its audio played and its response.done
+ *    followed, and nothing waits) makes that item
+ *    current and confirmed: older work reporting back (a delegated task's
+ *    result, the outcome of a spoken approval) plays. The finished reply's
+ *    ids keep playing what still arrives but never take over or flush, and
+ *    a continuation that played without a turn of its own is that older
+ *    work's. A turn_started naming the latest hold's item again (its own
+ *    continuation) makes it current again; the adopted reply stops, after
+ *    what it queued. A press that heard no speech
+ *    still lets nothing play, and an earlier item of the same hold is never
+ *    adopted. A reply cut off by a press never comes back, but the work it
+ *    started may report back this way: that is the point, since answering
+ *    an approval question with a press is how the user says yes. Audio
+ *    carries no link to its item, so a continuation of the latest hold's
+ *    reply that arrives without its own turn_started after older work was
+ *    adopted counts as that work's (a filler line, then a tool call, then the
+ *    real answer as a continuation), and audio of the finished reply that
+ *    arrives after the adopted reply starts is cut. turn_settled can't mark
+ *    the end instead: it waits for that older work's reply too.
+ *  - Otherwise, a turn_started naming any other item (a late reply to older
+ *    work) marks stale what waits and what plays without a turn of its own (a
  *    continuation whose audio came before its alias turn: it was that older
  *    work's), flushing it, and blocks new ids, which go stale, until a
  *    turn_started names the current item again. input_suppressed for the
@@ -271,6 +294,7 @@ bool muse_vc_gate_mic_open(const muse_vc_gate_t *g, int64_t now_us);
  * older one's. */
 
 #define MUSE_VC_GATE_IDS 128
+#define MUSE_VC_GATE_HOLD_ITEMS 4   /* input items one hold can start */
 
 typedef enum { MUSE_VC_GATE_DROP, MUSE_VC_GATE_HOLD, MUSE_VC_GATE_PLAY } muse_vc_gate_verdict_t;
 
@@ -298,6 +322,11 @@ typedef struct {
     char turn[MUSE_VC_TURN_ID_MAX];            /* that turn's submission_message_id */
     char response[MUSE_VC_TURN_ID_MAX];        /* the response.created id after it */
     bool want_response;                        /* the next response.created is its */
+    char hold[MUSE_VC_GATE_HOLD_ITEMS][MUSE_VC_TURN_ID_MAX];   /* items since the last press */
+    uint8_t n_hold;
+    bool hold_full;                            /* more than fit: adopt nothing */
+    char hold_last[MUSE_VC_TURN_ID_MAX];       /* the newest of them */
+    bool reply_played;                         /* the current turn's reply played audio */
 } muse_vc_reply_gate_t;
 
 /* A new call: forgets every id. */

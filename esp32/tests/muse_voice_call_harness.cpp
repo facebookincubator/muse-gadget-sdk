@@ -1969,6 +1969,143 @@ static void ptt_gate_latest_item(void)
     assert(gate_audio(&g, "c2") == MUSE_VC_GATE_DROP);       /* C doesn't become current again */
 }
 
+static void gate_response(muse_vc_reply_gate_t *g, muse_vc_ev_kind_t kind, const char *id)
+{
+    muse_vc_event_t ev = {};
+    ev.kind = kind;
+    ev.mapper_response_id = { id, strlen(id) };
+    muse_vc_reply_gate_event(g, &ev);
+}
+
+/* Older work reporting back once the current reply has finished (a spoken
+ * approval: ask, answer "yes", the task's result) plays after it; while the
+ * current reply is still going, or after a press with no speech, it doesn't. */
+static void ptt_gate_follow_up(void)
+{
+    muse_session_call_wake();   /* (a pure gate case: the harness expects the session woken) */
+    static muse_vc_reply_gate_t g;
+    muse_vc_reply_gate_init(&g);
+    muse_vc_reply_gate_press(&g);
+    /* The request, and Muse asking for approval. */
+    gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, "item-A");
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-A", "sA");
+    gate_response(&g, MUSE_VC_EV_RESPONSE_CREATED, "mA");
+    assert(gate_audio(&g, "a1") == MUSE_VC_GATE_PLAY);
+    gate_response(&g, MUSE_VC_EV_RESPONSE_DONE, "mA");
+    /* "Yes": a press, a new item, a short acknowledgement. */
+    muse_vc_reply_gate_press(&g);
+    gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, "item-B");
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-B", "sB");
+    gate_response(&g, MUSE_VC_EV_RESPONSE_CREATED, "mB");
+    assert(gate_audio(&g, "b1") == MUSE_VC_GATE_PLAY);
+    /* A's result before B's reply finished: dropped, as before. */
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-A", "sA2");
+    assert(gate_audio(&g, "z1") == MUSE_VC_GATE_DROP);
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-B", "sB2");   /* B current again */
+    gate_response(&g, MUSE_VC_EV_RESPONSE_CREATED, "mB2");
+    assert(gate_audio(&g, "b2") == MUSE_VC_GATE_PLAY);
+    muse_vc_reply_gate_take_flush(&g);
+    gate_response(&g, MUSE_VC_EV_RESPONSE_DONE, "mB2");
+    /* B's reply done: A's result plays, B's queued audio isn't flushed and
+     * B takes no new audio; A's reply shows captions and owns its completion. */
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-A", "sA3");
+    assert(muse_vc_reply_gate_take_flush(&g) == 0);
+    assert(muse_vc_reply_gate_playing(&g));
+    assert(muse_vc_reply_gate_captions(&g));
+    assert(gate_audio(&g, "b2") == MUSE_VC_GATE_PLAY);   /* B's trailing audio still plays */
+    assert(gate_audio(&g, "a9") == MUSE_VC_GATE_PLAY);
+    assert(muse_vc_reply_gate_take_flush(&g) == 0);       /* what B queued plays first */
+    assert(gate_audio(&g, "b2") == MUSE_VC_GATE_DROP);   /* then B stops: never interleaved */
+    assert(gate_audio(&g, "a9") == MUSE_VC_GATE_PLAY);
+    gate_response(&g, MUSE_VC_EV_RESPONSE_CREATED, "mA3");
+    gate_response(&g, MUSE_VC_EV_RESPONSE_DONE, "mA3");
+    {
+        muse_vc_event_t done = {};
+        done.kind = MUSE_VC_EV_RESPONSE_DONE;
+        done.mapper_response_id = { "mA3", 3 };
+        assert(muse_vc_reply_gate_done(&g, &done));
+    }
+    /* A press stops it for good, and with no speech nothing opens again. */
+    muse_vc_reply_gate_press(&g);
+    assert(gate_audio(&g, "a9") == MUSE_VC_GATE_DROP);
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-B", "sB3");
+    assert(gate_audio(&g, "n1") == MUSE_VC_GATE_DROP);
+    /* Speech that hasn't been confirmed: older work's turn still blocks. */
+    gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, "item-C");
+    assert(gate_audio(&g, "c1") == MUSE_VC_GATE_HOLD);
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-A", "sA4");
+    assert(gate_audio(&g, "c1") == MUSE_VC_GATE_DROP && gate_audio(&g, "x1") == MUSE_VC_GATE_DROP);
+
+    /* Older work whose audio came before its turn: that continuation was its
+     * reply, and plays on once the turn names it. */
+    muse_vc_reply_gate_press(&g);
+    gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, "item-D");
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-D", "sD");
+    gate_response(&g, MUSE_VC_EV_RESPONSE_CREATED, "mD");
+    assert(gate_audio(&g, "d1") == MUSE_VC_GATE_PLAY);
+    gate_response(&g, MUSE_VC_EV_RESPONSE_DONE, "mD");
+    assert(gate_audio(&g, "e1") == MUSE_VC_GATE_PLAY);   /* no turn of its own yet */
+    muse_vc_reply_gate_take_flush(&g);
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-E", "sE");
+    assert(muse_vc_reply_gate_take_flush(&g) == 0);
+    assert(gate_audio(&g, "e1") == MUSE_VC_GATE_PLAY);
+    assert(muse_vc_reply_gate_captions(&g));
+    /* The latest hold's own continuation alias: D is current again. */
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-D", "sD2");
+    assert(muse_vc_reply_gate_take_flush(&g) == 0);   /* E's reply stops after what it queued */
+    assert(gate_audio(&g, "e1") == MUSE_VC_GATE_DROP);
+    assert(muse_vc_reply_gate_captions(&g));
+    assert(gate_audio(&g, "d2") == MUSE_VC_GATE_PLAY);
+
+    /* An earlier item of the same hold is never adopted. */
+    muse_vc_reply_gate_press(&g);
+    gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, "item-F");
+    gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, "item-G");
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-G", "sG");
+    gate_response(&g, MUSE_VC_EV_RESPONSE_CREATED, "mG");
+    assert(gate_audio(&g, "g1") == MUSE_VC_GATE_PLAY);
+    gate_response(&g, MUSE_VC_EV_RESPONSE_DONE, "mG");
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-F", "sF");
+    assert(gate_audio(&g, "f1") == MUSE_VC_GATE_DROP);
+
+    /* On the ordinary path a finished reply's trailing audio stops once the
+     * next reply plays, without a flush. */
+    muse_vc_reply_gate_press(&g);
+    gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, "item-H");
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-H", "sH");
+    gate_response(&g, MUSE_VC_EV_RESPONSE_CREATED, "mH");
+    assert(gate_audio(&g, "h1") == MUSE_VC_GATE_PLAY);
+    gate_response(&g, MUSE_VC_EV_RESPONSE_DONE, "mH");
+    muse_vc_reply_gate_take_flush(&g);   /* (anything left from the cases above) */
+    assert(gate_audio(&g, "h1") == MUSE_VC_GATE_PLAY);
+    assert(gate_audio(&g, "h2") == MUSE_VC_GATE_PLAY);
+    assert(muse_vc_reply_gate_take_flush(&g) == 0);
+    assert(gate_audio(&g, "h1") == MUSE_VC_GATE_DROP);
+    assert(gate_audio(&g, "h2") == MUSE_VC_GATE_PLAY);
+
+    /* A turn whose first response played nothing (a tool call) hasn't
+     * answered yet: older work still waits its turn. */
+    muse_vc_reply_gate_press(&g);
+    gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, "item-J");
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-J", "sJ");
+    gate_response(&g, MUSE_VC_EV_RESPONSE_CREATED, "mJ");
+    gate_response(&g, MUSE_VC_EV_RESPONSE_DONE, "mJ");
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-H", "sH2");
+    assert(gate_audio(&g, "k1") == MUSE_VC_GATE_DROP);
+
+    /* A long hold: the newest item is still the one a turn confirms, even
+     * past the list's size. */
+    muse_vc_reply_gate_press(&g);
+    const char *items[] = {"item-1", "item-2", "item-3", "item-4", "item-5"};
+    for (const char *it : items) {
+        gate_ev(&g, MUSE_VC_EV_SPEECH_STARTED, it);
+    }
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-4", "s4");
+    assert(gate_audio(&g, "x4") == MUSE_VC_GATE_DROP);
+    gate_ev(&g, MUSE_VC_EV_TURN_STARTED, "item-5", "s5");
+    assert(gate_audio(&g, "x5") == MUSE_VC_GATE_PLAY);
+}
+
 /* The current reply's completion is its own: an older response.done or
  * turn_settled doesn't mark it done. */
 static void ptt_stale_completion(void)
@@ -2461,7 +2598,7 @@ int main(int argc, char **argv)
                                     cleanup_expires, cleanup_gate_inflight, cleanup_4xx_then_lost, ptt_startup,
                                     ptt_overflow, ptt_press_during_reply, ptt_silent_press, ptt_rapid_edges,
                                     ptt_edges_while_opening, ptt_disconnect, ptt_end_and_generations, ptt_waiting,
-                                    ptt_server_hold, ptt_gate_capacity, ptt_gate_latest_item,
+                                    ptt_server_hold, ptt_gate_capacity, ptt_gate_latest_item, ptt_gate_follow_up,
                                     ptt_stale_completion, ptt_hold_clock_gap, ptt_abandoned_start,
                                     ptt_quiet_after_early_audio, ptt_cutover, ptt_many_edges_while_connecting,
                                     ptt_bad_turn_identity, ptt_playing_while_waiting, ptt_captions,

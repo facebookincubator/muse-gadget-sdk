@@ -511,6 +511,14 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   silent keepalive audio is. Turns are tracked by `submission_message_id` and
   input `item_id`: a `turn_settled` retires its submission and the earlier ones
   for that item, never another item's or a later alias.
+- On push-to-talk calls only replies to your latest hold play
+  (`muse_vc_reply_gate_t`). The one exception: once that reply has finished,
+  older work from before your last press reporting back (a delegated task's
+  result, or the outcome after you answer a spoken approval) plays after it,
+  with captions. The audio of a reply you cut off with a press never comes
+  back, and older work arriving while a newer reply is still going is
+  dropped. Approvals work by voice: Muse asks in the call and you hold to
+  answer; the gadget has no approval card.
 - Nothing plays and the mic doesn't open until `hatch.voice.session` names this
   call's exact `call_id` and a `session_id`; a missing or wrong one fails the
   call. Before that, an `error` event fails it too; after, only `session_dead`
