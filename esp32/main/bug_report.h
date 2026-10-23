@@ -21,7 +21,9 @@
 #include "noise_control.h"
 
 #define BUG_REPORT_REQUEST_ID_MAX_BYTES 63
-#define BUG_REPORT_MAX_BYTES (32 * 1024)
+// Worst case is about 50 KB: a full log tail (~22 KB base64) plus device_health
+// with a full connectivity history (~25 KB).
+#define BUG_REPORT_MAX_BYTES (64 * 1024)
 
 typedef enum {
     BUG_REPORT_START_ACCEPTED = 0,

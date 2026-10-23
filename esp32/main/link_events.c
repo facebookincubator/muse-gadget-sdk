@@ -50,6 +50,7 @@ static const char *kind_name(link_event_kind_t kind) {
         case LINK_EVENT_TUNNEL_UP: return "tunnel_up";
         case LINK_EVENT_TUNNEL_DOWN: return "tunnel_down";
         case LINK_EVENT_TUNNEL_TX_BLOCKED: return "tunnel_tx_blocked";
+        case LINK_EVENT_STALL_PROBE: return "stall_probe";
         default: return "unknown";
     }
 }

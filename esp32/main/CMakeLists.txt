@@ -32,6 +32,7 @@ set(GADGET_SRCS
     "vm_api.c"
     "diagnostic_log.c"
     "link_events.c"
+    "link_probe.c"
     "stack_monitor.c"
     "bug_report.c"
     "ota.c"

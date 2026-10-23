@@ -28,7 +28,9 @@ extern "C" {
 // Recorded only on transitions, so one outage costs a few entries. Lost on
 // reboot; device.health and bug.report expose it so the agent can explain
 // past outages ("123s ago tunnel_down: keepalive timeout ...").
-#define LINK_EVENTS_CAPACITY 40
+// About two days of history at 50-60 events a day (each
+// VM replacement costs three). 40 held only 10-17 hours.
+#define LINK_EVENTS_CAPACITY 128
 #define LINK_EVENTS_DETAIL_MAX 112
 
 typedef enum {
@@ -39,6 +41,7 @@ typedef enum {
     LINK_EVENT_TUNNEL_UP,
     LINK_EVENT_TUNNEL_DOWN,
     LINK_EVENT_TUNNEL_TX_BLOCKED,
+    LINK_EVENT_STALL_PROBE,  // which hop failed when the session went silent
 } link_event_kind_t;
 
 // Allocates the PSRAM ring. Without PSRAM, recording is a no-op.

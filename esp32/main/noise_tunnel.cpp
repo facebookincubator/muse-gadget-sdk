@@ -97,8 +97,9 @@ extern "C" bool noise_tx_has_contiguous_dma_headroom(void) {
 // as an empty batch). Any inbound tunnel frame — a pong or real data — refreshes
 // liveness. If nothing arrives for TUN_KEEPALIVE_TIMEOUT_US (several missed
 // pings), we declare the tunnel dead so noise_tunnel_maybe_reopen reconnects it.
+// TUN_KEEPALIVE_TIMEOUT_US lives in noise_tunnel_internal.h: the session loop
+// uses the same window to decide that the whole connection is dead.
 #define TUN_KEEPALIVE_INTERVAL_US (20 * 1000 * 1000)  // ping after 20s idle
-#define TUN_KEEPALIVE_TIMEOUT_US  (65 * 1000 * 1000)  // dead after ~3 missed
 
 // Outbound stall. Keepalive only watches inbound frames, so while the VM keeps
 // sending (e.g. TCP retransmits) a tunnel whose batches never leave because the
@@ -140,6 +141,9 @@ static bool s_needs_reset = false;
 // emit a ping.
 static uint64_t s_last_rx_us = 0;
 static uint64_t s_last_ping_us = 0;
+// Set by a keepalive timeout whose pings went out but got no answer; consumed
+// by noise_tunnel_take_unanswered_timeout(). Session-task-owned.
+static bool s_unanswered_timeout = false;
 
 // Start of the current outbound stall (batches queued, DMA-gated, none sent).
 // Session-task-owned, cleared by any send, an empty queue or a stream open.
@@ -374,8 +378,20 @@ extern "C" bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit) {
     return true;
 }
 
+extern "C" uint32_t noise_tunnel_rx_idle_s(void) {
+    if (!s_last_rx_us) return UINT32_MAX;
+    return (uint32_t)((esp_timer_get_time() - s_last_rx_us) / 1000000);
+}
+
+extern "C" bool noise_tunnel_take_unanswered_timeout(void) {
+    bool fired = s_unanswered_timeout;
+    s_unanswered_timeout = false;
+    return fired;
+}
+
 extern "C" void noise_tunnel_on_session_down(void) {
     s_connected.store(false, std::memory_order_relaxed);
+    s_unanswered_timeout = false;
     end_tx_stall(esp_timer_get_time(), "session ended");
     s_reopen_gated_since_us = 0;
     note_tunnel_down(nullptr);
@@ -485,6 +501,7 @@ extern "C" void noise_tunnel_tick(const noise_tunnel_emit_t *emit) {
         s_needs_reset = true;
         s_connected.store(false, std::memory_order_relaxed);
         // A last ping long ago means pings were DMA-gated, not unanswered.
+        s_unanswered_timeout = now - s_last_ping_us < TUN_KEEPALIVE_INTERVAL_US;
         char why[48];
         snprintf(why, sizeof(why), "keepalive timeout, last ping %us ago",
                  (unsigned)((now - s_last_ping_us) / 1000000));

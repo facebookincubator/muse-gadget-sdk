@@ -149,6 +149,9 @@ class LinkNoiseTunnelTest(unittest.TestCase):
     def test_silent_session_pings_then_reconnects(self):
         self.run_harness("rx_idle")
 
+    def test_dead_connection_reconnects_at_tunnel_timeout(self):
+        self.run_harness("dead_connection")
+
     def test_config_guard_rejects_either_stale_tcp_limit(self):
         source = (ROOT / "cmake" / "validate_config.cmake").read_text()
         start = source.index("# TCP limits:")

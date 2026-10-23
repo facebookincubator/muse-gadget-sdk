@@ -36,6 +36,10 @@ extern "C" {
 // Tunnel stream id on the shared Noise session (control uses stream 1).
 #define TUNNEL_STREAM_ID 2
 
+// No inbound tunnel frame (pong or data) for this long marks the tunnel dead:
+// about three missed 20s keepalive pings.
+#define TUN_KEEPALIVE_TIMEOUT_US (65 * 1000 * 1000)
+
 // Emit-side callbacks the session owner provides to the tunnel. All run on
 // the session task, so they may touch the ClientSession directly.
 typedef struct {
@@ -129,6 +133,16 @@ int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit);
 // the half-open case where the WS/Noise transport is alive but the VM-side
 // backend behind raw.sock has gone away. No-op if the tunnel is down.
 void noise_tunnel_tick(const noise_tunnel_emit_t *emit);
+
+// True once after noise_tunnel_tick() marked the tunnel down because keepalive
+// pings went out and nothing came back. False when the pings were DMA-gated,
+// since an unsent ping proves nothing. Lets the session owner tell a dead
+// backend (reopen the tunnel) from a dead connection (reconnect).
+bool noise_tunnel_take_unanswered_timeout(void);
+
+// Seconds since the last inbound tunnel frame (pong or data), counting a
+// stream open as one. UINT32_MAX if the tunnel has never opened. Session task.
+uint32_t noise_tunnel_rx_idle_s(void);
 
 #ifdef __cplusplus
 }

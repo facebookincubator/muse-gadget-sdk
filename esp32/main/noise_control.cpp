@@ -21,6 +21,7 @@
 #include "noise_tunnel.h"
 #include "noise_tunnel_internal.h"
 #include "link_events.h"
+#include "link_probe.h"
 #include "ws_mask.h"
 #if CONFIG_HOMEHUB_FAST_GCM
 #include "fast_gcm.h"
@@ -52,6 +53,7 @@ extern "C" {
 #include "reterminal_battery.h"
 #endif
 #include "ota.h"
+#include "tunnel_netif.h"
 #if CONFIG_MUSE_ENABLED
 extern "C" {
 #include "muse_state.h"
@@ -1719,9 +1721,7 @@ static void noise_ota_status(const ota_event_t *ev, void *user) {
 
 // ---- Inbound message dispatch -----------------------------------------------
 
-static void send_device_health(
-    noise_ctrl_session_generation_t session_generation,
-    const char *request_id) {
+extern "C" cJSON *noise_ctrl_device_health_json(bool include_ssid) {
     char wifi_ssid[sizeof(s_wifi_ssid)];
     copy_wifi_ssid(wifi_ssid, sizeof(wifi_ssid));
 
@@ -1771,15 +1771,38 @@ static void send_device_health(
     cJSON_AddItemToObject(health, "metrics", metrics);
 #if CONFIG_HOMEHUB_TUNNEL
     cJSON_AddBoolToObject(health, "tunnel_connected", noise_tunnel_is_connected());
+    // tunnel_connected only means the stream is open. Idle time and counters
+    // show whether it is passing traffic. No control-side idle time: this
+    // request itself just arrived on control.
+    tunnel_stats_t tun_stats;
+    tunnel_netif_get_stats(&tun_stats);
+    cJSON *tunnel = cJSON_CreateObject();
+    uint32_t tun_idle_s = noise_tunnel_rx_idle_s();
+    if (tun_idle_s != UINT32_MAX) {
+        cJSON_AddNumberToObject(tunnel, "rx_idle_seconds", tun_idle_s);
+    }
+    cJSON_AddNumberToObject(tunnel, "rx_packets", tun_stats.rx_pkts);
+    cJSON_AddNumberToObject(tunnel, "rx_bytes", tun_stats.rx_bytes);
+    cJSON_AddNumberToObject(tunnel, "tx_packets", tun_stats.tx_pkts);
+    cJSON_AddNumberToObject(tunnel, "tx_bytes", tun_stats.tx_bytes);
+    cJSON_AddNumberToObject(tunnel, "tx_dropped", tun_stats.tx_dropped);
+    cJSON_AddItemToObject(health, "tunnel", tunnel);
 #endif
     link_events_add_json(health, "connectivity_events");
-    if (wifi_ssid[0]) {
+    if (include_ssid && wifi_ssid[0]) {
         cJSON_AddStringToObject(health, "network_ssid", wifi_ssid);
     }
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON_AddStringToObject(health, "version",
                             desc ? desc->version : "unknown");
+    return health;
+}
 
+static void send_device_health(
+    noise_ctrl_session_generation_t session_generation,
+    const char *request_id) {
+    cJSON *health = noise_ctrl_device_health_json(true);
+    if (!health) return;
     char *payload = cJSON_PrintUnformatted(health);
     cJSON_Delete(health);
     if (!payload) return;
@@ -2090,6 +2113,7 @@ static void note_attempt_failed(const char *reason) {
 static session_result_t run_session(stack_monitor_t *stack) {
     session_result_t result = SESSION_FAILED;
     const char *end_reason = "stopped";
+    bool went_silent = false;  // torn down because nothing came back from the VM
     uint64_t session_up_us = 0;
     uint8_t *ws_buf = nullptr, *rx_buf = nullptr;
     uint8_t *svc_scratch = nullptr, *env_scratch = nullptr;
@@ -2544,6 +2568,18 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // internally, so it's safe to call every loop iteration.
         if (tunnel_opened) {
             noise_tunnel_tick(&tun_emit);
+            // If control has been silent for the same window as the unanswered
+            // tunnel pings, the connection itself is dead (typically a WAN drop
+            // leaving TCP half-open). Reopening the tunnel on it can't work, so
+            // reconnect now instead of waiting out RX_IDLE_TIMEOUT_MS.
+            if (noise_tunnel_take_unanswered_timeout()
+                && esp_timer_get_time() - last_rx_us >= TUN_KEEPALIVE_TIMEOUT_US) {
+                ESP_LOGW(TAG, "tunnel keepalive unanswered and control silent; reconnecting");
+                end_reason = "no response from VM (tunnel keepalive)";
+                went_silent = true;
+                error = true;
+                break;
+            }
         }
 
         // A seal failure permanently poisons Noise, including failures from
@@ -2570,6 +2606,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 ESP_LOGW(TAG, "nothing received for %llus; reconnecting",
                          (unsigned long long)(rx_idle_us / 1000000));
                 end_reason = "no response from VM";
+                went_silent = true;
                 error = true;
                 break;
             }
@@ -2606,6 +2643,9 @@ static session_result_t run_session(stack_monitor_t *stack) {
                        end_reason,
                        (unsigned)((s_session_down_us - session_up_us) / 1000000),
                        (unsigned)((s_session_down_us - last_rx_us) / 1000000));
+    // Silence alone can't say which hop failed; check the internet while the
+    // reconnect runs.
+    if (went_silent) link_probe_on_stall();
     notify_status("ws_disconnected");
     // Clean exit (s_running went false) — no backoff needed.
     if (!error) result = SESSION_OK;

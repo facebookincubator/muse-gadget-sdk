@@ -141,7 +141,7 @@ class LinkBugReportHarnessTest(unittest.TestCase):
 
             self.assertNotIn("BUG_REPORT_SIGNATURE", source)
             self.assertNotIn("BUG_REPORT_ENVELOPE", source + header)
-            self.assertLessEqual(len(report_json.encode()), 32 * 1024)
+            self.assertLessEqual(len(report_json.encode()), 64 * 1024)
             self.assertEqual(
                 set(report),
                 {
@@ -153,8 +153,8 @@ class LinkBugReportHarnessTest(unittest.TestCase):
                     "device",
                     "runtime",
                     "network",
-                    "tunnel",
                     "ota",
+                    "device_health",
                     "logs",
                 },
             )
@@ -163,6 +163,11 @@ class LinkBugReportHarnessTest(unittest.TestCase):
             self.assertEqual(report["redaction_profile"], "hatch-link-support-v1")
             self.assertEqual(report["device"]["model_id"], "hatch-link")
             self.assertEqual(report["network"], {"wifi_connected": True, "rssi_dbm": -47})
+            self.assertEqual(
+                report["device_health"]["connectivity_events"],
+                ["12s ago tunnel_down: keepalive timeout (dma_free=1 dma_largest=1)"],
+            )
+            self.assertNotIn("network_ssid", report["device_health"])
             self.assertEqual(report["logs"]["format"], "hatch-link-application-log-v1")
             self.assertEqual(report["logs"]["sensitivity"], "restricted")
             self.assertTrue(report["logs"]["contains_pii"])

@@ -294,6 +294,7 @@ static void req_end_all() {}
 #define ESP_LOGD log_message
 #define KEEPALIVE_INTERVAL_MS 60000
 static const char *last_end_reason;
+static bool last_went_silent;
 static bool control_tx_turn(bool tunnel_opened = true,
                             noise_ctrl_session_generation_t session_generation = 1) {
     ClientSession &session = *noise_session;
@@ -303,11 +304,13 @@ static bool control_tx_turn(bool tunnel_opened = true,
     void *stack = nullptr;
     bool error = false, did = false;
     const char *end_reason = nullptr;
+    bool went_silent = false;
     const uint64_t last_rx_us = rx_silent ? rx_silent_since_us : now_us;
     do {
 #include "control_tx_turn.inc"
     } while (false);
     last_end_reason = end_reason;
+    last_went_silent = went_silent;
     return error;
 }
 static void cleanup_control() {
@@ -736,6 +739,56 @@ static void test_heartbeat() {
     reset_control();
 }
 
+static void test_dead_connection() {
+    // A WAN drop leaves TCP half-open, so tunnel pongs and control traffic stop
+    // together. Unanswered pings plus silent control reconnect at the tunnel
+    // timeout instead of reopening the tunnel and waiting out RX_IDLE_TIMEOUT_MS.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    uint64_t start = now_us;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US - 1000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(pings == 3 && noise_tunnel_is_connected());
+    now_us = start + TUN_KEEPALIVE_TIMEOUT_US;
+    assert(control_tx_turn());
+    assert(strcmp(last_end_reason, "no response from VM (tunnel keepalive)") == 0);
+    assert(last_went_silent);
+    assert(logs.back() == "tunnel keepalive unanswered and control silent; reconnecting");
+    assert(stream_ops == "O");  // no reopen on the dead connection
+
+    // Control still receiving: only the tunnel backend is gone. Keep the
+    // session and reopen the tunnel, as before.
+    reset_control();
+    start = now_us;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(!noise_tunnel_is_connected() && !noise_tunnel_take_unanswered_timeout());
+    now_us += 1000000;
+    assert(!control_tx_turn());
+    assert(noise_tunnel_is_connected() && stream_ops == "ORO");
+
+    // DMA-gated pings were never sent, so their silence proves nothing: fall
+    // back to the RX-idle limit.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    start = now_us;
+    dma_free = 0;
+    while (now_us - start < static_cast<uint64_t>(RX_IDLE_TIMEOUT_MS) * 1000 - 1000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(pings == 0 && !noise_tunnel_is_connected());
+    now_us = start + static_cast<uint64_t>(RX_IDLE_TIMEOUT_MS) * 1000;
+    assert(control_tx_turn());
+    assert(strcmp(last_end_reason, "no response from VM") == 0);
+    assert(last_went_silent);
+}
 static void test_rx_idle() {
     // A half-open connection accepts every write, so only silence reveals it:
     // ping after 60s idle, reconnect once nothing has come back for 150s.
@@ -753,6 +806,7 @@ static void test_rx_idle() {
     now_us += 1;
     assert(control_tx_turn());
     assert(strcmp(last_end_reason, "no response from VM") == 0);
+    assert(last_went_silent);
     assert(logs.back() == "nothing received for 150s; reconnecting");
 
     // Sending doesn't hide silence: RX idle pings even while TX is active,
@@ -808,6 +862,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[1], "lifecycle") == 0) test_control_lifecycle();
         else if (strcmp(argv[1], "failures") == 0) test_control_failures();
         else if (strcmp(argv[1], "rx_idle") == 0) test_rx_idle();
+        else if (strcmp(argv[1], "dead_connection") == 0) test_dead_connection();
         else assert(false);
         cleanup_control();
         drain_stale_results();

@@ -141,7 +141,9 @@ int main(void) {
     events = cJSON_GetObjectItem(root, "events");
     CHECK(count(events) == LINK_EVENTS_CAPACITY, "expected full ring, got %d", count(events));
     CHECK(strstr(at(events, 0), "wifi_up: n=5 "), "oldest wrong: %s", at(events, 0));
-    CHECK(strstr(at(events, LINK_EVENTS_CAPACITY - 1), "0s ago wifi_up: n=44 "),
+    char newest[32];
+    snprintf(newest, sizeof(newest), "0s ago wifi_up: n=%d ", LINK_EVENTS_CAPACITY + 4);
+    CHECK(strstr(at(events, LINK_EVENTS_CAPACITY - 1), newest),
           "newest wrong: %s", at(events, LINK_EVENTS_CAPACITY - 1));
     cJSON_Delete(root);
     CHECK(g_lock_depth == 0, "lock leaked");
