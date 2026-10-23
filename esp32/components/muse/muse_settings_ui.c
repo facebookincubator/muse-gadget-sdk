@@ -38,6 +38,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 
 /* Keep content in a column that stays inside a round panel (and fits a 368 px one). */
 #define LIST_W 330
@@ -74,6 +77,9 @@ typedef struct {
 
 /* Home values. */
 static lv_obj_t *s_home_wifi, *s_home_hatch, *s_home_ble, *s_home_sound, *s_home_sleep, *s_home_battery, *s_about;
+#if CONFIG_MUSE_VIDEO
+static lv_obj_t *s_home_camera;
+#endif
 
 /* Wi-Fi page. */
 static lv_obj_t *s_wifi_sw, *s_wifi_status, *s_wifi_saved, *s_wifi_scan_btn, *s_wifi_scan_lbl, *s_wifi_list;
@@ -1324,6 +1330,15 @@ static const page_t SLEEP = { &s_sleep, build_sleep_page };
 static const page_t BATTERY = { &s_battery, build_battery_page };
 static const page_t POWER = { &s_power, build_power_page };
 
+#if CONFIG_MUSE_VIDEO
+/* Phone camera: the video view, which asks the phone for a stream. */
+static void on_camera(lv_event_t *e)
+{
+    (void)e;
+    muse_video_open();
+}
+#endif
+
 static void build_home(lv_obj_t *tile)
 {
     lv_obj_t *list;
@@ -1334,6 +1349,11 @@ static void build_home(lv_obj_t *tile)
     row(list, LV_SYMBOL_VOLUME_MAX, "Sound", &s_home_sound, on_nav, (void *)&SOUND);
     row(list, LV_SYMBOL_EYE_CLOSE, "Sleep", &s_home_sleep, on_nav, (void *)&SLEEP);
     row(list, LV_SYMBOL_BATTERY_FULL, "Battery", &s_home_battery, on_nav, (void *)&BATTERY);
+#if CONFIG_MUSE_VIDEO
+    if (muse_video_supported()) {
+        row(list, LV_SYMBOL_VIDEO, "Phone camera", &s_home_camera, on_camera, NULL);
+    }
+#endif
     if (muse_board->power_off) {
         row(list, LV_SYMBOL_POWER, "Power off", NULL, on_nav, (void *)&POWER);
     }
@@ -1372,6 +1392,11 @@ static void tick_home(void)
         snprintf(buf, sizeof(buf), "%s%d%%", p.charging ? LV_SYMBOL_CHARGE " " : "", p.battery_pct);
     }
     set_text(s_home_battery, buf);
+#if CONFIG_MUSE_VIDEO
+    if (s_home_camera) {
+        set_text(s_home_camera, muse_video_has_client() ? "Ready" : "No phone");
+    }
+#endif
 
     snprintf(buf, sizeof(buf), "Muse %s  -  %s", esp_app_get_description()->version,
              w.state == MUSE_WIFI_CONNECTED ? w.ip : "offline");

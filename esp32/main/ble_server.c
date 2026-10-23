@@ -88,6 +88,7 @@ static bool s_advertising_active = false;
 static bool s_plaintext_status_blocked = false;
 static ble_companion_t s_companion = {0};
 static bool s_companion_advertising = false;
+static volatile bool s_quiet = false;     // ble_server_set_quiet
 
 static SemaphoreHandle_t s_tx_mutex = NULL;
 static SemaphoreHandle_t s_rx_mutex = NULL;
@@ -892,6 +893,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 
 static void start_advertising(void) {
     if (s_shutting_down) return;
+    if (s_quiet) return;   // a Wi-Fi video stream wants the radio (ble_server_set_quiet)
     // The companion service keeps the device visible after setup.
     if (!s_companion_advertising) {
         if (config_setup_complete()) return;
@@ -1060,6 +1062,22 @@ void ble_server_disconnect_pairing_session(uint32_t generation) {
     work->generation = generation;
     ble_npl_event_init(&work->event, disconnect_pairing_session_event, work);
     ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &work->event);
+}
+
+void ble_server_set_quiet(bool quiet) {
+    if (s_quiet == quiet) return;
+    s_quiet = quiet;
+    if (!s_started || s_shutting_down) return;
+    if (quiet) {
+        if (s_advertising_active) {
+            int rc = ble_gap_adv_stop();
+            if (rc != 0) ESP_LOGD(TAG, "adv_stop rc=%d", rc);
+            s_advertising_active = false;
+            ESP_LOGI(TAG, "advertising paused (Wi-Fi video)");
+        }
+    } else if (s_synced) {
+        start_advertising();
+    }
 }
 
 void ble_server_begin_advertising(void) {

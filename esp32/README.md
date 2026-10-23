@@ -264,6 +264,13 @@ To give Muse a command of its own, such as reading a sensor or switching a
 relay, advertise it in `link.register` and handle it in `main/app.c`.
 [`AGENTS.md`](AGENTS.md#adding-a-command) walks through it.
 
+To show your phone's camera on a board's screen, build it with
+`MUSE_VIDEO=1 tools/muse/board.sh build <board>` and run Muse Gadgets Test
+([Android](../android/musegadgetstest), [iPhone](../ios/musegadgetstest)) on a phone on the
+same Wi-Fi, then open Phone camera on the board: the phone encodes H.264 or
+VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and
+[`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
+
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
@@ -346,6 +353,14 @@ their upstream licenses:
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.
+- [`components/tinyh264/src`](components/tinyh264), the H.264 decoder, is the
+  Android Open Source Project's (via udevbe/tinyh264), Apache-2.0 under its
+  copyright. See [`components/tinyh264/LICENSE`](components/tinyh264/LICENSE).
+- [`components/libvpx_vp8/src`](components/libvpx_vp8), the VP8 decoder, is
+  libvpx v1.16.0's, trimmed: BSD-3-Clause under the WebM Project authors'
+  copyright, with Google's patent grant. See
+  [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
+  [`PATENTS`](components/libvpx_vp8/PATENTS).
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.

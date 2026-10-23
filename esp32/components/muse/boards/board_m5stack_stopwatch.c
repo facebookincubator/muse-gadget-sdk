@@ -610,6 +610,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
         return NULL;
     }
     esp_lcd_panel_set_gap(s_panel, LCD_GAP_X, 0);
+    muse_lcd_bands_set_gap(LCD_GAP_X, 0);   /* video draws to the panel's memory directly */
     panel_setup(NULL);
 
     esp_lv_adapter_config_t adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
@@ -1103,6 +1104,7 @@ static const muse_board_t s_board = {
     .set_brightness = set_brightness,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
+    .draw_frame = muse_lcd_bands_frame,
     .audio_init = audio_init,
     .mic_slot = 0,              /* one mic, on the left slot */
     .audio_power = audio_power,

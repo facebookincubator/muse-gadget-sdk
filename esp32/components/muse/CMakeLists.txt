@@ -116,6 +116,18 @@ if(CONFIG_MUSE_ENABLED)
     elseif(CONFIG_MUSE_BOARD_AI_PASSPORT)
         list(APPEND srcs "boards/board_ai_passport.c")
     endif()
+    if(CONFIG_MUSE_VIDEO)
+        # Phone camera: decode and draw (muse_video), and the transports that feed it.
+        list(APPEND srcs "muse_video.c" "muse_vdec.c" "muse_yuv.c")
+        if(CONFIG_IDF_TARGET_ESP32S3)
+            list(APPEND srcs "muse_yuv_pie.S")   # the S3's SIMD colour conversion
+        elseif(CONFIG_IDF_TARGET_ESP32S31)
+            list(APPEND srcs "muse_yuv_pie_s31.S")   # the same on the S31's SIMD (checked at first use)
+        endif()
+        if(CONFIG_MUSE_VIDEO_WIFI)
+            list(APPEND srcs "muse_video_wifi.c" "muse_video_wire.c")
+        endif()
+    endif()
     # Shared core, independent of board selection. Keep it after the BSP so
     # Watcher's independently retained recovery markers keep their link order.
     if(CONFIG_MUSE_POWER_TEST)
@@ -131,7 +143,7 @@ endif()
 set(muse_priv_requires
     esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
     bt esp-tls mbedtls esp_app_format esp_http_client
-    noise_core minimp3
+    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt efuse
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
