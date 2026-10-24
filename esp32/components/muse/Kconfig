@@ -153,6 +153,18 @@ menu "Muse"
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
 
+    # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
+    # of LVGL: FreeInk drives the panel and its refreshes, and draws the face,
+    # Settings and the keyboard. Each one names its FreeInk device profile.
+    config MUSE_UI_FREEINK
+        bool
+        default y if MUSE_BOARD_RETERMINAL_STICKY
+
+    config MUSE_FREEINK_DEVICE
+        string
+        default "STICKY" if MUSE_BOARD_RETERMINAL_STICKY
+        default ""
+
     config MUSE_STICKY_SD
         bool "Mount the reTerminal Sticky's microSD card at /sdcard"
         depends on MUSE_BOARD_RETERMINAL_STICKY

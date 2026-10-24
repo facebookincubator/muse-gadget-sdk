@@ -26,6 +26,13 @@ dependencies:
     public: true
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} != \"none\""
+      - if: "$CONFIG{MUSE_UI_FREEINK} != True"
+  # E-paper boards' UI (CONFIG_MUSE_UI_FREEINK, eink/).
+  freeink-sdk:
+    git: https://github.com/Free-Ink/freeink-sdk.git
+    version: 2c047df7792cedece1191503793f18f5d8f1c695
+    rules:
+      - if: "$CONFIG{MUSE_UI_FREEINK} == True"
   espressif/esp_codec_dev:
     version: "~1.5"
     public: true
