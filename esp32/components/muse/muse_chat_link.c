@@ -890,6 +890,11 @@ void muse_hatch_turn_cancel(void)
     xQueueReset(s_events);
 }
 
+bool muse_hatch_incoming(void)
+{
+    return false;   /* replies come on the turn's own session */
+}
+
 muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
 {
     pump();

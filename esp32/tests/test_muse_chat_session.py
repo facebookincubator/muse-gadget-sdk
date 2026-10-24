@@ -26,6 +26,7 @@ class ChatSession(unittest.TestCase):
         handlers = source[source.index('static int find_msg('):source.index('static void on_chat_ack(')]
         reset = source[source.index('static bool turn_start('):source.index('static void turn_begin(')]
         code = r'''
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -39,6 +40,7 @@ class ChatSession(unittest.TestCase):
 #define ESP_LOGI(...) ((void)0)
 ''' + constants + types + r'''
 static turn_t s_turn;
+static std::atomic<uint32_t> s_gen{0};
 static char s_reply_shown[EV_TEXT];
 static int64_t s_last_seq, s_marks[4];
 static int captions, console_events;
@@ -128,12 +130,34 @@ static void bounded_rejections() {
     event("message.assistant", "second", "note", "Second");
     assert(s_turn.nmsgs == 2 && s_turn.msgs[0].done && s_turn.msgs[1].done);
 }
+static void late_reply() {
+    /* A turn that ended while Muse still worked: its request is remembered. */
+    begin();
+    memcpy(s_pending.ids, s_turn.user_ids, sizeof(s_pending.ids));
+    s_pending.active = true;
+    s_turn.phase = P_IDLE;
+    s_incoming = false;
+    event("delta.message_start", "stranger", "elsewhere");   /* a reply to something else */
+    event("delta.text_append", "late", "note", "Not a start");
+    assert(s_turn.phase == P_IDLE && !s_incoming);
+    event("delta.message_start", "late");   /* Muse's first event names no parent */
+    assert(s_turn.phase == P_WAIT_REPLY && s_incoming.exchange(false) && s_turn.incoming && s_turn.acked);
+    event("delta.text_append", "late", "", "The document is ready");
+    event("delta.message_done", "late");
+    assert(s_turn.nmsgs == 1 && s_turn.msgs[0].done && s_turn.msgs[0].len == 21 && captions == 1);
+    /* Nobody waits for it any more. */
+    s_turn.phase = P_IDLE;
+    s_pending.active = false;
+    event("delta.message_start", "later");
+    assert(s_turn.phase == P_IDLE && !s_incoming);
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
     case 0: rejected_deltas(); break;
     case 1: valid_parents(); break;
     case 2: bounded_rejections(); break;
+    case 3: late_reply(); break;
     default: return 2;
     }
 }
@@ -166,3 +190,6 @@ int main(int argc, char **argv) {
 
     def test_rejection_capacity_preserves_correlation(self):
         self.run_case(2)
+
+    def test_a_reply_after_its_turn_ended_starts_a_turn_only_for_its_request(self):
+        self.run_case(3)

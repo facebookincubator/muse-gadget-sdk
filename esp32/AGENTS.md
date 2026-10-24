@@ -460,6 +460,15 @@ To skip BLE Wi-Fi provisioning while you iterate, set
 `CONFIG_HOMEHUB_WIFI_SSID` and `CONFIG_HOMEHUB_WIFI_PASSWORD` in `menuconfig`.
 The device still needs to be paired once for its token.
 
+## Slow replies
+
+On a board with the full UI and Muse's own voice session (PSRAM), a push-to-talk turn whose request Muse took
+but hasn't answered after 20 s adds a notice to the turn ("Muse is working on it. I'll tell you when it's
+done."), lets go of the turn so you can ask something else, and remembers the request for 30 minutes. A message
+that then arrives with no turn running and doesn't name another request starts a turn of its own, which wakes the
+screen and plays like any reply (`muse_hatch_incoming()` tells the voice task). A reply that arrives in the
+middle of another turn is still rejected, as before, and only one request is remembered at a time.
+
 ## Video from a phone
 
 `MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
