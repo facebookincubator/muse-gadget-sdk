@@ -404,8 +404,13 @@ its animation (`jollybot.gif`, and `happy_anim.c/.h` made from it by
 `tools/gen_happy_anim.py`).
 
 Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
-`main/pixel_font.c` (BSD-2-Clause, Adafruit), and
-`components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32).
+`main/pixel_font.c` (BSD-2-Clause, Adafruit),
+`components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
+`main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
+`components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
+`components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
+Each third-party file is listed under License in `README.md` and the root
+`README.md`; add a new one to both.
 Don't restyle them or replace their headers with the Apache one; `components/minimp3/README.md` says how to
 update minimp3.
 
@@ -456,6 +461,60 @@ pairing as well, identifying its three physical controls.
 To skip BLE Wi-Fi provisioning while you iterate, set
 `CONFIG_HOMEHUB_WIFI_SSID` and `CONFIG_HOMEHUB_WIFI_PASSWORD` in `menuconfig`.
 The device still needs to be paired once for its token.
+
+## Video from a phone
+
+`MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
+`devices/sdkconfig.muse-video`) adds video streaming (`CONFIG_MUSE_VIDEO`,
+`CONFIG_MUSE_VIDEO_WIFI`): Muse Gadgets Test (`../android/musegadgetstest` for
+Android, `../ios/musegadgetstest` for iPhone) on a phone on the same Wi-Fi streams
+its camera, or a clip, as H.264 or VP8
+(`CONFIG_MUSE_VIDEO_VP8`, on by default), and the board decodes it and
+draws it full screen. `../protocols/VIDEO.md` has
+the design, the Wi-Fi protocol and the numbers.
+
+- **Boards:** those whose panel driver has `draw_frame` and that have PSRAM:
+  the Waveshare S3 1.75C (tested) and 1.75, the StopWatch and the
+  ESP-Mosaico. Another QSPI AMOLED driven by `boards/muse_lcd_bands.c` gets
+  it with `.draw_frame = muse_lcd_bands_frame` and its panel gap
+  (`muse_lcd_bands_set_gap`); `muse_lcd_bands_set_te` if the TE line is wired.
+- **Pieces:** `components/tinyh264` and `components/libvpx_vp8` (the
+  decoders, behind `muse_vdec.c`),
+  `components/muse_vstream` (the receive ring and frame format any transport
+  shares), `components/muse/muse_video.c` (decode and show tasks, pacing,
+  bands, the view), `muse_yuv*.c/.S` (colour conversion and scaling),
+  `muse_video_wifi.c` (TCP on port 7766, mDNS `_musevideo._tcp`) and
+  `muse_video_wire.c` (its messages). A new transport fills a
+  `muse_video_transport_t` and calls `muse_video_begin()`.
+- **Using it:** Phone camera in Settings (touch boards) or the menu opens the
+  view and asks the phone for a stream; any button closes it. The console's
+  `>video` / `>video=0` do the same. The board takes a stream only while the
+  view is open: the port is unauthenticated (`../protocols/VIDEO.md`, Trust).
+  `CONFIG_MUSE_VIDEO_WIFI_START_ANYTIME` lifts that for automated benches;
+  never ship it. Stats every 2 s on `muse_video`: decode time,
+  received-to-shown, kb/s, shown/dropped/skipped, each core's load.
+- **Radio:** while a stream is on, Wi-Fi stays out of modem sleep and BLE
+  stops advertising (`muse_wifi_keep_awake`, `muse_link_ble_quiet`): with BLE
+  advertising, the radio's scheduler gives BLE half of every beacon period
+  and the stream's packets wait out that half (50 ms round trips instead of
+  15, and the phone's bitrate falls to its floor).
+- **Memory:** the ring (128 KB) and the decoders' memory are in PSRAM, and
+  the decode tasks' stacks in main SRAM (`MALLOC_CAP_DMA`): the S31 also
+  hands out LP RAM as heap once main SRAM runs low, several times slower, so
+  keep anything per-frame out of plain internal `malloc`. The decode and show
+  tasks take about 20 KB of internal RAM once the first stream starts.
+  `CONFIG_MUSE_VIDEO_DECODER_IRAM` (off) puts the decoders' hot code in IRAM:
+  44 KB (and 33 KB for VP8; `CONFIG_MUSE_VP8_IRAM` picks less or more) that a
+  Wi-Fi + BLE + UI build on the S3 can't spare (LVGL's task then fails to
+  start).
+- **Test** with `tests/test_muse_video.py` (the ring and the Wi-Fi messages,
+  and the wiring under the options), `tests/test_video_untrusted.py`
+  (hostile sizes, the port's guards), `tests/test_tinyh264_pie.py` and
+  `tests/test_libvpx_vp8.py`; on a board, with Muse Gadgets Test (Android:
+  `adb logcat -s MuseCam`; iPhone: Xcode's console).
+- **Untrusted input:** everything from the network is. Keep the checks in
+  `../protocols/VIDEO.md`'s Trust section when changing the transport, the
+  decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
 
 ## Configuration gotchas
 

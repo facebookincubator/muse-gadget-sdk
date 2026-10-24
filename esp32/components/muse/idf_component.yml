@@ -16,6 +16,11 @@ dependencies:
   idf:
     version: ">=5.5"
   espressif/cjson: "~1.7"
+  # Video over Wi-Fi announces itself with it (muse_video_wifi.c).
+  espressif/mdns:
+    version: "^1.8"
+    rules:
+      - if: "$CONFIG{MUSE_VIDEO_MDNS} == \"y\""
   lvgl/lvgl:
     version: "9.5.0"
     public: true

@@ -96,7 +96,7 @@ void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result);
 
-// ---- Extra daemon requests on this session (Muse builds only) ----
+// ---- Extra daemon requests on this session (Muse and display builds) ----
 //
 // Any task can open an HTTP request to the VM daemon on its own stream of this
 // session. A refused or reset request never affects the control session.
@@ -122,6 +122,10 @@ bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
 // Cancels the request. Until the session task gets to the cancel, the callback
 // may still run, even with -1 if the session ends, so ctx must stay valid.
 void noise_ctrl_req_cancel(int64_t id);
+// The daemon may send a reply body in one frame, and a frame larger than this
+// board's buffers ends the session (NOISE_CTRL_REQ_TOO_LARGE). A request whose
+// reply could be larger should bound it to this many bytes, e.g. with Range.
+size_t noise_ctrl_req_max_body(void);
 
 #ifdef __cplusplus
 }

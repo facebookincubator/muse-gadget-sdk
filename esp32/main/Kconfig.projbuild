@@ -509,8 +509,9 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_DISPLAY
         default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM
         help
-            Set when display.draw_url can draw a downloaded image: the
-            display backends, and boards with the full UI and PSRAM for the image.
+            Set when display.draw_url and display.draw_file can draw an
+            image: the display backends, and boards with the full UI and PSRAM
+            for the image.
 
     config HOMEHUB_PRE_DVT_GPIO
         bool "Use pre-DVT GPIO assignments"

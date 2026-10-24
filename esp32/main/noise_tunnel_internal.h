@@ -65,13 +65,20 @@ typedef struct {
 
 // ---- Called by the session owner (noise_control.cpp) ------------------------
 
+// TOTAL free DMA is the burst margin: roughly two 8 KiB batches (or ten
+// MTU-sized buffers) for the chunk plus concurrent WiFi/lwIP churn. Keep this
+// at the result-queue boundary, before every control chunk, tunnel batch and
+// ping. Download admission also leaves this margin after its allocations.
+// It is not a contiguous-allocation requirement or a reservation.
+#define NOISE_TX_DMA_RESERVE_BYTES (16 * 1024)
+
 // Total-free burst margin for tunnel batches, result dequeue, every control
 // chunk and tunnel pings. Optionally return the same sample for diagnostics.
 bool noise_tx_has_dma_headroom(size_t *dma_free);
 
 // The same margin, counting `reclaimable` bytes the send itself frees (Muse's
 // queued request payloads; on boards without PSRAM they are DMA-capable too).
-// Muse builds only.
+// Muse and display builds only.
 bool noise_tx_has_dma_headroom_reclaiming(size_t reclaimable);
 
 // Small contiguous AES-allocation floor, independent of the total-free burst

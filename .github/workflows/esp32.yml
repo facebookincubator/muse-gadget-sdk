@@ -148,6 +148,10 @@ jobs:
           - board: muse-waveshare-s3-175
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175"
+          # Video from a phone (MUSE_VIDEO=1 tools/muse/board.sh): the decoder and Wi-Fi transport.
+          - board: muse-waveshare-s3-175c-video
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-video"
           - board: muse-waveshare-s3-185c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-185c"
@@ -187,6 +191,9 @@ jobs:
           - board: muse-m5stack-stopwatch
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch"
+          - board: muse-m5stack-stopwatch-video
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
           - board: muse-seeed-xiao-s3-147
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147"

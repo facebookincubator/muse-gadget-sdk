@@ -120,6 +120,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (bsp_display_new(&panel_cfg, &panel, &s_io) != ESP_OK) {
         return NULL;
     }
+    muse_lcd_bands_set_gap(6, 0);   /* the BSP's panel gap, for video's direct writes */
     const esp_lv_adapter_display_config_t disp_cfg = {
         .panel = panel,
         .panel_io = s_io,
@@ -274,6 +275,7 @@ static const muse_board_t s_board = {
     .set_brightness = set_brightness,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
+    .draw_frame = muse_lcd_bands_frame,
     .audio_init = audio_init,
     .mic_slot = -1,
     .set_mic_gain = set_mic_gain,

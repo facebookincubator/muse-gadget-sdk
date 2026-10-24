@@ -13,8 +13,6 @@
  * The PDM microphone uses I2S0. The board has no speaker. This profile does
  * not use SD/IMU.
  */
-#include <string.h>
-
 #include "driver/i2c_master.h"
 #include "driver/i2s_pdm.h"
 #include "driver/ledc.h"

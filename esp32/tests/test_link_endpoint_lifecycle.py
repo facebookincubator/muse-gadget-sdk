@@ -75,6 +75,10 @@ class LinkEndpointLifecycleTest(unittest.TestCase):
 #define ESP_OTA_IMG_PENDING_VERIFY 1
 #define esp_ota_get_running_partition() NULL
 #define esp_ota_get_state_partition(p, s) ((void)(p), (void)(s), -1)
+#define esp_ota_mark_app_valid_cancel_rollback() ESP_OK
+#define ota_installed_by_vibe_mode() false
+#define ota_verify_forget() ((void)0)
+#define ESP_LOGI(...) ((void)0)
 #define xTaskCreate(...) ((void)0)
 typedef int esp_partition_t;
 typedef int esp_ota_img_states_t;
