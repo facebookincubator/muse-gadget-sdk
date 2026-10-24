@@ -282,7 +282,7 @@ menu "Muse"
 
     config MUSE_VIDEO
         bool "Video streaming from a phone to the display"
-        depends on MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31)
+        depends on MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31) && !MUSE_UI_FREEINK
         default n
         help
             A phone (Muse Gadgets Test, android/musegadgetstest) streams its camera, or

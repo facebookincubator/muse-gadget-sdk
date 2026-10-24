@@ -73,8 +73,10 @@ class LinkEpaperStatusTest(unittest.TestCase):
         sd = kc[kc.index("config MUSE_STICKY_SD"):]
         self.assertIn("default n", sd[:sd.index("help")])
         sticky = (ROOT / "components/muse/boards/board_reterminal_sticky.c").read_text()
-        task = sticky[:sticky.index("static void sd_task(")]
-        self.assertTrue(task.rstrip().endswith("#if CONFIG_MUSE_STICKY_SD"))
+        helper = sticky[:sticky.index("static esp_err_t sd_bus_init(")]
+        self.assertTrue(helper.rstrip().endswith("#if CONFIG_MUSE_STICKY_SD"))
+        task = sticky[sticky.index("static esp_err_t sd_bus_init("):sticky.index("static void sd_task(")]
+        self.assertNotIn("#endif", task)
         workflow = (ROOT.parent / ".github/workflows/esp32.yml").read_text()
         self.assertIn('board: reterminal-sticky\n            target: esp32s3\n'
                       '            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"',

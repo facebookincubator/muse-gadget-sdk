@@ -682,6 +682,10 @@ Run one `idf.py build` first: `test_link_discovery` compiles cJSON from
 `managed_components/`, and that directory only exists after a build. Set `CC`
 or `CXX` to change compilers.
 
+The e-ink navigation tests use the pinned FreeInk source: set
+`FREEINK_SOURCE_DIR` to its checkout, or use `managed_components/freeink-sdk`
+from a Sticky configure. CI checks out that exact pin for the host tests.
+
 Two tests skip quietly when their inputs are missing; check the summary for
 `skipped=`:
 

@@ -26,6 +26,7 @@
 #include "muse_link.h"
 #include "eink/muse_eink.h"
 #if CONFIG_MUSE_STICKY_SD
+#include "driver/spi_master.h"
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #endif
@@ -60,6 +61,21 @@ static esp_err_t gauge_connect(void)
 
 static esp_err_t touch_start(void);
 #if CONFIG_MUSE_STICKY_SD
+static esp_err_t sd_bus_init(void)
+{
+    /* The panel is write-only; the SD card also needs its MISO line. FreeInk
+     * reuses this already-initialized bus without changing its pins. */
+    const spi_bus_config_t bus = {
+        .mosi_io_num = GPIO_NUM_14,
+        .miso_io_num = GPIO_NUM_12,
+        .sclk_io_num = GPIO_NUM_13,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4096,
+    };
+    return spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO);
+}
+
 static void sd_task(void *arg);
 #endif
 
@@ -110,7 +126,7 @@ static esp_err_t init(void)
     if (gauge_connect() != ESP_OK) ESP_LOGW(TAG, "BQ27220 not responding; retrying later");
     if (touch_start() != ESP_OK) ESP_LOGW(TAG, "GT911 unavailable; buttons remain active");
 #if CONFIG_MUSE_STICKY_SD
-    /* It retries until FreeInk has brought up the panel's SPI bus. */
+    ESP_RETURN_ON_ERROR(sd_bus_init(), TAG, "shared SD/panel SPI bus");
     s_sd_lock = xSemaphoreCreateMutex();
     if (!s_sd_lock || xTaskCreate(sd_task, "sticky_sd", 4096, NULL, 2, NULL) != pdPASS) {
         ESP_LOGW(TAG, "SD hotplug monitor unavailable");

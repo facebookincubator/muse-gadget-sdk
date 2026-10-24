@@ -178,10 +178,19 @@ static void advance(Column &c, int h)
 /* Text cut to w px, ending in dots, as LONG_MODE_DOTS. */
 static void fit(char *out, size_t cap, const char *text, FontId font, int w)
 {
-    strlcpy(out, text, cap);
+    if (!cap) return;
+    size_t n = utf8_prefix_bytes(text, cap - 1);
+    memcpy(out, text, n);
+    out[n] = 0;
+    sanitize_utf8(out);
     if (text_width(font, out) <= w) return;
-    size_t n = strlen(out);
-    while (n && text_width(font, out) + text_width(font, "...") > w) out[--n] = 0;
+    size_t room = cap > 3 ? cap - 4 : 0;
+    n = utf8_prefix_bytes(out, room);
+    out[n] = 0;
+    while (n && text_width(font, out) + text_width(font, "...") > w) {
+        n = utf8_pop_bytes(out, n);
+        out[n] = 0;
+    }
     strlcat(out, "...", cap);
 }
 
@@ -351,6 +360,21 @@ static bool s_text_password, s_text_reveal;
 static text_done_cb_t s_text_done;
 static Page s_text_back;
 static freeink::ui::KeyboardEntry s_entry;
+static const freeink::ui::KeyboardLayout *s_keyboard_frame;
+
+static const freeink::ui::KeyboardLayout &keyboard_for_frame(void)
+{
+    s_keyboard_frame = &freeink::ui::builtinKeyboardLayout(s_entry.layout, s_entry.shifted, s_entry.symbols,
+                                                          s_entry.numberRow, /*langKey=*/true);
+    return *s_keyboard_frame;
+}
+
+bool settings_keyboard_changed(void)
+{
+    return s_page == TEXT && s_keyboard_frame &&
+           s_keyboard_frame != &freeink::ui::builtinKeyboardLayout(s_entry.layout, s_entry.shifted, s_entry.symbols,
+                                                                   s_entry.numberRow, /*langKey=*/true);
+}
 
 static const char *sleep_name(int secs)
 {
@@ -365,6 +389,7 @@ static const char *sleep_name(int secs)
 static void show(Page p)
 {
     if (p == s_page) return;
+    navigation_changed();
     s_page = p;
     s_scroll = 0;
     s_changed = true;
@@ -388,7 +413,7 @@ static void close_text(void)
 }
 
 static void open_text(const char *title, const char *initial, bool password, size_t max_len, const char *hint,
-                      text_done_cb_t done)
+                      text_done_cb_t done, Page back)
 {
     if (!s_text) s_text = (char *)calloc(1, TEXT_MAX);
     if (!s_text) return;
@@ -401,7 +426,7 @@ static void open_text(const char *title, const char *initial, bool password, siz
     s_text_password = password;
     s_text_reveal = false;
     s_text_done = done;
-    s_text_back = s_page;
+    s_text_back = back;
     show(TEXT);
 }
 
@@ -443,6 +468,7 @@ void settings_scroll(int dy)
     to = to > max ? max : to;
     to = to < 0 ? 0 : to;
     if (to != s_scroll) {
+        navigation_changed();
         s_scroll = to;
         s_changed = true;
     }
@@ -456,8 +482,7 @@ static void on_other_ssid(const char *ssid)
 {
     if (!ssid[0]) return;
     strlcpy(s_join_ssid, ssid, sizeof(s_join_ssid));
-    open_text(ssid, "", true, MUSE_PASS_MAX, "Empty if it's open", on_wifi_pass);
-    s_text_back = WIFI;
+    open_text(ssid, "", true, MUSE_PASS_MAX, "Empty if it's open", on_wifi_pass, WIFI);
 }
 
 static void on_hatch_host_done(const char *text) { muse_settings_set_hatch_host(text); }
@@ -501,22 +526,25 @@ static void on_action(const ActionEvent &e, void *)
     case ACT_WIFI_SW: muse_settings_set_wifi_on(!muse_settings_wifi_on()); break;
     case ACT_WIFI_SCAN: muse_wifi_scan(); break;
     case ACT_WIFI_AP: {
+        if (s_page != WIFI || e.value < 0 || e.value >= s_ap_n) break;
         /* A saved network asks again too, in case its password changed. */
         const muse_wifi_ap_t *ap = &s_aps[e.value];
         strlcpy(s_join_ssid, ap->ssid, sizeof(s_join_ssid));
         if (ap->secure) {
             g_app->clearTapFlash();
-            open_text(ap->ssid, "", true, MUSE_PASS_MAX, "Password", on_wifi_pass);
+            open_text(ap->ssid, "", true, MUSE_PASS_MAX, "Password", on_wifi_pass, WIFI);
         } else {
             muse_settings_set_wifi(s_join_ssid, "");
         }
         break;
     }
     case ACT_WIFI_SAVED:
+        if (s_page != WIFI || e.value < 0 || e.value >= s_saved_n) break;
         /* Two taps within a few seconds forget a saved network. */
         if (s_forget_armed == e.value && now - s_forget_armed_us < 4000000) {
             muse_wifi_forget(s_saved[e.value].ssid);
             s_forget_armed = -1;
+            s_forget_armed_us = 0;
         } else {
             s_forget_armed = e.value;
             s_forget_armed_us = now;
@@ -525,7 +553,7 @@ static void on_action(const ActionEvent &e, void *)
         break;
     case ACT_WIFI_OTHER:
         g_app->clearTapFlash();
-        open_text("Other network", "", false, MUSE_SSID_MAX, "Network name", on_other_ssid);
+        open_text("Other network", "", false, MUSE_SSID_MAX, "Network name", on_other_ssid, WIFI);
         break;
     case ACT_HATCH_RESET:
         /* Two taps within a few seconds: this wipes Wi-Fi and the Muse app pairing. */
@@ -541,24 +569,24 @@ static void on_action(const ActionEvent &e, void *)
         char host[MUSE_HOST_MAX + 1];
         muse_settings_hatch_host(host);
         g_app->clearTapFlash();
-        open_text("Muse server", host, false, MUSE_HOST_MAX, "Empty for the default", on_hatch_host_done);
+        open_text("Muse server", host, false, MUSE_HOST_MAX, "Empty for the default", on_hatch_host_done, HATCH);
         break;
     }
     case ACT_HATCH_VM: {
         char vm[MUSE_VM_MAX + 1];
         muse_settings_hatch_vm(vm);
         g_app->clearTapFlash();
-        open_text("VM ID", vm, false, MUSE_VM_MAX, "Optional", on_hatch_vm_done);
+        open_text("VM ID", vm, false, MUSE_VM_MAX, "Optional", on_hatch_vm_done, HATCH);
         break;
     }
     case ACT_HATCH_TOKEN:
         g_app->clearTapFlash();
-        open_text("Device token", "", true, MUSE_TOKEN_MAX, "Empty keeps the current one", on_hatch_token_done);
+        open_text("Device token", "", true, MUSE_TOKEN_MAX, "Empty keeps the current one", on_hatch_token_done, HATCH);
         break;
     case ACT_HATCH_SDK:
         g_app->clearTapFlash();
         open_text("SDK token", "", true, 48 /* mgst_ and 43 more */, "Empty keeps the current one; a new one restarts",
-                  on_hatch_sdk_token_done);
+                  on_hatch_sdk_token_done, HATCH);
         break;
     case ACT_HATCH_TEST: muse_hatch_test(); break;
     case ACT_BLE_SW: muse_settings_set_ble_on(!muse_settings_ble_on()); break;
@@ -583,8 +611,14 @@ static void on_action(const ActionEvent &e, void *)
         break;
     case ACT_TEXT_SHOW: s_text_reveal = !s_text_reveal; break;
     case ACT_KB_KEY: s_entry.key(e.value, e.longPress); break;
-    case ACT_KB_SHIFT: s_entry.shift(); break;
-    case ACT_KB_MODE: s_entry.mode(); break;
+    case ACT_KB_SHIFT:
+        s_entry.shift();
+        if (s_entry.symbols) navigation_changed();   /* symbol pages change hit geometry */
+        break;
+    case ACT_KB_MODE:
+        s_entry.mode();
+        navigation_changed();
+        break;
     case ACT_KB_DEL: s_entry.backspace(); break;
     case ACT_KB_LANG: {
         /* The next of FreeInk's layouts the fonts draw and the field reads
@@ -601,6 +635,7 @@ static void on_action(const ActionEvent &e, void *)
         s_entry.layout = LAYOUTS[(i + 1) % n];
         s_entry.shifted = false;
         s_entry.symbols = false;
+        navigation_changed();
         break;
     }
     case ACT_KB_OK:
@@ -674,6 +709,9 @@ static void tick_wifi(void)
     muse_wifi_saved_t saved[MUSE_WIFI_SAVED_MAX];
     int n = muse_wifi_saved(saved, MUSE_WIFI_SAVED_MAX);
     if (n != s_saved_n || memcmp(saved, s_saved, n * sizeof(saved[0]))) {
+        bool rows_changed = n != s_saved_n;
+        for (int i = 0; !rows_changed && i < n; i++) rows_changed = strcmp(saved[i].ssid, s_saved[i].ssid) != 0;
+        if (rows_changed) navigation_changed();
         memcpy(s_saved, saved, n * sizeof(saved[0]));
         s_saved_n = n;
         s_forget_armed = -1;
@@ -693,8 +731,15 @@ static void tick_wifi(void)
     }
 
     uint32_t gen;
-    n = muse_wifi_scan_results(s_aps, MAX_APS, &gen);
-    if (gen != s_shown_scan_gen) {
+    muse_wifi_ap_t aps[MAX_APS];
+    n = muse_wifi_scan_results(aps, MAX_APS, &gen);
+    bool rows_changed = n != s_ap_n;
+    for (int i = 0; !rows_changed && i < n; i++) {
+        rows_changed = strcmp(aps[i].ssid, s_aps[i].ssid) != 0 || aps[i].secure != s_aps[i].secure;
+    }
+    if (rows_changed) navigation_changed();
+    memcpy(s_aps, aps, n * sizeof(aps[0]));
+    if (gen != s_shown_scan_gen || rows_changed) {
         bool fresh = s_shown_scan_gen != UINT32_MAX, saved_seen = false;
         s_shown_scan_gen = gen;
         s_ap_n = n;
@@ -1046,8 +1091,7 @@ static void page_text(Screen &screen)
      * the bottom of the screen, under the thumbs. */
     const int kb_w = g_w - 16, kb_h = kb_w * 206 / 384, kb_y = g_h - kb_h - 8;
     freeink::ui::KeyboardProps kb;
-    kb.layout = &freeink::ui::builtinKeyboardLayout(s_entry.layout, s_entry.shifted, s_entry.symbols, s_entry.numberRow,
-                                                    /*langKey=*/true);
+    kb.layout = &keyboard_for_frame();
     kb.langAction = ACT_KB_LANG;
     kb.keyAction = ACT_KB_KEY;
     kb.shiftAction = ACT_KB_SHIFT;

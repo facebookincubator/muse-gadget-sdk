@@ -17,7 +17,7 @@
 /* What the e-ink face (muse_eink_ui.cpp) and Settings (muse_eink_settings.cpp) share. */
 #include <FreeInkApp.h>
 #include <FreeInkUIDisplayTarget.h>
-
+#include "muse_eink_text.h"
 
 namespace muse_eink {
 
@@ -75,10 +75,13 @@ bool settings_back(void);           /* false at its home page */
 void settings_home(void);
 bool settings_tick(void);           /* true when its page needs drawing again */
 bool settings_typing(void);         /* the keyboard is up: swipes don't leave */
+bool settings_keyboard_changed(void); /* rebuild key IDs before draining more input */
 void settings_scroll(int dy);       /* a vertical swipe of dy px */
 
 /* From a handler: draw again as soon as the current refresh is done. */
 void request_draw(void);
+/* Fence old-page touches until the replacement page is presented. */
+void navigation_changed(void);
 void request_face(void);
 
 }  // namespace muse_eink

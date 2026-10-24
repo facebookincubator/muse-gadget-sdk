@@ -32,6 +32,7 @@
  */
 
 #include <EInkDisplay.h>
+#include <atomic>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -95,10 +96,11 @@ int g_w = 480, g_h = 800;
 static EInkDisplay s_display(0, 0, 0, 0, 0, 0);   /* pins come from FreeInk's board profile */
 static freeink::ui::DisplayTarget *s_target;
 static TaskHandle_t s_task, s_touch_task;
-static volatile bool s_ready, s_paused, s_dark, s_draw_now, s_want_face;
-static volatile bool s_face_active = true;
+static std::atomic<bool> s_ready{}, s_paused{}, s_dark{}, s_draw_now{}, s_want_face{};
+static std::atomic<bool> s_face_active{true}, s_image_shown{};
 static int s_fast_count;
-static bool s_need_clean = true;
+static std::atomic<bool> s_need_clean{true};
+static std::atomic<uint32_t> s_navigation_epoch{}, s_presented_epoch{};
 
 /* The layout, worked out as muse_ui.c does for the full layout. */
 static int s_canvas_px, s_dy, s_big_y;
@@ -113,59 +115,91 @@ static ReplyBox s_read;     /* the read layout: replies on a speakerless board *
 struct TouchEvent {
     int16_t x, y;
     bool down;
+    int64_t time_us;
+    uint32_t epoch;
 };
 static QueueHandle_t s_touch_q;
-static volatile int16_t s_mic_x = -1, s_mic_y, s_mic_r;    /* the mic's hit circle, -1 hidden */
+static std::atomic<bool> s_mic_visible{};
+
+static bool mic_available(void)
+{
+    return s_mic_visible && s_face_active && !s_image_shown && !s_dark && !s_paused &&
+           s_presented_epoch.load() == s_navigation_epoch.load();
+}
+
+struct TouchState {
+    bool was_down, mic, swallow;
+    int16_t x, y;
+    uint32_t epoch;
+};
+static TouchState s_touch;
+
+static void touch_sample(bool down, int16_t nx, int16_t ny)
+{
+    TouchState &t = s_touch;
+    if (down) {
+        t.x = nx;
+        t.y = ny;
+    }
+    if (t.mic && !mic_available()) {
+        muse_input_touch_talk(false);
+        t.mic = false;
+        t.swallow = true;   /* a held mic press must not become a Settings tap */
+    }
+    if (down && !t.was_down) {
+        t.epoch = s_presented_epoch.load();
+        /* As muse_ui.c's on_any_press. */
+        if (muse_board->touch_talk && muse_link_state() == MUSE_LINK_CONFIRM) {
+            muse_input_touch_talk(true);
+            muse_input_touch_talk(false);
+        }
+        muse_state_poke();
+        t.swallow = false;
+        t.mic = false;
+        if (muse_state_asleep() || s_dark) {
+            /* The waking touch only wakes, like the LVGL UI's sleep cover. */
+            muse_state_set_asleep(false);
+            t.swallow = true;
+            if (s_task) xTaskNotifyGive(s_task);
+        } else if (mic_available()) {
+            int dx = t.x - g_w / 2, dy = t.y - (g_h - 50 - MIC_PX / 2);
+            const int r = MIC_PX / 2 + MIC_HIT_PAD;
+            if (dx * dx + dy * dy <= r * r) {
+                muse_input_touch_talk(true);
+                t.mic = true;
+            }
+        }
+    }
+    if (!down && t.was_down && t.mic) {
+        muse_input_touch_talk(false);
+        t.mic = false;
+        t.swallow = true;
+    }
+    /* A mic press keeps ownership until release, even if the finger moves. */
+    if (!t.swallow && !t.mic && down != t.was_down) {
+        TouchEvent e = {t.x, t.y, down, esp_timer_get_time(), t.epoch};
+        if (xQueueSend(s_touch_q, &e, 0) == pdTRUE && !down && s_task) xTaskNotifyGive(s_task);
+    }
+    t.was_down = down;
+}
 
 static void touch_task(void *arg)
 {
     (void)arg;
-    bool was_down = false, mic = false, swallow = false;
-    int16_t x = 0, y = 0;   /* where the finger is, or last was */
     for (;;) {
         if (s_paused) {
+            if (s_touch.mic) {
+                muse_input_touch_talk(false);
+                s_touch.mic = false;
+                s_touch.swallow = true;
+            }
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             continue;
         }
         vTaskDelay(pdMS_TO_TICKS(TOUCH_POLL_MS));
-        int16_t nx, ny;
-        bool down = muse_board->touch_read(&nx, &ny);
-        if (down) {
-            x = nx;
-            y = ny;
-        }
-        if (down && !was_down) {
-            /* As muse_ui.c's on_any_press. */
-            if (muse_board->touch_talk && muse_link_state() == MUSE_LINK_CONFIRM) {
-                muse_input_touch_talk(true);
-                muse_input_touch_talk(false);
-            }
-            muse_state_poke();
-            swallow = false;
-            mic = false;
-            if (muse_state_asleep() || s_dark) {
-                /* The waking touch only wakes, like the LVGL UI's sleep cover. */
-                muse_state_set_asleep(false);
-                swallow = true;
-                if (s_task) xTaskNotifyGive(s_task);
-            } else if (s_mic_x >= 0) {
-                int dx = x - s_mic_x, dy = y - s_mic_y, r = s_mic_r;
-                if (dx * dx + dy * dy <= r * r) {
-                    muse_input_touch_talk(true);
-                    mic = true;
-                }
-            }
-        }
-        if (!down && was_down && mic) {
-            muse_input_touch_talk(false);
-        }
-        /* The press and the release, which is where the finger last was: a
-         * swipe is the distance between them. */
-        if (!swallow && !mic && down != was_down) {
-            TouchEvent e = {x, y, down};
-            if (xQueueSend(s_touch_q, &e, 0) == pdTRUE && !down && s_task) xTaskNotifyGive(s_task);
-        }
-        was_down = down;
+        int16_t x = 0, y = 0;
+        bool down = muse_board->touch_read(&x, &y);
+        touch_sample(down, x, y);
     }
 }
 
@@ -179,12 +213,7 @@ int line_height(FontId font)
 /* The next codepoint's bytes. */
 static size_t utf8_len(const char *s)
 {
-    unsigned char c = (unsigned char)*s;
-    size_t n = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 1;
-    for (size_t i = 1; i < n; i++) {
-        if (!s[i]) return i;
-    }
-    return n;
+    return utf8_scalar_bytes(s);
 }
 
 static int run_width(FontId font, const char *text, size_t len)
@@ -192,10 +221,10 @@ static int run_width(FontId font, const char *text, size_t len)
     char buf[160];
     int w = 0;
     while (len) {
-        size_t n = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
-        while (n < len && n && ((unsigned char)text[n] & 0xC0) == 0x80) n--;   /* whole codepoints */
+        size_t n = utf8_prefix_bytes(text, len < sizeof(buf) - 1 ? len : sizeof(buf) - 1);
         memcpy(buf, text, n);
         buf[n] = 0;
+        sanitize_utf8(buf);
         w += s_target->measureText(font, buf, TextStyle{}).width;
         text += n;
         len -= n;
@@ -220,10 +249,10 @@ static void draw_run(int x, int y, FontId font, const char *text, size_t len, Co
     char buf[160];
     while (len) {
         /* A codepoint at a time with letter spacing, else as much as fits. */
-        size_t n = letter_space ? utf8_len(text) : len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
-        while (!letter_space && n < len && n && ((unsigned char)text[n] & 0xC0) == 0x80) n--;
+        size_t n = letter_space ? utf8_len(text) : utf8_prefix_bytes(text, len < sizeof(buf) - 1 ? len : sizeof(buf) - 1);
         memcpy(buf, text, n);
         buf[n] = 0;
+        sanitize_utf8(buf);
         int w = s_target->measureText(font, buf, style).width;
         s_target->text(Rect{(int16_t)x, (int16_t)y, (int16_t)(w + 2), (int16_t)line_height(font)}, buf, style);
         x += w + letter_space;
@@ -280,7 +309,7 @@ int draw_wrapped(int x, int y, int w, FontId font, const char *text, int max_lin
         const char *next;
         size_t n = fit_line(font, text, w, &next);
         char buf[160];
-        n = n < sizeof(buf) - 4 ? n : sizeof(buf) - 4;
+        n = utf8_prefix_bytes(text, n < sizeof(buf) - 4 ? n : sizeof(buf) - 4);
         memcpy(buf, text, n);
         buf[n] = 0;
         if (lines == max_lines - 1 && *next) {
@@ -564,11 +593,9 @@ static void face_screen(Screen &screen, const Face &f)
     if (f.mic && !covered) {
         int top = mic_top;
         draw_mic(cx, top, MIC_PX);
-        s_mic_y = (int16_t)(top + MIC_PX / 2);
-        s_mic_r = MIC_PX / 2 + MIC_HIT_PAD;
-        s_mic_x = (int16_t)cx;
+        s_mic_visible = true;
     } else {
-        s_mic_x = -1;
+        s_mic_visible = false;
     }
 }
 
@@ -603,7 +630,7 @@ static uint16_t *s_image_buf;       /* RGB565, the screen's size */
  * coordinates: ink in the LSB and the MSB plane of FreeInk's absolute
  * grayscale (black 00, dark 10, light 01, white 11, as LSB MSB). */
 static uint8_t *s_image_bits;       /* the LSB mask, then the MSB mask */
-static volatile bool s_image_new, s_image_shown;
+static std::atomic<bool> s_image_new{};
 
 static void image_hide(void)
 {
@@ -621,6 +648,7 @@ static void image_hide(void)
     s_image_new = false;
     xSemaphoreGive(s_image_mutex);
     if (shown) {
+        navigation_changed();
         s_need_clean = true;
         request_draw();
     }
@@ -670,8 +698,15 @@ static void dither_image(void)
 /* An image in four grays: each plane drawn through the target (which turns
  * it to the panel's orientation) and shown with one absolute grayscale
  * refresh. A panel without one gets the darker half as black. */
-static void present_image(void)
+static bool present_image(void)
 {
+    /* The command/fetch tasks can hide or replace either plane. Keep their
+     * lifetime locked through presentation, not just while loading a pointer. */
+    xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    if (!s_image_shown || !s_image_bits) {
+        xSemaphoreGive(s_image_mutex);
+        return false;
+    }
     uint8_t *fb = s_display.getFrameBuffer();
     size_t fb_len = (size_t)s_display.getDisplayWidthBytes() * s_display.getDisplayHeight();
     static uint8_t *planes;
@@ -699,11 +734,19 @@ static void present_image(void)
     }
     s_need_clean = true;   /* back to black and white with a full refresh */
     s_fast_count = 0;
+    xSemaphoreGive(s_image_mutex);
+    return true;
 }
 
 /* ─── The loop ──────────────────────────────────────────────────────────── */
 
 static bool s_settings;             /* the Settings page is showing */
+static bool s_render_image;         /* the image hit region in the current frame */
+
+void navigation_changed(void)
+{
+    s_navigation_epoch.fetch_add(1);
+}
 
 void request_draw(void)
 {
@@ -719,12 +762,15 @@ void request_face(void)
 
 static void root_screen(Screen &screen, void *)
 {
-    if (s_image_shown && s_image_bits) {
+    s_render_image = s_image_shown;
+    if (s_render_image) {
+        s_mic_visible = false;
         /* Drawn by present_image(); a tap anywhere puts it away. */
         screen.frame().hit(Rect{0, 0, (int16_t)g_w, (int16_t)g_h}, ACTION_IMAGE);
         return;
     }
     if (s_settings) {
+        s_mic_visible = false;
         settings_screen(screen);
         if (!settings_in_subpage()) draw_dots(true);
     } else {
@@ -746,27 +792,40 @@ static void on_image(const ActionEvent &, void *)
 
 static void present(void)
 {
-    bool clean = s_need_clean || ++s_fast_count >= CLEAN_EVERY;
+    bool clean = s_need_clean.exchange(false) || ++s_fast_count >= CLEAN_EVERY;
     int64_t t = esp_timer_get_time();
     s_display.displayBuffer(clean ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
     ESP_LOGD(TAG, "%s refresh %d ms", clean ? "full" : "fast", (int)((esp_timer_get_time() - t) / 1000));
     if (clean) s_fast_count = 0;
-    s_need_clean = false;
 }
 
 static void draw(const InputSnapshot &input)
 {
     /* Paper first: FreeInk's fill plots pixel by pixel, a memset doesn't. */
     memset(s_display.getFrameBuffer(), 0xFF, (size_t)s_display.getDisplayWidthBytes() * s_display.getDisplayHeight());
+    uint32_t epoch = s_navigation_epoch.load();
     g_app->render(input);
-    if (s_image_shown && s_image_bits) present_image();
-    else present();
+    if (!present_image()) {
+        if (s_render_image) {
+            /* A hide raced rendering: rebuild the face/Settings and its hit
+             * regions before presenting, rather than showing a blank frame. */
+            memset(s_display.getFrameBuffer(), 0xFF,
+                   (size_t)s_display.getDisplayWidthBytes() * s_display.getDisplayHeight());
+            epoch = s_navigation_epoch.load();
+            g_app->render(input);
+        }
+        present();
+    }
+    /* Input sampled during a page refresh still belongs to the old page. */
+    if (epoch == s_navigation_epoch.load()) s_presented_epoch = epoch;
 }
 
 static void set_page(bool settings)
 {
     if (settings == s_settings) return;
+    navigation_changed();
     s_settings = settings;
+    s_mic_visible = false;   /* re-enable only after the face is drawn */
     s_face_active = !settings;
     if (!settings) settings_home();
     s_need_clean = true;
@@ -781,6 +840,10 @@ static void handle_touch(void)
     static bool down;
     TouchEvent e;
     while (xQueueReceive(s_touch_q, &e, 0) == pdTRUE) {
+        if (e.epoch != s_navigation_epoch.load()) {
+            down = false;
+            continue;
+        }
         InputSnapshot in;
         in.touchX = e.x;
         in.touchY = e.y;
@@ -788,10 +851,11 @@ static void handle_touch(void)
             down = true;
             down_x = e.x;
             down_y = e.y;
-            down_us = esp_timer_get_time();
+            down_us = e.time_us;
             continue;
         }
         if (e.down) continue;
+        if (!down) continue;   /* an orphan release cannot become a tap */
         down = false;
         int dx = e.x - down_x, dy = e.y - down_y;
         if (abs(dy) >= SWIPE_PX && abs(dy) > abs(dx)) {
@@ -799,6 +863,7 @@ static void handle_touch(void)
             if (s_settings && !settings_typing()) {
                 settings_scroll(dy);
                 request_draw();
+                break;   /* rebuild the hit table before dispatching another tap */
             }
             continue;
         }
@@ -808,13 +873,17 @@ static void handle_touch(void)
             if (dx < 0 && !s_settings) set_page(true);
             else if (dx > 0 && s_settings && !settings_typing() && !settings_back()) set_page(false);
             request_draw();
-            continue;
+            break;
         }
         in.touchX = down_x;
         in.touchY = down_y;
         in.touchReleased = true;
-        in.longPress = esp_timer_get_time() - down_us >= LONG_PRESS_MS * 1000;
-        if (g_app->route(in)) request_draw();
+        in.longPress = e.time_us - down_us >= LONG_PRESS_MS * 1000;
+        uint32_t epoch = s_navigation_epoch.load();
+        if (g_app->route(in)) {
+            request_draw();
+            if (epoch != s_navigation_epoch.load() || settings_keyboard_changed()) break;
+        }
     }
 }
 
@@ -856,6 +925,8 @@ static void ui_task(void *arg)
         xSemaphoreTake(s_image_mutex, portMAX_DELAY);
         if (s_image_new && s_image_bits) {
             s_image_new = false;
+            s_mic_visible = false;
+            if (!s_image_shown) navigation_changed();
             s_image_shown = true;
             s_need_clean = true;
             s_draw_now = true;
@@ -877,10 +948,11 @@ static void ui_task(void *arg)
 
         /* Muse moves a frame per frame_ms while the face shows. */
         bool frame_due = (TickType_t)(xTaskGetTickCount() - next_frame) < portMAX_DELAY / 2;
-        bool redraw = s_draw_now || !(s_face == s_drawn) || g_app->invalidated();
+        bool draw_requested = s_draw_now.exchange(false);
+        bool redraw = draw_requested || !(s_face == s_drawn) || g_app->invalidated();
         if (s_image_shown) {
             /* An image stays as it is, unless the pairing card comes or goes over it. */
-            redraw = s_draw_now || strcmp(s_face.pair_code, s_drawn.pair_code) != 0;
+            redraw = draw_requested || strcmp(s_face.pair_code, s_drawn.pair_code) != 0;
         }
         if (frame_due) {
             next_frame = xTaskGetTickCount() + frame;
@@ -894,7 +966,6 @@ static void ui_task(void *arg)
             }
         }
         if (!redraw) continue;
-        s_draw_now = false;
         s_drawn = s_face;
         draw(InputSnapshot{});
     }
@@ -1008,7 +1079,7 @@ extern "C" bool muse_ui_dark(void)
 
 extern "C" bool muse_ui_face_active(void)
 {
-    return s_face_active;
+    return s_face_active && !s_image_shown;
 }
 
 extern "C" void muse_ui_show_face(void)
