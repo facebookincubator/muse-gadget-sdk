@@ -10,12 +10,11 @@ buttons through a dedicated
 backend. The tested setup used a USB data host, with no external speaker or
 battery connected.
 
-The validation below was completed on 2026-10-24 using Muse baseline
-[`e6fe5174092702ffddae6f90759a38d55a4ebae1`](https://github.com/facebookincubator/muse-gadget-sdk/commit/e6fe5174092702ffddae6f90759a38d55a4ebae1)
-plus the local 1.32 board changes and **ESP-IDF v6.0.1**. Later Muse revisions,
-including `c9354b7`, have not been built or tested with this port in that
-validation. The experimental label remains appropriate while the full Muse,
-acoustic, and battery checks are outstanding.
+Validation on 2026-10-24 used **ESP-IDF v6.0.1**. The publication candidate
+based on upstream `c9354b7` passed fresh normal/bench builds and the full host
+suite. It has not been flashed. The earlier hardware validation used baseline
+`e6fe517` plus the earlier local port; those results are recorded separately
+below. Full Muse, acoustic, and battery acceptance remain outstanding.
 
 ## Hardware map
 
@@ -70,7 +69,7 @@ The normal build directory is `build-muse-waveshare-s3-132`. Bench adds
 `devices/sdkconfig.muse-bench` last, enables screenshots, and uses
 `build-muse-waveshare-s3-132-bench`. Both profiles use the existing
 [`partitions_muse_8mb.csv`](../partitions_muse_8mb.csv) layout, with two
-4,063,232-byte application slots. The tested final normal image was
+4,063,232-byte application slots. Both current publication images are
 2,166,784 bytes, leaving 46.67% of one slot free.
 
 Build profiles sequentially because they share managed components and the
@@ -92,17 +91,47 @@ check the target before flashing when more than one board is attached.
 - Touch response and release were checked at the upper, lower, left, right,
   and center controls, then checked again after display sleep/wake.
 
-## Validation
+## Current publication validation
 
-These results apply to one unit and the baseline above. Host checks and
-software audio checks are distinct from peripheral or acoustic acceptance.
+These checks used source commit
+`a05029997e49994beb120fbbf6a5203d197643c3`, based on upstream
+[`c9354b7a765cfb7dd3c4f1945a9ca838d871630c`](https://github.com/facebookincubator/muse-gadget-sdk/commit/c9354b7a765cfb7dd3c4f1945a9ca838d871630c).
+The new candidate has not been flashed; these are software validation results.
+
+| Check | Result |
+|---|---|
+| Toolchain | ESP-IDF v6.0.1 |
+| Full host suite | 640 tests passed, 0 skipped, 163.157 seconds |
+| Normal firmware build | Passed; app 2,166,784 bytes, slot 4,063,232 bytes |
+| Bench firmware build | Passed; app 2,166,784 bytes, slot 4,063,232 bytes |
+| Board overlay audit | All 35 checked settings matched in each profile |
+| Candidate hardware run | Not performed; neither new image was flashed |
+
+The application image SHA-256 values are:
+
+| Profile | SHA-256 |
+|---|---|
+| Normal | `9b833d19b23ef1f88542ffac0c30f27c493ce3cb4ea38bd9496e9267fafa6349` |
+| Bench | `5110a137555a2d38f3b300ef8368fa0dbf1e1a6fe554c376fb19f849be858d4d` |
+
+The resolved dependency lock has SHA-256
+`252567ed344eaf74bcc5f93efca7224a8334a5adf4190c7def267aeb5bfa7569`,
+matching the lock used for the earlier hardware validation.
+
+## Historical hardware validation
+
+The following results apply to one unit running Muse baseline
+[`e6fe5174092702ffddae6f90759a38d55a4ebae1`](https://github.com/facebookincubator/muse-gadget-sdk/commit/e6fe5174092702ffddae6f90759a38d55a4ebae1)
+plus the earlier local 1.32 port. The normal image used on that unit had SHA-256
+`4cd06ad0724fbf7669fb66ee7a02db9f0945602bc835323831b29df20035bbfb`.
+These observations do not constitute a hardware run of the publication
+candidate. Software audio checks are distinct from acoustic acceptance.
 
 | Check | Profile / scope | Result |
 |---|---|---|
-| Firmware builds | Normal and bench, ESP-IDF v6.0.1 | Passed; both images were flashed and booted |
-| Other full-UI board regression | StopWatch build in a separate build environment | Passed; no StopWatch hardware test |
-| Full host suite | Earlier adaptation revision | 640 tests passed, 0 skipped |
-| Final focused board tests | Final board changes | 11 tests passed: touch frames, serialized panel commands, battery error handling, build/configuration and USB selection |
+| Historical firmware builds | Normal and bench on the earlier port, ESP-IDF v6.0.1 | Passed; both earlier images were flashed and booted |
+| Historical full-UI board regression | StopWatch build on the `e6fe517` baseline in a separate build environment | Passed; no StopWatch hardware test |
+| Historical focused board tests | Final changes to the earlier port | 11 tests passed: touch frames, serialized panel commands, battery error handling, build/configuration and USB selection |
 | Final normal boot | Three 30-second observations | Passed without panic, watchdog reset, or repeated boot |
 | Normal stability | 600-second USB observation, unpaired and offline | 120 heartbeats; no crash or reboot; end heap did not decrease |
 | Bench display/status | Face and settings screenshots | Checked; button hints clear of status text, battery shown as unknown under USB |
@@ -114,10 +143,6 @@ software audio checks are distinct from peripheral or acoustic acceptance.
 | Handshake cleanup | Separate 120-second serial observation | No crash or reboot; device remained unpaired and without network configuration |
 | Audio software path | Normal; MP3 decoding and eight codec gain settings | Passed; DAC reference in the right slot is not an acoustic loopback |
 | Wi-Fi scan | Normal | Access points discovered; network connection was not tested |
-
-The full host run preceded the final board refinements. The final 11 focused
-tests and firmware rebuilds cover those changes; the 640-test result is not
-presented as a fresh full-suite run on a later revision.
 
 The temporary handshake exercised P-256 ECDH, HKDF, AES-GCM, transcript hash,
 and session ID verification. It sent only a client hello and encrypted
