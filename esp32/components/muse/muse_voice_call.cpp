@@ -597,8 +597,8 @@ static bool taking_audio(void);
  * press fenced on both sides, and no barge-in flush pending. */
 static bool ptt_playable(void)
 {
-    return taking_audio() && !s_talk && s_press == s_press_req.load() && s_press_clean.load() == s_press &&
-           s_flush_req.load() == s_flush_ack.load();
+    return taking_audio() && !end_requested() && !s_talk && s_press == s_press_req.load() &&
+           s_press_clean.load() == s_press && s_flush_req.load() == s_flush_ack.load();
 }
 
 static void out_write(const int16_t *pcm, size_t n)
@@ -899,7 +899,11 @@ static void on_line(void *ctx, const char *line, size_t len)
             s_st |= ST_REPLY_DONE;   /* this reply's own turn or response, never an older one's */
         }
     } else if (s_ptt && s_call.state != MUSE_VC_LIVE) {
-        defer_clear();
+        if (ptt_playable()) {
+            ring_clear(&s_wait);   /* Muse's goodbye drains only confirmed, playable audio. */
+        } else {
+            defer_clear();
+        }
     }
 }
 

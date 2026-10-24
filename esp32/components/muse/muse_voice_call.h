@@ -36,9 +36,9 @@ extern "C" {
  * talking (muse_vc_gate_t in muse_voice_call_core.h) unless the board's own
  * echo cancellation is confirmed.
  *
- * Muse can't yet ask a gadget to hang up when it says goodbye: the call ends
- * on a press, a session_control stop, the server ending the media stream, or
- * the idle and length limits here.
+ * A compatible VM can end the call with a session_control stop. A press,
+ * the server ending the media stream, or the idle and length limits here
+ * also end it.
  *
  * A push-to-talk call (muse_voice_call_start_ptt) is the same call with the
  * mic under a button: only audio captured while it's held goes up, and after

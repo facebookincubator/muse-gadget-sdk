@@ -2585,6 +2585,96 @@ static void ptt_end_mid_pump(void)
     ptt_hang_up(fresh);
 }
 
+/* Muse's stop drains confirmed reply audio queued beyond s_out as well. */
+static void ptt_stop_drains_deferred(void)
+{
+    int64_t id = ptt_live_call();
+    muse_voice_call_set_talking(true);
+    poll();
+    line(id, ev_speech("i1"));
+    line(id, ev_turn("s1", "i1"));
+    muse_voice_call_set_talking(false);
+    poll();
+    assert(heard_peak() == 0);   /* complete the press fence */
+    for (int i = 0; i < 120; i++) {
+        line(id, cavd_id(8000, "p1"));   /* 76800 samples: s_out holds only 64000 */
+    }
+    int16_t first[640];
+    bool flushed;
+    size_t before = muse_voice_call_read(first, 640, &flushed);
+    assert(before == 640 && !flushed && muse_vc_peak(first, before) > 7000);
+    const char *stop_line = "{\"type\":\"conversation.item.added\",\"item\":{\"type\":\"session_control\",\"name\":\"stop\"}}";
+    line(id, stop_line);
+    line(id, stop_line);   /* duplicates and trailing non-audio must not discard the goodbye */
+    line(id, ev_done("mapper1"));
+    line(id, cavd_id(8000, "p1"));   /* the confirmed reply's trailing frame */
+    poll();
+    assert(count("end_call") == 1 && count("reset", id) == 0);
+    size_t after = 0;
+    assert(heard_peak(&after) > 7000);
+    fprintf(stderr, "ptt_stop_drain: before=%zu after=%zu expected_total=%d\n", before, after, 121 * 640);
+    assert(before + after == 121 * 640);
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
+/* Stops never promote an unconfirmed or held reply, nor override a local end. */
+static void ptt_stop_discards_ineligible(void)
+{
+    for (int variant = 0; variant < 6; variant++) {
+        s_ops.clear();
+        int64_t id = ptt_live_call();
+        muse_voice_call_set_talking(true);
+        poll();
+        line(id, ev_speech("i1"));
+        if (variant != 0) {
+            line(id, ev_turn("s1", "i1"));
+        }
+        if (variant != 1) {
+            muse_voice_call_set_talking(false);
+            poll();
+        }
+        assert(heard_peak() == 0);
+        for (int i = 0; i < 120; i++) {
+            line(id, cavd_id(8000, "p1"));
+        }
+        if (variant == 2) {
+            muse_voice_call_end();
+            poll();
+        } else if (variant == 3) {
+            lose_connection();
+        }
+        line(id, "{\"type\":\"conversation.item.added\",\"item\":{\"type\":\"session_control\",\"name\":\"stop\"}}");
+        if (variant == 4) {
+            muse_voice_call_end();   /* local hang-up after Muse's stop still wins */
+            poll();
+        } else if (variant == 5) {
+            lose_connection();
+        }
+        line(id, cavd_id(8000, "p1"));
+        size_t after = 0;
+        int peak = heard_peak(&after);
+        /* Local end preserves the pre-existing s_out policy, not s_defer. */
+        if (variant >= 2) {
+            assert(after <= 64000);
+        } else {
+            assert(peak == 0 && after == 0);
+        }
+        fprintf(stderr, "ptt_stop_ineligible: variant=%d after=%zu\n", variant, after);
+        if (variant != 3 && variant != 5) {
+            serve_ending(id);
+            expect_event(MUSE_VOICE_CALL_EV_ENDED);
+        } else {
+            expect_event(MUSE_VOICE_CALL_EV_ENDED);
+            s_connected = true;
+            poll(2, 1000000);
+            answer_end(end_call_id());   /* settle the fake reconnect cleanup before the next case */
+            poll();
+            assert(!muse_voice_call_busy());
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -2602,7 +2692,8 @@ int main(int argc, char **argv)
                                     ptt_stale_completion, ptt_hold_clock_gap, ptt_abandoned_start,
                                     ptt_quiet_after_early_audio, ptt_cutover, ptt_many_edges_while_connecting,
                                     ptt_bad_turn_identity, ptt_playing_while_waiting, ptt_captions,
-                                    ptt_end_while_held_reply, ptt_end_mid_pump };
+                                    ptt_end_while_held_reply, ptt_end_mid_pump, ptt_stop_drains_deferred,
+                                    ptt_stop_discards_ineligible };
     int which = atoi(argv[1]);
     if (which < 0 || which >= (int)(sizeof(cases) / sizeof(cases[0]))) {
         return 2;

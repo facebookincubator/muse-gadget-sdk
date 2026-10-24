@@ -341,7 +341,7 @@ class VoiceCallSession(unittest.TestCase):
              'ptt_gate_latest_item', 'ptt_gate_follow_up', 'ptt_stale_completion', 'ptt_hold_clock_gap', 'ptt_abandoned_start',
              'ptt_quiet_after_early_audio', 'ptt_cutover', 'ptt_many_edges_while_connecting',
              'ptt_bad_turn_identity', 'ptt_playing_while_waiting', 'ptt_captions', 'ptt_end_while_held_reply',
-             'ptt_end_mid_pump']
+             'ptt_end_mid_pump', 'ptt_stop_drains_deferred', 'ptt_stop_discards_ineligible']
 
     @classmethod
     def setUpClass(cls):
@@ -455,6 +455,12 @@ class VoiceCallSession(unittest.TestCase):
 
     def test_ptt_hang_up_mid_pump_stops_the_mic_at_once(self):
         self.run_case('ptt_end_mid_pump')
+
+    def test_ptt_server_stop_drains_confirmed_deferred_reply(self):
+        self.run_case('ptt_stop_drains_deferred')
+
+    def test_ptt_server_stop_never_promotes_ineligible_reply(self):
+        self.run_case('ptt_stop_discards_ineligible')
 
     def test_ptt_first_start_on_a_filled_heap(self):
         # A fresh process whose first act is a push-to-talk start: the reply

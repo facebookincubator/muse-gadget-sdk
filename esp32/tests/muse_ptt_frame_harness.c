@@ -22,6 +22,8 @@ typedef void lv_timer_t;
 static bool s_snapshot;
 static float s_level;
 static muse_mode_t s_last_mode=MUSE_MODE_COUNT, mode;
+static muse_mode_t s_last_epaper_pose=MUSE_MODE_COUNT;
+static const struct { bool epaper; } board = { false }, *muse_board = &board;
 static muse_voice_view_t view;
 static float source_level;
 static muse_pose_t rendered;
