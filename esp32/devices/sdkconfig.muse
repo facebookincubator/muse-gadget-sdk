@@ -65,6 +65,12 @@ CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
 # Muse's Hatch client derives its Noise keys with HKDF.
 CONFIG_MBEDTLS_HKDF_C=y
 
+# The TTS endpoint replies speak through (muse_tts.c) serves a chain ending in
+# a root the bundle trusts, cross-signed by one it doesn't, which the bundle
+# can't follow unless it gets to offer candidate CAs while the chain is built.
+# ~700 bytes of heap during a handshake.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
+
 # The display, touch and audio drivers need DMA-capable internal RAM, which
 # Link's C5 tuning spends on Wi-Fi speed. Keep Wi-Fi/lwIP hot paths in flash
 # (on the S3 and C6, IRAM comes out of the same SRAM) and hold fewer resident
