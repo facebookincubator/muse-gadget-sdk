@@ -101,6 +101,14 @@ typedef enum {
 muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap);
 
 /*
+ * True once when a reply has come for a request whose turn ended before it
+ * (Muse was slow, and the turn said so and let go): the turn is already
+ * running, to be played like any reply, but nobody pressed anything. The voice
+ * task checks this while idle.
+ */
+bool muse_hatch_incoming(void);
+
+/*
  * The page of reply text holding what's being said after `played` frames of
  * reply speech (sized by muse_state_page), or before the speech its opening
  * page. False until there's reply text to page.

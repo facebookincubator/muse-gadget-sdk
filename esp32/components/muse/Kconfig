@@ -242,6 +242,19 @@ menu "Muse"
             to pay for the CPU's light-sleep retention memory, which it
             takes at boot and keeps.
 
+    config MUSE_CONVERSATION
+        bool "Conversation: tap once, then talk back and forth"
+        depends on MUSE_HATCH
+        default n
+        help
+            A tap (a press under half a second) starts a conversation:
+            the mic stays on between turns, a turn starts when you speak
+            and ends after a second of quiet, and when Muse has said its
+            reply the mic listens again. Eight seconds without speech, or
+            another tap, ends it. A longer press is push-to-talk as before.
+            Speech is found by its level against the room's noise, so a
+            noisy room can hold a turn open until the 15 s limit.
+
     config MUSE_HATCH
         bool "Muse's own voice session"
         depends on MUSE_ENABLED

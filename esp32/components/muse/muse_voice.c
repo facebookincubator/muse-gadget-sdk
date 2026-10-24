@@ -43,7 +43,11 @@ static const char *TAG = "muse_voice";
 #define MAX_SECS 15
 #define TAIL_FRAMES (MUSE_AUDIO_RATE * 12 / 100)   /* capture lag + poll interval, stops before the release click */
 #define MAX_FRAMES (MUSE_AUDIO_RATE * MAX_SECS)
+#if CONFIG_MUSE_CONVERSATION
+#define MIN_HELD_FRAMES (MUSE_AUDIO_RATE / 2)   /* a press this short is a tap: it starts or ends a conversation */
+#else
 #define MIN_HELD_FRAMES (MUSE_AUDIO_RATE * 3 / 10)   /* shorter presses are taps, not speech */
+#endif
 #if CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT
 #define PRE_CHUNKS 6                                   /* 120 ms; a 320 ms upload burst stalls on the ADV and C3 */
 #else
@@ -73,6 +77,29 @@ static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
 static volatile bool s_loopback;
 static volatile bool s_mp3test;
+
+#if CONFIG_MUSE_CONVERSATION
+/*
+ * Conversation: a tap starts it. The mic then stays armed between turns: it
+ * waits for speech (a few chunks well above the room's noise), records until a
+ * second of quiet, sends, plays the reply and arms again. Eight seconds without
+ * speech, or another tap, ends it. A longer press is push-to-talk as before.
+ */
+#define LISTEN_WAIT_US (8LL * 1000000)    /* armed this long without speech: it ends */
+#define VOICED_CHUNKS 5                   /* 100 ms above the noise starts a turn */
+#define CALIB_CHUNKS 10                   /* the room's noise, taken right after arming */
+#define START_DB 12.0f                    /* this far above the noise is speech */
+#define END_DB 10.0f                      /* within this of the recording's floor is quiet */
+#define END_QUIET_FRAMES MUSE_AUDIO_RATE  /* this much quiet ends what's being said */
+#define MIN_SPEECH_FRAMES (MUSE_AUDIO_RATE * 4 / 10)   /* shorter is a click or a cough */
+
+static bool s_convo;                /* a conversation is on */
+static int64_t s_listen_until_us;   /* the mic is armed until then; 0 when not */
+static int s_voiced, s_calib;
+static float s_noise_db;
+static bool s_by_voice;             /* the recording was started by speech, not a press */
+static bool s_stopped;              /* a tap ended a recording in a conversation */
+#endif
 
 /*
  * Pre-roll: while idle the mic keeps running into this ring, so a recording
@@ -154,6 +181,21 @@ static void idle_capture(void)
         s_settle--;
         return;
     }
+#if CONFIG_MUSE_CONVERSATION
+    if (s_listen_until_us) {
+        float db = muse_audio_dbfs(s_chunk, MUSE_AUDIO_CHUNK);
+        muse_state_set_level(muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK));
+        if (s_calib) {
+            s_noise_db = s_calib == CALIB_CHUNKS ? db : s_noise_db + (db - s_noise_db) * 0.3f;
+            s_calib--;
+        } else {
+            bool loud = db > s_noise_db + START_DB;
+            s_voiced = loud ? s_voiced + 1 : 0;
+            /* Down fast, up slowly, and slower still while it's loud: speech must not become the noise. */
+            s_noise_db += (db - s_noise_db) * (db < s_noise_db ? 0.3f : loud ? 0.002f : 0.02f);
+        }
+    }
+#endif
     pre_chunk_t *c = &s_pre[s_pre_next];
 #if MUSE_LOW_MEM
     c->start = s_pre_enc;
@@ -244,9 +286,10 @@ static void take(rec_stats_t *st, const int16_t *pcm)
  * If not, the note is kept in s_rec to send later, and streams from partway
  * if Hatch comes within reach. Returns false if Hatch failed the turn with no
  * kept note to fall back on (why says what failed). There is no start chirp:
- * anything played now would land on top of the first words.
+ * anything played now would land on top of the first words. vad: speech began
+ * it (CONFIG_MUSE_CONVERSATION), so a second of quiet ends it, not a release.
  */
-static bool record(bool barge_in, size_t *held, char *why, size_t cap)
+static bool record(bool barge_in, bool vad, size_t *held, char *why, size_t cap)
 {
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
@@ -260,6 +303,9 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
     bool gave_up = false;   /* Hatch failed this note: it's kept, and goes later */
     char text[96];
     rec_stats_t st = { 0 };
+#if CONFIG_MUSE_CONVERSATION
+    size_t quiet = 0;
+#endif
 
     size_t n = 0;
     if (barge_in) {
@@ -312,11 +358,25 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         if (!heard && ok && tick) {
             muse_state_set_caption("%s %.1fs", s_live ? "LISTENING" : "RECORDING", (double)n / MUSE_AUDIO_RATE);
         }
+#if CONFIG_MUSE_CONVERSATION
+        if (vad) {
+            if (got_event(MUSE_PTT_DOWN)) {   /* a tap in the middle of it: stop */
+                s_stopped = true;
+                break;
+            }
+            float db = muse_audio_dbfs(s_chunk, MUSE_AUDIO_CHUNK);
+            quiet = db > fmaxf(st.floor_db, -62.0f) + END_DB ? 0 : quiet + MUSE_AUDIO_CHUNK;
+            if (quiet >= END_QUIET_FRAMES) {
+                released = true;   /* it has said what it had to */
+                break;
+            }
+        }
+#endif
         /*
          * Capture runs 60-80 ms behind real time and people let go on their
          * last syllable, so keep going briefly after release.
          */
-        if (!released && got_event(MUSE_PTT_UP)) {
+        if (!vad && !released && got_event(MUSE_PTT_UP)) {
             released = true;
             stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
         }
@@ -343,11 +403,13 @@ static void go_idle(const char *caption);
 /*
  * Plays Hatch's reply as it arrives, with its text as the caption. Returns
  * true if interrupted by a new press. *delivered: the VM has the note.
+ * incoming: a reply to an earlier request, which nobody pressed for.
  */
-static bool hatch_reply(bool *delivered)
+static bool hatch_reply(bool *delivered, bool incoming)
 {
     muse_state_set_mode(MUSE_MODE_THINKING);
-    muse_state_set_caption("SENDING VOICE NOTE");   /* until there's a transcript or reply */
+    /* Until there's a transcript or reply; a late reply has no note to send. */
+    muse_state_set_caption(incoming ? "MUSE HAS AN ANSWER" : "SENDING VOICE NOTE");
     static int16_t buf[MUSE_AUDIO_CHUNK];
     static const int16_t silence[MUSE_AUDIO_CHUNK];
     char text[96];
@@ -435,6 +497,29 @@ static void go_idle(const char *caption)
     muse_state_set_mode(MUSE_MODE_IDLE);
     muse_state_set_caption("%s", caption);
 }
+
+#if CONFIG_MUSE_CONVERSATION
+/* Arms the mic for the next turn, once Muse's last sound and the room's echo of it have died out. */
+static void convo_arm(void)
+{
+    s_convo = true;
+    s_listen_until_us = esp_timer_get_time() + LISTEN_WAIT_US;
+    s_voiced = 0;
+    s_calib = CALIB_CHUNKS;
+    pre_reset();
+    s_settle = SETTLE_CHUNKS + 25;   /* 700 ms */
+    muse_state_set_mode(MUSE_MODE_LISTENING);
+    muse_state_set_caption("TALK, OR TAP TO STOP");
+}
+
+/* The conversation is over; the caller says what the screen shows. */
+static void convo_end(void)
+{
+    s_convo = false;
+    s_listen_until_us = 0;
+    s_by_voice = false;
+}
+#endif
 
 /* Why a press can't go to Hatch; voice notes only go there. */
 static const char *not_ready_reason(void)
@@ -648,7 +733,7 @@ static bool send_held(bool quiet)
     if (fed == FED && quiet) {
         delivered = wait_delivered();
     } else if (fed == FED) {
-        interrupted = hatch_reply(&delivered);
+        interrupted = hatch_reply(&delivered, false);
     }
     if (fed != FED || quiet) {
         muse_hatch_turn_cancel();   /* asleep, the reply is left for the app */
@@ -735,7 +820,7 @@ static bool finish_note(void)
             }
         }
         if (fed) {
-            interrupted = hatch_reply(&delivered);
+            interrupted = hatch_reply(&delivered, false);
         }
         if (delivered || interrupted) {
             drop_rec();
@@ -747,7 +832,7 @@ static bool finish_note(void)
 #endif
     muse_hatch_turn_end();   /* before the chirp, which takes ~90 ms */
     muse_audio_chirp(0);
-    return hatch_reply(&delivered);
+    return hatch_reply(&delivered, false);
 }
 
 /*
@@ -843,16 +928,50 @@ static void voice_task(void *arg)
                 muse_audio_loopback_test(muse_settings_volume());
                 pre_reset();
             }
+            if (muse_hatch_incoming()) {
+                /* Muse took long and has the answer now: light the screen, say it. */
+                bool delivered;
+                muse_state_set_asleep(false);
+                muse_wifi_power(MUSE_WIFI_FULL);
+                pending_down = hatch_reply(&delivered, true);
+                pre_reset();
+                if (!pending_down && muse_state_mode(NULL) != MUSE_MODE_IDLE) {
+                    muse_state_make_happy();
+                    go_idle("");
+                }
+#if CONFIG_MUSE_CONVERSATION
+                if (s_convo && !pending_down) {
+                    convo_arm();
+                }
+#endif
+                continue;
+            }
             /* The 20 ms read paces this loop. */
             idle_capture();
-            if (xQueueReceive(s_queue, &ev, 0) != pdTRUE) {
-                continue;
+            bool voiced = false;
+#if CONFIG_MUSE_CONVERSATION
+            if (s_listen_until_us) {
+                if (s_voiced >= VOICED_CHUNKS) {
+                    s_listen_until_us = 0;
+                    s_by_voice = voiced = true;
+                    muse_state_poke();
+                } else if (esp_timer_get_time() > s_listen_until_us) {
+                    convo_end();   /* nobody spoke */
+                    go_idle("");
+                    continue;
+                }
             }
-            muse_state_poke();
-            if (ev.type != MUSE_PTT_DOWN) {
-                continue;
+#endif
+            if (!voiced) {
+                if (xQueueReceive(s_queue, &ev, 0) != pdTRUE) {
+                    continue;
+                }
+                muse_state_poke();
+                if (ev.type != MUSE_PTT_DOWN) {
+                    continue;
+                }
+                wake = ev.wake;
             }
-            wake = ev.wake;
         }
         if (wake && !held_on_waking()) {
             continue;   /* a tap: it only woke Muse */
@@ -860,17 +979,51 @@ static void voice_task(void *arg)
         muse_wifi_power(MUSE_WIFI_FULL);
         if (!can_record()) {
             pending_down = false;
+#if CONFIG_MUSE_CONVERSATION
+            convo_end();   /* can_record() has said why */
+#endif
             continue;
         }
         size_t held;
         char why[96];
-        bool ok = record(pending_down, &held, why, sizeof(why));
+        bool by_voice = false;
+#if CONFIG_MUSE_CONVERSATION
+        by_voice = s_by_voice;
+        s_by_voice = false;
+#endif
+        bool ok = record(pending_down, by_voice, &held, why, sizeof(why));
         pending_down = false;
+#if CONFIG_MUSE_CONVERSATION
+        if (s_stopped || (by_voice && held < MIN_SPEECH_FRAMES)) {
+            /* A tap in the middle of it ends the conversation; a click or a cough is not a turn. */
+            muse_hatch_turn_cancel();
+            drop_rec();
+            pre_reset();
+            if (s_stopped) {
+                s_stopped = false;
+                convo_end();
+                go_idle("");
+            } else {
+                convo_arm();
+            }
+            continue;
+        }
+#endif
         if (held < MIN_HELD_FRAMES && !wake) {
             muse_hatch_turn_cancel();
             drop_rec();
             pre_reset();
+#if CONFIG_MUSE_CONVERSATION
+            /* A tap: it starts a conversation, or ends the one that's on. */
+            if (s_convo) {
+                convo_end();
+                go_idle("");
+            } else {
+                convo_arm();
+            }
+#else
             go_idle("HOLD LONGER TO TALK");
+#endif
             continue;
         }
         if (!ok) {
@@ -880,10 +1033,18 @@ static void voice_task(void *arg)
         }
         pending_down = finish_note();
         pre_reset();
-        if (!pending_down && muse_state_mode(NULL) != MUSE_MODE_IDLE) {
+        bool replied = !pending_down && muse_state_mode(NULL) != MUSE_MODE_IDLE;
+        if (replied) {
             muse_state_make_happy();
             go_idle("");
         }
+#if CONFIG_MUSE_CONVERSATION
+        if (s_convo && replied) {
+            convo_arm();   /* the next turn */
+        } else if (s_convo && !pending_down) {
+            convo_end();   /* it failed: the caption says why */
+        }
+#endif
     }
 }
 
