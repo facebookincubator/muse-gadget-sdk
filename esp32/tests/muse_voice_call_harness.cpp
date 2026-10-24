@@ -2675,6 +2675,142 @@ static void ptt_stop_discards_ineligible(void)
     }
 }
 
+/* A 20 ms speaker consumes the queued reply after the end-call ACK. */
+static void ptt_stop_no_progress_deadline(void)
+{
+    for (int eof = 0; eof < 2; eof++) {
+        s_ops.clear();
+        int64_t id = ptt_live_call();
+        muse_voice_call_set_talking(true);
+        poll();
+        line(id, ev_speech("i1"));
+        line(id, ev_turn("s1", "i1"));
+        muse_voice_call_set_talking(false);
+        poll();
+        assert(heard_peak() == 0);
+        for (int i = 0; i < 125; i++) line(id, cavd_id(8000, "p1"));
+        line(id, "{\"type\":\"conversation.item.added\",\"item\":{\"type\":\"session_control\",\"name\":\"stop\"}}");
+        poll();
+        answer_end(end_call_id());
+        poll();
+        if (eof) { stream_end(id, true, 200); poll(); }
+        char text[96];
+        assert(next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_NONE && muse_voice_call_busy());
+        int64_t start = s_now;
+        poll(1, 4900000);
+        assert(next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_NONE && muse_voice_call_busy());
+        poll(1, 200000);
+        expect_event(MUSE_VOICE_CALL_EV_ENDED);
+        assert(!muse_voice_call_busy());
+        size_t samples = read_all();
+        assert(samples <= 64000);   /* the deferred ring expired, not silently kept */
+        poll(3);
+        assert(read_all() == 0);
+        fprintf(stderr, "ptt_ack_deadline: eof=%d elapsed_us=%lld samples=%zu busy=0\n",
+                eof, (long long)(s_now - start), samples);
+    }
+}
+
+static void ptt_stop_paced_interrupts(void)
+{
+    for (int variant = 0; variant < 6; variant++) {
+        s_ops.clear();
+        int64_t id = ptt_live_call();
+        muse_voice_call_set_talking(true);
+        poll();
+        line(id, ev_speech("i1"));
+        if (variant != 4) line(id, ev_turn("s1", "i1"));
+        if (variant != 5) { muse_voice_call_set_talking(false); poll(); }
+        assert(heard_peak() == 0);
+        for (int i = 0; i < 125; i++) line(id, cavd_id(8000, "p1"));
+        line(id, "{\"type\":\"conversation.item.added\",\"item\":{\"type\":\"session_control\",\"name\":\"stop\"}}");
+        poll();
+        answer_end(end_call_id());
+        poll();
+        stream_end(id, true, 200);
+        poll();
+        if (variant == 0) { muse_voice_call_end(); poll(); }
+        else if (variant == 1) { muse_voice_call_set_talking(true); poll(); }
+        else if (variant == 2) { muse_voice_call_start(); poll(); }
+        else if (variant == 3) lose_connection();
+        line(id, cavd_id(12000, "p1"));
+        size_t samples = read_all();
+        poll();
+        samples += read_all();
+        assert(samples <= (variant == 0 || variant == 3 ? 64000u : 0u));
+        fprintf(stderr, "ptt_ack_interrupt: variant=%d samples=%zu\n", variant, samples);
+        if (variant == 2) {
+            char text[96];
+            assert(next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_NONE);
+            int64_t fresh = media_id();
+            assert(fresh && fresh != id);
+            make_live(fresh);
+            assert(read_all() == 0);
+            muse_voice_call_end();
+            serve_ending(fresh);
+        }
+        expect_event(MUSE_VOICE_CALL_EV_ENDED);
+        assert(!muse_voice_call_busy());
+        s_connected = true;
+        poll();
+    }
+}
+
+static void ptt_stop_paced(int order, int frames)
+{
+    int64_t id = ptt_live_call();
+    muse_voice_call_set_talking(true);
+    poll();
+    line(id, ev_speech("i1"));
+    line(id, ev_turn("s1", "i1"));
+    muse_voice_call_set_talking(false);
+    poll();
+    assert(heard_peak() == 0);
+    for (int i = 0; i < frames; i++) line(id, cavd_id(8000, "p1"));
+    const char *stop_line = "{\"type\":\"conversation.item.added\",\"item\":{\"type\":\"session_control\",\"name\":\"stop\"}}";
+    line(id, stop_line);
+    poll();
+    if (order == 2) stream_end(id, true, 200);   /* EOF before ACK */
+    answer_end(end_call_id());
+    poll();
+    line(id, cavd_id(12000, "p1"));   /* half-closed: new wire audio must be refused */
+    line(id, stop_line);
+    line(id, ev_done("mapper1"));
+    if (order == 1) { stream_end(id, true, 200); poll(); }   /* ACK before EOF */
+    size_t samples = 0;
+    bool early_end = false, ended = false;
+    int64_t ended_at = 0, start = s_now;
+    for (int i = 0; i < 500; i++) {
+        char text[96];
+        if (next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_ENDED) {
+            ended = true;
+            ended_at = s_now;
+            early_end |= samples < (size_t)frames * 640;
+        }
+        /* The production voice consumer has only a 2 s tail after ENDED. */
+        if (ended && s_now - ended_at >= 2000000) break;
+        int16_t pcm[320];
+        bool flushed;
+        size_t n = muse_voice_call_read(pcm, 320, &flushed);
+        assert(!flushed);
+        if (n) assert(muse_vc_peak(pcm, n) < 9000);   /* none of the late 12000 tone */
+        samples += n;
+        poll(1, 20000);
+        if (samples == (size_t)frames * 640 && (!muse_voice_call_busy() || order == 0)) break;
+    }
+    fprintf(stderr, "ptt_ack_drain: order=%d frames=%d samples=%zu expected=%d early_end=%d elapsed_us=%lld\n",
+            order, frames, samples, frames * 640, early_end, (long long)(s_now - start));
+    assert(samples == (size_t)frames * 640 && !early_end);
+    if (order == 0) { stream_end(id, true, 200); poll(); }
+    if (!ended) expect_event(MUSE_VOICE_CALL_EV_ENDED);
+    assert(!muse_voice_call_busy() && read_all() == 0);
+}
+
+static void ptt_stop_paced_ack_only(void) { ptt_stop_paced(0, 125); }
+static void ptt_stop_paced_ack_eof(void) { ptt_stop_paced(1, 125); }
+static void ptt_stop_paced_eof_ack(void) { ptt_stop_paced(2, 125); }
+static void ptt_stop_paced_output_only(void) { ptt_stop_paced(1, 75); }
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -2693,7 +2829,9 @@ int main(int argc, char **argv)
                                     ptt_quiet_after_early_audio, ptt_cutover, ptt_many_edges_while_connecting,
                                     ptt_bad_turn_identity, ptt_playing_while_waiting, ptt_captions,
                                     ptt_end_while_held_reply, ptt_end_mid_pump, ptt_stop_drains_deferred,
-                                    ptt_stop_discards_ineligible };
+                                    ptt_stop_discards_ineligible, ptt_stop_paced_ack_only, ptt_stop_paced_ack_eof,
+                                    ptt_stop_paced_eof_ack, ptt_stop_paced_output_only, ptt_stop_no_progress_deadline,
+                                    ptt_stop_paced_interrupts };
     int which = atoi(argv[1]);
     if (which < 0 || which >= (int)(sizeof(cases) / sizeof(cases[0]))) {
         return 2;

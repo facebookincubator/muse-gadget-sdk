@@ -169,6 +169,9 @@ class StopWatchPTT(unittest.TestCase):
     def test_held_call_press_does_not_leave_a_pending_call(self):
         self.run_case('input', 10)
 
+    def test_consumer_plays_three_seconds_before_delayed_stop_ended_event(self):
+        self.run_case('voice', 41)
+
     def test_goodbye_tail_drains_bounded_and_yellow_interrupts(self):
         for scenario in (12, 13, 14):
             self.run_case('voice', scenario)

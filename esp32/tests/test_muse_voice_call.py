@@ -341,7 +341,9 @@ class VoiceCallSession(unittest.TestCase):
              'ptt_gate_latest_item', 'ptt_gate_follow_up', 'ptt_stale_completion', 'ptt_hold_clock_gap', 'ptt_abandoned_start',
              'ptt_quiet_after_early_audio', 'ptt_cutover', 'ptt_many_edges_while_connecting',
              'ptt_bad_turn_identity', 'ptt_playing_while_waiting', 'ptt_captions', 'ptt_end_while_held_reply',
-             'ptt_end_mid_pump', 'ptt_stop_drains_deferred', 'ptt_stop_discards_ineligible']
+             'ptt_end_mid_pump', 'ptt_stop_drains_deferred', 'ptt_stop_discards_ineligible',
+             'ptt_stop_paced_ack_only', 'ptt_stop_paced_ack_eof', 'ptt_stop_paced_eof_ack', 'ptt_stop_paced_output_only',
+             'ptt_stop_no_progress_deadline', 'ptt_stop_paced_interrupts']
 
     @classmethod
     def setUpClass(cls):
@@ -461,6 +463,24 @@ class VoiceCallSession(unittest.TestCase):
 
     def test_ptt_server_stop_never_promotes_ineligible_reply(self):
         self.run_case('ptt_stop_discards_ineligible')
+
+    def test_ptt_stop_paces_deferred_reply_after_ack(self):
+        self.run_case('ptt_stop_paced_ack_only')
+
+    def test_ptt_stop_paces_reply_after_ack_then_media_eof(self):
+        self.run_case('ptt_stop_paced_ack_eof')
+
+    def test_ptt_stop_paces_reply_after_media_eof_then_ack(self):
+        self.run_case('ptt_stop_paced_eof_ack')
+
+    def test_ptt_stop_paces_output_only_reply_longer_than_consumer_tail(self):
+        self.run_case('ptt_stop_paced_output_only')
+
+    def test_ptt_stop_without_playback_progress_ends_at_existing_deadline(self):
+        self.run_case('ptt_stop_no_progress_deadline')
+
+    def test_ptt_stop_queued_playback_keeps_all_interruption_fences(self):
+        self.run_case('ptt_stop_paced_interrupts')
 
     def test_ptt_first_start_on_a_filled_heap(self):
         # A fresh process whose first act is a push-to-talk start: the reply

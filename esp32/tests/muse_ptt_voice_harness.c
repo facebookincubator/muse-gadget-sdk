@@ -167,6 +167,11 @@ bool muse_voice_call_audio(const int16_t *p,size_t n) {
 size_t muse_voice_call_read(int16_t *p,size_t n,bool *flushed) {
     *flushed=false;
     assert(!muse_voice_ptt_call() || !held);
+    if(scenario==41 && ready_event && !held && tail_reads<150) {
+        ++tail_reads;
+        for(size_t i=0;i<n;i++) p[i]=25000;
+        return n;
+    }
     if (ended_event && scenario>=12 && scenario<=14 && (tail_reads<3 || scenario==14)) {
         ++tail_reads;
         for(size_t i=0;i<n;i++) p[i]=25000;
@@ -180,6 +185,12 @@ size_t muse_voice_call_read(int16_t *p,size_t n,bool *flushed) {
 }
 muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
     if (!ready_event && frame>=2) { ready_event=true; return MUSE_VOICE_CALL_EV_READY; }
+    if(scenario==41) {
+        if(tail_reads==150 && !ended_event) {
+            ended_event=true; snprintf(p,n,"MUSE ENDED THE CALL"); return MUSE_VOICE_CALL_EV_ENDED;
+        }
+        return MUSE_VOICE_CALL_EV_NONE;
+    }
     if (scenario==1 && frame==11 && !hold_event) { hold_event=true; hold_status=true; return MUSE_VOICE_CALL_EV_HOLD; }
     if (scenario==1 && frame==12 && !resume_event) { resume_event=true; hold_status=false; return MUSE_VOICE_CALL_EV_RESUME; }
     if(scenario==26 && frame==4 && !hold_event) {
@@ -202,7 +213,8 @@ muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
 #endif
 
 esp_err_t muse_audio_read(int16_t *p,size_t n) {
-    ++frame; clock_us+=scenario==22?1000:20000; assert(frame<1200);
+    ++frame; clock_us+=scenario==41?0:scenario==22?1000:20000; assert(frame<1200);
+    if(scenario==41 && frame==2) push(MUSE_PTT_UP);
     if(scenario>=22 && scenario<=28) {
         if(frame==2) push(MUSE_PTT_UP);
         if(scenario==23) fail_read=frame>=3;
@@ -262,6 +274,12 @@ int main(int argc,char **argv) {
         return 0;
     }
 #if CONFIG_MUSE_REALTIME_VOICE
+    if(scenario==41) {
+        run_call(true,0);
+        assert(tail_reads==150 && ended_event && !ends && !held && !muse_voice_in_call());
+        assert(clock_us>=3000000 && clock_us<5000000);   /* 3 s consumed before ENDED, not a 2 s tail */
+        return 0;
+    }
     if (scenario>=35 && scenario<=36) {
         /* The input task marks a push-to-talk press pending (blue then ends
          * the call it starts). A waking tap clears the mark, unless another

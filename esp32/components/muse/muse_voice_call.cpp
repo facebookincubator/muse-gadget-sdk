@@ -158,6 +158,8 @@ static uint32_t s_call_gen;          /* the generation s_call belongs to */
 static uint32_t s_pending_gen;       /* a start waiting for the session (or the last call) */
 static int64_t s_media_id, s_end_id;
 static uint32_t s_acts;              /* actions waiting for the next poll */
+static int64_t s_stop_drain_until;   /* accepted playback, independent of the closed media stream */
+static bool s_stop_ended;            /* network ended; notify the voice task after the bounded drain */
 static muse_vc_lines_t s_lines;
 static char *s_line_buf;
 static uint8_t *s_dec;
@@ -399,10 +401,21 @@ static void end_call_settled(const char *why)
     take(muse_vc_call_end_call_done(&s_call, now_us()));
 }
 
+static bool ptt_fenced(void);
+
 /* Carries out what the call core asked for. False if a send failed. */
-static bool run(uint32_t acts)
+static bool run(uint32_t acts, bool allow_stop_drain = true)
 {
     int64_t now = now_us();
+    if (allow_stop_drain && s_ptt && s_call.reason == MUSE_VC_END_STOP && ptt_fenced() &&
+        (acts & (MUSE_VC_ACT_HALF_CLOSE | MUSE_VC_ACT_ENDED))) {
+        if (!s_stop_drain_until) s_stop_drain_until = now + s_call.limits.drain_us;
+        if ((acts & MUSE_VC_ACT_ENDED) && now < s_stop_drain_until &&
+            (s_defer.len || xStreamBufferBytesAvailable(s_out))) {
+            s_stop_ended = true;
+            acts &= ~MUSE_VC_ACT_ENDED;
+        }
+    }
     if (acts & MUSE_VC_ACT_RESET_MEDIA) {
         muse_session_call_reset(s_media_id);
         s_media_id = 0;
@@ -445,6 +458,8 @@ static bool run(uint32_t acts)
         emit(MUSE_VOICE_CALL_EV_READY, nullptr);
     }
     if (acts & MUSE_VC_ACT_ENDED) {
+        s_stop_ended = false;
+        s_stop_drain_until = 0;
         char why[EV_TEXT];
         if (s_call.reason == MUSE_VC_END_REJECTED && s_call.http_status) {
             snprintf(why, sizeof(why), "%s (%d)", muse_vc_end_caption(s_call.reason), s_call.http_status);
@@ -593,12 +608,17 @@ static void defer_clear(void)
 
 static bool taking_audio(void);
 
-/* Reply audio may go to s_out: the call takes audio, released, the last
- * press fenced on both sides, and no barge-in flush pending. */
+/* Released input, current call generation, and the press/flush fence complete. */
+static bool ptt_fenced(void)
+{
+    return !end_requested() && !s_talk && s_gen.load() == s_call_gen && s_press == s_press_req.load() &&
+           s_press_clean.load() == s_press && s_flush_req.load() == s_flush_ack.load();
+}
+
 static bool ptt_playable(void)
 {
-    return taking_audio() && !end_requested() && !s_talk && s_press == s_press_req.load() &&
-           s_press_clean.load() == s_press && s_flush_req.load() == s_flush_ack.load();
+    bool draining = s_stop_drain_until && now_us() < s_stop_drain_until;
+    return (taking_audio() || draining) && ptt_fenced();
 }
 
 static void out_write(const int16_t *pcm, size_t n)
@@ -673,6 +693,7 @@ static void ptt_pressed(uint32_t press)
         strlcpy(s_cancel, open, sizeof(s_cancel));
     }
     muse_vc_reply_gate_press(s_gate);
+    s_stop_drain_until = 0;
     defer_clear();
     s_reply[0] = '\0';   /* the old reply's caption is done too */
     muse_vc_resampler_init(&s_down, MUSE_VC_WIRE_RATE, MUSE_VC_MIC_RATE);   /* no edge carried from the old reply */
@@ -1026,6 +1047,8 @@ static bool begin_call(uint32_t gen)
 {
     s_pending_gen = 0;
     s_call_gen = gen;
+    s_stop_drain_until = 0;
+    s_stop_ended = false;
     if (!muse_session_call_connect()) {
         emit(MUSE_VOICE_CALL_EV_ENDED, muse_hatch_configured() ? "CAN'T REACH MUSE" : "MUSE NOT SET UP");
         return true;
@@ -1199,7 +1222,12 @@ bool muse_voice_call_poll(void)
         }
     }
     if (s_ptt) {
+        if (s_stop_drain_until && now >= s_stop_drain_until) defer_clear();
         defer_flush();
+        if (s_stop_ended && (!ptt_playable() || (!s_defer.len && !xStreamBufferBytesAvailable(s_out)))) {
+            defer_clear();
+            run(MUSE_VC_ACT_ENDED, false);
+        }
     }
     bool ok = pump_mic(now_us());
     publish();
@@ -1208,7 +1236,8 @@ bool muse_voice_call_poll(void)
 
 bool muse_voice_call_busy(void)
 {
-    return s_inited && (s_call.state != MUSE_VC_IDLE || s_pending_gen || s_cleanup_id || s_gen.load() != s_taken_gen);
+    return s_inited && (s_call.state != MUSE_VC_IDLE || s_stop_ended || s_pending_gen || s_cleanup_id ||
+                        s_gen.load() != s_taken_gen);
 }
 
 bool muse_voice_call_rx_full(void)
@@ -1319,10 +1348,12 @@ void muse_voice_call_disconnected(void)
     }
     s_media_id = s_end_id = 0;
     s_drop = false;
+    s_stop_drain_until = 0;
+    defer_clear();
     take(muse_vc_call_lost(&s_call, now));
-    uint32_t acts = s_acts;
+    uint32_t acts = s_acts | (s_stop_ended ? MUSE_VC_ACT_ENDED : 0);
     s_acts = 0;
-    run(acts & MUSE_VC_ACT_ENDED);   /* nothing to send on a dead connection */
+    run(acts & MUSE_VC_ACT_ENDED, false);   /* nothing to send or keep playing on a dead connection */
 }
 
 /* ---- Voice task side ---- */
