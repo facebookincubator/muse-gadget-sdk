@@ -1,6 +1,6 @@
 # Skill Catalog
 
-43 active skills: 42 device/family skills and one shared Google Cast skill.
+45 active skills: 44 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -66,3 +66,8 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
 - [Wyze RTSP cameras](gadget-wyze-rtsp-cameras/SKILL.md) — viewing/capture with compatible legacy firmware already installed.
 - [yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
+
+## Vehicles and climate
+
+- [Tesla](gadget-tesla/SKILL.md) — self-hosted status, drive/charge history and efficiency analytics via Fleet API, TeslaMate and Fleet Telemetry; read-only by default.
+- [Google Nest Thermostats](gadget-google-nest-thermostats/SKILL.md) — temperature and setpoints via a Smart Device Management bridge.
