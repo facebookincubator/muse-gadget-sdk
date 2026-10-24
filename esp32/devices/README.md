@@ -38,6 +38,7 @@ session to Muse. The rest depends on the hardware.
 | **Waveshare ESP32-S3-1.54inch-ePaper V2** | ESP32-S3 | 1.54" 200×200 black and white e-paper (SSD1681) | 8 MB / 8 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-1.54inch-ePaper) | [Waveshare](https://www.waveshare.com/esp32-s3-1.54inch-epaper.htm) |
 | **Seeed reTerminal E1001** | ESP32-S3 | 7.5" 800×480 black and white e-paper | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/getting_started_with_reterminal_e1001/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-E1001-p-6534.html) |
 | **Seeed reTerminal E1002** | ESP32-S3 | 7.3" 800×480 six-colour e-paper (E Ink Spectra 6) | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/reterminal_e10xx_with_esphome/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html) |
+| **Seeed reTerminal E1003** | ESP32-S3 | 10.3" 16-level grayscale e-paper (IT8951; 1404×1872 panel, 1872×1404 landscape coordinates), GT911 touch | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/getting_started_with_reterminal_e1003/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-E1003-p-6731.html) |
 | **Seeed reTerminal Sticky (experimental)** | ESP32-S3 | 3.97" SSD1677 e-paper (native 800×480; portrait 480×800, four gray levels for images/UI) | 32 MB / 8 MB | [Seeed hardware overview](https://www.seeedstudio.com/sticky/docs/en/device-guide/hardware-overview/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-Sticky-p-6861.html) |
 | **Home Assistant Voice Preview Edition** | ESP32-S3 | None (12-LED ring) | 16 MB / 8 MB | [ESPHome repo](https://github.com/esphome/home-assistant-voice-pe) | [Home Assistant](https://www.home-assistant.io/voice-pe/) |
 | **Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental)** | ESP32-S3 | None (single RGB LED) | 8 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/xiao_respeaker/) | — |
@@ -596,6 +597,7 @@ board's overlays, in order:
 | Waveshare S3 ePaper 1.54 | `esp32s3` | [`devices/sdkconfig.waveshare-s3-epaper-154`](sdkconfig.waveshare-s3-epaper-154) | `tools/board.sh waveshare-s3-epaper-154 build` |
 | Seeed reTerminal E1001 | `esp32s3` | [`devices/sdkconfig.reterminal-e1001`](sdkconfig.reterminal-e1001) | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | `esp32s3` | [`devices/sdkconfig.reterminal-e1002`](sdkconfig.reterminal-e1002) | `tools/board.sh reterminal-e1002 build` |
+| Seeed reTerminal E1003 | `esp32s3` | [`devices/sdkconfig.reterminal-e1003`](sdkconfig.reterminal-e1003) | `tools/board.sh reterminal-e1003 build` |
 | Seeed reTerminal Sticky (experimental) | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.reterminal-sticky`](sdkconfig.reterminal-sticky) | `tools/board.sh reterminal-sticky build` |
 | Seeed reTerminal Sticky Link status (experimental) | `esp32s3` | [`devices/sdkconfig.reterminal-sticky-link`](sdkconfig.reterminal-sticky-link) | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice PE | `esp32s3` | [`devices/sdkconfig.home-assistant-voice`](sdkconfig.home-assistant-voice) | `tools/board.sh home-assistant-voice build` |

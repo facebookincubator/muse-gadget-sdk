@@ -54,6 +54,7 @@ before adding a feature to one.
 | Seeed SenseCAP Indicator | `esp32s3` | `devices/sdkconfig.sensecap-indicator` | `tools/board.sh sensecap-indicator` |
 | Seeed reTerminal E1001 | `esp32s3` | `devices/sdkconfig.reterminal-e1001` | `tools/board.sh reterminal-e1001` |
 | Seeed reTerminal E1002 | `esp32s3` | `devices/sdkconfig.reterminal-e1002` | `tools/board.sh reterminal-e1002` |
+| Seeed reTerminal E1003 | `esp32s3` | `devices/sdkconfig.reterminal-e1003` | `tools/board.sh reterminal-e1003` |
 | Seeed reTerminal Sticky (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky` | `tools/board.sh reterminal-sticky` |
 | Seeed reTerminal Sticky Link status (experimental) | `esp32s3` | `devices/sdkconfig.reterminal-sticky-link` | `tools/board.sh reterminal-sticky-link` |
 | Home Assistant Voice Preview Edition | `esp32s3` | `devices/sdkconfig.home-assistant-voice` | `tools/board.sh home-assistant-voice` |
@@ -405,6 +406,8 @@ Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `main/pixel_font.c` (BSD-2-Clause, Adafruit),
 `components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
+`main/reterminal_e100x.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
+`main/epd_it8951.c` and `main/uc8179_gray4_lut.h` (MIT, Seeed_GFX2),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
 Each third-party file is listed under License in `README.md` and the root

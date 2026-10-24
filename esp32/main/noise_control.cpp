@@ -16,6 +16,10 @@
 
 #include "ble_commands.h"
 #include "noise_control.h"
+#include "sdkconfig.h"
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE || CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT || CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
+#include "reterminal_e100x.h"
+#endif
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
 #include "noise_tunnel_internal.h"
@@ -1368,6 +1372,10 @@ static char *build_register_json(void) {
     copy_wifi_ssid(wifi_ssid, sizeof(wifi_ssid));
 
     cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        ESP_LOGE(TAG, "link.register JSON root allocation failed");
+        return nullptr;
+    }
     cJSON_AddStringToObject(root, "type", "req");
     char uuid[40];
     make_uuid(uuid, sizeof(uuid));
@@ -1378,6 +1386,11 @@ static char *build_register_json(void) {
     s_register_req_id[sizeof(s_register_req_id) - 1] = '\0';
     cJSON_AddStringToObject(root, "method", "link.register");
     cJSON *params = cJSON_CreateObject();
+    if (!params) {
+        ESP_LOGE(TAG, "link.register JSON params allocation failed");
+        cJSON_Delete(root);
+        return nullptr;
+    }
     cJSON_AddStringToObject(params, "node_id", s_node_id);
     cJSON_AddStringToObject(params, "display_name", s_display_name);
     cJSON_AddStringToObject(params, "platform", "esp32");
@@ -1390,6 +1403,12 @@ static char *build_register_json(void) {
     add_register_metadata_string(&metadata, params, "network_ssid", wifi_ssid);
 
     cJSON *commands = cJSON_CreateObject();
+    if (!commands) {
+        ESP_LOGE(TAG, "link.register JSON commands allocation failed");
+        cJSON_Delete(params);
+        cJSON_Delete(root);
+        return nullptr;
+    }
     add_command(commands, "device.health",
                 "Report basic Link health, including battery level (percent), "
                 "voltage, and whether it is charging or on USB power; each is "
@@ -1466,7 +1485,45 @@ static char *build_register_json(void) {
         cJSON *url_required = cJSON_CreateObject();
         cJSON_AddItemToObject(url_required, "url",
                               string_param("http:// or https:// URL of the image."));
-        add_command(commands, "display.draw_url", desc, url_required, row_params());
+        cJSON *url_optional = row_params();
+        add_command(commands, "display.draw_url", desc, url_required, url_optional);
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+        add_command(commands, "display.draw_gray4_url",
+                    "E1001 only: download a baseline JPEG or raw RGB565 image and show "
+                    "it using the panel's four physical gray levels (black, dark gray, "
+                    "light gray, white). The device converts and dithers the input, "
+                    "then performs one full gray refresh. Use for photos; "
+                    "display.draw_url keeps the faster black-and-white mode.",
+                    cJSON_Duplicate(url_required, true), cJSON_Duplicate(url_optional, true));
+        cJSON_AddNumberToObject(
+            cJSON_GetObjectItem(commands, "display.draw_gray4_url"), "timeout_ms", 90000);
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        add_command(commands, "display.draw_gray16_url",
+                    "E1003 only: show a baseline JPEG or raw RGB565 using 16 physical gray levels. "
+                    "Full-screen refresh; display.draw_url retains the black-and-white mode.",
+                    cJSON_Duplicate(url_required, true), cJSON_Duplicate(url_optional, true));
+        cJSON_AddNumberToObject(
+            cJSON_GetObjectItem(commands, "display.draw_gray16_url"), "timeout_ms", 90000);
+        cJSON *partial_required = cJSON_Duplicate(url_required, true);
+        auto rect_param = [](const char *description) {
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "type", "integer");
+            cJSON_AddStringToObject(item, "description", description);
+            return item;
+        };
+        cJSON_AddItemToObject(partial_required, "x", rect_param("Left edge; multiple of 16"));
+        cJSON_AddItemToObject(partial_required, "y", rect_param("Top edge"));
+        cJSON_AddItemToObject(partial_required, "width", rect_param("Width; multiple of 16"));
+        cJSON_AddItemToObject(partial_required, "height", rect_param("Height"));
+        add_command(commands, "display.draw_partial_url",
+                    "E1003 only: retain the rest of the monochrome screen and update one aligned "
+                    "rectangle. Source JPEG or raw RGB565 must exactly match width x height; "
+                    "no scaling. Full refresh occasionally to clear ghosting.",
+                    partial_required, nullptr);
+        cJSON_AddNumberToObject(
+            cJSON_GetObjectItem(commands, "display.draw_partial_url"), "timeout_ms", 90000);
+#endif
         // The six-colour e-paper may first finish a status screen refresh,
         // then takes as long again for the image.
         cJSON_AddNumberToObject(
@@ -1556,23 +1613,57 @@ static char *build_register_json(void) {
     ble_commands_register(commands);
 #endif
 
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE || CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT || CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
+    reterminal_e100x_register(commands);
+#endif
     cJSON_AddItemToObject(params, "commands_v2", commands);
     cJSON_AddItemToObject(root, "params", params);
 
-    // cJSON_PrintUnformatted grows its buffer by doubling, holding the old
-    // one each time, so ~2 KB of JSON briefly needs ~6 KB of byte-addressable
-    // heap. Right after the handshake there is often not that much, so print
-    // into one buffer sized to fit instead.
+    // cJSON_PrintUnformatted grows its buffer while retaining the old one.
+    // Keep registration bounded and retry only when the preallocated output
+    // is too small. A PSRAM board keeps this session-scoped JSON out of the
+    // internal heap needed by Wi-Fi/TLS; the control stream sends it in chunks.
+#if CONFIG_SPIRAM
+    constexpr int kInitialCapacity = 8192;
+    constexpr int kMaxCapacity = 16384;
+    constexpr int kGrowth = 2048;
+#else
+    constexpr int kInitialCapacity = 2048;
+    constexpr int kMaxCapacity = 8192;
+    constexpr int kGrowth = 512;
+#endif
     char *json = nullptr;
-    for (int size = 2048; size <= 8192 && !json; size += 512) {
-        json = (char *)malloc(size);
-        if (!json) break;
+    int capacity = 0;
+    bool allocation_failed = false;
+    for (int size = kInitialCapacity; size <= kMaxCapacity; size += kGrowth) {
+        capacity = size;
+#if CONFIG_SPIRAM
+        json = static_cast<char *>(heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#else
+        json = static_cast<char *>(malloc(size));
+#endif
+        if (!json) {
+            allocation_failed = true;
+            break;
+        }
         if (!cJSON_PrintPreallocated(root, json, size, false)) {
             free(json);
             json = nullptr;
+            continue;
         }
+        break;
     }
     cJSON_Delete(root);
+    if (json) {
+        ESP_LOGI(TAG, "link.register JSON %u bytes (buffer %d)",
+                 (unsigned)strlen(json), capacity);
+    } else if (allocation_failed) {
+        ESP_LOGE(TAG, "link.register JSON output allocation failed at %d bytes",
+                 capacity);
+    } else {
+        ESP_LOGE(TAG, "link.register JSON serialization failed at %d-byte limit",
+                 kMaxCapacity);
+    }
     return json;
 }
 
@@ -1686,6 +1777,9 @@ static void send_device_health(
                           charging ? charging : cJSON_CreateNull());
     cJSON_AddItemToObject(metrics, "usb_power",
                           usb_power ? usb_power : cJSON_CreateNull());
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE || CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT || CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
+    reterminal_e100x_health(metrics);
+#endif
     cJSON_AddItemToObject(health, "metrics", metrics);
     if (wifi_ssid[0]) {
         cJSON_AddStringToObject(health, "network_ssid", wifi_ssid);
@@ -2122,11 +2216,13 @@ static session_result_t run_session(stack_monitor_t *stack) {
         s_heartbeat_registered = false;
         char *reg_json = build_register_json();
         if (!reg_json) {
-            ESP_LOGE(TAG, "could not build link.register: int=%u/%u dma=%u/%u",
+            ESP_LOGE(TAG, "could not build link.register: int=%u/%u dma=%u/%u psram=%u/%u",
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
-                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
             goto cleanup;
         }
         control_tx = {reg_json, strlen(reg_json), 0, false, session_generation};

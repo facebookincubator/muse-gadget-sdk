@@ -401,6 +401,10 @@ menu "ESP32 Device SDK"
             bool "reTerminal E1002 7.3 inch Spectra 6 colour e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
+        config HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+            bool "reTerminal E1003 10.3 inch IT8951 e-paper (status screen)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
         config HOMEHUB_LED_BACKEND_STICKY_SSD1677
             bool "reTerminal Sticky 3.97 inch SSD1677 e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
@@ -452,6 +456,7 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default y if HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
         default y if HOMEHUB_LED_BACKEND_STICKY_SSD1677
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
         help
@@ -485,13 +490,40 @@ menu "ESP32 Device SDK"
             temperature and humidity need the Grove AHT20. Needs Seeed's stock
             RP2040 firmware.
 
+    config HOMEHUB_RETERMINAL_E100X_HARDWARE
+        bool "reTerminal E1001/E1002 hardware command interfaces"
+        depends on HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default n
+        help
+            Expose the E1001/E1002 V1.2 buttons and events, FAT SD storage, PCF8563
+            RTC, buzzer, battery ADC and on-demand PDM microphone capture.
+            No picture lists, local button actions or periodic display tasks.
+
+    config HOMEHUB_RETERMINAL_E1003_INPUT
+        bool "reTerminal E1003 buttons and GT911 touch events"
+        depends on HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        default y
+        help
+            Report KEY0/1/2 and GT911 touch transitions through buttons.read,
+            touch.read and events.read/wait. No local display actions.
+
+    config HOMEHUB_RETERMINAL_E1003_HARDWARE
+        bool "reTerminal E1003 battery, charger, RTC, buzzer, LED, SD and microphone"
+        depends on HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        default y
+        help
+            Expose E1003-specific battery voltage/curve, read-only SY6974B
+            charger status, PCF8563 RTC, bounded buzzer tones, GPIO16 LED,
+            FAT microSD commands and bounded PDM microphone capture.
+            Does not change charging configuration or power policy.
+
     config HOMEHUB_RETERMINAL_SHT4X
         bool "reTerminal E100x or Sticky onboard SHT4x sensor (sensors.read)"
-        depends on HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || HOMEHUB_LED_BACKEND_STICKY_SSD1677 || MUSE_BOARD_RETERMINAL_STICKY
+        depends on HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || HOMEHUB_LED_BACKEND_RETERMINAL_IT8951 || HOMEHUB_LED_BACKEND_STICKY_SSD1677 || MUSE_BOARD_RETERMINAL_STICKY
         default y
         help
             Poll the onboard Sensirion SHT4x temperature and humidity sensor
-            over I2C (E100x: SDA GPIO19, SCL GPIO20; Sticky: SDA GPIO1,
+            over I2C (E1001/E1002/E1003: SDA GPIO19, SCL GPIO20; Sticky: SDA GPIO1,
             SCL GPIO0; address 0x44) and answer sensors.read.
 
     config HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET

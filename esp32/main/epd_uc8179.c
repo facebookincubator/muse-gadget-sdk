@@ -22,6 +22,8 @@
 // and timings: GxEPD2's GxEPD2_750_GDEY075T7 (github.com/ZinggJM/GxEPD2).
 
 #include "epd_panel.h"
+#include "reterminal_e100x_board.h"
+#include "uc8179_gray4_lut.h"
 
 #include <string.h>
 
@@ -36,19 +38,20 @@
 static const char *TAG = "link.led";
 
 #define EPD_HOST        SPI2_HOST
-#define EPD_PIN_SCLK    7
-#define EPD_PIN_MOSI    9
-#define EPD_PIN_CS      10
-#define EPD_PIN_DC      11
-#define EPD_PIN_RST     12
-#define EPD_PIN_BUSY    13
+#define EPD_PIN_SCLK    E100X_SPI_SCLK_GPIO
+#define EPD_PIN_MOSI    E100X_SPI_MOSI_GPIO
+#define EPD_PIN_CS      E100X_PANEL_CS_GPIO
+#define EPD_PIN_DC      E100X_PANEL_DC_OR_DRIVE_GPIO
+#define EPD_PIN_RST     E100X_PANEL_RESET_GPIO
+#define EPD_PIN_BUSY    E100X_PANEL_READY_GPIO
 #define EPD_SPI_HZ      (10 * 1000 * 1000)
-#define EPD_W           800
-#define EPD_H           480
+#define EPD_W           E100X_WIDTH
+#define EPD_H           E100X_HEIGHT
 #define EPD_ROW_BYTES   (EPD_W / 8)
 #define EPD_FRAME_BYTES (EPD_ROW_BYTES * EPD_H)
 #define EPD_CHUNK_BYTES (EPD_ROW_BYTES * 40)
 #define EPD_BUSY_TIMEOUT_MS 10000
+#define EPD_GRAY_BUSY_TIMEOUT_MS 30000
 
 static spi_device_handle_t s_spi;
 static uint8_t *s_chunk;
@@ -73,13 +76,17 @@ static esp_err_t epd_cmd(uint8_t cmd, const uint8_t *data, size_t len) {
     return err;
 }
 
-static esp_err_t epd_wait_idle(void) {
-    int64_t give_up = esp_timer_get_time() + EPD_BUSY_TIMEOUT_MS * 1000LL;
+static esp_err_t epd_wait_idle_for(int timeout_ms) {
+    int64_t give_up = esp_timer_get_time() + timeout_ms * 1000LL;
     while (gpio_get_level(EPD_PIN_BUSY) == 0) {
         if (esp_timer_get_time() > give_up) return ESP_ERR_TIMEOUT;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     return ESP_OK;
+}
+
+static esp_err_t epd_wait_idle(void) {
+    return epd_wait_idle_for(EPD_BUSY_TIMEOUT_MS);
 }
 
 typedef struct { uint8_t cmd, len; uint8_t data[5]; } init_cmd_t;
@@ -112,7 +119,11 @@ static esp_err_t uc8179_init(void) {
     const spi_bus_config_t bus = {
         .sclk_io_num = EPD_PIN_SCLK,
         .mosi_io_num = EPD_PIN_MOSI,
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE
+        .miso_io_num = E100X_SPI_MISO_GPIO, // SD shares SPI2 with the E1001 panel.
+#else
         .miso_io_num = -1,
+#endif
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = EPD_CHUNK_BYTES,
@@ -161,6 +172,56 @@ static esp_err_t uc8179_update(const uint8_t *frame, const uint8_t *prev, bool f
     return ESP_OK;
 }
 
+static esp_err_t uc8179_update_gray4(const uint8_t *old_plane, const uint8_t *new_plane) {
+    // Seeed_GFX2 UC8179 Gray4 sequence: external gray LUT and two data planes.
+    gpio_set_level(EPD_PIN_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(EPD_PIN_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    esp_err_t err = epd_wait_idle_for(EPD_GRAY_BUSY_TIMEOUT_MS);
+    static const uint8_t power[] = {0x07, 0x17, 0x3F, 0x3F, 0x07};
+    static const uint8_t booster[] = {0x27, 0x27, 0x28, 0x17};
+    static const uint8_t resolution[] = {EPD_W >> 8, EPD_W & 0xFF,
+                                         EPD_H >> 8, EPD_H & 0xFF};
+    static const uint8_t interval[] = {0x10, 0x07};
+    if (err == ESP_OK) err = epd_cmd(0x01, power, sizeof(power));
+    if (err == ESP_OK) err = epd_cmd(0x30, (const uint8_t[]){0x06}, 1);
+    if (err == ESP_OK) err = epd_cmd(0x82, (const uint8_t[]){0x12}, 1);
+    if (err == ESP_OK) err = epd_cmd(0x06, booster, sizeof(booster));
+    if (err == ESP_OK) err = epd_cmd(0x04, NULL, 0);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        err = epd_wait_idle_for(EPD_GRAY_BUSY_TIMEOUT_MS);
+    }
+    if (err == ESP_OK) err = epd_cmd(0x00, (const uint8_t[]){0x3F}, 1);
+    if (err == ESP_OK) err = epd_cmd(0xE3, (const uint8_t[]){0x88}, 1);
+    if (err == ESP_OK) err = epd_cmd(0x50, interval, sizeof(interval));
+    if (err == ESP_OK) err = epd_cmd(0x52, (const uint8_t[]){0x00}, 1);
+    if (err == ESP_OK) err = epd_cmd(0x61, resolution, sizeof(resolution));
+    static const struct { uint8_t command; const uint8_t *lut; } luts[] = {
+        {0x20, lut_vcom_gray}, {0x21, lut_ww_gray}, {0x22, lut_kw_gray},
+        {0x23, lut_wk_gray}, {0x24, lut_kk_gray},
+    };
+    for (size_t i = 0; err == ESP_OK && i < sizeof(luts) / sizeof(luts[0]); i++) {
+        err = epd_wait_idle_for(EPD_GRAY_BUSY_TIMEOUT_MS);
+        if (err == ESP_OK) err = epd_cmd(luts[i].command, luts[i].lut, 42);
+    }
+    if (err == ESP_OK) err = epd_cmd(0x10, old_plane, EPD_FRAME_BYTES);
+    if (err == ESP_OK) err = epd_cmd(0x13, new_plane, EPD_FRAME_BYTES);
+    if (err == ESP_OK) err = epd_wait_idle_for(EPD_GRAY_BUSY_TIMEOUT_MS);
+    int64_t start = esp_timer_get_time();
+    if (err == ESP_OK) err = epd_cmd(0x12, NULL, 0);
+    if (err == ESP_OK) err = epd_wait_idle_for(EPD_GRAY_BUSY_TIMEOUT_MS);
+    int ms = (int)((esp_timer_get_time() - start) / 1000);
+    if (err == ESP_OK) err = epd_cmd(0x02, NULL, 0);
+    if (err == ESP_OK) err = epd_wait_idle_for(EPD_GRAY_BUSY_TIMEOUT_MS);
+    static const uint8_t check = 0xA5;
+    if (err == ESP_OK) err = epd_cmd(0x07, &check, 1);
+    if (err != ESP_OK) ESP_LOGE(TAG, "e-paper gray4 refresh failed: %s", esp_err_to_name(err));
+    else ESP_LOGI(TAG, "e-paper gray4 refresh in %d ms", ms);
+    return err;
+}
+
 static const epd_panel_t s_panel = {
     .name            = "reTerminal E1001 UC8179",
     .depth           = "1 bit per pixel",
@@ -175,6 +236,7 @@ static const epd_panel_t s_panel = {
     .status_scale    = 4,
     .init            = uc8179_init,
     .update          = uc8179_update,
+    .update_gray4_planes = uc8179_update_gray4,
 };
 
 const epd_panel_t *epd_panel_get(void) { return &s_panel; }

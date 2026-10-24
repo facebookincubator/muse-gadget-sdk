@@ -189,6 +189,7 @@ status screen.
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
+| Seeed reTerminal E1003 | Status on a 10.3" e-paper, black and white images | `tools/board.sh reterminal-e1003 build` |
 | Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
 | Seeed reTerminal Sticky Link status (experimental) | 3.97" e-paper status screen and SHT40 only; no Muse UI | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
@@ -349,6 +350,13 @@ their upstream licenses:
 - [`main/epd_ssd1677.c`](main/epd_ssd1677.c), the reTerminal Sticky SSD1677
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence, is MIT
   and retains the source's copyright and license notice.
+- [`main/reterminal_e100x.c`](main/reterminal_e100x.c), the E1001/E1002/E1003
+  battery curves adapted from Seeed's E10xx firmware, is MIT with its notice
+  retained in the source.
+- [`main/epd_it8951.c`](main/epd_it8951.c), the E1003 panel commands and
+  image order adapted from Seeed_GFX2, is MIT with its notice retained.
+- [`main/uc8179_gray4_lut.h`](main/uc8179_gray4_lut.h), the E1001 four-gray
+  waveform from Seeed_GFX2, is MIT with its notice retained.
 - [`components/tinyh264/src`](components/tinyh264), the H.264 decoder, is the
   Android Open Source Project's (via udevbe/tinyh264), Apache-2.0 under its
   copyright. See [`components/tinyh264/LICENSE`](components/tinyh264/LICENSE).

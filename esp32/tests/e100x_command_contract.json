@@ -1,0 +1,290 @@
+{
+  "e10012": {
+    "buttons.read": {
+      "required": {},
+      "optional": {}
+    },
+    "events.read": {
+      "required": {},
+      "optional": {
+        "after": {
+          "type": "integer"
+        }
+      }
+    },
+    "events.wait": {
+      "required": {},
+      "optional": {
+        "after": {
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "timeout_ms": 35000
+    },
+    "battery.read": {
+      "required": {},
+      "optional": {}
+    },
+    "buzzer.beep": {
+      "required": {
+        "frequency_hz": {
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer"
+        }
+      },
+      "optional": {}
+    },
+    "rtc.read": {
+      "required": {},
+      "optional": {}
+    },
+    "rtc.set": {
+      "required": {
+        "year": {
+          "type": "integer"
+        },
+        "month": {
+          "type": "integer"
+        },
+        "day": {
+          "type": "integer"
+        },
+        "hour": {
+          "type": "integer"
+        },
+        "minute": {
+          "type": "integer"
+        },
+        "second": {
+          "type": "integer"
+        }
+      },
+      "optional": {}
+    },
+    "sd.status": {
+      "required": {},
+      "optional": {}
+    },
+    "sd.list": {
+      "required": {},
+      "optional": {
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "sd.read_text": {
+      "required": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "optional": {}
+    },
+    "sd.write_text": {
+      "required": {
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "optional": {}
+    },
+    "sd.read": {
+      "required": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "optional": {
+        "offset": {
+          "type": "integer"
+        }
+      }
+    },
+    "sd.write": {
+      "required": {
+        "path": {
+          "type": "string"
+        },
+        "data_base64": {
+          "type": "string"
+        }
+      },
+      "optional": {
+        "offset": {
+          "type": "integer"
+        }
+      }
+    },
+    "microphone.record": {
+      "required": {
+        "duration_ms": {
+          "type": "integer"
+        }
+      },
+      "optional": {}
+    }
+  },
+  "e1003": {
+    "battery.read": {
+      "required": {},
+      "optional": {}
+    },
+    "pmic.read": {
+      "required": {},
+      "optional": {}
+    },
+    "rtc.read": {
+      "required": {},
+      "optional": {}
+    },
+    "rtc.set": {
+      "required": {
+        "year": {
+          "type": "integer"
+        },
+        "month": {
+          "type": "integer"
+        },
+        "day": {
+          "type": "integer"
+        },
+        "hour": {
+          "type": "integer"
+        },
+        "minute": {
+          "type": "integer"
+        },
+        "second": {
+          "type": "integer"
+        }
+      },
+      "optional": {}
+    },
+    "buzzer.beep": {
+      "required": {
+        "frequency_hz": {
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer"
+        }
+      },
+      "optional": {}
+    },
+    "led.read": {
+      "required": {},
+      "optional": {}
+    },
+    "led.set": {
+      "required": {
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "optional": {}
+    },
+    "sd.status": {
+      "required": {},
+      "optional": {}
+    },
+    "sd.list": {
+      "required": {},
+      "optional": {
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "sd.read_text": {
+      "required": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "optional": {}
+    },
+    "sd.write_text": {
+      "required": {
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "optional": {}
+    },
+    "sd.read": {
+      "required": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "optional": {
+        "offset": {
+          "type": "integer"
+        }
+      }
+    },
+    "sd.write": {
+      "required": {
+        "path": {
+          "type": "string"
+        },
+        "data_base64": {
+          "type": "string"
+        }
+      },
+      "optional": {
+        "offset": {
+          "type": "integer"
+        }
+      }
+    },
+    "microphone.record": {
+      "required": {
+        "duration_ms": {
+          "type": "integer"
+        }
+      },
+      "optional": {}
+    },
+    "buttons.read": {
+      "required": {},
+      "optional": {}
+    },
+    "touch.read": {
+      "required": {},
+      "optional": {}
+    },
+    "events.read": {
+      "required": {},
+      "optional": {
+        "after": {
+          "type": "integer"
+        }
+      }
+    },
+    "events.wait": {
+      "required": {},
+      "optional": {
+        "after": {
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "timeout_ms": 35000
+    }
+  }
+}

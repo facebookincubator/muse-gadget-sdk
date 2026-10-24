@@ -1,0 +1,48 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Seeed reTerminal E1003 V1.0: ESP32-S3R8, 32 MB flash, 8 MB octal PSRAM,
+# ED103TC2 / IT8951 10.3 inch e-paper. Load after sdkconfig.defaults.
+# Board wiring: 202004522_reTerminal_E1003_V1.0_SCH_251231.pdf, sheets 4-8.
+# Display protocol: Seeed_GFX2 Driver_IT8951 and Driver_ED103TC2 (MIT).
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_PM_ENABLE=y
+CONFIG_PM_PROFILING=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+# CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set
+
+CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951=y
+CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT=y
+CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE=y
+CONFIG_HOMEHUB_RETERMINAL_SHT4X=y
+# Start with Seeed's uncompensated reading; calibrate E1003 board heat on hardware.
+CONFIG_HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET=0
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# Green KEY0 on GPIO3 confirms Muse pairing and resets setup on a long press.
+CONFIG_HOMEHUB_BUTTON_GPIO=3
+CONFIG_HOMEHUB_BUTTON_LABEL="the green button"
+
+# The physical flash is 32 MB; the existing Link partitions fit below 16 MB.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# 2.6 MB 8-bit canvas and 1-bit panel frames reside in octal PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
