@@ -411,6 +411,20 @@ int main(void) {
         self.assertIn("1 bit per pixel", block)
         self.assertIn("16 bits per pixel (RGB565)", block)
 
+    def test_draw_url_states_the_four_colour_inks(self):
+        noise = (ROOT / "main/noise_control.cpp").read_text()
+        start = noise.index("#if CONFIG_HOMEHUB_DISPLAY_COMMANDS")
+        block = noise[start:noise.index('"display.show_animation"', start)]
+        self.assertIn("bool epaper = bits == 1 || bits == 2 || bits == 4;", block)
+        # Four inks only on the 1.54G; elsewhere 2 bits stay four grays.
+        self.assertIn("#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G\n        bool inks4 = bits == 2;", block)
+        self.assertIn("four-level grayscale e-paper screen, 2 bits per pixel", block)
+        self.assertIn('inks4 ? "four-colour e-paper screen, 2 bits per pixel"', block)
+        start = block.index('inks4 ? " The screen has only four inks:')
+        text = re.sub(r'"\s*"', "", block[start:block.index("bits == 4", start)])
+        for ink in ("black #000000", "white #ffffff", "yellow #ffff00", "red #ff0000"):
+            self.assertIn(ink, text)
+
     def test_draw_url_states_the_six_colour_inks(self):
         noise = (ROOT / "main/noise_control.cpp").read_text()
         start = noise.index("#if CONFIG_HOMEHUB_DISPLAY_COMMANDS")
@@ -428,7 +442,8 @@ int main(void) {
         self.assertIn("led_status_display_bits", driver)
         self.assertIn("return s_panel->update_gray4 ? 2 : s_panel->bits_per_pixel;", driver)
         for panel, bits in (("epd_spectra6.c", 4), ("epd_uc8179.c", 1),
-                            ("epd_ssd1681.c", 1), ("epd_ssd1677.c", 1)):
+                            ("epd_ssd1681.c", 1), ("epd_ssd1677.c", 1),
+                            ("epd_154g.c", 2)):
             self.assertRegex((ROOT / "main" / panel).read_text(),
                              rf"\.bits_per_pixel\s*=\s*{bits},", panel)
 
@@ -443,6 +458,8 @@ int main(void) {
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1681.c"\)\s*'
+                                r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_154g.c"\)\s*'
                                 r'else\(\)\s*'
                                 r'list\(APPEND GADGET_SRCS "led_status.c"\)')
         # Both implementations provide the whole display interface.

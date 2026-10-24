@@ -16,5 +16,14 @@ dependencies:
   espressif/esp_websocket_client: "~1.2"
   espressif/cjson: "~1.7"
   espressif/led_strip: "~3.0"
+  espressif/esp_codec_dev:
+    version: "~1.5"
+    # In this order: rules stop at the first false one, and each option
+    # exists only when the rule before it holds.
+    rules:
+      - if: "$IDF_TARGET == esp32s3"
+      - if: "$CONFIG{SPIRAM} == True"
+      - if: "$CONFIG{HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G} == True"
+      - if: "$CONFIG{HOMEHUB_VOICE} == True"
   idf:
     version: ">=5.1"
