@@ -1331,6 +1331,21 @@ static int bind_msg(const char *id, cJSON *payload)
     return s_turn.nmsgs++;
 }
 
+/* The first n bytes of s without a UTF-8 character cut short at their end. */
+static size_t whole_chars(const char *s, size_t n)
+{
+    size_t lead = n;
+    while (lead && n - lead < 3 && ((unsigned char)s[lead - 1] & 0xc0) == 0x80) {
+        lead--;
+    }
+    if (!lead) {
+        return n;
+    }
+    unsigned char c = (unsigned char)s[lead - 1];
+    size_t need = c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : c >= 0xc0 ? 2 : 1;
+    return c >= 0xc0 && n - (lead - 1) < need ? lead - 1 : n;
+}
+
 static void append_text(msg_t &m, const char *text)
 {
     size_t add = strlen(text);
@@ -1339,7 +1354,15 @@ static void append_text(msg_t &m, const char *text)
         if (!m.len) {
             full[0] = '\0';
         }
-        strlcat(full, text, TEXT_MAX);
+        /* What fits, ending on a whole character (a cut one shows as a box).
+         * Once some is left out nothing more is added, or the rest of the
+         * reply would join on after the gap. */
+        size_t used = strlen(full);
+        if (used == m.len) {
+            size_t take = add < TEXT_MAX - 1 - used ? add : TEXT_MAX - 1 - used;
+            memcpy(full + used, text, take);
+            full[take < add ? whole_chars(full, used + take) : used + take] = '\0';
+        }
     }
     m.len += add;
     size_t have = strlen(m.tail);
@@ -1534,7 +1557,10 @@ static void start_tts(void)
          * and finishes the message once it's drained.
          */
         m.pcm_start = s_turn.pcm_out;
-        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        /* Paced to the text kept: a reply longer than TEXT_MAX shows what was
+         * kept at reading pace, not stretched over the whole reply's time. */
+        size_t shown = s_turn.texts ? strlen(s_turn.texts + i * TEXT_MAX) : m.len;
+        m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
         s_turn.silent = true;
