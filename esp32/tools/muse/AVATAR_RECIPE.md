@@ -58,17 +58,26 @@ What it does, step by step:
 2. Sends your Muse `tools/muse/avatar_prompt.md` with the current renderer
    attached, as a typed message through the board (`tools/muse/chat.py`).
    Muse replies with a new `muse_pixel.c`.
-3. Saves the reply as `components/muse/avatar/last_reply.md` and the file
-   as `components/muse/avatar/muse_pixel.c`. The file it replaces becomes
-   `muse_pixel.c.prev`. The first comment in the file says what Muse drew,
-   and the tool prints it.
-4. Builds the file on your computer with warnings as errors, then runs every
-   animation with the address sanitizer. If either fails, it sends the errors
-   back to Muse and asks for a fixed file, twice at most. It also renders one
-   GIF per animation to `components/muse/avatar/gifs/`.
-5. Builds the firmware with `tools/muse/board.sh build` and flashes it.
+3. Saves the reply as `components/muse/avatar/last_reply.md`, and checks the
+   file in it before touching your avatar. A reply cut off on the way is never
+   used. It builds the file on your computer with warnings as errors, runs every
+   animation with the address sanitizer, and renders one GIF per animation.
+   Then it builds the firmware with the file, with `tools/muse/board.sh build`
+   in a copy of this tree, reusing your own build's configuration for that board
+   (`build-muse-*/sdkconfig`), or the defaults if you have no build of it yet.
+   If a check finds an error in the avatar, it sends the errors back to Muse
+   and asks for a fixed file, twice at most. Any failure leaves your avatar as
+   it was. The first comment in the
+   file says what Muse drew, and the tool prints it.
+4. Only once it all passes, saves the file as
+   `components/muse/avatar/muse_pixel.c` (the file it replaces becomes
+   `muse_pixel.c.prev`) and its GIFs in `components/muse/avatar/gifs/`.
+5. Flashes the firmware it built and checked. With `--no-flash`, that build
+   stays in `components/muse/avatar/firmware-BOARD/`, with the hashes of its
+   avatar and app image in `VERIFIED`, and the tool prints the command that
+   flashes it. A later run that fails leaves it; a new avatar replaces it.
 
-Options: `--no-flash` stops after the build, `--port` picks the board when
+Options: `--no-flash` stops after the build and keeps it, `--port` picks the board when
 more than one is plugged in, and `--reply FILE` skips asking Muse and uses a
 reply you saved yourself.
 
