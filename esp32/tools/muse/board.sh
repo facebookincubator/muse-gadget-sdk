@@ -137,6 +137,15 @@ if [ -n "${iris:-}" ]; then
     [ -e "$ws/projects/muse_gadget" ] || { mkdir -p "$ws/projects" && ln -s "$root" "$ws/projects/muse_gadget"; }
     cd "$ws" && exec python3 mosaico.py iris system-update --bundle "$root/$B/muse-gadget-system-update.irisfw" ${3:+--device-id $3}
 fi
+# Experimental LCD 1.54: the vendor publishes both UART and USJ console
+# configurations. Never auto-select the only USB device and risk flashing a
+# different attached S3. Require an explicit /dev/... port for this board.
+if [ "$board" = lcd154 ]; then
+    if [[ "${3:-}" != /dev/* ]]; then
+        echo "lcd154 is experimental: pass its verified /dev/... serial port explicitly" >&2
+        exit 2
+    fi
+fi
 port=$(python "$root/tools/muse/ports.py" $board ${3:-}) || exit 1
 esptool="-m esptool"
 [ -n "${paced:-}" ] && esptool="$root/tools/muse/paced_esptool.py"
