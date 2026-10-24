@@ -541,15 +541,44 @@ static void handle_rx_write_locked(const uint8_t *data, size_t len,
         if (idx == 0 || s_rx_total != total) {
             rx_reset_locked();
             s_rx_total = total;
-            s_rx_cap = MAX_RX_TOTAL_BYTES;
+            // Sized to the message: a fixed 8 KB buffer doesn't fit beside the
+            // UI on boards without PSRAM. The longer of this chunk and one ATT
+            // write is only an estimate; a longer chunk later grows the buffer.
+            size_t chunk_max = s_mtu > 3 + CHUNK_HEADER_BYTES
+                               ? (size_t)s_mtu - 3 - CHUNK_HEADER_BYTES : 0;
+            if (flen > chunk_max) chunk_max = flen;
+            s_rx_cap = (size_t)total * chunk_max;
+            if (s_rx_cap > MAX_RX_TOTAL_BYTES) s_rx_cap = MAX_RX_TOTAL_BYTES;
             s_rx_buf = malloc(s_rx_cap);
-            if (!s_rx_buf) { rx_reset_locked(); return; }
+            if (!s_rx_buf) {
+                ESP_LOGE(TAG, "no memory to reassemble a %u-byte command", (unsigned)s_rx_cap);
+                rx_reset_locked();
+                return;
+            }
             s_rx_len = 0;
         }
 
         if (idx != s_rx_next_idx || idx >= s_rx_total) { rx_reset_locked(); return; }
 
-        if (s_rx_len + flen > s_rx_cap) { rx_reset_locked(); return; }
+        if (s_rx_len + flen > MAX_RX_TOTAL_BYTES) {
+            ESP_LOGE(TAG, "chunked command exceeds %d bytes", MAX_RX_TOTAL_BYTES);
+            rx_reset_locked();
+            return;
+        }
+        if (s_rx_len + flen > s_rx_cap) {
+            // A long write can carry more than the estimate: assume the rest of
+            // the chunks are this long too.
+            size_t cap = s_rx_len + (size_t)(s_rx_total - idx) * flen;
+            if (cap > MAX_RX_TOTAL_BYTES) cap = MAX_RX_TOTAL_BYTES;
+            uint8_t *grown = realloc(s_rx_buf, cap);
+            if (!grown) {
+                ESP_LOGE(TAG, "no memory to reassemble a %u-byte command", (unsigned)cap);
+                rx_reset_locked();
+                return;
+            }
+            s_rx_buf = grown;
+            s_rx_cap = cap;
+        }
         memcpy(s_rx_buf + s_rx_len, frag, flen);
         s_rx_len += flen;
         s_rx_count++;
