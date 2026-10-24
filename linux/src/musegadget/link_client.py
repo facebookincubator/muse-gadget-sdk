@@ -149,6 +149,7 @@ class LinkSession:
         device: DeviceDescription,
         run_command: Callable[[str, dict, int | None], dict],
         connect=None,
+        invoke_slots: asyncio.Semaphore | None = None,
     ) -> None:
         self._url = noise_url(noise_host, vm_id)
         self._token = vm_auth_token
@@ -156,7 +157,7 @@ class LinkSession:
         self._run_command = run_command
         self._connect = connect
         self._send_lock = asyncio.Lock()
-        self._invokes = asyncio.Semaphore(MAX_CONCURRENT_INVOKES)
+        self._invokes = invoke_slots if invoke_slots is not None else asyncio.Semaphore(MAX_CONCURRENT_INVOKES)
         self._tasks: set[asyncio.Task] = set()
         self._stream_id = 0
         self._register_id = ""
@@ -560,13 +561,28 @@ class LinkSession:
             return
         shown = printable(command)
         log.info("invoke %s", shown)
-        async with self._invokes:
-            started = time.monotonic()
-            result = await asyncio.get_running_loop().run_in_executor(
+        await self._invokes.acquire()
+        started = time.monotonic()
+        try:
+            worker = asyncio.get_running_loop().run_in_executor(
                 None, self._run_command, command, params, timeout_ms,
             )
-            log.info("%s %s in %d ms", shown, describe_result(result),
-                     (time.monotonic() - started) * 1000)
+        except BaseException:
+            self._invokes.release()
+            raise
+
+        def finished(future: asyncio.Future) -> None:
+            self._invokes.release()
+            # Observe failures even when the disconnected session no longer waits.
+            if not future.cancelled():
+                future.exception()
+
+        worker.add_done_callback(finished)
+        # Cancelling this session cannot stop a running command thread. Keep its
+        # slot until it really finishes, including across service reconnects.
+        result = await asyncio.shield(worker)
+        log.info("%s %s in %d ms", shown, describe_result(result),
+                 (time.monotonic() - started) * 1000)
         await self.send({"method": "link.result", "id": invoke_id, **result})
 
 

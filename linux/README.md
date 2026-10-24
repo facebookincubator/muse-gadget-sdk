@@ -88,6 +88,12 @@ an active man-in-the-middle attack. Set it up on a network you trust.
 Commands run as the account you installed for, with exactly that account's
 permissions. If it can use sudo, so can Muse.
 
+The service runs at most four commands at once, including commands still running
+from a disconnected session. Disconnecting does not stop a command that already
+started; it keeps its slot until it returns. Queued commands from the old session
+are cancelled. Results from that session are not resent after reconnecting, and
+the service does not automatically retry those commands.
+
 Ask Muse things like:
 
 > What's using all the disk space on my Pi?
