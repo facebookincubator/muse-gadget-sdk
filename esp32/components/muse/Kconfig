@@ -242,6 +242,19 @@ menu "Muse"
             to pay for the CPU's light-sleep retention memory, which it
             takes at boot and keeps.
 
+    config MUSE_SMALL_FULL_REPLY
+        bool "Full-screen replies on small screens"
+        depends on MUSE_ENABLED
+        default n
+        help
+            On screens with the compact layout (under 200 px or so), Muse
+            normally keeps the avatar and pages replies two lines at a time
+            in a band along the bottom. With this on, the avatar steps aside
+            while Muse thinks or answers, and the reply fills the screen
+            below the status line. Muse comes back when the reply ends.
+            The menu gains a Text size setting (Small, Medium, Large) for
+            the reply's font, kept across restarts.
+
     config MUSE_HATCH
         bool "Muse's own voice session"
         depends on MUSE_ENABLED

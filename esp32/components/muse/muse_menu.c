@@ -70,6 +70,9 @@ typedef enum {
     ITEM_BRIGHTNESS,
     ITEM_MIC,
     ITEM_SLEEP,
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    ITEM_TEXT,
+#endif
     ITEM_PHONE,
     ITEM_WIFI,
 #if CONFIG_MUSE_VIDEO
@@ -90,6 +93,9 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_BRIGHTNESS] = "Brightness",
     [ITEM_MIC] = "Mic gain",
     [ITEM_SLEEP] = "Auto-sleep",
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    [ITEM_TEXT] = "Text size",
+#endif
     [ITEM_PHONE] = "Phone setup",
     [ITEM_WIFI] = "Wi-Fi",
 #if CONFIG_MUSE_VIDEO
@@ -110,6 +116,9 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_BRIGHTNESS] = "Change",
     [ITEM_MIC] = "Change",
     [ITEM_SLEEP] = "Change",
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    [ITEM_TEXT] = "Change",
+#endif
     [ITEM_PHONE] = "Toggle",
     [ITEM_WIFI] = "Toggle",
 #if CONFIG_MUSE_VIDEO
@@ -129,6 +138,9 @@ static const int BRIGHT_STEPS[] = { 10, 25, 50, 75, 100 };
 static const int GAIN_STEPS[] = { 0, 6, 12, 18, 24, 30, 36 };
 static const int SLEEP_STEPS[] = { 0, 30, 60, 120, 300, 600 };
 static const char *const SLEEP_NAMES[] = { "Never", "30 s", "1 min", "2 min", "5 min", "10 min" };
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+static const char *const TEXT_NAMES[] = { "Small", "Medium", "Large" };
+#endif
 #define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
 typedef enum {
@@ -227,6 +239,11 @@ static void value_text(int item, char *buf, size_t n)
     case ITEM_SLEEP:
         strlcpy(buf, sleep_name(muse_settings_sleep_s()), n);
         break;
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    case ITEM_TEXT:
+        strlcpy(buf, TEXT_NAMES[muse_settings_text_size()], n);
+        break;
+#endif
     case ITEM_PHONE:
         strlcpy(buf, muse_settings_ble_on() ? "On" : "Off", n);
         break;
@@ -422,6 +439,11 @@ static void activate(int item, int direction)
     case ITEM_SLEEP:
         muse_settings_set_sleep_s(value_step(SLEEP_STEPS, COUNT(SLEEP_STEPS), muse_settings_sleep_s(), direction));
         break;
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    case ITEM_TEXT:
+        muse_settings_set_text_size((muse_settings_text_size() + (direction < 0 ? COUNT(TEXT_NAMES) - 1 : 1)) % COUNT(TEXT_NAMES));
+        break;
+#endif
     case ITEM_PHONE:
         muse_settings_set_ble_on(!muse_settings_ble_on());
         break;

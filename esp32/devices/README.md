@@ -216,7 +216,9 @@ steps through the menu, as on the AIPI. Powering off from Muse turns off the
 screen, speaker and codec and puts the ESP32-S3 in deep sleep; either button
 wakes it. Double-click the power button for a full power-off, and click it to
 turn back on. Muse turns off the power chip's green LED, which would otherwise
-stay lit. The IMU, IR and Grove port aren't used yet.
+stay lit. While Muse answers, the reply fills the screen in place of the
+avatar; **Text size** in the menu picks Small, Medium or Large. The IMU, IR
+and Grove port aren't used yet.
 [M5Unified](https://github.com/m5stack/M5Unified) is M5Stack's reference
 driver for the power chip and peripherals.
 

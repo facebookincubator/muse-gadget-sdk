@@ -132,6 +132,15 @@ void muse_ui_bench_demo(bool enabled)
 #endif
 static lv_obj_t *s_ring;
 static lv_obj_t *s_bar;     /* compact layout's stand-in for the ring */
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+#define FULL_REPLY_TOP 18   /* under the compact status line */
+static const lv_font_t *s_full_font;   /* the reply's font, from the Text size setting */
+static int s_full_size = -1;           /* the setting s_full_font was picked for */
+static int s_full_reply_h;  /* the caption's height while it fills the screen */
+static const lv_font_t *s_band_font;   /* the caption's font in the two-line band */
+static bool s_full_reply;
+static bool s_caption_shown;
+#endif
 static lv_obj_t *s_state_lbl;
 static lv_obj_t *s_name_lbl;    /* this gadget's own name, to tell it from the next one */
 static lv_obj_t *s_power_lbl;
@@ -849,6 +858,39 @@ static void on_ring_draw(lv_event_t *e)
     layer->_clip_area = clip;
 }
 
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+/* Picks the reply font for the Text size setting and pages replies to fit it:
+ * unscii-8's fixed cell (the band's font), or Montserrat 14 or 20. Montserrat
+ * is proportional, so pages are cut for an average character, with a line
+ * spare for lines LVGL wraps again when they run wide. */
+static void apply_text_size(void)
+{
+    static const struct { const lv_font_t *font; int char_w; int spare; } SIZES[] = {
+        [MUSE_TEXT_SMALL] = { &lv_font_unscii_8, 8, 0 },
+        [MUSE_TEXT_MEDIUM] = { &lv_font_montserrat_14, 9, 1 },
+        [MUSE_TEXT_LARGE] = { &lv_font_montserrat_20, 12, 1 },
+    };
+    int size = muse_settings_text_size();
+    if (size == s_full_size) {
+        return;
+    }
+    s_full_size = size;
+    s_full_font = SIZES[size].font;
+    int pitch = lv_font_get_line_height(s_full_font) + CAPTION_LINE_SPACE;
+    int cols = (s_w - 6) / SIZES[size].char_w;
+    int lines = (s_full_reply_h - 4 + CAPTION_LINE_SPACE) / pitch - SIZES[size].spare;
+    /* A third of the caption spare for characters wider than a byte. */
+    while ((cols + 1) * lines > MUSE_CAPTION_MAX * 2 / 3) {
+        lines--;
+    }
+    muse_state_set_page(cols, lines);
+    if (s_full_reply) {
+        lv_obj_set_style_text_font(s_caption_lbl, s_full_font, 0);
+    }
+    ESP_LOGI(TAG, "full-screen reply pages: %d x %d", cols, lines);
+}
+#endif
+
 static void build_screen(void)
 {
     lv_obj_t *scr = lv_screen_active();
@@ -986,6 +1028,11 @@ static void build_screen(void)
         /* CJK doesn't fit unscii-8's cell, so a reply with CJK in it fills the
          * band one line at a time in the 16 px caption font instead. */
         muse_state_set_cjk_page(s_w / lv_font_get_glyph_width(caption_font(), 'M', ' '), 1);
+#endif
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+        s_full_reply_h = s_h - FULL_REPLY_TOP - 6;
+        s_band_font = lv_obj_get_style_text_font(s_caption_lbl, 0);
+        apply_text_size();
 #endif
 
         s_bar = lv_obj_create(face);
@@ -1459,6 +1506,34 @@ static void update_power(float now)
     }
 }
 
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+/* While Muse thinks or answers, the caption takes the screen and Muse steps
+ * aside; otherwise it's the usual two-line band over the bottom of the face. */
+static void set_full_reply(bool on)
+{
+    if (on == s_full_reply) {
+        return;
+    }
+    s_full_reply = on;
+    lv_obj_set_flag(s_canvas, LV_OBJ_FLAG_HIDDEN, on);
+    if (on) {
+        lv_obj_set_size(s_caption_lbl, s_w, s_full_reply_h);
+        lv_obj_set_style_text_font(s_caption_lbl, s_full_font, 0);
+        lv_obj_set_style_pad_hor(s_caption_lbl, 3, 0);
+        lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_COVER, 0);
+        lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, FULL_REPLY_TOP);
+    } else {
+        lv_obj_set_size(s_caption_lbl, s_w, 2 * 8 + 2 + 4);
+        lv_obj_set_style_text_font(s_caption_lbl, s_band_font, 0);
+        lv_obj_set_style_pad_hor(s_caption_lbl, 0, 0);
+        lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
+        lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+    }
+}
+#endif
+
 static void update_status(muse_mode_t mode, float now)
 {
     uint32_t accent = muse_pixel_accent(mode);
@@ -1560,7 +1635,16 @@ static void update_status(muse_mode_t mode, float now)
         if (s_reply_lbl) {
             lv_obj_add_flag(answer >= 0 ? s_caption_lbl : s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
         }
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+        s_caption_shown = caption[0] != 0;
+#endif
     }
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    if (s_small) {
+        apply_text_size();
+        set_full_reply(s_caption_shown && (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING));
+    }
+#endif
     update_power(now);
 }
 
