@@ -250,9 +250,9 @@ menu "Muse"
         help
             Push-to-talk turns go over a voice session of Muse's own, to the
             VM Home Link is paired with or one set up on the device with a
-            device token. Replies are text, shown as captions; start_tts in
-            muse_chat_session.cpp is where a TTS API of your own can speak
-            them. Needs PSRAM. Without it, voice notes go over Home Link's own
+            device token. Muse speaks the replies (start_tts in
+            muse_chat_session.cpp), with captions; with the speaker off
+            they're shown as text. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
     config MUSE_HATCH_COMPACT_BUFFERS
