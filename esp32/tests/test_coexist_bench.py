@@ -28,6 +28,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -54,16 +55,25 @@ class BenchServerTest(unittest.TestCase):
         self.addCleanup(httpd.shutdown)
         return http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=10)
 
+    def _await_log(self, out: io.StringIO, pattern: str, timeout: float = 2.0) -> None:
+        # The handler logs from the server thread after it has sent the last byte,
+        # so the client can finish reading before the line is printed. Call this
+        # inside the redirect_stdout block, or the late print goes to the real stdout.
+        deadline = time.monotonic() + timeout
+        while not re.search(pattern, out.getvalue()) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertRegex(out.getvalue(), pattern)
+
     def test_blob_streams_the_requested_bytes(self) -> None:
         conn = self._http()
         with contextlib.redirect_stdout(io.StringIO()) as out:
             conn.request("GET", "/blob?bytes=200000")
             resp = conn.getresponse()
             body = resp.read()
+            self._await_log(out, r"http GET /blob 200000 B in [0-9.]+ s")
         self.assertEqual(resp.status, 200)
         self.assertEqual(len(body), 200000)
         self.assertEqual(int(resp.getheader("Content-Length")), 200000)
-        self.assertRegex(out.getvalue(), r"http GET /blob 200000 B in [0-9.]+ s")
 
     def test_sink_counts_the_body(self) -> None:
         conn = self._http()
@@ -71,9 +81,9 @@ class BenchServerTest(unittest.TestCase):
             conn.request("POST", "/sink", body=b"x" * 150000)
             resp = conn.getresponse()
             body = resp.read().decode()
+            self._await_log(out, r"http POST /sink 150000 B in")
         self.assertEqual(resp.status, 200)
         self.assertIn('"bytes":150000', body)
-        self.assertRegex(out.getvalue(), r"http POST /sink 150000 B in")
 
     def test_other_paths_are_not_found(self) -> None:
         conn = self._http()
