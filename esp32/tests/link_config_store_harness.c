@@ -274,8 +274,55 @@ static void test_setup_clear_fails_closed_on_uncommitted_credential(void) {
           "failed setup clear deleted unrelated device state");
 }
 
+static void test_unpair_clears_pairing_and_marker_but_keeps_wifi(void) {
+    static const char *const pairing_keys[] = {
+        "access_token", "refresh_token", "auth_token", "vm_url", "username",
+        "pair_sdk_hint", "api_url", "api_url_v2", "noise_host", "setup_complete",
+    };
+    static const char *const wifi_keys[] = {
+        "ssid", "password", "wifi_channel", "wifi_others", "wifi_hidden",
+    };
+    fake_reset();
+    for (size_t i = 0; i < sizeof(pairing_keys) / sizeof(pairing_keys[0]); i++) {
+        fake_put(pairing_keys[i], "credential");
+    }
+    for (size_t i = 0; i < sizeof(wifi_keys) / sizeof(wifi_keys[0]); i++) {
+        fake_put(wifi_keys[i], "network");
+    }
+    fake_put("device_state", "device-identity");
+
+    CHECK(config_unpair(), "unpair should succeed");
+    for (size_t i = 0; i < sizeof(pairing_keys) / sizeof(pairing_keys[0]); i++) {
+        CHECK(config_key_lookup(pairing_keys[i]) == CONFIG_KEY_NOT_FOUND,
+              "%s was not deleted", pairing_keys[i]);
+    }
+    for (size_t i = 0; i < sizeof(wifi_keys) / sizeof(wifi_keys[0]); i++) {
+        CHECK(config_key_lookup(wifi_keys[i]) == CONFIG_KEY_FOUND,
+              "unpair deleted wifi key %s", wifi_keys[i]);
+    }
+    CHECK(config_key_lookup("device_state") == CONFIG_KEY_FOUND,
+          "unpair deleted unrelated device state");
+}
+
+static void test_unpair_keeps_marker_until_pairing_is_gone(void) {
+    fake_reset();
+    fake_put("access_token", "access");
+    fake_put("refresh_token", "refresh");
+    fake_put("setup_complete", "1");
+    s_commit_error_key = "refresh_token";
+
+    // Tokens without the marker would read as credentials kept after a
+    // refusal; a failed unpair must leave the device paired instead.
+    CHECK(!config_unpair(), "unpair must fail when a token erase is uncommitted");
+    CHECK(config_key_lookup("refresh_token") == CONFIG_KEY_FOUND,
+          "uncommitted credential unexpectedly disappeared");
+    CHECK(config_key_lookup("setup_complete") == CONFIG_KEY_FOUND,
+          "marker cleared while pairing credentials remain");
+}
+
 static void test_reset_clears_endpoints_before_credentials(void) {
-    bool (*const resetters[])(void) = {config_clear_pairing, config_clear_setup};
+    bool (*const resetters[])(void) = {config_clear_pairing, config_unpair,
+                                       config_clear_setup};
     for (size_t i = 0; i < sizeof(resetters) / sizeof(resetters[0]); i++) {
         fake_reset();
         fake_put("api_url", "https://previous.example");
@@ -295,6 +342,8 @@ int main(void) {
     test_setup_clear_verifies_credentials_and_preserves_identity();
     test_pairing_clear_preserves_wifi_channel();
     test_setup_clear_fails_closed_on_uncommitted_credential();
+    test_unpair_clears_pairing_and_marker_but_keeps_wifi();
+    test_unpair_keeps_marker_until_pairing_is_gone();
     test_reset_clears_endpoints_before_credentials();
     puts("config_store harness: PASS");
     return 0;

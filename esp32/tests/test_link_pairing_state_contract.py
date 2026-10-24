@@ -20,6 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_C = ROOT / "main" / "app.c"
+CONFIG_STORE_C = ROOT / "main" / "config_store.c"
 WIFI_MGR_C = ROOT / "main" / "wifi_mgr.c"
 
 
@@ -39,8 +40,8 @@ def _function_body(source: str, signature: str) -> str:
 
 class LinkPairingStateContractTest(unittest.TestCase):
     """Locks in the setup/pairing state machine: a failure at any stage wipes
-    the partial state to a clean slate and the device stays advertising for a
-    clean re-pair (no half-paired state, no reboot)."""
+    the partial pairing to a clean slate (saved Wi-Fi stays) and the device
+    stays advertising for a clean re-pair (no half-paired state, no reboot)."""
 
     def test_setup_wipe_clears_all_state_and_disconnects_wifi(self) -> None:
         source = APP_C.read_text()
@@ -49,12 +50,14 @@ class LinkPairingStateContractTest(unittest.TestCase):
         clear = _function_body(source, "static bool clear_setup_credentials(")
 
         # The single source of truth for "wipe partial pairing state": every
-        # recovery path must drop transports, drop the radio, and clear NVS.
+        # recovery path must drop transports, drop the radio, and clear the
+        # pairing from NVS. Saved Wi-Fi networks are not pairing state.
         self.assertIn("setup_disconnect_to_clean()", body)
         self.assertIn("disconnect_vm_transports()", disconnect)
         self.assertIn("wifi_mgr_disconnect()", disconnect)
         self.assertIn("clear_setup_credentials()", body)
-        self.assertIn("config_clear_setup()", clear)
+        self.assertIn("config_unpair()", clear)
+        self.assertNotIn("config_clear_setup()", clear)
         # Device tokens now refresh on rejection, not on a timer. Reset every
         # part of the VM-auth retry cadence so a later pair starts fresh.
         locked = clear[clear.index("auth_lock_take()") : clear.index("auth_lock_give()")]
@@ -122,16 +125,24 @@ class LinkPairingStateContractTest(unittest.TestCase):
         ]
         self.assertEqual(order, sorted(order))
 
-    def test_ble_unpair_wipes_wifi_via_full_wipe(self) -> None:
+    def test_ble_unpair_clears_pairing_and_marker_but_keeps_wifi(self) -> None:
         source = APP_C.read_text()
         body = _function_body(source, "static void on_unpair(")
         reset = _function_body(source, "static bool reset_setup_with_gate_held(")
+        unpair = _function_body(CONFIG_STORE_C.read_text(), "bool config_unpair(")
 
-        # Setup-mode unpair is "start over": it must wipe Wi-Fi too, not just
-        # pairing — leaving Wi-Fi behind is what left the device half-unpaired.
+        # Unpair goes through the shared wipe, which also clears the
+        # setup-complete marker: leaving that behind is what left a device
+        # half-unpaired (pairing refused). Wi-Fi survives so it can pair again.
         self.assertIn('reset_setup_with_gate_held("BLE unpair")', body)
         self.assertIn("setup_wipe_to_clean()", reset)
         self.assertNotIn("config_clear_pairing()", reset)
+        self.assertIn("config_clear_pairing()", unpair)
+        self.assertIn("config_clear_setup_complete()", unpair)
+        self.assertLess(unpair.index("config_clear_pairing()"),
+                        unpair.index("config_clear_setup_complete()"))
+        self.assertNotIn("ssid", unpair)
+        self.assertNotIn("password", unpair)
 
     def test_wifi_failure_keeps_the_ble_retry_session(self) -> None:
         body = _function_body(APP_C.read_text(), "static void setup_fail_for_session(")
@@ -160,11 +171,18 @@ class LinkPairingStateContractTest(unittest.TestCase):
         self.assertNotIn("partial setup at boot", override_branch)
         self.assertNotIn("config_clear_setup()", override_branch)
 
-    def test_boot_migration_requires_wifi_creds(self) -> None:
+    def test_boot_keeps_tokens_with_wifi_and_clears_tokens_without(self) -> None:
         body = _function_body(APP_C.read_text(), "void app_run(")
-        # Legacy provisioned->setup_complete migration only fires when Wi-Fi
-        # creds are also present (a token without Wi-Fi is a partial pair).
-        self.assertIn("if (!setup_complete && provisioned && have_wifi)", body)
+        # Tokens and Wi-Fi without the marker are kept, with pairing open,
+        # until a token is accepted; boot must not mark them complete (a
+        # refused device would restart into the same refusal). A token without
+        # Wi-Fi is a partial pair, and only its pairing is cleared.
+        kept = _function_body(body, "if (!setup_complete && provisioned && have_wifi)")
+        self.assertNotIn("config_mark_setup_complete", kept)
+        self.assertNotIn("config_clear", kept)
+        partial = _function_body(body, "} else if (!setup_complete && provisioned)")
+        self.assertIn("config_clear_pairing()", partial)
+        self.assertNotIn("config_clear_setup()", body)
 
     def test_wifi_connect_polls_past_wifi_state(self) -> None:
         body = _function_body(WIFI_MGR_C.read_text(), "bool wifi_mgr_connect(")

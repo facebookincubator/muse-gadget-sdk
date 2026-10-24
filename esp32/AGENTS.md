@@ -433,7 +433,7 @@ Button (BOOT on the dev boards):
 
 - **short press**: confirm a pending pairing, or reopen the setup window if
   setup isn't complete
-- **hold for 5 s**: reset setup (unpair and forget Wi-Fi)
+- **hold for 5 s**: reset setup (unpair; saved Wi-Fi networks are kept)
 
 EchoEar-2ST confirms pending pairing with an explicit screen press; hold the
 on-screen microphone to record and release it to send once paired. It has no

@@ -258,33 +258,40 @@ int main(void) {
             ran = subprocess.run([str(binary)], capture_output=True, text=True)
             self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
 
-    def test_token_revocation_is_serialized_through_reboot(self) -> None:
-        defer = _function_body(
-            self.app, "static void defer_token_revocation_reset("
-        )
+    def test_token_refusal_reopens_pairing_through_the_app_task(self) -> None:
+        defer = _function_body(self.app, "static void defer_pairing_reopen(")
         ensure = _function_body(
             self.app, "static bool ensure_access_token_ready_with_gate_held("
         )
+        reopen = _function_body(
+            self.app, "static void reopen_pairing_after_token_refusal("
+        )
         app_run = _function_body(self.app, "void app_run(")
 
+        # A refusal never wipes: it asks the app task to reopen pairing.
         self.assertNotIn("setup_wipe_to_clean", defer)
+        self.assertNotIn("config_clear", defer)
+        self.assertNotIn("s_setup_reset_pending", defer)
         self.assertNotIn("noise_ctrl_disconnect", defer)
         self.assertNotIn("esp_restart", defer)
         setup_guard = defer.index('strcmp(s_setup_stage, "done") != 0')
         pending = defer.index(
-            "atomic_store_explicit(&s_setup_reset_pending, true"
+            "atomic_store_explicit(&s_pairing_reopen_pending, true"
         )
         self.assertLess(setup_guard, pending)
         self.assertIn("return;", defer[setup_guard:pending])
-        self.assertIn(
-            "atomic_store_explicit(&s_setup_reset_pending, true", defer
-        )
-        self.assertIn("defer_token_revocation_reset()", ensure)
+        self.assertIn("defer_pairing_reopen()", ensure)
+        self.assertNotIn("config_clear", ensure)
+        self.assertIn("reopen_pairing_after_token_refusal()", app_run)
+        self.assertIn("close_pairing_after_token_accepted()", app_run)
+        # Reopening takes the gate without blocking and retries a busy one.
+        busy = _function_body(reopen, 'if (!operation_gate_take(0, "reopen pairing"))')
+        self.assertIn("atomic_store_explicit(&s_pairing_reopen_pending, true", busy)
         self.assertIn('operation_gate_take(portMAX_DELAY, "boot VM connect")',
                       app_run)
         # The token-maintenance call in the heartbeat loop must take the gate
         # non-blocking (timeout 0). Blocking here would let it sit on the gate
-        # while a deferred revocation reset is waiting to run. The label is
+        # while a deferred pairing reopen or setup reset is waiting to run. The label is
         # incidental — assert the timeout and that it actually wraps the
         # token-readiness call, so a rename cannot silently drop the guarantee.
         maintenance = app_run.index('operation_gate_take(0, ')
@@ -313,6 +320,14 @@ int main(void) {
         source = CONFIG_STORE_C.read_text()
         self.assertIn('"wifi_channel"', _function_body(source, "bool config_clear_setup("))
         self.assertNotIn('"wifi_channel"', _function_body(source, "bool config_clear_pairing("))
+        self.assertNotIn('"wifi_channel"', _function_body(source, "bool config_unpair("))
+
+    def test_only_a_full_setup_clear_forgets_wifi(self) -> None:
+        # Unpair and every pairing-recovery path keep saved Wi-Fi; the app
+        # never calls the full setup clear.
+        self.assertNotIn("config_clear_setup()", self.app)
+        clear = _function_body(self.app, "static bool clear_setup_credentials(")
+        self.assertIn("config_unpair()", clear)
 
     def test_endpoint_urls_cleared_on_pairing_and_setup_reset(self) -> None:
         source = CONFIG_STORE_C.read_text()

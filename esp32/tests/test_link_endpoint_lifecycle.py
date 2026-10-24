@@ -106,19 +106,32 @@ static bool config_set_str(const char *key, const char *value) {
 static bool config_erase_key(const char *key) { return config_set_str(key, ""); }
 static bool config_get_str(const char *key, char *value, size_t cap) {
     int index = key_index(key);
-    if (booting && index != 0) assert(checked_setup && complete && provisioned);
+    if (booting && index != 0) assert(checked_setup && provisioned);
     snprintf(value, cap, "%s", stored[index]);
     return stored[index][0] != '\0';
 }
 static bool config_setup_complete(void) { checked_setup = true; return complete; }
 static bool config_is_provisioned(void) { return provisioned; }
-static bool config_mark_setup_complete(void) { complete = true; return true; }
 static bool config_clear_setup(void) {
     memset(stored, 0, sizeof(stored));
     complete = provisioned = false;
     return true;
 }
-static bool clear_setup_credentials(void) { return config_clear_setup(); }
+static bool config_clear_pairing(void) {
+    for (int i = 1; i < 4; i++) stored[i][0] = '\0';
+    provisioned = false;
+    return true;
+}
+static bool config_unpair(void) {
+    complete = false;
+    return config_clear_pairing();
+}
+static bool clear_setup_credentials(void) { return config_unpair(); }
+#define CONFIG_KEY_NOT_FOUND 0
+static int config_key_lookup(const char *key) {
+    (void)key;
+    return provisioned ? 1 : CONFIG_KEY_NOT_FOUND;
+}
 static void disconnect_vm_transports(void) { disconnects++; }
 void diagnostic_log_clear(void) {
     assert(disconnects > log_clears);
@@ -183,7 +196,12 @@ static void check_boot_v2(bool setup, bool token, bool wifi, bool keep_endpoints
     assert((stored[1][0] != '\0') == keep_endpoints);
     assert((stored[2][0] != '\0') == keep_endpoints);
     assert((stored[3][0] != '\0') == (keep_endpoints && with_v2));
-    if (WIFI_WITHOUT_PAIRING && !setup && !token && wifi) assert(stored[0][0]);
+    // Boot never forgets Wi-Fi, and never marks kept tokens complete: only an
+    // accepted token does that.
+    assert((stored[0][0] != '\0') == wifi);
+    if (!setup) assert(!complete);
+    // A marker without credentials is an unpair cut short: boot finishes it.
+    if (setup && !token && !CONFIG_HOMEHUB_WIFI_SSID[0]) assert(!complete);
 }
 static void check_boot(bool setup, bool token, bool wifi, bool keep_endpoints) {
     check_boot_v2(setup, token, wifi, keep_endpoints, false);
@@ -233,10 +251,10 @@ int main(void) {
         expect_endpoints(VM_API_DEFAULT_BASE_URL, NOISE_DEFAULT_HOST);
     }
     check_boot(false, false, false, false);  // Orphan endpoint keys.
-    check_boot(false, false, true, false);   // Unpaired Wi-Fi on Muse.
-    check_boot(true, false, true, false);    // Marker without credentials.
+    check_boot(false, false, true, false);   // Unpaired, Wi-Fi kept.
+    check_boot(true, false, true, false);    // Marker without credentials: unpaired.
     check_boot(true, true, true, true);     // Complete custom setup.
-    check_boot(false, true, true, true);    // Legacy marker migration.
+    check_boot(false, true, true, true);    // Kept tokens, pairing open.
     check_boot(false, true, false, CONFIG_HOMEHUB_WIFI_SSID[0] != '\0');
     return 0;
 }
