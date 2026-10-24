@@ -34,7 +34,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"waveshare_s3_185c\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"esp_mosaico\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"waveshare_s3_185c\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"waveshare_s3_lcd154\", \"esp_mosaico\"]"
   78/esp_lcd_nv3023:
     version: "1.0.1"
     rules:
@@ -110,7 +110,7 @@ dependencies:
   espressif/esp_lcd_touch_cst816s:
     version: "==1.1.2"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_185c\", \"waveshare_s3_lcd128\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_185c\", \"waveshare_s3_lcd128\", \"waveshare_s3_lcd154\"]"
   espressif/esp_lcd_gc9a01:
     version: "^2.0.0"
     rules:

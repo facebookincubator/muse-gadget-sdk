@@ -158,6 +158,9 @@ jobs:
           - board: muse-waveshare-s3-lcd7
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd7"
+          - board: muse-waveshare-s3-lcd154
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd154"
           - board: muse-waveshare-s3-lcd128
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd128"
