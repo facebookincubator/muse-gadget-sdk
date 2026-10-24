@@ -133,6 +133,9 @@ jobs:
           - board: reterminal-sticky-link
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-sticky-link"
+          - board: waveshare-s3-epaper-154g
+            target: esp32s3
+            overlays: ";devices/sdkconfig.waveshare-s3-epaper-154g"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"
