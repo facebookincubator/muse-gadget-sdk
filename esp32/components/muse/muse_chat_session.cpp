@@ -136,12 +136,33 @@ static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP
 
 /* ---- Voice task <-> session task ---- */
 
-enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE };
+enum cmd_type_t : uint8_t {
+    CMD_CONNECT,
+    CMD_FORGET,
+    CMD_BEGIN,
+    CMD_END,
+    CMD_CANCEL,
+    CMD_TEXT,
+    CMD_TEXT_CANCEL,
+    CMD_IMAGE,
+    CMD_WAKE
+};
+
+struct image_job_t {
+    char *base64;
+    size_t base64_len;
+    char *caption;          /* already JSON-escaped */
+    size_t caption_len;
+    size_t body_len;
+    muse_hatch_image_done_t done;
+    void *ctx;
+};
 
 struct cmd_t {
     cmd_type_t type;
     uint32_t gen;
     char *text;              /* CMD_TEXT: malloc'd, freed by the session task */
+    image_job_t *image;
 };
 
 struct ev_t {
@@ -154,6 +175,7 @@ static QueueHandle_t s_cmds, s_events;
 static StreamBufferHandle_t s_in, s_out;
 static std::atomic<uint32_t> s_gen{0};
 static std::atomic<bool> s_resting{false};
+static std::atomic<bool> s_task_ready{false};
 
 /* ---- Connection ---- */
 
@@ -221,7 +243,10 @@ struct turn_t {
     phase_t phase;
     uint32_t gen;
     bool text;               /* typed at the console: the reply goes there, unspoken */
+    bool image;
     bool end_requested, end_sent, chat_posted, acked;
+    muse_hatch_image_done_t image_done;
+    void *image_ctx;
     int64_t dict_id, chat_id;
     int64_t start_us, end_sent_us, chat_us, last_event_us, last_content_us;
     uint64_t sent24;         /* 24 kHz frames sent to dictation */
@@ -958,24 +983,41 @@ static void turn_reset_streams(void)
     }
 }
 
-static void turn_finish(void)
+static void turn_finish_as(muse_hatch_image_result_t image_result)
 {
+    muse_hatch_image_done_t done = s_turn.image_done;
+    void *ctx = s_turn.image_ctx;
+    s_turn.image_done = nullptr;
+    s_turn.image_ctx = nullptr;
     turn_reset_streams();
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
     s_turn.tts_msg = -1;
     s_turn.silent = false;
     s_turn.mp3_len = 0;
+    if (done) {
+        done(image_result, ctx);
+    }
 }
 
-static void turn_fail(const char *why)
+static void turn_finish(void)
+{
+    turn_finish_as(MUSE_HATCH_IMAGE_NETWORK_ERROR);
+}
+
+static void turn_fail_as(const char *why, muse_hatch_image_result_t image_result)
 {
     ESP_LOGW(TAG, "turn failed: %s", why);
     if (s_turn.text) {
         muse_hatch_console("error", why, nullptr);
     }
     emit(MUSE_HATCH_EV_ERROR, why);
-    turn_finish();
+    turn_finish_as(image_result);
+}
+
+static void turn_fail(const char *why)
+{
+    turn_fail_as(why, MUSE_HATCH_IMAGE_NETWORK_ERROR);
 }
 
 /* Ends the turn once its reply is in; `complete` is false when it was cut off. */
@@ -1202,6 +1244,82 @@ static void send_chat(const char *text, const char *modality)
     s_turn.body_sent = len;
     s_turn.chat_us = s_turn.last_event_us = now_us();
     s_turn.phase = P_WAIT_REPLY;
+}
+
+static bool send_image_piece(int64_t id, const char *data, size_t len)
+{
+    for (size_t off = 0; off < len; off += CHAT_PART) {
+        size_t n = len - off < CHAT_PART ? len - off : CHAT_PART;
+        if (!send_body(id, reinterpret_cast<const uint8_t *>(data + off), n, false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void free_image_job(image_job_t *job)
+{
+    if (!job) {
+        return;
+    }
+    free(job->base64);
+    free(job->caption);
+    free(job);
+}
+
+static void finish_image_job(image_job_t *job, muse_hatch_image_result_t result)
+{
+    muse_hatch_image_done_t done = job ? job->done : nullptr;
+    void *ctx = job ? job->ctx : nullptr;
+    free_image_job(job);
+    if (done) {
+        done(result, ctx);
+    }
+}
+
+/* Streams the already-sized JSON without ever materializing the 256 KiB body. */
+static void send_image(image_job_t *job)
+{
+    s_turn.image = true;
+    s_turn.image_done = job->done;
+    s_turn.image_ctx = job->ctx;
+    s_turn.chat_posted = true;
+    s_turn.chat_id = open_stream(K_CHAT, "POST", "/chat/stream", "application/json", nullptr, nullptr, false);
+    bool ok = s_turn.chat_id
+              && send_image_piece(s_turn.chat_id, MUSE_HATCH_IMAGE_HEAD_1, sizeof(MUSE_HATCH_IMAGE_HEAD_1) - 1)
+              && send_image_piece(s_turn.chat_id, job->caption, job->caption_len)
+              && send_image_piece(s_turn.chat_id, MUSE_HATCH_IMAGE_HEAD_2, sizeof(MUSE_HATCH_IMAGE_HEAD_2) - 1)
+              && send_image_piece(s_turn.chat_id, job->caption, job->caption_len)
+              && send_image_piece(s_turn.chat_id, MUSE_HATCH_IMAGE_HEAD_3, sizeof(MUSE_HATCH_IMAGE_HEAD_3) - 1)
+              && send_image_piece(s_turn.chat_id, job->base64, job->base64_len)
+              && send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(MUSE_HATCH_IMAGE_TAIL),
+                           sizeof(MUSE_HATCH_IMAGE_TAIL) - 1, true);
+    size_t body_len = job->body_len;
+    free_image_job(job);
+    if (!ok) {
+        disconnect("image chat/stream failed");
+        turn_fail("CAN'T REACH MUSE");
+        return;
+    }
+    s_turn.body_sent = body_len;
+    mark(M_SENT);
+    s_turn.chat_us = s_turn.last_event_us = now_us();
+    s_turn.phase = P_WAIT_REPLY;
+    ESP_LOGI(TAG, "JPEG attachment: %u byte request", (unsigned)body_len);
+}
+
+static void image_begin(image_job_t *job, uint32_t gen)
+{
+    if (s_turn.phase != P_IDLE || gen != s_gen.load()) {
+        finish_image_job(job, MUSE_HATCH_IMAGE_BUSY);
+        return;
+    }
+    xQueueReset(s_events);
+    if (!turn_start(gen, false)) {
+        finish_image_job(job, MUSE_HATCH_IMAGE_NETWORK_ERROR);
+        return;
+    }
+    send_image(job);
 }
 
 static void post_chat(const char *text)
@@ -1499,11 +1617,23 @@ static void on_chat_ack(stream_t *s)
             strlcpy(s_turn.user_ids[k], id, sizeof(s_turn.user_ids[k]));
         }
     }
+    if (s_turn.image && !s_turn.user_ids[0][0]) {
+        cJSON_Delete(root);
+        turn_fail_as("MUSE DIDN'T TAKE THE PHOTO", MUSE_HATCH_IMAGE_REJECTED);
+        return;
+    }
     s_turn.acked = true;
     mark(M_ACK);
     ESP_LOGI(TAG, "chat/stream ack: user message %s", s_turn.user_ids[0]);
     cJSON_Delete(root);
     emit(MUSE_HATCH_EV_SENT, nullptr);
+    if (s_turn.image_done) {
+        muse_hatch_image_done_t done = s_turn.image_done;
+        void *ctx = s_turn.image_ctx;
+        s_turn.image_done = nullptr;
+        s_turn.image_ctx = nullptr;
+        done(MUSE_HATCH_IMAGE_SENT, ctx);
+    }
 }
 
 /* ---- Turn: speech ---- */
@@ -1786,7 +1916,9 @@ static bool stream_end(stream_t *s, bool ok)
         close_stream(s);
         s_turn.chat_id = 0;
         if (!ok) {
-            turn_fail("MUSE DIDN'T TAKE IT");
+            bool rejected = s->status >= 400;
+            turn_fail_as("MUSE DIDN'T TAKE IT",
+                         rejected ? MUSE_HATCH_IMAGE_REJECTED : MUSE_HATCH_IMAGE_NETWORK_ERROR);
         }
         break;
     case K_TTS:
@@ -1940,6 +2072,9 @@ static void handle(const cmd_t &cmd)
             turn_fail("CANCELLED");
         }
         break;
+    case CMD_IMAGE:
+        image_begin(cmd.image, cmd.gen);
+        break;
     case CMD_WAKE:   /* only ends hatch_task's resting wait */
         break;
     }
@@ -2025,7 +2160,7 @@ static void hatch_task(void *arg)
 static void post(cmd_type_t type, uint32_t gen)
 {
     if (s_cmds) {
-        cmd_t cmd{ type, gen, nullptr };
+        cmd_t cmd{ type, gen, nullptr, nullptr };
         xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(100));
     }
 }
@@ -2037,9 +2172,45 @@ static void drain_out(void)
     }
 }
 
+static void startup_cleanup(void)
+{
+    s_task_ready.store(false);
+    if (s_cmds) {
+        vQueueDelete(s_cmds);
+        s_cmds = nullptr;
+    }
+    if (s_events) {
+        vQueueDelete(s_events);
+        s_events = nullptr;
+    }
+    if (s_in) {
+        vStreamBufferDelete(s_in);
+        s_in = nullptr;
+    }
+    if (s_out) {
+        vStreamBufferDelete(s_out);
+        s_out = nullptr;
+    }
+    heap_caps_free(s_turn.chunk);
+    heap_caps_free(s_turn.mp3);
+    heap_caps_free(s_turn.note);
+    heap_caps_free(s_turn.texts);
+    heap_caps_free(s_pcm);
+    heap_caps_free(s_pcm16);
+    for (auto &s : s_streams) {
+        heap_caps_free(s.line);
+        s.line = nullptr;
+        s.cap = 0;
+    }
+    s_turn = turn_t{};
+    s_turn.tts_msg = -1;
+    s_pcm = nullptr;
+    s_pcm16 = nullptr;
+}
+
 extern "C" void muse_hatch_start(void)
 {
-    if (s_cmds) {
+    if (s_task_ready.load() || s_cmds) {
         return;
     }
     cJSON_Hooks hooks = { json_alloc, heap_caps_free };
@@ -2070,11 +2241,20 @@ extern "C" void muse_hatch_start(void)
     }
     s_turn.tts_msg = -1;
     /* Stack in PSRAM: TLS, Noise and the MP3 decoder (~16 KB of scratch) all run here. */
-    if (!s_cmds || !s_events || !s_in || !s_out || !s_turn.chunk || !s_turn.mp3 || (VOICE_NOTE && !s_turn.note) || !s_pcm || !s_pcm16 ||
-        xTaskCreatePinnedToCoreWithCaps(hatch_task, "muse_chat", 48 * 1024, nullptr, 5, nullptr, 0,
-                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
-        ESP_LOGE(TAG, "start failed");
+    bool stream_lines = true;
+    for (const auto &s : s_streams) {
+        stream_lines &= s.line != nullptr;
     }
+    bool allocated = s_cmds && s_events && s_in && s_out && s_turn.chunk && s_turn.mp3
+                     && (!VOICE_NOTE || s_turn.note) && s_pcm && s_pcm16 && stream_lines;
+    if (allocated
+        && xTaskCreatePinnedToCoreWithCaps(hatch_task, "muse_chat", 48 * 1024, nullptr, 5, nullptr, 0,
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS) {
+        s_task_ready.store(true);
+        return;
+    }
+    startup_cleanup();
+    ESP_LOGE(TAG, "start failed");
 }
 
 extern "C" void muse_hatch_chat_connect(void)
@@ -2089,7 +2269,12 @@ extern "C" void muse_hatch_chat_forget(void)
 
 extern "C" bool muse_hatch_ready(void)
 {
-    return s_cmds && muse_hatch_configured() && muse_wifi_connected();
+    return s_task_ready.load() && muse_hatch_configured() && muse_wifi_connected();
+}
+
+extern "C" bool muse_hatch_needs_voice_poll(void)
+{
+    return false;
 }
 
 extern "C" void muse_hatch_turn_begin(void)
@@ -2136,8 +2321,8 @@ extern "C" void muse_hatch_set_resting(bool resting)
 
 extern "C" void muse_hatch_text_turn(char *text)
 {
-    cmd_t cmd{ CMD_TEXT, 0, text };
-    if (!s_cmds || !muse_hatch_configured()) {
+    cmd_t cmd{ CMD_TEXT, 0, text, nullptr };
+    if (!s_task_ready.load() || !muse_hatch_configured()) {
         muse_hatch_console("error", "MUSE NOT SET UP", nullptr);
         free(text);
     } else if (xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(1000)) != pdTRUE) {
@@ -2149,6 +2334,46 @@ extern "C" void muse_hatch_text_turn(char *text)
 extern "C" void muse_hatch_text_cancel(void)
 {
     post(CMD_TEXT_CANCEL, 0);
+}
+
+extern "C" muse_hatch_image_result_t muse_hatch_send_jpeg(char *jpeg_base64, size_t jpeg_base64_len,
+                                                            const char *caption, muse_hatch_image_done_t done,
+                                                            void *ctx)
+{
+    size_t caption_len, body_len;
+    if (!muse_hatch_is_jpeg_base64(jpeg_base64, jpeg_base64_len)) {
+        free(jpeg_base64);
+        return MUSE_HATCH_IMAGE_INVALID_JPEG;
+    }
+    if (!muse_hatch_image_body_size(caption, jpeg_base64_len, &caption_len, &body_len)) {
+        free(jpeg_base64);
+        return MUSE_HATCH_IMAGE_TOO_LARGE;
+    }
+    if (!s_task_ready.load() || !muse_hatch_configured() || !muse_wifi_connected()) {
+        free(jpeg_base64);
+        return MUSE_HATCH_IMAGE_NETWORK_ERROR;
+    }
+    image_job_t *job = static_cast<image_job_t *>(calloc(1, sizeof(*job)));
+    char *escaped = static_cast<char *>(psram_alloc(caption_len + 1));
+    if (!job || !escaped || !muse_hatch_json_escape(caption, escaped, caption_len + 1)) {
+        free(job);
+        free(escaped);
+        free(jpeg_base64);
+        return MUSE_HATCH_IMAGE_NO_MEMORY;
+    }
+    job->base64 = jpeg_base64;
+    job->base64_len = jpeg_base64_len;
+    job->caption = escaped;
+    job->caption_len = caption_len;
+    job->body_len = body_len;
+    job->done = done;
+    job->ctx = ctx;
+    cmd_t cmd{ CMD_IMAGE, s_gen.load(), nullptr, job };
+    if (xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        free_image_job(job);
+        return MUSE_HATCH_IMAGE_BUSY;
+    }
+    return MUSE_HATCH_IMAGE_QUEUED;
 }
 
 extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)

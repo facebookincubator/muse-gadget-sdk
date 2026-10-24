@@ -48,7 +48,7 @@ if(CONFIG_MUSE_ENABLED)
     else()
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
     endif()
-    list(APPEND srcs "muse_chat_text.c")
+    list(APPEND srcs "muse_chat_text.c" "muse_chat_image.c")
     if(CONFIG_MUSE_CJK_FONT)
         list(APPEND srcs "fonts/muse_font_cjk_16.c")   # captions' CJK fallback
     endif()
@@ -133,7 +133,7 @@ if(CONFIG_MUSE_ENABLED)
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
     # voice_muse_chat.c stands in for the Muse settings, Wi-Fi and Link hooks.
-    list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_chat_text.c" "muse_text.c")
+    list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_chat_text.c" "muse_chat_image.c" "muse_text.c")
     list(APPEND embed "test_reply.mp3")
 endif()
 

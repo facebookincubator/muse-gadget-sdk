@@ -88,6 +88,38 @@ void muse_hatch_turn_end(void);
 /* Abandons the turn (tap, or barge-in during the reply). */
 void muse_hatch_turn_cancel(void);
 
+/* ---- JPEG attachment turns ---- */
+
+typedef enum {
+    MUSE_HATCH_IMAGE_QUEUED,          /* accepted; `done` will report the outcome */
+    MUSE_HATCH_IMAGE_SENT,            /* /chat/stream returned a valid message ACK */
+    MUSE_HATCH_IMAGE_TOO_LARGE,       /* serialized JSON would exceed 256 KiB */
+    MUSE_HATCH_IMAGE_BUSY,            /* another voice, text, or image turn owns chat */
+    MUSE_HATCH_IMAGE_NETWORK_ERROR,   /* the request could not reach Muse */
+    MUSE_HATCH_IMAGE_REJECTED,        /* Muse rejected it or returned an invalid ACK */
+    MUSE_HATCH_IMAGE_INVALID_JPEG,    /* data does not have a JPEG base64 prefix */
+    MUSE_HATCH_IMAGE_NO_MEMORY,
+} muse_hatch_image_result_t;
+
+typedef void (*muse_hatch_image_done_t)(muse_hatch_image_result_t result, void *ctx);
+
+/*
+ * Sends one base64-encoded JPEG and a caption as a /chat/stream attachment.
+ * The body follows the chat `items` schema: a text item followed by an
+ * image/jpeg file item. `jpeg_base64` must be malloc'd; this function takes
+ * ownership and frees it for every return value. The 256 KiB limit applies to
+ * the complete serialized request, including both escaped copies of caption.
+ * Without CONFIG_MUSE_HATCH, invoke this on the voice task: that backend's
+ * turn state and transport progression are voice-task-owned.
+ *
+ * A return other than QUEUED is final and `done` is not called. After QUEUED,
+ * `done` is called exactly once with SENT, BUSY, NETWORK_ERROR, or REJECTED.
+ * The callback runs on the chat/voice task and must not block.
+ */
+muse_hatch_image_result_t muse_hatch_send_jpeg(char *jpeg_base64, size_t jpeg_base64_len,
+                                                const char *caption, muse_hatch_image_done_t done,
+                                                void *ctx);
+
 typedef enum {
     MUSE_HATCH_EV_NONE,
     MUSE_HATCH_EV_HEARD,    /* transcript so far (partial while talking, then final) */
