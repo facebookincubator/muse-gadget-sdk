@@ -21,12 +21,19 @@
 
 #if !CONFIG_MUSE_CONSOLE_UART
 #include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 
 esp_err_t muse_console_install(size_t rx_buf)
 {
     usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     cfg.rx_buffer_size = rx_buf;
-    return usb_serial_jtag_driver_install(&cfg);
+    esp_err_t err = usb_serial_jtag_driver_install(&cfg);
+    if (err == ESP_OK) {
+        /* stdout/logs must share the driver's TX ring with console writes,
+         * rather than writing directly to its hardware FIFO. */
+        usb_serial_jtag_vfs_use_driver();
+    }
+    return err;
 }
 
 bool muse_console_getc(uint8_t *c)
