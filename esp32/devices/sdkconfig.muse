@@ -14,7 +14,8 @@
 
 # Boards with the full UI: Home Link plus the avatar, voice and settings UI
 # (components/muse). Load after sdkconfig.defaults, then one board overlay:
-# sdkconfig.muse-waveshare-s3-175c, sdkconfig.muse-aipi,
+# sdkconfig.muse-waveshare-s3-175c, sdkconfig.muse-waveshare-s3-132,
+# sdkconfig.muse-aipi,
 # sdkconfig.muse-waveshare-c6-18, sdkconfig.muse-sensecap-watcher,
 # sdkconfig.muse-espressif-box-3, sdkconfig.muse-m5stack-sticks3,
 # sdkconfig.muse-m5stack-stopwatch, sdkconfig.muse-m5stack-cores3,
