@@ -1339,6 +1339,15 @@ static cJSON *row_params(void) {
 }
 #endif
 
+#if CONFIG_HOMEHUB_CHIP_TOOL_FORWARDER
+static cJSON *typed_param(const char *type, const char *description) {
+    cJSON *param = cJSON_CreateObject();
+    cJSON_AddStringToObject(param, "type", type);
+    cJSON_AddStringToObject(param, "description", description);
+    return param;
+}
+#endif
+
 static void add_command(cJSON *commands, const char *name,
                         const char *description,
                         cJSON *required, cJSON *optional) {
@@ -1525,6 +1534,19 @@ static char *build_register_json(void) {
                 "and relative humidity in percent. Each reading has its age "
                 "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
+#endif
+
+#if CONFIG_HOMEHUB_CHIP_TOOL_FORWARDER
+    {
+        // Matter devices through chip-tool-remote (the chip_tool_forwarder component):
+        // the rest of the forwarder's commands go over its stream.
+        cJSON *connect_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(connect_optional, "rotate",
+                              typed_param("boolean", "Replace the secret first, closing every connection."));
+        add_command(commands, "matter.connect",
+                    "Matter devices: the endpoint and secret chip-tool-remote connects with (never print the secret).",
+                    nullptr, connect_optional);
+    }
 #endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA

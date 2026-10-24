@@ -18,3 +18,10 @@ dependencies:
   espressif/led_strip: "~3.0"
   idf:
     version: ">=5.1"
+  # The Matter forwarder (HOMEHUB_CHIP_TOOL_FORWARDER), which brings esp-matter.
+  dhavalgujar/chip_tool_forwarder:
+    git: "https://github.com/dhavalgujar/chip-tool-remote-forwarder.git"
+    path: "components/chip_tool_forwarder"
+    version: "v0.1.0"
+    rules:
+      - if: "$CONFIG{HOMEHUB_CHIP_TOOL_FORWARDER} == True"

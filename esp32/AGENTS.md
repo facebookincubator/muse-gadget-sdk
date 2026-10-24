@@ -628,6 +628,53 @@ the management commands that `on_ws_command()` also handles (`device.list_vms`,
 `link.register`: `tests/test_link_transport_contract.py` checks they stay
 unadvertised.
 
+## Matter devices through chip-tool-remote
+
+The forwarder is the
+[chip-tool-remote-forwarder](https://github.com/dhavalgujar/chip-tool-remote-forwarder)
+component, a git dependency in `main/idf_component.yml` fetched only when
+`CONFIG_HOMEHUB_CHIP_TOOL_FORWARDER` is on (off by default). The gadget is the home's
+Matter controller (CHIP's, through `esp-matter`'s controller): it adds devices
+to the home and talks to each one over its own secure session. `chip-tool-remote`
+(`chip-tool` with a client for the forwarder) connects to the gadget over one
+encrypted stream through the home-network tunnel (TCP 7401), and the gadget
+passes its requests on to the devices. The keys of the home's Matter network
+stay with `chip-tool-remote`, in Muse's VM: the gadget enrolls once (`chip-tool-remote`
+signs the gadget's own certificate), then has `chip-tool-remote` check and sign
+every device it adds. `skills/gadget-esp32-matter-controller` tells the agent how
+to use it.
+
+- **Build:** load `devices/sdkconfig.chip-tool-forwarder` after the board's own
+  overlay. It needs PSRAM, the tunnel and 8 MB of flash
+  (`partitions_chip_tool_forwarder_8mb.csv`). For the C5 devkit, as CI builds it:
+
+  ```bash
+  idf.py -B build-chip-tool-forwarder -DIDF_TARGET=esp32c5 -DSDKCONFIG=build-chip-tool-forwarder/sdkconfig \
+    -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.chip-tool-forwarder" \
+    build
+  ```
+  - The component, and `esp-matter` from the component registry, are
+    downloaded only into a build with the option on.
+  - The first build compiles CHIP and takes a while.
+- **The integration** is in `main/`: `app.c` starts the forwarder on a paired
+  boot (Bluetooth belongs to setup until then), restarts shortly after a
+  pairing so that Matter starts, and erases the fabric, its devices and the
+  secret at the end of every setup reset (long press, the device menu, unpair
+  over Bluetooth or from the server); `noise_control.cpp` advertises
+  `matter.connect`.
+- **Link commands:** `matter.connect` hands the paired agent the stream's
+  endpoint and secret (`"rotate": true` replaces the secret). `chip-tool-remote`
+  calls everything else (commissioning, the device list, Thread credentials,
+  enrollment) as the forwarder's own commands, over the stream.
+- **The fabric's keys** are in the `matter` partition, readable by anyone who
+  can read the flash. This `esp-matter` version doesn't support the HMAC-based
+  NVS encryption scheme (`CONFIG_HOMEHUB_NVS_ENCRYPTION`), so the two can't be
+  combined.
+- **Tests:** `tests/test_link_chip_tool_forwarder.py` checks that `matter.connect`
+  is advertised and dispatched under the option, and that a setup reset
+  erases the forwarder. The component's and `chip-tool-remote`'s own tests are in
+  their repository.
+
 ## Say Muse, never Hatch
 
 Users never see the name Hatch.
