@@ -91,8 +91,9 @@ bool muse_settings_speaker_on(void) {
     return true;
 }
 
-// No screen either, so reply text is never shown; Muse's default page.
-void muse_state_page(bool cjk, int *cols, int *lines) {
+// Muse's default page, for boards that never show reply text. A board that
+// does defines its own.
+__attribute__((weak)) void muse_state_page(bool cjk, int *cols, int *lines) {
     (void)cjk;
     *cols = 16;
     *lines = 2;
