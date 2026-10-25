@@ -71,7 +71,7 @@ typedef struct {
     bool no_ring;           /* square panel: progress as a bar along the bottom edge, no ring around Muse */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
-    bool touch_talk;        /* on-screen mic supplies talk edges; no physical talk button */
+    bool touch_talk;        /* on-screen mic supplies talk edges alongside buttons */
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */
     const char *aux_button;     /* "bottom" */
