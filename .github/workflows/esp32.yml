@@ -56,6 +56,10 @@ jobs:
           . "$IDF_PATH/export.sh" > /dev/null
           idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
 
+      - name: Test ElevenLabs proxy (stdlib, mocked upstream)
+        working-directory: .
+        run: python3 -m unittest discover -s tools/muse/tts-proxy/tests -v
+
       - name: Run host tests
         run: |
           . "$IDF_PATH/export.sh" > /dev/null
