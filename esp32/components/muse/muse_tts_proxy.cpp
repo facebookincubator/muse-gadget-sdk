@@ -16,6 +16,8 @@
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -99,7 +101,13 @@ void fetch_speech(const Job &job)
     if (!still_current(job.id)) return;
 
     cJSON *body_obj = cJSON_CreateObject();
-    if (!body_obj) return;
+    if (!body_obj) {
+        muse_tts_packet_t end{};
+        end.id = job.id;
+        end.kind = MUSE_TTS_FAILED;
+        if (still_current(job.id)) emit_packet(end);
+        return;
+    }
     cJSON_AddStringToObject(body_obj, "text", job.text);
     char *body = cJSON_PrintUnformatted(body_obj);
     cJSON_Delete(body_obj);
