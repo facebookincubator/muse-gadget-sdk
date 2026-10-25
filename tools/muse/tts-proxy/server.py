@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 LOG = logging.getLogger("muse_tts")
 MAX_REQUEST_BYTES = 4096
@@ -40,6 +40,16 @@ class Settings:
         if not s.elevenlabs_key or not s.voice_id or len(s.proxy_token) < 24:
             raise ValueError("Set ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID and a random TTS_PROXY_TOKEN (>=24 characters)")
         return s
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Never send the ElevenLabs API key to a redirect destination."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def open_upstream(request: Request):
+    return build_opener(_NoRedirect()).open(request, timeout=35)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -104,7 +114,7 @@ class Handler(BaseHTTPRequestHandler):
             "Accept": "audio/mpeg",
         })
         try:
-            upstream = urlopen(request, timeout=35)
+            upstream = open_upstream(request)
         except HTTPError as exc:
             LOG.warning("ElevenLabs returned HTTP %s", exc.code)
             self._json(502, "speech provider unavailable")

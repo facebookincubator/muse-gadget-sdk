@@ -59,14 +59,14 @@ class ProxyTests(unittest.TestCase):
         return status, output
 
     def test_unauthorized_never_calls_provider(self):
-        with patch.object(mod, "urlopen") as provider:
+        with patch.object(mod, "open_upstream") as provider:
             status, _ = self.request(token="bad")
         self.assertEqual(status, 401)
         provider.assert_not_called()
 
     def test_streams_raw_mp3_bytes(self):
         payload = b"\xff\xfb" + b"x" * 5000
-        with patch.object(mod, "urlopen", return_value=FakeAudio(payload)) as provider:
+        with patch.object(mod, "open_upstream", return_value=FakeAudio(payload)) as provider:
             status, received = self.request("Hola desde Muse")
         self.assertEqual(status, 200)
         self.assertEqual(received, payload)
@@ -76,13 +76,13 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(upstream.get_header("Xi-api-key"), "test-eleven-key")
 
     def test_empty_text_rejected(self):
-        with patch.object(mod, "urlopen") as provider:
+        with patch.object(mod, "open_upstream") as provider:
             status, _ = self.request("")
         self.assertEqual(status, 422)
         provider.assert_not_called()
 
     def test_provider_error_is_masked(self):
-        with patch.object(mod, "urlopen", side_effect=mod.URLError("unavailable")):
+        with patch.object(mod, "open_upstream", side_effect=mod.URLError("unavailable")):
             status, output = self.request()
         self.assertEqual(status, 502)
         self.assertNotIn(b"test-eleven-key", output)
