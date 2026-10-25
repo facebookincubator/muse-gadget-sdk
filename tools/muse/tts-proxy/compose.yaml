@@ -1,0 +1,11 @@
+services:
+  muse-tts:
+    build: .
+    container_name: muse-tts
+    env_file: .env
+    ports:
+      - "127.0.0.1:8765:8765"
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
