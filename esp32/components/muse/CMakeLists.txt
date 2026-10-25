@@ -44,6 +44,9 @@ if(CONFIG_MUSE_ENABLED)
         "muse_ble.c")
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp")
+        if(CONFIG_MUSE_TTS_PROXY)
+            list(APPEND srcs "muse_tts_proxy.cpp")
+        endif()
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
     else()
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session

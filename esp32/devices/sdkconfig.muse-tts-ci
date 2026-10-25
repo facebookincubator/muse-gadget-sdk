@@ -1,0 +1,6 @@
+# CI-only NON-SECRET build profile; never use to flash real devices.
+# Allows compile/link coverage of the HTTPS TTS worker, disabled by default
+# on standard board profiles. No network requests occur during compilation.
+CONFIG_MUSE_TTS_PROXY=y
+CONFIG_MUSE_TTS_PROXY_URL="https://tts.example.com/v1/tts"
+CONFIG_MUSE_TTS_PROXY_TOKEN="CI-DUMMY-DO-NOT-DEPLOY-NOT-A-SECRET"
