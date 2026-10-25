@@ -49,6 +49,7 @@
 #include <cstring>
 #include <new>
 
+#include "sdkconfig.h"
 #include "esp_attr.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
