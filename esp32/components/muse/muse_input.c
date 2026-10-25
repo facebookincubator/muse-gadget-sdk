@@ -45,6 +45,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -77,6 +80,7 @@ static const char *TAG = "muse_input";
 #define CHAT_MAX (192 * 1024)  /* a typed message, assembled from "chat+=" lines */
 
 static QueueHandle_t s_queue;
+static bool (*s_console_hook)(const char *line);
 static TaskHandle_t s_input;
 static bool s_talk_down;
 static bool s_cpu_low;      /* display stopped and the CPU allowed to sleep */
@@ -525,6 +529,16 @@ static void input_task(void *arg)
 
     for (;;) {
         unsigned ev = muse_board->poll_buttons() | atomic_exchange(&s_touch_talk_events, 0);
+#if CONFIG_MUSE_VIDEO
+        /* Any press leaves the video view (its release then does nothing). */
+        const unsigned presses = MUSE_BTN_TALK_PRESS | MUSE_BTN_AUX_PRESS | MUSE_BTN_POWER_PRESS |
+                                 MUSE_BTN_SPEAKER_PRESS | MUSE_BTN_UP | MUSE_BTN_DOWN | MUSE_BTN_LEFT |
+                                 MUSE_BTN_RIGHT | MUSE_BTN_ENTER | MUSE_BTN_ESCAPE;
+        if ((ev & presses) && muse_video_is_open()) {
+            muse_video_close();
+            ev &= ~(presses | MUSE_BTN_POWER_LONG);
+        }
+#endif
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",
                      ev & MUSE_BTN_TALK_RELEASE ? " release" : "");
@@ -697,6 +711,24 @@ static void set_face(const char *name)
  */
 static bool console_command(char *line, bool whole)
 {
+    if (whole && s_console_hook && s_console_hook(line)) {
+        return true;
+    }
+#if CONFIG_MUSE_VIDEO
+    /* The Phone camera item, for a bench without fingers: "video" opens the
+     * view (asking the phone for a stream), "video=0" closes it. */
+    if (!strcmp(line, "video") || !strcmp(line, "video=0")) {
+        muse_state_poke();
+        if (line[5]) {
+            muse_video_close();
+        } else {
+            muse_video_open();
+        }
+        printf("@video %s\n", muse_video_is_open() ? "open" : "closed");
+        fflush(stdout);
+        return true;
+    }
+#endif
     if (!strcmp(line, "status")) {
         size_t cap = 1024;   /* long SSID, host and VM names escaped: past 512 */
         char *json = heap_caps_malloc(cap, MUSE_BIG_CAPS);
@@ -814,6 +846,11 @@ static void serial_task(void *arg)
             post(c == 'd' ? MUSE_PTT_DOWN : MUSE_PTT_UP, false);
         }
     }
+}
+
+void muse_input_set_console_hook(bool (*hook)(const char *line))
+{
+    s_console_hook = hook;
 }
 
 esp_err_t muse_input_start(QueueHandle_t queue)

@@ -33,12 +33,6 @@ static const char *TAG = "link.noise_tun";
 // Max batch payload = tunnel_netif BATCH_MAX_BYTES. Keep in sync.
 #define TUN_MAX_MSG_BYTES 8192
 
-// TOTAL free DMA is the burst margin: roughly two 8 KiB batches (or ten
-// MTU-sized buffers) for the chunk plus concurrent WiFi/lwIP churn. Keep this
-// at the result-queue boundary, before every control chunk, tunnel batch and
-// ping. It is not a contiguous-allocation requirement or a reservation.
-static constexpr size_t NOISE_TX_DMA_RESERVE_BYTES = 16 * 1024;
-
 // LARGEST free DMA block is a separate, much smaller allocation floor. C5 AES
 // allocates heap_caps_aligned_calloc(8, n * 2, sizeof(crypto_dma_desc_t), DMA):
 // even a maximum 65,519-byte Noise plaintext needs ceil(65519 / 4080) = 17
@@ -63,7 +57,8 @@ extern "C" bool noise_tx_has_dma_headroom(size_t *dma_free) {
     return available >= NOISE_TX_DMA_RESERVE_BYTES;
 }
 
-#if CONFIG_MUSE_ENABLED
+// For the extra daemon requests (Muse, display.draw_file).
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_DISPLAY_COMMANDS
 extern "C" bool noise_tx_has_dma_headroom_reclaiming(size_t reclaimable) {
     return heap_caps_get_free_size(MALLOC_CAP_DMA) + reclaimable
         >= NOISE_TX_DMA_RESERVE_BYTES;

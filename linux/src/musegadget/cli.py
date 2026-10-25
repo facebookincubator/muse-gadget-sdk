@@ -102,11 +102,22 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
 
 def cmd_info(args: argparse.Namespace) -> int:
     ident = identity.load_or_create()
-    paired = config.load_json(config.PAIRING_FILE) is not None
+    pairing = config.load_json(config.PAIRING_FILE)
+    try:
+        sdk_token = config.sdk_token_hint(config.sdk_token())
+    except ValueError:
+        sdk_token = "not valid"
+    paired_with = (pairing or {}).get("sdk_token_hint")
     print(f"version:   {__version__}")
     print(f"node id:   {ident.node_id}")
     print(f"BLE name:  {ident.ble_name}")
-    print(f"paired:    {'yes' if paired else 'no'}")
+    print(f"SDK token: {sdk_token}")
+    if pairing is None:
+        print("paired:    no")
+    elif paired_with is not None and paired_with != sdk_token:
+        print(f"paired:    yes, with SDK token {paired_with}; run `musegadget pair --force` to use this one")
+    else:
+        print("paired:    yes")
     return 0
 
 

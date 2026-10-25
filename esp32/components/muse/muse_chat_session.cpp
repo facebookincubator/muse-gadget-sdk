@@ -92,11 +92,18 @@ static const char *TAG = "muse_chat_session";
 #define NDJSON_LINE_MAX (16 * 1024)               /* one NDJSON line / the chat ack */
 #define SUB_LINE_MAX (256 * 1024)          /* an event line grows its buffer up to this */
 #define CHAT_PART (16 * 1024)              /* one body chunk of a long typed message */
+#if CONFIG_MUSE_HATCH_COMPACT_BUFFERS       /* 2 MB of PSRAM: see its Kconfig help */
+#define MP3_BUF (128 * 1024)
+#define IN_BYTES (MIC_RATE * 2 * 2)        /* 2 s of mic backlog while connecting */
+#define OUT_BYTES (MIC_RATE * 2 * 1)       /* 1 s of decoded reply */
+#else
 #define MP3_BUF (512 * 1024)
-#define MP3_HOLD (1441 + 4)               /* the largest MP3 frame and the next header */
-#define MP3_POLL_ROOM (SCRATCH + 8192)     /* stop reading the socket below this much MP3 room */
 #define IN_BYTES (MIC_RATE * 2 * 8)        /* 8 s of mic backlog while connecting */
 #define OUT_BYTES (MIC_RATE * 2 * 2)       /* 2 s of decoded reply */
+#endif
+#define MP3_HOLD (1441 + 4)               /* the largest MP3 frame and the next header */
+#define MP3_POLL_ROOM (SCRATCH + 8192)     /* stop reading the socket below this much MP3 room */
+static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP3 buffer empty");
 #define EV_TEXT 72
 #define TEXT_MAX 1024                      /* a message's text, for captions timed to its speech */
 #define SPEECH_CHARS_PER_S 14              /* until the speech's length is known */
@@ -890,9 +897,9 @@ static bool ensure_connected(void)
         }
         int status;
         if (connect_once(err, sizeof(err), &status)) {
-            char detail[48] = "Connected to ";
-            strlcat(detail, s_vm.vm_name[0] ? s_vm.vm_name : s_vm.vm_id, sizeof(detail));
-            muse_hatch_report(MUSE_HATCH_REACHABLE, detail);
+            /* The settings page shows the VM in its VM ID row. */
+            muse_hatch_report_vm(s_vm.vm_id);
+            muse_hatch_report(MUSE_HATCH_REACHABLE, "");
             return true;
         }
         disconnect(err);
