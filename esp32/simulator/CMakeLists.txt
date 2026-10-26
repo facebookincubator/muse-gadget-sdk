@@ -238,6 +238,7 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     target_compile_options(muse_settings_text_test PRIVATE -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections)
     target_link_libraries(muse_settings_text_test PRIVATE ${MUSE_SIM_LVGL_TARGET} ${MUSE_SIM_SDL_TARGET} Threads::Threads m)
     if(APPLE)
+        target_compile_definitions(muse_settings_text_test PRIVATE _DARWIN_C_SOURCE)
         target_link_options(muse_settings_text_test PRIVATE -Wl,-dead_strip)
         target_link_libraries(muse_settings_text_test PRIVATE ${MUSE_SIM_IOKIT_FRAMEWORK})
     else()
