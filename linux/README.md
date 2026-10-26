@@ -31,8 +31,10 @@ command.
 
 - **A Raspberry Pi with Bluetooth**: a 3B+, 4, 5 or Zero 2 W. Other Linux
   computers work too, as long as they have Bluetooth LE.
-- **Raspberry Pi OS Bullseye or later**, Debian 11 or later, or Ubuntu 22.04
-  or later, already on your network. 32-bit and 64-bit both work.
+- **Raspberry Pi OS Bullseye or later**, Debian 11 or later, Ubuntu 22.04
+  or later, Arch, or [Fedora](docs/fedora.md), already on your network.
+  Debian/Ubuntu support 32-bit and 64-bit; Arch/Fedora require x86_64 or aarch64.
+- **Python 3.9 or later**, using the distro's Python and Bluetooth bindings.
 - **An account with sudo** on the machine.
 - **An SDK token** from [gadgets.muse.ai](https://gadgets.muse.ai/settings/sdk-tokens)
   (Account > SDK tokens). Every gadget needs one to pair, including ones you
