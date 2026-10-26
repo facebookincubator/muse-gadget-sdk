@@ -144,27 +144,34 @@ the temperature is corrected by `CONFIG_HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET`
 
 The experimental reTerminal Sticky Muse profile follows Seeed's `factory_fw`
 source: SSD1677 panel, GPIO45/46 power latch, GT911 touch (I2C0), PDM mic,
-BQ27220 battery gauge and SD card on the panel's SPI2 bus. It renders a still
-480×800 UI and four-level grayscale images; the avatar updates on state changes
-rather than animating continuously on slow e-paper. The AI button starts a
-voice note and confirms pairing; GT911 touch opens settings. Up/Down only
-wake the screen. There is no speaker: replies are
-text on screen. The profile includes Muse's Chinese/Japanese CJK caption font
-for UTF-8 replies. The microSD slot is off by default (`CONFIG_MUSE_STICKY_SD`):
+BQ27220 battery gauge and SD card on the panel's SPI2 bus. Its UI is Muse's
+e-ink layer (`components/muse/eink/`, `CONFIG_MUSE_UI_FREEINK`) rather than
+LVGL: [FreeInk](https://github.com/Free-Ink/freeink-sdk) drives the panel from
+its `sticky` profile, and the layer draws the face, Settings and FreeInk's
+keyboard in black on white. Muse animates once a second on fast partial
+refreshes, with a clean refresh every 30 frames and on page changes, images and
+sleep; images show in four grays. Asleep, the panel keeps its last picture at
+no power. Progress is a bar along the bottom edge, as on Muse's square panels.
+The AI button starts a voice note and confirms pairing; touch swipes to
+Settings and confirms pairing too. Up/Down only wake the screen. There is no
+speaker: replies are text on screen. Text uses the LVGL UI's fonts, drawn from
+their TTFs, and Muse's Chinese/Japanese CJK caption font. The
+microSD slot is off by default (`CONFIG_MUSE_STICKY_SD`):
 turned on, an inserted card is mounted at `/sdcard` without formatting, though
 nothing reads it yet. The SHT40 on
 I2C1 answers `sensors.read` with an uncalibrated 0 °C temperature offset.
 The profile uses 16 MB of the physical 32 MB flash. Muse's battery sleep and
 Wi-Fi nap are enabled, but the touch and SD rails remain powered: standby
 behaviour is not factory-equivalent. Settings Power off releases the power
-latch only when USB is disconnected. On one unit, portrait UI and black/white
-polarity, left-swipe touch, accurate Sleep row selection and back navigation,
-stable idle display, SHT40 readings, battery percentage/voltage, sleep/wake,
-voice-note delivery and Chinese replies were checked; saving a Sleep setting
-no longer reboots the device. The contributor additionally confirms FAT SD
-mount/removal/reinsertion, charging-state indication, battery-only Power off
-and restart, Muse OTA and measurement of standby current. The numeric current
-value and measurement conditions will be recorded when supplied.
+latch only when USB is disconnected. On one unit, the e-ink UI was checked
+for pairing, voice turns and replies, the mic during replies, swiping and
+navigating Settings, the keyboard, sleep and wake, and fast refreshes. With the
+earlier LVGL UI, SHT40 readings, battery percentage/voltage, voice-note
+delivery and Chinese replies were checked; the contributor additionally
+confirms FAT SD mount/removal/reinsertion, charging-state indication,
+battery-only Power off and restart, Muse OTA and measurement of standby
+current. The numeric current value and measurement conditions will be
+recorded when supplied.
 Back up factory firmware and any device-specific data before flashing.
 
 The optional `reterminal-sticky-link` profile uses the same SSD1677 and SHT40
