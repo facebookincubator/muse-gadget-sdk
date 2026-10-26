@@ -73,6 +73,10 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
 #define MUSE_HATCH_NOTE_HEAD \
     "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
     "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
+/* The same, asking for a reply Muse can speak (GET /api/voice/tts-stream). */
+#define MUSE_HATCH_NOTE_HEAD_VOICE \
+    "{\"message\":\"\",\"output_modality\":\"voice\",\"items\":[{\"type\":\"file\"," \
+    "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44
 

@@ -26,8 +26,11 @@
  *   2. POST /chat/stream with the transcript. The reply arrives as events on
  *      the connection's long-lived POST /chat/subscribe stream: one or more
  *      assistant messages, each delta.message_start / text_append / message_done.
- *   3. Each finished message is shown at reading pace (see start_tts to
- *      speak it with a TTS API of your own; Muse doesn't speak gadget replies).
+ *   3. Each finished message is spoken: with the speaker on, the turn asks for
+ *      voice replies, and start_tts fetches each one's MP3 from
+ *      GET /api/voice/tts-stream (/voice/tts-stream on older servers) and
+ *      plays it, captions following. With the speaker off, or if the speech
+ *      can't be had, it's shown at reading pace instead.
  * A turn has no explicit end event; like Sidekick, it settles once every
  * message is done and nothing has arrived for a few seconds.
  *
@@ -230,6 +233,7 @@ struct turn_t {
     phase_t phase;
     uint32_t gen;
     bool text;               /* typed at the console: the reply goes there, unspoken */
+    bool voice;              /* asked for voice replies, to fetch and speak */
     bool end_requested, end_sent, chat_posted, acked;
     int64_t dict_id, chat_id;
     int64_t start_us, end_sent_us, chat_us, last_event_us, last_content_us;
@@ -252,6 +256,7 @@ struct turn_t {
     bool agent_busy;
     /* TTS */
     int tts_msg;             /* message being fetched (or shown, speaker off), or -1 */
+    bool tts_legacy;         /* the server has no /api/voice/tts-stream: use /voice/tts-stream */
     bool silent;             /* speaker off: tts_msg is paced by silence, not fetched */
     uint8_t *mp3;            /* MP3_BUF */
     size_t mp3_len;
@@ -1030,6 +1035,8 @@ static bool turn_start(uint32_t gen, bool text)
     s_turn.texts = texts;
     s_turn.gen = gen;
     s_turn.text = text;
+    /* Speech needs the MP3 buffer; muted, the reply is shown at reading pace. */
+    s_turn.voice = !text && s_turn.mp3 && muse_settings_speaker_on();
     s_turn.tts_msg = -1;
     memset(s_marks, 0, sizeof(s_marks));
     s_reply_shown[0] = '\0';
@@ -1148,8 +1155,9 @@ static bool open_note(void)
     if (!s_turn.chat_id) {
         return false;
     }
-    s_turn.body_sent = sizeof(MUSE_HATCH_NOTE_HEAD) - 1;
-    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(MUSE_HATCH_NOTE_HEAD), sizeof(MUSE_HATCH_NOTE_HEAD) - 1, false)) {
+    const char *head = s_turn.voice ? MUSE_HATCH_NOTE_HEAD_VOICE : MUSE_HATCH_NOTE_HEAD;
+    s_turn.body_sent = strlen(head);
+    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(head), s_turn.body_sent, false)) {
         return false;
     }
     muse_hatch_wav_header(s_turn.note, MIC_RATE);
@@ -1243,7 +1251,7 @@ static void post_chat(const char *text)
     }
     ESP_LOGI(TAG, "heard: \"%s\"", text);
     emit(MUSE_HATCH_EV_HEARD, text);
-    send_chat(text, "text");
+    send_chat(text, s_turn.voice ? "voice" : "text");
 }
 
 /* A typed turn: the text goes straight to the chat. */
@@ -1530,6 +1538,37 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+/* Asks for message i's speech. False if the request couldn't be sent. */
+static bool open_tts(int i)
+{
+    char id[3 * sizeof(s_turn.msgs[0].id)];
+    query_escape(s_turn.msgs[i].id, id, sizeof(id));
+    char path[40 + sizeof(id)];
+    snprintf(path, sizeof(path), "%s?message_id=%s",
+             s_turn.tts_legacy ? "/voice/tts-stream" : "/api/voice/tts-stream", id);
+    int64_t sid = open_stream(K_TTS, "GET", path, nullptr, "audio/mpeg", nullptr, true);
+    stream_t *st = sid ? find_stream(sid) : nullptr;
+    if (!st) {
+        return false;
+    }
+    st->msg = i;
+    return true;
+}
+
+/* Shows message i at reading pace, silence in place of its speech. */
+static void show_silently(int i)
+{
+    msg_t &m = s_turn.msgs[i];
+    m.pcm_start = s_turn.pcm_out;
+    m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+    m.tts = TTS_ACTIVE;
+    s_turn.tts_msg = i;
+    s_turn.silent = true;
+    ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+    show_reply_start(m);
+}
+
+/* Speaks the next finished message, or shows it with the speaker off. */
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1540,28 +1579,26 @@ static void start_tts(void)
         if (m.tts != TTS_QUEUED) {
             continue;
         }
-        /*
-         * Replies are text, shown at reading pace: silence in place of speech
-         * paces the captions and ends the turn. To speak them instead, send
-         * the message's text (s_turn.texts + i * TEXT_MAX, if texts was
-         * allocated; up to TEXT_MAX - 1 bytes) to a TTS API of your choice and
-         * play the MP3 it returns. In place of the silence below: keep
-         * m.tts = TTS_ACTIVE and s_turn.tts_msg = i, set s_turn.silent = false,
-         * m.pcm_start = s_turn.pcm_out, m.pcm_frames = 0, s_turn.mp3_len = 0,
-         * s_turn.mp3_ended = false, s_turn.kbps = 0, s_turn.down_rate = 0 and
-         * mp3dec_init(&s_turn.dec). Then, on this task, pass the MP3 to
-         * tts_data() as it arrives (it buffers up to MP3_BUF and drops the
-         * rest, so hold off while it's full) and set s_turn.mp3_ended at the
-         * end. decode() plays it at the speaker's volume, captions following,
-         * and finishes the message once it's drained.
-         */
-        m.pcm_start = s_turn.pcm_out;
-        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
-        m.tts = TTS_ACTIVE;
-        s_turn.tts_msg = i;
-        s_turn.silent = true;
-        ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
-        show_reply_start(m);
+        if (s_turn.voice) {
+            m.tts = TTS_ACTIVE;
+            m.pcm_start = s_turn.pcm_out;
+            m.pcm_frames = 0;
+            s_turn.tts_msg = i;
+            s_turn.silent = false;
+            s_turn.mp3_len = 0;
+            s_turn.mp3_ended = false;
+            s_turn.kbps = 0;
+            s_turn.down_rate = 0;
+            mp3dec_init(&s_turn.dec);
+            if (open_tts(i)) {
+                mark(M_TTS);
+                ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
+                show_reply_start(m);   /* its opening lines while the audio is on its way */
+                return;
+            }
+            ESP_LOGW(TAG, "couldn't ask for message %s's speech", m.id);
+        }
+        show_silently(i);
         return;
     }
 }
@@ -1580,16 +1617,29 @@ static void tts_data(const uint8_t *data, size_t len)
 static void tts_end(stream_t *s, bool ok)
 {
     int i = s->msg;
+    int status = s->status;
     close_stream(s);
     if (i < 0 || i != s_turn.tts_msg) {
         return;
     }
     if (ok) {
         s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
-    } else {
-        s_turn.msgs[i].tts = TTS_FINISHED;
-        s_turn.tts_msg = -1;
+        return;
     }
+    if (status == 404 && !s_turn.tts_legacy) {
+        /* An older server: the speech lives at /voice/tts-stream. */
+        s_turn.tts_legacy = true;
+        if (open_tts(i)) {
+            return;
+        }
+    }
+    if (s_turn.pcm_out > s_turn.msgs[i].pcm_start) {
+        s_turn.mp3_ended = true;   /* cut off partway: play what came */
+        return;
+    }
+    ESP_LOGW(TAG, "no speech for message %s (HTTP %d): showing it", s_turn.msgs[i].id, status);
+    s_turn.mp3_len = 0;
+    show_silently(i);
 }
 
 /* Speaker off: queues the shown message's silence while the reply buffer has room. */

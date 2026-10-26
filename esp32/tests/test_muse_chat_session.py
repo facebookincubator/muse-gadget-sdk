@@ -57,6 +57,7 @@ static void turn_finish() { s_turn.phase = P_IDLE; }
 static void turn_fail(const char *) { turn_finish(); }
 static bool ensure_connected() { return true; }
 bool muse_hatch_configured() { return true; }
+bool muse_settings_speaker_on() { return true; }
 static void resampler_init(resampler_t *, int, int) {}
 ''' + reset + handlers + r'''
 static void begin(bool typed = false) {
