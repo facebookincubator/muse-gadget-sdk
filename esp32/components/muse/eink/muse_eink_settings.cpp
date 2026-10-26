@@ -175,6 +175,20 @@ static void advance(Column &c, int h)
     c.y += h + GAP;
 }
 
+static int note_height(const char *text)
+{
+    return wrapped_lines(LIST_W, FONT_M16, text) * line_height(FONT_M16);
+}
+
+/* Only variable-height notes move the hit regions below them. */
+static bool set_note(char *dst, size_t cap, const char *text)
+{
+    int old_h = note_height(dst);
+    set_text(dst, cap, text);
+    return old_h != note_height(dst);
+}
+#define SET_NOTE(dst, text) set_note(dst, sizeof(dst), text)
+
 /* Text cut to w px, ending in dots, as LONG_MODE_DOTS. */
 static void fit(char *out, size_t cap, const char *text, FontId font, int w)
 {
@@ -197,7 +211,7 @@ static void fit(char *out, size_t cap, const char *text, FontId font, int w)
 static void note(Column &c, const char *text)
 {
     if (!text[0]) return;
-    int h = wrapped_lines(LIST_W, FONT_M16, text) * line_height(FONT_M16);
+    int h = note_height(text);
     if (visible(c.y, h)) draw_wrapped(c.x, c.y, LIST_W, FONT_M16, text, 40, 0, true);
     advance(c, h);
 }
@@ -702,7 +716,8 @@ static void tick_wifi(void)
     case MUSE_WIFI_FAILED:
     default: snprintf(buf, sizeof(buf), "Couldn't join %s\n%s", w.ssid, w.detail); break;
     }
-    SET(s_wifi_status, buf);
+    bool layout_changed = SET_NOTE(s_wifi_status, buf);
+    layout_changed |= s_wifi_on != (w.state != MUSE_WIFI_OFF);
     set_flag(&s_wifi_on, w.state != MUSE_WIFI_OFF);
     set_flag(&s_wifi_scanning, muse_wifi_scanning());
 
@@ -711,7 +726,7 @@ static void tick_wifi(void)
     if (n != s_saved_n || memcmp(saved, s_saved, n * sizeof(saved[0]))) {
         bool rows_changed = n != s_saved_n;
         for (int i = 0; !rows_changed && i < n; i++) rows_changed = strcmp(saved[i].ssid, s_saved[i].ssid) != 0;
-        if (rows_changed) navigation_changed();
+        layout_changed |= rows_changed;
         memcpy(s_saved, saved, n * sizeof(saved[0]));
         s_saved_n = n;
         s_forget_armed = -1;
@@ -722,14 +737,6 @@ static void tick_wifi(void)
         s_forget_armed = -1;
         s_changed = true;
     }
-    for (int i = 0; i < s_saved_n; i++) {
-        const char *text = i == s_forget_armed ? "Tap to forget"
-                           : w.state == MUSE_WIFI_CONNECTED && !strcmp(w.ssid, s_saved[i].ssid) ? "Connected"
-                           : s_saved[i].hidden ? "Hidden"
-                                               : "";
-        SET(s_saved_vals[i], text);
-    }
-
     uint32_t gen;
     muse_wifi_ap_t aps[MAX_APS];
     n = muse_wifi_scan_results(aps, MAX_APS, &gen);
@@ -737,7 +744,7 @@ static void tick_wifi(void)
     for (int i = 0; !rows_changed && i < n; i++) {
         rows_changed = strcmp(aps[i].ssid, s_aps[i].ssid) != 0 || aps[i].secure != s_aps[i].secure;
     }
-    if (rows_changed) navigation_changed();
+    layout_changed |= rows_changed;
     memcpy(s_aps, aps, n * sizeof(aps[0]));
     if (gen != s_shown_scan_gen || rows_changed) {
         bool fresh = s_shown_scan_gen != UINT32_MAX, saved_seen = false;
@@ -748,10 +755,24 @@ static void tick_wifi(void)
             saved_seen |= sv;
             strlcpy(s_ap_vals[i], sv ? "saved" : s_aps[i].secure ? "secured" : "open", sizeof(s_ap_vals[i]));
         }
+        layout_changed |= s_wifi_on && s_scan_empty != (gen && !n);
         s_scan_empty = gen && !n;
         s_changed = true;
         /* The scan found one: join it now rather than at the next look. */
         if (fresh && saved_seen && w.state == MUSE_WIFI_NOT_NEARBY) muse_wifi_apply();
+    }
+    if (layout_changed) {
+        /* FreeInk publishes new hit regions before the panel refresh finishes. */
+        navigation_changed();
+        s_forget_armed = -1;
+        s_forget_armed_us = 0;
+    }
+    for (int i = 0; i < s_saved_n; i++) {
+        const char *text = i == s_forget_armed ? "Tap to forget"
+                           : w.state == MUSE_WIFI_CONNECTED && !strcmp(w.ssid, s_saved[i].ssid) ? "Connected"
+                           : s_saved[i].hidden ? "Hidden"
+                                               : "";
+        SET(s_saved_vals[i], text);
     }
 }
 
@@ -762,7 +783,7 @@ static void tick_hatch(void)
                          : muse_link_sdk_token_changed() ? "paired with another SDK token, pair again to use this one"
                                                          : "paired";
     snprintf(buf, sizeof(buf), "Muse app: %s\n%s", paired, muse_link_state_name(muse_link_state()));
-    SET(s_link_status, buf);
+    bool layout_changed = SET_NOTE(s_link_status, buf);
     if (s_link_reset_armed_us && esp_timer_get_time() - s_link_reset_armed_us >= 5000000) {
         s_link_reset_armed_us = 0;
         SET(s_link_reset_lbl, "Reset pairing");
@@ -771,7 +792,12 @@ static void tick_hatch(void)
     muse_hatch_status(&h);
     if (h.detail[0]) snprintf(buf, sizeof(buf), "%s\n%s", muse_hatch_state_name(h.state), h.detail);
     else strlcpy(buf, muse_hatch_state_name(h.state), sizeof(buf));
-    SET(s_hatch_status, buf);
+    layout_changed |= SET_NOTE(s_hatch_status, buf);
+    if (layout_changed) {
+        navigation_changed();
+        s_link_reset_armed_us = 0;
+        SET(s_link_reset_lbl, "Reset pairing");
+    }
     char host[MUSE_HOST_MAX + 1], vm[MUSE_VM_MAX + 1];
     muse_settings_hatch_host(host);
     muse_settings_hatch_vm(vm);
@@ -800,7 +826,7 @@ static void tick_ble(void)
     case MUSE_BLE_CONNECTED:
     default: snprintf(buf, sizeof(buf), "Phone connected\n%s", b.secure ? "Paired" : "Waiting for pairing"); break;
     }
-    SET(s_ble_status, buf);
+    if (SET_NOTE(s_ble_status, buf)) navigation_changed();
     set_flag(&s_ble_on, muse_settings_ble_on());
 }
 
@@ -845,7 +871,7 @@ static void tick_battery(void)
     else snprintf(t, sizeof(t), "%d min", m);
     if (!b.started) strlcpy(buf, p.battery_pct < 0 ? "No battery" : "Unplug USB to start measuring.", sizeof(buf));
     else snprintf(buf, sizeof(buf), b.running ? "On battery for %s" : "Last run: %s on battery", t);
-    SET(s_batt_status, buf);
+    bool layout_changed = SET_NOTE(s_batt_status, buf);
 
     if (p.battery_pct < 0) strlcpy(buf, "None", sizeof(buf));
     else if (p.battery_mv)
@@ -880,7 +906,8 @@ static void tick_battery(void)
     }
     buf[0] = 0;
     if (b.started && b.awake[0]) snprintf(buf, sizeof(buf), "Also kept awake by: %s", b.awake);
-    SET(s_batt_awake, buf);
+    layout_changed |= SET_NOTE(s_batt_awake, buf);
+    if (layout_changed) navigation_changed();
 }
 
 bool settings_tick(void)
