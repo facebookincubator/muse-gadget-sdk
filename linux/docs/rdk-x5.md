@@ -26,8 +26,9 @@ profile or an offline model deployment.
 
 - A working network connection, DNS and system clock.
 - Bluetooth LE and the SDK's distro-provided BlueZ/D-Bus dependencies.
-- The Linux account you want Muse commands to run as. The tested image uses
-  `sunrise`; select the account deliberately when installing the SDK.
+- The Linux account you want Muse commands to run as. The reported image uses
+  `sunrise`; select it with the installer's `--run-as USER` option
+  (`--run-as sunrise` for that image).
 
 The SDK handles pairing and device commands. Installing it alone does not
 provide a graphical avatar interface or a speech synthesis service.
@@ -36,14 +37,18 @@ provide a graphical avatar interface or a speech synthesis service.
 
 A separate [community RDK X5 UI project](https://github.com/shockley6668/rdk-x5-muse-gadget)
 adds a native LVGL/SDL frontend using the Muse pixel avatar and CJK captions,
-a Python chat/audio bridge, and optional Edge TTS speech output. It reads the
-existing SDK pairing without replacing the `musegadget` service. Follow that
-project's prerequisites and review its installer before installing it.
+a Python chat/audio bridge, and optional Edge TTS speech output. These notes
+reference [snapshot `01f18d1`](https://github.com/shockley6668/rdk-x5-muse-gadget/tree/01f18d12bc48a98fd5e6924288e78309d43de7e9).
+The project reports the checks below without identifying an exact tested
+commit. It reads the existing SDK pairing without replacing
+the `musegadget` service. Follow that project's prerequisites and review its
+installer before installing it.
 
 The tested display setup is a 480 x 320 SPI touchscreen with a working
-XFCE/Xorg session. Screen and touch drivers must already be installed. The
-community installer currently assumes the default `sunrise` account, UID
-1000 and display `:0`; other setups require adapting its paths and units.
+XFCE/Xorg session. Screen and touch drivers must already be installed.
+At that snapshot, the community installer assumes the default `sunrise`
+account, UID 1000 and display `:0`; other setups require adapting its paths
+and units.
 
 Two practical display lessons from this setup:
 
@@ -53,8 +58,8 @@ Two practical display lessons from this setup:
 - Use a modest refresh rate for the small SPI screen. This setup limits avatar
   and display refresh to 8 fps to keep the desktop responsive.
 
-The community backend currently needs root access to read the SDK's pairing.
-Its README documents the local caption-state permissions and intended
+At that snapshot, the community backend needs root access to read the SDK's
+pairing. Its README documents the local caption-state permissions and intended
 single-user deployment. It uses SDK internals and cloud chat endpoints, so
 upstream changes may require updates. Its extra TTS dependency requires a
 network connection and is not part of this SDK.
