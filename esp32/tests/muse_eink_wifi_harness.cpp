@@ -53,7 +53,8 @@ static uint32_t scan_generation = 1;
 static int64_t now_us = 1000000, edge_us;
 static std::string joined;
 static int64_t esp_timer_get_time() { return now_us; }
-static size_t strlcpy(char *out,const char *text,size_t cap) {
+#define strlcpy muse_test_strlcpy
+static size_t muse_test_strlcpy(char *out,const char *text,size_t cap) {
     size_t n=strlen(text),copy=n<cap?n:cap-1;
     if(cap) { memcpy(out,text,copy); out[copy]=0; }
     return n;

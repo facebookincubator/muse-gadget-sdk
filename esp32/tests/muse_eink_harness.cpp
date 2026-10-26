@@ -194,7 +194,8 @@ static int text_width(FontId, const char *s) {
     }
     return count;
 }
-static size_t strlcat(char *out, const char *src, size_t cap) {
+#define strlcat muse_test_strlcat
+static size_t muse_test_strlcat(char *out, const char *src, size_t cap) {
     const size_t n = strlen(out), len = strlen(src);
     if (n < cap) {
         size_t copy = len < cap - n - 1 ? len : cap - n - 1;

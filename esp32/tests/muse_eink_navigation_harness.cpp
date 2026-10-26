@@ -59,7 +59,8 @@ static int xQueueReceive(QueueHandle_t, TouchEvent *e, int) {
     events.pop_front();
     return pdTRUE;
 }
-static size_t strlcpy(char *dst, const char *src, size_t cap) {
+#define strlcpy muse_test_strlcpy
+static size_t muse_test_strlcpy(char *dst, const char *src, size_t cap) {
     const size_t len = strlen(src), n = cap && len >= cap ? cap-1 : len;
     if (cap) { memcpy(dst,src,n); dst[n] = 0; }
     return len;

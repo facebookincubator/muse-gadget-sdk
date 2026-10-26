@@ -25,7 +25,8 @@ using namespace muse_eink;
 static DisplayTarget *s_target;
 int text_width(FontId, const char *, int = 0);
 void draw_text(int, int, FontId, const char *, Color, int = 0);
-static size_t strlcat(char *out, const char *src, size_t cap) {
+#define strlcat muse_test_strlcat
+static size_t muse_test_strlcat(char *out, const char *src, size_t cap) {
     size_t n = strlen(out), len = strlen(src);
     if (n < cap) {
         size_t copy = len < cap-n-1 ? len : cap-n-1;
