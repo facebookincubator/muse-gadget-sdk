@@ -183,6 +183,49 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
     return true;
 }
 
+/*
+ * Drops * and ` anywhere (bold, italics, code) and the marks a line starts
+ * with: a heading's #, a quote's >, a list's bullet and a table's rule. A
+ * table's cells are separated by commas. Numbered lists keep their numbers,
+ * which read as they are.
+ * ponytail: a line that starts with a sign ("-5 độ") loses it too.
+ */
+size_t muse_hatch_plain(char *text, muse_hatch_plain_t *plain)
+{
+    char *o = text;
+    for (const char *p = text; *p; p++) {
+        char c = *p;
+        if (c == '\n') {
+            *plain = (muse_hatch_plain_t){ 0 };   /* a row's closing | adds nothing */
+        } else if (c == '*' || c == '`' || (!plain->mid_line && strchr("#>+-|: \t", c))) {
+            continue;
+        } else if (c == '|') {
+            while (o > text && o[-1] == ' ') {
+                o--;
+            }
+            plain->cell = true;
+            continue;
+        } else if (plain->cell && c == ' ') {
+            continue;
+        } else {
+            plain->mid_line = true;
+            if (plain->cell) {
+                /* ", " in place of the | and its spaces, as much as they left room for */
+                if (o < p) {
+                    *o++ = ',';
+                }
+                if (o < p) {
+                    *o++ = ' ';
+                }
+                plain->cell = false;
+            }
+        }
+        *o++ = c;
+    }
+    *o = '\0';
+    return o - text;
+}
+
 /* ---- Typed turns on the serial console ---- */
 
 /* JSON-escapes whole characters of *src into out, up to cap - 1 bytes; moves *src past them. */

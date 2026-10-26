@@ -125,6 +125,7 @@ size_t muse_hatch_base64(const uint8_t *p,size_t n,char *out) {
     (void)p; size_t len=(n+2)/3*4; memset(out,'A',len); return len;
 }
 void muse_hatch_tail_words(const char *text,char *out,size_t cap) { strlcpy(out,text,cap); }
+size_t muse_hatch_plain(char *text,muse_hatch_plain_t *plain) { (void)plain; return strlen(text); }
 bool muse_hatch_caption_at(const char *text,size_t at,char *out,size_t cap) {
     (void)at; strlcpy(out,text,cap); return text[0]!=0;
 }
