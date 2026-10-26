@@ -269,7 +269,7 @@ flash size and status backend.
 
    | Hint | Board |
    |---|---|
-   | `top-right` (`yellow` on older firmware) | M5Stack StopWatch |
+   | `top-right`, or `top-left` with live calls (`yellow` on older firmware) | M5Stack StopWatch |
    | `USR1` | Seeed XIAO ESP32-S3 1.47 Touch Display |
    | `power` | M5Stack CoreS3 |
    | `front` | M5Stack StickS3, or StickC Plus2 — tell them apart by the port: the StickS3 is native USB, the Plus2 is a CH9102 `usbserial` |
@@ -461,6 +461,129 @@ pairing as well, identifying its three physical controls.
 To skip BLE Wi-Fi provisioning while you iterate, set
 `CONFIG_HOMEHUB_WIFI_SSID` and `CONFIG_HOMEHUB_WIFI_PASSWORD` in `menuconfig`.
 The device still needs to be paired once for its token.
+
+## Live voice calls (experimental)
+
+`CONFIG_MUSE_REALTIME_VOICE` (off by default, "Live voice calls with Muse"
+under Muse in menuconfig) adds calls beside voice notes on boards with Muse's
+own voice session: the full-UI boards with PSRAM and the Voice PE (and
+reSpeaker Lite) builds. On StopWatch, hold yellow to talk or interrupt, release
+to keep the call open, and tap blue to hang up; voice notes are an explicit
+Sound setting. With the option on, the StopWatch's yellow key is its talk
+button and blue its speaker button (`board_m5stack_stopwatch.c`), swapped from
+the default build: outside a call blue still mutes, and during one, or once a
+press that will start one is queued, its press hangs up (`muse_input.c`). A
+hang-up that can't be queued moves the input epoch, which ends the call. Other boards retain tap-to-call and hold-for-note. Link-only
+builds, the DevKitC-1 default included, don't have the option and don't change.
+
+- The call is a `POST /voice/realtime` over the voice session's Noise
+  connection: `components/muse/muse_voice_call_core.c` has the protocol (a
+  bounded JSON scanner, the 40 ms appends, the audio decode, the call's
+  lifecycle and deadlines) with no IDF in it, and `muse_voice_call.cpp` runs
+  it on the session task. `tests/test_muse_voice_call.py` covers both on the
+  host with synthetic audio.
+- The session connects with `app_id` (`CONFIG_MUSE_REALTIME_VOICE_APP_ID`,
+  `hatch-web` by default): the VM takes the app identity from the connection,
+  not from a request header, and refuses calls without one. With the option
+  on, this applies to everything on that connection, voice notes and typed
+  turns included.
+- The voice session never sends `link.register`: Link's own control
+  connection keeps the device's registration.
+- Muse's greeting is off by default (`CONFIG_MUSE_REALTIME_VOICE_GREETING`).
+- Every way out of a call sends `POST /voice/end-call` while the connection
+  is up: closing the media alone doesn't end a call. Server policy may also
+  end a call before the client's own limits. If the connection drops instead, the
+  VM keeps the call through a disconnect grace (about 45 s, then up to 35 s
+  more) before ending it, and in that window another connection of the same
+  account can take the call over; end calls explicitly rather than by
+  dropping. So a call whose end wasn't confirmed (the connection dropped
+  first, or Muse didn't confirm the end-call) is kept as one pending cleanup:
+  its end-call, unchanged, goes again when the session reconnects, before a
+  new call starts (which waits for one try, at most 10 s), up to 3 tries and
+  for at most 10 minutes; a refused (4xx) end-call isn't retried. It names the old call's id, so it can't end a new
+  call, and nothing else of the old call is sent again. A new call's admission
+  replaces the old one at Muse, which also ends the cleanup. The pending
+  cleanup is in RAM only: if the gadget loses power or restarts first, the
+  call stays until Muse's disconnect grace runs out. If Muse doesn't confirm the end-call
+  (`{"ok":true,...}`), the session drops its connection once the media is
+  down, which makes the VM end the call. The gadget hangs up after
+  `CONFIG_MUSE_REALTIME_VOICE_IDLE_S` quiet seconds, and always at
+  `CONFIG_MUSE_REALTIME_VOICE_MAX_S`. Held input, a caller mid-sentence (until
+  that speech item's own stop) and a turn Muse is still working on aren't idle;
+  silent keepalive audio is. Turns are tracked by `submission_message_id` and
+  input `item_id`: a `turn_settled` retires its submission and the earlier ones
+  for that item, never another item's or a later alias.
+- On push-to-talk calls only replies to your latest hold play
+  (`muse_vc_reply_gate_t`). The one exception: once that reply has finished,
+  older work from before your last press reporting back (a delegated task's
+  result, or the outcome after you answer a spoken approval) plays after it,
+  with captions. The audio of a reply you cut off with a press never comes
+  back, and older work arriving while a newer reply is still going is
+  dropped. Approvals work by voice: Muse asks in the call and you hold to
+  answer; the gadget has no approval card.
+- Nothing plays and the mic doesn't open until `hatch.voice.session` names this
+  call's exact `call_id` and a `session_id`; a missing or wrong one fails the
+  call. Before that, an `error` event fails it too; after, only `session_dead`
+  does.
+- Caller and reply text go to captions only, never the log.
+- Hands-free calls shut the mic while Muse is audibly talking, plus 300 ms.
+  The Voice PE keeps it open (full duplex) when its XMOS reports echo-cancelled
+  outputs at start-up.
+- The VM must accept calls from the gadget's credentials. A `session_control`
+  stop on this call's realtime stream ends the call: the client drains queued
+  playback and explicitly ends it. The admission body's second line,
+  `MUSE_VC_CAPABILITY_OFFER` (`hatch.voice.capability.offer` with
+  `end_call_stop: 1`), tells Muse the gadget ends calls that way, so it can
+  hang up when the caller says goodbye; the gadget has no channel for
+  `ui.set.voice.end_call`. A VM that doesn't support the offer ignores it and
+  sends no stop on goodbye, so a press, the idle limit or the length limit is
+  what reliably ends a call there.
+
+## Requests to Muse's VM from your code
+
+`CONFIG_HOMEHUB_DAEMON_REQUESTS` (on by default, on every board, Link-only
+builds included) lets firmware open its own HTTP requests to the VM's daemon
+on Link's Noise session, with `noise_ctrl_req_open()`, `noise_ctrl_req_send()`
+and `noise_ctrl_req_cancel()` in `main/noise_control.h`. Muse's own voice notes
+and chat use the same calls. Each request gets a stream of its own; a refused,
+reset or cancelled request never touches Link's control stream.
+`tests/test_link_daemon_requests.py` runs them on the host with the Muse UI off.
+
+Routes a gadget's credentials can reach, besides Link's own and the voice
+call's `POST /voice/realtime` and `POST /voice/end-call`:
+
+- `GET /chat/history`: the chat's messages. Ask for one at a time
+  (`GET /chat/history?limit=1`) so the response stays under the frame bound
+  below. A single message larger than that bound can't be fetched this way.
+- `POST /fs/read` and `POST /fs/write`: files on the user's VM, with JSON
+  bodies. A `path` is relative to the user's home on the VM, under the VM's
+  existing path rules; nothing confines it to a workspace folder.
+  - read: `{"path": "notes/today.md", "offset": 0, "len": 1024}`. `offset`
+    and `len` pick the part of the file to return. Keep `len` at 1024 or less:
+    the content comes back escaped (or base64), which can grow it well past
+    its size in the file, and the response has to fit the frame bound below.
+  - write: `{"path": "notes/today.md", "text": "...", "overwrite": true,
+    "append": false, "create_parent": true}`, or `data_base64` in place of
+    `text` (one of the two). `overwrite`, `append` and `create_parent` are
+    required booleans: send all three every time. Write a large file in
+    several requests, the later ones with `"append": true`.
+
+There are no list or stat routes for gadgets.
+
+Keep within the session's bounds:
+
+- Up to 3 requests at once; another is refused (its callback gets -1).
+- Send a body in pieces of at most 8 KB (4 KB on Muse boards without PSRAM,
+  2 KB on the Cardputer ADV and AI Passport): a larger piece ends that request.
+  Queued body bytes are capped at 16 KB with PSRAM and 4 KB without, and
+  `noise_ctrl_req_send()` waits up to `wait_ms` for room.
+- Each response frame has to fit the session's inbound buffer (12 KB, 17 KB on
+  Muse boards without PSRAM). A larger one ends the whole session, which
+  reconnects, and the request with `NOISE_CTRL_REQ_TOO_LARGE`. Ask for
+  responses that stay under it: read large files in parts.
+- The callback runs on the session task: copy what you need and return. Do
+  slow work, and any request that depends on its result, in a task of your
+  own, as `on_ws_command()`'s asynchronous commands do.
 
 ## Video from a phone
 

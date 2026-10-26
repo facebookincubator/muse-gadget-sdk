@@ -67,6 +67,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #include "muse_audio.h"
 #include "muse_board.h"
@@ -103,8 +104,16 @@ static const char *TAG = "board";
 #define CODEC_ARM_MS 30            /* M5Unified arms capture at +30/60/90 ms of running I2S clock */
 #define ES8311_REG_SYSTEM 0x0D     /* 0x01: analog circuitry powered up */
 
+/* With live calls (CONFIG_MUSE_REALTIME_VOICE), yellow is the talk button
+ * (hold to talk or interrupt) and blue the speaker button, which also hangs
+ * up during a call (muse_input.c). Otherwise blue talks, yellow mutes. */
+#if !CONFIG_MUSE_REALTIME_VOICE
 #define TALK_GPIO GPIO_NUM_1       /* KEYB / BtnB, blue, upper right: PTT */
 #define SPEAKER_GPIO GPIO_NUM_2    /* KEYA / BtnA, yellow, upper left: speaker */
+#else
+#define TALK_GPIO GPIO_NUM_2       /* KEYA / BtnA, yellow, upper left: talk */
+#define SPEAKER_GPIO GPIO_NUM_1    /* KEYB / BtnB, blue, upper right: speaker, hang up */
+#endif
 
 #define TP_ADDR 0x15
 #define TP_REG_POINTS 0x02         /* finger count, then X and Y, 12 bits each */
@@ -1087,14 +1096,21 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .diagonal_in = 1.75f,
-    .talk_button = "top-right",
     .power_button = "red bottom-left",
-    .speaker_button = "top-left",
     .rim_controls = true,
     /* Physical positions with USB down: blue ~2 o'clock, yellow ~10,
      * red ~7:30. All hint corners fit inside the 223 px inner rim. */
+#if !CONFIG_MUSE_REALTIME_VOICE
+    .talk_button = "top-right",
+    .speaker_button = "top-left",
     .talk_hint = { LV_ALIGN_CENTER, 144, -110 },
     .speaker_hint = { LV_ALIGN_CENTER, -144, -110 },
+#else
+    .talk_button = "top-left",
+    .speaker_button = "top-right",
+    .talk_hint = { LV_ALIGN_CENTER, -144, -110 },
+    .speaker_hint = { LV_ALIGN_CENTER, 144, -110 },
+#endif
     .power_hint = { LV_ALIGN_CENTER, -144, 110 },
     .frame_ms = 40,
     .init = init,

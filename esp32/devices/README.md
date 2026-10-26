@@ -256,7 +256,10 @@ python -m esptool --chip esp32s3 -p PORT write-flash 0 sticks3.bin
 The M5Stack StopWatch has the same CO5300 round AMOLED as the Waveshare S3
 1.75C, with a CST820 touch controller and the StickS3's ES8311 audio. With USB
 at the bottom, **blue top-right is PTT/pairing confirmation**, **yellow
-top-left toggles speaker on/off**, and **red bottom-left is POWER**. A short
+top-left toggles speaker on/off**, and **red bottom-left is POWER**. Builds with
+live calls (`CONFIG_MUSE_REALTIME_VOICE`) swap the two rim keys and their
+icons: yellow talks (and confirms pairing), and blue toggles the speaker and,
+during a call, hangs up. A short
 POWER press sleeps/wakes the screen; a 1.5 s hold while awake shows goodbye
 and shuts down the M5PM1 (click red to power back on). A waking press is
 consumed, not interpreted as another action. Hardware double-click power-off

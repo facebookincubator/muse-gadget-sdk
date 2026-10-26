@@ -38,6 +38,8 @@ pairing and control protocols, so the same app pairs either.
 | `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
+| `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
+| `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
@@ -163,6 +165,48 @@ never has a command's parameters, output or error message.
   speak them, use a text-to-speech API of your choice.
 - The VM accepts at most 256 KB per message from the device, so command output
   is cut at 96 KB per stream.
+
+## Realtime voice
+
+- `musegadget voice-call` uses the paired store and exact `--vm-id`; never
+  add an owner-token fallback or change the account's default VM. Its
+  `LinkSession(register_device=False)` waits for transport readiness without
+  `/link-control` or `link.register`, preserving the normal run service's live
+  transport. Reuse the persistent identity for attribution only.
+- Each voice invocation admits a fresh call. Omit the realtime `session_id`
+  query (it is for an already-admitted call); optional `thread_id` belongs in
+  the admission record. Do not imply that this client implements resumption.
+- Set the configured voice app ID on the Noise upgrade query. Per-request
+  app-ID headers are not a substitute. Keep ordinary chat ACKs buffered.
+- Admit only `mcu-wearable` audio calls. Wait for HTTP success and matching
+  call/session readiness before microphone upload. Explicitly end the call
+  before upload EOS, including failure/cancellation paths, with bounded cleanup.
+- PCM is signed 16-bit LE, mono 24 kHz, up to 960 samples per 40 ms upload.
+  Bound response chunks, lines, decoded audio and playback. Silence keepalives
+  are not activity and must not hold the mic gate shut.
+- Half duplex is the default, with playback flush on barge-in and server hold
+  respected. Response completion/cancellation and turn settlement are not call
+  termination or proof that all PCM has arrived.
+- Right after the admission record, the client sends
+  `{"type":"hatch.voice.capability.offer","end_call_stop":1}`: it ends the
+  call on a `session_control/stop`, so Muse may hang up that way when the
+  caller says goodbye. A VM that doesn't know the key ignores it. The stop
+  arrives on this call's realtime response stream. Its `item.call_id` is a
+  control ID, not the admission call ID. Handle it once, drain queued playback
+  within a bound, then explicitly end the call. Don't add other capabilities,
+  invent server events or widen the device's permissions.
+- Post-readiness operation errors are advisory unless the peer explicitly
+  reports `session_dead`; admission errors remain fatal. Never log error text.
+- Idle suspension follows identified active turns, including delayed aliases.
+  Only a matching settlement retires that input item's work through the matched
+  submission, not newer aliases or unrelated inputs. Keep identity storage
+  bounded, restart idle after settlement, and never suspend the overall timer.
+- A validated end-call ACK is not undone by a delayed media EOF if a bounded
+  stream reset succeeds; report the incomplete drain separately.
+- Tests use self-authored tones/zeros and synthetic identities only. Never put
+  real recordings, credentials, internal documents or captured events here.
+  `test_streaming.py`, `test_voice_call.py` and `test_voice_cli.py` exercise real
+  Noise against an in-process fake VM without hardware or external calls.
 
 ## Adding a command
 

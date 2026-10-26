@@ -45,6 +45,7 @@
 #include "muse_state.h"
 #include "muse_text.h"
 #include "muse_wifi.h"
+#include "muse_voice.h"
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
@@ -141,6 +142,10 @@ static lv_obj_t *s_meter[METER_SEGS];
 static lv_obj_t *s_speaker;
 static lv_obj_t *s_speaker_icon;
 static lv_obj_t *s_aux_icon;
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+static lv_obj_t *s_talk_hint_lbl, *s_end_hint_lbl;
+#define CALL_HINT_OUT 26   /* px outwards from the rim icon's x: the 320 px avatar's sparkles reach ~125 */
+#endif
 static lv_obj_t *s_image;   /* display.draw_url, over the face */
 #if CONFIG_MUSE_WATCHER_CAMERA
 static lv_obj_t *s_camera_hint;
@@ -1182,6 +1187,21 @@ static void build_overlays(void)
         lv_obj_align(s_ptt_hint, muse_board->talk_hint.align, muse_board->talk_hint.x, muse_board->talk_hint.y);
         s_spk_hint = make_control_icon(scr, &muse_board->speaker_hint, LV_SYMBOL_VOLUME_MID, 0xffd060);
         s_pwr_hint = make_control_icon(scr, &muse_board->power_hint, LV_SYMBOL_POWER, 0xff8080);
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+        /* During a push-to-talk call: what yellow does now, and that blue
+         * hangs up. Under each rim icon, pushed out towards the rim, clear of
+         * the avatar and its sparkles (CALL_HINT_OUT). */
+        const muse_button_hint_t *t = &muse_board->talk_hint, *k = &muse_board->speaker_hint;
+        s_talk_hint_lbl = make_label(scr, &lv_font_montserrat_14, 0xffdc55);
+        s_end_hint_lbl = make_label(scr, &lv_font_montserrat_14, 0x70baff);
+        lv_obj_set_style_text_align(s_talk_hint_lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_align(s_end_hint_lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(s_talk_hint_lbl, t->align, t->x + (t->x < 0 ? -CALL_HINT_OUT : CALL_HINT_OUT), t->y + 36);
+        lv_obj_align(s_end_hint_lbl, k->align, k->x + (k->x < 0 ? -CALL_HINT_OUT : CALL_HINT_OUT), k->y + 36);
+        lv_label_set_text(s_end_hint_lbl, "END CALL");
+        lv_obj_add_flag(s_talk_hint_lbl, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_end_hint_lbl, LV_OBJ_FLAG_HIDDEN);
+#endif
         update_control_hints(MUSE_MODE_BOOT);
     }
 
@@ -1463,6 +1483,21 @@ static void update_status(muse_mode_t mode, float now)
 {
     uint32_t accent = muse_pixel_accent(mode);
     const char *name = mode == MUSE_MODE_IDLE ? s_idle_name : MODE_NAMES[mode];
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+    const char *call_name = muse_voice_call_label();
+    const char *hint = muse_voice_call_hint();
+    if (call_name) name = call_name;
+    if (s_talk_hint_lbl) {
+        /* Hidden over the settings rows, as the rim icons are, and once the
+         * call is ending (an empty hint). */
+        bool show = hint && hint[0] && !(s_tv && lv_tileview_get_tile_active(s_tv) == s_settings);
+        lv_obj_set_flag(s_talk_hint_lbl, LV_OBJ_FLAG_HIDDEN, !show);
+        lv_obj_set_flag(s_end_hint_lbl, LV_OBJ_FLAG_HIDDEN, !show);
+        if (show && strcmp(lv_label_get_text(s_talk_hint_lbl), hint)) {
+            lv_label_set_text(s_talk_hint_lbl, hint);
+        }
+    }
+#endif
 
     if (name != s_shown_name) {
         lv_label_set_text(s_state_lbl, name);
@@ -1632,6 +1667,7 @@ static void frame_tick(lv_timer_t *timer)
     float now = (float)esp_timer_get_time() / 1e6f;
 
     if (mode != s_last_mode) {
+        if (muse_voice_in_call()) s_level = 0;   /* do not smooth speaker energy into the mic meter */
         if (mode == MUSE_MODE_LISTENING) {
             image_hide_locked();
             muse_ui_show_face();
@@ -1663,6 +1699,9 @@ static void frame_tick(lv_timer_t *timer)
 
     /* Fast attack, slow release keeps the mouth and meter lively but readable. */
     float level = muse_state_level();
+    /* The voice task can switch sources after this frame read its mode. */
+    if (muse_voice_in_call() &&
+        ((mode == MUSE_MODE_LISTENING) != (muse_voice_call_view() == MUSE_VOICE_VIEW_LISTENING))) level = 0;
     s_level += (level - s_level) * (level > s_level ? 0.6f : 0.2f);
 
     muse_pose_t pose = {

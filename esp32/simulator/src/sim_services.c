@@ -24,6 +24,11 @@
 #include "muse_menu.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
+#include "muse_voice.h"
+
+/* The preview drives modes directly; it has no live call transport. */
+bool muse_voice_in_call(void) { return false; }
+muse_voice_view_t muse_voice_call_view(void) { return MUSE_VOICE_VIEW_NONE; }
 
 #define SIM_DEFAULT_NAME "MuseGadget-SIM001"
 #define SIM_DEFAULT_SSID "Muse Simulator"
