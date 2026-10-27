@@ -1438,7 +1438,8 @@ static char *build_register_json(void) {
                 "voltage, and whether it is charging or on USB power (each "
                 "null when the device has no battery or can't measure it), and "
                 "connectivity_events: recent Wi-Fi, session and tunnel outages "
-                "with causes, as \"<N>s ago\" lines",
+                "with causes, as \"<N>s ago\" lines. For older history, file a "
+                "bug report",
                 nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
@@ -1721,7 +1722,7 @@ static void noise_ota_status(const ota_event_t *ev, void *user) {
 
 // ---- Inbound message dispatch -----------------------------------------------
 
-extern "C" cJSON *noise_ctrl_device_health_json(bool include_ssid) {
+extern "C" cJSON *noise_ctrl_device_health_json(bool for_bug_report) {
     char wifi_ssid[sizeof(s_wifi_ssid)];
     copy_wifi_ssid(wifi_ssid, sizeof(wifi_ssid));
 
@@ -1788,8 +1789,10 @@ extern "C" cJSON *noise_ctrl_device_health_json(bool include_ssid) {
     cJSON_AddNumberToObject(tunnel, "tx_dropped", tun_stats.tx_dropped);
     cJSON_AddItemToObject(health, "tunnel", tunnel);
 #endif
-    link_events_add_json(health, "connectivity_events");
-    if (include_ssid && wifi_ssid[0]) {
+    link_events_add_json(health, "connectivity_events",
+                         for_bug_report ? LINK_EVENTS_CAPACITY
+                                        : LINK_EVENTS_HEALTH_MAX);
+    if (!for_bug_report && wifi_ssid[0]) {
         cJSON_AddStringToObject(health, "network_ssid", wifi_ssid);
     }
     const esp_app_desc_t *desc = esp_app_get_description();
@@ -1801,7 +1804,7 @@ extern "C" cJSON *noise_ctrl_device_health_json(bool include_ssid) {
 static void send_device_health(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id) {
-    cJSON *health = noise_ctrl_device_health_json(true);
+    cJSON *health = noise_ctrl_device_health_json(false);
     if (!health) return;
     char *payload = cJSON_PrintUnformatted(health);
     cJSON_Delete(health);

@@ -70,12 +70,16 @@ BaseType_t xSemaphoreGive(SemaphoreHandle_t s) {
     return pdTRUE;
 }
 
-static cJSON *events_json(void) {
+static cJSON *events_json_max(size_t max) {
     cJSON *root = cJSON_CreateObject();
-    CHECK(link_events_add_json(root, "events"), "add_json failed");
+    CHECK(link_events_add_json(root, "events", max), "add_json failed");
     cJSON *events = cJSON_GetObjectItem(root, "events");
     CHECK(cJSON_IsArray(events), "events is not an array");
     return root;
+}
+
+static cJSON *events_json(void) {
+    return events_json_max(LINK_EVENTS_CAPACITY);
 }
 
 static int count(const cJSON *array) {
@@ -145,6 +149,19 @@ int main(void) {
     snprintf(newest, sizeof(newest), "0s ago wifi_up: n=%d ", LINK_EVENTS_CAPACITY + 4);
     CHECK(strstr(at(events, LINK_EVENTS_CAPACITY - 1), newest),
           "newest wrong: %s", at(events, LINK_EVENTS_CAPACITY - 1));
+    cJSON_Delete(root);
+
+    // A smaller max keeps only the newest events, still oldest first.
+    root = events_json_max(LINK_EVENTS_HEALTH_MAX);
+    events = cJSON_GetObjectItem(root, "events");
+    CHECK(count(events) == LINK_EVENTS_HEALTH_MAX, "expected %d, got %d",
+          LINK_EVENTS_HEALTH_MAX, count(events));
+    char oldest[32];
+    snprintf(oldest, sizeof(oldest), "wifi_up: n=%d ",
+             LINK_EVENTS_CAPACITY + 5 - LINK_EVENTS_HEALTH_MAX);
+    CHECK(strstr(at(events, 0), oldest), "oldest wrong: %s", at(events, 0));
+    CHECK(strstr(at(events, LINK_EVENTS_HEALTH_MAX - 1), newest),
+          "newest wrong: %s", at(events, LINK_EVENTS_HEALTH_MAX - 1));
     cJSON_Delete(root);
     CHECK(g_lock_depth == 0, "lock leaked");
 

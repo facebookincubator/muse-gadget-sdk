@@ -207,7 +207,7 @@ void noise_ctrl_send_command_result(
 
 // Mirrors the device.health shape. The full variant holds a worst-case
 // connectivity history: 128 lines at the longest detail and largest counters.
-cJSON *noise_ctrl_device_health_json(bool include_ssid) {
+cJSON *noise_ctrl_device_health_json(bool for_bug_report) {
     if (g_health_fails) return NULL;
     cJSON *health = cJSON_CreateObject();
     CHECK(health != NULL, "health allocation failed");
@@ -231,7 +231,7 @@ cJSON *noise_ctrl_device_health_json(bool include_ssid) {
         cJSON_AddItemToArray(events, cJSON_CreateString(
             "12s ago tunnel_down: keepalive timeout (dma_free=1 dma_largest=1)"));
     }
-    if (include_ssid) cJSON_AddStringToObject(health, "network_ssid", "Office");
+    if (!for_bug_report) cJSON_AddStringToObject(health, "network_ssid", "Office");
     cJSON_AddStringToObject(health, "version", "1.2.3");
     return health;
 }

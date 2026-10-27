@@ -256,7 +256,7 @@ static char *build_report_json(const bug_report_snapshot_t *snapshot,
     // The device.health payload: connectivity history and tunnel state.
     // Optional: a report without it still beats no report.
     if (ok) {
-        cJSON *health = noise_ctrl_device_health_json(false);
+        cJSON *health = noise_ctrl_device_health_json(true);
         if (health) {
             if (!cJSON_AddItemToObject(root, "device_health", health)) {
                 cJSON_Delete(health);

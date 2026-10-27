@@ -29,8 +29,10 @@ extern "C" {
 // reboot; device.health and bug.report expose it so the agent can explain
 // past outages ("123s ago tunnel_down: keepalive timeout ...").
 // About two days of history at 50-60 events a day (each
-// VM replacement costs three). 40 held only 10-17 hours.
+// VM replacement costs three). bug.report carries all of it; device.health
+// only the newest LINK_EVENTS_HEALTH_MAX (10-17 hours) to stay small.
 #define LINK_EVENTS_CAPACITY 128
+#define LINK_EVENTS_HEALTH_MAX 40
 #define LINK_EVENTS_DETAIL_MAX 112
 
 typedef enum {
@@ -52,10 +54,10 @@ bool link_events_init(void);
 void link_events_record(link_event_kind_t kind, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 
-// Adds an array `name` of strings to `parent`, oldest first:
+// Adds an array `name` of the newest `max` events to `parent`, oldest first:
 // "<N>s ago <kind>: <detail> (dma_free=<B> dma_largest=<B>)".
 struct cJSON;
-bool link_events_add_json(struct cJSON *parent, const char *name);
+bool link_events_add_json(struct cJSON *parent, const char *name, size_t max);
 
 #ifdef __cplusplus
 }

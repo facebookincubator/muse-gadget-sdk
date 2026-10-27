@@ -90,7 +90,7 @@ void link_events_record(link_event_kind_t kind, const char *fmt, ...) {
     xSemaphoreGive(s_lock);
 }
 
-bool link_events_add_json(struct cJSON *parent, const char *name) {
+bool link_events_add_json(struct cJSON *parent, const char *name, size_t max) {
     cJSON *array = cJSON_CreateArray();
     if (!array || !cJSON_AddItemToObject(parent, name, array)) {
         cJSON_Delete(array);
@@ -107,7 +107,7 @@ bool link_events_add_json(struct cJSON *parent, const char *name) {
         free(copy);
         return false;
     }
-    size_t len = s_len;
+    size_t len = s_len < max ? s_len : max;
     size_t start = (s_head + LINK_EVENTS_CAPACITY - len) % LINK_EVENTS_CAPACITY;
     for (size_t i = 0; i < len; i++) {
         copy[i] = s_ring[(start + i) % LINK_EVENTS_CAPACITY];
