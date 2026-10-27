@@ -54,11 +54,12 @@ Common cases:
 
 - **What's playing?** `/query/active-app`, then `/query/media-player`.
 - **Open an app by name:** `/query/apps`, match the name, `POST /launch/<id>`.
-- **Type a search string:** `Search` key, then `Lit_` per character. Then stop and tell the user
-  what is on screen. Do not send `Select` right after typing: focus is usually still on the
-  on-screen keyboard, so `Select` may type the highlighted letter instead of opening a result.
-  To open a result, move focus to the results first and confirm with the user. On some
-  voice-remote models the `Search` key may start voice input.
+- **Type a search string:** `Search` key, then `Lit_` per character. Then stop and ask the user
+  what is on screen: ECP can't read search results or keyboard focus. Do not send `Select`
+  right after typing: focus is usually still on the on-screen keyboard, so `Select` may type
+  the highlighted letter instead of opening a result. To open a result, move focus to the
+  results first and confirm with the user. On some voice-remote models the `Search` key may
+  start voice input.
 - **Turn the TV on or off:** check `power-mode`, send the key, wait a few seconds, check again.
 
 ## Verify the Result
@@ -99,14 +100,15 @@ curl -s -X POST http://<ip>:8060/install/<appId>
   Right, Rev, Play, Fwd, InstantReplay, Info, Search, Enter, Backspace, FindRemote.
 - **Roku TV only:** VolumeUp, VolumeDown, VolumeMute, PowerOff, ChannelUp, ChannelDown,
   InputTuner, InputHDMI1-4, InputAV1. `PowerOn` and `Power` are also accepted (see Power).
-- **Text entry:** one request per character, `/keypress/Lit_<char>`; URL-encode non-ASCII as
-  UTF-8 (`Lit_%E2%82%AC`). Space is `Lit_%20`.
+- **Text entry:** one request per character, `/keypress/Lit_<char>`. Percent-encode the
+  character as UTF-8 unless it is an ASCII letter, digit, `-`, `.`, `_` or `~`: space is
+  `Lit_%20`, `#` is `Lit_%23`, `?` is `Lit_%3F`, `&` is `Lit_%26`, `€` is `Lit_%E2%82%AC`.
 - **Deep links:** `contentID` (under 255 chars, URL-encoded) and `MediaType` (series, season,
   episode, movie, shortFormVideo, tvSpecial). Support is per app; an unsupported link just
   opens the app.
 - **Search:** `keyword` is required; optional `title`, `type` (movie, tv-show, person, channel,
   game), `season`, `tmsid`, `match-any`, `provider`, `provider-id`, `show-unavailable`, `launch`.
-  Reliability is limited (see Limits).
+  Percent-encode each value (`&` in a keyword is `%26`). Reliability is limited (see Limits).
 - `/install/<appId>` only opens the Channel Store page; the user confirms the install on screen.
 
 ## Limits
