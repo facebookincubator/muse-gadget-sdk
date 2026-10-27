@@ -109,7 +109,8 @@ class LinkEpaperStatusTest(unittest.TestCase):
         self.assertIn("CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677 || CONFIG_MUSE_BOARD_RETERMINAL_STICKY", sensor)
         self.assertIn("reTerminal Sticky*", (ROOT / "devices/README.md").read_text())
         ui = (ROOT / "components/muse/muse_ui.c").read_text()
-        self.assertIn("font.fallback = &muse_font_cjk_16;", ui)
+        self.assertIn("#define CJK_FONT muse_font_cjk_16", ui)
+        self.assertIn("font.fallback = &CJK_FONT;", ui)
         self.assertIn("s_reply_lbl = make_label(face, font, COLOR_CAPTION);", ui)
 
     def test_sticky_link_profile_is_independent(self):
