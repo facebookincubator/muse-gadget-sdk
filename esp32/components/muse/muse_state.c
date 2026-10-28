@@ -43,6 +43,7 @@ static volatile bool s_asleep;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_caption[MUSE_CAPTION_MAX];
 static uint32_t s_caption_version;
+static volatile int64_t s_hint_until_us;   /* hint caption expiry; 0 = none pending */
 static SemaphoreHandle_t s_format_lock;
 static EventGroupHandle_t s_wake;
 static volatile int s_page_cols = 16, s_page_lines = 2;
@@ -123,14 +124,30 @@ void muse_state_set_caption(const char *fmt, ...)
         memcpy(s_caption, buf, sizeof(s_caption));
         s_caption_version++;
     }
+    s_hint_until_us = 0;   /* a plain caption cancels any pending hint expiry */
     portEXIT_CRITICAL(&s_lock);
     xSemaphoreGive(s_format_lock);
+}
+
+void muse_state_set_hint(const char *text)
+{
+    muse_state_set_caption("%s", text);
+    portENTER_CRITICAL(&s_lock);
+    s_hint_until_us = esp_timer_get_time() + MUSE_HINT_MS * 1000LL;
+    portEXIT_CRITICAL(&s_lock);
 }
 
 bool muse_state_caption(char *out, size_t out_len, uint32_t *version)
 {
     bool changed = false;
     portENTER_CRITICAL(&s_lock);
+    if (s_hint_until_us && esp_timer_get_time() > s_hint_until_us) {
+        s_hint_until_us = 0;
+        if (s_caption[0]) {
+            s_caption[0] = '\0';
+            s_caption_version++;   /* the UI redraws: the hint is gone */
+        }
+    }
     if (*version != s_caption_version) {
         strlcpy(out, s_caption, out_len);
         *version = s_caption_version;

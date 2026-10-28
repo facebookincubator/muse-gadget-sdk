@@ -60,6 +60,12 @@ float muse_state_progress(void);
 #define MUSE_CAPTION_MAX 400
 
 void muse_state_set_caption(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/* A transient hint caption: cleared once MUSE_HINT_MS passes. Plain
+ * captions (replies, status) never expire; a hint set replaces any
+ * caption, and any later plain caption cancels the pending expiry. */
+#define MUSE_HINT_MS 5000
+void muse_state_set_hint(const char *text);
 /* Copies the caption if it changed since *version; returns true on change. */
 bool muse_state_caption(char *out, size_t out_len, uint32_t *version);
 

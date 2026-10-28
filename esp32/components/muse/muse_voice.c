@@ -507,7 +507,13 @@ static void go_idle(const char *caption)
 {
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
-    muse_state_set_caption("%s", caption);
+    /* Idle notices are hints: they clear themselves after MUSE_HINT_MS
+     * instead of haunting the face (and surviving sleep) forever. */
+    if (caption[0]) {
+        muse_state_set_hint(caption);
+    } else {
+        muse_state_set_caption("%s", caption);
+    }
 }
 
 /* Why a press can't go to Hatch; voice notes only go there. */

@@ -181,9 +181,13 @@ static void toggle_phone_setup(void)
     muse_ble_status_t b;
     muse_ble_status(&b);
     if (on && b.name[0]) {
+        /* The setup name stays up: it is the instruction for pairing. */
         muse_state_set_caption("PHONE SETUP: %s", b.name);
+    } else if (on) {
+        muse_state_set_caption("PHONE SETUP ON");
     } else {
-        muse_state_set_caption("PHONE SETUP %s", on ? "ON" : "OFF");
+        /* OFF is a confirmation, not a state worth keeping on screen. */
+        muse_state_set_hint("PHONE SETUP OFF");
     }
 }
 
