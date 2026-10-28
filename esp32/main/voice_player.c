@@ -151,3 +151,7 @@ void voice_player_stop(void) {
 bool voice_player_started(void) {
     return s_started;
 }
+
+size_t voice_player_queued(void) {
+    return s_buf ? xStreamBufferBytesAvailable(s_buf) / sizeof(int16_t) : 0;
+}

@@ -64,6 +64,37 @@ static void check_luma(void) {
     assert(mid >= 126 && mid <= 134);
 }
 
+static void check_gray4(void) {
+    uint8_t packed[W / 4 * H];
+    memset(gray, 0, sizeof(gray));
+    dither_gray4(gray, packed, W, H, err);
+    for (size_t i = 0; i < sizeof(packed); i++) assert(packed[i] == 0);
+    memset(gray, 255, sizeof(gray));
+    dither_gray4(gray, packed, W, H, err);
+    for (size_t i = 0; i < sizeof(packed); i++) assert(packed[i] == 0xFF);
+    gray[0] = 0;
+    gray[1] = 85;
+    gray[2] = 170;
+    gray[3] = 255;
+    dither_gray4(gray, packed, W, H, err);
+    assert(packed[0] == 0x1B);
+}
+
+static void check_rgb565_be(void) {
+    const uint8_t src[] = {0xF8, 0x00, 0x07, 0xE0, 0x00, 0x1F, 0x84, 0x10};
+    for (int i = 0; i < 4; i++) rgb[i] = rgb565_from_be(src + 2 * i);
+    assert(rgb[0] == 0xF800);
+    assert(rgb[1] == 0x07E0);
+    assert(rgb[2] == 0x001F);
+    assert(rgb[3] == 0x8410);
+    assert(luma565(rgb[3]) >= 126 && luma565(rgb[3]) <= 134);
+    for (int i = 4; i < W * H; i++) rgb[i] = 0xFFFF;
+    dither_color(rgb, codes, W, H, color_err);
+    assert(codes[0] == 0x36);
+    assert(codes[1] >> 4 == 5);
+    assert((codes[1] & 0x0F) <= 1);
+}
+
 static void check_dither(void) {
     // Pure black and white come through exactly, 1 for white, leftmost pixel
     // in the top bit.
@@ -99,6 +130,7 @@ static void check_dither(void) {
 }
 
 static void check_color_dither(void) {
+    assert(nearest_ink(0, 255, 255) == 4);
     // Each ink's own colour comes through exactly, as its controller code.
     const struct { uint16_t px; int code; } inks[] = {
         {0x0000, 0}, {0xFFFF, 1}, {0xFFE0, 2}, {0xF800, 3}, {0x001F, 5}, {0x07E0, 6},
@@ -115,12 +147,16 @@ static void check_color_dither(void) {
     fill_rgb(0xFFFF);
     rgb[0] = 0xF800;
     rgb[1] = 0x001F;
+    rgb[W] = 0xF800;
+    rgb[W + 1] = 0x001F;
     dither_color(rgb, codes, W, H, color_err);
     assert(codes[0] == 0x35);
     assert(codes[1] == 0x11);
+    assert(codes[W / 2] == 0x35);
+    assert(codes[W / 2 + 1] == 0x11);
 
     // Grays stay black and white, as that share of white dots.
-    const uint16_t grays[] = {0x2104, 0x8410, 0xC618};
+    const uint16_t grays[] = {0x2104, 0x8410, 0x8411, 0xC618};
     for (size_t g = 0; g < sizeof(grays) / sizeof(grays[0]); g++) {
         fill_rgb(grays[g]);
         dither_color(rgb, codes, W, H, color_err);
@@ -135,6 +171,14 @@ static void check_color_dither(void) {
         int expect = W * H * luma565(grays[g]) / 255;
         assert(white > expect - W * H / 50 && white < expect + W * H / 50);
     }
+
+    fill_rgb(0x07FF);
+    dither_color(rgb, codes, W, H, color_err);
+    int blue = 0;
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) blue += code_at(x, y) == 5;
+    }
+    assert(blue > W * H / 2);
 
     // Orange mixes red and yellow, and nothing else.
     fill_rgb(0xFC00);
@@ -153,7 +197,9 @@ static void check_color_dither(void) {
 
 int main(void) {
     check_luma();
+    check_rgb565_be();
     check_dither();
+    check_gray4();
     check_color_dither();
     puts("PASS epaper pixels: RGB565 luma, exact black and white, bit order, checkerboard, gray levels as dot density; "
          "exact Spectra 6 inks, nibble order, grays in black and white, orange as red and yellow");

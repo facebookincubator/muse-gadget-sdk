@@ -36,6 +36,9 @@
 #include "muse_text.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 
 static const char *TAG = "muse_menu";
 
@@ -69,6 +72,9 @@ typedef enum {
     ITEM_SLEEP,
     ITEM_PHONE,
     ITEM_WIFI,
+#if CONFIG_MUSE_VIDEO
+    ITEM_CAMERA,
+#endif
     ITEM_INFO,
     ITEM_BATTERY,
     ITEM_RESET,
@@ -86,6 +92,9 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_SLEEP] = "Auto-sleep",
     [ITEM_PHONE] = "Phone setup",
     [ITEM_WIFI] = "Wi-Fi",
+#if CONFIG_MUSE_VIDEO
+    [ITEM_CAMERA] = "Phone camera",
+#endif
     [ITEM_INFO] = "Status",
     [ITEM_BATTERY] = "Battery",
     [ITEM_RESET] = "Reset pairing",
@@ -103,6 +112,9 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_SLEEP] = "Change",
     [ITEM_PHONE] = "Toggle",
     [ITEM_WIFI] = "Toggle",
+#if CONFIG_MUSE_VIDEO
+    [ITEM_CAMERA] = "Open",
+#endif
     [ITEM_INFO] = "Open",
     [ITEM_BATTERY] = "Open",
     [ITEM_RESET] = "Select",
@@ -222,6 +234,11 @@ static void value_text(int item, char *buf, size_t n)
         muse_wifi_status(&w);
         strlcpy(buf, WIFI_VALUES[w.state], n);
         break;
+#if CONFIG_MUSE_VIDEO
+    case ITEM_CAMERA:
+        strlcpy(buf, muse_video_has_client() ? "Ready" : "No phone", n);
+        break;
+#endif
     case ITEM_BATTERY:
         p = muse_state_power();
         if (p.usb || p.battery_pct < 0) {
@@ -411,6 +428,12 @@ static void activate(int item, int direction)
     case ITEM_WIFI:
         muse_settings_set_wifi_on(!muse_settings_wifi_on());
         break;
+#if CONFIG_MUSE_VIDEO
+    case ITEM_CAMERA:
+        muse_menu_close();
+        muse_video_open();
+        return;
+#endif
     case ITEM_INFO:
         show(VIEW_STATUS);
         return;
@@ -458,8 +481,8 @@ static void handle(muse_menu_key_t key)
         break;
     case VIEW_STATUS:
     case VIEW_BATTERY:
-        if (key == MUSE_MENU_BACK || key == MUSE_MENU_LEFT ||
-            key == MUSE_MENU_SELECT || key == MUSE_MENU_DOWN) show(VIEW_LIST);
+        if (key == MUSE_MENU_BACK || key == MUSE_MENU_LEFT || key == MUSE_MENU_SELECT ||
+            key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) show(VIEW_LIST);
         break;
     case VIEW_POWER:
     case VIEW_RESET:
@@ -520,9 +543,10 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     s_row_h = small ? 16 : 36;
     s_visible_rows = (h - title_h - hint_h) / s_row_h;
     /* A button on the right edge (StickS3) gets its hint turned on end in a
-     * strip beside it, clear of the list. */
+     * strip beside it, clear of the list, unless the board can't spare the
+     * RAM to draw it turned. */
     const muse_button_hint_t *talk = &muse_board->talk_hint, *aux = &muse_board->aux_hint;
-    bool aux_side = aux->align == LV_ALIGN_RIGHT_MID;
+    bool aux_side = aux->align == LV_ALIGN_RIGHT_MID && !muse_board->flat_menu_hints;
     int strip = aux_side ? lv_font_get_line_height(font) + 2 : 0;
 
     s_keys = xQueueCreate(8, sizeof(uint8_t));
@@ -587,7 +611,7 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
         lv_obj_align(s_hint_down, LV_ALIGN_CENTER, (w - strip) / 2, aux->y);
     } else {
         s_down_text = muse_board->keyboard ? "Esc Back" : LV_SYMBOL_DOWN " Down";
-        align_on_bar(s_hint_down, aux->align, pad);
+        align_on_bar(s_hint_down, aux->align == LV_ALIGN_RIGHT_MID ? LV_ALIGN_BOTTOM_LEFT : aux->align, pad);
     }
     s_hint_select = label(s_root, font, COLOR_TEXT, "");
     align_on_bar(s_hint_select, talk->align, pad);
