@@ -40,6 +40,14 @@ extern "C" {
 // about three missed 20s keepalive pings.
 #define TUN_KEEPALIVE_TIMEOUT_US (65 * 1000 * 1000)
 
+// A tunnel ping unanswered this long (pongs normally take well under a second)
+// makes the session send a WebSocket ping, whose pong shows the connection is
+// still alive even if the tunnel backend is gone.
+#define TUN_PING_PROBE_US (5 * 1000 * 1000)
+// Only a ping unanswered at least this long can prove the connection dead,
+// leaving the WebSocket ping sent at TUN_PING_PROBE_US 10s for its pong.
+#define TUN_PING_ANSWER_US (15 * 1000 * 1000)
+
 // Emit-side callbacks the session owner provides to the tunnel. All run on
 // the session task, so they may touch the ClientSession directly.
 typedef struct {
@@ -134,14 +142,19 @@ int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit);
 // backend behind raw.sock has gone away. No-op if the tunnel is down.
 void noise_tunnel_tick(const noise_tunnel_emit_t *emit);
 
-// True once after noise_tunnel_tick() marked the tunnel down because keepalive
-// pings went out and nothing came back. False when the pings were DMA-gated,
-// since an unsent ping proves nothing. Lets the session owner tell a dead
-// backend (reopen the tunnel) from a dead connection (reconnect).
-bool noise_tunnel_take_unanswered_timeout(void);
+// Send time of the oldest keepalive ping with no inbound tunnel frame since, or
+// 0 if none is outstanding. Session task.
+uint64_t noise_tunnel_unanswered_ping_us(void);
+
+// Once after noise_tunnel_tick() marked the tunnel down: the send time of the
+// oldest unanswered ping, if it had TUN_PING_ANSWER_US to be answered, else 0
+// (pings DMA-gated, or one sent just before the timeout). If nothing at all
+// has arrived on the connection since then, the connection is dead (reconnect)
+// rather than only the tunnel backend (reopen the tunnel). Session task.
+uint64_t noise_tunnel_take_unanswered_timeout(void);
 
 // Seconds since the last inbound tunnel frame (pong or data), counting a
-// stream open as one. UINT32_MAX if the tunnel has never opened. Session task.
+// stream open as one. UINT32_MAX if the tunnel has never opened. Any task.
 uint32_t noise_tunnel_rx_idle_s(void);
 
 #ifdef __cplusplus

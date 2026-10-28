@@ -51,6 +51,7 @@ cJSON *cJSON_CreateNumber(double number);
 cJSON *cJSON_CreateArray(void);
 cJSON *cJSON_CreateString(const char *string);
 int cJSON_AddItemToArray(cJSON *array, cJSON *item);
+void cJSON_DeleteItemFromArray(cJSON *array, int which);
 cJSON *cJSON_AddItemToObject(cJSON *object, const char *name, cJSON *item);
 cJSON *cJSON_AddStringToObject(cJSON *object, const char *name, const char *string);
 cJSON *cJSON_AddBoolToObject(cJSON *object, const char *name, int boolean);

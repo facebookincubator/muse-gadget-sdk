@@ -202,6 +202,22 @@ static char *encode_log_tail(const diagnostic_log_snapshot_t *logs) {
     return encoded;
 }
 
+// Drops the oldest device_health connectivity events until about `excess`
+// bytes of serialized report are gone. False if there was nothing to drop.
+static bool drop_oldest_events(cJSON *root, size_t excess) {
+    cJSON *health = cJSON_GetObjectItem(root, "device_health");
+    cJSON *events = cJSON_GetObjectItem(health, "connectivity_events");
+    size_t dropped = 0;
+    while (dropped < excess && cJSON_IsArray(events)) {
+        cJSON *oldest = events->child;
+        if (!oldest) break;
+        // The string, its quotes and a comma.
+        dropped += (cJSON_IsString(oldest) ? strlen(oldest->valuestring) : 0) + 3;
+        cJSON_DeleteItemFromArray(events, 0);
+    }
+    return dropped > 0;
+}
+
 static char *build_report_json(const bug_report_snapshot_t *snapshot,
                                const char *source_request_id,
                                const diagnostic_log_snapshot_t *logs,
@@ -288,12 +304,23 @@ static char *build_report_json(const bug_report_snapshot_t *snapshot,
         free(encoded_logs);
     }
 
-    char *report = ok ? cJSON_PrintUnformatted(root) : NULL;
+    // Over the cap, keep the newest connectivity events that fit rather than
+    // lose the whole report.
+    char *report = NULL;
+    size_t report_len = 0;
+    while (ok) {
+        report = cJSON_PrintUnformatted(root);
+        if (!report) break;
+        report_len = strlen(report);
+        if (report_len <= BUG_REPORT_MAX_BYTES) break;
+        secure_zero(report, report_len);
+        cJSON_free(report);
+        report = NULL;
+        if (!drop_oldest_events(root, report_len - BUG_REPORT_MAX_BYTES)) break;
+    }
     cJSON_Delete(root);
     if (!report) return NULL;
-    size_t report_len = strlen(report);
-    if (report_len == 0 || report_len > BUG_REPORT_MAX_BYTES) {
-        secure_zero(report, report_len);
+    if (report_len == 0) {
         cJSON_free(report);
         return NULL;
     }

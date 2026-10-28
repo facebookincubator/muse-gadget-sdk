@@ -357,6 +357,18 @@ int cJSON_AddItemToArray(cJSON *array, cJSON *item) {
     return 1;
 }
 
+void cJSON_DeleteItemFromArray(cJSON *array, int which) {
+    if (!cJSON_IsArray(array) || which < 0) return;
+    cJSON *item = array->child;
+    while (item && which-- > 0) item = item->next;
+    if (!item) return;
+    if (item->prev) item->prev->next = item->next;
+    else array->child = item->next;
+    if (item->next) item->next->prev = item->prev;
+    item->next = item->prev = NULL;
+    cJSON_Delete(item);
+}
+
 cJSON *cJSON_AddItemToObject(cJSON *object, const char *name, cJSON *item) {
     if (!cJSON_IsObject(object) || !name || !item || item->string) return NULL;
     item->string = xstrdup(name);

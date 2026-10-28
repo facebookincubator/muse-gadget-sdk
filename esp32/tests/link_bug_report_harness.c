@@ -206,7 +206,8 @@ void noise_ctrl_send_command_result(
 }
 
 // Mirrors the device.health shape. The full variant holds a worst-case
-// connectivity history: 128 lines at the longest detail and largest counters.
+// connectivity history: 128 lines at the longest detail and largest counters,
+// numbered e000 (oldest) to e127.
 cJSON *noise_ctrl_device_health_json(bool for_bug_report) {
     if (g_health_fails) return NULL;
     cJSON *health = cJSON_CreateObject();
@@ -217,14 +218,14 @@ cJSON *noise_ctrl_device_health_json(bool for_bug_report) {
     CHECK(events != NULL, "events allocation failed");
     cJSON_AddItemToObject(health, "connectivity_events", events);
     if (g_health_full) {
-        char detail[112];
+        char detail[107];
         memset(detail, 'd', sizeof(detail) - 1);
         detail[sizeof(detail) - 1] = '\0';
         for (int i = 0; i < 128; i++) {
             char line[256];
             snprintf(line, sizeof(line),
-                     "4294967295s ago tunnel_tx_blocked: %s "
-                     "(dma_free=4294967295 dma_largest=4294967295)", detail);
+                     "4294967295s ago tunnel_tx_blocked: e%03d %s "
+                     "(dma_free=4294967295 dma_largest=4294967295)", i, detail);
             cJSON_AddItemToArray(events, cJSON_CreateString(line));
         }
     } else {
@@ -408,8 +409,14 @@ static void test_logs_degrade_safely_and_maximum_stays_bounded(void) {
               && strstr(report_json(), "\"dropped_lines\":2")
               && strstr(report_json(), "\"truncated_lines\":1"),
           "log-loss counters were not serialized");
-    CHECK(strstr(report_json(), "\"device_health\":{"),
-          "full connectivity history was dropped");
+    // Over the cap: the oldest events go, the newest and the logs stay.
+    CHECK(strstr(report_json(), "\"device_health\":{")
+              && strstr(report_json(), "e127 ")
+              && !strstr(report_json(), "e000 "),
+          "oversized report should keep only the newest events");
+    CHECK(strstr(report_json(), "\"tail_base64\":\"eHh4")
+              && strlen(report_json()) > 4 * (DIAGNOSTIC_LOG_CAPACITY_BYTES / 3),
+          "oversized report should keep the full log tail");
     free(large_events);
 }
 

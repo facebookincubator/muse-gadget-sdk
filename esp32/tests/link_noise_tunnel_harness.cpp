@@ -284,7 +284,13 @@ static uint64_t last_activity_us;
 // by default every turn sees fresh RX; rx_silent_since_us opts a case into it.
 static bool rx_silent;
 static uint64_t rx_silent_since_us, last_ws_ping_us;
-static bool ws_send_ping(esp_tls_t *) { ++ws_pings; return true; }
+// A live connection: the peer answers a WebSocket ping at once.
+static bool ws_pong;
+static bool ws_send_ping(esp_tls_t *) {
+    ++ws_pings;
+    if (ws_pong) rx_silent_since_us = now_us;
+    return true;
+}
 static void vTaskDelay(int ticks) { assert(ticks == 1); ++delays; }
 static uint64_t last_busy_us;
 static void idle_wait(esp_tls_t *, uint64_t) { vTaskDelay(1); }   // traffic still recent
@@ -346,7 +352,7 @@ static void reset_control() {
     heartbeat_sent = false;
     last_heartbeat_us = 0;
     last_activity_us = now_us;
-    rx_silent = false;
+    rx_silent = ws_pong = false;
     last_ws_ping_us = 0;
 }
 static std::string payload(size_t len) {
@@ -756,8 +762,67 @@ static void test_dead_connection() {
     assert(control_tx_turn());
     assert(strcmp(last_end_reason, "no response from VM (tunnel keepalive)") == 0);
     assert(last_went_silent);
-    assert(logs.back() == "tunnel keepalive unanswered and control silent; reconnecting");
+    assert(logs.back() == "tunnel keepalive unanswered and nothing received since; reconnecting");
     assert(stream_ops == "O");  // no reopen on the dead connection
+
+    // Control heard from after the tunnel's last frame still counts as a dead
+    // connection when nothing has arrived since the first unanswered ping. A
+    // WebSocket ping probes it 5s after that tunnel ping.
+    reset_control();
+    start = now_us;
+    while (now_us - start < 10000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US - 1000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(pings == 3 && ws_pings == 1 && noise_tunnel_is_connected());
+    now_us = start + TUN_KEEPALIVE_TIMEOUT_US;
+    assert(control_tx_turn());
+    assert(strcmp(last_end_reason, "no response from VM (tunnel keepalive)") == 0);
+    assert(stream_ops == "O");
+
+    // Same, but the connection is alive and only the tunnel backend is gone:
+    // the pong to that WebSocket ping keeps the session and the tunnel reopens.
+    reset_control();
+    start = now_us;
+    while (now_us - start < 10000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    rx_silent = ws_pong = true;
+    rx_silent_since_us = now_us;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(ws_pings == 1 && !noise_tunnel_is_connected());
+    now_us += 1000000;
+    assert(!control_tx_turn());
+    assert(noise_tunnel_is_connected() && stream_ops == "ORO");
+
+    // Only one ping got past the DMA gate, just before the timeout: too recent
+    // to be unanswered, so reopen the tunnel rather than reconnect.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    start = now_us;
+    dma_free = 0;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US - 5000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(pings == 0);
+    dma_free = 64 * 1024;
+    now_us += 1000000;
+    assert(!control_tx_turn() && pings == 1);
+    now_us = start + TUN_KEEPALIVE_TIMEOUT_US;
+    assert(!control_tx_turn());
+    assert(!noise_tunnel_is_connected() && !noise_tunnel_take_unanswered_timeout());
 
     // Control still receiving: only the tunnel backend is gone. Keep the
     // session and reopen the tunnel, as before.
@@ -792,19 +857,21 @@ static void test_dead_connection() {
 static void test_rx_idle() {
     // A half-open connection accepts every write, so only silence reveals it:
     // ping after 60s idle, reconnect once nothing has come back for 150s.
+    // Control only: with the tunnel open, unanswered tunnel pings end a silent
+    // session sooner (test_dead_connection).
     reset_control();
     rx_silent = true;
     rx_silent_since_us = now_us;
     now_us += 59999999;
-    assert(!control_tx_turn() && ws_pings == 0);
+    assert(!control_tx_turn(false) && ws_pings == 0);
     now_us += 1;
-    assert(!control_tx_turn() && ws_pings == 1);
+    assert(!control_tx_turn(false) && ws_pings == 1);
     now_us += 60000000;
-    assert(!control_tx_turn() && ws_pings == 2);
+    assert(!control_tx_turn(false) && ws_pings == 2);
     now_us = rx_silent_since_us + 149999999;
-    assert(!control_tx_turn());
+    assert(!control_tx_turn(false));
     now_us += 1;
-    assert(control_tx_turn());
+    assert(control_tx_turn(false));
     assert(strcmp(last_end_reason, "no response from VM") == 0);
     assert(last_went_silent);
     assert(logs.back() == "nothing received for 150s; reconnecting");
@@ -816,19 +883,19 @@ static void test_rx_idle() {
     rx_silent_since_us = now_us;
     now_us += 60000000;
     last_activity_us = now_us;
-    assert(!control_tx_turn() && ws_pings == 1);
+    assert(!control_tx_turn(false) && ws_pings == 1);
     now_us += 30000000;
     last_activity_us = now_us;
-    assert(!control_tx_turn() && ws_pings == 1);
+    assert(!control_tx_turn(false) && ws_pings == 1);
     now_us += 30000000;
     last_activity_us = now_us;
-    assert(!control_tx_turn() && ws_pings == 2);
+    assert(!control_tx_turn(false) && ws_pings == 2);
 
     // Inbound traffic keeps an idle session alive indefinitely.
     reset_control();
     for (int i = 0; i < 20; ++i) {
         now_us += 60000000;
-        assert(!control_tx_turn());
+        assert(!control_tx_turn(false));
     }
     assert(ws_pings == 20);
 }

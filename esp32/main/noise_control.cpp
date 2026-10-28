@@ -2571,13 +2571,14 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // internally, so it's safe to call every loop iteration.
         if (tunnel_opened) {
             noise_tunnel_tick(&tun_emit);
-            // If control has been silent for the same window as the unanswered
-            // tunnel pings, the connection itself is dead (typically a WAN drop
-            // leaving TCP half-open). Reopening the tunnel on it can't work, so
-            // reconnect now instead of waiting out RX_IDLE_TIMEOUT_MS.
-            if (noise_tunnel_take_unanswered_timeout()
-                && esp_timer_get_time() - last_rx_us >= TUN_KEEPALIVE_TIMEOUT_US) {
-                ESP_LOGW(TAG, "tunnel keepalive unanswered and control silent; reconnecting");
+            // If nothing at all has arrived since the oldest unanswered tunnel
+            // ping, not even the pong to the WebSocket ping sent after it, the
+            // connection itself is dead (typically a WAN drop leaving TCP
+            // half-open). Reopening the tunnel on it can't work, so reconnect
+            // now instead of waiting out RX_IDLE_TIMEOUT_MS.
+            const uint64_t unanswered_ping_us = noise_tunnel_take_unanswered_timeout();
+            if (unanswered_ping_us && last_rx_us < unanswered_ping_us) {
+                ESP_LOGW(TAG, "tunnel keepalive unanswered and nothing received since; reconnecting");
                 end_reason = "no response from VM (tunnel keepalive)";
                 went_silent = true;
                 error = true;
@@ -2615,7 +2616,13 @@ static session_result_t run_session(stack_monitor_t *stack) {
             }
             bool tx_idle = !did && now_us - last_activity_us >= interval_us;
             bool rx_idle = rx_idle_us >= interval_us && now_us - last_ws_ping_us >= interval_us;
-            if (tx_idle || rx_idle) {
+            // A tunnel ping unanswered with nothing received since: ping once
+            // more, so a live connection answers before the tunnel keepalive
+            // timeout above decides between a tunnel reopen and a reconnect.
+            const uint64_t tun_ping_us = tunnel_opened ? noise_tunnel_unanswered_ping_us() : 0;
+            bool tun_probe = tun_ping_us && now_us - tun_ping_us >= TUN_PING_PROBE_US
+                             && last_rx_us < tun_ping_us && last_ws_ping_us < tun_ping_us;
+            if (tx_idle || rx_idle || tun_probe) {
                 if (!ws_send_ping(tls)) {
                     ESP_LOGW(TAG, "keepalive ping failed");
                     end_reason = "WebSocket ping failed";

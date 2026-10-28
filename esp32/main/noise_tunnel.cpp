@@ -141,9 +141,23 @@ static bool s_needs_reset = false;
 // emit a ping.
 static uint64_t s_last_rx_us = 0;
 static uint64_t s_last_ping_us = 0;
-// Set by a keepalive timeout whose pings went out but got no answer; consumed
-// by noise_tunnel_take_unanswered_timeout(). Session-task-owned.
-static bool s_unanswered_timeout = false;
+// s_last_rx_us in whole seconds for readers on other tasks (bug.report): a
+// 64-bit read can tear on the 32-bit C5. UINT32_MAX until the first open.
+static std::atomic<uint32_t> s_last_rx_s{UINT32_MAX};
+// Send time of the oldest ping with no inbound frame since; 0 when none is
+// outstanding. Session-task-owned.
+static uint64_t s_unanswered_ping_us = 0;
+// Set by a keepalive timeout to s_unanswered_ping_us if that ping had
+// TUN_PING_ANSWER_US to be answered, else 0; consumed by
+// noise_tunnel_take_unanswered_timeout(). Session-task-owned.
+static uint64_t s_timeout_ping_us = 0;
+
+// An inbound tunnel frame, or a stream open, which counts as one.
+static void note_tunnel_rx(uint64_t now) {
+    s_last_rx_us = now;
+    s_last_rx_s.store((uint32_t)(now / 1000000), std::memory_order_relaxed);
+    s_unanswered_ping_us = 0;
+}
 
 // Start of the current outbound stall (batches queued, DMA-gated, none sent).
 // Session-task-owned, cleared by any send, an empty queue or a stream open.
@@ -331,7 +345,7 @@ static bool try_open_stream(const noise_tunnel_emit_t *emit) {
     s_connected.store(true, std::memory_order_release);
     // Arm keepalive liveness from the open: treat the successful open as the
     // first "rx" so we don't immediately time out or ping before any traffic.
-    s_last_rx_us = now;
+    note_tunnel_rx(now);
     s_last_ping_us = now;
     ESP_LOGI(TAG, "tunnel stream open (stream %d)", TUNNEL_STREAM_ID);
     return true;
@@ -379,19 +393,25 @@ extern "C" bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit) {
 }
 
 extern "C" uint32_t noise_tunnel_rx_idle_s(void) {
-    if (!s_last_rx_us) return UINT32_MAX;
-    return (uint32_t)((esp_timer_get_time() - s_last_rx_us) / 1000000);
+    uint32_t last_rx_s = s_last_rx_s.load(std::memory_order_relaxed);
+    if (last_rx_s == UINT32_MAX) return UINT32_MAX;
+    return (uint32_t)(esp_timer_get_time() / 1000000) - last_rx_s;
 }
 
-extern "C" bool noise_tunnel_take_unanswered_timeout(void) {
-    bool fired = s_unanswered_timeout;
-    s_unanswered_timeout = false;
-    return fired;
+extern "C" uint64_t noise_tunnel_unanswered_ping_us(void) {
+    return s_unanswered_ping_us;
+}
+
+extern "C" uint64_t noise_tunnel_take_unanswered_timeout(void) {
+    uint64_t ping_us = s_timeout_ping_us;
+    s_timeout_ping_us = 0;
+    return ping_us;
 }
 
 extern "C" void noise_tunnel_on_session_down(void) {
     s_connected.store(false, std::memory_order_relaxed);
-    s_unanswered_timeout = false;
+    s_unanswered_ping_us = 0;
+    s_timeout_ping_us = 0;
     end_tx_stall(esp_timer_get_time(), "session ended");
     s_reopen_gated_since_us = 0;
     note_tunnel_down(nullptr);
@@ -405,7 +425,7 @@ extern "C" void noise_tunnel_on_server_drop(const char *why) {
 extern "C" void noise_tunnel_on_inbound(const uint8_t *data, size_t len) {
     // Any inbound tunnel frame — a real packet batch OR a keepalive pong —
     // proves the VM backend is alive, so refresh liveness first.
-    s_last_rx_us = esp_timer_get_time();
+    note_tunnel_rx(esp_timer_get_time());
     if (!s_rx_since_open) {
         s_rx_since_open = true;
         note_tunnel_up(s_last_rx_us);
@@ -500,8 +520,13 @@ extern "C" void noise_tunnel_tick(const noise_tunnel_emit_t *emit) {
                  (unsigned long long)((now - s_last_rx_us) / 1000000));
         s_needs_reset = true;
         s_connected.store(false, std::memory_order_relaxed);
-        // A last ping long ago means pings were DMA-gated, not unanswered.
-        s_unanswered_timeout = now - s_last_ping_us < TUN_KEEPALIVE_INTERVAL_US;
+        // No ping outstanding means they were DMA-gated, and one sent just
+        // before the timeout hasn't had time for a reply: neither proves the
+        // connection dead.
+        s_timeout_ping_us = s_unanswered_ping_us
+                            && now - s_unanswered_ping_us >= TUN_PING_ANSWER_US
+                            ? s_unanswered_ping_us : 0;
+        s_unanswered_ping_us = 0;
         char why[48];
         snprintf(why, sizeof(why), "keepalive timeout, last ping %us ago",
                  (unsigned)((now - s_last_ping_us) / 1000000));
@@ -522,6 +547,7 @@ extern "C" void noise_tunnel_tick(const noise_tunnel_emit_t *emit) {
         if (!noise_tx_has_dma_headroom(nullptr)
             || !noise_tx_has_contiguous_dma_headroom()) return;
         s_last_ping_us = now;
+        if (!s_unanswered_ping_us) s_unanswered_ping_us = now;
         const uint8_t ping = TUN_KEEPALIVE_SENTINEL;
         if (!emit->send_body(emit->ctx, &ping, 1)) {
             // A failed send is a live signal the stream is broken; drop now

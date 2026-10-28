@@ -70,6 +70,9 @@ class LinkBugReportHarnessTest(unittest.TestCase):
             "s_connected.store(false, std::memory_order_relaxed)", source
         )
         self.assertNotIn("volatile bool s_connected", source)
+        # rx_idle_seconds reads a 32-bit copy: 64-bit reads tear on the C5.
+        self.assertIn("static std::atomic<uint32_t> s_last_rx_s{UINT32_MAX};", source)
+        self.assertIn("s_last_rx_s.load(", source)
 
     def test_bug_report_harness_and_opaque_json_contract(self) -> None:
         cc = _cc_command()
@@ -141,7 +144,7 @@ class LinkBugReportHarnessTest(unittest.TestCase):
 
             self.assertNotIn("BUG_REPORT_SIGNATURE", source)
             self.assertNotIn("BUG_REPORT_ENVELOPE", source + header)
-            self.assertLessEqual(len(report_json.encode()), 64 * 1024)
+            self.assertLessEqual(len(report_json.encode()), 32 * 1024)
             self.assertEqual(
                 set(report),
                 {
