@@ -215,7 +215,10 @@ class LinkNoiseTunnelTest(unittest.TestCase):
         cfg = values(ROOT / "sdkconfig.defaults")
         cfg.update(values(ROOT / "sdkconfig.defaults.esp32c5"))
         cfg["CONFIG_IDF_TARGET_ESP32C5"] = "y"
-        self.assertEqual(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"], "65535")
+        self.assertEqual(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"], "98304")
+        # Over 64 KiB needs window scaling, which needs PSRAM required at boot.
+        self.assertEqual(cfg["CONFIG_LWIP_WND_SCALE"], "y")
+        self.assertEqual(cfg["CONFIG_SPIRAM_IGNORE_NOTFOUND"], "n")
         self.assertIn(int(cfg["CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS"]), range(1, 13))
         # The block-ack window may be at most twice the static RX buffers.
         self.assertLessEqual(int(cfg["CONFIG_ESP_WIFI_RX_BA_WIN"]),
