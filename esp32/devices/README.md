@@ -642,6 +642,13 @@ board's overlays, in order:
 | VN ESP32-S3 1.83-inch NV3023 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-vn-s3-183`](sdkconfig.muse-vn-s3-183) | `tools/muse/board.sh build vn183` |
 | FoloToy AI Passport | `esp32c3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-ai-passport`](sdkconfig.muse-ai-passport) | `tools/muse/board.sh build ai-passport` |
 
+Boards with PSRAM can also run an optional Matter forwarder, through which
+`chip-tool-remote` in Muse's VM controls Matter devices. It loads
+[`devices/sdkconfig.chip-tool-forwarder`](sdkconfig.chip-tool-forwarder) after the
+board's overlays: see
+[Matter devices through chip-tool-remote](../AGENTS.md#matter-devices-through-chip-tool-remote)
+in `esp32/AGENTS.md`.
+
 `tools/board.sh BOARD [build|flash|monitor|flash-monitor] [PORT]` builds each
 board in its own `build-<board>` directory. For the boards with the full UI, run `idf.py`
 with the target and overlays from the table:

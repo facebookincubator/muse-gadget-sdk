@@ -123,6 +123,10 @@ jobs:
           - board: c6-nopsram
             target: esp32c6
             overlays: ";devices/sdkconfig.c6-nopsram"
+          # With the optional Matter forwarder (PSRAM boards), so that CI builds it too.
+          - board: devkit-chip-tool-forwarder
+            target: esp32c5
+            overlays: ";devices/sdkconfig.chip-tool-forwarder"
           - board: waveshare-c6-lcd-147
             target: esp32c6
             overlays: ";devices/sdkconfig.waveshare-c6-lcd-147"

@@ -517,6 +517,33 @@ menu "ESP32 Device SDK"
             tenths of a degree Celsius. The E100x sensor reads warm from board
             heat; -33 (-3.3 C, about -6 F) is a starting point for those boards.
 
+    config HOMEHUB_CHIP_TOOL_FORWARDER
+        bool "Matter devices through chip-tool-remote in Muse's VM"
+        default n
+        help
+            Run a Matter forwarder on the device, through which chip-tool-remote in
+            Muse's VM controls the home's Matter devices (Wi-Fi, and Thread
+            through the home's border router) over the home-network tunnel. The
+            forwarder is the chip-tool-remote-forwarder component, fetched only when
+            this is on. Load devices/sdkconfig.chip-tool-forwarder; see "Matter
+            devices through chip-tool-remote" in esp32/AGENTS.md.
+
+    choice HOMEHUB_CHIP_TOOL_FORWARDER_LISTEN
+        prompt "chip-tool-remote connects from"
+        depends on HOMEHUB_CHIP_TOOL_FORWARDER
+        default HOMEHUB_CHIP_TOOL_FORWARDER_LISTEN_TUNNEL
+        help
+            Where chip-tool-remote connects from: the home-network tunnel (how Muse
+            reaches the forwarder; the port isn't open on the home network), or
+            the local network, for development only (the port is then open to
+            the home network, and each client still needs the forwarder's secret).
+
+        config HOMEHUB_CHIP_TOOL_FORWARDER_LISTEN_TUNNEL
+            bool "The home-network tunnel"
+        config HOMEHUB_CHIP_TOOL_FORWARDER_LISTEN_LAN
+            bool "The local network (development)"
+    endchoice
+
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
