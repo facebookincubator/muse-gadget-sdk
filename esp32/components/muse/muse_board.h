@@ -23,7 +23,15 @@
 #include "driver/gpio.h"
 #include "esp_codec_dev.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
+#if CONFIG_MUSE_UI_FREEINK
+/* FreeInk boards build without LVGL; its types stay opaque here. */
+typedef struct _lv_display_t lv_display_t;
+typedef struct _lv_indev_t lv_indev_t;
+typedef uint8_t lv_align_t;
+#else
 #include "lvgl.h"
+#endif
 
 #include "muse_state.h"
 
@@ -105,6 +113,19 @@ typedef struct {
      * so the chip can light-sleep. Buttons still wake it. NULL: LVGL keeps
      * running. */
     void (*display_pause)(bool pause);
+    /* FreeInk boards (CONFIG_MUSE_UI_FREEINK): the touch point while a
+     * finger is down, in screen coordinates (width x height, as above).
+     * FreeInk drives the panel, so these boards leave display_start and the
+     * display hooks above NULL. */
+    bool (*touch_read)(int16_t *x, int16_t *y);
+    /*
+     * Video (CONFIG_MUSE_VIDEO): draws a rectangle (end exclusive) straight
+     * to the panel, bypassing LVGL, in pieces of `rows` rows that
+     * fill(dst, stride, row, rows, arg) writes in the panel's byte order
+     * (dst 16-byte aligned). Returns once it's all gone. NULL: no video.
+     */
+    void (*draw_frame)(int x1, int y1, int x2, int y2, int rows,
+                       void (*fill)(uint8_t *dst, int stride, int row, int rows, void *arg), void *arg);
 
     /* Codec handles for one duplex, 2-slot I2S bus, not yet opened. */
     esp_err_t (*audio_init)(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic);

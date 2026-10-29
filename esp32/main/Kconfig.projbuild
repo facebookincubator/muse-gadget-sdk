@@ -305,6 +305,19 @@ menu "ESP32 Device SDK"
         depends on HOMEHUB_PIPELINE_BENCH
         default "MuseGadget-A7F5B4"
 
+    config HOMEHUB_DAEMON_REQUESTS
+        bool "Requests to Muse's VM from your own code"
+        default y
+        help
+            Lets firmware code open its own HTTP requests to the VM's
+            daemon on Link's Noise session (noise_ctrl_req_open() and
+            friends in main/noise_control.h): reading the chat history,
+            or reading and writing files on the user's VM, say. Each
+            request gets a stream of its own; a refused or reset one
+            doesn't touch Link's control stream. Muse's own boards, and
+            boards with display.draw_file, always have it. Costs a few KB
+            of flash and a small queue in RAM.
+
     config HOMEHUB_DEV_BUILD
         bool "Dev build (dev signing key + dev-only affordances)"
         default y
@@ -508,9 +521,11 @@ menu "ESP32 Device SDK"
         bool
         default y if HOMEHUB_DISPLAY
         default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM
+        select HOMEHUB_DAEMON_REQUESTS   # display.draw_file reads from the VM
         help
-            Set when display.draw_url can draw a downloaded image: the
-            display backends, and boards with the full UI and PSRAM for the image.
+            Set when display.draw_url and display.draw_file can draw an
+            image: the display backends, and boards with the full UI and PSRAM
+            for the image.
 
     config HOMEHUB_PRE_DVT_GPIO
         bool "Use pre-DVT GPIO assignments"

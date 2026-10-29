@@ -40,6 +40,8 @@ static const char *TAG = "lcd_bands";
 
 static lv_display_t *s_disp;
 static esp_lcd_panel_handle_t s_panel;
+static esp_lcd_panel_io_handle_t s_io;
+static int s_gap_x, s_gap_y;
 static QueueHandle_t s_bands;            /* room for LVGL's band and a call */
 static SemaphoreHandle_t s_call_lock;
 static SemaphoreHandle_t s_call_done;
@@ -62,7 +64,7 @@ typedef struct {
     uint32_t n, held, torn;
     int64_t sum_us;
 } te_stats_t;
-static te_stats_t s_te_ui = { .what = "UI band" };
+static te_stats_t s_te_ui = { .what = "UI band" }, s_te_video = { .what = "video frame" };
 static int s_rows;                       /* the panel's */
 /* A band's write, learned from the ones before: about s_fixed_us + bytes *
  * s_ns_per_kb / 1024000 (a smoothed least-squares line over the size). */
@@ -94,7 +96,35 @@ static bool IRAM_ATTR on_chunk_sent(esp_lcd_panel_io_handle_t io, esp_lcd_panel_
         s_band_end = esp_timer_get_time();
     }
     bool yield = last && esp_lv_adapter_display_notify_color_trans_done_from_isr(s_disp);
+    /* esp_lcd's SPI IO ignores this callback's return value, so the send
+     * task, woken here, would wait for the next tick (up to 1 ms a piece,
+     * 58 pieces a frame): ask for the switch at the interrupt's exit. */
+    if (yield || woken == pdTRUE) {
+        portYIELD_FROM_ISR();
+    }
     return yield || woken == pdTRUE;
+}
+
+/*
+ * Waits until no piece is on the wire, holding `held` of the two buffers.
+ *
+ * Every call into the panel IO acquires the SPI bus lock. If that happens
+ * while a queued piece is still going out, the driver hands the lock over
+ * from its interrupt when the piece is done; once in tens of thousands of
+ * frames that hand-over is lost (ESP-IDF 6.0.1 spi_bus_lock: the device's
+ * lock bit set, no acquiring device, the bus idle, the waiter never woken),
+ * and the send task, the video and the UI hang for good. Acquiring only
+ * with nothing in flight never takes that path. It costs the gap between
+ * pieces (the next one is filled while the last is on the wire either way).
+ */
+static void wire_idle(int held)
+{
+    for (int i = held; i < 2; i++) {
+        xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+    }
+    for (int i = held; i < 2; i++) {
+        xSemaphoreGive(s_chunk_free);
+    }
 }
 
 static esp_err_t queue_band(lv_display_t *disp, esp_lcd_panel_handle_t panel, int x1, int y1, int x2, int y2,
@@ -240,6 +270,7 @@ static void send_bands(void *arg)
     for (;;) {
         xQueueReceive(s_bands, &b, portMAX_DELAY);
         if (!b.data) {
+            wire_idle(0);
             s_call(s_call_arg);
             xSemaphoreGive(s_call_done);
             continue;
@@ -254,6 +285,7 @@ static void send_bands(void *arg)
             int h = b.y2 - y < rows ? b.y2 - y : rows;
             xSemaphoreTake(s_chunk_free, portMAX_DELAY);
             memcpy(s_chunk[k], b.data + (size_t)(y - b.y1) * row, h * row);
+            wire_idle(1);
             esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, b.x1, y, b.x2, y + h, s_chunk[k]);
             if (err != ESP_OK) {
                 xSemaphoreGive(s_chunk_free);
@@ -269,6 +301,7 @@ static void send_bands(void *arg)
 lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int lines, size_t chunk_bytes)
 {
     s_panel = cfg.panel;
+    s_io = cfg.panel_io;
     s_chunk_bytes = chunk_bytes;
     if (xTaskGetCoreID(xTaskGetCurrentTaskHandle()) != MUSE_UI_CORE) {
         ESP_LOGE(TAG, "not pinned to core %d: the panel's SPI interrupt can strand the send task", MUSE_UI_CORE);
@@ -277,8 +310,9 @@ lv_display_t *muse_lcd_bands_register(esp_lv_adapter_display_config_t cfg, int l
     s_call_lock = xSemaphoreCreateMutex();
     s_call_done = xSemaphoreCreateBinary();
     s_chunk_free = xSemaphoreCreateCounting(2, 2);
-    s_chunk[0] = heap_caps_malloc(chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    s_chunk[1] = heap_caps_malloc(chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    /* 16-byte aligned: video fills them with the S3's SIMD stores (muse_lcd_bands_frame). */
+    s_chunk[0] = heap_caps_aligned_alloc(16, chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    s_chunk[1] = heap_caps_aligned_alloc(16, chunk_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!s_bands || !s_call_lock || !s_call_done || !s_chunk_free || !s_chunk[0] || !s_chunk[1] ||
         xTaskCreatePinnedToCore(send_bands, "lcd_send", 2560, NULL, MUSE_UI_PRIORITY + 1, NULL, MUSE_UI_CORE) != pdPASS) {
         return NULL;
@@ -314,6 +348,83 @@ void muse_lcd_bands_run(void (*fn)(void *arg), void *arg)
     xQueueSend(s_bands, &call, portMAX_DELAY);
     xSemaphoreTake(s_call_done, portMAX_DELAY);
     xSemaphoreGive(s_call_lock);
+}
+
+typedef struct {
+    int x1, y1, x2, y2, rows;
+    muse_lcd_fill_fn fill;
+    void *arg;
+} frame_job_t;
+
+/* On the send task: each piece is filled straight into a free DMA buffer
+ * while the one before is on the wire. */
+void muse_lcd_bands_set_gap(int x, int y)
+{
+    s_gap_x = x;
+    s_gap_y = y;
+}
+
+/* QSPI framing of the CO5300 family (and most QSPI AMOLED controllers):
+ * opcode 0x02 for a command, 0x32 for pixels on four lines. */
+#define QSPI_CMD(c) ((0x02 << 24) | ((c) << 8))
+#define QSPI_PIXELS(c) ((0x32 << 24) | ((c) << 8))
+
+/*
+ * On the send task: one window for the whole frame, then the pieces as
+ * Memory Write and Memory Write Continue (2Ch, 3Ch), each filled straight
+ * into a free DMA buffer while the one before is on the wire. Setting the
+ * window per piece (as esp_lcd_panel_draw_bitmap does) costs two polled
+ * commands that wait for the bus each time: about a third of the frame.
+ */
+static void send_frame(void *arg)
+{
+    const frame_job_t *j = arg;
+    /* Let LVGL's last band finish first, so its count of pieces in flight
+     * (chunk_done) never sees ours. */
+    xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+    xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+    xSemaphoreGive(s_chunk_free);
+    xSemaphoreGive(s_chunk_free);
+    /* A whole frame is slower to write than the panel scans (26 ms on the
+     * 1.75C): it stays clear started within a few ms of a scan's start. */
+    static int64_t avg;
+    if (s_te_on && avg) {
+        te_hold(&s_te_video, j->y1, j->y2, avg, 3);   /* steady: the same size each time */
+    }
+    int64_t fall = 0, p = 0, scan = 0;
+    bool timed = te_now(&fall, &p, &scan);
+    int64_t t_start = esp_timer_get_time();
+    size_t row = (size_t)(j->x2 - j->x1) * 2;
+    int rows = j->rows;
+    if ((size_t)rows * row > s_chunk_bytes) {
+        rows = (int)(s_chunk_bytes / row) & ~1;
+    }
+    int x1 = j->x1 + s_gap_x, x2 = j->x2 - 1 + s_gap_x, y1 = j->y1 + s_gap_y, y2 = j->y2 - 1 + s_gap_y;
+    bool ok = esp_lcd_panel_io_tx_param(s_io, QSPI_CMD(0x2A), (uint8_t[]){ x1 >> 8, x1, x2 >> 8, x2 }, 4) == ESP_OK &&
+              esp_lcd_panel_io_tx_param(s_io, QSPI_CMD(0x2B), (uint8_t[]){ y1 >> 8, y1, y2 >> 8, y2 }, 4) == ESP_OK;
+    int k = 0;
+    for (int y = j->y1; ok && y < j->y2; y += rows) {
+        int h = j->y2 - y < rows ? j->y2 - y : rows;
+        xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+        j->fill(s_chunk[k], (int)row, y - j->y1, h, j->arg);
+        wire_idle(1);
+        if (esp_lcd_panel_io_tx_color(s_io, QSPI_PIXELS(y == j->y1 ? 0x2C : 0x3C), s_chunk[k], (size_t)h * row) !=
+            ESP_OK) {
+            xSemaphoreGive(s_chunk_free);
+            ok = false;
+        }
+        k ^= 1;
+    }
+    /* Both buffers back: the caller's picture is no longer read. */
+    xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+    xSemaphoreTake(s_chunk_free, portMAX_DELAY);
+    xSemaphoreGive(s_chunk_free);
+    xSemaphoreGive(s_chunk_free);
+    int64_t w = esp_timer_get_time() - t_start;
+    avg = avg ? (avg * 7 + (w > avg ? 2 * w - avg : w)) / 8 : w;   /* quick to rise */
+    if (timed) {
+        te_done(&s_te_video, j->y1, j->y2, t_start, w, fall, p, scan);
+    }
 }
 
 static void IRAM_ATTR on_te(void *arg)
@@ -352,4 +463,10 @@ void muse_lcd_bands_set_te(int gpio)
         return;
     }
     s_te_on = true;
+}
+
+void muse_lcd_bands_frame(int x1, int y1, int x2, int y2, int rows, muse_lcd_fill_fn fill, void *arg)
+{
+    frame_job_t j = { x1, y1, x2, y2, rows, fill, arg };
+    muse_lcd_bands_run(send_frame, &j);
 }
