@@ -114,6 +114,7 @@ extern void test_command(const char *), test_advance(unsigned), test_error(void)
 int64_t test_now = 1000000;
 static int pmu;
 static uint8_t pmu_reg; /* Charger disabled before boot recovery. */
+static unsigned pmu_failures; /* Next PMIC writes that fail without changing the register. */
 esp_reset_reason_t esp_reset_reason(void) { return ESP_RST_POWERON; }
 static jmp_buf guard_wait;
 static void (*guard_entry)(void *);
@@ -154,6 +155,7 @@ esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t d, const uint8_t *
 esp_err_t i2c_master_transmit(i2c_master_dev_handle_t d, const uint8_t *tx, size_t n, int ms)
 {
     assert(d == &pmu && n == 2 && tx[0] == 0x18);
+    if (pmu_failures) { pmu_failures--; return ESP_FAIL; }
     /* Charging must stay off through the final capture, until cleanup. */
     if (tx[1] & 2) { assert(!test_running() || s_charge_expired == CHARGE_EXPIRED_MAGIC); }
     pmu_reg = tx[1]; return ESP_OK;
@@ -177,6 +179,7 @@ void vTaskDelay(unsigned ticks)
         if (sscanf(line, "advance %u", &value) == 1) { test_advance(value); }
         else if (!strcmp(line, "capture")) { assert(test_capture()); }
         else if (sscanf(line, "charging %u", &value) == 1) { assert(!!(pmu_reg & 2) == (bool)value); }
+        else if (sscanf(line, "pmufail %u", &value) == 1) { pmu_failures = value; }
         else if (!strncmp(line, "poll ", 5)) { strcat(line, "\n"); console_input = line + 5; return; }
         else if (!strcmp(line, "guard")) { guard_timeouts = 1; if (!setjmp(guard_wait)) { assert(guard_entry); guard_entry(NULL); } assert(pmu_reg & 2); test_advance(10); }
         else if (!strcmp(line, "error")) { test_error(); }

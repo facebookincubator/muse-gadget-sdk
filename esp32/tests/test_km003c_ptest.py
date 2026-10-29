@@ -47,7 +47,7 @@ class KM003CPtestTest(unittest.TestCase):
                 self.assertEqual(arm["charging_off"], 1)
                 self.assertLess(order.mock_calls.index(call.stop()), order.mock_calls.index(call.console.send("ptest.results", wake=True)))
                 console.send.assert_any_call("ptest.status")
-                self.assertNotIn(call("ptest.abort", wake=False), console.send.call_args_list)
+                self.assertNotIn(call("ptest.abort"), console.send.call_args_list)
                 if case in ("ok", "retry"):
                     self.assertEqual((rows[1]["start"], rows[1]["end"], rows[1]["mean_uA"], rows[1]["included_s"]), (101, 105, 10000, 2))
                 else:
@@ -117,13 +117,31 @@ class CollectorCleanupTest(unittest.TestCase):
                     code = tool.main(["--console", "PORT", "--output", str(output)],
                                      console_factory=lambda _: console, meter_factory=lambda _: meter)
                 self.assertEqual(code, 1)
-                console.send.assert_any_call("ptest.abort", wake=False)
-                self.assertLess(order.mock_calls.index(call.console.send("ptest.abort", wake=False)),
+                console.send.assert_any_call("ptest.abort")
+                self.assertLess(order.mock_calls.index(call.console.send("ptest.abort")),
                                 order.mock_calls.index(call.console.close()))
                 self.assertEqual({sig: signal.getsignal(sig) for sig in old_handlers}, old_handlers)
                 saved = json.loads(output.read_text().splitlines()[0])
                 if case == "meter": self.assertIn("meter disconnected", saved["results_error"])
                 if case == "timeout": self.assertIn("duration bound", saved["results_error"])
+
+    def test_arm_error_names_firmware_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            console, meter = Mock(), Mock()
+            console.lines.return_value = []
+            recorder = tool.Recorder(meter, 20)
+            recorder.start, recorder.stop = Mock(), Mock(return_value=[])
+            error = dict(type="error", error=259, message="already_active")
+            output = Path(tmp) / "run.jsonl"
+            with patch.object(tool, "Recorder", return_value=recorder), \
+                 patch.object(tool, "ptest_lines", side_effect=[[(0, error)]]), \
+                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = tool.main(["--console", "PORT", "--output", str(output)],
+                                 console_factory=lambda _: console, meter_factory=lambda _: meter)
+            self.assertEqual(code, 1)
+            saved = json.loads(output.read_text().splitlines()[0])
+            self.assertIn("did not arm: already_active (259)", saved["results_error"])
+            console.send.assert_any_call("ptest.abort")
 
     def test_missing_meter_does_not_create_output(self):
         with tempfile.TemporaryDirectory() as tmp:

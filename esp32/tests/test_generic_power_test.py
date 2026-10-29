@@ -63,6 +63,22 @@ class GenericPowerTest(unittest.TestCase):
                     self.assertEqual(rows[-1]["state"], state)
                     if ending == "guard":
                         self.assertEqual(rows[-1]["error"], 263)  # ESP_ERR_TIMEOUT
+    def test_charging_write_failures(self):
+        for board in ("175c", "216"):
+            with self.subTest(board=board, failure="disable"):
+                # The disable write fails at run start: the run ends as error with charging on.
+                rows = self.run_commands(arm(usb_powered=1, charging_off=1), "pmufail 1", "advance 1500",
+                                         "charging 1", ">ptest.results", profile=board)
+                self.assertEqual((rows[-1]["state"], rows[-1]["error"]), ("error", -1))  # ESP_FAIL
+            with self.subTest(board=board, failure="restore"):
+                # Every cleanup restore fails: the run cannot finish cleanly, the guard
+                # retries until charging is back, and the next run is unaffected.
+                rows = self.run_commands(arm(usb_powered=1, charging_off=1), "advance 1500", "capture",
+                                         "pmufail 3", "error", "charging 0", ">ptest.results", "guard",
+                                         "charging 1", arm(usb_powered=1), "advance 90000", ">ptest.results",
+                                         profile=board)
+                self.assertEqual((rows[1]["state"], rows[1]["restore_error"]), ("error", -1))
+                self.assertEqual(rows[-1]["state"], "complete")
     def test_guard_expiry_does_not_poison_next_run(self):
         for board in ("175c", "216"):
             with self.subTest(board=board):

@@ -171,6 +171,8 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
                     ack = m
                     if "now_us" in m: anchors.append((m["now_us"] / 1e6, at))
                     break
+            if ack and ack.get("type") == "error":
+                raise ValueError(f"USB sweep did not arm: {ack.get('message')} ({ack.get('error')})")
             if not ack or ack.get("type") != "arm_ack" or not ack.get("usb_powered") or not anchors:
                 raise ValueError("USB sweep did not arm")
             if args.charging_off and ack.get("charging_off") is not True:
@@ -202,7 +204,7 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
         finally:
             if armed:
                 try:
-                    console.send("ptest.abort", wake=False)
+                    console.send("ptest.abort")  # The newline ends any interrupted command.
                 except (Exception, KeyboardInterrupt, SystemExit) as e:
                     results_error = results_error or f"abort failed: {e}"
             samples = recorder.stop()
