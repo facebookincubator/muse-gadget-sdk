@@ -305,6 +305,19 @@ menu "ESP32 Device SDK"
         depends on HOMEHUB_PIPELINE_BENCH
         default "MuseGadget-A7F5B4"
 
+    config HOMEHUB_DAEMON_REQUESTS
+        bool "Requests to Muse's VM from your own code"
+        default y
+        help
+            Lets firmware code open its own HTTP requests to the VM's
+            daemon on Link's Noise session (noise_ctrl_req_open() and
+            friends in main/noise_control.h): reading the chat history,
+            or reading and writing files on the user's VM, say. Each
+            request gets a stream of its own; a refused or reset one
+            doesn't touch Link's control stream. Muse's own boards, and
+            boards with display.draw_file, always have it. Costs a few KB
+            of flash and a small queue in RAM.
+
     config HOMEHUB_DEV_BUILD
         bool "Dev build (dev signing key + dev-only affordances)"
         default y
@@ -401,6 +414,10 @@ menu "ESP32 Device SDK"
             bool "reTerminal E1002 7.3 inch Spectra 6 colour e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
+        config HOMEHUB_LED_BACKEND_STICKY_SSD1677
+            bool "reTerminal Sticky 3.97 inch SSD1677 e-paper (status screen)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
         config HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
             bool "Waveshare ESP32-S3-1.54inch-ePaper SSD1681 e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
@@ -448,6 +465,7 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default y if HOMEHUB_LED_BACKEND_STICKY_SSD1677
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
         help
             Set for backends with a display: the status bars, animation and
@@ -481,30 +499,33 @@ menu "ESP32 Device SDK"
             RP2040 firmware.
 
     config HOMEHUB_RETERMINAL_SHT4X
-        bool "reTerminal E100x onboard SHT4x sensor (sensors.read)"
-        depends on HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        bool "reTerminal E100x or Sticky onboard SHT4x sensor (sensors.read)"
+        depends on HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || HOMEHUB_LED_BACKEND_STICKY_SSD1677 || MUSE_BOARD_RETERMINAL_STICKY
         default y
         help
             Poll the onboard Sensirion SHT4x temperature and humidity sensor
-            over I2C (SDA GPIO19, SCL GPIO20, address 0x44) and answer
-            sensors.read with the latest temperature and humidity.
+            over I2C (E100x: SDA GPIO19, SCL GPIO20; Sticky: SDA GPIO1,
+            SCL GPIO0; address 0x44) and answer sensors.read.
 
     config HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET
         int "SHT4x temperature offset, in tenths of a degree Celsius"
         depends on HOMEHUB_RETERMINAL_SHT4X
+        default 0 if HOMEHUB_LED_BACKEND_STICKY_SSD1677 || MUSE_BOARD_RETERMINAL_STICKY
         default -33
         help
             Calibration offset added to the SHT4x temperature reading, in
-            tenths of a degree Celsius. The onboard sensor reads warm from
-            board heat; -33 (-3.3 C, about -6 F) is a starting point.
+            tenths of a degree Celsius. The E100x sensor reads warm from board
+            heat; -33 (-3.3 C, about -6 F) is a starting point for those boards.
 
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
         default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM
+        select HOMEHUB_DAEMON_REQUESTS   # display.draw_file reads from the VM
         help
-            Set when display.draw_url can draw a downloaded image: the
-            display backends, and boards with the full UI and PSRAM for the image.
+            Set when display.draw_url and display.draw_file can draw an
+            image: the display backends, and boards with the full UI and PSRAM
+            for the image.
 
     config HOMEHUB_PRE_DVT_GPIO
         bool "Use pre-DVT GPIO assignments"

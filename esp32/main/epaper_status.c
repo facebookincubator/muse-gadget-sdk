@@ -89,6 +89,34 @@ static inline void dither_frame(const uint8_t *gray, uint8_t *bits, int w, int h
     }
 }
 
+static void dither_gray4(const uint8_t *gray, uint8_t *codes, int w, int h, int16_t *err) {
+    int16_t *cur = err, *next = err + w + 2;
+    memset(err, 0, 2 * (size_t)(w + 2) * sizeof(*err));
+    for (int y = 0; y < h; y++) {
+        memset(next, 0, (size_t)(w + 2) * sizeof(*next));
+        for (int x = 0; x < w; x += 4) {
+            uint8_t byte = 0;
+            for (int k = 0; k < 4; k++) {
+                int i = x + k;
+                int v = gray[(size_t)y * w + i] + cur[i + 1];
+                int level = (v + 42) / 85;
+                if (level < 0) level = 0;
+                if (level > 3) level = 3;
+                int e = v - level * 85;
+                cur[i + 2] += (int16_t)(e * 7 / 16);
+                next[i] += (int16_t)(e * 3 / 16);
+                next[i + 1] += (int16_t)(e * 5 / 16);
+                next[i + 2] += (int16_t)(e / 16);
+                byte = (uint8_t)(byte << 2 | level);
+            }
+            codes[(size_t)y * (w / 4) + x / 4] = byte;
+        }
+        int16_t *t = cur;
+        cur = next;
+        next = t;
+    }
+}
+
 // The Spectra 6 inks: the controller's 4-bit code and exact RGB primaries.
 // Black and white come first and win ties.
 static const struct {
@@ -209,6 +237,7 @@ static const epd_panel_t *s_panel;
 static uint8_t *s_canvas;   // what is being drawn (gray or RGB565)
 static size_t s_canvas_bytes;
 static uint8_t *s_frame;    // s_canvas dithered, about to be shown
+static uint8_t *s_gray4_frame;
 static uint8_t *s_shown;    // what the panel shows (mono panels only)
 static int16_t *s_err;      // dithering error rows
 static bool s_ready;
@@ -371,6 +400,9 @@ bool led_status_init(void) {
     s_canvas_bytes = (size_t)EPD_W * EPD_H * pixel_bytes;
     s_canvas = heap_caps_malloc(s_canvas_bytes, MALLOC_CAP_SPIRAM);
     s_frame = heap_caps_malloc(EPD_FRAME_BYTES, MALLOC_CAP_SPIRAM);
+    if (s_panel->update_gray4) {
+        s_gray4_frame = heap_caps_malloc((size_t)EPD_W * EPD_H / 4, MALLOC_CAP_SPIRAM);
+    }
     size_t err_values;
     if (EPD_COLOR) {
         s_shown = NULL;
@@ -385,6 +417,7 @@ bool led_status_init(void) {
     s_mutex = xSemaphoreCreateMutex();
     bool ok = s_canvas && s_frame && s_err && s_panel_lock && s_lock && s_mutex;
     if (!EPD_COLOR) ok = ok && s_shown;
+    if (s_panel->update_gray4) ok = ok && s_gray4_frame;
     if (!ok) {
         ESP_LOGE(TAG, "e-paper buffer alloc failed");
         return false;
@@ -431,7 +464,7 @@ bool led_status_display_info(int *width, int *height) {
 
 int led_status_display_bits(void) {
     if (!s_ready) return 0;
-    return s_panel->bits_per_pixel;
+    return s_panel->update_gray4 ? 2 : s_panel->bits_per_pixel;
 }
 
 bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
@@ -469,11 +502,17 @@ void led_status_draw_done(void) {
     bool show = s_image_mode && s_image_dirty;
     if (show) {
         s_image_dirty = false;
-        epd_dither();
+        if (s_panel->update_gray4) {
+            dither_gray4(s_canvas, s_gray4_frame, EPD_W, EPD_H, s_err);
+        } else {
+            epd_dither();
+        }
     }
     xSemaphoreGive(s_lock);
     if (show) {
-        if (s_panel->update(s_frame, s_shown, true) == ESP_OK && s_shown) {
+        esp_err_t err = s_panel->update_gray4 ? s_panel->update_gray4(s_gray4_frame)
+                                              : s_panel->update(s_frame, s_shown, true);
+        if (err == ESP_OK && s_shown && !s_panel->update_gray4) {
             memcpy(s_shown, s_frame, EPD_FRAME_BYTES);
         }
     }

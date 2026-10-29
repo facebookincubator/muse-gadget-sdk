@@ -189,6 +189,8 @@ status screen.
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
+| Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI on FreeInk, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
+| Seeed reTerminal Sticky Link status (experimental) | 3.97" e-paper status screen and SHT40 only; no Muse UI | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
@@ -203,6 +205,7 @@ status screen.
 | M5Stack Cardputer ADV (experimental) | UI, GO/Space push-to-talk with text replies, Esc/Enter/arrow menu controls | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
@@ -260,7 +263,18 @@ for how it works and for boards that need the manual steps.
 
 To give Muse a command of its own, such as reading a sensor or switching a
 relay, advertise it in `link.register` and handle it in `main/app.c`.
-[`AGENTS.md`](AGENTS.md#adding-a-command) walks through it.
+[`AGENTS.md`](AGENTS.md#adding-a-command) walks through it. Going the other
+way, your code can ask the VM for the chat history, or read and write files
+in the user's home on the VM, over Link's session, on every board:
+[`AGENTS.md`](AGENTS.md#requests-to-muses-vm-from-your-code) has the routes
+and limits.
+
+To show your phone's camera on a board's screen, build it with
+`MUSE_VIDEO=1 tools/muse/board.sh build <board>` and run Muse Gadgets Test
+([Android](../android/musegadgetstest), [iPhone](../ios/musegadgetstest)) on a phone on the
+same Wi-Fi, then open Phone camera on the board: the phone encodes H.264 or
+VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and
+[`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
 
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
@@ -279,6 +293,34 @@ things you can change:
   [`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
   is the spot: it has the reply text, and the MP3 decoder, speaker and volume
   are already wired up there.
+
+To talk with Muse live instead (experimental), turn on "Live voice calls with
+Muse" under Muse in `idf.py menuconfig` (`CONFIG_MUSE_REALTIME_VOICE`). It's
+offered on boards with the full UI and PSRAM and on the Voice PE and reSpeaker
+Lite. The DevKitC-1 and other boards without a mic and speaker don't have it,
+and builds without it don't change. With it on:
+
+- **StopWatch:** hold yellow to talk or interrupt playback; release to let Muse
+  answer without ending the call. A capture tail of up to 120 ms preserves the
+  last syllable. Tap blue to hang up. With calls built in, yellow is the talk
+  button and blue the speaker button (mute outside a call), the other way round
+  from builds without them; red stays power. Use **Settings > Sound > Voice notes** for
+  the old note-and-text mode. Interrupting playback does not cancel detached
+  background work, whose results may arrive later.
+- **Other boards:** tap the talk button to start a call, press again to hang up;
+  holding still sends a voice note. The mic is off while Muse talks, except on
+  the Voice PE when its audio chip reports echo cancellation.
+- A call also ends when Muse ends it, after 45 seconds of quiet (not counting
+  time Muse is still working on something), or after 15 minutes. Muse may not
+  hang up by itself when it says goodbye: press to end the call. If the
+  connection drops mid-call, the gadget ends that call on Muse when it
+  reconnects (not after a power loss or restart: Muse ends it a minute or so
+  later).
+- On the Voice PE, the mute switch hangs up, and nothing the mic picked up
+  after it went on is sent.
+- Muse doesn't say hello unless you turn that on
+  (`CONFIG_MUSE_REALTIME_VOICE_GREETING`).
+- The Muse VM has to accept voice calls from the gadget.
 
 A few things worth knowing:
 
@@ -337,6 +379,25 @@ their upstream licenses:
 - [`components/muse/boards/ostb_echoear_display_init.h`](components/muse/boards/ostb_echoear_display_init.h),
   the ST77916 panel initialization table from 78/xiaozhi-esp32, is MIT, as its
   retained upstream notice says.
+- [`main/epd_ssd1677.c`](main/epd_ssd1677.c), the reTerminal Sticky SSD1677
+  driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
+  Sticky's Link status profile), is MIT and retains the source's copyright and
+  license notice.
+- The JD9853A initialization sequence in
+  [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
+  adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
+  [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
+  fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
+  Font Awesome 5 Free (SIL OFL 1.1); see its README.
+- [`components/tinyh264/src`](components/tinyh264), the H.264 decoder, is the
+  Android Open Source Project's (via udevbe/tinyh264), Apache-2.0 under its
+  copyright. See [`components/tinyh264/LICENSE`](components/tinyh264/LICENSE).
+- [`components/libvpx_vp8/src`](components/libvpx_vp8), the VP8 decoder, is
+  libvpx v1.16.0's, trimmed: BSD-3-Clause under the WebM Project authors'
+  copyright, with Google's patent grant. See
+  [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
+  [`PATENTS`](components/libvpx_vp8/PATENTS).
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.

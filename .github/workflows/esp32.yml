@@ -56,7 +56,18 @@ jobs:
           . "$IDF_PATH/export.sh" > /dev/null
           idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
 
+      # Exercise the actual FreeInk router without a board or Arduino runtime.
+      - name: Check out pinned FreeInk host-test source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Free-Ink/freeink-sdk
+          ref: 2c047df7792cedece1191503793f18f5d8f1c695
+          path: freeink-host-source
+          persist-credentials: false
+
       - name: Run host tests
+        env:
+          FREEINK_SOURCE_DIR: ${{ github.workspace }}/freeink-host-source
         run: |
           . "$IDF_PATH/export.sh" > /dev/null
           python -m unittest discover -s tests -p 'test_*.py' -v
@@ -127,6 +138,12 @@ jobs:
           - board: reterminal-e1002
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-e1002"
+          - board: reterminal-sticky
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"
+          - board: reterminal-sticky-link
+            target: esp32s3
+            overlays: ";devices/sdkconfig.reterminal-sticky-link"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"
@@ -142,6 +159,10 @@ jobs:
           - board: muse-waveshare-s3-175
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175"
+          # Video from a phone (MUSE_VIDEO=1 tools/muse/board.sh): the decoder and Wi-Fi transport.
+          - board: muse-waveshare-s3-175c-video
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-video"
           - board: muse-waveshare-s3-185c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-185c"
@@ -181,6 +202,12 @@ jobs:
           - board: muse-m5stack-stopwatch
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch"
+          - board: muse-m5stack-stopwatch-video
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
+          - board: muse-seeed-xiao-s3-147
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147"
           - board: muse-m5stack-cores3
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3"

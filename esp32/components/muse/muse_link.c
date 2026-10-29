@@ -18,10 +18,13 @@
 
 #include <string.h>
 
+#include "esp_log.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
 
 #include "muse_state.h"
 
+static const char *TAG = "muse_link";
 static const muse_link_ops_t *s_ops;
 static volatile muse_link_state_t s_state = MUSE_LINK_BOOT;
 
@@ -184,26 +187,71 @@ bool muse_wifi_connected(void)
     return w.state == MUSE_WIFI_CONNECTED;
 }
 
+static muse_wifi_power_t s_power_level = MUSE_WIFI_FULL;
+static wifi_ps_type_t s_power_before;   /* none, or modem sleep for BLE coexistence */
+static int s_awake_holds;               /* muse_wifi_keep_awake */
+static portMUX_TYPE s_power_lock = portMUX_INITIALIZER_UNLOCKED;
+
+/* What the level (and any hold) asks of the radio. */
+static wifi_ps_type_t power_ps(void)
+{
+    portENTER_CRITICAL(&s_power_lock);
+    muse_wifi_power_t level = s_power_level;
+    bool held = s_awake_holds > 0;
+    portEXIT_CRITICAL(&s_power_lock);
+    /* Resting, the radio wakes for every tenth beacon (the listen interval
+     * wifi_mgr joins with, about 1 s), not every DTIM; replies can wait that
+     * long. */
+    return held                      ? WIFI_PS_NONE
+           : level == MUSE_WIFI_REST ? WIFI_PS_MAX_MODEM
+           : level == MUSE_WIFI_DOZE ? WIFI_PS_MIN_MODEM
+                                     : s_power_before;
+}
+
 void muse_wifi_power(muse_wifi_power_t level)
 {
-    static muse_wifi_power_t now = MUSE_WIFI_FULL;
-    static wifi_ps_type_t before;   /* none, or modem sleep for BLE coexistence */
-    if (level == now) {
+    if (level == s_power_level) {
         return;
     }
     if (s_ops && s_ops->power_save) {
         s_ops->power_save(level == MUSE_WIFI_REST);
     }
-    if (now == MUSE_WIFI_FULL && esp_wifi_get_ps(&before) != ESP_OK) {
-        before = WIFI_PS_NONE;   /* as wifi_mgr starts it */
+    if (s_power_level == MUSE_WIFI_FULL && s_awake_holds == 0 && esp_wifi_get_ps(&s_power_before) != ESP_OK) {
+        s_power_before = WIFI_PS_NONE;   /* as wifi_mgr starts it */
     }
-    now = level;
-    /* Resting, the radio wakes for every tenth beacon (the listen interval
-     * wifi_mgr joins with, about 1 s), not every DTIM; replies can wait that
-     * long. */
-    esp_wifi_set_ps(level == MUSE_WIFI_REST   ? WIFI_PS_MAX_MODEM
-                    : level == MUSE_WIFI_DOZE ? WIFI_PS_MIN_MODEM
-                                              : before);
+    portENTER_CRITICAL(&s_power_lock);
+    s_power_level = level;
+    portEXIT_CRITICAL(&s_power_lock);
+    esp_wifi_set_ps(power_ps());
+}
+
+void muse_link_ble_quiet(bool quiet)
+{
+    static int holds;
+    portENTER_CRITICAL(&s_power_lock);
+    int was = holds;
+    holds += quiet ? 1 : (holds > 0 ? -1 : 0);
+    int now = holds;
+    portEXIT_CRITICAL(&s_power_lock);
+    if ((was == 0) != (now == 0) && s_ops && s_ops->ble_quiet) {
+        s_ops->ble_quiet(now > 0);
+    }
+}
+
+void muse_wifi_keep_awake(bool on)
+{
+    wifi_ps_type_t was = WIFI_PS_NONE;
+    esp_wifi_get_ps(&was);
+    portENTER_CRITICAL(&s_power_lock);
+    bool first = on && s_awake_holds == 0;
+    s_awake_holds += on ? 1 : (s_awake_holds > 0 ? -1 : 0);
+    portEXIT_CRITICAL(&s_power_lock);
+    if (first && s_power_level == MUSE_WIFI_FULL) {
+        s_power_before = was;   /* what FULL means once the hold goes */
+    }
+    esp_err_t err = esp_wifi_set_ps(power_ps());
+    ESP_LOGI(TAG, "wifi power save %d -> %d%s (%s)", (int)was, (int)power_ps(), on ? ", held awake" : "",
+             esp_err_to_name(err));
 }
 
 void muse_wifi_nap(bool nap)
