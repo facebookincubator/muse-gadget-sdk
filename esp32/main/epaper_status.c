@@ -44,6 +44,10 @@ static const char *TAG = "link.led";
 
 // ---- Pixels (host-tested) ---------------------------------------------------
 
+static inline uint16_t rgb565_from_be(const uint8_t *src) {
+    return (uint16_t)((uint16_t)src[0] << 8 | src[1]);
+}
+
 // Gray level of a native RGB565 pixel, 0 (black) to 255 (white).
 static inline uint8_t luma565(uint16_t px) {
     int r = (px >> 11) & 0x1F, g = (px >> 5) & 0x3F, b = px & 0x1F;
@@ -85,8 +89,36 @@ static inline void dither_frame(const uint8_t *gray, uint8_t *bits, int w, int h
     }
 }
 
-// The Spectra 6 inks: the controller's 4-bit code and the colour dithered to
-// it. Black and white come first and win ties.
+static void dither_gray4(const uint8_t *gray, uint8_t *codes, int w, int h, int16_t *err) {
+    int16_t *cur = err, *next = err + w + 2;
+    memset(err, 0, 2 * (size_t)(w + 2) * sizeof(*err));
+    for (int y = 0; y < h; y++) {
+        memset(next, 0, (size_t)(w + 2) * sizeof(*next));
+        for (int x = 0; x < w; x += 4) {
+            uint8_t byte = 0;
+            for (int k = 0; k < 4; k++) {
+                int i = x + k;
+                int v = gray[(size_t)y * w + i] + cur[i + 1];
+                int level = (v + 42) / 85;
+                if (level < 0) level = 0;
+                if (level > 3) level = 3;
+                int e = v - level * 85;
+                cur[i + 2] += (int16_t)(e * 7 / 16);
+                next[i] += (int16_t)(e * 3 / 16);
+                next[i + 1] += (int16_t)(e * 5 / 16);
+                next[i + 2] += (int16_t)(e / 16);
+                byte = (uint8_t)(byte << 2 | level);
+            }
+            codes[(size_t)y * (w / 4) + x / 4] = byte;
+        }
+        int16_t *t = cur;
+        cur = next;
+        next = t;
+    }
+}
+
+// The Spectra 6 inks: the controller's 4-bit code and exact RGB primaries.
+// Black and white come first and win ties.
 static const struct {
     uint8_t code, r, g, b;
 } s_inks[] = {
@@ -98,23 +130,40 @@ static const struct {
     {6, 0, 255, 0},      // green
 };
 
-// The ink nearest an RGB colour, by lightness and by the red and blue
-// differences from it. Plain RGB distance puts mid grays about as close to
-// yellow, red, blue and green as to black and white, and the error that
-// picking those spreads soon turns a whole gray area into coloured dots.
+static const uint8_t s_ink_targets[][3] = {
+    {17, 16, 14}, {250, 250, 250}, {245, 225, 35},
+    {225, 55, 70}, {0, 138, 225}, {45, 160, 60},
+};
+
+// The ink nearest an RGB colour, using the Spectra 6 pigment references.
+// Black and white come first and win ties; gray input is limited to them.
+// A direct RGB distance over all six inks would turn mid grays green,
+// so color dithering handles neutral pixels separately.
 static int nearest_ink(int r, int g, int b) {
-    int y = (77 * r + 150 * g + 29 * b) >> 8;
     int best = 0, best_d = 0;
     for (int i = 0; i < (int)(sizeof(s_inks) / sizeof(s_inks[0])); i++) {
-        int iy = (77 * s_inks[i].r + 150 * s_inks[i].g + 29 * s_inks[i].b) >> 8;
-        int dy = y - iy, du = (r - y) - (s_inks[i].r - iy), dv = (b - y) - (s_inks[i].b - iy);
-        int d = dy * dy + du * du + dv * dv;
+        int dr = r - s_ink_targets[i][0];
+        int dg = g - s_ink_targets[i][1];
+        int db = b - s_ink_targets[i][2];
+        int d = dr * dr + dg * dg + db * db;
         if (i == 0 || d < best_d) {
             best = i;
             best_d = d;
         }
     }
     return best;
+}
+
+static int exact_ink(uint16_t px) {
+    switch (px) {
+        case 0x0000: return 0;
+        case 0xFFFF: return 1;
+        case 0xFFE0: return 2;
+        case 0xF800: return 3;
+        case 0x001F: return 4;
+        case 0x07E0: return 5;
+        default: return -1;
+    }
 }
 
 // Dither w x h native RGB565 pixels to the inks with Floyd-Steinberg, packed
@@ -126,29 +175,43 @@ static void dither_color(const uint16_t *rgb, uint8_t *codes, int w, int h, int1
     for (int y = 0; y < h; y++) {
         const uint16_t *row = rgb + (size_t)y * w;
         uint8_t *out = codes + (size_t)y * (w / 2);
+        bool rtl = y & 1;
+        int forward = rtl ? -1 : 1;
         memset(next, 0, 3 * (size_t)(w + 2) * sizeof(*next));
-        for (int x = 0; x < w; x++) {
-            int r = (row[x] >> 11) & 0x1F, g = (row[x] >> 5) & 0x3F, b = row[x] & 0x1F;
-            // cur and next are offset by one pixel so that x - 1 stays in range.
-            int c[3] = {r << 3 | r >> 2, g << 2 | g >> 4, b << 3 | b >> 2};
-            for (int k = 0; k < 3; k++) {
-                c[k] += cur[3 * (x + 1) + k];
-                // Bright or dark runs would otherwise pile up error that
-                // bleeds far into the next area.
-                if (c[k] < -128) c[k] = -128;
-                if (c[k] > 383) c[k] = 383;
-            }
-            int ink = nearest_ink(c[0], c[1], c[2]);
-            const int want[3] = {s_inks[ink].r, s_inks[ink].g, s_inks[ink].b};
-            for (int k = 0; k < 3; k++) {
-                int e = c[k] - want[k];
-                cur[3 * (x + 2) + k] += (int16_t)(e * 7 / 16);
-                next[3 * x + k] += (int16_t)(e * 3 / 16);
-                next[3 * (x + 1) + k] += (int16_t)(e * 5 / 16);
-                next[3 * (x + 2) + k] += (int16_t)(e / 16);
+        memset(out, 0, (size_t)w / 2);
+        for (int xi = 0; xi < w; xi++) {
+            int x = rtl ? w - 1 - xi : xi;
+            int ink = exact_ink(row[x]);
+            if (ink < 0) {
+                int r = (row[x] >> 11) & 0x1F, g = (row[x] >> 5) & 0x3F, b = row[x] & 0x1F;
+                // cur and next are offset by one pixel so that x - 1 stays in range.
+                int c[3] = {r << 3 | r >> 2, g << 2 | g >> 4, b << 3 | b >> 2};
+                int lo = c[0], hi = c[0];
+                for (int k = 1; k < 3; k++) {
+                    if (c[k] < lo) lo = c[k];
+                    if (c[k] > hi) hi = c[k];
+                }
+                bool neutral = hi - lo <= 12;
+                for (int k = 0; k < 3; k++) {
+                    c[k] += cur[3 * (x + 1) + k];
+                    // Bright or dark runs would otherwise pile up error that
+                    // bleeds far into the next area.
+                    if (c[k] < -255) c[k] = -255;
+                    if (c[k] > 510) c[k] = 510;
+                }
+                ink = neutral ? ((77 * c[0] + 150 * c[1] + 29 * c[2]) >> 8) >= 128
+                              : nearest_ink(c[0], c[1], c[2]);
+                for (int k = 0; k < 3; k++) {
+                    int target = neutral ? (ink ? 255 : 0) : s_ink_targets[ink][k];
+                    int e = c[k] - target;
+                    cur[3 * (x + 1 + forward) + k] += (int16_t)(e * 7 / 16);
+                    next[3 * (x + 1 - forward) + k] += (int16_t)(e * 3 / 16);
+                    next[3 * (x + 1) + k] += (int16_t)(e * 5 / 16);
+                    next[3 * (x + 1 + forward) + k] += (int16_t)(e / 16);
+                }
             }
             if (x & 1) out[x / 2] |= s_inks[ink].code;
-            else out[x / 2] = (uint8_t)(s_inks[ink].code << 4);
+            else out[x / 2] |= (uint8_t)(s_inks[ink].code << 4);
         }
         int16_t *t = cur;
         cur = next;
@@ -174,6 +237,7 @@ static const epd_panel_t *s_panel;
 static uint8_t *s_canvas;   // what is being drawn (gray or RGB565)
 static size_t s_canvas_bytes;
 static uint8_t *s_frame;    // s_canvas dithered, about to be shown
+static uint8_t *s_gray4_frame;
 static uint8_t *s_shown;    // what the panel shows (mono panels only)
 static int16_t *s_err;      // dithering error rows
 static bool s_ready;
@@ -336,6 +400,9 @@ bool led_status_init(void) {
     s_canvas_bytes = (size_t)EPD_W * EPD_H * pixel_bytes;
     s_canvas = heap_caps_malloc(s_canvas_bytes, MALLOC_CAP_SPIRAM);
     s_frame = heap_caps_malloc(EPD_FRAME_BYTES, MALLOC_CAP_SPIRAM);
+    if (s_panel->update_gray4) {
+        s_gray4_frame = heap_caps_malloc((size_t)EPD_W * EPD_H / 4, MALLOC_CAP_SPIRAM);
+    }
     size_t err_values;
     if (EPD_COLOR) {
         s_shown = NULL;
@@ -350,6 +417,7 @@ bool led_status_init(void) {
     s_mutex = xSemaphoreCreateMutex();
     bool ok = s_canvas && s_frame && s_err && s_panel_lock && s_lock && s_mutex;
     if (!EPD_COLOR) ok = ok && s_shown;
+    if (s_panel->update_gray4) ok = ok && s_gray4_frame;
     if (!ok) {
         ESP_LOGE(TAG, "e-paper buffer alloc failed");
         return false;
@@ -396,7 +464,7 @@ bool led_status_display_info(int *width, int *height) {
 
 int led_status_display_bits(void) {
     if (!s_ready) return 0;
-    return s_panel->bits_per_pixel;
+    return s_panel->update_gray4 ? 2 : s_panel->bits_per_pixel;
 }
 
 bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
@@ -414,11 +482,11 @@ bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
     for (int r = 0; r < h; r++) {
         uint8_t *line = s_canvas + ((size_t)(y + r) * EPD_W + x) * pixel_bytes;
         if (EPD_COLOR) {
-            memcpy(line, src, w * 2);
-            src += w * 2;
+            uint16_t *dst = (uint16_t *)line;
+            for (int i = 0; i < w; i++, src += 2) dst[i] = rgb565_from_be(src);
         } else {
             for (int i = 0; i < w; i++, src += 2) {
-                line[i] = luma565((uint16_t)(src[0] << 8 | src[1]));
+                line[i] = luma565(rgb565_from_be(src));
             }
         }
     }
@@ -434,11 +502,17 @@ void led_status_draw_done(void) {
     bool show = s_image_mode && s_image_dirty;
     if (show) {
         s_image_dirty = false;
-        epd_dither();
+        if (s_panel->update_gray4) {
+            dither_gray4(s_canvas, s_gray4_frame, EPD_W, EPD_H, s_err);
+        } else {
+            epd_dither();
+        }
     }
     xSemaphoreGive(s_lock);
     if (show) {
-        if (s_panel->update(s_frame, s_shown, true) == ESP_OK && s_shown) {
+        esp_err_t err = s_panel->update_gray4 ? s_panel->update_gray4(s_gray4_frame)
+                                              : s_panel->update(s_frame, s_shown, true);
+        if (err == ESP_OK && s_shown && !s_panel->update_gray4) {
             memcpy(s_shown, s_frame, EPD_FRAME_BYTES);
         }
     }

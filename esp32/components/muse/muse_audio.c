@@ -27,6 +27,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "muse_board.h"
 #include "muse_mem.h"
@@ -48,6 +49,7 @@ static int16_t s_out_stereo[MUSE_AUDIO_CHUNK * CHANNELS];
 
 /* One-pole high-pass on the mixed mic signal. */
 static float s_hpf_a;
+static float s_mic_scale = 1.0f;
 static float s_hpf_x1, s_hpf_y1;
 
 static void lock(void)
@@ -86,6 +88,10 @@ static void apply_volume(int volume)
 
 static void apply_mic_gain(int db)
 {
+    if (muse_board->mic_init) {
+        s_mic_scale = powf(10.0f, (float)db / 20.0f);
+        return;
+    }
     if (!s_mic || !codecs_reachable()) {
         return;
     }
@@ -117,21 +123,29 @@ esp_err_t muse_audio_init(int volume, int mic_gain_db)
 {
     s_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_lock, ESP_ERR_NO_MEM, TAG, "audio lock");
-    /* A board-switched supply goes off again on any failure: nothing will
-     * open the codecs, and the setters skip them while closed. */
-    codec_power(true);
-    esp_err_t err = muse_board->audio_init(&s_spk, &s_mic);
-    if (err == ESP_OK && !(s_spk && s_mic)) {
-        err = ESP_FAIL;
-    }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "codec init failed");
+    esp_err_t err;
+    if (muse_board->mic_init) {
+        err = muse_board->mic_init();
+        if (err == ESP_OK) err = muse_board->mic_power(true);
+        if (err != ESP_OK) return err;
+        s_open = true;
     } else {
-        err = open_codecs();   /* logs its own failure */
-    }
-    if (err != ESP_OK) {
-        codec_power(false);
-        return err;
+        /* A board-switched supply goes off again on any failure: nothing will
+         * open the codecs, and the setters skip them while closed. */
+        codec_power(true);
+        err = muse_board->audio_init(&s_spk, &s_mic);
+        if (err == ESP_OK && !(s_spk && s_mic)) {
+            err = ESP_FAIL;
+        }
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "codec init failed");
+        } else {
+            err = open_codecs();   /* logs its own failure */
+        }
+        if (err != ESP_OK) {
+            codec_power(false);
+            return err;
+        }
     }
     muse_audio_set_volume(volume);
     muse_audio_set_mic_gain(mic_gain_db);
@@ -147,6 +161,11 @@ esp_err_t muse_audio_init(int volume, int mic_gain_db)
 void muse_audio_power(bool on)
 {
     lock();
+    if (muse_board->mic_init) {
+        if (on != s_open && muse_board->mic_power(on) == ESP_OK) s_open = on;
+        unlock();
+        return;
+    }
     if (!s_spk || on == s_open) {
         unlock();
         return;
@@ -206,6 +225,13 @@ static float to_db(double mean_sq)
 
 void muse_audio_selftest(void)
 {
+    if (muse_board->mic_init) {
+        int16_t mono[MUSE_AUDIO_CHUNK];
+        if (muse_audio_read(mono, MUSE_AUDIO_CHUNK) == ESP_OK) {
+            ESP_LOGI(TAG, "PDM mic capture: %.1f dBFS", muse_audio_dbfs(mono, MUSE_AUDIO_CHUNK));
+        }
+        return;
+    }
     enum { FLUSH = MUSE_AUDIO_RATE / 4, MEASURE = MUSE_AUDIO_RATE / 2 };
 
     /* Capture: drop the DMA backlog, then time a known number of frames. */
@@ -272,6 +298,10 @@ static float tone_db(const int16_t *st, int ch, size_t frames, float f)
  */
 void muse_audio_loopback_test(int volume)
 {
+    if (muse_board->mic_init) {
+        ESP_LOGW(TAG, "no speaker for loopback test");
+        return;
+    }
     enum { TONE = MUSE_AUDIO_RATE * 3 / 10, SKIP = MUSE_AUDIO_RATE / 10, MEAS = TONE - SKIP };
     static const float freqs[] = { 200, 400, 700, 1000, 2000, 3000, 4000, 6000 };
     static const int gains[] = { 0, 6, 12, 18, 24, 30, 33, 36 };
@@ -334,12 +364,15 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 {
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
-        if (esp_codec_dev_read(s_mic, s_in_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
+        if (muse_board->mic_init) {
+            if (muse_board->mic_read(mono, n) != ESP_OK) return ESP_FAIL;
+        } else if (esp_codec_dev_read(s_mic, s_in_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
             return ESP_FAIL;
         }
         for (size_t i = 0; i < n; i++) {
-            float x = muse_board->mic_slot < 0 ? 0.5f * ((float)s_in_stereo[2 * i] + (float)s_in_stereo[2 * i + 1])
-                                               : (float)s_in_stereo[2 * i + muse_board->mic_slot];
+            float x = muse_board->mic_init ? (float)mono[i] * s_mic_scale
+                     : muse_board->mic_slot < 0 ? 0.5f * ((float)s_in_stereo[2 * i] + (float)s_in_stereo[2 * i + 1])
+                                                : (float)s_in_stereo[2 * i + muse_board->mic_slot];
             float y = s_hpf_a * (s_hpf_y1 + x - s_hpf_x1);
             s_hpf_x1 = x;
             s_hpf_y1 = y;
@@ -353,6 +386,11 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 
 esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
 {
+    if (muse_board->mic_init) {
+        (void)mono;
+        vTaskDelay(pdMS_TO_TICKS((frames * 1000 + MUSE_AUDIO_RATE - 1) / MUSE_AUDIO_RATE));
+        return ESP_OK;
+    }
     /* Speaker off still plays silence at the same pace, so captions timed to
      * the audio scroll as if it were heard. */
     bool mute = !muse_settings_speaker_on();

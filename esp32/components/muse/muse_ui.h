@@ -31,6 +31,9 @@ esp_err_t muse_ui_start(void);
 /* From any task: the screen has gone dark for sleep (and not yet woken). */
 bool muse_ui_dark(void);
 
+/* From any task: the face tile is the currently visible tile. */
+bool muse_ui_face_active(void);
+
 /* The functions below run in the LVGL task (or with the display lock held). */
 
 /* Slide back to the face (e.g. when a talk starts). */
@@ -46,6 +49,10 @@ void muse_ui_preview_brightness(int pct);
  * The size is false without PSRAM for the image or before the UI is up.
  */
 bool muse_ui_image_size(int *w, int *h);
+/* What the panel shows of those pixels: 16 (colour), or 2 on a four-gray e-paper. */
+int muse_ui_image_bits(void);
+/* The image is complete: a four-gray e-paper dithers it to its grays. */
+void muse_ui_image_done(void);
 bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels);
 void muse_ui_image_hide(void);
 /* Watcher camera mode: shows an on-screen shutter hint over the live image. */

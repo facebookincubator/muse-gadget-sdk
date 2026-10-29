@@ -16,11 +16,23 @@ dependencies:
   idf:
     version: ">=5.5"
   espressif/cjson: "~1.7"
+  # Video over Wi-Fi announces itself with it (muse_video_wifi.c).
+  espressif/mdns:
+    version: "^1.8"
+    rules:
+      - if: "$CONFIG{MUSE_VIDEO_MDNS} == \"y\""
   lvgl/lvgl:
     version: "9.5.0"
     public: true
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} != \"none\""
+      - if: "$CONFIG{MUSE_FREEINK_DEVICE} == \"\""
+  # The device string is always defined, including on non-e-ink builds.
+  freeink-sdk:
+    git: https://github.com/Free-Ink/freeink-sdk.git
+    version: 2c047df7792cedece1191503793f18f5d8f1c695
+    rules:
+      - if: "$CONFIG{MUSE_FREEINK_DEVICE} != \"\""
   espressif/esp_codec_dev:
     version: "~1.5"
     public: true
@@ -29,7 +41,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"waveshare_s3_185c\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"seeed_xiao_s3_147\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"esp_mosaico\"]"
   78/esp_lcd_nv3023:
     version: "1.0.1"
     rules:
@@ -77,7 +89,11 @@ dependencies:
   espressif/esp_lcd_co5300:
     version: "^2.2.0"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"m5stack_stopwatch\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"m5stack_stopwatch\", \"esp_mosaico\"]"
+  espressif/esp_lcd_touch_cst9220:
+    version: "^0.1"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"esp_mosaico\""
   espressif/m5stack_core_2:
     version: "^3.0.3"
     rules:
@@ -89,4 +105,20 @@ dependencies:
   espressif/esp_lcd_touch_gt911:
     version: "1.2.1"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_lcd7\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_lcd7\", \"reterminal_sticky\"]"
+  espressif/esp_lcd_touch:
+    version: "^1.2.0"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_185c\""
+  espressif/esp_lcd_st77916:
+    version: "2.0.2"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_185c\", \"ostb_echoear_2st\"]"
+  espressif/esp_lcd_touch_cst816s:
+    version: "==1.1.2"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_185c\", \"waveshare_s3_lcd128\"]"
+  espressif/esp_lcd_gc9a01:
+    version: "^2.0.0"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_lcd128\""

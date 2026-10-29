@@ -105,13 +105,18 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // Chat subscriptions deliver 16 KB body chunks plus framing, even on boards
 // without PSRAM. Reserve enough inbound space for those frames. Not on the
 // ESP32-C3 AI Passport: three 17 KB buffers beside its UI leave too little to
-// upload a voice note. It takes 12 KB, as the PSRAM boards' session does.
+// upload a voice note. It takes 12 KB, as Link boards without PSRAM do.
+// With PSRAM it is the protocol's largest frame, as Muse's chat session uses,
+// so extra requests (display.draw_file) can take large replies in few frames;
+// the two buffers cost 104 KB of PSRAM more than 12 KB ones.
 // Chat events arrive one per frame; a frame over that ends the session (it
 // can't be skipped: Noise's nonces and the ordered framer would desync), the
 // request in flight ends with NOISE_CTRL_REQ_TOO_LARGE, and the session
 // reconnects.
 #if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
 #define SVC_FRAME_SCRATCH (12 * 1024)
+#elif CONFIG_SPIRAM
+#define SVC_FRAME_SCRATCH (64 * 1024)
 #else
 #define SVC_FRAME_SCRATCH (SMALL_CONTROL_SESSION ? 17 * 1024 : 12288)
 #endif
@@ -1007,8 +1012,9 @@ static bool tunnel_send_body_inplace(void *vctx, uint8_t *buf, size_t headroom,
 
 // ---- Extra daemon requests (noise_ctrl_req_*) --------------------------------
 
-// Only Muse opens these; Link-only gateways get the empty stubs below.
-#if CONFIG_MUSE_ENABLED
+// Opened by Muse and by an app's own code (CONFIG_HOMEHUB_DAEMON_REQUESTS);
+// builds without it get the empty stubs below.
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
 
 // Stream ids from here up belong to these requests; lower ids are Link's own.
 #define REQ_STREAM_BASE 16
@@ -1016,8 +1022,14 @@ static bool tunnel_send_body_inplace(void *vctx, uint8_t *buf, size_t headroom,
 #define REQ_QUEUE_LEN   6
 #define REQ_MAX_HEADERS 6
 // Body bytes queued at once. Without PSRAM a larger backlog leaves no block big
-// enough for mbedTLS's per-write record buffer, and the session drops.
-#define REQ_QUEUE_BYTES (SMALL_CONTROL_SESSION ? 4096 : 16384)
+// enough for mbedTLS's per-write record buffer, and the session drops: on any
+// board without it, Muse or not.
+#if SMALL_CONTROL_SESSION || !CONFIG_SPIRAM
+#define REQ_LOW_RAM 1
+#else
+#define REQ_LOW_RAM 0
+#endif
+#define REQ_QUEUE_BYTES (REQ_LOW_RAM ? 4096 : 16384)
 // Largest free block a request send needs: the TLS record plus overhead.
 #define REQ_TLS_BLOCK   (CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN + 512)
 
@@ -1143,7 +1155,7 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
     int32_t queued = s_req_queued_bytes;
     if (!noise_tx_has_dma_headroom_reclaiming(queued > 0 ? (size_t)queued : 0)
         || !noise_tx_has_contiguous_dma_headroom()) return true;
-    if (SMALL_CONTROL_SESSION
+    if (REQ_LOW_RAM
         && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < REQ_TLS_BLOCK) return true;
     req_op op;
     if (!req_take(&op)) return true;
@@ -1210,7 +1222,7 @@ static void req_init(void) {
 static void req_init(void) {}
 static void req_end_all(void) {}
 static bool req_on_frame(const DecodedServiceFrame &) { return false; }
-#endif  // CONFIG_MUSE_ENABLED
+#endif  // CONFIG_HOMEHUB_DAEMON_REQUESTS
 
 // ---- Agent identity ----------------------------------------------------------
 
@@ -1308,6 +1320,24 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
+#if CONFIG_HOMEHUB_DISPLAY_COMMANDS
+// The optional `row` of display.draw_url and display.draw_file.
+static cJSON *row_params(void) {
+    cJSON *optional = cJSON_CreateObject();
+    cJSON *top_param = cJSON_CreateObject();
+    cJSON_AddStringToObject(top_param, "type", "integer");
+    cJSON_AddStringToObject(top_param, "description",
+#if CONFIG_HOMEHUB_LED_BACKEND_MUSE
+                            "Row to draw the top of the image at; by default a JPEG "
+                            "is centred down the screen and raw data starts at 0.");
+#else
+                            "Row to draw the top of the image at; default 0.");
+#endif
+    cJSON_AddItemToObject(optional, "row", top_param);
+    return optional;
+}
+#endif
+
 static void add_command(cJSON *commands, const char *name,
                         const char *description,
                         cJSON *required, cJSON *optional) {
@@ -1379,7 +1409,7 @@ static char *build_register_json(void) {
         // and, for e-paper, the exact inks.
         int bits = led_status_display_bits();
         bool mono = bits == 1;
-        bool epaper = bits == 1 || bits == 4;
+        bool epaper = bits == 1 || bits == 2 || bits == 4;
         char desc[1536];
         snprintf(desc, sizeof(desc),
                  "Download an image and draw it on the %dx%d %s. Takes a "
@@ -1400,7 +1430,8 @@ static char *build_register_json(void) {
                  mono ? "black and white e-paper screen, 1 bit per pixel"
                  : bits == 4 ? "six-colour e-paper screen (E Ink Spectra 6), "
                                "4 bits per pixel"
-                             : "colour screen, 16 bits per pixel (RGB565)",
+                             : bits == 2 ? "four-level grayscale e-paper screen, 2 bits per pixel"
+                                         : "colour screen, 16 bits per pixel (RGB565)",
                  disp_w * 2,
                  mono ? " The screen has no gray or colour: the device "
                         "dithers them to black and white dots, so photos "
@@ -1422,7 +1453,11 @@ static char *build_register_json(void) {
                                "screen rather than several parts, at most "
                                "about once a minute. The image stays on "
                                "screen without power."
-                             : ""
+                             : bits == 2 ? " Images are quantized to four gray levels. "
+                                           "The panel refreshes the whole image at once and retains "
+                                           "it without power; send one whole screen rather than "
+                                           "several parts."
+                                         : ""
 #if !CONFIG_HOMEHUB_LED_BACKEND_MUSE
                  , epaper ? "status screen" : "animation"
 #endif
@@ -1430,22 +1465,27 @@ static char *build_register_json(void) {
         cJSON *url_required = cJSON_CreateObject();
         cJSON_AddItemToObject(url_required, "url",
                               string_param("http:// or https:// URL of the image."));
-        cJSON *url_optional = cJSON_CreateObject();
-        cJSON *top_param = cJSON_CreateObject();
-        cJSON_AddStringToObject(top_param, "type", "integer");
-        cJSON_AddStringToObject(top_param, "description",
-#if CONFIG_HOMEHUB_LED_BACKEND_MUSE
-                                "Row to draw the top of the image at; by default a JPEG "
-                                "is centred down the screen and raw data starts at 0.");
-#else
-                                "Row to draw the top of the image at; default 0.");
-#endif
-        cJSON_AddItemToObject(url_optional, "row", top_param);
-        add_command(commands, "display.draw_url", desc, url_required, url_optional);
+        add_command(commands, "display.draw_url", desc, url_required, row_params());
         // The six-colour e-paper may first finish a status screen refresh,
         // then takes as long again for the image.
         cJSON_AddNumberToObject(
             cJSON_GetObjectItem(commands, "display.draw_url"), "timeout_ms",
+            bits == 4 ? 120000 : 60000);
+        cJSON *path_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(path_required, "path",
+                              string_param("Path of the image file on this VM, relative, "
+                                           "as the VM's file API takes it, e.g. "
+                                           "workspace/picture.jpg."));
+        add_command(commands, "display.draw_file",
+                    "Draw an image file from this VM on the screen. The same as "
+                    "display.draw_url, with the same image formats and screen, "
+                    "but takes a path on the VM instead of a URL: the device "
+                    "reads the file over its connection to the VM, so the file "
+                    "need not be on the internet. Replies when the image is "
+                    "drawn.",
+                    path_required, row_params());
+        cJSON_AddNumberToObject(
+            cJSON_GetObjectItem(commands, "display.draw_file"), "timeout_ms",
             bits == 4 ? 120000 : 60000);
         add_command(commands, "display.show_animation",
                     epaper ? "Clear the image and bring back the status screen "
@@ -2010,7 +2050,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     if (!rx_buf) rx_buf = static_cast<uint8_t *>(malloc(WS_RX_BUF_SIZE));
 
     // Crypto/framing scratch. PSRAM-preferred (with a heap fallback) so the
-    // 12 KB buffers don't land in internal SRAM — anything under
+    // buffers don't land in internal SRAM — anything under
     // CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL would otherwise be served from the
     // scarce internal pool that WiFi/TLS/lwIP also need.
     svc_scratch = static_cast<uint8_t *>(
@@ -2177,7 +2217,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 auto &frame = inbound.frame;
                 bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
                 if (req_on_frame(frame)) {
-                    // One of Muse's extra requests.
+                    // One of the extra daemon requests.
                 } else if (frame.stream_id == IDENTITY_STREAM_ID) {
                     identity_on_frame(identity, frame);
                 } else if (frame.kind == ServiceFrameKind::BodyChunk) {
@@ -2301,7 +2341,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
             }
         }
 
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
         {
             bool sent = false;
             if (!req_pump_tx(tls, session, svc_scratch, env_scratch, ws_buf, &sent)) {
@@ -2549,7 +2589,7 @@ extern "C" void noise_ctrl_send_command_result(
     queue_result(session_generation, request_id, result);
 }
 
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
 extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
                                        const char *const *headers, bool end_body,
                                        noise_ctrl_req_cb cb, void *ctx) {
@@ -2612,4 +2652,12 @@ extern "C" void noise_ctrl_req_cancel(int64_t id) {
     req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr};
     req_put(op, pdMS_TO_TICKS(100));
 }
-#endif  // CONFIG_MUSE_ENABLED
+
+// What a reply frame leaves for its body in SVC_FRAME_SCRATCH, after the
+// framing and the response head (status and headers).
+#define REQ_FRAME_OVERHEAD 2048
+
+extern "C" size_t noise_ctrl_req_max_body(void) {
+    return SVC_FRAME_SCRATCH - REQ_FRAME_OVERHEAD;
+}
+#endif  // CONFIG_HOMEHUB_DAEMON_REQUESTS
