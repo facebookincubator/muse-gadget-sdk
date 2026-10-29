@@ -172,6 +172,7 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
                     if "now_us" in m: anchors.append((m["now_us"] / 1e6, at))
                     break
             if ack and ack.get("type") == "error":
+                armed = False  # Refused: never abort a run this tool did not start.
                 raise ValueError(f"USB sweep did not arm: {ack.get('message')} ({ack.get('error')})")
             if not ack or ack.get("type") != "arm_ack" or not ack.get("usb_powered") or not anchors:
                 raise ValueError("USB sweep did not arm")

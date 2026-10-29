@@ -141,7 +141,7 @@ class CollectorCleanupTest(unittest.TestCase):
             self.assertEqual(code, 1)
             saved = json.loads(output.read_text().splitlines()[0])
             self.assertIn("did not arm: already_active (259)", saved["results_error"])
-            console.send.assert_any_call("ptest.abort")
+            self.assertNotIn(call("ptest.abort"), console.send.call_args_list)  # Another host's run survives.
 
     def test_missing_meter_does_not_create_output(self):
         with tempfile.TemporaryDirectory() as tmp:
