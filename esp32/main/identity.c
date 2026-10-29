@@ -24,6 +24,8 @@
 #include "esp_log.h"
 #if CONFIG_ESP_HOSTED_ENABLED
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #endif
 
 #include "config_store.h"
@@ -55,8 +57,13 @@ static char s_sdk_token[IDENTITY_SDK_TOKEN_LEN + 1];
 void identity_init(void) {
     uint8_t mac[6] = {0};
 #if CONFIG_ESP_HOSTED_ENABLED
-    /* The STA MAC is the Wi-Fi coprocessor's: app_run() brings Wi-Fi up first. */
+    /* The STA MAC is the Wi-Fi coprocessor's: app_run() brings Wi-Fi up first.
+     * It names the device to Muse, so retry a failed call before using zeros. */
     esp_err_t err = esp_wifi_get_mac(WIFI_IF_STA, mac);
+    for (int i = 0; i < 4 && err != ESP_OK; i++) {
+        vTaskDelay(pdMS_TO_TICKS(250));
+        err = esp_wifi_get_mac(WIFI_IF_STA, mac);
+    }
 #else
     esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
 #endif
