@@ -154,7 +154,9 @@ class CollectorCleanupTest(unittest.TestCase):
     def test_sample_coverage_threshold(self):
         window = dict(start=0, end=12)
         samples = [(1 + i / 20, 10000, 5) for i in range(160)]
-        self.assertIsNotNone(tool.summarise(samples, window, 1, 20))
+        summary = tool.summarise(samples, window, 1, 20)
+        self.assertEqual((summary["expected_sample_count_estimate"], summary["coverage_ratio_estimate"],
+                          summary["missing_sample_count_estimate"]), (200, 0.8, 40))
         self.assertIsNone(tool.summarise(samples[:-1], window, 1, 20))
 
 class KernelDriverTest(unittest.TestCase):
@@ -177,3 +179,18 @@ class KernelDriverTest(unittest.TestCase):
                                     order.mock_calls.index(call.util.claim_interface(device, 0)))
                 else: device.detach_kernel_driver.assert_not_called()
                 backend.close()
+                if active and failure is None:  # Give the powerz hwmon driver its interface back.
+                    device.attach_kernel_driver.assert_called_once_with(0)
+                    self.assertLess(order.mock_calls.index(call.util.release_interface(device, 0)),
+                                    order.mock_calls.index(call.device.attach_kernel_driver(0)))
+                else: device.attach_kernel_driver.assert_not_called()
+
+    def test_reattach_when_claim_fails(self):
+        core, util, device = Mock(), Mock(), Mock()
+        core.USBError = type("USBError", (Exception,), {})
+        core.find.return_value = device
+        device.is_kernel_driver_active.return_value = True
+        util.claim_interface.side_effect = core.USBError("busy")
+        with self.assertRaises(core.USBError):
+            kb.KM003CBackend(usb_core=core, usb_util=util)
+        device.attach_kernel_driver.assert_called_once_with(0)

@@ -92,7 +92,11 @@ def summarise(samples, window, guard_s, rate_hz):
     stats = CurrentStats(4096)
     stats.add([s[1] for s in inside])
     vbus_v = sum(s[2] for s in inside) / len(inside)
-    return {**stats.summary(hi - lo, vbus_v * 1000, len(inside) / (hi - lo)), "mean_vbus_v": vbus_v,
+    # Charge integrates at the observed rate; coverage is against the requested rate.
+    expected = rate_hz * (hi - lo)
+    coverage = dict(expected_sample_count_estimate=expected, coverage_ratio_estimate=len(inside) / expected,
+                    missing_sample_count_estimate=max(0.0, expected - len(inside)))
+    return {**stats.summary(hi - lo, vbus_v * 1000, len(inside) / (hi - lo)), **coverage, "mean_vbus_v": vbus_v,
             "mean_power_mW": sum(s[1] * s[2] for s in inside) / len(inside) / 1000, "included_s": hi - lo}
 
 def ptest_lines(console, seconds):

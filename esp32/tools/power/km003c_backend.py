@@ -93,13 +93,28 @@ class KM003CBackend:
             pass  # already configured; claiming the interface is what matters
         # Linux powerz hwmon claims interface 0. Platforms without kernel
         # driver support (including macOS) can still claim the vendor interface.
+        self.detached = False
         try:
             if self.device.is_kernel_driver_active(INTERFACE):
                 self.device.detach_kernel_driver(INTERFACE)
+                self.detached = True
         except (NotImplementedError, usb_core.USBError):
             pass
-        usb_util.claim_interface(self.device, INTERFACE)
+        try:
+            usb_util.claim_interface(self.device, INTERFACE)
+        except BaseException:
+            self.reattach()
+            raise
         self.next_id = 0
+
+    def reattach(self):
+        """Give interface 0 back to the kernel driver this backend detached."""
+        if self.detached:
+            self.detached = False
+            try:
+                self.device.attach_kernel_driver(INTERFACE)
+            except Exception:
+                pass  # best effort: replugging the meter also rebinds it
 
     def read(self):
         """One reading, from the request this call sends."""
@@ -118,3 +133,4 @@ class KM003CBackend:
             self.usb_util.release_interface(self.device, INTERFACE)
         finally:
             self.usb_util.dispose_resources(self.device)
+            self.reattach()
