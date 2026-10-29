@@ -22,9 +22,11 @@ on:
 permissions:
   contents: read
 
+# PRs cancel superseded runs; main queues them so a web flasher deploy
+# always finishes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   host-tests:
@@ -54,7 +56,18 @@ jobs:
           . "$IDF_PATH/export.sh" > /dev/null
           idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
 
+      # Exercise the actual FreeInk router without a board or Arduino runtime.
+      - name: Check out pinned FreeInk host-test source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Free-Ink/freeink-sdk
+          ref: 2c047df7792cedece1191503793f18f5d8f1c695
+          path: freeink-host-source
+          persist-credentials: false
+
       - name: Run host tests
+        env:
+          FREEINK_SOURCE_DIR: ${{ github.workspace }}/freeink-host-source
         run: |
           . "$IDF_PATH/export.sh" > /dev/null
           python -m unittest discover -s tests -p 'test_*.py' -v
@@ -104,6 +117,9 @@ jobs:
           - board: devkit
             target: esp32c5
             overlays: ""
+          - board: echoear-2st
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-ostb-echoear-2st"
           - board: c6-nopsram
             target: esp32c6
             overlays: ";devices/sdkconfig.c6-nopsram"
@@ -122,6 +138,12 @@ jobs:
           - board: reterminal-e1002
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-e1002"
+          - board: reterminal-sticky
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"
+          - board: reterminal-sticky-link
+            target: esp32s3
+            overlays: ";devices/sdkconfig.reterminal-sticky-link"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"
@@ -137,9 +159,19 @@ jobs:
           - board: muse-waveshare-s3-175
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175"
+          # Video from a phone (MUSE_VIDEO=1 tools/muse/board.sh): the decoder and Wi-Fi transport.
+          - board: muse-waveshare-s3-175c-video
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-video"
+          - board: muse-waveshare-s3-185c
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-185c"
           - board: muse-waveshare-s3-lcd7
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd7"
+          - board: muse-waveshare-s3-lcd128
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd128"
           - board: muse-waveshare-s3-216
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216"
@@ -155,6 +187,9 @@ jobs:
           - board: muse-sensecap-watcher
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher"
+          - board: muse-watcher-power-test
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test"
           - board: muse-m5stack-cardputer-adv
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv"
@@ -167,6 +202,12 @@ jobs:
           - board: muse-m5stack-stopwatch
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch"
+          - board: muse-m5stack-stopwatch-video
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
+          - board: muse-seeed-xiao-s3-147
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147"
           - board: muse-m5stack-cores3
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3"
@@ -206,3 +247,72 @@ jobs:
           . "$IDF_PATH/export.sh" > /dev/null
           idf.py -B build -DIDF_TARGET="$TARGET" -DSDKCONFIG=build/sdkconfig \
             -DSDKCONFIG_DEFAULTS="$DEFAULTS" build
+
+      # Boards listed in web-flasher/boards.json also go on the web flasher.
+      - name: Package for the web flasher
+        id: package
+        env:
+          BOARD: ${{ matrix.board }}
+        run: |
+          NAME=$(python3 -c 'import json, os; print(next((b["name"] for b in json.load(open("../web-flasher/boards.json")) if b["board"] == os.environ["BOARD"]), ""))')
+          [ -n "$NAME" ] || exit 0
+          python3 ../web-flasher/make_manifest.py build "out/$BOARD" \
+            "Muse Gadget ($NAME)" "$(cat version.txt)+${GITHUB_SHA::7}"
+          echo "listed=true" >> "$GITHUB_OUTPUT"
+
+      - if: steps.package.outputs.listed
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-${{ matrix.board }}
+          path: esp32/out/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The web flasher: a page on GitHub Pages that flashes the boards in
+  # web-flasher/boards.json from Chrome or Edge over Web Serial (ESP Web Tools).
+  # PRs assemble it to check it; pushes to main deploy it.
+  web-flasher:
+    name: Assemble web flasher
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: firmware-*
+          path: site/firmware
+          merge-multiple: true
+
+      # A listed board that the build matrix doesn't build has no manifest.
+      - name: Add page
+        run: |
+          for board in $(jq -r '.[].board' web-flasher/boards.json); do
+            [ -f "site/firmware/$board/manifest.json" ] || {
+              echo "::error::$board is in web-flasher/boards.json but not in the build matrix"
+              exit 1
+            }
+          done
+          cp web-flasher/index.html web-flasher/*.js web-flasher/boards.json site/
+          echo "{\"commit\": \"$GITHUB_SHA\"}" > site/build.json
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy-web-flasher:
+    name: Deploy web flasher
+    needs: web-flasher
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
