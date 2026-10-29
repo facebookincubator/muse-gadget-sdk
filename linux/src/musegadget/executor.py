@@ -128,10 +128,17 @@ def error(message: str) -> dict:
 
 
 class Executor:
-    def __init__(self, account: Account) -> None:
+    def __init__(self, account: Account, guard=None) -> None:
         self.account = account
+        # Optional command guard (see examples/command_guard). None, the
+        # default, preserves the original behaviour exactly.
+        self.guard = guard
 
     def run(self, command: str, params: dict, timeout_ms: int | None = None) -> dict:
+        if self.guard is not None:
+            decision = self.guard.check(command, params)
+            if decision.action != "allow":
+                return error(f"guard: {decision.action}: {decision.reason}")
         try:
             if command == "system.run":
                 return self.system_run(params, timeout_ms)

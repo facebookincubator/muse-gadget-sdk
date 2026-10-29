@@ -72,8 +72,34 @@ def cmd_run(args: argparse.Namespace) -> int:
         log.warning("running without an SDK token: %s", exc)
         sdk_token = None
     log.info("musegadget %s: commands run as %s", __version__, account.name)
-    run_service(identity.load_or_create(), Executor(account), sdk_token)
+    run_service(identity.load_or_create(), Executor(account, guard=_build_guard(account)), sdk_token)
     return 0
+
+
+def _build_guard(account):
+    """The opt-in command guard (examples/command_guard), or None.
+
+    Only built when MUSEGADGET_GUARD=1. If the guard is requested but the
+    example package cannot be imported, fail closed: raise, so the service
+    does not start unguarded by accident.
+    """
+    if os.environ.get("MUSEGADGET_GUARD") != "1":
+        return None
+    import sys
+    from pathlib import Path
+
+    examples = Path(__file__).resolve().parents[2] / "examples"
+    if examples.is_dir() and str(examples) not in sys.path:
+        sys.path.insert(0, str(examples))
+    try:
+        from command_guard import build_guard
+    except ImportError as exc:
+        raise RuntimeError(
+            "MUSEGADGET_GUARD=1 but the command_guard example package is not "
+            f"importable ({exc}); refusing to run unguarded"
+        ) from exc
+    log.info("command guard enabled")
+    return build_guard(home=account.home)
 
 
 def cmd_send_user_msg(args: argparse.Namespace) -> int:
