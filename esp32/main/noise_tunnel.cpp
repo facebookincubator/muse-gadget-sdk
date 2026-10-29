@@ -175,7 +175,7 @@ static bool s_rx_since_open = false;
 static uint32_t s_outage_reopens = 0;
 static uint64_t s_outage_dma_wait_us = 0;
 static uint64_t s_reopen_gated_since_us = 0;
-static char s_outage_last_failure[48] = "";
+static char s_outage_last_failure[TUNNEL_FAILURE_MAX] = "";
 
 // `why` is null when the session ended; its session_down event says why.
 static void note_tunnel_down(const char *why) {
@@ -527,7 +527,7 @@ extern "C" void noise_tunnel_tick(const noise_tunnel_emit_t *emit) {
                             && now - s_unanswered_ping_us >= TUN_PING_ANSWER_US
                             ? s_unanswered_ping_us : 0;
         s_unanswered_ping_us = 0;
-        char why[48];
+        char why[TUNNEL_FAILURE_MAX];
         snprintf(why, sizeof(why), "keepalive timeout, last ping %us ago",
                  (unsigned)((now - s_last_ping_us) / 1000000));
         note_tunnel_down(why);

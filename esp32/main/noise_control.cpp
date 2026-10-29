@@ -27,6 +27,7 @@
 #include "fast_gcm.h"
 #endif
 
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -273,6 +274,23 @@ static void store_wifi_ssid(const char *ssid) {
     size_t len = strnlen(ssid, sizeof(s_wifi_ssid) - 1);
     memcpy(s_wifi_ssid, ssid, len);
     s_wifi_ssid[len] = '\0';
+}
+
+// Longest server Reset reason kept. Enough for every noise-transport reason
+// ("chunk for stream with completed body" is 36) while leaving the
+// "server reset stream, code=N: " prefix room in a TUNNEL_FAILURE_MAX detail.
+static constexpr size_t RESET_REASON_MAX = 40;
+
+// Copy a Reset reason off the wire for logs and the connectivity history:
+// printable ASCII only (anything else becomes '?'), cut at RESET_REASON_MAX.
+static void copy_reset_reason(StringView reason, char *out, size_t out_len) {
+    if (!out || out_len == 0) return;
+    size_t len = std::min(reason.size(), out_len - 1);
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)reason[i];
+        out[i] = (c >= 0x20 && c <= 0x7e) ? (char)c : '?';
+    }
+    out[len] = '\0';
 }
 
 static constexpr int64_t WS_FRAME_TIMEOUT_US = 15000000;
@@ -2406,12 +2424,16 @@ static session_result_t run_session(stack_monitor_t *stack) {
                         if (is_tunnel) {
                             // Tunnel stream reset is non-fatal for the control
                             // session; drop the tunnel and keep control alive.
-                            // Code only: reason text is bytes off the wire.
-                            ESP_LOGW(TAG, "server reset tunnel stream: code=%d",
-                                     (int)frame.reset.code);
-                            char why[48];
-                            snprintf(why, sizeof(why), "server reset stream, code=%d",
-                                     (int)frame.reset.code);
+                            // The reason is bytes off the wire: printable ASCII
+                            // only, capped. The code alone doesn't say which of
+                            // the server's ProtocolError cases this was.
+                            char reason[RESET_REASON_MAX + 1];
+                            copy_reset_reason(frame.reset.reason, reason, sizeof(reason));
+                            ESP_LOGW(TAG, "server reset tunnel stream: code=%d reason=\"%s\"",
+                                     (int)frame.reset.code, reason);
+                            char why[TUNNEL_FAILURE_MAX];
+                            snprintf(why, sizeof(why), "server reset stream, code=%d%s%s",
+                                     (int)frame.reset.code, reason[0] ? ": " : "", reason);
                             noise_tunnel_on_server_drop(why);
                         } else {
                             ESP_LOGW(TAG, "server reset stream %lld",
@@ -2427,7 +2449,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                             if (is_tunnel) {
                                 ESP_LOGW(TAG, "server rejected /link-tunnel: %d",
                                          frame.response.status);
-                                char why[48];
+                                char why[TUNNEL_FAILURE_MAX];
                                 snprintf(why, sizeof(why), "server rejected open: %d",
                                          (int)frame.response.status);
                                 noise_tunnel_on_server_drop(why);

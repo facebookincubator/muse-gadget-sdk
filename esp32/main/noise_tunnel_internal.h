@@ -119,6 +119,10 @@ bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit);
 // Session torn down: mark the tunnel down and forget the emit context.
 void noise_tunnel_on_session_down(void);
 
+// Longest failure description noise_tunnel_on_server_drop() keeps, NUL
+// included; a longer `why` is cut.
+#define TUNNEL_FAILURE_MAX 72
+
 // The server reset the tunnel stream or refused POST /link-tunnel: mark the
 // tunnel down (control stays up) and record `why` in the connectivity history.
 void noise_tunnel_on_server_drop(const char *why);
