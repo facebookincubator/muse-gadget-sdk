@@ -2031,66 +2031,143 @@ static void reconnect_delay(uint32_t delay_ms) {
 
 // ---- Session loop -----------------------------------------------------------
 
+// A /link-control message cut across BodyChunks, held for its session until
+// the rest arrives. Bytes of one message held at most: one longer is skipped
+// whole (logged), so the stream stays in step.
+static constexpr uint32_t kCtrlRxMaxHeld = 32 * 1024;
+static struct {
+    noise_ctrl_session_generation_t generation;
+    uint8_t head[4];       // a length prefix cut short
+    size_t head_len;
+    uint8_t *body;         // a message cut short: body_have of body_len bytes
+    uint32_t body_len, body_have;
+    uint32_t skip;         // bytes left of a message too long to hold
+} s_ctrl_rx;
+
+// The session ended: free a message it left cut short.
+static void drop_held_control_message(void) {
+    free(s_ctrl_rx.body);
+    s_ctrl_rx = {};
+}
+
 // Process one inbound RX body-chunk message from the server. The Noise layer
 // gives us reassembled service frames; inside is a stream-1 BodyChunk whose
-// data is one or more u32-LE prefixed JSON messages.
+// data carries u32-LE prefixed JSON messages. The stream is bytes: a message
+// may start in one BodyChunk and end in a later one (the Linux client buffers
+// it the same way), so a partial one waits for the rest, for this session
+// only.
 static void process_inbound_body_chunk(
     ConstByteSpan data,
     noise_ctrl_session_generation_t session_generation) {
+    auto &rx = s_ctrl_rx;
+    if (rx.generation != session_generation) {
+        drop_held_control_message();
+        rx.generation = session_generation;
+    }
+    auto handle = [&](const uint8_t *p, uint32_t msg_len) {
+        // Detect the link.register reply (id matches our request) so the
+        // caller can open the tunnel stream only once the server has
+        // recorded this connection's device registration.
+        if (!s_register_acked && s_register_req_id[0]) {
+            cJSON *msg = cJSON_ParseWithLength(
+                reinterpret_cast<const char *>(p), msg_len);
+            if (msg) {
+                cJSON *id = cJSON_GetObjectItem(msg, "id");
+                if (cJSON_IsString(id) && id->valuestring
+                    && strcmp(id->valuestring, s_register_req_id) == 0) {
+                    cJSON *failure = cJSON_GetObjectItem(msg, "error");
+                    if (failure && !cJSON_IsNull(failure) && !cJSON_IsFalse(failure)) {
+                        // Not registered, so the server would refuse the
+                        // tunnel and the Muse can't invoke this device.
+                        cJSON *reason = cJSON_IsObject(failure)
+                            ? cJSON_GetObjectItem(failure, "message") : failure;
+                        ESP_LOGE(TAG, "link.register rejected: %s",
+                                 cJSON_IsString(reason) && reason->valuestring
+                                     ? reason->valuestring : "no reason given");
+                    } else {
+                        s_register_acked = true;
+                        ESP_LOGI(TAG, "link.register acked; tunnel may open");
+                        cJSON *type = cJSON_GetObjectItem(msg, "type");
+                        cJSON *reply = cJSON_GetObjectItem(msg, "result");
+                        cJSON *status = cJSON_GetObjectItem(reply, "status");
+                        s_heartbeat_registered = cJSON_IsString(type)
+                            && strcmp(type->valuestring, "res") == 0
+                            && cJSON_IsString(status)
+                            && strcmp(status->valuestring, "registered") == 0
+                            && !failure;
+                    }
+                }
+                cJSON_Delete(msg);
+            }
+        }
+        handle_invoke_request(reinterpret_cast<const char *>(p), msg_len,
+                              session_generation);
+    };
+    // A message of msg_len bytes whose first bytes come next: held, or
+    // skipped if it can't be.
+    auto start_partial = [&](uint32_t msg_len) {
+        rx.body = msg_len <= kCtrlRxMaxHeld ? static_cast<uint8_t *>(malloc(msg_len)) : nullptr;
+        if (!rx.body) {
+            ESP_LOGW(TAG, "inbound control message of %u bytes too long to hold; skipping it",
+                     (unsigned)msg_len);
+            rx.skip = msg_len;
+            return;
+        }
+        rx.body_len = msg_len;
+        rx.body_have = 0;
+    };
     const uint8_t *p = data.data();
     size_t remaining = data.size();
 
-    while (remaining >= 4) {
-        uint32_t msg_len = static_cast<uint32_t>(p[0])
-                         | (static_cast<uint32_t>(p[1]) << 8)
-                         | (static_cast<uint32_t>(p[2]) << 16)
-                         | (static_cast<uint32_t>(p[3]) << 24);
-        p += 4;
-        remaining -= 4;
-        if (msg_len > remaining) {
-            ESP_LOGW(TAG, "truncated inbound message: want %u, have %u",
-                     (unsigned)msg_len, (unsigned)remaining);
-            break;
+    while (remaining > 0) {
+        if (rx.skip) {
+            size_t n = remaining < rx.skip ? remaining : rx.skip;
+            rx.skip -= static_cast<uint32_t>(n);
+            p += n;
+            remaining -= n;
+            continue;
         }
-        if (msg_len > 0) {
-            // Detect the link.register reply (id matches our request) so the
-            // caller can open the tunnel stream only once the server has
-            // recorded this connection's device registration.
-            if (!s_register_acked && s_register_req_id[0]) {
-                cJSON *msg = cJSON_ParseWithLength(
-                    reinterpret_cast<const char *>(p), msg_len);
-                if (msg) {
-                    cJSON *id = cJSON_GetObjectItem(msg, "id");
-                    if (cJSON_IsString(id) && id->valuestring
-                        && strcmp(id->valuestring, s_register_req_id) == 0) {
-                        cJSON *failure = cJSON_GetObjectItem(msg, "error");
-                        if (failure && !cJSON_IsNull(failure) && !cJSON_IsFalse(failure)) {
-                            // Not registered, so the server would refuse the
-                            // tunnel and the Muse can't invoke this device.
-                            cJSON *reason = cJSON_IsObject(failure)
-                                ? cJSON_GetObjectItem(failure, "message") : failure;
-                            ESP_LOGE(TAG, "link.register rejected: %s",
-                                     cJSON_IsString(reason) && reason->valuestring
-                                         ? reason->valuestring : "no reason given");
-                        } else {
-                            s_register_acked = true;
-                            ESP_LOGI(TAG, "link.register acked; tunnel may open");
-                            cJSON *type = cJSON_GetObjectItem(msg, "type");
-                            cJSON *reply = cJSON_GetObjectItem(msg, "result");
-                            cJSON *status = cJSON_GetObjectItem(reply, "status");
-                            s_heartbeat_registered = cJSON_IsString(type)
-                                && strcmp(type->valuestring, "res") == 0
-                                && cJSON_IsString(status)
-                                && strcmp(status->valuestring, "registered") == 0
-                                && !failure;
-                        }
-                    }
-                    cJSON_Delete(msg);
-                }
+        if (rx.body) {
+            size_t n = rx.body_len - rx.body_have;
+            if (n > remaining) n = remaining;
+            memcpy(rx.body + rx.body_have, p, n);
+            rx.body_have += static_cast<uint32_t>(n);
+            p += n;
+            remaining -= n;
+            if (rx.body_have == rx.body_len) {
+                handle(rx.body, rx.body_len);
+                free(rx.body);
+                rx.body = nullptr;
             }
-            handle_invoke_request(reinterpret_cast<const char *>(p), msg_len,
-                                  session_generation);
+            continue;
         }
+        uint32_t msg_len;
+        if (rx.head_len || remaining < 4) {
+            size_t n = 4 - rx.head_len;
+            if (n > remaining) n = remaining;
+            memcpy(rx.head + rx.head_len, p, n);
+            rx.head_len += n;
+            p += n;
+            remaining -= n;
+            if (rx.head_len < 4) break;
+            rx.head_len = 0;
+            msg_len = static_cast<uint32_t>(rx.head[0])
+                    | (static_cast<uint32_t>(rx.head[1]) << 8)
+                    | (static_cast<uint32_t>(rx.head[2]) << 16)
+                    | (static_cast<uint32_t>(rx.head[3]) << 24);
+        } else {
+            msg_len = static_cast<uint32_t>(p[0])
+                    | (static_cast<uint32_t>(p[1]) << 8)
+                    | (static_cast<uint32_t>(p[2]) << 16)
+                    | (static_cast<uint32_t>(p[3]) << 24);
+            p += 4;
+            remaining -= 4;
+        }
+        if (msg_len > remaining) {
+            start_partial(msg_len);
+            continue;
+        }
+        if (msg_len > 0) handle(p, msg_len);
         p += msg_len;
         remaining -= msg_len;
     }
@@ -2773,6 +2850,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
 
 cleanup:
     clear_pending_json_body(control_tx);
+    drop_held_control_message();
     free(ws_buf);
     free(identity.body);
     free(rx_buf);
