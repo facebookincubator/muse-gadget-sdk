@@ -34,7 +34,7 @@ import time
 from dataclasses import dataclass, field
 
 from musegadget import __version__, config, muse_api
-from musegadget.executor import COMMAND_SPECS, Executor
+from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import MAX_CONCURRENT_INVOKES, DeviceDescription, LinkSession, Outcome
 
@@ -137,7 +137,8 @@ class Service:
             node_id=self.identity.node_id,
             display_name=self.display_name,
             version=__version__,
-            commands=COMMAND_SPECS,
+            commands=self.executor.specs(node_id=self.identity.node_id,
+                                         display_name=self.display_name, version=__version__),
         )
 
     def run_command(self, name: str, params: dict, timeout_ms: int | None = None) -> dict:
