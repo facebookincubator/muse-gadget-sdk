@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import builtins
 import json
+import os
 import socket
 import tempfile
 import threading
@@ -103,6 +104,15 @@ def test_non_image_is_refused_before_it_is_read(tmp_path, monkeypatch, capsys, s
     refuse_to_open(monkeypatch, path)
     assert cli.main(["send-user-msg", "--image", str(path), "hi"]) == 1
     assert capsys.readouterr().err == f"{name} is not a JPEG, PNG, GIF or WebP image\n"
+    assert service == []
+
+
+def test_fifo_is_refused_instead_of_waiting_for_a_writer(tmp_path, monkeypatch, capsys, service):
+    fifo = tmp_path / "camera.jpg"
+    os.mkfifo(fifo)
+    refuse_to_open(monkeypatch, fifo)
+    assert cli.main(["send-user-msg", "--image", str(fifo), "hi"]) == 1
+    assert capsys.readouterr().err == "camera.jpg is not a regular file\n"
     assert service == []
 
 

@@ -143,6 +143,7 @@ def test_local_request_over_the_line_limit_gets_a_json_error():
 
     run_with_socket(check)
 
+
 def test_local_message_fails_cleanly_when_not_connected():
     async def check(service, path):
         reply = await ask(path, b'{"message": "hi"}\n')

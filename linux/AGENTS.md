@@ -165,7 +165,7 @@ never has a command's parameters, output or error message.
   `chat_id` is not an API field and is ignored. The response is only the ack
   (`message_id`); the reply appears in the Muse chat. Replies are text: to
   speak them, use a text-to-speech API of your choice.
-- The VM accepts at most 256 KB per message from the device, so command output
+- The VM accepts at most 256 KB per `/link-control` message, so command output
   is cut at 96 KB per stream.
 
 ## Realtime voice

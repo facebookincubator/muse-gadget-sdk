@@ -85,6 +85,7 @@ _IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"
 def _read_image(path: str) -> dict | None:
     """Check a picture's type and size before reading it; print why not."""
     import base64
+    import stat
 
     from musegadget.link_client import MAX_IMAGE_BYTES
 
@@ -95,9 +96,12 @@ def _read_image(path: str) -> dict | None:
         return None
     too_big = f"images must be 2 MiB ({MAX_IMAGE_BYTES:,} bytes) or less"
     try:
-        size = os.stat(path).st_size
-        if size > MAX_IMAGE_BYTES:
-            print(f"{name} is {size:,} bytes; {too_big}", file=sys.stderr)
+        info = os.stat(path)
+        if not stat.S_ISREG(info.st_mode):
+            print(f"{name} is not a regular file", file=sys.stderr)
+            return None
+        if info.st_size > MAX_IMAGE_BYTES:
+            print(f"{name} is {info.st_size:,} bytes; {too_big}", file=sys.stderr)
             return None
         with open(path, "rb") as f:
             data = f.read(MAX_IMAGE_BYTES + 1)
@@ -107,7 +111,7 @@ def _read_image(path: str) -> dict | None:
     if not data:
         print(f"{name} is empty", file=sys.stderr)
         return None
-    if len(data) > MAX_IMAGE_BYTES:  # it grew, or it isn't a regular file
+    if len(data) > MAX_IMAGE_BYTES:  # it grew after the check
         print(f"{name} is over the limit; {too_big}", file=sys.stderr)
         return None
     return {"filename": name, "mime_type": mime_type,

@@ -841,7 +841,7 @@ class HttpStreamError(ConnectionError):
 
 
 class RequestRejected(ConnectionError):
-    """Muse refused a ``send_chat`` or ``send_voice`` request."""
+    """Muse refused a ``send_chat``, ``send_voice`` or ``send_image`` request."""
 
     def __init__(self, status: int | None) -> None:
         super().__init__(f"Muse rejected conversation request: HTTP {status}")
@@ -849,7 +849,7 @@ class RequestRejected(ConnectionError):
 
 
 def acknowledgement(result: dict) -> dict:
-    """Muse's acknowledgement in a ``send_chat`` or ``send_voice`` result.
+    """Muse's acknowledgement in a ``send_chat``, ``send_voice`` or ``send_image`` result.
 
     Raises :class:`RequestRejected` when Muse refused the request, and
     ``ValueError`` when it accepted it without an acknowledgement.
