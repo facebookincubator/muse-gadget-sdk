@@ -24,8 +24,8 @@ import wave
 import pytest
 
 from musegadget.link_client import (
-    DeviceDescription, HttpStreamError, LinkSession, MessageDecoder, Outcome, RequestRejected, SideChat,
-    acknowledgement, describe_result, encode_message, noise_url, printable,
+    DeviceDescription, HttpStreamError, LinkSession, MAX_CONCURRENT_INVOKES, MessageDecoder, Outcome,
+    RequestRejected, SideChat, acknowledgement, describe_result, encode_message, noise_url, printable,
 )
 from musegadget.noise import (
     ApplicationResponse, BodyChunk, Header, NoiseFrameDecoder, NoiseXXResponder, ServiceFrame,
@@ -241,6 +241,90 @@ def test_send_chat_posts_a_device_attributed_message_on_the_same_session():
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("fill_budget", [False, True])
+def test_drop_in_command_is_registered_and_runs_over_the_session(tmp_path, fill_budget):
+    import sys
+
+    from musegadget import commands
+    from musegadget.executor import Account, Executor
+
+    program = tmp_path / "pump.py"
+    program.write_text(
+        "import json, sys\n"
+        "print(json.dumps({'pump': 'on' if json.load(sys.stdin)['on'] else 'off'}))\n")
+    (tmp_path / "pump.set.json").write_text(json.dumps({
+        "description": "Switch the garden pump.",
+        "exec": [sys.executable, str(program)],
+        "required": {"on": {"type": "boolean", "description": "true for on."}},
+    }))
+    if fill_budget:
+        for i in range(4):
+            (tmp_path / f"custom.a{i}.json").write_text(json.dumps({
+                "description": "x" * 60000, "exec": ["/bin/true"]}))
+        (tmp_path / "zzz.large.json").write_text(json.dumps({
+            "description": "界" * 21000, "exec": ["/bin/true"]}, ensure_ascii=False))
+    (tmp_path / "aaa.bad.json").write_text(json.dumps({
+        "description": "bad", "exec": ["/bin/true"],
+        "required": {"x": {"type": ["string"], "description": "d"}}}))
+    current = Account.current()
+    executor = Executor(Account(current.name, current.uid, current.gid, str(tmp_path)),
+                        commands.load(tmp_path))
+
+    async def scenario():
+        to_device, to_vm = asyncio.Queue(), asyncio.Queue()
+        device_ws, vm_ws = Pipe(to_device, to_vm), Pipe(to_vm, to_device)
+
+        async def connect(url, headers):
+            return device_ws
+
+        session = LinkSession(
+            noise_host="gw.example", vm_id="vm", vm_auth_token="tok",
+            device=DeviceDescription(node_id="homelink-abcdef", display_name="pi",
+                                     version="0.1.0", commands=executor.specs(
+                                         node_id="homelink-abcdef", display_name="pi", version="0.1.0")),
+            run_command=executor.run, connect=connect,
+        )
+        vm = FakeVm(vm_ws)
+        task = asyncio.ensure_future(session.run(asyncio.Event()))
+        await vm.handshake()
+        await vm.accept_control_stream()
+
+        register = await vm.next_message()
+        spec = register["params"]["commands_v2"]["pump.set"]
+        assert spec["description"] == "Switch the garden pump."
+        assert "exec" not in spec
+        assert "system.run" in register["params"]["commands_v2"]
+        from musegadget.link_client import MAX_CONTROL_MESSAGE_BYTES
+        assert len(encode_message(register)) <= MAX_CONTROL_MESSAGE_BYTES
+        assert "aaa.bad" not in register["params"]["commands_v2"]
+        if fill_budget:
+            assert "zzz.large" not in register["params"]["commands_v2"]
+            assert len(register["params"]["commands_v2"]) == 9
+        await vm.send_message({"type": "res", "id": register["id"], "ok": True})
+
+        await vm.send_message({"method": "link.invoke", "id": "inv-1", "command": "pump.set",
+                               "params": {"on": True}, "timeout_ms": spec["timeout_ms"]})
+        assert await asyncio.wait_for(vm.next_message(), 10) == {
+            "method": "link.result", "id": "inv-1", "ok": True, "payload": {"pump": "on"}}
+
+        await vm.send_message({"method": "link.invoke", "id": "inv-2", "command": "pump.set",
+                               "params": {}})
+        assert await asyncio.wait_for(vm.next_message(), 10) == {
+            "method": "link.result", "id": "inv-2", "ok": False, "error": "on is required"}
+
+        if fill_budget:
+            await vm.send_message({"method": "link.invoke", "id": "inv-skipped",
+                                   "command": "zzz.large", "params": {}})
+            assert await asyncio.wait_for(vm.next_message(), 2) == {
+                "method": "link.result", "id": "inv-skipped", "ok": False,
+                "error": "unsupported command: zzz.large"}
+
+        await vm.send_message({"type": "evt", "event": "link.unpaired"})
+        assert await asyncio.wait_for(task, 2) is Outcome.UNPAIRED
+
+    asyncio.run(scenario())
+
+
 def test_each_invoke_logs_how_it_ended_but_not_what_it_ran(caplog):
     async def scenario():
         results = iter([
@@ -282,6 +366,136 @@ def test_describe_result(result, described):
 def test_printable_replaces_control_characters():
     assert printable("system.run") == "system.run"
     assert printable("a\nb\x1b[2Jc") == "a?b?[2Jc"
+
+
+@pytest.mark.parametrize("command", [42, ["system.run"], {"name": "system.run"}])
+def test_non_string_invocation_gets_correlated_failure(command):
+    asyncio.run(_failed_invoke_then_healthy(command, "invalid-command"))
+
+
+@pytest.mark.parametrize("failure", ["raise", "invalid-result", "unserializable-result"])
+def test_callback_failure_gets_correlated_result_and_session_stays_usable(failure, caplog):
+    caplog.set_level("INFO", logger="musegadget.link_client")
+    asyncio.run(_failed_invoke_then_healthy("fixture.fail", failure))
+    expected = {"raise": "RuntimeError", "invalid-result": "AttributeError",
+                "unserializable-result": "TypeError"}[failure]
+    assert f"fixture.fail failed ({expected})" in caplog.text
+    assert "secret callback details" not in caplog.text
+    assert "secret parameter" not in caplog.text
+
+
+async def _failed_invoke_then_healthy(command, failure):
+    calls = []
+    unhandled = []
+
+    def run_command(name, params, timeout):
+        calls.append(name)
+        if name == "fixture.fail":
+            if failure == "raise":
+                raise RuntimeError("secret callback details")
+            if failure == "unserializable-result":
+                return {"ok": True, "payload": b"secret callback details"}
+            return None
+        return {"ok": True}
+
+    session, vm = make_session(run_command, [])
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda loop, context: unhandled.append(context))
+    task = asyncio.ensure_future(session.run(asyncio.Event()))
+    try:
+        await vm.handshake()
+        await vm.accept_control_stream()
+        await vm.next_message()
+        await vm.send_message({"method": "link.invoke", "id": "failed-id", "command": command,
+                               "params": {"value": "secret parameter"}})
+        result = await asyncio.wait_for(vm.next_message(), 2)
+        assert result == {"method": "link.result", "id": "failed-id", "ok": False,
+                          "error": "command must be a string" if failure == "invalid-command"
+                          else "command failed"}
+        if failure == "invalid-command":
+            assert calls == []
+        await vm.send_message({"method": "link.invoke", "id": "healthy-id",
+                               "command": "fixture.ok"})
+        assert await asyncio.wait_for(vm.next_message(), 2) == {
+            "method": "link.result", "id": "healthy-id", "ok": True}
+        await vm.send_message({"event": "link.unpaired"})
+        assert await asyncio.wait_for(task, 2) is Outcome.UNPAIRED
+        assert not unhandled
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        loop.set_exception_handler(previous)
+
+
+def test_invocation_transport_failure_propagates():
+    async def scenario():
+        session, _ = make_session(lambda *args: {"ok": True}, [])
+
+        async def fail_send(message):
+            raise ConnectionError("transport closed")
+
+        session.send = fail_send
+        with pytest.raises(ConnectionError, match="transport closed"):
+            await session._invoke({"id": "inv-1", "command": "fixture.ok"})
+
+    asyncio.run(scenario())
+
+
+def test_invocation_cancelled_while_waiting_for_slot_sends_nothing():
+    async def scenario():
+        session, _ = make_session(lambda *args: {"ok": True}, [])
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        session.send = send
+        for _ in range(MAX_CONCURRENT_INVOKES):
+            await session._invokes.acquire()
+        task = asyncio.ensure_future(session._invoke({"id": "inv-1", "command": "fixture.ok"}))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not sent
+
+    asyncio.run(asyncio.wait_for(scenario(), 2))
+
+
+@pytest.mark.parametrize("failure_type", [KeyboardInterrupt, SystemExit])
+def test_invocation_does_not_swallow_process_control_exceptions(failure_type):
+    # Calling the coroutine directly keeps the process-control exception out
+    # of asyncio's task runner while exercising the real callback boundary.
+    async def scenario():
+        def stop_command(*args):
+            raise failure_type()
+
+        session, _ = make_session(stop_command, [])
+        with pytest.raises(failure_type):
+            await session._invoke({"id": "inv-1", "command": "fixture.stop"})
+
+    asyncio.run(scenario())
+
+
+def test_rejected_registration_is_not_marked_as_registered(caplog):
+    async def scenario():
+        session, vm = make_session(lambda *args: {}, [])
+        task = asyncio.ensure_future(session.run(asyncio.Event()))
+        try:
+            await vm.handshake()
+            await vm.accept_control_stream()
+            register = await vm.next_message()
+            await vm.send_message({"type": "res", "id": register["id"],
+                                   "error": {"message": "registration rejected"}})
+            assert await asyncio.wait_for(task, 2) is Outcome.FORBIDDEN
+            assert session.registered_at is None
+            assert not session.registered.is_set()
+        finally:
+            task.cancel()
+
+    asyncio.run(scenario())
+    assert "link.register rejected" in caplog.text
 
 
 async def registered_session():
@@ -856,13 +1070,18 @@ def test_invoke_failure_releases_slot_for_later_commands(failure):
         slots = asyncio.Semaphore(1)
         session, _ = make_session(command, [], invoke_slots=slots)
 
+        sent = []
+
         async def send(message):
+            sent.append(message)
             raise ConnectionError("send failed")
 
         session.send = send
-        expected = RuntimeError if failure == "command" else ConnectionError
-        with pytest.raises(expected, match=f"{failure} failed"):
+        # A command failure becomes a correlated result, so both cases reach send.
+        with pytest.raises(ConnectionError, match="send failed"):
             await session._invoke({"id": "failed", "command": "test"})
+        result = {"ok": False, "error": "command failed"} if failure == "command" else {"ok": True}
+        assert sent == [{"method": "link.result", "id": "failed", **result}]
         await asyncio.wait_for(slots.acquire(), 1)
         assert slots.locked()
         slots.release()
