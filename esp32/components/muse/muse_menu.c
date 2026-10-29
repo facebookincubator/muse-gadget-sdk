@@ -36,6 +36,7 @@
 #include "muse_state.h"
 #include "muse_text.h"
 #include "muse_voice.h"
+#include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
@@ -70,6 +71,9 @@ typedef enum {
     ITEM_SPEAKER,
     ITEM_BRIGHTNESS,
     ITEM_MIC,
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    ITEM_WAKE,
+#endif
     ITEM_SLEEP,
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     ITEM_TEXT,
@@ -93,6 +97,9 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_SPEAKER] = "Speaker",
     [ITEM_BRIGHTNESS] = "Brightness",
     [ITEM_MIC] = "Mic gain",
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    [ITEM_WAKE] = "Wake word",
+#endif
     [ITEM_SLEEP] = "Auto-sleep",
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     [ITEM_TEXT] = "Text size",
@@ -116,6 +123,9 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_SPEAKER] = "Toggle",
     [ITEM_BRIGHTNESS] = "Change",
     [ITEM_MIC] = "Change",
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    [ITEM_WAKE] = "Toggle",
+#endif
     [ITEM_SLEEP] = "Change",
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     [ITEM_TEXT] = "Change",
@@ -281,6 +291,11 @@ static void value_text(int item, char *buf, size_t n)
     case ITEM_MIC:
         snprintf(buf, n, "%d dB", muse_settings_mic_gain());
         break;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    case ITEM_WAKE:
+        strlcpy(buf, muse_wakeword_enabled() ? "On" : "Off", n);
+        break;
+#endif
     case ITEM_SLEEP:
         strlcpy(buf, sleep_name(muse_settings_sleep_s()), n);
         break;
@@ -490,6 +505,11 @@ static void activate(int item, int direction)
     case ITEM_MIC:
         muse_settings_set_mic_gain(value_step(GAIN_STEPS, COUNT(GAIN_STEPS), muse_settings_mic_gain(), direction));
         break;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    case ITEM_WAKE:
+        muse_wakeword_set_enabled(!muse_wakeword_enabled());
+        break;
+#endif
     case ITEM_SLEEP:
         muse_settings_set_sleep_s(value_step(SLEEP_STEPS, COUNT(SLEEP_STEPS), muse_settings_sleep_s(), direction));
         break;
