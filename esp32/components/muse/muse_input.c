@@ -570,7 +570,7 @@ static void dedicated_buttons(unsigned ev)
             bool on = !muse_settings_speaker_on();
             muse_settings_set_speaker_on(on);
             if (muse_state_mode(NULL) == MUSE_MODE_IDLE) {
-                muse_state_set_caption(on ? "SPEAKER ON" : "SPEAKER OFF");
+                muse_state_set_hint(on ? "SPEAKER ON" : "SPEAKER OFF");
             }
         }
     }
