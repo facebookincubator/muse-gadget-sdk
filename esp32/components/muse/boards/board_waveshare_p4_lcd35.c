@@ -27,6 +27,8 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "muse_board.h"
 #include "muse_audio.h"
@@ -39,6 +41,7 @@ static const char *TAG = "board";
 static muse_gpio_button_t s_talk;
 static bool s_pmu;
 static esp_lcd_panel_handle_t s_panel;
+static int s_brightness;
 
 static esp_err_t init(void)
 {
@@ -92,6 +95,7 @@ static bool display_lock(int timeout_ms)
 
 static void set_brightness(int pct)
 {
+    s_brightness = pct;
     bsp_display_brightness_set(pct);
 }
 
@@ -145,7 +149,14 @@ static esp_err_t power_off(void)
     ESP_RETURN_ON_FALSE(s_pmu, ESP_ERR_INVALID_STATE, TAG, "no PMU");
     bsp_display_backlight_off();
     /* PWR turns it back on. */
-    return muse_pmu_power_off();
+    esp_err_t err = muse_pmu_power_off();
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        err = ESP_FAIL;   /* still running */
+    }
+    /* Light the screen again for the error: the UI won't, its brightness is unchanged. */
+    bsp_display_brightness_set(s_brightness);
+    return err;
 }
 
 static const muse_board_t s_board = {
