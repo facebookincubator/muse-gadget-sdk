@@ -24,8 +24,9 @@ import wave
 import pytest
 
 from musegadget.link_client import (
-    DeviceDescription, HttpStreamError, LinkSession, MAX_CONCURRENT_INVOKES, MessageDecoder, Outcome,
-    RequestRejected, SideChat, acknowledgement, describe_result, encode_message, noise_url, printable,
+    DeviceDescription, HttpStreamError, LinkSession, MAX_CONCURRENT_INVOKES, MAX_IMAGE_BYTES,
+    MessageDecoder, Outcome, RequestRejected, SideChat, acknowledgement, check_image, describe_result,
+    encode_message, noise_url, printable,
 )
 from musegadget.noise import (
     ApplicationResponse, BodyChunk, Header, NoiseFrameDecoder, NoiseXXResponder, ServiceFrame,
@@ -211,32 +212,6 @@ def test_decoder_drops_messages_that_are_not_utf8():
 
 def test_vm_id_is_escaped_like_encode_uri_component():
     assert noise_url("h", "a-b_c.d!~*'()?&=") == "wss://h/v1/noise?vm_id=a-b_c.d!~*'()%3F%26%3D"
-
-
-def test_send_chat_sends_attachments_and_repeats_the_text_as_an_item():
-    async def scenario():
-        session, vm = make_session(lambda *a: {"ok": True}, [])
-        task = asyncio.ensure_future(session.run(asyncio.Event()))
-        await vm.handshake()
-        await vm.accept_control_stream()
-        await vm.next_message()  # link.register
-
-        picture = {"filename": "porch.jpg", "mime_type": "image/jpeg", "data_base64": "/9j/AA=="}
-        reply = asyncio.ensure_future(session.send_chat("who is it?", attachments=[picture]))
-        request = await vm.next_frame()
-        assert json.loads(request.value.body) == {
-            "message": "who is it?", "output_modality": "text", "device_id": "homelink-abcdef",
-            "items": [{"type": "text", "text": "who is it?"}, {"type": "file", **picture}]}
-        await vm.send_frame(ServiceFrame.response(
-            request.stream_id, ApplicationResponse(status=200, body=b"{}", end_body=True)))
-        assert (await asyncio.wait_for(reply, 2))["ok"]
-
-        too_big = {**picture, "data_base64": "A" * (256 * 1024)}
-        with pytest.raises(ValueError, match="256 KB"):
-            await session.send_chat("who is it?", attachments=[too_big])
-        task.cancel()
-
-    asyncio.run(scenario())
 
 
 def test_send_chat_posts_a_device_attributed_message_on_the_same_session():
@@ -555,6 +530,81 @@ def test_register_rejection_never_reports_ready(rejection):
         assert session.registered_at is None
 
     asyncio.run(bounded_scenario(scenario()))
+
+
+async def read_upload(vm):
+    request = await vm.next_frame()
+    assert (request.value.verb, request.value.path, request.value.end_body) == (
+        "POST", "/chat/stream", False)
+    body = bytearray(request.value.body)
+    chunks = 0
+    while True:
+        frame = await vm.next_frame()
+        assert frame.kind == "body_chunk" and frame.stream_id == request.stream_id
+        assert len(frame.value.data) <= 16384
+        body += frame.value.data
+        chunks += 1
+        if frame.value.end_body:
+            return request, json.loads(body), chunks
+
+
+def test_largest_image_uploads_in_chunks_as_an_image_item_after_its_text():
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        picture = b"\x89PNG\r\n\x1a\n" + bytes(MAX_IMAGE_BYTES - 8)
+        reply = asyncio.ensure_future(session.send_image(
+            picture, "image/png", "porch-chat", message="who is it?", filename="porch.png"))
+        request, uploaded, chunks = await read_upload(vm)
+        assert chunks > 100
+        text, image = uploaded.pop("items")
+        assert uploaded == {
+            "message": "who is it?", "output_modality": "text", "device_id": "homelink-abcdef",
+            "session_id": "porch-chat",
+        }
+        assert text == {"type": "text", "text": "who is it?"}
+        assert {key: image[key] for key in ("type", "mime_type", "filename")} == {
+            "type": "image", "mime_type": "image/png", "filename": "porch.png"}
+        assert base64.b64decode(image["data_base64"]) == picture
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b'{"result":{"message_id":"user-1"}}', end_body=True,
+        )))
+        assert (await reply)["ok"]
+        stop.set()
+        await task
+
+    asyncio.run(asyncio.wait_for(scenario(), 30))
+
+
+def test_send_image_refuses_oversized_or_non_image_input_before_sending():
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        with pytest.raises(ValueError, match="images must be 2 MiB or less"):
+            await session.send_image(bytes(MAX_IMAGE_BYTES + 1), "image/jpeg", message="hi")
+        with pytest.raises(ValueError, match="JPEG, PNG, GIF or WebP"):
+            await session.send_image(b"%PDF-1.7", "application/pdf", message="hi")
+        with pytest.raises(ValueError, match="empty"):
+            await session.send_image(b"", "image/jpeg", message="hi")
+        # Nothing went out: the next request on the session is this one.
+        reply = asyncio.ensure_future(session.send_image(b"GIF89a", "image/gif"))
+        request = await vm.next_frame()
+        uploaded = json.loads(request.value.body)
+        assert [item["type"] for item in uploaded["items"]] == ["image"]
+        assert "filename" not in uploaded["items"][0]
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b"{}", end_body=True)))
+        assert (await reply)["ok"]
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
+def test_check_image_accepts_exactly_the_limit_and_supported_types():
+    for mime_type in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+        check_image(bytes(MAX_IMAGE_BYTES), mime_type)
+    for mime_type in ("image/heic", "image/svg+xml", "text/plain", ""):
+        with pytest.raises(ValueError):
+            check_image(b"x", mime_type)
 
 
 def test_twenty_second_voice_note_uploads_in_bounded_chunks():

@@ -78,6 +78,42 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+_IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                ".gif": "image/gif", ".webp": "image/webp"}
+
+
+def _read_image(path: str) -> dict | None:
+    """Check a picture's type and size before reading it; print why not."""
+    import base64
+
+    from musegadget.link_client import MAX_IMAGE_BYTES
+
+    name = os.path.basename(path)
+    mime_type = _IMAGE_TYPES.get(os.path.splitext(path)[1].lower())
+    if mime_type is None:
+        print(f"{name} is not a JPEG, PNG, GIF or WebP image", file=sys.stderr)
+        return None
+    too_big = f"images must be 2 MiB ({MAX_IMAGE_BYTES:,} bytes) or less"
+    try:
+        size = os.stat(path).st_size
+        if size > MAX_IMAGE_BYTES:
+            print(f"{name} is {size:,} bytes; {too_big}", file=sys.stderr)
+            return None
+        with open(path, "rb") as f:
+            data = f.read(MAX_IMAGE_BYTES + 1)
+    except OSError as exc:
+        print(f"Could not read {path}: {exc}", file=sys.stderr)
+        return None
+    if not data:
+        print(f"{name} is empty", file=sys.stderr)
+        return None
+    if len(data) > MAX_IMAGE_BYTES:  # it grew, or it isn't a regular file
+        print(f"{name} is over the limit; {too_big}", file=sys.stderr)
+        return None
+    return {"filename": name, "mime_type": mime_type,
+            "data_base64": base64.b64encode(data).decode("ascii")}
+
+
 def cmd_send_user_msg(args: argparse.Namespace) -> int:
     import json
     import socket
@@ -87,20 +123,10 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
     if args.session_id:
         request["session_id"] = args.session_id
     if args.image:
-        import base64
-        import mimetypes
-
-        try:
-            with open(args.image, "rb") as f:
-                data = f.read()
-        except OSError as exc:
-            print(f"Could not read {args.image}: {exc}", file=sys.stderr)
+        image = _read_image(args.image)
+        if image is None:
             return 1
-        request["attachments"] = [{
-            "filename": os.path.basename(args.image),
-            "mime_type": mimetypes.guess_type(args.image)[0] or "image/jpeg",
-            "data_base64": base64.b64encode(data).decode(),
-        }]
+        request["image"] = image
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(90)
@@ -266,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("--session-id",
                      help="send to this side chat (a new id starts one) instead of the main chat")
     send.add_argument("--image", metavar="FILE",
-                     help="attach a picture for the Muse to look at (about 180 KB at most)")
+                     help="attach a JPEG, PNG, GIF or WebP picture of at most 2 MiB for Muse to look at")
     send.set_defaults(func=cmd_send_user_msg)
 
     from musegadget.link_client import validate_app_id

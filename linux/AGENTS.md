@@ -314,16 +314,20 @@ run_command=...)` is one encrypted session with a Muse VM.
   the same threading and result contract as `Service.run_command`.
 - `registered` is an `asyncio.Event` that is set once Muse accepts the device.
   It clears when the session ends.
-- `send_chat(message, session_id=None, *, output_modality="text",
-  attachments=None)` sends a user message as coming from this device.
-  Without `session_id` it goes to the main chat. `attachments` are files,
-  each `{"filename", "mime_type", "data_base64"}`, within a 256 KB request.
+- `send_chat(message, session_id=None, *, output_modality="text")` sends a
+  user message as coming from this device. Without `session_id` it goes to
+  the main chat.
 - `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None)`
   sends a WAV voice note of at most 2 MiB.
+- `send_image(image_bytes, mime_type, session_id=None, *, message="",
+  filename=None, output_modality="text")` sends a picture of at most
+  `link_client.MAX_IMAGE_BYTES` (2 MiB), with `message` as its text.
+  `mime_type` is one of `link_client.IMAGE_MIME_TYPES`: JPEG, PNG, GIF or
+  WebP. Anything else raises `ValueError`.
 - `link_client.acknowledgement(result)` reads Muse's acknowledgement from the
-  result of `send_chat` or `send_voice`. It raises `RequestRejected`, with a
-  `status` attribute, when Muse refused the request, or `ValueError` when the
-  response is not a dict.
+  result of `send_chat`, `send_voice` or `send_image`. It raises
+  `RequestRejected`, with a `status` attribute, when Muse refused the request,
+  or `ValueError` when the response is not a dict.
 - `await open_side_chat(session_id)` looks up a side chat and returns a `SideChat`.
   `SideChat.exists` is false for an ID that Muse does not know yet. The first
   `send_chat` to that ID creates the chat. The lookup closes its subscription
@@ -332,8 +336,9 @@ run_command=...)` is one encrypted session with a Muse VM.
   `chat_subscribed` is set while a subscription is open.
 - `stream_tts(message_id)` yields MP3 audio for a reply that Muse gave in voice
   mode.
-- `send_chat` and `send_voice` are coroutines that return a dict with `ok`,
-  `status` and `response`. `subscribe_chat` and `stream_tts` are async iterators.
+- `send_chat`, `send_voice` and `send_image` are coroutines that return a
+  dict with `ok`, `status` and `response`. `subscribe_chat` and `stream_tts`
+  are async iterators.
 - `open_side_chat`, `subscribe_chat` and `stream_tts` raise `HttpStreamError`
   on refused HTTP requests. It has `status` and `path` attributes.
 
