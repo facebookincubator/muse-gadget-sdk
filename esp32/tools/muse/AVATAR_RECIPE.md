@@ -120,9 +120,10 @@ it yourself:
    python3 tools/muse/avatar.py --reply reply.md --board c6
    ```
 
-   This saves the file, checks it, builds the firmware and flashes it. With
-   `--no-flash` and no board plugged in, it only checks and builds. The file
-   can hold the whole reply or just the C file.
+   This checks the file and builds the firmware with it, and only once both
+   pass saves it as your avatar and flashes it. With `--no-flash` it doesn't
+   need the board: it stops after saving and keeps the checked build to
+   flash later. The file can hold the whole reply or just the C file.
 
 You can also save the C file straight to `components/muse/avatar/muse_pixel.c`
 and build as usual with `tools/muse/board.sh build <board>`. The build log
