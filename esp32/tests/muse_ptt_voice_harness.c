@@ -97,7 +97,8 @@ void muse_state_set_progress(float v) { (void)v; }
 void muse_state_set_caption(const char *fmt,...) {
     va_list ap; va_start(ap,fmt); vsnprintf(caption,sizeof(caption),fmt,ap); va_end(ap);
 }
-void muse_state_poke(void) {}
+static int pokes;
+void muse_state_poke(void) { ++pokes; }
 void muse_state_nudge(void) {}
 void muse_state_make_happy(void) {}
 bool muse_state_asleep(void) { return sleep_state; }
@@ -126,7 +127,12 @@ void muse_hatch_turn_audio(const int16_t *p,size_t n) { (void)p;(void)n; }
 size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) { (void)p;(void)ms;return n; }
 void muse_hatch_turn_end(void) {}
 void muse_hatch_turn_cancel(void) {}
-muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) { (void)p;(void)n;return MUSE_HATCH_EV_NONE; }
+static bool hatch_done_once;
+muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) {
+    (void)p;(void)n;
+    if(hatch_done_once) { hatch_done_once=false; return MUSE_HATCH_EV_DONE; }
+    return MUSE_HATCH_EV_NONE;
+}
 bool muse_hatch_turn_caption(size_t x,char *p,size_t n) { (void)x;(void)p;(void)n;return false; }
 size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) { (void)p;(void)n;(void)ms;return 0; }
 
@@ -349,6 +355,18 @@ int main(int argc,char **argv) {
     }
     if (scenario==9) {
         assert(ptt_held_on_waking()); assert(clock_us>=300000 && !delivered);
+        return 0;
+    }
+    if (scenario==42) {
+        /* An active turn counts as activity for auto-sleep (#281): the reply
+         * loop pokes the idle clock, and returning to idle pokes it again so
+         * the reading clock starts when the turn ends. */
+        pokes=0; hatch_done_once=true;
+        bool done_delivered;
+        assert(!hatch_reply(&done_delivered));
+        assert(done_delivered); assert(pokes>=1);
+        pokes=0; go_idle("TEST");
+        assert(pokes>=1 && mode==MUSE_MODE_IDLE);
         return 0;
     }
 #if CONFIG_MUSE_REALTIME_VOICE
