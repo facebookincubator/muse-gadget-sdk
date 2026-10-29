@@ -16,36 +16,64 @@ limitations under the License.
 
 # muse_wakeword
 
-Hands-free activation: a clap (or a serial bench trigger) starts the
+Hands-free activation: saying "Hey Muse" (or "Ok Muse") starts the
 same voice note as holding the talk button.
 
-## What this is
+## Status: ExecuTorch runner implemented; feature still off by default
 
-- `include/ww_runner.h` - the interface contract with the wake
-  word runner. No ESP-IDF types, so the host tests link the same
-  code.
-- `ww_runner_bench.c` - the runner linked here. It fires on serial
-  bench triggers (`wake=1`, `wake.test=1`) or a loud-then-quiet
-  energy burst (a clap). **It detects no speech and no wake word**;
-  the Settings row's small print says the model is not implemented
-  yet, and the boot log names it `runner=bench`, so it cannot be
-  mistaken for detection.
-- `include/muse_wakeword.h` + `muse_wakeword_core.c` - the
-  session state machine, the integer energy fallback, and the
-  caller-owned frame ring behind the handoff queue and pre-roll.
-- `Kconfig` - the options. `MUSE_WAKEWORD_ENABLE` defaults to
-  `n` and no board overlay sets it, so shipped builds are unchanged.
+`ww_runner_et.cpp` (default) drives the embedded int8
+`models/hey_muse.pte` through the generated ExecuTorch component
+(`wakeword_int8` profile); `ww_runner_bench.c` offers serial/clap
+triggers for bring-up only, with no speech detection.
+`MUSE_WAKEWORD_ENABLE` defaults to `n` and no board overlay sets it,
+so shipped builds are unchanged.
 
-The firmware glue in the `muse` component taps `muse_voice` audio,
-runs the wake task, posts synthetic push-to-talk turns (with the
-trigger audio as pre-roll), and persists a runtime opt-in. Turning
-listening on or off is one shared setter, driven by the Sound
-settings toggle, the quick-menu row, `>wake.on` / `>wake.off` over
-serial (status: `>wake`), and the Muse-side `enable_wakeword`
-control.
-
-Run the host tests with:
+Verified by `tests/test_muse_wakeword.py`:
 
 ```sh
 python3 -m unittest tests.test_muse_wakeword -v
 ```
+
+## Trying it on a BOX-3
+
+For the real runner, build with `CONFIG_MUSE_WAKEWORD_ENABLE=y`
+(the ExecuTorch runner is the default choice and selects the runtime)
+in the build's `sdkconfig` (token setup as usual), flash, run
+`>wake.on`, and say "Hey Muse". Expect research-checkpoint behavior,
+including false triggers; `@wake` and the `muse_wake`/`ww_et` logs
+show the flow.
+
+Trim for size: build with ExecuTorch runtime logging compiled out
+(`CONFIG_ET_ENABLE_LOGGING` unset in the build's sdkconfig fragment).
+Measured on BOX-3 it saves ~91 KB with no latency cost (inference
+still ~15 ms/frame), and `et_model`/runner error logs still reach
+the console. Program verification is already off
+(`CONFIG_ET_PROGRAM_VERIFICATION` unset; the runtime falls back to
+minimal header checks), and the `wakeword_int8` profile already
+registers only the 13 kernels the model uses, so there is nothing
+further to prune there. Do not use `CONFIG_ET_OPTIMIZE_SIZE`: a build
+with it (plus an Error log floor) measured 67 KB smaller but slowed
+inference to ~23 ms/frame, over the 20 ms budget with tap-frame
+drops, so it was rejected.
+
+For plumbing-only bring-up, build instead with
+`CONFIG_MUSE_WAKEWORD_RUNNER_BENCH=y`, flash with
+`tools/muse/board.sh flash box3`, then over serial:
+
+```text
+>wake.on       listening on (persisted; >wake.off turns it off)
+>wake=1        fires a wake; stay quiet and T_start cancels it
+>wake.test=1   wake + speech; the 700 ms silence endpoint ends it
+>wake          prints @wake status (also what the commands return)
+```
+
+Or clap loudly near the microphones while listening. On-device, the
+same persisted opt-in is the **Sound > Wake word** settings switch
+(on button boards, the quick menu's **Wake word** row); in bench
+builds the switch's small print says the model is not implemented
+yet, since clapping is all the bench runner detects. A submit only
+reaches Muse once the gadget is paired; unpaired, the turn stops
+at the setup caption, and the `muse_wake` log lines plus `@wake`
+counters show the flow. In the Muse app once paired,
+`enable_wakeword` and `disable_wakeword` do the same as `wake.on`
+and `wake.off`.

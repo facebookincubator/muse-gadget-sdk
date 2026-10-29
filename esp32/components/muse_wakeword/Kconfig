@@ -19,24 +19,36 @@ menu "Muse wake word"
         bool "Compile in hands-free wake word support"
         default n
         help
-            A clap (or a serial bench trigger) starts the same voice
-            note as holding the talk button. This only compiles the
-            feature in: listening also needs a runtime opt-in, so
-            flashing this firmware never starts listening on its own.
+            Saying "Hey Muse" (or "Ok Muse") starts the same voice note
+            as holding the talk button. This only compiles the feature
+            in: listening also needs a runtime opt-in, so flashing this
+            firmware never starts listening on its own.
 
-            The bench runner detects no speech at all: it fires on a
-            loud-then-quiet energy burst (a clap) or on serial bench
-            keys. No board overlay enables this yet; enablement is
-            per-board and opt-in.
+            The session core, audio rings, energy endpointing, LFBE
+            frontend, detector, and ExecuTorch runner are built here;
+            the runtime comes from the generated components/executorch
+            component. No board overlay enables this yet; enablement
+            is per-board and opt-in. The current model is a
+            synthetic-data research checkpoint, not a
+            production-tuned detector.
 
     choice MUSE_WAKEWORD_RUNNER
         prompt "Wake word runner"
-        default MUSE_WAKEWORD_RUNNER_BENCH
+        default MUSE_WAKEWORD_RUNNER_EXECUTORCH
         depends on MUSE_WAKEWORD_ENABLE
         help
-            What sits behind the runner interface.
-            The boot log names the linked runner so the bench build is
-            never mistaken for wake-word detection.
+            What sits behind the runner interface. Exactly one
+            implementation is linked, and the boot log names it so a
+            test double is never mistaken for real detection.
+
+        config MUSE_WAKEWORD_RUNNER_EXECUTORCH
+            bool "ExecuTorch Hey Muse model"
+            select ET_ENABLE
+            help
+                SDK-owned LFBE frontend and posterior detector driving
+                the embedded models/hey_muse.pte through the generated
+                ExecuTorch component. Selects ET_ENABLE; the bench
+                choice below leaves the vendored runtime empty.
 
         config MUSE_WAKEWORD_RUNNER_BENCH
             bool "Bench triggers (serial key or loud burst, no detection)"

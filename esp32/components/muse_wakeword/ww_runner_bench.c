@@ -22,8 +22,9 @@
 
 /*
  * The runner contract with test triggers behind it instead of a model.
- * This is the runner the component links; a build that logs
- * "runner=bench" has no wake word detection whatsoever; see
+ * Link this *or* ww_runner_et.cpp, never both: the component's
+ * CMakeLists picks by CONFIG_MUSE_WAKEWORD_RUNNER_*. A build that
+ * logs "runner=bench" has no wake word detection whatsoever; see
  * ww_runner_bench.h for what can make it fire.
  */
 #define PENDING_MAX 4
