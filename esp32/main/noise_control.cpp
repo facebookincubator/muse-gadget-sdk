@@ -1633,6 +1633,21 @@ static char *build_register_json(void) {
                 nullptr, nullptr);
 #endif
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    add_command(commands, "enable_wakeword",
+                "Turn hands-free listening on: a clap near the device then "
+                "starts a voice note like holding the talk button. There is no "
+                "spoken wake word yet; runner \"bench\" detects claps only. Kept "
+                "across restarts. Returns enabled and listening state and the "
+                "runner in use.",
+                nullptr, nullptr);
+    add_command(commands, "disable_wakeword",
+                "Turn hands-free wake word listening off at once, ending any "
+                "hands-free capture in progress. Kept across restarts. "
+                "Returns the same state as enable_wakeword.",
+                nullptr, nullptr);
+#endif
+
 #if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
     add_command(commands, "camera.capture",
 #if CONFIG_MUSE_WATCHER_CAMERA

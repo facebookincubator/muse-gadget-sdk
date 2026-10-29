@@ -47,7 +47,8 @@ class StopWatchPTT(unittest.TestCase):
             # source-string assertions: the same control flow as firmware runs.
             for source in MUSE.glob('*.h'):
                 shutil.copyfile(source, stage / source.name)
-            for name in ('muse_voice.c', 'muse_input.c', 'muse_settings.c'):
+            for name in ('muse_voice.c', 'muse_input.c', 'muse_settings.c',
+                         'muse_wakeword_glue.c'):
                 shutil.copyfile(MUSE / name, stage / name)
             # Independent UI/core workers can validate against the agreed header
             # before integration. Normal runs always use this checkout's header.
@@ -86,6 +87,11 @@ class StopWatchPTT(unittest.TestCase):
                            '-g', '-O1', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                            '-no-pie', '-include', str(ROOT / 'tests/host_compat.h'),
                            '-I', str(stage), str(source)]
+                if kind == 'voice':
+                    # muse_voice.c calls the glue hooks unconditionally; the
+                    # stage sdkconfig leaves CONFIG_MUSE_WAKEWORD_ENABLE unset, so
+                    # this compiles the glue file's no-op stubs.
+                    command.append(str(stage / 'muse_wakeword_glue.c'))
                 if kind == 'voice' and realtime:
                     command.append(str(MUSE / 'muse_voice_call_core.c'))
                 if kind == 'voice':
