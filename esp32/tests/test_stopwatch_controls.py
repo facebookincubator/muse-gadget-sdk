@@ -44,7 +44,7 @@ class StopWatchControls(unittest.TestCase):
         cls.ui = (MUSE / "muse_ui.c").read_text()
         cls.input = (MUSE / "muse_input.c").read_text()
         flags = "\n".join(re.findall(r"^#define MUSE_BTN_.*", (MUSE / "muse_board.h").read_text(), re.M))
-        board_defines = "\n".join(re.findall(r"^#define (?:PMIC_BTN_\w+|PMIC_SYS_CMD|PMIC_SHUTDOWN|POWER_\w+).*", cls.board, re.M))
+        board_defines = "\n".join(re.findall(r"^#define (?:PMIC_BTN_\w+|PMIC_SYS_CMD|PMIC_SHUTDOWN|POWER_\w+|CLICK_CREDIT_US).*", cls.board, re.M))
         common = '#include <assert.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n' + flags + '\n' + '#include "' + str(MUSE / 'muse_state.h') + '"\n'
         board = common + r'''
 #define BIT(n) (1u << (n))
@@ -57,6 +57,9 @@ typedef int esp_err_t;
 static void *s_pmic;
 static bool s_power_pressed = true, s_power_candidate = true, s_power_armed, s_power_long;
 static int64_t s_power_changed_at, s_power_held_at, now = 10000;
+static unsigned s_click_credits, s_click_pending;
+static int64_t s_click_credit_at;
+static unsigned take_power_irq(void) { return 0; } /* no PM1 click: test_stopwatch_power covers it */
 static int read_error, write_error, writes;
 static uint8_t key;
 static int64_t esp_timer_get_time(void) { return now; }
@@ -334,7 +337,7 @@ int main(void) {
     def test_positions_and_round_safe_area(self):
         self.assertRegex(self.board, r'#define TALK_GPIO GPIO_NUM_1')
         self.assertRegex(self.board, r'#define SPEAKER_GPIO GPIO_NUM_2')
-        self.assertIn('.wait_buttons = NULL', self.board)
+        self.assertIn('.wait_buttons = wait_buttons', self.board)
         self.assertNotIn('esp_sleep_enable_ext1_wakeup', self.board)
         for name, sign_x, sign_y in [('talk', 1, -1), ('speaker', -1, -1), ('power', -1, 1)]:
             x, y = map(int, re.search(r'\.' + name + r'_hint = \{ LV_ALIGN_CENTER, (-?\d+), (-?\d+) \}', self.board).groups())

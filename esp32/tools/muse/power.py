@@ -48,9 +48,28 @@ def duration(secs):
     return f"{h} h {m} min" if h else f"{m} min {int(secs) % 60} s"
 
 
+def memory(heap):
+    """Internal RAM, from the JSON's "heap": what Wi-Fi, BLE and the tunnel have to work with.
+    With the CPU powered down in light sleep, its retention memory was taken at boot and kept,
+    so it's out of every figure: "lowest while resting" is the headroom while resting, not a dip."""
+    kb = lambda n: f"{n / 1024:.1f} KB"
+    mem = (f"Memory    internal RAM {kb(heap['free'])} free (largest block {kb(heap['largest'])}), "
+           f"{kb(heap['min'])} lowest since boot")
+    if heap.get("resting_min") is not None:
+        mem += f", {kb(heap['resting_min'])} lowest while resting"
+    if "cpu_pd" in heap:
+        cpu = f"CPU {'powers down' if heap['cpu_pd'] else 'stays powered'} in light sleep"
+        if "retention_free" in heap:   # a saved record leaves them out
+            cpu = (f"retention-capable RAM left {kb(heap['retention_free'])} (largest block "
+                   f"{kb(heap['retention_largest'])}); " + cpu)
+        mem += "\n          " + cpu
+    return mem
+
+
 def report(p, mah=None):
     if not p.get("started"):
-        return "No measurement yet: unplug USB, let the board run on battery, then plug it back in."
+        text = "No measurement yet: unplug USB, let the board run on battery, then plug it back in."
+        return text + ("\n" + memory(p["heap"]) if p.get("heap") else "")
     secs = p["secs"]
     lines = [("On battery for %s, still measuring." if p["running"] else
               "Ran on battery for %s; stopped when USB came back.") % duration(secs)]
@@ -86,6 +105,8 @@ def report(p, mah=None):
     if "modes" in p:
         lines.append("Modes     " + ", ".join(f"{p['modes'].get(k, 0)}% {what}" for k, what in MODES))
         lines.append(f"          {p.get('sleep_rejects', 0)} light sleeps refused (a wake-up already pending)")
+    if p.get("heap"):
+        lines.append(memory(p["heap"]))
     locks = sorted((l for l in p.get("locks", []) if l["held"] or l["taken"]), key=lambda l: -l["held"])
     if locks:
         lines.append("Power locks held (each one keeps the chip out of light sleep; rtos0/1 = a CPU core busy):")

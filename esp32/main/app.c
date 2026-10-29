@@ -43,10 +43,15 @@
 #include "lwip/ip4_addr.h"
 
 #include "identity.h"
+#include "sdk_token_console.h"
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
 #include "customer_product_info.h"
+#include "ble_coex.h"
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+#include "ble_commands.h"
+#endif
 #include "ble_server.h"
 #include "factory_test.h"
 #include "vm_api.h"
@@ -76,10 +81,15 @@
 #endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
+#include "muse_input.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
 #else
 #define WIFI_WITHOUT_PAIRING 0
+#endif
+
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+#include "ble_basic.h"
 #endif
 
 static const char *TAG = "link.app";
@@ -109,7 +119,8 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 #define PAIRING_CONFIRMED_IDLE_TIMEOUT_MS (120 * 1000)
 
 // OTA rollback: how long a freshly-installed (PENDING_VERIFY) image has to
-// reach the authenticated control WebSocket before the bootloader reverts it.
+// reach the authenticated control WebSocket before the bootloader reverts it
+// (on every board; on the ESP-Mosaico, not for a Vibe Mode install).
 // The control WS is the recovery channel — if a new image can't reach it,
 // no future device.ota could repair the device, so rolling back is correct.
 #define OTA_VERIFY_TIMEOUT_US (300LL * 1000000LL)
@@ -129,9 +140,6 @@ static int64_t s_last_vm_auth_refresh_attempt_us = 0;
 // Uptime of the last proactive-refresh attempt. 0 = none this boot, so the
 // first one falls due once uptime alone exceeds the interval.
 static int64_t s_last_periodic_token_refresh_us = 0;
-// The SDK token reaches Muse only in refresh bodies until apps forward it at
-// mint, so each boot of a token-bearing build attempts one refresh to report it.
-static bool s_sdk_token_report_attempted = false;
 static int64_t s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
 static uint8_t s_vm_auth_refusals = 0;
 static bool s_vm_auth_refresh_pending = false;
@@ -652,9 +660,16 @@ static void shutdown_ble_task(void *arg) {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(1000));
     ui_set_ble("off");
-#if CONFIG_MUSE_ENABLED
-    // Muse's phone-setup service shares the server: stop setup advertising only.
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
+    // A companion service shares the server (Muse's phone setup, or the
+    // basic service that keeps BLE up beside Wi-Fi): stop setup advertising
+    // only, and let the companion advertise slowly.
     ble_server_stop_advertising(false);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    ble_server_set_companion_advertising(true);
+    ble_coex_set_active(true);
+    ui_set_ble("companion");
+#endif
 #else
     ble_server_full_shutdown();
 #endif
@@ -679,8 +694,12 @@ static bool complete_setup_and_stop_ble(const char *reason, uint32_t session_gen
         ESP_LOGW(TAG, "failed to start BLE stop task");
         vTaskDelay(pdMS_TO_TICKS(1000));
         ui_set_ble("off");
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
         ble_server_stop_advertising(false);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        ble_server_set_companion_advertising(true);
+        ble_coex_set_active(true);
+#endif
 #else
         ble_server_full_shutdown();
 #endif
@@ -771,6 +790,7 @@ static bool mint_and_store_device_tokens_unlocked(const char *source_token,
     int rc = vm_api_mint_device_token(source_token, identity_node_id(), &tokens);
     if (rc == 0) {
         bool ok = store_token_pair_unlocked(tokens.access_token, tokens.refresh_token);
+        if (ok) identity_note_paired_sdk_token();
         if (ok && username) store_pairing_username_unlocked(username);
         vm_device_tokens_free(&tokens);
         return ok;
@@ -792,7 +812,10 @@ static bool accept_pairing_credentials(const char *access_token,
     bool ok = false;
     if (refresh_token && *refresh_token) {
         ok = store_token_pair_unlocked(access_token, refresh_token);
-        if (ok) store_pairing_username_unlocked(username);
+        if (ok) {
+            identity_note_paired_sdk_token();
+            store_pairing_username_unlocked(username);
+        }
     } else if (!wifi_mgr_is_connected()) {
         ESP_LOGW(TAG, "cannot mint device token before WiFi is connected");
         ok = false;
@@ -878,9 +901,7 @@ static bool ensure_access_token_ready_with_gate_held(
                    >= TOKEN_PERIODIC_REFRESH_INTERVAL_US;
 #endif
 
-    bool sdk_token_report_due = identity_sdk_token() && !s_sdk_token_report_attempted;
-
-    if (!access_token_rejected && !periodic_due && !sdk_token_report_due) {
+    if (!access_token_rejected && !periodic_due) {
         // Nothing has complained about this token, so keep using it.
         ok = true;
         goto done;
@@ -893,12 +914,7 @@ static bool ensure_access_token_ready_with_gate_held(
         s_last_periodic_token_refresh_us = esp_timer_get_time();
         ESP_LOGI(TAG, "proactive device token refresh (every %d days of uptime)",
                  CONFIG_HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS);
-    } else if (sdk_token_report_due && !access_token_rejected) {
-        ESP_LOGI(TAG, "refreshing device token to report the SDK token");
     }
-    // Stamped on the attempt, like the periodic refresh, so failures don't
-    // retry on every fetch_vms.
-    if (sdk_token_report_due) s_sdk_token_report_attempted = true;
 
     vm_device_tokens_t tokens = {0};
     vm_token_refresh_method_t method = VM_TOKEN_REFRESH_NONE;
@@ -1840,9 +1856,19 @@ static cJSON *bug_report_command(
 }
 #endif
 
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+// ---- BLE commands' hooks (main/ble_commands.c) ----
+
+#endif  // CONFIG_HOMEHUB_BLE_COMMANDS
+
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+    if (ble_commands_handles(command)) {
+        return ble_commands_handle(command, params, request_id, session_generation);
+    }
+#endif
     if (strcmp(command, "device.list_vms") == 0) {
         return list_vms_command();
     }
@@ -1852,19 +1878,25 @@ static cJSON *on_ws_command(
         return queue_ws_control(WS_CONTROL_SET_VM, url);
     }
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
-    if (strcmp(command, "display.draw_url") == 0) {
-        cJSON *url = cJSON_GetObjectItem(params, "url");
+    bool draw_file = strcmp(command, "display.draw_file") == 0;
+    if (draw_file || strcmp(command, "display.draw_url") == 0) {
+        // draw_file takes a path on the VM, fetched over this session.
+        cJSON *target = cJSON_GetObjectItem(params, draw_file ? "path" : "url");
         cJSON *row = cJSON_GetObjectItem(params, "row");
-        if (!cJSON_IsString(url) || !url->valuestring || !url->valuestring[0]) {
-            return command_error("missing_param", "url is required");
+        if (!cJSON_IsString(target) || !target->valuestring || !target->valuestring[0]) {
+            return command_error("missing_param",
+                                 draw_file ? "path is required" : "url is required");
         }
         draw_url_ctx_t *ctx = calloc(1, sizeof(*ctx));
         if (!ctx) return command_error("out_of_memory", "failed to allocate");
         ctx->session_generation = session_generation;
         strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
         const char *code, *message;
-        if (!image_fetch_start(url->valuestring, cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW,
-                               draw_url_done, ctx, &code, &message)) {
+        int top = cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW;
+        bool started = draw_file
+            ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
+            : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        if (!started) {
             free(ctx);
             return command_error(code, message);
         }
@@ -1955,6 +1987,7 @@ static void enter_advertising_state(const char *reason) {
     ui_set_ble("advertising");
     ui_set_status("pairing_advertising");
     led_status_set_state(LED_STATE_BLE_ADVERTISING);
+    ble_coex_set_active(false);  // setup keeps ESP-IDF's balanced sharing
     ble_server_begin_advertising();
 }
 
@@ -2080,6 +2113,7 @@ static void on_client_disconnected(void) {
     ui_set_status("pairing_advertising");
     led_status_set_state(LED_STATE_BLE_ADVERTISING);
     setup_window_lock_give();
+    ble_coex_set_active(false);
     ble_server_begin_advertising();
 }
 
@@ -2100,6 +2134,59 @@ static void start_ble_setup_server_if_needed(void) {
     s_ble_started = true;
     heap_snapshot("after ble_start");
 }
+
+
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+// Muse drives the Link's BLE through ble.* commands (main/ble_commands.c).
+static bool ble_cmd_power(bool on) {
+    if (!on) {
+        if (!s_ble_started) return true;
+        if (!ble_server_power_off()) return false;
+        s_ble_started = false;
+        ui_set_ble("off");
+        return true;
+    }
+    if (!s_ble_started) start_ble_setup_server_if_needed();
+    if (!ble_server_is_started()) return false;
+    if (config_setup_complete()) {
+        ble_server_set_companion_advertising(true);
+        ui_set_ble("companion");
+    }
+    for (int i = 0; i < 30 && !ble_server_is_synced(); i++) vTaskDelay(pdMS_TO_TICKS(100));
+    return ble_server_is_synced();
+}
+
+static bool ble_cmd_is_on(void) {
+    return s_ble_started && ble_server_is_started();
+}
+
+static void ble_cmd_advertise(bool on, int interval_ms) {
+    if (interval_ms) ble_server_set_companion_interval_ms(interval_ms);
+    ble_server_set_companion_advertising(on);
+    if (config_setup_complete()) ui_set_ble(on ? "companion" : "on");
+}
+
+static void ble_cmd_set_wifi_first(bool on) {
+    ble_coex_set_withheld(on ? (BLE_COEX_ADV | BLE_COEX_CONN) : 0);
+}
+
+static bool ble_cmd_wifi_first(void) {
+    return ble_coex_active() && ble_coex_withheld() != 0;
+}
+
+static const ble_commands_ops_t s_ble_cmd_ops = {
+    .power = ble_cmd_power,
+    .is_on = ble_cmd_is_on,
+    .advertise = ble_cmd_advertise,
+    .is_advertising = ble_server_is_advertising,
+    .adv_interval_ms = ble_server_companion_interval_ms,
+    .own_address = ble_server_own_address,
+    .name = identity_ble_name,
+    .peripheral_connected = ble_server_has_connection,
+    .set_wifi_first = ble_cmd_set_wifi_first,
+    .wifi_first = ble_cmd_wifi_first,
+};
+#endif
 
 static void open_setup_window(const char *reason) {
     if (config_setup_complete()) {
@@ -2392,6 +2479,9 @@ static void on_ws_control_status(const char *status) {
         ESP_LOGI(TAG, "control WebSocket disconnected");
         led_status_set_state(LED_STATE_WS_DISCONNECTED);
         tunnel_netif_set_link(false);
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+        ble_commands_session_ended();   // close what Muse's BLE commands opened
+#endif
     } else if (strcmp(status, "ws_unpaired") == 0) {
         strcpy(s_ui_ws, "down");
         ESP_LOGW(TAG, "server sent node.unpaired — clearing credentials and restarting");
@@ -2428,6 +2518,7 @@ static void ota_verify_task(void *arg) {
         if (noise_ctrl_is_connected()) {
             if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
                 ESP_LOGI(TAG, "OTA image validated (control WS up)");
+                ota_verify_forget();
             } else {
                 ESP_LOGE(TAG, "esp_ota_mark_app_valid_cancel_rollback failed");
             }
@@ -2439,6 +2530,7 @@ static void ota_verify_task(void *arg) {
     }
     if (s_ota_pending_verify) {
         ESP_LOGE(TAG, "OTA verify timed out; rolling back to previous firmware");
+        ota_verify_forget();
         stack_monitor_record(NULL);
         esp_ota_mark_app_invalid_rollback_and_reboot();
         // Only returns when there is no valid partition to revert to.
@@ -2512,11 +2604,20 @@ void app_run(void) {
     ESP_LOGI(TAG, "  Verify:   %s", link_pairing_sign_factory_test());
     // Only the hint gadgets.muse.ai displays; the full token is never logged.
     ESP_LOGI(TAG, "  SDK token:  %.12s", identity_sdk_token() ? identity_sdk_token() : "(none)");
+    char paired_sdk_hint[IDENTITY_SDK_TOKEN_HINT_LEN + 1];
+    if (identity_sdk_token_changed_since_pairing(paired_sdk_hint, sizeof(paired_sdk_hint))) {
+        ESP_LOGW(TAG, "  Paired with SDK token %s, not this one. Pair again in the "
+                      "Muse app to use it.", paired_sdk_hint);
+    }
     ESP_LOGI(TAG, "========================");
 
     link_pairing_init(identity_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
+#if !CONFIG_MUSE_ENABLED
+    // Muse boards' own console takes the command (muse_glue_start).
+    sdk_token_console_start();
+#endif
 
     if (!led_status_init()) {
         ESP_LOGW(TAG, "LED init failed — continuing without status LED");
@@ -2532,16 +2633,34 @@ void app_run(void) {
     noise_ctrl_set_command_cb(on_ws_command);
     noise_ctrl_set_agent_name_cb(led_status_set_title);
     heap_snapshot("after noise_ctrl_init");
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+    ble_commands_init(&s_ble_cmd_ops);
+#endif
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    ble_basic_register();
+#endif
 
     // Arm OTA rollback verification. If the running image was just installed
     // by device.ota it boots as PENDING_VERIFY and must reach the control WS
     // within OTA_VERIFY_TIMEOUT_US, else the bootloader reverts it on reboot.
+    // The one exception is the ESP-Mosaico in Vibe Mode: its Vibe Mode
+    // firmware installs apps itself and leaves them PENDING_VERIFY, and that
+    // is nothing to roll back (ota_installed_by_vibe_mode checks the board,
+    // the build and the flash layout). Every other PENDING_VERIFY image, on
+    // every board, is checked.
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
     if (running && esp_ota_get_state_partition(running, &ota_state) == ESP_OK
         && ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-        s_ota_pending_verify = true;
-        ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
+        if (!ota_installed_by_vibe_mode()) {
+            s_ota_pending_verify = true;
+            ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
+        } else if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+            ESP_LOGI(TAG, "PENDING_VERIFY image installed by Vibe Mode; marked valid");
+        }
+    }
+    if (!s_ota_pending_verify) {
+        ota_verify_forget();   // an update that never booted
     }
     xTaskCreate(ota_verify_task, "ota_verify", 4096, NULL, 4, NULL);
 
@@ -2655,6 +2774,14 @@ void app_run(void) {
     } else {
         ui_set_ble("off");
         ESP_LOGI(TAG, "BLE setup disabled; long-press reset to pair again");
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        // BLE stays up beside Wi-Fi: bring the stack up before the VM session
+        // fragments internal RAM, and advertise the basic service slowly.
+        start_ble_setup_server_if_needed();
+        ble_server_set_companion_advertising(true);
+        ble_coex_set_active(true);
+        ui_set_ble("companion");
+#endif
 #if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
@@ -2803,13 +2930,24 @@ void app_run(void) {
 
         size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        size_t min_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+        // What's left of the RAM light sleep's CPU retention memory comes
+        // from (not the reserved DMA pool), after muse_input_power_init()
+        // took it at boot for good, and whether it got it (cpu_pd).
+        char retention[48] = "";
+#if CONFIG_MUSE_ENABLED && CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP
+        snprintf(retention, sizeof(retention), " ret=%uK/%uK cpu_pd=%s",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_RETENTION) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_RETENTION) / 1024),
+                 muse_input_cpu_pd() ? "on" : "off");
+#endif
         size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA);
         size_t largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
         size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
         tunnel_stats_t tun;
         tunnel_netif_get_stats(&tun);
         ESP_LOGI(HEARTBEAT_TAG, "hb t=%llds setup=%s wifi=%s ws=%s raw=%s ble=%s "
-                       "int=%uK/%uK dma=%uK/%uK psram=%uK "
+                       "int=%uK/%uK min=%uK%s dma=%uK/%uK psram=%uK "
                        "tun rx+%lu/%luB tx+%lu/%luB drop+%lu",
                  esp_timer_get_time() / 1000000,
                  s_setup_stage,
@@ -2819,6 +2957,8 @@ void app_run(void) {
                  s_ui_ble,
                  (unsigned)(free_int / 1024),
                  (unsigned)(largest_int / 1024),
+                 (unsigned)(min_int / 1024),
+                 retention,
                  (unsigned)(free_dma / 1024),
                  (unsigned)(largest_dma / 1024),
                  (unsigned)(free_psram / 1024),
@@ -2828,6 +2968,9 @@ void app_run(void) {
                  (unsigned long)(tun.tx_bytes - prev_tun.tx_bytes),
                  (unsigned long)(tun.tx_dropped - prev_tun.tx_dropped));
         prev_tun = tun;
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        ble_basic_notify_status();
+#endif
         stack_monitor_record(&stack);
 #if CONFIG_MUSE_ENABLED
         muse_heartbeat_pause();

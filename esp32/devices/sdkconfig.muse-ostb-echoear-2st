@@ -1,0 +1,22 @@
+# OSTB EchoEar-2ST: measured ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM.
+# Native USB Serial/JTAG (303A:1001). Load after sdkconfig.muse.
+# Reference: https://docs.yishierniao.cn/details/ai/echoear-2st/product.html
+# Variant GPIOs and validation limitations: devices/ostb-echoear-2st.md.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_OSTB_ECHOEAR_2ST=y
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# The full UI requires the observed octal memory to be present.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=n
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+
+# Keep internal DMA RAM available for display and shared duplex audio.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_ESP_PHY_INIT_DATA_IN_PARTITION=n

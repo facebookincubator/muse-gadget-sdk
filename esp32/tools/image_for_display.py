@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Turn an image into a file for `display.draw_url` on a Link with a display.
+"""Turn an image into a file for `display.draw_url` or `display.draw_file` on a
+Link with a display.
 
 The image is scaled to cover the screen (170x320 by default), cropped to the
 centre, and written as a baseline JPEG for a .jpg/.jpeg name, otherwise as raw

@@ -276,14 +276,134 @@ int main(void) {
             ran = subprocess.run([str(binary)], capture_output=True, text=True, timeout=5)
             self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
 
+    def test_chunked_receive_sizes_its_buffer_to_the_message(self) -> None:
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        if not cc or shutil.which(cc[0]) is None:
+            self.skipTest("C compiler not available")
+        ble = BLE_SERVER_C.read_text()
+        constants = "\n".join(line for line in ble.splitlines() if line.startswith((
+            "#define MAX_RX_TOTAL_BYTES", "#define CHUNK_HEADER_BYTES", "#define CHUNK_MAGIC",
+        )))
+        harness = constants + r"""
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#define ESP_LOGI(...) ((void)0)
+#define ESP_LOGE(...) ((void)0)
+static size_t largest_free_block;
+static void *limited_malloc(size_t n) {
+    return n > largest_free_block ? NULL : malloc(n);
+}
+static void *limited_realloc(void *p, size_t n) {
+    return n > largest_free_block ? NULL : realloc(p, n);
+}
+#define malloc limited_malloc
+#define realloc limited_realloc
+static uint16_t s_mtu;
+static uint8_t *s_rx_buf;
+static size_t s_rx_len, s_rx_cap;
+static uint8_t s_rx_total, s_rx_count, s_rx_next_idx;
+"""
+        harness += "static void rx_reset_locked(void) {"
+        harness += _function_body(ble, "static void rx_reset_locked(") + "}\n"
+        harness += ("static void handle_rx_write_locked(const uint8_t *data, size_t len,"
+                    " uint8_t **complete, size_t *complete_len) {")
+        harness += _function_body(ble, "static void handle_rx_write_locked(") + "}\n"
+        harness += r"""
+// Returns the reassembled length, or 0 when the message was dropped.
+// Chunk i is chunks[i] long, the last one whatever remains.
+static size_t send_chunks(size_t len, const size_t *chunks, size_t total) {
+    static uint8_t message[MAX_RX_TOTAL_BYTES + 1], frame[CHUNK_HEADER_BYTES + 512];
+    for (size_t i = 0; i < len; i++) message[i] = (uint8_t)(i * 7 + 1);
+    uint8_t *complete = NULL;
+    size_t complete_len = 0;
+    for (size_t i = 0, off = 0; i < total; off += chunks[i++]) {
+        size_t flen = i + 1 == total ? len - off : chunks[i];
+        frame[0] = CHUNK_MAGIC;
+        frame[1] = (uint8_t)i;
+        frame[2] = (uint8_t)total;
+        memcpy(frame + CHUNK_HEADER_BYTES, message + off, flen);
+        assert(!complete);
+        handle_rx_write_locked(frame, flen + CHUNK_HEADER_BYTES, &complete, &complete_len);
+    }
+    if (!complete) return 0;
+    assert(complete_len == len && !memcmp(complete, message, len));
+    free(complete);
+    return complete_len;
+}
+static size_t send_message(size_t len, size_t chunk) {
+    static size_t chunks[MAX_RX_TOTAL_BYTES + 1];
+    size_t total = (len + chunk - 1) / chunk;
+    for (size_t i = 0; i < total; i++) chunks[i] = chunk;
+    return send_chunks(len, chunks, total);
+}
+int main(void) {
+    // The Muse app's credentials message, with the 7 KB largest free block
+    // the FoloToy AI Passport has while pairing.
+    s_mtu = 247;
+    largest_free_block = 7168;
+    assert(send_message(2800, 241) == 2800);
+    // The overall limit stays.
+    largest_free_block = SIZE_MAX;
+    assert(send_message(MAX_RX_TOTAL_BYTES, 241) == MAX_RX_TOTAL_BYTES);
+    assert(send_message(MAX_RX_TOTAL_BYTES + 1, 241) == 0);
+    // Chunks longer than one ATT write, and chunks before the MTU is known.
+    assert(send_message(1500, 500) == 1500);
+    s_mtu = 23;
+    assert(send_message(2800, 241) == 2800);
+    // A later chunk longer than the first, e.g. a long write after a short
+    // one, or a first chunk that arrived before the MTU was known.
+    s_mtu = 247;
+    assert(send_chunks(741, (const size_t[]){241, 500}, 2) == 741);
+    s_mtu = 23;
+    assert(send_chunks(1100, (const size_t[]){100, 500, 500}, 3) == 1100);
+    // ...but still not past the overall limit.
+    s_mtu = 247;
+    size_t past_limit[17] = {241};
+    for (size_t i = 1; i < 17; i++) past_limit[i] = 500;
+    assert(send_chunks(MAX_RX_TOTAL_BYTES + 1, past_limit, 17) == 0);
+    // Growing needs the memory too.
+    largest_free_block = 482;
+    assert(send_chunks(741, (const size_t[]){241, 500}, 2) == 0);
+    return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "ble_rx_reassembly.c"
+            binary = source.with_suffix("")
+            source.write_text(harness)
+            compiled = subprocess.run(
+                [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                 str(source), "-o", str(binary)], capture_output=True, text=True,
+            )
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            ran = subprocess.run([str(binary)], capture_output=True, text=True, timeout=5)
+            self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+
     def test_ble_shutdown_stops_nimble_and_blocks_advertising_restart(self) -> None:
         source = BLE_SERVER_C.read_text()
-        shutdown = _function_body(source, "void ble_server_full_shutdown(")
+        full_shutdown = _function_body(source, "void ble_server_full_shutdown(")
+        self.assertIn("shutdown_stack(true)", full_shutdown)
+        # ble_server_power_off() stops the same way but keeps the controller's
+        # memory so BLE can come back.
+        self.assertIn("shutdown_stack(false)", _function_body(source, "bool ble_server_power_off("))
+        shutdown = _function_body(source, "static void shutdown_stack(bool release_memory) {")
         start_adv = _function_body(source, "static void start_advertising(void) {")
         gap = _function_body(source, "static int gap_event_cb(")
         begin_adv = _function_body(source, "void ble_server_begin_advertising(")
         stop_adv = _function_body(source, "void ble_server_stop_advertising(")
 
+        # Companion events are hidden while shutting down, so the companion
+        # (ble_basic) is told the phone's link is gone once the stack stops;
+        # otherwise it keeps notifying a dead handle after ble.power off.
+        self.assertIn("ev.type = BLE_GAP_EVENT_DISCONNECT", shutdown)
+        self.assertIn("s_companion.on_gap_event(&ev)", shutdown)
+        self.assertLess(shutdown.index("nimble_port_deinit()"),
+                        shutdown.index("s_companion.on_gap_event(&ev)"))
+        basic = (BLE_SERVER_C.parent / "ble_basic.c").read_text()
+        self.assertIn("if (!ble_hs_synced()) return;",
+                      _function_body(basic, "void ble_basic_notify_status("))
         self.assertIn("s_shutting_down = true", shutdown)
         self.assertIn("s_advertising_enabled = false", shutdown)
         self.assertIn("ble_gap_adv_stop()", shutdown)

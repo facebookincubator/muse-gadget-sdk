@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Muse Gadget Web Flasher</title>
+  <!-- Pinned: flasher-hooks.js relies on how this version works. -->
+  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #fff; --text: #1d1f23; --muted: #646b75; --line: #e1e4e9;
+      --accent: #2f6fed; --accent-text: #fff; --ok: #1b7f37; --error: #c4262e;
+      --warn-bg: #fff6e6; --warn-line: #f0a020;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #131416; --card: #1d1f23; --text: #e8eaed; --muted: #9aa0a8; --line: #33363c;
+        --accent: #5b8ff9; --accent-text: #0b1020; --ok: #4cc26b; --error: #ff6b6b;
+        --warn-bg: #2e2510; --warn-line: #c88a1c;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 3rem 1rem; background: var(--bg); color: var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 38rem; margin: 0 auto; }
+    h1 { font-size: 1.75rem; margin: 0 0 0.25rem; }
+    .lede { color: var(--muted); margin: 0 0 2rem; }
+    a { color: var(--accent); }
+    code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 1.25rem 1.5rem; margin-bottom: 1rem;
+      transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+    }
+    .step.active { border-color: var(--accent); box-shadow: 0 6px 24px rgb(47 111 237 / 0.12); }
+    .step.waiting { opacity: 0.6; }
+    .step.waiting:hover, .step.waiting:focus-within { opacity: 1; }
+    .step-head { display: flex; align-items: center; gap: 0.75rem; min-height: 2rem; }
+    .step-head h2 { font-size: 1.1rem; margin: 0; }
+    .badge {
+      flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; display: grid; place-items: center;
+      font-size: 0.9rem; font-weight: 600; background: var(--line); color: var(--text);
+    }
+    .active .badge { background: var(--accent); color: var(--accent-text); }
+    .done .badge { background: var(--ok); color: #fff; }
+    .summary { margin-left: auto; display: flex; gap: 0.75rem; align-items: baseline; font-size: 0.9rem; }
+    .summary a { color: var(--muted); }
+    .step-body { margin-top: 1rem; }
+    .step-body p { margin: 0 0 0.75rem; }
+
+    label.field { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem; }
+    input[type="password"], select {
+      width: 100%; font: inherit; color: inherit; background: var(--bg);
+      border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem;
+    }
+    input[type="password"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .button {
+      font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 0.65rem 1.25rem; cursor: pointer;
+      background: var(--accent); color: var(--accent-text);
+    }
+    .button.secondary { background: var(--line); color: var(--text); }
+    .button:disabled { opacity: 0.5; cursor: default; }
+    .install-row { margin: 1rem 0 0.75rem; }
+
+    .note { color: var(--muted); font-size: 0.875rem; }
+    .warning {
+      background: var(--warn-bg); border-left: 3px solid var(--warn-line); border-radius: 6px;
+      padding: 0.6rem 0.8rem; font-size: 0.9rem; margin: 0.75rem 0 0;
+    }
+    .checkbox { display: flex; gap: 0.5rem; align-items: center; font-size: 0.875rem; color: var(--muted); margin-top: 0.75rem; }
+    .status { margin: 0.75rem 0 0; font-size: 0.9rem; }
+    .status:empty, .warning:empty, [hidden] { display: none; }
+    .status.ok { color: var(--ok); }
+    .status.error { color: var(--error); }
+
+    details.card summary { cursor: pointer; font-weight: 600; }
+    details.card[open] summary { margin-bottom: 0.75rem; }
+    footer { text-align: center; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Muse Gadget Web Flasher</h1>
+    <p class="lede">Flash the open source Muse Gadget firmware onto your ESP32 board, straight from Chrome or Edge on a desktop computer.</p>
+
+    <section class="card step" id="step-token">
+      <div class="step-head">
+        <span class="badge" id="token-badge">1</span>
+        <h2>SDK token</h2>
+        <span class="summary" id="token-saved" hidden>
+          <code id="token-hint"></code>
+          <a href="#" id="change-token">Change</a>
+          <a href="#" id="forget-token">Forget</a>
+        </span>
+      </div>
+      <div class="step-body" id="token-entry">
+        <p>
+          A gadget needs your SDK token to pair. Get it from
+          <a href="https://gadgets.muse.ai/settings/sdk-tokens">gadgets.muse.ai</a>
+          (Account &gt; SDK tokens). It's sent to the gadget over USB after
+          installing, the gadget keeps it through updates, and this browser
+          remembers it for next time.
+        </p>
+        <label class="field" for="token">SDK token</label>
+        <input id="token" type="password" placeholder="mgst_…" autocomplete="off" spellcheck="false">
+        <p id="token-check" class="status"></p>
+      </div>
+    </section>
+
+    <section class="card step" id="step-install">
+      <div class="step-head">
+        <span class="badge">2</span>
+        <h2>Install</h2>
+      </div>
+      <div class="step-body">
+        <label class="field" for="board">Board</label>
+        <select id="board"></select>
+        <p id="board-note" class="warning"></p>
+        <label class="checkbox" id="all-ports-row">
+          <input type="checkbox" id="all-ports"> Show all serial ports, not just this board's USB device
+        </label>
+        <p id="token-warning" class="warning" hidden>
+          You haven't entered your SDK token yet. You can install without it,
+          but the gadget can't pair until it has one.
+        </p>
+        <div class="install-row">
+          <esp-web-install-button id="install">
+            <button slot="activate" class="button">Connect &amp; install</button>
+            <span slot="unsupported">
+              Your browser doesn't support Web Serial. Use Chrome or Edge on a desktop computer.
+            </span>
+            <span slot="not-allowed">Web Serial needs a secure (https) connection.</span>
+          </esp-web-install-button>
+        </div>
+        <p class="note">
+          Keep this tab in front while installing. Updating keeps your pairing,
+          Wi-Fi settings and token. When it's done, close the installer: the
+          page sends your token, and you set the gadget up in the Muse app.
+        </p>
+        <p id="install-status" class="status"></p>
+      </div>
+    </section>
+
+    <details class="card" id="already">
+      <summary>Already installed? Send your token to a gadget</summary>
+      <p class="note">For a gadget running firmware from this page. Pick its port when asked.</p>
+      <button id="send-token" class="button secondary">Send token to gadget</button>
+      <p id="token-status" class="status"></p>
+    </details>
+
+    <footer class="note">
+      Board not showing up? Some boards need you to hold <strong>BOOT</strong>
+      while plugging in USB. Built from
+      <a id="commit" href="https://github.com/facebookincubator/muse-gadget-sdk">main</a>.
+    </footer>
+  </main>
+
+  <script type="module">
+    import { installFlasherHooks } from "./flasher-hooks.js";
+    import { installPacedSerial } from "./paced-serial.js";
+    import { isSdkToken, sendSdkToken } from "./sdk-token.js";
+
+    const $ = (id) => document.getElementById(id);
+    const select = $("board");
+    const button = $("install");
+    const tokenInput = $("token");
+    const allPorts = $("all-ports");
+    const pacing = "SerialPort" in window ? installPacedSerial(SerialPort) : null;
+    const showStatus = (el, text, kind = "") => {
+      el.textContent = text;
+      el.className = `status ${kind}`;
+    };
+
+    const [boards, build] = await Promise.all([
+      fetch("boards.json").then((r) => r.json()),
+      fetch("build.json").then((r) => r.json()).catch(() => null),
+    ]);
+    for (const { board, name } of boards) {
+      select.add(new Option(name, board));
+    }
+
+    // The selected board, and how much flash its build needs (its manifest).
+    let board;
+    let minFlashBytes = 0;
+    const update = async () => {
+      board = boards.find((b) => b.board === select.value);
+      const manifestPath = `firmware/${board.board}/manifest.json`;
+      button.setAttribute("manifest", manifestPath);
+      // Boards whose USB bridge drops bytes get their writes paced.
+      pacing?.set(board.pacing ?? null);
+      $("board-note").innerHTML = board.note ?? "";
+      $("all-ports-row").hidden = !board.usb;
+      minFlashBytes = 0;
+      const manifest = await fetch(manifestPath).then((r) => r.json()).catch(() => null);
+      if (board.board === select.value) minFlashBytes = manifest?.min_flash_bytes ?? 0;
+    };
+    select.addEventListener("change", update);
+    await update();
+
+    // The token, remembered in this browser. Once saved, step 1 folds to its
+    // first 12 characters (the hint the gadget logs and gadgets.muse.ai
+    // shows) and step 2 takes the focus.
+    const TOKEN_KEY = "muse-sdk-token";
+    let saved = localStorage.getItem(TOKEN_KEY);
+    if (!isSdkToken(saved ?? "")) saved = null;
+    const token = () => saved;
+    const showToken = (entering = false) => {
+      const done = Boolean(saved) && !entering;
+      $("step-token").className = `card step ${done ? "done" : "active"}`;
+      $("step-install").className = `card step ${done ? "active" : "waiting"}`;
+      $("token-badge").textContent = done ? "✓" : "1";
+      $("token-saved").hidden = !done;
+      $("token-entry").hidden = done;
+      $("token-hint").textContent = saved ? `${saved.slice(0, 12)}…` : "";
+      $("token-warning").hidden = Boolean(saved);
+    };
+    tokenInput.addEventListener("input", () => {
+      const value = tokenInput.value.trim();
+      if (isSdkToken(value)) {
+        saved = value;
+        localStorage.setItem(TOKEN_KEY, value);
+        tokenInput.value = "";
+        showStatus($("token-check"), "");
+        showToken();
+        select.focus();
+      } else {
+        showStatus($("token-check"), value ? "That isn't an SDK token. Copy it again from gadgets.muse.ai." : "", "error");
+      }
+    });
+    tokenInput.addEventListener("blur", () => {
+      if (!tokenInput.value.trim()) showToken();   // changed their mind
+    });
+    $("change-token").addEventListener("click", (e) => {
+      e.preventDefault();
+      showToken(true);
+      tokenInput.focus();
+    });
+    $("forget-token").addEventListener("click", (e) => {
+      e.preventDefault();
+      saved = null;
+      localStorage.removeItem(TOKEN_KEY);
+      showToken();
+      tokenInput.focus();
+    });
+    showToken();
+    if (saved) select.focus();
+
+    const send = async (port, statusEl) => {
+      showStatus(statusEl, "Sending your SDK token to the gadget…");
+      try {
+        await sendSdkToken(port, token());
+        showStatus(statusEl, "Done. The gadget restarts with your token; set it up in the Muse app.", "ok");
+      } catch (e) {
+        showStatus(statusEl, e.message, "error");
+      }
+    };
+
+    // After an install, closing the installer sends the token over its port.
+    let installedPort = null;
+    if (pacing) {
+      installFlasherHooks({
+        getSelection: () => ({ usb: allPorts.checked ? null : board.usb, minFlashBytes }),
+        onInstalled: (port) => (installedPort = port),
+      });
+    }
+    document.addEventListener("closed", async (e) => {
+      if (e.target.localName !== "ewt-install-dialog" || !installedPort) return;
+      const port = installedPort;
+      installedPort = null;
+      if (!token()) {
+        showStatus($("install-status"), "Installed. Now enter your SDK token in step 1, then send it under “Already installed?”.", "error");
+        tokenInput.focus();
+        return;
+      }
+      // The installer closes the port as it goes; wait for that.
+      for (let i = 0; i < 20 && (port.readable || port.writable); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await send(port, $("install-status"));
+    });
+
+    $("send-token").disabled = !pacing;
+    $("send-token").addEventListener("click", async () => {
+      if (!token()) {
+        showStatus($("token-status"), "Enter your SDK token in step 1 first.", "error");
+        tokenInput.focus();
+        return;
+      }
+      let port;
+      try {
+        port = await navigator.serial.requestPort();
+      } catch {
+        return;   // no port picked
+      }
+      await send(port, $("token-status"));
+    });
+
+    if (build?.commit) {
+      const link = $("commit");
+      link.href += `/commit/${build.commit}`;
+      link.textContent = build.commit.slice(0, 7);
+    }
+  </script>
+</body>
+</html>

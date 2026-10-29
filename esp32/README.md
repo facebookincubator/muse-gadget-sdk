@@ -112,6 +112,19 @@ idf.py build
 This builds for the ESP32-C5 DevKitC-1. The firmware lands in
 `build/muse-gadget.bin`.
 
+A build without a token can get one later over serial: send the line
+`>sdk_token=mgst_…` on the board's console, and it stores the token in NVS,
+answers `@sdk_token ok` and restarts with it. A stored token takes precedence
+over the build's. The [web flasher](../web-flasher/README.md) does this for
+you after installing.
+
+Muse records a gadget's SDK token when the gadget pairs, and nowhere else. If
+you change the token on a paired gadget, or revoke the one it paired with,
+pair it again: hold the button for 5 seconds, then pair it in the Muse app.
+Until then it keeps the token it paired with, and once that token is revoked it
+can't reach Muse. The boot log warns when the gadget is paired with a token
+other than its current one.
+
 ### 3. Flash
 
 Plug in the board and flash it:
@@ -149,7 +162,11 @@ connected.
 
 To reset the device and set it up again, hold the button for 5 seconds.
 
-Pairing requires a press of the button on the device, and every setup creates
+On the experimental EchoEar-2ST, press the screen to confirm pairing; after
+pairing, hold the screen microphone to record and release it to send. See
+[EchoEar setup](devices/ostb-echoear-2st.md) for its controls and validation limits.
+
+Pairing requires an explicit press on the device, and every setup creates
 a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
@@ -172,11 +189,14 @@ status screen.
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
+| Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI on FreeInk, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
+| Seeed reTerminal Sticky Link status (experimental) | 3.97" e-paper status screen and SHT40 only; no Muse UI | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
@@ -185,9 +205,11 @@ status screen.
 | M5Stack Cardputer ADV (experimental) | UI, GO/Space push-to-talk with text replies, Esc/Enter/arrow menu controls | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
+| Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
@@ -206,6 +228,25 @@ Boards without PSRAM, like the classic ESP32 and the ESP32-C6, run without the
 home-network tunnel, which needs more memory than they have. Muse can still
 reach the device and control it.
 
+## Power characterization
+
+Start at [Power profiling](docs/power/README.md). Read the
+[PPK2 rules](docs/power/ppk2.md) before any PPK2 use; the SenseCAP Watcher has
+its own [USB-free procedure](docs/power/sensecap-watcher.md). The opt-in
+power-test image runs an autonomous, timestamped peripheral sweep after USB
+is removed; one PPK2 process keeps source power continuous through reconnect.
+Battery isolation and USB-charger backfeed protection are required before
+output is enabled. Diagnostic figures are not production application profiles.
+
+To profile another board or device, follow the
+[porting recipe](docs/power/README.md): labelled PPK2 capture for anything the
+PPK2 can power, or the board-neutral `CONFIG_MUSE_POWER_TEST` autonomous sweep.
+Implement the [board hook header](components/muse/boards/muse_power_test_board.h)
+and board-owned matrices; no core rename is needed. The shared host CLI is
+[`tools/power/power_sweep.py`](tools/power/power_sweep.py). Its analyzer uses the
+firmware-reported board name, with `--device` as an override and Watcher as the
+legacy-only fallback.
+
 ## Hack and extend it
 
 Every board's settings live in a small `devices/sdkconfig.<board>` file loaded
@@ -222,7 +263,18 @@ for how it works and for boards that need the manual steps.
 
 To give Muse a command of its own, such as reading a sensor or switching a
 relay, advertise it in `link.register` and handle it in `main/app.c`.
-[`AGENTS.md`](AGENTS.md#adding-a-command) walks through it.
+[`AGENTS.md`](AGENTS.md#adding-a-command) walks through it. Going the other
+way, your code can ask the VM for the chat history, or read and write files
+in the user's home on the VM, over Link's session, on every board:
+[`AGENTS.md`](AGENTS.md#requests-to-muses-vm-from-your-code) has the routes
+and limits.
+
+To show your phone's camera on a board's screen, build it with
+`MUSE_VIDEO=1 tools/muse/board.sh build <board>` and run Muse Gadgets Test
+([Android](../android/musegadgetstest), [iPhone](../ios/musegadgetstest)) on a phone on the
+same Wi-Fi, then open Phone camera on the board: the phone encodes H.264 or
+VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and
+[`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
 
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
@@ -242,11 +294,40 @@ things you can change:
   is the spot: it has the reply text, and the MP3 decoder, speaker and volume
   are already wired up there.
 
+To talk with Muse live instead (experimental), turn on "Live voice calls with
+Muse" under Muse in `idf.py menuconfig` (`CONFIG_MUSE_REALTIME_VOICE`). It's
+offered on boards with the full UI and PSRAM and on the Voice PE and reSpeaker
+Lite. The DevKitC-1 and other boards without a mic and speaker don't have it,
+and builds without it don't change. With it on:
+
+- **StopWatch:** hold yellow to talk or interrupt playback; release to let Muse
+  answer without ending the call. A capture tail of up to 120 ms preserves the
+  last syllable. Tap blue to hang up. With calls built in, yellow is the talk
+  button and blue the speaker button (mute outside a call), the other way round
+  from builds without them; red stays power. Use **Settings > Sound > Voice notes** for
+  the old note-and-text mode. Interrupting playback does not cancel detached
+  background work, whose results may arrive later.
+- **Other boards:** tap the talk button to start a call, press again to hang up;
+  holding still sends a voice note. The mic is off while Muse talks, except on
+  the Voice PE when its audio chip reports echo cancellation.
+- A call also ends when Muse ends it, after 45 seconds of quiet (not counting
+  time Muse is still working on something), or after 15 minutes. Muse may not
+  hang up by itself when it says goodbye: press to end the call. If the
+  connection drops mid-call, the gadget ends that call on Muse when it
+  reconnects (not after a power loss or restart: Muse ends it a minute or so
+  later).
+- On the Voice PE, the mute switch hangs up, and nothing the mic picked up
+  after it went on is sent.
+- Muse doesn't say hello unless you turn that on
+  (`CONFIG_MUSE_REALTIME_VOICE_GREETING`).
+- The Muse VM has to accept voice calls from the gadget.
+
 A few things worth knowing:
 
-- Your SDK token ships inside the firmware, so treat it as an identifier
-  rather than a password. If it leaks, revoke it on gadgets.muse.ai, generate
-  a new one, and rebuild.
+- Your SDK token ships inside the firmware, or sits in NVS if you set it over
+  serial, so treat it as an identifier rather than a password. If it leaks,
+  revoke it on gadgets.muse.ai, generate a new one, and rebuild or send the
+  new one over serial.
 - **We strongly recommend enabling NVS encryption** if your board supports it.
   NVS stores Wi-Fi credentials and device tokens in flash; without encryption,
   anyone with physical access to the board can read them. Enable it with
@@ -295,6 +376,28 @@ their upstream licenses:
   decoder, is CC0-1.0. See [`components/minimp3/LICENSE`](components/minimp3/LICENSE).
 - [`main/pixel_font.c`](main/pixel_font.c), the Adafruit GFX font, is
   BSD-2-Clause, as its header says.
+- [`components/muse/boards/ostb_echoear_display_init.h`](components/muse/boards/ostb_echoear_display_init.h),
+  the ST77916 panel initialization table from 78/xiaozhi-esp32, is MIT, as its
+  retained upstream notice says.
+- [`main/epd_ssd1677.c`](main/epd_ssd1677.c), the reTerminal Sticky SSD1677
+  driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
+  Sticky's Link status profile), is MIT and retains the source's copyright and
+  license notice.
+- The JD9853A initialization sequence in
+  [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
+  adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
+  [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
+  fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
+  Font Awesome 5 Free (SIL OFL 1.1); see its README.
+- [`components/tinyh264/src`](components/tinyh264), the H.264 decoder, is the
+  Android Open Source Project's (via udevbe/tinyh264), Apache-2.0 under its
+  copyright. See [`components/tinyh264/LICENSE`](components/tinyh264/LICENSE).
+- [`components/libvpx_vp8/src`](components/libvpx_vp8), the VP8 decoder, is
+  libvpx v1.16.0's, trimmed: BSD-3-Clause under the WebM Project authors'
+  copyright, with Google's patent grant. See
+  [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
+  [`PATENTS`](components/libvpx_vp8/PATENTS).
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.
