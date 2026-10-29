@@ -43,6 +43,7 @@ pairing and control protocols, so the same app pairs either.
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
+| `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |
 | `noise/` | Noise XX handshake, framing and service envelopes |
 | `data/` | The systemd unit and the hash-pinned `requirements.lock`, shipped in the package |
 
@@ -211,6 +212,14 @@ never has a command's parameters, output or error message.
 
 ## Adding a command
 
+A device's owner adds commands without changing the package: one JSON file
+per command in `/etc/musegadget/commands.d/` (`MUSEGADGET_COMMANDS_DIR`
+overrides it), read when the service starts. `commands.py` documents the
+format and validates it, including the directory trust check;
+`Executor.run_drop_in` runs them. `Executor.specs` takes the actual device
+metadata to admit whole definitions under the serialized registration budget. See "Add your own
+commands" in `README.md`. To add a built-in command to the package itself:
+
 1. Add a spec to `COMMAND_SPECS` in `executor.py`: `description`, `required`
    and `optional` parameters (each with `type` and `description`), and
    `timeout_ms` if the default 30 seconds is too short.
@@ -351,7 +360,8 @@ run_command=...)` is one encrypted session with a Muse VM.
 - `replies` maps each answer's message ID to its latest `Reply`.
   `abandon_reply(message_id)` stops waiting for one reply.
 - `acknowledge(response, follow_up=True)` binds one more user message to the
-  request. Call `expect_follow_up()` before you send it.
+  request. Call `expect_follow_up()` before you send it. Until that
+  acknowledgement arrives, the turn is neither complete nor settled.
 - `acknowledged`, `busy`, `task_finished`, `activity_code` and
   `last_activity` describe the request's state.
 - `ReplayScope` drops events from earlier turns. Share one across the turns

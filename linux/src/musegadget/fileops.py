@@ -19,8 +19,9 @@ account that runs commands, so file access is limited by that account's
 permissions rather than the service's. Takes a JSON request on stdin and
 prints a JSON result.
 
-Writes land in a hidden partial file next to the target and replace it
-atomically once the final chunk arrives and its SHA-256 matches.
+Writes land in a hidden partial file next to the target and publish it
+atomically once the final chunk arrives and its SHA-256 matches. Without
+overwrite, publication refuses any existing destination directory entry.
 """
 
 from __future__ import annotations
@@ -111,9 +112,6 @@ def write(request: dict) -> dict:
     if expected and expected.lower() != digest.hexdigest():
         os.unlink(partial)
         raise FileOpError("sha256 mismatch; write discarded")
-    if os.path.exists(path) and not request.get("overwrite", True):
-        os.unlink(partial)
-        raise FileOpError("file exists and overwrite is false")
     # Keep the permission bits of the file being replaced, such as 0600 or
     # 0755, but not its setuid, setgid or sticky bits. A new file gets 0644,
     # less the umask.
@@ -124,7 +122,20 @@ def write(request: dict) -> dict:
         os.umask(umask)
         mode = 0o644 & ~umask
     os.chmod(partial, mode)
-    os.replace(partial, path)
+    if request.get("overwrite", True):
+        os.replace(partial, path)
+    else:
+        # Both names are in the same directory. link() atomically refuses an
+        # existing entry (including a dangling symlink); an exists()/rename()
+        # pair would let another writer's file be replaced between the calls.
+        # Like rename(), publish the partial entry itself, never a symlink's
+        # target (Python 3.14 changed link()'s default to follow it).
+        try:
+            os.link(partial, path, follow_symlinks=False)
+        except FileExistsError:
+            raise FileOpError("file exists and overwrite is false") from None
+        finally:
+            os.unlink(partial)
     return {"path": path, "size": written, "sha256": digest.hexdigest(), "complete": True}
 
 
