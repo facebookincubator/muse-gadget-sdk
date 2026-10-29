@@ -32,10 +32,10 @@ request = json.loads(sys.stdin.readline())
 replace, link = fileops.os.replace, fileops.os.link
 
 def pause(publish):
-    def wrapped(source, destination):
+    def wrapped(source, destination, **kwargs):
         print("READY", flush=True)
         assert sys.stdin.readline().strip() == "publish"
-        return publish(source, destination)
+        return publish(source, destination, **kwargs)
     return wrapped
 
 fileops.os.replace = pause(replace)
@@ -116,7 +116,7 @@ def test_no_overwrite_refuses_existing_directory_entries(tmp_path, entry):
 
 
 def test_no_overwrite_publication_failure_discards_partial(tmp_path, monkeypatch):
-    def unsupported(*args):
+    def unsupported(*args, **kwargs):
         raise OSError("hard links unavailable")
     monkeypatch.setattr(fileops.os, "link", unsupported)
     target = tmp_path / "new"
@@ -124,3 +124,19 @@ def test_no_overwrite_publication_failure_discards_partial(tmp_path, monkeypatch
         fileops.write(request_for(target))
     assert not target.exists()
     assert not (tmp_path / ".new.musegadget-partial").exists()
+
+
+def test_no_overwrite_publishes_a_swapped_partial_symlink_not_its_target(tmp_path):
+    private = tmp_path / "private"
+    private.write_bytes(b"secret")
+    target = tmp_path / "new"
+    first = request_for(target, final=False)
+    assert fileops.write(first)["complete"] is False
+    partial = tmp_path / ".new.musegadget-partial"
+    partial.unlink()
+    partial.symlink_to(private)
+    final = request_for(target, offset=len(b"secret"), data_b64="")
+    fileops.write(final)
+    assert target.is_symlink()
+    assert os.stat(private).st_nlink == 1
+    assert not os.path.lexists(partial)

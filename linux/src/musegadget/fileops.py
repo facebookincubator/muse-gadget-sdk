@@ -128,8 +128,10 @@ def write(request: dict) -> dict:
         # Both names are in the same directory. link() atomically refuses an
         # existing entry (including a dangling symlink); an exists()/rename()
         # pair would let another writer's file be replaced between the calls.
+        # Like rename(), publish the partial entry itself, never a symlink's
+        # target (Python 3.14 changed link()'s default to follow it).
         try:
-            os.link(partial, path)
+            os.link(partial, path, follow_symlinks=False)
         except FileExistsError:
             raise FileOpError("file exists and overwrite is false") from None
         finally:
