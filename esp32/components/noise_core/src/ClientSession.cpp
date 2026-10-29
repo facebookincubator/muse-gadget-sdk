@@ -278,6 +278,58 @@ StatusWithSize ClientSession::WriteNextOutboundWebSocketPayload(
   return StatusWithSize(sealResult.status(), sealResult.size());
 }
 
+ClientSession::InPlacePayload ClientSession::SealBodyChunkInPlace(
+    ServiceType service,
+    int64_t streamId,
+    ByteSpan buffer,
+    size_t dataOffset,
+    size_t dataSize) noexcept {
+  if (!isEstablished() || framer_.HasOutboundMessage()) {
+    return InPlacePayload{Status::FailedPrecondition(), 0, 0};
+  }
+  if (!IsValidOutput(buffer) || dataSize == 0 || dataOffset > buffer.size() ||
+      dataSize > buffer.size() - dataOffset) {
+    return InPlacePayload{Status::InvalidArgument(), 0, 0};
+  }
+
+  // The request envelope's prefix (envelope, service frame and chunk fields)
+  // goes right before the data, and the transport frame's fields before it.
+  uint8_t prefix[kMaxBodyChunkInPlaceHeadroom];
+  StatusWithSize prefixResult = EncodeBodyChunkRequestPrefix(
+      service, streamId, dataSize, ByteSpan(prefix, sizeof(prefix)));
+  if (!prefixResult.ok()) {
+    return InPlacePayload{prefixResult.status(), 0, 0};
+  }
+  const size_t prefixSize = prefixResult.size();
+  if (prefixSize > dataOffset) {
+    return InPlacePayload{Status::ResourceExhausted(), 0, 0};
+  }
+  const size_t envelopeOffset = dataOffset - prefixSize;
+
+  const size_t envelopeSize = prefixSize + dataSize;
+  if (buffer.size() - dataOffset - dataSize < Transport::kTagSize) {
+    return InPlacePayload{Status::ResourceExhausted(), 0, 0};
+  }
+
+  for (size_t i = 0; i < prefixSize; ++i) {
+    buffer[envelopeOffset + i] = prefix[i];
+  }
+  OrderedTransportFramer::InPlaceFrame frame =
+      framer_.EncodeSingleFrameInPlace(buffer, envelopeOffset, envelopeSize);
+  if (!frame.status.ok()) {
+    return InPlacePayload{frame.status, 0, 0};
+  }
+
+  StatusWithSize sealResult = transport_->SealInPlace(
+      buffer.subspan(frame.offset, frame.size + Transport::kTagSize),
+      frame.size);
+  if (!sealResult.ok()) {
+    stage_ = Stage::Failed;
+    return InPlacePayload{sealResult.status(), 0, 0};
+  }
+  return InPlacePayload{OkStatus(), frame.offset, sealResult.size()};
+}
+
 ClientSessionInboundResult ClientSession::ProcessInboundWebSocketPayload(
     ConstByteSpan websocketPayload,
     ByteSpan transportFrameScratch,
@@ -303,9 +355,11 @@ ClientSessionInboundResult ClientSession::ProcessInboundWebSocketPayload(
         FrameStatusForOpenFailure(openResult.status()), openResult.status());
   }
 
-  InboundFrameResult frameResult = framer_.DecodeAndAppendInboundFrame(
+  ConstByteSpan message;
+  InboundFrameResult frameResult = framer_.DecodeInboundFrame(
       transportFrameScratch.subspan(0, openResult.size()),
-      serviceResponseScratch);
+      serviceResponseScratch,
+      message);
   if (!frameResult.status.ok() ||
       frameResult.frame_status != InboundFrameStatus::Complete) {
     if (frameResult.frame_status == InboundFrameStatus::NeedMore &&
@@ -319,8 +373,8 @@ ClientSessionInboundResult ClientSession::ProcessInboundWebSocketPayload(
   }
 
   DecodedServiceResponseEnvelope envelope;
-  ServiceCodecResult envelopeResult = DecodeServiceResponseEnvelopeDetailed(
-      serviceResponseScratch.subspan(0, frameResult.size), envelope);
+  ServiceCodecResult envelopeResult =
+      DecodeServiceResponseEnvelopeDetailed(message, envelope);
   if (!envelopeResult.ok()) {
     stage_ = Stage::Failed;
     return InboundFailure(

@@ -58,6 +58,7 @@ typedef enum {
 typedef struct {
     muse_hatch_state_t state;
     char detail[48];
+    char vm_id[64];     /* the VM it last connected to; empty before that */
 } muse_hatch_status_t;
 
 /* Starts the connection task; it connects once Wi-Fi is up. */

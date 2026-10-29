@@ -35,9 +35,25 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.75 (not the 1.75C)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_OSTB_ECHOEAR_2ST
+            bool "OSTB EchoEar-2ST (360px round touch LCD, experimental)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_RETERMINAL_STICKY
+            bool "Seeed reTerminal Sticky (480x800 touch e-paper, experimental)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_S3_216
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_185C
+            bool "Waveshare ESP32-S3-Touch-LCD-1.85C"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_ESP_MOSAICO
+            bool "Espressif ESP-Mosaico (ESP32-S31)"
+            depends on IDF_TARGET_ESP32S31
 
         config MUSE_BOARD_AIPI
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
@@ -75,6 +91,10 @@ menu "Muse"
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_SEEED_XIAO_S3_147
+            bool "Seeed XIAO ESP32-S3 1.47 Touch Display (PDM mic, no speaker)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_M5STACK_CORES3
             bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
@@ -92,6 +112,9 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD7
             bool "Waveshare ESP32-S3-Touch-LCD-7 (800x480 touch LCD, no audio)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_WAVESHARE_S3_LCD128
+            bool "Waveshare ESP32-S3-Touch-LCD-1.28 (240x240 round touch LCD, no audio)"
+            depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_VN_S3_183
             bool "VN ESP32-S3 board (1.83\" 284x240 NV3023 LCD, ES8311 and ES7210)"
             depends on IDF_TARGET_ESP32S3
@@ -103,6 +126,7 @@ menu "Muse"
     config MUSE_ENABLED
         bool
         default y if !MUSE_BOARD_NONE
+        select HOMEHUB_DAEMON_REQUESTS   # voice notes and chat over Link's session
 
     # Always defined, unlike the target-dependent board options, so
     # idf_component.yml rules can select each board's managed components.
@@ -110,7 +134,11 @@ menu "Muse"
         string
         default "waveshare_s3_175c" if MUSE_BOARD_WAVESHARE_S3_175C
         default "waveshare_s3_175" if MUSE_BOARD_WAVESHARE_S3_175
+        default "ostb_echoear_2st" if MUSE_BOARD_OSTB_ECHOEAR_2ST
+        default "reterminal_sticky" if MUSE_BOARD_RETERMINAL_STICKY
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
+        default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
+        default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
         default "aipi" if MUSE_BOARD_AIPI
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
@@ -120,27 +148,67 @@ menu "Muse"
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "seeed_xiao_s3_147" if MUSE_BOARD_SEEED_XIAO_S3_147
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
         default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
         default "fnk0104b" if MUSE_BOARD_FNK0104B
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
         default "waveshare_s3_lcd7" if MUSE_BOARD_WAVESHARE_S3_LCD7
+        default "waveshare_s3_lcd128" if MUSE_BOARD_WAVESHARE_S3_LCD128
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
+
+    # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
+    # of LVGL: FreeInk drives the panel and its refreshes, and draws the face,
+    # Settings and the keyboard. Each one names its FreeInk device profile.
+    config MUSE_UI_FREEINK
+        bool
+        default y if MUSE_BOARD_RETERMINAL_STICKY
+
+    config MUSE_FREEINK_DEVICE
+        string
+        default "STICKY" if MUSE_BOARD_RETERMINAL_STICKY
+        default ""
+
+    config MUSE_STICKY_SD
+        bool "Mount the reTerminal Sticky's microSD card at /sdcard"
+        depends on MUSE_BOARD_RETERMINAL_STICKY
+        default n
+        help
+            Watches the card-detect pin and mounts an inserted card's FAT
+            filesystem at /sdcard (never formatting it), on the panel's SPI
+            bus. Nothing in the firmware reads the card yet, so it's off: a
+            mount costs a task, time on the bus the e-paper shares, and parsing
+            whatever card is inserted. Turn it on for a feature that uses it.
 
     # The Muse tools' serial port: the console UART behind the board's USB
     # bridge, where the chip's own USB Serial/JTAG isn't wired to a connector
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
     # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME
         int "Speaker volume until one is chosen in settings (percent)"
         range 0 100
         default 70
+
+    config MUSE_POWER_TEST
+        bool "Isolated board BSP power-characterization firmware"
+        # Boards implementing boards/muse_power_test_board.h; extend this list
+        # only after the new board's diagnostic hooks and matrix pass tests.
+        depends on (MUSE_BOARD_SENSECAP_WATCHER) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        default n
+        help
+            DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
+            at app_main. USB UART arms a timed autonomous VBUS-free BSP-load
+            sweep. No credentials, production NVS, BLE provisioning or OTA.
+            Results are retained in RAM/RTC until read back after USB reconnect.
+            This characterizes isolated BSP loads, NOT production power.
+            Optional camera support is not required and unsupported matrix
+            features are explicitly skipped. Never enable in a release profile.
 
     config MUSE_WATCHER_CAMERA
         bool "SenseCAP Watcher camera capture and live preview"
@@ -165,6 +233,16 @@ menu "Muse"
             Without it those characters show as boxes. Hangul isn't
             included.
 
+    config MUSE_CJK_FONT_NOTO
+        bool "Draw CJK captions with Noto Sans SC instead of Unifont"
+        depends on MUSE_CJK_FONT
+        default n
+        help
+            Anti-aliased Noto Sans SC Medium at 16 px in place of Unifont's
+            1-bit bitmaps, in the same 16 px cell. Covers the 6763 hanzi of
+            GB2312 rather than every CJK Unified Ideograph: rarer characters
+            show as boxes. Takes about 910 KB of flash, against 850 KB.
+
     config MUSE_JC3248W535_MIC_GPIO
         int "JC3248W535: GPIO for an external I2S mic's data (SD) line"
         depends on MUSE_BOARD_GUITION_JC3248W535
@@ -176,6 +254,21 @@ menu "Muse"
             to GPIO2), L/R to GND, power to 3.3 V, and its SD line to a free
             GPIO, and set that GPIO here. -1 leaves push-to-talk recording
             silence.
+
+    config MUSE_STATIC_BUFFERS_IN_PSRAM
+        bool "Keep the avatar's and audio's static buffers in PSRAM"
+        depends on MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+        default n
+        help
+            Places the zero-initialized statics of the avatar renderer
+            (muse_pixel.c: its frame, mask and lookup tables) and the audio
+            path (muse_audio.c: the I2S staging and chirp buffers), about
+            17 KB, in PSRAM instead of internal RAM (linker.lf). Only the
+            CPU touches them: the avatar is scaled into LVGL's draw buffer,
+            and the I2S driver copies to and from its own DMA buffers. Turn
+            it on where internal RAM is short, as the SenseCAP Watcher does
+            to pay for the CPU's light-sleep retention memory, which it
+            takes at boot and keeps.
 
     config MUSE_HATCH
         bool "Muse's own voice session"
@@ -189,5 +282,186 @@ menu "Muse"
             muse_chat_session.cpp is where a TTS API of your own can speak
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
+
+    config MUSE_REALTIME_VOICE
+        bool "Live voice calls with Muse (experimental)"
+        depends on (MUSE_HATCH || HOMEHUB_VOICE) && SPIRAM
+        default n
+        help
+            A tap on the talk button starts a live voice call with Muse over
+            the voice session; the next press hangs up. Holding the button
+            still sends a voice note. On the StopWatch, holding yellow talks
+            in a call instead, blue hangs up, and voice notes are a Sound
+            setting. The mic is shut while Muse is talking
+            unless the board's audio chip confirms echo cancellation (the
+            Home Assistant Voice PE's XMOS), so you take turns. The call
+            also ends when Muse ends it, when nothing has been said or
+            played for the idle limit, or at the length limit. Muse's VM
+            has to accept voice calls from this gadget's credentials.
+
+if MUSE_REALTIME_VOICE
+
+    config MUSE_REALTIME_VOICE_APP_ID
+        string "App ID the voice session connects as"
+        default "hatch-web"
+        help
+            Sent as app_id when the voice session connects, which is where
+            Muse's VM takes the app identity for every request on that
+            connection: calls, and voice notes and typed messages too (it
+            drops a per-request x-app-id). A call is refused without one. A
+            positive 64-bit app ID, or "hatch-web", the web app's. Empty
+            sends none. Builds without calls send none either.
+
+    config MUSE_REALTIME_VOICE_IDLE_S
+        int "Hang up after this many quiet seconds"
+        range 15 1800
+        default 45
+        help
+            Nothing said and nothing audible from Muse for this long ends
+            the call. The server may enforce a shorter idle limit.
+
+    config MUSE_REALTIME_VOICE_MAX_S
+        int "Longest call, in seconds"
+        range 60 7200
+        default 900
+
+    config MUSE_REALTIME_VOICE_GREETING
+        bool "Muse says hello when a call starts"
+        default n
+
+    config MUSE_REALTIME_VOICE_AEC_DUPLEX
+        bool "Keep the mic open while Muse talks if echo is cancelled"
+        depends on HOMEHUB_VOICE
+        default y
+        help
+            On the Voice PE, when the XMOS reports at start-up that its
+            output is echo-cancelled, the call is full duplex and you can
+            talk over Muse. Otherwise, and on other boards, the mic is shut
+            while Muse is audibly talking and for a moment after.
+
+endif
+
+    config MUSE_HATCH_COMPACT_BUFFERS
+        bool "Smaller voice session buffers, for 2 MB of PSRAM"
+        depends on MUSE_HATCH
+        default n
+        help
+            The voice session keeps about 830 KB of audio buffers in PSRAM:
+            512 KB of reply speech, 8 s of mic backlog and 2 s of decoded
+            audio. With 2 MB of PSRAM that leaves too little once Home Link
+            is connected, and a chat turn runs out of memory. This keeps
+            128 KB of speech, 2 s of mic backlog and 1 s of decoded audio
+            (about 220 KB), which still covers a push-to-talk turn. Board
+            overlays with 2 MB of PSRAM turn it on.
+
+    config MUSE_VIDEO
+        bool "Video streaming from a phone to the display"
+        depends on MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31) && !MUSE_UI_FREEINK
+        default n
+        help
+            A phone (Muse Gadgets Test, android/musegadgetstest) streams its camera, or
+            a clip, as H.264 constrained baseline (or VP8, MUSE_VIDEO_VP8);
+            the board decodes it (components/tinyh264) and shows it full
+            screen, scaled to fit.
+            The menu gets a Phone camera item that asks the phone for a
+            stream. Needs a board whose panel driver has draw_frame (the
+            Waveshare S3 1.75 and 1.75C, the StopWatch, the ESP-Mosaico),
+            PSRAM for the receive ring and the decoder's pictures, and the
+            S3's SIMD or the S31's speed for the colour conversion. About
+            100 KB of flash; the decoder's hot code can go in IRAM
+            (MUSE_VIDEO_DECODER_IRAM).
+            protocols/VIDEO.md has the design.
+
+    config MUSE_VIDEO_WIFI
+        bool "Take streams over Wi-Fi"
+        depends on MUSE_VIDEO
+        default y
+        help
+            The stream over TCP on the local network: the board listens on
+            MUSE_VIDEO_WIFI_PORT and announces itself over mDNS as
+            _musevideo._tcp, so the phone finds it on the same network.
+            protocols/VIDEO.md has the wire format.
+
+    # Always defined, so idf_component.yml can key mDNS on it in every build
+    # (a bool whose dependencies are unmet isn't written to sdkconfig).
+    config MUSE_VIDEO_MDNS
+        string
+        default "y" if MUSE_VIDEO_WIFI
+        default "n"
+
+    config MUSE_VIDEO_WIFI_PORT
+        int "TCP port for video over Wi-Fi"
+        depends on MUSE_VIDEO_WIFI
+        range 1024 65535
+        default 7766
+
+    config MUSE_VIDEO_WIFI_START_ANYTIME
+        bool "Accept a Wi-Fi stream with the Phone camera view closed (bench builds only)"
+        depends on MUSE_VIDEO_WIFI
+        default n
+        help
+            The Wi-Fi port is unauthenticated: anyone on the network can
+            connect. By default the board takes a stream only while someone
+            has opened Phone camera on it (a client hears "closed" otherwise
+            and waits for "want"), so a stranger can't wake the screen, draw on
+            it or keep the radio busy. Turn this on only for automated
+            benches that start streams without touching the board.
+
+    config MUSE_VIDEO_VP8
+        bool "VP8 as well as H.264"
+        depends on MUSE_VIDEO
+        default y
+        help
+            Decode VP8 streams too (components/libvpx_vp8, libvpx's decoder:
+            BSD-3-Clause with the WebM project's patent grant, no
+            royalty-charging patent pool). The board lists it in hello's
+            codecs and the client picks. About 45 KB of flash; on the S3 it
+            decodes a 232 px stream at 1000 kb/s in 24 ms a frame against
+            tinyh264's 33, for the same picture. protocols/VIDEO.md has the
+            numbers.
+
+    config MUSE_VIDEO_VP8_PROF
+        bool "Log VP8 decode time per stage (bench)"
+        depends on MUSE_VIDEO_VP8
+        default n
+        help
+            Times the VP8 decoder's stages with the CPU cycle counter and logs
+            them with the video stats. Costs a little decode time.
+
+    config MUSE_VIDEO_DECODER_IRAM
+        bool "Decoder's hot code in IRAM"
+        depends on MUSE_VIDEO
+        default n
+        help
+            tinyh264's per-macroblock code and tables in IRAM (about 44 KB;
+            with MUSE_VIDEO_VP8, libvpx_vp8's too, by default its compact
+            set, about 33 KB more: MUSE_VP8_IRAM),
+            so the decoder never waits on the instruction cache. On the S3
+            that comes out of the heap; a board running Wi-Fi, BLE and the
+            UI can't spare it. Measured on the Waveshare S3 1.75C: see
+            protocols/VIDEO.md. (The colour conversion, 4 KB, is always in
+            IRAM: from the cache it slows both it and the decoder by a
+            quarter.)
+
+    config MUSE_VIDEO_SIMD_MC
+        bool "Motion compensation on the S31's SIMD"
+        depends on MUSE_VIDEO && IDF_TARGET_ESP32S31
+        default n
+        help
+            tinyh264's luma 6-tap filters and chroma on the ESP32-S31's SIMD.
+            Checked against the C on first use (the C stays if they differ,
+            logged on tinyh264). Off by default: correct, but slower on the
+            board than the C (480 px in two bands: 40 ms a frame against
+            28), so experimental.
+
+    config MUSE_VIDEO_BUFFER
+        int "Video receive buffer (bytes, a power of two)"
+        depends on MUSE_VIDEO
+        range 16384 262144
+        default 131072
+        help
+            The client may have this much in flight; in PSRAM. 128 KB holds
+            about half a second at 2 Mb/s, enough for a keyframe and the
+            frames behind it.
 
 endmenu

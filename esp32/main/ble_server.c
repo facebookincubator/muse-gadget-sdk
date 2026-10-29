@@ -81,10 +81,14 @@ static bool s_started = false;
 static bool s_shutting_down = false;
 static bool s_synced = false;
 static bool s_advertising_enabled = false;
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+static int s_companion_interval_ms = CONFIG_HOMEHUB_BLE_PERSISTENT_ADV_INTERVAL_MS;
+#endif
 static bool s_advertising_active = false;
 static bool s_plaintext_status_blocked = false;
 static ble_companion_t s_companion = {0};
 static bool s_companion_advertising = false;
+static volatile bool s_quiet = false;     // ble_server_set_quiet
 
 static SemaphoreHandle_t s_tx_mutex = NULL;
 static SemaphoreHandle_t s_rx_mutex = NULL;
@@ -537,15 +541,44 @@ static void handle_rx_write_locked(const uint8_t *data, size_t len,
         if (idx == 0 || s_rx_total != total) {
             rx_reset_locked();
             s_rx_total = total;
-            s_rx_cap = MAX_RX_TOTAL_BYTES;
+            // Sized to the message: a fixed 8 KB buffer doesn't fit beside the
+            // UI on boards without PSRAM. The longer of this chunk and one ATT
+            // write is only an estimate; a longer chunk later grows the buffer.
+            size_t chunk_max = s_mtu > 3 + CHUNK_HEADER_BYTES
+                               ? (size_t)s_mtu - 3 - CHUNK_HEADER_BYTES : 0;
+            if (flen > chunk_max) chunk_max = flen;
+            s_rx_cap = (size_t)total * chunk_max;
+            if (s_rx_cap > MAX_RX_TOTAL_BYTES) s_rx_cap = MAX_RX_TOTAL_BYTES;
             s_rx_buf = malloc(s_rx_cap);
-            if (!s_rx_buf) { rx_reset_locked(); return; }
+            if (!s_rx_buf) {
+                ESP_LOGE(TAG, "no memory to reassemble a %u-byte command", (unsigned)s_rx_cap);
+                rx_reset_locked();
+                return;
+            }
             s_rx_len = 0;
         }
 
         if (idx != s_rx_next_idx || idx >= s_rx_total) { rx_reset_locked(); return; }
 
-        if (s_rx_len + flen > s_rx_cap) { rx_reset_locked(); return; }
+        if (s_rx_len + flen > MAX_RX_TOTAL_BYTES) {
+            ESP_LOGE(TAG, "chunked command exceeds %d bytes", MAX_RX_TOTAL_BYTES);
+            rx_reset_locked();
+            return;
+        }
+        if (s_rx_len + flen > s_rx_cap) {
+            // A long write can carry more than the estimate: assume the rest of
+            // the chunks are this long too.
+            size_t cap = s_rx_len + (size_t)(s_rx_total - idx) * flen;
+            if (cap > MAX_RX_TOTAL_BYTES) cap = MAX_RX_TOTAL_BYTES;
+            uint8_t *grown = realloc(s_rx_buf, cap);
+            if (!grown) {
+                ESP_LOGE(TAG, "no memory to reassemble a %u-byte command", (unsigned)cap);
+                rx_reset_locked();
+                return;
+            }
+            s_rx_buf = grown;
+            s_rx_cap = cap;
+        }
         memcpy(s_rx_buf + s_rx_len, frag, flen);
         s_rx_len += flen;
         s_rx_count++;
@@ -752,7 +785,19 @@ bool ble_server_send_encrypted_json(const char *json, uint32_t generation) {
     return sent;
 }
 
+static void shutdown_stack(bool release_memory);
+
 void ble_server_full_shutdown(void) {
+    shutdown_stack(true);
+}
+
+bool ble_server_power_off(void) {
+    if (!s_started || s_shutting_down) return true;
+    shutdown_stack(false);
+    return !s_started;
+}
+
+static void shutdown_stack(bool release_memory) {
     if (!s_started || s_shutting_down) return;
     s_shutting_down = true;
     s_advertising_enabled = false;
@@ -762,6 +807,10 @@ void ble_server_full_shutdown(void) {
     if (rc != 0) {
         ESP_LOGD(TAG, "adv_stop rc=%d", rc);
     }
+    // gap_event_cb hides events from the companion while shutting down, and
+    // the stack may stop before the disconnect arrives at all. Remember the
+    // link so the companion can be told it's gone (below).
+    uint16_t phone_conn = s_conn_handle;
     if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
         rc = ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         if (rc != 0) {
@@ -790,7 +839,25 @@ void ble_server_full_shutdown(void) {
     s_started = false;
     s_synced = false;
     s_advertising_active = false;
+    if (phone_conn != BLE_HS_CONN_HANDLE_NONE && s_companion.on_gap_event) {
+        // Otherwise a companion such as ble_basic keeps the dead handle and
+        // goes on notifying into a stopped stack.
+        struct ble_gap_event ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = BLE_GAP_EVENT_DISCONNECT;
+        ev.disconnect.reason = BLE_HS_ENOTCONN;
+        ev.disconnect.conn.conn_handle = phone_conn;
+        (void)s_companion.on_gap_event(&ev);
+    }
 
+    s_shutting_down = false;
+    if (!release_memory) {
+        // The controller's static memory stays, so ble_server_start() can
+        // bring the stack back.
+        ESP_LOGI(TAG, "BLE stopped");
+        return;
+    }
+    s_shutting_down = true;   // released for good: no restart
     err = esp_bt_mem_release(ESP_BT_MODE_BLE);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "esp_bt_mem_release: %s", esp_err_to_name(err));
@@ -855,6 +922,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 
 static void start_advertising(void) {
     if (s_shutting_down) return;
+    if (s_quiet) return;   // a Wi-Fi video stream wants the radio (ble_server_set_quiet)
     // The companion service keeps the device visible after setup.
     if (!s_companion_advertising) {
         if (config_setup_complete()) return;
@@ -865,6 +933,15 @@ static void start_advertising(void) {
     struct ble_gap_adv_params advp = {0};
     advp.conn_mode = BLE_GAP_CONN_MODE_UND;
     advp.disc_mode = BLE_GAP_DISC_MODE_GEN;
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    // When only the companion service is advertising (after setup), advertise
+    // slowly: each advertising event takes the shared radio from Wi-Fi. Setup
+    // keeps NimBLE's fast 30-60 ms default.
+    if (config_setup_complete() || !s_advertising_enabled) {
+        advp.itvl_min = BLE_GAP_ADV_ITVL_MS(s_companion_interval_ms);
+        advp.itvl_max = advp.itvl_min + BLE_GAP_ADV_ITVL_MS(20);
+    }
+#endif
 
     // Adv packet: flags + 128-bit service UUID + manufacturer data (~26 bytes).
     // Manufacturer data: 0xFFFF (test/unassigned company ID) + 1 byte paired flag.
@@ -1016,6 +1093,22 @@ void ble_server_disconnect_pairing_session(uint32_t generation) {
     ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &work->event);
 }
 
+void ble_server_set_quiet(bool quiet) {
+    if (s_quiet == quiet) return;
+    s_quiet = quiet;
+    if (!s_started || s_shutting_down) return;
+    if (quiet) {
+        if (s_advertising_active) {
+            int rc = ble_gap_adv_stop();
+            if (rc != 0) ESP_LOGD(TAG, "adv_stop rc=%d", rc);
+            s_advertising_active = false;
+            ESP_LOGI(TAG, "advertising paused (Wi-Fi video)");
+        }
+    } else if (s_synced) {
+        start_advertising();
+    }
+}
+
 void ble_server_begin_advertising(void) {
     if (!s_started || s_shutting_down) return;
     s_advertising_enabled = true;
@@ -1073,6 +1166,36 @@ void ble_server_set_companion_advertising(bool enabled) {
         }
         s_advertising_active = false;
     }
+}
+
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+void ble_server_set_companion_interval_ms(int interval_ms) {
+    if (interval_ms < 20 || interval_ms > 10240 || interval_ms == s_companion_interval_ms) return;
+    s_companion_interval_ms = interval_ms;
+    if (!s_started || s_shutting_down || !s_advertising_active || s_advertising_enabled) return;
+    // Restart advertising at the new interval.
+    if (ble_gap_adv_stop() == 0) {
+        s_advertising_active = false;
+        if (s_synced && s_companion_advertising) start_advertising();
+    }
+}
+
+int ble_server_companion_interval_ms(void) {
+    return s_companion_interval_ms;
+}
+#endif
+
+bool ble_server_is_advertising(void) {
+    return s_started && !s_shutting_down && s_advertising_active;
+}
+
+bool ble_server_own_address(uint8_t addr[6]) {
+    if (!s_started || s_shutting_down || !s_synced) return false;
+    return ble_hs_id_copy_addr(BLE_ADDR_PUBLIC, addr, NULL) == 0;
+}
+
+bool ble_server_is_synced(void) {
+    return s_started && !s_shutting_down && s_synced;
 }
 
 bool ble_server_is_started(void) {

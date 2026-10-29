@@ -1,0 +1,40 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ESP32-C5 only: ESP-IDF loads this after sdkconfig.defaults for IDF_TARGET
+# esp32c5, so these lines override the shared 16 KiB, internal-RAM TCP
+# configuration for the C5 DevKitC-1 and nothing else.
+#
+# lwIP pbufs and TCP segments, and the Wi-Fi driver's heap allocations
+# (including its dynamic RX buffers), prefer the 8 MB PSRAM, so TCP windows
+# stop costing scarce internal RAM. That pays for 64 KiB windows in each
+# direction. Wi-Fi DMA buffers stay in internal RAM.
+#
+# A 64 KiB receive window needs a receive path deep enough to take a whole
+# window in one burst: with ESP-IDF's 32 dynamic RX buffers and 4 queued
+# out-of-order segments, a paired gadget lost segments about ten times per
+# 4 MB transfer and VM-to-gadget throughput fell to 1.8 Mbit/s. 64 dynamic RX
+# buffers and 12 out-of-order segments fix it (tools/coexist/README.md has
+# the numbers). The block-ack window stays at sdkconfig.defaults' 32.
+#
+# PSRAM can fail to start (CONFIG_SPIRAM_IGNORE_NOTFOUND keeps the gadget
+# running): lwIP and Wi-Fi then fall back to internal RAM. The out-of-order
+# queue stays bounded (12 segments per connection, not ESP-IDF's "0 =
+# unlimited") so even then a connection can't queue a whole window there, and
+# the gadget logs the missing PSRAM at boot.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=12

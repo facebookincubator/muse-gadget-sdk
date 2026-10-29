@@ -36,6 +36,9 @@
 #include "muse_text.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 
 static const char *TAG = "muse_menu";
 
@@ -69,6 +72,9 @@ typedef enum {
     ITEM_SLEEP,
     ITEM_PHONE,
     ITEM_WIFI,
+#if CONFIG_MUSE_VIDEO
+    ITEM_CAMERA,
+#endif
     ITEM_INFO,
     ITEM_BATTERY,
     ITEM_RESET,
@@ -86,6 +92,9 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_SLEEP] = "Auto-sleep",
     [ITEM_PHONE] = "Phone setup",
     [ITEM_WIFI] = "Wi-Fi",
+#if CONFIG_MUSE_VIDEO
+    [ITEM_CAMERA] = "Phone camera",
+#endif
     [ITEM_INFO] = "Status",
     [ITEM_BATTERY] = "Battery",
     [ITEM_RESET] = "Reset pairing",
@@ -103,6 +112,9 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_SLEEP] = "Change",
     [ITEM_PHONE] = "Toggle",
     [ITEM_WIFI] = "Toggle",
+#if CONFIG_MUSE_VIDEO
+    [ITEM_CAMERA] = "Open",
+#endif
     [ITEM_INFO] = "Open",
     [ITEM_BATTERY] = "Open",
     [ITEM_RESET] = "Select",
@@ -222,6 +234,11 @@ static void value_text(int item, char *buf, size_t n)
         muse_wifi_status(&w);
         strlcpy(buf, WIFI_VALUES[w.state], n);
         break;
+#if CONFIG_MUSE_VIDEO
+    case ITEM_CAMERA:
+        strlcpy(buf, muse_video_has_client() ? "Ready" : "No phone", n);
+        break;
+#endif
     case ITEM_BATTERY:
         p = muse_state_power();
         if (p.usb || p.battery_pct < 0) {
@@ -411,6 +428,12 @@ static void activate(int item, int direction)
     case ITEM_WIFI:
         muse_settings_set_wifi_on(!muse_settings_wifi_on());
         break;
+#if CONFIG_MUSE_VIDEO
+    case ITEM_CAMERA:
+        muse_menu_close();
+        muse_video_open();
+        return;
+#endif
     case ITEM_INFO:
         show(VIEW_STATUS);
         return;
