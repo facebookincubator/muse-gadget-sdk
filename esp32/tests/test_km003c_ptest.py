@@ -54,6 +54,24 @@ class KM003CPtestTest(unittest.TestCase):
                     self.assertEqual(rows[-1]["type"], "partial_capture")
                     self.assertEqual(rows[-1]["samples"], json.loads(json.dumps(samples)))
 
+    def test_recorder_skips_slots_after_a_slow_read(self):
+        clock, waits = [0.0], []
+        meter = Mock()
+        def read():
+            if meter.read.call_count == 2: clock[0] += 1.0  # one read stalls for a second
+            return Mock(host_time_s=clock[0], ibus_a=-0.01, vbus_v=5.0)
+        meter.read.side_effect = read
+        recorder = tool.Recorder(meter, 20)
+        recorder.stopped = Mock()
+        recorder.stopped.is_set.side_effect = lambda: meter.read.call_count >= 4
+        recorder.stopped.wait.side_effect = lambda t: (waits.append(t), clock.__setitem__(0, clock[0] + t))
+        with patch.object(tool.time, "monotonic", side_effect=lambda: clock[0]):
+            recorder.run()
+        self.assertEqual(len(waits), 4)
+        self.assertTrue(all(w > 0.01 for w in waits), waits)  # no back-to-back catch-up reads
+        times = [s[0] for s in recorder.samples]
+        self.assertTrue(all(b - a >= 0.04 for a, b in zip(times, times[1:])), times)
+
     def test_offset_and_drift(self):
         records = {("idle", 0): dict(id="idle", repeat=0, measure_start_us=2000000, end_us=4000000)}
         window, = tool.windows_from(records, [(1, 100), (11, 111), (21, 122)])

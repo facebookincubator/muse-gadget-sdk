@@ -63,7 +63,10 @@ class Recorder(threading.Thread):
                 return
             self.samples.append((r.host_time_s, abs(r.ibus_a) * 1e6, r.vbus_v))
             next_read += self.period
-            self.stopped.wait(max(0.0, next_read - time.monotonic()))
+            now = time.monotonic()
+            if next_read <= now:  # A slow read restarts the schedule; never burst to catch up.
+                next_read = now + self.period
+            self.stopped.wait(next_read - now)
     def stop(self):
         self.stopped.set()
         if self.ident is not None:

@@ -1191,8 +1191,8 @@ void muse_power_test_run(void)
 {
     boot_results(esp_random(), esp_reset_reason());
     /* No muse_console RX wake lock/timer, no LVGL, voice, reconnect, BLE,
-     * credentials, NVS, or production app initialization. UART is the bridge
-     * console selected by the board overlay; no serial-JTAG assumption. */
+     * credentials, NVS, or production app initialization. The console is the
+     * board overlay's bridge UART unless the board overrides the console hooks. */
     esp_log_set_vprintf(capture_error_log);
     esp_log_level_set("*", ESP_LOG_NONE);
     esp_log_level_set("board", ESP_LOG_ERROR); /* BSP returns use capture-only hook */
