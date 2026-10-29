@@ -955,13 +955,18 @@ def test_invoke_failure_releases_slot_for_later_commands(failure):
         slots = asyncio.Semaphore(1)
         session, _ = make_session(command, [], invoke_slots=slots)
 
+        sent = []
+
         async def send(message):
+            sent.append(message)
             raise ConnectionError("send failed")
 
         session.send = send
-        expected = RuntimeError if failure == "command" else ConnectionError
-        with pytest.raises(expected, match=f"{failure} failed"):
+        # A command failure becomes a correlated result, so both cases reach send.
+        with pytest.raises(ConnectionError, match="send failed"):
             await session._invoke({"id": "failed", "command": "test"})
+        result = {"ok": False, "error": "command failed"} if failure == "command" else {"ok": True}
+        assert sent == [{"method": "link.result", "id": "failed", **result}]
         await asyncio.wait_for(slots.acquire(), 1)
         assert slots.locked()
         slots.release()
