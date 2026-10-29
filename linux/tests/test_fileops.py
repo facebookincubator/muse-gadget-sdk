@@ -13,9 +13,11 @@
 # limitations under the License.
 
 import base64
+import errno
 import json
 import os
 import select
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -140,3 +142,86 @@ def test_no_overwrite_publishes_a_swapped_partial_symlink_not_its_target(tmp_pat
     assert target.is_symlink()
     assert os.stat(private).st_nlink == 1
     assert not os.path.lexists(partial)
+
+
+# ENOTSUP and EOPNOTSUPP are the same number on Linux but not on macOS.
+NO_HARD_LINKS = sorted(
+    {errno.EPERM, errno.EMLINK, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP}
+)
+
+
+def fail_link(monkeypatch, code):
+    def link(*args, **kwargs):
+        raise OSError(code, os.strerror(code))
+    monkeypatch.setattr(fileops.os, "link", link)
+
+
+@pytest.mark.parametrize("code", NO_HARD_LINKS, ids=errno.errorcode.get)
+def test_no_overwrite_without_hard_links_creates_new_file(tmp_path, monkeypatch, code):
+    fail_link(monkeypatch, code)
+    target = tmp_path / "new"
+    result = fileops.write(request_for(target))
+    assert result["complete"]
+    assert target.read_bytes() == b"contents"
+    umask = os.umask(0)
+    os.umask(umask)
+    assert stat.S_IMODE(os.lstat(target).st_mode) == 0o644 & ~umask
+    assert not (tmp_path / ".new.musegadget-partial").exists()
+
+
+@pytest.mark.parametrize("entry", ["file", "dangling"])
+@pytest.mark.parametrize("code", NO_HARD_LINKS, ids=errno.errorcode.get)
+def test_no_overwrite_without_hard_links_refuses_existing_entries(
+    tmp_path, monkeypatch, code, entry
+):
+    fail_link(monkeypatch, code)
+    target = tmp_path / "existing"
+    if entry == "file":
+        target.write_bytes(b"original")
+    else:
+        target.symlink_to(tmp_path / "referent")
+    with pytest.raises(fileops.FileOpError, match="^file exists and overwrite is false$"):
+        fileops.write(request_for(target))
+    if entry == "file":
+        assert target.read_bytes() == b"original"
+    else:
+        assert target.is_symlink() and not (tmp_path / "referent").exists()
+    assert not (tmp_path / ".existing.musegadget-partial").exists()
+
+
+def test_no_overwrite_without_hard_links_removes_placeholder_if_rename_fails(
+    tmp_path, monkeypatch
+):
+    fail_link(monkeypatch, errno.EPERM)
+
+    def replace(*args):
+        raise OSError(errno.EIO, os.strerror(errno.EIO))
+    monkeypatch.setattr(fileops.os, "replace", replace)
+    target = tmp_path / "new"
+    with pytest.raises(OSError) as raised:
+        fileops.write(request_for(target))
+    assert raised.value.errno == errno.EIO
+    assert not os.path.lexists(target)
+    assert not (tmp_path / ".new.musegadget-partial").exists()
+
+
+def test_no_overwrite_link_file_exists_error_is_not_retried(tmp_path, monkeypatch):
+    fail_link(monkeypatch, errno.EEXIST)
+    target = tmp_path / "new"
+    with pytest.raises(fileops.FileOpError, match="^file exists and overwrite is false$"):
+        fileops.write(request_for(target))
+    assert not os.path.lexists(target)
+    assert not (tmp_path / ".new.musegadget-partial").exists()
+
+
+@pytest.mark.parametrize(
+    "code", [errno.ENOSPC, errno.EACCES, errno.EROFS, errno.EIO], ids=errno.errorcode.get
+)
+def test_no_overwrite_other_link_errors_propagate(tmp_path, monkeypatch, code):
+    fail_link(monkeypatch, code)
+    target = tmp_path / "new"
+    with pytest.raises(OSError) as raised:
+        fileops.write(request_for(target))
+    assert raised.value.errno == code
+    assert not os.path.lexists(target)
+    assert not (tmp_path / ".new.musegadget-partial").exists()

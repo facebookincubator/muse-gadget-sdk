@@ -21,12 +21,15 @@ prints a JSON result.
 
 Writes land in a hidden partial file next to the target and publish it
 atomically once the final chunk arrives and its SHA-256 matches. Without
-overwrite, publication refuses any existing destination directory entry.
+overwrite, publication refuses any existing destination directory entry; on a
+filesystem without hard links, see ``_publish_without_link`` for the limit.
 """
 
 from __future__ import annotations
 
 import base64
+import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -34,6 +37,13 @@ import stat
 import sys
 
 MAX_CHUNK_BYTES = 64 * 1024
+
+# link() errors meaning the filesystem can't make hard links at all: FAT and
+# exFAT give EPERM, some network and FUSE mounts EOPNOTSUPP/ENOTSUP or ENOSYS,
+# and EMLINK for the partial, which has only one name, means one is the limit.
+_NO_HARD_LINKS = frozenset(
+    {errno.EPERM, errno.EMLINK, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP}
+)
 
 
 class FileOpError(Exception):
@@ -49,6 +59,32 @@ def _require_absolute(path: object) -> str:
     if not isinstance(path, str) or not os.path.isabs(path):
         raise FileOpError("path must be an absolute path")
     return path
+
+
+def _publish_without_link(partial: str, path: str) -> None:
+    """Rename partial to path, refusing an existing entry, without link().
+
+    O_EXCL reserves the name atomically and never follows a symlink, so an
+    existing entry still raises FileExistsError. Unlike link(), the rename()
+    that fills the reservation would replace anything another process puts at
+    that name between the two calls, by deleting the empty placeholder or
+    renaming over it.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    fd = os.open(path, flags, 0o600)
+    try:
+        reserved = os.fstat(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.replace(partial, path)
+    except OSError:
+        # Remove the placeholder, unless something else has taken the name.
+        with contextlib.suppress(OSError):
+            current = os.lstat(path)
+            if (current.st_dev, current.st_ino) == (reserved.st_dev, reserved.st_ino):
+                os.unlink(path)
+        raise
 
 
 def read(request: dict) -> dict:
@@ -131,11 +167,17 @@ def write(request: dict) -> dict:
         # Like rename(), publish the partial entry itself, never a symlink's
         # target (Python 3.14 changed link()'s default to follow it).
         try:
-            os.link(partial, path, follow_symlinks=False)
+            try:
+                os.link(partial, path, follow_symlinks=False)
+            except OSError as exc:
+                if exc.errno not in _NO_HARD_LINKS:
+                    raise
+                _publish_without_link(partial, path)
         except FileExistsError:
             raise FileOpError("file exists and overwrite is false") from None
         finally:
-            os.unlink(partial)
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(partial)
     return {"path": path, "size": written, "sha256": digest.hexdigest(), "complete": True}
 
 
