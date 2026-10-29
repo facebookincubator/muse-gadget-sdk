@@ -30,7 +30,7 @@ import sys
 USJ = (0x303A, 0x1001)      # the chip's own USB Serial/JTAG
 CH342 = (0x1A86, 0x55D2)    # WCH dual UART bridge: two ports per device
 CH9102 = (0x1A86, 0x55D4)   # WCH single UART bridge
-CH343 = (0x1A86, 0x55D3)    # WCH single UART bridge on Waveshare 7-inch LCD
+CH343 = (0x1A86, 0x55D3)    # WCH single UART bridge on Waveshare 7-inch and 1.28-inch LCDs
 CP210X = (0x10C4, 0xEA60)   # Silicon Labs CP2104 bridge
 
 
@@ -58,10 +58,12 @@ USB = {
     "sticks3": USJ,
     "cardputer-adv": USJ,
     "stopwatch": USJ,
+    "xiao147": USJ,
     "cores3": USJ,
     "fnk0104b": USJ,
     "jc3248w535": USJ,
     "lcd7": CH343,
+    "lcd128": CH343,
     "vn183": USJ,
     "ai-passport": USJ,
     "watcher": CH342,   # the ESP32-S3 on the second port; the Himax camera chip is on the first
@@ -70,7 +72,7 @@ USB = {
 }
 # Boards whose console takes Muse's serial commands (tools/muse/chat.py). The
 # Watcher reads them on its CH342 port with MUSE_CONSOLE_UART.
-COMMANDS = ("s3", "s3n", "s3-216", "185c", "aipi", "atk-box", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "vn183", "ai-passport", "echoear")
+COMMANDS = ("s3", "s3n", "s3-216", "185c", "aipi", "atk-box", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "xiao147", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "ai-passport", "echoear")
 # Bridges that drop bytes when a whole packet arrives at once, so writes to them
 # go 64 bytes at a time at the line rate (paced_esptool.py, chat.Board.write).
 PACED = (CH342,)

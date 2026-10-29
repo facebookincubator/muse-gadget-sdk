@@ -27,6 +27,7 @@ set(GADGET_SRCS
     "wifi_mgr.c"
     "wifi_known.c"
     "identity.c"
+    "sdk_token_console.c"
     "config_store.c"
     "vm_api.c"
     "diagnostic_log.c"
@@ -68,6 +69,7 @@ set(GADGET_REQUIRES
     esp_driver_ledc
     esp_driver_spi
     esp_driver_uart
+    esp_driver_usb_serial_jtag
     esp_lcd
     lwip
     mbedtls
@@ -85,6 +87,8 @@ if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677)
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1681.c")
 else()

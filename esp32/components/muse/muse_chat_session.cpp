@@ -39,6 +39,10 @@
  * A typed turn (muse_hatch_text_turn, from the serial console) skips steps 1
  * and 3: the text goes to /chat/stream and the reply streams back to the
  * console as "@chat" lines instead of to the voice task.
+ *
+ * A realtime voice call (CONFIG_MUSE_REALTIME_VOICE, muse_voice_call.cpp)
+ * runs on the same connection and task, on streams of its own (K_CALL,
+ * K_END_CALL); this file only hands it their frames and polls it.
  */
 
 #include <atomic>
@@ -48,6 +52,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <strings.h>
 
 #include "esp_attr.h"
 #include "esp_crt_bundle.h"
@@ -72,6 +77,10 @@ extern "C" {
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
+#include "sdkconfig.h"
+#if CONFIG_MUSE_REALTIME_VOICE
+#include "muse_voice_call_priv.h"
+#endif
 
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
@@ -92,11 +101,18 @@ static const char *TAG = "muse_chat_session";
 #define NDJSON_LINE_MAX (16 * 1024)               /* one NDJSON line / the chat ack */
 #define SUB_LINE_MAX (256 * 1024)          /* an event line grows its buffer up to this */
 #define CHAT_PART (16 * 1024)              /* one body chunk of a long typed message */
+#if CONFIG_MUSE_HATCH_COMPACT_BUFFERS       /* 2 MB of PSRAM: see its Kconfig help */
+#define MP3_BUF (128 * 1024)
+#define IN_BYTES (MIC_RATE * 2 * 2)        /* 2 s of mic backlog while connecting */
+#define OUT_BYTES (MIC_RATE * 2 * 1)       /* 1 s of decoded reply */
+#else
 #define MP3_BUF (512 * 1024)
-#define MP3_HOLD (1441 + 4)               /* the largest MP3 frame and the next header */
-#define MP3_POLL_ROOM (SCRATCH + 8192)     /* stop reading the socket below this much MP3 room */
 #define IN_BYTES (MIC_RATE * 2 * 8)        /* 8 s of mic backlog while connecting */
 #define OUT_BYTES (MIC_RATE * 2 * 2)       /* 2 s of decoded reply */
+#endif
+#define MP3_HOLD (1441 + 4)               /* the largest MP3 frame and the next header */
+#define MP3_POLL_ROOM (SCRATCH + 8192)     /* stop reading the socket below this much MP3 room */
+static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP3 buffer empty");
 #define EV_TEXT 72
 #define TEXT_MAX 1024                      /* a message's text, for captions timed to its speech */
 #define SPEECH_CHARS_PER_S 14              /* until the speech's length is known */
@@ -172,7 +188,7 @@ static int64_t s_auto_backoff_us = AUTO_RETRY_MIN_US;
 
 /* ---- Streams on the connection ---- */
 
-enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS };
+enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS, K_CALL, K_END_CALL };
 
 struct stream_t {
     int64_t id;
@@ -518,13 +534,23 @@ static int ws_upgrade(esp_tls_t *tls, const char *vm_id, const char *token)
 {
     char id[3 * 128 + 1];
     query_escape(vm_id, id, sizeof(id));
-    size_t cap = 512 + strlen(id) + strlen(token) + strlen(s_host);
+    /* The VM takes the app identity of every request on this connection from
+     * the upgrade's app_id (it drops a per-request x-app-id), and voice calls
+     * need one. */
+    char app[3 * 64 + 16] = "";
+#if CONFIG_MUSE_REALTIME_VOICE
+    if (CONFIG_MUSE_REALTIME_VOICE_APP_ID[0]) {
+        strcpy(app, "&app_id=");
+        query_escape(CONFIG_MUSE_REALTIME_VOICE_APP_ID, app + 8, sizeof(app) - 8);
+    }
+#endif
+    size_t cap = 512 + strlen(id) + strlen(app) + strlen(token) + strlen(s_host);
     char *req = static_cast<char *>(malloc(cap));
     if (!req) {
         return 0;
     }
     int len = snprintf(req, cap,
-                       "GET " NOISE_PATH "?vm_id=%s HTTP/1.1\r\n"
+                       "GET " NOISE_PATH "?vm_id=%s%s HTTP/1.1\r\n"
                        "Host: %s\r\n"
                        "Authorization: Bearer %s\r\n"
                        "Upgrade: websocket\r\n"
@@ -532,7 +558,7 @@ static int ws_upgrade(esp_tls_t *tls, const char *vm_id, const char *token)
                        "Sec-WebSocket-Version: 13\r\n"
                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                        "\r\n",
-                       id, s_host, token);
+                       id, app, s_host, token);
     bool sent = write_all(tls, req, len);
     free(req);
     if (!sent) {
@@ -746,6 +772,9 @@ static void disconnect(const char *why)
         s.kind = K_NONE;
     }
     s_connected = false;
+#if CONFIG_MUSE_REALTIME_VOICE
+    muse_voice_call_disconnected();
+#endif
 }
 
 static void forget_vm(void)
@@ -890,9 +919,9 @@ static bool ensure_connected(void)
         }
         int status;
         if (connect_once(err, sizeof(err), &status)) {
-            char detail[48] = "Connected to ";
-            strlcat(detail, s_vm.vm_name[0] ? s_vm.vm_name : s_vm.vm_id, sizeof(detail));
-            muse_hatch_report(MUSE_HATCH_REACHABLE, detail);
+            /* The settings page shows the VM in its VM ID row. */
+            muse_hatch_report_vm(s_vm.vm_id);
+            muse_hatch_report(MUSE_HATCH_REACHABLE, "");
             return true;
         }
         disconnect(err);
@@ -1324,6 +1353,21 @@ static int bind_msg(const char *id, cJSON *payload)
     return s_turn.nmsgs++;
 }
 
+/* The first n bytes of s without a UTF-8 character cut short at their end. */
+static size_t whole_chars(const char *s, size_t n)
+{
+    size_t lead = n;
+    while (lead && n - lead < 3 && ((unsigned char)s[lead - 1] & 0xc0) == 0x80) {
+        lead--;
+    }
+    if (!lead) {
+        return n;
+    }
+    unsigned char c = (unsigned char)s[lead - 1];
+    size_t need = c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : c >= 0xc0 ? 2 : 1;
+    return c >= 0xc0 && n - (lead - 1) < need ? lead - 1 : n;
+}
+
 static void append_text(msg_t &m, const char *text)
 {
     size_t add = strlen(text);
@@ -1332,7 +1376,15 @@ static void append_text(msg_t &m, const char *text)
         if (!m.len) {
             full[0] = '\0';
         }
-        strlcat(full, text, TEXT_MAX);
+        /* What fits, ending on a whole character (a cut one shows as a box).
+         * Once some is left out nothing more is added, or the rest of the
+         * reply would join on after the gap. */
+        size_t used = strlen(full);
+        if (used == m.len) {
+            size_t take = add < TEXT_MAX - 1 - used ? add : TEXT_MAX - 1 - used;
+            memcpy(full + used, text, take);
+            full[take < add ? whole_chars(full, used + take) : used + take] = '\0';
+        }
     }
     m.len += add;
     size_t have = strlen(m.tail);
@@ -1527,7 +1579,10 @@ static void start_tts(void)
          * and finishes the message once it's drained.
          */
         m.pcm_start = s_turn.pcm_out;
-        m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+        /* Paced to the text kept: a reply longer than TEXT_MAX shows what was
+         * kept at reading pace, not stretched over the whole reply's time. */
+        size_t shown = s_turn.texts ? strlen(s_turn.texts + i * TEXT_MAX) : m.len;
+        m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
         s_turn.silent = true;
@@ -1756,6 +1811,12 @@ static void stream_data(stream_t *s, ConstByteSpan data)
             tts_data(data.data(), data.size());
         }
         break;
+#if CONFIG_MUSE_REALTIME_VOICE
+    case K_CALL:
+    case K_END_CALL:
+        muse_voice_call_data(s->id, data.data(), data.size());
+        break;
+#endif
     default:
         break;
     }
@@ -1785,6 +1846,16 @@ static bool stream_end(stream_t *s, bool ok)
     case K_TTS:
         tts_end(s, ok);
         break;
+#if CONFIG_MUSE_REALTIME_VOICE
+    case K_CALL:
+    case K_END_CALL: {
+        int64_t id = s->id;
+        int status = s->status;
+        close_stream(s);
+        muse_voice_call_stream_end(id, ok, status);
+        break;
+    }
+#endif
     default:
         break;
     }
@@ -1813,6 +1884,20 @@ static bool on_frame(const DecodedServiceFrame &f)
         if (f.response.status >= 400) {
             return on_http_error(s, f.response);
         }
+#if CONFIG_MUSE_REALTIME_VOICE
+        if (s->kind == K_CALL) {
+            const char *date = nullptr;
+            size_t date_len = 0;
+            for (size_t i = 0; i < f.response.headers.size(); i++) {
+                const HeaderView &h = f.response.headers[i];
+                if (h.key.size() == 4 && !strncasecmp(h.key.data(), "date", 4)) {
+                    date = h.value.data();
+                    date_len = h.value.size();
+                }
+            }
+            muse_voice_call_head(s->id, f.response.status, date, date_len);
+        }
+#endif
         stream_data(s, f.response.body);
         if (f.response.end_body && alive(s, f.stream_id)) {
             return stream_end(s, true);
@@ -1843,6 +1928,11 @@ static bool poll_socket(void)
         if (s_turn.tts_msg >= 0 && MP3_BUF - s_turn.mp3_len < MP3_POLL_ROOM) {
             return true;
         }
+#if CONFIG_MUSE_REALTIME_VOICE
+        if (muse_voice_call_rx_full()) {
+            return true;   /* the voice task is behind on the call's audio */
+        }
+#endif
         ssize_t n = ws_recv(s_conn.tls, s_conn.rx, SCRATCH, false);
         if (n == -2) {
             return true;
@@ -1886,11 +1976,21 @@ static void drop_connection(const char *why)
     muse_hatch_report(MUSE_HATCH_UNTESTED, "");
 }
 
+/* A realtime call is starting, running or ending. */
+static bool call_busy(void)
+{
+#if CONFIG_MUSE_REALTIME_VOICE
+    return muse_voice_call_busy();
+#else
+    return false;
+#endif
+}
+
 static void handle(const cmd_t &cmd)
 {
     switch (cmd.type) {
     case CMD_CONNECT:
-        if (s_turn.phase == P_IDLE) {
+        if (s_turn.phase == P_IDLE && !call_busy()) {
             disconnect("reconnect requested");
             ensure_connected();
         }
@@ -1945,8 +2045,12 @@ static void hatch_task(void *arg)
         cmd_t cmd;
         /* Resting, the socket's keepalive (PING_US) needs no quicker polls.
          * Resting unconnected, Wi-Fi may nap (muse_wifi_nap): wait for a
-         * turn or for waking (CMD_WAKE) instead of watching it. */
-        int wait_ms = !s_connected ? (s_resting ? -1 : 200) : s_turn.phase != P_IDLE ? 2 : s_resting ? 500 : 20;
+         * turn or for waking (CMD_WAKE) instead of watching it. A call
+         * wakes it too. */
+        int wait_ms = call_busy() ? 2
+                      : !s_connected ? (s_resting ? -1 : 200)
+                      : s_turn.phase != P_IDLE ? 2
+                      : s_resting ? 500 : 20;
         TickType_t wait = wait_ms < 0 ? portMAX_DELAY : pdMS_TO_TICKS(wait_ms);
         if (xQueueReceive(s_cmds, &cmd, wait) == pdTRUE) {
             handle(cmd);
@@ -1954,6 +2058,12 @@ static void hatch_task(void *arg)
                 handle(cmd);
             }
         }
+#if CONFIG_MUSE_REALTIME_VOICE
+        if (!muse_voice_call_poll()) {
+            drop_connection("call send failed");
+            continue;
+        }
+#endif
         if (!s_connected) {
             if (!muse_wifi_connected()) {
                 s_auto_next_us = 0;
@@ -2000,7 +2110,7 @@ static void hatch_task(void *arg)
         int64_t t = now_us();
         if (t - s_conn.last_rx_us > DEAD_US) {
             drop_connection("server went quiet");
-        } else if (s_turn.phase == P_IDLE && t - s_conn.last_use_us > IDLE_CLOSE_US) {
+        } else if (s_turn.phase == P_IDLE && !call_busy() && t - s_conn.last_use_us > IDLE_CLOSE_US) {
             disconnect("idle");
             muse_hatch_report(MUSE_HATCH_UNTESTED, "");
             s_auto_next_us = INT64_MAX;   /* the next turn connects */
@@ -2062,6 +2172,9 @@ extern "C" void muse_hatch_start(void)
         s.cap = NDJSON_LINE_MAX;
     }
     s_turn.tts_msg = -1;
+#if CONFIG_MUSE_REALTIME_VOICE
+    muse_voice_call_init();   /* calls stay unavailable if it fails; notes still work */
+#endif
     /* Stack in PSRAM: TLS, Noise and the MP3 decoder (~16 KB of scratch) all run here. */
     if (!s_cmds || !s_events || !s_in || !s_out || !s_turn.chunk || !s_turn.mp3 || (VOICE_NOTE && !s_turn.note) || !s_pcm || !s_pcm16 ||
         xTaskCreatePinnedToCoreWithCaps(hatch_task, "muse_chat", 48 * 1024, nullptr, 5, nullptr, 0,
@@ -2126,6 +2239,49 @@ extern "C" void muse_hatch_set_resting(bool resting)
         post(CMD_WAKE, 0);
     }
 }
+
+#if CONFIG_MUSE_REALTIME_VOICE
+/* ---- For the realtime call (muse_voice_call_priv.h), on this task ---- */
+
+/* The call sizes its reply-buffer headroom by the largest frame body. */
+static_assert(SCRATCH <= MUSE_SESSION_FRAME_MAX, "inbound frames outgrew the call's reply headroom");
+
+extern "C" int64_t muse_session_call_open(bool media, const char *path, const char *content_type, const char *body,
+                                          bool end_body)
+{
+    if (!s_connected) {
+        return 0;
+    }
+    return open_stream(media ? K_CALL : K_END_CALL, "POST", path, content_type,
+                       media ? "application/x-ndjson" : "application/json", body, end_body);
+}
+
+extern "C" bool muse_session_call_send(int64_t id, const uint8_t *data, size_t len, bool end_body)
+{
+    if (!s_connected) {
+        return false;
+    }
+    if (!find_stream(id)) {
+        return true;   /* the stream already ended: nothing to send it */
+    }
+    return send_body(id, data, len, end_body);
+}
+
+extern "C" void muse_session_call_reset(int64_t id)
+{
+    send_reset(id);
+}
+
+extern "C" bool muse_session_call_connect(void)
+{
+    return ensure_connected();
+}
+
+extern "C" void muse_session_call_wake(void)
+{
+    post(CMD_WAKE, 0);
+}
+#endif
 
 extern "C" void muse_hatch_text_turn(char *text)
 {

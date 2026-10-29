@@ -1,0 +1,4 @@
+lib/
+Local.xcconfig
+xcuserdata/
+*.xcuserstate

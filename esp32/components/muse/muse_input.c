@@ -45,6 +45,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -77,8 +80,23 @@ static const char *TAG = "muse_input";
 #define CHAT_MAX (192 * 1024)  /* a typed message, assembled from "chat+=" lines */
 
 static QueueHandle_t s_queue;
+static bool (*s_console_hook)(const char *line);
 static TaskHandle_t s_input;
 static bool s_talk_down;
+/* A push-to-talk press the voice task hasn't taken up yet: the speaker
+ * button already ends the call it will start. Each such DOWN sets a mark of
+ * its own and carries it; the voice task clears a mark only by that id, so
+ * a press posted while it clears an older one keeps its mark. 0: none. */
+static atomic_uint s_call_pending;
+static atomic_uint s_mark_seq;
+static atomic_uint s_call_epoch;
+uint32_t muse_input_call_epoch(void) { return atomic_load(&s_call_epoch); }
+void muse_input_clear_call_pending(uint32_t mark)
+{
+    if (mark) {
+        atomic_compare_exchange_strong(&s_call_pending, &mark, 0);
+    }
+}
 static bool s_cpu_low;      /* display stopped and the CPU allowed to sleep */
 static volatile bool s_power_off_requested;
 static bool s_cpu_pd;       /* muse_input_power_init() holds the CPU's retention memory */
@@ -90,9 +108,25 @@ static volatile bool s_nap_now;   /* ">nap": asleep, as if on battery, nap witho
 
 static void post(muse_ptt_t type, bool wake)
 {
-    muse_input_event_t ev = { .type = type, .wake = wake };
-    ESP_LOGI(TAG, "PTT %s%s", type == MUSE_PTT_DOWN ? "down" : "up", wake ? " (waking)" : "");
-    xQueueSend(s_queue, &ev, 0);
+    muse_input_event_t ev = { .type = type, .wake = wake, .epoch = muse_input_call_epoch() };
+    bool pending = type == MUSE_PTT_DOWN && muse_voice_ptt_enabled() && !muse_voice_in_call();
+    if (pending) {
+        uint32_t mark;
+        do {
+            mark = atomic_fetch_add(&s_mark_seq, 1) + 1;
+        } while (!mark);
+        ev.mark = mark;
+        atomic_store(&s_call_pending, mark);   /* before the send, so the speaker button sees it */
+    }
+    ESP_LOGI(TAG, "PTT %s%s", type == MUSE_PTT_DOWN ? "down" : type == MUSE_PTT_UP ? "up" : "end call",
+             wake ? " (waking)" : "");
+    if (xQueueSend(s_queue, &ev, pdMS_TO_TICKS(20)) != pdTRUE) {
+        /* A lost edge cannot leave a live microphone open. Invalidate the
+         * entire gesture, including queued older DOWNs, without another send. */
+        atomic_fetch_add(&s_call_epoch, 1);
+        atomic_store(&s_call_pending, 0);
+        ESP_LOGW(TAG, "input queue full: call gesture invalidated");
+    }
 }
 
 static bool update_power(void);
@@ -103,6 +137,7 @@ static void power_off(void)
         return;   /* a physical switch powers it off */
     }
     ESP_LOGI(TAG, "shutting down");
+    muse_voice_shutdown(3000);   /* bounded best effort; never drop power before requesting end-call */
     muse_state_set_asleep(false);
     update_power();
     muse_state_set_progress(0);
@@ -119,6 +154,7 @@ static void power_off(void)
     /* Only reached if the board couldn't power off. */
     vTaskDelay(pdMS_TO_TICKS(500));
     ESP_LOGE(TAG, "power-off failed (%s)", esp_err_to_name(err));
+    muse_voice_cancel_shutdown();
     muse_state_set_mode(MUSE_MODE_IDLE);
     muse_state_set_caption("COULDN'T POWER OFF");
 }
@@ -327,6 +363,7 @@ static void check_sleep(void)
         set_asleep(false, "pairing");
         return;
     }
+    if (muse_voice_in_call()) return;
     int after = muse_settings_sleep_s();
     float mode_t;
     if (after && !muse_state_asleep() && muse_state_mode(&mode_t) == MUSE_MODE_IDLE
@@ -501,6 +538,26 @@ static void dedicated_buttons(unsigned ev)
         power_off();
     }
     if (release) power_release();
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+    /* In a push-to-talk call, or with its press still on the way, the speaker
+     * button (blue) hangs up, on the press, and wakes the screen. A quick
+     * second press just after doesn't toggle the speaker. If the hang-up
+     * can't be queued, post() moves the input epoch, which ends the call. */
+    static int ignore_in;
+    if (ignore_in) --ignore_in;
+    if (ev & MUSE_BTN_SPEAKER_PRESS) {
+        if (muse_voice_in_call() || atomic_load(&s_call_pending)) {
+            muse_state_poke();
+            set_asleep(false, muse_board->speaker_button);
+            post(MUSE_PTT_END_CALL, false);
+            ignore_in = DOUBLE_TICKS;
+            return;
+        }
+        if (ignore_in) {
+            return;
+        }
+    }
+#endif
     if (ev & MUSE_BTN_SPEAKER_PRESS) {
         muse_state_poke();
         if (muse_state_asleep()) {
@@ -525,6 +582,16 @@ static void input_task(void *arg)
 
     for (;;) {
         unsigned ev = muse_board->poll_buttons() | atomic_exchange(&s_touch_talk_events, 0);
+#if CONFIG_MUSE_VIDEO
+        /* Any press leaves the video view (its release then does nothing). */
+        const unsigned presses = MUSE_BTN_TALK_PRESS | MUSE_BTN_AUX_PRESS | MUSE_BTN_POWER_PRESS |
+                                 MUSE_BTN_SPEAKER_PRESS | MUSE_BTN_UP | MUSE_BTN_DOWN | MUSE_BTN_LEFT |
+                                 MUSE_BTN_RIGHT | MUSE_BTN_ENTER | MUSE_BTN_ESCAPE;
+        if ((ev & presses) && muse_video_is_open()) {
+            muse_video_close();
+            ev &= ~(presses | MUSE_BTN_POWER_LONG);
+        }
+#endif
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",
                      ev & MUSE_BTN_TALK_RELEASE ? " release" : "");
@@ -697,6 +764,24 @@ static void set_face(const char *name)
  */
 static bool console_command(char *line, bool whole)
 {
+    if (whole && s_console_hook && s_console_hook(line)) {
+        return true;
+    }
+#if CONFIG_MUSE_VIDEO
+    /* The Phone camera item, for a bench without fingers: "video" opens the
+     * view (asking the phone for a stream), "video=0" closes it. */
+    if (!strcmp(line, "video") || !strcmp(line, "video=0")) {
+        muse_state_poke();
+        if (line[5]) {
+            muse_video_close();
+        } else {
+            muse_video_open();
+        }
+        printf("@video %s\n", muse_video_is_open() ? "open" : "closed");
+        fflush(stdout);
+        return true;
+    }
+#endif
     if (!strcmp(line, "status")) {
         size_t cap = 1024;   /* long SSID, host and VM names escaped: past 512 */
         char *json = heap_caps_malloc(cap, MUSE_BIG_CAPS);
@@ -814,6 +899,11 @@ static void serial_task(void *arg)
             post(c == 'd' ? MUSE_PTT_DOWN : MUSE_PTT_UP, false);
         }
     }
+}
+
+void muse_input_set_console_hook(bool (*hook)(const char *line))
+{
+    s_console_hook = hook;
 }
 
 esp_err_t muse_input_start(QueueHandle_t queue)

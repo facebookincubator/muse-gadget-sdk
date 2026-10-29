@@ -18,7 +18,10 @@
 
 #include <stdbool.h>
 
+#include "sdkconfig.h"
+#if !CONFIG_MUSE_UI_FREEINK
 #include "lvgl.h"
+#endif
 
 /*
  * Menu for boards without touch, in place of the settings tile.
@@ -41,7 +44,9 @@ void muse_menu_key(muse_menu_key_t key);
 bool muse_menu_is_open(void);
 
 /* LVGL task only. */
+#if !CONFIG_MUSE_UI_FREEINK
 void muse_menu_build(lv_obj_t *parent, int w, int h);
+#endif
 /* Handles queued keys; returns true while the menu covers the face. */
 bool muse_menu_tick(float now);
 void muse_menu_close(void);
