@@ -46,6 +46,7 @@ from urllib.parse import quote
 
 from musegadget.muse_api import user_agent
 from musegadget.noise import Header, NoiseTransport, NoiseXXInitiator
+from musegadget.streaming import MAX_BUFFER_BYTES, MAX_BUFFER_CHUNKS, StreamingRequest
 
 log = logging.getLogger(__name__)
 
@@ -135,8 +136,27 @@ class MessageDecoder:
         return messages
 
 
-def noise_url(noise_host: str, vm_id: str) -> str:
-    return f"wss://{noise_host}{NOISE_PATH}?vm_id={quote(vm_id, safe=_URI_COMPONENT_SAFE)}"
+def validate_app_id(app_id: str) -> str:
+    """Voice app identity is fixed for the entire Noise connection."""
+    if app_id == "hatch-web":
+        return app_id
+    if (isinstance(app_id, str) and app_id.isascii() and app_id.isdecimal()
+            and len(app_id) <= 19 and 0 < int(app_id) <= (1 << 63) - 1):
+        return str(int(app_id))
+    raise ValueError("app ID must be a positive int64 or hatch-web")
+
+
+def noise_url(noise_host: str, vm_id: str, app_id: str | None = None) -> str:
+    url = f"wss://{noise_host}{NOISE_PATH}?vm_id={quote(vm_id, safe=_URI_COMPONENT_SAFE)}"
+    if app_id is not None:
+        url += "&app_id=" + quote(validate_app_id(app_id), safe="")
+    return url
+
+
+@dataclass(frozen=True)
+class SideChat:
+    session_id: str
+    exists: bool    # False: Muse has no chat with this ID yet; the first send_chat to it creates it
 
 
 class LinkSession:
@@ -149,69 +169,103 @@ class LinkSession:
         device: DeviceDescription,
         run_command: Callable[[str, dict, int | None], dict],
         connect=None,
+        invoke_slots: asyncio.Semaphore | None = None,
+        app_id: str | None = None,
+        register_device: bool = True,
     ) -> None:
-        self._url = noise_url(noise_host, vm_id)
+        self._url = noise_url(noise_host, vm_id, app_id)
+        self._register_device = register_device
+        self._transport_ready = asyncio.Event()
         self._token = vm_auth_token
         self._device = device
         self._run_command = run_command
         self._connect = connect
         self._send_lock = asyncio.Lock()
-        self._invokes = asyncio.Semaphore(MAX_CONCURRENT_INVOKES)
+        self._invokes = invoke_slots if invoke_slots is not None else asyncio.Semaphore(MAX_CONCURRENT_INVOKES)
         self._tasks: set[asyncio.Task] = set()
         self._stream_id = 0
         self._register_id = ""
-        self._requests: dict[int, _Request] = {}
+        self._requests: dict[int, _Request | StreamingRequest] = {}
         self._streams: dict[int, HttpStream] = {}
         self._running = False
         self.registered = asyncio.Event()
         self.chat_subscribed = asyncio.Event()
+        self._registration_changed = asyncio.Event()
+        self._registration_error: Exception | None = None
+        self._closed = False
+        self._used = False
         self.registered_at: float | None = None
 
     async def run(self, stop: asyncio.Event) -> Outcome:
+        if self._used:
+            raise ValueError("a LinkSession can only run once")
+        self._used = True
         self.registered.clear()
         self.chat_subscribed.clear()
-        try:
-            ws = await self._open()
-        except _UpgradeRejected as rejected:
-            log.warning("VM refused connection: HTTP %d", rejected.status)
-            return Outcome.AUTH_REJECTED if rejected.status == 401 else Outcome.FORBIDDEN
+        ws = None
         reader = stopper = None
         try:
+            try:
+                ws = await self._open()
+            except _UpgradeRejected as rejected:
+                log.warning("VM refused connection: HTTP %d", rejected.status)
+                return Outcome.AUTH_REJECTED if rejected.status == 401 else Outcome.FORBIDDEN
             self._ws = ws
             self._transport = await asyncio.wait_for(self._handshake(ws), HANDSHAKE_TIMEOUT_S)
             self._running = True
-            await self._open_control_stream()
+            if self._register_device:
+                await self._open_control_stream()
             reader = asyncio.ensure_future(self._read_loop())
+            self._transport_ready.set()
             stopper = asyncio.ensure_future(stop.wait())
             done, _ = await asyncio.wait({reader, stopper}, return_when=asyncio.FIRST_COMPLETED)
             if stopper in done:
-                reader.cancel()
                 return Outcome.STOPPED
-            stopper.cancel()
             return reader.result()
         finally:
             self._running = False
+            self._closed = True
             self.registered.clear()
             self.chat_subscribed.clear()
-            background = []
-            for pending in (reader, stopper):
-                if pending is not None:
-                    pending.cancel()
-                    background.append(pending)
-            for task in self._tasks:
+            self._transport_ready.set()
+            self._registration_changed.set()
+            tasks = [t for t in (reader, stopper, *self._tasks) if t is not None]
+            for task in tasks:
                 task.cancel()
-                background.append(task)
             for request in self._requests.values():
-                if not request.done.done():
-                    request.done.set_exception(ConnectionError("session ended"))
+                request.fail(ConnectionError("session ended"))
             self._requests.clear()
             for stream in self._streams.values():
                 stream.fail(ConnectionError("session ended"))
             self._streams.clear()
-            # Closing the socket wakes writers stalled by network backpressure.
-            await ws.close()
-            if background:
-                await asyncio.gather(*background, return_exceptions=True)
+            # Close before joining writers stalled by network backpressure.
+            if ws is not None:
+                try:
+                    await asyncio.wait_for(ws.close(), 2)
+                except Exception:
+                    log.warning("could not close Noise connection")
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def wait_transport_ready(self, timeout: float = HANDSHAKE_TIMEOUT_S) -> None:
+        """Wait for the authenticated upgrade, Noise handshake and receive loop.
+
+        With register_device=False no control stream or link.register is sent;
+        this preserves another connection's registration for the same device.
+        """
+        await asyncio.wait_for(self._transport_ready.wait(), timeout)
+        if self._closed or not hasattr(self, "_transport"):
+            raise ConnectionError("Noise transport did not become ready")
+
+    async def wait_registered(self, timeout: float = HANDSHAKE_TIMEOUT_S) -> None:
+        """Wait for the registration ACK, not merely an open WebSocket."""
+        if not self._register_device:
+            raise ValueError("device registration is disabled on this session")
+        await asyncio.wait_for(self._registration_changed.wait(), timeout)
+        if self._registration_error is not None:
+            raise self._registration_error
+        if self._closed or self.registered_at is None:
+            raise ConnectionError("session ended before registration")
 
     # -- Connection setup -----------------------------------------------------
 
@@ -231,7 +285,7 @@ class LinkSession:
                 open_timeout=HANDSHAKE_TIMEOUT_S,
                 ping_interval=PING_INTERVAL_S,
                 ping_timeout=PING_INTERVAL_S,
-                max_size=None,
+                max_size=128 * 1024,
             )
         except InvalidStatus as exc:
             status = exc.response.status_code
@@ -255,9 +309,10 @@ class LinkSession:
         return NoiseTransport(send, recv)
 
     async def _open_control_stream(self) -> None:
-        encrypted = self._transport.start_stream_request("POST", CONTROL_PATH)
+        encrypted = await self._send_encrypted(
+            lambda: self._transport.start_stream_request("POST", CONTROL_PATH),
+        )
         self._stream_id = encrypted.stream_id
-        await self._send_frames(encrypted.frames)
         self._register_id = str(uuid.uuid4())
         await self.send({
             "type": "req",
@@ -326,36 +381,62 @@ class LinkSession:
     async def _post_chat(self, request_body: dict) -> dict:
         if not self._running:
             raise ConnectionError("Muse session is not connected")
-        body = json.dumps(request_body).encode()
-        headers = self._http_headers([
-            Header("Content-Type", "application/json"),
-        ])
+        return await self._request(
+            "POST", CHAT_PATH, json.dumps(request_body).encode(),
+            headers=self._http_headers([Header("Content-Type", "application/json")]),
+            timeout=REQUEST_TIMEOUT_S, finish_sends=True,
+        )
+
+    async def request(self, method: str, path: str, body: bytes = b"", *,
+                      headers=None, timeout: float = REQUEST_TIMEOUT_S) -> dict:
+        """Buffered request for small JSON replies, including call cleanup."""
+        return await self._request(method, path, body, headers=headers, timeout=timeout)
+
+    async def _request(self, method: str, path: str, body: bytes, *,
+                       headers, timeout: float, finish_sends: bool = False) -> dict:
+        send = self._send_complete if finish_sends else self._send_encrypted
         upload_in_parts = len(body) > MAX_INLINE_REQUEST_BYTES
-        if upload_in_parts:
-            encrypted = self._transport.start_stream_request("POST", CHAT_PATH, headers=headers)
-        else:
-            encrypted = self._transport.encrypt_http_request("POST", CHAT_PATH, body, headers=headers)
         request = _Request(asyncio.get_running_loop().create_future())
-        self._requests[encrypted.stream_id] = request
+        stream_id = None
+
+        def encrypt():
+            nonlocal stream_id
+            if upload_in_parts:
+                encrypted = self._transport.start_stream_request(method, path, headers=headers)
+            else:
+                encrypted = self._transport.encrypt_http_request(method, path, body, headers=headers)
+            stream_id = encrypted.stream_id
+            self._requests[stream_id] = request
+            return encrypted
+
+        completed = False
         try:
-            await self._send_frames(encrypted.frames)
+            await send(encrypt)
             if upload_in_parts:
                 for offset in range(0, len(body), REQUEST_CHUNK_BYTES):
                     part = body[offset:offset + REQUEST_CHUNK_BYTES]
-                    frames = self._transport.encrypt_body_chunk(
-                        encrypted.stream_id, part, end_body=offset + len(part) == len(body),
-                    )
-                    await self._send_frames(frames)
-            status, response = await asyncio.wait_for(request.done, REQUEST_TIMEOUT_S)
-        except BaseException:
-            request.done.cancel()
-            await self._reset_stream(encrypted.stream_id)
-            raise
+                    await send(lambda: self._transport.encrypt_body_chunk(
+                        stream_id, part, end_body=offset + len(part) == len(body),
+                    ))
+            status, response = await asyncio.wait_for(request.done, timeout)
+            completed = True
         finally:
-            self._requests.pop(encrypted.stream_id, None)
+            if stream_id is not None:
+                self._requests.pop(stream_id, None)
+            if not request.done.done():
+                request.done.cancel()
+            elif not request.done.cancelled():
+                request.done.exception()  # retrieve send-time failures too
+            if not completed and stream_id is not None and not self._closed:
+                try:
+                    await asyncio.wait_for(self._send_encrypted(
+                        lambda: self._transport.encrypt_reset(stream_id, reason="request ended"),
+                    ), 1)
+                except Exception:
+                    log.warning("could not reset abandoned request")
         try:
             decoded = json.loads(response) if response else None
-        except json.JSONDecodeError:
+        except (ValueError, UnicodeError):
             decoded = response.decode("utf-8", errors="replace")[:2000]
         return {"ok": 200 <= status < 300, "status": status, "response": decoded}
 
@@ -373,21 +454,48 @@ class LinkSession:
         """
         if not self._running:
             raise ConnectionError("Muse session is not connected")
-        encrypted = self._transport.encrypt_http_request(
-            method, path, body, headers=self._http_headers(headers),
-        )
         stream = HttpStream(max_buffer_bytes)
-        self._streams[encrypted.stream_id] = stream
+        stream_id = None
+
+        def encrypt():
+            nonlocal stream_id
+            encrypted = self._transport.encrypt_http_request(
+                method, path, body, headers=self._http_headers(headers),
+            )
+            stream_id = encrypted.stream_id
+            self._streams[stream_id] = stream
+            return encrypted
+
         try:
-            await self._send_frames(encrypted.frames)
+            await self._send_complete(encrypt)
             await asyncio.wait_for(stream.ready, REQUEST_TIMEOUT_S)
             yield stream
         finally:
-            self._streams.pop(encrypted.stream_id, None)
-            if not stream.ended and not stream.reset_requested:
-                stream.reset_requested = True
-                await self._reset_stream(encrypted.stream_id)
+            if stream_id is not None:
+                self._streams.pop(stream_id, None)
+                if not stream.ended and not stream.reset_requested:
+                    stream.reset_requested = True
+                    await self._reset_stream(stream_id)
             stream.close()
+
+    async def open_side_chat(self, session_id: str) -> SideChat:
+        """Look up the side chat ``session_id`` without reading its events.
+
+        Raises :class:`HttpStreamError` when Muse answers with anything but
+        success or 404.
+        """
+        path = "/chat/subscribe"
+        body = json.dumps({"session_id": session_id}).encode()
+        async with self.stream_http("POST", path, body, headers=[
+            Header("Content-Type", "application/json"), Header("Accept", "application/x-ndjson"),
+        ]) as stream:
+            if 200 <= stream.status < 300:
+                exists = True
+            elif stream.status == 404:
+                exists = False
+            else:
+                raise HttpStreamError(stream.status, path)
+        return SideChat(session_id, exists)
 
     async def subscribe_chat(self, session_id: str | None = None) -> AsyncIterator[dict]:
         """Yield Muse chat events from its NDJSON subscription."""
@@ -449,20 +557,51 @@ class LinkSession:
         if not self._running:
             return
         try:
-            await self._send_frames(self._transport.encrypt_reset(stream_id, reason="consumer closed"))
+            await self._send_complete(
+                lambda: self._transport.encrypt_reset(stream_id, reason="consumer closed"),
+            )
         except Exception:
             log.debug("could not cancel closed Muse stream", exc_info=True)
+
+    async def stream_request(self, method: str, path: str, *, headers=None,
+                             max_buffer_bytes: int = MAX_BUFFER_BYTES,
+                             max_buffer_chunks: int = MAX_BUFFER_CHUNKS) -> StreamingRequest:
+        if max_buffer_bytes < 1 or max_buffer_chunks < 1:
+            raise ValueError("stream limits must be positive")
+        stream = None
+
+        def encrypt():
+            nonlocal stream
+            encrypted = self._transport.start_stream_request(method, path, headers=headers)
+            stream = StreamingRequest(self, encrypted.stream_id,
+                                      max_buffer_bytes=max_buffer_bytes,
+                                      max_buffer_chunks=max_buffer_chunks)
+            self._requests[encrypted.stream_id] = stream
+            return encrypted
+
+        try:
+            await self._send_encrypted(encrypt)
+        except BaseException:
+            if stream is not None:
+                self._requests.pop(stream.stream_id, None)
+            raise
+        return stream
 
     # -- Sending --------------------------------------------------------------
 
     async def send(self, message: dict) -> None:
-        frames = self._transport.encrypt_body_chunk(self._stream_id, encode_message(message))
-        await self._send_frames(frames)
+        if not self._register_device:
+            raise ValueError("no device control stream on this session")
+        await self._send_complete(lambda: self._transport.encrypt_body_chunk(
+            self._stream_id, encode_message(message),
+        ))
 
-    async def _send_frames(self, frames) -> None:
-        # Encryption has already advanced the Noise nonce. Finish this batch
-        # before cancellation so the next sender cannot leave a nonce gap.
-        sender = asyncio.ensure_future(self._write_frames(frames))
+    async def _send_complete(self, encrypt):
+        # Chat/TTS cancellation finishes the current batch, then resets only its
+        # stream. Duplex voice sends instead fail the connection if interrupted.
+        sender = asyncio.ensure_future(self._send_encrypted(encrypt))
+        self._tasks.add(sender)
+        sender.add_done_callback(self._tasks.discard)
         cancelled = False
         while True:
             try:
@@ -480,11 +619,35 @@ class LinkSession:
             if not sender.cancelled():
                 sender.exception()
             raise asyncio.CancelledError
+        return sender.result()
 
-    async def _write_frames(self, frames) -> None:
+    async def _send_encrypted(self, encrypt, *, check=None):
+        # Encryption advances the Noise nonce: acquire the lock BEFORE encrypting
+        # so concurrent requests and cancelled sends cannot reorder ciphertext.
         async with self._send_lock:
-            for frame in frames:
-                await self._ws.send(frame)
+            if self._closed:
+                raise ConnectionError("session closed")
+            if check is not None:
+                check()  # No nonce consumed: a stale stream need not fail the session.
+            try:
+                result = encrypt()
+                frames = result.frames if hasattr(result, "frames") else result
+                for frame in frames:
+                    await self._ws.send(frame)
+                return result
+            except BaseException:
+                # Delivery is now ambiguous; never reuse this cipher state.
+                self._closed = True
+                self._running = False
+                for request in self._requests.values():
+                    request.fail(ConnectionError("send failed"))
+                for stream in self._streams.values():
+                    stream.fail(ConnectionError("send failed"))
+                try:
+                    await asyncio.wait_for(self._ws.close(), 2)
+                except Exception:
+                    log.warning("could not close failed Noise connection")
+                raise
 
     # -- Receiving ------------------------------------------------------------
 
@@ -502,7 +665,7 @@ class LinkSession:
             frame = self._transport.decrypt_frame(bytes(raw))
             if frame is None:
                 continue
-            if frame.stream_id != self._stream_id:
+            if not self._register_device or frame.stream_id != self._stream_id:
                 stream = self._streams.get(frame.stream_id)
                 if stream is not None:
                     if not stream.on_frame(frame):
@@ -517,7 +680,7 @@ class LinkSession:
                 log.warning("control stream reset: %s", frame.value.reason)
                 return Outcome.CLOSED
             if frame.kind == "response":
-                if frame.value.status >= 400:
+                if not 200 <= frame.value.status < 300:
                     log.warning("/link-control refused: HTTP %d", frame.value.status)
                     return Outcome.FORBIDDEN if frame.value.status == 403 else Outcome.CLOSED
                 data, ended = frame.value.body, frame.value.end_body
@@ -534,12 +697,15 @@ class LinkSession:
     def _handle(self, message: dict) -> Outcome | None:
         if message.get("id") == self._register_id and message.get("method") is None:
             if message.get("error") or message.get("ok") is False:
+                self._registration_error = ConnectionError("link registration rejected")
+                self._registration_changed.set()
                 log.error("link.register rejected")
                 return Outcome.FORBIDDEN
             else:
                 self.registered_at = time.monotonic()
                 self.registered.set()
                 log.info("registered with the Muse")
+            self._registration_changed.set()
             return None
         event = message.get("event")
         if event in ("link.unpaired", "node.unpaired"):
@@ -560,13 +726,28 @@ class LinkSession:
             return
         shown = printable(command)
         log.info("invoke %s", shown)
-        async with self._invokes:
-            started = time.monotonic()
-            result = await asyncio.get_running_loop().run_in_executor(
+        await self._invokes.acquire()
+        started = time.monotonic()
+        try:
+            worker = asyncio.get_running_loop().run_in_executor(
                 None, self._run_command, command, params, timeout_ms,
             )
-            log.info("%s %s in %d ms", shown, describe_result(result),
-                     (time.monotonic() - started) * 1000)
+        except BaseException:
+            self._invokes.release()
+            raise
+
+        def finished(future: asyncio.Future) -> None:
+            self._invokes.release()
+            # Observe failures even when the disconnected session no longer waits.
+            if not future.cancelled():
+                future.exception()
+
+        worker.add_done_callback(finished)
+        # Cancelling this session cannot stop a running command thread. Keep its
+        # slot until it really finishes, including across service reconnects.
+        result = await asyncio.shield(worker)
+        log.info("%s %s in %d ms", shown, describe_result(result),
+                 (time.monotonic() - started) * 1000)
         await self.send({"method": "link.result", "id": invoke_id, **result})
 
 
@@ -594,6 +775,28 @@ class HttpStreamError(ConnectionError):
         super().__init__(f"Muse request {path} failed: HTTP {status}")
         self.status = status
         self.path = path
+
+
+class RequestRejected(ConnectionError):
+    """Muse refused a ``send_chat`` or ``send_voice`` request."""
+
+    def __init__(self, status: int | None) -> None:
+        super().__init__(f"Muse rejected conversation request: HTTP {status}")
+        self.status = status
+
+
+def acknowledgement(result: dict) -> dict:
+    """Muse's acknowledgement in a ``send_chat`` or ``send_voice`` result.
+
+    Raises :class:`RequestRejected` when Muse refused the request, and
+    ``ValueError`` when it accepted it without an acknowledgement.
+    """
+    if not result.get("ok"):
+        raise RequestRejected(result.get("status"))
+    response = result.get("response")
+    if not isinstance(response, dict):
+        raise ValueError("Muse did not acknowledge the request")
+    return response
 
 
 class HttpStream:
@@ -696,6 +899,10 @@ class _Request:
         self.status = 0
         self.body = bytearray()
 
+    def fail(self, error: Exception) -> None:
+        if not self.done.done():
+            self.done.set_exception(error)
+
     def on_frame(self, frame) -> None:
         if self.done.done():
             return
@@ -703,14 +910,21 @@ class _Request:
             self.done.set_exception(ConnectionError(f"stream reset: {frame.value.reason}"))
             return
         if frame.kind == "response":
+            if self.status or not 100 <= frame.value.status <= 599:
+                self.fail(ValueError("invalid or duplicate response head"))
+                return
             self.status = frame.value.status
             data, ended = frame.value.body, frame.value.end_body
-        else:
+        elif frame.kind == "body_chunk" and self.status:
             data, ended = frame.value.data, frame.value.end_body
-        self.body += data
-        if len(self.body) > MAX_RESPONSE_BYTES:
+        else:
+            self.fail(ValueError("response body before head"))
+            return
+        if len(self.body) + len(data) > MAX_RESPONSE_BYTES:
             self.done.set_exception(ValueError("response too large"))
-        elif ended:
+            return
+        self.body += data
+        if ended:
             self.done.set_result((self.status, bytes(self.body)))
 
 

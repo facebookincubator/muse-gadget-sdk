@@ -91,6 +91,10 @@ menu "Muse"
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_SEEED_XIAO_S3_147
+            bool "Seeed XIAO ESP32-S3 1.47 Touch Display (PDM mic, no speaker)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_M5STACK_CORES3
             bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
@@ -122,6 +126,7 @@ menu "Muse"
     config MUSE_ENABLED
         bool
         default y if !MUSE_BOARD_NONE
+        select HOMEHUB_DAEMON_REQUESTS   # voice notes and chat over Link's session
 
     # Always defined, unlike the target-dependent board options, so
     # idf_component.yml rules can select each board's managed components.
@@ -143,6 +148,7 @@ menu "Muse"
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "seeed_xiao_s3_147" if MUSE_BOARD_SEEED_XIAO_S3_147
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
         default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
         default "fnk0104b" if MUSE_BOARD_FNK0104B
@@ -152,6 +158,18 @@ menu "Muse"
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
+
+    # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
+    # of LVGL: FreeInk drives the panel and its refreshes, and draws the face,
+    # Settings and the keyboard. Each one names its FreeInk device profile.
+    config MUSE_UI_FREEINK
+        bool
+        default y if MUSE_BOARD_RETERMINAL_STICKY
+
+    config MUSE_FREEINK_DEVICE
+        string
+        default "STICKY" if MUSE_BOARD_RETERMINAL_STICKY
+        default ""
 
     config MUSE_STICKY_SD
         bool "Mount the reTerminal Sticky's microSD card at /sdcard"
@@ -215,6 +233,16 @@ menu "Muse"
             Without it those characters show as boxes. Hangul isn't
             included.
 
+    config MUSE_CJK_FONT_NOTO
+        bool "Draw CJK captions with Noto Sans SC instead of Unifont"
+        depends on MUSE_CJK_FONT
+        default n
+        help
+            Anti-aliased Noto Sans SC Medium at 16 px in place of Unifont's
+            1-bit bitmaps, in the same 16 px cell. Covers the 6763 hanzi of
+            GB2312 rather than every CJK Unified Ideograph: rarer characters
+            show as boxes. Takes about 910 KB of flash, against 850 KB.
+
     config MUSE_JC3248W535_MIC_GPIO
         int "JC3248W535: GPIO for an external I2S mic's data (SD) line"
         depends on MUSE_BOARD_GUITION_JC3248W535
@@ -255,6 +283,64 @@ menu "Muse"
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
+    config MUSE_REALTIME_VOICE
+        bool "Live voice calls with Muse (experimental)"
+        depends on (MUSE_HATCH || HOMEHUB_VOICE) && SPIRAM
+        default n
+        help
+            A tap on the talk button starts a live voice call with Muse over
+            the voice session; the next press hangs up. Holding the button
+            still sends a voice note. On the StopWatch, holding yellow talks
+            in a call instead, blue hangs up, and voice notes are a Sound
+            setting. The mic is shut while Muse is talking
+            unless the board's audio chip confirms echo cancellation (the
+            Home Assistant Voice PE's XMOS), so you take turns. The call
+            also ends when Muse ends it, when nothing has been said or
+            played for the idle limit, or at the length limit. Muse's VM
+            has to accept voice calls from this gadget's credentials.
+
+if MUSE_REALTIME_VOICE
+
+    config MUSE_REALTIME_VOICE_APP_ID
+        string "App ID the voice session connects as"
+        default "hatch-web"
+        help
+            Sent as app_id when the voice session connects, which is where
+            Muse's VM takes the app identity for every request on that
+            connection: calls, and voice notes and typed messages too (it
+            drops a per-request x-app-id). A call is refused without one. A
+            positive 64-bit app ID, or "hatch-web", the web app's. Empty
+            sends none. Builds without calls send none either.
+
+    config MUSE_REALTIME_VOICE_IDLE_S
+        int "Hang up after this many quiet seconds"
+        range 15 1800
+        default 45
+        help
+            Nothing said and nothing audible from Muse for this long ends
+            the call. The server may enforce a shorter idle limit.
+
+    config MUSE_REALTIME_VOICE_MAX_S
+        int "Longest call, in seconds"
+        range 60 7200
+        default 900
+
+    config MUSE_REALTIME_VOICE_GREETING
+        bool "Muse says hello when a call starts"
+        default n
+
+    config MUSE_REALTIME_VOICE_AEC_DUPLEX
+        bool "Keep the mic open while Muse talks if echo is cancelled"
+        depends on HOMEHUB_VOICE
+        default y
+        help
+            On the Voice PE, when the XMOS reports at start-up that its
+            output is echo-cancelled, the call is full duplex and you can
+            talk over Muse. Otherwise, and on other boards, the mic is shut
+            while Muse is audibly talking and for a moment after.
+
+endif
+
     config MUSE_HATCH_COMPACT_BUFFERS
         bool "Smaller voice session buffers, for 2 MB of PSRAM"
         depends on MUSE_HATCH
@@ -270,7 +356,7 @@ menu "Muse"
 
     config MUSE_VIDEO
         bool "Video streaming from a phone to the display"
-        depends on MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31)
+        depends on MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31) && !MUSE_UI_FREEINK
         default n
         help
             A phone (Muse Gadgets Test, android/musegadgetstest) streams its camera, or

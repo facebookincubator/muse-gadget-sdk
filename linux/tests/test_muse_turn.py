@@ -281,3 +281,63 @@ def test_transcript_reads_only_assistant_text():
         ]},
     ]}
     assert transcript_text(transcript) == "Hello.\nGoodbye."
+
+
+@pytest.mark.parametrize("parent_key", ["reply_to_message_id", "parent_message_id"])
+@pytest.mark.parametrize("name, payload", [
+    ("task.status", {"status": "completed"}),
+    ("task.status", {"status": "running"}),
+    ("agent.status", {"activity_code": "idle"}),
+    ("agent.status", {"activity_code": "working"}),
+])
+@pytest.mark.parametrize("finished", [False, True])
+def test_shared_chat_unrelated_status_does_not_change_turn(parent_key, name, payload, finished):
+    turn = shared_turn()
+    turn.feed(event("task.status", parent="u1", status="completed" if finished else "running"))
+    before = (turn.busy, turn.task_finished, turn.activity_code, turn.last_activity)
+    assert turn.feed(event(name, **{parent_key: "another-request", **payload})) == []
+    assert (turn.busy, turn.task_finished, turn.activity_code, turn.last_activity) == before
+    assert turn.complete(turn.last_activity) == finished
+
+
+def test_shared_chat_unrelated_status_held_before_ack_is_ignored():
+    turn = MuseTurn("chat")
+    turn.feed(event("task.status", parent="u1", status="running"))
+    turn.feed(event("task.status", parent="another-request", status="completed"))
+    assert turn.acknowledge({"message_id": "u1"}) == []
+    assert turn.busy and not turn.task_finished
+
+
+def test_shared_chat_parentless_status_keeps_legacy_behavior():
+    turn = shared_turn()
+    turn.feed(event("task.status", status="running"))
+    assert turn.busy
+    assert turn.feed(event("task.status", status="completed")) == [TaskFinished()]
+    assert turn.complete(turn.last_activity)
+
+
+def test_shared_chat_status_can_reference_a_bound_reply():
+    turn = shared_turn()
+    turn.feed(event("delta.message_done", "r1", parent="u1", content="Answer"))
+    assert turn.feed(event("agent.status", parent="r1", activity_code="working")) == [
+        AgentStatus("working", None)]
+    assert turn.feed(event("task.status", parent="r1", status="completed")) == [TaskFinished()]
+    assert turn.complete(turn.last_activity)
+
+
+def test_shared_chat_foreign_parent_overrides_a_known_reply_id():
+    turn = shared_turn()
+    turn.feed(event("delta.message_done", "r1", parent="u1", content="Answer"))
+    turn.feed(event("task.status", parent="u1", status="running"))
+    assert turn.feed(event("task.status", "r1", parent="another-request", status="completed")) == []
+    assert turn.busy and not turn.task_finished
+
+
+def test_shared_chat_unrelated_status_does_not_release_follow_up():
+    turn = shared_turn()
+    turn.expect_follow_up()
+    turn.acknowledge({"message_id": "u2"}, follow_up=True)
+    turn.feed(event("task.status", parent="another-request", status="completed"))
+    assert not turn.complete(turn.last_activity + 10)
+    assert turn.feed(event("task.status", parent="u2", status="completed")) == [TaskFinished()]
+    assert turn.complete(turn.last_activity)

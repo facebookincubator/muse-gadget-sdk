@@ -35,6 +35,10 @@
 #include "voice_board.h"
 #include "voice_muse_chat.h"
 #include "voice_player.h"
+#if CONFIG_MUSE_REALTIME_VOICE
+#include "muse_voice_call.h"
+#include "muse_voice_call_core.h"
+#endif
 
 static const char *TAG = "link.voice";
 
@@ -199,6 +203,126 @@ static bool reply(void) {
     return false;
 }
 
+#if CONFIG_MUSE_REALTIME_VOICE
+// How far the speaker runs behind the player's buffer (DMA), and how long the
+// mic stays shut after Muse's voice stops when the call is half duplex.
+#define CALL_SPEAKER_LAG_US 80000
+#define CALL_TAIL_US        300000
+#define CALL_END_WAIT_US    (20LL * 1000000)
+
+// Full duplex only where the XMOS confirms echo cancellation; otherwise the
+// mic is shut while Muse is audibly talking.
+static bool call_full_duplex(void) {
+#if CONFIG_MUSE_REALTIME_VOICE_AEC_DUPLEX
+    return voice_board_echo_cancelled();
+#else
+    return false;
+#endif
+}
+
+// A realtime call, from a tap until it ends; a press (or the mute switch)
+// hangs up. The mic read paces the loop; the player's own task drains the
+// reply to the speaker.
+static void run_call(void) {
+    static int16_t chunk[CAPTURE_CHUNK];
+    static int16_t pcm[REPLY_CHUNK];
+    char text[96] = "";
+    muse_vc_gate_t gate;
+    bool duplex = call_full_duplex();
+    muse_vc_gate_init(&gate, duplex, CALL_TAIL_US);
+    bool live = false, hung_up = false, ended = false;
+    int64_t give_up = 0;
+    voice_player_stop();
+    led_status_set_level(0);
+    led_status_set_voice(LED_VOICE_THINKING);
+    if (voice_board_mic_start() != ESP_OK) {
+        fail("microphone unavailable");
+        return;
+    }
+    voice_player_begin();
+    muse_voice_call_start();
+    ESP_LOGI(TAG, "call: started (%s duplex)", duplex ? "full" : "half");
+    while (!ended) {
+        int peak = 0;
+        size_t got = voice_board_mic_read(chunk, CAPTURE_CHUNK, &peak);
+        int64_t now = esp_timer_get_time();
+        // The mute switch is read after the capture and before anything is
+        // handed on: a chunk captured while the switch went on is dropped.
+        bool muted = voice_board_muted();
+        if (got && !muted && live && !hung_up && muse_vc_gate_mic_open(&gate, now)) {
+            muse_voice_call_audio(chunk, got);
+            led_status_set_level(peak / 12000.0f);
+        }
+        muse_voice_call_ev_t ev;
+        while (!ended && (ev = muse_voice_call_event(text, sizeof(text))) != MUSE_VOICE_CALL_EV_NONE) {
+            switch (ev) {
+            case MUSE_VOICE_CALL_EV_READY:
+                live = true;
+                led_status_set_voice(LED_VOICE_LISTENING);
+                break;
+            case MUSE_VOICE_CALL_EV_ENDED:
+                ESP_LOGI(TAG, "call: %s", text);
+                ended = true;
+                break;
+            default:
+                break;
+            }
+        }
+        if (ended) break;
+        bool press = false;
+        voice_evt_t evt;
+        while (xQueueReceive(s_events, &evt, 0) == pdTRUE) press |= evt == EVT_PRESS;
+        if (!hung_up && (press || muted || !got)) {
+            ESP_LOGI(TAG, "call: hanging up (%s)", press ? "press" : muted ? "muted" : "microphone failed");
+            hung_up = true;
+            give_up = now + CALL_END_WAIT_US;
+            muse_voice_call_end();
+            voice_player_stop();
+            led_status_set_voice(LED_VOICE_THINKING);
+        }
+        if (hung_up) {
+            if (now > give_up) {
+                ESP_LOGW(TAG, "call: no word that it ended");
+                break;
+            }
+            if (!got) vTaskDelay(pdMS_TO_TICKS(20));   // no mic to pace the loop
+            continue;
+        }
+        // Move what has arrived to the player (up to 200 ms per pass).
+        for (int i = 0; i < 10; i++) {
+            bool flushed = false;
+            size_t n = muse_voice_call_read(pcm, REPLY_CHUNK, &flushed);
+            if (flushed) {
+                // The caller barged in: drop what the player still holds.
+                voice_player_begin();
+                muse_vc_gate_flush(&gate, now);
+            }
+            if (!n) break;
+            int64_t queued = (int64_t)voice_player_queued() * 1000000 / VOICE_PLAYER_RATE;
+            muse_vc_gate_playout(&gate, pcm, n, now, queued + CALL_SPEAKER_LAG_US);
+            voice_player_write(pcm, n);
+        }
+        if (live) {
+            led_status_set_voice(muse_vc_gate_mic_open(&gate, now) ? LED_VOICE_LISTENING : LED_VOICE_SPEAKING);
+        }
+    }
+    voice_board_mic_stop();
+    led_status_set_level(0);
+    if (ended && !hung_up) {
+        // Muse ended it (a goodbye, say): let what it already said finish.
+        bool flushed;
+        size_t n;
+        while ((n = muse_voice_call_read(pcm, REPLY_CHUNK, &flushed)) > 0) voice_player_write(pcm, n);
+        voice_player_end();
+        while (!voice_player_wait(0)) {
+            if (pressed_again(pdMS_TO_TICKS(40))) break;
+        }
+    }
+    voice_player_stop();
+    led_status_set_voice(LED_VOICE_IDLE);
+}
+#endif
+
 // Returns true if a new press interrupted the turn.
 static bool run_turn(void) {
     voice_player_stop();
@@ -209,6 +333,13 @@ static bool run_turn(void) {
     if (samples < VOICE_MIC_RATE * CAPTURE_MIN_MS / 1000) {
         muse_hatch_turn_cancel();
         if (!samples) return fail("microphone unavailable");
+#if CONFIG_MUSE_REALTIME_VOICE
+        // A tap: a call, beside holding for a note.
+        if (muse_voice_call_ready()) {
+            run_call();
+            return false;
+        }
+#endif
         ESP_LOGI(TAG, "press too short");
         led_status_set_voice(LED_VOICE_IDLE);
         return false;

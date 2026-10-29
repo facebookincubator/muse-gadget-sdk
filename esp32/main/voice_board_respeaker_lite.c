@@ -74,6 +74,12 @@ void voice_board_set_volume(int percent) {
     if (err != ESP_OK) ESP_LOGW(TAG, "volume: %s", esp_err_to_name(err));
 }
 
+// Not confirmed: this port doesn't read the XMOS pipeline stages, so calls
+// stay half duplex.
+bool voice_board_echo_cancelled(void) {
+    return false;
+}
+
 bool voice_board_muted(void) {
     uint8_t muted = 1;
     // Firmware >=1.0.9 exposes the hardware mute state. Fail closed if unreadable.
