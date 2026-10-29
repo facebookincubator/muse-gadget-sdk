@@ -119,7 +119,8 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 #define PAIRING_CONFIRMED_IDLE_TIMEOUT_MS (120 * 1000)
 
 // OTA rollback: how long a freshly-installed (PENDING_VERIFY) image has to
-// reach the authenticated control WebSocket before the bootloader reverts it.
+// reach the authenticated control WebSocket before the bootloader reverts it
+// (on every board; on the ESP-Mosaico, not for a Vibe Mode install).
 // The control WS is the recovery channel — if a new image can't reach it,
 // no future device.ota could repair the device, so rolling back is correct.
 #define OTA_VERIFY_TIMEOUT_US (300LL * 1000000LL)
@@ -1877,19 +1878,25 @@ static cJSON *on_ws_command(
         return queue_ws_control(WS_CONTROL_SET_VM, url);
     }
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
-    if (strcmp(command, "display.draw_url") == 0) {
-        cJSON *url = cJSON_GetObjectItem(params, "url");
+    bool draw_file = strcmp(command, "display.draw_file") == 0;
+    if (draw_file || strcmp(command, "display.draw_url") == 0) {
+        // draw_file takes a path on the VM, fetched over this session.
+        cJSON *target = cJSON_GetObjectItem(params, draw_file ? "path" : "url");
         cJSON *row = cJSON_GetObjectItem(params, "row");
-        if (!cJSON_IsString(url) || !url->valuestring || !url->valuestring[0]) {
-            return command_error("missing_param", "url is required");
+        if (!cJSON_IsString(target) || !target->valuestring || !target->valuestring[0]) {
+            return command_error("missing_param",
+                                 draw_file ? "path is required" : "url is required");
         }
         draw_url_ctx_t *ctx = calloc(1, sizeof(*ctx));
         if (!ctx) return command_error("out_of_memory", "failed to allocate");
         ctx->session_generation = session_generation;
         strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
         const char *code, *message;
-        if (!image_fetch_start(url->valuestring, cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW,
-                               draw_url_done, ctx, &code, &message)) {
+        int top = cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW;
+        bool started = draw_file
+            ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
+            : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        if (!started) {
             free(ctx);
             return command_error(code, message);
         }
@@ -2511,6 +2518,7 @@ static void ota_verify_task(void *arg) {
         if (noise_ctrl_is_connected()) {
             if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
                 ESP_LOGI(TAG, "OTA image validated (control WS up)");
+                ota_verify_forget();
             } else {
                 ESP_LOGE(TAG, "esp_ota_mark_app_valid_cancel_rollback failed");
             }
@@ -2522,6 +2530,7 @@ static void ota_verify_task(void *arg) {
     }
     if (s_ota_pending_verify) {
         ESP_LOGE(TAG, "OTA verify timed out; rolling back to previous firmware");
+        ota_verify_forget();
         stack_monitor_record(NULL);
         esp_ota_mark_app_invalid_rollback_and_reboot();
         // Only returns when there is no valid partition to revert to.
@@ -2634,12 +2643,24 @@ void app_run(void) {
     // Arm OTA rollback verification. If the running image was just installed
     // by device.ota it boots as PENDING_VERIFY and must reach the control WS
     // within OTA_VERIFY_TIMEOUT_US, else the bootloader reverts it on reboot.
+    // The one exception is the ESP-Mosaico in Vibe Mode: its Vibe Mode
+    // firmware installs apps itself and leaves them PENDING_VERIFY, and that
+    // is nothing to roll back (ota_installed_by_vibe_mode checks the board,
+    // the build and the flash layout). Every other PENDING_VERIFY image, on
+    // every board, is checked.
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
     if (running && esp_ota_get_state_partition(running, &ota_state) == ESP_OK
         && ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-        s_ota_pending_verify = true;
-        ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
+        if (!ota_installed_by_vibe_mode()) {
+            s_ota_pending_verify = true;
+            ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
+        } else if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+            ESP_LOGI(TAG, "PENDING_VERIFY image installed by Vibe Mode; marked valid");
+        }
+    }
+    if (!s_ota_pending_verify) {
+        ota_verify_forget();   // an update that never booted
     }
     xTaskCreate(ota_verify_task, "ota_verify", 4096, NULL, 4, NULL);
 
