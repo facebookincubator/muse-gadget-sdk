@@ -44,8 +44,8 @@ The keys run along the top edge: K2, K1, K0 from the left.
   or off.
 - Power off is deep sleep with the backlight and amplifier off; K0 or RESET
   wakes it. USB power can't be cut.
-- Captions show Chinese and Japanese (`CONFIG_MUSE_CJK_FONT`, on in this
-  profile).
+- Captions show Chinese, Japanese and Korean (`CONFIG_MUSE_CJK_FONT`, on in
+  this profile).
 - Not integrated: the buzzer, the TF card slot and the USB-A host port. There
   is no battery reading.
 

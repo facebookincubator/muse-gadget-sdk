@@ -45,5 +45,5 @@ CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 # Two-key menu.
 CONFIG_LV_FONT_MONTSERRAT_12=y
 # Sold mostly to Chinese speakers: captions fall back to Unifont's CJK
-# (850 KB) instead of showing boxes.
+# (about 1.2 MB) instead of showing boxes.
 CONFIG_MUSE_CJK_FONT=y

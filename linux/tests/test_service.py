@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import stat
@@ -27,9 +28,9 @@ import pytest
 from musegadget import config, muse_api, service as service_module
 from musegadget.executor import Account, Executor
 from musegadget.identity import Identity
-from musegadget.link_client import DeviceDescription, Outcome
+from musegadget.link_client import MAX_IMAGE_BYTES, DeviceDescription, Outcome
 from musegadget.noise import ApplicationResponse, ServiceFrame
-from musegadget.service import Backoff, Service
+from musegadget.service import MAX_LOCAL_REQUEST, Backoff, Service
 
 from test_link_client import FakeVm, Pipe, bounded_scenario
 
@@ -42,6 +43,11 @@ class FakeSession:
 
     async def send_chat(self, message: str, session_id: str | None = None) -> dict:
         self.sent.append((message, session_id))
+        return {"ok": True, "status": 200, "response": None}
+
+    async def send_image(self, image_bytes: bytes, mime_type: str, session_id: str | None = None,
+                         *, message: str = "", filename: str | None = None) -> dict:
+        self.sent.append((message, session_id, image_bytes, mime_type, filename))
         return {"ok": True, "status": 200, "response": None}
 
 
@@ -90,6 +96,50 @@ def test_local_message_can_target_a_side_chat():
         assert session.sent == [("ring", sid)]
         bad = await ask(path, b'{"message": "ring", "session_id": "../x"}\n')
         assert not bad["ok"] and len(session.sent) == 1
+
+    run_with_socket(check)
+
+
+def test_local_message_can_carry_a_picture():
+    async def check(service, path):
+        session = FakeSession()
+        service._current = session
+        largest = bytes(MAX_IMAGE_BYTES)
+        image = {"filename": "porch.jpg", "mime_type": "image/jpeg",
+                 "data_base64": base64.b64encode(largest).decode()}
+        request = {"message": "who is it?", "image": image}
+        assert (await ask(path, json.dumps(request).encode() + b"\n"))["ok"]
+        assert session.sent == [("who is it?", None, largest, "image/jpeg", "porch.jpg")]
+        too_big = {**image, "data_base64": base64.b64encode(bytes(MAX_IMAGE_BYTES + 1)).decode()}
+        for bad, error in (
+            ([image], "image must be"),
+            ({"filename": "porch.jpg"}, "image must be"),
+            ({**image, "data_base64": 1}, "image must be"),
+            ({**image, "data_base64": "not base64!"}, "not valid base64"),
+            ({**image, "mime_type": "application/pdf"}, "JPEG, PNG, GIF or WebP"),
+            ({**image, "data_base64": ""}, "empty"),
+            (too_big, "images must be 2 MiB or less"),
+        ):
+            reply = await ask(path, json.dumps({"message": "hi", "image": bad}).encode() + b"\n")
+            assert not reply["ok"] and error in reply["error"], reply
+        assert len(session.sent) == 1
+
+    run_with_socket(check)
+
+
+def test_local_request_over_the_line_limit_gets_a_json_error():
+    async def check(service, path):
+        service._current = session = FakeSession()
+        reader, writer = await asyncio.open_unix_connection(str(path))
+        # Send the whole oversized line before reading, as the CLI does.
+        writer.write(b'{"message": "' + b"x" * MAX_LOCAL_REQUEST + b'"}\n')
+        await writer.drain()
+        reply = json.loads(await reader.readline())
+        writer.close()
+        assert reply == {"ok": False, "error": "the request is over 4 MiB"}
+        assert session.sent == []
+        # The socket keeps serving.
+        assert (await ask(path, b'{"message": "hi"}\n'))["ok"]
 
     run_with_socket(check)
 

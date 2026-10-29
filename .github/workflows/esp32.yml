@@ -144,6 +144,9 @@ jobs:
           - board: reterminal-sticky-link
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-sticky-link"
+          - board: waveshare-s3-epaper-154g
+            target: esp32s3
+            overlays: ";devices/sdkconfig.waveshare-s3-epaper-154g"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"
@@ -196,6 +199,15 @@ jobs:
           - board: muse-watcher-power-test
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test"
+          - board: muse-waveshare-s3-175c-power-test
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-power-test"
+          - board: muse-waveshare-s3-216-power-test
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216;devices/sdkconfig.muse-waveshare-s3-216-power-test"
+          - board: muse-aipi-power-test
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-aipi;devices/sdkconfig.muse-aipi-power-test"
           - board: muse-m5stack-cardputer-adv
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv"

@@ -165,7 +165,7 @@ never has a command's parameters, output or error message.
   `chat_id` is not an API field and is ignored. The response is only the ack
   (`message_id`); the reply appears in the Muse chat. Replies are text: to
   speak them, use a text-to-speech API of your choice.
-- The VM accepts at most 256 KB per message from the device, so command output
+- The VM accepts at most 256 KB per `/link-control` message, so command output
   is cut at 96 KB per stream.
 
 ## Realtime voice
@@ -319,10 +319,15 @@ run_command=...)` is one encrypted session with a Muse VM.
   the main chat.
 - `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None)`
   sends a WAV voice note of at most 2 MiB.
+- `send_image(image_bytes, mime_type, session_id=None, *, message="",
+  filename=None, output_modality="text")` sends a picture of at most
+  `link_client.MAX_IMAGE_BYTES` (2 MiB), with `message` as its text.
+  `mime_type` is one of `link_client.IMAGE_MIME_TYPES`: JPEG, PNG, GIF or
+  WebP. Anything else raises `ValueError`.
 - `link_client.acknowledgement(result)` reads Muse's acknowledgement from the
-  result of `send_chat` or `send_voice`. It raises `RequestRejected`, with a
-  `status` attribute, when Muse refused the request, or `ValueError` when the
-  response is not a dict.
+  result of `send_chat`, `send_voice` or `send_image`. It raises
+  `RequestRejected`, with a `status` attribute, when Muse refused the request,
+  or `ValueError` when the response is not a dict.
 - `await open_side_chat(session_id)` looks up a side chat and returns a `SideChat`.
   `SideChat.exists` is false for an ID that Muse does not know yet. The first
   `send_chat` to that ID creates the chat. The lookup closes its subscription
@@ -331,8 +336,9 @@ run_command=...)` is one encrypted session with a Muse VM.
   `chat_subscribed` is set while a subscription is open.
 - `stream_tts(message_id)` yields MP3 audio for a reply that Muse gave in voice
   mode.
-- `send_chat` and `send_voice` are coroutines that return a dict with `ok`,
-  `status` and `response`. `subscribe_chat` and `stream_tts` are async iterators.
+- `send_chat`, `send_voice` and `send_image` are coroutines that return a
+  dict with `ok`, `status` and `response`. `subscribe_chat` and `stream_tts`
+  are async iterators.
 - `open_side_chat`, `subscribe_chat` and `stream_tts` raise `HttpStreamError`
   on refused HTTP requests. It has `status` and `path` attributes.
 
