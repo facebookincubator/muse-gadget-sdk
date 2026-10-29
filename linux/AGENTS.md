@@ -351,7 +351,8 @@ run_command=...)` is one encrypted session with a Muse VM.
 - `replies` maps each answer's message ID to its latest `Reply`.
   `abandon_reply(message_id)` stops waiting for one reply.
 - `acknowledge(response, follow_up=True)` binds one more user message to the
-  request. Call `expect_follow_up()` before you send it.
+  request. Call `expect_follow_up()` before you send it. Until that
+  acknowledgement arrives, the turn is neither complete nor settled.
 - `acknowledged`, `busy`, `task_finished`, `activity_code` and
   `last_activity` describe the request's state.
 - `ReplayScope` drops events from earlier turns. Share one across the turns
