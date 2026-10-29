@@ -30,14 +30,18 @@ pairing and control protocols, so the same app pairs either.
 | Module | Role |
 |---|---|
 | `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `info`, `unpair` |
+| `pair.py` | `pair()`: opens BLE setup, checks and saves the pairing, prints nothing |
 | `pairing.py` | Community pairing v5: P-256 ECDH, HKDF-SHA256, AES-256-GCM, `confirm_app` |
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
 | `ble_setup.py` | Setup commands behind the GATT characteristics (no BlueZ dependency) |
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
-| `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream` |
+| `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
+| `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
+| `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
+| `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
 | `noise/` | Noise XX handshake, framing and service envelopes |
 | `data/` | The systemd unit and the hash-pinned `requirements.lock`, shipped in the package |
@@ -54,10 +58,11 @@ pairing and control protocols, so the same app pairs either.
 
 ## Tests
 
-The tests need no Bluetooth, device or network:
+Run these commands from `linux/`. The tests need no Bluetooth, device or
+external network:
 
 ```sh
-uv run --with pytest --with . pytest
+uv run --no-project --isolated --with pytest --with . python -m pytest -q
 ```
 
 To check the oldest supported versions, pin them. cryptography 3.3.2 has no
@@ -162,6 +167,48 @@ never has a command's parameters, output or error message.
 - The VM accepts at most 256 KB per message from the device, so command output
   is cut at 96 KB per stream.
 
+## Realtime voice
+
+- `musegadget voice-call` uses the paired store and exact `--vm-id`; never
+  add an owner-token fallback or change the account's default VM. Its
+  `LinkSession(register_device=False)` waits for transport readiness without
+  `/link-control` or `link.register`, preserving the normal run service's live
+  transport. Reuse the persistent identity for attribution only.
+- Each voice invocation admits a fresh call. Omit the realtime `session_id`
+  query (it is for an already-admitted call); optional `thread_id` belongs in
+  the admission record. Do not imply that this client implements resumption.
+- Set the configured voice app ID on the Noise upgrade query. Per-request
+  app-ID headers are not a substitute. Keep ordinary chat ACKs buffered.
+- Admit only `mcu-wearable` audio calls. Wait for HTTP success and matching
+  call/session readiness before microphone upload. Explicitly end the call
+  before upload EOS, including failure/cancellation paths, with bounded cleanup.
+- PCM is signed 16-bit LE, mono 24 kHz, up to 960 samples per 40 ms upload.
+  Bound response chunks, lines, decoded audio and playback. Silence keepalives
+  are not activity and must not hold the mic gate shut.
+- Half duplex is the default, with playback flush on barge-in and server hold
+  respected. Response completion/cancellation and turn settlement are not call
+  termination or proof that all PCM has arrived.
+- Right after the admission record, the client sends
+  `{"type":"hatch.voice.capability.offer","end_call_stop":1}`: it ends the
+  call on a `session_control/stop`, so Muse may hang up that way when the
+  caller says goodbye. A VM that doesn't know the key ignores it. The stop
+  arrives on this call's realtime response stream. Its `item.call_id` is a
+  control ID, not the admission call ID. Handle it once, drain queued playback
+  within a bound, then explicitly end the call. Don't add other capabilities,
+  invent server events or widen the device's permissions.
+- Post-readiness operation errors are advisory unless the peer explicitly
+  reports `session_dead`; admission errors remain fatal. Never log error text.
+- Idle suspension follows identified active turns, including delayed aliases.
+  Only a matching settlement retires that input item's work through the matched
+  submission, not newer aliases or unrelated inputs. Keep identity storage
+  bounded, restart idle after settlement, and never suspend the overall timer.
+- A validated end-call ACK is not undone by a delayed media EOF if a bounded
+  stream reset succeeds; report the incomplete drain separately.
+- Tests use self-authored tones/zeros and synthetic identities only. Never put
+  real recordings, credentials, internal documents or captured events here.
+  `test_streaming.py`, `test_voice_call.py` and `test_voice_cli.py` exercise real
+  Noise against an in-process fake VM without hardware or external calls.
+
 ## Adding a command
 
 1. Add a spec to `COMMAND_SPECS` in `executor.py`: `description`, `required`
@@ -173,6 +220,145 @@ never has a command's parameters, output or error message.
 4. Add a test in `tests/test_executor.py`.
 
 Muse sees the new command after the service restarts and re-registers.
+
+## Building a gadget
+
+A gadget is a program that uses `musegadget` to talk to Muse from its own
+hardware, such as a robot or a speaker. It may use the parts of the package
+listed here. Everything else is internal and can change.
+
+### Identity and state
+
+- `identity.load_or_create()` returns the device `Identity`. It creates one on
+  first use and keeps it across unpairing.
+- `Identity.node_id` is the `homelink-xxxxxx` ID that Muse knows the device by.
+  `Identity.ble_name` is the name the Muse app shows during pairing.
+- `config.state_dir()` is the directory for device state. Set
+  `MUSEGADGET_STATE_DIR` to move it.
+- `config.load_json(name)`, `config.save_json(name, data)` and
+  `config.delete_json(name)` read, write and remove one JSON file in the state
+  directory. `save_json` writes atomically and makes the file readable only by
+  its owner.
+- `config.sdk_token()` returns the SDK token from `MUSEGADGET_SDK_TOKEN` or the
+  state directory, or `None`. It raises `ValueError` for a token that
+  gadgets.muse.ai could not have issued.
+- `config.PAIRING_FILE` is the file that holds the pairing.
+- `config.STATE_DIR_ENV` and `config.SDK_TOKEN_ENV` hold the names of the two
+  environment variables, `MUSEGADGET_STATE_DIR` and `MUSEGADGET_SDK_TOKEN`.
+
+### Pairing
+
+- `pair.pair(on_open=..., force=False, timeout_s=600)` opens Bluetooth setup
+  so that the Muse app can pair the device. It prints nothing.
+- Just before setup opens, it calls `on_open` with a `SetupWindow`. Use it to
+  tell the user what to do. `ble_name` is the device to choose in the Muse
+  app, `timeout_s` is how long setup stays open, and `has_sdk_token` is false
+  when neither the environment nor the state directory provides an SDK token.
+- It returns a `PairResult`. `PairResult.outcome` is a `PairOutcome`:
+  `PAIRED`, `ALREADY_PAIRED`, `INVALID_SDK_TOKEN` or `WINDOW_CLOSED`. For
+  `INVALID_SDK_TOKEN`, `PairResult.sdk_token_problem` says what is wrong.
+- A paired device is left alone unless `force` is true.
+
+### Connecting
+
+- `service.Service` keeps a paired device connected to its Muse. It fetches the
+  device's VMs, connects, reconnects with backoff and rotates the device token.
+- `Service(identity, executor, sdk_token=None, display_name=...)` is a
+  dataclass. A dataclass subclass can add fields with defaults. `executor`
+  is an `executor.Executor` instance.
+- `await Service.run()` runs until `Service.stop()` is called or `serve()`
+  returns `Outcome.STOPPED`.
+- To describe your own device, or to run your own work while it is connected,
+  subclass `Service` and override any of these three methods.
+- `describe()` returns the `DeviceDescription` to register with Muse.
+  `Service` calls it for each new session.
+- `run_command(name, params, timeout_ms=None)` handles each command from Muse
+  synchronously in a worker thread. Commands can run concurrently. By default
+  it calls the `Executor`. Return `{"ok": True, "payload": {...}}` on success
+  or `{"ok": False, "error": "..."}` on failure.
+- `async serve(session, vm, stop)` runs each new `LinkSession` and returns its
+  `Outcome`. `vm` holds the selected VM's credentials, and `stop` is the
+  service's `asyncio.Event`. The default awaits `session.run(stop)`.
+  An override must run the session, finish when it ends or `stop` is set,
+  and clean up its background tasks before returning the outcome. `Service`
+  logs exceptions from `serve()` and reconnects with backoff. Cancellation
+  propagates to the caller.
+- `await Service.serve_local(path)` starts the optional local message socket
+  at a `pathlib.Path`. It returns an `asyncio.Server` that the caller must
+  close. The socket forwards to the registered session while `serve()` runs.
+  `Service.run()` does not start this socket itself.
+- `link_client.DeviceDescription(node_id, display_name, version, commands)` describes the
+  device to Muse. `commands` maps each command name to its spec: a
+  `description`, `required` and `optional` parameters, and an optional
+  `timeout_ms`.
+- `link_client.Outcome` says how a session ended: `CLOSED`, `AUTH_REJECTED`, `FORBIDDEN`,
+  `UNPAIRED` or `STOPPED`.
+
+### LinkSession
+
+`link_client.LinkSession(noise_host=..., vm_id=..., vm_auth_token=..., device=...,
+run_command=...)` is one encrypted session with a Muse VM.
+
+- `await run(stop)` connects, registers the device and serves Muse's commands until
+  `stop` is set or the link ends. It returns an `Outcome`.
+- `run_command(name, params, timeout_ms)` is the synchronous callback, with
+  the same threading and result contract as `Service.run_command`.
+- `registered` is an `asyncio.Event` that is set once Muse accepts the device.
+  It clears when the session ends.
+- `send_chat(message, session_id=None, *, output_modality="text")` sends a
+  user message as coming from this device. Without `session_id` it goes to
+  the main chat.
+- `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None)`
+  sends a WAV voice note of at most 2 MiB.
+- `link_client.acknowledgement(result)` reads Muse's acknowledgement from the
+  result of `send_chat` or `send_voice`. It raises `RequestRejected`, with a
+  `status` attribute, when Muse refused the request, or `ValueError` when the
+  response is not a dict.
+- `await open_side_chat(session_id)` looks up a side chat and returns a `SideChat`.
+  `SideChat.exists` is false for an ID that Muse does not know yet. The first
+  `send_chat` to that ID creates the chat. The lookup closes its subscription
+  without reading events.
+- `subscribe_chat(session_id=None)` yields Muse's chat events.
+  `chat_subscribed` is set while a subscription is open.
+- `stream_tts(message_id)` yields MP3 audio for a reply that Muse gave in voice
+  mode.
+- `send_chat` and `send_voice` are coroutines that return a dict with `ok`,
+  `status` and `response`. `subscribe_chat` and `stream_tts` are async iterators.
+- `open_side_chat`, `subscribe_chat` and `stream_tts` raise `HttpStreamError`
+  on refused HTTP requests. It has `status` and `path` attributes.
+
+### Following one request
+
+- `muse_turn.MuseTurn` follows one request through Muse's chat events.
+- Create it before you send the request. Pass every chat event to `feed()`.
+  Pass `acknowledgement(result)` to `acknowledge()`.
+- Both methods return lists of events. `acknowledge()` releases events held
+  before the acknowledgement arrived. Each event is an `AgentStatus` for
+  public progress, a `Reply` when an answer message changes, or a `TaskFinished`
+  when Muse's task ends.
+  `TurnEvent` is the union of these three types. `AgentStatus` has
+  `activity_code` and `activity_text`. `Reply` has `message_id`, `text`,
+  `streamed`, `done` and `bound`, which is true when the reply is known to
+  answer this request. Both texts have their control characters removed,
+  except tab and newline.
+- `complete(now)` says when Muse is done answering. `settled(now)` says when
+  Muse finished the task, every reply is done and the grace period passed.
+  Pass a `time.monotonic()` value as `now`.
+- `MuseTurn(session_id=None, *, owns_chat=False, replay_scope=None,
+  ignore_parentless_until=0.0)` follows a request on the chat `session_id`.
+  Set `owns_chat` when the gadget owns that chat. Its acknowledgement must
+  then confirm the same `session_id` and `is_thread: true`.
+- `replies` maps each answer's message ID to its latest `Reply`.
+  `abandon_reply(message_id)` stops waiting for one reply.
+- `acknowledge(response, follow_up=True)` binds one more user message to the
+  request. Call `expect_follow_up()` before you send it.
+- `acknowledged`, `busy`, `task_finished`, `activity_code` and
+  `last_activity` describe the request's state.
+- `ReplayScope` drops events from earlier turns. Share one across the turns
+  of a chat the gadget owns. `retire()` on a finished turn adds its IDs.
+  `ReplayScope.retire_request(response)` retires a request that no turn
+  follows. `ReplayScope.observe_idle(event, session_id)` retires an event
+  seen while no turn is open.
 
 ## Say Muse, never Hatch
 

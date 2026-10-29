@@ -1,0 +1,4 @@
+# Runtime dependencies only; host fake tests need neither package.
+# Upstream decoder/private write hook reviewed against this exact version.
+ppk2-api==0.9.2
+pyserial==3.5

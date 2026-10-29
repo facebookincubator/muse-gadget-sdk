@@ -1,0 +1,38 @@
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Muse Gadgets Test's build settings (the Xcode project's base
+// configuration; build.sh reads the bundle ID from here too).
+//
+// Your own settings go in Local.xcconfig next to this file (git-ignored),
+// so they stay out of the project:
+//   DEVELOPMENT_TEAM = ABCDE12345          // your team (Xcode > Settings > Accounts)
+//   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.musegadgetstest
+// Bundle IDs are unique across all teams: with a free Personal Team pick
+// your own. Choosing the team in Signing & Capabilities works too.
+
+PRODUCT_BUNDLE_IDENTIFIER = com.musegadgets.test
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic
+
+// The optional encoders (README.md): stubs unless native/build_x264.sh or
+// native/build_vpx.sh has written lib/codecs.xcconfig. They're built for
+// devices only, so the simulator always gets the stubs.
+MG_CODEC_DEFINES = MG_STUB_X264=1 MG_STUB_VPX=1
+MG_CODEC_LDFLAGS =
+#include? "lib/codecs.xcconfig"
+#include? "Local.xcconfig"
+
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited) $(MG_CODEC_DEFINES)
+OTHER_LDFLAGS = $(inherited) $(MG_CODEC_LDFLAGS)

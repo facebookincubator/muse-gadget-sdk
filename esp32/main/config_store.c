@@ -161,6 +161,7 @@ bool config_clear_pairing(void) {
         "auth_token",
         "vm_url",
         "username",
+        "pair_sdk_hint",
     };
     return clear_and_verify(keys, sizeof(keys) / sizeof(keys[0]));
 }
@@ -175,6 +176,7 @@ bool config_clear_setup(void) {
         "auth_token",
         "vm_url",
         "username",
+        "pair_sdk_hint",
         "ssid",
         "password",
         "wifi_channel",

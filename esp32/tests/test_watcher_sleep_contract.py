@@ -138,8 +138,14 @@ class WatcherSleepTest(unittest.TestCase):
         self.assertEqual(low.count("s_awake_held = true;"), 1)
         self.assertEqual(low.count("s_awake_held = false;"), 1)
         # Only the input task changes the clock: no other esp_pm_configure in Muse or Link.
+        # The power-test image is the exception: app_main() runs it instead of
+        # Muse and returns, so muse_input never starts beside it.
+        main_c = (ROOT / "main" / "main.c").read_text()
+        power_test = body(main_c, "void app_main(void)")
+        self.assertLess(power_test.index("muse_power_test_run();\n    return;"),
+                        power_test.index("muse_glue_start();"))
         for path in list(MUSE.glob("*.c")) + list(MUSE.glob("boards/*.c")) + list((ROOT / "main").glob("*.c*")):
-            if path.name != "muse_input.c":
+            if path.name not in ("muse_input.c", "muse_power_test.c"):
                 self.assertNotIn("esp_pm_configure(", path.read_text(), path.name)
 
     def test_deep_sleep_disarms_the_timer(self) -> None:

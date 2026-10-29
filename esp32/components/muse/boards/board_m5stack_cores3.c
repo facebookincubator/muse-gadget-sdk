@@ -66,6 +66,9 @@ static lv_display_t *display_start(lv_indev_t **touch)
     };
     cfg.lvgl_port_cfg.task_affinity = MUSE_UI_CORE;
     cfg.lvgl_port_cfg.task_priority = MUSE_UI_PRIORITY;
+    /* The port's 7168-byte default overflows when settings lists Wi-Fi scan
+     * results (taskLVGL stack overflow, reboot loop). */
+    cfg.lvgl_port_cfg.task_stack = 10240;
     lv_display_t *disp = bsp_display_start_with_config(&cfg);
     if (!disp) {
         return NULL;

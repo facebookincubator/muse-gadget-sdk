@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from musegadget import __version__, config, muse_api
 from musegadget.executor import COMMAND_SPECS, Executor
 from musegadget.identity import Identity
-from musegadget.link_client import DeviceDescription, LinkSession, Outcome
+from musegadget.link_client import MAX_CONCURRENT_INVOKES, DeviceDescription, LinkSession, Outcome
 
 log = logging.getLogger(__name__)
 
@@ -79,10 +79,11 @@ class Service:
     display_name: str = field(default_factory=socket.gethostname)
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _last_refresh_attempt: float = float("-inf")
-    # The SDK token reaches Muse only in refresh bodies until apps forward it at
-    # mint, so each start with a token attempts one refresh to report it.
-    _sdk_token_report_attempted: bool = False
+    _sdk_token_change_warned: bool = False
     _current: LinkSession | None = None
+    _invoke_slots: asyncio.Semaphore = field(
+        default_factory=lambda: asyncio.Semaphore(MAX_CONCURRENT_INVOKES), init=False, repr=False,
+    )
 
     def stop(self) -> None:
         self._stop.set()
@@ -95,6 +96,7 @@ class Service:
                 log.info("not paired; run `musegadget pair` to set up")
                 await self._sleep(UNPAIRED_POLL_S)
                 continue
+            self._warn_if_sdk_token_changed(pairing)
             pairing = await self._maybe_refresh(pairing)
             if pairing is None:
                 await self._sleep(TOKEN_RETRY_S)
@@ -129,25 +131,42 @@ class Service:
             log.info("reconnecting in %.0fs", delay)
             await self._sleep(delay)
 
-    async def _session(self, vm: dict, pairing: dict) -> tuple[Outcome, float]:
-        device = DeviceDescription(
+    def describe(self) -> DeviceDescription:
+        """Describe the device to register with Muse for each session."""
+        return DeviceDescription(
             node_id=self.identity.node_id,
             display_name=self.display_name,
             version=__version__,
             commands=COMMAND_SPECS,
         )
+
+    def run_command(self, name: str, params: dict, timeout_ms: int | None = None) -> dict:
+        """Handle one command from Muse. LinkSession calls this in a worker thread."""
+        return self.executor.run(name, params, timeout_ms)
+
+    async def serve(self, session: LinkSession, vm: dict, stop: asyncio.Event) -> Outcome:
+        """Run one session until it ends or ``stop`` is set, and return how it ended.
+
+        Override to run the gadget's own work beside ``session.run(stop)``.
+        Clean up that work before returning the session's outcome. An active
+        local message socket forwards to this session while it is registered.
+        """
+        return await session.run(stop)
+
+    async def _session(self, vm: dict, pairing: dict) -> tuple[Outcome, float]:
         session = LinkSession(
             noise_host=pairing.get("noise_host") or DEFAULT_NOISE_HOST,
             vm_id=vm["vm_id"] or vm["vm_name"],
             vm_auth_token=vm["vm_auth_token"],
-            device=device,
-            run_command=self.executor.run,
+            device=self.describe(),
+            run_command=self.run_command,
+            invoke_slots=self._invoke_slots,
         )
         log.info("connecting to %s", vm["vm_name"] or vm["vm_id"])
         started = time.monotonic()
         self._current = session
         try:
-            outcome = await session.run(self._stop)
+            outcome = await self.serve(session, vm, self._stop)
         except Exception as exc:
             log.warning("session failed: %s: %s", type(exc).__name__, exc)
             outcome = Outcome.CLOSED
@@ -157,6 +176,17 @@ class Service:
         log.info("session ended: %s after %.0fs", outcome.value, time.monotonic() - started)
         return outcome, lasted
 
+    def _warn_if_sdk_token_changed(self, pairing: dict) -> None:
+        """Muse records a device's SDK token only when it pairs, so a token set
+        afterwards takes effect only once the device pairs again."""
+        paired = pairing.get("sdk_token_hint")
+        if self._sdk_token_change_warned or paired is None:
+            return
+        if paired != config.sdk_token_hint(self.sdk_token):
+            self._sdk_token_change_warned = True
+            log.warning("paired with SDK token %s, not this one; run `musegadget pair --force` "
+                        "to use it", paired)
+
     async def _maybe_refresh(self, pairing: dict, force: bool = False) -> dict | None:
         """Return current pairing, rotating tokens first if they are due.
 
@@ -165,16 +195,11 @@ class Service:
         has been revoked.
         """
         age = time.time() - pairing.get("access_token_saved_at", 0)
-        report_due = bool(self.sdk_token) and not self._sdk_token_report_attempted
-        due = force or age >= TOKEN_REFRESH_AGE_S
-        if not due and not report_due:
+        if not force and age < TOKEN_REFRESH_AGE_S:
             return pairing
         if not force and time.monotonic() - self._last_refresh_attempt < TOKEN_RETRY_S:
             return pairing
         self._last_refresh_attempt = time.monotonic()
-        if report_due:
-            self._sdk_token_report_attempted = True
-            log.info("refreshing device token to report the SDK token")
         tokens, status = await asyncio.to_thread(
             muse_api.refresh_device_token,
             pairing["refresh_token"], self.identity.node_id,
@@ -190,11 +215,6 @@ class Service:
             }
             config.save_json(config.PAIRING_FILE, pairing)
             log.info("device token rotated")
-            return pairing
-        if not due:
-            # Only reporting the SDK token: nothing has rejected the current
-            # token, so a refusal here must never unpair the device.
-            log.warning("SDK token report refresh failed (HTTP %s); keeping the pairing", status)
             return pairing
         if status == 401:
             config.delete_json(config.PAIRING_FILE)
