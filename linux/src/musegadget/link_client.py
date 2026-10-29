@@ -762,13 +762,13 @@ class LinkSession:
             # remains outside so a broken transport is never retried as a
             # command error.
             encode_message({"method": "link.result", "id": invoke_id, **result})
-        except Exception:
-            # Callback failures belong to this invocation. Never include
-            # exception text, which can contain parameters or credentials.
+        except Exception as exc:
+            # Callback failures belong to this invocation. Log only the
+            # exception type: its text can contain parameters or credentials.
             # Cancellation and other BaseExceptions still propagate, and
             # transport failures remain outside this boundary.
             result = {"ok": False, "error": "command failed"}
-            summary = "failed"
+            summary = f"failed ({printable(type(exc).__name__)})"
         log.info("%s %s in %d ms", shown, summary,
                  (time.monotonic() - started) * 1000)
         await self.send({"method": "link.result", "id": invoke_id, **result})

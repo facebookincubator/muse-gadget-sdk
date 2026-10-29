@@ -377,6 +377,9 @@ def test_non_string_invocation_gets_correlated_failure(command):
 def test_callback_failure_gets_correlated_result_and_session_stays_usable(failure, caplog):
     caplog.set_level("INFO", logger="musegadget.link_client")
     asyncio.run(_failed_invoke_then_healthy("fixture.fail", failure))
+    expected = {"raise": "RuntimeError", "invalid-result": "AttributeError",
+                "unserializable-result": "TypeError"}[failure]
+    assert f"fixture.fail failed ({expected})" in caplog.text
     assert "secret callback details" not in caplog.text
     assert "secret parameter" not in caplog.text
 
@@ -428,20 +431,25 @@ async def _failed_invoke_then_healthy(command, failure):
 def test_invocation_transport_failure_propagates():
     async def scenario():
         session, _ = make_session(lambda *args: {"ok": True}, [])
+
         async def fail_send(message):
             raise ConnectionError("transport closed")
+
         session.send = fail_send
         with pytest.raises(ConnectionError, match="transport closed"):
             await session._invoke({"id": "inv-1", "command": "fixture.ok"})
+
     asyncio.run(scenario())
 
 
-def test_cancelled_invocation_does_not_send_failure_result():
+def test_invocation_cancelled_while_waiting_for_slot_sends_nothing():
     async def scenario():
         session, _ = make_session(lambda *args: {"ok": True}, [])
         sent = []
+
         async def send(message):
             sent.append(message)
+
         session.send = send
         for _ in range(MAX_CONCURRENT_INVOKES):
             await session._invokes.acquire()
@@ -451,6 +459,7 @@ def test_cancelled_invocation_does_not_send_failure_result():
         with pytest.raises(asyncio.CancelledError):
             await task
         assert not sent
+
     asyncio.run(asyncio.wait_for(scenario(), 2))
 
 
@@ -461,9 +470,11 @@ def test_invocation_does_not_swallow_process_control_exceptions(failure_type):
     async def scenario():
         def stop_command(*args):
             raise failure_type()
+
         session, _ = make_session(stop_command, [])
         with pytest.raises(failure_type):
             await session._invoke({"id": "inv-1", "command": "fixture.stop"})
+
     asyncio.run(scenario())
 
 
