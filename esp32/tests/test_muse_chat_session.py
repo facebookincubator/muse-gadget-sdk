@@ -25,6 +25,8 @@ class ChatSession(unittest.TestCase):
         types = source[source.index('enum phase_t'):source.index('/* 10 KB')]
         handlers = source[source.index('static int find_msg('):source.index('static void on_chat_ack(')]
         reset = source[source.index('static bool turn_start('):source.index('static void turn_begin(')]
+        tts = source.index('static void start_tts(void)')
+        start_tts = source[tts:source.index('\n}\n', tts) + 3]
         code = r'''
 #include <cassert>
 #include <cstdint>
@@ -58,7 +60,7 @@ static void turn_fail(const char *) { turn_finish(); }
 static bool ensure_connected() { return true; }
 bool muse_hatch_configured() { return true; }
 static void resampler_init(resampler_t *, int, int) {}
-''' + reset + handlers + r'''
+''' + reset + handlers + start_tts + r'''
 static void begin(bool typed = false) {
     assert(turn_start(s_turn.gen + 1, typed));
     s_turn.phase = P_WAIT_REPLY;
@@ -128,12 +130,63 @@ static void bounded_rejections() {
     event("message.assistant", "second", "note", "Second");
     assert(s_turn.nmsgs == 2 && s_turn.msgs[0].done && s_turn.msgs[1].done);
 }
+static char s_texts[MAX_MSGS * TEXT_MAX];
+/* A voice reply streamed as these pieces; returns the text kept for its captions. */
+static const char *voice_reply(std::initializer_list<const char *> pieces) {
+    s_turn.texts = s_texts;   /* turn_start() keeps it */
+    begin();
+    event("delta.message_start", "long", "note");
+    for (const char *piece : pieces) event("delta.text_append", "long", "", piece);
+    event("delta.message_done", "long");
+    return s_texts;
+}
+static void cut_inside_a_character() {
+    /* The cut falls inside a two-byte character: it's left out whole, and so is
+     * everything after it, even what would fit in the byte that frees. */
+    static char head[TEXT_MAX];
+    memset(head, 'a', TEXT_MAX - 2);
+    head[TEXT_MAX - 2] = '\0';
+    const char *kept = voice_reply({head, "\xc3\xa9" "bbb", "z"});
+    assert(strlen(kept) == TEXT_MAX - 2 && !strpbrk(kept, "\xc3" "bz"));
+    assert(s_turn.msgs[0].len == TEXT_MAX - 2 + 5 + 1);
+    s_turn.texts = nullptr;
+}
+static void character_split_across_pieces() {
+    /* A piece ends with a character's first byte, exactly at the cut; its last
+     * byte comes in the next piece and doesn't fit. */
+    static char head[TEXT_MAX];
+    memset(head, 'a', TEXT_MAX - 2);
+    head[TEXT_MAX - 2] = '\xc3';
+    head[TEXT_MAX - 1] = '\0';
+    const char *kept = voice_reply({head, "\xa9" "bbb"});
+    assert(strlen(kept) == TEXT_MAX - 2 && !strpbrk(kept, "\xc3" "b"));
+    s_turn.texts = nullptr;
+}
+static void paced_to_the_kept_text() {
+    /* Speaker off, a reply is shown at reading pace: for the text kept, not
+     * for the whole reply, which would crawl the kept part across its time. */
+    static char reply[TEXT_MAX + 1000];
+    memset(reply, 'a', sizeof(reply) - 1);
+    reply[sizeof(reply) - 1] = '\0';
+    const char *kept = voice_reply({reply});
+    start_tts();
+    const msg_t &m = s_turn.msgs[0];
+    assert(m.tts == TTS_ACTIVE && m.len == sizeof(reply) - 1 && strlen(kept) == TEXT_MAX - 1);
+    assert(m.pcm_frames == (uint32_t)((TEXT_MAX - 1) * MIC_RATE / TEXT_CHARS_PER_S));
+    voice_reply({"Short reply"});   /* nothing left out: paced as before */
+    start_tts();
+    assert(s_turn.msgs[0].pcm_frames == (uint32_t)(11 * MIC_RATE / TEXT_CHARS_PER_S));
+    s_turn.texts = nullptr;
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
     case 0: rejected_deltas(); break;
     case 1: valid_parents(); break;
     case 2: bounded_rejections(); break;
+    case 3: cut_inside_a_character(); break;
+    case 4: character_split_across_pieces(); break;
+    case 5: paced_to_the_kept_text(); break;
     default: return 2;
     }
 }
@@ -166,3 +219,12 @@ int main(int argc, char **argv) {
 
     def test_rejection_capacity_preserves_correlation(self):
         self.run_case(2)
+
+    def test_long_reply_cut_inside_a_character_keeps_whole_characters(self):
+        self.run_case(3)
+
+    def test_long_reply_character_split_across_pieces_is_left_out(self):
+        self.run_case(4)
+
+    def test_long_reply_is_paced_to_the_text_kept(self):
+        self.run_case(5)

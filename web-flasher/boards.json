@@ -29,6 +29,13 @@
     ]
   },
   {
+    "board": "muse-seeed-xiao-s3-147",
+    "name": "Seeed Studio XIAO ESP32-S3 1.47\" Touch Display",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
     "board": "muse-sensecap-watcher",
     "name": "Seeed Studio SenseCAP Watcher",
     "usb": [
@@ -51,5 +58,13 @@
   {
     "board": "reterminal-e1002",
     "name": "Seeed Studio reTerminal E1002 (7.3\" colour e-paper)"
+  },
+  {
+    "board": "reterminal-sticky",
+    "name": "Seeed Studio reTerminal Sticky (3.97\" e-paper, experimental)",
+    "usb": [
+      "1a86:55d3"
+    ],
+    "note": "Flashing takes about 3 minutes; keep the tab in front. Muse replaces Seeed's factory firmware. To go back to it later, back up the flash first: <code>python -m esptool --chip esp32s3 -p PORT read-flash 0 ALL sticky-factory.bin</code>"
   }
 ]

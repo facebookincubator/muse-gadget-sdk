@@ -55,6 +55,7 @@ session to Muse. The rest depends on the hardware.
 | **M5Stack Cardputer ADV (experimental)** | ESP32-S3 | 1.14" 240×135 LCD | 8 MB / none | [M5Stack docs](https://docs.m5stack.com/en/core/Cardputer-Adv) | — |
 | **M5Stack StickS3** | ESP32-S3 | 1.14" 135×240 LCD | 8 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/StickS3), [M5Unified](https://github.com/m5stack/M5Unified) | [M5Stack](https://shop.m5stack.com/products/m5sticks3-esp32s3-mini-iot-dev-kit) |
 | **M5Stack StopWatch** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/StopWatch), [M5Unified](https://github.com/m5stack/M5Unified), [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo) | — |
+| **Seeed XIAO ESP32-S3 1.47 Touch Display** | ESP32-S3 (XIAO ESP32-S3 Plus) | 1.47" 172×320 IPS LCD (JD9853A), touch | 16 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/getting_started_1.47_inch_touch_display_esp32s3/), [setup](seeed-xiao-s3-147.md) | [Seeed Studio](https://www.seeedstudio.com/1-47-Inch-Touch-Display-Powered-by-XIAO-ESP32-S3-Plus-p-6996.html) |
 | **M5Stack CoreS3** | ESP32-S3 | 2" 320×240 LCD, touch | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/CoreS3), [Espressif BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3) | — |
 | **Guition JC3248W535** | ESP32-S3 | 3.5" 320×480 IPS LCD, touch | 16 MB / 8 MB | [JC3248W535C notes](https://github.com/sirisakG2/JC3248W535C), [JC3248W535-Driver](https://github.com/me-processware/JC3248W535-Driver) | — |
 | **Waveshare ESP32-S3-Touch-LCD-1.28** | ESP32-S3 | 1.28" 240×240 round LCD (GC9A01A), touch | 16 MB / 2 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.28) | — |
@@ -72,20 +73,20 @@ are documented separately; this is not a generic ESP-VoCat profile.
 
 ## Features
 
-|  | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | SenseCAP Indicator | Waveshare S3 ePaper 1.54 | reTerminal E1001 | reTerminal E1002 | reTerminal Sticky* | HA Voice PE | reSpeaker Lite (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | Waveshare S3 1.85C | Waveshare S3 2.16 | AIPI Lite | Waveshare C6 1.8 | Waveshare C6 2.06 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | CoreS3 | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 | VN S3 1.83-inch | Waveshare LCD7 | Waveshare LCD 1.28 | AI Passport | EchoEar-2ST* | Waveshare P4 3.5 |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Home-network tunnel | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | Enabled | ✅ |
-| Shows status on | Light | Light | Screen | Screen | Screen | E-paper | E-paper | E-paper | E-paper | Light ring | RGB LED | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
-| Images from Muse | — | — | ✅ | ✅ | ✅ | Black and white | Black and white | Six colours | Four grays (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | — | Enabled | — |
-| UI and settings | — | — | — | — | — | — | — | — | Basic navigation checked | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | Experimental | Experimental | ✅ |
-| Push-to-talk | — | — | — | — | — | — | — | — | AI voice note checked; screen mic unverified | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | ✅ | ✅ | Text replies | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ | ✅ | — | With an added I2S mic | ✅ | — | — | Text replies (experimental) | Screen mic | ✅ |
-| Speaker and mic | — | — | — | — | — | — | — | — | PDM voice note checked, no speaker | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | ES8311, ES7210 | — | — | ES8311 (experimental) | ES8311 / ES7210 | ES8311 |
-| Air sensors | — | — | — | — | D1S, D1Pro | — | Temperature, humidity | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Video from a phone (`MUSE_VIDEO=1`) | — | — | — | — | — | — | — | — | — | — | — | ✅ | Built, not run | — | — | — | — | — | — | — | — | — | — | Built, not run | — | — | — | — | — | — | — | — | — | — | — |
-| Touch | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | — | ✅ | ✅ |
-| Battery status | — | — | — | — | — | — | — | — | BQ27220 %/mV and charging checked | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | No charging state | Unverified | ✅ |
-| Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | On | On | On | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On | On | On | Off | On | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | BOOT, PWR (talk), KEY (talk) on top | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | OK (talk), UP/DOWN (menu) | Touch; bottom power button | BOOT (talk), PWR |
+|  | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | SenseCAP Indicator | Waveshare S3 ePaper 1.54 | reTerminal E1001 | reTerminal E1002 | reTerminal Sticky* | HA Voice PE | reSpeaker Lite (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | Waveshare S3 1.85C | Waveshare S3 2.16 | AIPI Lite | Waveshare C6 1.8 | Waveshare C6 2.06 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | XIAO S3 1.47 | CoreS3 | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 | VN S3 1.83-inch | Waveshare LCD7 | Waveshare LCD 1.28 | AI Passport | EchoEar-2ST* | Waveshare P4 3.5 |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Home-network tunnel | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | Enabled | ✅ |
+| Shows status on | Light | Light | Screen | Screen | Screen | E-paper | E-paper | E-paper | E-paper | Light ring | RGB LED | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
+| Images from Muse | — | — | ✅ | ✅ | ✅ | Black and white | Black and white | Six colours | Four grays (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | — | Enabled | — |
+| UI and settings | — | — | — | — | — | — | — | — | Basic navigation checked | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | Experimental | Experimental | ✅ |
+| Push-to-talk | — | — | — | — | — | — | — | — | AI voice note checked; screen mic unverified | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | ✅ | ✅ | Text replies | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | USR1 | ✅ | ✅ | ✅ | — | With an added I2S mic | ✅ | — | — | Text replies (experimental) | Screen mic | ✅ |
+| Speaker and mic | — | — | — | — | — | — | — | — | PDM voice note checked, no speaker | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | PDM mic, no speaker | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | ES8311, ES7210 | — | — | ES8311 (experimental) | ES8311 / ES7210 | ES8311 |
+| Air sensors | — | — | — | — | D1S, D1Pro | — | Temperature, humidity | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Video from a phone (`MUSE_VIDEO=1`) | — | — | — | — | — | — | — | — | — | — | — | ✅ | Built, not run | — | — | — | — | — | — | — | — | — | — | Built, not run | — | — | — | — | — | — | — | — | — | — | — | — |
+| Touch | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | — | ✅ | ✅ |
+| Battery status | — | — | — | — | — | — | — | — | BQ27220 %/mV and charging checked | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | — | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | No charging state | Unverified | ✅ |
+| Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | On | On | On | On | On | On | On | On | On | On | Off | On | On | Off | On | On | On | Off | On | On | On | On | Off | On | On |
+| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | BOOT, PWR (talk), KEY (talk) on top | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | OK (talk), UP/DOWN (menu) | Touch; bottom power button | BOOT (talk), PWR |
 
 *Sticky entries describe an experimental Muse port, not Seeed's factory
 firmware. On one unit the display, touch, voice notes/CJK replies, SHT40,
@@ -144,27 +145,34 @@ the temperature is corrected by `CONFIG_HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET`
 
 The experimental reTerminal Sticky Muse profile follows Seeed's `factory_fw`
 source: SSD1677 panel, GPIO45/46 power latch, GT911 touch (I2C0), PDM mic,
-BQ27220 battery gauge and SD card on the panel's SPI2 bus. It renders a still
-480×800 UI and four-level grayscale images; the avatar updates on state changes
-rather than animating continuously on slow e-paper. The AI button starts a
-voice note and confirms pairing; GT911 touch opens settings. Up/Down only
-wake the screen. There is no speaker: replies are
-text on screen. The profile includes Muse's Chinese/Japanese CJK caption font
-for UTF-8 replies. The microSD slot is off by default (`CONFIG_MUSE_STICKY_SD`):
+BQ27220 battery gauge and SD card on the panel's SPI2 bus. Its UI is Muse's
+e-ink layer (`components/muse/eink/`, `CONFIG_MUSE_UI_FREEINK`) rather than
+LVGL: [FreeInk](https://github.com/Free-Ink/freeink-sdk) drives the panel from
+its `sticky` profile, and the layer draws the face, Settings and FreeInk's
+keyboard in black on white. Muse animates once a second on fast partial
+refreshes, with a clean refresh every 30 frames and on page changes, images and
+sleep; images show in four grays. Asleep, the panel keeps its last picture at
+no power. Progress is a bar along the bottom edge, as on Muse's square panels.
+The AI button starts a voice note and confirms pairing; touch swipes to
+Settings and confirms pairing too. Up/Down only wake the screen. There is no
+speaker: replies are text on screen. Text uses the LVGL UI's fonts, drawn from
+their TTFs, and Muse's Chinese/Japanese CJK caption font. The
+microSD slot is off by default (`CONFIG_MUSE_STICKY_SD`):
 turned on, an inserted card is mounted at `/sdcard` without formatting, though
 nothing reads it yet. The SHT40 on
 I2C1 answers `sensors.read` with an uncalibrated 0 °C temperature offset.
 The profile uses 16 MB of the physical 32 MB flash. Muse's battery sleep and
 Wi-Fi nap are enabled, but the touch and SD rails remain powered: standby
 behaviour is not factory-equivalent. Settings Power off releases the power
-latch only when USB is disconnected. On one unit, portrait UI and black/white
-polarity, left-swipe touch, accurate Sleep row selection and back navigation,
-stable idle display, SHT40 readings, battery percentage/voltage, sleep/wake,
-voice-note delivery and Chinese replies were checked; saving a Sleep setting
-no longer reboots the device. The contributor additionally confirms FAT SD
-mount/removal/reinsertion, charging-state indication, battery-only Power off
-and restart, Muse OTA and measurement of standby current. The numeric current
-value and measurement conditions will be recorded when supplied.
+latch only when USB is disconnected. On one unit, the e-ink UI was checked
+for pairing, voice turns and replies, the mic during replies, swiping and
+navigating Settings, the keyboard, sleep and wake, and fast refreshes. With the
+earlier LVGL UI, SHT40 readings, battery percentage/voltage, voice-note
+delivery and Chinese replies were checked; the contributor additionally
+confirms FAT SD mount/removal/reinsertion, charging-state indication,
+battery-only Power off and restart, Muse OTA and measurement of standby
+current. The numeric current value and measurement conditions will be
+recorded when supplied.
 Back up factory firmware and any device-specific data before flashing.
 
 The optional `reterminal-sticky-link` profile uses the same SSD1677 and SHT40
@@ -256,7 +264,10 @@ python -m esptool --chip esp32s3 -p PORT write-flash 0 sticks3.bin
 The M5Stack StopWatch has the same CO5300 round AMOLED as the Waveshare S3
 1.75C, with a CST820 touch controller and the StickS3's ES8311 audio. With USB
 at the bottom, **blue top-right is PTT/pairing confirmation**, **yellow
-top-left toggles speaker on/off**, and **red bottom-left is POWER**. A short
+top-left toggles speaker on/off**, and **red bottom-left is POWER**. Builds with
+live calls (`CONFIG_MUSE_REALTIME_VOICE`) swap the two rim keys and their
+icons: yellow talks (and confirms pairing), and blue toggles the speaker and,
+during a call, hangs up. A short
 POWER press sleeps/wakes the screen; a 1.5 s hold while awake shows goodbye
 and shuts down the M5PM1 (click red to power back on). A waking press is
 consumed, not interpreted as another action. Hardware double-click power-off
@@ -293,6 +304,13 @@ screenshots (`a/s` only navigate non-touch menus). `>face=boot`, `idle`,
 unpaired captures, `>ui.demo=1` shows `MuseGadget-DEMO` instead of the hardware
 name; `>ui.demo=0` restores it. This changes only the screen, not BLE identity,
 pairing, Wi-Fi or tokens.
+
+The Seeed XIAO ESP32-S3 1.47 Touch Display has a 172×320 JD9853A LCD, AXS5106L
+touch and a PDM mic. **USR1 is push-to-talk and pairing confirmation, USR2
+sleeps and wakes the screen.** It has a microphone and no speaker, so replies
+are read on screen. The IMU, MicroSD slot and battery input aren't used, and
+OTA is off. Pairing, push-to-talk, touch settings, screen sleep and power off
+were checked on one unit. Its [setup guide](seeed-xiao-s3-147.md) has the pins.
 
 The M5Stack CoreS3 runs on Espressif's
 [BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3),
@@ -614,6 +632,7 @@ board's overlays, in order:
 | M5Stack Cardputer ADV | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-sticks3`](sdkconfig.muse-m5stack-sticks3) | by hand |
 | M5Stack StopWatch | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stopwatch`](sdkconfig.muse-m5stack-stopwatch) | by hand |
+| Seeed XIAO ESP32-S3 1.47 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-seeed-xiao-s3-147`](sdkconfig.muse-seeed-xiao-s3-147) | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-cores3`](sdkconfig.muse-m5stack-cores3) | `tools/muse/board.sh build cores3` |
 | Guition JC3248W535 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-guition-jc3248w535`](sdkconfig.muse-guition-jc3248w535) | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-lcd7`](sdkconfig.muse-waveshare-s3-lcd7) | `tools/muse/board.sh build lcd7` |

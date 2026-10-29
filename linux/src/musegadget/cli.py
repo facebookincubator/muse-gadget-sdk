@@ -21,7 +21,7 @@ import logging
 import os
 import sys
 
-from musegadget import __version__, config, identity
+from musegadget import __version__, config, doctor, identity
 from musegadget.pair import SETUP_WINDOW_S, PairOutcome, SetupWindow, pair
 
 log = logging.getLogger("musegadget")
@@ -100,6 +100,96 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_voice_call(args: argparse.Namespace) -> int:
+    import asyncio
+    import signal
+
+    from musegadget import muse_api
+    from musegadget.link_client import DeviceDescription, LinkSession
+    from musegadget.service import DEFAULT_NOISE_HOST
+    from musegadget.voice_audio import LiveAudio, WavAudio
+    from musegadget.voice_call import VoiceCall
+
+    if args.live and (args.in_wav or args.out_wav):
+        print("Choose --live or both --in-wav and --out-wav.", file=sys.stderr)
+        return 2
+    if not args.live and not (args.in_wav and args.out_wav):
+        print("WAV mode requires --in-wav and --out-wav.", file=sys.stderr)
+        return 2
+    pairing = config.load_json(config.PAIRING_FILE)
+    if not pairing or not pairing.get("access_token"):
+        print("Not paired; run `musegadget pair` first.", file=sys.stderr)
+        return 1
+    ident = identity.load_or_create()
+    # WebSocket debug logs include the Authorization header. Never enable them
+    # for a credentialed call, even when the CLI was invoked with -v.
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+
+    async def run(audio):
+        vms, status = await asyncio.to_thread(
+            muse_api.fetch_vms_with_status, pairing["access_token"],
+            muse_api.api_root(pairing.get("api_url_v2", "")),
+        )
+        if status != 200:
+            raise ConnectionError("VM lookup failed; refresh the paired device credentials")
+        matches = [vm for vm in vms if vm["vm_id"] == args.vm_id]
+        if len(matches) != 1:
+            raise ValueError("--vm-id must exactly match one leased VM")
+        vm = matches[0]
+        session = LinkSession(
+            noise_host=pairing.get("noise_host") or DEFAULT_NOISE_HOST,
+            vm_id=vm["vm_id"], vm_auth_token=vm["vm_auth_token"], app_id=args.app_id,
+            register_device=False,
+            device=DeviceDescription(ident.node_id, "Muse voice", __version__, {}),
+            run_command=lambda *unused: {"ok": False, "error": "unsupported command"},
+        )
+        stop = asyncio.Event()
+        connection = asyncio.create_task(session.run(stop))
+        current = asyncio.current_task()
+        loop = asyncio.get_running_loop()
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(signum, current.cancel)
+        try:
+            await session.wait_transport_ready(35)
+            call = VoiceCall(
+                session, device_id=ident.node_id, thread_id=args.thread_id,
+                half_duplex=not args.full_duplex,
+                mic_threshold=args.mic_threshold, idle_timeout=args.idle_timeout,
+                overall_timeout=args.overall_timeout,
+            )
+            return await call.run(audio.frames(), audio, realtime_input=args.live)
+        finally:
+            stop.set()
+            try:
+                await asyncio.wait_for(connection, 3)
+            except (Exception, asyncio.CancelledError):
+                connection.cancel()
+                await asyncio.gather(connection, return_exceptions=True)
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(signum)
+
+    audio = None
+    try:
+        audio = LiveAudio() if args.live else WavAudio(args.in_wav, args.out_wav)
+        reason = asyncio.run(run(audio))
+        print(f"Voice call ended: {reason}.")
+        return 0
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print("Voice call stopped.")
+        return 130
+    except Exception as exc:
+        # Exception bodies from network/device libraries may echo credentials
+        # or user data. Keep CLI diagnostics limited to the failure class.
+        print(f"Voice call failed ({type(exc).__name__}).", file=sys.stderr)
+        return 1
+    finally:
+        if audio is not None:
+            try:
+                audio.close()
+            except Exception:
+                log.warning("could not close audio device or WAV file")
+
+
 def cmd_info(args: argparse.Namespace) -> int:
     ident = identity.load_or_create()
     pairing = config.load_json(config.PAIRING_FILE)
@@ -127,6 +217,14 @@ def cmd_unpair(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    print(f"Muse Gadget doctor (version {__version__})")
+    results: tuple[doctor.CheckResult, ...] = doctor.run_checks()
+    for result in results:
+        print(doctor.format_check(result))
+    return 1 if any(result["status"] == "FAIL" for result in results) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="musegadget")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -152,8 +250,29 @@ def main(argv: list[str] | None = None) -> int:
                      help="send to this side chat (a new id starts one) instead of the main chat")
     send.set_defaults(func=cmd_send_user_msg)
 
+    from musegadget.link_client import validate_app_id
+    from musegadget.voice_call import positive_seconds
+
+    voice = sub.add_parser("voice-call", help="start a realtime Muse voice call (may replace another call)")
+    voice.add_argument("--vm-id", required=True, help="exact leased VM ID; does not change defaults")
+    voice.add_argument("--app-id", type=validate_app_id, default="hatch-web",
+                       help="connection app identity: positive int64 or %(default)s")
+    voice.add_argument("--in-wav", help="PCM16LE mono 24 kHz input WAV")
+    voice.add_argument("--out-wav", help="write played reply audio to this WAV")
+    voice.add_argument("--live", action="store_true", help="use microphone and speaker (requires [voice])")
+    voice.add_argument("--full-duplex", action="store_true", help="disable speaker mic gating; use headphones")
+    voice.add_argument("--mic-threshold", type=int, default=0,
+                       help="optional RMS mic gate, 0 disables it (range 0–32767)")
+    voice.add_argument("--idle-timeout", type=positive_seconds, default=45,
+                       help="hang up after this many inactive seconds (default: %(default)s)")
+    voice.add_argument("--overall-timeout", type=positive_seconds, default=300,
+                       help="maximum call seconds (default: %(default)s)")
+    voice.add_argument("--thread-id", help="target thread, otherwise the primary thread")
+    voice.set_defaults(func=cmd_voice_call)
+
     sub.add_parser("info", help="show device identity").set_defaults(func=cmd_info)
     sub.add_parser("unpair", help="forget the saved pairing").set_defaults(func=cmd_unpair)
+    sub.add_parser("doctor", help="check setup and suggest troubleshooting steps").set_defaults(func=cmd_doctor)
 
     args = parser.parse_args(argv)
     logging.basicConfig(

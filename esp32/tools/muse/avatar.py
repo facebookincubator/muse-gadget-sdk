@@ -72,6 +72,7 @@ BOARDS = {
     "M5Stack Cardputer ADV": "cardputer-adv",
     "M5Stack StickC Plus2": "plus2",
     "M5Stack StopWatch": "stopwatch",
+    "Seeed XIAO ESP32-S3 1.47 Touch Display": "xiao147",
     "M5Stack CoreS3": "cores3",
     "M5Stack Core2": "core2",
     "Freenove FNK0104B": "fnk0104b",
@@ -82,7 +83,7 @@ BOARDS = {
     "FoloToy AI Passport": "ai-passport",
     "Waveshare ESP32-P4 3.5": "p4lcd35",
 }
-CHAT_BOARDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "sticks3", "watcher", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "echoear", "p4lcd35")
+CHAT_BOARDS = ("s3", "s3n", "s3-216", "185c", "aipi", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "echoear", "p4lcd35")
 
 
 class Stop(Exception):
