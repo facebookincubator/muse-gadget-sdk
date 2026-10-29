@@ -25,6 +25,7 @@ size_t xStreamBufferReceive(StreamBufferHandle_t s, void *data, size_t len, Tick
 size_t xStreamBufferSpacesAvailable(StreamBufferHandle_t s);
 size_t xStreamBufferBytesAvailable(StreamBufferHandle_t s);
 BaseType_t xStreamBufferReset(StreamBufferHandle_t s);
+BaseType_t xStreamBufferIsEmpty(StreamBufferHandle_t stream);
 #ifdef __cplusplus
 }
 #endif

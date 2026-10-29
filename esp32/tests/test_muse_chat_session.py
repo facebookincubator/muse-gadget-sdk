@@ -27,7 +27,10 @@ class ChatSession(unittest.TestCase):
         reset = source[source.index('static bool turn_start('):source.index('static void turn_begin(')]
         tts = source.index('static void start_tts(void)')
         start_tts = source[tts:source.index('\n}\n', tts) + 3]
+        pacing = source.index('static void pace_as_text(')
+        pace_as_text = source[pacing:source.index('\n}\n', pacing) + 3]
         code = r'''
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -39,12 +42,14 @@ class ChatSession(unittest.TestCase):
 #include "minimp3.h"
 #include "muse_chat_priv.h"
 #define ESP_LOGI(...) ((void)0)
+#define ESP_LOGW(...) ((void)0)
+#define mp3dec_init(...) ((void)0)
 ''' + constants + types + r'''
 static turn_t s_turn;
 static char s_reply_shown[EV_TEXT];
 static int64_t s_last_seq, s_marks[4];
 static int captions, console_events;
-enum mark_t { M_TEXT, M_DONE };
+enum mark_t { M_TEXT, M_DONE, M_TTS };
 static void mark(mark_t) {}
 static int64_t now_us() { return 12345; }
 static void emit(muse_hatch_ev_t type, const char *) {
@@ -57,10 +62,18 @@ bool muse_hatch_caption_at(const char *text, size_t, char *out, size_t cap) {
 }
 static void turn_finish() { s_turn.phase = P_IDLE; }
 static void turn_fail(const char *) { turn_finish(); }
+static void retry_voice_as_text() {}
 static bool ensure_connected() { return true; }
 bool muse_hatch_configured() { return true; }
 static void resampler_init(resampler_t *, int, int) {}
-''' + reset + handlers + start_tts + r'''
+static std::atomic<bool> s_tts_busy{false};
+static bool s_tts_pending;
+static bool speaker_on, tts_stream_available;
+static bool muse_settings_speaker_on() { return speaker_on; }
+static bool tts_enabled() { return false; }
+static bool tts_start(const char *) { return false; }
+static bool open_tts_stream(int, bool) { return tts_stream_available; }
+''' + reset + handlers + pace_as_text + start_tts + r'''
 static void begin(bool typed = false) {
     assert(turn_start(s_turn.gen + 1, typed));
     s_turn.phase = P_WAIT_REPLY;
@@ -176,6 +189,16 @@ static void paced_to_the_kept_text() {
     voice_reply({"Short reply"});   /* nothing left out: paced as before */
     start_tts();
     assert(s_turn.msgs[0].pcm_frames == (uint32_t)(11 * MIC_RATE / TEXT_CHARS_PER_S));
+    speaker_on = true;
+    voice_reply({reply});
+    start_tts();
+    assert(s_turn.silent);
+    assert(s_turn.msgs[0].pcm_frames == (uint32_t)((TEXT_MAX - 1) * MIC_RATE / TEXT_CHARS_PER_S));
+    tts_stream_available = true;
+    voice_reply({reply});
+    start_tts();
+    assert(!s_turn.silent && !s_turn.msgs[0].pcm_frames);
+    speaker_on = tts_stream_available = false;
     s_turn.texts = nullptr;
 }
 int main(int argc, char **argv) {

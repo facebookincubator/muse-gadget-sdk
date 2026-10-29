@@ -41,7 +41,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"waveshare_s3_185c\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"seeed_xiao_s3_147\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"esp_mosaico\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_216\", \"waveshare_s3_185c\", \"waveshare_s3_146b\", \"aipi\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"seeed_xiao_s3_147\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"esp_mosaico\"]"
   78/esp_lcd_nv3023:
     version: "1.0.1"
     rules:
@@ -81,11 +81,11 @@ dependencies:
   espressif/esp_lcd_spd2010:
     version: "^2.0.0"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"sensecap_watcher\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"sensecap_watcher\", \"waveshare_s3_146b\"]"
   espressif/esp_lcd_touch_spd2010:
     version: "^2.0.1"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"sensecap_watcher\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"sensecap_watcher\", \"waveshare_s3_146b\"]"
   espressif/esp_lcd_co5300:
     version: "^2.2.0"
     rules:

@@ -77,6 +77,12 @@ esp_err_t esp_http_client_set_header(esp_http_client_handle_t client,
 esp_err_t esp_http_client_set_post_field(esp_http_client_handle_t client,
                                          const char *data, int len);
 esp_err_t esp_http_client_perform(esp_http_client_handle_t client);
+esp_err_t esp_http_client_open(esp_http_client_handle_t client, int write_len);
+int esp_http_client_write(esp_http_client_handle_t client, const char *buffer, int len);
+int64_t esp_http_client_fetch_headers(esp_http_client_handle_t client);
+int esp_http_client_read(esp_http_client_handle_t client, char *buffer, int len);
+bool esp_http_client_is_complete_data_received(esp_http_client_handle_t client);
+esp_err_t esp_http_client_close(esp_http_client_handle_t client);
 int esp_http_client_get_status_code(esp_http_client_handle_t client);
 esp_err_t esp_http_client_cleanup(esp_http_client_handle_t client);
 esp_err_t esp_http_client_get_url(esp_http_client_handle_t client, char *url, int len);

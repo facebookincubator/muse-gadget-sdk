@@ -55,6 +55,10 @@ menu "Muse"
             bool "Espressif ESP-Mosaico (ESP32-S31)"
             depends on IDF_TARGET_ESP32S31
 
+        config MUSE_BOARD_WAVESHARE_S3_146B
+            bool "Waveshare ESP32-S3-Touch-LCD-1.46B"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_AIPI
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
@@ -139,6 +143,7 @@ menu "Muse"
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
         default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
         default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
+        default "waveshare_s3_146b" if MUSE_BOARD_WAVESHARE_S3_146B
         default "aipi" if MUSE_BOARD_AIPI
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
@@ -353,6 +358,31 @@ endif
             128 KB of speech, 2 s of mic backlog and 1 s of decoded audio
             (about 220 KB), which still covers a push-to-talk turn. Board
             overlays with 2 MB of PSRAM turn it on.
+
+    config MUSE_ELEVENLABS_API_KEY
+        string "ElevenLabs API key for spoken replies"
+        depends on MUSE_HATCH
+        default ""
+        help
+            With a key, each Muse reply is spoken via ElevenLabs streaming
+            TTS. Empty: set one later over USB with >elevenlabs.key=…, or
+            replies stay text / try Muse's own TTS stream. The key ships in
+            firmware if set here: never commit a generated sdkconfig.
+
+    config MUSE_ELEVENLABS_VOICE_ID
+        string "ElevenLabs voice ID"
+        depends on MUSE_HATCH
+        default "EXAVITQu4vr4xnSDxMaL"
+        help
+            Any voice in the account. Default is the premade "Sarah".
+
+    config MUSE_ELEVENLABS_MODEL
+        string "ElevenLabs model"
+        depends on MUSE_HATCH
+        default "eleven_flash_v2_5"
+        help
+            eleven_flash_v2_5 is fast and multilingual; eleven_multilingual_v2
+            sounds richer but starts later.
 
     config MUSE_VIDEO
         bool "Video streaming from a phone to the display"

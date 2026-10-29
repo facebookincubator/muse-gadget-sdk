@@ -17,6 +17,8 @@
 /* A Muse build with calls on, as Kconfig would generate it (off with
  * MUSE_TEST_CALLS_OFF, where Kconfig leaves the symbols out). */
 #pragma once
+#define CONFIG_MUSE_ELEVENLABS_VOICE_ID "EXAVITQu4vr4xnSDxMaL"
+#define CONFIG_MUSE_ELEVENLABS_MODEL "eleven_flash_v2_5"
 #ifndef MUSE_TEST_CALLS_OFF
 #define CONFIG_MUSE_REALTIME_VOICE 1
 #define CONFIG_MUSE_REALTIME_VOICE_APP_ID "hatch-web"
