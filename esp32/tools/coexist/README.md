@@ -44,7 +44,7 @@ own directory.
 | `sdkconfig.ble-mem` | BLE resident without the RAM cost (after `ble-persist` and `nimble-tuned`): NimBLE host allocations in PSRAM, controller code in flash, BLE buffers and static Wi-Fi RX buffers trimmed (10, with a 20-frame block-ack window) |
 | `sdkconfig.wifi-trim` | No SoftAP or WPA2-Enterprise (-58 KB flash) |
 | `sdkconfig.net-internal16` | Bench baseline: the pre-change networking (lwIP in internal RAM, 16 KiB windows) |
-| `sdkconfig.tx-by-ref` | Require PSRAM at boot so Wi-Fi transmits lwIP's PSRAM pbufs by reference and window scaling is available |
+| `sdkconfig.tx-by-ref` | Require PSRAM at boot so Wi-Fi transmits lwIP's PSRAM pbufs by reference and window scaling is available (C5 builds now do by default) |
 | `sdkconfig.tcp128` | 128 KiB receive / 112 KiB send windows (needs `tx-by-ref`; stalled the VM tunnel, not for use) |
 | `sdkconfig.ctrl-flash` | BLE controller from flash (-21 KB IRAM; experimental, slows BLE) |
 | `sdkconfig.bench`, `sdkconfig.bench-quick` | Boot into `main/pipeline_bench.cpp` instead of the gadget |
@@ -185,3 +185,34 @@ Mbit/s as the LAN host measured them:
   to 1.8 Mbit/s even nearby.
 - Free internal RAM at idle, paired, is the same with the new defaults:
   53 KiB (38 KiB DMA-capable).
+
+### Through a paired VM, 96 KiB windows (2026-10-28)
+
+12-second transfers between the VM and speed.cloudflare.com through the Link,
+the C5 at -47 dBm on 5 GHz, the VM about 100 ms away, BLE off after setup.
+Mbit/s through the tunnel as the C5 counted it, with its CPU busy:
+
+| Build | To VM (CPU) | From VM (CPU) | Internal RAM free, idle / lowest |
+|---|---|---|---|
+| 64 KiB windows (previous C5 defaults) | 4.2 (91%) | 3.2 (68%) | 56 / 43 KiB |
+| 96 KiB, 16 static Wi-Fi TX buffers | 4.1 (94%) | 4.7 (93%) | 28 / 14 KiB |
+| 96 KiB, 8 static Wi-Fi TX buffers (two runs) | 4.1, 4.0 (99%) | 4.1, 4.9 (92-93%) | 42 / 26 KiB |
+| 96 KiB, 6 static Wi-Fi TX buffers | 4.1 (99%) | 4.7 (94%) | 45 / 33 KiB |
+| 96 KiB, 4 static Wi-Fi TX buffers (new C5 defaults) | 4.3 (99%) | 4.4 (93%) | 49 / 39 KiB |
+
+- At a 100 ms round trip a 64 KiB window caps each direction near 5 Mbit/s.
+  From the VM it held the tunnel at 3.2 Mbit/s with the CPU at 68%; with
+  96 KiB the CPU is the limit both ways: 4.1-4.9 Mbit/s from the VM over the
+  five runs, median 4.7.
+- To the VM the CPU was already the limit, so the wider send window changes
+  nothing at this distance; it raises the cap for VMs farther away.
+- Window scaling needs PSRAM required at boot, which makes the Wi-Fi driver
+  preallocate static TX buffers in internal RAM, about 1.7 KiB each. The count
+  made no measurable difference (the two 8-buffer runs alone span 4.1-4.9).
+  16 cost 28 KiB of idle free RAM and left the lowest free DMA-capable RAM at
+  16.5 KiB, next to the tunnel's 16 KiB send reserve; 4 cost 8 KiB. All runs
+  were at good signal: with a weak one, retries hold each buffer longer.
+- More data in flight queues ahead of the gadget: round trips during
+  VM-to-gadget transfers rose from about 220 to 300 ms.
+- The RAM figures come from a development build with extra test tasks; the
+  differences carry over.
