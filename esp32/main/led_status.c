@@ -546,7 +546,8 @@ static void oled_show_state(led_state_t state) {
     oled_flush();
 }
 
-// The status is drawn from the state (oled_show_state), not from colours.
+// The LED task draws the status from the state (oled_show_state) and skips
+// the colour animations.
 static void led_hw_set_color(rgb_t c) {
     (void)c;
 }
@@ -1274,7 +1275,11 @@ static void led_task(void *arg) {
         xSemaphoreGive(s_mutex);
         if (title_dirty) led_hw_set_title(title);
 #if CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
+        // Words, not colours: no breathing or blinking to wait out, so a new
+        // state shows within one frame.
         oled_show_state(state);
+        led_wait(200);
+        continue;
 #endif
 #if CONFIG_HOMEHUB_VOICE
         if (voice_render()) continue;

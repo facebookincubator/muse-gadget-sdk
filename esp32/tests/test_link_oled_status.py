@@ -343,6 +343,16 @@ class LinkOledStatusTest(unittest.TestCase):
             result = subprocess.run([str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_led_task_shows_a_new_state_without_waiting_out_an_animation(self) -> None:
+        source = LED_C.read_text()
+        task = source[source.index("static void led_task(void *arg) {"):]
+        oled = task[task.index("#if CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306"):]
+        oled = oled[:oled.index("#endif")]
+        self.assertIn("oled_show_state(state);", oled)
+        self.assertIn("led_wait(200);", oled)
+        self.assertIn("continue;", oled)
+        self.assertLess(task.index("oled_show_state(state);"), task.index("switch (state)"))
+
     def test_board_wiring(self) -> None:
         overlay = (ROOT / "devices" / "sdkconfig.c3-oled-042").read_text()
         for setting in ('CONFIG_IDF_TARGET="esp32c3"',

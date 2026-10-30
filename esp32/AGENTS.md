@@ -299,8 +299,8 @@ cd build && python -m esptool --chip esp32c5 -b 460800 \
   --before default-reset --after hard-reset write-flash "@flash_args"
 ```
 
-Typical ports: `/dev/cu.usbmodem*` or `/dev/ttyACM*` for native USB (C5, S3 and
-C6 boards), and `/dev/cu.usbserial-*`, `/dev/cu.wchusbserial*` or `/dev/ttyUSB*`
+Typical ports: `/dev/cu.usbmodem*` or `/dev/ttyACM*` for native USB (C3, C5, S3
+and C6 boards), and `/dev/cu.usbserial-*`, `/dev/cu.wchusbserial*` or `/dev/ttyUSB*`
 for CH340 bridges (ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002). On Linux,
 add yourself to the `dialout` (or `uucp`) group. If the chip won't enter the
 bootloader, hold BOOT, tap RESET, release BOOT, and flash again.
