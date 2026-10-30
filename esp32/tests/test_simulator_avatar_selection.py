@@ -48,7 +48,7 @@ class AvatarSelection(unittest.TestCase):
         )
         for name in ("sim_board.c", "sim_platform.c", "sim_services.c"):
             (sim / "src" / name).write_text("typedef int unused;\n")
-        for name in ("muse_ui.c", "muse_state.c", "muse_text.c"):
+        for name in ("muse_ui.c", "muse_state.c", "muse_text.c", "muse_lang.c"):
             (muse / name).write_text("typedef int unused;\n")
         text = SIM_CMAKE.read_text()
         start = text.index('set(MUSE_COMPONENT_DIR ')

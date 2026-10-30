@@ -30,6 +30,7 @@
 #include "muse_board.h"
 #include "muse_chat.h"
 #include "muse_input.h"
+#include "muse_lang.h"
 #include "muse_link.h"
 #include "muse_settings.h"
 #include "muse_state.h"
@@ -158,22 +159,36 @@ static lv_obj_t *s_list;
 static lv_obj_t *s_rows[ITEM_COUNT];
 static lv_obj_t *s_values[ITEM_COUNT];
 static lv_obj_t *s_page;        /* status and power-off confirmation text */
+static lv_obj_t *s_page_box;    /* s_page's window, which scrolls a page that runs past it */
 static lv_obj_t *s_hint_down;
 static lv_obj_t *s_hint_select;
 static const char *s_down_text;
+static const lv_font_t *s_fine;   /* the title's and pages' unscii */
 
 static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, const char *text)
 {
+    text = muse_lang_menu(text);
     lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_font(l, font == s_fine ? muse_lang_label_font(text, font) : font, 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
     lv_label_set_text(l, text);
     return l;
 }
 
+/* In the screen's language; the title and pages take the caption font for
+ * accented letters, which their unscii lacks. */
 static void set_text(lv_obj_t *l, const char *text)
 {
+    text = muse_lang_menu(text);
     if (strcmp(lv_label_get_text(l), text) != 0) {
+        if (l == s_title || l == s_page) {
+            const lv_font_t *font = muse_lang_label_font(text, s_fine);
+            lv_obj_set_style_text_font(l, font, 0);
+            if (l == s_title) {
+                /* unscii's spaced capitals; the caption font's wider letters close up to fit */
+                lv_obj_set_style_text_letter_space(l, font == s_fine ? 1 : 0, 0);
+            }
+        }
         lv_label_set_text(l, text);
     }
 }
@@ -181,8 +196,38 @@ static void set_text(lv_obj_t *l, const char *text)
 static void select_hint(const char *action)
 {
     char text[40];
-    snprintf(text, sizeof(text), "%s%s", muse_board->keyboard ? "Enter " : "", action);
+    snprintf(text, sizeof(text), "%s%s", muse_board->keyboard ? "Enter " : "", muse_lang_menu(action));
     set_text(s_hint_select, text);
+}
+
+/* A page longer than its window (a compact screen's, in the caption font)
+ * moves by a window less a line; false once it's at that end. */
+static bool page_scroll(int direction)
+{
+    lv_obj_update_layout(s_page_box);
+    int y = lv_obj_get_scroll_y(s_page_box);
+    int room = direction > 0 ? lv_obj_get_scroll_bottom(s_page_box) : y;
+    if (room <= 0) {
+        return false;
+    }
+    int line = lv_font_get_line_height(lv_obj_get_style_text_font(s_page, 0)) +
+               lv_obj_get_style_text_line_space(s_page, 0);
+    int step = lv_obj_get_content_height(s_page_box) - line;
+    step = step < line ? line : (step > room ? room : step);
+    lv_obj_scroll_to_y(s_page_box, y + direction * step, LV_ANIM_OFF);
+    return true;
+}
+
+/* Down's hint on a page: Down while there's more of it, else what Down does
+ * at its end. A keyboard's arrows scroll and its Esc hint stays. */
+static void page_hint(void)
+{
+    if (muse_board->keyboard) {
+        return;
+    }
+    lv_obj_update_layout(s_page_box);
+    bool page = s_view == VIEW_STATUS || s_view == VIEW_BATTERY;
+    set_text(s_hint_down, lv_obj_get_scroll_bottom(s_page_box) > 0 ? s_down_text : (page ? "Back" : "Cancel"));
 }
 
 static int value_step(const int *steps, int n, int cur, int direction)
@@ -267,13 +312,14 @@ static void status_text(char *buf, size_t n)
     if (p.battery_pct >= 0) {
         snprintf(batt, sizeof(batt), "%d%%%s", p.battery_pct, p.charging ? " +" : "");
     }
-    const char *phone = b.state == MUSE_BLE_OFF ? "Off" : (b.state == MUSE_BLE_CONNECTED ? "Connected" : b.name);
-    snprintf(buf, n, "Wi-Fi %s\nIP    %s\nLink  %s\nMuse  %s\nPhone %s\nPower %s\nVer   %s",
-             w.state == MUSE_WIFI_CONNECTED ? w.ssid : (w.state == MUSE_WIFI_OFF ? "off" : "offline"),
-             w.state == MUSE_WIFI_CONNECTED ? w.ip : "-", muse_link_state_name(muse_link_state()),
-             muse_hatch_state_name(h.state), phone, batt,
+    const char *phone = b.state == MUSE_BLE_OFF ? muse_lang_menu("Off")
+                      : (b.state == MUSE_BLE_CONNECTED ? muse_lang_menu("Connected") : b.name);
+    snprintf(buf, n, muse_lang_menu("Wi-Fi %s\nIP    %s\nLink  %s\nMuse  %s\nPhone %s\nPower %s\nVer   %s"),
+             w.state == MUSE_WIFI_CONNECTED ? w.ssid : muse_lang_menu(w.state == MUSE_WIFI_OFF ? "off" : "offline"),
+             w.state == MUSE_WIFI_CONNECTED ? w.ip : "-", muse_lang_menu(muse_link_state_name(muse_link_state())),
+             muse_lang_menu(muse_hatch_state_name(h.state)), phone, batt,
              esp_app_get_description()->version);
-    muse_text_to_ascii(buf, n);   /* network and phone names can have curly quotes */
+    muse_text_to_caption(buf, n);   /* network and phone names can have curly quotes */
 }
 
 static void pm_text(char out[24], int pm)
@@ -312,13 +358,14 @@ static void battery_text(char *buf, size_t n)
     pm_text(off, b.screen_off_pm);
     pm_text(slept, b.slept_pm);
     pm_text(busy, b.busy_pm);
-    snprintf(buf, n, "%s %s\nBatt  %d>%d%%\nRate  %s\nFull  %s\nOff   %s\nSleep %s\nWakes %s\nBusy  %s",
-             b.running ? "On batt" : "Last run", t, b.pct_start, b.pct_now, rate, full, off, slept, wakes, busy);
+    snprintf(buf, n, muse_lang_menu("%s %s\nBatt  %d>%d%%\nRate  %s\nFull  %s\nOff   %s\nSleep %s\nWakes %s\nBusy  %s"),
+             muse_lang_menu(b.running ? "On batt" : "Last run"), t, b.pct_start, b.pct_now, rate, full, off, slept,
+             wakes, busy);
 }
 
 static void refresh(void)
 {
-    char buf[160];
+    char buf[256];   /* a page whose labels and names are UTF-8 (status_text) */
     if (s_view == VIEW_LIST) {
         for (int i = 0; i < ITEM_COUNT; i++) {
             value_text(i, buf, sizeof(buf));
@@ -341,12 +388,14 @@ static void refresh(void)
     } else if (s_view == VIEW_STATUS) {
         status_text(buf, sizeof(buf));
         set_text(s_page, buf);
+        page_hint();
     } else if (s_view == VIEW_BATTERY) {
         int64_t now = esp_timer_get_time();
         if (!s_batt_shown_us || now - s_batt_shown_us >= 1000000) {
             s_batt_shown_us = now;
             battery_text(buf, sizeof(buf));
             set_text(s_page, buf);
+            page_hint();
         }
     }
 }
@@ -357,7 +406,8 @@ static void show(view_t view)
     s_shown_sel = -1;
     s_batt_shown_us = 0;
     lv_obj_set_flag(s_list, LV_OBJ_FLAG_HIDDEN, view != VIEW_LIST);
-    lv_obj_set_flag(s_page, LV_OBJ_FLAG_HIDDEN, view == VIEW_LIST);
+    lv_obj_set_flag(s_page_box, LV_OBJ_FLAG_HIDDEN, view == VIEW_LIST);
+    lv_obj_scroll_to_y(s_page_box, 0, LV_ANIM_OFF);
     bool danger = view == VIEW_POWER || view == VIEW_RESET;
     lv_obj_set_style_text_color(s_hint_select, lv_color_hex(danger ? COLOR_DANGER : COLOR_TEXT), 0);
 
@@ -370,7 +420,7 @@ static void show(view_t view)
         break;
     case VIEW_POWER: {
         char text[96];
-        snprintf(text, sizeof(text), "Turn Muse off?\n\nPress the %s button to turn it back on.",
+        snprintf(text, sizeof(text), muse_lang_menu("Turn Muse off?\n\nPress the %s button to turn it back on."),
                  muse_board->keyboard      ? "GO"
                  : muse_board->wake_button ? muse_board->wake_button
                                            : muse_board->aux_button);
@@ -378,6 +428,7 @@ static void show(view_t view)
         set_text(s_page, text);
         set_text(s_hint_down, muse_board->keyboard ? "Esc Cancel" : "Cancel");
         select_hint("Power off");
+        page_hint();
         break;
     }
     case VIEW_RESET:
@@ -385,6 +436,7 @@ static void show(view_t view)
         set_text(s_page, "Forget Wi-Fi and the Muse app pairing, then restart?");
         set_text(s_hint_down, muse_board->keyboard ? "Esc Cancel" : "Cancel");
         select_hint("Reset");
+        page_hint();
         break;
     default:
         set_text(s_title, muse_board->keyboard ? "MENU  ^v Move  <> Change" : "MENU");
@@ -483,13 +535,20 @@ static void handle(muse_menu_key_t key)
         break;
     case VIEW_STATUS:
     case VIEW_BATTERY:
-        if (key == MUSE_MENU_BACK || key == MUSE_MENU_LEFT || key == MUSE_MENU_SELECT ||
-            key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) show(VIEW_LIST);
+        /* Up and Down scroll a page that runs past the screen, then go back. */
+        if ((key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) && page_scroll(key == MUSE_MENU_DOWN ? 1 : -1)) {
+            page_hint();
+        } else if (key == MUSE_MENU_BACK || key == MUSE_MENU_LEFT || key == MUSE_MENU_SELECT ||
+                   key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) {
+            show(VIEW_LIST);
+        }
         break;
     case VIEW_POWER:
     case VIEW_RESET:
-        if (key == MUSE_MENU_BACK || key == MUSE_MENU_LEFT ||
-            key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) {
+        if ((key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) && page_scroll(key == MUSE_MENU_DOWN ? 1 : -1)) {
+            page_hint();   /* the rest of the question; an arrow still never confirms */
+        } else if (key == MUSE_MENU_BACK || key == MUSE_MENU_LEFT ||
+                   key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) {
             show(VIEW_LIST);
         } else if (key == MUSE_MENU_SELECT) {
             bool power = s_view == VIEW_POWER;
@@ -547,10 +606,12 @@ static void align_on_bar(lv_obj_t *l, int slot, int pad)
 void muse_menu_build(lv_obj_t *parent, int w, int h)
 {
     bool small = h < 200 || w < 200;
-    const lv_font_t *font = small ? FONT_COMPACT : &lv_font_montserrat_20;
+    const lv_font_t *font = muse_lang_montserrat(small ? FONT_COMPACT : &lv_font_montserrat_20);
     const lv_font_t *fine = small ? &lv_font_unscii_8 : &lv_font_unscii_16;
+    s_fine = fine;
     int pad = small ? 2 : 8;
-    int title_h = small ? 13 : 40;
+    /* The title's font is the caption font for accented letters (set_text). */
+    int title_h = small ? lv_font_get_line_height(muse_lang_label_font(muse_lang_menu("MENU"), fine)) + 5 : 40;
     int hint_h = small ? 17 : 44;
     s_row_h = small ? 16 : 36;
     s_visible_rows = (h - title_h - hint_h) / s_row_h;
@@ -572,7 +633,7 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     lv_obj_add_flag(s_root, LV_OBJ_FLAG_HIDDEN);
 
     s_title = label(s_root, fine, COLOR_DIM, "MENU");
-    lv_obj_set_style_text_letter_space(s_title, 1, 0);
+    lv_obj_set_style_text_letter_space(s_title, lv_obj_get_style_text_font(s_title, 0) == fine ? 1 : 0, 0);
     lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, small ? 3 : 12);
 
     s_list = lv_obj_create(s_root);
@@ -598,12 +659,18 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
         s_rows[i] = r;
     }
 
-    s_page = label(s_root, fine, COLOR_TEXT, "");
-    lv_obj_set_width(s_page, w - 4 * pad - strip);
+    /* Down to the hints' rule: a longer page scrolls (page_scroll). */
+    s_page_box = lv_obj_create(s_root);
+    lv_obj_remove_style_all(s_page_box);
+    lv_obj_set_size(s_page_box, w - 4 * pad - strip, h - hint_h - 1 - (title_h + pad));
+    lv_obj_set_pos(s_page_box, 2 * pad, title_h + pad);
+    lv_obj_set_scrollbar_mode(s_page_box, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_remove_flag(s_page_box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_page_box, LV_OBJ_FLAG_HIDDEN);
+    s_page = label(s_page_box, fine, COLOR_TEXT, "");
+    lv_obj_set_width(s_page, lv_pct(100));
     lv_obj_set_style_text_line_space(s_page, small ? 3 : 8, 0);
     lv_label_set_long_mode(s_page, LV_LABEL_LONG_MODE_WRAP);
-    lv_obj_set_pos(s_page, 2 * pad, title_h + pad);
-    lv_obj_add_flag(s_page, LV_OBJ_FLAG_HIDDEN);
 
     /* Hints sit next to their buttons, where the face shows their icons. */
     lv_obj_t *rule = lv_obj_create(s_root);
