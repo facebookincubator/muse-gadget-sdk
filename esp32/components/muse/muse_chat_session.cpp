@@ -236,6 +236,9 @@ struct resampler_t {
 struct turn_t {
     phase_t phase;
     uint32_t gen;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    uint32_t review;         /* this turn's identity for reply review (typed turns all have gen 0) */
+#endif
     bool text;               /* typed at the console: the reply goes there, unspoken */
     bool end_requested, end_sent, chat_posted, acked;
     int64_t dict_id, chat_id;
@@ -1036,6 +1039,9 @@ static bool turn_start(uint32_t gen, bool text)
     s_turn.note = note;
     s_turn.texts = texts;
     s_turn.gen = gen;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    s_turn.review = muse_review_turn();
+#endif
     s_turn.text = text;
     s_turn.tts_msg = -1;
     memset(s_marks, 0, sizeof(s_marks));
@@ -1439,7 +1445,7 @@ static void message_done(int i, const char *final_text)
     /* Keep complete final text, rather than the 1 KB automatic-caption copy. */
     const char *review = final_text && final_text[0] ? final_text
         : m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
-    muse_review_store(s_turn.gen, review);
+    muse_review_store(s_turn.review, review);
 #endif
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */

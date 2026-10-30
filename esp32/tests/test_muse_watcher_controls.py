@@ -120,6 +120,40 @@ static void retained(void) {
     assert(muse_review_page(text, sizeof(text), &page, &total));
     assert(text[0] == '"' && !strncmp(text + 1, "cafe", 4) && text[5] == '"' && !text[6]);
 }
+/* The screen's review copy: closing review, or sleeping (which closes it),
+ * hands the label back to the live caption, which review never writes. */
+static void view(void) {
+    cols = 10; lines = 2;
+    muse_review_init();
+    muse_review_close();
+    muse_review_view_t v = {0};
+    char out[256] = "live caption";
+    bool changed;
+    assert(!muse_review_frame(&v, out, sizeof(out), &changed) && !changed);
+    muse_review_store(muse_review_turn(), "the quick brown fox jumps over the lazy dog");
+    assert(!muse_review_frame(&v, out, sizeof(out), &changed) && !changed);
+    assert(!strcmp(out, "live caption"));
+    assert(muse_review_step(1));
+    assert(muse_review_frame(&v, out, sizeof(out), &changed) && changed);
+    assert(!strcmp(out, "the quick\nbrown fox") && v.page == 1 && v.pages == 4);
+    assert(muse_review_frame(&v, out, sizeof(out), &changed) && !changed);   /* nothing to redraw */
+    assert(muse_review_step(1));
+    assert(muse_review_frame(&v, out, sizeof(out), &changed) && changed);
+    assert(!strcmp(out, "brown fox\njumps over") && v.page == 2);
+    muse_review_close();
+    assert(!muse_review_frame(&v, out, sizeof(out), &changed) && changed);   /* back to the live caption */
+    assert(!muse_review_frame(&v, out, sizeof(out), &changed) && !changed);
+    assert(muse_review_step(1));   /* reopens on the first page */
+    assert(muse_review_frame(&v, out, sizeof(out), &changed) && changed && v.page == 1);
+    uint32_t turn = muse_review_turn();
+    muse_review_store(turn, "new reply");   /* a new turn's reply closes review */
+    assert(!muse_review_frame(&v, out, sizeof(out), &changed) && changed);
+    assert(muse_review_step(1));
+    assert(muse_review_frame(&v, out, sizeof(out), &changed) && changed && !strcmp(out, "new reply"));
+    muse_review_store(turn, "more");   /* the same turn's next message updates the page */
+    assert(muse_review_frame(&v, out, sizeof(out), &changed) && changed && !strcmp(out, "new reply\nmore"));
+    assert(muse_review_turn() != turn);
+}
 static void long_reply(void) {
     cols = 10; lines = 2;
     char *large = malloc(40000);
@@ -184,6 +218,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "pages")) pages();
     else if (!strcmp(argv[1], "retained")) retained();
     else if (!strcmp(argv[1], "long")) long_reply();
+    else if (!strcmp(argv[1], "view")) view();
     else if (!strcmp(argv[1], "routing")) routing();
     else return 2;
     return 0;
@@ -222,6 +257,16 @@ int main(int argc, char **argv) {
 
     def test_review_handles_long_reply(self):
         self.run_case("long")
+
+    def test_closing_review_returns_the_live_caption(self):
+        self.run_case("view")
+
+    def test_screen_keeps_review_apart_from_the_live_caption(self):
+        source = (MUSE / "muse_ui.c").read_text()
+        start = source.index("static void update_status(")
+        body = source[start:source.index("\nstatic volatile bool s_snapshot;", start)]
+        self.assertFalse("muse_review_page(caption" in body, "review must not write the live caption")
+        self.assertTrue("muse_review_frame(&view, review, sizeof(review)" in body)
 
 
     def test_input_routes_click_hold_pairing_and_rotation(self):

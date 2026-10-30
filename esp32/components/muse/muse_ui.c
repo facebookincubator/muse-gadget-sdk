@@ -1605,8 +1605,13 @@ static void update_status(muse_mode_t mode, float now)
 
     static char caption[MUSE_CAPTION_MAX];
     bool fresh = muse_state_caption(caption, sizeof(caption), &s_caption_version);
+    const char *shown = caption;
     int answer = -1;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    /* The review page has its own buffer, so the live caption is still there to
+     * go back to when review ends, including any that arrived meanwhile. */
+    static char review[MUSE_CAPTION_MAX];
+    static muse_review_view_t view;
     bool reviewing = muse_review_active();
 #endif
     if (s_reply_lbl) {
@@ -1623,16 +1628,20 @@ static void update_status(muse_mode_t mode, float now)
             answer = layout;
         }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-        int page = 0, pages = 0;
-        if (reviewing && muse_review_page(caption, sizeof(caption), &page, &pages)) {
+        bool review_changed;
+        reviewing = muse_review_frame(&view, review, sizeof(review), &review_changed);
+        if (reviewing) {
             answer = ANSWER_READ;
+            shown = review;
+        }
+        if (review_changed) {
             fresh = true;
-            char position[24];
-            snprintf(position, sizeof(position), "%d / %d", page, pages);
-            lv_label_set_text(s_review_position, position);
-            lv_obj_remove_flag(s_review_position, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(s_review_position, LV_OBJ_FLAG_HIDDEN);
+            if (reviewing) {
+                char position[24];
+                snprintf(position, sizeof(position), "%d / %d", view.page, view.pages);
+                lv_label_set_text(s_review_position, position);
+            }
+            lv_obj_set_flag(s_review_position, LV_OBJ_FLAG_HIDDEN, !reviewing);
         }
 #endif
     }
@@ -1644,11 +1653,11 @@ static void update_status(muse_mode_t mode, float now)
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
 #if CONFIG_MUSE_CJK_FONT
         if (s_small) {
-            set_caption_font(muse_text_has_cjk(caption));
+            set_caption_font(muse_text_has_cjk(shown));
         }
 #endif
-        lv_label_set_text(lbl, caption);
-        lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !caption[0]);
+        lv_label_set_text(lbl, shown);
+        lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !shown[0]);
         if (s_reply_lbl) {
             lv_obj_add_flag(answer >= 0 ? s_caption_lbl : s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
         }

@@ -27,12 +27,27 @@ extern "C" {
 
 /* Watcher reply review: a bounded RAM copy survives the chat turn ending. */
 esp_err_t muse_review_init(void);
-void muse_review_store(uint32_t generation, const char *text);
+/* A new identity for each chat turn, typed or spoken. Replies stored under
+ * one identity are joined; the next identity's first reply replaces them. */
+uint32_t muse_review_turn(void);
+void muse_review_store(uint32_t turn, const char *text);
 bool muse_review_step(int direction);
 void muse_review_close(void);
 bool muse_review_active(void);
 /* Copies the selected page and returns its one-based position and total. */
 bool muse_review_page(char *out, size_t cap, int *page, int *pages);
+
+/* The screen's copy of the review page, apart from the live caption. */
+typedef struct {
+    uint32_t version;
+    bool shown;
+    int page, pages;
+} muse_review_view_t;
+
+/* While reviewing, true, with the page in out. *changed says whether the
+ * label needs redrawing: a new page, or review just ended and the live
+ * caption has to come back. out is only written when the page changes. */
+bool muse_review_frame(muse_review_view_t *view, char *out, size_t cap, bool *changed);
 
 #ifdef __cplusplus
 }

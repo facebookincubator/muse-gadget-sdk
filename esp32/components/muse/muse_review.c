@@ -27,8 +27,8 @@
 
 static SemaphoreHandle_t s_lock;
 static char *s_text;
-static uint32_t s_generation;
-static bool s_have_generation, s_active;
+static uint32_t s_turn, s_next_turn, s_version;
+static bool s_have_turn, s_active;
 static int s_page, s_pages = 1;
 
 esp_err_t muse_review_init(void)
@@ -37,17 +37,27 @@ esp_err_t muse_review_init(void)
     return s_lock ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-void muse_review_store(uint32_t generation, const char *text)
+uint32_t muse_review_turn(void)
+{
+    if (!s_lock) return 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    uint32_t turn = ++s_next_turn;
+    xSemaphoreGive(s_lock);
+    return turn;
+}
+
+void muse_review_store(uint32_t turn, const char *text)
 {
     if (!s_lock || !text || !text[0]) return;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (!s_text) s_text = heap_caps_malloc(REVIEW_CAP, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (s_text) {
-        bool fresh = !s_have_generation || generation != s_generation;
+        bool fresh = !s_have_turn || turn != s_turn;
+        s_version++;
         if (fresh) {
             s_text[0] = '\0';
-            s_generation = generation;
-            s_have_generation = true;
+            s_turn = turn;
+            s_have_turn = true;
             s_active = false;
             s_page = 0;
             s_pages = 1;
@@ -74,6 +84,7 @@ bool muse_review_step(int direction)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool have = s_text && s_text[0];
     if (have) {
+        s_version++;
         if (!s_active) {
             s_active = true;
             s_page = 0;
@@ -91,6 +102,7 @@ void muse_review_close(void)
 {
     if (!s_lock) return;
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_active) s_version++;
     s_active = false;
     xSemaphoreGive(s_lock);
 }
@@ -114,6 +126,7 @@ bool muse_review_page(char *out, size_t cap, int *page, int *pages)
         if (s_pages) muse_text_to_ascii(out, cap);
         if (!s_pages) {
             s_active = active = false;
+            s_version++;
         } else {
             if (s_page >= s_pages) s_page = s_pages - 1;
             *page = s_page + 1;
@@ -121,5 +134,26 @@ bool muse_review_page(char *out, size_t cap, int *page, int *pages)
         }
     }
     xSemaphoreGive(s_lock);
+    return active;
+}
+
+bool muse_review_frame(muse_review_view_t *view, char *out, size_t cap, bool *changed)
+{
+    *changed = false;
+    if (!s_lock) return false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool active = s_active && s_text && s_text[0];
+    uint32_t version = s_version;
+    xSemaphoreGive(s_lock);
+    if (active && (!view->shown || view->version != version)) {
+        /* Another store or step in between moves the version again: the next frame catches it. */
+        view->version = version;
+        active = muse_review_page(out, cap, &view->page, &view->pages);
+        *changed = active;
+    }
+    if (active != view->shown) {
+        view->shown = active;
+        *changed = true;
+    }
     return active;
 }
