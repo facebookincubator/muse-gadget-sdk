@@ -24,14 +24,14 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 
 ## Workflow
 
-1. GET `/get_livedata_info` and pick the requested fields (see Request Shape).
+1. GET `/get_livedata_info` and pick the requested fields (see Response Shape).
 2. Report values with the units the gateway returns; convert only when asked.
 3. For wind direction, use the 10-minute average `0x6D` when present; the instantaneous `0x0A` swings between reads.
-4. Say it is raining only when rain rate or event total is above zero. `srain_piezo` can read `1` briefly with zero rain from mist or dew; call that possible drizzle.
+4. Say it is raining now only when the rain rate `0x0E` is above zero. The event total `0x0D` is rain since the event began and stays positive after rain stops; report it as accumulation, not as current rain. If `srain_piezo` reads `1` while the rate is zero, call it possible drizzle; mist or dew can trigger it briefly.
 
-## Request Shape
+## Response Shape
 
-`common_list`, `rain` and `piezoRain` are arrays of `{"id","val","unit"?}` entries; `wh25` is a single object with named fields. Groups appear only for sensors that are reporting. Excerpt from a GW2000 with a WS90:
+`common_list`, `rain` and `piezoRain` are arrays of `{"id","val","unit"?}` entries; `wh25` is a one-element array; read the named fields from its first object (`wh25[0]`). Groups appear only for sensors that are reporting. Excerpt from a GW2000 with a WS90:
 
 ```json
 {"common_list":[{"id":"0x02","val":"58.8","unit":"F"},{"id":"0x0B","val":"2.68 mph"}],
