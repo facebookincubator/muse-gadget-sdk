@@ -107,11 +107,12 @@ menu "ESP32 Device SDK"
 
     config HOMEHUB_SHOW_AGENT_NAME
         bool "Show the agent's name on the display"
-        default y if HOMEHUB_DISPLAY
+        default y if HOMEHUB_DISPLAY || HOMEHUB_LED_BACKEND_C3_SSD1306
         help
             After the device registers, fetch GET /identity over the Noise
             session and show the agent's name on the status display. Only
-            display backends can show it, so it is off for LED-only builds.
+            display backends (and the C3's text OLED) can show it, so it is
+            off for LED-only builds.
 
     config HOMEHUB_TUNNEL
         bool "Enable the home-network tunnel and network discovery"
@@ -387,6 +388,8 @@ menu "ESP32 Device SDK"
             their e-paper instead (black and white on the E1001, six colours
             on the E1002).
             The Waveshare ESP32-S3-ePaper-1.54G does the same in four colours.
+            The ESP32-C3 with a 0.42 inch OLED shows the status and the
+            agent's name as text.
             Boards with the full UI have no status LED; their screen shows Link's pairing
             and connection state instead.
 

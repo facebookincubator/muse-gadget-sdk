@@ -37,7 +37,8 @@
 #include "driver/gpio.h"
 #include "led_strip.h"
 #elif CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
+#include "pixel_font.h"
 #elif CONFIG_HOMEHUB_DISPLAY
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
@@ -112,9 +113,9 @@ static const char *TAG = "link.led";
 // How long the ring stays green after connecting before it goes dark.
 #define RING_CONNECTED_MS    3000
 #elif CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
-// ESP32-C3 with 0.42" SSD1306 OLED: 72x40 monochrome text status display on
-// I2C. The visible 72x40 area sits at column 30, row 14 within the
-// SSD1306's 128x64 GRAM; only 5 pages (40 rows) are used.
+// ESP32-C3 with a 0.42 inch SSD1306 OLED on I2C: the status and the agent's
+// name as text, no status LED. The visible 72x40 pixels sit at column 30,
+// row 14 of the controller's 128x64 RAM (u8g2's 72x40 offsets).
 #define OLED_NAME         "SSD1306 72x40"
 #define OLED_I2C_ADDR     0x3C
 #define OLED_PIN_SDA      5
@@ -124,18 +125,20 @@ static const char *TAG = "link.led";
 #define OLED_HEIGHT       40
 #define OLED_COL_OFFSET   30
 #define OLED_ROW_OFFSET   14
+#define OLED_PAGES        (OLED_HEIGHT / 8)
 #define OLED_ROW_SHIFT    (OLED_ROW_OFFSET % 8)
 #define OLED_FIRST_PAGE   (OLED_ROW_OFFSET / 8)
-// 40 rows shifted by OLED_ROW_SHIFT bits spills into one extra page.
-#define OLED_XFER_PAGES   (OLED_PAGES + 1)
-#define OLED_PAGES        (OLED_HEIGHT / 8)
-// 5x7 font: 12 characters per line, 5 lines.
-#define OLED_FONT_W       5
-#define OLED_FONT_H       7
-#define OLED_CHAR_W       (OLED_FONT_W + 1)
-#define OLED_LINE_H       (OLED_FONT_H + 1)
+// Rows that don't start on a page boundary spill into one more page.
+#define OLED_XFER_PAGES   (OLED_PAGES + (OLED_ROW_SHIFT ? 1 : 0))
+// Four lines of 12 characters: the status on the first two, the name below.
+#define OLED_CHAR_W       (PIXEL_FONT_WIDTH + 1)
+#define OLED_LINE_H       10
 #define OLED_COLS         (OLED_WIDTH / OLED_CHAR_W)
-#define OLED_LINES        (OLED_HEIGHT / OLED_LINE_H)
+#define OLED_LINES        4
+_Static_assert(OLED_COL_OFFSET + OLED_WIDTH <= 128, "OLED window past column 127");
+_Static_assert(OLED_FIRST_PAGE + OLED_XFER_PAGES <= 8, "OLED window past page 7");
+_Static_assert((OLED_LINES - 1) * OLED_LINE_H + PIXEL_FONT_HEIGHT <= OLED_HEIGHT,
+               "OLED text lines past the bottom row");
 #elif CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
 // ideaspark ESP32 board: 170x320 ST7789 IPS panel on SPI, no status LED.
 #define LCD_NAME         "ideaspark ST7789"
@@ -384,337 +387,6 @@ static void led_hw_set_connected(void) {
     if (s_connected_frames * 200 < RING_CONNECTED_MS) s_connected_frames++;
 }
 
-#elif CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
-// ESP32-C3 0.42" SSD1306 OLED: 72x40 monochrome text status display.
-// The visible area is columns 30-101 of the controller's 128-wide GRAM and
-// 5 pages (40 rows). A 5x7 font gives 12 characters x 5 lines. No graphics,
-// no animation: line 0 shows the status, lines 1-2 the agent name.
-
-// SSD1306 framebuffer: 5 pages of 72 bytes.
-static uint8_t s_oled_fb[OLED_PAGES * OLED_WIDTH];
-static bool s_oled_ready = false;
-
-static esp_err_t oled_write_cmd(uint8_t cmd) {
-    i2c_cmd_handle_t h = i2c_cmd_link_create();
-    if (!h) return ESP_ERR_NO_MEM;
-    i2c_master_start(h);
-    i2c_master_write_byte(h, (OLED_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(h, 0x00, true);  // Co=0, D/C#=0: command follows
-    i2c_master_write_byte(h, cmd, true);
-    i2c_master_stop(h);
-    esp_err_t err = i2c_master_cmd_begin(I2C_NUM_0, h, pdMS_TO_TICKS(100));
-    i2c_cmd_link_delete(h);
-    return err;
-}
-
-static esp_err_t oled_write_cmds(const uint8_t *cmds, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        esp_err_t err = oled_write_cmd(cmds[i]);
-        if (err != ESP_OK) return err;
-    }
-    return ESP_OK;
-}
-
-// Push the framebuffer to the SSD1306 visible window: columns 30-101,
-// pages 1-6. The 72x40 content starts at row 14 (bit 6 of page 1), so the
-// 5-page framebuffer is shifted down 6 bits into a 6-page transfer buffer.
-static esp_err_t oled_update(void) {
-    static uint8_t xfer[OLED_XFER_PAGES * OLED_WIDTH];
-    static uint32_t last_ms = 0;
-    static uint8_t last_fb[sizeof(s_oled_fb)];
-    static bool first = true;
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    bool changed = first || memcmp(last_fb, s_oled_fb, sizeof(s_oled_fb)) != 0;
-    if (!changed && (now - last_ms) < 250) return ESP_OK;
-    first = false;
-    memcpy(last_fb, s_oled_fb, sizeof(s_oled_fb));
-    last_ms = now;
-    memset(xfer, 0, sizeof(xfer));
-    // Shift the framebuffer down by OLED_ROW_SHIFT bits into OLED_XFER_PAGES pages.
-    for (int row = 0; row < OLED_HEIGHT; row++) {
-        int src_byte = (row / 8) * OLED_WIDTH;
-        int src_bit = row % 8;
-        int dst_row = row + OLED_ROW_SHIFT;
-        int dst_byte = (dst_row / 8) * OLED_WIDTH;
-        int dst_bit = dst_row % 8;
-        for (int x = 0; x < OLED_WIDTH; x++) {
-            if (s_oled_fb[src_byte + x] & (1 << src_bit)) {
-                xfer[dst_byte + x] |= (1 << dst_bit);
-            }
-        }
-    }
-
-    static const uint8_t col_cmds[] = { 0x21, OLED_COL_OFFSET, OLED_COL_OFFSET + OLED_WIDTH - 1 };
-    static const uint8_t page_cmds[] = { 0x22, OLED_FIRST_PAGE, OLED_FIRST_PAGE + OLED_XFER_PAGES - 1 };
-    esp_err_t err = oled_write_cmds(col_cmds, sizeof(col_cmds));
-    if (err == ESP_OK) err = oled_write_cmds(page_cmds, sizeof(page_cmds));
-    if (err != ESP_OK) return err;
-
-    // OLED_XFER_PAGES x OLED_WIDTH bytes, one page per I2C transaction.
-    for (int p = 0; p < OLED_XFER_PAGES; p++) {
-        i2c_cmd_handle_t h = i2c_cmd_link_create();
-        if (!h) return ESP_ERR_NO_MEM;
-        i2c_master_start(h);
-        i2c_master_write_byte(h, (OLED_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
-        i2c_master_write_byte(h, 0x40, true);  // Co=0, D/C#=1: data follows
-        i2c_master_write(h, xfer + p * OLED_WIDTH, OLED_WIDTH, true);
-        i2c_master_stop(h);
-        err = i2c_master_cmd_begin(I2C_NUM_0, h, pdMS_TO_TICKS(100));
-        i2c_cmd_link_delete(h);
-        if (err != ESP_OK) return err;
-    }
-    return ESP_OK;
-}
-
-static void oled_clear(void) {
-    memset(s_oled_fb, 0, sizeof(s_oled_fb));
-    if (s_oled_ready) oled_update();
-}
-
-// 5x7 font, ASCII 32-127. Each character is 5 bytes; each byte is one column,
-// LSB at the top.
-static const uint8_t oled_font[96][5] = {
-    {0x00,0x00,0x00,0x00,0x00}, // space
-    {0x00,0x00,0x5F,0x00,0x00}, // !
-    {0x00,0x07,0x00,0x07,0x00}, // "
-    {0x14,0x7F,0x14,0x7F,0x14}, // #
-    {0x24,0x2A,0x7F,0x2A,0x12}, // $
-    {0x23,0x13,0x08,0x64,0x62}, // %
-    {0x36,0x49,0x55,0x22,0x50}, // &
-    {0x00,0x05,0x03,0x00,0x00}, // '
-    {0x00,0x1C,0x22,0x41,0x00}, // (
-    {0x00,0x41,0x22,0x1C,0x00}, // )
-    {0x14,0x08,0x3E,0x08,0x14}, // *
-    {0x08,0x08,0x3E,0x08,0x08}, // +
-    {0x00,0x50,0x30,0x00,0x00}, // ,
-    {0x08,0x08,0x08,0x08,0x08}, // -
-    {0x00,0x60,0x60,0x00,0x00}, // .
-    {0x20,0x10,0x08,0x04,0x02}, // /
-    {0x3E,0x51,0x49,0x45,0x3E}, // 0
-    {0x00,0x42,0x7F,0x40,0x00}, // 1
-    {0x42,0x61,0x51,0x49,0x46}, // 2
-    {0x21,0x41,0x45,0x4B,0x31}, // 3
-    {0x18,0x14,0x12,0x7F,0x10}, // 4
-    {0x27,0x45,0x45,0x45,0x39}, // 5
-    {0x3C,0x4A,0x49,0x49,0x30}, // 6
-    {0x01,0x71,0x09,0x05,0x03}, // 7
-    {0x36,0x49,0x49,0x49,0x36}, // 8
-    {0x06,0x49,0x49,0x29,0x1E}, // 9
-    {0x00,0x36,0x36,0x00,0x00}, // :
-    {0x00,0x56,0x36,0x00,0x00}, // ;
-    {0x08,0x14,0x22,0x41,0x00}, // <
-    {0x14,0x14,0x14,0x14,0x14}, // =
-    {0x00,0x41,0x22,0x14,0x08}, // >
-    {0x02,0x01,0x51,0x09,0x06}, // ?
-    {0x32,0x49,0x79,0x41,0x3E}, // @
-    {0x7E,0x11,0x11,0x11,0x7E}, // A
-    {0x7F,0x49,0x49,0x49,0x36}, // B
-    {0x3E,0x41,0x41,0x41,0x22}, // C
-    {0x7F,0x41,0x41,0x22,0x1C}, // D
-    {0x7F,0x49,0x49,0x49,0x41}, // E
-    {0x7F,0x48,0x48,0x48,0x40}, // F
-    {0x3E,0x41,0x49,0x49,0x7A}, // G
-    {0x7F,0x08,0x08,0x08,0x7F}, // H
-    {0x00,0x41,0x7F,0x41,0x00}, // I
-    {0x20,0x40,0x41,0x3F,0x01}, // J
-    {0x7F,0x08,0x14,0x22,0x41}, // K
-    {0x7F,0x40,0x40,0x40,0x40}, // L
-    {0x7F,0x02,0x0C,0x02,0x7F}, // M
-    {0x7F,0x04,0x08,0x10,0x7F}, // N
-    {0x3E,0x41,0x41,0x41,0x3E}, // O
-    {0x7F,0x09,0x09,0x09,0x06}, // P
-    {0x3E,0x41,0x51,0x21,0x5E}, // Q
-    {0x7F,0x09,0x19,0x29,0x46}, // R
-    {0x46,0x49,0x49,0x49,0x31}, // S
-    {0x01,0x01,0x7F,0x01,0x01}, // T
-    {0x7F,0x40,0x40,0x40,0x7F}, // U
-    {0x1F,0x20,0x40,0x20,0x1F}, // V
-    {0x3F,0x40,0x38,0x40,0x3F}, // W
-    {0x63,0x14,0x08,0x14,0x63}, // X
-    {0x07,0x08,0x70,0x08,0x07}, // Y
-    {0x61,0x51,0x49,0x45,0x43}, // Z
-    {0x00,0x7F,0x41,0x41,0x00}, // [
-    {0x02,0x04,0x08,0x10,0x20}, // backslash
-    {0x00,0x41,0x41,0x7F,0x00}, // ]
-    {0x04,0x02,0x01,0x02,0x04}, // ^
-    {0x40,0x40,0x40,0x40,0x40}, // _
-    {0x00,0x01,0x02,0x04,0x00}, // `
-    {0x20,0x54,0x54,0x54,0x78}, // a
-    {0x7F,0x48,0x44,0x44,0x38}, // b
-    {0x38,0x44,0x44,0x44,0x20}, // c
-    {0x38,0x44,0x44,0x48,0x7F}, // d
-    {0x38,0x54,0x54,0x54,0x18}, // e
-    {0x08,0x7E,0x09,0x01,0x02}, // f
-    {0x0C,0x52,0x52,0x52,0x3E}, // g
-    {0x7F,0x08,0x04,0x04,0x78}, // h
-    {0x00,0x44,0x7D,0x40,0x00}, // i
-    {0x20,0x40,0x44,0x3D,0x00}, // j
-    {0x7F,0x10,0x28,0x44,0x00}, // k
-    {0x00,0x41,0x7F,0x40,0x00}, // l
-    {0x7C,0x04,0x18,0x04,0x78}, // m
-    {0x7C,0x08,0x04,0x04,0x78}, // n
-    {0x38,0x44,0x44,0x44,0x38}, // o
-    {0x7C,0x14,0x14,0x14,0x08}, // p
-    {0x08,0x14,0x14,0x18,0x7C}, // q
-    {0x7C,0x08,0x04,0x04,0x08}, // r
-    {0x48,0x54,0x54,0x54,0x20}, // s
-    {0x04,0x3F,0x44,0x40,0x20}, // t
-    {0x7C,0x40,0x40,0x40,0x7C}, // u
-    {0x1C,0x20,0x40,0x20,0x1C}, // v
-    {0x3C,0x40,0x30,0x40,0x3C}, // w
-    {0x44,0x28,0x10,0x28,0x44}, // x
-    {0x0C,0x50,0x50,0x50,0x3C}, // y
-    {0x44,0x64,0x54,0x4C,0x44}, // z
-    {0x00,0x08,0x36,0x41,0x00}, // {
-    {0x00,0x00,0x7F,0x00,0x00}, // |
-    {0x00,0x41,0x36,0x08,0x00}, // }
-    {0x10,0x08,0x08,0x10,0x08}, // ~
-    {0x00,0x00,0x00,0x00,0x00}, // DEL
-};
-
-// Draw one character at pixel (x, y). Clipped to the 72x40 framebuffer.
-static void oled_draw_char(int x, int y, char c) {
-    if ((unsigned char)c < 32 || (unsigned char)c > 127) c = '?';
-    const uint8_t *glyph = oled_font[c - 32];
-    for (int col = 0; col < OLED_FONT_W; col++) {
-        int px = x + col;
-        if (px < 0 || px >= OLED_WIDTH) continue;
-        uint8_t bits = glyph[col];
-        for (int row = 0; row < OLED_FONT_H; row++) {
-            int py = y + row;
-            if (py < 0 || py >= OLED_HEIGHT) continue;
-            if (bits & (1 << row)) {
-                s_oled_fb[(py / 8) * OLED_WIDTH + px] |= (1 << (py % 8));
-            }
-        }
-    }
-}
-
-// Draw a NUL-terminated string at pixel (x, y). No wrapping.
-static void oled_draw_text(int x, int y, const char *str) {
-    int cx = x;
-    while (*str && cx < OLED_WIDTH) {
-        oled_draw_char(cx, y, *str++);
-        cx += OLED_CHAR_W;
-    }
-}
-
-// Clear one text line (0-based) and leave the rest of the framebuffer alone.
-static void oled_clear_line(int line) {
-    int y0 = line * OLED_LINE_H;
-    for (int y = y0; y < y0 + OLED_LINE_H && y < OLED_HEIGHT; y++) {
-        for (int x = 0; x < OLED_WIDTH; x++) {
-            s_oled_fb[(y / 8) * OLED_WIDTH + x] &= ~(1 << (y % 8));
-        }
-    }
-}
-
-static void oled_show_status(const char *label) {
-    static char last_label[16] = "";
-    const char *cur = label ? label : "";
-    if (strcmp(last_label, cur) == 0) return;
-    strncpy(last_label, cur, sizeof(last_label) - 1);
-    last_label[sizeof(last_label) - 1] = 0;
-    oled_clear_line(0);
-    if (label) oled_draw_text(0, 0, label);
-    oled_update();
-}
-
-static void led_hw_set_color(rgb_t c) {
-    if (!s_oled_ready) return;
-    if (memcmp(&c, &COLOR_OFF, sizeof(c)) == 0) {
-        // Don't clear the OLED on OFF - keep last status visible.
-        return;
-    } else if (memcmp(&c, &COLOR_BLUE, sizeof(c)) == 0) {
-        oled_show_status("SYNC");
-    } else if (memcmp(&c, &COLOR_GREEN, sizeof(c)) == 0) {
-        oled_show_status("OK");
-    } else if (memcmp(&c, &COLOR_RED, sizeof(c)) == 0) {
-        oled_show_status("ERR");
-    } else if (memcmp(&c, &COLOR_YELLOW, sizeof(c)) == 0) {
-        oled_show_status("WARN");
-    } else if (memcmp(&c, &COLOR_ORANGE, sizeof(c)) == 0) {
-        oled_show_status("BOOT");
-    } else if (memcmp(&c, &COLOR_PURPLE, sizeof(c)) == 0) {
-        oled_show_status("PAIR");
-    } else {
-        // Unknown intermediate color (e.g. breathing) - keep last status, don't flicker.
-    }
-}
-
-// Agent name on lines 1-2, up to 24 characters.
-#if !CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
-static void led_hw_set_title(const char *text) {
-    if (!s_oled_ready) return;
-    oled_clear_line(1);
-    oled_clear_line(2);
-    if (text) {
-        char buf[25];
-        snprintf(buf, sizeof(buf), "%s", text);
-        oled_draw_text(0, OLED_LINE_H, buf);
-        if (strlen(buf) > OLED_COLS) {
-            oled_draw_text(0, 2 * OLED_LINE_H, buf + OLED_COLS);
-        }
-    }
-    oled_update();
-}
-#endif
-
-// Connected: show "Online" on the status line.
-static void led_hw_set_connected(void) {
-    if (!s_oled_ready) return;
-    oled_show_status("Online");
-}
-
-static bool led_hw_init(void) {
-    i2c_config_t cfg = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = OLED_PIN_SDA,
-        .scl_io_num = OLED_PIN_SCL,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = OLED_I2C_FREQ_HZ,
-    };
-    if (i2c_param_config(I2C_NUM_0, &cfg) != ESP_OK ||
-        i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0) != ESP_OK) {
-        ESP_LOGE(TAG, "OLED I2C init failed");
-        return false;
-    }
-
-
-    // SSD1306 init: 128x64 GRAM, visible 72x40 at (30,14), 180-degree rotation.
-    static const uint8_t init_seq[] = {
-        0xAE,             // display off
-        0xD5, 0x80,       // clock divide
-        0xA8, 0x3F,       // multiplex ratio 64
-        0xD3, 0x00,       // display offset 0
-        0x40,             // start line 0
-        0x8D, 0x14,       // charge pump enable
-        0x20, 0x00,       // horizontal addressing mode
-        0xA0,             // segment remap (SEG0 -> col 0), for 180-rot
-        0xC0,             // COM scan normal (COM0 -> COM0), for 180-rot
-        0xDA, 0x12,       // COM pins hardware config
-        0x81, 0xCF,       // contrast
-        0xD9, 0xF1,       // pre-charge period
-        0xDB, 0x40,       // VCOMH deselect level
-        0xA4,             // display from RAM
-        0xA6,             // normal (non-inverted) display
-        0xAF,             // display on
-    };
-    if (oled_write_cmds(init_seq, sizeof(init_seq)) != ESP_OK) {
-        ESP_LOGE(TAG, "OLED init sequence failed");
-        return false;
-    }
-
-    s_oled_ready = true;
-    oled_clear();
-    oled_draw_text(0, 0, "Muse");
-    oled_update();
-
-    ESP_LOGI(TAG, "LED status ready: " OLED_NAME " 72x40 (I2C 0x%02X, SDA=%d SCL=%d)",
-             OLED_I2C_ADDR, OLED_PIN_SDA, OLED_PIN_SCL);
-    return true;
-}
 static bool led_hw_init(void) {
     esp_err_t err = ESP_OK;
 #if CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING
@@ -745,6 +417,195 @@ static bool led_hw_init(void) {
     }
 
     ESP_LOGI(TAG, "LED status ready: %d addressable LED(s) (GPIO=%d)", RING_LEDS, RING_GPIO);
+    return true;
+}
+#elif CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
+// The LED task does all the drawing, so nothing here needs a lock.
+static i2c_master_dev_handle_t s_oled = NULL;
+// One bit per pixel, page-major like the SSD1306: bit 0 is the top row.
+static uint8_t s_oled_fb[OLED_PAGES * OLED_WIDTH];
+// The panel doesn't show s_oled_fb yet. Stays set after a failed write, so
+// the next status frame tries again.
+static bool s_oled_dirty = false;
+static bool s_oled_failed = false;
+static const char *s_oled_status = NULL;
+
+static esp_err_t oled_cmds(const uint8_t *cmds, size_t n) {
+    uint8_t buf[32];
+    if (n + 1 > sizeof(buf)) return ESP_ERR_INVALID_SIZE;
+    buf[0] = 0x00;  // Co=0, D/C#=0: the rest are commands
+    memcpy(buf + 1, cmds, n);
+    return i2c_master_transmit(s_oled, buf, n + 1, 100);
+}
+
+// Copy the frame buffer into the visible window, shifted down to its row.
+static void oled_flush(void) {
+    static uint8_t xfer[OLED_XFER_PAGES][1 + OLED_WIDTH];
+    if (!s_oled || !s_oled_dirty) return;
+    memset(xfer, 0, sizeof(xfer));
+    for (int y = 0; y < OLED_HEIGHT; y++) {
+        const uint8_t *src = &s_oled_fb[(y / 8) * OLED_WIDTH];
+        int dy = y + OLED_ROW_SHIFT;
+        uint8_t *dst = &xfer[dy / 8][1];
+        for (int x = 0; x < OLED_WIDTH; x++) {
+            if (src[x] >> (y % 8) & 1) dst[x] |= 1 << (dy % 8);
+        }
+    }
+    static const uint8_t window[] = {
+        0x21, OLED_COL_OFFSET, OLED_COL_OFFSET + OLED_WIDTH - 1,     // columns
+        0x22, OLED_FIRST_PAGE, OLED_FIRST_PAGE + OLED_XFER_PAGES - 1, // pages
+    };
+    esp_err_t err = oled_cmds(window, sizeof(window));
+    for (int p = 0; p < OLED_XFER_PAGES && err == ESP_OK; p++) {
+        xfer[p][0] = 0x40;  // Co=0, D/C#=1: the rest are data
+        err = i2c_master_transmit(s_oled, xfer[p], sizeof(xfer[p]), 100);
+    }
+    if (err != ESP_OK) {
+        if (!s_oled_failed) ESP_LOGW(TAG, "OLED write failed: %s", esp_err_to_name(err));
+        s_oled_failed = true;
+        return;
+    }
+    s_oled_failed = false;
+    s_oled_dirty = false;
+}
+
+static void oled_clear_lines(int first, int count) {
+    for (int y = first * OLED_LINE_H; y < (first + count) * OLED_LINE_H && y < OLED_HEIGHT; y++) {
+        for (int x = 0; x < OLED_WIDTH; x++) s_oled_fb[(y / 8) * OLED_WIDTH + x] &= ~(1 << (y % 8));
+    }
+    s_oled_dirty = true;
+}
+
+// Draw n characters on a line. Bytes outside printable ASCII show as '?'.
+static void oled_draw_line(int line, const char *text, int n) {
+    if (n > OLED_COLS) n = OLED_COLS;
+    int y0 = line * OLED_LINE_H;
+    for (int i = 0; i < n; i++) {
+        unsigned char ch = (unsigned char)text[i];
+        if (ch < PIXEL_FONT_FIRST || ch > PIXEL_FONT_LAST) ch = '?';
+        const uint8_t *glyph = pixel_font[ch - PIXEL_FONT_FIRST];
+        for (int gx = 0; gx < PIXEL_FONT_WIDTH; gx++) {
+            int x = i * OLED_CHAR_W + gx;
+            for (int gy = 0; gy < PIXEL_FONT_HEIGHT; gy++) {
+                int y = y0 + gy;
+                if (glyph[gx] >> gy & 1) s_oled_fb[(y / 8) * OLED_WIDTH + x] |= 1 << (y % 8);
+            }
+        }
+    }
+    s_oled_dirty = true;
+}
+
+// Text on two lines from `line`, wrapped at a space where one fits and cut
+// off after the second line.
+static void oled_draw_wrapped(int line, const char *text) {
+    oled_clear_lines(line, 2);
+    int n = (int)strlen(text);
+    int first = n;
+    if (n > OLED_COLS) {
+        first = OLED_COLS;
+        for (int i = OLED_COLS; i > 0; i--) {
+            if (text[i] == ' ') {
+                first = i;
+                break;
+            }
+        }
+    }
+    oled_draw_line(line, text, first);
+    const char *rest = text + first;
+    while (*rest == ' ') rest++;
+    oled_draw_line(line + 1, rest, (int)strlen(rest));
+}
+
+// The e-paper status screen's words, shortened to fit two 12-column lines.
+static const char *const OLED_LABELS[] = {
+    [LED_STATE_BOOT]                     = "Starting",
+    [LED_STATE_SETUP_IDLE]               = "Press " CONFIG_HOMEHUB_BUTTON_LABEL " to set up",
+    [LED_STATE_BLE_ADVERTISING]          = "Ready to pair",
+    [LED_STATE_BLE_CONNECTED]            = "Pairing",
+    [LED_STATE_PAIRING_CONFIRM_REQUIRED] = "Press " CONFIG_HOMEHUB_BUTTON_LABEL " to confirm",
+    [LED_STATE_WIFI_CONNECTING]          = "Connecting",
+    [LED_STATE_WIFI_CONNECTED]           = "Connecting",
+    [LED_STATE_AUTH_OK]                  = "Connecting",
+    [LED_STATE_VM_SWITCHING]             = "Connecting",
+    [LED_STATE_VM_OK]                    = "Connecting",
+    [LED_STATE_WS_CONNECTED]             = "Connected",
+    [LED_STATE_WS_DISCONNECTED]          = "Reconnecting",
+    [LED_STATE_UNPAIRED]                 = "Not paired",
+    [LED_STATE_ERROR]                    = "Error",
+};
+
+// Called by the LED task every frame: the status as words, since an OLED has
+// no colours. Retries a failed write.
+static void oled_show_state(led_state_t state) {
+    const char *label = (unsigned)state < sizeof(OLED_LABELS) / sizeof(OLED_LABELS[0])
+                        && OLED_LABELS[state] ? OLED_LABELS[state] : "";
+    if (label != s_oled_status) {
+        s_oled_status = label;
+        oled_draw_wrapped(0, label);
+    }
+    oled_flush();
+}
+
+// The status is drawn from the state (oled_show_state), not from colours.
+static void led_hw_set_color(rgb_t c) {
+    (void)c;
+}
+
+static void led_hw_set_title(const char *text) {
+    oled_draw_wrapped(2, text ? text : "");
+    oled_flush();
+}
+
+static bool led_hw_init(void) {
+    i2c_master_bus_config_t bus_cfg = {
+        .i2c_port = -1,
+        .sda_io_num = OLED_PIN_SDA,
+        .scl_io_num = OLED_PIN_SCL,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = OLED_I2C_ADDR,
+        .scl_speed_hz = OLED_I2C_FREQ_HZ,
+    };
+    i2c_master_bus_handle_t bus = NULL;
+    esp_err_t err = i2c_new_master_bus(&bus_cfg, &bus);
+    if (err == ESP_OK) err = i2c_master_bus_add_device(bus, &dev_cfg, &s_oled);
+    // 128x64 controller, rotated 180 degrees for how the panel is mounted.
+    static const uint8_t init_seq[] = {
+        0xAE,        // display off
+        0xD5, 0x80,  // clock divide
+        0xA8, 0x3F,  // multiplex ratio 64
+        0xD3, 0x00,  // display offset 0
+        0x40,        // start line 0
+        0x8D, 0x14,  // charge pump on
+        0x20, 0x00,  // horizontal addressing
+        0xA0,        // segment remap: SEG0 is column 0
+        0xC0,        // COM scan normal
+        0xDA, 0x12,  // COM pins
+        0x81, 0xCF,  // contrast
+        0xD9, 0xF1,  // pre-charge period
+        0xDB, 0x40,  // VCOMH deselect level
+        0xA4,        // show RAM
+        0xA6,        // not inverted
+        0xAF,        // display on
+    };
+    if (err == ESP_OK) err = oled_cmds(init_seq, sizeof(init_seq));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OLED init failed: %s", esp_err_to_name(err));
+        if (s_oled) i2c_master_bus_rm_device(s_oled);
+        s_oled = NULL;
+        if (bus) i2c_del_master_bus(bus);
+        return false;
+    }
+    // Clear the window: the controller's RAM is random at power-on.
+    s_oled_dirty = true;
+    oled_flush();
+
+    ESP_LOGI(TAG, "LED status ready: " OLED_NAME " OLED (I2C 0x%02X, SDA=%d SCL=%d)",
+             OLED_I2C_ADDR, OLED_PIN_SDA, OLED_PIN_SCL);
     return true;
 }
 #elif CONFIG_HOMEHUB_DISPLAY
@@ -898,7 +759,6 @@ static void led_hw_set_connected(void) {
 // text and cutting off what still does not fit. Bytes outside printable
 // ASCII show as '?'. Skipped while an image is shown. Uses s_bar_buf: LED
 // task only.
-#if !CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
 static void led_hw_set_title(const char *text) {
     if (!s_panel) return;
     const int adv = PIXEL_FONT_WIDTH + 1;
@@ -937,7 +797,6 @@ static void led_hw_set_title(const char *text) {
         xSemaphoreGive(s_lcd_lock);
     }
 }
-#endif
 
 // Skipped while an image is shown. s_anim_buf is shared with image drawing, so
 // each stripe is filled and sent under s_lcd_lock.
@@ -1253,7 +1112,7 @@ static bool led_hw_init(void) {
 #endif
 
 #if !CONFIG_HOMEHUB_DISPLAY
-#if !(CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE || CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306)
+#if !(CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
 static void led_hw_set_connected(void) {
     led_hw_set_color(COLOR_GREEN);
 }
@@ -1412,6 +1271,9 @@ static void led_task(void *arg) {
         s_title_dirty = false;
         xSemaphoreGive(s_mutex);
         if (title_dirty) led_hw_set_title(title);
+#if CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
+        oled_show_state(state);
+#endif
 #if CONFIG_HOMEHUB_VOICE
         if (voice_render()) continue;
 #endif
