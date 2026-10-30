@@ -18,7 +18,7 @@
  * Waveshare ESP32-S3-Touch-LCD-1.46: round 412 px SPD2010 QSPI panel with the
  * controller's own capacitive touch on I2C, PCM5101 I2S DAC for the speaker
  * (no control interface), an I2S MEMS mic on a bus of its own, TCA9554 I/O
- * expander (LCD and touch resets live on its EXIO1/EXIO2 pins), no PMU.
+ * expander (display and touch resets live on its EXIO2/EXIO1 pins), no PMU.
  * BOOT (GPIO0) is the talk button; holding a finger on the face tile also
  * talks. Same shell and pin family as the Touch-LCD-1.85C, with the SPD2010
  * panel the SenseCAP Watcher uses.
@@ -55,7 +55,7 @@
 
 static const char *TAG = "board";
 
-/* Pins (board wiki / vendor demo). */
+/* Pins (board wiki / vendor demo, waveshareteam/ESP32-S3-Touch-LCD-1.46). */
 #define LCD_PCLK GPIO_NUM_40
 #define LCD_D0 GPIO_NUM_46
 #define LCD_D1 GPIO_NUM_45
@@ -78,8 +78,8 @@ static const char *TAG = "board";
 #define TCA9554_ADDR 0x20
 #define TCA9554_OUTPUT_REG 0x01
 #define TCA9554_CONFIG_REG 0x03
-#define EXIO_LCD_RST_BIT BIT(0)     /* EXIO1, to the SPD2010 panel */
-#define EXIO_TOUCH_RST_BIT BIT(1)   /* EXIO2, to its touch side */
+#define EXIO_TOUCH_RST_BIT BIT(0)   /* EXIO1 (TP_RST), to the SPD2010's touch side */
+#define EXIO_LCD_RST_BIT BIT(1)     /* EXIO2 (LCD_RST), to its panel */
 /* EXIO3 is the SD card's CS (kept high: deselected); EXIO4/EXIO5 are driven
  * by the QMI8658's interrupt pins, so they stay inputs. */
 #define EXIO_OUTPUTS (EXIO_LCD_RST_BIT | EXIO_TOUCH_RST_BIT | BIT(2))
@@ -518,8 +518,9 @@ static void wait_buttons(int timeout_ms)
     muse_gpio_buttons_wait((muse_gpio_button_t *const[]){ &s_boot }, 1, timeout_ms);
 }
 
-/* The wiki documents no battery-sense pin for this board, so the meter only
- * knows whether a USB host is on the chip's own port. */
+/* Battery sense (GPIO8) and the PWR button's power hold (GPIO7) aren't
+ * handled yet, so the meter only knows whether a USB host is on the chip's
+ * own port. */
 static esp_err_t read_power(muse_power_t *out)
 {
     out->battery_mv = 0;

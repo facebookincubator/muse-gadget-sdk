@@ -728,8 +728,8 @@ The 1.46 is a 1.46" 412x412 round LCD whose SPD2010 controller (QSPI) also
 scans the capacitive touch, with a PCM5101 speaker DAC and an I2S microphone
 on buses of their own. It runs the full avatar UI: hold a finger on the face
 tile to talk, BOOT for push-to-talk and pairing confirmation, settings on the
-touchscreen. The wiki documents no battery-sense pin, so the battery meter
-only reports USB.
+touchscreen. Battery sense (GPIO8) and the PWR button's power hold (GPIO7)
+aren't handled yet, so run it from USB; the battery meter only reports USB.
 
 It enumerates as the chip's own USB Serial/JTAG port; there's no USB bridge:
 
