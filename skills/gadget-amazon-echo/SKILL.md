@@ -26,8 +26,9 @@ Smart Plug, on amazon.in, 2026-10-04.
   Amazon over the internet, and it acts as the user's Amazon account.
 - Amazon changes authentication without notice; when it breaks, re-auth is
   the fix, not a bug in these steps.
-- Session cookies expire (roughly 14 days). Expect to re-authenticate
-  periodically.
+- The script renews its session cookies from the refresh token, but
+  Amazon can stop accepting the token. Expect the user to re-run the
+  login tool periodically.
 - No voice purchasing, no Drop In, no multi-room changes unless the user
   explicitly asks.
 
@@ -59,20 +60,21 @@ On a Linux Home Link (the Muse Linux client):
   (`/usr/local/bin`, `/usr/bin`, `/bin` and the `sbin` directories), so
   install it there or call it by absolute path.
 - Each command runs in a fresh non-interactive shell; exports from an
-  earlier command do not persist. Keep the settings below in a private
-  env file (mode 0600, owned by the Home Link account) and source it in
-  the same command as every call, e.g.
+  earlier command do not persist. Keep the settings below as `export`
+  lines in a private env file (mode 0600, owned by the Home Link account)
+  and source it in the same command as every call, e.g.
   `. ~/.config/alexa-remote-control.env && alexa-remote-control.sh ...`.
 - Region: set `AMAZON` and `ALEXA` for the user's store — e.g.
   `amazon.com`/`alexa.amazon.com` (US), `amazon.in`/`alexa.amazon.in`
   (India), `amazon.de`/`alexa.amazon.de` (Germany),
-  `amazon.co.uk`/`alexa.amazon.co.uk` (UK). Do not use another region's
-  defaults.
-- Authentication: preferred method is `REFRESH_TOKEN` (obtained via
-  alexa-cookie-cli), which avoids storing the Amazon password. The user
-  performs the login step themselves and puts the token in the env file.
-  Never place the password, OTP, or refresh token in a command line, log,
-  or chat message.
+  `amazon.co.uk`/`alexa.amazon.co.uk` (UK) — and `TTS_LOCALE` for the
+  user's language (e.g. `en-US`, `en-IN`). The script's built-in defaults
+  are German (`amazon.de`, `de-DE`); do not rely on them.
+- Authentication: `REFRESH_TOKEN` (obtained via alexa-cookie-cli) is
+  the script's only working login, and it avoids storing the Amazon
+  password. The user performs the login step themselves and puts the
+  token in the env file. Never place the password, OTP, or refresh token
+  in a command line, log, or chat message.
 - Point `TMP` at a private directory (mode 0700) owned by the Home Link
   account rather than the shared `/tmp`: the script keeps its cookie jar,
   device list and volume cache there. The same OS account must run the
@@ -161,6 +163,9 @@ words and punctuation.
 - Do not create, modify, or delete Alexa routines, alarms, or schedules
   under a control request — those need their own requested scope.
 - Do not enable voice purchasing or change payment settings, ever.
+- `textcommand` and `automation` can trigger anything Alexa can do. Use
+  them only for the device control or query the user asked for — never
+  for purchases, calls, messages, Drop In or account settings.
 - The temperature and motion sensors are readable only through Alexa
   responses and routine triggers, not as direct API values — query via
   `textcommand` (e.g. "what is the room temperature") and treat the
