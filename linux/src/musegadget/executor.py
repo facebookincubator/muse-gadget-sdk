@@ -14,7 +14,8 @@
 
 """The commands a Muse can invoke on this device.
 
-Shell commands and file operations run in child processes as a separate,
+Shell commands, file operations and the owner's drop-in commands
+(``musegadget.commands``) run in child processes as a separate,
 unprivileged account (``run_as``), never as the service account, which owns
 the device credentials. A command gets exactly the access that account has.
 """
@@ -33,8 +34,13 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from typing import Iterable
 
 from musegadget import __version__
+from musegadget.commands import DropInCommand, InvalidCommand
+from musegadget.link_client import (
+    DeviceDescription, MAX_CONTROL_MESSAGE_BYTES, REGISTER_ID_BYTES, encode_message,
+)
 
 log = logging.getLogger(__name__)
 
@@ -42,8 +48,10 @@ DEFAULT_TIMEOUT_S = 120
 MAX_TIMEOUT_S = 600
 # How long to wait for output after killing a timed-out command's process group.
 KILL_GRACE_S = 2
-# How long to keep reading queued output after the shell exits.
+# Bound draining after the direct child exits, even if descendants hold its pipes.
 DRAIN_S = 0.5
+# Give all three pipes a turn, even if one output stream stays readable.
+READ_SLICE_S = 0.01
 # /link-control accepts at most 256 KiB per message from the device; leave
 # room for the JSON envelope and escaping.
 MAX_OUTPUT_BYTES = 96 * 1024
@@ -128,8 +136,38 @@ def error(message: str) -> dict:
 
 
 class Executor:
-    def __init__(self, account: Account) -> None:
+    def __init__(self, account: Account, drop_ins: Iterable[DropInCommand] = ()) -> None:
         self.account = account
+        self._drop_ins = {c.name: c for c in drop_ins if c.name not in COMMAND_SPECS}
+        self.drop_ins = dict(self._drop_ins)
+
+    def specs(self, *, node_id: str = "", display_name: str = "",
+              version: str = __version__) -> dict:
+        """Admit whole definitions in name order using the actual register envelope.
+
+        Service supplies its metadata. Refused definitions aren't executable; the
+        built-ins are always retained. No command count or character-count estimate.
+        """
+        specs = dict(COMMAND_SPECS)
+        device = DeviceDescription(node_id, display_name, version, specs)
+
+        def fits() -> bool:
+            encoded = encode_message(device.register_message("0" * REGISTER_ID_BYTES))
+            return len(encoded) <= MAX_CONTROL_MESSAGE_BYTES
+
+        if not fits():
+            raise ValueError("device metadata and built-in commands exceed the registration budget")
+        admitted = {}
+        for name, command in sorted(self._drop_ins.items()):
+            specs[name] = command.spec
+            if fits():
+                admitted[name] = command
+            else:
+                del specs[name]
+                log.warning("skipping command %s: link.register would exceed %d bytes",
+                            name, MAX_CONTROL_MESSAGE_BYTES)
+        self.drop_ins = admitted
+        return specs
 
     def run(self, command: str, params: dict, timeout_ms: int | None = None) -> dict:
         try:
@@ -139,6 +177,8 @@ class Executor:
                 return self.file_op(command.split(".")[1], params)
             if command == "device.health":
                 return ok(device_health())
+            if command in self.drop_ins:
+                return self.run_drop_in(self.drop_ins[command], params)
         except Exception as exc:
             log.exception("%s failed", command)
             return error(f"{type(exc).__name__}: {exc}")
@@ -170,45 +210,80 @@ class Executor:
         log.info("system.run as %s (timeout %ss)", self.account.name, timeout_s)
         started = time.monotonic()
         try:
-            proc = subprocess.Popen(
-                ["/bin/bash", "-c", command], cwd=cwd,
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                bufsize=0,
-                **self._child_options(),
-            )
+            stdout, stderr, exit_code, timed_out = self._run_child(
+                ["/bin/bash", "-c", command], cwd, timeout_s)
         except OSError as exc:
             return error(f"could not start command: {exc}")
-        timed_out, stdout, stderr = _wait_for_shell(proc, timeout_s)
-        if timed_out:
-            for pipe in (proc.stdout, proc.stderr):
-                if pipe is not None and not pipe.closed:
-                    os.set_blocking(pipe.fileno(), True)
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                more_out, more_err = proc.communicate(timeout=KILL_GRACE_S)
-            except subprocess.TimeoutExpired as exc:
-                # A process that left the group (setsid, a daemon) survived the kill and
-                # still holds the pipes. Keep what was read instead of waiting on it.
-                more_out, more_err = exc.stdout or b"", exc.stderr or b""
-                for pipe in (proc.stdout, proc.stderr):
-                    if pipe is not None:
-                        pipe.close()
-                proc.wait()
-            stdout += more_out
-            stderr += more_err
         out, out_cut = _clip(stdout)
         err, err_cut = _clip(stderr)
         return ok({
             "stdout": out,
             "stderr": err,
-            "exit_code": proc.returncode,
+            "exit_code": exit_code,
             "timed_out": timed_out,
             "truncated": out_cut or err_cut,
             "duration_ms": int((time.monotonic() - started) * 1000),
         })
+
+    def run_drop_in(self, command: DropInCommand, params: dict) -> dict:
+        try:
+            request = json.dumps(command.check_params(params)).encode()
+        except InvalidCommand as exc:
+            return error(str(exc))
+        timeout_s = command.timeout_ms / 1000
+        log.info("%s as %s (timeout %ss)", command.name, self.account.name, timeout_s)
+        try:
+            stdout, stderr, exit_code, timed_out = self._run_child(
+                list(command.argv), self.account.home, timeout_s, stdin=request)
+        except OSError as exc:
+            return error(f"could not start {command.argv[0]}: {exc}")
+        if timed_out:
+            return error(f"{command.name} timed out after {timeout_s:g}s")
+        if exit_code != 0:
+            lines = stderr.decode(errors="replace").strip().splitlines()
+            reason = f": {lines[-1][:500]}" if lines else ""
+            return error(f"{command.name} exited with {exit_code}{reason}")
+        out, cut = _clip(stdout)
+        if not cut:
+            try:
+                payload = json.loads(out)
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict):
+                return ok(payload)
+        return ok({"output": out, "truncated": True} if cut else {"output": out})
+
+    def _run_child(self, argv: list, cwd: str, timeout_s: float,
+                   stdin: bytes | None = None) -> tuple[bytes, bytes, int, bool]:
+        """Run ``argv`` as the account. Returns stdout, stderr, exit code, timed out.
+
+        On timeout the whole process group is killed. Raises OSError if it
+        can't start.
+        """
+        proc = subprocess.Popen(
+            argv, cwd=cwd,
+            stdin=subprocess.DEVNULL if stdin is None else subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+            **self._child_options(),
+        )
+        try:
+            timed_out, stdout, stderr = _wait_for_shell(proc, timeout_s, stdin)
+            if timed_out:
+                _kill_group(proc)
+                _, more_out, more_err = _wait_for_shell(proc, KILL_GRACE_S)
+                stdout = (stdout + more_out)[:MAX_OUTPUT_BYTES + 1]
+                stderr = (stderr + more_err)[:MAX_OUTPUT_BYTES + 1]
+            proc.wait(timeout=KILL_GRACE_S)
+            return stdout, stderr, proc.returncode, timed_out
+        except BaseException:
+            # Close and reap our own child on cancellation or a pipe failure, too.
+            _kill_group(proc)
+            proc.wait(timeout=KILL_GRACE_S)
+            raise
+        finally:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
 
     def file_op(self, op: str, params: dict) -> dict:
         request = json.dumps({**params, "op": op})
@@ -225,21 +300,21 @@ class Executor:
 def _read_available(pipe, deadline: float) -> tuple[bytes, bool]:
     # Stop at the deadline too: a writer that outpaces the reads would
     # otherwise keep this loop from ever seeing an empty pipe.
-    chunks = []
+    chunks = bytearray()
     while time.monotonic() < deadline:
         try:
             chunk = pipe.read(65536)
         except BlockingIOError:
-            return b"".join(chunks), True
+            return bytes(chunks), True
         if chunk is None:
-            return b"".join(chunks), True
+            return bytes(chunks), True
         if chunk == b"":
-            return b"".join(chunks), False
-        chunks.append(chunk)
-    return b"".join(chunks), True
+            return bytes(chunks), False
+        chunks.extend(chunk[:max(0, MAX_OUTPUT_BYTES + 1 - len(chunks))])
+    return bytes(chunks), True
 
 
-def _wait_for_shell(proc, timeout_s: float) -> tuple[bool, bytes, bytes]:
+def _wait_for_shell(proc, timeout_s: float, stdin: bytes | None = None) -> tuple[bool, bytes, bytes]:
     # Wait until the shell exits. Read only bytes already queued so a grandchild
     # that inherited the pipes cannot hold this open until EOF.
     streams: dict = {}
@@ -247,21 +322,40 @@ def _wait_for_shell(proc, timeout_s: float) -> tuple[bool, bytes, bytes]:
         if pipe is None:
             continue
         os.set_blocking(pipe.fileno(), False)
-        streams[pipe] = []
+        streams[pipe] = bytearray()
     watching = list(streams)
+    pending = memoryview(stdin or b"")
+    writer = proc.stdin if proc.stdin is not None and pending else None
+    if writer is not None:
+        os.set_blocking(writer.fileno(), False)
+    elif proc.stdin is not None:
+        proc.stdin.close()
     deadline = time.monotonic() + timeout_s
     while proc.poll() is None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return True, _joined(streams, proc.stdout), _joined(streams, proc.stderr)
-        if not watching:
+        if not watching and writer is None:
             time.sleep(min(remaining, 0.05))
             continue
-        ready, _, _ = select.select(watching, [], [], min(remaining, 0.05))
+        ready, writable, _ = select.select(
+            watching, [writer] if writer is not None else [], [], min(remaining, 0.05))
+        if writable:
+            try:
+                sent = os.write(writer.fileno(), pending[:4096])
+                pending = pending[sent:]
+            except BlockingIOError:
+                pass
+            except BrokenPipeError:
+                pending = pending[len(pending):]
+            if not pending:
+                writer.close()
+                writer = None
         for pipe in ready:
-            data, still_open = _read_available(pipe, deadline)
+            data, still_open = _read_available(
+                pipe, min(deadline, time.monotonic() + READ_SLICE_S))
             if data:
-                streams[pipe].append(data)
+                _keep_output(streams[pipe], data)
             if not still_open:
                 watching.remove(pipe)
     drain_deadline = time.monotonic() + DRAIN_S
@@ -270,12 +364,24 @@ def _wait_for_shell(proc, timeout_s: float) -> tuple[bool, bytes, bytes]:
             continue
         data, _ = _read_available(pipe, drain_deadline)
         if data:
-            streams[pipe].append(data)
+            _keep_output(streams[pipe], data)
     return False, _joined(streams, proc.stdout), _joined(streams, proc.stderr)
 
 
 def _joined(streams: dict, pipe) -> bytes:
-    return b"".join(streams.get(pipe, ()))
+    return bytes(streams.get(pipe, b""))
+
+
+def _keep_output(buffer: bytearray, data: bytes) -> None:
+    # One extra byte lets _clip report truncation without retaining unbounded output.
+    buffer.extend(data[:max(0, MAX_OUTPUT_BYTES + 1 - len(buffer))])
+
+
+def _kill_group(proc) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def _clip(data: bytes) -> tuple[str, bool]:

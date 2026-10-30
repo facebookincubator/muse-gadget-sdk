@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <s3|s3n|s3-216|mosaico|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear> [serial|port]
+#   tools/muse/board.sh build|flash <s3|s3n|s3-216|s3-206|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -22,22 +22,26 @@
 # MUSE_BENCH=1 adds devices/sdkconfig.muse-bench (screenshots) and builds and
 # flashes in build-muse-<profile>-bench/, so neither build's sdkconfig hides
 # the other's.
+# MUSE_VIDEO=1 adds devices/sdkconfig.muse-video (the phone camera over
+# Wi-Fi, on boards whose panel driver has draw_frame) in build-muse-<profile>-video/.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master
 # (IDF_EXPORT_S31) and Espressif's esp-mosaico-utils (MOSAICO_UTILS), and
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|185c|146|mosaico|aipi|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear}
+cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|s3-206|185c|146|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
     s3n)     profile=waveshare-s3-175;     target=esp32s3 ;;
     s3-216)  profile=waveshare-s3-216;     target=esp32s3 ;;
+    s3-206)  profile=waveshare-s3-206;     target=esp32s3 ;;
     185c)    profile=waveshare-s3-185c;    target=esp32s3 ;;
     146)     profile=waveshare-s3-146;     target=esp32s3 ;;
     # ESP-Mosaico: ESP-IDF master (IDF_EXPORT_S31, default ~/.espressif/esp-idf-s31).
     mosaico) profile=esp-mosaico;          target=esp32s31 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;
+    atk-box) profile=atk-dnesp32s3-box;     target=esp32s3 ;;
     echoear) profile=ostb-echoear-2st; target=esp32s3 ;;
     box3)    profile=espressif-box-3;       target=esp32s3 ;;
     c6)      profile=waveshare-c6-18;      target=esp32c6 ;;
@@ -48,12 +52,15 @@ case $board in
     cardputer-adv) profile=m5stack-cardputer-adv; target=esp32s3 ;;
     sticks3) profile=m5stack-sticks3;      target=esp32s3 ;;
     stopwatch) profile=m5stack-stopwatch;  target=esp32s3 ;;
+    xiao147) profile=seeed-xiao-s3-147;    target=esp32s3 ;;
     cores3)  profile=m5stack-cores3;       target=esp32s3 ;;
     fnk0104b) profile=fnk0104b;            target=esp32s3 ;;
     jc3248w535) profile=guition-jc3248w535; target=esp32s3 ;;
     lcd7) profile=waveshare-s3-lcd7; target=esp32s3 ;;
     lcd128) profile=waveshare-s3-lcd128; target=esp32s3 ;;
     vn183)   profile=vn-s3-183;            target=esp32s3 ;;
+    p4lcd35) profile=waveshare-p4-lcd35;   target=esp32p4 ;;
+    rorolee) profile=deotaland-rorolee;    target=esp32s3 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.
@@ -83,6 +90,9 @@ command -v idf.py >/dev/null 2>&1 || { echo "idf.py not found; activate ESP-IDF 
 cd "$root"
 B=build-muse-$profile
 defaults="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-$profile"
+if [ -n "${MUSE_VIDEO:-}" ]; then
+    B=$B-video; defaults="$defaults;devices/sdkconfig.muse-video"
+fi
 if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"
 fi

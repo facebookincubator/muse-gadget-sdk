@@ -36,6 +36,9 @@
 #include "muse_text.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 
 static const char *TAG = "muse_menu";
 
@@ -69,6 +72,9 @@ typedef enum {
     ITEM_SLEEP,
     ITEM_PHONE,
     ITEM_WIFI,
+#if CONFIG_MUSE_VIDEO
+    ITEM_CAMERA,
+#endif
     ITEM_INFO,
     ITEM_BATTERY,
     ITEM_RESET,
@@ -86,6 +92,9 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_SLEEP] = "Auto-sleep",
     [ITEM_PHONE] = "Phone setup",
     [ITEM_WIFI] = "Wi-Fi",
+#if CONFIG_MUSE_VIDEO
+    [ITEM_CAMERA] = "Phone camera",
+#endif
     [ITEM_INFO] = "Status",
     [ITEM_BATTERY] = "Battery",
     [ITEM_RESET] = "Reset pairing",
@@ -103,6 +112,9 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_SLEEP] = "Change",
     [ITEM_PHONE] = "Toggle",
     [ITEM_WIFI] = "Toggle",
+#if CONFIG_MUSE_VIDEO
+    [ITEM_CAMERA] = "Open",
+#endif
     [ITEM_INFO] = "Open",
     [ITEM_BATTERY] = "Open",
     [ITEM_RESET] = "Select",
@@ -222,6 +234,11 @@ static void value_text(int item, char *buf, size_t n)
         muse_wifi_status(&w);
         strlcpy(buf, WIFI_VALUES[w.state], n);
         break;
+#if CONFIG_MUSE_VIDEO
+    case ITEM_CAMERA:
+        strlcpy(buf, muse_video_has_client() ? "Ready" : "No phone", n);
+        break;
+#endif
     case ITEM_BATTERY:
         p = muse_state_power();
         if (p.usb || p.battery_pct < 0) {
@@ -354,7 +371,9 @@ static void show(view_t view)
     case VIEW_POWER: {
         char text[96];
         snprintf(text, sizeof(text), "Turn Muse off?\n\nPress the %s button to turn it back on.",
-                 muse_board->keyboard ? "GO" : muse_board->aux_button);
+                 muse_board->keyboard      ? "GO"
+                 : muse_board->wake_button ? muse_board->wake_button
+                                           : muse_board->aux_button);
         set_text(s_title, "POWER OFF");
         set_text(s_page, text);
         set_text(s_hint_down, muse_board->keyboard ? "Esc Cancel" : "Cancel");
@@ -411,6 +430,12 @@ static void activate(int item, int direction)
     case ITEM_WIFI:
         muse_settings_set_wifi_on(!muse_settings_wifi_on());
         break;
+#if CONFIG_MUSE_VIDEO
+    case ITEM_CAMERA:
+        muse_menu_close();
+        muse_video_open();
+        return;
+#endif
     case ITEM_INFO:
         show(VIEW_STATUS);
         return;
@@ -492,20 +517,30 @@ bool muse_menu_is_open(void)
     return s_open;
 }
 
-/* On the bottom bar, on the side of the button's face icon. */
-static void align_on_bar(lv_obj_t *l, lv_align_t icon, int pad)
+/* Where on the bottom bar a button's hint goes, from its face icon: -1 left,
+ * 0 middle, 1 right. An icon centred on an edge goes by the side it's moved to. */
+static int bar_slot(const muse_button_hint_t *icon)
 {
-    switch (icon) {
+    switch (icon->align) {
     case LV_ALIGN_BOTTOM_LEFT:
     case LV_ALIGN_LEFT_MID:
-        lv_obj_align(l, LV_ALIGN_BOTTOM_LEFT, 2 * pad, -pad);
-        break;
+        return -1;
     case LV_ALIGN_BOTTOM_MID:
-        lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -pad);
-        break;
+    case LV_ALIGN_TOP_MID:
+        return (icon->x > 0) - (icon->x < 0);
     default:
+        return 1;
+    }
+}
+
+static void align_on_bar(lv_obj_t *l, int slot, int pad)
+{
+    if (slot < 0) {
+        lv_obj_align(l, LV_ALIGN_BOTTOM_LEFT, 2 * pad, -pad);
+    } else if (slot == 0) {
+        lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -pad);
+    } else {
         lv_obj_align(l, LV_ALIGN_BOTTOM_RIGHT, -2 * pad, -pad);
-        break;
     }
 }
 
@@ -577,6 +612,7 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     lv_obj_set_style_bg_color(rule, lv_color_hex(COLOR_RULE), 0);
     lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
     lv_obj_align(rule, LV_ALIGN_BOTTOM_MID, 0, -hint_h);
+    int select = bar_slot(talk);
     s_hint_down = label(s_root, font, COLOR_TEXT, "");
     if (aux_side) {
         /* Reads downwards, the arrow pointing down; centred on the icon's
@@ -588,10 +624,16 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
         lv_obj_align(s_hint_down, LV_ALIGN_CENTER, (w - strip) / 2, aux->y);
     } else {
         s_down_text = muse_board->keyboard ? "Esc Back" : LV_SYMBOL_DOWN " Down";
-        align_on_bar(s_hint_down, aux->align == LV_ALIGN_RIGHT_MID ? LV_ALIGN_BOTTOM_LEFT : aux->align, pad);
+        int down = aux->align == LV_ALIGN_RIGHT_MID ? -1 : bar_slot(aux);
+        /* Two buttons on one side (the ATK-DNESP32S3-BOX's K1 and K0, both
+         * top right) put Down one place left of Select. */
+        if (down == select) {
+            down = select > -1 ? select - 1 : 0;
+        }
+        align_on_bar(s_hint_down, down, pad);
     }
     s_hint_select = label(s_root, font, COLOR_TEXT, "");
-    align_on_bar(s_hint_select, talk->align, pad);
+    align_on_bar(s_hint_select, select, pad);
 }
 
 bool muse_menu_tick(float now)
