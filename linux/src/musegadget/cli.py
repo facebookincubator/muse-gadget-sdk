@@ -155,7 +155,9 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
         print(f"Could not reach the musegadget service: {exc}", file=sys.stderr)
         return 1
     if not reply.get("ok"):
-        print(f"Not delivered: {reply.get('error') or reply}", file=sys.stderr)
+        unknown = reply.get("sent") == "unknown"
+        prefix = "May not have been delivered" if unknown else "Not delivered"
+        print(f"{prefix}: {reply.get('error') or reply}", file=sys.stderr)
         return 1
     if args.wait:
         from musegadget.link_client import printable

@@ -166,9 +166,11 @@ never has a command's parameters, output or error message.
   (`message_id`); the reply appears in the Muse chat. Replies are text: to
   speak them, use a text-to-speech API of your choice.
 - `send-user-msg --wait` (the local socket's `"wait"`) opens `/chat/subscribe`
-  before sending, follows the request with `MuseTurn` and returns the answer's
-  text. One waiting request per chat at a time; the whole wait, queueing
-  included, is bounded by its seconds.
+  before sending and returns the answer's text: what follows the message's own
+  `message.user` event, as on the ESP32, read through `MuseTurn`. A new side
+  chat is created by the message, so it is sent first. One waiting request per
+  chat at a time; the whole wait, queueing and cleanup included, is bounded by
+  its seconds.
 - The VM accepts at most 256 KB per `/link-control` message, so command output
   is cut at 96 KB per stream.
 

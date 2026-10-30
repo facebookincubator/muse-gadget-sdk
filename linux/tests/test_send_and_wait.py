@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from musegadget import cli, config
+from musegadget import cli, config, service as service_module
 from musegadget.link_client import HttpStreamError
 from musegadget.noise import ApplicationResponse, BodyChunk, Header, ServiceFrame
 from musegadget.service import send_and_wait
@@ -43,9 +43,13 @@ def event(name, message_id=None, *, parent=None, session="main", **payload):
     return {"type": "event", "event": name, "payload": data}
 
 
+# The request's own message, which the answer follows.
+NOTE = {"type": "event", "event": "message.user",
+        "payload": {"session_id": "main", "message_id": "u1", "role": "user", "text": "what is 2 + 2?"}}
 # How Muse answers on the main chat: no reply_to_message_id, a start and a done
 # without a parent, and text deltas that name the reply itself as their parent.
 ANSWER = [
+    NOTE,
     event("agent.status", activity_code="thinking"),
     event("delta.message_start", "r1"),
     event("delta.text_append", "r1", parent="r1", text="Four"),
@@ -62,17 +66,20 @@ class ChatSession:
 
     registered_at = 1.0
 
-    def __init__(self, *, refuse: int | None = None, ack: dict = ACK) -> None:
+    def __init__(self, *, refuse: int | None = None, refuse_once: bool = False,
+                 ack: dict = ACK) -> None:
         self.events: asyncio.Queue = asyncio.Queue()
         self.log: list = []
         self.refuse = refuse
+        self.refuse_once = refuse_once
         self.ack = ack
         self.open = 0
 
     async def subscribe_chat(self, session_id=None, *, opened=None):
         self.log.append(("subscribe", session_id))
         if self.refuse:
-            raise HttpStreamError(self.refuse, "/chat/subscribe")
+            status, self.refuse = self.refuse, (None if self.refuse_once else self.refuse)
+            raise HttpStreamError(status, "/chat/subscribe")
         self.open += 1
         opened.set()
         try:
@@ -118,11 +125,12 @@ def test_reply_to_another_message_is_not_the_answer():
     async def scenario():
         session = ChatSession()
         session.answer([
+            NOTE,
             event("delta.message_start", "other", parent="someone-else"),
             event("delta.text_append", "other", parent="other", text="Not yours"),
             event("delta.message_done", "other", display_text="Not yours"),
             event("message.assistant", "elsewhere", session="side", display_text="Wrong chat"),
-            *ANSWER,
+            *ANSWER[1:],
         ])
         result = await send_and_wait(session, send_of(session), None, 5)
         assert result["reply"] == "Four."
@@ -130,10 +138,129 @@ def test_reply_to_another_message_is_not_the_answer():
     run(scenario())
 
 
+def test_an_earlier_answer_still_arriving_is_not_taken_for_this_one():
+    async def scenario():
+        session = ChatSession()
+        session.answer([
+            # Muse finishing something asked earlier, before this message appears.
+            event("message.assistant", "old", display_text="Yesterday's answer"),
+            event("task.status", status="completed"),
+        ])
+        waiting = asyncio.ensure_future(send_and_wait(session, send_of(session), None, 5))
+        await asyncio.sleep(0.3)
+        assert not waiting.done()
+        session.answer(ANSWER)
+        assert (await waiting)["reply"] == "Four."
+
+    run(scenario())
+
+
+def test_a_reply_naming_the_message_counts_wherever_it_falls():
+    async def scenario():
+        session = ChatSession()
+        session.answer([
+            event("message.assistant", "r1", parent="u1", display_text="Named."),
+            event("task.status", status="completed"),
+        ])
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Named."
+
+    run(scenario())
+
+
+def test_a_message_sent_from_elsewhere_ends_the_answer_but_not_a_reply_under_way():
+    async def scenario():
+        session = ChatSession()
+        session.answer([
+            NOTE,
+            event("delta.message_start", "r1"),
+            event("delta.text_append", "r1", parent="r1", text="Fo"),
+            {"type": "event", "event": "message.user",
+             "payload": {"session_id": "main", "message_id": "app-1", "role": "user"}},
+            event("delta.message_start", "app-answer"),
+            event("delta.message_done", "app-answer", display_text="For the app"),
+            event("delta.text_append", "r1", parent="r1", text="ur."),
+            event("delta.message_done", "r1", display_text="Four."),
+        ])
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Four."
+
+    run(scenario())
+
+
+def test_a_repeated_seq_is_dropped():
+    async def scenario():
+        session = ChatSession()
+        rows = [dict(item, seq=number) for number, item in enumerate([
+            NOTE,
+            event("delta.message_start", "r1"),
+            event("delta.text_append", "r1", parent="r1", text="Four"),
+            event("delta.text_append", "r1", parent="r1", text="."),
+            event("delta.message_done", "r1"),  # no final text: the deltas are the answer
+            event("task.status", status="completed"),
+        ], 1)]
+        session.answer(rows[:3] + rows[2:3] + rows[3:])  # a delta sent twice
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Four."
+
+    run(scenario())
+
+
+def test_a_new_side_chat_is_created_by_the_message_then_followed():
+    async def scenario():
+        session = ChatSession(refuse=404, refuse_once=True,
+                              ack={**ACK, "response": {"message_id": "u1", "session_id": "new-chat",
+                                                       "is_thread": True}})
+        session.answer([event(item["event"], session="new-chat",
+                              **{k: v for k, v in item["payload"].items() if k != "session_id"})
+                        for item in ANSWER[2:]])  # its message event came before the subscription
+        result = await send_and_wait(session, send_of(session, session_id="new-chat"), "new-chat", 5)
+        assert result["reply"] == "Four."
+        assert [entry[0] for entry in session.log] == ["subscribe", "send", "subscribe"]
+
+    run(scenario())
+
+
+def test_a_stalled_transport_cannot_hold_the_caller_past_its_deadline():
+    async def scenario():
+        release = asyncio.Event()
+
+        async def stubborn():
+            while not release.is_set():
+                try:
+                    await asyncio.sleep(10)
+                except asyncio.CancelledError:
+                    continue  # like a send that finishes its frames before giving up
+
+        class Stalled(ChatSession):
+            async def send_chat(self, message, session_id=None):
+                await stubborn()
+
+            async def subscribe_chat(self, session_id=None, *, opened=None):
+                opened.set()
+                try:
+                    await asyncio.sleep(3600)
+                    yield {}
+                finally:
+                    await stubborn()  # a stream reset stuck behind the stalled send
+
+        session = Stalled()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        result = await send_and_wait(session, send_of(session), None, 0.3)
+        assert loop.time() - started < 0.3 + service_module.CLEANUP_S + 0.5
+        assert result == {"ok": False, "sent": "unknown",
+                          "error": "Muse did not acknowledge the message within 0.3 seconds"}
+        release.set()
+
+    asyncio.run(asyncio.wait_for(scenario(), 10))
+
+
 def test_several_answer_messages_are_joined_and_controls_removed():
     async def scenario():
         session = ChatSession()
         session.answer([
+            NOTE,
             event("delta.message_start", "r1"),
             event("delta.message_done", "r1", display_text="Let me check.\x1b[2J"),
             event("delta.message_start", "r2", parent="r1"),
@@ -150,6 +277,7 @@ def test_an_unfinished_message_is_not_an_answer_yet():
     async def scenario():
         session = ChatSession()
         session.answer([
+            NOTE,
             event("agent.status", activity_code="working"),
             event("message.assistant", "r1", display_text="", display_text_ready=False),
         ])
@@ -168,7 +296,7 @@ def test_an_unfinished_message_is_not_an_answer_yet():
 def test_no_answer_in_time_says_so_after_the_message_was_acknowledged():
     async def scenario():
         session = ChatSession()
-        session.answer([event("agent.status", activity_code="working")])
+        session.answer([NOTE, event("agent.status", activity_code="working")])
         result = await send_and_wait(session, send_of(session), None, 0.3)
         assert result == {**ACK, "reply": None, "detail": "no answer within 0.3 seconds"}
 
@@ -179,6 +307,7 @@ def test_wait_running_out_mid_answer_returns_what_arrived_as_partial():
     async def scenario():
         session = ChatSession()
         session.answer([
+            NOTE,
             event("agent.status", activity_code="working"),
             event("delta.message_start", "r1"),
             event("delta.message_done", "r1", display_text="Looking into it."),
@@ -192,7 +321,7 @@ def test_wait_running_out_mid_answer_returns_what_arrived_as_partial():
 def test_task_finished_without_text_is_an_empty_answer():
     async def scenario():
         session = ChatSession()
-        session.answer([event("task.status", status="completed")])
+        session.answer([NOTE, event("task.status", status="completed")])
         result = await send_and_wait(session, send_of(session), None, 10)
         assert result["reply"] == ""
 
@@ -213,7 +342,7 @@ def test_refused_subscription_sends_nothing():
 def test_subscription_ending_mid_wait_is_reported():
     async def scenario():
         session = ChatSession()
-        session.answer([event("agent.status", activity_code="working"), None])
+        session.answer([NOTE, event("agent.status", activity_code="working"), None])
         result = await send_and_wait(session, send_of(session), None, 5)
         assert result == {**ACK, "reply": None, "detail": "Muse closed the reply stream"}
 
@@ -363,6 +492,8 @@ def local_reply(monkeypatch):
      "Looking.\n", "Muse was still answering: no answer within 30 seconds\n"),
     ({"ok": False, "error": "not connected to the Muse"}, 1, "",
      "Not delivered: not connected to the Muse\n"),
+    ({"ok": False, "sent": "unknown", "error": "Muse did not acknowledge the message within 30 seconds"},
+     1, "", "May not have been delivered: Muse did not acknowledge the message within 30 seconds\n"),
 ])
 def test_cli_prints_the_answer(local_reply, capsys, answer, code, out, err):
     received, reply = local_reply
