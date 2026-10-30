@@ -28,12 +28,16 @@
 
 #include "app.h"
 #include "config_store.h"
+#include "identity.h"
 #include "wifi_mgr.h"
 
 #include "muse_link.h"
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_REALTIME_VOICE
+#include "muse_voice_call.h"
+#endif
 
 // The session task's stack is in PSRAM, where reading flash would crash, so
 // what it asks for comes from here rather than NVS.
@@ -97,3 +101,10 @@ void muse_state_page(bool cjk, int *cols, int *lines) {
     *cols = 16;
     *lines = 2;
 }
+
+#if CONFIG_MUSE_REALTIME_VOICE
+// The call names Link's node as its device (a RAM string set at boot).
+const char *muse_voice_call_device_id(void) {
+    return identity_node_id();
+}
+#endif

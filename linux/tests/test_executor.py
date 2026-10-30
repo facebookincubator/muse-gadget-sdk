@@ -220,3 +220,44 @@ def test_file_paths_must_be_absolute(ex, monkeypatch):
 def test_device_health_reports_basics(ex):
     payload = ex.run("device.health", {})["payload"]
     assert payload["version"] and payload["hostname"] and "disk_gb" in payload
+
+
+@pytest.mark.parametrize("deadline, expected_reads", [(0.0, 0), (0.5, 2), (1.0, 4)])
+def test_read_available_stops_at_deadline_with_a_continuously_readable_pipe(
+    monkeypatch, deadline, expected_reads,
+):
+    # A real writer can briefly empty its pipe even without the deadline guard.
+    # Model a slower reader with data queued on every read, independent of OS
+    # scheduling. The finite read ceiling also makes a removed guard fail rather
+    # than hanging pytest or allocating unbounded output.
+    clock = SimpleNamespace(now=0.0)
+
+    class ContinuouslyReadablePipe:
+        reads = 0
+
+        def read(self, size):
+            assert size == 65536
+            self.reads += 1
+            assert self.reads <= 8, "reader ignored its deadline on a continuously readable pipe"
+            clock.now += 0.25
+            return b"queued output"
+
+    monkeypatch.setattr(executor, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    pipe = ContinuouslyReadablePipe()
+    output, still_open = executor._read_available(pipe, deadline)
+    assert pipe.reads == expected_reads
+    assert output == b"queued output" * expected_reads
+    assert still_open is True  # Stopped at the deadline, not because of EOF.
+
+
+def test_file_write_without_overwrite_uses_the_child_protocol(ex, tmp_path, monkeypatch):
+    _child_env_passes_pythonpath(monkeypatch)
+    target = tmp_path / "new"
+    request = {"path": str(target), "data_b64": "aGk=", "final": True, "overwrite": False}
+    assert ex.run("file.write", request)["ok"]
+    assert target.read_bytes() == b"hi"
+    request["data_b64"] = "bmV3"
+    result = ex.run("file.write", request)
+    assert result == {"ok": False, "error": "file exists and overwrite is false"}
+    assert target.read_bytes() == b"hi"
+    assert not (tmp_path / ".new.musegadget-partial").exists()

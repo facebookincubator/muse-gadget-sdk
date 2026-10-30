@@ -17,6 +17,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "esp_lv_adapter.h"
 
@@ -63,6 +64,21 @@ void muse_lcd_bands_run(void (*fn)(void *arg), void *arg);
  * then goes out at a moment its write won't meet the panel's scan (usually
  * at once): no tear line where the scan would have passed the write. Logs
  * the refresh period, and how many bands it held or couldn't keep clear,
- * every 1000 bands. Call it after muse_lcd_bands_register.
+ * every 1000 bands. Call it after muse_lcd_bands_register. Frames drawn with
+ * muse_lcd_bands_frame are timed the same way.
  */
 void muse_lcd_bands_set_te(int gpio);
+
+/*
+ * Draws the rectangle (x1, y1)-(x2, y2) (end exclusive) without LVGL, in
+ * pieces of `rows` rows (even; fewer if a piece wouldn't fit chunk_bytes):
+ * fill(dst, stride, row, rows, arg) writes rows [row, row + rows) of the
+ * rectangle in the panel's byte order into dst, which is 16-byte aligned,
+ * stride bytes a row. Runs on the send task (fill too) and returns once the
+ * last piece has gone. LVGL must be paused or have nothing to draw there.
+ */
+/* The panel's gap (esp_lcd_panel_set_gap), for muse_lcd_bands_frame, which
+ * writes the panel's memory directly. */
+void muse_lcd_bands_set_gap(int x, int y);
+typedef void (*muse_lcd_fill_fn)(uint8_t *dst, int stride, int row, int rows, void *arg);
+void muse_lcd_bands_frame(int x1, int y1, int x2, int y2, int rows, muse_lcd_fill_fn fill, void *arg);

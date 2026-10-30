@@ -74,7 +74,7 @@ class StopWatchPower(unittest.TestCase):
         path = Path(self.tmp.name) / (name + ".c")
         path.write_text(code)
         cc = shlex.split(os.environ.get("CC", "cc"))
-        result = subprocess.run(cc + ["-std=gnu11", "-Wall", "-Wextra", "-Werror", str(path), "-o", str(path.with_suffix(""))],
+        result = subprocess.run(cc + ["-std=gnu11", "-Wall", "-Wextra", "-Werror", str(path), "-o", str(path.with_suffix("")), "-lm"],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         return path.with_suffix("")
@@ -354,17 +354,25 @@ static void board_audio_power(bool on) { note(on ? "amp-on" : "amp-off"); }
 static int board_audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic) {
     note("audio-init"); *spk = &spk_dev; *mic = init_null ? NULL : &mic_dev; return init_err;
 }
+static int pdm_init(void) { note("pdm-init"); return ESP_OK; }
+static int pdm_power(bool on) { note(on ? "pdm-on" : "pdm-off"); return ESP_OK; }
+static int pdm_read(int16_t *mono, size_t frames) { (void)mono; (void)frames; return ESP_OK; }
 static struct {
     int (*audio_init)(esp_codec_dev_handle_t *, esp_codec_dev_handle_t *);
     void (*set_mic_gain)(esp_codec_dev_handle_t, int);
     void (*audio_power)(bool);
     void (*codec_power)(bool);
-} board = { board_audio_init, NULL, board_audio_power, board_codec_power }, *muse_board = &board;
+    int (*mic_init)(void);
+    int (*mic_power)(bool);
+    int (*mic_read)(int16_t *, size_t);
+} board = { .audio_init = board_audio_init, .audio_power = board_audio_power,
+            .codec_power = board_codec_power }, *muse_board = &board;
 #include <math.h>
 #define CHANNELS 2
 #define HPF_HZ 80.0f
 #define MUSE_AUDIO_RATE 16000
 static float s_hpf_a;
+static float s_mic_scale;
 static esp_codec_dev_handle_t s_spk;
 static esp_codec_dev_handle_t s_mic;
 static bool s_open;
@@ -419,6 +427,14 @@ int main(int argc, char **argv) {
             expect(want[i]);
             assert(!s_open && !locked);
         }
+    } else if (test == 5) {
+        board.mic_init = pdm_init; board.mic_power = pdm_power; board.mic_read = pdm_read;
+        s_spk = s_mic = NULL; s_open = false; s_lock = NULL;
+        assert(muse_audio_init(50, 20) == ESP_OK);
+        expect("pdm-init pdm-on ");
+        assert(s_open && s_mic_scale > 9.9f && s_mic_scale < 10.1f);
+        muse_audio_power(false); expect("pdm-off ");
+        muse_audio_power(true); expect("pdm-on ");
     } else {   /* other boards (no codec_power): unchanged, setters reach a closed codec as before */
         board.codec_power = NULL;
         muse_audio_power(false); expect("amp-off close-spk close-mic ");
@@ -428,7 +444,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 '''
-        self.run_cases(self.build("audio", code), 5)
+        self.run_cases(self.build("audio", code), 6)
         init = function(audio, "muse_audio_init")
         self.assertLess(init.index("codec_power(true)"), init.index("muse_board->audio_init("))
 

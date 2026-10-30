@@ -16,6 +16,7 @@
 
 #include "muse_settings.h"
 
+#include <stdatomic.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -23,6 +24,7 @@
 #include "freertos/semphr.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "sdkconfig.h"
 
 #include "muse_link.h"
 
@@ -55,6 +57,8 @@ static struct {
 };
 
 static SemaphoreHandle_t s_lock;
+/* StopWatch samples this at the next press, never during an active call. */
+static atomic_bool s_voice_notes;
 static nvs_handle_t s_nvs;
 static muse_setting_cb_t s_listener;
 
@@ -119,6 +123,11 @@ esp_err_t muse_settings_init(void)
         s.speaker_on = b;
     }
     load_u8("mic_gain", &s.mic_gain);
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+    if (nvs_get_u8(s_nvs, "voice_notes", &b) == ESP_OK) {
+        atomic_store(&s_voice_notes, b != 0);
+    }
+#endif
     load_u8("bright", &s.brightness);
     nvs_get_u16(s_nvs, "sleep_s", &s.sleep_s);
     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
@@ -154,6 +163,14 @@ int muse_settings_brightness(void) { return s.brightness; }
 int muse_settings_sleep_s(void) { return s.sleep_s; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
+bool muse_settings_voice_notes(void) { return atomic_load(&s_voice_notes); }
+
+void muse_settings_set_voice_notes(bool on)
+{
+    atomic_store(&s_voice_notes, on);
+    save_u8("voice_notes", on);
+    notify(MUSE_SETTING_VOICE_NOTES);
+}
 
 /* Home Link owns the saved networks (this is the first); the local copy is only a fallback. */
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1])

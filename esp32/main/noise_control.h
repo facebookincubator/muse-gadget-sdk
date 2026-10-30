@@ -96,10 +96,18 @@ void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result);
 
-// ---- Extra daemon requests on this session (Muse builds only) ----
+// ---- Extra daemon requests on this session (CONFIG_HOMEHUB_DAEMON_REQUESTS) ----
 //
 // Any task can open an HTTP request to the VM daemon on its own stream of this
-// session. A refused or reset request never affects the control session.
+// session: Muse's voice notes and chat, or an app's own calls (the chat
+// history, files on the user's VM). A refused or reset request never
+// affects the control session. Up to 3 run at once; queued body bytes are
+// capped (4 KB without PSRAM, 16 KB with it), and one send of more than 8 KB
+// (4 KB on Muse boards without PSRAM, 2 KB on the Cardputer ADV and AI
+// Passport) can't be framed and ends that request. Each response frame has to fit
+// the session's inbound buffer (12 KB, 17 KB on Muse boards without PSRAM): a
+// larger one ends the whole session, which reconnects, and the request with
+// NOISE_CTRL_REQ_TOO_LARGE. Ask for responses that stay under it.
 //
 // The callback runs on the session task and must return quickly. status is the
 // HTTP status on the response head (with any inline body), 0 on a later body
@@ -122,6 +130,10 @@ bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
 // Cancels the request. Until the session task gets to the cancel, the callback
 // may still run, even with -1 if the session ends, so ctx must stay valid.
 void noise_ctrl_req_cancel(int64_t id);
+// The daemon may send a reply body in one frame, and a frame larger than this
+// board's buffers ends the session (NOISE_CTRL_REQ_TOO_LARGE). A request whose
+// reply could be larger should bound it to this many bytes, e.g. with Range.
+size_t noise_ctrl_req_max_body(void);
 
 #ifdef __cplusplus
 }

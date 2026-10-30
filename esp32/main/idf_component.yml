@@ -18,3 +18,12 @@ dependencies:
   espressif/led_strip: "~3.0"
   idf:
     version: ">=5.1"
+  # The Waveshare P4 3.5's Wi-Fi and BLE are on its ESP32-C6, over SDIO.
+  espressif/esp_hosted:
+    version: "~2.12.13"
+    rules:
+      - if: '$CONFIG{MUSE_BOARD_ID} == "waveshare_p4_lcd35"'
+  espressif/esp_wifi_remote:
+    version: "~1.4.2"
+    rules:
+      - if: '$CONFIG{MUSE_BOARD_ID} == "waveshare_p4_lcd35"'
