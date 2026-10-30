@@ -15,7 +15,7 @@
 # VIEWESMART SmartRing-Plus: ESP32-S3-N16R8, 360x360 round ST77916 display with
 # CST816 touch, ES8311 speaker/mic, 16 MB flash, 8 MB octal PSRAM.
 # Native USB Serial/JTAG (303a:1001). BOOT is GPIO0 and is inside the case;
-# the on-screen mic is the talk button. Power-off is the hardware switch only.
+# the on-screen mic is the talk button. Power-off is the switch.
 # BSP viewesmart/smartring_plus 1.1.2 is vendored at
 # components_vendor/viewesmart__smartring_plus. Load last, after sdkconfig.defaults
 # and sdkconfig.muse.

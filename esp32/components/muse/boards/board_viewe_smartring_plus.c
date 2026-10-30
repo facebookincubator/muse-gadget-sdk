@@ -33,8 +33,9 @@
  * 16 kHz duplex bus. The ES8311 is set up here as on the other single-ES8311
  * boards, MCLK = 256 x Fs (the rate Muse's esp_codec_dev_open() asks of I2S).
  *
- * Power: the hardware switch only, so there is no power_off and Settings has
- * no Power off.
+ * Power: the switch. The BSP's GPIO47 soft power-off (bsp_power_shutdown())
+ * hasn't been checked with this port, so there is no power_off and Settings
+ * has no Power off.
  *
  * No display_pause: pausing LVGL on battery would stop the touch input that
  * is this board's only reachable way to wake the screen, since BOOT is inside
@@ -195,8 +196,8 @@ static const muse_board_t s_board = {
     .mic_slot = 0,              /* one mic, on the left slot */
     .poll_buttons = poll_buttons,
     .read_power = read_power,
-    /* No .power_off: the hardware switch controls power, so Settings leaves
-     * Power off out. */
+    /* No .power_off: the switch controls power, so Settings leaves Power off
+     * out. */
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

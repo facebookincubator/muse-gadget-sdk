@@ -12,7 +12,7 @@ Board Support Package (BSP) for **SmartRing-Plus** —— SmartRing-Plus develop
 
 This component wraps the board’s verified peripherals behind a stable `bsp_*` API so application code does not hard-code pins, init sequences, or bus wiring.
 
-Vendored into muse-gadget-sdk. The Muse board file uses this BSP for the display, touch, shared I2C bus and battery only. It does not call `bsp_audio_init()` (that opens the codec and leaves the speaker muted) or `bsp_power_shutdown()`. Audio is a 16 kHz I2S in `components/muse/boards/board_viewe_smartring_plus.c`. Power-off is the hardware switch; Muse's `power_off()` returns `ESP_ERR_NOT_SUPPORTED`.
+Vendored into muse-gadget-sdk. The Muse board file uses this BSP for the display, touch, shared I2C bus and battery only. It does not call `bsp_audio_init()` (that opens the codec and leaves the speaker muted) or `bsp_power_shutdown()`. Audio is a 16 kHz I2S in `components/muse/boards/board_viewe_smartring_plus.c`. Muse leaves `power_off` out, so Settings has no Power off; turn the board off with its switch.
 
 ```c
 #include "bsp/smartring_plus.h"

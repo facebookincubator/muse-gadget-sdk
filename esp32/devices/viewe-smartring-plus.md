@@ -1,8 +1,9 @@
 # VIEWE SmartRing-Plus
 
-This profile runs Muse's avatar, touch settings, on-screen push-to-talk,
-images, BLE setup, Wi-Fi, and the home-network tunnel on the VIEWESMART
-SmartRing-Plus (ESP32-S3-N16R8).
+This profile builds Muse's avatar, touch settings, on-screen push-to-talk,
+images, BLE setup, Wi-Fi, and the home-network tunnel for the VIEWESMART
+SmartRing-Plus (ESP32-S3-N16R8). Pairing with the Muse app and everything that
+needs it are untested on this board; see Hardware verification below.
 
 Buy it from [VIEWE](https://viewedisplay.com/product/smart-ring-plus-esp32-ai-chatbot-1-8-inch-smart-touch-display/).
 
@@ -47,8 +48,9 @@ open. `board_viewe_smartring_plus.c` builds a 16 kHz duplex I2S
 (`MUSE_AUDIO_RATE`) and returns separate speaker and mic handles. `mic_slot`
 is 0.
 
-There is no soft power-off, so Settings has no Power off. Turn the board off
-with the hardware switch.
+The board file leaves `power_off` out, so Settings has no Power off. The BSP
+has a GPIO47 soft power-off (`bsp_power_shutdown()`), but it hasn't been
+checked with this port. Turn the board off with its switch.
 
 The board leaves `display_pause` out. Pausing LVGL on battery would also stop
 touch, and with BOOT inside the case touch is the only way to wake the screen.

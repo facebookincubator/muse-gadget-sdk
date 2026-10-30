@@ -393,6 +393,9 @@ their upstream licenses:
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- [`components_vendor/viewesmart__smartring_plus/`](components_vendor/viewesmart__smartring_plus),
+  VIEWE's SmartRing-Plus BSP, is Apache-2.0 under its own copyright. See its
+  [`LICENSE`](components_vendor/viewesmart__smartring_plus/LICENSE).
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.
