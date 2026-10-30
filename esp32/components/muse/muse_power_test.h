@@ -21,7 +21,8 @@
 #include "esp_err.h"
 
 /* Diagnostic BSP loads, NOT a model of the normal application's power.
- * USB bridge UART: 115200 baud, newline-delimited commands/replies.
+ * Console (the bridge UART at 115200 baud, or a board's console hooks):
+ * newline-delimited commands/replies.
  *   >ptest.arm={"run_id":"bench-1","settle_ms":5000,"capture_ms":20000,"repeats":1}
  *   >ptest.status[=<request_id>]    >ptest.results    >ptest.abort
  * Optional request_id: 1..32 alphanumeric/_/- characters, echoed in status
@@ -29,8 +30,11 @@
  * Replies: one JSON object per line after "PTEST ", schema=1.
  * Arm ACK is not the run start. First absent VBUS read starts the sweep;
  * last_usb_present_us..vbus_removed_us brackets that edge (100ms gate poll).
- * Optional fifth arm key: "matrix":"peripheral" (default, version 1) or
- * "sleep" (version 2, one repeat only: external cold codec state is irreversible).
+ * Optional arm keys: "matrix":"peripheral" (default, version 1) or
+ * "sleep" (version 2, one repeat only: external cold codec state is irreversible);
+ * "usb_powered":1 starts on the next poll with VBUS present (peripheral only);
+ * "charging_off":1 disables battery charging for the run where the board
+ * supports it, else the arm is rejected (docs/power/km003c.md).
  * Event timestamps use esp_timer_get_time() + timeline_offset_us, continuing
  * the run epoch across validated timer-deep resumes with RTC uncertainty.
  * ACK/status/results identify matrix/version/resumes/offset/uncertainty; plan
@@ -51,7 +55,7 @@
 
 typedef struct {
     uint8_t dac[7], adc[4];
-    uint8_t dac_mask, adc_mask, adc_variant; /* 0 unknown, 1 ES7243, 2 ES7243E */
+    uint8_t dac_mask, adc_mask, adc_variant; /* 0 unknown, 1 ES7243, 2 ES7243E, 3 ES7210 */
     bool expected; /* value evidence only; transport failures are separate errors */
 } muse_ptest_codec_regs_t;
 
