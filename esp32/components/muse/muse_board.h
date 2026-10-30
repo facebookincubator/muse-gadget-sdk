@@ -23,7 +23,15 @@
 #include "driver/gpio.h"
 #include "esp_codec_dev.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
+#if CONFIG_MUSE_UI_FREEINK
+/* FreeInk boards build without LVGL; its types stay opaque here. */
+typedef struct _lv_display_t lv_display_t;
+typedef struct _lv_indev_t lv_indev_t;
+typedef uint8_t lv_align_t;
+#else
 #include "lvgl.h"
+#endif
 
 #include "muse_state.h"
 
@@ -75,6 +83,7 @@ typedef struct {
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */
     const char *aux_button;     /* "bottom" */
+    const char *wake_button;    /* wakes it from power off, if not aux_button: "K0" */
     muse_button_hint_t talk_hint;   /* mic icon; the menu's hints follow both */
     muse_button_hint_t aux_hint;    /* power or menu icon; left out, there's none */
     /* Optional dedicated POWER and speaker controls, independent of AUX. */
@@ -105,6 +114,11 @@ typedef struct {
      * so the chip can light-sleep. Buttons still wake it. NULL: LVGL keeps
      * running. */
     void (*display_pause)(bool pause);
+    /* FreeInk boards (CONFIG_MUSE_UI_FREEINK): the touch point while a
+     * finger is down, in screen coordinates (width x height, as above).
+     * FreeInk drives the panel, so these boards leave display_start and the
+     * display hooks above NULL. */
+    bool (*touch_read)(int16_t *x, int16_t *y);
     /*
      * Video (CONFIG_MUSE_VIDEO): draws a rectangle (end exclusive) straight
      * to the panel, bypassing LVGL, in pieces of `rows` rows that
