@@ -190,7 +190,7 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
  * muse_hatch_caption_at, a page's last line starts the next one, so paging
  * through shows every line.
  */
-int muse_hatch_caption_page(const char *text, int page, char *out, size_t cap)
+int muse_chat_caption_page(const char *text, int page, char *out, size_t cap)
 {
     if (!cap) return 0;
     out[0] = '\0';

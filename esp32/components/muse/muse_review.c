@@ -29,7 +29,7 @@ static SemaphoreHandle_t s_lock;
 static char *s_text;
 static uint32_t s_turn, s_next_turn, s_version;
 static bool s_have_turn, s_active;
-static int s_page, s_pages = 1;
+static int s_page, s_pages;   /* s_pages: 0 until the text is paged */
 
 esp_err_t muse_review_init(void)
 {
@@ -60,11 +60,11 @@ void muse_review_store(uint32_t turn, const char *text)
             s_have_turn = true;
             s_active = false;
             s_page = 0;
-            s_pages = 1;
         } else if (s_text[0]) {
             strlcat(s_text, "\n\n", REVIEW_CAP);
         }
         strlcat(s_text, text, REVIEW_CAP);
+        s_pages = 0;   /* steps before the next paging aren't clamped to the old count */
         /* Truncation must not leave half a UTF-8 character at the end. */
         size_t len = strlen(s_text);
         if (len) {
@@ -91,7 +91,7 @@ bool muse_review_step(int direction)
         } else {
             s_page += direction;
             if (s_page < 0) s_page = 0;
-            if (s_page >= s_pages) s_page = s_pages - 1;
+            if (s_pages && s_page >= s_pages) s_page = s_pages - 1;
         }
     }
     xSemaphoreGive(s_lock);
@@ -122,7 +122,7 @@ bool muse_review_page(char *out, size_t cap, int *page, int *pages)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool active = s_active && s_text && s_text[0];
     if (active) {
-        s_pages = muse_hatch_caption_page(s_text, s_page, out, cap);
+        s_pages = muse_chat_caption_page(s_text, s_page, out, cap);
         if (s_pages) muse_text_to_ascii(out, cap);
         if (!s_pages) {
             s_active = active = false;
@@ -145,9 +145,10 @@ bool muse_review_frame(muse_review_view_t *view, char *out, size_t cap, bool *ch
     bool active = s_active && s_text && s_text[0];
     uint32_t version = s_version;
     xSemaphoreGive(s_lock);
-    if (active && (!view->shown || view->version != version)) {
+    if (active && (!view->shown || view->stale || view->version != version)) {
         /* Another store or step in between moves the version again: the next frame catches it. */
         view->version = version;
+        view->stale = false;
         active = muse_review_page(out, cap, &view->page, &view->pages);
         *changed = active;
     }

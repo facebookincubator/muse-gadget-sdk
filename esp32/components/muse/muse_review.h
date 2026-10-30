@@ -41,6 +41,7 @@ bool muse_review_page(char *out, size_t cap, int *page, int *pages);
 typedef struct {
     uint32_t version;
     bool shown;
+    bool stale;   /* set when the page layout changes: the page is wrapped again */
     int page, pages;
 } muse_review_view_t;
 

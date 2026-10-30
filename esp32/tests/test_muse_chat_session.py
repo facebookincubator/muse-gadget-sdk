@@ -95,7 +95,7 @@ static void on_dictation_end(bool) {}
 static void log_marks() {}
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 /* The real review store, read back whole: one page holds all of it here. */
-int muse_hatch_caption_page(const char *text, int, char *out, size_t cap) {
+int muse_chat_caption_page(const char *text, int, char *out, size_t cap) {
     strlcpy(out, text, cap); return 1;
 }
 void muse_text_to_ascii(char *, size_t) {}

@@ -93,7 +93,7 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap);
 /* Manual pages, with the same word/UTF-8 wrapping as automatic captions.
  * Returns the total number of pages; page is clamped to that range. */
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-int muse_hatch_caption_page(const char *text, int page, char *out, size_t cap);
+int muse_chat_caption_page(const char *text, int page, char *out, size_t cap);
 #endif
 
 #ifdef __cplusplus

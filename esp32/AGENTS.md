@@ -193,6 +193,12 @@ which fails on its USB bridge (see "Flash it"). Build the Watcher with
 more, except the StickS3, StickC Plus2, Cardputer ADV and AI Passport, which have 8 MB and use
 `partitions_muse_8mb.csv`.
 
+On the Watcher, rotation opens and pages through the latest reply. A short
+wheel click sleeps/wakes; a 300 ms hold starts push-to-talk. Pairing still
+confirms on the initial press. `muse_review.c` keeps up to 32 KB of the reply
+in PSRAM across the end of the turn. `>review.next`, `>review.prev`, and
+`>review.close` exercise navigation over the serial console.
+
 All boards share `managed_components/` and `dependencies.lock` in this
 directory. If the component manager fails after you switch between a board
 with the full UI and one without (lvgl is the usual offender), delete both and build again.
@@ -286,12 +292,6 @@ flash size and status backend.
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
-
-On the Watcher, rotation opens and pages through the latest reply. A short
-wheel click sleeps/wakes; a 300 ms hold starts push-to-talk. Pairing still
-confirms on the initial press. `muse_review.c` keeps up to 32 KB of the reply
-in PSRAM across the end of the turn. `>review.next`, `>review.prev`, and
-`>review.close` exercise navigation over the serial console.
 
 ### Flash it
 

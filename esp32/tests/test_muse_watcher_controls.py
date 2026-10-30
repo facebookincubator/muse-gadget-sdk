@@ -65,23 +65,23 @@ static void pairing(void) {
 static void pages(void) {
     char text[256];
     const char *reply = "the quick brown fox jumps over the lazy dog";
-    assert(muse_hatch_caption_page(reply, 0, text, sizeof(text)) == 4);
+    assert(muse_chat_caption_page(reply, 0, text, sizeof(text)) == 4);
     assert(!strcmp(text, "the quick\nbrown fox"));
-    assert(muse_hatch_caption_page(reply, 1, text, sizeof(text)) == 4);
+    assert(muse_chat_caption_page(reply, 1, text, sizeof(text)) == 4);
     assert(!strcmp(text, "brown fox\njumps over"));
-    assert(muse_hatch_caption_page(reply, 999, text, sizeof(text)) == 4);
+    assert(muse_chat_caption_page(reply, 999, text, sizeof(text)) == 4);
     assert(!strcmp(text, "the lazy\ndog"));
-    assert(muse_hatch_caption_page(reply, -99, text, sizeof(text)) == 4);
+    assert(muse_chat_caption_page(reply, -99, text, sizeof(text)) == 4);
     assert(!strcmp(text, "the quick\nbrown fox"));
-    assert(!muse_hatch_caption_page("", 0, text, sizeof(text)) && !text[0]);
-    assert(!muse_hatch_caption_page(reply, 0, text, 0));
+    assert(!muse_chat_caption_page("", 0, text, sizeof(text)) && !text[0]);
+    assert(!muse_chat_caption_page(reply, 0, text, 0));
     cols = 4; lines = 2;
-    assert(muse_hatch_caption_page("一二三四五，六七八九十", 0, text, sizeof(text)) == 2);
+    assert(muse_chat_caption_page("一二三四五，六七八九十", 0, text, sizeof(text)) == 2);
     assert(!strcmp(text, "一二三四\n五，六七"));
-    assert(muse_hatch_caption_page("一二三四五，六七八九十", 1, text, sizeof(text)) == 2);
+    assert(muse_chat_caption_page("一二三四五，六七八九十", 1, text, sizeof(text)) == 2);
     assert(!strcmp(text, "五，六七\n八九十"));
     cols = 10; lines = 1;
-    assert(muse_hatch_caption_page(reply, 2, text, sizeof(text)) == 5);
+    assert(muse_chat_caption_page(reply, 2, text, sizeof(text)) == 5);
     assert(!strcmp(text, "jumps over"));
 }
 /* A full Watcher read page of CJK (18 x 9, three bytes a character) is more
@@ -97,10 +97,10 @@ static void cjk_capacity(void) {
     }
     *w = 0;
     char page[400], joined[sizeof(reply)] = "", last[64] = "";
-    int total = muse_hatch_caption_page(reply, 0, page, sizeof(page));
+    int total = muse_chat_caption_page(reply, 0, page, sizeof(page));
     assert(total > 1);
     for (int i = 0; i < total; i++) {
-        assert(muse_hatch_caption_page(reply, i, page, sizeof(page)) == total);
+        assert(muse_chat_caption_page(reply, i, page, sizeof(page)) == total);
         assert(strlen(page) < sizeof(page));
         char *line = page, *next;
         for (int n = 0; line; n++, line = next) {
@@ -185,6 +185,26 @@ static void view(void) {
     muse_review_store(turn, "more");   /* the same turn's next message updates the page */
     assert(muse_review_frame(&v, out, sizeof(out), &changed) && changed && !strcmp(out, "new reply\nmore"));
     assert(muse_review_turn() != turn);
+    cols = 5;   /* a new layout wraps the same page again */
+    v.stale = true;
+    assert(muse_review_frame(&v, out, sizeof(out), &changed) && changed && !strcmp(out, "new\nreply"));
+    v.stale = true;   /* and after review, still hands back the live caption */
+    muse_review_close();
+    assert(!muse_review_frame(&v, out, sizeof(out), &changed) && changed);
+}
+/* Turns before the first paging aren't lost to the old page count. */
+static void fast_turns(void) {
+    cols = 10; lines = 2;
+    muse_review_init();
+    muse_review_store(muse_review_turn(), "the quick brown fox jumps over the lazy dog");
+    assert(muse_review_step(1));   /* opens on page 1 */
+    assert(muse_review_step(1) && muse_review_step(1));
+    char text[256]; int page, total;
+    assert(muse_review_page(text, sizeof(text), &page, &total) && page == 3 && total == 4);
+    for (int i = 0; i < 9; i++) muse_review_step(1);
+    assert(muse_review_page(text, sizeof(text), &page, &total) && page == 4);
+    muse_review_step(-1);   /* known count now: one back is page 3 */
+    assert(muse_review_page(text, sizeof(text), &page, &total) && page == 3);
 }
 static void long_reply(void) {
     cols = 10; lines = 2;
@@ -277,6 +297,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "retained")) retained();
     else if (!strcmp(argv[1], "long")) long_reply();
     else if (!strcmp(argv[1], "view")) view();
+    else if (!strcmp(argv[1], "fast")) fast_turns();
     else if (!strcmp(argv[1], "routing")) routing();
     else if (!strcmp(argv[1], "threshold")) threshold();
     else if (!strcmp(argv[1], "empty")) nothing_to_review();
@@ -323,6 +344,9 @@ int main(int argc, char **argv) {
 
     def test_closing_review_returns_the_live_caption(self):
         self.run_case("view")
+
+    def test_turns_before_the_first_paging_count(self):
+        self.run_case("fast")
 
     def test_screen_keeps_review_apart_from_the_live_caption(self):
         source = (MUSE / "muse_ui.c").read_text()

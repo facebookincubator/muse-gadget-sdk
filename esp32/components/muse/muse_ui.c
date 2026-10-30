@@ -1623,6 +1623,9 @@ static void update_status(muse_mode_t mode, float now)
         if (layout != s_page_for) {
             muse_state_set_page(s_answers[layout].cols, s_answers[layout].lines);
             s_page_for = layout;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+            view.stale = true;   /* a page wrapped for the old layout is wrapped again */
+#endif
         }
         if (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING) {
             answer = layout;
