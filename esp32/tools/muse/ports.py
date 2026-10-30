@@ -30,6 +30,7 @@ import sys
 USJ = (0x303A, 0x1001)      # the chip's own USB Serial/JTAG
 CH342 = (0x1A86, 0x55D2)    # WCH dual UART bridge: two ports per device
 CH9102 = (0x1A86, 0x55D4)   # WCH single UART bridge
+CH343 = (0x1A86, 0x55D3)    # WCH single UART bridge on the Waveshare 7-inch, 1.28-inch and P4 3.5 LCDs
 CP210X = (0x10C4, 0xEA60)   # Silicon Labs CP2104 bridge
 
 
@@ -46,15 +47,28 @@ def _usbs(usb):
 USB = {
     "s3": USJ,
     "s3n": USJ,
+    "s3-216": USJ,
+    "s3-206": USJ,
+    "185c": USJ,
     "aipi": USJ,
+    "atk-box": USJ,
     "box3": USJ,
+    "echoear": USJ,
     "c6": USJ,
+    "c6-206": USJ,
     "sticks3": USJ,
     "cardputer-adv": USJ,
     "stopwatch": USJ,
+    "xiao147": USJ,
     "cores3": USJ,
     "fnk0104b": USJ,
     "jc3248w535": USJ,
+    "lcd7": CH343,
+    "lcd128": CH343,
+    "vn183": USJ,
+    "ai-passport": USJ,
+    "p4lcd35": CH343,
+    "rorolee": USJ,
     "lcd19": USJ,
     "watcher": CH342,   # the ESP32-S3 on the second port; the Himax camera chip is on the first
     "plus2": CH9102,
@@ -62,11 +76,11 @@ USB = {
 }
 # Boards whose console takes Muse's serial commands (tools/muse/chat.py). The
 # Watcher reads them on its CH342 port with MUSE_CONSOLE_UART.
-COMMANDS = ("s3", "s3n", "aipi", "box3", "c6", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd19")
+COMMANDS = ("s3", "s3n", "s3-216", "s3-206", "185c", "aipi", "atk-box", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "xiao147", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "ai-passport", "echoear", "p4lcd35", "rorolee", "lcd19")
 # Bridges that drop bytes when a whole packet arrives at once, so writes to them
 # go 64 bytes at a time at the line rate (paced_esptool.py, chat.Board.write).
 PACED = (CH342,)
-KINDS = {USJ: "Espressif USB Serial/JTAG", CH342: "CH342 bridge", CH9102: "CH9102 bridge",
+KINDS = {USJ: "Espressif USB Serial/JTAG", CH342: "CH342 bridge", CH9102: "CH9102 bridge", CH343: "CH343 bridge",
          CP210X: "CP2104 bridge"}
 
 

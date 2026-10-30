@@ -33,9 +33,10 @@ namespace musegadgets::noise::core {
 // Result for one inbound encrypted websocket payload.
 //
 // When `frame_status == InboundFrameStatus::Complete`, `frame` contains views
-// into the caller-provided `serviceResponseScratch` passed to
-// `ProcessInboundWebSocketPayload`. Header views use the caller-provided
-// `headerStorage`. Both buffers must outlive use of `frame`.
+// into the caller-provided `transportFrameScratch` (a message that arrived in
+// one transport frame) or `serviceResponseScratch` (one reassembled from
+// several) passed to `ProcessInboundWebSocketPayload`. Header views use the
+// caller-provided `headerStorage`. These buffers must outlive use of `frame`.
 struct ClientSessionInboundResult {
   InboundFrameStatus frame_status{InboundFrameStatus::NeedMore};
   Status status{OkStatus()};
@@ -115,6 +116,34 @@ class ClientSession {
   [[nodiscard]] StatusWithSize WriteNextOutboundWebSocketPayload(
       ByteSpan websocketPayloadScratchAndOut) noexcept;
 
+  // Where SealBodyChunkInPlace put the encrypted websocket payload.
+  struct InPlacePayload {
+    Status status{OkStatus()};
+    size_t offset{0};
+    size_t size{0};
+  };
+
+  // Encodes and encrypts one BodyChunk (end_body false) around data that
+  // already sits at `buffer[dataOffset, +dataSize)`, with no copy of it: the
+  // frame headers go in the bytes before it and the tag after it. On success
+  // the websocket payload is `buffer[offset, +size)`, the same bytes that
+  // StartOutboundBodyChunk and WriteNextOutboundWebSocketPayload produce.
+  // Needs no outbound message in progress, a chunk that fits one transport
+  // frame, up to kMaxBodyChunkInPlaceHeadroom bytes before the data and
+  // Transport::kTagSize after it. Fails without changing state if not; a
+  // failed seal fails the session.
+  static constexpr size_t kMaxBodyChunkInPlaceHeadroom = 64;
+  [[nodiscard]] InPlacePayload SealBodyChunkInPlace(
+      ServiceType service,
+      int64_t streamId,
+      ByteSpan buffer,
+      size_t dataOffset,
+      size_t dataSize) noexcept;
+
+  // A message that arrives in one transport frame is decoded where it was
+  // decrypted, in `transportFrameScratch`; only messages split across frames
+  // are reassembled in `serviceResponseScratch`. The decoded frame's views
+  // point into whichever holds the message.
   [[nodiscard]] ClientSessionInboundResult ProcessInboundWebSocketPayload(
       ConstByteSpan websocketPayload,
       ByteSpan transportFrameScratch,

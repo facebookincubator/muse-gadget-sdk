@@ -28,12 +28,20 @@
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static muse_hatch_state_t s_result = MUSE_HATCH_UNTESTED;
 static char s_detail[48];
+static char s_vm_id[64];
 
 void muse_hatch_report(muse_hatch_state_t state, const char *detail)
 {
     portENTER_CRITICAL(&s_lock);
     s_result = state;
     strlcpy(s_detail, detail, sizeof(s_detail));
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void muse_hatch_report_vm(const char *vm_id)
+{
+    portENTER_CRITICAL(&s_lock);
+    strlcpy(s_vm_id, vm_id, sizeof(s_vm_id));
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -54,6 +62,7 @@ void muse_hatch_test(void)
 void muse_hatch_config_changed(void)
 {
     muse_hatch_report(MUSE_HATCH_UNTESTED, "");
+    muse_hatch_report_vm("");
     muse_hatch_chat_forget();
 }
 
@@ -62,11 +71,13 @@ void muse_hatch_status(muse_hatch_status_t *out)
     if (!muse_hatch_configured()) {
         out->state = MUSE_HATCH_NOT_SET;
         strlcpy(out->detail, "Pair in the Muse app", sizeof(out->detail));
+        out->vm_id[0] = '\0';
         return;
     }
     portENTER_CRITICAL(&s_lock);
     out->state = s_result;
     strlcpy(out->detail, s_detail, sizeof(out->detail));
+    strlcpy(out->vm_id, s_vm_id, sizeof(out->vm_id));
     portEXIT_CRITICAL(&s_lock);
     if (!muse_wifi_connected() && out->state != MUSE_HATCH_TESTING) {
         out->state = MUSE_HATCH_OFFLINE;

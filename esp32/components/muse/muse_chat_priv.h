@@ -33,6 +33,8 @@ extern "C" {
 bool muse_hatch_configured(void);
 /* Session task -> status shown in settings and over BLE. */
 void muse_hatch_report(muse_hatch_state_t state, const char *detail);
+/* The VM the session connected to, for the settings page; empty forgets it. */
+void muse_hatch_report_vm(const char *vm_id);
 
 /* Asks the session task to (re)connect now. */
 void muse_hatch_chat_connect(void);
