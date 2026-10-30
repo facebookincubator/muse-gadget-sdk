@@ -198,6 +198,7 @@ status screen.
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 | UI, touch, push-to-talk, settings, images (unverified) | [S3 2.06 setup](devices/waveshare-s3-206.md) |
+| Waveshare ESP32-S3-Touch-AMOLED-1.32 (experimental) | UI, touch, settings; push-to-talk, images, audio and battery unverified | `tools/muse/board.sh build s3-132` |
 | OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
 | ALIENTEK ATK-DNESP32S3-BOX V1.1 | UI, push-to-talk, two-key menu, images | `tools/muse/board.sh build atk-box`, see [setup](devices/atk-dnesp32s3-box.md) |
@@ -384,6 +385,10 @@ their upstream licenses:
 - [`components/muse/boards/ostb_echoear_display_init.h`](components/muse/boards/ostb_echoear_display_init.h),
   the ST77916 panel initialization table from 78/xiaozhi-esp32, is MIT, as its
   retained upstream notice says.
+- [`components/muse/boards/waveshare_s3_132_display_init.h`](components/muse/boards/waveshare_s3_132_display_init.h),
+  the panel sequence from [Waveshare's official 1.32 BSP v1.0.1](https://github.com/waveshareteam/Waveshare-ESP32-components/blob/c77caf968fa6b11f3b6a416c853c578d012a8cea/bsp/esp32_s3_touch_amoled_1_32/esp32_s3_touch_amoled_1_32.c#L50-L62),
+  is Apache-2.0 with local changes documented in its header. See the
+  [retained license](components/muse/boards/waveshare_s3_132_display_init.LICENSE).
 - [`main/epd_ssd1677.c`](main/epd_ssd1677.c), the reTerminal Sticky SSD1677
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
   Sticky's Link status profile), is MIT and retains the source's copyright and
