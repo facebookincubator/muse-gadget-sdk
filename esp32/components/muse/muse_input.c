@@ -41,7 +41,9 @@
 #include "muse_mem.h"
 #include "muse_menu.h"
 #include "muse_settings.h"
-#include "muse_settings_ui.h"
+#if !CONFIG_MUSE_UI_FREEINK
+#include "muse_settings_ui.h"   /* LVGL only; e-paper builds use FreeInk */
+#endif
 #include "muse_state.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
@@ -832,6 +834,8 @@ static bool console_command(char *line, bool whole)
     if (!strncmp(line, "ui.settings=", 12)) {
         if (muse_settings_ui_bench_open(line + 12)) {
             muse_ui_bench_page(true);
+        } else {
+            printf("@ui.error unknown settings page \"%s\": home wifi muse ble sound sleep battery power\n", line + 12);
         }
         return true;
     }
