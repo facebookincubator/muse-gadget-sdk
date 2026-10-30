@@ -28,29 +28,37 @@ if(CONFIG_MUSE_ENABLED)
         "muse_console.c"
         "muse_state.c"
         "muse_battery.c"
-        "muse_ui.c"
         "muse_audio.c"
         "muse_pmu.c"
         "muse_input.c"
-        "muse_menu.c"
         "muse_voice.c"
         "muse_adpcm.c"
         "muse_settings.c"
-        "muse_settings_ui.c"
         "muse_text.c"
-        "muse_keypad.c"
-        "muse_lv_mem.c"
         "muse_link.c"
         "muse_ble.c")
+    if(CONFIG_MUSE_UI_FREEINK)
+        # E-paper: FreeInk draws the face, Settings and the keyboard.
+        list(APPEND srcs "eink/muse_eink_ui.cpp" "eink/muse_eink_settings.cpp" "eink/muse_eink_fonts.cpp")
+        # The LVGL UI's fonts, as the TTFs LVGL builds them from (eink/fonts/).
+        list(APPEND embed "eink/fonts/montserrat.ttf" "eink/fonts/symbols.ttf" "eink/fonts/unscii.ttf")
+    else()
+        list(APPEND srcs "muse_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c" "muse_lv_mem.c")
+    endif()
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
+        if(CONFIG_MUSE_REALTIME_VOICE)
+            list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
+        endif()
     else()
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
     endif()
     list(APPEND srcs "muse_chat_text.c")
-    if(CONFIG_MUSE_CJK_FONT)
-        list(APPEND srcs "fonts/muse_font_cjk_16.c")   # captions' CJK fallback
+    if(CONFIG_MUSE_CJK_FONT_NOTO)
+        list(APPEND srcs "fonts/muse_font_cjk_noto_16.c")   # captions' CJK fallback
+    elseif(CONFIG_MUSE_CJK_FONT)
+        list(APPEND srcs "fonts/muse_font_cjk_16.c")
     endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
@@ -68,15 +76,19 @@ if(CONFIG_MUSE_ENABLED)
     elseif(CONFIG_MUSE_BOARD_OSTB_ECHOEAR_2ST)
         list(APPEND srcs "boards/board_ostb_echoear_2st.c")
     elseif(CONFIG_MUSE_BOARD_RETERMINAL_STICKY)
-        list(APPEND srcs "boards/board_reterminal_sticky.c" "../../main/epd_ssd1677.c")
+        list(APPEND srcs "boards/board_reterminal_sticky.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_216)
         list(APPEND srcs "boards/board_waveshare_s3_216.c" "boards/muse_lcd_bands.c")
+    elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_206)
+        list(APPEND srcs "boards/board_waveshare_s3_206.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_185C)
         list(APPEND srcs "boards/board_waveshare_s3_185c.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_ESP_MOSAICO)
         list(APPEND srcs "boards/board_esp_mosaico.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_AIPI)
         list(APPEND srcs "boards/board_aipi.c")
+    elseif(CONFIG_MUSE_BOARD_ATK_DNESP32S3_BOX)
+        list(APPEND srcs "boards/board_atk_dnesp32s3_box.c")
     elseif(CONFIG_MUSE_BOARD_ESPRESSIF_BOX_3)
         list(APPEND srcs "boards/board_espressif_box_3.c" "boards/box_3_microphone.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_C6_18)
@@ -98,6 +110,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_m5stack_stickc_plus2.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH)
         list(APPEND srcs "boards/board_m5stack_stopwatch.c" "boards/muse_lcd_bands.c")
+    elseif(CONFIG_MUSE_BOARD_SEEED_XIAO_S3_147)
+        list(APPEND srcs "boards/board_seeed_xiao_s3_147.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_CORES3)
         list(APPEND srcs "boards/board_m5stack_cores3.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_CORE2)
@@ -114,6 +128,10 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_vn_s3_183.c")
     elseif(CONFIG_MUSE_BOARD_AI_PASSPORT)
         list(APPEND srcs "boards/board_ai_passport.c")
+    elseif(CONFIG_MUSE_BOARD_WAVESHARE_P4_LCD35)
+        list(APPEND srcs "boards/board_waveshare_p4_lcd35.c")
+    elseif(CONFIG_MUSE_BOARD_DEOTALAND_ROROLEE)
+        list(APPEND srcs "boards/board_deotaland_rorolee.c")
     endif()
     if(CONFIG_MUSE_VIDEO)
         # Phone camera: decode and draw (muse_video), and the transports that feed it.
@@ -131,12 +149,18 @@ if(CONFIG_MUSE_ENABLED)
     # Watcher's independently retained recovery markers keep their link order.
     if(CONFIG_MUSE_POWER_TEST)
         list(APPEND srcs "muse_power_test.c")
+        if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_216 OR CONFIG_MUSE_BOARD_AIPI)
+            list(APPEND srcs "boards/board_power_test_generic.c")
+        endif()
     endif()
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
     # voice_muse_chat.c stands in for the Muse settings, Wi-Fi and Link hooks.
     list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_chat_text.c" "muse_text.c")
     list(APPEND embed "test_reply.mp3")
+    if(CONFIG_MUSE_REALTIME_VOICE)
+        list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
+    endif()
 endif()
 
 set(muse_priv_requires
@@ -160,7 +184,19 @@ idf_component_register(
     PRIV_REQUIRES ${muse_priv_requires}
 )
 
-if(CONFIG_MUSE_ENABLED)
+if(CONFIG_MUSE_UI_FREEINK)
+    # FreeInk's board profile, for the panel and its pins. PUBLIC: FreeInk's
+    # headers read it too, in every file that includes them.
+    idf_component_get_property(freeink_lib freeink-sdk COMPONENT_LIB)
+    # One framebuffer, the e-ink UI's DisplayTarget's: the panel's RAM keeps
+    # the previous frame for fast refreshes (as FreeInk's samples build it).
+    target_compile_definitions(${freeink_lib} PUBLIC "FREEINK_DEVICE_${CONFIG_MUSE_FREEINK_DEVICE}=1"
+                               "EINK_DISPLAY_SINGLE_BUFFER_MODE=1")
+    # Muse's CJK font is LVGL's format: the e-ink UI reads it with LVGL's font
+    # types only (eink/lvgl_font/lvgl.h), not LVGL.
+    set_source_files_properties("fonts/muse_font_cjk_16.c" PROPERTIES
+        COMPILE_OPTIONS "-I${COMPONENT_DIR}/eink/lvgl_font")
+elseif(CONFIG_MUSE_ENABLED)
     # LVGL spins forever on a failed assert unless LV_ASSERT_HANDLER is set,
     # which its Kconfig can't do. Abort, so the panic handler prints a backtrace
     # and reboots. PUBLIC reaches LVGL and every file that includes lvgl.h.

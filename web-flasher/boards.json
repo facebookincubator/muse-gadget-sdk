@@ -29,6 +29,13 @@
     ]
   },
   {
+    "board": "muse-seeed-xiao-s3-147",
+    "name": "Seeed Studio XIAO ESP32-S3 1.47\" Touch Display",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
     "board": "muse-sensecap-watcher",
     "name": "Seeed Studio SenseCAP Watcher",
     "usb": [

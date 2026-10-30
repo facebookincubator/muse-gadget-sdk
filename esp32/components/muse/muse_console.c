@@ -21,12 +21,19 @@
 
 #if !CONFIG_MUSE_CONSOLE_UART
 #include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 
 esp_err_t muse_console_install(size_t rx_buf)
 {
     usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     cfg.rx_buffer_size = rx_buf;
-    return usb_serial_jtag_driver_install(&cfg);
+    esp_err_t err = usb_serial_jtag_driver_install(&cfg);
+    if (err == ESP_OK) {
+        /* stdout/logs must share the driver's TX ring with console writes,
+         * rather than writing directly to its hardware FIFO. */
+        usb_serial_jtag_vfs_use_driver();
+    }
+    return err;
 }
 
 bool muse_console_getc(uint8_t *c)
@@ -34,9 +41,15 @@ bool muse_console_getc(uint8_t *c)
     return usb_serial_jtag_read_bytes(c, 1, portMAX_DELAY) == 1;
 }
 
-void muse_console_write(const void *buf, size_t n)
+/* A stalled host must not keep the UI snapshot timer holding its lock.
+ * Queue each line in one driver call: the ring takes all of it or none. */
+bool muse_console_write(const void *buf, size_t n)
 {
-    usb_serial_jtag_write_bytes(buf, n, portMAX_DELAY);
+    if (!n) {
+        return true;
+    }
+    int written = usb_serial_jtag_write_bytes(buf, n, pdMS_TO_TICKS(200));
+    return written > 0 && (size_t)written == n;
 }
 
 bool muse_console_host(void)
@@ -141,9 +154,9 @@ bool muse_console_getc(uint8_t *c)
     return true;
 }
 
-void muse_console_write(const void *buf, size_t n)
+bool muse_console_write(const void *buf, size_t n)
 {
-    uart_write_bytes(PORT, buf, n);
+    return uart_write_bytes(PORT, buf, n) == (int)n;
 }
 
 bool muse_console_host(void)
