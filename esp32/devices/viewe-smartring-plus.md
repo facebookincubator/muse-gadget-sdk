@@ -40,7 +40,11 @@ LVGL 9.5 and esp_codec_dev ~1.5.
 ## Display, audio and power
 
 `bsp_display_init_with_task()` starts the panel and pins LVGL's task to the
-Muse UI core. Touch is the CST816 input device the BSP registers.
+Muse UI core. Touch is the CST816 input device the BSP registers. The vendored
+copy draws through two 10-line buffers in internal RAM, as the EchoEar-2ST does
+with the same panel, instead of the upstream BSP's 40-line PSRAM buffers: those
+need a fresh 28.8 KB internal DMA buffer on every flush, which may not be
+available once Wi-Fi, BLE and the Muse session are up.
 
 Do not call `bsp_audio_init()` from the board file. It opens the codec itself
 and leaves the speaker muted, and Muse never unmutes a handle it did not

@@ -169,13 +169,16 @@ esp_err_t bsp_display_init_with_task(int task_core_id, uint32_t task_priority)
     adapter_cfg.task_priority = task_priority;
     ESP_RETURN_ON_ERROR(esp_lv_adapter_init(&adapter_cfg), TAG, "lvgl adapter init failed");
 
-    /* QSPI + PSRAM：适配器 OTHER 接口在 RGB565 flush 时自动字节交换，匹配本屏 */
-    esp_lv_adapter_display_config_t disp_cfg = ESP_LV_ADAPTER_DISPLAY_SPI_WITH_PSRAM_DEFAULT_CONFIG(
+    /* 适配器 OTHER 接口在 RGB565 flush 时自动字节交换，匹配本屏。
+     * Muse: internal-RAM draw buffers, 10 lines, double-buffered. From PSRAM
+     * buffers every flush needs a fresh internal DMA bounce buffer the size of
+     * the band (28.8 KB at 40 lines), which may not be available once Wi-Fi,
+     * BLE and the Muse session are up; the same ST77916 at 360x360 runs this
+     * way on the EchoEar-2ST. */
+    esp_lv_adapter_display_config_t disp_cfg = ESP_LV_ADAPTER_DISPLAY_SPI_WITHOUT_PSRAM_DEFAULT_CONFIG(
         panel, io, BOARD_LCD_H_RES, BOARD_LCD_V_RES, ESP_LV_ADAPTER_ROTATE_0);
-    /* QSPI + PSRAM：条带高度不宜过大。
-     * 整屏(360) 单次 flush≈259KB，SPI DMA 私有缓冲必须占内部 RAM，会 ESP_ERR_NO_MEM 花屏。
-     * 40 行双缓冲≈56KB，本板已验证稳定。 */
-    disp_cfg.profile.buffer_height = 40;
+    disp_cfg.profile.buffer_height = 10;
+    disp_cfg.profile.require_double_buffer = true;
     s_disp = esp_lv_adapter_register_display(&disp_cfg);
     ESP_RETURN_ON_FALSE(s_disp != NULL, ESP_FAIL, TAG, "esp_lv_adapter_register_display failed");
 
