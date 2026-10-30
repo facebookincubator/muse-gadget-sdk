@@ -78,3 +78,19 @@ def test_short_http_body_is_a_retryable_failure(monkeypatch, operation):
         assert muse_api.fetch_vms_with_status("a") == ([], None)
     else:
         assert muse_api.refresh_device_token("r", "homelink-abcdef") == (None, None)
+
+
+@pytest.mark.parametrize("operation", ["fetch", "refresh"])
+def test_invalid_response_encoding_is_a_retryable_failure(monkeypatch, operation):
+    def urlopen(req, timeout):
+        wire = b'HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n\xff'
+        sock = SimpleNamespace(makefile=lambda mode: io.BytesIO(wire))
+        response = http.client.HTTPResponse(sock)
+        response.begin()
+        return response
+
+    monkeypatch.setattr(muse_api.urllib.request, "urlopen", urlopen)
+    if operation == "fetch":
+        assert muse_api.fetch_vms_with_status("a") == ([], None)
+    else:
+        assert muse_api.refresh_device_token("r", "homelink-abcdef") == (None, None)
