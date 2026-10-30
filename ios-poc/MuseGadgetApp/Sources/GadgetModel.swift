@@ -32,7 +32,6 @@ final class GadgetModel: ObservableObject {
     let service: GadgetService
     private let commands: PhoneCommands
     private let pathMonitor = NWPathMonitor()
-    private nonisolated(unsafe) var online = false
     private var peripheral: BLEPeripheral?
     private var controller: SetupController?
 
@@ -59,8 +58,8 @@ final class GadgetModel: ObservableObject {
             runCommand: { command, params in await MainActor.run { commands.run(command, params) } })
         paired = service.credentials != nil
         service.log = { [weak self] line in Task { @MainActor in self?.log(line) } }
+        service.onUnpaired = { [weak self] in Task { @MainActor in self?.paired = false } }
         commands.showText = { [weak self] text in self?.shownText = text }
-        pathMonitor.pathUpdateHandler = { [weak self] path in self?.online = path.status == .satisfied }
         pathMonitor.start(queue: DispatchQueue(label: "musegadget.path"))
         if let imported { log("imported pairing for \(imported.nodeID) from the Mac") }
         if importFailed { log("couldn't save the pairing from the Mac; will retry on the next launch") }
@@ -84,14 +83,14 @@ final class GadgetModel: ObservableObject {
         let service = self.service
         let controller = SetupController(
             pairing: pairing, identity: identity, version: Self.version, transport: peripheral,
-            isOnline: { [weak self] in self?.online ?? false },
+            isOnline: { [pathMonitor] in pathMonitor.currentPath.status == .satisfied },
             provision: { credentials, commit in try await service.verifyAndSave(credentials, commit: commit) },
             onComplete: { [weak self] in
                 Task { @MainActor in
                     guard let self else { return }
                     self.log("paired")
                     self.paired = true
-                    self.service.start()
+                    self.service.restart()  // drops a session from an earlier pairing
                     // Let the last status reach the app, then close this
                     // window unless it was stopped or replaced meanwhile.
                     try? await Task.sleep(nanoseconds: 1_500_000_000)

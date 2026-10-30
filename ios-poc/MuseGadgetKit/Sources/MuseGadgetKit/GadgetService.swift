@@ -72,11 +72,25 @@ public final class GadgetService {
     public let store: KeychainStore
     public let identity: GadgetIdentity
     public var device: DeviceDescription
-    public var sdkToken: String?
     public var runCommand: LinkSession.CommandHandler
     public var log: (String) -> Void = { print("[musegadget]", $0) }
-    public private(set) var current: LinkSession?
+    /// Called when the Muse removed the pairing or revoked its token.
+    public var onUnpaired: () -> Void = {}
     private var loop: Task<Void, Never>?
+
+    // Shared between the caller and the service task.
+    private let stateLock = NSLock()
+    private var currentValue: LinkSession?
+    private var sdkTokenValue: String?
+    private var sdkTokenUnreported = false
+
+    public var current: LinkSession? { locked { currentValue } }
+
+    /// Reported with the next token refresh after it changes.
+    public var sdkToken: String? {
+        get { locked { sdkTokenValue } }
+        set { locked { sdkTokenValue = newValue; sdkTokenUnreported = newValue != nil } }
+    }
 
     public init(store: KeychainStore = KeychainStore(), device: (GadgetIdentity) -> DeviceDescription,
                 sdkToken: String?, runCommand: @escaping LinkSession.CommandHandler) {
@@ -88,8 +102,8 @@ public final class GadgetService {
             store.save(identity, Self.identityAccount)
         }
         self.device = device(identity)
-        self.sdkToken = sdkToken
         self.runCommand = runCommand
+        self.sdkToken = sdkToken
     }
 
     public var credentials: DeviceCredentials? {
@@ -103,7 +117,7 @@ public final class GadgetService {
             log("device token check failed (HTTP \(status.map(String.init) ?? "-"))")
             throw ProvisionFailed("auth_failed")
         }
-        guard commit({ store.save(credentials, Self.credentialsAccount) }) else {
+        guard commit({ locked { store.save(credentials, Self.credentialsAccount) } }) else {
             throw ProvisionFailed("error_storage")
         }
     }
@@ -113,14 +127,21 @@ public final class GadgetService {
         loop = Task { await run() }
     }
 
+    /// Stops the service and ends the current session.
     public func stop() {
         loop?.cancel()
         loop = nil
+        current?.close()
+    }
+
+    /// Starts over with the pairing just saved, dropping any older session.
+    public func restart() {
+        stop()
+        start()
     }
 
     private func run() async {
         var failures = 0
-        var reportedSDKToken = false
         while !Task.isCancelled {
             guard var creds = credentials else {
                 log("not paired")
@@ -129,9 +150,13 @@ public final class GadgetService {
             }
             let api = MuseAPI(apiURLv2: creds.apiURLv2)
             let due = Date().timeIntervalSince(creds.accessTokenSavedAt) >= Self.tokenRefreshAge
-            if due || (sdkToken != nil && !reportedSDKToken) {
-                reportedSDKToken = true
+            let reportToken = locked { () -> Bool in
+                defer { sdkTokenUnreported = false }
+                return sdkTokenUnreported
+            }
+            if due || reportToken {
                 if let rotated = await refresh(creds, api: api, mayRevoke: due) { creds = rotated }
+                if Task.isCancelled { return }
                 if credentials == nil { continue }  // revoked
             }
             let (vms, status) = await api.fetchVMs(accessToken: creds.accessToken)
@@ -150,15 +175,17 @@ public final class GadgetService {
                 bearer: vm.authToken, userAgent: api.userAgent)
             let session = LinkSession(socket: socket, device: device, runCommand: runCommand)
             session.log = log
-            current = session
+            locked { currentValue = session }
+            if Task.isCancelled { session.close() }  // stopped while connecting
             log("connecting to \(vm.name.isEmpty ? vm.id : vm.name)")
             let outcome = await session.run()
-            current = nil
+            locked { if currentValue === session { currentValue = nil } }
             log("session ended: \(outcome)")
+            if Task.isCancelled { return }
             switch outcome {
             case .stopped: return
             case .unpaired:
-                store.delete(Self.credentialsAccount)
+                removeCredentials(ifStill: creds)
                 continue
             default:
                 if let registered = session.registeredAt, Date().timeIntervalSince(registered) >= 30 { failures = 0 }
@@ -175,7 +202,7 @@ public final class GadgetService {
         guard let tokens else {
             if status == 401, mayRevoke {
                 log("pairing revoked; pair again")
-                store.delete(Self.credentialsAccount)
+                removeCredentials(ifStill: creds)
             }
             return nil
         }
@@ -183,9 +210,33 @@ public final class GadgetService {
         rotated.accessToken = tokens.access
         rotated.refreshToken = tokens.refresh
         rotated.accessTokenSavedAt = Date()
-        store.save(rotated, Self.credentialsAccount)
+        // A newer pairing saved meanwhile wins over this rotation.
+        guard replaceCredentials(creds, with: rotated) else { return nil }
         log("device token rotated")
         return rotated
+    }
+
+    /// Deletes the pairing only if it is still the one this loop used, so an
+    /// old session can't remove a pairing made since.
+    func removeCredentials(ifStill creds: DeviceCredentials) {
+        let removed = locked { () -> Bool in
+            guard credentials?.refreshToken == creds.refreshToken else { return false }
+            store.delete(Self.credentialsAccount)
+            return true
+        }
+        if removed { onUnpaired() }
+    }
+
+    func replaceCredentials(_ old: DeviceCredentials, with new: DeviceCredentials) -> Bool {
+        locked {
+            guard credentials?.refreshToken == old.refreshToken else { return false }
+            return store.save(new, Self.credentialsAccount)
+        }
+    }
+
+    private func locked<T>(_ body: () -> T) -> T {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return body()
     }
 
     private func backoff(_ failures: inout Int, floor: Double = 0) async {

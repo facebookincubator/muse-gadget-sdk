@@ -25,8 +25,8 @@ import Foundation
 ///   `0xFFFF` manufacturer-data "paired flag" the other SDKs send is dropped.
 /// - The name and UUID are advertised only while the app is in the foreground.
 /// - The GAP Device Name is the iPhone's own name, not `MuseGadgetXXXXXX`.
-/// - A peripheral can't drop a central; `disconnect(after:)` resets state
-///   and re-advertises instead. There is no connect/disconnect callback, so
+/// - A peripheral can't drop a central; `disconnect(after:)` only resets
+///   the setup state instead. There is no connect/disconnect callback, so
 ///   unsubscribing from TX stands in for a disconnect.
 public final class BLEPeripheral: NSObject, SetupTransport, CBPeripheralManagerDelegate {
     public static let serviceUUID = CBUUID(string: "7fdd3d1c-38ea-46cf-8b46-314ecf5f240c")

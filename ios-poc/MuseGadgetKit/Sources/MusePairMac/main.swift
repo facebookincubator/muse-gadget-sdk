@@ -15,7 +15,10 @@
  */
 // Pair a Muse gadget identity from this Mac, then hand it to the iPhone app.
 //
-//   swift run MusePairMac --sdk-token mgst_… [--out pairing-export.json]
+//   swift run MusePairMac [--out pairing-export.json]
+//
+// It asks for the SDK token (mgst_…), or reads MUSE_SDK_TOKEN. It never takes
+// the token as an argument, where other accounts could see it.
 //
 // The Mac advertises as MuseGadgetXXXXXX; add it from the Muse app on a phone
 // (Settings > Devices > Developer mode, then Add Device). On success the
@@ -34,7 +37,18 @@ func option(_ flag: String) -> String? {
 }
 
 let output = URL(fileURLWithPath: option("--out") ?? "pairing-export.json")
-let sdkToken = option("--sdk-token") ?? ProcessInfo.processInfo.environment["MUSE_SDK_TOKEN"]
+umask(0o077)  // the export holds device tokens: owner-only from creation
+
+func readSDKToken() -> String? {
+    if let token = ProcessInfo.processInfo.environment["MUSE_SDK_TOKEN"], !token.isEmpty { return token }
+    guard isatty(STDIN_FILENO) != 0, let raw = getpass("SDK token from gadgets.muse.ai (Enter to skip): ") else {
+        return nil
+    }
+    let token = String(cString: raw).trimmingCharacters(in: .whitespaces)
+    return token.isEmpty ? nil : token
+}
+
+let sdkToken = readSDKToken()
 let windowMinutes = Double(option("--minutes") ?? "") ?? 10
 let identity = option("--mac").map(GadgetIdentity.init) ?? .generate()
 let version = "0.1.0-ios"
@@ -77,7 +91,7 @@ peripheral.log = log
 peripheral.onWrite = { controller.onWrite($0) }
 peripheral.onDisconnect = { controller.onDisconnect() }
 
-if sdkToken == nil { log("warning: no SDK token (--sdk-token or MUSE_SDK_TOKEN); pairing may be refused") }
+if sdkToken == nil { log("warning: no SDK token (prompt or MUSE_SDK_TOKEN); pairing may be refused") }
 log("Node id \(identity.nodeID). Setup open for \(Int(windowMinutes)) minutes.")
 log("In the Muse app: Settings > Devices > Developer mode, then Add Device > \(identity.bleName)")
 peripheral.start()

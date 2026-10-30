@@ -60,7 +60,7 @@ needs internet.
 
 | Layer | Exact contract | Source of truth | Swift |
 |---|---|---|---|
-| Advertising | Local name `MuseGadget` + last 6 hex of the identity, uppercase, **no hyphen**. Service UUID `7fdd3d1c-38ea-46cf-8b46-314ecf5f240c`. Linux/ESP32 also send manufacturer data `FF FF <paired 0/1>`. | `linux/.../ble_server.py`, `esp32/main/ble_server.c:857` | `BLEPeripheral.swift` |
+| Advertising | Local name `MuseGadget` + last 6 hex of the identity, uppercase, **no hyphen**. Service UUID `7fdd3d1c-38ea-46cf-8b46-314ecf5f240c`. Linux/ESP32 also send manufacturer data `FF FF <paired 0/1>`. | `linux/.../ble_server.py`, `esp32/main/ble_server.c` | `BLEPeripheral.swift` |
 | GATT | RX `4d593029-28a2-4a6e-a1f0-3c2d5e8f9b01` (write, write-without-response). TX `d75dc4ca-7b2b-4e9c-8f0a-1d2e3f4a5b6c` (read, notify). No bonding or encryption. | same | `BLEPeripheral.swift` |
 | BLE framing | `0xFE, index, total, fragment`; packet ≤ min(MTU−3, 160); 50 ms between notifies; ≤ 255 chunks; reassembly cap 8 KiB | `ble_framing.py` | `BLEFraming.swift` |
 | Setup actions | Plaintext: `get_device_info`, `pairing_client_hello`, `pairing_encrypted`. Encrypted: `pairing_client_finished`, `wifi_scan`, `provision_v2` (`access_token`, `refresh_token`, `token_type:"device"`, `api_url_v2`, `noise_host`, …). Statuses: `pairing_confirmed` (with `sdk_token`), `wifi_connecting`, `wifi_connected`, `auth_ok` / `auth_failed`. | `ble_setup.py`, `esp32/main/ble_server.c:303-490` | `SetupController.swift` |
@@ -68,7 +68,7 @@ needs internet.
 | Device API | `GET /fetch_vms` (`Bearer <access>`, `X-API-Version: 1.0.0`). `POST /device_token/refresh` (`Bearer hatch_refresh:<raw>`, body `{device_id, sdk_token}`); rotate every 3 h. | `muse_api.py`, `esp32/main/vm_api.c` | `MuseAPI.swift` |
 | Noise | `wss://<noise_host>/v1/noise?vm_id=<encodeURIComponent>`, `Authorization: Bearer <vm_auth_token>`; 401/403 means fetch VMs again. `Noise_XX_25519_AESGCM_SHA256`, empty prologue, fresh static key per session, empty msg3 payload. | `noise/noise_xx.py`, `link_client.py` | `NoiseXX.swift` |
 | Envelopes | Each WebSocket binary frame = AES-GCM(`NoiseTransportFrame{chunk_id, index, total, payload}`). Outbound payload `ServiceRequest{service, ServiceFrame{stream_id, request\|body_chunk\|reset}}`; inbound `ServiceResponse{ServiceFrame{response\|body_chunk\|reset}}`. Hand-rolled protobuf. | `noise/{framing,envelope,transport}.py` | `NoiseEnvelope.swift` |
-| Control stream | Stream 1 `POST /link-control`, never ended. JSON messages, each with a u32-LE length prefix. Send `link.register`, `link.heartbeat`, `link.result`; receive the register reply, `link.invoke`, `link.unpaired`. Register as `platform:"linux"`, `device_family:"homehub"`; **never `link`**, because the server pushes ESP32 OTA updates to that family. | `link_client.py`, `esp32/main/noise_control.cpp` | `LinkSession.swift` |
+| Control stream | Stream 1 `POST /link-control`, never ended. JSON messages, each with a u32-LE length prefix. Send `link.register`, `link.result` and, like the ESP32 (not Linux), one `link.heartbeat` after registering; receive the register reply, `link.invoke`, `link.unpaired`. Register as `platform:"linux"`, `device_family:"homehub"`; **never `link`**, because the server pushes ESP32 OTA updates to that family. | `link_client.py`, `esp32/main/noise_control.cpp` | `LinkSession.swift` |
 | Chat | `POST /chat/stream` `{message, output_modality:"text", device_id}`; reply is an ack `{message_id}`. Voice (ESP32): base64 16 kHz PCM16 WAV in `items[]`, replies via `POST /chat/subscribe` NDJSON. Replies are text only. | `link_client.py`, `esp32/components/muse/` | `LinkSession.sendChat` (text) |
 
 Not ported, and not possible or useful on iOS:
@@ -131,7 +131,7 @@ gadgets.muse.ai is enough.
 From `MuseGadgetKit/`:
 
 ```sh
-swift test                 # 15 tests (+1 skipped live test)
+swift test                 # 17 tests (+1 skipped live test)
 ./Tests/run_interop.sh     # Swift client ↔ Python fake VM over a real WebSocket
 ```
 
@@ -156,7 +156,9 @@ swift test                 # 15 tests (+1 skipped live test)
     `link.invoke` → `link.result`, `/chat/stream`, and `link.unpaired`.
 - **Concurrency:** concurrent `link.result`s and chats reach the socket in
   Noise nonce order; a failed send closes the session; a chat times out after
-  60 s; stopping setup mid-provisioning saves nothing and reports nothing.
+  60 s; a rejected `link.register` ends the session; stopping setup
+  mid-provisioning saves nothing and reports nothing; a session from an
+  earlier pairing can't remove or overwrite a newer one.
 - `xcodebuild` for `generic/platform=iOS` succeeds for the kit and the app, with
   no warnings. The app launches in the Simulator.
 
@@ -205,7 +207,7 @@ one-time pairing, and let the iPhone run the Muse app:
 
 ```sh
 cd ios-poc/MuseGadgetKit
-swift run MusePairMac --sdk-token mgst_… --out ~/muse-pairing.json
+swift run MusePairMac --out ~/muse-pairing.json   # asks for the SDK token
 # In the Muse app on the iPhone: Developer mode > Add Device > MuseGadgetXXXXXX
 xcrun devicectl device copy to --device <IPHONE_ID> --domain-type appDataContainer \
   --domain-identifier <YOUR_BUNDLE_ID> \

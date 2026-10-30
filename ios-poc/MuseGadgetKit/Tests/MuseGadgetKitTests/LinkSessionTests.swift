@@ -130,4 +130,51 @@ final class LinkSessionTests: XCTestCase {
         var reader = ProtoReader(Data([0x0A, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]))
         XCTAssertThrowsError(try reader.next())
     }
+
+    /// Both rejection forms end the session, as in link_client.py, so the
+    /// service fetches the VM again instead of sitting on a dead session.
+    func testRejectedRegistrationEndsTheSession() async throws {
+        for reply: [String: Any] in [["ok": false], ["error": ["code": "denied"]]] {
+            let session = makeSession(RecordingSocket())
+            try await session.openControlStream(registerID: "r1")
+            var message = reply
+            message["id"] = "r1"
+            XCTAssertEqual(session.handle(message), .forbidden)
+            XCTAssertNil(session.registeredAt)
+        }
+        let session = makeSession(RecordingSocket())
+        try await session.openControlStream(registerID: "r1")
+        XCTAssertNil(session.handle(["id": "r1", "ok": true, "result": ["status": "registered"]]))
+        XCTAssertNotNil(session.registeredAt)
+    }
+}
+
+/// Uses a throwaway Keychain service name.
+final class GadgetServiceTests: XCTestCase {
+    func testOldLoopCannotRemoveOrOverwriteANewerPairing() throws {
+        let store = KeychainStore(service: "musegadget-test-\(UUID().uuidString)")
+        defer {
+            store.delete(GadgetService.credentialsAccount)
+            store.delete(GadgetService.identityAccount)
+        }
+        let service = GadgetService(store: store, device: { identity in
+            DeviceDescription(nodeID: identity.nodeID, displayName: "test", version: "test", commands: [:])
+        }, sdkToken: nil) { _, _ in [:] }
+        var unpaired = 0
+        service.onUnpaired = { unpaired += 1 }
+        func creds(_ refresh: String) -> DeviceCredentials {
+            DeviceCredentials(accessToken: "a", refreshToken: refresh, username: "u", apiURLv2: "", noiseHost: "")
+        }
+        try XCTSkipUnless(store.save(creds("new"), GadgetService.credentialsAccount), "no Keychain access")
+
+        // A session from the earlier pairing ends with link.unpaired, or rotates its token.
+        service.removeCredentials(ifStill: creds("old"))
+        XCTAssertFalse(service.replaceCredentials(creds("old"), with: creds("old-rotated")))
+        XCTAssertEqual(service.credentials?.refreshToken, "new")
+        XCTAssertEqual(unpaired, 0)
+
+        service.removeCredentials(ifStill: creds("new"))
+        XCTAssertNil(service.credentials)
+        XCTAssertEqual(unpaired, 1)
+    }
 }

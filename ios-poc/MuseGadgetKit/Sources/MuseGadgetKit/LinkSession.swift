@@ -161,7 +161,8 @@ public final class LinkSession {
     private var pending: [Int64: PendingRequest] = [:]
     private var requestsClosed = false  // guarded by pendingLock
     private let pendingLock = NSLock()
-    public private(set) var registeredAt: Date?
+    private var registeredAtValue: Date?  // guarded by pendingLock
+    public var registeredAt: Date? { withPendingLock { registeredAtValue } }
     /// How long `sendChat` waits for the whole response (the Linux client's 60 s).
     public var requestTimeout: TimeInterval = 60
     static let maxResponseBytes = 1024 * 1024
@@ -312,12 +313,17 @@ public final class LinkSession {
         }
     }
 
-    private func handle(_ message: [String: Any]) -> Outcome? {
+    /// Ends the session from outside; `run` then returns.
+    public func close() { socket.close() }
+
+    func handle(_ message: [String: Any]) -> Outcome? {
         if message["id"] as? String == registerID, message["method"] == nil {
-            if let error = message["error"] {
-                log("link.register rejected: \(error)")
+            // Rejected either way, as in link_client.py: fetch the VM again.
+            if message["error"] != nil || message["ok"] as? Bool == false {
+                log("link.register rejected")
+                return .forbidden
             } else {
-                registeredAt = Date()
+                withPendingLock { registeredAtValue = Date() }
                 log("registered with the Muse")
                 Task { try? await send(["method": "link.heartbeat"]) }
             }
@@ -383,6 +389,11 @@ public final class LinkSession {
 
     private func complete(_ stream: Int64, _ result: Result<(status: Int, body: Data), Error>) {
         takePending(stream)?.continuation.resume(with: result)
+    }
+
+    private func withPendingLock<T>(_ body: () -> T) -> T {
+        pendingLock.lock(); defer { pendingLock.unlock() }
+        return body()
     }
 
     private func takePending(_ stream: Int64) -> PendingRequest? {
