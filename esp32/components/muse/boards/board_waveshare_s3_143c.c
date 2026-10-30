@@ -335,17 +335,24 @@ static void set_brightness(int pct)
 }
 
 /* Panel commands go through the bands' send task, between bands, so they
- * never land in the middle of a pixel write (muse_lcd_bands.h). */
+ * never land in the middle of a pixel write (muse_lcd_bands.h). The SH8601
+ * driver has no disp_sleep, so SLPIN/SLPOUT go out as raw QSPI commands, as
+ * brightness does; GRAM is kept. */
+static void lcd_cmd(uint8_t cmd)
+{
+    esp_lcd_panel_io_tx_param(s_io, (0x02 << 24) | (cmd << 8), NULL, 0);
+}
+
 static void send_sleep(void *sleep)
 {
-    esp_lcd_panel_disp_sleep(s_panel, *(bool *)sleep);   /* SLPIN/SLPOUT; GRAM is kept */
+    lcd_cmd(*(bool *)sleep ? 0x10 : 0x11);
 }
 
 static void send_off(void *arg)
 {
     (void)arg;
     esp_lcd_panel_disp_on_off(s_panel, false);
-    esp_lcd_panel_disp_sleep(s_panel, true);
+    lcd_cmd(0x10);
 }
 
 static void panel_sleep(bool sleep)
