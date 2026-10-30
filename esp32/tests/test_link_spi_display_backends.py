@@ -63,8 +63,10 @@ def _run_c(text: str, defines: dict[str, int]) -> str:
         src = Path(tmp) / "probe.c"
         exe = Path(tmp) / "probe"
         src.write_text(text)
+        (Path(tmp) / "sdkconfig.h").write_text("")
         args = [f"-D{k}={v}" for k, v in defines.items()]
-        subprocess.run([*_cc(), "-std=c11", *args, str(src), "-o", str(exe)],
+        includes = [f"-I{tmp}", f"-I{ROOT / 'avatar'}", f"-I{ROOT / 'main'}"]
+        subprocess.run([*_cc(), "-std=c11", *includes, *args, str(src), "-o", str(exe)],
                        check=True, capture_output=True, text=True)
         return subprocess.run([str(exe)], check=True, capture_output=True,
                               text=True).stdout
@@ -102,23 +104,24 @@ class TitleGeometryTest(unittest.TestCase):
                          "static SemaphoreHandle_t s_mutex")
         probe = (
             "#include <stdio.h>\n"
-            "#define HAPPY_ANIM_WIDTH 56\n#define HAPPY_ANIM_HEIGHT 59\n"
-            "#define PIXEL_FONT_HEIGHT 8\n"
+            '#include "happy_anim.h"\n#include "pixel_font.h"\n'
             + block +
             "\nint main(void) {\n"
-            '    printf("%d %d %d %d\\n", LCD_TITLE_Y, LCD_TITLE_MAX_SCALE,\n'
-            "           LCD_ANIM_SCALE, LCD_BAR_ROWS);\n"
+            '    printf("%d %d %d %d %d\\n", LCD_TITLE_Y, LCD_TITLE_MAX_SCALE,\n'
+            "           LCD_ANIM_SCALE, LCD_BAR_ROWS, LCD_DOT_Y + LCD_DOT_SIZE);\n"
             "    return 0;\n}\n"
         )
-        y, title, anim, bars = map(int, _run_c(
+        y, title, anim, bars, dot_end = map(int, _run_c(
             probe, {backend: 1, "CONFIG_HOMEHUB_DISPLAY": 1}).split())
-        return {"y": y, "title": title, "anim": anim, "bars": bars}
+        return {"y": y, "title": title, "anim": anim, "bars": bars, "dot_end": dot_end}
 
-    def test_title_starts_below_the_top_bar_on_every_status_screen(self) -> None:
+    def test_title_clears_the_top_bar_and_the_dot_on_every_status_screen(self) -> None:
+        # Neither the title nor the connected dot repaints the other.
         for backend in STATUS_SCREENS:
             with self.subTest(backend=backend):
                 g = self._geometry(backend)
                 self.assertGreaterEqual(g["y"], g["bars"])
+                self.assertGreaterEqual(g["y"], g["dot_end"])
 
     def test_only_the_cyd_shrinks_the_title(self) -> None:
         for backend in STATUS_SCREENS:
@@ -129,17 +132,6 @@ class TitleGeometryTest(unittest.TestCase):
                     self.assertLess(g["title"], g["anim"])
                 else:
                     self.assertEqual(g["title"], g["anim"])
-
-
-class TitleKeepsStatusTest(unittest.TestCase):
-    def test_title_redraw_repaints_the_status_over_its_stripes(self) -> None:
-        # On the CYD the title's rows cross the connected dot's, and a title
-        # drawn after the dot would otherwise erase it for good: the dot is
-        # not redrawn while it is marked as shown.
-        source = LED_C.read_text()
-        title = _between(source, "static void led_hw_set_title(const char *text) {", "\n}\n")
-        overlay = title.index("lcd_overlay_status(s_bar_buf, LCD_TITLE_Y + sy, LCD_TITLE_STRIPE_ROWS)")
-        self.assertLess(overlay, title.index("lcd_draw(0, LCD_TITLE_Y + sy"))
 
 
 class SmallControlSessionTest(unittest.TestCase):

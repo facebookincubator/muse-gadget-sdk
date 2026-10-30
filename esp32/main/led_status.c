@@ -226,17 +226,22 @@ static const char *TAG = "link.led";
 #define LCD_DOT_SIZE     (LCD_DOT_CELLS * LCD_ANIM_SCALE)
 #define LCD_DOT_X        (LCD_H_RES - LCD_DOT_MARGIN - LCD_DOT_SIZE)
 #define LCD_DOT_Y        LCD_DOT_MARGIN
-// Title: one line of pixel font, in the animation's pixel size when it fits.
-// On the CYD the animation fills most of the panel's height, and a title that
-// size would start above the top edge, so it is drawn at half the size.
+// Title: one line of pixel font, in the animation's pixel size when it fits,
+// 16 rows above the animation. On the CYD the animation fills most of the
+// panel's height, so the title is drawn at half the size and closer to the
+// animation, below the connected dot.
 #if CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
 #define LCD_TITLE_MAX_SCALE 2
+#define LCD_TITLE_GAP    4
 #else
 #define LCD_TITLE_MAX_SCALE LCD_ANIM_SCALE
+#define LCD_TITLE_GAP    16
 #endif
 #define LCD_TITLE_ROWS   (PIXEL_FONT_HEIGHT * LCD_TITLE_MAX_SCALE)
-#define LCD_TITLE_Y      (LCD_ANIM_Y - LCD_TITLE_ROWS - 16)
-_Static_assert(LCD_TITLE_Y >= LCD_BAR_ROWS, "title overlaps the top status bar");
+#define LCD_TITLE_Y      (LCD_ANIM_Y - LCD_TITLE_ROWS - LCD_TITLE_GAP)
+// Neither the title nor the dot redraws the other, so they must not overlap.
+_Static_assert(LCD_TITLE_Y >= LCD_BAR_ROWS && LCD_TITLE_Y >= LCD_DOT_Y + LCD_DOT_SIZE,
+               "title overlaps the top status bar or the connected dot");
 // Rows rendered per panel write; must fit s_bar_buf.
 #define LCD_TITLE_STRIPE_ROWS 8
 // Full-width rows that fit s_anim_buf.
@@ -603,8 +608,6 @@ static void led_hw_set_title(const char *text) {
         }
         xSemaphoreTake(s_lcd_lock, portMAX_DELAY);
         if (!s_image_mode) {
-            // The title can reach the connected dot's rows (it does on the CYD).
-            lcd_overlay_status(s_bar_buf, LCD_TITLE_Y + sy, LCD_TITLE_STRIPE_ROWS);
             lcd_draw(0, LCD_TITLE_Y + sy, LCD_H_RES,
                      LCD_TITLE_Y + sy + LCD_TITLE_STRIPE_ROWS, s_bar_buf);
         }
