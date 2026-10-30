@@ -204,6 +204,31 @@ class CaptionWrapTest(unittest.TestCase):
         self.assertEqual(self.pages("a \u2014 b", 21, 34, 12), [["a \u2014", "b"]])
         self.assertEqual(self.pages("a \u2014 b", 21, 33, 12), [["a", "\u2014", "b"]])
 
+    def assert_lines_cover(self, text: str, pages: list[list[str]], cap: int = 400) -> None:
+        """Every page fits the buffer, and its lines, less each page's overlap, are the text."""
+        shown: list[str] = []
+        for page in pages:
+            self.assertLess(len("\n".join(page).encode()), cap, page)
+            shown.extend(page[1:] if shown and page[0] == shown[-1] else page)
+        self.assertEqual("".join(shown).replace(" ", ""), "".join(text.split()))
+
+    def test_multibyte_lines_that_overflow_the_buffer_turn_the_page(self) -> None:
+        # Twelve lines of 21 narrow letters, three bytes each: 64 bytes a line,
+        # so only six fit the 400-byte page. The rest start the next one.
+        text = "\n".join(["\u1ecb" * 21] * 6 + ["\u1ec9" * 21] * 6)
+        pages = self.pages(text, 21, 148, 12)
+        self.assertEqual([len(page) for page in pages], [6, 6, 2])
+        self.assert_lines_cover(text, pages)
+        # Without pixels, CJK lines of 24 three-byte characters overflow the same way.
+        cjk = "还伴有八级左右的雷雨大风和短时强降水出门记得带伞注意安全" * 9
+        self.assert_lines_cover(cjk, self.pages(cjk, 24, 0, 10))
+
+    def test_pages_that_fit_turn_every_lines_minus_one(self) -> None:
+        text = " ".join(f"w{i:02d}" for i in range(20))
+        pages = self.pages(text, 3, 0, 4)
+        self.assertEqual([page[0] for page in pages], ["w00", "w03", "w06", "w09", "w12", "w15", "w18"])
+        self.assert_lines_cover(text, pages)
+
     def test_cjk_keeps_its_fixed_width_page(self) -> None:
         text = "还伴有八级左右的雷雨大风和短时强降水出门记得带伞注意安全"
         self.assertEqual([len(line) for line in self.pages(text, 13, 20, 12)[0]], [13, 13, 2])

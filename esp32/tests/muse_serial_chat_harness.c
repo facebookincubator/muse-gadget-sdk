@@ -115,14 +115,19 @@ int main(int argc, char **argv)
             fputs(page, stdout);
         }
     } else if (argc > 4 && !strcmp(argv[1], "pages")) {
-        /* Every page the reply turns through, pixel-wrapped, one per offset
-         * where it changes, separated by form feeds. */
+        /* Every page the reply turns through, pixel-wrapped (PX 0: by
+         * characters only), one per offset where it changes, separated by form
+         * feeds. CAP is the page buffer, the voice task's by default. */
         s_cols = atoi(argv[2]);
         muse_hatch_set_caption_px(atoi(argv[3]), fake_glyph_px);
         s_lines = atoi(argv[4]);
+        size_t cap = argc > 5 ? (size_t)atoi(argv[5]) : MUSE_CAPTION_MAX;
         static char page[1 << 16], last[1 << 16];
+        if (cap > sizeof(page)) {
+            return 2;
+        }
         for (size_t at = 0; at < len; at++) {
-            if (muse_hatch_caption_at(in, at, page, sizeof(page)) && strcmp(page, last)) {
+            if (muse_hatch_caption_at(in, at, page, cap) && strcmp(page, last)) {
                 printf("%s%s", last[0] ? "\f" : "", page);
                 strlcpy(last, page, sizeof(last));
             }
@@ -137,7 +142,7 @@ int main(int argc, char **argv)
         muse_hatch_caption_at(in, 0, page, sizeof(page));
         printf("%s %s\n", muse_text_has_cjk(in) ? "cjk" : "latin", s_page_cjk ? "cjk" : "latin");
     } else {
-        fprintf(stderr, "usage: %s console|unescape|caption COLS|pages COLS PX LINES|ascii|page < input\n", argv[0]);
+        fprintf(stderr, "usage: %s console|unescape|caption COLS|pages COLS PX LINES [CAP]|ascii|page < input\n", argv[0]);
         return 2;
     }
     free(in);

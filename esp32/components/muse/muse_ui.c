@@ -1042,10 +1042,9 @@ static void build_screen(void)
             int pitch = lv_font_get_line_height(font) + LONG_LINE_SPACE;
             int lines = (s_h - LONG_HINTS_H - top + LONG_LINE_SPACE) / pitch;
             int w = s_w - 24;
-            int page = lines;
             /* A third of the caption spare for characters wider than a byte:
              * this caps a line of narrow letters. */
-            int cols = MUSE_CAPTION_MAX * 2 / 3 / page - 1;
+            int cols = MUSE_CAPTION_MAX * 2 / 3 / lines - 1;
             muse_hatch_set_caption_px(w, long_glyph_px);
             lv_obj_set_style_text_font(s_caption_lbl, font, 0);
             lv_obj_set_style_text_line_space(s_caption_lbl, LONG_LINE_SPACE, 0);
@@ -1054,11 +1053,11 @@ static void build_screen(void)
             lv_obj_set_style_text_align(s_caption_lbl, LV_TEXT_ALIGN_LEFT, 0);
             lv_obj_set_size(s_caption_lbl, w, lines * pitch - LONG_LINE_SPACE);
             lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, top);
-            muse_state_set_page(cols, page);
+            muse_state_set_page(cols, lines);
 #if CONFIG_MUSE_CJK_FONT
             int cjk_pitch = lv_font_get_line_height(caption_font()) + LONG_LINE_SPACE;
             muse_state_set_cjk_page(w / lv_font_get_glyph_width(caption_font(), 'M', ' '),
-                                    (lines * pitch) / cjk_pitch - 2);
+                                    (lines * pitch) / cjk_pitch);
 #endif
             if (muse_board->touch) {
                 build_speaker(face, s_w / 2 - 96, s_h / 2 - 75);   /* in the bottom strip, left of the key hints */

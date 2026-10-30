@@ -187,6 +187,13 @@ void muse_hatch_status(muse_hatch_status_t *out)
     }
 }
 
+/* The simulator pages no replies (muse_chat_text.c isn't built). */
+void muse_hatch_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next))
+{
+    (void)width_px;
+    (void)glyph_px;
+}
+
 muse_link_state_t muse_link_state(void)
 {
     return s_link;

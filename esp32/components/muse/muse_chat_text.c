@@ -200,40 +200,43 @@ static bool next_line(const char **text, int cols, int px, const char **start, s
  * Wraps `text` to the screen's page (muse_state_page) and puts the page holding
  * byte `at` in `out`. Pages overlap by a line: a page's last line starts the
  * next one, so the page turns as that line is reached and nothing is skipped.
+ * A page also ends at the last whole line that fits in `cap`, and the next
+ * one starts at that line, so lines of multibyte characters aren't skipped
+ * either.
  */
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
 {
     int cols, lines;
     bool cjk = muse_text_has_cjk(text);
     muse_state_page(cjk, &cols, &lines);
+    lines = lines > 1 ? lines : 1;
     int px = cjk ? 0 : s_caption_px;   /* CJK captions are in a fixed-width font */
-    const char *p = text, *start;
-    size_t len;
-    int line = -1, n = 0;
-    while (next_line(&p, cols, px, &start, &len)) {
-        line = n++;
-        if ((size_t)(start + len - text) > at) {
-            break;
+    const char *page = text;
+    for (;;) {
+        const char *p = page, *start, *last = NULL;
+        size_t len, o = 0;
+        int n = 0;
+        out[0] = '\0';
+        const char *line = p;
+        while (n < lines && next_line(&p, cols, px, &start, &len)) {
+            if (o + 1 + len >= cap) {
+                p = line;   /* whole lines only: this one starts the next page */
+                break;
+            }
+            line = p;
+            o += snprintf(out + o, cap - o, "%s%.*s", o ? "\n" : "", (int)len, start);
+            last = start;
+            n++;
         }
-    }
-    if (line < 0) {
-        return false;
-    }
-    int first = lines > 1 ? line / (lines - 1) * (lines - 1) : line;
-
-    size_t o = 0;
-    out[0] = '\0';
-    p = text;
-    for (n = 0; n < first + lines && next_line(&p, cols, px, &start, &len); n++) {
-        if (n < first) {
-            continue;
+        if (!n) {
+            return next_line(&p, cols, px, &start, &len);   /* no text, or a line longer than cap */
         }
-        if (o + 1 + len >= cap) {
-            break;   /* whole lines only */
+        const char *next = n > 1 ? last : p;   /* the next page's first line */
+        if ((size_t)(next - text) > at || !next_line(&p, cols, px, &start, &len)) {
+            return true;   /* `at` is before it, or this is the last page */
         }
-        o += snprintf(out + o, cap - o, "%s%.*s", o ? "\n" : "", (int)len, start);
+        page = next;
     }
-    return true;
 }
 
 /* ---- Typed turns on the serial console ---- */
