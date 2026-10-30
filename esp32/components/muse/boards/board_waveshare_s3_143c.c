@@ -531,7 +531,7 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .diagonal_in = 1.43f,
-    .talk_button = "BOOT",
+    .talk_button = "boot",
     /* BOOT is the only button, on the right rim of the puck. */
     .talk_hint = { LV_ALIGN_CENTER, 153, -129 },    /* 40 degrees above 3 o'clock */
     .frame_ms = 40,
