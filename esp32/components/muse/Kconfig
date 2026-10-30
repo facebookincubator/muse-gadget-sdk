@@ -47,6 +47,10 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_WAVESHARE_S3_206
+            bool "Waveshare ESP32-S3-Touch-AMOLED-2.06"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_S3_185C
             bool "Waveshare ESP32-S3-Touch-LCD-1.85C"
             depends on IDF_TARGET_ESP32S3
@@ -57,6 +61,10 @@ menu "Muse"
 
         config MUSE_BOARD_AIPI
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_ATK_DNESP32S3_BOX
+            bool "ALIENTEK ATK-DNESP32S3-BOX V1.1 (320x240 LCD, ES8311, three keys, no touch)"
             depends on IDF_TARGET_ESP32S3
 
         config MUSE_BOARD_ESPRESSIF_BOX_3
@@ -121,6 +129,13 @@ menu "Muse"
         config MUSE_BOARD_AI_PASSPORT
             bool "FoloToy AI Passport (ESP32-C3, three buttons, no touch)"
             depends on IDF_TARGET_ESP32C3
+        config MUSE_BOARD_WAVESHARE_P4_LCD35
+            bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 (ESP32-P4 + C6)"
+            depends on IDF_TARGET_ESP32P4
+
+        config MUSE_BOARD_DEOTALAND_ROROLEE
+            bool "Deotaland RoRoLee (ESP32-S3, 240x120 AMOLED, three buttons, no touch)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -137,9 +152,11 @@ menu "Muse"
         default "ostb_echoear_2st" if MUSE_BOARD_OSTB_ECHOEAR_2ST
         default "reterminal_sticky" if MUSE_BOARD_RETERMINAL_STICKY
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
+        default "waveshare_s3_206" if MUSE_BOARD_WAVESHARE_S3_206
         default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
         default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
         default "aipi" if MUSE_BOARD_AIPI
+        default "atk_dnesp32s3_box" if MUSE_BOARD_ATK_DNESP32S3_BOX
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
         default "waveshare_c6_206" if MUSE_BOARD_WAVESHARE_C6_206
@@ -157,6 +174,8 @@ menu "Muse"
         default "waveshare_s3_lcd128" if MUSE_BOARD_WAVESHARE_S3_LCD128
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
+        default "waveshare_p4_lcd35" if MUSE_BOARD_WAVESHARE_P4_LCD35
+        default "deotaland_rorolee" if MUSE_BOARD_DEOTALAND_ROROLEE
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -187,7 +206,7 @@ menu "Muse"
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_WAVESHARE_P4_LCD35 || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
     # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME
@@ -199,13 +218,13 @@ menu "Muse"
         bool "Isolated board BSP power-characterization firmware"
         # Boards implementing boards/muse_power_test_board.h; extend this list
         # only after the new board's diagnostic hooks and matrix pass tests.
-        depends on (MUSE_BOARD_SENSECAP_WATCHER) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
         default n
         help
             DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
-            at app_main. USB UART arms a timed autonomous VBUS-free BSP-load
+            at app_main. USB console arms a timed autonomous or USB-powered BSP-load
             sweep. No credentials, production NVS, BLE provisioning or OTA.
-            Results are retained in RAM/RTC until read back after USB reconnect.
+            Results are retained in RAM/RTC for USB readback.
             This characterizes isolated BSP loads, NOT production power.
             Optional camera support is not required and unsupported matrix
             features are explicitly skipped. Never enable in a release profile.
@@ -221,17 +240,17 @@ menu "Muse"
             Leave disabled to build without camera support.
 
     config MUSE_CJK_FONT
-        bool "Show Chinese and Japanese in captions"
+        bool "Show Chinese, Japanese and Korean in captions"
         depends on MUSE_ENABLED
         default n
         help
             Captions fall back to GNU Unifont's 16x16 bitmaps for CJK
-            punctuation, kana, the CJK Unified Ideographs and fullwidth
-            forms that the ASCII caption font lacks. Small screens, whose
-            captions are two lines of 8 px text, show a reply with CJK in it
-            one 16 px line at a time. Takes about 850 KB of flash and no RAM.
-            Without it those characters show as boxes. Hangul isn't
-            included.
+            punctuation, kana, the CJK Unified Ideographs, fullwidth forms,
+            Hangul jamo and Hangul syllables that the ASCII caption font
+            lacks. Small screens, whose captions are two lines of 8 px
+            text, show a reply with CJK in it one 16 px line at a time.
+            Takes about 1.2 MB of flash and no RAM. Without it those
+            characters show as boxes.
 
     config MUSE_CJK_FONT_NOTO
         bool "Draw CJK captions with Noto Sans SC instead of Unifont"
@@ -240,8 +259,9 @@ menu "Muse"
         help
             Anti-aliased Noto Sans SC Medium at 16 px in place of Unifont's
             1-bit bitmaps, in the same 16 px cell. Covers the 6763 hanzi of
-            GB2312 rather than every CJK Unified Ideograph: rarer characters
-            show as boxes. Takes about 910 KB of flash, against 850 KB.
+            GB2312 rather than every CJK Unified Ideograph, and no Hangul:
+            rarer characters and Korean show as boxes. Takes about 910 KB of
+            flash, against about 1.2 MB.
 
     config MUSE_JC3248W535_MIC_GPIO
         int "JC3248W535: GPIO for an external I2S mic's data (SD) line"

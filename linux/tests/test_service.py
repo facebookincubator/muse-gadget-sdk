@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import stat
@@ -24,12 +25,12 @@ from pathlib import Path
 
 import pytest
 
-from musegadget import config, muse_api
+from musegadget import config, muse_api, service as service_module
 from musegadget.executor import Account, Executor
 from musegadget.identity import Identity
-from musegadget.link_client import DeviceDescription, Outcome
+from musegadget.link_client import MAX_IMAGE_BYTES, DeviceDescription, Outcome
 from musegadget.noise import ApplicationResponse, ServiceFrame
-from musegadget.service import Backoff, Service
+from musegadget.service import MAX_LOCAL_REQUEST, Backoff, Service
 
 from test_link_client import FakeVm, Pipe, bounded_scenario
 
@@ -42,6 +43,11 @@ class FakeSession:
 
     async def send_chat(self, message: str, session_id: str | None = None) -> dict:
         self.sent.append((message, session_id))
+        return {"ok": True, "status": 200, "response": None}
+
+    async def send_image(self, image_bytes: bytes, mime_type: str, session_id: str | None = None,
+                         *, message: str = "", filename: str | None = None) -> dict:
+        self.sent.append((message, session_id, image_bytes, mime_type, filename))
         return {"ok": True, "status": 200, "response": None}
 
 
@@ -90,6 +96,50 @@ def test_local_message_can_target_a_side_chat():
         assert session.sent == [("ring", sid)]
         bad = await ask(path, b'{"message": "ring", "session_id": "../x"}\n')
         assert not bad["ok"] and len(session.sent) == 1
+
+    run_with_socket(check)
+
+
+def test_local_message_can_carry_a_picture():
+    async def check(service, path):
+        session = FakeSession()
+        service._current = session
+        largest = bytes(MAX_IMAGE_BYTES)
+        image = {"filename": "porch.jpg", "mime_type": "image/jpeg",
+                 "data_base64": base64.b64encode(largest).decode()}
+        request = {"message": "who is it?", "image": image}
+        assert (await ask(path, json.dumps(request).encode() + b"\n"))["ok"]
+        assert session.sent == [("who is it?", None, largest, "image/jpeg", "porch.jpg")]
+        too_big = {**image, "data_base64": base64.b64encode(bytes(MAX_IMAGE_BYTES + 1)).decode()}
+        for bad, error in (
+            ([image], "image must be"),
+            ({"filename": "porch.jpg"}, "image must be"),
+            ({**image, "data_base64": 1}, "image must be"),
+            ({**image, "data_base64": "not base64!"}, "not valid base64"),
+            ({**image, "mime_type": "application/pdf"}, "JPEG, PNG, GIF or WebP"),
+            ({**image, "data_base64": ""}, "empty"),
+            (too_big, "images must be 2 MiB or less"),
+        ):
+            reply = await ask(path, json.dumps({"message": "hi", "image": bad}).encode() + b"\n")
+            assert not reply["ok"] and error in reply["error"], reply
+        assert len(session.sent) == 1
+
+    run_with_socket(check)
+
+
+def test_local_request_over_the_line_limit_gets_a_json_error():
+    async def check(service, path):
+        service._current = session = FakeSession()
+        reader, writer = await asyncio.open_unix_connection(str(path))
+        # Send the whole oversized line before reading, as the CLI does.
+        writer.write(b'{"message": "' + b"x" * MAX_LOCAL_REQUEST + b'"}\n')
+        await writer.drain()
+        reply = json.loads(await reader.readline())
+        writer.close()
+        assert reply == {"ok": False, "error": "the request is over 4 MiB"}
+        assert session.sent == []
+        # The socket keeps serving.
+        assert (await ask(path, b'{"message": "hi"}\n'))["ok"]
 
     run_with_socket(check)
 
@@ -338,3 +388,148 @@ def test_reconnected_sessions_share_command_slots(monkeypatch):
             slots.release()
 
     asyncio.run(scenario())
+
+
+# Drive the production run loop with synthetic API responses and a recorded
+# stop-aware delay. asyncio's watchdog keeps using its real monotonic clock.
+def run_auth_cycles(tmp_path, monkeypatch, statuses, outcomes=(), refresh_status=200):
+    monkeypatch.setenv(config.STATE_DIR_ENV, str(tmp_path))
+    config.save_json(config.PAIRING_FILE, fresh_pairing())
+    trace = []
+
+    async def scenario():
+        service = Service(identity=Identity("02:00:00:00:00:01"),
+                          executor=Executor(Account.current()))
+        loop = asyncio.get_running_loop()
+        pending_statuses = iter(statuses)
+        pending_outcomes = iter(outcomes)
+
+        def fetch(token, api):
+            status = next(pending_statuses)
+            trace.append(("fetch", token, status))
+            if len([x for x in trace if x[0] == "fetch"]) == len(statuses) and status == 401:
+                loop.call_soon_threadsafe(service.stop)
+            return ([{"is_default": True}] if status == 200 else []), status
+
+        def refresh(*args):
+            trace.append(("refresh", refresh_status))
+            return ({"access_token": "new-a", "refresh_token": "new-r"}
+                    if refresh_status == 200 else None), refresh_status
+
+        async def sleep(seconds):
+            trace.append(("sleep", seconds))
+            await asyncio.sleep(0)
+
+        async def session(vm, pairing):
+            result = next(pending_outcomes)
+            trace.append(("session", result[0]))
+            return result
+
+        monkeypatch.setattr(muse_api, "fetch_vms_with_status", fetch)
+        monkeypatch.setattr(muse_api, "refresh_device_token", refresh)
+        monkeypatch.setattr(service, "_sleep", sleep)
+        monkeypatch.setattr(service, "_session", session)
+        await asyncio.wait_for(service.run(), 3)
+
+    asyncio.run(scenario())
+    return trace
+
+
+def test_repeated_rejections_after_successful_refresh_are_paced(tmp_path, monkeypatch, caplog):
+    trace = run_auth_cycles(tmp_path, monkeypatch, [401] * 4)
+    assert [x[2] for x in trace if x[0] == "fetch"] == [401] * 4
+    # The first refresh gets one immediate retry. Later rejected refreshed
+    # tokens must encounter a positive delay before another fetch/refresh cycle.
+    fetch_indices = [i for i, event in enumerate(trace) if event[0] == "fetch"]
+    for left, right in zip(fetch_indices[1:], fetch_indices[2:]):
+        assert any(event[0] == "sleep" and event[1] >= service_module.AUTH_BACKOFF_MIN_S
+                   for event in trace[left + 1:right]), trace
+    assert "new-a" not in caplog.text and "new-r" not in caplog.text
+
+
+def test_temporary_token_rejection_retries_immediately_with_the_saved_token(tmp_path, monkeypatch):
+    trace = run_auth_cycles(tmp_path, monkeypatch, [401, 200], [(Outcome.STOPPED, 0)])
+    assert [x[1] for x in trace if x[0] == "fetch"] == ["a", "new-a"]
+    assert [x for x in trace if x[0] == "refresh"] == [("refresh", 200)]
+    assert not [x for x in trace if x[0] == "sleep"]
+
+
+def test_healthy_session_resets_rejection_backoff(tmp_path, monkeypatch):
+    trace = run_auth_cycles(tmp_path, monkeypatch, [401] * 6 + [200, 401, 401, 200],
+                            [(Outcome.CLOSED, service_module.HEALTHY_SESSION_S), (Outcome.STOPPED, 0)])
+    assert [x[1] for x in trace if x[0] == "sleep"] == [15, 15, 15, 16, 32, 2, 15]
+
+
+@pytest.mark.parametrize("refresh_status, retained", [(401, False), (503, True)])
+def test_forced_refresh_failure_keeps_revocation_distinct_from_transient_failure(
+    tmp_path, monkeypatch, refresh_status, retained,
+):
+    trace = run_auth_cycles(tmp_path, monkeypatch, [401], refresh_status=refresh_status)
+    assert [x[1] for x in trace if x[0] == "sleep"] == [service_module.TOKEN_RETRY_S]
+    assert (tmp_path / config.PAIRING_FILE).exists() is retained
+    if retained:
+        assert config.load_json(config.PAIRING_FILE)["access_token"] == "a"
+
+
+def test_stop_wakes_the_real_rejection_delay_without_more_api_calls(tmp_path, monkeypatch):
+    monkeypatch.setenv(config.STATE_DIR_ENV, str(tmp_path))
+    config.save_json(config.PAIRING_FILE, fresh_pairing())
+    fetches = []
+
+    async def scenario():
+        service = Service(identity=Identity("02:00:00:00:00:01"),
+                          executor=Executor(Account.current()))
+        entered = asyncio.Event()
+        original_sleep = service._sleep
+
+        async def sleep(seconds):
+            assert seconds >= service_module.AUTH_BACKOFF_MIN_S
+            entered.set()
+            await original_sleep(seconds)
+
+        def fetch(*args):
+            fetches.append(1)
+            assert len(fetches) < 10, "unpaced rejection loop"
+            return [], 401
+
+        monkeypatch.setattr(muse_api, "fetch_vms_with_status", fetch)
+        monkeypatch.setattr(muse_api, "refresh_device_token",
+                            lambda *args: ({"access_token": "new-a", "refresh_token": "new-r"}, 200))
+        monkeypatch.setattr(service, "_sleep", sleep)
+        task = asyncio.ensure_future(service.run())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            assert len(fetches) == 2
+            service.stop()
+            await asyncio.wait_for(task, 1)
+            assert len(fetches) == 2
+        finally:
+            service.stop()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_age_based_refresh_keeps_pairing_and_observes_retry_cooldown(tmp_path, monkeypatch):
+    monkeypatch.setenv(config.STATE_DIR_ENV, str(tmp_path))
+    calls = []
+    fresh = fresh_pairing()
+    fresh["access_token_saved_at"] -= service_module.TOKEN_REFRESH_AGE_S + 1
+
+    def refresh(*args):
+        calls.append(1)
+        return None, 503
+
+    monkeypatch.setattr(muse_api, "refresh_device_token", refresh)
+    assert refresh_with({}, fresh, calls=2) is fresh
+    assert calls == [1]
+
+
+def test_repeated_rejection_backoff_is_bounded_in_the_run_loop(tmp_path, monkeypatch):
+    trace = run_auth_cycles(tmp_path, monkeypatch, [401] * 10)
+    delays = [x[1] for x in trace if x[0] == "sleep"]
+    assert len(delays) == 9
+    assert all(service_module.AUTH_BACKOFF_MIN_S <= delay <= service_module.BACKOFF_MAX_S
+               for delay in delays)
+    assert delays[-1] == service_module.BACKOFF_MAX_S

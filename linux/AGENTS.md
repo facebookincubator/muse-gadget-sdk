@@ -43,6 +43,7 @@ pairing and control protocols, so the same app pairs either.
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
+| `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |
 | `noise/` | Noise XX handshake, framing and service envelopes |
 | `data/` | The systemd unit and the hash-pinned `requirements.lock`, shipped in the package |
 
@@ -164,7 +165,7 @@ never has a command's parameters, output or error message.
   `chat_id` is not an API field and is ignored. The response is only the ack
   (`message_id`); the reply appears in the Muse chat. Replies are text: to
   speak them, use a text-to-speech API of your choice.
-- The VM accepts at most 256 KB per message from the device, so command output
+- The VM accepts at most 256 KB per `/link-control` message, so command output
   is cut at 96 KB per stream.
 
 ## Realtime voice
@@ -210,6 +211,14 @@ never has a command's parameters, output or error message.
   Noise against an in-process fake VM without hardware or external calls.
 
 ## Adding a command
+
+A device's owner adds commands without changing the package: one JSON file
+per command in `/etc/musegadget/commands.d/` (`MUSEGADGET_COMMANDS_DIR`
+overrides it), read when the service starts. `commands.py` documents the
+format and validates it, including the directory trust check;
+`Executor.run_drop_in` runs them. `Executor.specs` takes the actual device
+metadata to admit whole definitions under the serialized registration budget. See "Add your own
+commands" in `README.md`. To add a built-in command to the package itself:
 
 1. Add a spec to `COMMAND_SPECS` in `executor.py`: `description`, `required`
    and `optional` parameters (each with `type` and `description`), and
@@ -310,10 +319,15 @@ run_command=...)` is one encrypted session with a Muse VM.
   the main chat.
 - `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None)`
   sends a WAV voice note of at most 2 MiB.
+- `send_image(image_bytes, mime_type, session_id=None, *, message="",
+  filename=None, output_modality="text")` sends a picture of at most
+  `link_client.MAX_IMAGE_BYTES` (2 MiB), with `message` as its text.
+  `mime_type` is one of `link_client.IMAGE_MIME_TYPES`: JPEG, PNG, GIF or
+  WebP. Anything else raises `ValueError`.
 - `link_client.acknowledgement(result)` reads Muse's acknowledgement from the
-  result of `send_chat` or `send_voice`. It raises `RequestRejected`, with a
-  `status` attribute, when Muse refused the request, or `ValueError` when the
-  response is not a dict.
+  result of `send_chat`, `send_voice` or `send_image`. It raises
+  `RequestRejected`, with a `status` attribute, when Muse refused the request,
+  or `ValueError` when the response is not a dict.
 - `await open_side_chat(session_id)` looks up a side chat and returns a `SideChat`.
   `SideChat.exists` is false for an ID that Muse does not know yet. The first
   `send_chat` to that ID creates the chat. The lookup closes its subscription
@@ -322,8 +336,9 @@ run_command=...)` is one encrypted session with a Muse VM.
   `chat_subscribed` is set while a subscription is open.
 - `stream_tts(message_id)` yields MP3 audio for a reply that Muse gave in voice
   mode.
-- `send_chat` and `send_voice` are coroutines that return a dict with `ok`,
-  `status` and `response`. `subscribe_chat` and `stream_tts` are async iterators.
+- `send_chat`, `send_voice` and `send_image` are coroutines that return a
+  dict with `ok`, `status` and `response`. `subscribe_chat` and `stream_tts`
+  are async iterators.
 - `open_side_chat`, `subscribe_chat` and `stream_tts` raise `HttpStreamError`
   on refused HTTP requests. It has `status` and `path` attributes.
 
@@ -351,7 +366,8 @@ run_command=...)` is one encrypted session with a Muse VM.
 - `replies` maps each answer's message ID to its latest `Reply`.
   `abandon_reply(message_id)` stops waiting for one reply.
 - `acknowledge(response, follow_up=True)` binds one more user message to the
-  request. Call `expect_follow_up()` before you send it.
+  request. Call `expect_follow_up()` before you send it. Until that
+  acknowledgement arrives, the turn is neither complete nor settled.
 - `acknowledged`, `busy`, `task_finished`, `activity_code` and
   `last_activity` describe the request's state.
 - `ReplayScope` drops events from earlier turns. Share one across the turns

@@ -386,6 +386,7 @@ menu "ESP32 Device SDK"
             The reTerminal E1001 and E1002 show a still status screen on
             their e-paper instead (black and white on the E1001, six colours
             on the E1002).
+            The Waveshare ESP32-S3-ePaper-1.54G does the same in four colours.
             Boards with the full UI have no status LED; their screen shows Link's pairing
             and connection state instead.
 
@@ -420,6 +421,10 @@ menu "ESP32 Device SDK"
 
         config HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
             bool "Waveshare ESP32-S3-1.54inch-ePaper SSD1681 e-paper (status screen)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
+        config HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+            bool "Waveshare ESP32-S3-ePaper-1.54G four-colour e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
         config HOMEHUB_LED_BACKEND_VOICE_RING
@@ -458,6 +463,17 @@ menu "ESP32 Device SDK"
             DevKitC-1 uses GPIO27. The build stops if the pin is one the chip
             uses for its SPI flash or PSRAM.
 
+    config HOMEHUB_EPD154G_FAST_REFRESH
+        bool "Waveshare ESP32-S3-ePaper-1.54G fast refresh"
+        depends on HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        default y
+        help
+            Refresh with Waveshare's fast waveform (their EPD_1IN54G_Init_Fast)
+            and a fixed 120 Hz frame rate, which their code does not set:
+            about 8.5 s instead of 20, colour included. Waveshare lists a 20 s
+            full refresh and a 15 s fast one, so the effect on the panel's
+            life is unknown.
+
     config HOMEHUB_DISPLAY
         bool
         default y if HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
@@ -467,6 +483,7 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
         default y if HOMEHUB_LED_BACKEND_STICKY_SSD1677
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
         help
             Set for backends with a display: the status bars, animation and
             agent name (a still status screen on e-paper), and the display.*
@@ -520,12 +537,12 @@ menu "ESP32 Device SDK"
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
-        default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM
+        default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM && ESP_ROM_HAS_JPEG_DECODE
         select HOMEHUB_DAEMON_REQUESTS   # display.draw_file reads from the VM
         help
             Set when display.draw_url and display.draw_file can draw an
-            image: the display backends, and boards with the full UI and PSRAM
-            for the image.
+            image: the display backends, and boards with the full UI, PSRAM
+            for the image and the ROM's JPEG decoder.
 
     config HOMEHUB_PRE_DVT_GPIO
         bool "Use pre-DVT GPIO assignments"
