@@ -182,7 +182,11 @@ static uint32_t xTaskGetTickCount(void) { return tick; }
 static bool muse_link_talk_press(void) { bool c = confirm; confirm = false; return c; }
 static bool muse_state_asleep(void) { return asleep; }
 static void muse_state_poke(void) {}
-static void muse_state_set_caption(const char *text) { (void)text; }
+typedef enum { MUSE_MODE_IDLE = 1, MUSE_MODE_ERROR = 5 } muse_mode_t;
+static muse_mode_t mode = MUSE_MODE_IDLE;
+static char caption[64];
+static muse_mode_t muse_state_mode(float *since) { (void)since; return mode; }
+static void muse_state_set_caption(const char *text) { strlcpy(caption, text, sizeof(caption)); }
 static void set_asleep(bool value, const char *why) { (void)why; asleep = value; }
 static void talk_button(unsigned ev) { talks += !!(ev & 1); releases += !!(ev & 2); }
 #if CONFIG_MUSE_WATCHER_CAMERA
@@ -211,6 +215,27 @@ static void routing(void) {
     input(MUSE_BTN_REVIEW_NEXT, 4200);
     assert(muse_review_active() && talks == 1);
 }
+/* Let go on the very poll the hold would start: a click, not a press and release. */
+static void threshold(void) {
+    muse_review_init();
+    input(1, 0); input(2, 300);
+    assert(!talks && !releases);
+    input(0, 700);
+    assert(asleep);
+    input(1, 1000); input(2, 1050);   /* wakes */
+    assert(!asleep && !talks);
+}
+/* Turning with nothing to review says so, but not over an error caption. */
+static void nothing_to_review(void) {
+    muse_review_init();
+    strcpy(caption, "CAN'T REACH MUSE");
+    mode = MUSE_MODE_ERROR;
+    input(MUSE_BTN_REVIEW_NEXT, 100);
+    assert(!strcmp(caption, "CAN'T REACH MUSE") && !muse_review_active());
+    mode = MUSE_MODE_IDLE;
+    input(MUSE_BTN_REVIEW_NEXT, 200);
+    assert(!strcmp(caption, "NO REPLY YET"));
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     if (!strcmp(argv[1], "click")) click();
@@ -220,6 +245,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "long")) long_reply();
     else if (!strcmp(argv[1], "view")) view();
     else if (!strcmp(argv[1], "routing")) routing();
+    else if (!strcmp(argv[1], "threshold")) threshold();
+    else if (!strcmp(argv[1], "empty")) nothing_to_review();
     else return 2;
     return 0;
 }
@@ -271,6 +298,14 @@ int main(int argc, char **argv) {
 
     def test_input_routes_click_hold_pairing_and_rotation(self):
         self.run_case("routing")
+
+    def test_release_on_the_hold_poll_is_a_click(self):
+        for binary in (self.binary, self.camera_binary):
+            result = subprocess.run([str(binary), "threshold"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_nothing_to_review_keeps_an_error_caption(self):
+        self.run_case("empty")
 
     def test_camera_double_click_does_not_record_or_sleep(self):
         result = subprocess.run([str(self.camera_binary), "routing"], capture_output=True, text=True)

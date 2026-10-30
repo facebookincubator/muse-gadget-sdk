@@ -196,8 +196,13 @@ shows the current position. A short click sleeps or wakes the screen, and
 holding the wheel for 300 ms starts push-to-talk. A pairing confirmation still
 uses a normal click. Reviewing uses the larger text layout and holds the
 selected page while automatic reply playback finishes. The latest reply stays
-in RAM until another reply replaces it or the board restarts; up to 32 KB of
-reply text is retained.
+in RAM until the next turn's reply replaces it or the board restarts; up to
+32 KB of reply text is retained. Automatic captions still show the first 1 KB
+of each message, as on other boards. Sleeping closes the review. With Muse's
+own voice session turned off (`CONFIG_MUSE_HATCH`), replies come over Home
+Link's session and review keeps the first 1 KB of each. With live calls
+(`CONFIG_MUSE_REALTIME_VOICE`), letting go within 300 ms of push-to-talk
+starting starts a call, as a tap does on other boards.
 
 The SenseCAP Watcher keeps its factory data (the identity SenseCraft uses) in
 an `nvsfactory` partition at `0x9000`, where Muse puts its partition table and

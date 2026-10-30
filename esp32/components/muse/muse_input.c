@@ -168,6 +168,11 @@ static void set_asleep(bool asleep, const char *why)
     if (asleep != muse_state_asleep()) {
         ESP_LOGI(TAG, "%s (%s)", asleep ? "sleeping" : "waking", why);
         muse_state_set_asleep(asleep);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+        if (asleep) {
+            muse_review_close();   /* auto-sleep too: waking shows the live caption */
+        }
+#endif
         if (s_input) {
             xTaskNotifyGive(s_input);   /* out of wait_buttons() */
         }
@@ -342,6 +347,7 @@ static void watcher_buttons(unsigned ev)
     static muse_wheel_t wheel;
     bool down = wheel.down;
     if (ev & MUSE_BTN_TALK_PRESS) down = true;
+    else if (ev & MUSE_BTN_TALK_RELEASE) down = false;   /* let go before the hold timer runs */
     bool confirmed = down && !wheel.down && muse_link_talk_press();
     bool asleep = muse_state_asleep();
     uint32_t now = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
@@ -370,7 +376,7 @@ static void watcher_buttons(unsigned ev)
         muse_review_close();
         talk_button(MUSE_BTN_TALK_PRESS);
     }
-    if (ev & MUSE_BTN_TALK_RELEASE) {
+    if ((ev & MUSE_BTN_TALK_RELEASE) && wheel.down) {   /* pressed and let go in one poll */
         action = muse_wheel_update(&wheel, false, now, muse_state_asleep(), false);
     }
     if (action == MUSE_WHEEL_TALK_UP) {
@@ -392,8 +398,8 @@ static void watcher_buttons(unsigned ev)
         muse_state_poke();
         if (muse_review_step(ev & MUSE_BTN_REVIEW_NEXT ? 1 : -1)) {
             ESP_LOGI(TAG, "wheel: reviewing reply");
-        } else {
-            muse_state_set_caption("NO REPLY YET");
+        } else if (muse_state_mode(NULL) == MUSE_MODE_IDLE) {
+            muse_state_set_caption("NO REPLY YET");   /* not over an error or a turn's caption */
         }
     }
 }

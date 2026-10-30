@@ -117,11 +117,14 @@ static const char *TAG = "muse_chat_session";
 #define MP3_POLL_ROOM (SCRATCH + 8192)     /* stop reading the socket below this much MP3 room */
 static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP3 buffer empty");
 #define EV_TEXT 72
+#define CAPTION_TEXT 1024                  /* a message's text, for captions timed to its speech */
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-#define TEXT_MAX (32 * 1024)               /* keep streamed replies for wheel review in PSRAM */
+#define TEXT_MAX (32 * 1024)               /* the whole reply, kept for wheel review, in PSRAM */
 #else
-#define TEXT_MAX 1024                      /* a message's text, for captions timed to its speech */
+#define TEXT_MAX CAPTION_TEXT
 #endif
+/* The part of a message's kept text the automatic captions pace and show. */
+#define CAPTION_LEN(text) strnlen((text), CAPTION_TEXT - 1)
 #define SPEECH_CHARS_PER_S 14              /* until the speech's length is known */
 #define TEXT_CHARS_PER_S 16                /* speaker off: reading pace, a little over speech */
 #define TEXT_HOLD_S 2                      /* speaker off: how long a message's last lines stay up */
@@ -1602,9 +1605,10 @@ static void start_tts(void)
          * and finishes the message once it's drained.
          */
         m.pcm_start = s_turn.pcm_out;
-        /* Paced to the text kept: a reply longer than TEXT_MAX shows what was
-         * kept at reading pace, not stretched over the whole reply's time. */
-        size_t shown = s_turn.texts ? strlen(s_turn.texts + i * TEXT_MAX) : m.len;
+        /* Paced to the text kept: a reply longer than CAPTION_TEXT shows what
+         * was kept at reading pace, not stretched over the whole reply's time
+         * (the Watcher keeps the rest for review). */
+        size_t shown = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
         m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
@@ -2362,7 +2366,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         }
         return false;
     }
-    size_t len = strlen(text);
+    size_t len = CAPTION_LEN(text);
     uint32_t frames = m->pcm_frames ? m->pcm_frames : (uint32_t)(len * MIC_RATE / SPEECH_CHARS_PER_S);
     size_t at = frames ? (size_t)((uint64_t)(played - m->pcm_start) * len / frames) : 0;
     if (at >= len) {

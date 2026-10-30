@@ -392,6 +392,22 @@ static void review_keeps_the_whole_reply() {
     free(s_turn.texts);
     s_turn.texts = nullptr;
 }
+/* Keeping the whole reply for review doesn't slow the automatic captions:
+ * they pace the same first CAPTION_TEXT bytes as other boards, well inside
+ * the turn's cap, so a long completed reply isn't cut off as incomplete. */
+static void review_keeps_caption_pace() {
+    assert(muse_review_init() == 0);
+    static char reply[5001];
+    memset(reply, 'a', sizeof(reply) - 1);
+    const char *kept = voice_reply({reply});
+    start_tts();
+    const msg_t &m = s_turn.msgs[0];
+    assert(m.tts == TTS_ACTIVE && strlen(kept) == sizeof(reply) - 1);
+    assert(m.pcm_frames == (uint32_t)((CAPTION_TEXT - 1) * MIC_RATE / TEXT_CHARS_PER_S));
+    assert((int64_t)m.pcm_frames * 1000000 / MIC_RATE < TURN_CAP_US / 2);
+    assert(!strcmp(reviewed(), reply));
+    s_turn.texts = nullptr;
+}
 #endif
 int main(int argc, char **argv) {
     assert(argc == 2);
@@ -417,6 +433,7 @@ int main(int argc, char **argv) {
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
+    case 20: review_keeps_caption_pace(); break;
 #endif
     default: return 2;
     }
@@ -518,3 +535,6 @@ int main(int argc, char **argv) {
 
     def test_watcher_review_keeps_full_final_and_long_streamed_reply(self):
         self.run_case(19, watcher=True)
+
+    def test_watcher_review_keeps_the_caption_pace_inside_the_turn_cap(self):
+        self.run_case(20, watcher=True)
