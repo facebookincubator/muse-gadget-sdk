@@ -108,8 +108,12 @@ void app_launcher_render(uint16_t *fb, uint32_t now_ms)
     // Battery & Wi-Fi in top bar
     char bat_str[16];
     muse_power_t pwr = muse_state_power();
-    int pct = pwr.battery_pct >= 0 ? pwr.battery_pct : 100;
-    snprintf(bat_str, sizeof(bat_str), "%d%%", pct);
+    int pct = pwr.battery_pct >= 0 ? pwr.battery_pct : 0;   /* unknown: an empty icon */
+    if (pwr.battery_pct >= 0) {
+        snprintf(bat_str, sizeof(bat_str), "%d%%", pct);
+    } else {
+        snprintf(bat_str, sizeof(bat_str), "--");
+    }
     gfx_draw_string(fb, 276, 9, bat_str, GFX_TEXT_MAIN);
     // Battery icon
     gfx_draw_rect(fb, 252, 8, 18, 10, GFX_TEXT_MAIN);
@@ -193,26 +197,35 @@ void app_launcher_render(uint16_t *fb, uint32_t now_ms)
     gfx_draw_fast_hline(fb, 0, 206, SCREEN_W, 0x2104);
     gfx_draw_string(fb, 20, 214, "TAP A CARD TO OPEN", GFX_ACCENT_CYAN);
     gfx_draw_string(fb, 184, 214, "HOLD B TO TALK", GFX_ACCENT_ROSE);
-    gfx_draw_string(fb, 30, 227, "In an app, tap [< APPS] to come back here", GFX_TEXT_DIM);
+    gfx_draw_string(fb, 30, 227, "In an app, tap its top-left to come back", GFX_TEXT_DIM);
+}
+
+/* The card under (x, y): 0 Pet World, 1 debugger, 2 hardware demo; -1 none. */
+static int card_at(int x, int y)
+{
+    if (y >= 40 && y <= 200) {
+        if (x >= 8 && x < 108) {
+            return 0;
+        } else if (x >= 108 && x < 212) {
+            return 1;
+        } else if (x >= 212 && x <= 316) {
+            return 2;
+        }
+    }
+    return -1;
 }
 
 void app_launcher_touch_down(int x, int y)
 {
-    if (y >= 40 && y <= 200) {
-        if (x >= 8 && x < 108) {
-            s_touched_card = 0;
-        } else if (x >= 108 && x < 212) {
-            s_touched_card = 1;
-        } else if (x >= 212 && x <= 316) {
-            s_touched_card = 2;
-        }
-    }
+    s_touched_card = card_at(x, y);
 }
 
 void app_launcher_touch_move(int x, int y)
 {
-    (void)x;
-    (void)y;
+    /* Sliding off the card cancels it, so releasing elsewhere opens nothing. */
+    if (s_touched_card >= 0 && card_at(x, y) != s_touched_card) {
+        s_touched_card = -1;
+    }
 }
 
 void app_launcher_touch_up(void)

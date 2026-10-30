@@ -16,8 +16,8 @@
 
 /*
  * Pixel-art sprites for the Pet World demo. Original artwork created for this
- * demo and contributed under the repository's Apache-2.0 license. RGBA stored
- * as 0x00AARRGGBB per pixel; see pet_world.c for how they are blended.
+ * demo and contributed under the repository's Apache-2.0 license. Each pixel
+ * is (alpha << 16) | RGB565; see pet_world.c for how they are blended.
  */
 #pragma once
 #include <stdint.h>

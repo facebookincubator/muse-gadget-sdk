@@ -236,6 +236,9 @@ void app_demo_touch_down(int x, int y)
 
 void app_demo_touch_move(int x, int y)
 {
+    if (s_back_pressed && !(x >= 4 && x <= 64 && y >= 2 && y <= 26)) {
+        s_back_pressed = false;   /* slid off the back button: releasing does nothing */
+    }
     s_demo_touch_x = x;
     s_demo_touch_y = y;
 }

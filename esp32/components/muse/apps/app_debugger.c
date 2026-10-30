@@ -107,19 +107,19 @@ void app_debugger_render(uint16_t *fb, uint32_t now_ms)
         gfx_draw_string(fb, 12, 58, buf, GFX_TEXT_MUTED);
     }
 
-    // 3. Step 2: Hatch Cloud & Noise Status Box (x=164, y=30, w=150, h=48)
+    // 3. Step 2: Muse session (Noise) status box (x=164, y=30, w=150, h=48)
     gfx_fill_round_rect(fb, 164, 30, 150, 48, 4, GFX_CARD_BG);
     gfx_draw_round_rect(fb, 164, 30, 150, 48, 4, GFX_CARD_BORDER);
     gfx_draw_string(fb, 170, 34, "STEP 2: CLOUD NOISE", GFX_ACCENT_ROSE);
 
-    muse_hatch_status_t hatch_st;
-    muse_hatch_status(&hatch_st);
-    bool hatch_ok = hatch_st.state == MUSE_HATCH_REACHABLE;
-    const char *hatch_name = muse_hatch_state_name(hatch_st.state);
-    snprintf(buf, sizeof(buf), "State: %s", hatch_name ? hatch_name : "?");
+    muse_hatch_status_t link_st;
+    muse_hatch_status(&link_st);
+    bool link_ok = link_st.state == MUSE_HATCH_REACHABLE;
+    const char *link_name = muse_hatch_state_name(link_st.state);
+    snprintf(buf, sizeof(buf), "State: %s", link_name ? link_name : "?");
     buf[22] = '\0';
-    gfx_draw_string(fb, 170, 46, buf, hatch_ok ? GFX_GREEN : GFX_YELLOW);
-    snprintf(buf, sizeof(buf), "%s", hatch_st.detail[0] ? hatch_st.detail : "(no detail)");
+    gfx_draw_string(fb, 170, 46, buf, link_ok ? GFX_GREEN : GFX_YELLOW);
+    snprintf(buf, sizeof(buf), "%s", link_st.detail[0] ? link_st.detail : "(no detail)");
     buf[22] = '\0';
     gfx_draw_string(fb, 170, 58, buf, GFX_TEXT_MUTED);
 
@@ -183,26 +183,32 @@ void app_debugger_render(uint16_t *fb, uint32_t now_ms)
     }
 }
 
+/* The button under (x, y): 0 back to apps, 1 beep, 2 test cloud; -1 none. */
+static int button_at(int x, int y)
+{
+    if (x >= 4 && x <= 64 && y >= 2 && y <= 26) {
+        return 0;
+    }
+    if (x >= 6 && x <= 156 && y >= 132 && y <= 158) {
+        return 1;
+    }
+    if (x >= 164 && x <= 314 && y >= 132 && y <= 158) {
+        return 2;
+    }
+    return -1;
+}
+
 void app_debugger_touch_down(int x, int y)
 {
-    // [☷ APPS] button
-    if (x >= 4 && x <= 64 && y >= 2 && y <= 26) {
-        s_pressed_btn = 0;
-    }
-    // [▶ BEEP SPEAKER] button
-    else if (x >= 6 && x <= 156 && y >= 132 && y <= 158) {
-        s_pressed_btn = 1;
-    }
-    // [💬 PING CLOUD] button
-    else if (x >= 164 && x <= 314 && y >= 132 && y <= 158) {
-        s_pressed_btn = 2;
-    }
+    s_pressed_btn = button_at(x, y);
 }
 
 void app_debugger_touch_move(int x, int y)
 {
-    (void)x;
-    (void)y;
+    /* Sliding off a button cancels it, so releasing elsewhere does nothing. */
+    if (s_pressed_btn >= 0 && button_at(x, y) != s_pressed_btn) {
+        s_pressed_btn = -1;
+    }
 }
 
 void app_debugger_touch_up(void)

@@ -125,13 +125,14 @@ typedef struct {
     char speech_text[128];
     uint32_t speech_timer;
     bool is_talk_pressed;
+    int petted_frames;   /* frames left of the petted animation */
 
     // Clock & Status
     int cur_hour;
     int cur_min;
     int battery_pct;
     bool wifi_connected;
-    bool hatch_connected;
+    bool muse_connected;   /* the session to the Muse VM is up */
 } pet_world_t;
 
 // Initialize pet world in PSRAM

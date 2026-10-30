@@ -31,6 +31,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include <time.h>
+#include "muse_chat.h"
 #include "muse_state.h"
 #include "muse_wifi.h"
 
@@ -815,13 +816,14 @@ static void draw_status_bar(uint16_t *fb, const pet_world_t *w)
 
     // WiFi & Cloud Dot (x = 280)
     fill_circle(fb, 280, 12, 3, w->wifi_connected ? 0x07FF : 0x528A);
-    if (w->hatch_connected) {
+    if (w->muse_connected) {
         fill_circle(fb, 280, 7, 2, TFT_YELLOW);
     }
 
     // Battery (x = 292)
     draw_rect(fb, 292, 8, 18, 9, 0x9CD3);
     fill_rect(fb, 310, 10, 2, 5, 0x9CD3);
+    /* An unknown level (no battery reading) leaves the icon empty. */
     int b_pct = w->battery_pct < 0 ? 0 : (w->battery_pct > 100 ? 100 : w->battery_pct);
     int b_w = b_pct * 14 / 100;
     if (b_w > 0) fill_rect(fb, 294, 10, b_w, 5, b_pct > 20 ? 0x24C6 : TFT_RED);
@@ -921,9 +923,9 @@ void pet_world_init(void)
     s_world.food_amount = 80;
     s_world.cur_hour = 14;
     s_world.cur_min = 30;
-    s_world.battery_pct = 99;
-    s_world.wifi_connected = true;
-    s_world.hatch_connected = true;
+    s_world.battery_pct = -1;   /* unknown until the first status check */
+    s_world.wifi_connected = false;
+    s_world.muse_connected = false;
 
     s_world.ball.x = 540.0f;
     s_world.ball.y = 195.0f;
@@ -1015,6 +1017,10 @@ void pet_world_update(uint32_t now_ms, int muse_mode, float audio_level, const c
         muse_wifi_status(&w);
         s_world.wifi_connected = (w.state == MUSE_WIFI_CONNECTED);
 
+        muse_hatch_status_t link;
+        muse_hatch_status(&link);
+        s_world.muse_connected = (link.state == MUSE_HATCH_REACHABLE);
+
         muse_power_t p = muse_state_power();
         s_world.battery_pct = p.battery_pct;
 
@@ -1027,9 +1033,23 @@ void pet_world_update(uint32_t now_ms, int muse_mode, float audio_level, const c
         }
     }
 
-    // Autonomous Pet AI (when not interacting with assistant or dragged)
+    // Needs drift slowly: hungrier while not eating, more tired while awake.
+    static uint32_t last_needs_tick = 0;
+    if (now_ms - last_needs_tick > 20000) {
+        last_needs_tick = now_ms;
+        if (s_world.state != PET_ST_EAT && s_world.hunger < 100) s_world.hunger++;
+        if (s_world.state != PET_ST_SLEEP && s_world.energy > 0) s_world.energy--;
+    }
+
+    // A pat shows the petted animation for a moment before the pet moves on.
+    if (s_world.state == PET_ST_PETTED && s_world.petted_frames > 0) {
+        s_world.petted_frames--;
+    }
+
+    // Autonomous Pet AI (when not interacting with assistant, dragged or being petted)
     if (s_world.state != PET_ST_LISTENING && s_world.state != PET_ST_THINKING &&
-        s_world.state != PET_ST_SPEAKING && s_world.state != PET_ST_DRAGGED) {
+        s_world.state != PET_ST_SPEAKING && s_world.state != PET_ST_DRAGGED &&
+        !(s_world.state == PET_ST_PETTED && s_world.petted_frames > 0)) {
 
         if (now_ms > s_world.next_goal_eval) {
             s_world.next_goal_eval = now_ms + 10000 + (rand() % 8000);
@@ -1203,6 +1223,7 @@ void pet_world_touch_up(void)
         } else {
             // Tapped pet -> pet him!
             s_world.state = PET_ST_PETTED;
+            s_world.petted_frames = 30;   /* about 1.2 s at 40 ms frames */
             s_world.happiness = (s_world.happiness < 95) ? s_world.happiness + 5 : 100;
         }
         s_world.is_touching_pet = false;

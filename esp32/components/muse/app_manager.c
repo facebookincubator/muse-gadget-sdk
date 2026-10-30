@@ -59,7 +59,7 @@ void app_manager_open_launcher(void)
 
 void app_manager_update(uint32_t now_ms, int mode, float audio_level, const char *caption)
 {
-    // Always keep Pet World simulated in background so hunger/energy & speech work
+    // Always keep Pet World simulated in the background, so its needs and speech carry on
     pet_world_update(now_ms, mode, audio_level, caption);
 
     switch (s_current_app) {

@@ -56,7 +56,7 @@ slide to settings mid-gesture; open the launcher to reach settings.
 | Launcher | Pet World |
 |---|---|
 | ![Launcher](screenshots/01-launcher.png) | ![Pet World](screenshots/02-pet-world.png) |
-| Three cards with pixel-art icons, a battery gauge and a Wi-Fi dot. Tap a card to open; tap `[< APPS]` in an app to return. | An animated pet across three rooms with day/night lighting and speech bubbles driven by the voice session. |
+| Three cards with pixel-art icons, a battery gauge and a Wi-Fi dot. Tap a card to open; tap an app's top-left control (`< APPS`, or the menu icon in Pet World) to return. | An animated pet across three rooms with day/night lighting and speech bubbles driven by the voice session. |
 
 | Diagnostics | Hardware showcase |
 |---|---|
@@ -81,5 +81,5 @@ idf.py -DIDF_TARGET=esp32 \
 - The hardware-showcase "audio level" is the single session level
   (`muse_state_level`: mic while listening, playback while speaking), animated
   across bars for a VU look. It is not a per-frequency spectrum.
-- Return-to-launcher is on-screen (`[< APPS]`); the hardware Button A keeps its
+- Return-to-launcher is on-screen (the top-left control); the hardware Button A keeps its
   framework meaning.
