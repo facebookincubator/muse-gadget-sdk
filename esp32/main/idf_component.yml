@@ -16,6 +16,11 @@ dependencies:
   espressif/esp_websocket_client: "~1.2"
   espressif/cjson: "~1.7"
   espressif/led_strip: "~3.0"
+  # The ESP32-2432S028 (CYD) status screen.
+  espressif/esp_lcd_ili9341:
+    version: "~2.1"
+    rules:
+      - if: "target == esp32"
   idf:
     version: ">=5.1"
   # The Waveshare P4 3.5's Wi-Fi and BLE are on its ESP32-C6, over SDIO.

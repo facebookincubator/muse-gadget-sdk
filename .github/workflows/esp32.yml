@@ -129,6 +129,9 @@ jobs:
           - board: ideaspark
             target: esp32
             overlays: ";devices/sdkconfig.ideaspark"
+          - board: esp32-2432s028
+            target: esp32
+            overlays: ";devices/sdkconfig.esp32-2432s028"
           - board: sensecap-indicator
             target: esp32s3
             overlays: ";devices/sdkconfig.sensecap-indicator"

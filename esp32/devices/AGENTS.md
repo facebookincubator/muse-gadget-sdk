@@ -91,7 +91,10 @@ A board with a screen, mic and speaker should run the full UI. The UI needs 8 MB
 of flash or more: 16 MB boards use `partitions_muse.csv`, and 8 MB boards
 `partitions_muse_8mb.csv`. Without PSRAM it loses the tunnel and images, and voice
 notes go over Link's session with text-only replies. Link builds need 8 MB or
-more, since `partitions.csv` ends past 4 MB and its offsets must not move.
+more, since `partitions.csv` ends past 4 MB and its offsets must not move. A
+4 MB board needs its own single-app table and has no OTA, as the Waveshare C6
+LCD 1.47 and the CYD do (`partitions_waveshare_c6_lcd_147.csv`,
+`partitions_cyd_4mb.csv`).
 
 ## 3. Name it
 
@@ -157,11 +160,12 @@ In `main/led_status.c`:
 - The panel functions: `lcd_draw()` (it returns once `buf` can be reused),
   `lcd_from_be()` (the panel's RGB565 byte order), `lcd_panel_init()` (it
   creates `s_panel`) and `lcd_panel_on()`.
-- Four places split `#if ..._IDEASPARK_ST7789` / `#else`, with the SenseCAP
-  Indicator as the `#else`: the includes, `lcd_draw()` and `lcd_from_be()`,
-  `lcd_panel_init()` and `lcd_panel_on()`, and the pixel copy in
-  `lcd_draw_image_rect()`. Turn each `#else` into
-  `#elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701` and add yours. The pixel
+- Four places split by backend, the SPI panels first and
+  `#elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701` last: the includes,
+  `lcd_draw()` and `lcd_from_be()`, `lcd_panel_init()` and `lcd_panel_on()`,
+  and the pixel copy in `lcd_draw_image_rect()`. Add yours to each: another
+  SPI panel joins the SPI branches (pick its driver in `lcd_panel_init()`, as
+  the CYD does), and anything else gets its own `#elif`. The pixel
   copy depends only on byte order. SPI panels usually take big-endian like the
   ideaspark, and RGB frame buffers take native order like the SenseCAP
   Indicator.

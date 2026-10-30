@@ -92,8 +92,10 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // On a board with the full UI but no PSRAM or tunnel, only control JSON and Muse's
 // voice notes and live chat replies cross this session, and the whole session has
 // to fit in what internal RAM Wi-Fi, TLS and the display leave, so the buffers
-// below are smaller.
-#if CONFIG_MUSE_ENABLED && !CONFIG_SPIRAM && !CONFIG_HOMEHUB_TUNNEL
+// below are smaller. The CYD's status screen leaves too little internal RAM for
+// the usual Link buffers, so it takes the smaller ones too.
+#if (CONFIG_MUSE_ENABLED && !CONFIG_SPIRAM && !CONFIG_HOMEHUB_TUNNEL) || \
+    CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
 #define SMALL_CONTROL_SESSION 1
 #else
 #define SMALL_CONTROL_SESSION 0
