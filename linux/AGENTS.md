@@ -165,6 +165,10 @@ never has a command's parameters, output or error message.
   `chat_id` is not an API field and is ignored. The response is only the ack
   (`message_id`); the reply appears in the Muse chat. Replies are text: to
   speak them, use a text-to-speech API of your choice.
+- `send-user-msg --wait` (the local socket's `"wait"`) opens `/chat/subscribe`
+  before sending, follows the request with `MuseTurn` and returns the answer's
+  text. One waiting request per chat at a time; the whole wait, queueing
+  included, is bounded by its seconds.
 - The VM accepts at most 256 KB per `/link-control` message, so command output
   is cut at 96 KB per stream.
 
@@ -332,7 +336,8 @@ run_command=...)` is one encrypted session with a Muse VM.
   `SideChat.exists` is false for an ID that Muse does not know yet. The first
   `send_chat` to that ID creates the chat. The lookup closes its subscription
   without reading events.
-- `subscribe_chat(session_id=None)` yields Muse's chat events.
+- `subscribe_chat(session_id=None, *, opened=None)` yields Muse's chat events.
+  `opened`, an `asyncio.Event`, is set once Muse accepts that subscription.
   `chat_subscribed` is set while a subscription is open.
 - `stream_tts(message_id)` yields MP3 audio for a reply that Muse gave in voice
   mode.

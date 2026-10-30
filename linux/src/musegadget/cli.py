@@ -118,6 +118,18 @@ def _read_image(path: str) -> dict | None:
             "data_base64": base64.b64encode(data).decode("ascii")}
 
 
+def _wait_seconds(value: str) -> int:
+    from musegadget.service import MAX_WAIT_S
+
+    try:
+        seconds = int(value)
+    except ValueError:
+        seconds = 0
+    if not 1 <= seconds <= MAX_WAIT_S:
+        raise argparse.ArgumentTypeError(f"must be a whole number of seconds from 1 to {MAX_WAIT_S}")
+    return seconds
+
+
 def cmd_send_user_msg(args: argparse.Namespace) -> int:
     import json
     import socket
@@ -146,10 +158,19 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
         print(f"Not delivered: {reply.get('error') or reply}", file=sys.stderr)
         return 1
     if args.wait:
-        if reply.get("reply") is None:
-            print("Sent to your Muse; no answer within the wait.", file=sys.stderr)
+        from musegadget.link_client import printable
+
+        text, detail = reply.get("reply"), printable(str(reply.get("detail") or ""))
+        if not isinstance(text, str):
+            print(f"Sent to your Muse, but got no answer: {detail}", file=sys.stderr)
             return 2
-        print(reply["reply"])
+        if text:
+            print(text)
+        else:
+            print("Muse finished without a text answer.", file=sys.stderr)
+        if reply.get("partial"):
+            print(f"Muse was still answering: {detail}", file=sys.stderr)
+            return 2
         return 0
     print("Sent to your Muse.")
     return 0
@@ -303,8 +324,8 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("message", nargs="+", help="the message, or - to read it from stdin")
     send.add_argument("--session-id",
                      help="send to this side chat (a new id starts one) instead of the main chat")
-    send.add_argument("--wait", type=int, metavar="SECONDS",
-                     help="wait up to this long for the Muse's answer and print it")
+    send.add_argument("--wait", type=_wait_seconds, metavar="SECONDS",
+                     help="wait up to this long (1 to 600) for Muse's answer and print it")
     send.add_argument("--image", metavar="FILE",
                      help="attach a JPEG, PNG, GIF or WebP picture of at most 2 MiB for Muse to look at")
     send.set_defaults(func=cmd_send_user_msg)

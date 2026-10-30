@@ -38,8 +38,10 @@ from musegadget import __version__, config, muse_api
 from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import (
-    MAX_CONCURRENT_INVOKES, DeviceDescription, LinkSession, Outcome, check_image,
+    MAX_CONCURRENT_INVOKES, DeviceDescription, HttpStreamError, LinkSession, Outcome,
+    acknowledgement, check_image,
 )
+from musegadget.muse_turn import MuseTurn
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +53,7 @@ HEALTHY_SESSION_S = 30.0
 UNPAIRED_POLL_S = 30.0
 MAX_LOCAL_REQUEST = 4 * 1024 * 1024  # room for a 2 MiB image in base64
 MAX_WAIT_S = 600
+REPLY_POLL_S = 0.5
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 # Device access tokens live about 4 hours; rotate at 3.
 TOKEN_REFRESH_AGE_S = 3 * 3600
@@ -88,6 +91,9 @@ class Service:
     _invoke_slots: asyncio.Semaphore = field(
         default_factory=lambda: asyncio.Semaphore(MAX_CONCURRENT_INVOKES), init=False, repr=False,
     )
+    # One waiting request at a time per chat: Muse's replies don't name the
+    # message they answer, so two waits on one chat would take each other's.
+    _reply_waits: dict = field(default_factory=dict, init=False, repr=False)
 
     def stop(self) -> None:
         self._stop.set()
@@ -307,29 +313,162 @@ class Service:
                 check_image(image_bytes, image["mime_type"])
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
+        wait = request.get("wait")
+        if wait is not None and not (
+            isinstance(wait, (int, float)) and not isinstance(wait, bool) and 1 <= wait <= MAX_WAIT_S
+        ):
+            return {"ok": False, "error": f"wait must be 1 to {MAX_WAIT_S} seconds"}
         session = self._current
         if session is None or session.registered_at is None:
             return {"ok": False, "error": "not connected to the Muse"}
-        wait = request.get("wait")
-        if wait is not None and not (
-            isinstance(wait, (int, float)) and not isinstance(wait, bool) and 0 < wait <= MAX_WAIT_S
-        ):
-            return {"ok": False, "error": f"wait must be 1..{MAX_WAIT_S} seconds"}
         if image is not None:
             log.info("forwarding a %d-character message and an image to the Muse", len(message))
-            return await session.send_image(
-                image_bytes, image["mime_type"], session_id,
-                message=message, filename=image.get("filename") or None)
-        log.info("forwarding a %d-character message to the Muse", len(message))
-        if wait:
-            return await session.send_chat(message, session_id, wait_reply=wait)
-        return await session.send_chat(message, session_id)
+
+            def send():
+                return session.send_image(
+                    image_bytes, image["mime_type"], session_id,
+                    message=message, filename=image.get("filename") or None)
+        else:
+            log.info("forwarding a %d-character message to the Muse", len(message))
+
+            def send():
+                return session.send_chat(message, session_id)
+        if wait is None:
+            return await send()
+        return await self._send_and_wait(session, send, session_id, float(wait))
+
+    async def _send_and_wait(self, session, send, session_id, wait_s: float) -> dict:
+        """send_and_wait, after any earlier waiting request on the same chat, within ``wait_s``."""
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        key = session_id or ""
+        lock, users = self._reply_waits.get(key, (None, 0))
+        lock = lock or asyncio.Lock()
+        self._reply_waits[key] = (lock, users + 1)
+        try:
+            if not await _acquire_within(lock, wait_s):
+                return {"ok": False, "error": "another request on this chat was still waiting "
+                                              "for its answer; this message was not sent"}
+            try:
+                return await send_and_wait(session, send, session_id,
+                                           wait_s - (loop.time() - started))
+            finally:
+                lock.release()
+        finally:
+            lock, users = self._reply_waits[key]
+            if users == 1:
+                del self._reply_waits[key]
+            else:
+                self._reply_waits[key] = (lock, users - 1)
 
     async def _sleep(self, seconds: float) -> None:
         try:
             await asyncio.wait_for(self._stop.wait(), seconds)
         except asyncio.TimeoutError:
             pass
+
+
+async def send_and_wait(session: LinkSession, send, session_id: str | None,
+                        wait_s: float) -> dict:
+    """Send a message with ``send()`` and wait up to ``wait_s`` seconds in all for Muse's answer.
+
+    The chat subscription opens before the message goes, and a :class:`MuseTurn`
+    picks this request's replies out of it. Returns ``send()``'s result, plus
+    ``"reply"`` once Muse acknowledged the message: the text of its answer
+    (blank-line separated when it sent several messages, "" when it finished
+    without text), or None when no answer came, with ``"detail"`` saying why.
+    ``"partial"`` is true when the wait ran out while Muse was still answering.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait_s
+    turn = MuseTurn(session_id)
+    opened = asyncio.Event()
+    changed = asyncio.Event()
+
+    async def follow() -> None:
+        async for event in session.subscribe_chat(session_id, opened=opened):
+            turn.feed(event)
+            changed.set()
+
+    follower = asyncio.ensure_future(follow())
+    try:
+        await _wait_for_event(opened, follower, deadline - loop.time())
+        if not opened.is_set():
+            why = _stream_problem(follower) if follower.done() else "it did not open in time"
+            return {"ok": False,
+                    "error": f"could not follow Muse's replies ({why}); the message was not sent"}
+        try:
+            result = await asyncio.wait_for(send(), max(deadline - loop.time(), 0.0))
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": f"Muse did not acknowledge the message within "
+                                          f"{wait_s:g} seconds"}
+        if not result.get("ok"):
+            return result
+        try:
+            turn.acknowledge(acknowledgement(result))
+        except ValueError as exc:
+            return {**result, "reply": None, "detail": str(exc)}
+        while True:
+            now = time.monotonic()
+            if turn.settled(now) or (turn.replies and turn.complete(now)):
+                return {**result, "reply": _reply_text(turn)}
+            remaining = deadline - loop.time()
+            if follower.done() or remaining <= 0:
+                detail = (_stream_problem(follower) if follower.done()
+                          else f"no answer within {wait_s:g} seconds")
+                text = _reply_text(turn)
+                if text:
+                    return {**result, "reply": text, "partial": True, "detail": detail}
+                return {**result, "reply": None, "detail": detail}
+            changed.clear()
+            await _wait_for_event(changed, follower, min(remaining, REPLY_POLL_S))
+    finally:
+        follower.cancel()
+        await asyncio.gather(follower, return_exceptions=True)
+
+
+def _reply_text(turn: MuseTurn) -> str:
+    return "\n\n".join(reply.text.strip() for reply in turn.replies.values() if reply.text.strip())
+
+
+def _stream_problem(follower: asyncio.Future) -> str:
+    """Why the reply stream ended, without text a server could have put there."""
+    exc = None if follower.cancelled() else follower.exception()
+    if exc is None:
+        return "Muse closed the reply stream"
+    if isinstance(exc, HttpStreamError):
+        return f"HTTP {exc.status}"
+    if isinstance(exc, ValueError):  # the size bounds in MuseTurn and subscribe_chat
+        return str(exc)
+    return f"the reply stream failed ({type(exc).__name__})"
+
+
+async def _wait_for_event(event: asyncio.Event, task: asyncio.Future, timeout: float) -> None:
+    """Wait until ``event`` is set, ``task`` ends or ``timeout`` passes."""
+    if event.is_set() or task.done() or timeout <= 0:
+        return
+    waiter = asyncio.ensure_future(event.wait())
+    try:
+        await asyncio.wait({waiter, task}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        waiter.cancel()
+
+
+async def _acquire_within(lock: asyncio.Lock, timeout: float) -> bool:
+    """Acquire ``lock`` within ``timeout`` seconds; a lock acquired just as time ran out is kept."""
+    acquire = asyncio.ensure_future(lock.acquire())
+    try:
+        await asyncio.wait({acquire}, timeout=max(timeout, 0.0))
+    except BaseException:
+        if acquire.done() and not acquire.cancelled():
+            lock.release()
+        else:
+            acquire.cancel()
+        raise
+    if not acquire.done():
+        acquire.cancel()  # a cancelled acquire never holds the lock
+        return False
+    return True
 
 
 async def _discard_line(reader, timeout_s: float = 10) -> None:
