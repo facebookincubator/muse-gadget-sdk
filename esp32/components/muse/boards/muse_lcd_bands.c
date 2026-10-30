@@ -165,16 +165,20 @@ static void wait_band(lv_display_t *disp)
 }
 
 /*
- * On the send task, a band's last piece failed to go out. Finish LVGL's flush
- * before letting wait_band return: the give can switch straight to LVGL's task
- * (when it is running above this one, as above), which may then queue its next
- * band, and a flush_ready after that would mark the new band as gone while it
- * is still queued, so LVGL wouldn't wait for it.
+ * On the send task, a band's last piece failed to go out. LVGL's task can
+ * take the core at any point here when it is running above this one (see
+ * wait_band), so LVGL's flushing flag and s_band_busy are cleared together:
+ * between the two it could queue its next band, which the second would then
+ * mark as gone while it is still queued. The give comes after, and only wakes
+ * wait_band; one LVGL didn't wait for just makes wait_band look at s_band_busy
+ * again.
  */
 static void band_failed(void)
 {
+    portENTER_CRITICAL(&s_lock);
     lv_display_flush_ready(s_disp);
     s_band_busy = false;
+    portEXIT_CRITICAL(&s_lock);
     xSemaphoreGive(s_band_done);
 }
 
