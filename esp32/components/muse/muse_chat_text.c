@@ -184,6 +184,12 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
 }
 
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+/*
+ * Pages of up to `lines` whole lines, each also fitting `cap` bytes (a page of
+ * CJK, three bytes a character, can hold fewer lines than the layout). As in
+ * muse_hatch_caption_at, a page's last line starts the next one, so paging
+ * through shows every line.
+ */
 int muse_hatch_caption_page(const char *text, int page, char *out, size_t cap)
 {
     if (!cap) return 0;
@@ -191,23 +197,34 @@ int muse_hatch_caption_page(const char *text, int page, char *out, size_t cap)
     int cols, lines;
     muse_state_page(muse_text_has_cjk(text), &cols, &lines);
     if (cols < 1 || lines < 1) return 0;
-    const char *p = text, *start;
-    size_t len;
-    int count = 0;
-    while (next_line(&p, cols, &start, &len)) count++;
-    if (!count) return 0;
-    int stride = lines > 1 ? lines - 1 : 1;
-    /* The last overlapping page must contribute at least one new line. */
-    int pages = count <= lines ? 1 : 1 + (count - lines + stride - 1) / stride;
     if (page < 0) page = 0;
-    if (page >= pages) page = pages - 1;
-    int first = page * stride;
-    p = text;
-    size_t o = 0;
-    for (int n = 0; n < first + lines && next_line(&p, cols, &start, &len); n++) {
-        if (n < first) continue;
-        if (o + (o ? 1 : 0) + len >= cap) break;
-        o += snprintf(out + o, cap - o, "%s%.*s", o ? "\n" : "", (int)len, start);
+    const char *first = text, *start;
+    size_t len;
+    int pages = 0;
+    for (;;) {
+        const char *p = first, *last = first;
+        size_t o = 0;
+        int n = 0;
+        bool copy = pages <= page;   /* out ends up with the page asked for, or the last */
+        while (n < lines) {
+            const char *q = p;
+            if (!next_line(&q, cols, &start, &len)) break;
+            if (n && o + 1 + len >= cap) break;   /* whole lines only */
+            if (copy) {
+                if (!n) o = 0;
+                o += snprintf(out + o, cap - o, "%s%.*s", n ? "\n" : "", (int)len, start);
+            } else {
+                o += (n ? 1 : 0) + len;
+            }
+            last = p;
+            p = q;
+            n++;
+        }
+        if (!n) break;
+        pages++;
+        const char *rest = p;
+        if (!next_line(&rest, cols, &start, &len)) break;
+        first = n > 1 ? last : p;
     }
     return pages;
 }

@@ -84,6 +84,38 @@ static void pages(void) {
     assert(muse_hatch_caption_page(reply, 2, text, sizeof(text)) == 5);
     assert(!strcmp(text, "jumps over"));
 }
+/* A full Watcher read page of CJK (18 x 9, three bytes a character) is more
+ * than the 400-byte caption: pages hold fewer lines, and none is skipped. */
+static void cjk_capacity(void) {
+    cols = 18; lines = 9;
+    static char reply[3 * 400 + 1];
+    char *w = reply;
+    for (unsigned cp = 0x4e00; cp < 0x4e00 + 400; cp++) {
+        *w++ = (char)(0xe0 | cp >> 12);
+        *w++ = (char)(0x80 | (cp >> 6 & 0x3f));
+        *w++ = (char)(0x80 | (cp & 0x3f));
+    }
+    *w = 0;
+    char page[400], joined[sizeof(reply)] = "", last[64] = "";
+    int total = muse_hatch_caption_page(reply, 0, page, sizeof(page));
+    assert(total > 1);
+    for (int i = 0; i < total; i++) {
+        assert(muse_hatch_caption_page(reply, i, page, sizeof(page)) == total);
+        assert(strlen(page) < sizeof(page));
+        char *line = page, *next;
+        for (int n = 0; line; n++, line = next) {
+            next = strchr(line, '\n');
+            if (next) *next++ = 0;
+            if (n == 0 && i) {
+                assert(!strcmp(line, last));   /* each page starts with the last one's last line */
+                continue;
+            }
+            strcat(joined, line);
+            strlcpy(last, line, sizeof(last));
+        }
+    }
+    assert(!strcmp(joined, reply));   /* every line shown, in order */
+}
 static void retained(void) {
     cols = 10; lines = 2;
     assert(!muse_review_step(1));
@@ -241,6 +273,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "click")) click();
     else if (!strcmp(argv[1], "pairing")) pairing();
     else if (!strcmp(argv[1], "pages")) pages();
+    else if (!strcmp(argv[1], "cjk")) cjk_capacity();
     else if (!strcmp(argv[1], "retained")) retained();
     else if (!strcmp(argv[1], "long")) long_reply();
     else if (!strcmp(argv[1], "view")) view();
@@ -278,6 +311,9 @@ int main(int argc, char **argv) {
 
     def test_page_boundaries_and_utf8(self):
         self.run_case("pages")
+
+    def test_cjk_pages_fit_the_caption_and_skip_no_line(self):
+        self.run_case("cjk")
 
     def test_review_retains_and_replaces_reply(self):
         self.run_case("retained")
