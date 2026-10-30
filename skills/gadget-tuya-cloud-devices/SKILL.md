@@ -70,9 +70,10 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 
 ## Verify the Result
 
-- Wait 1–2 seconds, re-read the detail and compare the mapped value before reporting success.
+- Wait 1–2 seconds, re-read the detail and compare the mapped value with the requested value
+  before reporting success. A value that already matched before the write is a success.
 - A `wr` property cannot be read back: report the command as accepted but unverified.
-- If the value did not change or the device went offline, say so; do not report success.
+- If the value does not match or the device went offline, say so; do not report success.
 
 ## Also Available
 
@@ -127,6 +128,9 @@ Property changes and online/offline transitions are also pushed over WebSocket. 
 long-lived process for an always-on host (a Linux gadget), not a one-shot query. Write a short
 Python script using the `websockets` package:
 
+- Start it only when the user asks for ongoing monitoring or automation, and run one instance
+  per key. Read the key from a file or environment variable only the user can read instead of
+  writing it into the script, and tell the user where it runs and how to stop it.
 - URI by key prefix (same mapping as the REST table): AZ `wss://wsmsgs.iot-wus.com`,
   EU `wss://wsmsgs.iot-eu.com`, IN `wss://wsmsgs.iot-ap.com`, UE `wss://wsmsgs.iot-eus.com`,
   WE `wss://wsmsgs.iot-weu.com`, SG `wss://wsmsgs.iot-sea.com`.
@@ -138,16 +142,17 @@ Python script using the `websockets` package:
   `data.time`.
 - Codes match thing-model codes. Look their meanings up via the model endpoint instead of
   guessing from the code string.
-- Reconnect with backoff on transient drops. Treat close codes 1002, 1003, 1008 and 1011 as
-  fatal, and any frame containing `error`, a failing `errorCode`, or `"success": false` as a
-  server error.
+- Reconnect with backoff on transient drops. Treat close codes 1002, 1003 and 1008 as fatal.
+  Close code 1011 is a server error: retry it a few times with growing backoff, then stop and
+  tell the user. A frame containing `error`, `errorMsg`, a failing `errorCode`, or
+  `"success": false` is a server error: stop and report it.
 - For event-driven automation, on a matching trigger issue properties to the action device as
   in Workflow step 5, and confirm the trigger→action mapping with the user before running it.
 
 ## Limits
 
-- Control only basic property types (bool, enum, integer, string). Never write `raw`, `bitmap`,
-  `struct` or `array` properties, or anything absent from the thing model.
+- Control only basic property types (bool, enum, integer `value`, string). Never write `raw`,
+  `bitmap`, `struct` or `array` properties, or anything absent from the thing model.
 - No lock/unlock, live video streaming, firmware updates, pairing or device removal — say so and
   point to the Tuya app.
 - Device listing takes one scope at a time (all, home or room). Rate-limit batch writes with a
