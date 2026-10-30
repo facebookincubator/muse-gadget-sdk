@@ -1131,7 +1131,7 @@ void pet_world_touch_down(int tx, int ty)
     // Check tap on status bar (y < 26)
     if (ty < WORLD_STATUS_BAR_H) {
         if (tx < 28) {
-            app_manager_open_launcher();
+            s_world.menu_pressed = true;   /* opens the launcher on release */
             return;
         }
         if (tx >= 62 && tx <= 176) {
@@ -1169,6 +1169,12 @@ void pet_world_touch_down(int tx, int ty)
 
 void pet_world_touch_move(int tx, int ty)
 {
+    if (s_world.menu_pressed) {
+        if (!(ty < WORLD_STATUS_BAR_H && tx < 28)) {
+            s_world.menu_pressed = false;   /* slid off the menu icon */
+        }
+        return;
+    }
     int dx = tx - s_world.last_touch_x;
     int total_dist = abs(tx - s_world.touch_start_x) + abs(ty - s_world.touch_start_y);
 
@@ -1204,6 +1210,11 @@ void pet_world_touch_move(int tx, int ty)
 
 void pet_world_touch_up(void)
 {
+    if (s_world.menu_pressed) {
+        s_world.menu_pressed = false;
+        app_manager_open_launcher();
+        return;
+    }
     if (s_world.is_touching_pet) {
         if (s_world.state == PET_ST_DRAGGED) {
             s_world.state = PET_ST_IDLE;
@@ -1229,6 +1240,19 @@ void pet_world_touch_up(void)
         s_world.is_touching_pet = false;
     }
 
+    s_world.is_swiping = false;
+}
+
+void pet_world_touch_cancel(void)
+{
+    /* The press was lost: no tap, no pat. A dragged pet lands where it is. */
+    s_world.menu_pressed = false;
+    if (s_world.is_touching_pet && s_world.state == PET_ST_DRAGGED) {
+        s_world.state = PET_ST_IDLE;
+        s_world.pet_y = 180.0f;
+        s_world.goal = PET_GOAL_NONE;
+    }
+    s_world.is_touching_pet = false;
     s_world.is_swiping = false;
 }
 

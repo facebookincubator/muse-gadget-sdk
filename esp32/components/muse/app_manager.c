@@ -168,7 +168,7 @@ void app_manager_touch_cancel(void)
         break;
     case APP_PET:
     default:
-        pet_world_touch_up();   /* just ends any room-swipe drag; no action */
+        pet_world_touch_cancel();
         break;
     }
 }

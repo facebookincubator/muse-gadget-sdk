@@ -205,8 +205,10 @@ APPS_HARNESS = r'''
 #include "muse_state.h"
 #include "muse_wifi.h"
 #include "esp_chip_info.h"
-/* Pet World's state is file-static: build it into this file to read it. */
+/* Pet World's and the debugger's state is file-static: build them into this
+ * file to read it. */
 #include "apps/pet_world.c"
+#include "apps/app_debugger.c"
 
 static lv_obj_t canvas = { LV_OBJ_FLAG_SCROLL_CHAIN };
 static lv_indev_t indev;
@@ -258,6 +260,7 @@ int muse_settings_mic_gain(void) { return 0; }
 void esp_chip_info(esp_chip_info_t *c) { memset(c, 0, sizeof(*c)); c->cores = 2; }
 size_t esp_psram_get_size(void) { return 8u << 20; }
 
+static const char *dbg_last_action(void) { return s_last_action; }
 static void frame(void) { fake_now_us += 40000; muse_apps_demo_tick(); }
 static void press(int x, int y) { point.x = x; point.y = y; send(LV_EVENT_PRESSED); }
 static void drag(int x, int y) { point.x = x; point.y = y; send(LV_EVENT_PRESSING); }
@@ -288,6 +291,12 @@ int main(void)
     tap(80, 145);
     assert(hatch_tests == 1 && chirps == 1);
 
+    /* A button's message expires back to ready, not a stale "Testing". */
+    assert(strcmp(dbg_last_action(), "Ready") != 0);
+    for (int i = 0; i < 200; i++) frame();
+    printf("debugger after expiry: [%s]\n", dbg_last_action());
+    assert(strcmp(dbg_last_action(), "Ready") == 0);
+
     /* Back to the launcher only on a release over < APPS. */
     press(30, 14); drag(30, 60); release(); frame();
     assert(app_manager_get_app() == APP_DEBUGGER);
@@ -316,6 +325,14 @@ int main(void)
     for (int i = 0; i < 15; i++) frame();
     assert(s_world.muse_connected);
 
+    /* A lost press is no pat. */
+    s_world.state = PET_ST_IDLE;
+    s_world.next_goal_eval = (uint32_t)(fake_now_us / 1000) + 100000;
+    int lx = (int)(s_world.pet_x - s_world.cam_x), ly = (int)s_world.pet_y;
+    press(lx, ly); send(LV_EVENT_PRESS_LOST);
+    printf("lost press: petted=%d\n", s_world.state == PET_ST_PETTED);
+    assert(s_world.state != PET_ST_PETTED && !s_world.is_touching_pet);
+
     /* A pat shows the petted animation for a moment, then the pet moves on. */
     s_world.state = PET_ST_IDLE;
     s_world.goal = PET_GOAL_NONE;
@@ -335,7 +352,11 @@ int main(void)
     printf("needs: hunger %d->%d energy %d->%d\n", hunger, s_world.hunger, energy, s_world.energy);
     assert(s_world.hunger > hunger && s_world.energy < energy);
 
-    /* Pet World's menu icon goes back to the launcher. */
+    /* Pet World's menu icon goes back to the launcher on release over it. */
+    press(10, 10); drag(10, 120); release(); frame();
+    assert(app_manager_get_app() == APP_PET);
+    press(10, 10); send(LV_EVENT_PRESS_LOST); frame();
+    assert(app_manager_get_app() == APP_PET);
     tap(10, 10);
     assert(app_manager_get_app() == APP_LAUNCHER && chains());
 
@@ -404,7 +425,7 @@ class Core2Apps(unittest.TestCase):
         cls.binary = tmp / "harness"
         compiler = shlex.split(os.environ.get("CC", "cc"))
         sources = [MUSE / "muse_apps_demo.c", MUSE / "app_manager.c", MUSE / "apps/app_launcher.c",
-                   MUSE / "apps/app_debugger.c", MUSE / "apps/app_demo.c"]
+                   MUSE / "apps/app_demo.c"]
         subprocess.run(
             compiler + ["-std=gnu11", "-Wall", "-Werror", "-Wno-unused-function", "-Wno-unused-variable",
                         "-Wno-unused-but-set-variable", "-include", str(ROOT / "tests/host_compat.h"), "-I", str(tmp), "-I", str(MUSE), "-I", str(MUSE / "apps"),

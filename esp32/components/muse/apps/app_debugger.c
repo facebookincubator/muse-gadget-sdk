@@ -60,7 +60,12 @@ void app_debugger_update(uint32_t now_ms, int mode, float audio_level, const cha
     if (s_action_until && now_ms < s_action_until) {
         return;
     }
-    s_action_until = 0;
+    if (s_action_until) {
+        /* The button's message has run its course: back to ready. */
+        s_action_until = 0;
+        strlcpy(s_last_action, "Ready", sizeof(s_last_action));
+        strlcpy(s_dbg_caption, "Ready. Tap TEST CLOUD or hold B to talk.", sizeof(s_dbg_caption));
+    }
     if (caption && caption[0]) {
         strlcpy(s_dbg_caption, caption, sizeof(s_dbg_caption));
     }

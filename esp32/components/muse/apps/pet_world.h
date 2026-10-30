@@ -90,6 +90,7 @@ typedef struct {
     float cam_x;
     float cam_vx;
     bool is_swiping;
+    bool menu_pressed;   /* the top-left menu icon is pressed; opens the launcher on release */
     int last_touch_x;
     int touch_start_x;
     int touch_start_y;
@@ -149,6 +150,7 @@ bool pet_world_is_talk_pressed(void);
 void pet_world_touch_down(int tx, int ty);
 void pet_world_touch_move(int tx, int ty);
 void pet_world_touch_up(void);
+void pet_world_touch_cancel(void);
 
 // Render entire 320x240 frame into RGB565 frame buffer
 void pet_world_render(uint16_t *fb, uint32_t now_ms);
