@@ -218,6 +218,14 @@ class StopWatchPTT(unittest.TestCase):
     def test_active_call_prevents_auto_sleep(self):
         self.run_case('input', 9)
 
+    def test_auto_sleep_only_when_truly_idle(self):
+        for board, realtime in ((1, 1), (0, 1), (1, 0)):
+            self.run_case('input', 15, board=board, realtime=realtime)
+
+    def test_active_turn_pokes_idle_clock(self):
+        for board, realtime in ((1, 1), (0, 1), (1, 0)):
+            self.run_case('voice', 42, board=board, realtime=realtime)
+
     def test_explicit_notes_and_other_boards_keep_notes(self):
         self.run_case('voice', 21)
         self.run_case('voice', 20, board=0)

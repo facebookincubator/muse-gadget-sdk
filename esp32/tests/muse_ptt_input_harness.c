@@ -37,7 +37,8 @@ void muse_state_set_level(float v) { (void)v; }
 void muse_state_set_progress(float v) { (void)v; }
 void muse_state_set_mode(muse_mode_t v) { mode=v; }
 muse_mode_t muse_state_mode(float *v) { if(v) *v=0; return mode; }
-float muse_state_idle_secs(void) { return 1000; }
+static float idle_secs = 1000;
+float muse_state_idle_secs(void) { return idle_secs; }
 void muse_state_set_caption(const char *fmt,...) {
     va_list ap; va_start(ap,fmt); vsnprintf(caption,sizeof(caption),fmt,ap); va_end(ap);
 }
@@ -176,6 +177,14 @@ int main(int argc,char **argv) {
         assert(queue.items[queue.n-1].type==MUSE_PTT_UP);
     } else if(scenario==9) {
         call=true; check_sleep(); assert(!asleep); call=false; check_sleep(); assert(asleep);
+    } else if(scenario==15) {
+        /* Auto-sleep (#281): fresh activity must not sleep, active modes
+         * must not sleep, and a stale clock in IDLE still sleeps. */
+        idle_secs=10; check_sleep(); assert(!asleep);   /* just poked (e.g. by a turn) */
+        mode=MUSE_MODE_SPEAKING; idle_secs=1000; check_sleep(); assert(!asleep);
+        mode=MUSE_MODE_THINKING; check_sleep(); assert(!asleep);
+        mode=MUSE_MODE_LISTENING; check_sleep(); assert(!asleep);
+        mode=MUSE_MODE_IDLE; check_sleep(); assert(asleep);   /* truly idle: sleeps */
     }
     return 0;
 }
