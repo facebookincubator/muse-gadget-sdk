@@ -18,9 +18,9 @@
  * Waveshare ESP32-S3-Touch-AMOLED-1.43 (the plain one, not the 1.43C): round
  * 466 px SH8601/CO5300 QSPI AMOLED with FT3168 touch, QMI8658 IMU and PCF85063
  * RTC on the same I2C bus, no speaker or microphone, no PMU. The panel's reset
- * is a plain GPIO; there is no I/O expander. BOOT (GPIO0) is the talk button
- * (pairing confirmation; without a mic the replies are text), and a tap
- * confirms pairing too. Pins from arduino-esp32's
+ * is a plain GPIO; there is no I/O expander. BOOT (GPIO0) is the talk button,
+ * but without a mic it only wakes the screen and confirms pairing (replies
+ * are text), and a tap confirms pairing too. Pins from arduino-esp32's
  * variants/waveshare_esp32_s3_touch_amoled_143.
  */
 #include "driver/gpio.h"
@@ -266,9 +266,10 @@ static void display_pause(bool pause)
 }
 
 /*
- * BOOT talks (and confirms pairing). Without a microphone the replies are
- * text, so there is no hold-to-talk on the face; a tap also confirms pairing,
- * which saves digging for the side button while it dangles on a lanyard.
+ * BOOT wakes the screen and confirms pairing; without a microphone there is
+ * nothing to talk into, so no hold-to-talk on the face. A tap also confirms
+ * pairing, which saves digging for the side button while it dangles on a
+ * lanyard.
  */
 static unsigned poll_buttons(void)
 {
@@ -338,7 +339,7 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .diagonal_in = 1.43f,
-    .talk_button = "BOOT",
+    .talk_button = "boot",
     /* BOOT is on the side edge, toward the top of the puck. */
     .talk_hint = { LV_ALIGN_TOP_LEFT, 20, 16 },
     .frame_ms = 40,

@@ -85,6 +85,7 @@ BOARDS = {
     "Waveshare ESP32-S3-Touch-LCD-1.85C": "185c",
     "Waveshare ESP32-S3-Touch-AMOLED-2.16": "s3-216",
     "Waveshare ESP32-S3-Touch-AMOLED-2.06": "s3-206",
+    "Waveshare ESP32-S3-Touch-AMOLED-1.43": "143",
     "AIPI Lite": "aipi",
     "ALIENTEK ATK-DNESP32S3-BOX": "atk-box",
     "OSTB EchoEar-2ST": "echoear",
@@ -107,7 +108,7 @@ BOARDS = {
     "Waveshare ESP32-P4 3.5": "p4lcd35",
     "Deotaland RoRoLee": "rorolee",
 }
-CHAT_BOARDS = ("s3", "s3n", "s3-216", "s3-206", "185c", "aipi", "atk-box", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "echoear", "p4lcd35", "rorolee")
+CHAT_BOARDS = ("s3", "s3n", "s3-216", "s3-206", "185c", "143", "aipi", "atk-box", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "echoear", "p4lcd35", "rorolee")
 
 
 class Stop(Exception):
