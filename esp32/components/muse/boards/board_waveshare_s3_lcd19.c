@@ -127,7 +127,8 @@ static i2c_master_bus_handle_t s_i2c;
 static muse_gpio_button_t s_boot;
 
 /* Brings up the CST816S and hands LVGL its input device. Failure is not fatal:
- * without it the BOOT button still opens and drives the menu. */
+ * BOOT still does push-to-talk and pairing, but with no second button there is
+ * no way into Settings, so the board is set up over BLE. */
 static esp_err_t touch_start(lv_display_t *disp, lv_indev_t **out)
 {
     const i2c_master_bus_config_t bus_cfg = {
@@ -271,7 +272,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
         return NULL;
     }
     if (touch_start(disp, touch) != ESP_OK) {
-        ESP_LOGW(TAG, "no touch: the BOOT button drives the menu");
+        ESP_LOGW(TAG, "no touch: BOOT still talks, Settings are unreachable");
         *touch = NULL;
     }
     return disp;
@@ -290,11 +291,6 @@ static void set_brightness(int pct)
      * is a zero duty and 0 % is a full one. */
     ledc_set_duty(BL_LEDC_MODE, BL_LEDC_CHANNEL, (uint32_t)(100 - pct) * BL_DUTY_MAX / 100);
     ledc_update_duty(BL_LEDC_MODE, BL_LEDC_CHANNEL);
-}
-
-static void panel_sleep(bool sleep)
-{
-    esp_lcd_panel_disp_sleep(s_panel, sleep);   /* SLPIN/SLPOUT; GRAM is kept */
 }
 
 static void display_pause(bool pause)
@@ -395,12 +391,6 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     return ESP_OK;
 }
 
-/* No PMU and no power latch: there is nothing to switch off. */
-static esp_err_t power_off(void)
-{
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
 static const muse_board_t s_board = {
     .name = "Waveshare ESP32-S3-Touch-LCD-1.9",
     .width = LCD_H_RES,
@@ -420,14 +410,17 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
-    .panel_sleep = panel_sleep,
+    /* NULL: the esp_lcd_sh8601 driver has no disp_sleep, so the screen goes
+     * dark on the backlight alone. */
+    .panel_sleep = NULL,
     .display_pause = display_pause,
     .audio_init = audio_init,
     .mic_slot = 0,
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,
     .read_power = NULL,         /* no battery gauge */
-    .power_off = power_off,
+    /* No .power_off: there is no PMU or power latch, and no verified wake
+     * path, so Settings offers no Power off. */
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

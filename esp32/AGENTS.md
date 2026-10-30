@@ -61,7 +61,7 @@ before adding a feature to one.
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-lite` | `tools/board.sh seeed-respeaker-lite` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
-| Waveshare ESP32-S3-Touch-LCD-1.9 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19` | manual |
+| Waveshare ESP32-S3-Touch-LCD-1.9 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19` | `tools/muse/board.sh build lcd19` |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216` | `tools/muse/board.sh build s3-216` |
 | Espressif ESP-Mosaico (experimental; ESP-IDF master, see `devices/README.md`) | `esp32s31` | `devices/sdkconfig.muse;devices/sdkconfig.muse-esp-mosaico;devices/sdkconfig.muse-esp-mosaico-iris` | `tools/muse/board.sh build mosaico` |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-206` | `tools/muse/board.sh build s3-206` |
@@ -158,7 +158,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-216|s3-206|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-216|s3-206|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the

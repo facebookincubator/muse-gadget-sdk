@@ -253,6 +253,9 @@ jobs:
           - board: muse-deotaland-rorolee
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-deotaland-rorolee"
+          - board: muse-waveshare-s3-lcd19
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19"
     defaults:
       run:
         shell: bash
