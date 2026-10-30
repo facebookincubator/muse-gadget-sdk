@@ -21,7 +21,9 @@
  *   caption C  stdin is a reply's text: prints it wrapped to C columns, as the
  *              screen pages it (test_muse_caption_wrap.py)
  *   ascii      stdin is a reply's text: prints it with the ASCII stand-ins the
- *              caption shows (muse_text.c, test_muse_caption_wrap.py) */
+ *              caption shows (muse_text.c, test_muse_caption_wrap.py)
+ *   page       stdin is a reply's text: prints "cjk" or "latin" for the caption
+ *              font it takes, then for the page it asks for (test_muse_caption_wrap.py) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,10 +35,11 @@
 
 /* Captions page to the screen; the console lines tested here don't. */
 static int s_cols = 16, s_lines = 2;
+static bool s_page_cjk;
 
 void muse_state_page(bool cjk, int *cols, int *lines)
 {
-    (void)cjk;
+    s_page_cjk = cjk;
     *cols = s_cols;
     *lines = s_lines;
 }
@@ -101,8 +104,12 @@ int main(int argc, char **argv)
         strlcpy(shown, in, sizeof(shown));
         muse_text_to_ascii(shown, sizeof(shown));
         fputs(shown, stdout);
+    } else if (argc > 1 && !strcmp(argv[1], "page")) {
+        static char page[1 << 16];
+        muse_hatch_caption_at(in, 0, page, sizeof(page));
+        printf("%s %s\n", muse_text_has_cjk(in) ? "cjk" : "latin", s_page_cjk ? "cjk" : "latin");
     } else {
-        fprintf(stderr, "usage: %s console|unescape|caption COLS|ascii < input\n", argv[0]);
+        fprintf(stderr, "usage: %s console|unescape|caption COLS|ascii|page < input\n", argv[0]);
         return 2;
     }
     free(in);

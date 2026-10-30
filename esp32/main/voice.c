@@ -19,6 +19,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -149,6 +150,7 @@ static bool fail(const char *why) {
 static bool reply(void) {
     static int16_t pcm[REPLY_CHUNK];
     char text[96];
+    char incomplete[sizeof(text)] = "";
     bool done = false;
     size_t played = 0;
     int64_t t0 = esp_timer_get_time();
@@ -171,6 +173,7 @@ static bool reply(void) {
                 break;
             case MUSE_HATCH_EV_DONE:
                 done = true;
+                strlcpy(incomplete, text, sizeof(incomplete));
                 break;
             case MUSE_HATCH_EV_ERROR:
                 voice_player_stop();
@@ -199,6 +202,7 @@ static bool reply(void) {
     }
     ESP_LOGI(TAG, "reply: %.1fs of speech, %.1fs total", (double)played / VOICE_PLAYER_RATE,
              (esp_timer_get_time() - t0) / 1e6);
+    if (incomplete[0]) return fail(incomplete);
     led_status_set_voice(LED_VOICE_IDLE);
     return false;
 }

@@ -18,8 +18,8 @@ screen, capacitive touch, a PDM microphone and two user buttons.
 ## What it does with Muse
 
 The Muse avatar, touch settings, BLE pairing, Wi-Fi, USR1 push-to-talk,
-Chinese and Japanese captions, and USR2 screen sleep and wake. Replies from
-Muse are text on the screen.
+Chinese, Japanese and Korean captions, and USR2 screen sleep and wake.
+Replies from Muse are text on the screen.
 
 The board has a microphone and no speaker, so it runs as a microphone-only
 gadget: Settings > Sound shows the microphone gain and level, and replies are

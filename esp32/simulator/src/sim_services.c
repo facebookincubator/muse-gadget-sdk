@@ -237,12 +237,12 @@ void muse_menu_close(void)
 {
 }
 
-void muse_console_write(const void *buf, size_t n)
+bool muse_console_write(const void *buf, size_t n)
 {
-    if (buf && n) {
-        (void)fwrite(buf, 1, n, stdout);
-        (void)fflush(stdout);
+    if (!n) {
+        return true;
     }
+    return buf && fwrite(buf, 1, n, stdout) == n && fflush(stdout) == 0;
 }
 
 void muse_input_touch_talk(bool pressed)
