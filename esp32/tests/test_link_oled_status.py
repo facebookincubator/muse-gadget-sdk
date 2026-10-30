@@ -262,7 +262,7 @@ class LinkOledStatusTest(unittest.TestCase):
                         "CONFIG_HOMEHUB_BUTTON_GPIO=9",
                         "CONFIG_SPIRAM=n",
                         "CONFIG_HOMEHUB_TUNNEL=n",
-                        'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_c3_4mb.csv"'):
+                        'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_c3_oled_042.csv"'):
             self.assertIn(setting, overlay)
         # The agent's name needs GET /identity, which only runs when this is on.
         kconfig = (ROOT / "main" / "Kconfig.projbuild").read_text()
