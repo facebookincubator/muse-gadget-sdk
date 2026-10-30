@@ -508,14 +508,23 @@ static int text_y(int y)
     return muse_board->height / 2 + text_px(y - 233);
 }
 
-/* Flat screens too short for the scaled layout (320x240): the back arrow and
- * title in one row, the field below, the keyboard under it. */
+/* Flat screens the scaled layout doesn't fit (320x240, 240x320): the back
+ * arrow and title in one row, the field below, the keyboard under it. */
 #define TEXT_COMPACT_FIELD_Y 44
 #define TEXT_COMPACT_FIELD_H 40
 
 static bool text_compact(void)
 {
-    return !muse_board->round && muse_board->height < 300;
+    /* Otherwise the full keyboard's field would run under the back arrow (it
+     * ends at y 76) or past the screen's sides. Keypad screens (under 2")
+     * place their own field. */
+    return !muse_board->round && muse_board->diagonal_in >= 2.0f &&
+           (text_y(76) < 80 || text_px(300) > muse_board->width - 16);
+}
+
+static int text_field_h(void)
+{
+    return text_compact() ? TEXT_COMPACT_FIELD_H : text_px(48);
 }
 
 static int text_field_y(void)
@@ -582,7 +591,7 @@ static void build_keyboard(void)
 {
     s_text_show = lv_button_create(s_text);
     lv_obj_remove_style_all(s_text_show);
-    lv_obj_set_size(s_text_show, 70, lv_obj_get_height(s_text_ta));
+    lv_obj_set_size(s_text_show, 70, text_field_h());
     lv_obj_set_style_radius(s_text_show, 14, 0);
     lv_obj_set_style_bg_opa(s_text_show, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(s_text_show, lv_color_hex(COLOR_CARD), 0);
@@ -632,7 +641,7 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 40);
 
     const lv_font_t *font = &lv_font_montserrat_20;
-    int h = text_compact() ? TEXT_COMPACT_FIELD_H : text_px(48), border = 2;
+    int h = text_field_h(), border = 2;
     int pad = (h - 2 * border - lv_font_get_line_height(font)) / 2;
     s_text_ta = lv_textarea_create(s_text);
     lv_textarea_set_one_line(s_text_ta, true);
@@ -657,7 +666,7 @@ static void build_text_page(lv_obj_t *tile)
     if (text_compact()) {
         lv_obj_set_size(back, 48, TEXT_COMPACT_FIELD_H);
         lv_obj_align(back, LV_ALIGN_TOP_LEFT, 4, 0);
-        lv_obj_set_width(s_text_title, muse_board->width - 120);
+        single_line(s_text_title, muse_board->width - 120);   /* a long SSID mustn't wrap onto the field */
         lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 10);
     }
 
