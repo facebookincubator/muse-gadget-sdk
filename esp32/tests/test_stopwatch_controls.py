@@ -124,7 +124,8 @@ void muse_state_poke(void) { ++pokes; }
 muse_mode_t muse_state_mode(float *secs) { (void)secs; return mode; }
 static bool muse_settings_speaker_on(void) { return speaker; }
 static void muse_settings_set_speaker_on(bool value) { speaker = value; ++toggles; }
-void muse_state_set_caption(const char *caption, ...) { assert(strcmp(caption, speaker ? "SPEAKER ON" : "SPEAKER OFF") == 0); }
+static int hints;
+void muse_state_set_hint(const char *caption) { assert(strcmp(caption, speaker ? "SPEAKER ON" : "SPEAKER OFF") == 0); ++hints; }
 static void talk_button(unsigned ev) { assert(ev == MUSE_BTN_TALK_RELEASE); s_talk_down = false; ++ptt_releases; }
 static void power_off(void) { ++shutdowns; }
 ''' + '\n'.join(function(cls.input, n) for n in ('power_release', 'dedicated_buttons')) + r'''
@@ -144,7 +145,7 @@ int main(int argc, char **argv) {
         assert(shutdowns == 1 && !asleep); /* failed shutdown remains usable */
         dedicated_buttons(MUSE_BTN_POWER_LONG); assert(shutdowns == 1); /* no press, no off */
     } else if (test == 2) {
-        dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(!speaker && toggles == 1 && shutdowns == 0);
+        dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(!speaker && toggles == 1 && shutdowns == 0 && hints == 1);
         dedicated_buttons(MUSE_BTN_SPEAKER_RELEASE); assert(toggles == 1);
         mode = MUSE_MODE_SPEAKING; dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(speaker && toggles == 2);
         asleep = true; dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(!asleep && toggles == 2);

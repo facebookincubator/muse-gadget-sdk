@@ -109,14 +109,13 @@ float muse_state_progress(void)
     return s_progress;
 }
 
-void muse_state_set_caption(const char *fmt, ...)
+/* Sets the caption and its expiry (0: none) in one step, so a hint's timer
+ * can never land on a caption set after it. */
+static void set_caption(int64_t until_us, const char *fmt, va_list ap)
 {
     static char buf[sizeof(s_caption)];   /* too big for some callers' stacks */
     xSemaphoreTake(s_format_lock, portMAX_DELAY);
-    va_list ap;
-    va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
     muse_text_to_ascii(buf, sizeof(buf));   /* replies have curly quotes and dashes */
 
     portENTER_CRITICAL(&s_lock);
@@ -124,17 +123,38 @@ void muse_state_set_caption(const char *fmt, ...)
         memcpy(s_caption, buf, sizeof(s_caption));
         s_caption_version++;
     }
-    s_hint_until_us = 0;   /* a plain caption cancels any pending hint expiry */
+    s_hint_until_us = until_us;
     portEXIT_CRITICAL(&s_lock);
     xSemaphoreGive(s_format_lock);
 }
 
+void muse_state_set_caption(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    set_caption(0, fmt, ap);
+    va_end(ap);
+}
+
+static void set_hint(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    set_caption(esp_timer_get_time() + MUSE_HINT_MS * 1000LL, fmt, ap);
+    va_end(ap);
+}
+
 void muse_state_set_hint(const char *text)
 {
-    muse_state_set_caption("%s", text);
+    set_hint("%s", text);
+}
+
+bool muse_state_hint_pending(void)
+{
     portENTER_CRITICAL(&s_lock);
-    s_hint_until_us = esp_timer_get_time() + MUSE_HINT_MS * 1000LL;
+    bool pending = s_hint_until_us && esp_timer_get_time() <= s_hint_until_us;
     portEXIT_CRITICAL(&s_lock);
+    return pending;
 }
 
 bool muse_state_caption(char *out, size_t out_len, uint32_t *version)
