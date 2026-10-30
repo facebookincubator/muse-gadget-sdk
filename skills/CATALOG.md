@@ -1,6 +1,6 @@
 # Skill Catalog
 
-43 active skills: 42 device/family skills and one shared Google Cast skill.
+46 active skills: 45 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -32,6 +32,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Google TV Streamer](gadget-google-tv-streamer/SKILL.md) — Cast and Android TV Remote v2.
 - [LG webOS TVs](gadget-lg-webos-tvs/SKILL.md) — local remote/apps/inputs; Cast when advertised.
 - [Logitech Squeezebox](gadget-logitech-squeezebox/SKILL.md) — playback through an existing Lyrion server.
+- [Roku TVs and players](gadget-roku-tvs-and-players/SKILL.md) — local remote, apps, text entry and power over ECP; network-control setting must allow it.
 - [Samsung Tizen TVs](gadget-samsung-tizen-tvs/SKILL.md) — local remote and model-specific Frame Art.
 - [Sonos speakers](gadget-sonos-speakers/SKILL.md) — playback, volume and grouping.
 - [VIZIO D40f-G9](gadget-vizio-d40f-g9/SKILL.md) — SmartCast management; Cast when advertised.
@@ -66,3 +67,8 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
 - [Wyze RTSP cameras](gadget-wyze-rtsp-cameras/SKILL.md) — viewing/capture with compatible legacy firmware already installed.
 - [yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
+
+## Vehicles and climate
+
+- [Tesla](gadget-tesla/SKILL.md) — self-hosted status, drive/charge history and efficiency analytics via Fleet API, TeslaMate and Fleet Telemetry; read-only by default.
+- [Google Nest Thermostats](gadget-google-nest-thermostats/SKILL.md) — temperature and setpoints via a Smart Device Management bridge.
