@@ -52,7 +52,8 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
    and command nothing. `result.properties` maps each property code to its current value.
 4. Read the thing model `GET /v1.0/end-user/devices/{device_id}/model`. Its `result.model` field
    is a JSON **string** that needs a second parse. `services[].properties[]` then defines each
-   property's `code`, `accessMode` (`ro` properties are read-only — say so) and `typeSpec`:
+   property's `code`, `accessMode` (`ro` is read-only — say so; `wr` is write-only and cannot
+   be read back) and `typeSpec`:
    - `value`: `min`, `max`, `step` and `scale` — the real-world value is the raw number divided
      by 10^scale.
    - `enum`: the issued value must be one of `range`.
@@ -64,8 +65,14 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
    `{"properties": "{\"switch_led\":true}"}`. An empty `result` object means the command was
    accepted, not that it took effect. For relative asks ("a bit brighter"), adjust the current
    value by 10% of the typeSpec range for vague amounts or by the stated amount exactly, clamp
-   to `[min, max]`, honor `scale` and round to `step`.
-6. Wait 1–2 seconds, re-read the detail and compare the mapped value before reporting success.
+   to `[min, max]`, honor `scale` and round to `step`. A relative ask needs a readable current
+   value; for a `wr` property, ask for an absolute value instead.
+
+## Verify the Result
+
+- Wait 1–2 seconds, re-read the detail and compare the mapped value before reporting success.
+- A `wr` property cannot be read back: report the command as accepted but unverified.
+- If the value did not change or the device went offline, say so; do not report success.
 
 ## Also Available
 
@@ -83,27 +90,36 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
   `GET .../hour/data?dev_id=..&dp_code=..&statistic_type=..&start_time=..&end_time=..`. Times
   are `yyyyMMddHH` and one request spans at most 24 hours; page longer ranges and aggregate.
   Values return as an array of `{time: value}` pairs with string values.
-- **Notifications** are self-send only — they reach the key's own user, nobody else. SMS and
-  voice take `{"message": "..."}`; mail and push take `{"subject": "...", "content": "..."}`.
+- **Notifications** are self-send only — they reach the key's own user, nobody else:
+  `POST /v1.0/end-user/services/{sms|voice|mail|push}/self-send`. SMS and voice take
+  `{"message": "..."}`; mail and push take `{"subject": "...", "content": "..."}`.
   Rate and duplicate limits apply (per contact: 15–30 per day, identical content more than
   twice within 50 seconds is refused).
-- **IPC cloud snapshots** (cameras): `POST /v1.0/end-user/ipc/{device_id}/capture/allocate`
-  with body `{"capture_json": "<json string>"}` — double-serialized like property issue. The
-  string carries `device_id`, `capture_type` (`PIC` or `VIDEO`), optionally `pic_count`
-  (clamped to 1–5), `video_duration_seconds` (1–60, default 10) and `home_id`. Allocate only
-  reserves an upload slot: `result.status` is `ACCEPTED` or `REJECTED` and `result` carries
-  `bucket` and the object key(s) (`image_object_key`, and for VIDEO also `video_object_key` /
-  `cover_image_object_key`) — never a media URL; the device still has to capture and upload.
-  Then poll `POST .../capture/resolve` with a `resolve_json` string echoing `device_id`,
-  `capture_type`, `bucket` and the object key(s) from allocate, and pass
-  `user_privacy_consent_accepted: true`. Resolve returns the link to hand the user: the
-  image/video cloud storage URL in `decrypt_image_url` / `decrypt_video_url`. `status:
-  NOT_READY` means keep polling — for PIC sleep 2 s, then resolve every 2 s up to 30 s, then
-  retry up to 3 times 3 s apart; for VIDEO sleep `max(5, video_duration_seconds_effective) + 2`
-  s using the clamped duration from the allocate response, then resolve every 2 s up to 120 s,
-  then retry up to 3 times 5 s apart. With `pic_count` above 1, allocate returns per-snapshot
-  coordinates in `pic_slots[]` — resolve each slot's key separately. A video's cover image can
-  lag the video itself — check `message_for_user`.
+- **IPC cloud snapshots** (cameras): first ask the user to confirm they want a capture from
+  that camera and a decrypted, viewable link to it. A request for a snapshot is not by itself
+  that consent; if they decline, do not capture.
+  1. Allocate with `POST /v1.0/end-user/ipc/{device_id}/capture/allocate` and body
+     `{"capture_json": "<json string>"}` — double-serialized like property issue. The string
+     carries `device_id`, `capture_type` (`PIC` or `VIDEO`), optionally `pic_count` (clamped to
+     1–5), `video_duration_seconds` (1–60, default 10) and `home_id`. Allocate only reserves an
+     upload slot: `result.status` is `ACCEPTED` or `REJECTED` and `result` carries `bucket`,
+     `encryption_key` and the object key(s) (`image_object_key`, and for VIDEO also
+     `video_object_key` / `cover_image_object_key`) — never a media URL; the device still has to
+     capture and upload. With `pic_count` above 1, `pic_slots[]` holds per-snapshot keys.
+  2. Resolve with `POST .../capture/resolve` and a `resolve_json` string echoing `device_id`,
+     `capture_type`, `bucket`, `encryption_key` and the object key(s) — one resolve per
+     `pic_slots[]` entry, with that slot's key and `encryption_key`. Set
+     `user_privacy_consent_accepted: true` only after the user's explicit yes for this capture;
+     never set it on their behalf. It returns the decrypted `decrypt_image_url` /
+     `decrypt_video_url` (and `decrypt_cover_image_url`); without it, resolve returns encrypted
+     `raw_presigned_*` URLs that cannot be viewed.
+  3. `status: NOT_READY` means keep polling — for PIC sleep 2 s, then resolve every 2 s up to
+     30 s, then retry up to 3 times 3 s apart; for VIDEO sleep
+     `max(5, video_duration_seconds_effective) + 2` s using the clamped duration from the
+     allocate response, then resolve every 2 s up to 120 s, then retry up to 3 times 5 s apart.
+     A video's cover image can lag the video itself — check `message_for_user`.
+  4. The link is private camera footage: give it only to the requesting user; never log or
+     forward it.
 
 ## Real-Time Subscription
 
