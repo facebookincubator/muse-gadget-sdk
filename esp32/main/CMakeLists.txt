@@ -79,14 +79,23 @@ set(GADGET_REQUIRES
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
     esp_driver_pcnt
+    esp_adc
+    fatfs
+    esp_driver_sdspi
+    sdmmc
 )
 
 # E-paper has its own status screen in place of led_status.c, with
 # a per-panel driver behind epd_panel.h.
+if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 OR CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 OR CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951)
+    list(APPEND GADGET_REQUIRES esp_pm)
+endif()
 if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "link_power.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "link_power.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951)
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_it8951.c" "link_power.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681)
@@ -95,6 +104,25 @@ elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_154g.c")
 else()
     list(APPEND GADGET_SRCS "led_status.c")
+endif()
+
+if(CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE OR CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT OR CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE)
+    list(APPEND GADGET_SRCS "reterminal_e100x.c" "reterminal_e100x_commands.c")
+endif()
+
+# Keep the legacy switches (including explicit n values); normalize their
+# source ownership here rather than duplicating a source list per model.
+if(CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE OR CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE)
+    list(APPEND GADGET_SRCS "reterminal_e100x_rtc.c" "reterminal_e100x_sd.c" "reterminal_e100x_microphone.c" "battery_adc.c")
+endif()
+if(CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE OR CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT OR CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE)
+    list(APPEND GADGET_SRCS "reterminal_e100x_events.c")
+endif()
+if(CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT)
+    list(APPEND GADGET_SRCS "e1003_touch.c")
+endif()
+if(CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE)
+    list(APPEND GADGET_SRCS "e1003_pmic.c")
 endif()
 
 if(CONFIG_MUSE_ENABLED)

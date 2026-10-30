@@ -40,7 +40,14 @@ typedef struct {
     // Show `frame` on the panel. `prev` is what the panel currently shows
     // (NULL on colour panels). Both are `row_bytes * height` long.
     esp_err_t (*update)(const uint8_t *frame, const uint8_t *prev, bool full);
+    // Optional four-level grayscale refresh from a packed 2-bit frame.
     esp_err_t (*update_gray4)(const uint8_t *frame);
+    // Optional UC8179 four-gray refresh from two 1-bit data planes.
+    esp_err_t (*update_gray4_planes)(const uint8_t *old_plane, const uint8_t *new_plane);
+    // E1003: 8-bit luminance source, quantized to the IT8951's 16 levels.
+    esp_err_t (*update_gray16)(const uint8_t *luma);
+    // E1003: update only an aligned rectangle of a complete monochrome frame.
+    esp_err_t (*update_partial)(const uint8_t *frame, int x, int y, int w, int h);
 } epd_panel_t;
 
 const epd_panel_t *epd_panel_get(void);

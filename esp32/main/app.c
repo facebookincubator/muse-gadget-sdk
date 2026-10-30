@@ -15,6 +15,13 @@
  */
 
 #include "app.h"
+#include "sdkconfig.h"
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+#include "link_power.h"
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE || CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT || CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
+#include "reterminal_e100x.h"
+#endif
 #include "stack_monitor.h"
 
 #include <string.h>
@@ -1172,6 +1179,13 @@ static void on_provision(const char *ssid, const char *password,
         ble_server_send_pairing_status("error_operation_in_progress", session_generation);
         return;
     }
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    if (!link_power_acquire(LINK_POWER_PROVISIONING)) {
+        operation_gate_give();
+        ble_server_send_pairing_status("error_operation_in_progress", session_generation);
+        return;
+    }
+#endif
     // A queued callback may be stale before it ever owned the operation gate.
     // It has no partial state to roll back and must not erase a later setup.
     if (!link_pairing_provisioning_session_valid(session_generation)) goto done;
@@ -1251,6 +1265,9 @@ static void on_provision(const char *ssid, const char *password,
 #endif
 
 done:
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    link_power_release(LINK_POWER_PROVISIONING);
+#endif
     operation_gate_give();
 }
 
@@ -1551,6 +1568,8 @@ static void discover_task(void *arg) {
 typedef struct {
     noise_ctrl_session_generation_t session_generation;
     char request_id[64];
+    bool gray4;
+    bool gray16;
 } draw_url_ctx_t;
 
 static void draw_url_done(const image_fetch_result_t *r, void *user) {
@@ -1565,12 +1584,17 @@ static void draw_url_done(const image_fetch_result_t *r, void *user) {
         cJSON_AddNumberToObject(payload, "scale", r->scale);
         cJSON_AddNumberToObject(payload, "bytes", (double)r->bytes);
         cJSON_AddNumberToObject(payload, "ms", r->ms);
+        if (ctx->gray4) cJSON_AddNumberToObject(payload, "gray_levels", 4);
+        if (ctx->gray16) cJSON_AddNumberToObject(payload, "gray_levels", 16);
     } else {
         cJSON *error = cJSON_AddObjectToObject(result, "error");
         cJSON_AddStringToObject(error, "code", r->code);
         cJSON_AddStringToObject(error, "message", r->message);
     }
     noise_ctrl_send_command_result(ctx->session_generation, ctx->request_id, result);
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    link_power_release(LINK_POWER_DISPLAY);
+#endif
     free(ctx);
 }
 #endif
@@ -1659,6 +1683,20 @@ static void free_ws_control_args(ws_control_args_t *args) {
     free(args);
 }
 
+static bool setup_control_power_begin(void) {
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    return link_power_acquire(LINK_POWER_SETUP_CONTROL);
+#else
+    return true;
+#endif
+}
+
+static void setup_control_power_end(void) {
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    link_power_release(LINK_POWER_SETUP_CONTROL);
+#endif
+}
+
 static void finish_precleared_setup_reset_with_gate_held(const char *source) {
     ESP_LOGI(TAG, "%s - finish verified setup reset", source);
     setup_stage_set("reset");
@@ -1678,8 +1716,13 @@ static bool reset_setup_from_control(const char *source) {
         ESP_LOGE(TAG, "%s could not acquire the setup operation gate", source);
         return false;
     }
+    if (!setup_control_power_begin()) {
+        operation_gate_give();
+        return false;
+    }
     bool reset = reset_setup_with_gate_held(source);
     if (!reset) {
+        setup_control_power_end();
         operation_gate_give();
         return false;
     }
@@ -1730,7 +1773,10 @@ static void ws_control_task(void *arg) {
             break;
     }
 
-    if (release_operation_gate) operation_gate_give();
+    if (release_operation_gate) {
+        operation_gate_give();
+        setup_control_power_end();
+    }
     free_ws_control_args(args);
     stack_monitor_record(NULL);
     vTaskDelete(NULL);
@@ -1741,9 +1787,15 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
         free(url);
         return command_error("busy", "another operation is active");
     }
+    if (!setup_control_power_begin()) {
+        operation_gate_give();
+        free(url);
+        return command_error("busy", "control operation unavailable");
+    }
 
     ws_control_args_t *args = calloc(1, sizeof(*args));
     if (!args) {
+        setup_control_power_end();
         operation_gate_give();
         free(url);
         return command_error("out_of_memory", "failed to allocate command");
@@ -1757,6 +1809,7 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
     // recreate credentials before the delayed disconnect and reboot.
     if (action == WS_CONTROL_UNPAIR) {
         if (!clear_setup_credentials()) {
+            setup_control_power_end();
             operation_gate_give();
             free_ws_control_args(args);
             return command_error("storage_error",
@@ -1771,6 +1824,7 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
             // Keep the gate reserved until reboot after verified deletion.
             restart_after_setup_reset();
         } else {
+            setup_control_power_end();
             operation_gate_give();
         }
         free_ws_control_args(args);
@@ -1864,6 +1918,10 @@ static cJSON *bug_report_command(
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE || CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT || CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
+    if (reterminal_e100x_handles(command))
+        return reterminal_e100x_command(command, params, request_id, session_generation);
+#endif
 #if CONFIG_HOMEHUB_BLE_COMMANDS
     if (ble_commands_handles(command)) {
         return ble_commands_handle(command, params, request_id, session_generation);
@@ -1878,25 +1936,72 @@ static cJSON *on_ws_command(
         return queue_ws_control(WS_CONTROL_SET_VM, url);
     }
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
-    bool draw_file = strcmp(command, "display.draw_file") == 0;
-    if (draw_file || strcmp(command, "display.draw_url") == 0) {
-        // draw_file takes a path on the VM, fetched over this session.
+    if (strcmp(command, "display.draw_url") == 0
+        || strcmp(command, "display.draw_file") == 0
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+        || strcmp(command, "display.draw_gray4_url") == 0
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        || strcmp(command, "display.draw_gray16_url") == 0
+        || strcmp(command, "display.draw_partial_url") == 0
+#endif
+    ) {
+        bool draw_file = strcmp(command, "display.draw_file") == 0;
         cJSON *target = cJSON_GetObjectItem(params, draw_file ? "path" : "url");
         cJSON *row = cJSON_GetObjectItem(params, "row");
         if (!cJSON_IsString(target) || !target->valuestring || !target->valuestring[0]) {
-            return command_error("missing_param",
-                                 draw_file ? "path is required" : "url is required");
+            return command_error("missing_param", draw_file ? "path is required" : "url is required");
         }
         draw_url_ctx_t *ctx = calloc(1, sizeof(*ctx));
         if (!ctx) return command_error("out_of_memory", "failed to allocate");
         ctx->session_generation = session_generation;
         strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
         const char *code, *message;
-        int top = cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW;
+        bool gray4 = strcmp(command, "display.draw_gray4_url") == 0;
+        bool gray16 = strcmp(command, "display.draw_gray16_url") == 0;
+        bool partial = strcmp(command, "display.draw_partial_url") == 0;
+        ctx->gray4 = gray4;
+        ctx->gray16 = gray16;
+        cJSON *x = cJSON_GetObjectItem(params, "x");
+        cJSON *y = cJSON_GetObjectItem(params, "y");
+        cJSON *w = cJSON_GetObjectItem(params, "width");
+        cJSON *h = cJSON_GetObjectItem(params, "height");
+        if (partial && (!cJSON_IsNumber(x) || !cJSON_IsNumber(y)
+                        || !cJSON_IsNumber(w) || !cJSON_IsNumber(h)
+                        || x->valuedouble != x->valueint || y->valuedouble != y->valueint
+                        || w->valuedouble != w->valueint || h->valuedouble != h->valueint)) {
+            free(ctx);
+            return command_error("invalid_params", "integer x,y,width,height required");
+        }
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        if (!link_power_acquire(LINK_POWER_DISPLAY)) {
+            free(ctx);
+            return command_error("busy", "display operation unavailable");
+        }
+#endif
         bool started = draw_file
-            ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
-            : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+            ? image_fetch_start_vm(target->valuestring,
+                                   cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW,
+                                   draw_url_done, ctx, &code, &message)
+            : partial
+            ? image_fetch_start_partial(target->valuestring, x->valueint, y->valueint,
+                                        w->valueint, h->valueint, draw_url_done, ctx,
+                                        &code, &message)
+            : gray16
+            ? image_fetch_start_gray16(target->valuestring,
+                                       cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW,
+                                       draw_url_done, ctx, &code, &message)
+            : gray4
+            ? image_fetch_start_gray4(target->valuestring,
+                                      cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW,
+                                      draw_url_done, ctx, &code, &message)
+            : image_fetch_start(target->valuestring,
+                                cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW,
+                                draw_url_done, ctx, &code, &message);
         if (!started) {
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+            link_power_release(LINK_POWER_DISPLAY);
+#endif
             free(ctx);
             return command_error(code, message);
         }
@@ -2622,14 +2727,31 @@ void app_run(void) {
     sdk_token_console_start();
 #endif
 
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    link_power_init();
+    link_power_enable_online_pm();
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE
+    reterminal_e100x_prepare_display();
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    bool panel_init_pm_locked = link_power_pm_enter(LINK_PM_PANEL);
+#endif
     if (!led_status_init()) {
         ESP_LOGW(TAG, "LED init failed — continuing without status LED");
     }
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    if (panel_init_pm_locked) link_power_pm_leave(LINK_PM_PANEL);
+#endif
     led_status_set_state(LED_STATE_BOOT);
 
     heap_snapshot("after config+id");
 
     wifi_mgr_init();
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    if (!link_power_enable_wifi_modem_sleep())
+        ESP_LOGW(TAG, "E100x Wi-Fi modem sleep unavailable");
+#endif
     heap_snapshot("after wifi_mgr_init");
 
     noise_ctrl_init(identity_node_id(), identity_ble_name(), on_ws_control_status);
@@ -2763,6 +2885,9 @@ void app_run(void) {
 #endif
 #if CONFIG_HOMEHUB_RETERMINAL_SHT4X
     reterminal_sht4x_init();
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE || CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT || CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
+    reterminal_e100x_init();
 #endif
 
     if (!setup_complete) {

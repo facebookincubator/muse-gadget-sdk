@@ -1204,10 +1204,28 @@ int led_status_display_bits(void) {
 #endif
 }
 
-void led_status_draw_done(void) {
+void led_status_draw_begin(void) {
+}
+
+void led_status_draw_begin_gray4(void) {
+}
+
+void led_status_draw_begin_gray16(void) {
+}
+
+bool led_status_draw_begin_partial(int x, int y, int w, int h) {
+    (void)x; (void)y; (void)w; (void)h;
+    return false;
+}
+
+void led_status_draw_cancel_partial(void) {
+}
+
+bool led_status_draw_done(void) {
 #if CONFIG_HOMEHUB_LED_BACKEND_MUSE && CONFIG_HOMEHUB_DISPLAY_COMMANDS
     muse_ui_image_done();
 #endif
+    return true;
 }
 
 #if CONFIG_HOMEHUB_DISPLAY

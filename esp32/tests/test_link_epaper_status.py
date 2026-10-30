@@ -23,7 +23,197 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def production_function(source, name):
+    """Extract an existing production function, never a test reimplementation."""
+    match = re.search(r"(?:static )?(?:esp_err_t|bool|void) " + name + r"\([^)]*\)\s*\{", source)
+    if not match:
+        raise AssertionError(name)
+    end, depth = match.end(), 1
+    while depth:
+        depth += (source[end] == "{") - (source[end] == "}")
+        end += 1
+    return source[match.start():end]
+
+
 class LinkEpaperStatusTest(unittest.TestCase):
+    def compile_production_check(self, name, code):
+        path = self.out / (name + ".c")
+        path.write_text(code)
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        exe = self.out / (name + ".exe")
+        r = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", str(path), "-o", str(exe)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout+r.stderr)
+        r = subprocess.run([str(exe)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout+r.stderr)
+
+    def test_it8951_packing_windows_and_bus_release(self):
+        source = (ROOT / "main/epd_it8951.c").read_text()
+        code = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_ERR_INVALID_STATE -1
+#define ESP_ERR_INVALID_ARG -2
+#define PANEL_W 1872
+#define PANEL_H 1404
+#define GRAY_ROW_BYTES (PANEL_W/2)
+#define TRANSFER_ROWS 14
+#define CMD_LOAD_AREA 0x21
+#define CMD_LOAD_END 0x22
+#define CMD_DISPLAY_AREA 0x34
+#define REG_LISAR 0x208
+#define REG_ONE_BIT_MODE 0x113a
+#define REG_ONE_BIT_COLOURS 0x1250
+#define SPI_TRANS_CS_KEEP_ACTIVE 1
+#define portMAX_DELAY 10000
+#define ESP_LOGI(tag,...) ((void)snprintf((char[256]){0},256,__VA_ARGS__))
+#define ESP_LOGE(...) ((void)0)
+typedef struct { int flags; size_t length; const void *tx_buffer; } spi_transaction_t;
+static void *s_spi = (void *)1;
+static uint32_t s_image_address;
+static uint8_t tx[TRANSFER_ROWS*GRAY_ROW_BYTES], *s_tx=tx;
+static uint8_t luma[PANEL_W*PANEL_H], wire[PANEL_W*PANEL_H/2];
+static size_t used;
+static int acquired, released, outer, takes, gives, fail_load, displays;
+static uint16_t args[8];
+static size_t nargs;
+static esp_err_t write_reg(uint16_t r,uint16_t v) { (void)r;(void)v;return 0; }
+static esp_err_t read_reg(uint16_t r,uint16_t *v) { (void)r;*v=0x18;return 0; }
+static esp_err_t command(uint16_t c) { nargs=0;if(c==CMD_DISPLAY_AREA) displays++;return 0; }
+static esp_err_t data_word(uint16_t v) { assert(nargs<8);args[nargs++]=v;return 0; }
+static esp_err_t wait_ready(int t) { assert(t>0);return 0; }
+static esp_err_t word(uint16_t v,void *r,bool keep) { (void)v;(void)r;assert(keep);return 0; }
+static esp_err_t wait_refresh(bool start) { (void)start;return 0; }
+static esp_err_t set_refresh_temperature(void) { return 0; }
+static bool reterminal_e100x_spi_lock(void) { assert(!outer);outer=1;takes++;return true; }
+static void reterminal_e100x_spi_unlock(void) { assert(outer);outer=0;gives++; }
+static esp_err_t spi_device_acquire_bus(void *s,int t) { assert(s && t);acquired++;return 0; }
+static void spi_device_release_bus(void *s) { assert(s);released++; }
+static esp_err_t spi_device_polling_transmit(void *s,const spi_transaction_t *t) {
+    assert(s && used+t->length/8<=sizeof(wire));
+    memcpy(wire+used,t->tx_buffer,t->length/8);used+=t->length/8;return 0;
+}
+static esp_err_t load_frame_area(const uint8_t *f,int x,int y,int w,int h) {
+    assert(f && x>=0 && y>=0 && w>0 && h>0);return fail_load ? -3 : 0;
+}
+'''
+        for name in ("load_gray16", "display_area", "it8951_update_gray16", "it8951_update_partial"):
+            code += production_function(source, name) + "\n"
+        code += r'''
+int main(void) {
+    for (int y=0;y<PANEL_H;y++) for(int x=0;x<PANEL_W;x++) luma[y*PANEL_W+x]=(x%16)*17;
+    assert(it8951_update_gray16(luma)==0 && used==sizeof(wire));
+    assert(acquired==released && takes==gives && !outer);
+    assert(args[0]==0 && args[2]==1872 && args[3]==1404 && args[4]==2);
+    for(size_t i=0;i<sizeof(wire);i+=8) {
+        static const uint8_t expected[8]={0xcd,0xef,0x89,0xab,0x45,0x67,0x01,0x23};
+        assert(!memcmp(wire+i,expected,8));
+    }
+    memset(luma,255,sizeof(luma));used=0;assert(load_gray16(luma)==0);
+    for(size_t i=0;i<sizeof(wire);i++) assert(wire[i]==255);
+    memset(luma,0,sizeof(luma));used=0;assert(load_gray16(luma)==0);
+    for(size_t i=0;i<sizeof(wire);i++) assert(wire[i]==0);
+    assert(it8951_update_partial(luma,288,312,288,312)==0);
+    assert(args[0]==1280 && args[1]==312 && args[2]==320 && args[3]==312 && args[4]==1);
+    for(int x=0;x<PANEL_W;x+=16) for(int w=16;w<=PANEL_W-x;w+=16) {
+        assert(it8951_update_partial(luma,x,0,w,1)==0);
+        int left=PANEL_W-args[0]-args[2];
+        assert(left<=x && left+args[2]>=x+w && left>=0 && left+args[2]<=PANEL_W);
+        assert(args[0]%32==0 && x-left<32 && left+args[2]-x-w<32);
+    }
+    used=0;memset(luma,0,sizeof(luma));
+    luma[PANEL_W-4]=8;luma[PANEL_W-3]=9;luma[PANEL_W-2]=246;luma[PANEL_W-1]=247;
+    assert(load_gray16(luma)==0 && wire[0]==0x01 && wire[1]==0xef);
+    int before=displays;fail_load=1;
+    assert(it8951_update_partial(luma,288,312,288,312)!=0 && displays==before);
+    assert(takes==gives && !outer);
+    assert(it8951_update_partial(luma,1,0,16,1)==ESP_ERR_INVALID_ARG);
+    return 0;
+}
+'''
+        self.compile_production_check("it8951", code)
+
+    def test_partial_refresh_state_and_cancel(self):
+        source = (ROOT / "main/epaper_status.c").read_text()
+        code = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+typedef int esp_err_t;
+#define ESP_OK 0
+#define CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951 1
+#define FULL_REFRESH_EVERY 10
+#define EPD_W 64
+#define EPD_H 16
+#define EPD_ROW_BYTES (EPD_W/8)
+#define EPD_FRAME_BYTES (EPD_ROW_BYTES*EPD_H)
+#define portMAX_DELAY 10000
+#define ESP_LOGI(tag,...) ((void)snprintf((char[256]){0},256,__VA_ARGS__))
+static bool s_ready=true,s_image_mode,s_image_dirty,s_gray4_mode,s_gray16_mode;
+static bool s_partial_mode,s_partial_ready,s_status_drawn;
+static unsigned s_partial_updates;
+static int s_partial_x,s_partial_y,s_partial_w,s_partial_h,s_fast_refreshes;
+static int s_panel_lock,s_lock,fulls,partials,grays,failing;
+static uint8_t canvas[EPD_W*EPD_H],frame[EPD_FRAME_BYTES],shown[EPD_FRAME_BYTES];
+static uint8_t *s_canvas=canvas,*s_frame=frame,*s_shown=shown;
+static uint8_t *s_gray_old=frame,*s_gray4_frame=frame;
+static void xSemaphoreTake(int m,int t) { (void)m;(void)t; }
+static void xSemaphoreGive(int m) { (void)m; }
+static void epd_dither(void) {}
+static esp_err_t update(const uint8_t *a,const uint8_t *b,bool full) { (void)a;(void)b;assert(full);fulls++;return failing; }
+static esp_err_t gray(const uint8_t *a) { (void)a;grays++;return failing; }
+static esp_err_t partial(const uint8_t *a,int x,int y,int w,int h) { (void)a;assert(x==16 && y==2 && w==16 && h==4);partials++;return failing; }
+static struct {
+    esp_err_t (*update)(const uint8_t *,const uint8_t *,bool);
+    esp_err_t (*update_gray16)(const uint8_t *);
+    esp_err_t (*update_gray4_planes)(const uint8_t *,const uint8_t *);
+    esp_err_t (*update_gray4)(const uint8_t *);
+    esp_err_t (*update_partial)(const uint8_t *,int,int,int,int);
+} panel={.update=update,.update_gray16=gray,.update_partial=partial},*s_panel=&panel;
+'''
+        for name in ("led_status_draw_begin_partial", "led_status_draw_cancel_partial", "led_status_draw_done"):
+            code += production_function(source, name) + "\n"
+        code += r'''
+int main(void) {
+    assert(!led_status_draw_begin_partial(16,2,16,4));
+    s_image_mode=s_image_dirty=true;assert(led_status_draw_done() && s_partial_ready);
+    for(int i=1;i<=10;i++) {
+        assert(led_status_draw_begin_partial(16,2,16,4));s_image_dirty=true;
+        assert(led_status_draw_done());assert(s_partial_updates==(unsigned)i%10);
+    }
+    assert(partials==9 && fulls==2);
+    assert(led_status_draw_begin_partial(16,2,16,4));s_image_dirty=true;failing=-1;
+    assert(!led_status_draw_done() && s_partial_updates==0);
+    failing=0;assert(led_status_draw_begin_partial(16,2,16,4));s_image_dirty=true;
+    assert(led_status_draw_done() && s_partial_updates==1);
+    for(int i=0;i<8;i++) {
+        assert(led_status_draw_begin_partial(16,2,16,4));s_image_dirty=true;
+        assert(led_status_draw_done());
+    }
+    assert(s_partial_updates==9);
+    failing=-1;assert(led_status_draw_begin_partial(16,2,16,4));s_image_dirty=true;
+    assert(!led_status_draw_done() && s_partial_updates==9);
+    failing=0;assert(led_status_draw_begin_partial(16,2,16,4));s_image_dirty=true;
+    assert(led_status_draw_done() && s_partial_updates==0);
+    memset(shown,255,sizeof(shown));memset(canvas,7,sizeof(canvas));
+    assert(led_status_draw_begin_partial(16,2,16,4));led_status_draw_cancel_partial();
+    for(int y=0;y<EPD_H;y++) for(int x=0;x<EPD_W;x++)
+        assert(canvas[y*EPD_W+x]==((x>=16 && x<32 && y>=2 && y<6)?255:7));
+    s_image_dirty=true;s_gray16_mode=true;assert(led_status_draw_done());
+    assert(grays==1 && !s_partial_ready && !led_status_draw_begin_partial(16,2,16,4));
+    return 0;
+}
+'''
+        self.compile_production_check("partial_state", code)
+
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
@@ -336,7 +526,7 @@ int main(void) {
 
     def test_muse_images_dither_to_four_grays(self):
         led = (ROOT / "main/led_status.c").read_text()
-        done = led[led.index("void led_status_draw_done(void) {"):]
+        done = led[led.index("bool led_status_draw_done(void) {"):]
         self.assertIn("muse_ui_image_done();", done[:done.index("\n}\n")])
         ui = (ROOT / "components/muse/muse_ui.c").read_text()
         start = ui.index("static void dither_gray4_565(")
@@ -444,6 +634,8 @@ int main(void) {
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c"\)\s*'
+                                r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_it8951.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681\)\s*'

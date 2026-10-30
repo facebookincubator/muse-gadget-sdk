@@ -50,6 +50,16 @@ bool led_status_display_info(int *width, int *height);
 // six-colour e-paper (the reTerminal E1002's Spectra 6), 2 for four-colour or
 // four-gray e-paper, 1 for black and white e-paper, 0 without a display.
 int led_status_display_bits(void);
+// Start a replacement image. E-paper clears its in-memory canvas to white;
+// the panel refresh still happens once at led_status_draw_done().
+void led_status_draw_begin(void);
+// E1001 only: replace the image using four physical gray levels.
+void led_status_draw_begin_gray4(void);
+// E1003 only: replace the image with 16 physical gray levels.
+void led_status_draw_begin_gray16(void);
+// E1003 only: retain the current image and update a 16-pixel-aligned region.
+bool led_status_draw_begin_partial(int x, int y, int w, int h);
+void led_status_draw_cancel_partial(void);
 // Draw w x h pixels at (x, y). `pixels` holds RGB565, 2 bytes each with the
 // high byte first, left to right and top to bottom; at most 23 full rows'
 // worth per call. The first call replaces the animation and title until
@@ -60,7 +70,7 @@ bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels);
 // The image is complete: e-paper refreshes now, and returns once it has
 // (a second or two in black and white, about 30 s in six colours). LCDs have
 // shown each draw already.
-void led_status_draw_done(void);
+bool led_status_draw_done(void);
 // Clear the image and bring back the animation and title.
 void led_status_show_animation(void);
 

@@ -112,6 +112,11 @@ typedef struct {
     // may not change it: TLS on the HTTP stack overflows it, and an HTTPS
     // fetch must not continue in cleartext.
     bool https;
+    bool gray4;
+    bool gray16;
+    bool partial;
+    bool partial_unavailable;
+    int partial_x, partial_y, partial_w, partial_h;
     int64_t deadline_us;
     // A file from the VM: the buffer for one range, what is in it, and where
     // the next range starts.
@@ -131,9 +136,9 @@ typedef struct {
     uint16_t mcu[JPEG_MCU_PIXELS];
 } fetch_t;
 
-// Boards with the full UI also take IMAGE_FETCH_CENTRE, which centres a JPEG down the
-// screen and starts raw data at the top. The display backends don't.
-#if CONFIG_HOMEHUB_LED_BACKEND_MUSE
+// Muse UI and E1002 take IMAGE_FETCH_CENTRE, which centres a JPEG down the
+// screen and starts raw data at the top.
+#if CONFIG_HOMEHUB_LED_BACKEND_MUSE || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
 #define CENTRED(f) ((f)->row == IMAGE_FETCH_CENTRE)
 #define MIN_ROW    IMAGE_FETCH_CENTRE
 #else
@@ -212,12 +217,31 @@ static int fetch_read(fetch_t *f, uint8_t *buf, size_t len) {
 
 // ---- Raw RGB565 --------------------------------------------------------------
 
+static const char *begin_partial(fetch_t *f) {
+    if (led_status_draw_begin_partial(f->partial_x, f->partial_y,
+                                      f->partial_w, f->partial_h)) return NULL;
+    // Geometry was checked before starting the task. A failure here means the
+    // panel has no full monochrome image to use as the partial baseline.
+    f->partial_unavailable = true;
+    return "partial refresh requires a full monochrome image first";
+}
+
 static const char *draw_raw(fetch_t *f, int *rows_drawn) {
-    const size_t row_bytes = (size_t)f->width * sizeof(uint16_t);
+    int draw_width = f->partial ? f->partial_w : f->width;
+    const size_t row_bytes = (size_t)draw_width * sizeof(uint16_t);
     uint8_t *buf = malloc(RAW_ROWS * row_bytes);
     if (!buf) return "out of memory";
     const char *err = NULL;
-    int y = TOP_ROW(f);
+    int y = f->partial ? f->partial_y : TOP_ROW(f);
+    if (f->partial) {
+        const char *partial_error = begin_partial(f);
+        if (partial_error) {
+            free(buf);
+            return partial_error;
+        }
+    } else if (f->gray16) led_status_draw_begin_gray16();
+    else if (f->gray4) led_status_draw_begin_gray4();
+    else led_status_draw_begin();
     for (;;) {
         int n = fetch_read(f, buf, RAW_ROWS * row_bytes);
         if (n < 0) {
@@ -229,11 +253,12 @@ static const char *draw_raw(fetch_t *f, int *rows_drawn) {
             break;
         }
         int rows = n / (int)row_bytes;
-        if (y + rows > f->height) {
+        if (y + rows > (f->partial ? f->partial_y + f->partial_h : f->height)) {
             err = "image runs past the last row";
             break;
         }
-        if (rows && !led_status_draw_rect(0, y, f->width, rows, (const uint16_t *)buf)) {
+        if (rows && !led_status_draw_rect(f->partial ? f->partial_x : 0, y,
+                                          draw_width, rows, (const uint16_t *)buf)) {
             err = "display write failed";
             break;
         }
@@ -241,7 +266,9 @@ static const char *draw_raw(fetch_t *f, int *rows_drawn) {
         if (rows < RAW_ROWS) break;
     }
     free(buf);
-    *rows_drawn = y - TOP_ROW(f);
+    *rows_drawn = y - (f->partial ? f->partial_y : TOP_ROW(f));
+    if (!err && f->partial && *rows_drawn != f->partial_h)
+        err = "partial raw image has fewer rows than requested";
     return err;
 }
 
@@ -285,9 +312,9 @@ static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale)
     JRESULT rc = jd_prepare(&jd, jpeg_in, pool, JPEG_POOL_BYTES, f);
     if (rc == JDR_OK) {
         // Shrink by the smallest power of two that fits below `row`.
-        int avail = f->height - TOP_ROW(f);
+        int avail = f->partial ? f->partial_h : f->height - TOP_ROW(f);
         uint8_t scale = 0;
-        while (scale < 3 && ((int)(jd.width >> scale) > f->width
+        while (!f->partial && scale < 3 && ((int)(jd.width >> scale) > f->width
                              || (int)(jd.height >> scale) > avail)) {
             scale++;
         }
@@ -295,12 +322,19 @@ static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale)
         *out_w = w;
         *out_h = h;
         *out_scale = 1 << scale;
-        if (w > f->width || h > avail) {
+        if (f->partial && (w != f->partial_w || h != f->partial_h)) {
+            err = "partial JPEG must exactly match the requested rectangle";
+        } else if (w > f->width || h > avail) {
             err = "JPEG is too large even at 1/8 scale";
         } else {
-            f->x0 = (f->width - w) / 2;
-            f->y0 = CENTRED(f) ? (f->height - h) / 2 : f->row;
-            rc = jd_decomp(&jd, jpeg_out, scale);
+            f->x0 = f->partial ? f->partial_x : (f->width - w) / 2;
+            f->y0 = f->partial ? f->partial_y : CENTRED(f) ? (f->height - h) / 2 : f->row;
+            if (f->partial) {
+                err = begin_partial(f);
+            } else if (f->gray16) led_status_draw_begin_gray16();
+            else if (f->gray4) led_status_draw_begin_gray4();
+            else led_status_draw_begin();
+            if (!err) rc = jd_decomp(&jd, jpeg_out, scale);
         }
     }
     if (!err && rc != JDR_OK) {
@@ -566,17 +600,19 @@ static void fetch_task(void *arg) {
         } else {
             int rows = 0;
             result.format = "rgb565";
-            result.width = f->width;
+            result.width = f->partial ? f->partial_w : f->width;
             result.scale = 1;
             fail = draw_raw(f, &rows);
             result.height = rows;
         }
-        // Show what arrived, even if the download broke off.
-        led_status_draw_done();
+        // Ordinary images show what arrived; a partial update must be atomic.
+        if (f->partial && fail) led_status_draw_cancel_partial();
+        else if (!led_status_draw_done() && !fail) fail = "display refresh failed";
         if (fail && f->timed_out) fail = "download timed out";
         if (fail) {
             result.message = fail;
             if (f->low_memory) result.code = "out_of_memory";
+            else if (f->partial_unavailable && !f->timed_out) result.code = "invalid_state";
             else if (!f->timed_out && strcmp(fail, "download failed") != 0) {
                 result.code = "invalid_image";
             }
@@ -595,10 +631,14 @@ static void fetch_task(void *arg) {
              result.width, result.height, result.scale, (unsigned)result.bytes, result.ms,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
     log_memory("image download end");
-    f->done(&result, f->user);
+    image_fetch_done_cb done = f->done;
+    void *user = f->user;
     free(f->url);
     free(f);
     atomic_store(&s_busy, false);
+    // The completion callback may release DISPLAY ownership. All fetch, VM
+    // buffer and display work must therefore be finished before calling it.
+    done(&result, user);
     vTaskDelete(NULL);
 }
 
@@ -659,12 +699,35 @@ static bool vm_allocate_body(fetch_t *f, size_t stack, int width) {
         && heap_caps_get_largest_free_block(BYTE_CAPS) >= block_need;
 }
 
-static bool start(const char *target, bool vm, int row, image_fetch_done_cb done,
-                  void *user, const char **code, const char **message) {
+static bool image_fetch_start_mode(const char *target, bool vm, int row,
+                                   bool gray4, bool gray16,
+                                   bool partial, int x, int y, int w, int h,
+                                   image_fetch_done_cb done, void *user,
+                                   const char **code, const char **message) {
     int width, height;
     if (!led_status_display_info(&width, &height)) {
         *code = "unsupported";
         *message = "no display";
+        return false;
+    }
+#if !CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+    if (gray4) {
+        *code = "unsupported";
+        *message = "four-gray refresh is available on E1001 only";
+        return false;
+    }
+#endif
+#if !CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    if (gray16 || partial) {
+        *code = "unsupported";
+        *message = "E1003 display mode only";
+        return false;
+    }
+#endif
+    if (partial && (x < 0 || y < 0 || w <= 0 || h <= 0 || (x & 15) || (w & 15)
+                    || x >= width || y >= height || w > width - x || h > height - y)) {
+        *code = "invalid_params";
+        *message = "partial rectangle must fit and x/width must align to 16 pixels";
         return false;
     }
     bool https = !vm && strncasecmp(target, "https://", 8) == 0;
@@ -715,7 +778,7 @@ static bool start(const char *target, bool vm, int row, image_fetch_done_cb done
     fetch_t *f = calloc(1, sizeof(*f));
     if (f) f->url = vm ? vm_request_path(target) : strdup(target);
     bool allocated = f && f->url;
-    if (allocated && vm) allocated = vm_allocate_body(f, stack, width);
+    if (allocated && vm) allocated = vm_allocate_body(f, stack, partial ? w : width);
     if (!allocated) {
         if (f) {
             free(f->body);
@@ -729,6 +792,10 @@ static bool start(const char *target, bool vm, int row, image_fetch_done_cb done
     }
     f->vm = vm;
     f->https = https;
+    f->gray4 = gray4;
+    f->gray16 = gray16;
+    f->partial = partial;
+    f->partial_x = x; f->partial_y = y; f->partial_w = w; f->partial_h = h;
     f->row = row;
     f->done = done;
     f->user = user;
@@ -748,12 +815,33 @@ static bool start(const char *target, bool vm, int row, image_fetch_done_cb done
 
 bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
                        void *user, const char **code, const char **message) {
-    return start(url, false, row, done, user, code, message);
+    return image_fetch_start_mode(url, false, row, false, false, false, 0, 0, 0, 0,
+                                  done, user, code, message);
 }
 
 bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
                           void *user, const char **code, const char **message) {
-    return start(path, true, row, done, user, code, message);
+    return image_fetch_start_mode(path, true, row, false, false, false, 0, 0, 0, 0,
+                                  done, user, code, message);
+}
+
+bool image_fetch_start_gray4(const char *url, int row, image_fetch_done_cb done,
+                             void *user, const char **code, const char **message) {
+    return image_fetch_start_mode(url, false, row, true, false, false, 0, 0, 0, 0,
+                                  done, user, code, message);
+}
+
+bool image_fetch_start_gray16(const char *url, int row, image_fetch_done_cb done,
+                              void *user, const char **code, const char **message) {
+    return image_fetch_start_mode(url, false, row, false, true, false, 0, 0, 0, 0,
+                                  done, user, code, message);
+}
+
+bool image_fetch_start_partial(const char *url, int x, int y, int w, int h,
+                               image_fetch_done_cb done, void *user,
+                               const char **code, const char **message) {
+    return image_fetch_start_mode(url, false, 0, false, false, true, x, y, w, h,
+                                  done, user, code, message);
 }
 
 #else
@@ -771,13 +859,24 @@ bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
 
 bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
                           void *user, const char **code, const char **message) {
-    (void)path;
-    (void)row;
-    (void)done;
-    (void)user;
-    *code = "unsupported";
-    *message = "no display";
-    return false;
+    return image_fetch_start(path, row, done, user, code, message);
+}
+
+bool image_fetch_start_gray4(const char *url, int row, image_fetch_done_cb done,
+                             void *user, const char **code, const char **message) {
+    return image_fetch_start(url, row, done, user, code, message);
+}
+
+bool image_fetch_start_gray16(const char *url, int row, image_fetch_done_cb done,
+                              void *user, const char **code, const char **message) {
+    return image_fetch_start(url, row, done, user, code, message);
+}
+
+bool image_fetch_start_partial(const char *url, int x, int y, int w, int h,
+                               image_fetch_done_cb done, void *user,
+                               const char **code, const char **message) {
+    (void)x; (void)y; (void)w; (void)h;
+    return image_fetch_start(url, 0, done, user, code, message);
 }
 
 #endif

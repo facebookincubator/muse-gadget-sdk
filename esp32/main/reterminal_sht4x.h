@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include "cJSON.h"
 
 // Start the I2C bus and the polling task. Logs and does nothing else when
@@ -29,3 +30,7 @@ void reterminal_sht4x_init(void);
 // sensors.read: the latest temperature and humidity readings, with their
 // age. A sensor with no recent reading is null; with none at all, an error.
 cJSON *reterminal_sht4x_command(void);
+
+// Latest calibrated temperature for the E1003 IT8951 waveform. Returns false
+// before the first successful measurement or when the reading is stale.
+bool reterminal_sht4x_temperature(float *temp_c);

@@ -63,7 +63,7 @@ def _sanitizer_flags(cc: list[str], tmp: Path) -> list[str]:
 
 
 class LinkImageFetchHarnessTest(unittest.TestCase):
-    def run_harness(self, spiram: bool) -> None:
+    def run_harness(self, spiram: bool, board: str) -> None:
         cc = _cc_command()
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -85,6 +85,7 @@ class LinkImageFetchHarnessTest(unittest.TestCase):
                 "-Wno-unused-variable",
                 "-g",
                 "-O1",
+                f"-DCONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_{board}=1",
                 *sanitizer_flags,
                 "-DLINK_FAKE_CUSTOM_TASKS",
                 "-DLINK_FAKE_CUSTOM_HEAP_CAPS",
@@ -132,10 +133,13 @@ class LinkImageFetchHarnessTest(unittest.TestCase):
             )
 
     def test_downloads_and_memory_without_psram(self) -> None:
-        self.run_harness(False)
+        self.run_harness(False, "UC8179")
 
     def test_downloads_and_memory_with_psram(self) -> None:
-        self.run_harness(True)
+        self.run_harness(True, "UC8179")
+
+    def test_e1003_modes_with_vm_fetch(self) -> None:
+        self.run_harness(True, "IT8951")
 
 
 if __name__ == "__main__":

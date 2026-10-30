@@ -30,6 +30,8 @@
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
 #   reterminal-e1002
 #              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
+#   reterminal-e1003
+#              Seeed reTerminal E1003 (ESP32-S3) with a 10.3 inch e-paper
 #   reterminal-sticky
 #              Seeed reTerminal Sticky (ESP32-S3) with a 3.97 inch e-paper
 #   reterminal-sticky-link
@@ -76,7 +78,7 @@ case "$BOARD" in
     # CH340 bridge. The SenseCAP Indicator's RP2040 shows up as a usbmodem, not here.
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
     ;;
-  reterminal-e1001|reterminal-e1002)
+  reterminal-e1001|reterminal-e1002|reterminal-e1003)
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
