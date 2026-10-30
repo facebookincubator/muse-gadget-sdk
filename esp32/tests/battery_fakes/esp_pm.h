@@ -19,13 +19,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-typedef int esp_err_t;
-#define ESP_OK 0
-
-static inline const char *esp_err_to_name(esp_err_t err) {
-    (void)err;
-    return "error";
-}
+#include "esp_err.h"
 
 typedef esp_err_t (*esp_pm_light_sleep_cb_t)(int64_t sleep_time_us, void *arg);
 
