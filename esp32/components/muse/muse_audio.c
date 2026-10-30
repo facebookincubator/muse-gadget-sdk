@@ -87,8 +87,12 @@ static void apply_volume(int volume)
     }
 }
 
+/* The gain last applied, for a board's read_mic, which applies it itself. */
+static int s_mic_gain_db;
+
 static void apply_mic_gain(int db)
 {
+    s_mic_gain_db = db;
     if (muse_board->mic_init) {
         s_mic_scale = powf(10.0f, (float)db / 20.0f);
         return;
@@ -128,7 +132,7 @@ static esp_err_t read_input(size_t frames)
         return esp_codec_dev_read(s_mic, s_in_stereo, frames * CHANNELS * sizeof(int16_t)) == ESP_CODEC_DEV_OK
             ? ESP_OK : ESP_FAIL;
     }
-    if (!muse_board->read_mic || muse_board->read_mic(s_in_mono, frames, muse_settings_mic_gain()) != ESP_OK) {
+    if (!muse_board->read_mic || muse_board->read_mic(s_in_mono, frames, s_mic_gain_db) != ESP_OK) {
         return ESP_FAIL;
     }
     for (size_t i = 0; i < frames; i++) {

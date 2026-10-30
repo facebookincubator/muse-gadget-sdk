@@ -33,10 +33,8 @@
 #include "esp_bt.h"
 #endif
 #include "esp_app_desc.h"
-#include "esp_heap_caps.h"
 #include "mbedtls/platform_util.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
@@ -54,6 +52,7 @@
 #include "config_store.h"
 #include "link_pairing.h"
 #include "factory_test.h"
+#include "helper_task.h"
 
 static const char *TAG = "link.ble";
 
@@ -185,7 +184,7 @@ static void provision_task(void *arg) {
     secure_free_str(a->noise_host);
     free(a);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static void scan_task(void *arg) {
@@ -476,14 +475,7 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
             // stack during TLS handshake than v5's 3.x (~2 KB more peak).
             a->session_generation = link_pairing_mark_provisioning_active();
             if (a->session_generation == 0
-                ||
-#if CONFIG_SPIRAM
-                xTaskCreateWithCaps(provision_task, "prov", 8192, a, 5, NULL,
-                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS
-#else
-                xTaskCreate(provision_task, "prov", 8192, a, 5, NULL) != pdPASS
-#endif
-                ) {
+                || helper_task_create(provision_task, "prov", 8192, a, 5, NULL) != pdPASS) {
                 uint32_t generation = a->session_generation;
                 secure_free_str(a->ssid);
                 secure_free_str(a->password);

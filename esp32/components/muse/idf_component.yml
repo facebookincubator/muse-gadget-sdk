@@ -91,7 +91,7 @@ dependencies:
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"sensecap_watcher\""
   espressif/esp_lcd_touch_gt911:
-    version: "^1.2.1"
+    version: "1.2.1"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} in [\"crowpanel_advance_43\", \"waveshare_s3_lcd7\", \"reterminal_sticky\"]"
   espressif/esp_lcd_co5300:
