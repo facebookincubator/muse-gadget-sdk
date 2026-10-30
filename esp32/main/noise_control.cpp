@@ -2035,6 +2035,19 @@ static session_result_t run_session(stack_monitor_t *stack) {
         return SESSION_FAILED;
     }
     ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s)", s_noise_host, NOISE_PORT, s_vm_id);
+    // Send each write at once. With Nagle's algorithm on, a small write (a
+    // tunnel batch holding a lone handshake packet or a short reply) waited
+    // until everything sent before it was acknowledged, adding ~100 ms to
+    // every exchange through the tunnel that sent two small writes in a row,
+    // such as each new connection's handshake. Every write here is a whole
+    // TLS record, so this adds no tiny segments.
+    {
+        int fd = -1, one = 1;
+        if (esp_tls_get_conn_sockfd(tls, &fd) != ESP_OK || fd < 0
+            || setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) != 0) {
+            ESP_LOGW(TAG, "TCP_NODELAY not set on the Muse connection");
+        }
+    }
 
     // 2. WebSocket upgrade
     noise_upgrade_result_t upgrade = ws_upgrade(tls);
