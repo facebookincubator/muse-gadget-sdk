@@ -9,7 +9,7 @@ description: >-
   Amazon login, and Amazon's unofficial Alexa web API.
 ---
 
-# Amazon Echo: Voice Control via CLI
+# Amazon Echo — Alexa Voice Control via CLI
 
 Use this skill when fresh discovery identifies Amazon Echo devices on the
 user's Alexa account and the user requests spoken announcements, volume or
@@ -89,7 +89,8 @@ On a Linux Home Link (the Muse Linux client):
    user's device by name **and** serial; if a device is missing or two
    lines could be it, stop and ask — do not guess.
 2. Select: use that whole line as the selector, e.g.
-   `SEL='Kitchen Dot=<deviceType>=<serial>=ECHO'`. Before acting, check
+   `SEL='Kitchen Dot=<deviceType>=<serial>=ECHO'` (write an apostrophe in
+   the name, as in `Sam's Echo Dot`, as `'\''`). Before acting, check
    `grep -c -- "$SEL" "$TMP/.alexa.devicelist.txt"` prints `1`. Stop if
    it does not, or if the line contains `*`, `?`, `[`, `\`, `%20` or
    repeated spaces (the script globs and regex-matches the selector);
@@ -167,9 +168,10 @@ words and punctuation.
   them only for the device control or query the user asked for — never
   for purchases, calls, messages, Drop In or account settings.
 - The temperature and motion sensors are readable only through Alexa
-  responses and routine triggers, not as direct API values — query via
-  `textcommand` (e.g. "what is the room temperature") and treat the
-  spoken answer as the reading.
+  responses and routine triggers, not as direct API values. A
+  `textcommand` question (e.g. "what is the room temperature") is
+  answered aloud on the Echo; the script does not print the answer, so
+  ask the user what Alexa said or report that the reading is unavailable.
 
 ## Sources
 
