@@ -16,16 +16,17 @@ so the build uses `partitions_muse.csv`.
 ## BSP
 
 `viewesmart/smartring_plus` 1.1.2 is vendored at
-`components/viewesmart__smartring_plus`. The directory name has two
-underscores because `override_path` has to match the managed component name.
-The version in that directory's `idf_component.yml` is `"1.1.2"`, which
-satisfies `^1.1.2`. A prerelease tag such as `1.1.2-muse` does not.
+`components_vendor/viewesmart__smartring_plus`. It sits outside `components/`
+so ESP-IDF doesn't pick it up for every build: other targets would compile its
+S3 pin map and pull in its LVGL and panel dependencies. The version in that
+directory's `idf_component.yml` is `"1.1.2"`, which satisfies `^1.1.2`. A
+prerelease tag such as `1.1.2-muse` does not.
 `components/muse/idf_component.yml` sets
 
 ```yaml
 viewesmart/smartring_plus:
   version: "^1.1.2"
-  override_path: "../viewesmart__smartring_plus"
+  override_path: "../../components_vendor/viewesmart__smartring_plus"
 ```
 
 and pulls it in only when `MUSE_BOARD_ID` is `viewe_smartring_plus`. The
@@ -46,18 +47,21 @@ open. `board_viewe_smartring_plus.c` builds a 16 kHz duplex I2S
 (`MUSE_AUDIO_RATE`) and returns separate speaker and mic handles. `mic_slot`
 is 0.
 
-`power_off()` logs and returns `ESP_ERR_NOT_SUPPORTED`. Choosing Power off
-in Settings shows "COULDN'T POWER OFF". Turn the board off with the hardware
-switch.
+There is no soft power-off, so Settings has no Power off. Turn the board off
+with the hardware switch.
+
+The board leaves `display_pause` out. Pausing LVGL on battery would also stop
+touch, and with BOOT inside the case touch is the only way to wake the screen.
+LVGL keeps running while the screen is dark, so a tap wakes it, at the cost of
+the light sleep the paused boards get.
 
 ## Talk, pairing and reset
 
 The mic icon at the bottom centre, under the caption and above the page dots,
 is the talk button (`touch_talk` on `muse_board_t`):
 
-- Let go within 0.4 s and the note keeps recording until the next tap.
-- Hold longer than 0.4 s and let go to send, the same as push-to-talk.
-- While Muse is asking you to confirm a pairing, a tap on the pairing card
+- Hold it to talk and let go to send.
+- While Muse is asking you to confirm a pairing, a tap on the screen
   confirms it.
 - BOOT still produces the same talk events if you can reach it.
 

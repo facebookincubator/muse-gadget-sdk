@@ -17,7 +17,7 @@
 # Native USB Serial/JTAG (303a:1001). BOOT is GPIO0 and is inside the case;
 # the on-screen mic is the talk button. Power-off is the hardware switch only.
 # BSP viewesmart/smartring_plus 1.1.2 is vendored at
-# components/viewesmart__smartring_plus. Load last, after sdkconfig.defaults
+# components_vendor/viewesmart__smartring_plus. Load last, after sdkconfig.defaults
 # and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_MUSE_BOARD_VIEWE_SMARTRING_PLUS=y

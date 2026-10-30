@@ -19,21 +19,26 @@
  * with CST816 touch, an ES8311 codec (speaker through an NS4150B amp, one
  * analog mic) and a V1 (GPIO1 ADC) or V2 (AXP2101) battery gauge. BOOT
  * (GPIO0) is the only user button, and it is inside the case, so the mic icon
- * is an on-screen talk button (touch_talk): tap it to start a voice note and
- * tap again to send it, or hold it and let go to send. The same tap on the
- * pairing card confirms a Muse app pairing. BOOT still talks if reachable.
+ * is an on-screen talk button (touch_talk): hold it to talk and let go to
+ * send. A tap on the screen confirms a Muse app pairing. BOOT still talks if
+ * reachable.
  *
  * Display, touch, the shared I2C bus and the battery come from the vendor BSP
- * (viewesmart/smartring_plus, vendored in components/viewesmart__smartring_plus);
- * pins are from its board_config.h.
+ * (viewesmart/smartring_plus, vendored in
+ * components_vendor/viewesmart__smartring_plus and added to the build only for
+ * this board); pins are from its board_config.h.
  *
  * Audio skips bsp_audio_init(): it opens the codec itself and leaves the
  * speaker muted, while Muse wants unopened speaker and mic handles on one
  * 16 kHz duplex bus. The ES8311 is set up here as on the other single-ES8311
  * boards, MCLK = 256 x Fs (the rate Muse's esp_codec_dev_open() asks of I2S).
  *
- * Power: the hardware switch only. power_off() logs and returns
- * ESP_ERR_NOT_SUPPORTED, so Settings shows "COULDN'T POWER OFF".
+ * Power: the hardware switch only, so there is no power_off and Settings has
+ * no Power off.
+ *
+ * No display_pause: pausing LVGL on battery would stop the touch input that
+ * is this board's only reachable way to wake the screen, since BOOT is inside
+ * the case. LVGL keeps running while the screen is dark, so a tap wakes it.
  */
 #include "bsp/smartring_plus.h"
 #include "driver/i2s_std.h"
@@ -41,19 +46,14 @@
 #include "esp_codec_dev_defaults.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
-#include "esp_timer.h"
 
 #include "muse_audio.h"
 #include "muse_board.h"
-#include "muse_link.h"
 #include "muse_mem.h"
-#include "muse_state.h"
 
 static const char *TAG = "board";
 
 #define TALK_GPIO GPIO_NUM_0    /* BOOT */
-#define TAP_US (400 * 1000)     /* on-screen talk button: let go sooner and it keeps talking */
-#define LATCH_WAIT_US (3000 * 1000)   /* a tap that never gets to listening ("NO WI-FI") lets go */
 
 static muse_gpio_button_t s_talk;
 static bool s_battery;
@@ -98,15 +98,6 @@ static bool display_lock(int timeout_ms)
 static void set_brightness(int pct)
 {
     bsp_display_backlight_set((uint8_t)(pct < 0 ? 0 : pct > 100 ? 100 : pct));
-}
-
-static void display_pause(bool pause)
-{
-    if (pause) {
-        esp_lv_adapter_pause(-1);
-    } else {
-        esp_lv_adapter_resume();
-    }
 }
 
 /* One ES8311 does both directions over a duplex I2S bus, clocked from MCLK. */
@@ -160,82 +151,9 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     return *spk && *mic ? ESP_OK : ESP_FAIL;
 }
 
-/* The on-screen talk button, counted on LVGL's task, read on the input task. */
-static volatile uint32_t s_touch_presses, s_touch_releases;
-
-static void touch_talk(bool down)
-{
-    if (down) {
-        s_touch_presses++;
-    } else {
-        s_touch_releases++;
-    }
-}
-
-/*
- * The on-screen talk button as MUSE_BTN_TALK_* edges. Muse's talk button is
- * push-to-talk, so a tap (let go within TAP_US) is held on for it until the
- * next tap, whose press ends the note; a longer press is plain push-to-talk.
- * A press that confirms pairing is passed through as it is. A held-on tap
- * lets go by itself once Muse stops listening (the 15 s cap) or never
- * started (not set up, no Wi-Fi), so the next tap starts a new note.
- */
-static unsigned touch_talk_poll(void)
-{
-    static uint32_t presses, releases;
-    static bool down, latched, heard, swallow_release, passthrough;
-    static int64_t pressed_at;
-    unsigned ev = 0;
-    int64_t now = esp_timer_get_time();
-
-    if (presses != s_touch_presses) {
-        presses = s_touch_presses;
-        if (!down) {
-            down = true;
-            if (latched) {
-                latched = false;
-                swallow_release = true;   /* this tap only stops the note */
-                ev |= MUSE_BTN_TALK_RELEASE;
-            } else {
-                pressed_at = now;
-                heard = false;
-                passthrough = muse_link_state() == MUSE_LINK_CONFIRM;
-                ev |= MUSE_BTN_TALK_PRESS;
-            }
-        }
-    }
-    if (releases != s_touch_releases) {
-        releases = s_touch_releases;
-        if (down) {
-            down = false;
-            if (swallow_release) {
-                swallow_release = false;
-            } else if (!passthrough && now - pressed_at < TAP_US) {
-                latched = true;
-            } else {
-                ev |= MUSE_BTN_TALK_RELEASE;
-            }
-        }
-    }
-    if (latched) {
-        if (muse_state_mode(NULL) == MUSE_MODE_LISTENING) {
-            heard = true;
-        } else if (heard || now - pressed_at > LATCH_WAIT_US) {
-            latched = false;
-            ev |= MUSE_BTN_TALK_RELEASE;
-        }
-    }
-    return ev;
-}
-
 static unsigned poll_buttons(void)
 {
-    return muse_gpio_button_poll(&s_talk) | touch_talk_poll();
-}
-
-static void wait_buttons(int timeout_ms)
-{
-    muse_gpio_buttons_wait((muse_gpio_button_t *const[]){ &s_talk }, 1, timeout_ms);
+    return muse_gpio_button_poll(&s_talk);
 }
 
 /* The BSP samples the gauge in its own task; V1 reads the VCC_OUT rail, V2 the AXP2101. */
@@ -256,13 +174,6 @@ static esp_err_t read_power(muse_power_t *out)
     return ESP_OK;
 }
 
-/* No soft power-off on this board: it turns off with its hardware switch. */
-static esp_err_t power_off(void)
-{
-    ESP_LOGW(TAG, "no soft power-off; use the power switch");
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
 static const muse_board_t s_board = {
     .name = "VIEWE SmartRing-Plus",
     .width = BOARD_LCD_H_RES,
@@ -270,6 +181,7 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .diagonal_in = 1.39f,
+    .touch_talk = true,         /* BOOT is inside the case */
     .talk_button = "boot",
     /* The talk button's centre: under the caption, above the page dots. */
     .talk_hint = { LV_ALIGN_CENTER, 0, 132 },
@@ -279,14 +191,12 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
-    .display_pause = display_pause,
     .audio_init = audio_init,
     .mic_slot = 0,              /* one mic, on the left slot */
     .poll_buttons = poll_buttons,
-    .touch_talk = touch_talk,   /* BOOT is inside the case */
-    .wait_buttons = wait_buttons,
     .read_power = read_power,
-    .power_off = power_off,     /* called unconditionally by Muse, so not NULL */
+    /* No .power_off: the hardware switch controls power, so Settings leaves
+     * Power off out. */
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

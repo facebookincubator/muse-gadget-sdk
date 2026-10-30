@@ -137,6 +137,6 @@ dependencies:
       - if: '$CONFIG{MUSE_BOARD_ID} == "waveshare_p4_lcd35"'
   viewesmart/smartring_plus:
     version: "^1.1.2"
-    override_path: "../viewesmart__smartring_plus"
+    override_path: "../../components_vendor/viewesmart__smartring_plus"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"viewe_smartring_plus\""
