@@ -137,8 +137,8 @@ static void long_reply(void) {
 
 #define MUSE_BTN_TALK_PRESS 1
 #define MUSE_BTN_TALK_RELEASE 2
-#define MUSE_BTN_REVIEW_PREV (1u << 10)
-#define MUSE_BTN_REVIEW_NEXT (1u << 11)
+#define MUSE_BTN_REVIEW_PREV (1u << 15)
+#define MUSE_BTN_REVIEW_NEXT (1u << 16)
 #define portTICK_PERIOD_MS 1
 #define ESP_LOGI(...) ((void)0)
 static bool asleep, confirm;

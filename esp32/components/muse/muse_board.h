@@ -17,12 +17,21 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "driver/gpio.h"
 #include "esp_codec_dev.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
+#if CONFIG_MUSE_UI_FREEINK
+/* FreeInk boards build without LVGL; its types stay opaque here. */
+typedef struct _lv_display_t lv_display_t;
+typedef struct _lv_indev_t lv_indev_t;
+typedef uint8_t lv_align_t;
+#else
 #include "lvgl.h"
+#endif
 
 #include "muse_state.h"
 
@@ -48,10 +57,17 @@ extern "C" {
 #define MUSE_BTN_RIGHT        (1u << 7)
 #define MUSE_BTN_ENTER        (1u << 8)
 #define MUSE_BTN_ESCAPE       (1u << 9)
+/* Dedicated controls; legacy two-button boards keep AUX's existing role.
+ * POWER_LONG is a validated hold/PMIC long event, never a fabricated level. */
+#define MUSE_BTN_POWER_PRESS  (1u << 10)
+#define MUSE_BTN_POWER_RELEASE (1u << 11)
+#define MUSE_BTN_POWER_LONG   (1u << 12)
+#define MUSE_BTN_SPEAKER_PRESS (1u << 13)
+#define MUSE_BTN_SPEAKER_RELEASE (1u << 14)
 /* Rotary reply navigation; these are steps, not held buttons. */
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-#define MUSE_BTN_REVIEW_PREV  (1u << 10)
-#define MUSE_BTN_REVIEW_NEXT  (1u << 11)
+#define MUSE_BTN_REVIEW_PREV  (1u << 15)
+#define MUSE_BTN_REVIEW_NEXT  (1u << 16)
 #endif
 
 /* Where a button's icon goes on screen: beside the button, inside the panel. */
@@ -64,13 +80,25 @@ typedef struct {
     const char *name;
     int width, height;
     bool round;             /* circular panel: keep content inside the circle */
+    bool epaper;            /* slow e-paper refresh: settings poll less often and skip live text */
+    bool no_ring;           /* square panel: progress as a bar along the bottom edge, no ring around Muse */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
+    bool touch_talk;        /* on-screen mic supplies talk edges; no physical talk button */
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */
     const char *aux_button;     /* "bottom" */
+    const char *wake_button;    /* wakes it from power off, if not aux_button: "K0" */
     muse_button_hint_t talk_hint;   /* mic icon; the menu's hints follow both */
     muse_button_hint_t aux_hint;    /* power or menu icon; left out, there's none */
+    /* Optional dedicated POWER and speaker controls, independent of AUX. */
+    const char *power_button;
+    const char *speaker_button;
+    muse_button_hint_t power_hint;
+    muse_button_hint_t speaker_hint;
+    /* 466 px round-panel layout: dedicated 26-36 px rim icons, safe header chord
+     * and central read-reply column. Requires all three hint positions/names. */
+    bool rim_controls;
     /* The menu turns a right-edge aux button's hint on end, which LVGL draws
      * through a ~14 KB layer; set this where that's too much RAM (the C3) and
      * the hint lies flat on the menu's bar, left of the talk button's. */
@@ -91,11 +119,40 @@ typedef struct {
      * so the chip can light-sleep. Buttons still wake it. NULL: LVGL keeps
      * running. */
     void (*display_pause)(bool pause);
+    /* FreeInk boards (CONFIG_MUSE_UI_FREEINK): the touch point while a
+     * finger is down, in screen coordinates (width x height, as above).
+     * FreeInk drives the panel, so these boards leave display_start and the
+     * display hooks above NULL. */
+    bool (*touch_read)(int16_t *x, int16_t *y);
+    /*
+     * Video (CONFIG_MUSE_VIDEO): draws a rectangle (end exclusive) straight
+     * to the panel, bypassing LVGL, in pieces of `rows` rows that
+     * fill(dst, stride, row, rows, arg) writes in the panel's byte order
+     * (dst 16-byte aligned). Returns once it's all gone. NULL: no video.
+     */
+    void (*draw_frame)(int x1, int y1, int x2, int y2, int rows,
+                       void (*fill)(uint8_t *dst, int stride, int row, int rows, void *arg), void *arg);
 
     /* Codec handles for one duplex, 2-slot I2S bus, not yet opened. */
     esp_err_t (*audio_init)(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic);
+    /* A microphone without a codec or speaker (a PDM mic), in place of
+     * audio_init: set up once, powered on and off with the audio
+     * (muse_audio_power), read as mono at MUSE_AUDIO_RATE.
+     * A board with mic_init has no speaker: replies are read, not heard. */
+    esp_err_t (*mic_init)(void);
+    esp_err_t (*mic_power)(bool on);
+    esp_err_t (*mic_read)(int16_t *mono, size_t frames);
     int mic_slot;           /* slot carrying the mic (0/1), or -1 to mix both */
     void (*set_mic_gain)(esp_codec_dev_handle_t mic, int db);   /* NULL: esp_codec_dev_set_in_gain */
+    /* Audio power the board can switch, such as an amp's enable: on once
+     * the codecs are open, off before they close to rest. NULL: none. */
+    void (*audio_power)(bool on);
+    /* The codecs' own supply, where the board switches it: on before they
+     * open (the first time too, before audio_init), off once both have
+     * closed to rest. Off, nothing reaches them: muse_audio skips the volume
+     * and gain setters until they open again, and reapplies the settings
+     * then. NULL: always powered. */
+    void (*codec_power)(bool on);
 
     /* Called every 10 ms from the input task (50 ms while the display is
      * paused, unless wait_buttons is set); returns MUSE_BTN_* edges. */
@@ -105,7 +162,8 @@ typedef struct {
      * buttons needn't be polled. NULL: polled. */
     void (*wait_buttons)(int timeout_ms);
     esp_err_t (*read_power)(muse_power_t *out);
-    /* Turns the board off; returns only on failure. */
+    /* Turns the board off; returns only on failure. NULL: it can't from
+     * software (a physical switch does), and Settings has no Power off. */
     esp_err_t (*power_off)(void);
 } muse_board_t;
 

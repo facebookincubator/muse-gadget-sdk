@@ -16,10 +16,12 @@
 
 #include "image_fetch.h"
 #include "led_status.h"
+#include "noise_control.h"
 #include "sdkconfig.h"
 
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
 
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,7 +34,9 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "noise_tunnel_internal.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "rom/tjpgd.h"
 
@@ -67,6 +71,28 @@ static const char *TAG = "link.image";
 #define FETCH_TIMEOUT_MS    10000
 #define FETCH_DEADLINE_MS   60000
 #define FETCH_MAX_REDIRECTS 3
+// A file from the VM is read in Range requests of at most
+// noise_ctrl_req_max_body() bytes into one buffer, each sent once the last is
+// drawn: the daemon may send a reply in one frame, which must fit the session's
+// receive buffers, and the session can't be paused while a slow screen catches
+// up. The buffer goes in PSRAM where there is some.
+#if CONFIG_SPIRAM
+#define VM_CAPS             (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#else
+#define VM_CAPS             MALLOC_CAP_8BIT
+#endif
+#define VM_POLL_MS          20
+#define VM_PATH_PREFIX      "/fs/raw/"
+// Smaller ranges cost round trips: only shrink without PSRAM when the maximum
+// will not fit, and refuse rather than going below this.
+#define VM_MIN_CHUNK        (2 * 1024)
+// Leave room for the range allocation's heap header, alignment and optional
+// poisoning canaries; otherwise a range sized to all available bytes fails
+// the post-allocation check by its own allocator overhead.
+#define VM_CHUNK_ALLOC_BYTES 32
+// The GET verb, Range header and separators in noise_ctrl_req_open's copy,
+// beyond the path. Enough for two unsigned 32-bit offsets in the header.
+#define VM_REQUEST_BYTES    64
 // Raw RGB565 is read and drawn this many rows at a time.
 #define RAW_ROWS            4
 // Work pool for the ROM JPEG decoder, the size its documentation asks for.
@@ -75,7 +101,8 @@ static const char *TAG = "link.image";
 #define JPEG_MCU_PIXELS     (16 * 16)
 
 typedef struct {
-    char *url;
+    char *url;  // or, for a file from the VM, the request path
+    bool vm;
     int row;
     image_fetch_done_cb done;
     void *user;
@@ -86,6 +113,11 @@ typedef struct {
     // fetch must not continue in cleartext.
     bool https;
     int64_t deadline_us;
+    // A file from the VM: the buffer for one range, what is in it, and where
+    // the next range starts.
+    uint8_t *body;
+    size_t chunk, body_len, body_pos;
+    size_t next_offset;
     // Two bytes read to sniff the format, handed back to the first read.
     uint8_t peek[2];
     size_t peek_len;
@@ -145,6 +177,8 @@ static bool within_deadline(fetch_t *f) {
     return true;
 }
 
+static int vm_read(fetch_t *f, uint8_t *buf, size_t len);
+
 // Read up to `len` bytes, waiting for all of them unless the body ends.
 // Returns the count read, or -1 on a network error, low memory or timeout.
 static int fetch_read(fetch_t *f, uint8_t *buf, size_t len) {
@@ -153,6 +187,10 @@ static int fetch_read(fetch_t *f, uint8_t *buf, size_t len) {
         buf[have++] = f->peek[0];
         f->peek[0] = f->peek[1];
         f->peek_len--;
+    }
+    if (f->vm) {
+        int n = vm_read(f, buf + have, len - have);
+        return n < 0 ? -1 : (int)have + n;
     }
     while (have < len && !f->eof) {
         if (internal_free() < FETCH_FLOOR_BYTES) {
@@ -276,6 +314,164 @@ static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale)
     return err;
 }
 
+// ---- File from the VM --------------------------------------------------------
+
+// The reply to the one GET /fs/raw in flight, written into the download's
+// buffer on the Noise session task. Frames of an earlier request, cancelled
+// or timed out, carry an older generation and are dropped, so the download
+// task never waits on them and they never touch the buffer.
+static struct {
+    SemaphoreHandle_t lock;
+    uint32_t gen;
+    uint8_t *buf;        // set only while a request is in flight
+    size_t cap, len;
+    int status;          // HTTP status, or a noise_ctrl_req_cb failure below 0
+    bool done;
+    bool complete;       // the whole body arrived
+    bool too_large;      // more than was asked for
+} s_vm;
+
+// How one request for a range ended.
+typedef struct {
+    size_t len;
+    int status;
+    bool complete, too_large, not_sent;
+} vm_reply_t;
+
+static void vm_on_frame(void *ctx, int status, const uint8_t *data, size_t len, bool end) {
+    xSemaphoreTake(s_vm.lock, portMAX_DELAY);
+    if ((uint32_t)(uintptr_t)ctx == s_vm.gen && !s_vm.done) {
+        if (status) s_vm.status = status;
+        // Only a 206's body is the range, or a 200's the whole file.
+        bool ok = true;
+        if (len && (s_vm.status == 200 || s_vm.status == 206)) {
+            if (len > s_vm.cap - s_vm.len) {
+                s_vm.too_large = true;
+                ok = false;
+            } else {
+                memcpy(s_vm.buf + s_vm.len, data, len);
+                s_vm.len += len;
+            }
+        }
+        s_vm.complete = end && status >= 0 && ok;
+        s_vm.done = end || status < 0 || !ok;
+    }
+    xSemaphoreGive(s_vm.lock);
+}
+
+static bool vm_done(void) {
+    xSemaphoreTake(s_vm.lock, portMAX_DELAY);
+    bool done = s_vm.done;
+    xSemaphoreGive(s_vm.lock);
+    return done;
+}
+
+// GETs the next f->chunk bytes into f->body and waits for the whole reply or
+// the deadline.
+static void vm_get_range(fetch_t *f, vm_reply_t *out) {
+    memset(out, 0, sizeof(*out));
+    char range[48];
+    snprintf(range, sizeof(range), "bytes=%u-%u", (unsigned)f->next_offset,
+             (unsigned)(f->next_offset + f->chunk - 1));
+    const char *headers[] = {"Range", range, NULL};
+    xSemaphoreTake(s_vm.lock, portMAX_DELAY);
+    uint32_t token = ++s_vm.gen;
+    s_vm.buf = f->body;
+    s_vm.cap = f->chunk;
+    s_vm.len = 0;
+    s_vm.status = 0;
+    s_vm.done = s_vm.complete = s_vm.too_large = false;
+    xSemaphoreGive(s_vm.lock);
+
+    int64_t id = noise_ctrl_req_open("GET", f->url, headers, true, vm_on_frame,
+                                     (void *)(uintptr_t)token);
+    while (id && !vm_done()) {
+        if (esp_timer_get_time() >= f->deadline_us) {
+            f->timed_out = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(VM_POLL_MS));
+    }
+
+    xSemaphoreTake(s_vm.lock, portMAX_DELAY);
+    s_vm.gen++;  // drop anything still to come for this request
+    s_vm.buf = NULL;
+    out->len = s_vm.len;
+    out->status = s_vm.status;
+    out->complete = s_vm.complete;
+    out->too_large = s_vm.too_large;
+    xSemaphoreGive(s_vm.lock);
+    out->not_sent = !id;
+    if (id && !out->complete) noise_ctrl_req_cancel(id);
+}
+
+// Reads the next range into f->body. False if it can't.
+static bool vm_next_range(fetch_t *f, vm_reply_t *out) {
+    f->body_len = f->body_pos = 0;
+    vm_get_range(f, out);
+    if (!out->complete) return false;
+    if (out->status == 416) {
+        // Starts at the end: an empty file, or the last range was full.
+        f->eof = true;
+        return true;
+    }
+    // A daemon ignoring Range sends the whole file, fine if it fits.
+    if (out->status != 206 && !(out->status == 200 && f->next_offset == 0)) return false;
+    f->body_len = out->len;
+    f->next_offset += out->len;
+    f->bytes += out->len;
+    if (out->status == 200 || out->len < f->chunk) f->eof = true;
+    return true;
+}
+
+// fetch_read for a file from the VM: from the buffer, refilled a range at a
+// time. Returns the count read, or -1 if a range can't be had.
+static int vm_read(fetch_t *f, uint8_t *buf, size_t len) {
+    size_t have = 0;
+    while (have < len) {
+        if (f->body_pos == f->body_len) {
+            if (f->eof) break;
+            vm_reply_t r;
+            if (!vm_next_range(f, &r)) {
+                ESP_LOGW(TAG, "%s at %u: status %d, %u bytes%s", f->url,
+                         (unsigned)f->next_offset, r.status, (unsigned)r.len,
+                         r.complete ? "" : ", incomplete");
+                return -1;
+            }
+            continue;
+        }
+        size_t n = f->body_len - f->body_pos;
+        if (n > len - have) n = len - have;
+        memcpy(buf + have, f->body + f->body_pos, n);
+        f->body_pos += n;
+        have += n;
+    }
+    return (int)have;
+}
+
+// Reads the first range, ready to read the file. False with result->message
+// set if it can't.
+static bool vm_open(fetch_t *f, image_fetch_result_t *result, char *msg, size_t msg_len) {
+    ESP_LOGI(TAG, "GET %s, %u bytes at a time", f->url, (unsigned)f->chunk);
+    vm_reply_t r;
+    if (vm_next_range(f, &r)) return true;
+    if (r.not_sent) {
+        result->message = "could not send the request to the VM";
+    } else if (f->timed_out) {
+        result->message = "download timed out";
+    } else if (r.too_large) {
+        result->message = "the VM ignored Range and sent the whole file";
+    } else if (r.status == NOISE_CTRL_REQ_TOO_LARGE) {
+        result->message = "the VM sent a frame too large for this board";
+    } else if (r.status < 0) {
+        result->message = "the VM connection dropped";
+    } else {
+        snprintf(msg, msg_len, "VM answered HTTP %d", r.status);
+        result->message = msg;
+    }
+    return false;
+}
+
 // ---- Task --------------------------------------------------------------------
 
 // esp_http_client_read keeps reading until it has all it was asked for, so a
@@ -318,13 +514,9 @@ static esp_err_t open_following_redirects(fetch_t *f, int *status) {
     }
 }
 
-static void fetch_task(void *arg) {
-    fetch_t *f = arg;
-    int64_t start = esp_timer_get_time();
-    f->deadline_us = start + FETCH_DEADLINE_MS * 1000LL;
-    image_fetch_result_t result = { .code = "download_failed" };
-    log_memory("image download start");
-
+// Opens the URL, following redirects, ready to read the body. False with
+// result->message set if it can't.
+static bool http_open(fetch_t *f, image_fetch_result_t *result, char *msg, size_t msg_len) {
     esp_http_client_config_t cfg = {
         .url = f->url,
         .crt_bundle_attach = esp_crt_bundle_attach,
@@ -339,18 +531,32 @@ static void fetch_task(void *arg) {
     int status = 0;
     esp_err_t err = f->http ? open_following_redirects(f, &status) : ESP_ERR_NO_MEM;
     log_memory("image download connected");
-    char msg[64];
     if (f->scheme_changed) {
-        result.message = "redirect changed scheme";
+        result->message = "redirect changed scheme";
     } else if (f->timed_out) {
-        result.message = "download timed out";
+        result->message = "download timed out";
     } else if (err != ESP_OK) {
-        snprintf(msg, sizeof(msg), "could not connect: %s", esp_err_to_name(err));
-        result.message = msg;
+        snprintf(msg, msg_len, "could not connect: %s", esp_err_to_name(err));
+        result->message = msg;
     } else if (status != 200) {
-        snprintf(msg, sizeof(msg), "server answered HTTP %d", status);
-        result.message = msg;
+        snprintf(msg, msg_len, "server answered HTTP %d", status);
+        result->message = msg;
     } else {
+        return true;
+    }
+    return false;
+}
+
+static void fetch_task(void *arg) {
+    fetch_t *f = arg;
+    int64_t start = esp_timer_get_time();
+    f->deadline_us = start + FETCH_DEADLINE_MS * 1000LL;
+    image_fetch_result_t result = { .code = "download_failed" };
+    log_memory("image download start");
+
+    char msg[64];
+    if (f->vm ? vm_open(f, &result, msg, sizeof(msg))
+              : http_open(f, &result, msg, sizeof(msg))) {
         int n = fetch_read(f, f->peek, sizeof(f->peek));
         f->peek_len = n > 0 ? (size_t)n : 0;
         const char *fail;
@@ -380,6 +586,7 @@ static void fetch_task(void *arg) {
         }
     }
     if (f->http) esp_http_client_cleanup(f->http);
+    free(f->body);
 
     result.bytes = f->bytes;
     result.ms = (int)((esp_timer_get_time() - start) / 1000);
@@ -395,16 +602,80 @@ static void fetch_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
-                       void *user, const char **code, const char **message) {
+// GET /fs/raw/ and the path, without its leading slashes, percent-encoded
+// but for its slashes. NULL if out of memory.
+static char *vm_request_path(const char *path) {
+    while (*path == '/') path++;
+    size_t prefix = strlen(VM_PATH_PREFIX);
+    char *out = malloc(prefix + strlen(path) * 3 + 1);
+    if (!out) return NULL;
+    memcpy(out, VM_PATH_PREFIX, prefix);
+    char *p = out + prefix;
+    for (const unsigned char *c = (const unsigned char *)path; *c; c++) {
+        if (isalnum(*c) || strchr("-._~/", *c)) {
+            *p++ = (char)*c;
+        } else {
+            *p++ = '%';
+            *p++ = "0123456789ABCDEF"[*c >> 4];
+            *p++ = "0123456789ABCDEF"[*c & 15];
+        }
+    }
+    *p = '\0';
+    return out;
+}
+
+// Allocate the largest safe range once. Future allocations must leave Noise's
+// TX margin: the task stack, either decoder or raw rows, and the queued GET.
+static bool vm_allocate_body(fetch_t *f, size_t stack, int width) {
+    size_t draw_bytes = (size_t)width * RAW_ROWS * sizeof(uint16_t);
+    if (draw_bytes < JPEG_POOL_BYTES) draw_bytes = JPEG_POOL_BYTES;
+    size_t request_bytes = strlen(f->url) + VM_REQUEST_BYTES;
+    size_t keep = NOISE_TX_DMA_RESERVE_BYTES + stack + draw_bytes
+                  + request_bytes + FETCH_RESERVE_BYTES;
+    size_t available = internal_free();
+    size_t dma_free = heap_caps_get_free_size(MALLOC_CAP_DMA);
+    if (available > dma_free) available = dma_free;
+    if (available < keep) return false;
+
+    size_t chunk = noise_ctrl_req_max_body();
+#if !CONFIG_SPIRAM
+    if (available - keep < VM_CHUNK_ALLOC_BYTES) return false;
+    size_t room = available - keep - VM_CHUNK_ALLOC_BYTES;
+    if (chunk > room) chunk = room;
+    size_t block = heap_caps_get_largest_free_block(VM_CAPS);
+    if (chunk > block) chunk = block;
+    if (chunk < VM_MIN_CHUNK) return false;
+#endif
+    f->body = heap_caps_malloc(chunk, VM_CAPS);
+    if (!f->body) return false;
+    f->chunk = chunk;
+
+    // Recheck after the actual allocations, including their heap overhead.
+    // A concurrent allocation may also have consumed the sampled headroom.
+    size_t block_need = stack > draw_bytes ? stack : draw_bytes;
+    if (block_need < request_bytes) block_need = request_bytes;
+    return internal_free() >= keep
+        && heap_caps_get_free_size(MALLOC_CAP_DMA) >= keep
+        && heap_caps_get_largest_free_block(BYTE_CAPS) >= block_need;
+}
+
+static bool start(const char *target, bool vm, int row, image_fetch_done_cb done,
+                  void *user, const char **code, const char **message) {
     int width, height;
     if (!led_status_display_info(&width, &height)) {
         *code = "unsupported";
         *message = "no display";
         return false;
     }
-    bool https = strncasecmp(url, "https://", 8) == 0;
-    if (!https && strncasecmp(url, "http://", 7) != 0) {
+    bool https = !vm && strncasecmp(target, "https://", 8) == 0;
+    if (vm) {
+        const char *name = target + strspn(target, "/");
+        if (!*name) {
+            *code = "invalid_params";
+            *message = "path names no file";
+            return false;
+        }
+    } else if (!https && strncasecmp(target, "http://", 7) != 0) {
         *code = "invalid_params";
         *message = "url must be http:// or https://";
         return false;
@@ -420,13 +691,19 @@ bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
         *message = "another image is still downloading";
         return false;
     }
+    if (vm && !s_vm.lock && !(s_vm.lock = xSemaphoreCreateMutex())) {
+        atomic_store(&s_busy, false);
+        *code = "out_of_memory";
+        *message = "failed to allocate";
+        return false;
+    }
 
     size_t stack = https ? FETCH_TLS_STACK : FETCH_STACK_BYTES;
     size_t need = stack + FETCH_RESERVE_BYTES
                 + (https ? FETCH_TLS_BYTES : FETCH_HTTP_BYTES);
     size_t block = heap_caps_get_largest_free_block(BYTE_CAPS);
-    if (internal_free() < need || block < stack
-        || (https && block < FETCH_TLS_BLOCK)) {
+    if (!vm && (internal_free() < need || block < stack
+        || (https && block < FETCH_TLS_BLOCK))) {
         log_memory("image download refused");
         atomic_store(&s_busy, false);
         *code = "out_of_memory";
@@ -436,14 +713,21 @@ bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
     }
 
     fetch_t *f = calloc(1, sizeof(*f));
-    if (f) f->url = strdup(url);
-    if (!f || !f->url) {
+    if (f) f->url = vm ? vm_request_path(target) : strdup(target);
+    bool allocated = f && f->url;
+    if (allocated && vm) allocated = vm_allocate_body(f, stack, width);
+    if (!allocated) {
+        if (f) {
+            free(f->body);
+            free(f->url);
+        }
         free(f);
         atomic_store(&s_busy, false);
         *code = "out_of_memory";
         *message = "failed to allocate";
         return false;
     }
+    f->vm = vm;
     f->https = https;
     f->row = row;
     f->done = done;
@@ -451,6 +735,7 @@ bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
     f->width = width;
     f->height = height;
     if (xTaskCreate(fetch_task, "image", stack, f, 4, NULL) != pdPASS) {
+        free(f->body);
         free(f->url);
         free(f);
         atomic_store(&s_busy, false);
@@ -461,11 +746,32 @@ bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
     return true;
 }
 
+bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
+                       void *user, const char **code, const char **message) {
+    return start(url, false, row, done, user, code, message);
+}
+
+bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
+                          void *user, const char **code, const char **message) {
+    return start(path, true, row, done, user, code, message);
+}
+
 #else
 
 bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
                        void *user, const char **code, const char **message) {
     (void)url;
+    (void)row;
+    (void)done;
+    (void)user;
+    *code = "unsupported";
+    *message = "no display";
+    return false;
+}
+
+bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
+                          void *user, const char **code, const char **message) {
+    (void)path;
     (void)row;
     (void)done;
     (void)user;
