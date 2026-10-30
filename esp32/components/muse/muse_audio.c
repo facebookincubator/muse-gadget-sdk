@@ -87,14 +87,10 @@ static void apply_volume(int volume)
     }
 }
 
-/* The gain last applied, for a board's read_mic, which applies it itself. */
-static int s_mic_gain_db;
-
 static void apply_mic_gain(int db)
 {
-    s_mic_gain_db = db;
-    if (muse_board->mic_init) {
-        s_mic_scale = powf(10.0f, (float)db / 20.0f);
+    if (muse_board->mic_init || (!s_mic && muse_board->mic_read)) {
+        s_mic_scale = powf(10.0f, (float)db / 20.0f);   /* no codec gain: scale samples */
         return;
     }
     if (!s_mic || !codecs_reachable()) {
@@ -132,12 +128,15 @@ static esp_err_t read_input(size_t frames)
         return esp_codec_dev_read(s_mic, s_in_stereo, frames * CHANNELS * sizeof(int16_t)) == ESP_CODEC_DEV_OK
             ? ESP_OK : ESP_FAIL;
     }
-    if (!muse_board->read_mic || muse_board->read_mic(s_in_mono, frames, s_mic_gain_db) != ESP_OK) {
+    /* A mic without a codec beside a speaker codec: mono, scaled here. */
+    if (!muse_board->mic_read || muse_board->mic_read(s_in_mono, frames) != ESP_OK) {
         return ESP_FAIL;
     }
     for (size_t i = 0; i < frames; i++) {
-        s_in_stereo[2 * i] = s_in_mono[i];
-        s_in_stereo[2 * i + 1] = s_in_mono[i];
+        float x = (float)s_in_mono[i] * s_mic_scale;
+        int16_t v = (int16_t)(x > 32767 ? 32767 : (x < -32768 ? -32768 : x));
+        s_in_stereo[2 * i] = v;
+        s_in_stereo[2 * i + 1] = v;
     }
     return ESP_OK;
 }
@@ -157,7 +156,7 @@ esp_err_t muse_audio_init(int volume, int mic_gain_db)
          * open the codecs, and the setters skip them while closed. */
         codec_power(true);
         err = muse_board->audio_init(&s_spk, &s_mic);
-        if (err == ESP_OK && !(s_spk && (s_mic || muse_board->read_mic))) {
+        if (err == ESP_OK && !(s_spk && (s_mic || muse_board->mic_read))) {
             err = ESP_FAIL;
         }
         if (err != ESP_OK) {

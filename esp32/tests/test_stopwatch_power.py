@@ -365,7 +365,6 @@ static struct {
     int (*mic_init)(void);
     int (*mic_power)(bool);
     int (*mic_read)(int16_t *, size_t);
-    int (*read_mic)(int16_t *, size_t, int);
 } board = { .audio_init = board_audio_init, .audio_power = board_audio_power,
             .codec_power = board_codec_power }, *muse_board = &board;
 #include <math.h>
@@ -374,7 +373,6 @@ static struct {
 #define MUSE_AUDIO_RATE 16000
 static float s_hpf_a;
 static float s_mic_scale;
-static int s_mic_gain_db;
 static esp_codec_dev_handle_t s_spk;
 static esp_codec_dev_handle_t s_mic;
 static bool s_open;

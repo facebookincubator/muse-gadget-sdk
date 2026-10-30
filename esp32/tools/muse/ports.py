@@ -84,6 +84,7 @@ PACED = (CH342,)
 KINDS = {USJ: "Espressif USB Serial/JTAG", CH342: "CH342 bridge", CH9102: "CH9102 bridge", CH343: "CH343 bridge",
          CH340: "CH340 bridge", CP210X: "CP2104 bridge"}
 
+
 class NotFound(Exception):
     """No one port fits; str() says what was found."""
 

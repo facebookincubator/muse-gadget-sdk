@@ -128,15 +128,16 @@ typedef struct {
     void (*draw_frame)(int x1, int y1, int x2, int y2, int rows,
                        void (*fill)(uint8_t *dst, int stride, int row, int rows, void *arg), void *arg);
 
-    /* Speaker codec and optional mic codec, not yet opened. A board may use
-     * read_mic instead when its microphone is not standard I2S PCM. */
+    /* Speaker codec and mic codec, not yet opened. A mic without a codec (a
+     * PDM mic) leaves *mic NULL and is read through mic_read below. */
     esp_err_t (*audio_init)(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic);
-    /* Direct mono PCM input for microphones that bypass esp_codec_dev. */
-    esp_err_t (*read_mic)(int16_t *mono, size_t frames, int gain_db);
     /* A microphone without a codec or speaker (a PDM mic), in place of
      * audio_init: set up once, powered on and off with the audio
      * (muse_audio_power), read as mono at MUSE_AUDIO_RATE.
-     * A board with mic_init has no speaker: replies are read, not heard. */
+     * A board with mic_init has no speaker: replies are read, not heard.
+     * mic_read also serves a board whose audio_init returns a speaker but
+     * no mic codec; it is set up there, powered with the speaker. muse_audio
+     * applies the mic gain to what mic_read returns, in both cases. */
     esp_err_t (*mic_init)(void);
     esp_err_t (*mic_power)(bool on);
     esp_err_t (*mic_read)(int16_t *mono, size_t frames);

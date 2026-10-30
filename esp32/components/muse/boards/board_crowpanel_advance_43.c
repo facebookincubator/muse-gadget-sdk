@@ -35,8 +35,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include <math.h>
-
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_mem.h"
@@ -64,6 +62,7 @@ static esp_lcd_panel_io_handle_t s_touch_io;
 static esp_lcd_touch_handle_t s_touch;
 static muse_gpio_button_t s_talk;
 static i2s_chan_handle_t s_mic_rx;
+static uint8_t s_backlight = 0;   /* last STC8 backlight command */
 
 static esp_err_t stc8_command(uint8_t command)
 {
@@ -99,6 +98,7 @@ static void set_brightness(int pct)
 {
     pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
     const uint8_t command = (uint8_t)((100 - pct) * 245 / 100);
+    s_backlight = command;
     esp_err_t err = stc8_command(command);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "set backlight to %d%%: %s", pct, esp_err_to_name(err));
@@ -296,6 +296,9 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
 
     /* STC8 command 248 enables the speaker amplifier. */
     ESP_RETURN_ON_ERROR(stc8_command(248), TAG, "speaker amplifier");
+    /* The V1.3 notes list 0-245 as backlight levels, so command 2 may have
+     * changed the backlight the UI already set: put it back. */
+    ESP_RETURN_ON_ERROR(stc8_command(s_backlight), TAG, "restore backlight");
     audio_codec_i2s_cfg_t tx_data_cfg = { .port = I2S_NUM_1, .tx_handle = tx };
     const audio_codec_data_if_t *tx_data = audio_codec_new_i2s_data(&tx_data_cfg);
     ESP_RETURN_ON_FALSE(tx_data, ESP_ERR_NO_MEM, TAG, "speaker data interface");
@@ -310,22 +313,14 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     return *spk ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-static esp_err_t read_mic(int16_t *mono, size_t frames, int gain_db)
+static esp_err_t mic_read(int16_t *mono, size_t frames)
 {
     size_t bytes_read = 0;
     esp_err_t err = i2s_channel_read(s_mic_rx, mono, frames * sizeof(*mono), &bytes_read, pdMS_TO_TICKS(1000));
     if (err != ESP_OK) {
         return err;
     }
-    if (bytes_read != frames * sizeof(*mono)) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-    float gain = powf(10.0f, (gain_db < 0 ? 0 : gain_db > 36 ? 36 : gain_db) / 20.0f);
-    for (size_t i = 0; i < frames; i++) {
-        float sample = mono[i] * gain;
-        mono[i] = (int16_t)(sample > 32767.0f ? 32767 : sample < -32768.0f ? -32768 : sample);
-    }
-    return ESP_OK;
+    return bytes_read == frames * sizeof(*mono) ? ESP_OK : ESP_ERR_INVALID_SIZE;
 }
 
 static unsigned poll_buttons(void)
@@ -362,7 +357,7 @@ static const muse_board_t s_board = {
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
     .audio_init = audio_init,
-    .read_mic = read_mic,
+    .mic_read = mic_read,
     .mic_slot = 0,
     .poll_buttons = poll_buttons,
     .power_off = power_off,

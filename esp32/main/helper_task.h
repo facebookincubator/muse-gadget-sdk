@@ -18,12 +18,12 @@
 
 /*
  * Short-lived setup tasks (pairing timers, Wi-Fi scan refresh, provisioning)
- * whose stacks go to PSRAM where that is safe, sparing internal RAM.
+ * whose stacks go to PSRAM on boards that opt in with
+ * CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM, sparing internal RAM.
  *
- * Only where code and read-only data run from PSRAM: flash and NVS writes then
- * leave the cache on. Elsewhere a flash write from a task with a PSRAM stack
- * asserts in esp_task_stack_is_sane_cache_disabled(), so the stack stays
- * internal.
+ * That option needs code and read-only data in PSRAM: flash and NVS writes
+ * then leave the cache on. Elsewhere a flash write from a task with a PSRAM
+ * stack asserts in esp_task_stack_is_sane_cache_disabled().
  *
  * A task started with helper_task_create() must end with helper_task_delete(),
  * whether it deletes itself (NULL) or another task cancels it: a plain
@@ -33,7 +33,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#if CONFIG_SPIRAM && CONFIG_SPIRAM_FETCH_INSTRUCTIONS && CONFIG_SPIRAM_RODATA
+#if CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM && CONFIG_SPIRAM_FETCH_INSTRUCTIONS && CONFIG_SPIRAM_RODATA
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
 #define HELPER_TASK_STACK_IN_PSRAM 1

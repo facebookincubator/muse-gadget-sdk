@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HELPER_H = ROOT / "main" / "helper_task.h"
 APP_C = ROOT / "main" / "app.c"
 BLE_SERVER_C = ROOT / "main" / "ble_server.c"
+KCONFIG = ROOT / "main" / "Kconfig.projbuild"
 
 
 def _function_body(source: str, signature: str) -> str:
@@ -58,9 +59,17 @@ class HelperTaskContractTest(unittest.TestCase):
         gate = re.search(r"#if (.*)\n#include \"esp_heap_caps.h\"", header)
         self.assertIsNotNone(gate, "PSRAM gate not found")
         condition = gate.group(1)
+        self.assertIn("CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM", condition)
         self.assertIn("CONFIG_SPIRAM_FETCH_INSTRUCTIONS", condition)
         self.assertIn("CONFIG_SPIRAM_RODATA", condition)
         self.assertNotIn("||", condition)
+
+        # Opt-in per board, and only where flash writes keep the cache on.
+        kconfig = KCONFIG.read_text()
+        option = kconfig[kconfig.index("config HOMEHUB_SETUP_TASKS_IN_PSRAM") :]
+        option = option[: option.index("\n    config ", 1)]
+        self.assertIn("depends on SPIRAM && SPIRAM_FETCH_INSTRUCTIONS && SPIRAM_RODATA", option)
+        self.assertIn("default n", option)
 
         create = _function_body(header, "static inline BaseType_t helper_task_create(")
         delete = _function_body(header, "static inline void helper_task_delete(")
