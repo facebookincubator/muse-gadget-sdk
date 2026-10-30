@@ -42,6 +42,7 @@
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "driver/ledc.h"
+#include "driver/rtc_io.h"
 #include "driver/spi_master.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_adc/adc_cali.h"
@@ -219,7 +220,13 @@ static esp_err_t init(void)
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_12,
     };
-    return adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali);
+    /* Without the calibration eFuses the battery reads as unknown rather than
+     * stopping the board at boot. */
+    if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali) != ESP_OK) {
+        s_cali = NULL;
+        ESP_LOGW(TAG, "adc calibration unavailable; battery unknown");
+    }
+    return ESP_OK;
 }
 
 static bool IRAM_ATTR on_chunk_sent(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *edata, void *ctx)
@@ -547,6 +554,13 @@ static unsigned poll_buttons(void)
  * only with a host on the other end. */
 static esp_err_t read_power(muse_power_t *out)
 {
+    out->usb = usb_serial_jtag_is_connected();
+    out->charging = false;
+    if (!s_cali) {
+        out->battery_mv = 0;
+        out->battery_pct = -1;
+        return ESP_OK;
+    }
     int sum = 0;
     for (int i = 0; i < 8; i++) {
         int raw;
@@ -556,8 +570,6 @@ static esp_err_t read_power(muse_power_t *out)
     int mv;
     ESP_RETURN_ON_ERROR(adc_cali_raw_to_voltage(s_cali, sum / 8, &mv), TAG, "adc calibration");
     int v = mv * 3;
-    out->usb = usb_serial_jtag_is_connected();
-    out->charging = false;
     out->battery_mv = v;
     if (v < 2500) {
         out->battery_pct = -1;     /* no cell: the divider reads near zero */
@@ -584,6 +596,9 @@ static esp_err_t power_off(void)
     }
     vTaskDelay(pdMS_TO_TICKS(50));
     ESP_RETURN_ON_ERROR(esp_sleep_enable_ext0_wakeup(PWR_GPIO, 0), TAG, "power button wake");
+    /* Keep PWR's pull-up through deep sleep, as while awake (muse_gpio_button_init). */
+    rtc_gpio_pullup_en(PWR_GPIO);
+    rtc_gpio_pulldown_dis(PWR_GPIO);
     esp_deep_sleep_start();
     return ESP_FAIL;
 }
