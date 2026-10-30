@@ -16,9 +16,18 @@ set(GADGET_SRCS
     "main.c"
     "app.c"
     "ble_server.c"
+    "ble_basic.c"
+    "ble_central.c"
+    "ble_client.c"
+    "ble_commands.c"
+    "ble_coex.c"
+    "pipeline_bench.cpp"
+    "ghash32.c"
+    "fast_gcm.c"
     "wifi_mgr.c"
     "wifi_known.c"
     "identity.c"
+    "sdk_token_console.c"
     "config_store.c"
     "vm_api.c"
     "diagnostic_log.c"
@@ -52,12 +61,15 @@ set(GADGET_REQUIRES
     noise_core
     product_info
     bt
+    esp_psram
+    esp_coex
     driver
     esp_driver_gpio
     esp_driver_i2c
     esp_driver_ledc
     esp_driver_spi
     esp_driver_uart
+    esp_driver_usb_serial_jtag
     esp_lcd
     lwip
     mbedtls
@@ -69,10 +81,18 @@ set(GADGET_REQUIRES
     esp_driver_pcnt
 )
 
-# E-paper has its own status screen in place of led_status.c.
-if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
-   OR CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
-    list(APPEND GADGET_SRCS "epaper_status.c")
+# E-paper has its own status screen in place of led_status.c, with
+# a per-panel driver behind epd_panel.h.
+if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677)
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681)
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1681.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G)
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_154g.c")
 else()
     list(APPEND GADGET_SRCS "led_status.c")
 endif()
@@ -81,21 +101,28 @@ if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
 endif()
 
-if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING)
+if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING OR CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
     list(APPEND GADGET_REQUIRES led_strip)
 endif()
 
 if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
     list(APPEND GADGET_SRCS "sensecap_sensors.c")
 endif()
+if(CONFIG_HOMEHUB_RETERMINAL_SHT4X)
+    list(APPEND GADGET_SRCS "reterminal_sht4x.c")
+endif()
 
 if(CONFIG_HOMEHUB_VOICE)
     list(APPEND GADGET_SRCS
         "voice.c"
-        "voice_board.c"
         "voice_muse_chat.c"
         "voice_player.c"
     )
+    if(CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
+        list(APPEND GADGET_SRCS "voice_board_respeaker_lite.c")
+    else()
+        list(APPEND GADGET_SRCS "voice_board.c")
+    endif()
 endif()
 
 idf_component_register(
@@ -104,3 +131,25 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}
 )
+
+# fast_gcm.c takes over ESP-IDF's one-shot AES-GCM entry points (PSA's AES-GCM
+# driver calls them across archives, so the linker can redirect them).
+if(CONFIG_HOMEHUB_FAST_GCM)
+    # -u pulls fast_gcm.o out of libmain: nothing else in main references it,
+    # and the references the wrap creates come from later archives.
+    target_link_libraries(${COMPONENT_LIB} INTERFACE
+        "-Wl,--wrap=esp_aes_gcm_crypt_and_tag"
+        "-Wl,--wrap=esp_aes_gcm_auth_decrypt"
+        "-Wl,-u,__wrap_esp_aes_gcm_crypt_and_tag"
+        "-Wl,-u,__wrap_esp_aes_gcm_auth_decrypt")
+endif()
+
+# ble_coex.c sits between the BLE controller and the coexistence scheduler
+# (both in prebuilt archives, so the linker can redirect the calls).
+if(CONFIG_HOMEHUB_BLE_COEX)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE
+        "-Wl,--wrap=coex_schm_status_bit_set"
+        "-Wl,--wrap=coex_schm_status_bit_clear"
+        "-Wl,-u,__wrap_coex_schm_status_bit_set"
+        "-Wl,-u,__wrap_coex_schm_status_bit_clear")
+endif()

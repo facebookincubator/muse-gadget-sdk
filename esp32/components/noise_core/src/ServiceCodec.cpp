@@ -1433,6 +1433,63 @@ StatusWithSize EncodeBodyChunkFrame(
       out);
 }
 
+StatusWithSize EncodeBodyChunkRequestPrefix(
+    ServiceType service,
+    int64_t streamId,
+    size_t dataSize,
+    ByteSpan out) noexcept {
+  if (!IsKnownServiceType(service) || streamId == kReservedStreamId ||
+      dataSize == 0 || !IsValidOutput(out)) {
+    return StatusWithSize(Status::InvalidArgument(), 0);
+  }
+
+  // Sizes as ComputeBodyChunkSize, ComputeServiceFrameSize and
+  // ComputeServiceRequestEnvelopeSize work them out for the same frame.
+  size_t chunkSize = 0;
+  size_t frameSize = 0;
+  size_t envelopeSize = 0;
+  if (!AddDelimitedFieldSize(kBodyChunkDataField, dataSize, chunkSize) ||
+      (streamId != 0 &&
+       !AddVarintFieldSize(
+           kServiceFrameStreamIdField, SignedVarintValue(streamId), frameSize)) ||
+      !AddDelimitedFieldSize(kServiceFrameBodyChunkField, chunkSize, frameSize) ||
+      !ComputeServiceRequestEnvelopeSize(service, frameSize, envelopeSize) ||
+      envelopeSize <= dataSize) {
+    return StatusWithSize(Status::ResourceExhausted(), 0);
+  }
+  const size_t prefixSize = envelopeSize - dataSize;
+  Status status = ValidateOutputAtLeast(out, prefixSize);
+  if (!status.ok()) {
+    return StatusWithSize(status, 0);
+  }
+
+  BufferWriter writer(out.subspan(0, prefixSize));
+  if (service != ServiceType::Daemon) {
+    status = WriteVarintField(
+        writer,
+        kServiceRequestServiceField,
+        static_cast<uint64_t>(static_cast<int32_t>(service)));
+  }
+  if (status.ok()) {
+    status = WriteDelimitedPrefix(writer, kServiceRequestPayloadField, frameSize);
+  }
+  if (status.ok() && streamId != 0) {
+    status = WriteVarintField(
+        writer, kServiceFrameStreamIdField, SignedVarintValue(streamId));
+  }
+  if (status.ok()) {
+    status = WriteDelimitedPrefix(writer, kServiceFrameBodyChunkField, chunkSize);
+  }
+  if (status.ok()) {
+    status = WriteDelimitedPrefix(writer, kBodyChunkDataField, dataSize);
+  }
+  if (!status.ok() || writer.written() != prefixSize) {
+    return StatusWithSize(
+        status.ok() ? Status::Internal() : status, writer.written());
+  }
+  return StatusWithSize(OkStatus(), prefixSize);
+}
+
 StatusWithSize
 EncodeResetFrame(int64_t streamId, ResetView reset, ByteSpan out) noexcept {
   return EncodeServiceFrame(

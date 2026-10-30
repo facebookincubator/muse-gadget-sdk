@@ -303,7 +303,9 @@ class BleServer:
     def _handle_device_change(self, interface, changed, invalidated, path=None):
         if "Connected" in changed:
             log.info("device %s %s", path, "connected" if changed["Connected"] else "disconnected")
-        if changed.get("Connected") is False:
+        # dbus-python hands over dbus.Boolean values, which are never the
+        # False singleton, so test the value rather than its identity.
+        if "Connected" in changed and not changed["Connected"]:
             with self._lock:
                 ours = self._device_path in (None, path)
                 if ours:
