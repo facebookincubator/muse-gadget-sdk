@@ -36,8 +36,8 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Static buffers in PSRAM: Wi-Fi's, lwIP's and BT's, and those marked
 # EXT_RAM_BSS_ATTR (Muse's chat turn, the tunnel batch), as on the 1.85C,
 # which keeps internal DMA RAM free for Link (and for light sleep's code,
-# once it's turned on below). The chip always has PSRAM, so booting without
-# it needn't be allowed.
+# should PM be turned on later). The chip always has PSRAM, so booting
+# without it needn't be allowed.
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 # CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
 # That forces Wi-Fi's TX buffers static, in internal RAM: 8, not 16, at 1.6 KB

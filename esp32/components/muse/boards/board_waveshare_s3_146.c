@@ -472,8 +472,8 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
 /* Hold-to-talk on the face tile: a finger held on the avatar for
  * TOUCH_HOLD_MS acts as the talk button. Taps and touches on other tiles
  * (e.g. settings) never trigger talk. Touch state comes from LVGL's input
- * device, which owns the SPD2010 driver handle; reading the driver here
- * would race LVGL's own reads. */
+ * device, which reads poll_touch's cached point; reading the driver here
+ * would race poll_touch's reads. */
 #define TOUCH_HOLD_MS 500
 
 static unsigned poll_buttons(void)
@@ -530,10 +530,17 @@ static esp_err_t read_power(muse_power_t *out)
     return ESP_OK;
 }
 
+/* Once registered, the panel IO belongs to muse_lcd_bands' send task. */
+static void panel_off(void *arg)
+{
+    (void)arg;
+    esp_lcd_panel_disp_on_off(s_panel, false);
+}
+
 static esp_err_t power_off(void)
 {
     set_brightness(0);
-    esp_lcd_panel_disp_on_off(s_panel, false);
+    muse_lcd_bands_run(panel_off, NULL);
     /* No PMU; deep sleep is the closest thing to off. BOOT wakes it. */
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
     esp_deep_sleep_start();
