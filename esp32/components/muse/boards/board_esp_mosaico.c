@@ -71,6 +71,7 @@ static const char *TAG = "board";
 #define LCD_RES 480
 #define LCD_HOST SPI2_HOST
 #define LCD_CS GPIO_NUM_50
+#define LCD_TE GPIO_NUM_43
 #define LCD_D0 GPIO_NUM_36
 #define LCD_D1 GPIO_NUM_51
 #define LCD_D2 GPIO_NUM_35
@@ -124,6 +125,7 @@ static const co5300_lcd_init_cmd_t s_lcd_init[] = {
     {0xFE, (uint8_t[]){0x00}, 1, 0},
     {0xC4, (uint8_t[]){0x80}, 1, 0},
     {0x3A, (uint8_t[]){0x55}, 1, 0},
+    {0x35, (uint8_t[]){0x00}, 1, 0},   /* tearing effect on (V-blank), GPIO43: muse_lcd_bands_set_te */
     {0x53, (uint8_t[]){0x20}, 1, 0},
     {0x51, (uint8_t[]){0xFF}, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
@@ -260,6 +262,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
         return NULL;
     }
     lv_display_add_event_cb(disp, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
+    muse_lcd_bands_set_te(LCD_TE);
 
     /* Touch: the BSP's CST9220 setup, at its base orientation (no swap or mirror). */
     const esp_lcd_touch_config_t tp_cfg = {
@@ -426,6 +429,7 @@ static const muse_board_t s_board = {
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
     .panel_sleep = panel_sleep,
+    .draw_frame = muse_lcd_bands_frame,
     .audio_init = audio_init,
     .mic_slot = 0,
     .poll_buttons = poll_buttons,
