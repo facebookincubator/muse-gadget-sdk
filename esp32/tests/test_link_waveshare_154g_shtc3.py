@@ -41,6 +41,18 @@ class LinkWaveshare154gShtc3Test(unittest.TestCase):
             [*cc, "-std=c11", *flags, "-c", str(JSON / "cJSON.c"), "-o", str(out / "cjson.o")],
             [*cc, "-std=c11", *flags, str(ROOT / "tests/link_waveshare_154g_shtc3_harness.c"), str(out / "cjson.o"), "-lm", "-o", str(out / "shtc3")],
         ]
+        # The driver harness compiles the whole driver; its IDF headers are
+        # empty and the harness supplies the fakes.
+        fakes = out / "fakes"
+        for header in ("driver/i2c_master.h", "esp_log.h", "esp_timer.h",
+                       "freertos/FreeRTOS.h", "freertos/task.h"):
+            (fakes / header).parent.mkdir(parents=True, exist_ok=True)
+            (fakes / header).write_text("#pragma once\n")
+        commands.append([
+            *cc, "-std=c11", *flags, "-Wno-unused-function", "-I", str(fakes), "-I", str(ROOT / "main"),
+            str(ROOT / "tests/link_waveshare_154g_shtc3_driver_harness.c"), str(out / "cjson.o"), "-lm",
+            "-o", str(out / "shtc3_driver"),
+        ])
         for cmd in commands:
             compiled = subprocess.run(cmd, capture_output=True, text=True)
             if compiled.returncode:
@@ -49,6 +61,10 @@ class LinkWaveshare154gShtc3Test(unittest.TestCase):
 
     def test_bytes_to_sensors_read_result(self):
         result = subprocess.run([str(self.out / "shtc3")], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_driver_polls_after_a_missed_boot_probe(self):
+        result = subprocess.run([str(self.out / "shtc3_driver")], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_command_is_advertised_and_dispatched_with_the_feature(self):

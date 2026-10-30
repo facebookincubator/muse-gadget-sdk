@@ -213,8 +213,10 @@ void waveshare_154g_shtc3_init(void) {
     i2c_master_bus_handle_t bus = NULL;
     esp_err_t err = i2c_master_get_bus_handle(I2C_NUM_0, &bus);
     if (err != ESP_OK) err = i2c_new_master_bus(&bus_cfg, &bus);
+    // A missed probe isn't fatal: poll anyway, so the sensor reports once it
+    // answers, as the reTerminal's SHT4x does.
     if (err == ESP_OK && i2c_master_probe(bus, SHTC3_ADDR, 100) != ESP_OK) {
-        err = ESP_ERR_NOT_FOUND;
+        ESP_LOGW(TAG, "SHTC3 not responding at boot; will retry reads");
     }
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -223,7 +225,7 @@ void waveshare_154g_shtc3_init(void) {
     };
     if (err == ESP_OK) err = i2c_master_bus_add_device(bus, &dev_cfg, &s_dev);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "no SHTC3 at 0x%02x: %s", SHTC3_ADDR, esp_err_to_name(err));
+        ESP_LOGW(TAG, "can't add the SHTC3 at 0x%02x: %s", SHTC3_ADDR, esp_err_to_name(err));
         return;
     }
     if (xTaskCreate(sensors_task, "shtc3", 3072, NULL, 2, NULL) != pdPASS) {

@@ -23,8 +23,9 @@
 
 #include "cJSON.h"
 
-// Start the I2C bus and the polling task. Logs and does nothing else when
-// the sensor is missing.
+// Join the board's I2C bus (creating it if needed, and keeping it for the
+// codec and RTC) and start the polling task, which keeps retrying while the
+// sensor doesn't answer.
 void waveshare_154g_shtc3_init(void);
 
 // sensors.read: the latest temperature and humidity readings, with their
