@@ -69,6 +69,8 @@ MAX_STREAM_BUFFER_BYTES = 1024 * 1024
 MAX_TTS_BUFFER_BYTES = 8 * 1024 * 1024
 STREAM_CHUNK_BYTES = 16 * 1024
 MAX_VOICE_BYTES = 2 * 1024 * 1024
+MAX_IMAGE_BYTES = 2 * 1024 * 1024
+IMAGE_MIME_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
 REQUEST_CHUNK_BYTES = 16 * 1024
 MAX_INLINE_REQUEST_BYTES = 64 * 1024
 # Matches JavaScript's encodeURIComponent, as the firmware does.
@@ -165,6 +167,16 @@ def noise_url(noise_host: str, vm_id: str, app_id: str | None = None) -> str:
 class SideChat:
     session_id: str
     exists: bool    # False: Muse has no chat with this ID yet; the first send_chat to it creates it
+
+
+def check_image(image_bytes: bytes, mime_type: str) -> None:
+    """Raise ``ValueError`` unless ``LinkSession.send_image`` takes this picture."""
+    if mime_type not in IMAGE_MIME_TYPES:
+        raise ValueError("images must be JPEG, PNG, GIF or WebP")
+    if not image_bytes:
+        raise ValueError("the image is empty")
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise ValueError(f"the image is {len(image_bytes):,} bytes; images must be 2 MiB or less")
 
 
 class LinkSession:
@@ -357,23 +369,55 @@ class LinkSession:
     ) -> dict:
         """Post a WAV voice note, optionally including instructions in ``message``.
 
-        Muse chooses its usual reply format unless ``output_modality`` is set.
-        Its TTS endpoint requires a voice-modality assistant reply.
+        Muse reads only the items of a request that has any, so the text goes
+        first as its own item. Muse chooses its usual reply format unless
+        ``output_modality`` is set. Its TTS endpoint requires a voice-modality
+        assistant reply.
         """
         if not wav_bytes or len(wav_bytes) > MAX_VOICE_BYTES:
             raise ValueError("voice note must contain at most 2 MiB of WAV audio")
+        voice = {
+            "type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+            "data_base64": base64.b64encode(wav_bytes).decode("ascii"),
+        }
+        text = [{"type": "text", "text": message}] if message.strip() else []
         request_body = {
             "message": message,
             "device_id": self._device.node_id,
-            "items": [{
-                "type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
-                "data_base64": base64.b64encode(wav_bytes).decode("ascii"),
-            }],
+            "items": text + [voice],
         }
         if session_id:
             request_body["session_id"] = session_id
         if output_modality is not None:
             request_body["output_modality"] = output_modality
+        return await self._post_chat(request_body)
+
+    async def send_image(
+        self, image_bytes: bytes, mime_type: str, session_id: str | None = None, *,
+        message: str = "", filename: str | None = None, output_modality: str = "text",
+    ) -> dict:
+        """Post a picture for Muse to look at, with ``message`` as its text.
+
+        ``mime_type`` must be one of ``IMAGE_MIME_TYPES`` and the picture at
+        most 2 MiB. Muse reads only the items of a request that has any, so
+        the text goes first as its own item.
+        """
+        check_image(image_bytes, mime_type)
+        image = {
+            "type": "image", "mime_type": mime_type,
+            "data_base64": base64.b64encode(image_bytes).decode("ascii"),
+        }
+        if filename:
+            image["filename"] = filename
+        text = [{"type": "text", "text": message}] if message.strip() else []
+        request_body = {
+            "message": message,
+            "output_modality": output_modality,
+            "device_id": self._device.node_id,
+            "items": text + [image],
+        }
+        if session_id:
+            request_body["session_id"] = session_id
         return await self._post_chat(request_body)
 
     @staticmethod
@@ -801,7 +845,7 @@ class HttpStreamError(ConnectionError):
 
 
 class RequestRejected(ConnectionError):
-    """Muse refused a ``send_chat`` or ``send_voice`` request."""
+    """Muse refused a ``send_chat``, ``send_voice`` or ``send_image`` request."""
 
     def __init__(self, status: int | None) -> None:
         super().__init__(f"Muse rejected conversation request: HTTP {status}")
@@ -809,7 +853,7 @@ class RequestRejected(ConnectionError):
 
 
 def acknowledgement(result: dict) -> dict:
-    """Muse's acknowledgement in a ``send_chat`` or ``send_voice`` result.
+    """Muse's acknowledgement in a ``send_chat``, ``send_voice`` or ``send_image`` result.
 
     Raises :class:`RequestRejected` when Muse refused the request, and
     ``ValueError`` when it accepted it without an acknowledgement.

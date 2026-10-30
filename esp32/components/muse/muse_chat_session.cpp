@@ -1007,7 +1007,7 @@ static void turn_done(bool complete)
         muse_hatch_console("done", nullptr, "\"messages\":%d,\"complete\":%s", s_turn.nmsgs,
                            complete ? "true" : "false");
     }
-    emit(MUSE_HATCH_EV_DONE, nullptr);
+    emit(MUSE_HATCH_EV_DONE, complete ? nullptr : "REPLY INCOMPLETE");
     turn_finish();
 }
 
@@ -1714,6 +1714,13 @@ static void check_turn(void)
         return;
     }
     bool text = s_turn.text;
+    bool complete = s_turn.nmsgs > 0;
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        if (!s_turn.msgs[i].done || s_turn.msgs[i].tts == TTS_QUEUED || s_turn.msgs[i].tts == TTS_ACTIVE) {
+            complete = false;
+            break;
+        }
+    }
     if (t - s_turn.start_us > (text ? TEXT_TURN_CAP_US : TURN_CAP_US)) {
         ESP_LOGW(TAG, "turn hit the time cap");
         /* A voice turn that waited out the cap on a busy agent got no reply at all. */
@@ -1721,7 +1728,8 @@ static void check_turn(void)
             turn_fail("NO REPLY FROM MUSE");
             return;
         }
-        turn_done(false);
+        /* Finished only if every message is, and the agent isn't still working. */
+        turn_done(complete && !s_turn.agent_busy);
         return;
     }
     if (!s_turn.nmsgs) {
@@ -1731,10 +1739,8 @@ static void check_turn(void)
         }
         return;
     }
-    for (int i = 0; i < s_turn.nmsgs; i++) {
-        if (!s_turn.msgs[i].done || s_turn.msgs[i].tts == TTS_QUEUED || s_turn.msgs[i].tts == TTS_ACTIVE) {
-            return;
-        }
+    if (!complete) {
+        return;
     }
     if (t - s_turn.last_event_us < SETTLE_US) {
         return;

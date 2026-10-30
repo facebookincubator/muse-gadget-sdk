@@ -242,6 +242,13 @@ class PacingTest(unittest.TestCase):
         self.assertIn(lcd7.device, chat.ports.command_ports([lcd7]))
         self.assertFalse(chat.ports.paced(lcd7.device, [lcd7]))
 
+    def test_p4lcd35_uses_ch343_for_chat_and_flash(self) -> None:
+        board = SimpleNamespace(device="/dev/cu.wchusbserial5", vid=0x1A86, pid=0x55D3,
+                                serial_number="5")
+        self.assertEqual(chat.ports.find("p4lcd35", ports=[board]), board.device)
+        self.assertIn(board.device, chat.ports.command_ports([board]))
+        self.assertFalse(chat.ports.paced(board.device, [board]))
+
     def test_usbs_keeps_single_pairs_single(self) -> None:
         self.assertEqual(chat.ports._usbs(chat.ports.USJ), (chat.ports.USJ,))
         self.assertEqual(chat.ports._usbs(chat.ports.USB["core2"]), chat.ports.USB["core2"])
