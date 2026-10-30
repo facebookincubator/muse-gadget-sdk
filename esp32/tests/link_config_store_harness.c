@@ -218,7 +218,7 @@ static void test_erase_propagates_commit_failure(void) {
 static void test_setup_clear_verifies_credentials_and_preserves_identity(void) {
     static const char *const setup_keys[] = {
         "access_token", "refresh_token", "auth_token", "vm_url", "username",
-        "ssid", "password", "wifi_channel",
+        "pair_sdk_hint", "ssid", "password", "wifi_channel",
         "setup_complete", "api_url", "api_url_v2", "noise_host",
     };
     fake_reset();
@@ -242,6 +242,7 @@ static void test_setup_clear_verifies_credentials_and_preserves_identity(void) {
 static void test_pairing_clear_preserves_wifi_channel(void) {
     fake_reset();
     fake_put("access_token", "access");
+    fake_put("pair_sdk_hint", "mgst_AAAAAAA");
     fake_put("ssid", "network");
     fake_put("password", "secret");
     fake_put("wifi_channel", "104");
@@ -249,6 +250,8 @@ static void test_pairing_clear_preserves_wifi_channel(void) {
     CHECK(config_clear_pairing(), "pairing clear should succeed");
     CHECK(config_key_lookup("access_token") == CONFIG_KEY_NOT_FOUND,
           "pairing token was not deleted");
+    CHECK(config_key_lookup("pair_sdk_hint") == CONFIG_KEY_NOT_FOUND,
+          "the SDK token pairing used was not forgotten");
     CHECK(config_key_lookup("ssid") == CONFIG_KEY_FOUND,
           "pairing clear deleted wifi credentials");
     CHECK(config_key_lookup("wifi_channel") == CONFIG_KEY_FOUND,

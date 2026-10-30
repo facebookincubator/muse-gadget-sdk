@@ -17,7 +17,7 @@ Use this skill when the device is a VELUX KLF200 gateway with commissioned compa
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An existing commissioned KLF200 and its Wi-Fi/API password, which is distinct from its web-login password.
 - A compatible binary-protocol client such as pyvlx, routed through HomeLink's TCP transport while preserving the device's TLS requirements.

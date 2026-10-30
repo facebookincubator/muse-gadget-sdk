@@ -23,12 +23,36 @@
 #include "freertos/queue.h"
 
 /*
- * Push-to-talk turn loop: hold -> stream speech to Hatch, release -> think -> speak.
- * Out of Hatch's reach (Wi-Fi down, say) a note is saved to PSRAM and goes once
- * it's back, on boards with PSRAM. Consumes muse_input_event_t from `queue` and
- * drives muse_state for the UI.
+ * StopWatch with realtime enabled defaults to a held-mic call: hold yellow to
+ * talk, release to listen in the same call, blue to end. Release hides the mic
+ * meter immediately and keeps at most 120 ms of capture tail for codec lag.
+ * Settings > Sound can select voice notes instead. Other boards retain their
+ * existing note/tap flow.
+ * Notes recorded out of reach are saved to PSRAM on boards with PSRAM.
+ * Consumes muse_input_event_t from `queue` and drives muse_state for the UI.
  */
 esp_err_t muse_voice_start(QueueHandle_t queue);
+
+/* UI-loop state, including startup and teardown. PTT is pinned for the call. */
+typedef enum {
+    MUSE_VOICE_VIEW_NONE,
+    MUSE_VOICE_VIEW_CONNECTING,
+    MUSE_VOICE_VIEW_READY,
+    MUSE_VOICE_VIEW_LISTENING,
+    MUSE_VOICE_VIEW_THINKING,
+    MUSE_VOICE_VIEW_SPEAKING,
+    MUSE_VOICE_VIEW_ENDING,
+} muse_voice_view_t;
+muse_voice_view_t muse_voice_call_view(void);
+bool muse_voice_in_call(void);
+bool muse_voice_ptt_call(void);
+bool muse_voice_ptt_enabled(void);   /* next press, not the current call */
+const char *muse_voice_call_label(void);   /* NULL outside a PTT call */
+const char *muse_voice_call_hint(void);    /* yellow button, NULL outside PTT */
+/* Bounded best effort before software poweroff; suppresses new calls until
+ * shutdown is cancelled (only when the board's power-off operation fails). */
+void muse_voice_shutdown(int wait_ms);
+void muse_voice_cancel_shutdown(void);
 
 /* While on (settings' Sound page), idle mic audio feeds muse_voice_monitor_db(). */
 void muse_voice_set_monitor(bool on);

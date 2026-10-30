@@ -17,7 +17,7 @@ Use this skill when fresh discovery identifies a compatible Kasa EP25 and the us
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Provide the device's approved TP-Link local-authentication credentials or supported stored credential hash through secure storage. These authenticate locally; no cloud-control login is part of the runtime flow.
 - Know what load is attached. If credentials or the protocol configuration are missing, request setup instead of guessing or resetting.

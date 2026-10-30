@@ -24,6 +24,7 @@ expires, and immediately if the API rejects it.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -34,9 +35,11 @@ import time
 from dataclasses import dataclass, field
 
 from musegadget import __version__, config, muse_api
-from musegadget.executor import COMMAND_SPECS, Executor
+from musegadget.executor import Executor
 from musegadget.identity import Identity
-from musegadget.link_client import DeviceDescription, LinkSession, Outcome
+from musegadget.link_client import (
+    MAX_CONCURRENT_INVOKES, DeviceDescription, LinkSession, Outcome, check_image,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +49,7 @@ BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
 UNPAIRED_POLL_S = 30.0
-MAX_LOCAL_REQUEST = 64 * 1024
+MAX_LOCAL_REQUEST = 4 * 1024 * 1024  # room for a 2 MiB image in base64
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 # Device access tokens live about 4 hours; rotate at 3.
 TOKEN_REFRESH_AGE_S = 3 * 3600
@@ -59,7 +62,10 @@ class Backoff:
     floor: float = 0.0
 
     def next_delay(self) -> float:
-        delay = min(BACKOFF_BASE_S * (2 ** self.failures), BACKOFF_MAX_S)
+        # The delay saturates at BACKOFF_MAX_S after a handful of failures, so
+        # cap the exponent: 2 ** failures stops converting to a float at 1024,
+        # about 17 hours into an outage at the 60 s ceiling.
+        delay = min(BACKOFF_BASE_S * 2.0 ** min(self.failures, 16), BACKOFF_MAX_S)
         self.failures += 1
         return max(delay, self.floor)
 
@@ -76,22 +82,25 @@ class Service:
     display_name: str = field(default_factory=socket.gethostname)
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _last_refresh_attempt: float = float("-inf")
-    # The SDK token reaches Muse only in refresh bodies until apps forward it at
-    # mint, so each start with a token attempts one refresh to report it.
-    _sdk_token_report_attempted: bool = False
+    _sdk_token_change_warned: bool = False
     _current: LinkSession | None = None
+    _invoke_slots: asyncio.Semaphore = field(
+        default_factory=lambda: asyncio.Semaphore(MAX_CONCURRENT_INVOKES), init=False, repr=False,
+    )
 
     def stop(self) -> None:
         self._stop.set()
 
     async def run(self) -> None:
         backoff = Backoff()
+        token_rejected = False
         while not self._stop.is_set():
             pairing = config.load_json(config.PAIRING_FILE)
             if not pairing:
                 log.info("not paired; run `musegadget pair` to set up")
                 await self._sleep(UNPAIRED_POLL_S)
                 continue
+            self._warn_if_sdk_token_changed(pairing)
             pairing = await self._maybe_refresh(pairing)
             if pairing is None:
                 await self._sleep(TOKEN_RETRY_S)
@@ -105,7 +114,14 @@ class Service:
                 log.warning("device token rejected by the API; refreshing")
                 if await self._maybe_refresh(pairing, force=True) is None:
                     await self._sleep(TOKEN_RETRY_S)
+                elif token_rejected:
+                    # Allow one immediate retry with the first refreshed token.
+                    # Repeated rejection must not spin through successful refreshes.
+                    backoff.floor = AUTH_BACKOFF_MIN_S
+                    await self._sleep(backoff.next_delay())
+                token_rejected = True
                 continue
+            token_rejected = False
             vm = next((v for v in vms if v["is_default"]), vms[0] if vms else None)
             if vm is None:
                 await self._sleep(backoff.next_delay())
@@ -126,25 +142,43 @@ class Service:
             log.info("reconnecting in %.0fs", delay)
             await self._sleep(delay)
 
-    async def _session(self, vm: dict, pairing: dict) -> tuple[Outcome, float]:
-        device = DeviceDescription(
+    def describe(self) -> DeviceDescription:
+        """Describe the device to register with Muse for each session."""
+        return DeviceDescription(
             node_id=self.identity.node_id,
             display_name=self.display_name,
             version=__version__,
-            commands=COMMAND_SPECS,
+            commands=self.executor.specs(node_id=self.identity.node_id,
+                                         display_name=self.display_name, version=__version__),
         )
+
+    def run_command(self, name: str, params: dict, timeout_ms: int | None = None) -> dict:
+        """Handle one command from Muse. LinkSession calls this in a worker thread."""
+        return self.executor.run(name, params, timeout_ms)
+
+    async def serve(self, session: LinkSession, vm: dict, stop: asyncio.Event) -> Outcome:
+        """Run one session until it ends or ``stop`` is set, and return how it ended.
+
+        Override to run the gadget's own work beside ``session.run(stop)``.
+        Clean up that work before returning the session's outcome. An active
+        local message socket forwards to this session while it is registered.
+        """
+        return await session.run(stop)
+
+    async def _session(self, vm: dict, pairing: dict) -> tuple[Outcome, float]:
         session = LinkSession(
             noise_host=pairing.get("noise_host") or DEFAULT_NOISE_HOST,
             vm_id=vm["vm_id"] or vm["vm_name"],
             vm_auth_token=vm["vm_auth_token"],
-            device=device,
-            run_command=self.executor.run,
+            device=self.describe(),
+            run_command=self.run_command,
+            invoke_slots=self._invoke_slots,
         )
         log.info("connecting to %s", vm["vm_name"] or vm["vm_id"])
         started = time.monotonic()
         self._current = session
         try:
-            outcome = await session.run(self._stop)
+            outcome = await self.serve(session, vm, self._stop)
         except Exception as exc:
             log.warning("session failed: %s: %s", type(exc).__name__, exc)
             outcome = Outcome.CLOSED
@@ -154,6 +188,17 @@ class Service:
         log.info("session ended: %s after %.0fs", outcome.value, time.monotonic() - started)
         return outcome, lasted
 
+    def _warn_if_sdk_token_changed(self, pairing: dict) -> None:
+        """Muse records a device's SDK token only when it pairs, so a token set
+        afterwards takes effect only once the device pairs again."""
+        paired = pairing.get("sdk_token_hint")
+        if self._sdk_token_change_warned or paired is None:
+            return
+        if paired != config.sdk_token_hint(self.sdk_token):
+            self._sdk_token_change_warned = True
+            log.warning("paired with SDK token %s, not this one; run `musegadget pair --force` "
+                        "to use it", paired)
+
     async def _maybe_refresh(self, pairing: dict, force: bool = False) -> dict | None:
         """Return current pairing, rotating tokens first if they are due.
 
@@ -162,16 +207,11 @@ class Service:
         has been revoked.
         """
         age = time.time() - pairing.get("access_token_saved_at", 0)
-        report_due = bool(self.sdk_token) and not self._sdk_token_report_attempted
-        due = force or age >= TOKEN_REFRESH_AGE_S
-        if not due and not report_due:
+        if not force and age < TOKEN_REFRESH_AGE_S:
             return pairing
         if not force and time.monotonic() - self._last_refresh_attempt < TOKEN_RETRY_S:
             return pairing
         self._last_refresh_attempt = time.monotonic()
-        if report_due:
-            self._sdk_token_report_attempted = True
-            log.info("refreshing device token to report the SDK token")
         tokens, status = await asyncio.to_thread(
             muse_api.refresh_device_token,
             pairing["refresh_token"], self.identity.node_id,
@@ -188,11 +228,6 @@ class Service:
             config.save_json(config.PAIRING_FILE, pairing)
             log.info("device token rotated")
             return pairing
-        if not due:
-            # Only reporting the SDK token: nothing has rejected the current
-            # token, so a refusal here must never unpair the device.
-            log.warning("SDK token report refresh failed (HTTP %s); keeping the pairing", status)
-            return pairing
         if status == 401:
             config.delete_json(config.PAIRING_FILE)
             log.error("pairing revoked; run `musegadget pair` to set up again")
@@ -206,9 +241,10 @@ class Service:
         """Accept messages for the Muse from programs on this device.
 
         Each connection sends one JSON line, ``{"message": "..."}`` plus an
-        optional ``"session_id"`` naming a side chat, and gets one JSON line
-        back. Only root and the command account's group can
-        connect.
+        optional ``"session_id"`` naming a side chat and ``"image"``
+        (``{"mime_type", "data_base64", "filename"}``, see
+        ``LinkSession.send_image``), and gets one JSON line back. Only root
+        and the command account's group can connect.
         """
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if path.exists():
@@ -222,14 +258,25 @@ class Service:
         return server
 
     async def _handle_local(self, reader, writer) -> None:
+        too_long = False
         try:
-            line = await asyncio.wait_for(reader.readline(), 10)
-            reply = await self._local_request(line)
+            try:
+                line = await asyncio.wait_for(reader.readline(), 10)
+            except ValueError:  # the line is over the stream limit
+                too_long = True
+                reply = {"ok": False,
+                         "error": f"the request is over {MAX_LOCAL_REQUEST // (1024 * 1024)} MiB"}
+            else:
+                reply = await self._local_request(line)
         except Exception as exc:
             reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         writer.write(json.dumps(reply).encode() + b"\n")
         try:
             await writer.drain()
+            if too_long:
+                # Closing with unread input resets the connection, which can
+                # lose the reply before the sender reads it.
+                await _discard_line(reader)
         finally:
             writer.close()
 
@@ -243,9 +290,28 @@ class Service:
             isinstance(session_id, str) and _SESSION_ID_RE.fullmatch(session_id)
         ):
             return {"ok": False, "error": "session_id must be letters, digits and dashes"}
+        image = request.get("image")
+        if image is not None:
+            if not (isinstance(image, dict) and isinstance(image.get("mime_type"), str)
+                    and isinstance(image.get("data_base64"), str)
+                    and isinstance(image.get("filename", ""), str)):
+                return {"ok": False, "error": "image must be {mime_type, data_base64, filename}"}
+            try:
+                image_bytes = base64.b64decode(image["data_base64"], validate=True)
+            except ValueError:
+                return {"ok": False, "error": "image data_base64 is not valid base64"}
+            try:
+                check_image(image_bytes, image["mime_type"])
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
         session = self._current
         if session is None or session.registered_at is None:
             return {"ok": False, "error": "not connected to the Muse"}
+        if image is not None:
+            log.info("forwarding a %d-character message and an image to the Muse", len(message))
+            return await session.send_image(
+                image_bytes, image["mime_type"], session_id,
+                message=message, filename=image.get("filename") or None)
         log.info("forwarding a %d-character message to the Muse", len(message))
         return await session.send_chat(message, session_id)
 
@@ -254,6 +320,19 @@ class Service:
             await asyncio.wait_for(self._stop.wait(), seconds)
         except asyncio.TimeoutError:
             pass
+
+
+async def _discard_line(reader, timeout_s: float = 10) -> None:
+    async def discard():
+        while True:
+            data = await reader.read(64 * 1024)
+            if not data or b"\n" in data:
+                return
+
+    try:
+        await asyncio.wait_for(discard(), timeout_s)
+    except asyncio.TimeoutError:
+        pass
 
 
 def run_service(identity: Identity, executor: Executor, sdk_token: str | None = None) -> None:

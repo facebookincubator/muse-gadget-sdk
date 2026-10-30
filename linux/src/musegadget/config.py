@@ -29,6 +29,8 @@ IDENTITY_FILE = "identity.json"
 PAIRING_FILE = "pairing.json"
 SDK_TOKEN_ENV = "MUSEGADGET_SDK_TOKEN"
 SDK_TOKEN_FILE = "sdk_token"
+COMMANDS_DIR_ENV = "MUSEGADGET_COMMANDS_DIR"
+DEFAULT_COMMANDS_DIR = Path("/etc/musegadget/commands.d")
 # mgst_ plus 43 canonical base64url characters, as issued by gadgets.muse.ai.
 _SDK_TOKEN = re.compile(r"mgst_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]")
 
@@ -40,6 +42,11 @@ def state_dir() -> Path:
 def socket_path() -> Path:
     """Local socket where programs on this device hand messages to the service."""
     return Path(os.environ.get(SOCKET_ENV) or DEFAULT_SOCKET)
+
+
+def commands_dir() -> Path:
+    """Where the device's owner adds commands (see ``musegadget.commands``)."""
+    return Path(os.environ.get(COMMANDS_DIR_ENV) or DEFAULT_COMMANDS_DIR)
 
 
 def sdk_token(directory: Path | None = None) -> str | None:
@@ -61,11 +68,20 @@ def sdk_token(directory: Path | None = None) -> str | None:
     return token
 
 
+def sdk_token_hint(token: str | None) -> str:
+    """The part of an SDK token gadgets.muse.ai shows, or "none" without a token."""
+    return token[:12] if token else "none"
+
+
 def load_json(name: str, directory: Path | None = None) -> dict | None:
     path = (directory or state_dir()) / name
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except PermissionError:
+        # Not the same as a missing file: identity.load_or_create() would
+        # otherwise mint a new identity over one it merely can't read.
+        raise
+    except (OSError, ValueError):  # ValueError covers bad JSON and bad UTF-8
         return None
     return data if isinstance(data, dict) else None
 

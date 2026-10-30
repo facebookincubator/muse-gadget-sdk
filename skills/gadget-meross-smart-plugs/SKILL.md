@@ -17,7 +17,7 @@ Use this skill when the exact Meross plug and firmware support the signed local 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - The device UUID and existing local key, supplied through approved secret storage.
 - A direct protocol client or an agent-authored implementation of the documented request envelope. Use the community implementation as a protocol reference; installing its host platform is not required.
