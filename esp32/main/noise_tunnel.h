@@ -47,6 +47,14 @@ void noise_tunnel_set_packet_cb(noise_tunnel_packet_cb cb);
 // Non-blocking; returns false if the tunnel is down or the TX pool is full.
 bool noise_tunnel_send_packet(const uint8_t *data, size_t len);
 
+// Zero-copy form of noise_tunnel_send_packet: take a free batch buffer of
+// *cap bytes to fill in place, then hand it to commit (queued for the session
+// task) or abort (back to the pool). Returns NULL if the tunnel is down or
+// the pool is empty. Exactly one of commit/abort per acquired buffer.
+uint8_t *noise_tunnel_acquire_batch(size_t *cap);
+bool noise_tunnel_commit_batch(uint8_t *buf, size_t len);
+void noise_tunnel_abort_batch(uint8_t *buf);
+
 // True once the tunnel stream is open on the live Noise session.
 bool noise_tunnel_is_connected(void);
 

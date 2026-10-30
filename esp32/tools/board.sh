@@ -31,17 +31,25 @@
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
 #   reterminal-e1002
 #              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
+#   reterminal-sticky
+#              Seeed reTerminal Sticky (ESP32-S3) with a 3.97 inch e-paper
+#   reterminal-sticky-link
+#              Seeed reTerminal Sticky with a Link-only status screen
 #   c6-nopsram ESP32-C6 devkit without PSRAM (status LED on GPIO8, no display)
 #   espressif-s3-devkitc-1
 #              ESP32-S3-DevKitC-1 v1.1 N8R8 (status LED, no display)
 #   waveshare-c6-lcd-147
 #              Waveshare ESP32-C6-LCD-1.47 with a 172x320 status screen
+#   waveshare-s3-epaper-154
+#              Waveshare ESP32-S3-1.54inch-ePaper V2 with a 200x200 e-paper
+#   waveshare-s3-epaper-154g
+#              Waveshare ESP32-S3-ePaper-1.54G with a 200x200 four-colour e-paper
 #
 # The action defaults to build. Without PORT, flash and monitor use the only
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,46p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -79,6 +87,16 @@ case "$BOARD" in
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
     ;;
+  reterminal-sticky)
+    TARGET=esp32s3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.muse;devices/sdkconfig.$BOARD"
+    PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB* /dev/cu.usbmodem* /dev/ttyACM*"
+    ;;
+  reterminal-sticky-link)
+    TARGET=esp32s3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB* /dev/cu.usbmodem* /dev/ttyACM*"
+    ;;
   home-assistant-voice|seeed-respeaker-lite)
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
@@ -97,6 +115,12 @@ case "$BOARD" in
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # The "ESP32-S3 USB Port", the chip's own USB-Serial-JTAG. The
     # USB-to-UART port works too; pass it explicitly.
+    PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
+    ;;
+  waveshare-s3-epaper-154|waveshare-s3-epaper-154g)
+    TARGET=esp32s3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    # The S3's own USB-Serial-JTAG.
     PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
   *) echo "error: unknown board '$BOARD'" >&2; usage 2 ;;
