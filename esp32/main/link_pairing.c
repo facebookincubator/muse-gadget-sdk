@@ -44,6 +44,7 @@
 
 #include "pairing_signer_policy.h"
 #include "pairing_transcript.h"
+#include "token_fp.h"
 
 static const char *TAG = "link.pairing";
 
@@ -1058,7 +1059,8 @@ static char *status_plain_json(const char *status) {
         return NULL;
     }
     if (s_sdk_token && strcmp(status, "pairing_confirmed") == 0) {
-        ESP_LOGI(TAG, "pairing_confirmed carries SDK token %.12s", s_sdk_token);
+        char fp[TOKEN_FP_TEXT_LEN];
+        ESP_LOGI(TAG, "pairing_confirmed carries the SDK token (%s)", token_fp_text(s_sdk_token, fp));
     }
     char *plain_json = cJSON_PrintUnformatted(plain);
     cJSON_Delete(plain);

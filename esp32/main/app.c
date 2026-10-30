@@ -47,6 +47,7 @@
 #if CONFIG_MUSE_WASM_APPS
 #include "muse_apps.h"
 #endif
+#include "token_fp.h"
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
@@ -2823,12 +2824,13 @@ void app_run(void) {
     ESP_LOGI(TAG, "  Colour:   %s", have_colour ? colour : "(none)");
     ESP_LOGI(TAG, "  Region:   %s", have_region ? region : "(none)");
     ESP_LOGI(TAG, "  Verify:   %s", link_pairing_sign_factory_test());
-    // Only the hint gadgets.muse.ai displays; the full token is never logged.
-    ESP_LOGI(TAG, "  SDK token:  %.12s", identity_sdk_token() ? identity_sdk_token() : "(none)");
-    char paired_sdk_hint[IDENTITY_SDK_TOKEN_HINT_LEN + 1];
-    if (identity_sdk_token_changed_since_pairing(paired_sdk_hint, sizeof(paired_sdk_hint))) {
-        ESP_LOGW(TAG, "  Paired with SDK token %s, not this one. Pair again in the "
-                      "Muse app to use it.", paired_sdk_hint);
+    // Whether there is one, its length and a SHA-256 prefix: never any of its
+    // characters (token_fp.h).
+    char sdk_fp[TOKEN_FP_TEXT_LEN];
+    ESP_LOGI(TAG, "  SDK token:  %s", token_fp_text(identity_sdk_token(), sdk_fp));
+    if (identity_sdk_token_changed_since_pairing(NULL, 0)) {
+        ESP_LOGW(TAG, "  Paired with another SDK token, not this one. Pair again in the "
+                      "Muse app to use it.");
     }
     ESP_LOGI(TAG, "========================");
 
