@@ -24,8 +24,9 @@ import wave
 import pytest
 
 from musegadget.link_client import (
-    DeviceDescription, HttpStreamError, LinkSession, MAX_CONCURRENT_INVOKES, MessageDecoder, Outcome,
-    RequestRejected, SideChat, acknowledgement, describe_result, encode_message, noise_url, printable,
+    DeviceDescription, HttpStreamError, LinkSession, MAX_CONCURRENT_INVOKES, MAX_IMAGE_BYTES,
+    MessageDecoder, Outcome, RequestRejected, SideChat, acknowledgement, check_image, describe_result,
+    encode_message, noise_url, printable,
 )
 from musegadget.noise import (
     ApplicationResponse, BodyChunk, Header, NoiseFrameDecoder, NoiseXXResponder, ServiceFrame,
@@ -531,6 +532,81 @@ def test_register_rejection_never_reports_ready(rejection):
     asyncio.run(bounded_scenario(scenario()))
 
 
+async def read_upload(vm):
+    request = await vm.next_frame()
+    assert (request.value.verb, request.value.path, request.value.end_body) == (
+        "POST", "/chat/stream", False)
+    body = bytearray(request.value.body)
+    chunks = 0
+    while True:
+        frame = await vm.next_frame()
+        assert frame.kind == "body_chunk" and frame.stream_id == request.stream_id
+        assert len(frame.value.data) <= 16384
+        body += frame.value.data
+        chunks += 1
+        if frame.value.end_body:
+            return request, json.loads(body), chunks
+
+
+def test_largest_image_uploads_in_chunks_as_an_image_item_after_its_text():
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        picture = b"\x89PNG\r\n\x1a\n" + bytes(MAX_IMAGE_BYTES - 8)
+        reply = asyncio.ensure_future(session.send_image(
+            picture, "image/png", "porch-chat", message="who is it?", filename="porch.png"))
+        request, uploaded, chunks = await read_upload(vm)
+        assert chunks > 100
+        text, image = uploaded.pop("items")
+        assert uploaded == {
+            "message": "who is it?", "output_modality": "text", "device_id": "homelink-abcdef",
+            "session_id": "porch-chat",
+        }
+        assert text == {"type": "text", "text": "who is it?"}
+        assert {key: image[key] for key in ("type", "mime_type", "filename")} == {
+            "type": "image", "mime_type": "image/png", "filename": "porch.png"}
+        assert base64.b64decode(image["data_base64"]) == picture
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b'{"result":{"message_id":"user-1"}}', end_body=True,
+        )))
+        assert (await reply)["ok"]
+        stop.set()
+        await task
+
+    asyncio.run(asyncio.wait_for(scenario(), 30))
+
+
+def test_send_image_refuses_oversized_or_non_image_input_before_sending():
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        with pytest.raises(ValueError, match="images must be 2 MiB or less"):
+            await session.send_image(bytes(MAX_IMAGE_BYTES + 1), "image/jpeg", message="hi")
+        with pytest.raises(ValueError, match="JPEG, PNG, GIF or WebP"):
+            await session.send_image(b"%PDF-1.7", "application/pdf", message="hi")
+        with pytest.raises(ValueError, match="empty"):
+            await session.send_image(b"", "image/jpeg", message="hi")
+        # Nothing went out: the next request on the session is this one.
+        reply = asyncio.ensure_future(session.send_image(b"GIF89a", "image/gif"))
+        request = await vm.next_frame()
+        uploaded = json.loads(request.value.body)
+        assert [item["type"] for item in uploaded["items"]] == ["image"]
+        assert "filename" not in uploaded["items"][0]
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b"{}", end_body=True)))
+        assert (await reply)["ok"]
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
+def test_check_image_accepts_exactly_the_limit_and_supported_types():
+    for mime_type in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+        check_image(bytes(MAX_IMAGE_BYTES), mime_type)
+    for mime_type in ("image/heic", "image/svg+xml", "text/plain", ""):
+        with pytest.raises(ValueError):
+            check_image(b"x", mime_type)
+
+
 def test_twenty_second_voice_note_uploads_in_bounded_chunks():
     async def scenario():
         session, vm, stop, task = await registered_session()
@@ -577,6 +653,30 @@ def test_twenty_second_voice_note_uploads_in_bounded_chunks():
     asyncio.run(bounded_scenario(scenario()))
 
 
+@pytest.mark.parametrize("message, items", [
+    ("what did I just say?", [{"type": "text", "text": "what did I just say?"}]),
+    ("", []),
+    ("  \n", []),
+], ids=["with_message", "without_message", "blank_message"])
+def test_voice_note_sends_its_message_as_a_text_item_before_the_audio(message, items):
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        reply = asyncio.ensure_future(session.send_voice(b"WAV", message=message))
+        request = await vm.next_frame()
+        uploaded = json.loads(request.value.body)
+        assert uploaded["message"] == message
+        assert uploaded["items"] == items + [
+            {"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+             "data_base64": "V0FW"}]
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b"{}", end_body=True)))
+        assert (await reply)["ok"]
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
 @pytest.mark.parametrize("send, body", [
     (lambda session: session.send_chat("Hello", output_modality="voice"),
      {"message": "Hello", "device_id": "homelink-abcdef", "output_modality": "voice"}),
@@ -584,7 +684,8 @@ def test_twenty_second_voice_note_uploads_in_bounded_chunks():
         b"WAV", "existing-chat", message="Use concise robot replies.", output_modality="voice"),
      {"message": "Use concise robot replies.", "device_id": "homelink-abcdef",
       "session_id": "existing-chat", "output_modality": "voice",
-      "items": [{"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+      "items": [{"type": "text", "text": "Use concise robot replies."},
+                {"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
                  "data_base64": "V0FW"}]}),
 ], ids=["send_chat", "send_voice"])
 def test_request_can_ask_for_a_spoken_reply(send, body):

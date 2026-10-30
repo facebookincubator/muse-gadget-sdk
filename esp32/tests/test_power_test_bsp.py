@@ -116,7 +116,7 @@ class WatcherPowerBspTest(unittest.TestCase):
     def test_hold_release_precedes_uart_and_restoration_has_readback(self):
         source = (ROOT / "components/muse/muse_power_test.c").read_text()
         startup, _ = function_body(source, "void muse_power_test_run(void)")
-        self.assertLess(startup.index("muse_ptest_board_release_deep_holds()"), startup.index("uart_driver_install("))
+        self.assertLess(startup.index("muse_ptest_board_release_deep_holds()"), startup.index("muse_ptest_board_console_init("))
         finish, _ = function_body(source, "static void finish_run(")
         self.assertIn("s_run.restore_error = fw_readback(&restored)", finish)
         readback, _ = function_body(BSP.read_text(), "esp_err_t muse_ptest_board_readback(")

@@ -279,7 +279,11 @@ their own:
 ```sh
 musegadget send-user-msg "The garage door has been open for an hour."
 musegadget send-user-msg --session-id 6f1c2d4e-0b7a-4c3e-9f5d-2a8b1e0c7d93 "Posted to a side chat"
+musegadget send-user-msg --image porch.jpg "Who is at the door?"
 ```
+
+`--image` attaches a JPEG, PNG, GIF or WebP picture of at most 2 MiB for
+Muse to look at.
 
 `--session-id` posts into a side chat: a new id starts one, and reusing it
 keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_ring_bridge.py)

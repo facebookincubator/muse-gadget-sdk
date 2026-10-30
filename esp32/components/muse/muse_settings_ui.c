@@ -24,6 +24,9 @@
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
+#if CONFIG_ESP_HOSTED_ENABLED
+#include "esp_wifi.h"
+#endif
 
 #include "muse_audio.h"
 #include "muse_battery.h"
@@ -848,6 +851,22 @@ static bool rebuild_scan_list(void)
     return fresh && saved_seen;
 }
 
+static bool sta_mac(uint8_t m[6])
+{
+#if CONFIG_ESP_HOSTED_ENABLED
+    /* The Wi-Fi coprocessor's, asked once: the call queues behind its other RPCs. */
+    static uint8_t s_mac[6];
+    static bool s_have;
+    if (!s_have) {
+        s_have = esp_wifi_get_mac(WIFI_IF_STA, s_mac) == ESP_OK;
+    }
+    memcpy(m, s_mac, sizeof(s_mac));
+    return s_have;
+#else
+    return esp_read_mac(m, ESP_MAC_WIFI_STA) == ESP_OK;
+#endif
+}
+
 static void build_wifi_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
@@ -865,7 +884,7 @@ static void build_wifi_page(lv_obj_t *tile)
     row(list, LV_SYMBOL_EDIT, "Other network...", NULL, on_wifi_other, NULL);
     lv_obj_t *mac = info_row(list, "MAC address");
     uint8_t m[6];
-    if (esp_read_mac(m, ESP_MAC_WIFI_STA) == ESP_OK) {
+    if (sta_mac(m)) {
         char buf[18];
         snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
         lv_label_set_text(mac, buf);

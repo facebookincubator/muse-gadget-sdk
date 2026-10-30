@@ -187,6 +187,7 @@ status screen.
 | Waveshare ESP32-C6-LCD-1.47 | Status on screen, images | `tools/board.sh waveshare-c6-lcd-147 build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
+| Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours | `tools/board.sh waveshare-s3-epaper-154g build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
 | Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI on FreeInk, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
@@ -212,6 +213,7 @@ status screen.
 | Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
+| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
