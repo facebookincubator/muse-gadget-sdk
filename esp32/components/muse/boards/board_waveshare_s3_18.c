@@ -77,7 +77,9 @@ static esp_err_t init(void)
     ESP_RETURN_ON_ERROR(reset_panel_and_touch(), TAG, "panel reset");
     if (muse_pmu_init(bsp_i2c_get_handle(), true) != ESP_OK) {
         ESP_LOGW(TAG, "no PMU: PWR button and battery unavailable");
+        return ESP_OK;
     }
+    (void)muse_pmu_poll_key();   /* the press that turned the board on may still be latched */
     return ESP_OK;
 }
 

@@ -78,6 +78,7 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_18
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.8"
             depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_C6_206
             bool "Waveshare ESP32-C6-Touch-AMOLED-2.06"
             depends on IDF_TARGET_ESP32C6
