@@ -32,6 +32,7 @@ CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 
 # 4 MB flash with a custom single-app partition table (no OTA).
+CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_cyd_4mb.csv"
 # DIO is the safe mode for the unknown flash part on this board.
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y

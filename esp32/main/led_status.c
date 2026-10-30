@@ -227,9 +227,16 @@ static const char *TAG = "link.led";
 #define LCD_DOT_X        (LCD_H_RES - LCD_DOT_MARGIN - LCD_DOT_SIZE)
 #define LCD_DOT_Y        LCD_DOT_MARGIN
 // Title: one line of pixel font, in the animation's pixel size when it fits.
+// On the CYD the animation fills most of the panel's height, and a title that
+// size would start above the top edge, so it is drawn at half the size.
+#if CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
 #define LCD_TITLE_MAX_SCALE 2
+#else
+#define LCD_TITLE_MAX_SCALE LCD_ANIM_SCALE
+#endif
 #define LCD_TITLE_ROWS   (PIXEL_FONT_HEIGHT * LCD_TITLE_MAX_SCALE)
 #define LCD_TITLE_Y      (LCD_ANIM_Y - LCD_TITLE_ROWS - 16)
+_Static_assert(LCD_TITLE_Y >= LCD_BAR_ROWS, "title overlaps the top status bar");
 // Rows rendered per panel write; must fit s_bar_buf.
 #define LCD_TITLE_STRIPE_ROWS 8
 // Full-width rows that fit s_anim_buf.
@@ -673,10 +680,10 @@ static esp_err_t lcd_panel_init(void) {
     if (err == ESP_OK) {
         err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &io);
     }
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
-    if (err == ESP_OK) err = esp_lcd_new_panel_st7789(io, &panel_cfg, &s_panel);
-#else
+#if CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
     if (err == ESP_OK) err = esp_lcd_new_panel_ili9341(io, &panel_cfg, &s_panel);
+#else
+    if (err == ESP_OK) err = esp_lcd_new_panel_st7789(io, &panel_cfg, &s_panel);
 #endif
     if (err == ESP_OK) err = esp_lcd_panel_reset(s_panel);
     if (err == ESP_OK) err = esp_lcd_panel_init(s_panel);
@@ -685,8 +692,7 @@ static esp_err_t lcd_panel_init(void) {
     // orientation TFT_eSPI uses; without it the image is flipped left-right
     // (e.g. the connected dot lands top-left instead of top-right).
     if (err == ESP_OK) err = esp_lcd_panel_mirror(s_panel, true, false);
-#endif
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
+#else
     if (err == ESP_OK) err = esp_lcd_panel_invert_color(s_panel, true);
     if (err == ESP_OK) err = esp_lcd_panel_set_gap(s_panel, LCD_X_GAP, 0);
 #endif
