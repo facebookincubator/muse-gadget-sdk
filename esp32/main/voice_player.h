@@ -44,3 +44,5 @@ bool voice_player_wait(int timeout_ms);
 void voice_player_stop(void);
 // True once this reply has made a sound.
 bool voice_player_started(void);
+// Samples buffered and not yet sent to the speaker.
+size_t voice_player_queued(void);

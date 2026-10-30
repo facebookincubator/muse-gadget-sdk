@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -32,6 +33,7 @@
 #include "config_store.h"
 #include "identity.h"
 #include "noise_control.h"
+#include "sdk_token_console.h"
 #include "stack_monitor.h"
 #include "wifi_known.h"
 #include "wifi_mgr.h"
@@ -43,6 +45,9 @@
 #include "muse_mem.h"
 #include "muse_settings.h"
 #include "muse_state.h"
+#if CONFIG_MUSE_REALTIME_VOICE
+#include "muse_voice_call.h"
+#endif
 
 static const char *TAG = "link.muse";
 
@@ -371,6 +376,19 @@ static bool op_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *v
     return s_linked && app_hatch_vm_credentials(want_vm, vm_id, id_cap, vm_name, name_cap, vm_token);
 }
 
+// Pairing and the API client take the SDK token at boot, so a new one
+// needs a restart, as when it's set over serial (sdk_token_console.h).
+static bool op_sdk_token_set(const char *token) {
+    if (!identity_set_sdk_token(token)) return false;
+    ESP_LOGI(TAG, "SDK token %.12s set in settings, restarting to use it", token);
+    esp_restart();
+    return true;
+}
+
+static bool op_sdk_token_changed(void) {
+    return identity_sdk_token_changed_since_pairing(NULL, 0);
+}
+
 static bool op_talk_press(void) {
     return app_confirm_pairing_press();
 }
@@ -391,6 +409,9 @@ static const muse_link_ops_t s_ops = {
     .ble_apply = op_ble_apply,
     .ble_started = op_ble_started,
     .hatch_linked = op_hatch_linked,
+    .sdk_token = identity_sdk_token,
+    .sdk_token_set = op_sdk_token_set,
+    .sdk_token_changed = op_sdk_token_changed,
     .hatch_vm = op_hatch_vm,
     .talk_press = op_talk_press,
     .reset_setup = op_reset_setup,
@@ -400,6 +421,7 @@ static const muse_link_ops_t s_ops = {
     .req_cancel = noise_ctrl_req_cancel,
     .power_save = noise_ctrl_set_power_save,
     .wifi_nap = op_wifi_nap,
+    .ble_quiet = ble_server_set_quiet,
     .wifi_saved = op_wifi_saved,
     .wifi_forget = op_wifi_forget,
 };
@@ -463,6 +485,11 @@ static bool none_nearby_lately(void) {
     return !seen;
 }
 
+// CONFIG_HOMEHUB_WIFI_SSID (a development override, never saved to NVS):
+// Link joins that network itself and wifi_mgr rejoins it, so Muse's keeper
+// leaves Wi-Fi alone instead of dropping a network it has no copy of.
+#define WIFI_OVERRIDE (CONFIG_HOMEHUB_WIFI_SSID[0] != '\0')
+
 static void keeper_task(void *arg) {
     (void)arg;
     xEventGroupWaitBits(s_ready, BIT_LINK | BIT_MUSE, pdFALSE, pdTRUE, portMAX_DELAY);
@@ -518,7 +545,7 @@ static void keeper_task(void *arg) {
             }
         }
 
-        bool have = s_ssid[0] != '\0';
+        bool have = s_ssid[0] != '\0' || WIFI_OVERRIDE;
         napped = napped && s_nap;
         if (!muse_settings_wifi_on() || !have) {
             if (wifi_mgr_is_connected()) {
@@ -535,7 +562,7 @@ static void keeper_task(void *arg) {
                 ESP_LOGI(TAG, "screen off a while; left wifi");
                 napped = true;
             }
-        } else if (wifi_mgr_is_connected() && joined_gen != s_creds_gen) {
+        } else if (!WIFI_OVERRIDE && wifi_mgr_is_connected() && joined_gen != s_creds_gen) {
             ESP_LOGI(TAG, "wifi network changed; rejoining");
             wifi_mgr_disconnect();
             next_try = 0;
@@ -544,7 +571,7 @@ static void keeper_task(void *arg) {
             backoff = RETRY_MIN_US;
             away_backoff = AWAY_MIN_US;
             s_away = false;
-        } else if (!s_editing && esp_timer_get_time() >= next_try) {
+        } else if (!WIFI_OVERRIDE && !s_editing && esp_timer_get_time() >= next_try) {
             // NVS has Muse's changes (s_editing is clear), so Link joins from
             // the same list the settings show.
             uint32_t gen = s_creds_gen;
@@ -622,6 +649,7 @@ void muse_glue_start(void) {
     muse_input_power_init();
     s_ready = xEventGroupCreate();
     muse_link_register(&s_ops);
+    muse_input_set_console_hook(sdk_token_console_command);
     muse_ble_set_name(identity_ble_name());
     ble_companion_t companion = {
         .svcs = muse_ble_services(),
@@ -684,3 +712,10 @@ void muse_glue_led_state(led_state_t state) {
     // Pairing, provisioning and unpair all move the LED; pick up their config.
     keeper_kick(KEEP_RELOAD);
 }
+
+#if CONFIG_MUSE_REALTIME_VOICE
+// The call names Link's node as its device (a RAM string set at boot).
+const char *muse_voice_call_device_id(void) {
+    return identity_node_id();
+}
+#endif
