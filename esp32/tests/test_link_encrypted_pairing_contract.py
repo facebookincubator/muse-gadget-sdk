@@ -156,7 +156,7 @@ class LinkEncryptedPairingContractTest(unittest.TestCase):
         self.assertNotIn('cJSON_GetObjectItem(root, "token")', provision_v2_block)
         self.assertLess(
             provision_v2_block.index("link_pairing_mark_provisioning_active()"),
-            provision_v2_block.index("xTaskCreate(provision_task"),
+            provision_v2_block.index("helper_task_create(provision_task"),
         )
         self.assertIn('!= pdPASS', provision_v2_block)
         self.assertIn("secure_free_str(a->password)", provision_v2_block)

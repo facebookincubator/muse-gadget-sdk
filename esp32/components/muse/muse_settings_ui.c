@@ -135,6 +135,25 @@ static lv_obj_t *s_text_back;
 /* Network and phone names can have characters the fonts lack (muse_text.h). */
 #define SHOWN_MAX 96
 
+static bool wide_layout(void)
+{
+    return muse_board->width >= 640 && muse_board->height >= 400;
+}
+
+static const lv_font_t *settings_font(const lv_font_t *font)
+{
+    if (!wide_layout()) {
+        return font;
+    }
+    if (font == &lv_font_unscii_16 || font == &lv_font_montserrat_16) {
+        return &lv_font_montserrat_20;
+    }
+    if (font == &lv_font_montserrat_20) {
+        return &lv_font_montserrat_28;
+    }
+    return font;
+}
+
 /* A 172 px portrait panel cannot fit an icon, name and status side by side. */
 static bool narrow_panel(void)
 {
@@ -153,7 +172,7 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, 
 {
     char shown[SHOWN_MAX];
     lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_font(l, settings_font(font), 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
     lv_label_set_text(l, muse_text_showable(text, shown, sizeof(shown)));
     return l;
@@ -211,10 +230,16 @@ static lv_obj_t *back_button(lv_obj_t *p)
 {
     lv_obj_t *b = lv_button_create(p);
     lv_obj_remove_style_all(b);
-    lv_obj_set_size(b, 56, 48);
-    lv_obj_align(b, LV_ALIGN_TOP_MID, -112, 28);
+    if (wide_layout()) {
+        lv_obj_set_size(b, 72, 64);
+        lv_obj_align(b, LV_ALIGN_TOP_LEFT, 24, 12);
+    } else {
+        lv_obj_set_size(b, 56, 48);
+        lv_obj_align(b, LV_ALIGN_TOP_MID, -112, 28);
+    }
     lv_obj_add_event_cb(b, on_back, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *arrow = label(b, &lv_font_montserrat_20, COLOR_ACCENT, LV_SYMBOL_LEFT);
+    lv_obj_t *arrow = label(b, wide_layout() ? &lv_font_montserrat_28 : &lv_font_montserrat_20,
+                            COLOR_ACCENT, LV_SYMBOL_LEFT);
     lv_obj_center(arrow);
     return b;
 }
@@ -222,9 +247,11 @@ static lv_obj_t *back_button(lv_obj_t *p)
 /* A page: title, optional back arrow, and a vertically scrolling column. */
 static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **list_out)
 {
-    /* Flat short panels, and ones too narrow for LIST_W, get tighter rows. */
+    /* Flat short panels, and ones too narrow for LIST_W, get tighter rows;
+     * large panels get bigger ones. */
+    const bool wide = wide_layout();
     const bool compact = !muse_board->round && (muse_board->height <= 240 || muse_board->width < LIST_W);
-    const int list_top = compact ? (back ? 48 : 36) : LIST_TOP;
+    const int list_top = wide ? 96 : compact ? (back ? 48 : 36) : LIST_TOP;
     lv_obj_t *p = lv_obj_create(tile);
     lv_obj_remove_style_all(p);
     lv_obj_set_size(p, lv_pct(100), lv_pct(100));
@@ -232,9 +259,10 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
     lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
     catch_swipes(p);
 
-    lv_obj_t *t = label(p, compact ? &lv_font_montserrat_16 : &lv_font_unscii_16, COLOR_ACCENT, title);
-    lv_obj_set_style_text_letter_space(t, compact ? 0 : 2, 0);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, compact ? (back ? 12 : 8) : 44);
+    lv_obj_t *t = label(p, wide ? &lv_font_montserrat_28 :
+                        compact ? &lv_font_montserrat_16 : &lv_font_unscii_16, COLOR_ACCENT, title);
+    lv_obj_set_style_text_letter_space(t, wide ? 1 : compact ? 0 : 2, 0);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, wide ? 24 : compact ? (back ? 12 : 8) : 44);
     if (narrow_panel() && back) {
         single_line(t, muse_board->width - 56);
         lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
@@ -252,14 +280,14 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
     lv_obj_t *list = lv_obj_create(p);
     lv_obj_remove_style_all(list);
     /* Keep the scrolling viewport above the tile's fixed page indicators. */
-    lv_obj_set_size(list, compact ? muse_board->width - 16 : LIST_W,
+    lv_obj_set_size(list, wide ? muse_board->width - 96 : compact ? muse_board->width - 16 : LIST_W,
                     muse_board->height - list_top - (narrow_panel() ? 24 : 0));
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, list_top);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(list, narrow_panel() ? 6 : 10, 0);
+    lv_obj_set_style_pad_row(list, wide ? 16 : narrow_panel() ? 6 : 10, 0);
     /* Clear the page dots on flat panels, or the bottom curve on round ones. */
-    lv_obj_set_style_pad_bottom(list, narrow_panel() ? 12 : (compact ? 32 : 110), 0);
+    lv_obj_set_style_pad_bottom(list, wide ? 16 : narrow_panel() ? 12 : (compact ? 32 : 110), 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     *list_out = list;
@@ -270,15 +298,15 @@ static lv_obj_t *card(lv_obj_t *list, bool clickable)
 {
     lv_obj_t *c = clickable ? lv_button_create(list) : lv_obj_create(list);
     lv_obj_remove_style_all(c);
-    lv_obj_set_size(c, lv_pct(100), ROW_H);
+    lv_obj_set_size(c, lv_pct(100), wide_layout() ? 84 : ROW_H);
     lv_obj_set_style_radius(c, 18, 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD), 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD_PRESSED), LV_STATE_PRESSED);
-    lv_obj_set_style_pad_hor(c, narrow_panel() ? 10 : 16, 0);
+    lv_obj_set_style_pad_hor(c, wide_layout() ? 24 : narrow_panel() ? 10 : 16, 0);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(c, narrow_panel() ? 8 : 12, 0);
+    lv_obj_set_style_pad_column(c, wide_layout() ? 16 : narrow_panel() ? 8 : 12, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     return c;
 }
@@ -339,7 +367,7 @@ static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_
         lv_obj_set_height(t, lv_font_get_line_height(&lv_font_montserrat_16));
     }
     lv_obj_t *sw = lv_switch_create(c);
-    lv_obj_set_size(sw, narrow_panel() ? 44 : 60, 32);
+    lv_obj_set_size(sw, wide_layout() ? 76 : narrow_panel() ? 44 : 60, wide_layout() ? 42 : 32);
     lv_obj_set_style_bg_color(sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
     lv_obj_set_style_bg_color(sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (on) {
@@ -384,8 +412,8 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
 
     lv_obj_t *s = lv_slider_create(c);
     lv_obj_set_width(s, lv_pct(94));
-    lv_obj_set_height(s, 12);
-    lv_obj_align(s, LV_ALIGN_TOP_MID, 0, 40);
+    lv_obj_set_height(s, wide_layout() ? 16 : 12);
+    lv_obj_align(s, LV_ALIGN_TOP_MID, 0, wide_layout() ? 50 : 40);
     lv_slider_set_range(s, lo, hi);
     lv_slider_set_value(s, value, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s, lv_color_hex(0x2a2345), LV_PART_MAIN);
@@ -399,7 +427,7 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_t *spacer = lv_obj_create(c);   /* room below the slider */
     lv_obj_remove_style_all(spacer);
     lv_obj_set_size(spacer, 1, 1);
-    lv_obj_align(spacer, LV_ALIGN_TOP_LEFT, 0, 64);
+    lv_obj_align(spacer, LV_ALIGN_TOP_LEFT, 0, wide_layout() ? 76 : 64);
     return s;
 }
 
@@ -410,7 +438,7 @@ static lv_obj_t *column(lv_obj_t *list)
     lv_obj_remove_style_all(l);
     lv_obj_set_size(l, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(l, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(l, 10, 0);
+    lv_obj_set_style_pad_row(l, wide_layout() ? 14 : 10, 0);
     lv_obj_remove_flag(l, LV_OBJ_FLAG_SCROLLABLE);
     return l;
 }
@@ -431,7 +459,7 @@ static lv_obj_t *info_row(lv_obj_t *list, const char *text)
         lv_obj_align(v, LV_ALIGN_LEFT_MID, 0, 11);
         return v;
     }
-    lv_obj_set_height(c, 44);
+    lv_obj_set_height(c, wide_layout() ? 60 : 44);
     lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
     return label(c, &lv_font_montserrat_16, COLOR_ACCENT, "");
@@ -583,7 +611,7 @@ static void build_keyboard(void)
     lv_obj_set_style_bg_opa(s_text_kb, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(s_text_kb, 2, 0);
     lv_obj_set_style_pad_gap(s_text_kb, 4, 0);
-    lv_obj_set_style_text_font(s_text_kb, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_text_kb, settings_font(&lv_font_montserrat_20), LV_PART_ITEMS);
     lv_obj_set_style_bg_color(s_text_kb, lv_color_hex(COLOR_CARD), LV_PART_ITEMS);
     lv_obj_set_style_text_color(s_text_kb, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
     lv_obj_set_style_radius(s_text_kb, 8, LV_PART_ITEMS);
@@ -612,12 +640,13 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 40);
 
     const lv_font_t *font = &lv_font_montserrat_20;
+    const lv_font_t *display_font = settings_font(font);
     int h = text_px(48), border = 2;
-    int pad = (h - 2 * border - lv_font_get_line_height(font)) / 2;
+    int pad = (h - 2 * border - lv_font_get_line_height(display_font)) / 2;
     s_text_ta = lv_textarea_create(s_text);
     lv_textarea_set_one_line(s_text_ta, true);
     lv_obj_set_size(s_text_ta, text_px(300), h);
-    lv_obj_set_style_text_font(s_text_ta, font, 0);
+    lv_obj_set_style_text_font(s_text_ta, display_font, 0);
     lv_obj_set_style_pad_ver(s_text_ta, pad > 0 ? pad : 0, 0);
     lv_obj_set_style_pad_hor(s_text_ta, 14, 0);
     lv_obj_set_style_bg_color(s_text_ta, lv_color_hex(COLOR_CARD), 0);
@@ -625,7 +654,11 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_set_style_border_color(s_text_ta, lv_color_hex(COLOR_ACCENT), 0);
     lv_obj_set_style_border_width(s_text_ta, border, 0);
     lv_obj_set_style_radius(s_text_ta, 14, 0);
-    lv_obj_set_style_text_font(s_text_ta, &lv_font_montserrat_16, LV_PART_TEXTAREA_PLACEHOLDER);
+    if (wide_layout()) {
+        /* Large panels keep a steady cursor. */
+        lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    }
+    lv_obj_set_style_text_font(s_text_ta, settings_font(&lv_font_montserrat_16), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_set_style_text_color(s_text_ta, lv_color_hex(COLOR_DIM), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_add_state(s_text_ta, LV_STATE_FOCUSED);
     if (muse_board->epaper) {

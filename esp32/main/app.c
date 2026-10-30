@@ -53,6 +53,7 @@
 #include "ble_commands.h"
 #endif
 #include "ble_server.h"
+#include "helper_task.h"
 #include "factory_test.h"
 #include "vm_api.h"
 #include "vm_connect.h"
@@ -222,7 +223,7 @@ static uint32_t advance_confirm_generation_locked(void) {
     if (s_confirm_timeout_task) {
         // The waiter owns no resources until it clears this handle under
         // the same lock after its delay.
-        vTaskDelete(s_confirm_timeout_task);
+        helper_task_delete(s_confirm_timeout_task);
         s_confirm_timeout_task = NULL;
     }
     return ++s_confirm_generation;
@@ -235,8 +236,8 @@ static BaseType_t start_confirm_timeout(TaskFunction_t task, const char *name,
     if (s_confirm_generation == generation
         && link_pairing_session_is_current(session_generation)) {
         s_confirm_session_generation = session_generation;
-        rc = xTaskCreate(task, name, 4096, (void *)(uintptr_t)generation, 4,
-                         &s_confirm_timeout_task);
+        rc = helper_task_create(task, name, 4096, (void *)(uintptr_t)generation, 4,
+                                &s_confirm_timeout_task);
     }
     setup_window_lock_give();
     return rc;
@@ -1303,7 +1304,7 @@ static void scan_refresh_task(void *arg) {
     }
     heap_snapshot("after wifi_scan");
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static bool schedule_scan_refresh(bool reply_requested, bool *joined) {
@@ -1321,7 +1322,7 @@ static bool schedule_scan_refresh(bool reply_requested, bool *joined) {
         return true;
     }
 
-    if (xTaskCreate(scan_refresh_task, "scan_rfsh", 4096, NULL, 4, NULL)
+    if (helper_task_create(scan_refresh_task, "scan_rfsh", 4096, NULL, 4, NULL)
         != pdPASS) {
         atomic_store_explicit(&s_scan_refresh_flags, 0, memory_order_release);
         ESP_LOGE(TAG, "failed to start wifi scan task");
@@ -2010,7 +2011,7 @@ static void confirm_timeout_task(void *arg) {
         ble_server_disconnect_pairing_session(session_generation);
     }
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static void confirmed_idle_timeout_task(void *arg) {
@@ -2033,7 +2034,7 @@ static void confirmed_idle_timeout_task(void *arg) {
         ble_server_disconnect_pairing_session(session_generation);
     }
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static void notify_pairing_confirmed(uint32_t session_generation) {
@@ -2785,10 +2786,12 @@ void app_run(void) {
         ble_coex_set_active(true);
         ui_set_ble("companion");
 #endif
-#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
         // so bring the stack up now; it stays silent until advertising is on.
+        // The CrowPanel starts it lazily instead, after muse_app_run() has
+        // reserved its internal I2S DMA buffers.
         start_ble_setup_server_if_needed();
 #endif
     }

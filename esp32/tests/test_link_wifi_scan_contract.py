@@ -168,7 +168,7 @@ class LinkWifiScanContractTest(unittest.TestCase):
         self.assertIn("SCAN_REFRESH_RUNNING", schedule)
         self.assertIn("SCAN_REFRESH_REPLY_PENDING", schedule)
         self.assertIn("previous_flags & SCAN_REFRESH_RUNNING", schedule)
-        self.assertEqual(schedule.count("xTaskCreate("), 1)
+        self.assertEqual(schedule.count("helper_task_create("), 1)
         self.assertIn(
             "atomic_store_explicit(&s_scan_refresh_flags, 0",
             schedule,

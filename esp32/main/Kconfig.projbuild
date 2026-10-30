@@ -124,6 +124,18 @@ menu "ESP32 Device SDK"
             the classic ESP32) should disable this. The control API to the VM
             keeps working; the status turns green once the control session is up.
 
+    config HOMEHUB_SETUP_TASKS_IN_PSRAM
+        bool "Put the setup tasks' stacks in PSRAM"
+        depends on SPIRAM && SPIRAM_FETCH_INSTRUCTIONS && SPIRAM_RODATA
+        default n
+        help
+            Starts the pairing timers, the Wi-Fi scan refresh and the
+            provisioning task (main/helper_task.h) with their stacks in PSRAM,
+            sparing about 16 KB of internal RAM while setup runs. For a board
+            whose overlay is short of internal RAM. It needs code and read-only
+            data in PSRAM: flash writes then leave the cache on, and
+            provisioning writes NVS, which asserts on a PSRAM stack otherwise.
+
     config HOMEHUB_BLE_PERSISTENT
         bool "Keep BLE running next to Wi-Fi and the Noise session"
         depends on BT_NIMBLE_ENABLED && !MUSE_ENABLED

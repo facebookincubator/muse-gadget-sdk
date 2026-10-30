@@ -220,6 +220,9 @@ jobs:
           - board: muse-m5stack-sticks3
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3"
+          - board: muse-crowpanel-advance-43
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-crowpanel-advance-43"
           - board: muse-m5stack-stopwatch
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch"
