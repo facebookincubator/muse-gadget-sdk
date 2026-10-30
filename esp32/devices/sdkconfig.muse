@@ -18,7 +18,8 @@
 # sdkconfig.muse-waveshare-c6-18, sdkconfig.muse-sensecap-watcher,
 # sdkconfig.muse-espressif-box-3, sdkconfig.muse-m5stack-sticks3,
 # sdkconfig.muse-m5stack-stopwatch, sdkconfig.muse-m5stack-cores3,
-# sdkconfig.muse-m5stack-stickc-plus2 or sdkconfig.muse-guition-jc3248w535.
+# sdkconfig.muse-m5stack-stickc-plus2, sdkconfig.muse-guition-jc3248w535 or
+# sdkconfig.muse-deotaland-rorolee.
 # Link owns Wi-Fi, BLE pairing, credentials and OTA; the display shows Link's
 # status instead of a status LED.
 CONFIG_HOMEHUB_LED_BACKEND_MUSE=y
