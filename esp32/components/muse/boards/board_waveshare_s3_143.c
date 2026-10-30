@@ -318,10 +318,12 @@ static esp_err_t read_power(muse_power_t *out)
         mv = raw * 3300 / 4096;
     }
     out->battery_mv = mv * 3;
-    /* Rough Li-ion window: 3.3 V empty, 4.2 V full. Far below empty, no
-     * cell is fitted: report no battery rather than 0%. */
-    int pct = (out->battery_mv - 3300) * 100 / (4200 - 3300);
-    out->battery_pct = out->battery_mv < 2500 ? -1 : pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    /* No percentage until the divider is checked with a cell: on a charger
+     * without a computer (which the USB check below can't see) the divider
+     * reads the charger's ~4.2 V, which looks like a full cell, and a
+     * percentage would run the battery policy while plugged in. The voltage
+     * stays for diagnostics, as on the LCD-1.28. */
+    out->battery_pct = -1;
     out->charging = false;   /* no charge-state line reaches the chip */
     out->usb = usb_serial_jtag_is_connected();
     return ESP_OK;
@@ -333,7 +335,7 @@ static esp_err_t power_off(void)
     muse_lcd_bands_run(send_off, NULL);
     panel_sleep(true);
     /* No PMU; deep sleep is the closest thing to off. BOOT wakes it. */
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+    ESP_RETURN_ON_ERROR(esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0), TAG, "boot wake");
     esp_deep_sleep_start();
     return ESP_FAIL;
 }
