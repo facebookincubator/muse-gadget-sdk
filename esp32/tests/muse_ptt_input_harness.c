@@ -66,9 +66,13 @@ void muse_menu_key(muse_menu_key_t key) { selected=key; }
 static esp_err_t board_off(void) { assert(shutdown==1); ++powered_off; return ESP_FAIL; }
 /* A two-button board with AUX (every board but the StopWatch), and the
  * StopWatch as it ships: talk, speaker and red POWER, each its own control. */
-static const muse_board_t board={.touch=true,.talk_button="yellow",.aux_button="blue",.power_off=board_off};
+static esp_err_t board_mic(void) { return ESP_OK; }
+static const muse_board_t board={.touch=true,.talk_button="yellow",.aux_button="blue",.power_off=board_off,
+    .mic_init=board_mic};
 static const muse_board_t stopwatch_board={.touch=true,.rim_controls=true,.talk_button="top-left",
-    .speaker_button="top-right",.power_button="red bottom-left",.power_off=board_off};
+    .speaker_button="top-right",.power_button="red bottom-left",.power_off=board_off,.mic_init=board_mic};
+/* No speaker or microphone (the Waveshare 1.43, LCD-1.28): no voice task. */
+static const muse_board_t display_board={.touch=true,.talk_button="boot",.power_off=board_off};
 const muse_board_t *muse_board=&board;
 
 static void tap(void) { aux_button(true,true); aux_button(false,true); }
@@ -174,6 +178,17 @@ int main(int argc,char **argv) {
         dedicated_buttons(MUSE_BTN_POWER_PRESS); dedicated_buttons(MUSE_BTN_POWER_LONG);
         assert(!s_talk_down && shutdown==1 && powered_off==1 && !call);
         assert(queue.items[queue.n-1].type==MUSE_PTT_UP);
+    } else if(scenario==15) {
+        /* Display-only: nothing reads the queue, so a talk press never posts.
+         * It still wakes the screen, selects in the menu and confirms pairing. */
+        muse_board=&display_board;
+        asleep=true; talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE);
+        assert(!asleep && !queue.n && !s_talk_down);
+        for(int i=0;i<40;i++) { talk_button(MUSE_BTN_TALK_PRESS); talk_button(MUSE_BTN_TALK_RELEASE); }
+        assert(!queue.n && !s_talk_down && !atomic_load(&s_call_pending));
+        menu=true; talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE);
+        assert(!queue.n && selected==MUSE_MENU_SELECT);
+        menu=false; pairing=true; talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE); assert(!queue.n);
     } else if(scenario==9) {
         call=true; check_sleep(); assert(!asleep); call=false; check_sleep(); assert(asleep);
     }

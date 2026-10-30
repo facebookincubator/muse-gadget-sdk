@@ -210,6 +210,10 @@ class StopWatchPTT(unittest.TestCase):
     def test_talk_quick_tap_wake_menu_and_pairing(self):
         self.run_case('input', 7)
 
+    def test_display_only_talk_press_never_posts(self):
+        self.run_case('input', 15)
+        self.run_case('input', 15, board=0)
+
     def test_blue_call_routing_is_stopwatch_only(self):
         self.run_case('input', 8)
         self.run_case('input', 8, board=0)

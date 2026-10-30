@@ -266,10 +266,13 @@ static void aux_key(bool pressed, bool edge)
 
 /* Talk button: push-to-talk, or Select while the menu is open. Asleep, the
  * press wakes and is posted as a waking one: muse_voice records only if it's
- * still held once awake. */
+ * still held once awake. A display-only board (no audio_init or mic_init)
+ * runs no voice task to take presses off the queue, so there the press only
+ * wakes, selects or confirms pairing. */
 static void talk_button(unsigned ev)
 {
     bool talk_down = s_talk_down;
+    bool voice = muse_board->audio_init || muse_board->mic_init;
     static bool swallow;
 #if CONFIG_MUSE_WATCHER_CAMERA
     static TickType_t last_release;
@@ -304,15 +307,22 @@ static void talk_button(unsigned ev)
             swallow = true;
         } else if (muse_state_asleep()) {
             set_asleep(false, muse_board->talk_button);
-            post(MUSE_PTT_DOWN, true);
-            talk_down = true;
+            if (voice) {
+                post(MUSE_PTT_DOWN, true);
+                talk_down = true;
+            } else {
+                swallow = true;
+            }
         } else if (muse_menu_is_open()) {
             muse_state_poke();
             if (!muse_board->keyboard) muse_menu_key(MUSE_MENU_SELECT);
             swallow = true;
-        } else {
+        } else if (voice) {
             post(MUSE_PTT_DOWN, false);
             talk_down = true;
+        } else {
+            muse_state_poke();
+            swallow = true;
         }
     }
     if ((talk_down || swallow) && released) {
