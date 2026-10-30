@@ -104,6 +104,8 @@ static const char *TAG = "board";
 #define GAUGE_REMAINING 0x10            /* mAh */
 #define GAUGE_FULL 0x12                 /* FullChargeCapacity, mAh */
 #define GAUGE_DESIGN 0x3C               /* DesignCapacity, mAh */
+#define GAUGE_OPSTATUS 0x3A             /* OperationStatus */
+#define GAUGE_OP_CFGUPDATE 0x0400       /* OperationStatus: in CONFIG UPDATE */
 
 typedef struct {
     gpio_num_t i2c_sda, i2c_scl, lcd_scl, lcd_rst, codec_en;
@@ -115,7 +117,7 @@ static const pins_t *s_pins = &s_v1_2;
 
 static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_gauge;
-static volatile bool s_gauge_ready;   /* its battery profile checked (or programmed) */
+static volatile bool s_gauge_ready;   /* its profile check has finished (or failed) */
 static void gauge_task(void *arg);
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
@@ -201,6 +203,7 @@ static esp_err_t init(void)
     if (i2c_master_probe(s_i2c, GAUGE_ADDR, 50) == ESP_OK) {
         i2c_master_bus_add_device(s_i2c, &gauge, &s_gauge);
         if (xTaskCreate(gauge_task, "gauge", 4096, NULL, 2, NULL) != pdPASS) {
+            ESP_LOGW(TAG, "gauge: couldn't start its profile check: the percentage may be wrong");
             s_gauge_ready = true;
         }
     } else {
@@ -439,6 +442,18 @@ static void gauge_task(void *arg)
 {
     (void)arg;
     gauge_log("as found");
+    /* A restart in the middle of an earlier update can leave the gauge in
+     * CONFIG UPDATE, not gauging, until its own timeout (about 4 minutes); and
+     * a profile that matches is then never re-initialized. Leave it first,
+     * re-initialized (TI allows this sealed or not), then check as usual. */
+    uint16_t op = 0;
+    if (gauge_read(GAUGE_OPSTATUS, &op) == ESP_OK && (op & GAUGE_OP_CFGUPDATE)) {
+        ESP_LOGW(TAG, "gauge: left in CONFIG UPDATE by an interrupted update: leaving it");
+        const uint8_t exit_reinit[] = { 0x00, 0x91, 0x00 };   /* Control(EXIT_CFG_UPDATE_REINIT) */
+        if (i2c_master_transmit(s_gauge, exit_reinit, sizeof exit_reinit, 50) == ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+    }
     const i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = s_pins->i2c_sda,
@@ -447,7 +462,9 @@ static void gauge_task(void *arg)
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = 100000,
     };
-    i2c_bus_handle_t bus = i2c_bus_create(I2C_NUM_0, &conf);   /* wraps the bus init() made */
+    /* Wraps the bus init() made. Never i2c_bus_delete() it: that would delete
+     * the shared bus; bq27220_delete() removes only its own device. */
+    i2c_bus_handle_t bus = i2c_bus_create(I2C_NUM_0, &conf);
     const bq27220_config_t c = { .i2c_bus = bus, .cfg = &s_gauging, .cedv = &s_cedv };
     bq27220_handle_t bq = bus ? bq27220_create(&c) : NULL;
     if (bq) {

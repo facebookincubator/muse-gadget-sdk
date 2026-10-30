@@ -97,7 +97,7 @@ dependencies:
   # The Mosaico's BQ27220 keeps its battery profile in RAM: programmed at boot,
   # as Espressif's BSP does (board_esp_mosaico.c, gauge_task).
   espressif/bq27220:
-    version: "^0.1.1"
+    version: "^0.1.3"   # 0.1.2 fixed the profile check, the DOD50 write and resealing
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"esp_mosaico\""
   espressif/m5stack_core_2:
