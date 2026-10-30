@@ -52,7 +52,7 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 | `wh25` | `intemp`, `inhumi` | Indoor temperature and humidity at the gateway |
 | `wh25` | `abs`, `rel` | Station and sea-level pressure; measured indoors, but report it as local pressure |
 
-Do not guess the meaning of ids not listed here.
+A station with both a tipping-bucket gauge and a piezo sensor reports both `rain` and `piezoRain` with the same ids; keep their values separate and say which gauge each comes from. Do not guess the meaning of ids not listed here.
 
 ## Verify the Result
 
