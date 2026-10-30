@@ -561,6 +561,20 @@ static void set_resting(bool rest)
     ESP_LOGI(TAG, "%s", rest ? "resting: codecs off, Wi-Fi modem sleep" : "awake: codecs on");
 }
 
+/* A press released before a tap's length: it only woke Muse, or starts a call.
+ * The Watcher's wheel posts its press once held MUSE_WHEEL_HOLD_MS, which
+ * already tells a click from a hold; another tap's length on top would make
+ * holds up to twice that too short. With live calls it keeps the tap. */
+static bool short_press(size_t held)
+{
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER && !CONFIG_MUSE_REALTIME_VOICE
+    (void)held;
+    return false;
+#else
+    return held < MIN_HELD_FRAMES;
+#endif
+}
+
 /*
  * A press that woke the screen: listen from now, into the pre-roll, and
  * record only if it's still held after a tap's length. False if it was let
@@ -1239,7 +1253,7 @@ static void voice_task(void *arg)
         char why[96];
         bool ok = record(pending_down, &held, why, sizeof(why));
         pending_down = false;
-        if (held < MIN_HELD_FRAMES && !wake) {
+        if (short_press(held) && !wake) {
             muse_hatch_turn_cancel();
             drop_rec();
             pre_reset();

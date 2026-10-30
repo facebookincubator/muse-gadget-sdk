@@ -27,6 +27,7 @@ class ChatSession(unittest.TestCase):
         reset = source[source.index('static bool turn_start('):source.index('static void turn_begin(')]
         done = source[source.index('static void turn_done('):source.index('/* Ends any turn')]
         check = source[source.index('static void check_turn('):source.index('/* ---- Inbound dispatch')]
+        typed = source[source.index('static void text_begin('):source.index('static void on_dictation_line(')]
         tts = source.index('static void start_tts(void)')
         start_tts = source[tts:source.index('\n}\n', tts) + 3]
         code = r'''
@@ -41,6 +42,10 @@ class ChatSession(unittest.TestCase):
 #include "cJSON.h"
 #include "minimp3.h"
 #include "muse_chat_priv.h"
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#include "muse_text.h"
+#endif
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
 ''' + constants + types + r'''
@@ -51,7 +56,7 @@ static int captions, console_events;
 static int done_events;
 static int64_t clock_us = 12345;
 static char done_text[EV_TEXT], console_type[32], console_fields[128];
-enum mark_t { M_TEXT, M_DONE };
+enum mark_t { M_TEXT, M_DONE, M_SENT };
 static void mark(mark_t) {}
 static int64_t now_us() { return clock_us; }
 static void emit(muse_hatch_ev_t type, const char *text) {
@@ -88,7 +93,18 @@ bool muse_hatch_configured() { return true; }
 static void resampler_init(resampler_t *, int, int) {}
 static void on_dictation_end(bool) {}
 static void log_marks() {}
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+/* The real review store, read back whole: one page holds all of it here. */
+int muse_chat_caption_page(const char *text, int, char *out, size_t cap) {
+    strlcpy(out, text, cap); return 1;
+}
+void muse_text_to_ascii(char *, size_t) {}
+static void send_chat(const char *, const char *) { s_turn.phase = P_WAIT_REPLY; }
+#endif
 ''' + done + reset + handlers + start_tts + check + r'''
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+''' + typed + r'''
+#endif
 static void begin(bool typed = false) {
     clock_us = 12345;
     assert(turn_start(s_turn.gen + 1, typed));
@@ -303,6 +319,96 @@ static void typed_reply_at_cap(bool finished, bool busy) {
     assert(!strcmp(console_fields, finished && !busy ? "\"messages\":1,\"complete\":true"
                                                      : "\"messages\":1,\"complete\":false"));
 }
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+static char review[40000];
+static const char *reviewed() {
+    int page = 0, pages = 0;
+    review[0] = 0;
+    muse_review_close();
+    if (muse_review_step(1)) assert(muse_review_page(review, sizeof(review), &page, &pages));
+    muse_review_close();
+    return review;
+}
+/* Production typed turns: text_begin() starts each one with generation 0. */
+static void typed(const char *text) {
+    text_begin(text);
+    assert(s_turn.phase == P_WAIT_REPLY && s_turn.text && s_turn.gen == 0);
+    s_turn.acked = true;
+    strlcpy(s_turn.user_ids[0], "note", sizeof(s_turn.user_ids[0]));
+}
+static void reply(const char *id, const char *text) {
+    event("delta.message_start", id, "note");
+    event("delta.text_append", id, "", text);
+    event("delta.message_done", id);
+}
+static void typed_turns_replace_the_review() {
+    assert(muse_review_init() == 0);
+    s_turn.texts = static_cast<char *>(calloc(MAX_MSGS, TEXT_MAX));
+    typed("one");
+    reply("r1", "First reply");
+    assert(!strcmp(reviewed(), "First reply"));
+    typed("two");
+    reply("r2", "Second reply");
+    assert(!strcmp(reviewed(), "Second reply"));   /* not joined to the first turn's */
+    typed("three");
+    reply("a", "Part one");
+    reply("b", "Part two");
+    assert(!strcmp(reviewed(), "Part one\n\nPart two"));   /* one turn's messages stay together */
+    typed("four");   /* no reply: the last one stays */
+    assert(!strcmp(reviewed(), "Part one\n\nPart two"));
+    for (int i = 0; i < 40; i++) {   /* many serial turns never fill the store */
+        char text[32];
+        snprintf(text, sizeof(text), "Reply %d", i);
+        typed("again");
+        reply("r", text);
+        assert(!strcmp(reviewed(), text));
+    }
+    begin(false);   /* a voice turn replaces a typed one, and the other way round */
+    reply("v", "Spoken reply");
+    assert(!strcmp(reviewed(), "Spoken reply"));
+    typed("five");
+    reply("t", "Typed again");
+    assert(!strcmp(reviewed(), "Typed again"));
+    free(s_turn.texts);
+    s_turn.texts = nullptr;
+}
+static void review_keeps_the_whole_reply() {
+    assert(muse_review_init() == 0);
+    s_turn.texts = static_cast<char *>(calloc(MAX_MSGS, TEXT_MAX));
+    static char long_text[5000];
+    memset(long_text, 'a', sizeof(long_text) - 1);
+    for (bool typed_turn : {false, true}) {
+        begin(typed_turn);
+        reply("long", long_text);   /* past the 1 KB live-caption copy */
+        assert(!strcmp(reviewed(), long_text));
+        begin(typed_turn);
+        event("delta.message_start", "reply", "note");
+        event("delta.text_append", "reply", "", "short delta");
+        event("message.assistant", "reply", "note", "Complete final reply");
+        assert(!strcmp(reviewed(), "Complete final reply"));
+        event("delta.message_done", "reply");
+        assert(!strcmp(reviewed(), "Complete final reply"));   /* one completion, stored once */
+    }
+    free(s_turn.texts);
+    s_turn.texts = nullptr;
+}
+/* Keeping the whole reply for review doesn't slow the automatic captions:
+ * they pace the same first CAPTION_TEXT bytes as other boards, well inside
+ * the turn's cap, so a long completed reply isn't cut off as incomplete. */
+static void review_keeps_caption_pace() {
+    assert(muse_review_init() == 0);
+    static char reply[5001];
+    memset(reply, 'a', sizeof(reply) - 1);
+    const char *kept = voice_reply({reply});
+    start_tts();
+    const msg_t &m = s_turn.msgs[0];
+    assert(m.tts == TTS_ACTIVE && strlen(kept) == sizeof(reply) - 1);
+    assert(m.pcm_frames == (uint32_t)((CAPTION_TEXT - 1) * MIC_RATE / TEXT_CHARS_PER_S));
+    assert((int64_t)m.pcm_frames * 1000000 / MIC_RATE < TURN_CAP_US / 2);
+    assert(!strcmp(reviewed(), reply));
+    s_turn.texts = nullptr;
+}
+#endif
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
@@ -324,6 +430,11 @@ int main(int argc, char **argv) {
     case 15: typed_reply_at_cap(true, false); break;
     case 16: typed_reply_at_cap(true, true); break;
     case 17: typed_reply_at_cap(false, false); break;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    case 18: typed_turns_replace_the_review(); break;
+    case 19: review_keeps_the_whole_reply(); break;
+    case 20: review_keeps_caption_pace(); break;
+#endif
     default: return 2;
     }
 }
@@ -338,14 +449,35 @@ int main(int argc, char **argv) {
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags,
              str(out / 'session.cpp'), str(out / 'cjson.o'), '-o', str(out / 'session')],
         ]
+        # The Watcher keeps whole replies for review: the same handlers, with the
+        # real review store and fake FreeRTOS/heap headers.
+        stubs = out / 'watcher'
+        (stubs / 'freertos').mkdir(parents=True)
+        (stubs / 'esp_err.h').write_text('typedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_ERR_NO_MEM 1\n')
+        (stubs / 'esp_heap_caps.h').write_text(
+            '#include <stdlib.h>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\n'
+            '#define heap_caps_malloc(n, caps) malloc(n)\n')
+        (stubs / 'freertos/FreeRTOS.h').write_text('#define portMAX_DELAY 0\n')
+        (stubs / 'freertos/semphr.h').write_text(
+            'typedef int SemaphoreHandle_t;\n#define xSemaphoreCreateMutex() 1\n'
+            '#define xSemaphoreTake(lock, wait) ((void)0)\n#define xSemaphoreGive(lock) ((void)0)\n')
+        watcher = ['-DCONFIG_MUSE_BOARD_SENSECAP_WATCHER=1', '-I', str(stubs), '-include', str(ROOT / 'tests/host_compat.h')]
+        commands += [
+            [*shlex.split(os.environ.get('CC', 'cc')), '-std=gnu11', *flags, *watcher,
+             '-c', str(ROOT / 'components/muse/muse_review.c'), '-o', str(out / 'review.o')],
+            [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags, *watcher,
+             str(out / 'session.cpp'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-watcher')],
+        ]
         for command in commands:
             result = subprocess.run(command, capture_output=True, text=True)
             if result.returncode:
                 raise AssertionError(result.stdout + result.stderr)
         cls.binary = out / 'session'
+        cls.watcher_binary = out / 'session-watcher'
 
-    def run_case(self, case):
-        result = subprocess.run([str(self.binary), str(case)], capture_output=True, text=True)
+    def run_case(self, case, watcher=False):
+        binary = self.watcher_binary if watcher else self.binary
+        result = subprocess.run([str(binary), str(case)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_rejected_deltas_do_not_emit_or_complete_voice_or_typed_replies(self):
@@ -392,3 +524,17 @@ int main(int argc, char **argv) {
         for name, case in [('finished idle', 15), ('finished busy', 16), ('streaming', 17)]:
             with self.subTest(reply=name):
                 self.run_case(case)
+
+    def test_watcher_rejected_deltas_and_parents_are_unchanged(self):
+        for case in (0, 1, 2):
+            with self.subTest(case=case):
+                self.run_case(case, watcher=True)
+
+    def test_watcher_review_replaces_each_typed_or_spoken_turn(self):
+        self.run_case(18, watcher=True)
+
+    def test_watcher_review_keeps_full_final_and_long_streamed_reply(self):
+        self.run_case(19, watcher=True)
+
+    def test_watcher_review_keeps_the_caption_pace_inside_the_turn_cap(self):
+        self.run_case(20, watcher=True)

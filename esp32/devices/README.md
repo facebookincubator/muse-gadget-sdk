@@ -90,7 +90,7 @@ are documented separately; this is not a generic ESP-VoCat profile.
 | Touch | — | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | — | ✅ | — | ✅ | — |
 | Battery status | — | — | — | — | — | — | — | — | — | BQ27220 %/mV and charging checked | — | — | ✅ | ✅ | ✅ | ✅ | Unverified | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | — | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | No charging state | Unverified | — | ✅ | ✅ |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | On | On | On | On | On | On | On | On | On | On | On | Off | On | On | Off | On | On | On | Off | On | On | On | On | Off | On | On | On | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) |
+| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (hold to talk, click to sleep/wake, turn to review) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) |
 
 *Sticky entries describe an experimental Muse port, not Seeed's factory
 firmware. On one unit the display, touch, voice notes/CJK replies, SHT40,
@@ -189,6 +189,20 @@ confirms four-level grayscale image delivery and Link pairing. Link OTA was
 not separately confirmed. Switching between the two profiles with
 a full flash writes different partition layouts and can lose saved settings or
 pairing data; back up the device before switching.
+
+The SenseCAP Watcher's wheel opens the latest reply on its first turn; further
+turns move backward or forward through the reply's pages. The page counter
+shows the current position. A short click sleeps or wakes the screen, and
+holding the wheel for 300 ms starts push-to-talk. A pairing confirmation still
+uses a normal click. Reviewing uses the larger text layout and holds the
+selected page while automatic reply playback finishes. The latest reply stays
+in RAM until the next turn's reply replaces it or the board restarts; up to
+32 KB of reply text is retained. Automatic captions still show the first 1 KB
+of each message, as on other boards. Sleeping closes the review. With Muse's
+own voice session turned off (`CONFIG_MUSE_HATCH`), replies come over Home
+Link's session and review keeps the first 1 KB of each. With live calls
+(`CONFIG_MUSE_REALTIME_VOICE`), letting go within 300 ms of push-to-talk
+starting starts a call, as a tap does on other boards.
 
 The SenseCAP Watcher keeps its factory data (the identity SenseCraft uses) in
 an `nvsfactory` partition at `0x9000`, where Muse puts its partition table and
@@ -749,6 +763,8 @@ builds omit the camera worker, shutter UI, double-click gesture, and
 Double-click the wheel to open a live camera view. Aim the Watcher, then tap
 **TAP TO TAKE PHOTO** or double-click the wheel again. The captured frame stays
 on screen. Tap the image to return to the avatar.
+With camera support enabled, a single click waits 350 ms before sleeping so
+that a double-click can open the camera without starting a voice note.
 
 The `camera.capture` command returns a JPEG in
 `payload.data_base64`, with `payload.format` set to `jpeg-base64`. During live
