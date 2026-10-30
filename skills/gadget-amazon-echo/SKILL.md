@@ -83,7 +83,7 @@ On a Linux Home Link (the Muse Linux client):
 ## Workflow
 
 1. Discover fresh: the script reuses its cached device list until it is
-   deleted, so run `rm -f "$TMP"/.alexa.devicelist.*` then
+   deleted, so run `rm -f "${TMP:?}"/.alexa.devicelist.*` then
    `alexa-remote-control.sh -a`. Read `"$TMP/.alexa.devicelist.txt"`:
    one line per device, `<name>=<deviceType>=<serial>=<family>`. Match the
    user's device by name **and** serial; if a device is missing or two
@@ -97,6 +97,8 @@ On a Linux Home Link (the Muse Linux client):
    ask the user to rename the device in the Alexa app. Multi-room groups
    (family `WHA`) are out of scope for this selector.
 3. Pass `-d "$SEL"` on every device action below and on its readback.
+   `SEL`, like the sourced settings, does not carry over between commands:
+   set it in the same command as each call.
    Never omit `-d` (the script falls back to the first Echo) and never use
    `-d ALL` unless the user asked for every device. The script echoes
    `serial:<serial>` for the device it used; confirm it is the selected
@@ -149,7 +151,7 @@ words and punctuation.
 - After TTS, confirm audibly or ask the user — the API returns success
   before the speaker finishes talking.
 - After volume, wait a few seconds, then read it fresh:
-  `rm -f "$TMP/.alexa.volume.<serial>"` and run `-d "$SEL" -z`. The
+  `rm -f "${TMP:?}/.alexa.volume.<serial>"` and run `-d "$SEL" -z`. The
   script writes the requested level to that cache file before sending the
   command, and `-z` returns the cache for a minute, so without the `rm` it
   can confirm a change Amazon rejected. No number in the output means the
