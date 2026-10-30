@@ -248,15 +248,19 @@ class SetupController:
         ):
             self.send_status("error_missing_credentials")
             return
+        generation = 0
         with self._state_lock:
             if self._provisioning:
-                self.send_status("error_operation_in_progress")
-                return
-            generation = self._pairing.mark_provisioning()
-            if not generation:
-                self.send_status("error_pairing_confirm_required")
-                return
-            self._provisioning = True
+                refusal = "error_operation_in_progress"
+            else:
+                generation = self._pairing.mark_provisioning()
+                refusal = None if generation else "error_pairing_confirm_required"
+                self._provisioning = bool(generation)
+        # Sent after the lock is released: send_status() takes _state_lock
+        # itself when the session has no keys, and the lock is not reentrant.
+        if refusal:
+            self.send_status(refusal)
+            return
         # The Wi-Fi fields are deliberately dropped: this device only sets up
         # when it is already online.
         credentials = Credentials(

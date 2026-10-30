@@ -1,0 +1,61 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-C6-Touch-AMOLED-2.06: single core, 16 MB flash, no PSRAM.
+# Native USB Serial/JTAG (303a:1001). Hardware and BSP sources:
+# https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-2.06
+# https://components.espressif.com/components/waveshare/esp32_c6_touch_amoled_2_06
+# Load last, after sdkconfig.muse. Without PSRAM Muse has no voice session of
+# its own (MUSE_HATCH defaults off): voice notes go over Link's session and
+# replies show as text. Link's TLS, Wi-Fi and BLE buffers are trimmed to fit
+# internal RAM.
+CONFIG_IDF_TARGET="esp32c6"
+CONFIG_MUSE_BOARD_WAVESHARE_C6_206=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=1
+
+# BSP v2.0.0 ignores the runtime buffer size; its 100-line default takes 82 KB
+# per buffer. Use 8 lines (6.6 KB) to leave room for TLS during voice turns.
+CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT=8
+# The BSP defaults to I2S1, but ESP32-C6 only has I2S0.
+CONFIG_BSP_I2S_NUM=0
+CONFIG_HOMEHUB_BUTTON_GPIO=9
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+CONFIG_SPIRAM=n
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
+# Servers may still send 16 KB records, so only shrink outbound.
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+# Keep the existing C6 profile's dynamic TLS buffers: BLE pairing must not
+# require a contiguous 16 KB input allocation. These buffers follow record
+# sizes and are freed after the handshake; there is no PSRAM routing here.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+
+# The home-network tunnel and discovery need ~60 KB more internal RAM than the
+# control session; without them the status turns green once that is up.
+CONFIG_HOMEHUB_TUNNEL=n
+
+# Fewer Wi-Fi TX buffers and lwIP mailboxes than the S3 boards.
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=32
+
+# One phone at a time, a handful of notifications in flight: half the NimBLE
+# pools gives the pairing TLS handshake back ~9 KB.
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=15

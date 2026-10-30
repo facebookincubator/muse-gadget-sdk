@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from musegadget import config
@@ -43,3 +45,23 @@ def test_sdk_token_rejects_tokens_gadgets_could_not_issue(tmp_path, monkeypatch,
     monkeypatch.setenv(config.SDK_TOKEN_ENV, bad)
     with pytest.raises(ValueError):
         config.sdk_token(tmp_path)
+
+
+def test_load_json_treats_undecodable_bytes_as_missing(tmp_path):
+    (tmp_path / "pairing.json").write_bytes(bytes.fromhex("fffe") + b'{"mac": "x"}')
+    assert config.load_json("pairing.json", tmp_path) is None
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
+    reason="needs POSIX file modes and a user the mode applies to",
+)
+def test_load_json_does_not_mistake_permission_denied_for_missing(tmp_path):
+    path = tmp_path / "identity.json"
+    path.write_text('{"mac": "x"}')
+    path.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            config.load_json("identity.json", tmp_path)
+    finally:
+        path.chmod(0o600)

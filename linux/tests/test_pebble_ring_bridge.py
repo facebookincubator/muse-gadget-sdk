@@ -15,9 +15,11 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -96,3 +98,19 @@ def test_empty_transcription_is_rejected(server):
     url, sent = server
     status, _ = post(url, b'{"text": ""}', {"Content-Type": "application/json", "X-Pebble-Token": "s3"})
     assert status == 400 and sent == []
+
+
+def test_non_ascii_token_is_rejected_not_crashed(server):
+    url, sent = server
+    status, _ = post(url, b'{"text": "hi"}', {"Content-Type": "application/json", "X-Pebble-Token": "s\xe9"})
+    assert status == 401 and sent == []
+
+
+def test_bad_content_length_gets_a_400(server):
+    url, sent = server
+    host, port = urllib.parse.urlsplit(url).netloc.split(":")
+    with socket.create_connection((host, int(port)), timeout=5) as sock:
+        sock.sendall(b"POST /ingest HTTP/1.1\r\nHost: x\r\nContent-Length: abc\r\n"
+                     b"Content-Type: application/json\r\nX-Pebble-Token: s3\r\n\r\n")
+        status_line = sock.makefile("rb").readline()
+    assert status_line.split()[1] == b"400" and sent == []

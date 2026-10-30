@@ -1,0 +1,70 @@
+[
+  {
+    "board": "devkit",
+    "name": "Espressif ESP32-C5 DevKitC-1"
+  },
+  {
+    "board": "espressif-s3-devkitc-1",
+    "name": "Espressif ESP32-S3-DevKitC-1 (N8R8)"
+  },
+  {
+    "board": "muse-espressif-box-3",
+    "name": "Espressif ESP32-S3-BOX-3",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-m5stack-cores3",
+    "name": "M5Stack CoreS3",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-waveshare-s3-185c",
+    "name": "Waveshare ESP32-S3-Touch-LCD-1.85C",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-seeed-xiao-s3-147",
+    "name": "Seeed Studio XIAO ESP32-S3 1.47\" Touch Display",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-sensecap-watcher",
+    "name": "Seeed Studio SenseCAP Watcher",
+    "usb": [
+      "1a86:55d2"
+    ],
+    "pacing": {
+      "chunk": 32,
+      "factor": 2
+    },
+    "note": "Pick the <strong>second</strong> USB Dual_Serial port, the one with the higher number; the first is the camera chip. Flashing is slow on this board, about 4 minutes; keep the tab in front. Muse overwrites the Watcher's factory data, which is unique to each device, so <strong>back it up first</strong> and don't erase the device: <code>esp32/tools/muse/paced_esptool.py --chip esp32s3 -p PORT read-flash 0x9000 0x32000 nvsfactory.bin</code>"
+  },
+  {
+    "board": "sensecap-indicator",
+    "name": "Seeed Studio SenseCAP Indicator"
+  },
+  {
+    "board": "reterminal-e1001",
+    "name": "Seeed Studio reTerminal E1001 (7.5\" e-paper)"
+  },
+  {
+    "board": "reterminal-e1002",
+    "name": "Seeed Studio reTerminal E1002 (7.3\" colour e-paper)"
+  },
+  {
+    "board": "reterminal-sticky",
+    "name": "Seeed Studio reTerminal Sticky (3.97\" e-paper, experimental)",
+    "usb": [
+      "1a86:55d3"
+    ],
+    "note": "Flashing takes about 3 minutes; keep the tab in front. Muse replaces Seeed's factory firmware. To go back to it later, back up the flash first: <code>python -m esptool --chip esp32s3 -p PORT read-flash 0 ALL sticky-factory.bin</code>"
+  }
+]

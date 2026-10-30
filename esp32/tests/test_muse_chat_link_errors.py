@@ -1,4 +1,16 @@
-# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """Compile the entire low-memory chat implementation against a fake Link transport."""
 import os
 from pathlib import Path
@@ -61,6 +73,7 @@ static uint32_t esp_random(void) { return 42; }
 static bool muse_link_hatch_linked(void) { return true; }
 static bool muse_wifi_connected(void) { return true; }
 static bool muse_link_req_ready(void) { return true; }
+#define MUSE_LINK_REQ_TOO_LARGE (-2)   /* muse_link.h */
 typedef void (*frame_fn)(void *,int,const uint8_t *,size_t,bool);
 static struct { frame_fn cb; void *ctx; int id; } requests[2];
 static int next_id, allocation_attempts, fail_allocation, fail_send;
@@ -290,11 +303,13 @@ static void retry_and_stale(void) {
     begin(); release(); note_ack(); final("reply","note","Retry works"); assert_replied("Retry works");
 }
 static void denied_and_ack(void) {
-    int statuses[]={403,401,404,-1}; const char *errors[]={"ACCESS DENIED (403)","AUTH REQUIRED (401)","HTTP 404","LOST CONNECTION"};
-    for(unsigned i=0;i<4;i++) {
+    int statuses[]={403,401,404,-1,-2}; const char *errors[]={"ACCESS DENIED (403)","AUTH REQUIRED (401)","HTTP 404","LOST CONNECTION","REPLY TOO LONG"};
+    for(unsigned i=0;i<5;i++) {
         begin(); release(); feed(RX_SUB,statuses[i],NULL,0,true); pump();
         assert(s_turn.phase==T_IDLE && strstr(s_turn.error,errors[i]));
     }
+    begin(); release(); feed(RX_NOTE,-2,NULL,0,true); pump();
+    assert(s_turn.phase==T_IDLE && strstr(s_turn.error,"REPLY TOO LONG"));
     begin(); release(); ack("{}"); assert(s_turn.phase==T_IDLE && s_turn.error[0]);
     begin(); release(); feed(RX_SUB,200,NULL,0,true); note_ack();
     assert(s_turn.phase==T_IDLE && strstr(s_turn.error,"LOST CONNECTION"));
