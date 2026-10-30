@@ -43,6 +43,13 @@ esp_err_t muse_pmu_init(i2c_master_bus_handle_t bus, bool key_irqs);
  * in bit 8. Turns nothing on. */
 esp_err_t muse_pmu_keep_rails(uint8_t dcdc, uint16_t ldo);
 
+/* Whether holding PWR powers the board off: past the 10 s hold-off, and after
+ * 16 s where the PMU has that on. Boards that talk on PWR turn it on
+ * after muse_pmu_init(), off while PWR is held (a talk can outlast both) and on
+ * again at release; the 16 s one comes back only if the hold turned it off.
+ * Others leave it as the PMU has it. ESP_ERR_INVALID_STATE without a PMU. */
+esp_err_t muse_pmu_set_key_shutdown(bool on);
+
 /* Returns and clears latched MUSE_PMU_KEY_* events. */
 unsigned muse_pmu_poll_key(void);
 

@@ -321,10 +321,13 @@ The M5Stack CoreS3 runs on Espressif's
 which brings up its ILI9342C LCD, FT6336U touch, AW88298 amp and ES7210
 microphones and switches the AXP2101's rails for each of them. It has no user
 button: PWR on the left side is push-to-talk and pairing confirmation, read
-from the AXP2101's key interrupts (its hardware power-off moves to a 10 s
-hold), and settings are on the touch screen (swipe left from Muse). RST on the
-bottom edge restarts the board, and holding it for 3 s enters the bootloader.
-Powering off from Muse switches the AXP2101 off; click PWR to turn it back on.
+from the AXP2101's key interrupts, and settings are on the touch screen (swipe
+left from Muse). RST on the bottom edge restarts the board, and holding it for
+3 s enters the bootloader. Powering off from Muse switches the AXP2101 off;
+click PWR to turn it back on. While Muse is running, holding PWR is a talk and
+never powers the board off: Muse turns off the AXP2101's power-off hold for as
+long as PWR is down. If the firmware has stopped, holding PWR for 10 s still
+cuts the power, unless it stopped during a PWR talk; RST always restarts it.
 Its 1 W speaker is quiet, so the volume starts at 100%. The camera, proximity
 sensor, IMU, RTC, SD card and Grove ports aren't used yet. It enumerates as the
 chip's own USB serial port: `tools/muse/board.sh flash cores3`. If esptool
