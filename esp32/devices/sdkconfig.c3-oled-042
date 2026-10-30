@@ -44,6 +44,18 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
 CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
 # The home-network tunnel needs more internal RAM than the C3 has to spare.
 CONFIG_HOMEHUB_TUNNEL=n
+# On the C3, IRAM and DRAM are the same 400 KB of SRAM, so code kept in IRAM
+# is heap Wi-Fi, BLE and TLS don't get. As on the ideaspark: fewer static
+# Wi-Fi RX buffers (1.6 KB each, always resident; the RX block-ack window may
+# be at most twice their count), and the Wi-Fi and lwIP hot paths in flash.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_RX_BA_WIN=16
+CONFIG_ESP_WIFI_TX_BA_WIN=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+CONFIG_LWIP_IRAM_OPTIMIZATION=n
+CONFIG_LWIP_EXTRA_IRAM_OPTIMIZATION=n
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
 
 # NimBLE: no L2CAP channels; pairing uses GATT only.
 CONFIG_BT_NIMBLE_L2CAP_COC_MAX_NUM=0

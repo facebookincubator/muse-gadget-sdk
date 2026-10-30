@@ -68,6 +68,8 @@ typedef int esp_err_t;
 #define ESP_FAIL -1
 #define ESP_ERR_INVALID_SIZE 0x104
 #define ESP_LOGW(tag, ...) ((void)(tag))
+#define ESP_LOGE(tag, ...) ((void)(tag))
+#define ESP_LOGI(tag, ...) ((void)(tag))
 static const char *esp_err_to_name(esp_err_t e) { (void)e; return "err"; }
 static const char *TAG = "test";
 typedef struct { uint8_t r, g, b; } rgb_t;
@@ -81,6 +83,42 @@ static int g_tx_count;
 static int g_fail_from = -1;
 static struct fake_dev { int unused; } g_dev;
 
+/* The bus and device the backend creates, and which step fails. */
+typedef struct fake_bus *i2c_master_bus_handle_t;
+typedef enum { I2C_CLK_SRC_DEFAULT = 1 } i2c_clock_source_t;
+typedef enum { I2C_ADDR_BIT_LEN_7 = 7 } i2c_addr_bit_len_t;
+typedef struct {
+    int i2c_port, sda_io_num, scl_io_num;
+    i2c_clock_source_t clk_source;
+    int glitch_ignore_cnt;
+    struct { unsigned enable_internal_pullup : 1; } flags;
+} i2c_master_bus_config_t;
+typedef struct {
+    i2c_addr_bit_len_t dev_addr_length;
+    uint16_t device_address;
+    uint32_t scl_speed_hz;
+} i2c_device_config_t;
+static struct fake_bus { int unused; } g_bus;
+static i2c_master_bus_config_t g_bus_cfg;
+static i2c_device_config_t g_dev_cfg;
+static bool g_fail_bus, g_fail_dev;
+static int g_buses, g_devs;
+static esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *cfg, i2c_master_bus_handle_t *bus) {
+    g_bus_cfg = *cfg;
+    if (g_fail_bus) return ESP_FAIL;
+    g_buses++;
+    *bus = &g_bus;
+    return ESP_OK;
+}
+static esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t bus, const i2c_device_config_t *cfg,
+                                           i2c_master_dev_handle_t *dev);
+static esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev);
+static esp_err_t i2c_del_master_bus(i2c_master_bus_handle_t bus) {
+    assert(bus == &g_bus && g_buses == 1);
+    g_buses--;
+    return ESP_OK;
+}
+
 static esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev, const uint8_t *buf,
                                      size_t len, int timeout_ms) {
     (void)timeout_ms;
@@ -91,6 +129,21 @@ static esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev, const uint8_t 
     memcpy(g_tx[n], buf, len);
     g_tx_len[n] = len;
     return g_fail_from >= 0 && n >= g_fail_from ? ESP_FAIL : ESP_OK;
+}
+
+static esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t bus, const i2c_device_config_t *cfg,
+                                           i2c_master_dev_handle_t *dev) {
+    assert(bus == &g_bus);
+    g_dev_cfg = *cfg;
+    if (g_fail_dev) return ESP_FAIL;
+    g_devs++;
+    *dev = &g_dev;
+    return ESP_OK;
+}
+static esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev) {
+    assert(dev == &g_dev && g_devs == 1);
+    g_devs--;
+    return ESP_OK;
 }
 
 #include "oled_defs.inc"
@@ -114,9 +167,44 @@ static void check_frame(int first) {
     }
 }
 
+static void check_init(void) {
+    /* A failed bus, device or panel leaves nothing behind and draws nothing. */
+    g_fail_bus = true;
+    reset_tx();
+    assert(!led_hw_init() && !s_oled && g_buses == 0 && g_devs == 0 && g_tx_count == 0);
+    g_fail_bus = false;
+    g_fail_dev = true;
+    assert(!led_hw_init() && !s_oled && g_buses == 0 && g_devs == 0 && g_tx_count == 0);
+    g_fail_dev = false;
+    g_fail_from = 0;
+    assert(!led_hw_init() && !s_oled && g_buses == 0 && g_devs == 0 && g_tx_count == 1);
+    reset_tx();
+    oled_show_state(LED_STATE_BOOT);
+    led_hw_set_title("name");
+    assert(g_tx_count == 0);
+
+    /* The pins, address and clock, then the panel's setup in one command run
+       and a cleared window. */
+    memset(s_oled_fb, 0, sizeof(s_oled_fb));
+    s_oled_status = NULL;
+    reset_tx();
+    assert(led_hw_init() && s_oled == &g_dev && g_buses == 1 && g_devs == 1);
+    assert(g_bus_cfg.sda_io_num == 5 && g_bus_cfg.scl_io_num == 6 && g_bus_cfg.flags.enable_internal_pullup);
+    assert(g_dev_cfg.device_address == 0x3C && g_dev_cfg.scl_speed_hz == 400000);
+    static const uint8_t setup[] = {0x00, 0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0x8D, 0x14,
+                                    0x20, 0x00, 0xA0, 0xC0, 0xDA, 0x12, 0x81, 0xCF, 0xD9, 0xF1,
+                                    0xDB, 0x40, 0xA4, 0xA6, 0xAF};
+    assert(g_tx_len[0] == sizeof(setup) && memcmp(g_tx[0], setup, sizeof(setup)) == 0);
+    check_frame(1);
+    for (int p = 0; p < OLED_XFER_PAGES; p++) {
+        for (int x = 0; x < OLED_WIDTH; x++) assert(g_tx[2 + p][1 + x] == 0);
+    }
+}
+
 int main(void) {
     assert(OLED_COLS == 12 && OLED_XFER_PAGES == 6 && OLED_FIRST_PAGE == 1);
-    s_oled = &g_dev;
+    memset(s_oled_fb, 0, sizeof(s_oled_fb));
+    check_init();
 
     /* The status draws once and isn't written again while it stays. */
     reset_tx();
@@ -239,7 +327,7 @@ class LinkOledStatusTest(unittest.TestCase):
         defs = _between(source, "// ESP32-C3 with a 0.42 inch SSD1306 OLED",
                         "#elif CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789")
         impl = _between(source, "// The LED task does all the drawing",
-                        "static bool led_hw_init(void) {")
+                        "#elif CONFIG_HOMEHUB_DISPLAY\nstatic esp_lcd_panel_handle_t")
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             (out / "oled_defs.inc").write_text(defs)

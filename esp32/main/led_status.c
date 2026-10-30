@@ -573,7 +573,9 @@ static bool led_hw_init(void) {
     i2c_master_bus_handle_t bus = NULL;
     esp_err_t err = i2c_new_master_bus(&bus_cfg, &bus);
     if (err == ESP_OK) err = i2c_master_bus_add_device(bus, &dev_cfg, &s_oled);
-    // 128x64 controller, rotated 180 degrees for how the panel is mounted.
+    // 128x64 controller. Segment remap and COM scan stay at their reset
+    // values (A0, C0): the A1/C8 most SSD1306 modules use shows this panel
+    // upside down.
     static const uint8_t init_seq[] = {
         0xAE,        // display off
         0xD5, 0x80,  // clock divide
