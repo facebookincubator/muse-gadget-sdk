@@ -38,8 +38,10 @@ from musegadget import __version__, config, muse_api
 from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import (
-    MAX_CONCURRENT_INVOKES, DeviceDescription, LinkSession, Outcome, check_image,
+    MAX_CONCURRENT_INVOKES, DeviceDescription, HttpStreamError, LinkSession, Outcome,
+    acknowledgement, check_image,
 )
+from musegadget.muse_turn import MuseTurn, _acknowledged_message_ids
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +52,11 @@ AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
 UNPAIRED_POLL_S = 30.0
 MAX_LOCAL_REQUEST = 4 * 1024 * 1024  # room for a 2 MiB image in base64
+MAX_WAIT_S = 600
+REPLY_POLL_S = 0.5
+CLEANUP_S = 2.0
+MAX_HELD_EVENTS = 64
+MAX_HELD_TEXT_BYTES = 64 * 1024
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 # Device access tokens live about 4 hours; rotate at 3.
 TOKEN_REFRESH_AGE_S = 3 * 3600
@@ -87,6 +94,9 @@ class Service:
     _invoke_slots: asyncio.Semaphore = field(
         default_factory=lambda: asyncio.Semaphore(MAX_CONCURRENT_INVOKES), init=False, repr=False,
     )
+    # One waiting request at a time per chat: Muse's replies don't name the
+    # message they answer, so two waits on one chat would take each other's.
+    _reply_waits: dict[str, tuple[asyncio.Lock, int]] = field(default_factory=dict, init=False, repr=False)
 
     def stop(self) -> None:
         self._stop.set()
@@ -241,10 +251,12 @@ class Service:
         """Accept messages for the Muse from programs on this device.
 
         Each connection sends one JSON line, ``{"message": "..."}`` plus an
-        optional ``"session_id"`` naming a side chat and ``"image"``
+        optional ``"session_id"`` naming a side chat, ``"image"``
         (``{"mime_type", "data_base64", "filename"}``, see
-        ``LinkSession.send_image``), and gets one JSON line back. Only root
-        and the command account's group can connect.
+        ``LinkSession.send_image``) and ``"wait"`` (seconds) to hold the
+        connection open for the Muse's answer, and gets one JSON line back
+        (with ``"reply"`` when it waited). Only root and the command
+        account's group can connect.
         """
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if path.exists():
@@ -304,22 +316,261 @@ class Service:
                 check_image(image_bytes, image["mime_type"])
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
+        wait = request.get("wait")
+        if wait is not None and not (
+            isinstance(wait, (int, float)) and not isinstance(wait, bool) and 1 <= wait <= MAX_WAIT_S
+        ):
+            return {"ok": False, "error": f"wait must be 1 to {MAX_WAIT_S} seconds"}
         session = self._current
         if session is None or session.registered_at is None:
             return {"ok": False, "error": "not connected to the Muse"}
         if image is not None:
-            log.info("forwarding a %d-character message and an image to the Muse", len(message))
-            return await session.send_image(
-                image_bytes, image["mime_type"], session_id,
-                message=message, filename=image.get("filename") or None)
-        log.info("forwarding a %d-character message to the Muse", len(message))
-        return await session.send_chat(message, session_id)
+            def send():
+                log.info("forwarding a %d-character message and an image to the Muse", len(message))
+                return session.send_image(
+                    image_bytes, image["mime_type"], session_id,
+                    message=message, filename=image.get("filename") or None)
+        else:
+            def send():
+                log.info("forwarding a %d-character message to the Muse", len(message))
+                return session.send_chat(message, session_id)
+        if wait is None:
+            return await send()
+        return await self._send_and_wait(session, send, session_id, float(wait))
+
+    async def _send_and_wait(self, session, send, session_id, wait_s: float) -> dict:
+        """send_and_wait, after any earlier waiting request on the same chat, within ``wait_s``."""
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        key = session_id or ""
+        lock, users = self._reply_waits.get(key, (None, 0))
+        lock = lock or asyncio.Lock()
+        self._reply_waits[key] = (lock, users + 1)
+        try:
+            if not await _acquire_within(lock, wait_s):
+                return {"ok": False, "error": "another request on this chat was still waiting "
+                                              "for its answer; this message was not sent"}
+            try:
+                return await send_and_wait(session, send, session_id,
+                                           wait_s - (loop.time() - started))
+            finally:
+                lock.release()
+        finally:
+            lock, users = self._reply_waits[key]
+            if users == 1:
+                del self._reply_waits[key]
+            else:
+                self._reply_waits[key] = (lock, users - 1)
 
     async def _sleep(self, seconds: float) -> None:
         try:
             await asyncio.wait_for(self._stop.wait(), seconds)
         except asyncio.TimeoutError:
             pass
+
+
+async def send_and_wait(session: LinkSession, send, session_id: str | None,
+                        wait_s: float) -> dict:
+    """Send a message with ``send()`` and wait up to ``wait_s`` seconds in all for Muse's answer.
+
+    The chat subscription opens before the message goes. As on the ESP32
+    firmware, the answer is what follows the message's own ``message.user``
+    event, or what names the message as its parent; a :class:`MuseTurn` picks
+    the replies out of that. A side chat Muse doesn't know yet is created by
+    the message, so the message goes first and the chat's replies are the answer.
+
+    Returns ``send()``'s result, plus ``"reply"`` once Muse acknowledged the
+    message: the text of its answer (blank-line separated when it sent several
+    messages, "" when it finished without text), or None when no answer came,
+    with ``"detail"`` saying why. ``"partial"`` is true when the wait ran out
+    while Muse was still answering. A send Muse didn't acknowledge in time
+    returns ``"sent": "unknown"``.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait_s
+    reader = _ReplyReader(MuseTurn(session_id))
+    opened = asyncio.Event()
+
+    def follow() -> asyncio.Future:
+        return asyncio.ensure_future(_follow(session, session_id, opened, reader))
+
+    follower, sending = follow(), None
+    try:
+        await _wait_for_event(opened, follower, deadline - loop.time())
+        fresh = False
+        if not opened.is_set():
+            failure = None if not follower.done() or follower.cancelled() else follower.exception()
+            if session_id and isinstance(failure, HttpStreamError) and failure.status == 404:
+                fresh = True  # Muse doesn't know this side chat; the message creates it
+            else:
+                why = _stream_problem(follower) if follower.done() else "it did not open in time"
+                return {"ok": False,
+                        "error": f"could not follow Muse's replies ({why}); the message was not sent"}
+        sending = asyncio.ensure_future(send())
+        await asyncio.wait({sending}, timeout=max(deadline - loop.time(), 0.0))
+        if not sending.done():
+            return {"ok": False, "sent": "unknown",
+                    "error": f"Muse did not acknowledge the message within {wait_s:g} seconds"}
+        result = sending.result()
+        if not result.get("ok"):
+            return result
+        try:
+            reader.acknowledge(acknowledgement(result), fresh=fresh)
+        except ValueError as exc:
+            return {**result, "reply": None, "detail": str(exc)}
+        if fresh:
+            follower = follow()
+        turn = reader.turn
+        while True:
+            now = time.monotonic()
+            # A blank answer waits for settled(), which leaves time for late text.
+            if turn.settled(now) or (_reply_text(turn) and turn.complete(now)):
+                return {**result, "reply": _reply_text(turn)}
+            remaining = deadline - loop.time()
+            if follower.done() or remaining <= 0:
+                detail = (_stream_problem(follower) if follower.done()
+                          else f"no answer within {wait_s:g} seconds")
+                text = _reply_text(turn)
+                if text:
+                    return {**result, "reply": text, "partial": True, "detail": detail}
+                return {**result, "reply": None, "detail": detail}
+            reader.changed.clear()
+            await _wait_for_event(reader.changed, follower, min(remaining, REPLY_POLL_S))
+    finally:
+        # Bounded, so a stalled transport can't hold the caller or the chat's queue.
+        tasks = {task for task in (follower, sending) if task is not None and not task.done()}
+        for task in tasks:
+            task.cancel()
+            task.add_done_callback(_retrieve)
+        if tasks:
+            await asyncio.wait(tasks, timeout=CLEANUP_S)
+
+
+async def _follow(session: LinkSession, session_id: str | None, opened: asyncio.Event,
+                  reader: _ReplyReader) -> None:
+    async for event in session.subscribe_chat(session_id, opened=opened):
+        reader.take(event)
+
+
+class _ReplyReader:
+    """Passes MuseTurn the events that follow one request's own message.
+
+    Events repeating an earlier ``seq`` are dropped. Until Muse acknowledges
+    the message, events wait here (bounded). Then a ``message.user`` event
+    for the acknowledged message opens the answer, and one for any other
+    message on the chat closes it again; events of a reply already taken, and
+    events naming the message or a taken reply as their parent, always count.
+    """
+
+    def __init__(self, turn: MuseTurn) -> None:
+        self.turn = turn
+        self.changed = asyncio.Event()
+        self.user_ids: set[str] | None = None
+        self.after_note = False
+        self.last_seq = 0
+        self.held: list[dict] = []
+        self.held_text = 0
+
+    def take(self, event: dict) -> None:
+        seq = event.get("seq")
+        if isinstance(seq, int) and not isinstance(seq, bool):
+            if seq <= self.last_seq:
+                return
+            self.last_seq = seq
+        if self.user_ids is None:
+            if len(self.held) >= MAX_HELD_EVENTS:
+                raise ValueError("too many chat events before Muse acknowledged the message")
+            self.held_text += _text_bytes(event)
+            if self.held_text > MAX_HELD_TEXT_BYTES:
+                raise ValueError("more than 64 KiB of chat text before Muse acknowledged the message")
+            self.held.append(event)
+            return
+        self._route(event)
+        self.changed.set()
+
+    def acknowledge(self, response: dict, *, fresh: bool) -> None:
+        self.turn.acknowledge(response)
+        self.user_ids = _acknowledged_message_ids(response)
+        self.after_note = fresh
+        held, self.held = self.held, []
+        for event in held:
+            self._route(event)
+        self.changed.set()
+
+    def _route(self, event: dict) -> None:
+        payload = event.get("payload")
+        if event.get("type") != "event" or not isinstance(payload, dict):
+            return
+        chat = payload.get("session_id") or event.get("session_id")
+        if chat and self.turn.session_id and chat != self.turn.session_id:
+            return  # another chat's events neither open nor close this answer
+        message_id = payload.get("message_id") or event.get("message_id") or payload.get("id")
+        message_id = message_id if isinstance(message_id, str) else None
+        if event.get("event") == "message.user":
+            self.after_note = message_id in self.user_ids
+            return
+        parent = payload.get("reply_to_message_id") or payload.get("parent_message_id")
+        parent = parent if isinstance(parent, str) else None
+        if (self.after_note or parent in self.user_ids or message_id in self.turn.replies
+                or parent in self.turn.replies):
+            self.turn.feed(event)
+
+
+def _text_bytes(event: dict) -> int:
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        return 0
+    return sum(len(payload[key].encode("utf-8")) for key in ("text", "display_text", "content", "transcript")
+               if isinstance(payload.get(key), str))
+
+
+def _retrieve(task: asyncio.Future) -> None:
+    if not task.cancelled():
+        task.exception()
+
+
+def _reply_text(turn: MuseTurn) -> str:
+    return "\n\n".join(reply.text.strip() for reply in turn.replies.values() if reply.text.strip())
+
+
+def _stream_problem(follower: asyncio.Future) -> str:
+    """Why the reply stream ended, without text a server could have put there."""
+    exc = None if follower.cancelled() else follower.exception()
+    if exc is None:
+        return "Muse closed the reply stream"
+    if isinstance(exc, HttpStreamError):
+        return f"HTTP {exc.status}"
+    if isinstance(exc, ValueError):  # the size bounds in MuseTurn and subscribe_chat
+        return str(exc)
+    return f"the reply stream failed ({type(exc).__name__})"
+
+
+async def _wait_for_event(event: asyncio.Event, task: asyncio.Future, timeout: float) -> None:
+    """Wait until ``event`` is set, ``task`` ends or ``timeout`` passes."""
+    if event.is_set() or task.done() or timeout <= 0:
+        return
+    waiter = asyncio.ensure_future(event.wait())
+    try:
+        await asyncio.wait({waiter, task}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        waiter.cancel()
+
+
+async def _acquire_within(lock: asyncio.Lock, timeout: float) -> bool:
+    """Acquire ``lock`` within ``timeout`` seconds; a lock acquired just as time ran out is kept."""
+    acquire = asyncio.ensure_future(lock.acquire())
+    try:
+        await asyncio.wait({acquire}, timeout=max(timeout, 0.0))
+    except BaseException:
+        if acquire.done() and not acquire.cancelled():
+            lock.release()
+        else:
+            acquire.cancel()
+        raise
+    if not acquire.done():
+        acquire.cancel()  # a cancelled acquire never holds the lock
+        return False
+    return True
 
 
 async def _discard_line(reader, timeout_s: float = 10) -> None:
