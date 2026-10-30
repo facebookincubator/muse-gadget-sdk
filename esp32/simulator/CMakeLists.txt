@@ -270,6 +270,7 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_settings_round_240 COMMAND muse_settings_text_test 240 240 1 1.28 geometry)
     add_test(NAME muse_settings_flat_keyboard COMMAND muse_settings_text_test 320 240 0 2.0 geometry)
     add_test(NAME muse_settings_epaper_keyboard COMMAND muse_settings_text_test 480 800 0 3.97 geometry)
+    add_test(NAME muse_settings_long_keypad COMMAND muse_settings_text_test 172 640 0 3.49 geometry)
     add_test(NAME muse_settings_xiao_switch COMMAND muse_settings_text_test 172 320 0 1.47 switch)
     add_test(NAME muse_settings_round_switch COMMAND muse_settings_text_test 466 466 1 1.75 switch)
     get_property(settings_tests DIRECTORY PROPERTY TESTS)
