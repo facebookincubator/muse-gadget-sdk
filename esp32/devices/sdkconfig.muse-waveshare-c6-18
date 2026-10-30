@@ -50,8 +50,11 @@ CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
 CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=12
 CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=15
 
-# Move driver/ISR code from IRAM to flash: on the
-# C6 IRAM and DRAM share SRAM, so this returns heap for the voice upload.
+# On the C6, IRAM and DRAM share SRAM, so code kept in IRAM is heap the voice
+# upload doesn't get. Move driver ISRs, the heap and the BLE controller to
+# flash (the SPI master ISR follows the heap). None of these interrupts is
+# cache-safe on this board, so they wait out NVS and OTA flash writes; a
+# driver's cache-safe option still puts its handler back in IRAM.
 CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
 CONFIG_SPI_SLAVE_ISR_IN_IRAM=n
 CONFIG_GDMA_ISR_HANDLER_IN_IRAM=n
