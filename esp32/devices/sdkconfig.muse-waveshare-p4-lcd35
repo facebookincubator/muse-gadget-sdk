@@ -1,0 +1,45 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5: ESP32-P4 v3.x, 16MB flash, 32MB PSRAM.
+# 320x480 ST7796 SPI LCD, FT6336 touch, ES8311, AXP2101; pins come from
+# Waveshare's BSP (waveshare/esp32_p4_wifi6_touch_lcd_3_5) and schematic. The
+# console is UART0 on the CH343 bridge; the C6 is an SDIO coprocessor.
+# Load after sdkconfig.defaults and devices/sdkconfig.muse.
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_MUSE_BOARD_WAVESHARE_P4_LCD35=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+# Silicon v1.x needs its own build: a v3 image does not boot on it.
+CONFIG_ESP32P4_REV_MIN_300=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_400=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=n
+CONFIG_HOMEHUB_BUTTON_GPIO=35
+CONFIG_LV_COLOR_DEPTH=16
+# Wi-Fi and BLE run on the C6 through ESP-Hosted 2.12 over 4-bit SDIO (slot 1,
+# GPIO14-19); GPIO54 drives the C6's CHIP_PU.
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54
+# NimBLE on the P4 talks to the C6's controller over ESP-Hosted's virtual HCI.
+CONFIG_BT_CONTROLLER_DISABLED=y
+CONFIG_BT_NIMBLE_TRANSPORT_UART=n
+CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
+CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
