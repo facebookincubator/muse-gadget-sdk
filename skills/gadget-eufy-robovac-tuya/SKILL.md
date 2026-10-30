@@ -17,7 +17,7 @@ Use this skill when the exact Wi-Fi RoboVac model and firmware are confirmed to 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing local key, device ID and a model-appropriate command/datapoint map supplied securely.
 - A compatible local eufy/TinyTuya client using HomeLink's TCP transport, as described in the [Tuya skill](../gadget-tuya-wifi-devices/SKILL.md).

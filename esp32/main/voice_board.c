@@ -64,6 +64,10 @@ static const char *TAG = "link.voice_board";
 #define DIAL_COUNTS       4
 // Recentre the counter well before its limits.
 #define DIAL_LIMIT        1000
+// The hardware counter wraps to zero at its limits. Keep them far past the
+// recentre point: voice.c polls every 20 ms, and a quick turn moves a whole
+// detent between two polls, which would skip a limit only one detent away.
+#define DIAL_HW_LIMIT     INT16_MAX
 
 static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_xmos;
@@ -75,6 +79,7 @@ static int s_dial_base;
 static i2s_chan_handle_t s_mic;
 static i2s_chan_handle_t s_spk;
 static int32_t *s_mic_raw;
+static bool s_echo_cancelled;
 
 // ---- XMOS ----------------------------------------------------------------
 
@@ -108,9 +113,15 @@ static void xmos_init(void) {
     if (xmos_read(240, 88, version, sizeof(version)) == ESP_OK
         && xmos_read(241, 0x30, &stages[0], 1) == ESP_OK
         && xmos_read(241, 0x40, &stages[1], 1) == ESP_OK) {
-        // Stages: 0 none, 1 AEC, 2 IC, 3 NS, 4 AGC.
+        // Stages: 0 none, 1 AEC, 2 IC, 3 NS, 4 AGC. They build on each other
+        // (IC is AEC + IC, up to AGC with all four: the voice kit firmware's
+        // pipeline-stage commands, esphome/home-assistant-voice-pe#120), so
+        // both outputs at 1-4 means whichever channel is read is
+        // echo-cancelled. The speaker's audio passes through the XMOS on its
+        // way to the codec, which gives it the reference.
         ESP_LOGI(TAG, "XMOS firmware %u.%u.%u, output stages %u/%u",
                  version[0], version[1], version[2], stages[0], stages[1]);
+        s_echo_cancelled = stages[0] >= 1 && stages[0] <= 4 && stages[1] >= 1 && stages[1] <= 4;
     } else {
         ESP_LOGW(TAG, "XMOS not answering; the microphones may not work");
     }
@@ -199,8 +210,8 @@ void voice_board_set_volume(int percent) {
 // every edge of both phases: up clockwise, down anticlockwise.
 static esp_err_t dial_init(void) {
     pcnt_unit_config_t unit_cfg = {
-        .low_limit = -DIAL_LIMIT - DIAL_COUNTS,
-        .high_limit = DIAL_LIMIT + DIAL_COUNTS,
+        .low_limit = -DIAL_HW_LIMIT,
+        .high_limit = DIAL_HW_LIMIT,
     };
     pcnt_unit_handle_t unit;
     esp_err_t err = pcnt_new_unit(&unit_cfg, &unit);
@@ -333,6 +344,10 @@ void voice_board_amp(bool on) {
 
 bool voice_board_muted(void) {
     return gpio_get_level(PIN_MUTE_SWITCH) == 1;
+}
+
+bool voice_board_echo_cancelled(void) {
+    return s_echo_cancelled;
 }
 
 esp_err_t voice_board_init(void) {

@@ -31,11 +31,28 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | [waveshareteam/ESP32-S3-Touch-AMOLED-1.75C](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75C) | `Schematic/`. `examples/esp-idf/` for the AXP2101 power chip (`01_AXP2101`) and the QMI8658 IMU (`04_Immersive_block`). `examples/arduino/examples/` for the ES7210 mics and the ES8311 codec. Muse drives the display, touch and codec through its BSP, `waveshare/esp32_s3_touch_amoled_1_75c`. |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | [waveshareteam/ESP32-S3-Touch-AMOLED-1.75](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75) | The 1.75C's chips on other pins (LCD and touch reset on GPIO 39 and 40, MCLK on 42), plus an SD slot on GPIO 1 to 3 and a TCA9554 expander. PWR reaches the ESP32 only through the AXP2101. Muse uses the 1.75C driver with its BSP, `waveshare/esp32_s3_touch_amoled_1_75`. |
 | Waveshare ESP32-S3-Touch-AMOLED-1.8 | [waveshareteam/ESP32-S3-Touch-AMOLED-1.8](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.8) | `examples/arduino/` (SH8601 and FT3168) and `examples/arduino-v2/` (CO5300 and CST820) for the two revisions: `libraries/Mylibrary/pin_config.h` for pins, `02_Drawing_board` for the TCA9554 reset lines, `12_LVGL_AXP2101_ADC_Data` for the AXP2101 and the PWR key. Muse drives the display, touch and codec through its BSP, `waveshare/esp32_s3_touch_amoled_1_8`. xiaozhi-esp32's [board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/waveshare/esp32-s3-touch-amoled-1.8) is a second reference. |
+| Waveshare ESP32-C6-Touch-AMOLED-2.06 | [waveshareteam/ESP32-C6-Touch-AMOLED-2.06](https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-2.06), [Waveshare-ESP32-components](https://github.com/waveshareteam/Waveshare-ESP32-components/tree/master/bsp/esp32_c6_touch_amoled_2_06) | `Schematic/ESP32-C6-Touch-AMOLED-2.06-Schematic-V1.0.pdf` for BOOT GPIO9, the PWR circuit, and ES7210 MIC1/MIC2. Muse polls PWR edges through the AXP2101. Muse uses the published v2.0.0 BSP for display, touch, ES8311 speaker and ES7210 capture. Set `CONFIG_BSP_I2S_NUM=0` and `CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT=8`: the BSP defaults to I2S1 and ignores runtime draw-buffer settings. |
+| Waveshare ESP32-S3-Touch-AMOLED-2.06 | [waveshareteam/ESP32-S3-Touch-AMOLED-2.06](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.06) | `Schematic/ESP32-S3-Touch-AMOLED-2.06-Schematic-V1.0.pdf` for BOOT GPIO0, the PWR circuit (AXP2101 PWRON only), the GD25Q256 flash and ES7210 MIC1/MIC2. `examples/esp-idf/01_AXP2101` for the power chip (it switches no rails), `04_Immersive_block` for the QMI8658 IMU. Muse uses the published v2.0.0 BSP, `waveshare/esp32_s3_touch_amoled_2_06`, for the panel (CO5300 through the SH8601 driver, 22-column gap), FT3168 touch (ft5x06 driver) and codecs, and draws through `muse_lcd_bands` as on the 2.16. The BSP opens I2S mono at 22.05 kHz unless `bsp_audio_init()` gets a config first. |
+| Waveshare ESP32-S3-Touch-AMOLED-2.16 | [waveshareteam/ESP32-S3-Touch-AMOLED-2.16](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16) | `schematic/`. `examples/esp-idf/` for the AXP2101 power chip (`01_AXP2101`) and the QMI8658 IMU (`04_Immersive_block`). Muse drives the display, touch and codec through its BSP, `waveshare/esp32_s3_touch_amoled_2_16`. |
+| Waveshare ESP32-S3-ePaper-1.54G | [waveshareteam/ESP32-S3-ePaper-1.54G](https://github.com/waveshareteam/ESP32-S3-ePaper-1.54G) | `Hardware/schematics/` for the pins, the battery latch (GPIO17) and the panel supply switch (GPIO6). `Example/ESP-IDF_5.5.1/09_E_Paper_Test` for the panel's commands (`components/epaper_port/`). |
 | Seeed SenseCAP Watcher | [Seeed-Studio/SenseCAP-Watcher-Firmware](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware) | `components/sensecap-watcher/` is Seeed's BSP. `include/sensecap-watcher.h` has the pins for the LCD, touch, knob, IO expander, audio, battery, SD card and the Himax camera chip (driven through `components/sscma_client/`). `examples/factory_firmware/` is the firmware it ships with. xiaozhi-esp32's [sensecap-watcher board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/sensecap-watcher) is a second reference. |
-| Every M5Stack board (StickS3, StickC Plus2, Cardputer ADV, StopWatch) | [m5stack/M5Unified](https://github.com/m5stack/M5Unified), and [M5GFX](https://github.com/m5stack/M5GFX) for the panels | `src/M5Unified.inl` for pins, buttons and audio. `src/utility/` for power and the battery (`Power_Class.inl`), the IMU, RTC, mic, speaker and LEDs. `src/M5GFX.cpp` in M5GFX for the panel. Search both for the model's `board_M5...` name. For the StopWatch, M5's factory firmware [m5stack/M5StopWatch-UserDemo](https://github.com/m5stack/M5StopWatch-UserDemo): `main/hal/` for the power chip, IO expander, buttons and audio, and `main/apps/app_stopwatch/view/view.cpp` for where the buttons sit. |
+| Seeed reTerminal Sticky | Seeed's `Seeed-reTerminal-E10xx-Firmware` `factory_fw` checkout; [hardware overview](https://www.seeedstudio.com/sticky/docs/en/device-guide/hardware-overview/) | `main/boards/reterminal_e1005/config.h` defines GPIOs; `reterminal_e1005.cpp` drives GPIO45/46 power hold and selects a 480×800 portrait UI (270° rotation and panel X mirror). `components/seeed_epaper/driver/ssd1677.c` supplies SSD1677 full/partial refresh on SPI2 (GPIO13–18, enable GPIO47, active-high BUSY); the SHT40 is on I2C1 (SDA GPIO1, SCL GPIO0), AI button on GPIO4. |
+| Every M5Stack board (StickS3, StickC Plus2, Cardputer ADV, StopWatch, CoreS3, Core2) | [m5stack/M5Unified](https://github.com/m5stack/M5Unified), and [M5GFX](https://github.com/m5stack/M5GFX) for the panels | `src/M5Unified.inl` for pins, buttons and audio. `src/utility/` for power and the battery (`Power_Class.inl`), the IMU, RTC, mic, speaker and LEDs. `src/M5GFX.cpp` in M5GFX for the panel. Search both for the model's `board_M5...` name. For the StopWatch, M5's factory firmware [m5stack/M5StopWatch-UserDemo](https://github.com/m5stack/M5StopWatch-UserDemo): `main/hal/` for the power chip, IO expander, buttons and audio, and `main/apps/app_stopwatch/view/view.cpp` for where the buttons sit. For the Core2, Espressif's BSP [esp-bsp/bsp/m5stack_core_2](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_2): `m5stack_core_2.c` for the AXP rail setup, display, touch and speaker init. |
+| OSTB EchoEar-2ST (experimental) | [Official product](https://docs.yishierniao.cn/details/ai/echoear-2st/product.html), [user guide](https://docs.yishierniao.cn/details/ai/echoear-2st/user_guide.html), xiaozhi-esp32 [ESP-VoCat reference](https://github.com/78/xiaozhi-esp32/blob/0d576d3d4c049c6f55eaf879725dc23e516511b4/main/boards/espressif/esp-vocat/esp_vocat.cc) | The public ST77916 panel sequence is reused with its MIT notice. Stock ESP-VoCat pins differ from the measured EchoEar unit; use [the variant pin map](ostb-echoear-2st.md), not its generic pin configuration or an N32R8 box label. |
 | Espressif ESP32-S3-BOX-3 | [espressif/esp-bsp](https://github.com/espressif/esp-bsp) | `bsp/esp-box-3/`: pins in `include/bsp/esp-box-3.h`, LCD/touch revision detection and codecs in `esp-box-3.c`, duplex I2S in `esp-box-3_idf5.c`. |
+| ALIENTEK ATK-DNESP32S3-BOX | No vendor repo for this board. xiaozhi-esp32's [atk-dnesp32s3-box board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/alientek/atk-dnesp32s3-box) | `config.h` for the i80 LCD, I2S and button pins, then `atk_dnesp32s3_box.cc` for the XL9555 (address 0x20: P0.5 speaker enable, P0.7 backlight) and the ES8311. K1 and K2 are XL9555 P0.4 and P0.3, active low, found on a unit. Other ALIENTEK boxes (BOX0, BOX2, BOX3) sit beside it there with different pins. |
+| M5Stack CoreS3 | [espressif/esp-bsp](https://github.com/espressif/esp-bsp) | `bsp/m5stack_core_s3/`: pins in `include/bsp/m5stack_core_s3.h`, the AXP2101 rails and AW9523 lines each part needs in `src/bsp_feature_en.c` and `src/bsp_io_expander.c`, codecs in `src/bsp_audio.c`. Muse drives it through that BSP, `espressif/m5stack_core_s3`. |
+| FoloToy AI Passport | [FoloToy/ai-passport](https://github.com/FoloToy/ai-passport) | `components/bsp/include/bsp_pins.h` for every pin, the button ladder's windows and the I2C addresses. `components/bsp/src/` for the ST7789P3's init table (`bsp_display.c`), the ES8311 setup (`bsp_audio.c`, keep `no_dac_ref`) and the CW2017 gauge (`bsp_battery.c`). `docs/hardware-design/` has the hardware guide. |
 | AIPI Lite | xiaozhi-esp32's [aipi-lite board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/xorigin/aipi-lite) | `config.h` for pins, then `aipi-lite.cc` and `power_manager.h`. |
+| Guition JC3248W535 | No vendor repo. [me-processware/JC3248W535-Driver](https://github.com/me-processware/JC3248W535-Driver), [sirisakG2/JC3248W535C](https://github.com/sirisakG2/JC3248W535C) | `src/JC3248W535_Display.h` and `src/JC3248W535_Touch.h` in the driver for the LCD and touch pins and the touch read command; the notes repo for the audio pins and USB. Arduino_GFX's `Arduino_AXS15231B.h` for the panel's init sequence. |
+| VN ESP32-S3 1.83-inch NV3023 | [TienHuyIoT/xiaozhi-esp32_vietnam](https://github.com/TienHuyIoT/xiaozhi-esp32_vietnam) | `main/boards/xiaozhi-ai-iot-vietnam-1st/`: `config.h` for pins, the `.cc` for the NV3023 init table and the codecs (`BoxAudioCodec`), `power_manager.h` for the battery. `xingzhi-cube-1.83tft-wifi/` has the same panel. |
 | Home Assistant Voice Preview Edition | [esphome/home-assistant-voice-pe](https://github.com/esphome/home-assistant-voice-pe) | `home-assistant-voice.yaml`, its ESPHome config. |
+| Freenove FNK0104B | [Freenove/Freenove_ESP32_S3_Display](https://github.com/Freenove/Freenove_ESP32_S3_Display) | `Tutorial_With_Touch/Sketches/`: `Sketch_07.1_Music` (ES8311 + I2S pins), `Sketch_11.1_Touch` (FT6336U), `Sketch_05.1_Battery_Voltage` (battery divider), `Sketch_02.1_LedPixel` (WS2812 pin). `Libraries/FNK0104AB/` has the TFT_eSPI setup with the display pins. |
+| Waveshare ESP32-S3-Touch-LCD-7 | [waveshareteam/ESP32-S3-Touch-LCD-7](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-7), [waveshareteam/waveshare_boards](https://github.com/waveshareteam/waveshare_boards) | `examples/ESP-IDF/09_lvgl_v9_demo/components/waveshare_rgb_lcd_port.[ch]` for RGB timing, GT911 reset and CH422G output; `boards/esp32_s3_touch_lcd_7/` for the pin map. |
+| Waveshare ESP32-S3-Touch-LCD-1.28 | No ESP-IDF vendor repo (Arduino and MicroPython demos on the [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.28)). [waveshareteam/RP2040-Touch-LCD-1.28](https://github.com/waveshareteam/RP2040-Touch-LCD-1.28) carries the same panel module | The wiki for pins, backlight and battery divider. `c/lib/LCD/LCD_1in28.c` in the RP2040 repo for the GC9A01A init and MADCTL, `c/lib/Touch/CST816S.c` for touch. |
+| Seeed XIAO ESP32-S3 1.47 Touch Display | [Seeed-Studio/Seeed_GFX2](https://github.com/Seeed-Studio/Seeed_GFX2), the [Seeed board guide](https://wiki.seeedstudio.com/getting_started_1.47_inch_touch_display_esp32s3/) | `src/driver/tft/Driver_JD9853A.cpp` for the panel sequence, `src/touch/Touch_AXS5106L.cpp` for touch, and the `0519_DashBoard_147_ESP32` example for the PDM mic. The XIAO ESP32-S3 Plus wiki for D pin to GPIO. |
+| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | [waveshareteam/ESP32-P4-WIFI6-Touch-LCD-3.5](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-3.5) | `schematic/`, and the BSP component `waveshare/esp32_p4_wifi6_touch_lcd_3_5` for the pin map, LCD, touch and ES8311. C6 SDIO GPIO14–19, C6 enable GPIO54; the AXP2101 on I2C GPIO7/8 reports PWR. |
+| Seeed reSpeaker Lite | [respeaker/reSpeaker_Lite](https://github.com/respeaker/reSpeaker_Lite) | `doc/images/pinout.png`, the I2C examples, `xmos_firmwares/`. |
 
 For the Cardputer ADV keyboard, also read [m5stack/M5Cardputer](https://github.com/m5stack/M5Cardputer), especially `src/utility/Keyboard/KeyboardReader/TCA8418.cpp` and `src/utility/Adafruit_TCA8418/`.
 
@@ -68,7 +85,7 @@ from that vendor's code.
 |---|---|---|---|
 | Light | status LED, or nothing | an overlay | `sdkconfig.defaults` (the C5 DevKitC-1) |
 | Status screen | edge bars and an animation | an overlay and a display backend in `main/` | `sdkconfig.ideaspark`, `sdkconfig.sensecap-indicator` |
-| E-paper | a status screen with text | an overlay and its own `led_status.h` implementation | `sdkconfig.reterminal-e1001`, `main/epaper_status.c` |
+| E-paper | a status screen with text | an overlay and its own `led_status.h` implementation | `sdkconfig.reterminal-e1001`, `sdkconfig.reterminal-e1002`, `main/epaper_status.c` |
 | UI | LVGL avatar, voice and settings | an overlay on top of `sdkconfig.muse` and a `muse_board_t` | `sdkconfig.muse-*` |
 
 A board with a screen, mic and speaker should run the full UI. The UI needs 8 MB
@@ -98,7 +115,7 @@ settings grouped under short comments saying why. Set:
 
 - `CONFIG_IDF_TARGET="esp32xx"`.
 - `CONFIG_HOMEHUB_BUTTON_GPIO`. The button is active low with an internal
-  pull-up. Boards with the full UI ignore it, because their talk button confirms pairing.
+  pull-up. Boards with the full UI ignore it, because their talk button or touch control confirms pairing.
 - The status backend, `CONFIG_HOMEHUB_LED_BACKEND_*=y` (`..._NONE` for no
   light). `sdkconfig.muse` sets `..._MUSE` for you.
 - Flash: `CONFIG_ESPTOOLPY_FLASHSIZE_<N>MB=y` and
@@ -108,8 +125,9 @@ settings grouped under short comments saying why. Set:
   (see `sdkconfig.sensecap-indicator`). With no PSRAM, copy the whole block from
   `sdkconfig.ideaspark`: `CONFIG_SPIRAM=n`, mbedtls internal allocation,
   `CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096` and `CONFIG_HOMEHUB_TUNNEL=n`.
-- `CONFIG_HOMEHUB_BLE_NAME_PREFIX="HomeLink-Disp"` on status-screen boards.
-  Light boards keep the default, and `sdkconfig.muse` sets `MuseGadget`.
+- `CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"` on status-screen boards, which
+  advertise as `MuseGadget-Disp-XXXXXX`. Light boards keep the defaults, and
+  `sdkconfig.muse` sets the `MuseGadget` prefix explicitly.
 - On a classic ESP32, `sdkconfig.ideaspark`'s chip block: `CONFIG_ESP32_REV_MIN_3=y`
   (signed apps need it), BLE-only BTDM, and the Wi-Fi and lwIP IRAM options off.
 
@@ -157,7 +175,9 @@ If the panel driver isn't part of `esp_lcd` in IDF v6.0.1 (check
 `led_strip` is. Images from Muse are sized with
 `tools/image_for_display.py --width W --height H`.
 
-A status light the existing backends don't cover (another pin or LED type)
+A single addressable LED on another pin needs only the overlay:
+`CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27=y` and `CONFIG_HOMEHUB_LED_STRIP_GPIO`
+(and `CONFIG_HOMEHUB_LED_RGB_ORDER=n` for the usual GRB order). Another LED type
 follows the same two steps. Copy `DEVKIT_GPIO27` (addressable) or `PWM_RGB`.
 
 ## 6. Boards with the full UI: add a board
@@ -201,20 +221,26 @@ The fields of `muse_board_t`:
 |---|---|
 | `name`, `width`, `height` | The panel as the UI draws it |
 | `round`, `touch` | Round panel; `touch` only if `display_start` returns an input device |
+| `touch_talk` | Optional touch-only push-to-talk: the LVGL microphone sends press/release edges through the existing input handler, and an explicit screen press confirms pending pairing. Defaults to false; requires `touch`. |
 | `keyboard` | Dedicated navigation keys: `poll_buttons` emits `MUSE_BTN_UP/DOWN/LEFT/RIGHT/ENTER/ESCAPE` presses. Enter selects and confirms pairing; Talk is not repurposed as Select while the menu is open. Defaults to false for two-button boards. |
 | `talk_button`, `aux_button` | On-screen captions ("boot", "pwr"). `talk_hint` and `aux_hint` place them next to the physical button |
+| `wake_button` | The menu's power-off page names this button as the one that turns the board back on, when that isn't `aux_button` (and the board has no `keyboard`). May be NULL |
+| `flat_menu_hints` | With `aux_hint` on `LV_ALIGN_RIGHT_MID` the menu turns that button's hint on end, drawn through a ~14 KB layer. Set it on a board that can't spare the RAM (the ESP32-C3): the hint lies flat on the menu's bar instead |
 | `frame_ms` | Avatar frame period: 40 on the S3 boards, 50 on the C6 |
+| `avatar_px` | Optional avatar canvas size in pixels; 0 uses the layout default |
 | `init` | Runs first: power latches, I2C bus, PMU |
 | `display_start` | Panel, LVGL and its task. Returns the display; leaves `*touch` NULL without touch |
 | `display_lock`, `display_unlock` | LVGL's lock |
 | `set_brightness` | 0 to 100 |
 | `panel_sleep` | Puts the panel to sleep when the screen goes off. May be NULL: then only the backlight turns off |
-| `display_pause` | Once the screen is dark on battery: stops LVGL (`esp_lv_adapter_pause`), sleeps the touch controller and stops anything else holding a PM lock, so the chip can light-sleep. Only buttons wake it. With a USB host attached the CPU stays at full speed anyway. May be NULL: LVGL keeps running and the CPU stays at full speed. Needs the PM block in the overlay (see `sdkconfig.muse-aipi`), and with PSRAM its static-buffers block too: light sleep's code takes internal RAM Link needs |
+| `display_pause` | Once the screen is dark on battery: stops LVGL (`esp_lv_adapter_pause`), sleeps the touch controller and stops anything else holding a PM lock, so the chip can light-sleep. Only buttons wake it. With a USB host attached the CPU stays at full speed anyway. May be NULL: LVGL keeps running and the CPU stays at full speed. Needs the PM block in the overlay (see `sdkconfig.muse-aipi`), and with PSRAM its static-buffers block too: light sleep's code takes internal RAM Link needs. CPU power-down in light sleep (`CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP`) saves more but takes about 15 KB of internal RAM for good on an S3 with PSRAM (`muse_input_power_init()` takes it at boot, before the radios fragment the heap): the Watcher pays for it with `CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM` |
 | `audio_init` | `esp_codec_dev` speaker and mic. `mic_slot` is 0 or 1, or -1 to mix. `set_mic_gain` may be NULL |
+| `audio_power` | Audio power such as an amp's enable: on once the codecs are open, off before they close to rest. May be NULL |
+| `codec_power` | The codecs' own supply, where the board switches it: on before they open (the first time too, before `audio_init`), off once both have closed to rest. While it's off, `muse_audio` sends them nothing and reapplies volume and gain on the next open. Park the I2S lines so they don't feed the unpowered codec, and redo any codec setup a power-on reset loses (see `board_m5stack_stopwatch.c`). May be NULL: always powered |
 | `poll_buttons` | Called every 10 ms, or 50 ms while the display is paused and `wait_buttons` is NULL. Returns `MUSE_BTN_*` edges. Use `muse_gpio_button_*` for GPIO buttons, or `muse_pmu_poll_key()` for an AXP2101 PWR key |
-| `wait_buttons` | While the display is paused: blocks until a button changes, so the chip light-sleeps instead of waking to poll. `muse_gpio_buttons_wait()` for GPIO buttons; a key only the PMU sees has to be polled. May be NULL: polled every 50 ms |
+| `wait_buttons` | While the display is paused: blocks until a button changes, so the chip light-sleeps instead of waking to poll. `muse_gpio_buttons_wait()` for GPIO buttons; a key only the PMU sees has to be polled, unless the PMU can interrupt (the StopWatch's M5PM1 pulls GPIO12 low on a click). May be NULL: polled every 50 ms |
 | `read_power` | May be NULL (no battery). `muse_pmu_read_power` on an AXP2101. Leave `battery_mv` 0 if the board can't measure the voltage in millivolts. The battery meter (`muse_battery.h`: Settings → Battery, `tools/muse/power.py`) reads it |
-| `power_off` | Required. Returns only if it fails |
+| `power_off` | Required. Returns only if it fails; return `ESP_ERR_NOT_SUPPORTED` when no software power mechanism is verified (EchoEar-2ST). Do not guess a latch GPIO. |
 
 On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
 
@@ -234,7 +260,7 @@ On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
 
 - For light and status-screen boards, add a case to `tools/board.sh` with
   `TARGET`, the overlay appended to `DEFAULTS`, and the `PORTS` globs for its
-  USB. Add a line to the usage comment, and widen the `sed -n '16,26p'` range
+  USB. Add a line to the usage comment, and widen the `sed -n '16,31p'` range
   in `usage()` by the lines you added.
 - In `devices/README.md`, add a row to Supported devices, a column to
   Features, and a row to Build. Link only to reference and store pages you
@@ -276,3 +302,22 @@ On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
    scan should show `<prefix>-XXXXXX`.
 
 If you don't have the board, say that the port was only built, not run.
+
+## 9. Power measurement
+
+Optional, for battery-powered boards. Measuring with a Nordic PPK2 on the
+battery input is documented in `docs/power/`; read the doc that matches the
+job before touching hardware:
+
+| When | Read |
+|---|---|
+| Before any PPK2 use: authorization and fixture gates, host setup, the single continuous source owner, the control handshake, accepting a capture | [`docs/power/ppk2.md`](../docs/power/ppk2.md) |
+| Profiling a new board or device: choosing a level, the fixture checklist, porting the `CONFIG_MUSE_POWER_TEST` diagnostic | [`docs/power/README.md`](../docs/power/README.md) |
+| Running or extending the SenseCAP Watcher sweep | [`docs/power/sensecap-watcher.md`](../docs/power/sensecap-watcher.md) |
+
+The diagnostic core is already board-neutral: implement `muse_ptest_board_*`
+from `components/muse/boards/muse_power_test_board.h`, including the board
+name and immutable state matrices, and extend its supported-board Kconfig
+list. Use `tools/power/power_sweep.py`; do not fork or rename the core, and
+keep the Watcher conformance tests green. The board owner's authorization and
+the fixture checks come before any hardware step.

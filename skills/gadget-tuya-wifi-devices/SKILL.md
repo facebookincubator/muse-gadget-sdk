@@ -18,7 +18,7 @@ Use this skill when the exact device is confirmed to support Tuya local TCP and 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing device ID, local key, protocol version and a trustworthy model/firmware datapoint schema, supplied securely.
 - A compatible TinyTuya client with local TCP transport routed through HomeLink.

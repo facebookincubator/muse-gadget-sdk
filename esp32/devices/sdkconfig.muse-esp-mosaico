@@ -1,0 +1,59 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Espressif ESP-Mosaico: ESP32-S31NRV16 (two RISC-V cores at 320 MHz, 16 MB
+# in-package PSRAM), 16 MB QIO NOR flash, 480x480 CO5300 QSPI AMOLED. Its one
+# USB-C port is the S31's high-speed USB OTG, not USB Serial/JTAG; the retained
+# Vibe Mode firmware runs ESP-Iris on it to install apps (see
+# devices/README.md, ESP-Mosaico).
+#
+# Sources: Espressif's esp-mosaico/esp-mosaico-bsp (pins, PSRAM, display) and
+# esp-mosaico-utils (the retained partition prefix, template sdkconfig).
+# The S31 needs ESP-IDF master at 7b9cc1ac (IDF_EXPORT, devices/README.md).
+#
+# Load last, after sdkconfig.muse.
+
+CONFIG_IDF_TARGET="esp32s31"
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_MUSE_BOARD_ESP_MOSAICO=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_320=y
+
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_mosaico.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# Its PSRAM, as Espressif's application template sets it.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_SPEED_250M=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_MEMTEST=n
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+
+# USB-C is high-speed OTG; USB Serial/JTAG only reaches the expansion header.
+# The console is the UART on the header.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Not signed: the board's Vibe Mode firmware does the updates, and an app
+# signed with our key checks the image it switches to against that key, so
+# its enter-Vibe-Mode call (esp_ota_set_boot_partition on factory) fails
+# with ESP_ERR_OTA_VALIDATE_FAILED.
+# CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT is not set
+# CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES is not set

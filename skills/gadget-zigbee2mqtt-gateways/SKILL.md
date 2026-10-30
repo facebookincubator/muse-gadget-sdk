@@ -17,7 +17,7 @@ Use this skill when the home already has a Zigbee2MQTT installation and an autho
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing broker address, discovered/confirmed TCP listener, TLS trust and broker credentials where required.
 - The base topic and a compatible MQTT client such as Paho using HomeLink's TCP transport.

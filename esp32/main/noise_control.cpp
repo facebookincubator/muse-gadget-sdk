@@ -14,10 +14,15 @@
  * limitations under the License.
  */
 
+#include "ble_commands.h"
 #include "noise_control.h"
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
 #include "noise_tunnel_internal.h"
+#include "ws_mask.h"
+#if CONFIG_HOMEHUB_FAST_GCM
+#include "fast_gcm.h"
+#endif
 
 #include <cstring>
 #include <cstdlib>
@@ -98,12 +103,28 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // but the tunnel stream (multiplexed on this session) carries ~8 KB IP-packet
 // batches, so scratch must fit a full batch plus ServiceFrame/envelope overhead.
 // Chat subscriptions deliver 16 KB body chunks plus framing, even on boards
-// without PSRAM. Reserve enough inbound space for those frames.
+// without PSRAM. Reserve enough inbound space for those frames. Not on the
+// ESP32-C3 AI Passport: three 17 KB buffers beside its UI leave too little to
+// upload a voice note. It takes 12 KB, as Link boards without PSRAM do.
+// With PSRAM it is the protocol's largest frame, as Muse's chat session uses,
+// so extra requests (display.draw_file) can take large replies in few frames;
+// the two buffers cost 104 KB of PSRAM more than 12 KB ones.
+// Chat events arrive one per frame; a frame over that ends the session (it
+// can't be skipped: Noise's nonces and the ordered framer would desync), the
+// request in flight ends with NOISE_CTRL_REQ_TOO_LARGE, and the session
+// reconnects.
+#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#define SVC_FRAME_SCRATCH (12 * 1024)
+#elif CONFIG_SPIRAM
+#define SVC_FRAME_SCRATCH (64 * 1024)
+#else
 #define SVC_FRAME_SCRATCH (SMALL_CONTROL_SESSION ? 17 * 1024 : 12288)
+#endif
 
-// The ADV cannot allocate the session with the larger inbound buffers and the
-// usual outbound buffers together. Keep this reduction local to that board.
-#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV
+// The ADV and the ESP32-C3 AI Passport cannot allocate the session with the
+// larger inbound buffers and the usual outbound buffers together. Keep this
+// reduction local to those boards.
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT)
 #define CARDPUTER_CONTROL_SESSION 1
 #else
 #define CARDPUTER_CONTROL_SESSION 0
@@ -124,6 +145,11 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // outbound frames are bounded by OUT_ENV_SCRATCH and inbound ones by
 // SVC_FRAME_SCRATCH (the decrypted frame must fit there), so without PSRAM use
 // buffers just large enough for those plus framing and the AEAD tag.
+// Free bytes kept in front of the outbound WebSocket payload in ws_buf, so the
+// frame header (at most 14 bytes) can go in front of it and the frame leave in
+// one TLS write. 32 also keeps the payload, which Noise seals in place,
+// aligned to a cache line for the AES DMA.
+#define WS_HEADROOM 32
 #if CONFIG_SPIRAM
 #define WS_BUF_SIZE ClientSession::kMaxOutboundWebSocketPayloadSize
 #elif CARDPUTER_CONTROL_SESSION
@@ -132,9 +158,15 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define WS_BUF_SIZE (SMALL_CONTROL_SESSION ? 7 * 1024 : 16 * 1024)
 #endif
 // Inbound WebSocket frames: SVC_FRAME_SCRATCH plus framing and the AEAD tag.
+#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#define WS_RX_BUF_SIZE (SVC_FRAME_SCRATCH + 1024)
+#else
 #define WS_RX_BUF_SIZE (SMALL_CONTROL_SESSION ? 17 * 1024 : WS_BUF_SIZE)
+#endif
 
 static char s_node_id[64];
+// A frame too big for this board's buffers is ending the session.
+static bool s_req_too_large;
 static char s_display_name[64];
 static char s_wifi_ssid[33];
 static noise_ctrl_status_cb s_status_cb = nullptr;
@@ -282,26 +314,73 @@ static bool ws_send_binary(esp_tls_t *tls, const uint8_t *payload, size_t len) {
     memcpy(hdr + hdr_len, &mask_key, 4);
     hdr_len += 4;
 
-    if (write_all(tls, hdr, hdr_len) != static_cast<ssize_t>(hdr_len)) {
-        return false;
-    }
-
-    // Mask and send payload in chunks to avoid a full copy.
+    // Mask into a stack chunk, the header riding in the first one, so a short
+    // frame (the handshake) is one TLS record. Frames from ws_buf take
+    // ws_send_frame_inplace() instead.
     const uint8_t *mk = reinterpret_cast<const uint8_t *>(&mask_key);
     uint8_t chunk[512];
+    memcpy(chunk, hdr, hdr_len);
+    size_t fill = hdr_len;
     size_t off = 0;
-    while (off < len) {
-        size_t n = (len - off < sizeof(chunk)) ? (len - off) : sizeof(chunk);
+    do {
+        size_t n = len - off;
+        if (n > sizeof(chunk) - fill) n = sizeof(chunk) - fill;
         for (size_t i = 0; i < n; i++) {
-            chunk[i] = payload[off + i] ^ mk[(off + i) & 3];
+            chunk[fill + i] = payload[off + i] ^ mk[(off + i) & 3];
         }
-        if (write_all(tls, chunk, n) != static_cast<ssize_t>(n)) {
+        fill += n;
+        if (write_all(tls, chunk, fill) != static_cast<ssize_t>(fill)) {
             return false;
         }
         off += n;
-    }
+        fill = 0;
+    } while (off < len);
     return true;
 }
+
+// Send a masked binary WS frame whose payload sits at `payload` with at least
+// WS_HEADROOM writable bytes in front of it. The payload is masked in place
+// and the header written in front of it, so the frame leaves in ONE TLS write:
+// one record (up to CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN) instead of one per
+// 512-byte chunk, and one AES-GCM pass. The payload is scratch afterwards.
+static bool ws_send_frame_inplace(esp_tls_t *tls, uint8_t *payload, size_t len) {
+    uint8_t hdr[14];
+    size_t hdr_len;
+    hdr[0] = 0x82; // FIN | binary
+    if (len < 126) {
+        hdr[1] = 0x80 | static_cast<uint8_t>(len);
+        hdr_len = 2;
+    } else if (len <= 65535) {
+        hdr[1] = 0x80 | 126;
+        hdr[2] = static_cast<uint8_t>((len >> 8) & 0xff);
+        hdr[3] = static_cast<uint8_t>(len & 0xff);
+        hdr_len = 4;
+    } else {
+        hdr[1] = 0x80 | 127;
+        for (int i = 0; i < 8; i++) {
+            hdr[2 + i] = static_cast<uint8_t>((len >> (56 - 8 * i)) & 0xff);
+        }
+        hdr_len = 10;
+    }
+    uint32_t mask_key = esp_random();
+    memcpy(hdr + hdr_len, &mask_key, 4);
+    hdr_len += 4;
+
+    ws_mask_inplace(payload, len, reinterpret_cast<const uint8_t *>(&mask_key));
+
+    uint8_t *frame = payload - hdr_len;
+    memcpy(frame, hdr, hdr_len);
+    size_t total = hdr_len + len;
+    return write_all(tls, frame, total) == static_cast<ssize_t>(total);
+}
+
+#if CONFIG_HOMEHUB_PIPELINE_BENCH
+// Bench builds drive the production frame sender over their own TLS link.
+extern "C" bool noise_bench_ws_send_inplace(esp_tls_t *tls, uint8_t *payload, size_t len) {
+    s_running = true;
+    return ws_send_frame_inplace(tls, payload, len);
+}
+#endif
 
 // Send a zero-length masked WebSocket ping (opcode 0x9). The peer (the LB /
 // ingress-rev-proxy) replies with a pong, so this generates traffic in BOTH
@@ -392,6 +471,13 @@ static ssize_t ws_recv_frame(esp_tls_t *tls, uint8_t *buf, size_t buf_cap) {
     if (payload_len > buf_cap) {
         ESP_LOGE(TAG, "WS frame too large: %llu > %u",
                  (unsigned long long)payload_len, (unsigned)buf_cap);
+        return -1;
+    }
+    // RFC 6455 §5.5: control frames carry at most 125 bytes. A longer ping
+    // can't be echoed in a pong's 7-bit length field, so fail the connection
+    // instead of sending a malformed pong.
+    if (opcode >= 0x8 && payload_len > 125) {
+        ESP_LOGE(TAG, "WS control frame too large: %llu", (unsigned long long)payload_len);
         return -1;
     }
 
@@ -515,6 +601,11 @@ static ssize_t ws_recv_frame_nonblock(esp_tls_t *tls, uint8_t *buf, size_t cap) 
 
     if (payload_len > cap) {
         ESP_LOGE(TAG, "WS frame too large: %llu", (unsigned long long)payload_len);
+        s_req_too_large = true;
+        return -1;
+    }
+    if (opcode >= 0x8 && payload_len > 125) { // RFC 6455 §5.5, as above
+        ESP_LOGE(TAG, "WS control frame too large: %llu", (unsigned long long)payload_len);
         return -1;
     }
 
@@ -747,15 +838,18 @@ static bool noise_handshake(esp_tls_t *tls, ClientSession &session,
 
 static bool flush_outbound(esp_tls_t *tls, ClientSession &session,
                            uint8_t *ws_buf) {
+    // The payload goes WS_HEADROOM into ws_buf so its frame header fits in
+    // front of it (ws_send_frame_inplace).
+    uint8_t *payload = ws_buf + WS_HEADROOM;
     while (session.HasOutboundWebSocketPayload()) {
-        ByteSpan ws_span(ws_buf, WS_BUF_SIZE);
+        ByteSpan ws_span(payload, WS_BUF_SIZE);
         auto sws = session.WriteNextOutboundWebSocketPayload(ws_span);
         if (!sws.ok()) {
             ESP_LOGE(TAG, "WriteNextOutboundWebSocketPayload failed: %s",
                      sws.status().str());
             return false;
         }
-        if (!ws_send_binary(tls, ws_buf, sws.size())) {
+        if (!ws_send_frame_inplace(tls, payload, sws.size())) {
             ESP_LOGE(TAG, "ws_send_binary failed");
             return false;
         }
@@ -896,10 +990,31 @@ static bool tunnel_send_body(void *vctx, const uint8_t *data, size_t len) {
     return flush_outbound(c->tls, *c->session, c->ws_buf);
 }
 
+// The same, encoding and encrypting the batch where it sits in its tunnel
+// slot (noise_tunnel.cpp): no copy into the service, envelope and WebSocket
+// buffers. It fails, like the copying path, when the session isn't
+// established or another outbound message is mid-flight: every send here
+// flushes its frames before returning, so the latter means the session is
+// broken, and the caller drops the batch and rechecks the session.
+static bool tunnel_send_body_inplace(void *vctx, uint8_t *buf, size_t headroom,
+                                     size_t len, size_t tailroom) {
+    auto *c = static_cast<tunnel_emit_ctx *>(vctx);
+    auto r = c->session->SealBodyChunkInPlace(
+        ServiceType::Daemon, TUNNEL_STREAM_ID,
+        ByteSpan(buf, headroom + len + tailroom), headroom, len);
+    if (!r.status.ok() || r.offset < 14) {
+        ESP_LOGE(TAG, "tunnel SealBodyChunkInPlace failed: %s (offset %u)",
+                 r.status.str(), (unsigned)r.offset);
+        return false;
+    }
+    return ws_send_frame_inplace(c->tls, buf + r.offset, r.size);
+}
+
 // ---- Extra daemon requests (noise_ctrl_req_*) --------------------------------
 
-// Only Muse opens these; Link-only gateways get the empty stubs below.
-#if CONFIG_MUSE_ENABLED
+// Opened by Muse and by an app's own code (CONFIG_HOMEHUB_DAEMON_REQUESTS);
+// builds without it get the empty stubs below.
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
 
 // Stream ids from here up belong to these requests; lower ids are Link's own.
 #define REQ_STREAM_BASE 16
@@ -907,8 +1022,14 @@ static bool tunnel_send_body(void *vctx, const uint8_t *data, size_t len) {
 #define REQ_QUEUE_LEN   6
 #define REQ_MAX_HEADERS 6
 // Body bytes queued at once. Without PSRAM a larger backlog leaves no block big
-// enough for mbedTLS's per-write record buffer, and the session drops.
-#define REQ_QUEUE_BYTES (SMALL_CONTROL_SESSION ? 4096 : 16384)
+// enough for mbedTLS's per-write record buffer, and the session drops: on any
+// board without it, Muse or not.
+#if SMALL_CONTROL_SESSION || !CONFIG_SPIRAM
+#define REQ_LOW_RAM 1
+#else
+#define REQ_LOW_RAM 0
+#endif
+#define REQ_QUEUE_BYTES (REQ_LOW_RAM ? 4096 : 16384)
 // Largest free block a request send needs: the TLS record plus overhead.
 #define REQ_TLS_BLOCK   (CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN + 512)
 
@@ -967,18 +1088,21 @@ static void req_drop(req_op &op) {
     free(op.data);
 }
 
-static void req_fail(req_stream *s) {
+static void req_fail(req_stream *s, int status = -1) {
     req_stream gone = *s;
     *s = {};
-    gone.cb(gone.ctx, -1, nullptr, 0, true);
+    gone.cb(gone.ctx, status, nullptr, 0, true);
 }
 
-// The session is gone, and every request with it.
+// The session is gone, and every request with it: NOISE_CTRL_REQ_TOO_LARGE
+// when a frame too big for this board's buffers ended it.
 static void req_end_all(void) {
     req_op op;
     while (req_take(&op)) req_drop(op);
+    int status = s_req_too_large ? NOISE_CTRL_REQ_TOO_LARGE : -1;
+    s_req_too_large = false;
     for (auto &s : s_req_streams) {
-        if (s.id) req_fail(&s);
+        if (s.id) req_fail(&s, status);
     }
 }
 
@@ -1031,7 +1155,7 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
     int32_t queued = s_req_queued_bytes;
     if (!noise_tx_has_dma_headroom_reclaiming(queued > 0 ? (size_t)queued : 0)
         || !noise_tx_has_contiguous_dma_headroom()) return true;
-    if (SMALL_CONTROL_SESSION
+    if (REQ_LOW_RAM
         && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < REQ_TLS_BLOCK) return true;
     req_op op;
     if (!req_take(&op)) return true;
@@ -1098,7 +1222,7 @@ static void req_init(void) {
 static void req_init(void) {}
 static void req_end_all(void) {}
 static bool req_on_frame(const DecodedServiceFrame &) { return false; }
-#endif  // CONFIG_MUSE_ENABLED
+#endif  // CONFIG_HOMEHUB_DAEMON_REQUESTS
 
 // ---- Agent identity ----------------------------------------------------------
 
@@ -1196,6 +1320,24 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
+#if CONFIG_HOMEHUB_DISPLAY_COMMANDS
+// The optional `row` of display.draw_url and display.draw_file.
+static cJSON *row_params(void) {
+    cJSON *optional = cJSON_CreateObject();
+    cJSON *top_param = cJSON_CreateObject();
+    cJSON_AddStringToObject(top_param, "type", "integer");
+    cJSON_AddStringToObject(top_param, "description",
+#if CONFIG_HOMEHUB_LED_BACKEND_MUSE
+                            "Row to draw the top of the image at; by default a JPEG "
+                            "is centred down the screen and raw data starts at 0.");
+#else
+                            "Row to draw the top of the image at; default 0.");
+#endif
+    cJSON_AddItemToObject(optional, "row", top_param);
+    return optional;
+}
+#endif
+
 static void add_command(cJSON *commands, const char *name,
                         const char *description,
                         cJSON *required, cJSON *optional) {
@@ -1263,9 +1405,18 @@ static char *build_register_json(void) {
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
     int disp_w, disp_h;
     if (led_status_display_info(&disp_w, &disp_h)) {
-        // The agent prepares images from this, so it states the bit depth.
-        bool mono = led_status_display_bits() == 1;
-        char desc[1024];
+        // The agent prepares images from this, so it states the bit depth
+        // and, for e-paper, the exact inks.
+        int bits = led_status_display_bits();
+        bool mono = bits == 1;
+        bool epaper = bits == 1 || bits == 2 || bits == 4;
+        // 2 bits are four inks on the Waveshare 1.54G, four grays elsewhere.
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        bool inks4 = bits == 2;
+#else
+        bool inks4 = false;
+#endif
+        char desc[1536];
         snprintf(desc, sizeof(desc),
                  "Download an image and draw it on the %dx%d %s. Takes a "
                  "baseline "
@@ -1283,7 +1434,11 @@ static char *build_register_json(void) {
 #endif
                  disp_w, disp_h,
                  mono ? "black and white e-paper screen, 1 bit per pixel"
-                      : "colour screen, 16 bits per pixel (RGB565)",
+                 : inks4 ? "four-colour e-paper screen, 2 bits per pixel"
+                 : bits == 4 ? "six-colour e-paper screen (E Ink Spectra 6), "
+                               "4 bits per pixel"
+                             : bits == 2 ? "four-level grayscale e-paper screen, 2 bits per pixel"
+                                         : "colour screen, 16 bits per pixel (RGB565)",
                  disp_w * 2,
                  mono ? " The screen has no gray or colour: the device "
                         "dithers them to black and white dots, so photos "
@@ -1293,30 +1448,66 @@ static char *build_register_json(void) {
                         "is in, taking about 2 s and flashing, so send one "
                         "whole screen rather than several parts. The image "
                         "stays on screen without power."
-                      : ""
+                 : inks4 ? " The screen has only four inks: black #000000, "
+                               "white #ffffff, yellow #ffff00 and red #ff0000, "
+                               "shown exactly. There is no green or blue ink: "
+                               "saturated greens and blues come out nearly "
+                               "black. The device dithers every other "
+                               "colour and gray to dots of these, so photos "
+                               "look grainy and muted, and text, charts and "
+                               "flat artwork are sharpest drawn in those four "
+                               "colours only. It refreshes once the whole image "
+                               "is in, taking 9 to 20 s and flashing, so send "
+                               "one whole screen rather than several parts. "
+                               "The image stays on screen without power."
+                 : bits == 4 ? " The screen has only six inks: black #000000, "
+                               "white #ffffff, yellow #ffff00, red #ff0000, "
+                               "blue #0000ff and green #00ff00, shown exactly. "
+                               "The device dithers every other colour and gray "
+                               "to dots of these, so photos look grainy and "
+                               "muted, and text, charts and flat artwork are "
+                               "sharpest drawn in those six colours only. It "
+                               "refreshes once the whole image is in, taking "
+                               "about 30 s and flashing, so send one whole "
+                               "screen rather than several parts, at most "
+                               "about once a minute. The image stays on "
+                               "screen without power."
+                             : bits == 2 ? " Images are quantized to four gray levels. "
+                                           "The panel refreshes the whole image at once and retains "
+                                           "it without power; send one whole screen rather than "
+                                           "several parts."
+                                         : ""
 #if !CONFIG_HOMEHUB_LED_BACKEND_MUSE
-                 , mono ? "status screen" : "animation"
+                 , epaper ? "status screen" : "animation"
 #endif
                  );
         cJSON *url_required = cJSON_CreateObject();
         cJSON_AddItemToObject(url_required, "url",
                               string_param("http:// or https:// URL of the image."));
-        cJSON *url_optional = cJSON_CreateObject();
-        cJSON *top_param = cJSON_CreateObject();
-        cJSON_AddStringToObject(top_param, "type", "integer");
-        cJSON_AddStringToObject(top_param, "description",
-#if CONFIG_HOMEHUB_LED_BACKEND_MUSE
-                                "Row to draw the top of the image at; by default a JPEG "
-                                "is centred down the screen and raw data starts at 0.");
-#else
-                                "Row to draw the top of the image at; default 0.");
-#endif
-        cJSON_AddItemToObject(url_optional, "row", top_param);
-        add_command(commands, "display.draw_url", desc, url_required, url_optional);
+        add_command(commands, "display.draw_url", desc, url_required, row_params());
+        // The six-colour e-paper may first finish a status screen refresh,
+        // then takes as long again for the image.
         cJSON_AddNumberToObject(
-            cJSON_GetObjectItem(commands, "display.draw_url"), "timeout_ms", 60000);
+            cJSON_GetObjectItem(commands, "display.draw_url"), "timeout_ms",
+            bits == 4 ? 120000 : 60000);
+        cJSON *path_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(path_required, "path",
+                              string_param("Path of the image file on this VM, relative, "
+                                           "as the VM's file API takes it, e.g. "
+                                           "workspace/picture.jpg."));
+        add_command(commands, "display.draw_file",
+                    "Draw an image file from this VM on the screen. The same as "
+                    "display.draw_url, with the same image formats and screen, "
+                    "but takes a path on the VM instead of a URL: the device "
+                    "reads the file over its connection to the VM, so the file "
+                    "need not be on the internet. Replies when the image is "
+                    "drawn.",
+                    path_required, row_params());
+        cJSON_AddNumberToObject(
+            cJSON_GetObjectItem(commands, "display.draw_file"), "timeout_ms",
+            bits == 4 ? 120000 : 60000);
         add_command(commands, "display.show_animation",
-                    mono ? "Clear the image and bring back the status screen "
+                    epaper ? "Clear the image and bring back the status screen "
                            "and the agent's name."
                          : "Clear the image and bring back the animation and "
                            "the agent's name.",
@@ -1346,6 +1537,13 @@ static char *build_register_json(void) {
                 "humidity need the Grove AHT20 plugged in.",
                 nullptr, nullptr);
 #endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    add_command(commands, "sensors.read",
+                "Read the onboard air sensor: temperature in degrees Celsius "
+                "and relative humidity in percent. Each reading has its age "
+                "in seconds; a sensor with no recent reading is null.",
+                nullptr, nullptr);
+#endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA
     add_command(commands, "camera.capture",
@@ -1371,6 +1569,10 @@ static char *build_register_json(void) {
                     "(esp_https_ota), then reboot.",
                     ota_required, ota_optional);
     }
+
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+    ble_commands_register(commands);
+#endif
 
     cJSON_AddItemToObject(params, "commands_v2", commands);
     cJSON_AddItemToObject(root, "params", params);
@@ -1752,16 +1954,27 @@ static void process_inbound_body_chunk(
                     cJSON *id = cJSON_GetObjectItem(msg, "id");
                     if (cJSON_IsString(id) && id->valuestring
                         && strcmp(id->valuestring, s_register_req_id) == 0) {
-                        s_register_acked = true;
-                        ESP_LOGI(TAG, "link.register acked; tunnel may open");
-                        cJSON *type = cJSON_GetObjectItem(msg, "type");
-                        cJSON *reply = cJSON_GetObjectItem(msg, "result");
-                        cJSON *status = cJSON_GetObjectItem(reply, "status");
-                        s_heartbeat_registered = cJSON_IsString(type)
-                            && strcmp(type->valuestring, "res") == 0
-                            && cJSON_IsString(status)
-                            && strcmp(status->valuestring, "registered") == 0
-                            && !cJSON_GetObjectItem(msg, "error");
+                        cJSON *failure = cJSON_GetObjectItem(msg, "error");
+                        if (failure && !cJSON_IsNull(failure) && !cJSON_IsFalse(failure)) {
+                            // Not registered, so the server would refuse the
+                            // tunnel and the Muse can't invoke this device.
+                            cJSON *reason = cJSON_IsObject(failure)
+                                ? cJSON_GetObjectItem(failure, "message") : failure;
+                            ESP_LOGE(TAG, "link.register rejected: %s",
+                                     cJSON_IsString(reason) && reason->valuestring
+                                         ? reason->valuestring : "no reason given");
+                        } else {
+                            s_register_acked = true;
+                            ESP_LOGI(TAG, "link.register acked; tunnel may open");
+                            cJSON *type = cJSON_GetObjectItem(msg, "type");
+                            cJSON *reply = cJSON_GetObjectItem(msg, "result");
+                            cJSON *status = cJSON_GetObjectItem(reply, "status");
+                            s_heartbeat_registered = cJSON_IsString(type)
+                                && strcmp(type->valuestring, "res") == 0
+                                && cJSON_IsString(status)
+                                && strcmp(status->valuestring, "registered") == 0
+                                && !failure;
+                        }
                     }
                     cJSON_Delete(msg);
                 }
@@ -1827,6 +2040,9 @@ static session_result_t run_session(stack_monitor_t *stack) {
     noise_upgrade_result_t upgrade = ws_upgrade(tls);
     if (upgrade != NOISE_UPGRADE_OK) {
         esp_tls_conn_destroy(tls);
+#if CONFIG_HOMEHUB_FAST_GCM
+        fast_gcm_forget_all();
+#endif
         // The edge refusing our bearer is an auth failure, not a network
         // blip. Saying so takes the 60s auth backoff instead of the 15s
         // network cap, and raises ws_auth_failed so app.c re-fetches the
@@ -1840,17 +2056,20 @@ static session_result_t run_session(stack_monitor_t *stack) {
     PsaCryptoBackend crypto;
     ClientSession session(crypto);
 
-    size_t ws_buf_size = WS_BUF_SIZE;
-    ws_buf = static_cast<uint8_t *>(
-        heap_caps_malloc(ws_buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!ws_buf) ws_buf = static_cast<uint8_t *>(malloc(ws_buf_size));
+    // WS_HEADROOM in front of the payload for its frame header; the buffer is
+    // cache-line aligned so the payload Noise seals in place is too.
+    size_t ws_buf_size = WS_HEADROOM + WS_BUF_SIZE;
+    ws_buf = static_cast<uint8_t *>(heap_caps_aligned_alloc(
+        WS_HEADROOM, ws_buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!ws_buf) ws_buf = static_cast<uint8_t *>(heap_caps_aligned_alloc(
+        WS_HEADROOM, ws_buf_size, MALLOC_CAP_8BIT));
 
     rx_buf = static_cast<uint8_t *>(
         heap_caps_malloc(WS_RX_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!rx_buf) rx_buf = static_cast<uint8_t *>(malloc(WS_RX_BUF_SIZE));
 
     // Crypto/framing scratch. PSRAM-preferred (with a heap fallback) so the
-    // 12 KB buffers don't land in internal SRAM — anything under
+    // buffers don't land in internal SRAM — anything under
     // CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL would otherwise be served from the
     // scarce internal pool that WiFi/TLS/lwIP also need.
     svc_scratch = static_cast<uint8_t *>(
@@ -1961,7 +2180,8 @@ static session_result_t run_session(stack_monitor_t *stack) {
     // this connection has a registered device. Opening before the ack races the
     // registration and takes a 403 + slow reopen.
     tunnel_emit_ctx tun_ctx = {tls, &session, svc_scratch, env_scratch, ws_buf};
-    noise_tunnel_emit_t tun_emit = {&tun_ctx, tunnel_open_stream, tunnel_send_body};
+    noise_tunnel_emit_t tun_emit = {&tun_ctx, tunnel_open_stream, tunnel_send_body,
+                                    tunnel_send_body_inplace};
     bool tunnel_opened = false;
     uint64_t last_busy_us = esp_timer_get_time();
 
@@ -2003,6 +2223,12 @@ static session_result_t run_session(stack_monitor_t *stack) {
 
             if (!inbound.ok()) {
                 ESP_LOGW(TAG, "ProcessInbound failed: %s", inbound.status.str());
+                // Too large only if the frame's plaintext can't fit the scratch:
+                // a PSA allocation failure is ResourceExhausted too, and isn't.
+                if (inbound.status.IsResourceExhausted() &&
+                    static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
+                    s_req_too_large = true;
+                }
                 error = true;
                 break;
             }
@@ -2010,7 +2236,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 auto &frame = inbound.frame;
                 bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
                 if (req_on_frame(frame)) {
-                    // One of Muse's extra requests.
+                    // One of the extra daemon requests.
                 } else if (frame.stream_id == IDENTITY_STREAM_ID) {
                     identity_on_frame(identity, frame);
                 } else if (frame.kind == ServiceFrameKind::BodyChunk) {
@@ -2134,7 +2360,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
             }
         }
 
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
         {
             bool sent = false;
             if (!req_pump_tx(tls, session, svc_scratch, env_scratch, ws_buf, &sent)) {
@@ -2228,6 +2454,9 @@ cleanup:
     free(tf_scratch);
     free(sr_scratch);
     esp_tls_conn_destroy(tls);
+#if CONFIG_HOMEHUB_FAST_GCM
+    fast_gcm_forget_all();   // this session's TLS and Noise keys
+#endif
     return result;
 }
 
@@ -2379,7 +2608,7 @@ extern "C" void noise_ctrl_send_command_result(
     queue_result(session_generation, request_id, result);
 }
 
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
 extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
                                        const char *const *headers, bool end_body,
                                        noise_ctrl_req_cb cb, void *ctx) {
@@ -2442,4 +2671,12 @@ extern "C" void noise_ctrl_req_cancel(int64_t id) {
     req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr};
     req_put(op, pdMS_TO_TICKS(100));
 }
-#endif  // CONFIG_MUSE_ENABLED
+
+// What a reply frame leaves for its body in SVC_FRAME_SCRATCH, after the
+// framing and the response head (status and headers).
+#define REQ_FRAME_OVERHEAD 2048
+
+extern "C" size_t noise_ctrl_req_max_body(void) {
+    return SVC_FRAME_SCRATCH - REQ_FRAME_OVERHEAD;
+}
+#endif  // CONFIG_HOMEHUB_DAEMON_REQUESTS
