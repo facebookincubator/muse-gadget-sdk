@@ -30,15 +30,19 @@
  * Audio has no codec chip to talk to: the amplifier is a MAX98357 and the
  * microphone an INMP441, both register-less I2S parts, and they are on
  * separate buses (amplifier tx on I2S0, microphone rx on I2S1) where Muse's
- * `audio_init` contract is one duplex bus. Both are therefore built on
- * `esp_codec_dev`'s dummy codec, one data interface per bus.
+ * `audio_init` contract is one duplex bus. The amplifier is built on
+ * `esp_codec_dev`'s dummy codec; the microphone reads its own channel, as on
+ * the Guition JC3248W535, so its 32-bit slots survive esp_codec_dev_open().
  */
+#include <math.h>
+
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
+#include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"   /* audio_codec_new_i2s_data, audio_codec_new_gpio */
 #include "dummy_codec.h"              /* dummy_codec_new: the register-less codec */
 #include "esp_lcd_panel_io.h"
@@ -48,6 +52,7 @@
 #include "esp_lcd_touch_cst816s.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
+#include "freertos/FreeRTOS.h"
 
 #include "muse_audio.h"   /* MUSE_AUDIO_RATE */
 #include "muse_board.h"
@@ -91,6 +96,10 @@ static const char *TAG = "board";
 #define MIC_WS GPIO_NUM_6
 #define MIC_DIN GPIO_NUM_1
 
+/* An INMP441 is about -26 dBFS at 94 dB SPL; Muse's default 30 dB of gain
+ * brings speech up to where the ES8311 boards have it. */
+#define MIC_GAIN_OFFSET_DB 0
+
 #define BL_LEDC_MODE LEDC_LOW_SPEED_MODE
 #define BL_LEDC_CHANNEL LEDC_CHANNEL_0
 #define BL_LEDC_TIMER LEDC_TIMER_0
@@ -125,6 +134,9 @@ static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
 static i2c_master_bus_handle_t s_i2c;
 static muse_gpio_button_t s_boot;
+static i2s_chan_handle_t s_mic_rx;
+static int s_mic_gain_q8 = 256;
+static int32_t s_mic_dc[2];            /* each slot's zero level, x256 */
 
 /* Brings up the CST816S and hands LVGL its input device. Failure is not fatal:
  * BOOT still does push-to-talk and pairing, but with no second button there is
@@ -304,8 +316,8 @@ static void display_pause(bool pause)
 
 static unsigned poll_buttons(void)
 {
-    /* One button, so it is the talk button: it confirms pairing and opens the
-     * menu, the way the two-button boards' talk button does. */
+    /* One button, so it is the talk button: push-to-talk and pairing
+     * confirmation. Settings are reached by touch. */
     return muse_gpio_button_poll(&s_boot);
 }
 
@@ -315,11 +327,46 @@ static void wait_buttons(int timeout_ms)
     muse_gpio_buttons_wait(buttons, 1, timeout_ms);
 }
 
-/* Both chips are register-less, so both devices are built on the dummy codec:
- * the I2S data interface does the work and `pa_pin = -1` says there is no
- * amplifier enable line to drive. Muse wants one duplex bus, but this board
- * has two single-direction ones, so each gets its own data interface and its
- * own esp_codec_dev handle. */
+/* The microphone's data interface. It has no set_fmt, so esp_codec_dev_open()
+ * can't reconfigure the channel back to 16-bit slots. */
+static int mic_enable(const audio_codec_data_if_t *h, esp_codec_dev_type_t type, bool on)
+{
+    (void)h;
+    (void)type;
+    (void)on;
+    return ESP_CODEC_DEV_OK;
+}
+
+/* A MEMS mic's slot has a small DC offset, which the gain would turn into
+ * clipping: each slot's zero level is tracked and taken off first. */
+static int mic_read(const audio_codec_data_if_t *h, uint8_t *data, int size)
+{
+    (void)h;
+    size_t got;
+    if (i2s_channel_read(s_mic_rx, data, size, &got, pdMS_TO_TICKS(1000)) != ESP_OK || got != (size_t)size) {
+        return ESP_CODEC_DEV_READ_FAIL;
+    }
+    int16_t *s = (int16_t *)data;
+    for (int i = 0; i < size / 2; i++) {
+        int32_t *dc = &s_mic_dc[i & 1];
+        *dc += (s[i] * 256 - *dc) >> 8;
+        int v = (s[i] - (*dc >> 8)) * s_mic_gain_q8 >> 8;
+        s[i] = v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v;
+    }
+    return ESP_CODEC_DEV_OK;
+}
+
+/* The dummy codec has no gain, so the mic's gain is applied in mic_read. */
+static void set_mic_gain(esp_codec_dev_handle_t mic, int db)
+{
+    (void)mic;
+    s_mic_gain_q8 = (int)(256.0f * powf(10.0f, (db - MIC_GAIN_OFFSET_DB) / 20.0f));
+}
+
+/* The amplifier is register-less, so it is built on the dummy codec: the I2S
+ * data interface does the work and `pa_pin = -1` says there is no enable line
+ * to drive. Muse wants one duplex bus, but this board has two single-direction
+ * ones, so each gets its own esp_codec_dev handle. */
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)
 {
     i2s_chan_handle_t amp_tx = NULL;
@@ -341,11 +388,10 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(amp_tx, &amp_std), TAG, "amp std");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(amp_tx), TAG, "amp enable");
 
-    i2s_chan_handle_t mic_rx = NULL;
     i2s_chan_config_t mic_chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
     mic_chan.auto_clear = true;
-    ESP_RETURN_ON_ERROR(i2s_new_channel(&mic_chan, NULL, &mic_rx), TAG, "mic channel");
-    const i2s_std_config_t mic_std = {
+    ESP_RETURN_ON_ERROR(i2s_new_channel(&mic_chan, NULL, &s_mic_rx), TAG, "mic channel");
+    i2s_std_config_t mic_std = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(MUSE_AUDIO_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
                                                         I2S_SLOT_MODE_STEREO),
@@ -357,21 +403,22 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
             .din = MIC_DIN,
         },
     };
-    ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(mic_rx, &mic_std), TAG, "mic std");
-    ESP_RETURN_ON_ERROR(i2s_channel_enable(mic_rx), TAG, "mic enable");
+    /* 32-bit slots (64 clocks a frame), which an INMP441 needs. Each sample is
+     * the slot's top 16 bits. */
+    mic_std.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
+    mic_std.slot_cfg.ws_width = 32;
+    ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_mic_rx, &mic_std), TAG, "mic std");
+    ESP_RETURN_ON_ERROR(i2s_channel_enable(s_mic_rx), TAG, "mic enable");
 
     audio_codec_i2s_cfg_t amp_i2s = { .port = I2S_NUM_0, .tx_handle = amp_tx };
-    audio_codec_i2s_cfg_t mic_i2s = { .port = I2S_NUM_1, .rx_handle = mic_rx };
     const audio_codec_data_if_t *amp_data = audio_codec_new_i2s_data(&amp_i2s);
-    const audio_codec_data_if_t *mic_data = audio_codec_new_i2s_data(&mic_i2s);
     const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
-    ESP_RETURN_ON_FALSE(amp_data && mic_data && gpio_if, ESP_ERR_NO_MEM, TAG, "codec interfaces");
+    ESP_RETURN_ON_FALSE(amp_data && gpio_if, ESP_ERR_NO_MEM, TAG, "codec interfaces");
 
     dummy_codec_cfg_t amp_dummy = { .gpio_if = gpio_if, .pa_pin = -1 };
-    dummy_codec_cfg_t mic_dummy = { .gpio_if = gpio_if, .pa_pin = -1 };
     const audio_codec_if_t *amp_codec = dummy_codec_new(&amp_dummy);
-    const audio_codec_if_t *mic_codec = dummy_codec_new(&mic_dummy);
-    ESP_RETURN_ON_FALSE(amp_codec && mic_codec, ESP_FAIL, TAG, "dummy codec");
+    ESP_RETURN_ON_FALSE(amp_codec, ESP_FAIL, TAG, "dummy codec");
+    static const audio_codec_data_if_t mic_data = { .enable = mic_enable, .read = mic_read };
 
     /* Non-const: esp_codec_dev_new takes a plain esp_codec_dev_cfg_t *. */
     esp_codec_dev_cfg_t out_cfg = {
@@ -381,8 +428,7 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     };
     esp_codec_dev_cfg_t in_cfg = {
         .dev_type = ESP_CODEC_DEV_TYPE_IN,
-        .codec_if = mic_codec,
-        .data_if = mic_data,
+        .data_if = &mic_data,
     };
     *spk = esp_codec_dev_new(&out_cfg);
     *mic = esp_codec_dev_new(&in_cfg);
@@ -401,9 +447,9 @@ static const muse_board_t s_board = {
     .keyboard = false,
     .talk_button = "boot",
     .aux_button = NULL,
-    /* The BOOT button is on the right edge, roughly a third down. */
+    /* The BOOT button is on the right edge. No aux_hint: there is no second
+     * button to put an icon beside. */
     .talk_hint = { LV_ALIGN_RIGHT_MID, -8, 0 },
-    .aux_hint = { LV_ALIGN_RIGHT_MID, 0, 0 },
     .frame_ms = 40,
     .init = init,
     .display_start = display_start,
@@ -416,6 +462,7 @@ static const muse_board_t s_board = {
     .display_pause = display_pause,
     .audio_init = audio_init,
     .mic_slot = 0,
+    .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,
     .read_power = NULL,         /* no battery gauge */
