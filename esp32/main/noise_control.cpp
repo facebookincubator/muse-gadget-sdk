@@ -1544,6 +1544,13 @@ static char *build_register_json(void) {
                 "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
 #endif
+#if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
+    add_command(commands, "sensors.read",
+                "Read the onboard air sensor: temperature in degrees Celsius "
+                "and relative humidity in percent. Each reading has its age "
+                "in seconds; a sensor with no recent reading is null.",
+                nullptr, nullptr);
+#endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA
     add_command(commands, "camera.capture",

@@ -534,6 +534,24 @@ menu "ESP32 Device SDK"
             tenths of a degree Celsius. The E100x sensor reads warm from board
             heat; -33 (-3.3 C, about -6 F) is a starting point for those boards.
 
+    config HOMEHUB_WAVESHARE_154G_SHTC3
+        bool "Waveshare ESP32-S3-ePaper-1.54G onboard SHTC3 sensor (sensors.read)"
+        depends on HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        default y
+        help
+            Poll the onboard Sensirion SHTC3 temperature and humidity sensor
+            over I2C (SDA GPIO47, SCL GPIO48, address 0x70) and answer
+            sensors.read with the latest temperature and humidity.
+
+    config HOMEHUB_WAVESHARE_154G_SHTC3_TEMP_OFFSET
+        int "SHTC3 temperature offset, in tenths of a degree Celsius"
+        depends on HOMEHUB_WAVESHARE_154G_SHTC3
+        default -40
+        help
+            Calibration offset added to the SHTC3 temperature reading, in
+            tenths of a degree Celsius. Waveshare's own SHTC3 example for this
+            board subtracts 4 C, hence -40.
+
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
