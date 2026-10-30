@@ -441,9 +441,9 @@ int main(void) {
         cmake = (ROOT / "main/CMakeLists.txt").read_text()
         # Each e-paper backend builds the status screen with its panel driver.
         self.assertRegex(cmake, r'if\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179\)\s*'
-                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c"\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "reterminal_battery.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6\)\s*'
-                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c"\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "reterminal_battery.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681\)\s*'
