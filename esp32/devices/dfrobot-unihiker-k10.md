@@ -119,7 +119,8 @@ breathing red for errors.
 
 BOOT/GPIO0 is an I2S clock, so use A for talking. Backlight control is on/off;
 brightness percentages do not provide PWM dimming. Screen sleep can be woken
-by A/B. Power Off enters deep sleep and requires RESET to restart. There is no
+by A/B. Power Off enters deep sleep; press BOOT on the back (or RESET) to
+turn it back on. There is no
 battery gauge. Sensors, camera, TF card and original offline AI models are
 not integrated in this profile.
 

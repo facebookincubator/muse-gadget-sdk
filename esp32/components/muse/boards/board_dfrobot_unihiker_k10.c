@@ -7,8 +7,10 @@
  * ESP-IDF 6.0.1 port, using the same display adapter as board_aipi.c.
  */
 #include <math.h>
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
+#include "driver/rtc_io.h"
 #include "driver/spi_master.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
@@ -242,11 +244,23 @@ static esp_err_t read_power(muse_power_t *out)
     return ESP_OK;
 }
 
+/* GPIO0 is the I2S bit clock while running and the BOOT button on the back.
+ * A and B are on the expander, which can't wake the chip, so power off hands
+ * GPIO0 back to BOOT and sleeps until it (or RESET) is pressed. */
 static esp_err_t power_off(void)
 {
     set_brightness(0);
     led_strip_clear(s_rgb);
-    /* Reset wakes the first-version firmware; BOOT/GPIO0 belongs to I2S. */
+    if (s_tx) (void)i2s_channel_disable(s_tx);
+    if (s_rx) (void)i2s_channel_disable(s_rx);
+    const gpio_config_t boot = {
+        .pin_bit_mask = 1ULL << GPIO_NUM_0, .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&boot), TAG, "BOOT input");
+    while (gpio_get_level(GPIO_NUM_0) == 0) vTaskDelay(pdMS_TO_TICKS(20));
+    ESP_RETURN_ON_ERROR(esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0), TAG, "BOOT wake");
+    rtc_gpio_pullup_en(GPIO_NUM_0);
+    rtc_gpio_pulldown_dis(GPIO_NUM_0);
     esp_deep_sleep_start();
     return ESP_FAIL;
 }
@@ -254,6 +268,7 @@ static esp_err_t power_off(void)
 static const muse_board_t s_board = {
     .name = "DFRobot UNIHIKER K10", .width = 240, .height = 320, .round = false,
     .touch = false, .diagonal_in = 2.8f, .talk_button = "A", .aux_button = "B",
+    .wake_button = "BOOT", /* power_off wakes on BOOT (GPIO0); B is on the expander */
     .talk_hint = { LV_ALIGN_BOTTOM_LEFT, 12, -8 }, .aux_hint = { LV_ALIGN_BOTTOM_RIGHT, -12, -8 },
     .flat_menu_hints = true, .frame_ms = 40,
     .init = init, .display_start = display_start, .display_lock = display_lock,
