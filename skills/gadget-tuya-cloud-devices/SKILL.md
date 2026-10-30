@@ -83,13 +83,13 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
   URL-encoded JSON array of attribute codes such as `w.temp`, `w.humidity`, `w.condition`,
   `w.conditionNum`, `w.pressure`, `w.realFeel`, `w.uvi`, `w.windDir`, `w.windLevel`,
   `w.windSpeed`, plus `w.hour.N` to set the forecast horizon to the next N hours. Response keys
-  are `{code}.{index}` with index `0` meaning now. Home coordinates are shaped
-  `{"Value": "30.3"}` — read the inner `Value`; ask the user for their city if the home has
-  none set.
+  are `{code}.{index}` with index `0` meaning now. Use the home's `latitude` / `longitude`
+  from the homes list, shaped `{"Value": "30.3"}` — read the inner `Value`. If the home has
+  none set, ask the user for their city and use its latitude and longitude.
 - **Hourly statistics**: confirm capability with `GET /v1.0/end-user/statistics/hour/config`
   (items carry `dev_id`, `dp_code`, `statistic_type` of `SUM`/`COUNT`/`MAX`/`MIN`), then
   `GET .../hour/data?dev_id=..&dp_code=..&statistic_type=..&start_time=..&end_time=..`. Times
-  are `yyyyMMddHH` and one request spans at most 24 hours; page longer ranges and aggregate.
+  are `yyyyMMddHH` and one request spans at most 24 hours; split longer ranges and aggregate.
   Values return as an array of `{time: value}` pairs with string values.
 - **Notifications** are self-send only — they reach the key's own user, nobody else:
   `POST /v1.0/end-user/services/{sms|voice|mail|push}/self-send`. SMS and voice take
