@@ -55,11 +55,12 @@
 #define TINY_LIST_W 180
 #define TINY_LIST_TOP 46
 #define TINY_ROW_H 40
-/* The back arrow's button, from the top centre. */
+/* The back arrow's button, from the top centre: low and in enough that the
+ * whole glyph stays inside a 240 px circle, left of the title. */
 #define TINY_BACK_W 40
 #define TINY_BACK_H 36
-#define TINY_BACK_X (-68)
-#define TINY_BACK_Y 8
+#define TINY_BACK_X (-62)
+#define TINY_BACK_Y 16
 #define MAX_APS 12
 
 #define COLOR_TEXT 0xf2efff
@@ -167,7 +168,7 @@ static void single_line(lv_obj_t *l, int width)
     lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
 }
 
-/* Narrow flat panels and tiny round ones use smaller, bounded row text. */
+/* Narrow flat panels and tiny round ones stack a row's name over its value. */
 static bool stacked_rows(void)
 {
     return narrow_panel() || s_tiny;
@@ -325,7 +326,7 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
                      lv_event_cb_t cb, void *user)
 {
     lv_obj_t *c = card(list, cb != NULL);
-    if (narrow_panel()) {
+    if (stacked_rows()) {
         /* Explicit bounded lines: a changing value must never squeeze the name. */
         lv_obj_set_layout(c, LV_LAYOUT_NONE);
         lv_obj_set_height(c, value_out ? 60 : 48);
@@ -347,23 +348,16 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
         if (cb) lv_obj_add_event_cb(c, cb, LV_EVENT_CLICKED, user);
         return c;
     }
-    const lv_font_t *font = s_tiny ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
     if (icon) {
-        label(c, font, COLOR_ACCENT, icon);
+        label(c, &lv_font_montserrat_20, COLOR_ACCENT, icon);
     }
-    lv_obj_t *t = label(c, font, COLOR_TEXT, text);
+    lv_obj_t *t = label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
     lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
-    if (s_tiny) {
-        lv_obj_set_height(t, lv_font_get_line_height(font));   /* one line, ending in dots */
-    }
     if (value_out) {
-        lv_obj_t *v = label(c, s_tiny ? &lv_font_montserrat_14 : &lv_font_montserrat_16, COLOR_DIM, "");
-        lv_obj_set_style_max_width(v, s_tiny ? 72 : 130, 0);
+        lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_DIM, "");
+        lv_obj_set_style_max_width(v, 130, 0);
         lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);
-        if (s_tiny) {
-            lv_obj_set_height(v, lv_font_get_line_height(&lv_font_montserrat_14));
-        }
         *value_out = v;
     }
     if (cb) {
@@ -462,7 +456,8 @@ static lv_obj_t *column(lv_obj_t *list)
 static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 {
     lv_obj_t *c = card(list, false);
-    if (narrow_panel()) {
+    if (stacked_rows()) {
+        /* A MAC address or battery value beside its name overflows these. */
         lv_obj_set_layout(c, LV_LAYOUT_NONE);
         lv_obj_set_height(c, 60);
         const int text_w = stacked_text_w();
@@ -474,11 +469,10 @@ static lv_obj_t *info_row(lv_obj_t *list, const char *text)
         lv_obj_align(v, LV_ALIGN_LEFT_MID, 0, 11);
         return v;
     }
-    lv_obj_set_height(c, s_tiny ? 34 : 44);
-    const lv_font_t *font = s_tiny ? &lv_font_montserrat_14 : &lv_font_montserrat_16;
-    lv_obj_t *t = label(c, font, COLOR_TEXT, text);
+    lv_obj_set_height(c, 44);
+    lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
-    return label(c, font, COLOR_ACCENT, "");
+    return label(c, &lv_font_montserrat_16, COLOR_ACCENT, "");
 }
 
 /* ---------- navigation ---------- */
@@ -1617,9 +1611,14 @@ static void bench_open_pending(void)
         return;
     }
     s_bench_open = -1;
+    if (s_current == s_text) {
+        close_text();   /* clears the field and returns to the page under it */
+    }
     show(s_home);   /* drops the open sub-page, so the one asked for is built fresh */
     if (PAGES[i]) {
-        PAGES[i]->build(s_tile);
+        if (!*PAGES[i]->obj) {
+            PAGES[i]->build(s_tile);
+        }
         show(*PAGES[i]->obj);
     }
 }
