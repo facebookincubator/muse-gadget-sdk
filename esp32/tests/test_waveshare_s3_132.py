@@ -192,6 +192,55 @@ int main(void) {
 '''
         self.run_c(code)
 
+    def test_power_off_names_the_button_that_wakes_it(self):
+        # muse_menu.c tells the user to press wake_button (else aux_button)
+        # to turn the board back on; power_off arms ext0 wake on one GPIO.
+        wake_pin = re.search(r"esp_sleep_enable_ext0_wakeup\((\w+), 0\)", self.board).group(1)
+        self.assertEqual(wake_pin, "PWR_BUTTON")
+        self.assertRegex(self.board, r'\.wake_button = "pwr",')
+        self.assertRegex(self.board, r'\.aux_button = "boot",')
+
+    def test_power_off_keeps_wake_pull_up_and_cuts_rail_after_release(self):
+        code = r'''
+#define PWR_BUTTON 17
+#define VBAT_ENABLE 18
+#define AUDIO_PA 46
+enum { EXT0 = 1, PULLUP, NOPULLDOWN, DARK, RELEASED, PA_OFF, RAIL_OFF, SLEEP };
+static int events[16], n, presses_left = 3, pullup, rail = 1;
+static void ev(int e) { assert(n < 16); events[n++] = e; }
+static esp_err_t esp_sleep_enable_ext0_wakeup(int gpio, int level) {
+    assert(gpio == PWR_BUTTON && level == 0); ev(EXT0); return ESP_OK;
+}
+static void rtc_gpio_pullup_en(int gpio) { assert(gpio == PWR_BUTTON); pullup = 1; ev(PULLUP); }
+static void rtc_gpio_pulldown_dis(int gpio) { assert(gpio == PWR_BUTTON); ev(NOPULLDOWN); }
+static void set_brightness(int pct) { assert(pct == 0); }
+static void esp_lv_adapter_pause(int ms) { (void)ms; }
+static void send_display_off(void *arg) { (void)arg; }
+static void muse_lcd_bands_run(void (*fn)(void *), void *arg) { fn(arg); }
+static void panel_sleep(bool sleep) { assert(sleep); ev(DARK); }
+static int gpio_get_level(int gpio) {
+    assert(gpio == PWR_BUTTON && rail);
+    if (presses_left == 0) { ev(RELEASED); return 1; }
+    --presses_left; return 0;
+}
+static void vTaskDelay(int ms) { (void)ms; }
+static void gpio_set_level(int gpio, int level) {
+    if (gpio == AUDIO_PA) { assert(level == 0); ev(PA_OFF); return; }
+    assert(gpio == VBAT_ENABLE && level == 0); rail = 0; ev(RAIL_OFF);
+}
+static void esp_deep_sleep_start(void) { ev(SLEEP); }
+''' + function(self.board, "power_off") + r'''
+int main(void) {
+    assert(power_off() == ESP_FAIL);
+    int want[] = { EXT0, PULLUP, NOPULLDOWN, DARK, RELEASED, PA_OFF, RAIL_OFF, SLEEP };
+    assert(n == (int)(sizeof(want) / sizeof(want[0])));
+    for (int i = 0; i < n; ++i) assert(events[i] == want[i]);
+    assert(pullup && !rail);
+    return 0;
+}
+'''
+        self.run_c(code)
+
 
 if __name__ == "__main__":
     unittest.main()

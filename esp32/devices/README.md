@@ -111,7 +111,7 @@ baseline `e6fe517` plus the board changes. Normal and bench builds, display,
 cycles and a temporary encrypted handshake passed; complete phone pairing and
 Muse sessions remain untested. Audio software checks passed, but speaker
 acoustics, battery operation, OTA, and video remain untested. See the
-[board setup and validation limits](waveshare-s3-132.md).*
+[board setup and validation limits](waveshare-s3-132.md).
 
 Boards without PSRAM (the ideaspark, the C6 boards, the Cardputer ADV and the AI Passport) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
@@ -701,7 +701,7 @@ idf.py -B build-muse-aipi -DIDF_TARGET=esp32s3 \
 ```
 
 To flash, add `-p PORT flash` with the same arguments. Boards with the full UI need 16 MB
-of flash or more, except the StickS3, StickC Plus2, Cardputer ADV and AI Passport, whose overlays switch
+of flash or more, except the Waveshare S3 1.32, StickS3, StickC Plus2, Cardputer ADV and AI Passport, whose overlays switch
 to the 8 MB layout in [`partitions_muse_8mb.csv`](../partitions_muse_8mb.csv).
 [`AGENTS.md`](../AGENTS.md) covers flashing, monitoring, and what to do when a
 build picks up stale settings.

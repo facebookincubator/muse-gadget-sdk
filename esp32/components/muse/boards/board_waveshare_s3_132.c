@@ -30,6 +30,7 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
+#include "driver/rtc_io.h"
 #include "driver/spi_master.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_adc/adc_cali.h"
@@ -449,6 +450,9 @@ static esp_err_t power_off(void)
      * cutting the rail; deep sleep is a fallback if the rail does not drop
      * immediately on a particular hardware revision. */
     ESP_RETURN_ON_ERROR(esp_sleep_enable_ext0_wakeup(PWR_BUTTON, 0), TAG, "power wake");
+    /* Keep the key's pull-up through deep sleep, as the BOX-3 does. */
+    rtc_gpio_pullup_en(PWR_BUTTON);
+    rtc_gpio_pulldown_dis(PWR_BUTTON);
     set_brightness(0);
     esp_lv_adapter_pause(-1);
     muse_lcd_bands_run(send_display_off, NULL);
@@ -471,6 +475,7 @@ static const muse_board_t s_board = {
     .diagonal_in = 1.32f,
     .talk_button = "pwr",
     .aux_button = "boot",
+    .wake_button = "pwr",       /* power_off wakes on PWR (GPIO17), not BOOT */
     /* With USB at the bottom, PWR and BOOT sit along the upper-right rim
      * when viewed from the screen (mirror of Waveshare's rear resource photo).
      * Keep both hints clear of the top status and bottom page indicators. */

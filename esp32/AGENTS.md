@@ -614,7 +614,7 @@ draws it full screen. `../protocols/VIDEO.md` has
 the design, the Wi-Fi protocol and the numbers.
 
 - **Boards:** those whose panel driver has `draw_frame` and that have PSRAM:
-  the Waveshare S3 1.75C (tested) and 1.75, the experimental 1.32 backend, the StopWatch and the
+  the Waveshare S3 1.75C (tested) and 1.75, the experimental 1.32 (not built with video), the StopWatch and the
   ESP-Mosaico. Another QSPI AMOLED driven by `boards/muse_lcd_bands.c` gets
   it with `.draw_frame = muse_lcd_bands_frame` and its panel gap
   (`muse_lcd_bands_set_gap`); `muse_lcd_bands_set_te` if the TE line is wired.
