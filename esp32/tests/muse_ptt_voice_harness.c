@@ -84,8 +84,11 @@ int64_t esp_timer_get_time(void) { return clock_us; }
 void vTaskDelay(int ms) { clock_us += (int64_t)ms*1000; }
 void *heap_caps_malloc(size_t n, unsigned caps) { (void)caps; ++allocations; return malloc(n); }
 void *heap_caps_realloc(void *p, size_t n, unsigned caps) { (void)caps; return realloc(p,n); }
+static int pokes;
+static int64_t poked_us, idle_clock_at_idle = -1;
 void muse_state_set_mode(muse_mode_t m) {
     mode=m;
+    if (m==MUSE_MODE_IDLE) idle_clock_at_idle = clock_us - poked_us;   /* what check_sleep() would see */
     if (frame<128) { views[frame]=muse_voice_call_view(); level_at[frame]=level; }
 }
 muse_mode_t muse_state_mode(float *s) { if(s) *s=0; return mode; }
@@ -97,8 +100,7 @@ void muse_state_set_progress(float v) { (void)v; }
 void muse_state_set_caption(const char *fmt,...) {
     va_list ap; va_start(ap,fmt); vsnprintf(caption,sizeof(caption),fmt,ap); va_end(ap);
 }
-static int pokes;
-void muse_state_poke(void) { ++pokes; }
+void muse_state_poke(void) { ++pokes; poked_us=clock_us; }
 void muse_state_nudge(void) {}
 void muse_state_make_happy(void) {}
 bool muse_state_asleep(void) { return sleep_state; }
@@ -127,11 +129,16 @@ void muse_hatch_turn_audio(const int16_t *p,size_t n) { (void)p;(void)n; }
 size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) { (void)p;(void)ms;return n; }
 void muse_hatch_turn_end(void) {}
 void muse_hatch_turn_cancel(void) {}
-static bool hatch_done_once;
+/* One scripted way for hatch_reply() to end, arriving after a long turn. */
+static muse_hatch_ev_t hatch_end = MUSE_HATCH_EV_NONE;
+static const char *hatch_end_text = "";
 muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) {
-    (void)p;(void)n;
-    if(hatch_done_once) { hatch_done_once=false; return MUSE_HATCH_EV_DONE; }
-    return MUSE_HATCH_EV_NONE;
+    muse_hatch_ev_t ev=hatch_end;
+    if(ev==MUSE_HATCH_EV_NONE) return ev;
+    hatch_end=MUSE_HATCH_EV_NONE;
+    clock_us += 200*1000000LL;   /* well past any sleep timeout since the last poke */
+    snprintf(p,n,"%s",hatch_end_text);
+    return ev;
 }
 bool muse_hatch_turn_caption(size_t x,char *p,size_t n) { (void)x;(void)p;(void)n;return false; }
 size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) { (void)p;(void)n;(void)ms;return 0; }
@@ -358,15 +365,29 @@ int main(int argc,char **argv) {
         return 0;
     }
     if (scenario==42) {
-        /* An active turn counts as activity for auto-sleep (#281): the reply
-         * loop pokes the idle clock, and returning to idle pokes it again so
-         * the reading clock starts when the turn ends. */
-        pokes=0; hatch_done_once=true;
-        bool done_delivered;
-        assert(!hatch_reply(&done_delivered));
-        assert(done_delivered); assert(pokes>=1);
-        pokes=0; go_idle("TEST");
-        assert(pokes>=1 && mode==MUSE_MODE_IDLE);
+        /* An active turn counts as activity for auto-sleep (#281): however a
+         * long turn ends (the reply done, a capped REPLY INCOMPLETE, an
+         * error), the idle clock is fresh when the mode becomes IDLE, so the
+         * caption gets a full sleep timeout instead of blanking at once. */
+        static const struct { muse_hatch_ev_t ev; const char *text; } ways[] = {
+            {MUSE_HATCH_EV_DONE, ""},
+            {MUSE_HATCH_EV_DONE, "REPLY INCOMPLETE"},
+            {MUSE_HATCH_EV_ERROR, "NO REPLY FROM MUSE"},
+        };
+        for (size_t i=0; i<sizeof(ways)/sizeof(ways[0]); i++) {
+            hatch_end=ways[i].ev; hatch_end_text=ways[i].text;
+            idle_clock_at_idle=-1;
+            bool done_delivered;
+            assert(!hatch_reply(&done_delivered));
+            assert(done_delivered==(ways[i].ev==MUSE_HATCH_EV_DONE));
+            if (!ways[i].text[0]) {
+                /* A finished reply stays THINKING; voice_task then goes idle. */
+                assert(mode==MUSE_MODE_THINKING && idle_clock_at_idle==-1);
+                go_idle("");
+            }
+            assert(mode==MUSE_MODE_IDLE && idle_clock_at_idle==0);
+            assert(!strcmp(caption, ways[i].text));
+        }
         return 0;
     }
 #if CONFIG_MUSE_REALTIME_VOICE

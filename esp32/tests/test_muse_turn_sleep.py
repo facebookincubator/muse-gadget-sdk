@@ -14,12 +14,12 @@
 
 """An active turn counts as activity for auto-sleep (issue #281).
 
-The idle clock behind check_sleep() only moved on physical input, so a
-long turn could use up the whole sleep timeout while thinking/speaking
-(modes that block sleep), and the screen then blanked at the first IDLE
-moment: between messages, on an error caption, or while the final
-caption was still being read. The voice task now pokes the idle clock
-while a reply is delivered and when a turn returns to idle.
+The idle clock behind check_sleep() only moved on input, so a long turn
+could use up the whole sleep timeout while thinking/speaking (modes that
+block sleep), and a caption shown on returning to IDLE without a fresh
+poke (an error, a capped reply, a call ending) blanked at once. The voice
+task now pokes the idle clock while a reply is delivered and in go_idle(),
+before the mode becomes IDLE.
 """
 
 from __future__ import annotations
