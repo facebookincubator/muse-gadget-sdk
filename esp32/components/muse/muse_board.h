@@ -136,8 +136,9 @@ typedef struct {
      * (muse_audio_power), read as mono at MUSE_AUDIO_RATE.
      * A board with mic_init has no speaker: replies are read, not heard.
      * mic_read also serves a board whose audio_init returns a speaker but
-     * no mic codec; it is set up there, powered with the speaker. muse_audio
-     * applies the mic gain to what mic_read returns, in both cases. */
+     * no mic codec, which sets the mic up there (mic_init and mic_power
+     * stay NULL). muse_audio applies the mic gain to what mic_read returns,
+     * in both cases. */
     esp_err_t (*mic_init)(void);
     esp_err_t (*mic_power)(bool on);
     esp_err_t (*mic_read)(int16_t *mono, size_t frames);

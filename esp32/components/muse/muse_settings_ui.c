@@ -654,7 +654,10 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_set_style_border_color(s_text_ta, lv_color_hex(COLOR_ACCENT), 0);
     lv_obj_set_style_border_width(s_text_ta, border, 0);
     lv_obj_set_style_radius(s_text_ta, 14, 0);
-    lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    if (wide_layout()) {
+        /* Large panels keep a steady cursor, as the CrowPanel port chose. */
+        lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    }
     lv_obj_set_style_text_font(s_text_ta, settings_font(&lv_font_montserrat_16), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_set_style_text_color(s_text_ta, lv_color_hex(COLOR_DIM), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_add_state(s_text_ta, LV_STATE_FOCUSED);

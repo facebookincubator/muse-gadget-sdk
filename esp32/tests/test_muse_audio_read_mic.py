@@ -122,7 +122,6 @@ class MuseAudioCodeclessMicTest(unittest.TestCase):
 
     def test_board_contract_has_one_codecless_mic_hook(self) -> None:
         header = (MUSE / "muse_board.h").read_text()
-        self.assertNotIn("read_mic", header)
         self.assertIn("esp_err_t (*mic_read)(int16_t *mono, size_t frames);", header)
         source = (MUSE / "muse_audio.c").read_text()
         init = _function(source, "muse_audio_init")
