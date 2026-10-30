@@ -41,6 +41,8 @@ float muse_state_idle_secs(void) { return 1000; }
 void muse_state_set_caption(const char *fmt,...) {
     va_list ap; va_start(ap,fmt); vsnprintf(caption,sizeof(caption),fmt,ap); va_end(ap);
 }
+void muse_state_set_hint(const char *text) { snprintf(caption,sizeof(caption),"%s",text); }
+bool muse_state_hint_pending(void) { return false; }
 bool muse_state_caption(char *p,size_t n,uint32_t *v) { (void)v; snprintf(p,n,"%s",caption); return true; }
 bool muse_voice_in_call(void) { return call; }
 bool muse_voice_ptt_enabled(void) { return CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE && !notes_mode; }

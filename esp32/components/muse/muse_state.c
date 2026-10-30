@@ -43,6 +43,7 @@ static volatile bool s_asleep;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_caption[MUSE_CAPTION_MAX];
 static uint32_t s_caption_version;
+static volatile int64_t s_hint_until_us;   /* hint caption expiry; 0 = none pending */
 static SemaphoreHandle_t s_format_lock;
 static EventGroupHandle_t s_wake;
 static volatile int s_page_cols = 16, s_page_lines = 2;
@@ -108,14 +109,13 @@ float muse_state_progress(void)
     return s_progress;
 }
 
-void muse_state_set_caption(const char *fmt, ...)
+/* Sets the caption and its expiry (0: none) in one step, so a hint's timer
+ * can never land on a caption set after it. */
+static void set_caption(int64_t until_us, const char *fmt, va_list ap)
 {
     static char buf[sizeof(s_caption)];   /* too big for some callers' stacks */
     xSemaphoreTake(s_format_lock, portMAX_DELAY);
-    va_list ap;
-    va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
     muse_text_to_ascii(buf, sizeof(buf));   /* replies have curly quotes and dashes */
 
     portENTER_CRITICAL(&s_lock);
@@ -123,14 +123,51 @@ void muse_state_set_caption(const char *fmt, ...)
         memcpy(s_caption, buf, sizeof(s_caption));
         s_caption_version++;
     }
+    s_hint_until_us = until_us;
     portEXIT_CRITICAL(&s_lock);
     xSemaphoreGive(s_format_lock);
+}
+
+void muse_state_set_caption(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    set_caption(0, fmt, ap);
+    va_end(ap);
+}
+
+static void set_hint(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    set_caption(esp_timer_get_time() + MUSE_HINT_MS * 1000LL, fmt, ap);
+    va_end(ap);
+}
+
+void muse_state_set_hint(const char *text)
+{
+    set_hint("%s", text);
+}
+
+bool muse_state_hint_pending(void)
+{
+    portENTER_CRITICAL(&s_lock);
+    bool pending = s_hint_until_us && esp_timer_get_time() <= s_hint_until_us;
+    portEXIT_CRITICAL(&s_lock);
+    return pending;
 }
 
 bool muse_state_caption(char *out, size_t out_len, uint32_t *version)
 {
     bool changed = false;
     portENTER_CRITICAL(&s_lock);
+    if (s_hint_until_us && esp_timer_get_time() > s_hint_until_us) {
+        s_hint_until_us = 0;
+        if (s_caption[0]) {
+            s_caption[0] = '\0';
+            s_caption_version++;   /* the UI redraws: the hint is gone */
+        }
+    }
     if (*version != s_caption_version) {
         strlcpy(out, s_caption, out_len);
         *version = s_caption_version;

@@ -181,9 +181,13 @@ static void toggle_phone_setup(void)
     muse_ble_status_t b;
     muse_ble_status(&b);
     if (on && b.name[0]) {
+        /* The setup name stays up: it is the instruction for pairing. */
         muse_state_set_caption("PHONE SETUP: %s", b.name);
+    } else if (on) {
+        muse_state_set_caption("PHONE SETUP ON");
     } else {
-        muse_state_set_caption("PHONE SETUP %s", on ? "ON" : "OFF");
+        /* OFF is a confirmation, not a state worth keeping on screen. */
+        muse_state_set_hint("PHONE SETUP OFF");
     }
 }
 
@@ -199,6 +203,7 @@ static void aux_button(bool pressed, bool edge)
     static bool hinted;
     static int sleep_in;    /* ticks until a pending single press sleeps */
     static char saved_caption[64];
+    static bool saved_hint;
 
     if (sleep_in && --sleep_in == 0) {
         set_asleep(true, muse_board->aux_button);
@@ -224,6 +229,7 @@ static void aux_button(bool pressed, bool edge)
         if (held == HINT_TICKS) {
             uint32_t v = UINT32_MAX;
             muse_state_caption(saved_caption, sizeof(saved_caption), &v);
+            saved_hint = muse_state_hint_pending();
             muse_state_set_caption("HOLD TO POWER OFF");
             hinted = true;
         } else if (held == LONG_TICKS) {
@@ -234,7 +240,12 @@ static void aux_button(bool pressed, bool edge)
     }
     if (edge && !pressed && !swallow) {
         if (hinted) {
-            muse_state_set_caption("%s", saved_caption);   /* let go early: cancel */
+            /* Let go early: cancel, and put back what was there, a hint as a hint. */
+            if (saved_hint) {
+                muse_state_set_hint(saved_caption);
+            } else {
+                muse_state_set_caption("%s", saved_caption);
+            }
         } else {
             sleep_in = DOUBLE_TICKS;
         }
@@ -566,7 +577,7 @@ static void dedicated_buttons(unsigned ev)
             bool on = !muse_settings_speaker_on();
             muse_settings_set_speaker_on(on);
             if (muse_state_mode(NULL) == MUSE_MODE_IDLE) {
-                muse_state_set_caption(on ? "SPEAKER ON" : "SPEAKER OFF");
+                muse_state_set_hint(on ? "SPEAKER ON" : "SPEAKER OFF");
             }
         }
     }

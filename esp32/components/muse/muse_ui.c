@@ -603,12 +603,12 @@ static void on_speaker_event(lv_event_t *e)
         muse_settings_set_speaker_on(!on);
         show_speaker(!on);
         if (idle) {
-            muse_state_set_caption(on ? "SPEAKER OFF" : "SPEAKER ON");
+            muse_state_set_hint(on ? "SPEAKER OFF" : "SPEAKER ON");
         }
         break;
     case LV_EVENT_SHORT_CLICKED:
         if (idle) {
-            muse_state_set_caption(on ? "HOLD TO MUTE" : "HOLD TO UNMUTE");
+            muse_state_set_hint(on ? "HOLD TO MUTE" : "HOLD TO UNMUTE");
         }
         break;
     case LV_EVENT_RELEASED:

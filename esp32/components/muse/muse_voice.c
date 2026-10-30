@@ -517,6 +517,14 @@ static void go_idle(const char *caption)
     muse_state_set_caption("%s", caption);
 }
 
+/* Errors and status stay up; a press too short to count only needs a hint. */
+static void too_short(void)
+{
+    muse_state_set_progress(0);
+    muse_state_set_mode(MUSE_MODE_IDLE);
+    muse_state_set_hint("HOLD LONGER TO TALK");
+}
+
 /* Why a press can't go to Hatch; voice notes only go there. */
 static const char *not_ready_reason(void)
 {
@@ -641,7 +649,7 @@ static void hold_rec(bool tried)
     }
     if (!s_rec_n) {   /* nothing captured: realloc to 0 would free s_rec and return NULL */
         drop_rec();
-        go_idle("HOLD LONGER TO TALK");
+        too_short();
         return;
     }
     int16_t *pcm = heap_caps_realloc(s_rec, s_rec_n * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1251,7 +1259,7 @@ static void voice_task(void *arg)
                 continue;
             }
 #endif
-            go_idle("HOLD LONGER TO TALK");
+            too_short();
             continue;
         }
         if (!ok) {

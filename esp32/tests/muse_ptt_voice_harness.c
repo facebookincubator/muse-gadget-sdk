@@ -97,6 +97,7 @@ void muse_state_set_progress(float v) { (void)v; }
 void muse_state_set_caption(const char *fmt,...) {
     va_list ap; va_start(ap,fmt); vsnprintf(caption,sizeof(caption),fmt,ap); va_end(ap);
 }
+void muse_state_set_hint(const char *text) { snprintf(caption,sizeof(caption),"%s",text); }
 void muse_state_poke(void) {}
 void muse_state_nudge(void) {}
 void muse_state_make_happy(void) {}
