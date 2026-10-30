@@ -41,7 +41,7 @@ from musegadget.link_client import (
     MAX_CONCURRENT_INVOKES, DeviceDescription, HttpStreamError, LinkSession, Outcome,
     acknowledgement, check_image,
 )
-from musegadget.muse_turn import MuseTurn
+from musegadget.muse_turn import MuseTurn, _acknowledged_message_ids
 
 log = logging.getLogger(__name__)
 
@@ -458,8 +458,8 @@ class _ReplyReader:
     Events repeating an earlier ``seq`` are dropped. Until Muse acknowledges
     the message, events wait here (bounded). Then a ``message.user`` event
     for the acknowledged message opens the answer, and one for any other
-    message closes it again; events of a reply already taken, and events
-    naming the message as their parent, always count.
+    message on the chat closes it again; events of a reply already taken, and
+    events naming the message or a taken reply as their parent, always count.
     """
 
     def __init__(self, turn: MuseTurn) -> None:
@@ -490,9 +490,7 @@ class _ReplyReader:
 
     def acknowledge(self, response: dict, *, fresh: bool) -> None:
         self.turn.acknowledge(response)
-        result = response.get("result", response)
-        self.user_ids = {result[key] for key in ("message_id", "reply_to_message_id")
-                         if isinstance(result.get(key), str) and result[key]}
+        self.user_ids = _acknowledged_message_ids(response)
         self.after_note = fresh
         held, self.held = self.held, []
         for event in held:
@@ -503,6 +501,9 @@ class _ReplyReader:
         payload = event.get("payload")
         if event.get("type") != "event" or not isinstance(payload, dict):
             return
+        chat = payload.get("session_id") or event.get("session_id")
+        if chat and self.turn.session_id and chat != self.turn.session_id:
+            return  # another chat's events neither open nor close this answer
         message_id = payload.get("message_id") or event.get("message_id") or payload.get("id")
         message_id = message_id if isinstance(message_id, str) else None
         if event.get("event") == "message.user":
@@ -510,7 +511,8 @@ class _ReplyReader:
             return
         parent = payload.get("reply_to_message_id") or payload.get("parent_message_id")
         parent = parent if isinstance(parent, str) else None
-        if self.after_note or parent in self.user_ids or message_id in self.turn.replies:
+        if (self.after_note or parent in self.user_ids or message_id in self.turn.replies
+                or parent in self.turn.replies):
             self.turn.feed(event)
 
 

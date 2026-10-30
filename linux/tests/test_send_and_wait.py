@@ -168,6 +168,35 @@ def test_a_reply_naming_the_message_counts_wherever_it_falls():
     run(scenario())
 
 
+def test_a_reply_chained_to_a_named_reply_counts_too():
+    async def scenario():
+        session = ChatSession()
+        session.answer([
+            event("message.assistant", "r1", parent="u1", display_text="Let me check."),
+            event("message.assistant", "r2", parent="r1", display_text="It is four."),
+            event("task.status", parent="u1", status="completed"),
+        ])
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Let me check.\n\nIt is four."
+
+    run(scenario())
+
+
+def test_a_message_in_another_chat_does_not_end_the_answer():
+    async def scenario():
+        session = ChatSession()
+        session.answer([
+            NOTE,
+            {"type": "event", "event": "message.user",
+             "payload": {"session_id": "side", "message_id": "s1", "role": "user"}},
+            *ANSWER[1:],
+        ])
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Four."
+
+    run(scenario())
+
+
 def test_a_message_sent_from_elsewhere_ends_the_answer_but_not_a_reply_under_way():
     async def scenario():
         session = ChatSession()
