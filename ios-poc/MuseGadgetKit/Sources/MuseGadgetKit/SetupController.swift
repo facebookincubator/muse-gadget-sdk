@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import Foundation
 
 /// Stable gadget identity (`linux/src/musegadget/identity.py`): a random,
@@ -84,6 +99,7 @@ public final class SetupController {
     private var assembler = ChunkAssembler()
     private var plaintextBlocked = false
     private var provisioning = false
+    private var stopped = false
     public var log: (String) -> Void = { _ in }
 
     public init(pairing: PairingSession, identity: GadgetIdentity, version: String,
@@ -104,8 +120,17 @@ public final class SetupController {
 
     public func onWrite(_ packet: Data) {
         queue.async { [self] in
+            guard !locked({ stopped }) else { return }
             if let message = assembler.feed(packet) { handleMessage(message) }
         }
+    }
+
+    /// Ends this setup attempt: later writes are ignored, and a provisioning
+    /// still in flight can no longer commit or report completion.
+    public func stop() {
+        locked { stopped = true }
+        pairing.reset()
+        queue.async { [self] in assembler.reset() }
     }
 
     public func onDisconnect() {
@@ -240,6 +265,10 @@ public final class SetupController {
                 pairing.commitProvisioning(generation, save)
             }
         } catch {
+            if locked({ stopped }) {
+                log("setup stopped before provisioning finished")
+                return
+            }
             let status = (error as? ProvisionFailed)?.status ?? "auth_failed"
             log("provisioning failed: \(status)")
             sendStatus(status, generation: generation)

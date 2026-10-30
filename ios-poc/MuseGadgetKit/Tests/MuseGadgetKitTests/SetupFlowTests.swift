@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import CryptoKit
 import XCTest
 @testable import MuseGadgetKit
@@ -136,6 +151,68 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertEqual(saved?.accessToken, "at")
         XCTAssertEqual(saved?.noiseHost, "noise.example")
         XCTAssertEqual(saved?.apiURLv2, "https://api.example")
+    }
+
+    /// Stop (or reopening setup) while provisioning: the old attempt must not
+    /// save credentials, report success or answer further writes.
+    func testStopDuringProvisioningInvalidatesTheAttempt() throws {
+        let identity = GadgetIdentity(mac: "02:12:34:ab:cd:ef")
+        let pairing = PairingSession(nodeID: identity.nodeID, deviceID: identity.deviceID, mac: identity.mac,
+                                     firmwareVersion: "0.1.0-ios", sdkToken: nil)
+        let transport = FakeTransport()
+        let entered = expectation(description: "provision started")
+        let finished = expectation(description: "provision finished")
+        let completed = expectation(description: "setup complete")
+        completed.isInverted = true
+        let release = DispatchSemaphore(value: 0)
+        var committed: Bool?
+        let controller = SetupController(
+            pairing: pairing, identity: identity, version: "0.1.0-ios", transport: transport,
+            isOnline: { true },
+            provision: { _, commit in
+                entered.fulfill()
+                await withCheckedContinuation { done in
+                    DispatchQueue.global().async { release.wait(); done.resume() }
+                }
+                committed = commit { true }
+                finished.fulfill()
+                if committed != true { throw ProvisionFailed("error_storage") }
+            },
+            onComplete: { completed.fulfill() })
+
+        func write(_ data: Data) {
+            for packet in try! BLEFraming.encodeChunks(data, mtu: 185) { controller.onWrite(packet) }
+            controller.drain()
+        }
+        let phoneKey = P256.KeyAgreement.PrivateKey()
+        let phoneNonce = PairingSession.secureRandom(16)
+        write(try CompactJSON.data(["action": "pairing_client_hello", "version": 5, "pairing_auth": "none",
+                                    "pairing_policy": "confirm_app",
+                                    "mobile_pub": Base64URL.encode(phoneKey.publicKey.x963Representation),
+                                    "mobile_nonce": Base64URL.encode(phoneNonce)]))
+        let ready = CompactJSON.object(transport.take()[0])!
+        let devicePub = try P256.KeyAgreement.PublicKey(x963Representation: Base64URL.decode(ready["device_pub"])!)
+        let ecdh = try phoneKey.sharedSecretFromKeyAgreement(with: devicePub).withUnsafeBytes { Data($0) }
+        let keys = PairingCrypto.deriveSessionKeys(ecdhSecret: ecdh, mobileNonce: phoneNonce,
+                                                   deviceNonce: Base64URL.decode(ready["device_nonce"])!,
+                                                   transcriptHash: Base64URL.decode(ready["transcript_hash"])!)
+        var phone = Mobile(tx: keys.mobileTx, rx: keys.mobileRx, sessionID: ready["session_id"] as! String)
+        write(phone.seal(["action": "pairing_client_finished"]))
+        XCTAssertEqual(phone.open(transport.take()[0])["status"] as? String, "pairing_confirmed")
+
+        write(phone.seal(["action": "provision_v2", "ssid": "", "password": "", "access_token": "at",
+                          "refresh_token": "hatch_refresh:rt", "token_type": "device"]))
+        wait(for: [entered], timeout: 5)
+        controller.stop()
+        release.signal()
+        wait(for: [finished], timeout: 5)
+        wait(for: [completed], timeout: 0.5)
+        XCTAssertEqual(committed, false)
+        let statuses = transport.take().map { phone.open($0)["status"] as? String }
+        XCTAssertEqual(statuses, ["wifi_connecting", "wifi_connected"])
+
+        write(try CompactJSON.data(["action": "get_device_info"]))
+        XCTAssertEqual(transport.take(), [])
     }
 
     func testNoiseURLEscapesLikeEncodeURIComponent() {

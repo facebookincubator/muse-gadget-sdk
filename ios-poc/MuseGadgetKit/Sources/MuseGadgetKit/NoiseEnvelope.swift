@@ -1,6 +1,21 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import Foundation
 
-// Hand-rolled protobuf for the Hatch Noise envelopes
+// Hand-rolled protobuf for the Muse Noise envelopes
 // (`linux/src/musegadget/noise/{_proto,framing,envelope}.py`). Fields are
 // written in the same order, and only when non-default, so the bytes match
 // the Python and firmware encoders exactly.
@@ -46,8 +61,7 @@ struct ProtoReader {
         case 0: return (field, .varint(try readVarint()))
         case 1: try skip(8); return (field, .skipped)
         case 2:
-            let length = Int(try readVarint())
-            guard length <= bytes.count - offset else { throw NoiseError("truncated delimited field") }
+            guard let length = Int(exactly: try readVarint()), length <= bytes.count - offset else { throw NoiseError("truncated delimited field") }
             defer { offset += length }
             return (field, .bytes(Data(bytes[offset..<offset + length])))
         case 5: try skip(4); return (field, .skipped)

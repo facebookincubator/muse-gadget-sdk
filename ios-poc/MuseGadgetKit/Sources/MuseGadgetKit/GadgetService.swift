@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import Foundation
 import Security
 
@@ -195,17 +210,32 @@ public struct PairingExport: Codable {
 
     public static let fileName = "muse-import.json"
 
+    public struct ImportFailed: Error {}
+
     /// Moves an exported pairing from `directory` into the Keychain, replacing
-    /// this gadget's identity. Returns the imported identity, if any.
+    /// this gadget's identity. Returns the imported identity, if any. If the
+    /// Keychain refuses either record, the previous pairing is put back and
+    /// the file is kept for the next launch.
     @discardableResult
-    public static func importIfPresent(from directory: URL, into store: KeychainStore) -> GadgetIdentity? {
+    public static func importIfPresent(from directory: URL, into store: KeychainStore) throws -> GadgetIdentity? {
         let url = directory.appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: url),
               let export = try? JSONDecoder().decode(PairingExport.self, from: data)
         else { return nil }
-        store.save(export.identity, GadgetService.identityAccount)
-        store.save(export.credentials, GadgetService.credentialsAccount)
+        let oldIdentity = store.load(GadgetIdentity.self, GadgetService.identityAccount)
+        let oldCredentials = store.load(DeviceCredentials.self, GadgetService.credentialsAccount)
+        guard store.save(export.identity, GadgetService.identityAccount),
+              store.save(export.credentials, GadgetService.credentialsAccount)
+        else {
+            restore(oldIdentity, GadgetService.identityAccount, in: store)
+            restore(oldCredentials, GadgetService.credentialsAccount, in: store)
+            throw ImportFailed()
+        }
         try? FileManager.default.removeItem(at: url)
         return export.identity
+    }
+
+    private static func restore<T: Encodable>(_ value: T?, _ account: String, in store: KeychainStore) {
+        if let value { store.save(value, account) } else { store.delete(account) }
     }
 }

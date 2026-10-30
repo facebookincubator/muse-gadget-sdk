@@ -2,3 +2,5 @@
 .swiftpm/
 *.xcodeproj/
 Tests/.fake_vm.log
+MuseGadgetApp/Local.xcconfig
+xcuserdata/

@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import Foundation
 
 /// `/link-control` messages are JSON, each prefixed with a u32-LE length.
@@ -139,12 +154,17 @@ public final class LinkSession {
     private let runCommand: CommandHandler
     private let makeInitiator: () -> NoiseXXInitiator
     private let sendLock = AsyncLock()
-    private var transport: NoiseTransport!
+    private var sendFailed = false  // guarded by sendLock
+    var transport: NoiseTransport!
     private var controlStream: Int64 = 0
     private var registerID = ""
     private var pending: [Int64: PendingRequest] = [:]
+    private var requestsClosed = false  // guarded by pendingLock
     private let pendingLock = NSLock()
     public private(set) var registeredAt: Date?
+    /// How long `sendChat` waits for the whole response (the Linux client's 60 s).
+    public var requestTimeout: TimeInterval = 60
+    static let maxResponseBytes = 1024 * 1024
     public var log: (String) -> Void = { _ in }
 
     public static func noiseURL(host: String, vmID: String) -> URL {
@@ -196,9 +216,7 @@ public final class LinkSession {
     }
 
     func openControlStream(registerID: String = UUID().uuidString.lowercased()) async throws {
-        let (id, frames) = try transport.request("POST", "/link-control", endBody: false)
-        controlStream = id
-        try await sendFrames(frames)
+        controlStream = try await sendEncrypted { try transport.request("POST", "/link-control", endBody: false) }
         self.registerID = registerID
         try await send(["type": "req", "id": registerID, "method": "link.register",
                         "params": device.registerParams])
@@ -206,37 +224,66 @@ public final class LinkSession {
     }
 
     public func send(_ message: [String: Any]) async throws {
-        try await sendFrames(try transport.bodyChunk(streamID: controlStream, try LinkMessage.encode(message)))
+        let chunk = try LinkMessage.encode(message)
+        try await sendEncrypted { ((), try transport.bodyChunk(streamID: controlStream, chunk)) }
     }
 
     /// Posts a user message to the Muse as coming from this device.
     public func sendChat(_ message: String, sessionID: String? = nil) async throws -> (status: Int, body: Data) {
         var body: [String: Any] = ["message": message, "output_modality": "text", "device_id": device.nodeID]
         if let sessionID { body["session_id"] = sessionID }
+        let json = try CompactJSON.data(body)
         let headers = [NoiseHeader("Content-Type", "application/json"),
                        NoiseHeader("x-request-id", UUID().uuidString.lowercased()),
                        NoiseHeader("x-app-id", "musegadget")]
-        let (id, frames) = try transport.request("POST", "/chat/stream", headers: headers,
-                                                 body: try CompactJSON.data(body), endBody: true)
         return try await withCheckedThrowingContinuation { continuation in
-            pendingLock.lock()
-            pending[id] = PendingRequest(continuation: continuation)
-            pendingLock.unlock()
             Task {
-                do { try await sendFrames(frames) } catch { complete(id, .failure(error)) }
+                var registered = false
+                do {
+                    let id: Int64 = try await sendEncrypted {
+                        let (id, frames) = try transport.request("POST", "/chat/stream", headers: headers,
+                                                                 body: json, endBody: true)
+                        // Registered before sending, so the reply can't arrive first.
+                        try register(id, continuation)
+                        registered = true
+                        return (id, frames)
+                    }
+                    let timeout = requestTimeout
+                    Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                        await self?.abandon(id, NoiseError("request timed out"))
+                    }
+                } catch {
+                    // Once registered, a failed send has already failed every pending request.
+                    if !registered { continuation.resume(throwing: error) }
+                }
             }
         }
     }
 
-    private func sendFrames(_ frames: [Data]) async throws {
+    /// Encryption advances the Noise nonce, so it runs under the send lock:
+    /// ciphertext then reaches the socket in nonce order. A failure after
+    /// that leaves delivery ambiguous, so the session is closed rather than
+    /// reusing the cipher (`link_client.py` `_send_encrypted`).
+    @discardableResult
+    private func sendEncrypted<T>(_ encrypt: () throws -> (T, [Data])) async throws -> T {
         await sendLock.lock()
-        do {
-            for frame in frames { try await socket.send(frame) }
-        } catch {
+        guard !sendFailed else {
             await sendLock.unlock()
+            throw NoiseError("session closed")
+        }
+        do {
+            let (value, frames) = try encrypt()
+            for frame in frames { try await socket.send(frame) }
+            await sendLock.unlock()
+            return value
+        } catch {
+            sendFailed = true
+            await sendLock.unlock()
+            socket.close()
+            failPending()
             throw error
         }
-        await sendLock.unlock()
     }
 
     private func readLoop() async throws -> Outcome {
@@ -301,11 +348,29 @@ public final class LinkSession {
         var body = Data()
     }
 
+    private func register(_ stream: Int64, _ continuation: CheckedContinuation<(status: Int, body: Data), Error>) throws {
+        pendingLock.lock(); defer { pendingLock.unlock() }
+        guard !requestsClosed else { throw NoiseError("session ended") }
+        pending[stream] = PendingRequest(continuation: continuation)
+    }
+
+    /// Fails a request that is still waiting, and resets its stream.
+    private func abandon(_ stream: Int64, _ error: Error) async {
+        guard let request = takePending(stream) else { return }
+        request.continuation.resume(throwing: error)
+        _ = try? await sendEncrypted { ((), try transport.reset(streamID: stream, reason: "request ended")) }
+    }
+
     private func onRequestFrame(_ stream: Int64, _ frame: InboundFrame) {
         pendingLock.lock()
         guard var request = pending[stream] else { pendingLock.unlock(); return }
         if case let .response(status, _, _, _) = frame { request.status = status }
         let chunk = frame.data
+        if let (data, _) = chunk, request.body.count + data.count > Self.maxResponseBytes {
+            pendingLock.unlock()
+            Task { await abandon(stream, NoiseError("response too large")) }
+            return
+        }
         if let (data, _) = chunk { request.body.append(data) }
         pending[stream] = request
         pendingLock.unlock()
@@ -317,14 +382,17 @@ public final class LinkSession {
     }
 
     private func complete(_ stream: Int64, _ result: Result<(status: Int, body: Data), Error>) {
-        pendingLock.lock()
-        let request = pending.removeValue(forKey: stream)
-        pendingLock.unlock()
-        request?.continuation.resume(with: result)
+        takePending(stream)?.continuation.resume(with: result)
+    }
+
+    private func takePending(_ stream: Int64) -> PendingRequest? {
+        pendingLock.lock(); defer { pendingLock.unlock() }
+        return pending.removeValue(forKey: stream)
     }
 
     private func failPending() {
         pendingLock.lock()
+        requestsClosed = true
         let all = pending
         pending.removeAll()
         pendingLock.unlock()
@@ -332,7 +400,7 @@ public final class LinkSession {
     }
 }
 
-/// FIFO async mutex, so frames of one message are never interleaved.
+/// FIFO async mutex for `sendEncrypted`.
 actor AsyncLock {
     private var locked = false
     private var waiters: [CheckedContinuation<Void, Never>] = []

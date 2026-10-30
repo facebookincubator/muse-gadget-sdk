@@ -1,3 +1,19 @@
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
 # Muse Gadget on iPhone: feasibility and proof of concept
 
 **Question:** can an iPhone 15 (iOS 27) act as a Muse gadget, the way an ESP32 or
@@ -115,7 +131,7 @@ gadgets.muse.ai is enough.
 From `MuseGadgetKit/`:
 
 ```sh
-swift test                 # 10 tests (+1 skipped live test)
+swift test                 # 15 tests (+1 skipped live test)
 ./Tests/run_interop.sh     # Swift client ↔ Python fake VM over a real WebSocket
 ```
 
@@ -138,13 +154,17 @@ swift test                 # 10 tests (+1 skipped live test)
   - a wrong bearer gives HTTP 401, reported as `authRejected`;
   - then Noise, `/link-control`, `link.register`, `link.heartbeat`,
     `link.invoke` → `link.result`, `/chat/stream`, and `link.unpaired`.
+- **Concurrency:** concurrent `link.result`s and chats reach the socket in
+  Noise nonce order; a failed send closes the session; a chat times out after
+  60 s; stopping setup mid-provisioning saves nothing and reports nothing.
 - `xcodebuild` for `generic/platform=iOS` succeeds for the kit and the app, with
   no warnings. The app launches in the Simulator.
 
 ## First proof of concept on a real iPhone
 
 You need:
-- the iPhone 15 on iOS 27, with Xcode 27 and your team set in `MuseGadgetApp/project.yml`;
+- the iPhone 15 on iOS 27, with Xcode 27, and your signing team and a bundle ID
+  of your own in `MuseGadgetApp/Local.xcconfig` (see `Config.xcconfig`);
 - a second phone with the Muse app;
 - an SDK token from gadgets.muse.ai.
 
@@ -188,7 +208,7 @@ cd ios-poc/MuseGadgetKit
 swift run MusePairMac --sdk-token mgst_… --out ~/muse-pairing.json
 # In the Muse app on the iPhone: Developer mode > Add Device > MuseGadgetXXXXXX
 xcrun devicectl device copy to --device <IPHONE_ID> --domain-type appDataContainer \
-  --domain-identifier com.biswarupmondal.musegadget \
+  --domain-identifier <YOUR_BUNDLE_ID> \
   --source ~/muse-pairing.json --destination Documents/muse-import.json
 rm ~/muse-pairing.json
 ```

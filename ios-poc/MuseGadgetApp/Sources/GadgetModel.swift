@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import MuseGadgetKit
 import Network
 import SwiftUI
@@ -27,7 +42,9 @@ final class GadgetModel: ObservableObject {
         let store = KeychainStore()
         // A pairing done on the Mac (MusePairMac), copied into Documents by devicectl.
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let imported = PairingExport.importIfPresent(from: documents, into: store)
+        var imported: GadgetIdentity?
+        var importFailed = false
+        do { imported = try PairingExport.importIfPresent(from: documents, into: store) } catch { importFailed = true }
         let token = store.load(String.self, Self.sdkTokenAccount) ?? ""
         sdkToken = token
         let commands = PhoneCommands()
@@ -46,6 +63,7 @@ final class GadgetModel: ObservableObject {
         pathMonitor.pathUpdateHandler = { [weak self] path in self?.online = path.status == .satisfied }
         pathMonitor.start(queue: DispatchQueue(label: "musegadget.path"))
         if let imported { log("imported pairing for \(imported.nodeID) from the Mac") }
+        if importFailed { log("couldn't save the pairing from the Mac; will retry on the next launch") }
         if paired { service.start() }
     }
 
@@ -70,11 +88,14 @@ final class GadgetModel: ObservableObject {
             provision: { credentials, commit in try await service.verifyAndSave(credentials, commit: commit) },
             onComplete: { [weak self] in
                 Task { @MainActor in
-                    self?.log("paired")
+                    guard let self else { return }
+                    self.log("paired")
+                    self.paired = true
+                    self.service.start()
+                    // Let the last status reach the app, then close this
+                    // window unless it was stopped or replaced meanwhile.
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    self?.stopPairing()
-                    self?.paired = true
-                    self?.service.start()
+                    if self.peripheral === peripheral { self.stopPairing() }
                 }
             })
         let log: (String) -> Void = { [weak self] line in Task { @MainActor in self?.log(line) } }
@@ -90,6 +111,7 @@ final class GadgetModel: ObservableObject {
     }
 
     func stopPairing() {
+        controller?.stop()
         peripheral?.stop()
         peripheral = nil
         controller = nil
