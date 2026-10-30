@@ -23,12 +23,14 @@
  * espressif/esp_lcd_sh8601 with Waveshare's own init table, and touch is the
  * vendor's raw register protocol.
  *
- * Pins and sequences follow Waveshare's ESP32-S3-Touch-AMOLED-1.43C examples:
- * 02_Example/arduino_v3.3.0 bsp_config.h and esp32_s3_touch_amoled_1.43c.cpp
- * (mirrored by the espidf_v5.5.3 port_bsp): QSPI SCLK 14, D0-D3 9-12, CS 15,
+ * Pins and sequences follow Waveshare's ESP32-S3-Touch-AMOLED-1.43C examples
+ * and schematic: examples/esp-idf/<example>/components/port_bsp (bsp_config.h and
+ * esp32_s3_touch_amoled_1.43c.cpp, also in examples/arduino) and
+ * hardware/schematic: QSPI SCLK 14, D0-D3 9-12, CS 15,
  * RST 13, gap (8,0), brightness command 0x51; touch on I2C0 SDA 47/SCL 48 at
  * 0x15 with RST 16 and both axes mirrored; audio on I2S0 MCLK 38/BCLK 39/
- * WS 40/DOUT 41/DIN 42 with ES8311 out (PA 46, MCLK-fed) and ES7210 in;
+ * WS 40/DOUT 41/DIN 42 with ES8311 out (PA 46, MCLK-fed) and ES7210 in
+ * (MIC1 and MIC2 are the two microphones; MIC3 is the speaker loopback);
  * battery ADC1 CH3 with a x2 divider, GPIO7 low while charging.
  */
 #include "driver/gpio.h"
@@ -85,6 +87,8 @@ static const char *TAG = "board";
 
 #define BATT_ADC ADC_CHANNEL_3  /* GPIO4, x2 divider */
 #define CHARGE_GPIO GPIO_NUM_7  /* low while charging */
+
+#define TOUCH_I2C_TIMEOUT_MS 50  /* a stuck bus mustn't stall the UI task */
 
 #define DRAW_BUF_LINES 118     /* four bands to the screen (muse_lcd_bands.h) */
 #define LCD_CHUNK_BYTES (LCD_RES * 8 * 2)
@@ -194,10 +198,10 @@ static void round_area(lv_event_t *e)
     a->y2 |= 1;
 }
 
+static void touch_read(lv_indev_t *indev, lv_indev_data_t *data);
+
 /* muse_lcd_bands_register takes over the panel IO's color-done callback and,
  * with the bands, needs the bus set up on the same core as the UI task. */
-static bool get_coords(uint16_t *x, uint16_t *y);
-void board_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data);
 static lv_display_t *display_start(lv_indev_t **touch)
 {
     const spi_bus_config_t bus = SH8601_PANEL_BUS_QSPI_CONFIG(LCD_SCLK, LCD_D0, LCD_D1, LCD_D2, LCD_D3,
@@ -262,7 +266,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
     }
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_display(indev, disp);
-    lv_indev_set_read_cb(indev, board_touch_read_cb);
+    lv_indev_set_read_cb(indev, touch_read);
     *touch = indev;
     s_touch_indev = indev;
     if (esp_lv_adapter_start() != ESP_OK) {
@@ -277,7 +281,7 @@ static bool get_coords(uint16_t *x, uint16_t *y)
 {
     uint8_t reg = 0x02;
     uint8_t hdr[2] = { 0, 0 };
-    if (i2c_master_transmit_receive(s_touch, &reg, 1, hdr, sizeof(hdr), -1) != ESP_OK) {
+    if (i2c_master_transmit_receive(s_touch, &reg, 1, hdr, sizeof(hdr), TOUCH_I2C_TIMEOUT_MS) != ESP_OK) {
         return false;
     }
     if (hdr[0] == 0 || (hdr[1] >> 6) == 0x01) {
@@ -285,7 +289,7 @@ static bool get_coords(uint16_t *x, uint16_t *y)
     }
     reg = 0x03;
     uint8_t pos[4] = { 0, 0, 0, 0 };
-    if (i2c_master_transmit_receive(s_touch, &reg, 1, pos, sizeof(pos), -1) != ESP_OK) {
+    if (i2c_master_transmit_receive(s_touch, &reg, 1, pos, sizeof(pos), TOUCH_I2C_TIMEOUT_MS) != ESP_OK) {
         return false;
     }
     *x = (uint16_t)(((uint16_t)(pos[0] & 0x0f) << 8) | pos[1]);
@@ -293,13 +297,20 @@ static bool get_coords(uint16_t *x, uint16_t *y)
     return true;
 }
 
-void board_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
+/* Both axes mirrored; a raw reading past the panel's edge clamps to the
+ * mirrored edge (0), not the opposite one. */
+static int mirror_axis(uint16_t raw)
+{
+    return raw >= LCD_RES ? 0 : LCD_RES - 1 - raw;
+}
+
+static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
     uint16_t tx = 0, ty = 0;
     if (get_coords(&tx, &ty)) {
-        data->point.x = tx >= LCD_RES ? LCD_RES - 1 : (int16_t)(LCD_RES - 1 - tx);
-        data->point.y = ty >= LCD_RES ? LCD_RES - 1 : (int16_t)(LCD_RES - 1 - ty);
+        data->point.x = mirror_axis(tx);
+        data->point.y = mirror_axis(ty);
         data->state = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
@@ -323,10 +334,24 @@ static void set_brightness(int pct)
     muse_lcd_bands_run(send_brightness, &level);
 }
 
+/* Panel commands go through the bands' send task, between bands, so they
+ * never land in the middle of a pixel write (muse_lcd_bands.h). */
+static void send_sleep(void *sleep)
+{
+    esp_lcd_panel_disp_sleep(s_panel, *(bool *)sleep);   /* SLPIN/SLPOUT; GRAM is kept */
+}
+
+static void send_off(void *arg)
+{
+    (void)arg;
+    esp_lcd_panel_disp_on_off(s_panel, false);
+    esp_lcd_panel_disp_sleep(s_panel, true);
+}
+
 static void panel_sleep(bool sleep)
 {
-    esp_lcd_panel_disp_sleep(s_panel, sleep);   /* SLPIN/SLPOUT; GRAM is kept */
-    vTaskDelay(pdMS_TO_TICKS(120));             /* settle before the next command */
+    muse_lcd_bands_run(send_sleep, &sleep);
+    vTaskDelay(pdMS_TO_TICKS(120));   /* settle before the next command */
 }
 
 static void display_pause(bool pause)
@@ -480,8 +505,7 @@ static esp_err_t read_power(muse_power_t *out)
 static esp_err_t power_off(void)
 {
     set_brightness(0);
-    esp_lcd_panel_disp_on_off(s_panel, false);
-    esp_lcd_panel_disp_sleep(s_panel, true);
+    muse_lcd_bands_run(send_off, NULL);
     /* No PMU on this board; deep sleep is the closest thing to off. BOOT
      * wakes it. */
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);

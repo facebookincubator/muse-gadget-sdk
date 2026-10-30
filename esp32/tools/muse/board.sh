@@ -37,7 +37,7 @@ case $board in
     s3-216)  profile=waveshare-s3-216;     target=esp32s3 ;;
     s3-206)  profile=waveshare-s3-206;     target=esp32s3 ;;
     185c)    profile=waveshare-s3-185c;    target=esp32s3 ;;
-    143c)    profile=waveshare-s3-143c;     target=esp32s3 ;;
+    143c)    profile=waveshare-s3-143c;    target=esp32s3 ;;
     # ESP-Mosaico: ESP-IDF master (IDF_EXPORT_S31, default ~/.espressif/esp-idf-s31).
     mosaico) profile=esp-mosaico;          target=esp32s31 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;
