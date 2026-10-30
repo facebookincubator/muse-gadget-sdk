@@ -286,7 +286,7 @@ musegadget send-user-msg --image porch.jpg "Who is at the door?"
 Muse to look at.
 
 `--wait SECONDS` (1 to 600) waits that long for Muse's answer and prints it.
-It exits with status 2 if no answer came in time, or if Muse was still
+It exits with status 3 if no answer came in time, or if Muse was still
 answering (what arrived is printed). On the main chat, Muse's replies don't
 name the message they answer, so an answer to something sent there at the same
 moment, from the Muse app say, can be taken for this one. With `--session-id`

@@ -169,8 +169,9 @@ never has a command's parameters, output or error message.
   before sending and returns the answer's text: what follows the message's own
   `message.user` event, as on the ESP32, read through `MuseTurn`. A new side
   chat is created by the message, so it is sent first. One waiting request per
-  chat at a time; the whole wait, queueing and cleanup included, is bounded by
-  its seconds.
+  chat at a time; the whole wait, queueing included, is bounded by its seconds,
+  plus at most 2 s of cleanup. On a new side chat, an answer finished before
+  the follow-up subscription opens is missed and the wait times out.
 - The VM accepts at most 256 KB per `/link-control` message, so command output
   is cut at 96 KB per stream.
 

@@ -165,14 +165,14 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
         text, detail = reply.get("reply"), printable(str(reply.get("detail") or ""))
         if not isinstance(text, str):
             print(f"Sent to your Muse, but got no answer: {detail}", file=sys.stderr)
-            return 2
+            return 3
         if text:
             print(text)
         else:
             print("Muse finished without a text answer.", file=sys.stderr)
         if reply.get("partial"):
             print(f"Muse was still answering: {detail}", file=sys.stderr)
-            return 2
+            return 3
         return 0
     print("Sent to your Muse.")
     return 0

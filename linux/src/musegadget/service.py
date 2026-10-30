@@ -423,7 +423,8 @@ async def send_and_wait(session: LinkSession, send, session_id: str | None,
         turn = reader.turn
         while True:
             now = time.monotonic()
-            if turn.settled(now) or (turn.replies and turn.complete(now)):
+            # A blank answer waits for settled(), which leaves time for late text.
+            if turn.settled(now) or (_reply_text(turn) and turn.complete(now)):
                 return {**result, "reply": _reply_text(turn)}
             remaining = deadline - loop.time()
             if follower.done() or remaining <= 0:

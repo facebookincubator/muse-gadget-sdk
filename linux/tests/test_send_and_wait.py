@@ -188,6 +188,24 @@ def test_a_message_sent_from_elsewhere_ends_the_answer_but_not_a_reply_under_way
     run(scenario())
 
 
+def test_a_blank_reply_waits_for_text_that_comes_after_the_task_ends():
+    async def scenario():
+        session = ChatSession()
+        session.answer([
+            NOTE,
+            event("delta.message_start", "r1"),
+            event("delta.message_done", "r1", display_text=""),
+            event("task.status", status="completed"),
+        ])
+        waiting = asyncio.ensure_future(send_and_wait(session, send_of(session), None, 5))
+        await asyncio.sleep(0.3)
+        assert not waiting.done()
+        session.answer([event("message.assistant", "r1", display_text="Late text.")])
+        assert (await waiting)["reply"] == "Late text."
+
+    run(scenario())
+
+
 def test_a_repeated_seq_is_dropped():
     async def scenario():
         session = ChatSession()
@@ -486,9 +504,9 @@ def local_reply(monkeypatch):
 @pytest.mark.parametrize("answer, code, out, err", [
     ({**ACK, "reply": "Four."}, 0, "Four.\n", ""),
     ({**ACK, "reply": ""}, 0, "", "Muse finished without a text answer.\n"),
-    ({**ACK, "reply": None, "detail": "no answer within 30 seconds"}, 2, "",
+    ({**ACK, "reply": None, "detail": "no answer within 30 seconds"}, 3, "",
      "Sent to your Muse, but got no answer: no answer within 30 seconds\n"),
-    ({**ACK, "reply": "Looking.", "partial": True, "detail": "no answer within 30 seconds"}, 2,
+    ({**ACK, "reply": "Looking.", "partial": True, "detail": "no answer within 30 seconds"}, 3,
      "Looking.\n", "Muse was still answering: no answer within 30 seconds\n"),
     ({"ok": False, "error": "not connected to the Muse"}, 1, "",
      "Not delivered: not connected to the Muse\n"),
