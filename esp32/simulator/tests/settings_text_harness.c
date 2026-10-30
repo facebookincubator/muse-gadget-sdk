@@ -17,6 +17,7 @@ static char saved_ssid[MUSE_SSID_MAX + 1], saved_pass[MUSE_PASS_MAX + 1];
 static unsigned saves;
 
 void muse_voice_set_monitor(bool on) { (void)on; }
+float muse_voice_monitor_db(void) { abort(); }   /* no meter without a microphone */
 void muse_ui_set_swipe_enabled(bool on) { (void)on; }
 /* Other settings pages are linked by the production navigation table. Any
  * accidental access to their device services fails this focused test. */
@@ -29,10 +30,10 @@ void muse_input_request_power_off(void) { abort(); }
 void muse_link_reset_setup(void) { abort(); }
 bool muse_link_sdk_token_set(const char *s) { (void)s; abort(); }
 bool muse_settings_ble_on(void) { abort(); }
-int muse_settings_brightness(void) { abort(); }
+int muse_settings_brightness(void) { return 60; }
 void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]) { (void)out; abort(); }
 void muse_settings_hatch_vm(char out[MUSE_VM_MAX + 1]) { (void)out; abort(); }
-int muse_settings_mic_gain(void) { abort(); }
+int muse_settings_mic_gain(void) { return 30; }
 void muse_settings_set_ble_on(bool v) { (void)v; abort(); }
 void muse_settings_set_brightness(int v) { (void)v; abort(); }
 void muse_settings_set_hatch_host(const char *s) { (void)s; abort(); }
@@ -72,6 +73,7 @@ size_t muse_sim_strlcpy(char *dst, const char *src, size_t cap)
 }
 
 static void on_switch(lv_event_t *event) { (void)event; }
+static esp_err_t fake_mic_init(void) { return ESP_OK; }
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
 {
@@ -94,6 +96,43 @@ static void inside(lv_obj_t *obj)
     assert(b.x1 >= 0 && b.y1 >= 0);
     assert(b.x2 < muse_board->width && b.y2 < muse_board->height);
     assert(b.x2 >= b.x1 && b.y2 >= b.y1);
+}
+
+static bool box_inside(lv_area_t b, lv_area_t in)
+{
+    return b.x1 >= in.x1 && b.y1 >= in.y1 && b.x2 <= in.x2 && b.y2 <= in.y2;
+}
+
+/* Every corner of the box inside the panel's circle. */
+static bool in_circle(lv_area_t b)
+{
+    const int r = muse_board->width / 2;
+    const int xs[] = { b.x1, b.x2 + 1 }, ys[] = { b.y1, b.y2 + 1 };
+    for (int i = 0; i < 2; i++) {
+        for (int j = 0; j < 2; j++) {
+            int dx = xs[i] - r, dy = ys[j] - r;
+            if (dx * dx + dy * dy > r * r) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* One bounded line: a label that wrapped would be taller than its font's line. */
+static void one_line_in(lv_obj_t *l, lv_obj_t *card)
+{
+    lv_area_t b = area(l);
+    assert(lv_obj_get_height(l) == lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
+    lv_area_t c = area(card);
+    c.x1 += lv_obj_get_style_pad_left(card, 0);
+    c.x2 -= lv_obj_get_style_pad_right(card, 0);
+    assert(box_inside(b, c));
+}
+
+static const char *child_text(lv_obj_t *parent, int i)
+{
+    return lv_label_get_text(lv_obj_get_child(parent, i));
 }
 
 static void check_entry(void)
@@ -169,6 +208,7 @@ int main(int argc, char **argv)
     if (test_board.round && test_board.height < 466) {
         s_text_scale = test_board.height;
     }
+    s_tiny = test_board.round && test_board.width < 300;   /* as muse_settings_ui_build */
     if (!strcmp(scenario, "other")) {
         on_wifi_other(NULL);
         check_entry();
@@ -210,7 +250,64 @@ int main(int argc, char **argv)
         lv_obj_t *sw = switch_row(s_wifi, "Wi-Fi", true, on_switch);
         lv_obj_t *text = lv_obj_get_child(lv_obj_get_parent(sw), 0);
         assert(lv_label_get_long_mode(text) ==
-               (narrow_panel() ? LV_LABEL_LONG_MODE_DOTS : LV_LABEL_LONG_MODE_WRAP));
+               (stacked_rows() ? LV_LABEL_LONG_MODE_DOTS : LV_LABEL_LONG_MODE_WRAP));
+    } else if (!strcmp(scenario, "rows")) {
+        /* Long values stay on bounded lines inside their cards. */
+        lv_obj_t *list;
+        lv_obj_t *p = page(s_tile, "BLUETOOTH", true, &list);
+        lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_t *mac = info_row(list, "MAC address");
+        set_text(mac, "02:12:34:56:78:9A");
+        lv_obj_t *card = lv_obj_get_parent(mac);
+        one_line_in(lv_obj_get_child(card, 0), card);
+        one_line_in(mac, card);
+        lv_obj_t *batt = info_row(list, "Also kept awake by a long list of reasons");
+        set_text(batt, "Wi-Fi, Bluetooth, voice, the screen and a long tail");
+        card = lv_obj_get_parent(batt);
+        one_line_in(lv_obj_get_child(card, 0), card);
+        one_line_in(batt, card);
+        lv_obj_t *value;
+        card = row(list, LV_SYMBOL_BLUETOOTH, "Bluetooth", &value, on_switch, NULL);
+        set_text(value, "Connected");
+        one_line_in(lv_obj_get_child(card, 1), card);
+        one_line_in(value, card);
+        if (s_tiny) {
+            /* The cards and the back arrow stay inside the circle, clear of the title. */
+            assert(in_circle(area(lv_obj_get_parent(mac))));
+            lv_obj_t *title = lv_obj_get_child(p, 0), *back = lv_obj_get_child(p, 1);
+            lv_area_t arrow = area(lv_obj_get_child(back, 0)), t = area(title);
+            assert(in_circle(arrow));
+            assert(arrow.x2 < t.x1);
+            assert(in_circle(t));
+        }
+    } else if (!strcmp(scenario, "screen") || !strcmp(scenario, "mic")) {
+        /* Only a board with neither speaker nor microphone loses the mic controls. */
+        test_board.mic_init = !strcmp(scenario, "mic") ? fake_mic_init : NULL;
+        build_sound_page(s_tile);
+        const char *title = child_text(s_sound, 0);
+        if (test_board.mic_init) {
+            assert(!strcmp(title, "SOUND") && s_gain_sl && s_mic_bar && s_bright_sl);
+        } else {
+            assert(!strcmp(title, "SCREEN") && !s_gain_sl && !s_mic_bar && s_bright_sl);
+            assert(!strcmp(lv_label_get_text(s_bright_val), "60%"));
+            s_current = s_sound;
+            tick_sound();   /* must not touch the absent meter */
+        }
+    } else if (!strcmp(scenario, "bench")) {
+        /* Opening a page from text entry drops the entry and the page under it. */
+        test_board.talk_button = "screen";
+        on_wifi_other(NULL);
+        check_entry();
+        lv_textarea_set_text(s_text_ta, "2");
+        lv_obj_t *ta = s_text_ta;
+        assert(muse_settings_ui_bench_open("power"));
+        assert(!muse_settings_ui_bench_open("nope"));
+        bench_open_pending();   /* what the next visible tick does first */
+        assert(s_current == s_power && !s_wifi && !s_text);
+        assert(!strcmp(lv_textarea_get_text(ta), ""));
+        lv_obj_t *list = lv_obj_get_child(s_power, 2);
+        const char *wake = child_text(list, (int)lv_obj_get_child_count(list) - 1);
+        assert(!strcmp(wake, "Tap the screen to turn it back on."));
     } else {
         on_wifi_other(NULL);
         check_entry();

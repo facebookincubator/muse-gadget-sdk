@@ -50,6 +50,17 @@
 #define LIST_W 330
 #define LIST_TOP 84
 #define ROW_H 58
+/* A round screen under 300 px (1.28", 240 px) gets a narrower column of
+ * shorter rows in smaller type, kept inside the circle. */
+#define TINY_LIST_W 180
+#define TINY_LIST_TOP 46
+#define TINY_ROW_H 40
+/* The back arrow's button, from the top centre: low and in enough that the
+ * whole glyph stays inside a 240 px circle, left of the title. */
+#define TINY_BACK_W 40
+#define TINY_BACK_H 36
+#define TINY_BACK_X (-62)
+#define TINY_BACK_Y 16
 #define MAX_APS 12
 
 #define COLOR_TEXT 0xf2efff
@@ -65,6 +76,7 @@ typedef void (*text_done_cb_t)(const char *text);
 
 /* The screen size the text page is scaled to (see text_px). */
 static int s_text_scale = 466;
+static bool s_tiny;   /* round and under 300 px: see TINY_LIST_W */
 static lv_obj_t *s_tile;
 static lv_obj_t *s_current;
 static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text;
@@ -141,12 +153,31 @@ static bool narrow_panel(void)
     return !muse_board->round && muse_board->width <= 200;
 }
 
+/* No speaker and no microphone (the LCD-1.28 and LCD-7): the Sound page
+ * becomes a Screen page with just the brightness. */
+static bool screen_only(void)
+{
+    return !muse_board->audio_init && !muse_board->mic_init && !muse_board->epaper;
+}
+
 static void single_line(lv_obj_t *l, int width)
 {
     lv_obj_set_width(l, width);
     /* DOTS still wraps into an auto-height label unless both axes are bounded. */
     lv_obj_set_height(l, lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
     lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+}
+
+/* Narrow flat panels and tiny round ones stack a row's name over its value. */
+static bool stacked_rows(void)
+{
+    return narrow_panel() || s_tiny;
+}
+
+/* The width inside a card (its 10 px padding each side) on those panels. */
+static int stacked_text_w(void)
+{
+    return (s_tiny ? TINY_LIST_W : muse_board->width - 16) - 20;
 }
 
 static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, const char *text)
@@ -170,7 +201,7 @@ static void set_text(lv_obj_t *l, const char *text)
 
 static lv_obj_t *note(lv_obj_t *list, const char *text)
 {
-    lv_obj_t *l = label(list, &lv_font_montserrat_16, COLOR_DIM, text);
+    lv_obj_t *l = label(list, s_tiny ? &lv_font_montserrat_14 : &lv_font_montserrat_16, COLOR_DIM, text);
     lv_obj_set_width(l, lv_pct(100));
     lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
@@ -224,7 +255,7 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
 {
     /* Flat short panels, and ones too narrow for LIST_W, get tighter rows. */
     const bool compact = !muse_board->round && (muse_board->height <= 240 || muse_board->width < LIST_W);
-    const int list_top = compact ? (back ? 48 : 36) : LIST_TOP;
+    const int list_top = compact ? (back ? 48 : 36) : s_tiny ? TINY_LIST_TOP : LIST_TOP;
     lv_obj_t *p = lv_obj_create(tile);
     lv_obj_remove_style_all(p);
     lv_obj_set_size(p, lv_pct(100), lv_pct(100));
@@ -232,9 +263,9 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
     lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
     catch_swipes(p);
 
-    lv_obj_t *t = label(p, compact ? &lv_font_montserrat_16 : &lv_font_unscii_16, COLOR_ACCENT, title);
-    lv_obj_set_style_text_letter_space(t, compact ? 0 : 2, 0);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, compact ? (back ? 12 : 8) : 44);
+    lv_obj_t *t = label(p, compact || s_tiny ? &lv_font_montserrat_16 : &lv_font_unscii_16, COLOR_ACCENT, title);
+    lv_obj_set_style_text_letter_space(t, compact ? 0 : s_tiny ? 1 : 2, 0);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, compact ? (back ? 12 : 8) : s_tiny ? 18 : 44);
     if (narrow_panel() && back) {
         single_line(t, muse_board->width - 56);
         lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
@@ -246,20 +277,26 @@ static lv_obj_t *page(lv_obj_t *tile, const char *title, bool back, lv_obj_t **l
         if (compact) {
             lv_obj_set_size(b, 44, 44);
             lv_obj_align(b, LV_ALIGN_TOP_LEFT, 4, 0);
+        } else if (s_tiny) {
+            /* Left of the title, where the circle is still wide enough. Taps
+             * reach past the small arrow, since a finger covers most of it. */
+            lv_obj_set_size(b, TINY_BACK_W, TINY_BACK_H);
+            lv_obj_align(b, LV_ALIGN_TOP_MID, TINY_BACK_X, TINY_BACK_Y);
+            lv_obj_set_ext_click_area(b, 12);
         }
     }
 
     lv_obj_t *list = lv_obj_create(p);
     lv_obj_remove_style_all(list);
     /* Keep the scrolling viewport above the tile's fixed page indicators. */
-    lv_obj_set_size(list, compact ? muse_board->width - 16 : LIST_W,
+    lv_obj_set_size(list, compact ? muse_board->width - 16 : s_tiny ? TINY_LIST_W : LIST_W,
                     muse_board->height - list_top - (narrow_panel() ? 24 : 0));
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, list_top);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(list, narrow_panel() ? 6 : 10, 0);
+    lv_obj_set_style_pad_row(list, narrow_panel() || s_tiny ? 6 : 10, 0);
     /* Clear the page dots on flat panels, or the bottom curve on round ones. */
-    lv_obj_set_style_pad_bottom(list, narrow_panel() ? 12 : (compact ? 32 : 110), 0);
+    lv_obj_set_style_pad_bottom(list, narrow_panel() ? 12 : (compact ? 32 : s_tiny ? 64 : 110), 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     *list_out = list;
@@ -270,15 +307,15 @@ static lv_obj_t *card(lv_obj_t *list, bool clickable)
 {
     lv_obj_t *c = clickable ? lv_button_create(list) : lv_obj_create(list);
     lv_obj_remove_style_all(c);
-    lv_obj_set_size(c, lv_pct(100), ROW_H);
-    lv_obj_set_style_radius(c, 18, 0);
+    lv_obj_set_size(c, lv_pct(100), s_tiny ? TINY_ROW_H : ROW_H);
+    lv_obj_set_style_radius(c, s_tiny ? 12 : 18, 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD), 0);
     lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD_PRESSED), LV_STATE_PRESSED);
-    lv_obj_set_style_pad_hor(c, narrow_panel() ? 10 : 16, 0);
+    lv_obj_set_style_pad_hor(c, stacked_rows() ? 10 : 16, 0);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(c, narrow_panel() ? 8 : 12, 0);
+    lv_obj_set_style_pad_column(c, stacked_rows() ? 8 : 12, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     return c;
 }
@@ -289,12 +326,12 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
                      lv_event_cb_t cb, void *user)
 {
     lv_obj_t *c = card(list, cb != NULL);
-    if (narrow_panel()) {
+    if (stacked_rows()) {
         /* Explicit bounded lines: a changing value must never squeeze the name. */
         lv_obj_set_layout(c, LV_LAYOUT_NONE);
         lv_obj_set_height(c, value_out ? 60 : 48);
         const int inset = icon ? 28 : 0;
-        const int text_w = muse_board->width - 16 - 20 - inset;
+        const int text_w = stacked_text_w() - inset;
         if (icon) {
             lv_obj_t *i = label(c, &lv_font_montserrat_20, COLOR_ACCENT, icon);
             lv_obj_align(i, LV_ALIGN_LEFT_MID, 0, 0);
@@ -332,14 +369,14 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
 static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_cb_t cb)
 {
     lv_obj_t *c = card(list, false);
-    lv_obj_t *t = label(c, narrow_panel() ? &lv_font_montserrat_16 : &lv_font_montserrat_20, COLOR_TEXT, text);
+    lv_obj_t *t = label(c, stacked_rows() ? &lv_font_montserrat_16 : &lv_font_montserrat_20, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
-    if (narrow_panel()) {
+    if (stacked_rows()) {
         lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
         lv_obj_set_height(t, lv_font_get_line_height(&lv_font_montserrat_16));
     }
     lv_obj_t *sw = lv_switch_create(c);
-    lv_obj_set_size(sw, narrow_panel() ? 44 : 60, 32);
+    lv_obj_set_size(sw, stacked_rows() ? 44 : 60, s_tiny ? 24 : 32);
     lv_obj_set_style_bg_color(sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
     lv_obj_set_style_bg_color(sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (on) {
@@ -353,9 +390,9 @@ static lv_obj_t *button(lv_obj_t *list, const char *text, uint32_t color, lv_eve
 {
     lv_obj_t *b = card(list, true);
     lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *l = label(b, narrow_panel() ? &lv_font_montserrat_16 : &lv_font_montserrat_20, color, text);
-    if (narrow_panel()) {
-        single_line(l, muse_board->width - 36);
+    lv_obj_t *l = label(b, stacked_rows() ? &lv_font_montserrat_16 : &lv_font_montserrat_20, color, text);
+    if (stacked_rows()) {
+        single_line(l, stacked_text_w());
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     }
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
@@ -376,7 +413,7 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_set_style_pad_ver(c, 6, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
 
-    const lv_font_t *font = narrow_panel() ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
+    const lv_font_t *font = stacked_rows() ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
     label(c, font, COLOR_TEXT, text);
     lv_obj_t *v = label(c, font, COLOR_ACCENT, "");
     lv_obj_align(v, LV_ALIGN_TOP_RIGHT, 0, 0);
@@ -385,7 +422,7 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_t *s = lv_slider_create(c);
     lv_obj_set_width(s, lv_pct(94));
     lv_obj_set_height(s, 12);
-    lv_obj_align(s, LV_ALIGN_TOP_MID, 0, 40);
+    lv_obj_align(s, LV_ALIGN_TOP_MID, 0, s_tiny ? 30 : 40);
     lv_slider_set_range(s, lo, hi);
     lv_slider_set_value(s, value, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s, lv_color_hex(0x2a2345), LV_PART_MAIN);
@@ -399,7 +436,7 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_t *spacer = lv_obj_create(c);   /* room below the slider */
     lv_obj_remove_style_all(spacer);
     lv_obj_set_size(spacer, 1, 1);
-    lv_obj_align(spacer, LV_ALIGN_TOP_LEFT, 0, 64);
+    lv_obj_align(spacer, LV_ALIGN_TOP_LEFT, 0, s_tiny ? 48 : 64);
     return s;
 }
 
@@ -410,7 +447,7 @@ static lv_obj_t *column(lv_obj_t *list)
     lv_obj_remove_style_all(l);
     lv_obj_set_size(l, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(l, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(l, 10, 0);
+    lv_obj_set_style_pad_row(l, s_tiny ? 6 : 10, 0);
     lv_obj_remove_flag(l, LV_OBJ_FLAG_SCROLLABLE);
     return l;
 }
@@ -419,10 +456,11 @@ static lv_obj_t *column(lv_obj_t *list)
 static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 {
     lv_obj_t *c = card(list, false);
-    if (narrow_panel()) {
+    if (stacked_rows()) {
+        /* A MAC address or battery value beside its name overflows these. */
         lv_obj_set_layout(c, LV_LAYOUT_NONE);
         lv_obj_set_height(c, 60);
-        const int text_w = muse_board->width - 36;
+        const int text_w = stacked_text_w();
         lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_DIM, text);
         single_line(t, text_w);
         lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, -11);
@@ -464,7 +502,7 @@ static void show(lv_obj_t *p)
     }
     lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
     s_current = p;
-    if (p == s_sound && !muse_board->epaper) {   /* as in the tick: no meter on e-paper */
+    if (p == s_sound && !muse_board->epaper && !screen_only()) {   /* as in the tick: no meter */
         muse_voice_set_monitor(true);
     }
     muse_ui_set_swipe_enabled(p == s_home);
@@ -1185,6 +1223,13 @@ static void on_bright(lv_event_t *e)
 static void build_sound_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
+    if (screen_only()) {
+        /* No speaker or mic: the page is just the screen's brightness. */
+        s_sound = page(tile, "SCREEN", true, &list);
+        s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
+        set_val(s_bright_val, "%d%%", muse_settings_brightness());
+        return;
+    }
     s_sound = page(tile, "SOUND", true, &list);
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     s_notes_sw = switch_row(list, "Voice notes", muse_settings_voice_notes(), on_notes_sw);
@@ -1228,6 +1273,9 @@ static void build_sound_page(lv_obj_t *tile)
 
 static void tick_sound(void)
 {
+    if (screen_only()) {
+        return;
+    }
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     lv_obj_set_state(s_notes_sw, LV_STATE_CHECKED, muse_settings_voice_notes());
 #endif
@@ -1425,7 +1473,10 @@ static void build_power_page(lv_obj_t *tile)
     char text[128];
     const char *power = muse_board->power_button ? muse_board->power_button : muse_board->talk_button;
     const char *sleep = muse_board->power_button ? muse_board->power_button : muse_board->aux_button;
-    if (sleep) {
+    if (power && !strcmp(power, "screen")) {
+        /* Touch-only boards (the LCD-7 and LCD-1.28) wake on a tap. */
+        snprintf(text, sizeof(text), "Tap the screen to turn it back on.");
+    } else if (sleep) {
         snprintf(text, sizeof(text), "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
                  power, sleep);
     } else {
@@ -1461,7 +1512,11 @@ static void build_home(lv_obj_t *tile)
     row(list, LV_SYMBOL_WIFI, "Wi-Fi", &s_home_wifi, on_nav, (void *)&WIFI);
     row(list, LV_SYMBOL_HOME, "Muse", &s_home_hatch, on_nav, (void *)&HATCH);
     row(list, LV_SYMBOL_BLUETOOTH, "Bluetooth", &s_home_ble, on_nav, (void *)&BLE);
-    row(list, LV_SYMBOL_VOLUME_MAX, "Sound", &s_home_sound, on_nav, (void *)&SOUND);
+    if (screen_only()) {
+        row(list, LV_SYMBOL_IMAGE, "Screen", &s_home_sound, on_nav, (void *)&SOUND);
+    } else {
+        row(list, LV_SYMBOL_VOLUME_MAX, "Sound", &s_home_sound, on_nav, (void *)&SOUND);
+    }
     row(list, LV_SYMBOL_EYE_CLOSE, "Sleep", &s_home_sleep, on_nav, (void *)&SLEEP);
     row(list, LV_SYMBOL_BATTERY_FULL, "Battery", &s_home_battery, on_nav, (void *)&BATTERY);
 #if CONFIG_MUSE_VIDEO
@@ -1490,7 +1545,9 @@ static void tick_home(void)
     muse_ble_status(&b);
     set_text(s_home_ble, b.state == MUSE_BLE_OFF ? "Off" : (b.state == MUSE_BLE_CONNECTED ? "Connected" : "On"));
 
-    if (!muse_board->audio_init) {
+    if (screen_only()) {
+        set_val(s_home_sound, "%d%%", muse_settings_brightness());
+    } else if (!muse_board->audio_init) {
         set_text(s_home_sound, muse_board->mic_init ? "Mic only" : "No audio");
     } else if (muse_settings_speaker_on()) {
         set_val(s_home_sound, "Vol %d%%", muse_settings_volume());
@@ -1525,18 +1582,60 @@ void muse_settings_ui_build(lv_obj_t *tile)
     if (muse_board->round && muse_board->height < 466) {
         s_text_scale = muse_board->height;
     }
+    s_tiny = muse_board->round && muse_board->width < 300;
     s_tile = tile;
     build_home(tile);
     show(s_home);
 }
 
+#if LV_USE_SNAPSHOT
+static volatile int s_bench_open = -1;   /* applied in the LVGL task, by the next tick */
+
+bool muse_settings_ui_bench_open(const char *name)
+{
+    static const char *const NAMES[] = { "home", "wifi", "muse", "ble", "sound", "sleep", "battery", "power" };
+    for (int i = 0; i < (int)(sizeof(NAMES) / sizeof(NAMES[0])); i++) {
+        if (!strcmp(name, NAMES[i])) {
+            s_bench_open = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void bench_open_pending(void)
+{
+    static const page_t *const PAGES[] = { NULL, &WIFI, &HATCH, &BLE, &SOUND, &SLEEP, &BATTERY, &POWER };
+    int i = s_bench_open;
+    if (i < 0) {
+        return;
+    }
+    s_bench_open = -1;
+    if (s_current == s_text) {
+        close_text();   /* clears the field and returns to the page under it */
+    }
+    show(s_home);   /* drops the open sub-page, so the one asked for is built fresh */
+    if (PAGES[i]) {
+        if (!*PAGES[i]->obj) {
+            PAGES[i]->build(s_tile);
+        }
+        show(*PAGES[i]->obj);
+    }
+}
+#endif
+
 void muse_settings_ui_tick(bool visible)
 {
     static bool was_visible;
+#if LV_USE_SNAPSHOT
+    if (visible) {
+        bench_open_pending();
+    }
+#endif
     if (visible != was_visible) {
         was_visible = visible;
         /* Only listen to the mic while the Sound page is actually on screen. */
-        muse_voice_set_monitor(visible && s_current == s_sound && !muse_board->epaper);
+        muse_voice_set_monitor(visible && s_current == s_sound && !muse_board->epaper && !screen_only());
     }
     if (!visible) {
         return;
