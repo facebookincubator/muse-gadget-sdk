@@ -26,7 +26,12 @@
 
 #include "esp_log.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
+#if CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE
+#include "esp_hosted_misc.h"
+#else
 #include "esp_bt.h"
+#endif
 #include "esp_app_desc.h"
 #include "mbedtls/platform_util.h"
 #include "freertos/FreeRTOS.h"
@@ -47,6 +52,7 @@
 #include "config_store.h"
 #include "link_pairing.h"
 #include "factory_test.h"
+#include "helper_task.h"
 
 static const char *TAG = "link.ble";
 
@@ -178,7 +184,7 @@ static void provision_task(void *arg) {
     secure_free_str(a->noise_host);
     free(a);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static void scan_task(void *arg) {
@@ -469,7 +475,7 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
             // stack during TLS handshake than v5's 3.x (~2 KB more peak).
             a->session_generation = link_pairing_mark_provisioning_active();
             if (a->session_generation == 0
-                || xTaskCreate(provision_task, "prov", 8192, a, 5, NULL) != pdPASS) {
+                || helper_task_create(provision_task, "prov", 8192, a, 5, NULL) != pdPASS) {
                 uint32_t generation = a->session_generation;
                 secure_free_str(a->ssid);
                 secure_free_str(a->password);
@@ -858,12 +864,16 @@ static void shutdown_stack(bool release_memory) {
         return;
     }
     s_shutting_down = true;   // released for good: no restart
+#if CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE
+    ESP_LOGI(TAG, "BLE shut down");
+#else
     err = esp_bt_mem_release(ESP_BT_MODE_BLE);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "esp_bt_mem_release: %s", esp_err_to_name(err));
     }
 
     ESP_LOGI(TAG, "BLE shut down, memory released");
+#endif
 }
 
 // ---- GAP / NimBLE host wiring ----------------------------------------------
@@ -1029,6 +1039,19 @@ void ble_server_start(const char *device_name, const ble_callbacks_t *cb) {
     s_synced = false;
     s_advertising_enabled = false;
     s_advertising_active = false;
+
+#if CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE
+    /* The controller runs on the Wi-Fi/BLE coprocessor; NimBLE reaches it over
+     * ESP-Hosted's virtual HCI. */
+    esp_err_t hosted_err = esp_hosted_bt_controller_init();
+    if (hosted_err == ESP_OK) {
+        hosted_err = esp_hosted_bt_controller_enable();
+    }
+    if (hosted_err != ESP_OK) {
+        ESP_LOGE(TAG, "coprocessor BT controller: %s", esp_err_to_name(hosted_err));
+        return;
+    }
+#endif
 
     nimble_port_init();
     ble_svc_gap_init();

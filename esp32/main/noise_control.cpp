@@ -1410,6 +1410,12 @@ static char *build_register_json(void) {
         int bits = led_status_display_bits();
         bool mono = bits == 1;
         bool epaper = bits == 1 || bits == 2 || bits == 4;
+        // 2 bits are four inks on the Waveshare 1.54G, four grays elsewhere.
+#if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        bool inks4 = bits == 2;
+#else
+        bool inks4 = false;
+#endif
         char desc[1536];
         snprintf(desc, sizeof(desc),
                  "Download an image and draw it on the %dx%d %s. Takes a "
@@ -1428,6 +1434,7 @@ static char *build_register_json(void) {
 #endif
                  disp_w, disp_h,
                  mono ? "black and white e-paper screen, 1 bit per pixel"
+                 : inks4 ? "four-colour e-paper screen, 2 bits per pixel"
                  : bits == 4 ? "six-colour e-paper screen (E Ink Spectra 6), "
                                "4 bits per pixel"
                              : bits == 2 ? "four-level grayscale e-paper screen, 2 bits per pixel"
@@ -1441,6 +1448,18 @@ static char *build_register_json(void) {
                         "is in, taking about 2 s and flashing, so send one "
                         "whole screen rather than several parts. The image "
                         "stays on screen without power."
+                 : inks4 ? " The screen has only four inks: black #000000, "
+                               "white #ffffff, yellow #ffff00 and red #ff0000, "
+                               "shown exactly. There is no green or blue ink: "
+                               "saturated greens and blues come out nearly "
+                               "black. The device dithers every other "
+                               "colour and gray to dots of these, so photos "
+                               "look grainy and muted, and text, charts and "
+                               "flat artwork are sharpest drawn in those four "
+                               "colours only. It refreshes once the whole image "
+                               "is in, taking 9 to 20 s and flashing, so send "
+                               "one whole screen rather than several parts. "
+                               "The image stays on screen without power."
                  : bits == 4 ? " The screen has only six inks: black #000000, "
                                "white #ffffff, yellow #ffff00, red #ff0000, "
                                "blue #0000ff and green #00ff00, shown exactly. "

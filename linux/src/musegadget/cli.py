@@ -50,6 +50,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    from musegadget import commands
     from musegadget.executor import Account, Executor
     from musegadget.service import run_service
 
@@ -72,8 +73,49 @@ def cmd_run(args: argparse.Namespace) -> int:
         log.warning("running without an SDK token: %s", exc)
         sdk_token = None
     log.info("musegadget %s: commands run as %s", __version__, account.name)
-    run_service(identity.load_or_create(), Executor(account), sdk_token)
+    drop_ins = commands.load(config.commands_dir())
+    run_service(identity.load_or_create(), Executor(account, drop_ins), sdk_token)
     return 0
+
+
+_IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                ".gif": "image/gif", ".webp": "image/webp"}
+
+
+def _read_image(path: str) -> dict | None:
+    """Check a picture's type and size before reading it; print why not."""
+    import base64
+    import stat
+
+    from musegadget.link_client import MAX_IMAGE_BYTES
+
+    name = os.path.basename(path)
+    mime_type = _IMAGE_TYPES.get(os.path.splitext(path)[1].lower())
+    if mime_type is None:
+        print(f"{name} is not a JPEG, PNG, GIF or WebP image", file=sys.stderr)
+        return None
+    too_big = f"images must be 2 MiB ({MAX_IMAGE_BYTES:,} bytes) or less"
+    try:
+        info = os.stat(path)
+        if not stat.S_ISREG(info.st_mode):
+            print(f"{name} is not a regular file", file=sys.stderr)
+            return None
+        if info.st_size > MAX_IMAGE_BYTES:
+            print(f"{name} is {info.st_size:,} bytes; {too_big}", file=sys.stderr)
+            return None
+        with open(path, "rb") as f:
+            data = f.read(MAX_IMAGE_BYTES + 1)
+    except OSError as exc:
+        print(f"Could not read {path}: {exc}", file=sys.stderr)
+        return None
+    if not data:
+        print(f"{name} is empty", file=sys.stderr)
+        return None
+    if len(data) > MAX_IMAGE_BYTES:  # it grew after the check
+        print(f"{name} is over the limit; {too_big}", file=sys.stderr)
+        return None
+    return {"filename": name, "mime_type": mime_type,
+            "data_base64": base64.b64encode(data).decode("ascii")}
 
 
 def cmd_send_user_msg(args: argparse.Namespace) -> int:
@@ -81,13 +123,18 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
     import socket
 
     message = sys.stdin.read() if args.message == ["-"] else " ".join(args.message)
+    request = {"message": message}
+    if args.session_id:
+        request["session_id"] = args.session_id
+    if args.image:
+        image = _read_image(args.image)
+        if image is None:
+            return 1
+        request["image"] = image
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(90)
             sock.connect(str(config.socket_path()))
-            request = {"message": message}
-            if args.session_id:
-                request["session_id"] = args.session_id
             sock.sendall(json.dumps(request).encode() + b"\n")
             reply = json.loads(sock.makefile("rb").readline())
     except (OSError, ValueError) as exc:
@@ -248,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("message", nargs="+", help="the message, or - to read it from stdin")
     send.add_argument("--session-id",
                      help="send to this side chat (a new id starts one) instead of the main chat")
+    send.add_argument("--image", metavar="FILE",
+                     help="attach a JPEG, PNG, GIF or WebP picture of at most 2 MiB for Muse to look at")
     send.set_defaults(func=cmd_send_user_msg)
 
     from musegadget.link_client import validate_app_id
