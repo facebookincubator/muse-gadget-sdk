@@ -166,6 +166,13 @@ bool config_clear_pairing(void) {
     return clear_and_verify(keys, sizeof(keys) / sizeof(keys[0]));
 }
 
+bool config_unpair(void) {
+    // The marker goes last, and only once the pairing is verifiably gone:
+    // tokens left without it read at boot as credentials kept after a
+    // refusal, not as the unpair that was asked for.
+    return config_clear_pairing() && config_clear_setup_complete();
+}
+
 bool config_clear_setup(void) {
     static const char *const keys[] = {
         "api_url",

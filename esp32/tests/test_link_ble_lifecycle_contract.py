@@ -97,13 +97,22 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         advertise = _function_body(BLE_SERVER_C.read_text(), "static void start_advertising(void) {")
         self.assertIn("if (config_setup_complete()) return;", advertise)
 
-    def test_auth_rejection_does_not_reopen_setup(self) -> None:
-        body = _function_body(APP_C.read_text(), "static void handle_token_revoked_unlocked(")
+    def test_auth_rejection_keeps_credentials(self) -> None:
+        source = APP_C.read_text()
+        body = _function_body(source, "static void note_device_token_refused_unlocked(")
+        defer = _function_body(source, "static void defer_pairing_reopen(")
+        reopen = _function_body(source, "static void reopen_pairing_after_token_refusal(")
 
-        self.assertIn("config_clear_pairing()", body)
-        self.assertNotIn("config_clear_setup", body)
-        self.assertNotIn("config_clear_setup_complete", body)
-        self.assertNotIn("ble_server_start", body)
+        # A refusal erases nothing; reopening pairing clears only the marker.
+        for code in (body, defer):
+            self.assertNotIn("config_clear", code)
+            self.assertNotIn("config_erase_key", code)
+            self.assertNotIn("config_unpair", code)
+            self.assertNotIn("ble_server_start", code)
+        self.assertIn("config_clear_setup_complete()", reopen)
+        self.assertNotIn("config_clear_pairing", reopen)
+        self.assertNotIn("config_unpair", reopen)
+        self.assertNotIn("config_clear_setup()", reopen)
 
     def test_long_press_resets_setup_and_reboots(self) -> None:
         source = APP_C.read_text()
@@ -117,7 +126,8 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         self.assertIn('reset_setup_from_control("button long-press")', body)
         self.assertIn("setup_wipe_to_clean()", reset)
         self.assertIn("clear_setup_credentials()", wipe)
-        self.assertIn("config_clear_setup()", clear)
+        self.assertIn("config_unpair()", clear)
+        self.assertNotIn("config_clear_setup()", clear)
         self.assertIn("setup_disconnect_to_clean()", wipe)
         self.assertIn("disconnect_vm_transports()", disconnect)
         self.assertIn("wifi_mgr_disconnect()", disconnect)
