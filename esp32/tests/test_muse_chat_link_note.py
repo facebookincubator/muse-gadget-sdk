@@ -164,9 +164,10 @@ class LinkVoiceNote(NoteRequestAssertions, unittest.TestCase):
             [*cc, '-c', str(cjson / 'cJSON.c'), '-o', str(out / 'cjson.o')],
             [*cc, *SANITIZE, *helpers, '-c', str(MUSE / 'muse_chat_text.c'), '-o', str(out / 'text.o')],
             [*cc, *SANITIZE, *helpers, '-c', str(MUSE / 'muse_text.c'), '-o', str(out / 'muse_text.o')],
+            [*cc, *SANITIZE, *helpers, '-c', str(MUSE / 'muse_chat_image.c'), '-o', str(out / 'image.o')],
             [*cc, *SANITIZE, '-I', str(cjson), '-I', str(ROOT / 'tests'), '-I', str(MUSE),
-             str(out / 'link.c'), str(out / 'text.o'), str(out / 'muse_text.o'), str(out / 'cjson.o'),
-             '-o', str(out / 'link')],
+             str(out / 'link.c'), str(out / 'text.o'), str(out / 'muse_text.o'), str(out / 'image.o'),
+             str(out / 'cjson.o'), '-o', str(out / 'link')],
         ]
         for command in commands:
             result = subprocess.run(command, capture_output=True, text=True)

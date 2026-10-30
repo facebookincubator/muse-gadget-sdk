@@ -127,6 +127,7 @@ size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) { (void)p;(v
 void muse_hatch_turn_end(void) {}
 void muse_hatch_turn_cancel(void) {}
 muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) { (void)p;(void)n;return MUSE_HATCH_EV_NONE; }
+bool muse_chat_needs_voice_poll(void) { return false; }
 bool muse_hatch_turn_caption(size_t x,char *p,size_t n) { (void)x;(void)p;(void)n;return false; }
 size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) { (void)p;(void)n;(void)ms;return 0; }
 

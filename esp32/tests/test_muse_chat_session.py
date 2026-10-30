@@ -303,6 +303,43 @@ static void typed_reply_at_cap(bool finished, bool busy) {
     assert(!strcmp(console_fields, finished && !busy ? "\"messages\":1,\"complete\":true"
                                                      : "\"messages\":1,\"complete\":false"));
 }
+/* A photo sent while voice is idle: nothing drains reply audio, so its reply
+ * must end the turn without queueing paced captions, for every reply length. */
+static void image_reply_completes_without_playback() {
+    static const char *replies[] = {"Hi", "A cat on a windowsill, looking out at the rain."};
+    for (const char *reply : replies) {
+        begin();
+        s_turn.image = true;
+        event("message.assistant", "reply", "note", reply);
+        assert(s_turn.nmsgs == 1 && s_turn.msgs[0].done && s_turn.msgs[0].tts == TTS_NONE);
+        start_tts();
+        assert(s_turn.tts_msg == -1 && !s_turn.silent);
+        clock_us += SETTLE_US + 1;
+        check_turn();
+        assert(s_turn.phase == P_IDLE && done_events == 1 && !done_text[0] && !fail_events);
+    }
+}
+/* A reply that beats the photo's ACK doesn't end its turn: the ACK reports
+ * SENT first, or the turn fails once the ACK is overdue. */
+static void image_reply_waits_for_the_ack(bool acked_late) {
+    begin();
+    s_turn.image = true;
+    s_turn.acked = false;
+    event("message.assistant", "reply", "", "Early reply");
+    clock_us += SETTLE_US + 1;
+    check_turn();
+    assert(s_turn.phase == P_WAIT_REPLY && !done_events && !fail_events);
+    if (acked_late) {
+        s_turn.acked = true;
+        check_turn();
+        assert(s_turn.phase == P_IDLE && done_events == 1 && !fail_events);
+        return;
+    }
+    clock_us = s_turn.chat_us + REPLY_TIMEOUT_US + 1;
+    check_turn();
+    assert(s_turn.phase == P_IDLE && fail_events == 1 && !done_events);
+    assert(!strcmp(fail_text, "NO REPLY FROM MUSE"));
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
@@ -324,6 +361,9 @@ int main(int argc, char **argv) {
     case 15: typed_reply_at_cap(true, false); break;
     case 16: typed_reply_at_cap(true, true); break;
     case 17: typed_reply_at_cap(false, false); break;
+    case 18: image_reply_completes_without_playback(); break;
+    case 19: image_reply_waits_for_the_ack(true); break;
+    case 20: image_reply_waits_for_the_ack(false); break;
     default: return 2;
     }
 }
@@ -391,4 +431,12 @@ int main(int argc, char **argv) {
     def test_typed_reply_at_cap_is_complete_only_when_finished_and_idle(self):
         for name, case in [('finished idle', 15), ('finished busy', 16), ('streaming', 17)]:
             with self.subTest(reply=name):
+                self.run_case(case)
+
+    def test_image_reply_ends_the_turn_without_playback(self):
+        self.run_case(18)
+
+    def test_image_reply_before_the_ack_waits_for_it(self):
+        for name, case in [('late ACK', 19), ('no ACK', 20)]:
+            with self.subTest(ack=name):
                 self.run_case(case)
