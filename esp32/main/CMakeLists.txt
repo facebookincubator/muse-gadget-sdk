@@ -64,12 +64,12 @@ set(GADGET_REQUIRES
     esp_psram
     esp_coex
     driver
+    esp_adc
     esp_driver_gpio
     esp_driver_i2c
     esp_driver_ledc
     esp_driver_spi
     esp_driver_uart
-    esp_adc
     esp_driver_usb_serial_jtag
     esp_lcd
     lwip

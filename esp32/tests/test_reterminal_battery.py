@@ -179,7 +179,6 @@ class ReterminalBatteryTest(unittest.TestCase):
                 "-x", "c", "-fsyntax-only", "-"], input=source, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-
     def test_health_fields_for_reterminal_ui_and_other_boards(self):
         json_dir = Path(os.environ.get(
             "CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"))

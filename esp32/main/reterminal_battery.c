@@ -40,18 +40,18 @@ static adc_cali_handle_t s_cali;
 static const struct {
     int mv;
     int pct;
-} kCurve[] = {
+} CURVE[] = {
     {4150, 100}, {3960, 90}, {3910, 80}, {3850, 70}, {3800, 60},
     {3750, 50},  {3680, 40}, {3580, 30}, {3490, 20}, {3410, 10},
     {3300, 5},   {3270, 0},
 };
 
 static int pct_for_mv(int mv) {
-    if (mv >= kCurve[0].mv) return 100;
-    for (size_t i = 1; i < sizeof(kCurve) / sizeof(kCurve[0]); i++) {
-        if (mv >= kCurve[i].mv) {
-            int mv_hi = kCurve[i - 1].mv, mv_lo = kCurve[i].mv;
-            int pct_hi = kCurve[i - 1].pct, pct_lo = kCurve[i].pct;
+    if (mv >= CURVE[0].mv) return 100;
+    for (size_t i = 1; i < sizeof(CURVE) / sizeof(CURVE[0]); i++) {
+        if (mv >= CURVE[i].mv) {
+            int mv_hi = CURVE[i - 1].mv, mv_lo = CURVE[i].mv;
+            int pct_hi = CURVE[i - 1].pct, pct_lo = CURVE[i].pct;
             return pct_lo + (pct_hi - pct_lo) * (mv - mv_lo) / (mv_hi - mv_lo);
         }
     }
