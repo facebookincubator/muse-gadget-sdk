@@ -40,6 +40,7 @@ typedef enum {
     MUSE_VOICE_VIEW_READY,
     MUSE_VOICE_VIEW_LISTENING,
     MUSE_VOICE_VIEW_THINKING,
+    MUSE_VOICE_VIEW_WORKING,   /* nothing playing or said, Muse still has a caller turn open */
     MUSE_VOICE_VIEW_SPEAKING,
     MUSE_VOICE_VIEW_ENDING,
 } muse_voice_view_t;

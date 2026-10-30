@@ -120,9 +120,13 @@ typedef struct {
     bool reply_done;   /* Muse finished that reply (response.done or turn_settled) */
     bool overflow;     /* audio was dropped during the last hold: the start buffer was full */
     bool reply_lost;   /* a reply was dropped: too much of it came before Muse confirmed the turn */
+    bool working;      /* Muse still has work open: a turn not yet settled, or delegated work */
 } muse_voice_call_ptt_status_t;
 
 void muse_voice_call_ptt_status(muse_voice_call_ptt_status_t *out);
+/* Live, and Muse still has a caller turn open; on a hands-free call also its
+ * first reply is done and the server doesn't hear the caller talking. */
+bool muse_voice_call_working(void);
 
 /* Provided by the app: the Link node id ("homelink-xxxxxx") the call names as
  * its device, or "" if unknown. Called on the session task, whose stack is in

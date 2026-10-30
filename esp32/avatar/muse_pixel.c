@@ -67,6 +67,9 @@ static const scheme_t SCHEMES[MUSE_MODE_COUNT] = {
     [MUSE_MODE_OFF]       = { { 0xd8d4ff, 0x8f86d9, 0x5a4fb0, 0x2e2870 }, 0x7c72d0 },
 };
 
+/* THINKING while Muse works on a call (pose->working): warm and busy. */
+static const scheme_t WORKING_SCHEME = { { 0xfff4dc, 0xffcf7a, 0xffa23f, 0xc9651f }, 0xffb54d };
+
 /* Cream fur and a peach face. */
 static const uint32_t FIXED[C_COUNT] = {
     [C_BG] = 0x000000,
@@ -183,6 +186,11 @@ static inline uint16_t to565(rgb_t c)
 uint32_t muse_pixel_accent(muse_mode_t mode)
 {
     return SCHEMES[mode < MUSE_MODE_COUNT ? mode : MUSE_MODE_IDLE].acc;
+}
+
+uint32_t muse_pixel_working_accent(void)
+{
+    return WORKING_SCHEME.acc;
 }
 
 static void update_palette(const scheme_t *target, float dt)
@@ -317,7 +325,11 @@ static float eyes_update(const muse_pose_t *p, float dt)
     }
 
     float tgx = e->tgx, tgy = e->tgy;
-    switch (p->mode) {
+    if (p->mode == MUSE_MODE_THINKING && p->working > 0.5f) {
+        /* Eyes down on the busy paws, scanning along. */
+        tgx = 0.35f * sinf(p->mode_t * 2.1f);
+        tgy = 0.45f;
+    } else switch (p->mode) {
     case MUSE_MODE_LISTENING:
         tgx = 0;
         tgy = 0.1f;
@@ -807,6 +819,32 @@ static void draw_thought_dots(float x, float y, float t)
     }
 }
 
+/* A loading spinner: eight dots round a centre, one bright with a short tail. */
+static void draw_spinner(float x, float y, float t)
+{
+    static const int8_t RING[8][2] = { { 0, -3 }, { 2, -2 }, { 3, 0 }, { 2, 2 }, { 0, 3 }, { -2, 2 }, { -3, 0 }, { -2, -2 } };
+    int head = (int)(fracf(t * 1.25f) * 8.0f);
+    int cx = iround(x), cy = iround(y);
+    for (int i = 0; i < 8; i++) {
+        int behind = (head - i + 8) % 8;
+        uint8_t c = behind == 0 ? C_G0 : behind == 1 ? C_G1 : behind == 2 ? C_G2 : C_G3;
+        px(cx + RING[i][0], cy + RING[i][1], c);
+    }
+}
+
+/* A little keyboard under the paws; the key under the tapping paw lights up. */
+static void draw_keys(float cx, float y, float t)
+{
+    int x0 = iround(cx) - 7, y0 = iround(y);
+    for (int c = 0; c < 15; c++) {
+        px(x0 + c, y0, C_G1);
+        px(x0 + c, y0 + 1, C_G3);
+    }
+    int lit = sinf(t * 11.0f) > 0 ? 4 : 10;
+    lit += (int)(fracf(t * 0.9f) * 2.0f);
+    px(x0 + lit, y0, C_WHITE);
+}
+
 static void draw_hearts(float cx, float top, float t, float amount)
 {
     static const char *const HEART[] = { ".#.#.", "#o###", "#####", ".###.", "..#.." };
@@ -895,8 +933,9 @@ void muse_pixel_render(const muse_pose_t *p)
     float happy = p->happy;
     float level = p->level;
     float t = p->t;
+    bool working = mode == MUSE_MODE_THINKING && p->working > 0.5f;
 
-    update_palette(&SCHEMES[mode], dt);
+    update_palette(working ? &WORKING_SCHEME : &SCHEMES[mode], dt);
     float blink = eyes_update(p, dt);
 
     memset(s_fb, C_BG, sizeof(s_fb));
@@ -908,8 +947,12 @@ void muse_pixel_render(const muse_pose_t *p)
         bob = sinf(t * 3.0f) * 0.6f;
         break;
     case MUSE_MODE_THINKING:
-        bob = sinf(t * 2.4f) * 0.8f;
-        lean = sinf(t * 1.3f) * 1.2f;
+        if (working) {
+            bob = sinf(t * 4.2f) * 0.5f;
+        } else {
+            bob = sinf(t * 2.4f) * 0.8f;
+            lean = sinf(t * 1.3f) * 1.2f;
+        }
         break;
     case MUSE_MODE_SPEAKING:
         bob = sinf(t * 5.0f) * 0.6f - level * 1.5f;
@@ -953,9 +996,9 @@ void muse_pixel_render(const muse_pose_t *p)
     }
     draw_shadow(j.cx, 58.5f, 13.0f - hop * 0.8f);
 
-    float spk_speed = mode == MUSE_MODE_THINKING ? 2.8f : mode == MUSE_MODE_LISTENING ? 1.2f
+    float spk_speed = working ? 1.8f : mode == MUSE_MODE_THINKING ? 2.8f : mode == MUSE_MODE_LISTENING ? 1.2f
                     : mode == MUSE_MODE_SPEAKING ? 1.5f : 0.6f;
-    int spk_count = mode == MUSE_MODE_BOOT ? (int)(boot * 6) : (int)(6 * fade);
+    int spk_count = mode == MUSE_MODE_BOOT ? (int)(boot * 6) : working ? 3 : (int)(6 * fade);
     draw_sparkles(p, j.cx, j.cy, false, spk_speed, spk_count);
 
     /* ---- limbs ---- */
@@ -975,9 +1018,17 @@ void muse_pixel_render(const muse_pose_t *p)
         arms[1] = (limb_t){ j.cx + adx - 1.0f, j.fy + 5.0f, -0.55f };
         break;
     case MUSE_MODE_THINKING:
-        /* One paw up to the chin. */
-        arms[0] = (limb_t){ j.cx - adx, ay, -0.35f };
-        arms[1] = (limb_t){ j.cx + 7.5f, j.fy + j.fb + 3.5f, -1.1f };
+        if (working) {
+            /* Both paws in front, tapping away in turn. */
+            float tap_l = fmaxf(0, sinf(t * 11.0f)) * 1.6f;
+            float tap_r = fmaxf(0, -sinf(t * 11.0f)) * 1.6f;
+            arms[0] = (limb_t){ j.cx - 6.0f, ay + 2.0f - tap_l, 1.15f };
+            arms[1] = (limb_t){ j.cx + 6.0f, ay + 2.0f - tap_r, -1.15f };
+        } else {
+            /* One paw up to the chin. */
+            arms[0] = (limb_t){ j.cx - adx, ay, -0.35f };
+            arms[1] = (limb_t){ j.cx + 7.5f, j.fy + j.fb + 3.5f, -1.1f };
+        }
         break;
     case MUSE_MODE_OFF: {
         float w = sinf(t * 12.0f) * 0.35f * fade;
@@ -1024,8 +1075,8 @@ void muse_pixel_render(const muse_pose_t *p)
         mouth = MOUTH_O;
         break;
     case MUSE_MODE_THINKING:
-        open *= 0.85f;
-        mouth = MOUTH_HMM;
+        open *= working ? 1.0f : 0.85f;
+        mouth = working ? MOUTH_SMILE : MOUTH_HMM;
         break;
     case MUSE_MODE_SPEAKING:
         mouth = MOUTH_TALK;
@@ -1052,7 +1103,11 @@ void muse_pixel_render(const muse_pose_t *p)
 
     /* Tiny brows for the expressive states. */
     int bl = iround(j.fx - eye_dx), br = iround(j.fx + eye_dx), by = iround(eye_y) - 4;
-    if (mode == MUSE_MODE_THINKING) {
+    if (working) {
+        /* Busy, not puzzled: brows up a touch. */
+        px(bl - 1, by - 1, C_BROW); px(bl, by - 1, C_BROW);
+        px(br - 1, by - 1, C_BROW); px(br, by - 1, C_BROW);
+    } else if (mode == MUSE_MODE_THINKING) {
         px(bl - 1, by + 1, C_BROW); px(bl, by + 1, C_BROW);
         px(br - 1, by, C_BROW); px(br, by - 1, C_BROW);
     } else if (mode == MUSE_MODE_LISTENING) {
@@ -1073,7 +1128,10 @@ void muse_pixel_render(const muse_pose_t *p)
     if (mode == MUSE_MODE_LISTENING || mode == MUSE_MODE_SPEAKING) {
         draw_waves(j.cx, j.fy + 2, j.a, level, t);
     }
-    if (mode == MUSE_MODE_THINKING) {
+    if (working) {
+        draw_keys(j.cx, ay + 4.5f, t);
+        draw_spinner(j.cx + 16, top + 3, t);
+    } else if (mode == MUSE_MODE_THINKING) {
         draw_thought_dots(j.cx + 14, top + 2, t);
     }
     if (happy > 0) {

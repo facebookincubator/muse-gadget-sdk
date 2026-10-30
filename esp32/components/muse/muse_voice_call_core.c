@@ -629,6 +629,7 @@ bool muse_vc_parse_event(const char *line, size_t len, muse_vc_event_t *ev)
     } else if (span_is(type, "response.created")) {
         ev->kind = MUSE_VC_EV_RESPONSE_CREATED;
         get_id(line, len, "response.id", &ev->mapper_response_id);
+        get_string(line, len, "response.submission_message_id", &ev->response_submission_id);
     } else if (span_is(type, "response.done") || span_is(type, "response.completed")) {
         ev->kind = MUSE_VC_EV_RESPONSE_DONE;
         get_id(line, len, "response.id", &ev->mapper_response_id);
@@ -638,8 +639,11 @@ bool muse_vc_parse_event(const char *line, size_t len, muse_vc_event_t *ev)
         get_string(line, len, "submission_message_id", &ev->submission_id);
         get_string(line, len, "item_id", &ev->item_id);
     } else if (span_is(type, "hatch.voice.turn_settled")) {
+        muse_vc_span_t n;
         ev->kind = MUSE_VC_EV_TURN_SETTLED;
         get_string(line, len, "response_message_id", &ev->response_message_id);
+        ev->handoffs_none = get_checked(line, len, "async_handoffs_pending", &n) == MUSE_VC_J_NUMBER &&
+                            number_is(n, 0);
     } else if (span_is(type, "hatch.voice.input_suppressed")) {
         ev->kind = MUSE_VC_EV_INPUT_SUPPRESSED;
         get_string(line, len, "item_id", &ev->item_id);
@@ -1339,6 +1343,53 @@ static bool turn_started(muse_vc_turns_t *t, const muse_vc_event_t *ev, char ite
     return true;
 }
 
+/* The item of the active turn `submission`, or false if it isn't active. */
+static bool active_turn_item(const muse_vc_turns_t *t, const char *submission, char item[MUSE_VC_TURN_ID_MAX])
+{
+    for (int i = 0; i < t->n_active; i++) {
+        if (!strcmp(t->active[i].submission, submission)) {
+            memcpy(item, t->active[i].item, MUSE_VC_TURN_ID_MAX);
+            return true;
+        }
+    }
+    return false;
+}
+
+/* True if a turn before the newest active one already named `item`: a
+ * delayed reply's alias for older work (or a replay), not a new caller turn. */
+static bool item_seen_before(const muse_vc_turns_t *t, const char *item)
+{
+    for (int i = 0; i + 1 < t->n_active; i++) {
+        if (!strcmp(t->active[i].item, item)) {
+            return true;
+        }
+    }
+    for (int i = 0; i < t->n_settled; i++) {
+        if (!strcmp(t->settled[i].item, item)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Retires every active turn except those for item `keep` (NULL keeps none). */
+static void settle_all(muse_vc_turns_t *t, const char *keep)
+{
+    int kept = 0;
+    for (int i = 0; i < t->n_active; i++) {
+        if (keep && keep[0] && !strcmp(t->active[i].item, keep)) {
+            t->active[kept++] = t->active[i];
+            continue;
+        }
+        t->settled[t->settled_next] = t->active[i];
+        t->settled_next = (uint8_t)((t->settled_next + 1) % MUSE_VC_MAX_TURNS);
+        if (t->n_settled < MUSE_VC_MAX_TURNS) {
+            t->n_settled++;
+        }
+    }
+    t->n_active = (uint8_t)kept;
+}
+
 /* Retires the named submission and the earlier ones for its item. An unnamed
  * or unknown settlement retires nothing. Returns true if anything settled. */
 static bool turn_settled(muse_vc_turns_t *t, const muse_vc_event_t *ev)
@@ -1440,6 +1491,18 @@ uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_
             c->speaking = false;
             c->speaking_item[0] = '\0';
         }
+        if (strcmp(item, c->reply_item) != 0 && !item_seen_before(c->turns, item)) {
+            /* A new caller turn. A delayed reply's turn names an earlier
+             * item; early media the reply adopts was created unmarked. */
+            c->awaiting_reply = true;
+            c->reply_kept = false;
+            memcpy(c->reply_item, item, sizeof(c->reply_item));
+            if (c->open_response[0] && c->open_unmarked) {
+                memcpy(c->reply_response, c->open_response, sizeof(c->reply_response));
+            } else {
+                c->reply_response[0] = '\0';
+            }
+        }
         muse_vc_call_activity(c, now_us);
         return 0;
     }
@@ -1447,9 +1510,56 @@ uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_
         if (turn_settled(c->turns, ev)) {
             muse_vc_call_activity(c, now_us);   /* a fresh idle window after it */
         }
+        if (ev->handoffs_none && c->turns->n_active) {
+            /* Nothing pending: no handoff in the call remains, and Jarvis
+             * doesn't settle every caller turn by name, so a turn asked while
+             * a handoff ran would otherwise stay active (working, never idle)
+             * for the rest of the call. A turn not answered yet stays: an
+             * interrupted reply's settlement can follow the next turn's start. */
+            /* Keep an unanswered turn through one such settlement only, so a
+             * reply never seen can't hold the call open past its idle limit. */
+            bool keep = c->awaiting_reply && !c->reply_kept;
+            settle_all(c->turns, keep ? c->reply_item : NULL);
+            if (keep) {
+                c->reply_kept = true;
+            } else {
+                c->awaiting_reply = false;
+            }
+            muse_vc_call_activity(c, now_us);
+        }
         return 0;
-    case MUSE_VC_EV_RESPONSE_CREATED:
-    case MUSE_VC_EV_RESPONSE_DONE:     /* "cancelled" included: the call goes on */
+    case MUSE_VC_EV_RESPONSE_CREATED: {
+        char response[MUSE_VC_TURN_ID_MAX], submission[MUSE_VC_TURN_ID_MAX], item[MUSE_VC_TURN_ID_MAX];
+        if (!take_id(ev->mapper_response_id, response, sizeof(response))) {
+            response[0] = '\0';
+        }
+        bool marked = take_id(ev->response_submission_id, submission, sizeof(submission));
+        memcpy(c->open_response, response, sizeof(c->open_response));
+        c->open_unmarked = !marked;
+        /* The awaited turn's reply: one for its item, or one that doesn't say
+         * (older VMs, early media), never older work's. */
+        if (c->awaiting_reply && response[0] &&
+            (!marked || (active_turn_item(c->turns, submission, item) && !strcmp(item, c->reply_item)))) {
+            memcpy(c->reply_response, response, sizeof(c->reply_response));
+        }
+        muse_vc_call_activity(c, now_us);
+        return 0;
+    }
+    case MUSE_VC_EV_RESPONSE_DONE: {   /* "cancelled" included: the call goes on */
+        /* Only the awaited turn's reply answers it; an older one the caller
+         * interrupted finishing late doesn't. */
+        char response[MUSE_VC_TURN_ID_MAX];
+        if (take_id(ev->mapper_response_id, response, sizeof(response))) {
+            if (!strcmp(response, c->open_response)) {
+                c->open_response[0] = '\0';
+            }
+            if (c->awaiting_reply && c->reply_response[0] && !strcmp(response, c->reply_response)) {
+                c->awaiting_reply = false;
+            }
+        }
+        muse_vc_call_activity(c, now_us);
+        return 0;
+    }
     case MUSE_VC_EV_REPLY_TEXT:
     case MUSE_VC_EV_REPLY_DONE:
     case MUSE_VC_EV_USER_TEXT:
@@ -1460,6 +1570,10 @@ uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_
             return 0;
         }
         c->held = ev->held;
+        if (c->held) {
+            c->speaking = false;   /* its stop may never come */
+            c->speaking_item[0] = '\0';
+        }
         muse_vc_call_activity(c, now_us);
         return MUSE_VC_ACT_HOLD;
     case MUSE_VC_EV_STOP:
@@ -1531,6 +1645,11 @@ uint32_t muse_vc_call_lost(muse_vc_call_t *c, int64_t now_us)
     c->state = MUSE_VC_IDLE;
     c->media_open = c->end_call_pending = c->end_call_open = false;
     return MUSE_VC_ACT_ENDED;
+}
+
+bool muse_vc_call_working(const muse_vc_call_t *c)
+{
+    return c->state == MUSE_VC_LIVE && c->turns->n_active;
 }
 
 uint32_t muse_vc_call_poll(muse_vc_call_t *c, int64_t now_us)

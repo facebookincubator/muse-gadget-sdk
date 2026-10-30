@@ -39,6 +39,7 @@ typedef struct {
     float start_mode_t;     /* mode_t at the first recorded frame */
     bool talky;             /* drive `level` like live speech */
     bool pet;               /* play a happy reaction partway through */
+    bool working;           /* a call's Muse busy on work (pose.working) */
 } anim_t;
 
 static const anim_t ANIMS[] = {
@@ -46,6 +47,7 @@ static const anim_t ANIMS[] = {
     { "idle", MUSE_MODE_IDLE, 6.0f, 5 },
     { "listening", MUSE_MODE_LISTENING, 4.0f, 0, .talky = true },
     { "thinking", MUSE_MODE_THINKING, 4.0f, 0 },
+    { "working", MUSE_MODE_THINKING, 4.0f, 0, .working = true },
     { "speaking", MUSE_MODE_SPEAKING, 4.0f, 0, .talky = true },
     { "happy", MUSE_MODE_IDLE, 3.0f, 9, .pet = true },
     { "off", MUSE_MODE_OFF, 2.0f, 0 },
@@ -105,6 +107,7 @@ int main(int argc, char **argv)
                 .mode_t = an->start_mode_t + rt,
                 .level = an->talky ? speech_level(rt) : 0,
                 .happy = an->pet ? happiness(rt - 0.5f) : 0,
+                .working = an->working ? 1.0f : 0,
             };
             /* Modes that start at 0 hold their first frame during warm-up. */
             if (p.mode_t < 0) {

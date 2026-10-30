@@ -40,8 +40,10 @@ API (muse_pixel.h, unchanged; implement exactly these)
       float mode_t;   // seconds in the current mode
       float level;    // 0..1 live audio level (mic when listening, voice when speaking)
       float happy;    // 0..1 pet reaction; rises to 1, eases out over ~1.6 s
+      float working;  // 0 or 1, only in THINKING: Muse is busy on a call's work
   } muse_pose_t;
   uint32_t muse_pixel_accent(muse_mode_t mode);    // 0xRRGGBB accent for the UI around the avatar
+  uint32_t muse_pixel_working_accent(void);       // optional: accent while pose->working; 0 keeps THINKING's
   void muse_pixel_render(const muse_pose_t *pose); // draw one frame into the 64x64 grid
   void muse_pixel_set_size(int px);                // screen size the grid is scaled to, capped at 512
   void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int y1);
@@ -100,6 +102,11 @@ ANIMATION BEATS (every one of these, adapted to your body)
 - THINKING: eyes glance up and side to side, "hmm" mouth, one paw to the
   chin, gentle lean, three thought dots stepping up beside the head, faster
   sparkles.
+- THINKING with working = 1 (a live call where Muse is off doing what it was
+  asked, with nothing to say yet): busy rather than puzzled, e.g. both paws
+  in front tapping on a little keyboard, eyes down on the work, a small
+  spinner beside the head, a warmer scheme. With working = 0 it's plain
+  THINKING.
 - SPEAKING: mouth opens with `level` (plus a tiny flutter so it never
   freezes), body bobs with the voice, arms gesture, feet shuffle, rings and
   waves, extra blush.

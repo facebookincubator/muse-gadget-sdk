@@ -535,6 +535,46 @@ static void unit_lifecycle(void)
     t = now;
     assert(muse_vc_call_poll(&c, t + LIMITS.idle_us) == 0);
     assert(muse_vc_call_poll(&c, t + LIMITS.idle_us + 1) != 0 && c.reason == MUSE_VC_END_IDLE);
+
+    /* Working: a live call with a caller turn not yet settled. A settlement
+     * with handoffs pending (a spoken approval prompt) leaves Muse waiting on
+     * the caller, not working; one reporting nothing pending retires every
+     * turn, including one Jarvis never settled by name. Malformed or absent
+     * counts change nothing (older VMs: only named settlements retire). */
+#define SETTLED_PENDING(sub, n) feed(&c, "{\"type\":\"hatch.voice.turn_settled\",\"event_id\":\"e\",\"response_message_id\":\"" \
+                                     sub "\",\"async_handoffs_pending\":" n "}", now)
+    go_live(&c, &now);
+    assert(!muse_vc_call_working(&c));
+    STARTED("w1", "iw1");
+    assert(muse_vc_call_working(&c));
+    SETTLED_PENDING("w1", "1");          /* approval prompt: waiting on the caller */
+    assert(c.turns->n_active == 0 && !muse_vc_call_working(&c));
+    STARTED("w2", "iw2");                /* the caller's answer */
+    STARTED("w3", "iw3");                /* a question asked while the handoff runs */
+    assert(muse_vc_call_working(&c));
+    SETTLED_PENDING("w2", "\"0\"");    /* not a number: only the named turn settles */
+    assert(c.turns->n_active == 1 && muse_vc_call_working(&c));
+    SETTLED_PENDING("w2", "-1");
+    SETTLED_PENDING("w2", "0.5");
+    SETTLED("w2");                       /* no field: as before */
+    assert(c.turns->n_active == 1);
+    SETTLED_PENDING("w9", "0");          /* w3 has no reply yet: it stays */
+    assert(c.turns->n_active == 1);
+    feed(&c, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"rw3\"}}", now);
+    feed(&c, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"rw3\"}}", now);
+    SETTLED_PENDING("w9", "0");          /* nothing pending: w3 retires too */
+    assert(c.turns->n_active == 0 && !muse_vc_call_working(&c));
+    t = now;
+    assert(muse_vc_call_poll(&c, t + LIMITS.idle_us) == 0);   /* a fresh idle window */
+    STARTED("w3", "iw3");                /* settled before: not active again */
+    assert(!muse_vc_call_working(&c));
+    STARTED("w4", "iw4");
+    muse_vc_call_hang_up(&c, MUSE_VC_END_LOCAL, now);
+    assert(!muse_vc_call_working(&c));   /* only a live call works */
+    go_live(&c, &now);
+    assert(!muse_vc_call_working(&c));   /* a new call starts with nothing open */
+#undef SETTLED_PENDING
+
     go_live(&c, &now);
     STARTED("s1", "i1");
     for (t = now; t <= now + LIMITS.max_us; t += 10000000) {

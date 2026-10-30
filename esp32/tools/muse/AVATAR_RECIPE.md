@@ -134,7 +134,7 @@ says `Custom avatar: components/muse/avatar/muse_pixel.c` when it picks up your 
 - Preview without a board:
   `python3 tools/muse/make_gifs.py /tmp/avatar_gifs` draws your avatar (or
   the default avatar, with `--default`). There's one GIF for each of boot, idle,
-  listening, thinking, speaking, happy, off and error. Check each against the
+  listening, thinking, working, speaking, happy, off and error. Check each against the
   animation beats in `avatar_prompt.md`.
 - If a state looks wrong, run `avatar.py --edit` with the GIF's name and what
   to change. Muse then edits its file rather than starting over.

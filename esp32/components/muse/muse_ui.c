@@ -165,6 +165,7 @@ static const char *s_shown_name;
 static const char *s_idle_name = "READY";   /* idle's label: set by the Wi-Fi state */
 static int s_shown_lit = -1;
 static uint32_t s_shown_accent;
+static uint32_t s_shown_status_accent;   /* the label and ring: WORKING recolours within THINKING */
 static bool s_meter_visible = true;
 static int s_ring_value = -1;
 static uint32_t s_caption_version;
@@ -1506,10 +1507,21 @@ static void update_power(float now)
     }
 }
 
+/* An avatar without a working pose keeps THINKING's accent. */
+__attribute__((weak)) uint32_t muse_pixel_working_accent(void)
+{
+    return 0;
+}
+
 static void update_status(muse_mode_t mode, float now)
 {
     uint32_t accent = muse_pixel_accent(mode);
     const char *name = mode == MUSE_MODE_IDLE ? s_idle_name : MODE_NAMES[mode];
+    if (mode == MUSE_MODE_THINKING && muse_voice_call_view() == MUSE_VOICE_VIEW_WORKING) {
+        name = "WORKING";
+        uint32_t working = muse_pixel_working_accent();
+        if (working) accent = working;   /* the ring and label match the working avatar */
+    }
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     const char *call_name = muse_voice_call_label();
     const char *hint = muse_voice_call_hint();
@@ -1530,7 +1542,7 @@ static void update_status(muse_mode_t mode, float now)
         lv_label_set_text(s_state_lbl, name);
         s_shown_name = name;
     }
-    if ((int)mode != s_shown_state) {
+    if ((int)mode != s_shown_state || accent != s_shown_status_accent) {
         lv_obj_set_style_text_color(s_state_lbl, lv_color_hex(accent), 0);
         if (s_ring) {
             lv_obj_set_style_arc_color(s_ring, lv_color_hex(accent), LV_PART_INDICATOR);
@@ -1539,6 +1551,7 @@ static void update_status(muse_mode_t mode, float now)
         }
         set_mic_color(mode == MUSE_MODE_LISTENING ? accent : COLOR_DIM);   /* legacy face icon */
         s_shown_state = (int)mode;
+        s_shown_status_accent = accent;
         s_shown_lit = -1;
     }
 
@@ -1742,6 +1755,7 @@ static void frame_tick(lv_timer_t *timer)
         .mode_t = mode_t,
         .level = s_level,
         .happy = muse_state_happiness(),
+        .working = muse_voice_call_view() == MUSE_VOICE_VIEW_WORKING ? 1.0f : 0,
     };
     if (!muse_board->epaper || mode != s_last_epaper_pose) {
         muse_pixel_render(&pose);
