@@ -47,6 +47,10 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_WAVESHARE_S3_206
+            bool "Waveshare ESP32-S3-Touch-AMOLED-2.06"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_S3_185C
             bool "Waveshare ESP32-S3-Touch-LCD-1.85C"
             depends on IDF_TARGET_ESP32S3
@@ -128,6 +132,13 @@ menu "Muse"
         config MUSE_BOARD_AI_PASSPORT
             bool "FoloToy AI Passport (ESP32-C3, three buttons, no touch)"
             depends on IDF_TARGET_ESP32C3
+        config MUSE_BOARD_WAVESHARE_P4_LCD35
+            bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 (ESP32-P4 + C6)"
+            depends on IDF_TARGET_ESP32P4
+
+        config MUSE_BOARD_DEOTALAND_ROROLEE
+            bool "Deotaland RoRoLee (ESP32-S3, 240x120 AMOLED, three buttons, no touch)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -144,6 +155,7 @@ menu "Muse"
         default "ostb_echoear_2st" if MUSE_BOARD_OSTB_ECHOEAR_2ST
         default "reterminal_sticky" if MUSE_BOARD_RETERMINAL_STICKY
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
+        default "waveshare_s3_206" if MUSE_BOARD_WAVESHARE_S3_206
         default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
         default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
         default "aipi" if MUSE_BOARD_AIPI
@@ -166,6 +178,8 @@ menu "Muse"
         default "waveshare_s3_lcd349" if MUSE_BOARD_WAVESHARE_S3_LCD349
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
+        default "waveshare_p4_lcd35" if MUSE_BOARD_WAVESHARE_P4_LCD35
+        default "deotaland_rorolee" if MUSE_BOARD_DEOTALAND_ROROLEE
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -196,7 +210,7 @@ menu "Muse"
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_WAVESHARE_P4_LCD35 || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
     # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME

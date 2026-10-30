@@ -375,6 +375,7 @@ static const muse_board_t s_board = {
     .diagonal_in = 1.83f,
     .talk_button = "boot",
     .aux_button = "Vol+",
+    .wake_button = "boot",      /* power_off wakes on BOOT (GPIO0), not Vol+ */
     /* The menu puts each button's hint on the bottom bar by these: Select on
      * the left, Down on the right. */
     .talk_hint = { LV_ALIGN_BOTTOM_LEFT, 8, -8 },
