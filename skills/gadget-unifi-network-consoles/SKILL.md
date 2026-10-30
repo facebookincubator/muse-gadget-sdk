@@ -17,7 +17,7 @@ Use this skill when the home has an existing local UniFi Network controller/cons
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An existing authorized local controller account/session with read-only access where available.
 - The correct controller API family and trusted TLS identity. Cloud SSO/account access is not assumed.

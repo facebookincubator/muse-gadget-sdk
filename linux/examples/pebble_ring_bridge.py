@@ -105,14 +105,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.split("?", 1)[0] != "/ingest":
             return self._reply(404, {"ok": False, "error": "not found"})
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._reply(400, {"ok": False, "error": "bad content length"})
         if length > MAX_BODY_BYTES:
             return self._reply(413, {"ok": False, "error": "body too large"})
         try:
             fields = parse_body(self.headers.get("Content-Type", ""), self.rfile.read(length))
         except (ValueError, UnicodeDecodeError):
             return self._reply(400, {"ok": False, "error": "unreadable body"})
-        if not hmac.compare_digest(presented_token(self.headers, fields), self.secret):
+        # Compared as bytes: compare_digest() raises on non-ASCII str input.
+        presented = presented_token(self.headers, fields).encode()
+        if not hmac.compare_digest(presented, self.secret.encode()):
             return self._reply(401, {"ok": False, "error": "invalid token"})
         text = transcription(fields)
         if not text:

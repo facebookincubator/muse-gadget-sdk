@@ -17,7 +17,7 @@ Use this skill when fresh discovery and a scoped device read confirm a compatibl
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Know the connected load and confirm that switching it is intended.
 - The legacy interface needs no account credentials. If current firmware identifies a different protocol, do not force legacy XOR or silently switch to another family's skill.

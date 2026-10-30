@@ -58,6 +58,7 @@ typedef enum {
 typedef struct {
     muse_hatch_state_t state;
     char detail[48];
+    char vm_id[64];     /* the VM it last connected to; empty before that */
 } muse_hatch_status_t;
 
 /* Starts the connection task; it connects once Wi-Fi is up. */
@@ -91,7 +92,8 @@ typedef enum {
     MUSE_HATCH_EV_NONE,
     MUSE_HATCH_EV_HEARD,    /* transcript so far (partial while talking, then final) */
     MUSE_HATCH_EV_REPLY,    /* reply text so far */
-    MUSE_HATCH_EV_DONE,     /* reply complete; the audio stream is drained after this */
+    MUSE_HATCH_EV_DONE,     /* turn ended; empty text = complete, nonempty text = incomplete reason;
+                            * drain remaining audio after either outcome */
     MUSE_HATCH_EV_ERROR,    /* turn failed; text says why */
     MUSE_HATCH_EV_SENT,     /* the VM has acknowledged the note */
 } muse_hatch_ev_t;

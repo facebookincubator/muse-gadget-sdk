@@ -17,7 +17,7 @@ Use this skill when a Miele G 7566 has a compatible local communications module 
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing GroupID/GroupKey and a client implementing the documented MieleH256 signing, encrypted bodies and authenticated response handling.
 - The exact device route returned by the local appliance API, not a guessed serial number.

@@ -57,6 +57,8 @@ int cJSON_PrintPreallocated(cJSON *item, char *buffer, const int length, const i
 void cJSON_free(void *object);
 
 int cJSON_IsArray(const cJSON *item);
+int cJSON_IsFalse(const cJSON *item);
+int cJSON_IsNull(const cJSON *item);
 int cJSON_IsObject(const cJSON *item);
 int cJSON_IsString(const cJSON *item);
 int cJSON_IsTrue(const cJSON *item);

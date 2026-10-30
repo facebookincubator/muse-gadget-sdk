@@ -17,7 +17,7 @@ Use this skill when fresh discovery identifies a Sonos speaker with a compatible
 
 ## Prerequisites
 
-Follow the shared HomeLink networking and safety rules in `home_link.md`.
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - A compatible SoCo client or SOAP implementation using the actual device service URLs through HomeLink.
 - Permission for the requested room/group and operation; grouping can interrupt or redirect audio in other rooms.

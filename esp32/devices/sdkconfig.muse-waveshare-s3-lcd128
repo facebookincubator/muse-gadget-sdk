@@ -1,0 +1,50 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-S3-Touch-LCD-1.28: ESP32-S3R2 (2 MB embedded quad PSRAM),
+# 16 MB quad flash, round 240x240 GC9A01A LCD, CST816S touch, no audio,
+# console on a CH343P USB-UART bridge (1a86:55d3) on UART0.
+# Sources: https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.28 and the
+# attached board's esptool chip and flash ID.
+# Load last, after sdkconfig.defaults and sdkconfig.muse.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD128=y
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+# The chip's own USB isn't wired to the connector; the CH343P is on UART0.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
+
+# 2 MB quad PSRAM, the mode sdkconfig.defaults assumes. Unlike the 8 MB
+# boards, code and read-only data stay in flash: copying a Muse app (several
+# MB) into PSRAM wouldn't fit.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# Static buffers in PSRAM: Wi-Fi's, lwIP's and BT's, and those marked
+# EXT_RAM_BSS_ATTR. The chip always has PSRAM, so booting without it needn't
+# be allowed.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
+# That forces Wi-Fi's TX buffers static, in internal RAM: 8, not 16.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+# The voice session's full buffers would leave 2 MB of PSRAM nearly empty once
+# connected, and chat turns run out of memory.
+CONFIG_MUSE_HATCH_COMPACT_BUFFERS=y
+
+# Set your SDK token in build-muse-waveshare-s3-lcd128/sdkconfig (ignored by
+# Git), not here.
