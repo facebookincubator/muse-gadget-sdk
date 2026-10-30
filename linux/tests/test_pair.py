@@ -117,3 +117,16 @@ def test_pair_prints_nothing_and_hands_the_setup_window_to_the_caller(state, mon
         sdk_token_problem="the SDK token is not valid; copy it again from gadgets.muse.ai")
     assert len(windows) == 1
     assert capsys.readouterr() == ("", "")
+
+
+def test_the_pairing_remembers_the_sdk_token_it_presented(state, monkeypatch):
+    monkeypatch.setattr(pair_module.muse_api, "fetch_vms_with_status",
+                        lambda *args: ([{"vm_id": "vm"}], 200))
+    credentials = types.SimpleNamespace(
+        access_token="a", refresh_token="r", username="u", noise_host="",
+        api_url="https://api.example", api_url_v2="https://api.example")
+
+    pair_module._verify_and_save(credentials, lambda save: save(), "mgst_AbC1234token")
+    assert config.load_json(config.PAIRING_FILE)["sdk_token_hint"] == "mgst_AbC1234"
+    pair_module._verify_and_save(credentials, lambda save: save())
+    assert config.load_json(config.PAIRING_FILE)["sdk_token_hint"] == "none"

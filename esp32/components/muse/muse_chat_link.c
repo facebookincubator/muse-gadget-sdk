@@ -774,6 +774,7 @@ void muse_hatch_start(void)
 
 void muse_hatch_status(muse_hatch_status_t *out)
 {
+    out->vm_id[0] = '\0';   /* Home Link picks the VM */
     if (!muse_link_hatch_linked()) {
         out->state = MUSE_HATCH_NOT_SET;
         strlcpy(out->detail, "Pair in the Muse app", sizeof(out->detail));
