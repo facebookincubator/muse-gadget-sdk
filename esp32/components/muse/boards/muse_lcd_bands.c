@@ -165,6 +165,20 @@ static void wait_band(lv_display_t *disp)
 }
 
 /*
+ * On the send task, a band's last piece failed to go out. Finish LVGL's flush
+ * before letting wait_band return: the give can switch straight to LVGL's task
+ * (when it is running above this one, as above), which may then queue its next
+ * band, and a flush_ready after that would mark the new band as gone while it
+ * is still queued, so LVGL wouldn't wait for it.
+ */
+static void band_failed(void)
+{
+    lv_display_flush_ready(s_disp);
+    s_band_busy = false;
+    xSemaphoreGive(s_band_done);
+}
+
+/*
  * The panel reads its memory top to bottom once a refresh, starting as TE
  * falls and taking the period less the blanking (16.2 of 16.8 ms on the
  * CO5300), while QSPI writes it at its own pace (26 ms for a whole 466 px
@@ -317,9 +331,7 @@ static void send_bands(void *arg)
             if (err != ESP_OK) {
                 xSemaphoreGive(s_chunk_free);
                 if (chunk_done()) {
-                    s_band_busy = false;
-                    xSemaphoreGive(s_band_done);
-                    lv_display_flush_ready(s_disp);
+                    band_failed();
                 }
             }
             k ^= 1;
