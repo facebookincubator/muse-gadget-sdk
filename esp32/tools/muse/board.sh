@@ -60,7 +60,7 @@ case $board in
     vn183)   profile=vn-s3-183;            target=esp32s3 ;;
     p4lcd35) profile=waveshare-p4-lcd35;   target=esp32p4 ;;
     rorolee) profile=deotaland-rorolee;    target=esp32s3 ;;
-    lcd19)   profile=waveshare-s3-lcd19;  target=esp32s3 ;;
+    lcd19)   profile=waveshare-s3-lcd19;   target=esp32s3 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.

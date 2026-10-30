@@ -113,6 +113,13 @@ class WaveshareS3Lcd19(unittest.TestCase):
         self.assertRegex(source, r'mic_data = \{ \.enable = mic_enable, \.read = mic_read \}')
         self.assertRegex(BOARD.read_text(), r'\.set_mic_gain = set_mic_gain')
 
+    def test_backlight_turns_fully_off(self):
+        # Active low: an inverted channel at duty 0 holds the pin high. A
+        # hand-inverted duty of 1023/1024 would leave it faintly lit.
+        source = BOARD.read_text()
+        self.assertIn('.flags.output_invert = 1,', function(source, 'init'))
+        self.assertIn('(uint32_t)pct * BL_DUTY_MAX / 100', function(source, 'set_brightness'))
+
     def test_mic_read_removes_dc_and_applies_gain(self):
         board = BOARD.read_text()
         code = r'''
@@ -136,12 +143,13 @@ static i2s_chan_handle_t s_mic_rx;
 static int s_mic_gain_q8 = 256;
 static int32_t s_mic_dc[2];
 static int16_t feed[2];
+static size_t short_by;
 static esp_err_t i2s_channel_read(i2s_chan_handle_t h, void *dst, size_t size, size_t *got, int ticks)
 {
     (void)h; (void)ticks;
     int16_t *s = dst;
     for (size_t i = 0; i < size / 2; i++) s[i] = feed[i & 1];
-    *got = size;
+    *got = size - short_by;
     return ESP_OK;
 }
 ''' + function(board, 'mic_read') + function(board, 'set_mic_gain') + r'''
@@ -159,6 +167,14 @@ int main(void)
     assert(mic_read(NULL, (uint8_t *)buf, 4) == 0);
     assert(buf[0] > 3000 && buf[0] < 3300);
     assert(buf[1] == INT16_MAX);
+    /* Negative steps clip at the bottom too, at the most gain Muse allows. */
+    set_mic_gain(NULL, 36);
+    feed[0] = 1000 - 2000; feed[1] = -800 - 2000;
+    assert(mic_read(NULL, (uint8_t *)buf, 4) == 0);
+    assert(buf[0] == INT16_MIN && buf[1] == INT16_MIN);
+    /* A short read is a failure, not a buffer of stale samples. */
+    short_by = 2;
+    assert(mic_read(NULL, (uint8_t *)buf, sizeof buf) == ESP_CODEC_DEV_READ_FAIL);
     return 0;
 }
 '''

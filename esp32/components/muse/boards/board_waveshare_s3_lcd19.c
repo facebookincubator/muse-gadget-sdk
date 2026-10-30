@@ -179,8 +179,8 @@ static esp_err_t touch_start(lv_display_t *disp, lv_indev_t **out)
 static esp_err_t init(void)
 {
     /* The backlight is active low on this board: the vendor firmware drives
-     * GPIO 14 to 0 to light the panel and leaves it there. So the duty cycle
-     * below is inverted, and "off until the panel is up" means a full high. */
+     * GPIO 14 to 0 to light the panel and leaves it there. So LEDC inverts the
+     * pin, and a duty of 0 holds it high: fully off until the panel is up. */
     const ledc_timer_config_t timer = {
         .speed_mode = BL_LEDC_MODE,
         .duty_resolution = BL_LEDC_RES,
@@ -194,8 +194,9 @@ static esp_err_t init(void)
         .speed_mode = BL_LEDC_MODE,
         .channel = BL_LEDC_CHANNEL,
         .timer_sel = BL_LEDC_TIMER,
-        .duty = BL_DUTY_MAX,        /* high = backlight off */
+        .duty = 0,
         .hpoint = 0,
+        .flags.output_invert = 1,
     };
     ESP_RETURN_ON_ERROR(ledc_channel_config(&channel), TAG, "backlight channel");
 
@@ -299,9 +300,8 @@ static void set_brightness(int pct)
 {
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
-    /* Inverted: the backlight is on while the pin is low, so 100 % brightness
-     * is a zero duty and 0 % is a full one. */
-    ledc_set_duty(BL_LEDC_MODE, BL_LEDC_CHANNEL, (uint32_t)(100 - pct) * BL_DUTY_MAX / 100);
+    /* The pin is inverted in init(), so 0 % holds it high: fully off. */
+    ledc_set_duty(BL_LEDC_MODE, BL_LEDC_CHANNEL, (uint32_t)pct * BL_DUTY_MAX / 100);
     ledc_update_duty(BL_LEDC_MODE, BL_LEDC_CHANNEL);
 }
 
