@@ -37,6 +37,25 @@ static const char *TAG = "muse_apps_demo";
 static lv_obj_t *s_canvas;
 static lv_indev_t *s_indev;
 
+/*
+ * Pet World (room swipe) and the hardware demo (particle fling) use their own
+ * drags. Stop those drags at the canvas so they never chain to the tileview and
+ * slide to settings mid-gesture. The launcher and the debugger are tap-only, so
+ * they let drags through and swipe-left to settings keeps working there. This
+ * is the canvas's own flag, so muse_ui's chrome and show-face code, which turn
+ * the tileview's swipe back on, can't undo it.
+ */
+static void sync_scroll_chain(void)
+{
+    app_id_t app = app_manager_get_app();
+    bool chain = app == APP_LAUNCHER || app == APP_DEBUGGER;
+    if (lv_obj_has_flag(s_canvas, LV_OBJ_FLAG_SCROLL_CHAIN) != chain) {
+        lv_obj_set_flag(s_canvas, LV_OBJ_FLAG_SCROLL_CHAIN, chain);
+    }
+}
+
+/* Registered for the four press events only: LVGL also sends draw events to
+ * the canvas every frame, which must not count as activity. */
 static void on_touch(lv_event_t *e)
 {
     lv_indev_t *indev = lv_indev_active();
@@ -48,7 +67,6 @@ static void on_touch(lv_event_t *e)
     }
     lv_point_t p;
     lv_indev_get_point(indev, &p);
-    muse_state_poke();   /* a touch counts as activity: keep the screen awake */
     switch (lv_event_get_code(e)) {
     case LV_EVENT_PRESSED:
         app_manager_touch_down(p.x, p.y);
@@ -65,8 +83,10 @@ static void on_touch(lv_event_t *e)
         app_manager_touch_cancel();
         break;
     default:
-        break;
+        return;   /* not a touch */
     }
+    muse_state_poke();     /* a touch counts as activity: keep the screen awake */
+    sync_scroll_chain();   /* a tap may have switched apps */
 }
 
 lv_obj_t *muse_apps_demo_build(lv_obj_t *parent, lv_indev_t *indev)
@@ -83,11 +103,14 @@ lv_obj_t *muse_apps_demo_build(lv_obj_t *parent, lv_indev_t *indev)
     lv_obj_set_pos(s_canvas, 0, 0);
     lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(s_canvas, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(s_canvas, on_touch, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(s_canvas, on_touch, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(s_canvas, on_touch, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(s_canvas, on_touch, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(s_canvas, on_touch, LV_EVENT_PRESS_LOST, NULL);
+    sync_scroll_chain();
     ESP_LOGI(TAG, "multi-app demo UI up (%dx%d)", WORLD_SCREEN_W, WORLD_SCREEN_H);
     return s_canvas;
 }
-
 
 void muse_apps_demo_tick(void)
 {

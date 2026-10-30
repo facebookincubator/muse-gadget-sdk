@@ -47,9 +47,9 @@ cloud connection are untouched. If the framebuffer can't be allocated the demo
 is skipped and the avatar is shown instead.
 
 Swipe-left to the settings page stays available on the launcher and the
-diagnostics app (both tap-only). It is disabled on Pet World and the hardware
-demo, whose own horizontal drags (room switching, particle flinging) would
-otherwise fight the tileview and slide to settings mid-gesture.
+diagnostics app (both tap-only). On Pet World and the hardware demo the canvas
+keeps its drags to itself (room switching, particle flinging), so they don't
+slide to settings mid-gesture; open the launcher to reach settings.
 
 ## The apps
 

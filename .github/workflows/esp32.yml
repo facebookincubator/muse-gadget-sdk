@@ -241,6 +241,10 @@ jobs:
           - board: muse-m5stack-core2
             target: esp32
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2"
+          # The optional multi-app demo UI (CONFIG_MUSE_APPS_DEMO), off in the stock build.
+          - board: muse-m5stack-core2-demo
+            target: esp32
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2;devices/sdkconfig.muse-m5stack-core2-demo"
           - board: muse-fnk0104b
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b"
