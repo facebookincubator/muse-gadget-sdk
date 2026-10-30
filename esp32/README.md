@@ -187,6 +187,7 @@ status screen.
 | Waveshare ESP32-C6-LCD-1.47 | Status on screen, images | `tools/board.sh waveshare-c6-lcd-147 build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
+| Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours | `tools/board.sh waveshare-s3-epaper-154g build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
 | Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI on FreeInk, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
@@ -196,8 +197,10 @@ status screen.
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Waveshare ESP32-S3-Touch-AMOLED-2.06 | UI, touch, push-to-talk, settings, images (unverified) | [S3 2.06 setup](devices/waveshare-s3-206.md) |
 | OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
+| ALIENTEK ATK-DNESP32S3-BOX V1.1 | UI, push-to-talk, two-key menu, images | `tools/muse/board.sh build atk-box`, see [setup](devices/atk-dnesp32s3-box.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | UI, touch, push-to-talk with text replies | `tools/muse/board.sh build c6-206` |
@@ -210,11 +213,13 @@ status screen.
 | Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
+| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
 | VN ESP32-S3 1.83-inch NV3023 | UI, BOOT push-to-talk, Vol+/Vol- menu, images | `tools/muse/board.sh build vn183` |
 | FoloToy AI Passport (experimental) | UI, push-to-talk with text replies, three-button menu | `tools/muse/board.sh build ai-passport` |
+| Deotaland RoRoLee | UI, BOOT push-to-talk, VOL-/VOL+ menu, images | `tools/muse/board.sh build rorolee` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.

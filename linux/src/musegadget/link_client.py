@@ -60,11 +60,17 @@ HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
 MAX_INBOUND_MESSAGE = 4 * 1024 * 1024
+# Documented VM limit: 256 KiB per device control message. Include the u32
+# length prefix in our budget, conservatively, not just the JSON payload.
+MAX_CONTROL_MESSAGE_BYTES = 256 * 1024
+REGISTER_ID_BYTES = 36  # str(uuid.uuid4())
 MAX_CHAT_EVENT_BYTES = 256 * 1024
 MAX_STREAM_BUFFER_BYTES = 1024 * 1024
 MAX_TTS_BUFFER_BYTES = 8 * 1024 * 1024
 STREAM_CHUNK_BYTES = 16 * 1024
 MAX_VOICE_BYTES = 2 * 1024 * 1024
+MAX_IMAGE_BYTES = 2 * 1024 * 1024
+IMAGE_MIME_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
 REQUEST_CHUNK_BYTES = 16 * 1024
 MAX_INLINE_REQUEST_BYTES = 64 * 1024
 # Matches JavaScript's encodeURIComponent, as the firmware does.
@@ -97,6 +103,10 @@ class DeviceDescription:
             "is_wakeup_supported": False,
             "commands_v2": self.commands,
         }
+
+    def register_message(self, request_id: str) -> dict:
+        return {"type": "req", "id": request_id, "method": "link.register",
+                "params": self.register_params()}
 
 
 def encode_message(obj: dict) -> bytes:
@@ -157,6 +167,16 @@ def noise_url(noise_host: str, vm_id: str, app_id: str | None = None) -> str:
 class SideChat:
     session_id: str
     exists: bool    # False: Muse has no chat with this ID yet; the first send_chat to it creates it
+
+
+def check_image(image_bytes: bytes, mime_type: str) -> None:
+    """Raise ``ValueError`` unless ``LinkSession.send_image`` takes this picture."""
+    if mime_type not in IMAGE_MIME_TYPES:
+        raise ValueError("images must be JPEG, PNG, GIF or WebP")
+    if not image_bytes:
+        raise ValueError("the image is empty")
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise ValueError(f"the image is {len(image_bytes):,} bytes; images must be 2 MiB or less")
 
 
 class LinkSession:
@@ -314,12 +334,10 @@ class LinkSession:
         )
         self._stream_id = encrypted.stream_id
         self._register_id = str(uuid.uuid4())
-        await self.send({
-            "type": "req",
-            "id": self._register_id,
-            "method": "link.register",
-            "params": self._device.register_params(),
-        })
+        message = self._device.register_message(self._register_id)
+        if len(encode_message(message)) > MAX_CONTROL_MESSAGE_BYTES:
+            raise ValueError("link.register exceeds the VM's control message budget")
+        await self.send(message)
         log.info("sent link.register as %s", self._device.node_id)
 
     # -- Device-originated requests -------------------------------------------
@@ -351,23 +369,55 @@ class LinkSession:
     ) -> dict:
         """Post a WAV voice note, optionally including instructions in ``message``.
 
-        Muse chooses its usual reply format unless ``output_modality`` is set.
-        Its TTS endpoint requires a voice-modality assistant reply.
+        Muse reads only the items of a request that has any, so the text goes
+        first as its own item. Muse chooses its usual reply format unless
+        ``output_modality`` is set. Its TTS endpoint requires a voice-modality
+        assistant reply.
         """
         if not wav_bytes or len(wav_bytes) > MAX_VOICE_BYTES:
             raise ValueError("voice note must contain at most 2 MiB of WAV audio")
+        voice = {
+            "type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+            "data_base64": base64.b64encode(wav_bytes).decode("ascii"),
+        }
+        text = [{"type": "text", "text": message}] if message.strip() else []
         request_body = {
             "message": message,
             "device_id": self._device.node_id,
-            "items": [{
-                "type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
-                "data_base64": base64.b64encode(wav_bytes).decode("ascii"),
-            }],
+            "items": text + [voice],
         }
         if session_id:
             request_body["session_id"] = session_id
         if output_modality is not None:
             request_body["output_modality"] = output_modality
+        return await self._post_chat(request_body)
+
+    async def send_image(
+        self, image_bytes: bytes, mime_type: str, session_id: str | None = None, *,
+        message: str = "", filename: str | None = None, output_modality: str = "text",
+    ) -> dict:
+        """Post a picture for Muse to look at, with ``message`` as its text.
+
+        ``mime_type`` must be one of ``IMAGE_MIME_TYPES`` and the picture at
+        most 2 MiB. Muse reads only the items of a request that has any, so
+        the text goes first as its own item.
+        """
+        check_image(image_bytes, mime_type)
+        image = {
+            "type": "image", "mime_type": mime_type,
+            "data_base64": base64.b64encode(image_bytes).decode("ascii"),
+        }
+        if filename:
+            image["filename"] = filename
+        text = [{"type": "text", "text": message}] if message.strip() else []
+        request_body = {
+            "message": message,
+            "output_modality": output_modality,
+            "device_id": self._device.node_id,
+            "items": text + [image],
+        }
+        if session_id:
+            request_body["session_id"] = session_id
         return await self._post_chat(request_body)
 
     @staticmethod
@@ -724,6 +774,10 @@ class LinkSession:
         timeout_ms = message.get("timeout_ms") or None
         if not invoke_id:
             return
+        if not isinstance(command, str):
+            await self.send({"method": "link.result", "id": invoke_id,
+                             "ok": False, "error": "command must be a string"})
+            return
         shown = printable(command)
         log.info("invoke %s", shown)
         await self._invokes.acquire()
@@ -743,10 +797,23 @@ class LinkSession:
                 future.exception()
 
         worker.add_done_callback(finished)
-        # Cancelling this session cannot stop a running command thread. Keep its
-        # slot until it really finishes, including across service reconnects.
-        result = await asyncio.shield(worker)
-        log.info("%s %s in %d ms", shown, describe_result(result),
+        try:
+            # Cancelling this session cannot stop a running command thread. Keep its
+            # slot until it really finishes, including across service reconnects.
+            result = await asyncio.shield(worker)
+            summary = describe_result(result)
+            # Validate JSON before leaving the callback boundary. Sending
+            # remains outside so a broken transport is never retried as a
+            # command error.
+            encode_message({"method": "link.result", "id": invoke_id, **result})
+        except Exception as exc:
+            # Callback failures belong to this invocation. Log only the
+            # exception type: its text can contain parameters or credentials.
+            # Cancellation and other BaseExceptions still propagate, and
+            # transport failures remain outside this boundary.
+            result = {"ok": False, "error": "command failed"}
+            summary = f"failed ({printable(type(exc).__name__)})"
+        log.info("%s %s in %d ms", shown, summary,
                  (time.monotonic() - started) * 1000)
         await self.send({"method": "link.result", "id": invoke_id, **result})
 
@@ -778,7 +845,7 @@ class HttpStreamError(ConnectionError):
 
 
 class RequestRejected(ConnectionError):
-    """Muse refused a ``send_chat`` or ``send_voice`` request."""
+    """Muse refused a ``send_chat``, ``send_voice`` or ``send_image`` request."""
 
     def __init__(self, status: int | None) -> None:
         super().__init__(f"Muse rejected conversation request: HTTP {status}")
@@ -786,7 +853,7 @@ class RequestRejected(ConnectionError):
 
 
 def acknowledgement(result: dict) -> dict:
-    """Muse's acknowledgement in a ``send_chat`` or ``send_voice`` result.
+    """Muse's acknowledgement in a ``send_chat``, ``send_voice`` or ``send_image`` result.
 
     Raises :class:`RequestRejected` when Muse refused the request, and
     ``ValueError`` when it accepted it without an acknowledgement.

@@ -83,6 +83,7 @@ typedef struct {
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */
     const char *aux_button;     /* "bottom" */
+    const char *wake_button;    /* wakes it from power off, if not aux_button: "K0" */
     muse_button_hint_t talk_hint;   /* mic icon; the menu's hints follow both */
     muse_button_hint_t aux_hint;    /* power or menu icon; left out, there's none */
     /* Optional dedicated POWER and speaker controls, independent of AUX. */

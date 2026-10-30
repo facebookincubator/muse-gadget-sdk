@@ -45,6 +45,7 @@ static void fw_enter_deep(void);
 static void fw_codec_regs(muse_ptest_codec_regs_t *out);
 static void fw_dryrun_mode(bool on);
 static esp_err_t fw_flush(void);
+static uint32_t s_charge_bound_ms;
 static bool s_dryrun;
 static char s_last_error_log[MUSE_PTEST_ERROR_LOG_MAX + 1];
 static char s_error_log_fragment[MUSE_PTEST_ERROR_LOG_MAX + 1];
@@ -126,6 +127,7 @@ typedef struct {
     int64_t checkpoint_virtual_us, checkpoint_rtc_us;
     uint32_t resume_count, deep_count;
     uint8_t codec_history;
+    uint8_t usb_powered, charging_off, power_keys; /* occupy existing journal padding */
     int error, restore_error;
     uint8_t codec_count;
     uint16_t error_record;
@@ -144,6 +146,7 @@ static RTC_NOINIT_ATTR struct {
 /* ESP32-S3 RTC slow memory is 8KiB; leave >=512B for SDK metadata. */
 _Static_assert(sizeof(s_saved) + MUSE_PTEST_RTC_RECOVERY_BYTES <= 7680, "diagnostic RTC results exceed budget");
 static run_t s_run;
+static bool usb_aborts(bool usb) { return usb && !s_run.usb_powered; }
 static uint32_t s_boot_id;
 static int s_reset_reason;
 static bool s_restored, s_resume_pending, s_release_deep_holds;
@@ -237,6 +240,7 @@ static void boot_results(uint32_t boot_id, int reset_reason)
         && (s_saved.run.matrix != MATRIX_SLEEP || s_saved.run.repeats == 1)
         && s_saved.run.count <= matrix_count(s_saved.run.matrix) * s_saved.run.repeats
         && memchr(s_saved.run.run_id, 0, sizeof(s_saved.run.run_id))
+        && s_saved.run.usb_powered <= 1 && s_saved.run.charging_off <= 1 && s_saved.run.power_keys <= 1
         && s_saved.run.codec_history <= MUSE_PTEST_CODEC_SUSPENDED
         && s_saved.run.codec_count <= MUSE_PTEST_CODEC_SLOTS
         && memchr(s_saved.run.last_error_log, 0, sizeof(s_saved.run.last_error_log))
@@ -250,8 +254,8 @@ static void boot_results(uint32_t boot_id, int reset_reason)
         }
         for (unsigned i = 0; i < s_run.codec_count; i++) {
             const muse_ptest_codec_regs_t *c = &s_run.codec_regs[i];
-            valid &= c->adc_variant <= 2 && c->dac_mask <= 0x7f
-                && c->adc_mask <= (c->adc_variant == 1 ? 7 : c->adc_variant == 2 ? 15 : 0)
+            valid &= c->adc_variant <= 3 && c->dac_mask <= 0x7f
+                && c->adc_mask <= (c->adc_variant == 1 ? 7 : c->adc_variant >= 2 ? 15 : 0)
                 && ((const uint8_t *)&c->expected)[0] <= 1;
         }
         for (unsigned i = 0; i < s_run.count; i++) {
@@ -428,12 +432,13 @@ static void emit_codec_regs(const muse_ptest_codec_regs_t *regs)
         if (regs->dac_mask & (1u << i)) { emit("%u", (unsigned)regs->dac[i]); } else { emit("null"); }
     }
     emit("},\"adc\":{");
-    unsigned n = regs->adc_variant == 1 ? 3 : regs->adc_variant == 2 ? 4 : 0;
+    static const uint8_t es7210_keys[] = {0x01, 0x06, 0x40, 0x47};
+    unsigned n = regs->adc_variant == 1 ? 3 : regs->adc_variant == 2 || regs->adc_variant == 3 ? 4 : 0;
     for (unsigned i = 0; i < n; i++) {
-        emit("%s\"%02x\":", i ? "," : "", (unsigned)(regs->adc_variant == 1 ? old_keys[i] : new_keys[i]));
+        emit("%s\"%02x\":", i ? "," : "", (unsigned)(regs->adc_variant == 1 ? old_keys[i] : regs->adc_variant == 3 ? es7210_keys[i] : new_keys[i]));
         if (regs->adc_mask & (1u << i)) { emit("%u", (unsigned)regs->adc[i]); } else { emit("null"); }
     }
-    emit("},\"adc_variant\":\"%s\"},\"codec_regs_expected\":%s", regs->adc_variant == 1 ? "es7243" : regs->adc_variant == 2 ? "es7243e" : "unknown", regs->expected ? "true" : "false");
+    emit("},\"adc_variant\":\"%s\"},\"codec_regs_expected\":%s", regs->adc_variant == 1 ? "es7243" : regs->adc_variant == 2 ? "es7243e" : regs->adc_variant == 3 ? "es7210" : "unknown", regs->expected ? "true" : "false");
 }
 
 static void emit_results(void)
@@ -448,6 +453,7 @@ static void emit_results(void)
     emit("\"reset_reason\":%d,\"retrieval_reset_reason\":%d,\"state\":\"%s\",\"status\":\"%s\",\"complete\":%s,\"usb\":%s,\"power_error\":%d,",
          s_run.reset_reason, s_reset_reason, s_run_names[s_run.status], s_run_names[s_run.status],
          s_run.status == RUN_COMPLETE ? "true" : "false", power.usb ? "true" : "false", power_error);
+    if (s_run.power_keys) { emit("\"usb_powered\":%s,\"charging_off\":%s,", s_run.usb_powered ? "true" : "false", s_run.charging_off ? "true" : "false"); }
     emit("\"scope\":\"isolated_BSP_loads_not_production\",\"timestamp_unit\":\"us_since_run_boot\",\"ack_us\":%" PRId64 ",\"last_usb_present_us\":%" PRId64 ",\"vbus_removed_us\":%" PRId64 ",\"sequence_start_us\":%" PRId64 ",\"finished_us\":%" PRId64 ",",
          s_run.ack_us, s_run.last_usb_present_us, s_run.vbus_removed_us, s_run.sequence_start_us, s_run.finished_us);
     emit("\"settle_ms\":%" PRIu32 ",\"capture_ms\":%" PRIu32 ",\"repeats\":%" PRIu32 ",\"usb_abort_poll_ms\":%u,\"error\":%d,\"restore_error\":%d,\"records\":[",
@@ -476,9 +482,9 @@ static void emit_results(void)
     emit("]}\n");
 }
 
-/* Strict flat JSON: four required keys and optional matrix, each once;
+/* Strict flat JSON: four required keys; optional matrix/usb_powered/charging_off, each once;
  * no trailing junk, escapes, floats, signs, unknown or duplicate keys. */
-typedef struct { char run_id[MUSE_PTEST_RUN_ID_MAX + 1]; uint32_t settle_ms, capture_ms, repeats; matrix_t matrix; } arm_t;
+typedef struct { char run_id[MUSE_PTEST_RUN_ID_MAX + 1]; uint32_t settle_ms, capture_ms, repeats; matrix_t matrix; uint32_t usb_powered, charging_off; bool power_keys; } arm_t;
 static void ws(const char **p) { while (isspace((unsigned char)**p)) { (*p)++; } }
 static bool quoted(const char **p, char *out, size_t capacity)
 {
@@ -536,6 +542,8 @@ static bool parse_arm(const char *p, arm_t *a)
             if (!strcmp(key, "settle_ms")) { bit = 2; dst = &a->settle_ms; }
             else if (!strcmp(key, "capture_ms")) { bit = 4; dst = &a->capture_ms; }
             else if (!strcmp(key, "repeats")) { bit = 8; dst = &a->repeats; }
+            else if (!strcmp(key, "usb_powered")) { bit = 32; dst = &a->usb_powered; a->power_keys = true; }
+            else if (!strcmp(key, "charging_off")) { bit = 64; dst = &a->charging_off; a->power_keys = true; }
             else { return false; }
             if (!number(&p, dst)) { return false; }
         }
@@ -546,7 +554,7 @@ static bool parse_arm(const char *p, arm_t *a)
         if (*p++ != ',') { return false; }
     }
     ws(&p);
-    return !*p && (seen == 15 || seen == 31) && a->settle_ms >= 1000 && a->settle_ms <= 60000
+    return !*p && (seen & 15) == 15 && a->usb_powered <= 1 && a->charging_off <= 1 && a->settle_ms >= 1000 && a->settle_ms <= 60000
         && a->capture_ms >= 1000 && a->capture_ms <= 120000
         && a->repeats >= 1 && a->repeats <= MUSE_PTEST_MAX_REPEATS;
 }
@@ -562,6 +570,10 @@ static void finish_run(run_status_t status, esp_err_t error)
     if (!s_run.restore_error) {
         muse_ptest_readback_t restored = {0};
         s_run.restore_error = fw_readback(&restored); /* USB allowed outside RUN_RUNNING */
+    }
+    if (s_run.charging_off) {
+        esp_err_t charge_error = muse_ptest_board_charging(false, 0);
+        if (!s_run.restore_error) { s_run.restore_error = charge_error; }
     }
     if (!s_run.restore_error) { log_reset(); } /* ignored component errors are not record failures */
     if (s_run.restore_error) { remember_error(); }
@@ -684,6 +696,7 @@ static void command(const char *line)
     if (!parse_arm(line + 11, &a)) { emit_error("invalid_arm_json_or_bounds", ESP_ERR_INVALID_ARG); return; }
     unsigned timed = 0, deep = 0;
     if (a.matrix == MATRIX_SLEEP && a.repeats != 1) { emit_error("sleep_requires_one_repeat_cold_not_reversible", ESP_ERR_INVALID_ARG); return; }
+    if (a.matrix == MATRIX_SLEEP && a.usb_powered) { emit_error("usb_powered_requires_peripheral_matrix", ESP_ERR_NOT_SUPPORTED); return; }
     if (!matrix_count(a.matrix) || matrix_count(a.matrix) > MUSE_PTEST_MAX_RECORDS / a.repeats) {
         emit_error("matrix_unavailable_or_exceeds_capacity", ESP_ERR_NOT_SUPPORTED); return;
     }
@@ -698,7 +711,14 @@ static void command(const char *line)
     muse_ptest_readback_t p = {0};
     esp_err_t e = fw_power(&p);
     if (e || !p.usb) { emit_error("arm_requires_verified_usb_vbus", e ? e : ESP_ERR_INVALID_STATE); return; }
+    if (a.charging_off && !muse_ptest_board_charging_supported()) {
+        emit_error("charging_off_not_supported", ESP_ERR_NOT_SUPPORTED); return;
+    }
     memset(&s_run, 0, sizeof(s_run));
+    s_run.usb_powered = a.usb_powered;
+    s_run.charging_off = a.charging_off;
+    s_run.power_keys = a.power_keys;
+    s_charge_bound_ms = bound + 60000u;
     s_run.error_record = UINT16_MAX;
     log_reset();
     strcpy(s_run.run_id, a.run_id);
@@ -718,6 +738,7 @@ static void command(const char *line)
     save_run();
     emit("PTEST {\"schema\":1,\"type\":\"arm_ack\",\"status\":\"armed\",\"run_id\":\"%s\",\"boot_id\":%" PRIu32 ",\"ack_us\":%" PRId64 ",\"now_us\":%" PRId64 ",\"usb\":true,\"charging\":%s,\"expander_input\":%u,",
          a.run_id, s_boot_id, s_run.ack_us, fw_now(), p.charging ? "true" : "false", p.input);
+    if (a.power_keys) { emit("\"usb_powered\":%s,\"charging_off\":%s,", a.usb_powered ? "true" : "false", a.charging_off ? "true" : "false"); }
     emit_timeline();
     emit("\"settle_ms\":%" PRIu32 ",\"capture_ms\":%" PRIu32 ",\"repeats\":%" PRIu32 ",\"gate_poll_ms\":100,\"usb_abort_poll_ms\":%u,\"max_duration_ms\":%" PRIu32 ",\"rtc_bytes\":%u,\"plan\":",
          a.settle_ms, a.capture_ms, a.repeats, a.matrix == MATRIX_SLEEP ? 5000 : 1000, bound, (unsigned)(sizeof(s_saved) + MUSE_PTEST_RTC_RECOVERY_BYTES));
@@ -731,7 +752,7 @@ static esp_err_t sample(record_t *r)
     esp_err_t e = fw_readback(&r->actual);
     if (!e) { log_reset(); }
     capture_codec_record(r);
-    return !e && r->actual.usb ? ESP_ERR_INVALID_STATE : e;
+    return !e && usb_aborts(r->actual.usb) ? ESP_ERR_INVALID_STATE : e;
 }
 
 static void start_next(void)
@@ -759,7 +780,7 @@ static void start_next(void)
         esp_err_t e = fw_apply(s);
         r->applied_us = fw_now();
         if (!e) { e = sample(r); }
-        if (e && r->actual.usb) { abort_run(e, false); return; }
+        if (e && usb_aborts(r->actual.usb)) { abort_run(e, false); return; }
         if (e) {
             r->status = e == ESP_ERR_NOT_SUPPORTED ? REC_SKIPPED : REC_ERROR;
             r->error = e;
@@ -853,15 +874,18 @@ static void tick(void)
         int64_t at = fw_now();
         s_next_power_us = at + (int64_t)(s_run.status == RUN_ARMED ? 100 : running_poll_ms()) * 1000;
         if (s_run.status == RUN_ARMED) {
-            if (p.usb) { s_run.last_usb_present_us = at; return; }
-            s_run.vbus_removed_us = at;
+            if (usb_aborts(p.usb)) { s_run.last_usb_present_us = at; return; }
+            s_run.vbus_removed_us = p.usb ? 0 : at;
             s_run.sequence_start_us = at;
             s_run.status = RUN_RUNNING;
             save_run();
+            if (s_run.charging_off && (e = muse_ptest_board_charging(true, s_charge_bound_ms))) {
+                finish_run(RUN_ERROR, e); return;
+            }
             start_next();
             return;
         }
-        if (p.usb) { abort_run(ESP_ERR_INVALID_STATE, false); return; }
+        if (usb_aborts(p.usb)) { abort_run(ESP_ERR_INVALID_STATE, false); return; }
     }
     if (s_run.status != RUN_RUNNING || !s_run.count) { return; }
     record_t *r = &s_run.records[s_run.count - 1];
@@ -877,7 +901,7 @@ static void tick(void)
     int64_t now = fw_now();
     if (r->status == REC_SETTLE && now - r->applied_us >= (int64_t)s_run.settle_ms * 1000) {
         e = sample(r);
-        if (e && r->actual.usb) { abort_run(e, false); return; }
+        if (e && usb_aborts(r->actual.usb)) { abort_run(e, false); return; }
         if (!e) {
             r->measure_start_us = fw_now();
             s_capture_slept_us = r->actual.slept_us;
@@ -890,7 +914,7 @@ static void tick(void)
         }
     } else if (r->status == REC_CAPTURE && now - r->measure_start_us >= (int64_t)s_run.capture_ms * 1000) {
         e = sample(r);
-        if (e && r->actual.usb) { abort_run(e, false); return; }
+        if (e && usb_aborts(r->actual.usb)) { abort_run(e, false); return; }
         r->end_us = fw_now();
         if (!e) {
             r->actual.slept_us -= s_capture_slept_us;
@@ -1058,7 +1082,7 @@ static esp_err_t fw_power(muse_ptest_readback_t *out)
     /* VBUS, not UART 'connection' (the CH342 has no connection API). Keep
      * console RX awake on USB, release before the first USB-free state.
      * On uncertain power keep awake so the error/results remain readable. */
-    bool awake = s_dryrun || e || out->usb;
+    bool awake = s_dryrun || e || (out->usb && (s_run.status != RUN_RUNNING || usb_aborts(true)));
     if (s_usb_lock && awake != s_usb_lock_held) {
         esp_err_t lock_error = awake ? esp_pm_lock_acquire(s_usb_lock) : esp_pm_lock_release(s_usb_lock);
         if (!lock_error) { s_usb_lock_held = awake; }
@@ -1099,13 +1123,13 @@ static esp_err_t fw_apply(const muse_ptest_state_t *state)
 }
 static esp_err_t fw_readback(muse_ptest_readback_t *out)
 {
-    if (s_run.status == RUN_RUNNING && s_usb_lock_held) { return ESP_ERR_INVALID_STATE; }
+    if (s_run.status == RUN_RUNNING && usb_aborts(s_usb_lock_held)) { return ESP_ERR_INVALID_STATE; }
     esp_err_t e = muse_ptest_board_readback(out);
     if (out->usb) {
         muse_ptest_readback_t p = {0};
         esp_err_t power_error = fw_power(&p); /* UART restore/USB lock immediately. */
         if (!e) { e = power_error; }
-        if (s_run.status == RUN_RUNNING) { return ESP_ERR_INVALID_STATE; }
+        if (s_run.status == RUN_RUNNING && usb_aborts(out->usb)) { return ESP_ERR_INVALID_STATE; }
     }
     if (e) { return e; }
     if (s_dryrun) { out->auto_light_sleep = false; return ESP_OK; }
@@ -1141,20 +1165,34 @@ static esp_err_t fw_service(muse_ptest_load_t load)
 }
 static void fw_codec_regs(muse_ptest_codec_regs_t *out) { muse_ptest_board_codec_regs(out); }
 static void fw_dryrun_mode(bool on) { muse_ptest_board_usb_dryrun(on); }
-static esp_err_t fw_flush(void)
+#endif
+
+__attribute__((weak)) bool muse_ptest_board_charging_supported(void) { return false; }
+__attribute__((weak)) esp_err_t muse_ptest_board_charging(bool off, uint32_t guard_ms)
+{
+    (void)off; (void)guard_ms;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+#ifndef MUSE_PTEST_HOST
+__attribute__((weak)) esp_err_t muse_ptest_board_console_flush(void)
 {
     esp_err_t e = uart_wait_tx_done(CONFIG_ESP_CONSOLE_UART_NUM, pdMS_TO_TICKS(1000));
     if (e) { ESP_LOGE("power_test", "UART TX drain failed: %d", e); }
     return e;
 }
-static void fw_write(const char *buf, size_t n) { uart_write_bytes(CONFIG_ESP_CONSOLE_UART_NUM, buf, n); }
+__attribute__((weak)) void muse_ptest_board_console_write(const char *buf, size_t n) { uart_write_bytes(CONFIG_ESP_CONSOLE_UART_NUM, buf, n); }
+__attribute__((weak)) esp_err_t muse_ptest_board_console_init(void) { return uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM, 1024, 0, 0, NULL, 0); }
+__attribute__((weak)) bool muse_ptest_board_console_getc(uint8_t *c) { return uart_read_bytes(CONFIG_ESP_CONSOLE_UART_NUM, c, 1, 0) == 1; }
+static esp_err_t fw_flush(void) { return muse_ptest_board_console_flush(); }
+static void fw_write(const char *buf, size_t n) { muse_ptest_board_console_write(buf, n); }
 
 void muse_power_test_run(void)
 {
     boot_results(esp_random(), esp_reset_reason());
     /* No muse_console RX wake lock/timer, no LVGL, voice, reconnect, BLE,
-     * credentials, NVS, or production app initialization. UART is the bridge
-     * console selected by the board overlay; no serial-JTAG assumption. */
+     * credentials, NVS, or production app initialization. The console is the
+     * board overlay's bridge UART unless the board overrides the console hooks. */
     esp_log_set_vprintf(capture_error_log);
     esp_log_level_set("*", ESP_LOG_NONE);
     esp_log_level_set("board", ESP_LOG_ERROR); /* BSP returns use capture-only hook */
@@ -1162,9 +1200,10 @@ void muse_power_test_run(void)
     bool held_recovery = s_release_deep_holds || muse_ptest_board_deep_holds_owned();
     s_init_error = held_recovery ? muse_ptest_board_release_deep_holds() : ESP_OK;
     /* Recover owned pads even if UART allocation subsequently fails. */
-    esp_err_t uart_error = uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM, 1024, 0, 0, NULL, 0);
+    esp_err_t uart_error = muse_ptest_board_console_init();
     if (!s_init_error) { s_init_error = uart_error; }
-    if (!s_init_error) { s_init_error = muse_ptest_board_init(); }
+    esp_err_t board_error = muse_ptest_board_init(); /* charging recovery even after console failure */
+    if (!s_init_error) { s_init_error = board_error; }
     muse_ptest_board_restore_codec_history((held_recovery || muse_ptest_board_warm_seen()) ? MUSE_PTEST_CODEC_SUSPENDED : s_run.codec_history);
     if (!s_init_error) { s_init_error = esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "ptest_fixed", &s_cpu_lock); }
     if (!s_init_error) { s_init_error = esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "ptest_usb", &s_usb_lock); }
@@ -1191,13 +1230,13 @@ void muse_power_test_run(void)
     size_t used = 0;
     bool overflow = false;
     for (;;) {
-        if (s_run.status != RUN_RUNNING) {
-            /* Idle/armed/complete: detect VBUS every 100ms before UART RX.
-             * Running: tick() alone checks VBUS once/second, no extra poll. */
+        if (s_run.status != RUN_RUNNING || !usb_aborts(true)) {
+            /* USB-powered runs accept commands too; tick() owns their VBUS poll.
+             * Idle/armed/complete poll VBUS every 100ms before console RX. */
             muse_ptest_readback_t p = {0};
-            fw_power(&p);
+            if (s_run.status != RUN_RUNNING) { fw_power(&p); }
             uint8_t c;
-            while (uart_read_bytes(CONFIG_ESP_CONSOLE_UART_NUM, &c, 1, 0) == 1) {
+            while (muse_ptest_board_console_getc(&c)) {
                 if (c == '\r') { continue; }
                 if (c == '\n') {
                     line[used] = 0;
