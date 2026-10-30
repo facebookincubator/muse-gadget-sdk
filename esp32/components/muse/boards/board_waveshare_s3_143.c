@@ -28,6 +28,7 @@
 #include "driver/spi_master.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_check.h"
 #include "esp_lcd_panel_io.h"
@@ -143,6 +144,11 @@ static void send_brightness(void *level)
 static void send_sleep(void *sleep)
 {
     lcd_cmd(*(bool *)sleep ? 0x10 : 0x11, NULL, 0);
+}
+
+static void send_off(void *arg)
+{
+    esp_lcd_panel_disp_on_off(s_panel, false);
 }
 
 /* muse_lcd_bands_register takes over the panel IO's color-done callback and,
@@ -324,7 +330,7 @@ static esp_err_t read_power(muse_power_t *out)
 static esp_err_t power_off(void)
 {
     set_brightness(0);
-    esp_lcd_panel_disp_on_off(s_panel, false);
+    muse_lcd_bands_run(send_off, NULL);
     panel_sleep(true);
     /* No PMU; deep sleep is the closest thing to off. BOOT wakes it. */
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
