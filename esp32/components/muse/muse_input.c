@@ -836,6 +836,7 @@ static bool console_command(char *line, bool whole)
             muse_ui_bench_page(true);
         } else {
             printf("@ui.error unknown settings page \"%s\": home wifi muse ble sound sleep battery power\n", line + 12);
+            fflush(stdout);
         }
         return true;
     }
