@@ -83,14 +83,14 @@ are documented separately; this is not a generic ESP-VoCat profile.
 | Shows status on | Light | Light | Screen | Screen | Screen | E-paper | E-paper | E-paper | E-paper | E-paper | Light ring | RGB LED | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
 | Images from Muse | — | — | ✅ | ✅ | ✅ | Black and white | Four colours | Black and white | Six colours | Four grays (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | — | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | — | Enabled | Unverified | — | ✅ |
 | UI and settings | — | — | — | — | — | — | — | — | — | Basic navigation checked | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | Experimental | Experimental | ✅ | ✅ | ✅ |
-| Push-to-talk | — | — | — | — | — | — | — | — | — | AI voice note checked; screen mic unverified | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Text replies | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | USR1 | ✅ | ✅ | ✅ | — | With an added I2S mic | ✅ | — | — | Text replies (experimental) | Screen mic | ✅ | ✅ | ✅ |
+| Push-to-talk | — | — | — | — | — | — | — | — | — | AI voice note checked; screen mic unverified | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Text replies | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | USR1 | ✅ | ✅ | ✅ | — | With an added PDM or I2S mic | ✅ | — | — | Text replies (experimental) | Screen mic | ✅ | ✅ | ✅ |
 | Speaker and mic | — | — | — | — | — | — | — | — | — | PDM voice note checked, no speaker | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | PDM mic, no speaker | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | ES8311, ES7210 | — | — | ES8311 (experimental) | ES8311 / ES7210 | ES8311, one mic | ES8311 | ES8311, ES7210 |
 | Air sensors | — | — | — | — | D1S, D1Pro | — | — | Temperature, humidity | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | Video from a phone (`MUSE_VIDEO=1`) | — | — | — | — | — | — | — | — | — | — | — | — | ✅ | Built, not run | — | — | — | — | — | — | — | — | — | — | — | Built, not run | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | Touch | — | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | — | ✅ | — | ✅ | — |
 | Battery status | — | — | — | — | — | — | — | — | — | BQ27220 %/mV and charging checked | — | — | ✅ | ✅ | ✅ | ✅ | Unverified | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | — | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | No charging state | Unverified | — | ✅ | ✅ |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | On | On | On | On | On | On | On | On | On | On | On | Off | On | On | Off | On | On | On | Off | On | On | On | On | Off | On | On | On | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) |
+| Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT or on-screen mic (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) |
 
 *Sticky entries describe an experimental Muse port, not Seeed's factory
 firmware. On one unit the display, touch, voice notes/CJK replies, SHT40,
@@ -412,13 +412,23 @@ PSRAM and sends every frame whole. The panel's init sequence is the one
 Arduino_GFX uses for this board.
 
 It has an NS4168 I2S amp with a JST 1.25 connector for a 4-8 Ω speaker, but no
-microphone. Push-to-talk records silence until you add an I2S MEMS mic such
-as an INMP441: SCK to GPIO42 and WS to GPIO2 (shared with the amp), L/R to
-GND, VDD to 3.3 V, and SD to a free GPIO, which you set as
-`CONFIG_MUSE_JC3248W535_MIC_GPIO` under **Muse** in `menuconfig`. BOOT is the
-only button: push-to-talk, pairing confirmation, and waking the screen. Power
-off puts the chip in deep sleep until BOOT is pressed; there's no battery
-gauge.
+microphone. Push-to-talk records silence until you add one and pick it as
+`CONFIG_MUSE_JC3248W535_MIC` under **Muse** in `menuconfig`:
+
+- **PDM**, such as an MP34DT01 or MP34DT05 module, on the 4-pin extension
+  connector: CLK to GPIO17, DATA to GPIO18, SEL to GND, and the connector's
+  3.3 V and GND. This needs no soldering on the board. The speaker moves to
+  I2S1, since only I2S0 converts PDM.
+- **I2S**, such as an INMP441, on the speaker's clocks: SCK to GPIO42 and WS
+  to GPIO2 (shared with the amp), L/R to GND, VDD to 3.3 V, and SD to a free
+  GPIO, set as `CONFIG_MUSE_JC3248W535_MIC_GPIO`. GPIO42 and GPIO2 aren't on
+  a connector.
+
+BOOT is the only button: push-to-talk, pairing confirmation, and waking the
+screen. It's on the back, so the on-screen mic in the lower right is a talk
+button too: hold it to talk and let go to send, and tap the screen to confirm
+pairing. Power off puts the chip in deep sleep until BOOT is pressed; there's
+no battery gauge.
 
 It enumerates as the chip's own USB serial port. Back up the stock firmware
 before flashing Muse for the first time, and restore it with

@@ -210,7 +210,7 @@ status screen.
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
-| Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
+| Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added PDM or I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |

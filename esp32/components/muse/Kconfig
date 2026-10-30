@@ -263,17 +263,43 @@ menu "Muse"
             rarer characters and Korean show as boxes. Takes about 910 KB of
             flash, against about 1.2 MB.
 
+    choice MUSE_JC3248W535_MIC
+        prompt "JC3248W535: added microphone"
+        depends on MUSE_BOARD_GUITION_JC3248W535
+        # A configuration from before this choice existed set only the GPIO.
+        default MUSE_JC3248W535_MIC_I2S if MUSE_JC3248W535_MIC_GPIO >= 0
+        default MUSE_JC3248W535_MIC_NONE
+        help
+            The board has a speaker amp but no microphone. Pick the one
+            you've added; with none, push-to-talk records silence.
+
+        config MUSE_JC3248W535_MIC_NONE
+            bool "None"
+
+        config MUSE_JC3248W535_MIC_PDM
+            bool "PDM MEMS mic on the 4-pin extension connector"
+            help
+                A PDM mic such as an MP34DT01 or MP34DT05 module on the 4-pin
+                extension connector: CLK to GPIO17, DATA to GPIO18, SEL to
+                GND, power to its 3.3 V and GND. The speaker moves to I2S1,
+                since only I2S0 converts PDM.
+
+        config MUSE_JC3248W535_MIC_I2S
+            bool "I2S MEMS mic on the speaker's clocks"
+            help
+                An I2S mic such as an INMP441 wired to the speaker's clocks
+                (SCK to GPIO42, WS to GPIO2), L/R to GND, power to 3.3 V, and
+                its SD line to a free GPIO, set in
+                MUSE_JC3248W535_MIC_GPIO.
+    endchoice
+
     config MUSE_JC3248W535_MIC_GPIO
-        int "JC3248W535: GPIO for an external I2S mic's data (SD) line"
+        int "JC3248W535: GPIO for the I2S mic's data (SD) line"
         depends on MUSE_BOARD_GUITION_JC3248W535
         range -1 48
         default -1
         help
-            The board has a speaker amp but no microphone. Wire an I2S MEMS
-            mic such as an INMP441 to the speaker's clocks (SCK to GPIO42, WS
-            to GPIO2), L/R to GND, power to 3.3 V, and its SD line to a free
-            GPIO, and set that GPIO here. -1 leaves push-to-talk recording
-            silence.
+            Used only with the I2S mic option; -1 leaves it unconnected.
 
     config MUSE_STATIC_BUFFERS_IN_PSRAM
         bool "Keep the avatar's and audio's static buffers in PSRAM"
