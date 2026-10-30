@@ -20,6 +20,7 @@
 #include "muse_chat_priv.h"
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -96,13 +97,59 @@ void muse_hatch_tail_words(const char *src, char *out, size_t cap)
     strlcpy(out, p, cap);
 }
 
+static int s_caption_px;
+static int (*s_glyph_px)(uint32_t letter, uint32_t next);
+
+void muse_hatch_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next))
+{
+    s_caption_px = glyph_px ? width_px : 0;
+    s_glyph_px = glyph_px;
+}
+
+/* The code point of the UTF-8 character s, len bytes long. */
+static uint32_t code_point(const char *s, size_t len)
+{
+    const unsigned char *u = (const unsigned char *)s;
+    if (len < 2) {
+        return u[0];
+    }
+    uint32_t c = u[0] & (0x7F >> len);
+    for (size_t i = 1; i < len; i++) {
+        c = c << 6 | (u[i] & 0x3F);
+    }
+    return c;
+}
+
+/* What a line is in pixels so far: every glyph but the last with the kerning
+ * to the one after it, and the last. */
+typedef struct {
+    int px;          /* the glyphs before `last` */
+    uint32_t last;   /* 0 before the first glyph */
+} line_px_t;
+
+/* Adds the glyphs the character at s shows as (`shown`, w of them, or the
+ * character itself when w < 0) and returns the line's width with them. */
+static int add_glyphs(line_px_t *l, const char *s, size_t bytes, const char *shown, int w)
+{
+    int n = w < 0 ? 1 : w;
+    for (int i = 0; i < n; i++) {
+        uint32_t g = w < 0 ? code_point(s, bytes) : (unsigned char)shown[i];
+        if (l->last) {
+            l->px += s_glyph_px(l->last, g);
+        }
+        l->last = g;
+    }
+    return l->px + (l->last ? s_glyph_px(l->last, 0) : 0);
+}
+
 /*
  * The next line of `text` wrapped to `cols` characters as the caption shows
  * them (an ellipsis as three dots, muse_text.h), splitting only words longer
  * than a line. CJK has no spaces: it breaks between characters, but never
- * before closing punctuation.
+ * before closing punctuation. With `px`, a line also stays within px pixels
+ * of the caption's font (muse_hatch_set_caption_px).
  */
-static bool next_line(const char **text, int cols, const char **start, size_t *len)
+static bool next_line(const char **text, int cols, int px, const char **start, size_t *len)
 {
     const char *p = *text;
     while (*p == ' ' || *p == '\n') {
@@ -110,15 +157,18 @@ static bool next_line(const char **text, int cols, const char **start, size_t *l
     }
     const char *end = p, *brk = NULL, *movable = NULL;
     int n = 0;
+    line_px_t width = {0, 0};
     muse_text_cjk_t prev = MUSE_TEXT_NOT_CJK;
     while (*end && *end != '\n') {
         size_t bytes;
         char shown[4];
-        int w = muse_text_ascii(end, &bytes, shown);
-        w = w < 0 ? 1 : w;
+        int shows = muse_text_ascii(end, &bytes, shown);
+        int w = shows < 0 ? 1 : shows;
         muse_text_cjk_t cjk = muse_text_cjk(end);
         bool cjk_break = n && cjk != MUSE_TEXT_CJK_CLOSE && (cjk || prev);
-        if (n + w > cols && n) {
+        line_px_t wider = width;
+        bool too_wide = px && add_glyphs(&wider, end, bytes, shown, shows) > px;
+        if ((n + w > cols || too_wide) && n) {
             if (cjk_break) {
                 brk = end;
             } else if (cjk == MUSE_TEXT_CJK_CLOSE && !brk) {
@@ -135,6 +185,7 @@ static bool next_line(const char **text, int cols, const char **start, size_t *l
         n += w;
         end += bytes;
         prev = cjk;
+        width = wider;
     }
     if (*end && *end != ' ' && *end != '\n' && brk) {
         end = brk;   /* don't split a word */
@@ -153,11 +204,13 @@ static bool next_line(const char **text, int cols, const char **start, size_t *l
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
 {
     int cols, lines;
-    muse_state_page(muse_text_has_cjk(text), &cols, &lines);
+    bool cjk = muse_text_has_cjk(text);
+    muse_state_page(cjk, &cols, &lines);
+    int px = cjk ? 0 : s_caption_px;   /* CJK captions are in a fixed-width font */
     const char *p = text, *start;
     size_t len;
     int line = -1, n = 0;
-    while (next_line(&p, cols, &start, &len)) {
+    while (next_line(&p, cols, px, &start, &len)) {
         line = n++;
         if ((size_t)(start + len - text) > at) {
             break;
@@ -171,7 +224,7 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
     size_t o = 0;
     out[0] = '\0';
     p = text;
-    for (n = 0; n < first + lines && next_line(&p, cols, &start, &len); n++) {
+    for (n = 0; n < first + lines && next_line(&p, cols, px, &start, &len); n++) {
         if (n < first) {
             continue;
         }

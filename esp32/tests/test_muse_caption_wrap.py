@@ -14,7 +14,8 @@
 
 """How reply captions wrap to the screen's page (muse_chat_text.c): words stay
 whole, and CJK, which has no spaces, breaks between characters but never puts
-closing punctuation at the start of a line. Letters the ASCII fonts lack show
+closing punctuation at the start of a line. With a proportional caption font,
+lines also wrap to its width in pixels, so every page fits and none is skipped. Letters the ASCII fonts lack show
 as their plain ones (muse_text.c)."""
 
 from __future__ import annotations
@@ -141,6 +142,71 @@ class CaptionWrapTest(unittest.TestCase):
             [str(self.binary), "ascii"], input=text.encode(), capture_output=True, check=True
         )
         return proc.stdout.decode()
+
+    def pages(self, text: str, cols: int, px: int, lines: int) -> list[list[str]]:
+        proc = subprocess.run(
+            [str(self.binary), "pages", str(cols), str(px), str(lines)],
+            input=text.encode(),
+            capture_output=True,
+            check=True,
+        )
+        return [page.split("\n") for page in proc.stdout.decode().split("\f")]
+
+    @staticmethod
+    def px(line: str) -> int:
+        """The harness's proportional font (fake_glyph_px), as LVGL adds it up."""
+        total = 0
+        for i, c in enumerate(line):
+            w = 18 if c in "WM" else 4 if c in "il ." else 11 if ord(c) >= 0x80 else 10
+            total += w - (2 if c == "A" and line[i + 1 : i + 2] == "V" else 0)
+        return total
+
+    def assert_pages_show_everything(self, text: str, cols: int, px: int, lines: int) -> list[list[str]]:
+        pages = self.pages(text, cols, px, lines)
+        shown = []
+        for page in pages:
+            self.assertLessEqual(len(page), lines, page)
+            for line in page:
+                self.assertLessEqual(self.px(self.shown(line)), px, f"{line!r} wraps again on screen")
+                self.assertLessEqual(len(line), cols, line)
+            shown.extend(" ".join(page).split())
+        # Pages overlap by a line, so words repeat; none may be missing.
+        words = iter(shown)
+        for word in text.split():
+            self.assertIn(word, words, f"{word!r} is never shown")
+        return pages
+
+    def test_wide_letters_wrap_to_the_label_in_pixels(self) -> None:
+        # The LCD-3.49's long caption: 148 px wide, 12 lines, 21 characters at most.
+        text = " ".join(["WWWWWWW MMMMMM WWW"] * 12 + ["the end"])
+        pages = self.assert_pages_show_everything(text, 21, 148, 12)
+        self.assertGreater(len(pages), 2)
+        self.assertEqual(pages[0][0], "WWWWWWW")   # 126 px; a space and three Ms would be 184
+
+    def test_ordinary_and_narrow_text_fills_lines(self) -> None:
+        text = ("Tomorrow will be mild and dry, with a light breeze from the west in the "
+                "afternoon and clear skies until late evening. ") * 4
+        pages = self.assert_pages_show_everything(text, 21, 148, 12)
+        self.assertEqual(pages[0][0], "Tomorrow will be")
+        narrow = " ".join(["ill"] * 60)
+        for page in self.assert_pages_show_everything(narrow, 21, 148, 12):
+            self.assertTrue(all(len(line) <= 21 for line in page))
+        self.assertEqual(self.pages(narrow, 21, 148, 12)[0][0], "ill ill ill ill ill")
+
+    def test_kerning_counts_towards_the_width(self) -> None:
+        # "AVAVAVAVAVAVAVA": each A before a V is 8 px, so 15 letters make 136.
+        self.assertEqual(self.pages("AVAVAVAVAVAVAVA", 21, 136, 12), [["AVAVAVAVAVAVAVA"]])
+        self.assertEqual(self.pages("AVAVAVAVAVAVAVA", 21, 135, 12), [["AVAVAVAVAVAVAV", "A"]])
+
+    def test_stand_ins_are_measured_as_shown(self) -> None:
+        # An em dash shows as "--", two 10 px glyphs: "a --" is 34 px, and
+        # "-- b" 34 too. Measured as one 11 px glyph, "a \u2014" would fit in 33.
+        self.assertEqual(self.pages("a \u2014 b", 21, 34, 12), [["a \u2014", "b"]])
+        self.assertEqual(self.pages("a \u2014 b", 21, 33, 12), [["a", "\u2014", "b"]])
+
+    def test_cjk_keeps_its_fixed_width_page(self) -> None:
+        text = "还伴有八级左右的雷雨大风和短时强降水出门记得带伞注意安全"
+        self.assertEqual([len(line) for line in self.pages(text, 13, 20, 12)[0]], [13, 13, 2])
 
     def test_vietnamese_shows_its_plain_letters(self) -> None:
         self.assertEqual(

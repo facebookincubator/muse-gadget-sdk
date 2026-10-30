@@ -44,6 +44,21 @@ void muse_state_page(bool cjk, int *cols, int *lines)
     *lines = s_lines;
 }
 
+/* A proportional font for the pixel-wrapped pages: wide W and M, narrow i, l,
+ * spaces and stops, 10 px otherwise, and A pulled 2 px towards a V after it. */
+static int fake_glyph_px(uint32_t letter, uint32_t next)
+{
+    int w = 10;
+    if (letter == 'W' || letter == 'M') {
+        w = 18;
+    } else if (letter == 'i' || letter == 'l' || letter == ' ' || letter == '.') {
+        w = 4;
+    } else if (letter >= 0x80) {
+        w = 11;
+    }
+    return w - (letter == 'A' && next == 'V' ? 2 : 0);
+}
+
 static char *read_all(size_t *len)
 {
     size_t cap = 1 << 16, n = 0;
@@ -99,6 +114,19 @@ int main(int argc, char **argv)
         if (muse_hatch_caption_at(in, 0, page, sizeof(page))) {
             fputs(page, stdout);
         }
+    } else if (argc > 4 && !strcmp(argv[1], "pages")) {
+        /* Every page the reply turns through, pixel-wrapped, one per offset
+         * where it changes, separated by form feeds. */
+        s_cols = atoi(argv[2]);
+        muse_hatch_set_caption_px(atoi(argv[3]), fake_glyph_px);
+        s_lines = atoi(argv[4]);
+        static char page[1 << 16], last[1 << 16];
+        for (size_t at = 0; at < len; at++) {
+            if (muse_hatch_caption_at(in, at, page, sizeof(page)) && strcmp(page, last)) {
+                printf("%s%s", last[0] ? "\f" : "", page);
+                strlcpy(last, page, sizeof(last));
+            }
+        }
     } else if (argc > 1 && !strcmp(argv[1], "ascii")) {
         static char shown[1 << 16];
         strlcpy(shown, in, sizeof(shown));
@@ -109,7 +137,7 @@ int main(int argc, char **argv)
         muse_hatch_caption_at(in, 0, page, sizeof(page));
         printf("%s %s\n", muse_text_has_cjk(in) ? "cjk" : "latin", s_page_cjk ? "cjk" : "latin");
     } else {
-        fprintf(stderr, "usage: %s console|unescape|caption COLS|ascii|page < input\n", argv[0]);
+        fprintf(stderr, "usage: %s console|unescape|caption COLS|pages COLS PX LINES|ascii|page < input\n", argv[0]);
         return 2;
     }
     free(in);

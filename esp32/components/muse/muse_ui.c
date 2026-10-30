@@ -882,6 +882,14 @@ static void on_ring_draw(lv_event_t *e)
     layer->_clip_area = clip;
 }
 
+/* The long layout's caption font, for the pager (muse_hatch_set_caption_px):
+ * LVGL measures a label's lines the same way, and its built-in fonts are
+ * read-only, so this is safe off the LVGL task. */
+static int long_glyph_px(uint32_t letter, uint32_t next)
+{
+    return lv_font_get_glyph_width(&lv_font_montserrat_16, letter, next);
+}
+
 static void build_screen(void)
 {
     lv_obj_t *scr = lv_screen_active();
@@ -1026,22 +1034,22 @@ static void build_screen(void)
 #endif
         if (s_long) {
             /* Not a band over Muse but a page of the reply under it. Montserrat's
-             * letters differ in width, so the pager counts an average one and the
-             * page keeps two spare lines for lines of wide ones. */
+             * letters differ in width, so the pager wraps each line to the
+             * label's width in pixels as the label measures it: a line never
+             * wraps again on screen, and every page fits. */
             const lv_font_t *font = &lv_font_montserrat_16;
             int top = LONG_MUSE_TOP + s_canvas_px - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W) + 14;
             int pitch = lv_font_get_line_height(font) + LONG_LINE_SPACE;
             int lines = (s_h - LONG_HINTS_H - top + LONG_LINE_SPACE) / pitch;
             int w = s_w - 24;
-            int cols = w / lv_font_get_glyph_width(font, 'n', ' ');
-            int page = lines - 2;
-            /* A third of the caption spare for characters wider than a byte. */
-            while ((cols + 1) * page > MUSE_CAPTION_MAX * 2 / 3) {
-                page--;
-            }
+            int page = lines;
+            /* A third of the caption spare for characters wider than a byte:
+             * this caps a line of narrow letters. */
+            int cols = MUSE_CAPTION_MAX * 2 / 3 / page - 1;
+            muse_hatch_set_caption_px(w, long_glyph_px);
             lv_obj_set_style_text_font(s_caption_lbl, font, 0);
             lv_obj_set_style_text_line_space(s_caption_lbl, LONG_LINE_SPACE, 0);
-            lv_obj_set_style_pad_ver(s_caption_lbl, 0, 0);
+            lv_obj_set_style_pad_all(s_caption_lbl, 0, 0);
             lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_TRANSP, 0);
             lv_obj_set_style_text_align(s_caption_lbl, LV_TEXT_ALIGN_LEFT, 0);
             lv_obj_set_size(s_caption_lbl, w, lines * pitch - LONG_LINE_SPACE);
