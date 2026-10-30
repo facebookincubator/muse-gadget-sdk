@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 /* UNIHIKER K10 N16R8. Hardware sources:
  * DFRobot K10 schematic (V1.2 download), pages 1/3/5/6;
  * DFRobot/framework-arduinounihiker: libraries/unihiker_k10/src,
@@ -78,7 +94,10 @@ static void rgb_task(void *arg)
         } else {
             r = 36; g = 12; pulse = true;
         }
-        float level = pulse ? 0.15f + 0.85f * (1.0f + sinf(esp_timer_get_time() / 250000.0f)) / 2.0f : 1.0f;
+        /* Wrap to one 2*pi*250 ms period first: a float of the raw uptime
+         * loses the sub-second steps after a few weeks. */
+        float phase = (float)(esp_timer_get_time() % 1570796) / 250000.0f;
+        float level = pulse ? 0.15f + 0.85f * (1.0f + sinf(phase)) / 2.0f : 1.0f;
         for (int i = 0; i < 3; ++i) led_strip_set_pixel(s_rgb, i, r * level, g * level, b * level);
         led_strip_refresh(s_rgb);
         vTaskDelay(pdMS_TO_TICKS(60));

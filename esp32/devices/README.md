@@ -81,7 +81,7 @@ session to Muse. The rest depends on the hardware.
 | **Deotaland RoRoLee** | ESP32-S3 | 240×120 AMOLED (SH8501) | 16 MB / 8 MB | [rorolee.com](https://rorolee.com/) | [Rorolee](https://rorolee.com/products/rorolee-the-first-pocket-ai-agent) |
 | **VIEWE SmartRing-Plus** | ESP32-S3 | 1.85" 360×360 round LCD (ST77916), touch | 16 MB / 8 MB | [VIEWE GitHub](https://github.com/VIEWESMART/SmartRing-Plus), [BSP](https://components.espressif.com/components/viewesmart/smartring_plus); [setup](viewe-smartring-plus.md) | [VIEWE](https://viewedisplay.com/product/smart-ring-plus-esp32-ai-chatbot-1-8-inch-smart-touch-display/) |
 | **Waveshare ESP32-S3-Touch-LCD-1.9** | ESP32-S3 | 1.9" 170×320 LCD, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-LCD-1.9/Resources-And-Documents), [GitHub](https://github.com/waveshareteam/ESP32-S3-LCD-1.9) | [Waveshare](https://www.waveshare.com/esp32-s3-lcd-1.9.htm) |
-| **DFRobot UNIHIKER K10** | ESP32-S3 | 2.8" 240x320 LCD, no touch | 16 MB / 8 MB | [K10 setup](dfrobot-unihiker-k10.md) | [DFRobot](https://www.dfrobot.com/product-2904.html), [distributors](https://www.unihiker.com/distributors) |
+| **DFRobot UNIHIKER K10** | ESP32-S3 | 2.8" 240×320 LCD (ILI9341), no touch | 16 MB / 8 MB | [K10 setup](dfrobot-unihiker-k10.md) | [DFRobot](https://www.dfrobot.com/product-2904.html), [distributors](https://www.unihiker.com/distributors) |
 
 The experimental [OSTB EchoEar-2ST port](ostb-echoear-2st.md) targets the
 measured 16 MB flash / 8 MB PSRAM unit. Its hardware and validation limits

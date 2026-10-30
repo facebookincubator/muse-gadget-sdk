@@ -247,7 +247,7 @@ status screen.
 | VN ESP32-S3 1.83-inch NV3023 | UI, BOOT push-to-talk, Vol+/Vol- menu, images | `tools/muse/board.sh build vn183` |
 | FoloToy AI Passport (experimental) | UI, push-to-talk with text replies, three-button menu | `tools/muse/board.sh build ai-passport` |
 | Deotaland RoRoLee | UI, BOOT push-to-talk, VOL-/VOL+ menu, images | `tools/muse/board.sh build rorolee` |
-| DFRobot UNIHIKER K10 | UI, A-button voice input, multilingual captions and RGB; sensors, camera, optional streaming TTS and USB setup require the [full branch](https://github.com/DFRobot/muse-gadget-sdk/tree/muse-unihiker-k10-full) | [K10 setup](devices/dfrobot-unihiker-k10.md) |
+| DFRobot UNIHIKER K10 | UI, A push-to-talk, B menu, RGB status LEDs | [K10 setup](devices/dfrobot-unihiker-k10.md), `tools/muse/board.sh build k10` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.

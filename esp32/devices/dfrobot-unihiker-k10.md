@@ -17,13 +17,10 @@ pairing, Wi-Fi, voice-input, reply-caption and menu flows.
 - ES7243E microphone and NS4168 speaker drivers using the existing audio path.
 - Three RGB LEDs for setup, connection, recording, thinking and errors.
 
-The [full-feature branch](https://github.com/DFRobot/muse-gadget-sdk/tree/muse-unihiker-k10-full)
-adds sensors, humidity events, camera capture, optional streaming TTS and USB
-credential setup. They are not part of this basic port.
-
-For the full firmware's illustrated setup and usage instructions, see the
-[full firmware user guide](https://github.com/DFRobot/muse-gadget-sdk/blob/muse-unihiker-k10-full/esp32/devices/dfrobot-unihiker-k10.md).
-Follow the build and setup instructions below when using this basic branch.
+DFRobot also maintains a separate
+[full-feature firmware branch](https://github.com/DFRobot/muse-gadget-sdk/tree/muse-unihiker-k10-full)
+with sensors, camera capture and other extras. It is not part of this SDK and
+its features are not covered here; follow the instructions below for this port.
 
 ## Build and flash
 
@@ -31,15 +28,16 @@ Use ESP-IDF v6.0.1 and run commands from `esp32/`. The included USB data cable
 connects to the ESP32-S3's native USB Serial/JTAG (`303a:1001`). Several ESP32
 boards share that ID; verify the board and port before flashing.
 
-### 1. Configure your SDK Token before building (required)
+### 1. Configure your SDK Token
 
-**The basic firmware requires your own Muse Gadgets SDK Token at compile time.**
-Get one from [Muse Gadgets](https://gadgets.muse.ai/settings/sdk-tokens).
-Enter it in the build configuration; you do not need to edit any C source file.
-This branch has no runtime SDK Token entry or USB HTML configuration tool.
+Get a Muse Gadgets SDK Token from
+[Muse Gadgets](https://gadgets.muse.ai/settings/sdk-tokens). Either set it in
+the build configuration, as below, or flash without one and send it over the
+serial console afterwards (`>sdk_token=mgst_…`, see the
+[SDK instructions](../README.md)). You do not need to edit any C source file.
 
-In an activated ESP-IDF terminal, run the following command on one line
-(Windows, macOS or Linux):
+To set it in the build configuration, run the following command on one line in
+an activated ESP-IDF terminal (Windows, macOS or Linux):
 
 ```sh
 idf.py -B build-muse-dfrobot-unihiker-k10 -DIDF_TARGET=esp32s3 -DSDKCONFIG=build-muse-dfrobot-unihiker-k10/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-dfrobot-unihiker-k10" menuconfig
@@ -54,10 +52,10 @@ directly, replace the placeholder below with your own Token:
 CONFIG_GADGET_SDK_TOKEN="mgst_YOUR_TOKEN"
 ```
 
-The Token is embedded in the application binary. Changing it requires
-rebuilding and reflashing. Keep it out of board overlays and commits, and
-keep binaries containing your personal Token private. A build without a Token
-may compile with a warning, but it is not ready for new-device pairing.
+A Token set this way is embedded in the application binary. Keep it out of
+board overlays and commits, and keep binaries containing your personal Token
+private. A build without a Token compiles with a warning and needs one sent
+over serial before it can pair.
 
 ### 2. Build
 
@@ -90,16 +88,14 @@ NVS. See the [SDK flashing instructions](../README.md).
 
 ## Use
 
-For detailed usage instructions and demonstrations, see the
-[K10 Muse walkthrough](https://www.unihiker.com/wiki/K10/Playground/muse_unihiker_k10/).
-The walkthrough also demonstrates the extended features of the full firmware;
-this basic port supports the functions listed under **Included functionality**.
+DFRobot's [K10 Muse walkthrough](https://www.unihiker.com/wiki/K10/Playground/muse_unihiker_k10/)
+also demonstrates its full-feature firmware; this port supports the functions
+listed under **Included functionality**.
 
 Enable Developer mode in the Muse phone app, add K10, press A to confirm,
 and configure Wi-Fi. Hold A while speaking and release it to send. Muse's
-reply appears as text. B opens or advances the menu; A selects its item.
-The stock speaker path can play the SDK's existing audio cues and diagnostics;
-this basic port does not synthesize spoken replies.
+reply appears as captions and plays on the speaker when it includes audio. B
+opens or advances the menu; A selects its item.
 
 RGB: breathing amber for setup/offline, breathing blue for pairing/connecting,
 green for ready, blue for recording, breathing purple for thinking, and
