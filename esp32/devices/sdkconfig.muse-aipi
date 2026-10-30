@@ -64,3 +64,6 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # actually slept, and how long each power lock kept the chip awake.
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
+
+# Replies fill the screen while Muse answers; Text size in the menu.
+CONFIG_MUSE_SMALL_FULL_REPLY=y

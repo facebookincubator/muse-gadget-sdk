@@ -39,6 +39,7 @@ static struct {
     uint8_t mic_gain;
     uint8_t brightness;
     uint16_t sleep_s;
+    uint8_t text_size;
     bool wifi_on;
     bool ble_on;
     char ssid[MUSE_SSID_MAX + 1];
@@ -52,6 +53,7 @@ static struct {
     .mic_gain = 30,
     .brightness = 100,
     .sleep_s = 120,
+    .text_size = MUSE_TEXT_MEDIUM,
     .wifi_on = true,
     .host = DEFAULT_HOST,
 };
@@ -130,6 +132,7 @@ esp_err_t muse_settings_init(void)
 #endif
     load_u8("bright", &s.brightness);
     nvs_get_u16(s_nvs, "sleep_s", &s.sleep_s);
+    load_u8("text_size", &s.text_size);
     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
         s.wifi_on = b;
     }
@@ -145,6 +148,7 @@ esp_err_t muse_settings_init(void)
     s.volume = clampi(s.volume, 0, 100);
     s.mic_gain = clampi(s.mic_gain, 0, MUSE_MIC_GAIN_MAX);
     s.brightness = clampi(s.brightness, 10, 100);
+    s.text_size = clampi(s.text_size, MUSE_TEXT_SMALL, MUSE_TEXT_LARGE);
     ESP_LOGI(TAG, "vol %d%s, mic %d dB, bright %d, sleep %ds, wifi %s (%s), ble %s, muse %s",
              s.volume, s.speaker_on ? "" : " (speaker off)", s.mic_gain, s.brightness, s.sleep_s, s.wifi_on ? "on" : "off",
              "network saved by Link", s.ble_on ? "on" : "off", s.token[0] ? "token set" : "no token");
@@ -161,6 +165,7 @@ bool muse_settings_speaker_on(void) { return s.speaker_on; }
 int muse_settings_mic_gain(void) { return s.mic_gain; }
 int muse_settings_brightness(void) { return s.brightness; }
 int muse_settings_sleep_s(void) { return s.sleep_s; }
+int muse_settings_text_size(void) { return s.text_size; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
 bool muse_settings_voice_notes(void) { return atomic_load(&s_voice_notes); }
@@ -242,6 +247,12 @@ void muse_settings_set_sleep_s(int secs)
     nvs_set_u16(s_nvs, "sleep_s", s.sleep_s);
     nvs_commit(s_nvs);
     notify(MUSE_SETTING_SLEEP);
+}
+
+void muse_settings_set_text_size(int size)
+{
+    s.text_size = clampi(size, MUSE_TEXT_SMALL, MUSE_TEXT_LARGE);
+    save_u8("text_size", s.text_size);   /* the UI polls it */
 }
 
 void muse_settings_set_wifi_on(bool on)

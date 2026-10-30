@@ -290,6 +290,24 @@ menu "Muse"
             to pay for the CPU's light-sleep retention memory, which it
             takes at boot and keeps.
 
+    config MUSE_SMALL_FULL_REPLY
+        bool "Full-screen replies on small screens"
+        depends on MUSE_ENABLED
+        default n
+        help
+            On screens with the compact layout (under 200 px or so), Muse
+            normally keeps the avatar and pages replies two lines at a time
+            in a band along the bottom. With this on, the avatar steps aside
+            while Muse thinks or answers, and the reply fills the screen
+            below the status line. Muse comes back when the reply ends.
+            On boards with the two-button menu, the menu gains a Text size
+            setting (Small, Medium, Large) for the reply's font, kept across
+            restarts; touch boards have no such control and keep Medium. A
+            page that wouldn't fit at Medium or Large, such as one with long
+            lines of capitals, is shown at Small. With MUSE_CJK_FONT, a
+            reply with Chinese, Japanese or Korean in it fills the screen in
+            the 16 px caption font, whatever the Text size.
+
     config MUSE_HATCH
         bool "Muse's own voice session"
         depends on MUSE_ENABLED
