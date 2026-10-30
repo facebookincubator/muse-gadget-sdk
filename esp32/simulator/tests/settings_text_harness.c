@@ -120,11 +120,31 @@ static void check_entry(void)
             assert(field.y1 == text_y(44));
             assert(lv_obj_get_width(s_text_ta) == text_px(224));
             assert(lv_obj_get_width(back) == text_px(48));
+        } else if (text_compact()) {
+            /* Short or narrow flat panels: arrow and title in one row, then
+             * the field, then the keyboard, all on screen and apart. */
+            assert(s_text_kb && !s_text_kp);
+            inside(s_text_title);
+            inside(s_text_ta);
+            inside(back);
+            inside(s_text_kb);
+            lv_area_t arrow = area(back), keys = area(s_text_kb);
+            assert(arrow.x2 < title.x1 && arrow.y2 < field.y1 && title.y2 < field.y1);
+            assert(field.y1 == TEXT_COMPACT_FIELD_Y && field.y2 < keys.y1);
+            assert(lv_obj_get_content_height(s_text_ta) >= lv_font_get_line_height(&lv_font_montserrat_20));
+            if (!lv_obj_has_flag(s_text_show, LV_OBJ_FLAG_HIDDEN)) {
+                inside(s_text_show);
+                lv_area_t show_b = area(s_text_show);
+                assert(field.x2 < show_b.x1 && show_b.y1 == field.y1 && show_b.y2 == field.y2);
+            }
         } else {
             assert(title.y1 == 40);
             assert(field.y1 == text_y(76));
             assert(lv_obj_get_width(s_text_ta) == text_px(300));
             assert(s_text_kb && !s_text_kp);
+            /* Where this layout is kept, it has to fit on the screen. */
+            inside(s_text_ta);
+            assert(area(back).y2 < field.y1 && field.y2 < area(s_text_kb).y1);
         }
     }
 }
@@ -206,6 +226,18 @@ int main(int argc, char **argv)
         lv_obj_send_event(lv_obj_get_child(s_text, 0), LV_EVENT_CLICKED, NULL);
         assert(s_current == s_wifi && saves == 0);
         assert(!strcmp(lv_textarea_get_text(ta), ""));
+    } else if (!strcmp(scenario, "password")) {
+        /* A secured network on the full keyboard: the field and Show button. */
+        strlcpy(s_aps[0].ssid, "A network with a long name", sizeof(s_aps[0].ssid));
+        s_aps[0].secure = true;
+        lv_obj_t *ap = lv_button_create(s_wifi);
+        lv_obj_add_event_cb(ap, on_wifi_ap, LV_EVENT_CLICKED, (void *)(intptr_t)0);
+        lv_obj_send_event(ap, LV_EVENT_CLICKED, NULL);
+        assert(s_text_kb && !lv_obj_has_flag(s_text_show, LV_OBJ_FLAG_HIDDEN));
+        assert(lv_textarea_get_password_mode(s_text_ta));
+        check_entry();
+        lv_obj_send_event(lv_obj_get_child(s_text, 0), LV_EVENT_CLICKED, NULL);
+        assert(s_current == s_wifi && saves == 0);
     } else if (!strcmp(scenario, "switch")) {
         lv_obj_t *sw = switch_row(s_wifi, "Wi-Fi", true, on_switch);
         lv_obj_t *text = lv_obj_get_child(lv_obj_get_parent(sw), 0);
