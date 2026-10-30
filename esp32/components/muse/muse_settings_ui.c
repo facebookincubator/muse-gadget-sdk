@@ -655,7 +655,7 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_set_style_border_width(s_text_ta, border, 0);
     lv_obj_set_style_radius(s_text_ta, 14, 0);
     if (wide_layout()) {
-        /* Large panels keep a steady cursor, as the CrowPanel port chose. */
+        /* Large panels keep a steady cursor. */
         lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);
     }
     lv_obj_set_style_text_font(s_text_ta, settings_font(&lv_font_montserrat_16), LV_PART_TEXTAREA_PLACEHOLDER);

@@ -30,7 +30,7 @@ import sys
 USJ = (0x303A, 0x1001)      # the chip's own USB Serial/JTAG
 CH342 = (0x1A86, 0x55D2)    # WCH dual UART bridge: two ports per device
 CH9102 = (0x1A86, 0x55D4)   # WCH single UART bridge
-CH340 = (0x1A86, 0x7522)    # WCH USB-UART bridge
+CH340 = (0x1A86, 0x7522)    # WCH CH340K bridge on the CrowPanel (other CH340s are 0x7523)
 CH343 = (0x1A86, 0x55D3)    # WCH single UART bridge on the Waveshare 7-inch, 1.28-inch and P4 3.5 LCDs
 CP210X = (0x10C4, 0xEA60)   # Silicon Labs CP2104 bridge
 

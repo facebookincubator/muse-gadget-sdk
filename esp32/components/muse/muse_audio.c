@@ -128,12 +128,19 @@ static esp_err_t read_input(size_t frames)
         return esp_codec_dev_read(s_mic, s_in_stereo, frames * CHANNELS * sizeof(int16_t)) == ESP_CODEC_DEV_OK
             ? ESP_OK : ESP_FAIL;
     }
-    /* A mic without a codec beside a speaker codec: mono, scaled here. */
+    /* A mic without a codec beside a speaker codec, for the self-test and
+     * loopback test (muse_audio_read reads it directly): mono, its DC
+     * dropped before the gain so an offset doesn't saturate the samples. */
     if (!muse_board->mic_read || muse_board->mic_read(s_in_mono, frames) != ESP_OK) {
         return ESP_FAIL;
     }
+    float dc = 0;
     for (size_t i = 0; i < frames; i++) {
-        float x = (float)s_in_mono[i] * s_mic_scale;
+        dc += s_in_mono[i];
+    }
+    dc /= (float)frames;
+    for (size_t i = 0; i < frames; i++) {
+        float x = ((float)s_in_mono[i] - dc) * s_mic_scale;
         int16_t v = (int16_t)(x > 32767 ? 32767 : (x < -32768 ? -32768 : x));
         s_in_stereo[2 * i] = v;
         s_in_stereo[2 * i + 1] = v;
@@ -388,13 +395,16 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 {
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
-        if (muse_board->mic_init) {
+        /* A mic without a codec: its gain applies in float, ahead of the
+         * high-pass, so a DC offset can't saturate the samples first. */
+        bool direct = muse_board->mic_init || (!s_mic && muse_board->mic_read);
+        if (direct) {
             if (muse_board->mic_read(mono, n) != ESP_OK) return ESP_FAIL;
         } else if (read_input(n) != ESP_OK) {
             return ESP_FAIL;
         }
         for (size_t i = 0; i < n; i++) {
-            float x = muse_board->mic_init ? (float)mono[i] * s_mic_scale
+            float x = direct ? (float)mono[i] * s_mic_scale
                      : muse_board->mic_slot < 0 ? 0.5f * ((float)s_in_stereo[2 * i] + (float)s_in_stereo[2 * i + 1])
                                                 : (float)s_in_stereo[2 * i + muse_board->mic_slot];
             float y = s_hpf_a * (s_hpf_y1 + x - s_hpf_x1);
