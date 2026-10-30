@@ -131,6 +131,17 @@ class TitleGeometryTest(unittest.TestCase):
                     self.assertEqual(g["title"], g["anim"])
 
 
+class TitleKeepsStatusTest(unittest.TestCase):
+    def test_title_redraw_repaints_the_status_over_its_stripes(self) -> None:
+        # On the CYD the title's rows cross the connected dot's, and a title
+        # drawn after the dot would otherwise erase it for good: the dot is
+        # not redrawn while it is marked as shown.
+        source = LED_C.read_text()
+        title = _between(source, "static void led_hw_set_title(const char *text) {", "\n}\n")
+        overlay = title.index("lcd_overlay_status(s_bar_buf, LCD_TITLE_Y + sy, LCD_TITLE_STRIPE_ROWS)")
+        self.assertLess(overlay, title.index("lcd_draw(0, LCD_TITLE_Y + sy"))
+
+
 class SmallControlSessionTest(unittest.TestCase):
     def _small(self, defines: dict[str, int]) -> int:
         source = NOISE_CPP.read_text()

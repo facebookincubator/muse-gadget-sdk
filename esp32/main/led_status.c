@@ -603,6 +603,8 @@ static void led_hw_set_title(const char *text) {
         }
         xSemaphoreTake(s_lcd_lock, portMAX_DELAY);
         if (!s_image_mode) {
+            // The title can reach the connected dot's rows (it does on the CYD).
+            lcd_overlay_status(s_bar_buf, LCD_TITLE_Y + sy, LCD_TITLE_STRIPE_ROWS);
             lcd_draw(0, LCD_TITLE_Y + sy, LCD_H_RES,
                      LCD_TITLE_Y + sy + LCD_TITLE_STRIPE_ROWS, s_bar_buf);
         }

@@ -104,6 +104,11 @@ provided; factory-equivalent low-power behaviour is not claimed.
 pairing, touch, recording and playback, sleep and wake, and reconnect. See
 [validation limits](ostb-echoear-2st.md#validation).
 
+The CYD (ESP32-2432S028) runs the status screen only: its XPT2046 touch
+controller isn't used, and its 4 MB of flash holds one app slot, so it has no
+OTA. Its contributor reports a band of noise along the bottom of the screen
+that isn't diagnosed yet.
+
 Boards without PSRAM (the ideaspark, the CYD, the C6 boards, the Cardputer ADV and the AI Passport) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
 control session is up. The Waveshare C6, Cardputer ADV and AI Passport also can't hold their own voice
