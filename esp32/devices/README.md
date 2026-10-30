@@ -424,12 +424,11 @@ microphone. Push-to-talk records silence until you add one and pick it as
   GPIO, set as `CONFIG_MUSE_JC3248W535_MIC_GPIO`. GPIO42 and GPIO2 aren't on
   a connector.
 
-BOOT is the
-only button: push-to-talk, pairing confirmation, and waking the screen. It's
-on the back, so the on-screen mic in the lower right is a talk button too:
-hold it to talk and let go to send, and tap the screen to confirm pairing.
-Power off puts the chip in deep sleep until BOOT is pressed; there's no
-battery gauge.
+BOOT is the only button: push-to-talk, pairing confirmation, and waking the
+screen. It's on the back, so the on-screen mic in the lower right is a talk
+button too: hold it to talk and let go to send, and tap the screen to confirm
+pairing. Power off puts the chip in deep sleep until BOOT is pressed; there's
+no battery gauge.
 
 It enumerates as the chip's own USB serial port. Back up the stock firmware
 before flashing Muse for the first time, and restore it with

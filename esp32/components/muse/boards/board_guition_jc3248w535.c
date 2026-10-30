@@ -91,13 +91,8 @@ static const char *TAG = "board";
 #define TALK_GPIO GPIO_NUM_0       /* BOOT */
 
 /* An INMP441 and the MP34DT0x are both about -26 dBFS at 94 dB SPL; Muse's
- * default 30 dB of gain brings speech up to where the ES8311 boards have it.
- * The PDM path sums both slots, which doubles a mic that reaches both. */
-#if CONFIG_MUSE_JC3248W535_MIC_PDM
-#define MIC_GAIN_OFFSET_DB 6
-#else
+ * default 30 dB of gain brings speech up to where the ES8311 boards have it. */
 #define MIC_GAIN_OFFSET_DB 0
-#endif
 
 static const axs15231b_lcd_init_cmd_t s_lcd_init[] = {
     {0xBB, (uint8_t[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5A, 0xA5}, 8, 0},
@@ -389,29 +384,12 @@ static int mic_read(const audio_codec_data_if_t *h, uint8_t *data, int size)
         return ESP_CODEC_DEV_READ_FAIL;
     }
     int16_t *s = (int16_t *)data;
-#if CONFIG_MUSE_JC3248W535_MIC_PDM
-    /* The PDM filter fills both slots from the one data line. Which one
-     * carries the mic depends on SEL and the clock edge, and on this board
-     * both have; a loose DATA joint also made it hop between them. Sum the
-     * two and give both the result, so the mic gets through in either slot. */
-    for (int i = 0; i + 1 < size / 2; i += 2) {
-        int v = 0;
-        for (int k = 0; k < 2; k++) {
-            int32_t *dc = &s_mic_dc[k];
-            *dc += (s[i + k] * 256 - *dc) >> 8;
-            v += s[i + k] - (*dc >> 8);
-        }
-        v = v * s_mic_gain_q8 >> 8;
-        s[i] = s[i + 1] = v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v;
-    }
-#else
     for (int i = 0; i < size / 2; i++) {
         int32_t *dc = &s_mic_dc[i & 1];
         *dc += (s[i] * 256 - *dc) >> 8;
         int v = (s[i] - (*dc >> 8)) * s_mic_gain_q8 >> 8;
         s[i] = v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v;
     }
-#endif
     return ESP_CODEC_DEV_OK;
 }
 
@@ -445,8 +423,10 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     const int din = CONFIG_MUSE_JC3248W535_MIC_GPIO;
 #else
     const int din = -1;
-    ESP_LOGW(TAG, "no mic (CONFIG_MUSE_JC3248W535_MIC): push-to-talk records silence");
 #endif
+    if (din < 0) {
+        ESP_LOGW(TAG, "no mic (CONFIG_MUSE_JC3248W535_MIC, _MIC_GPIO): push-to-talk records silence");
+    }
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
     ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &s_tx, &s_rx), TAG, "i2s channel");
@@ -521,7 +501,13 @@ static const muse_board_t s_board = {
     .display_unlock = display_unlock,
     .set_brightness = set_brightness,
     .audio_init = audio_init,
-    .mic_slot = 0,              /* L/R or SEL to GND: the left slot */
+#if CONFIG_MUSE_JC3248W535_MIC_PDM
+    /* The PDM filter fills both slots from the one data line, and which one
+     * carries the mic depends on SEL and the clock edge: mix the two. */
+    .mic_slot = -1,
+#else
+    .mic_slot = 0,              /* INMP441 with L/R to GND: the left slot */
+#endif
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
     .power_off = power_off,

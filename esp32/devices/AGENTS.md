@@ -220,7 +220,7 @@ The fields of `muse_board_t`:
 |---|---|
 | `name`, `width`, `height` | The panel as the UI draws it |
 | `round`, `touch` | Round panel; `touch` only if `display_start` returns an input device |
-| `touch_talk` | Optional touch-only push-to-talk: the LVGL microphone sends press/release edges through the existing input handler, and an explicit screen press confirms pending pairing. Defaults to false; requires `touch`. |
+| `touch_talk` | Optional on-screen push-to-talk, alone or beside a physical talk button: the LVGL microphone sends press/release edges through the existing input handler, and an explicit screen press confirms pending pairing. Both sources share one talk state, so releasing either ends the recording. Defaults to false; requires `touch`. |
 | `keyboard` | Dedicated navigation keys: `poll_buttons` emits `MUSE_BTN_UP/DOWN/LEFT/RIGHT/ENTER/ESCAPE` presses. Enter selects and confirms pairing; Talk is not repurposed as Select while the menu is open. Defaults to false for two-button boards. |
 | `talk_button`, `aux_button` | On-screen captions ("boot", "pwr"). `talk_hint` and `aux_hint` place them next to the physical button |
 | `wake_button` | The menu's power-off page names this button as the one that turns the board back on, when that isn't `aux_button` (and the board has no `keyboard`). May be NULL |
