@@ -46,8 +46,7 @@ static const struct {
     {3300, 5},   {3270, 0},
 };
 
-static int pct_for_mv(int mv)
-{
+static int pct_for_mv(int mv) {
     if (mv >= kCurve[0].mv) return 100;
     for (size_t i = 1; i < sizeof(kCurve) / sizeof(kCurve[0]); i++) {
         if (mv >= kCurve[i].mv) {
@@ -59,8 +58,7 @@ static int pct_for_mv(int mv)
     return 0;
 }
 
-void reterminal_battery_init(void)
-{
+void reterminal_battery_init(void) {
     if (s_adc) return;
     gpio_config_t enable = {
         .pin_bit_mask = 1ULL << BATTERY_ENABLE_GPIO,
@@ -111,8 +109,7 @@ void reterminal_battery_init(void)
     }
 }
 
-bool reterminal_battery_read(int *battery_mv, int *battery_pct)
-{
+bool reterminal_battery_read(int *battery_mv, int *battery_pct) {
     if (!s_adc || !s_cali || !battery_mv || !battery_pct) return false;
     int sum = 0;
     for (int i = 0; i < 8; i++) {
