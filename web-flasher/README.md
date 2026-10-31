@@ -53,3 +53,10 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory /tmp/flasher/site
 
 To try changes to the page itself, copy `index.html` and the `.js` and
 `boards.json` files over the unpacked site and reload.
+
+Run the offline hook regression tests with Node.js 22 or later (no board or
+package installation needed):
+
+```sh
+node --test web-flasher/tests/*.test.mjs
+```

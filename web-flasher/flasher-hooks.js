@@ -54,11 +54,11 @@ export function installFlasherHooks({ getSelection, onInstalled }) {
       let problem;   // undefined until checked, then null or what's wrong
       const checkFlash = async () => {
         if (problem !== undefined) return problem;
-        problem = null;
         const { minFlashBytes } = getSelection();
-        if (!minFlashBytes) return problem;
+        if (!minFlashBytes) return (problem = null);
         const id = await value.readFlashId();
         const size = value.flashSizeBytes(value.DETECTED_FLASH_SIZES[(id >> 16) & 0xff] ?? "");
+        problem = null;
         // An unknown flash chip reports no size; let it through.
         if (size > 0 && size < minFlashBytes) {
           let needed = MB;
