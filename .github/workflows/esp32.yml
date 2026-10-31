@@ -253,6 +253,9 @@ jobs:
           - board: muse-deotaland-rorolee
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-deotaland-rorolee"
+          - board: muse-viewe-smartring-plus
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-viewe-smartring-plus"
     defaults:
       run:
         shell: bash

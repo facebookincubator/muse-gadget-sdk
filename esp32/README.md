@@ -214,6 +214,7 @@ status screen.
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
+| VIEWE SmartRing-Plus | UI, round touch, on-screen mic, settings, images | `tools/muse/board.sh build smartring-plus` |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
@@ -392,6 +393,9 @@ their upstream licenses:
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- [`components_vendor/viewesmart__smartring_plus/`](components_vendor/viewesmart__smartring_plus),
+  VIEWE's SmartRing-Plus BSP, is Apache-2.0 under its own copyright. See its
+  [`LICENSE`](components_vendor/viewesmart__smartring_plus/LICENSE).
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.
