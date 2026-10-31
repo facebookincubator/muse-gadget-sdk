@@ -86,6 +86,16 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define POWER_SAVE_POLL_MS        100     // then poll this often
 #define IDLE_QUIET_MS             50      // otherwise quiet this long,
 #define IDLE_POLL_MS              10      // then wait on the socket at most this long
+// Inbound frames the session reads per loop turn: everything waiting, up to
+// these bounds (always at least one frame). Reading one frame per turn let
+// small inbound frames (acknowledgements, requests to home devices) queue
+// behind a turn's tunnel sends during a download. The byte bound keeps large
+// frames (an upload's data) from taking a whole turn, so queued tunnel batches
+// still go out often. Only tunnel data keeps a turn reading: a control-stream
+// frame (a command, a daemon response) ends the turn's reads, as before, since
+// a command's result waits in a short queue the turn drains one at a time.
+#define SESSION_RX_FRAMES_PER_TURN 32
+#define SESSION_RX_BYTES_PER_TURN  (16 * 1024)
 #define STABLE_SESSION_MS         30000
 #define VM_REFRESH_FAILURES       3
 
@@ -2208,89 +2218,100 @@ static session_result_t run_session(stack_monitor_t *stack) {
         }
 #endif
 
-        // RX: try to receive a WS frame (non-blocking)
-        ssize_t n = ws_recv_frame_nonblock(tls, rx_buf, WS_RX_BUF_SIZE);
-        if (n > 0) {
-            did = true;
-            last_activity_us = esp_timer_get_time();
-            last_rx_us = last_activity_us;
+        // RX: read the waiting inbound WS frames (non-blocking), up to
+        // SESSION_RX_FRAMES_PER_TURN frames or SESSION_RX_BYTES_PER_TURN bytes.
+        size_t rx_bytes = 0;
+        bool rx_drain = true;  // cleared by a control-stream frame
+        for (int rx_frame = 0; rx_drain && rx_frame < SESSION_RX_FRAMES_PER_TURN
+                               && (rx_frame == 0 || rx_bytes < SESSION_RX_BYTES_PER_TURN);
+             rx_frame++) {
+            ssize_t n = ws_recv_frame_nonblock(tls, rx_buf, WS_RX_BUF_SIZE);
+            if (n > 0) {
+                rx_bytes += static_cast<size_t>(n);
+                did = true;
+                last_activity_us = esp_timer_get_time();
+                last_rx_us = last_activity_us;
 
-            auto inbound = session.ProcessInboundWebSocketPayload(
-                ConstByteSpan(rx_buf, static_cast<size_t>(n)),
-                ByteSpan(tf_scratch, SVC_FRAME_SCRATCH),
-                ByteSpan(sr_scratch, SVC_FRAME_SCRATCH),
-                Span<HeaderView>(hdr_storage, 16));
+                auto inbound = session.ProcessInboundWebSocketPayload(
+                    ConstByteSpan(rx_buf, static_cast<size_t>(n)),
+                    ByteSpan(tf_scratch, SVC_FRAME_SCRATCH),
+                    ByteSpan(sr_scratch, SVC_FRAME_SCRATCH),
+                    Span<HeaderView>(hdr_storage, 16));
 
-            if (!inbound.ok()) {
-                ESP_LOGW(TAG, "ProcessInbound failed: %s", inbound.status.str());
-                // Too large only if the frame's plaintext can't fit the scratch:
-                // a PSA allocation failure is ResourceExhausted too, and isn't.
-                if (inbound.status.IsResourceExhausted() &&
-                    static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
-                    s_req_too_large = true;
+                if (!inbound.ok()) {
+                    ESP_LOGW(TAG, "ProcessInbound failed: %s", inbound.status.str());
+                    // Too large only if the frame's plaintext can't fit the scratch:
+                    // a PSA allocation failure is ResourceExhausted too, and isn't.
+                    if (inbound.status.IsResourceExhausted() &&
+                        static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
+                        s_req_too_large = true;
+                    }
+                    error = true;
+                    break;
                 }
-                error = true;
-                break;
-            }
-            if (inbound.frame_status == InboundFrameStatus::Complete) {
-                auto &frame = inbound.frame;
-                bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
-                if (req_on_frame(frame)) {
-                    // One of the extra daemon requests.
-                } else if (frame.stream_id == IDENTITY_STREAM_ID) {
-                    identity_on_frame(identity, frame);
-                } else if (frame.kind == ServiceFrameKind::BodyChunk) {
-                    if (is_tunnel) {
-                        noise_tunnel_on_inbound(frame.body_chunk.data.data(),
-                                                frame.body_chunk.data.size());
-                    } else {
-                        process_inbound_body_chunk(frame.body_chunk.data,
-                                                   session_generation);
-                    }
-                } else if (frame.kind == ServiceFrameKind::Reset) {
-                    if (is_tunnel) {
-                        // Tunnel stream reset is non-fatal for the control
-                        // session; drop the tunnel and keep control alive.
-                        ESP_LOGW(TAG, "server reset tunnel stream");
-                        noise_tunnel_on_session_down();
-                    } else {
-                        ESP_LOGW(TAG, "server reset stream %lld",
-                                 (long long)frame.stream_id);
-                        error = true;
-                        break;
-                    }
-                } else if (frame.kind == ServiceFrameKind::Response) {
-                    ESP_LOGI(TAG, "got response status=%d on stream %lld",
-                             frame.response.status, (long long)frame.stream_id);
-                    if (frame.response.status != 200) {
+                if (inbound.frame_status == InboundFrameStatus::Complete) {
+                    auto &frame = inbound.frame;
+                    bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
+                    if (!is_tunnel) rx_drain = false;
+                    if (req_on_frame(frame)) {
+                        // One of the extra daemon requests.
+                    } else if (frame.stream_id == IDENTITY_STREAM_ID) {
+                        identity_on_frame(identity, frame);
+                    } else if (frame.kind == ServiceFrameKind::BodyChunk) {
                         if (is_tunnel) {
-                            ESP_LOGW(TAG, "server rejected /link-tunnel: %d",
-                                     frame.response.status);
+                            noise_tunnel_on_inbound(frame.body_chunk.data.data(),
+                                                    frame.body_chunk.data.size());
+                        } else {
+                            process_inbound_body_chunk(frame.body_chunk.data,
+                                                       session_generation);
+                        }
+                    } else if (frame.kind == ServiceFrameKind::Reset) {
+                        if (is_tunnel) {
+                            // Tunnel stream reset is non-fatal for the control
+                            // session; drop the tunnel and keep control alive.
+                            ESP_LOGW(TAG, "server reset tunnel stream");
                             noise_tunnel_on_session_down();
                         } else {
-                            ESP_LOGE(TAG, "server rejected /link-control: %d",
-                                     frame.response.status);
+                            ESP_LOGW(TAG, "server reset stream %lld",
+                                     (long long)frame.stream_id);
                             error = true;
                             break;
                         }
+                    } else if (frame.kind == ServiceFrameKind::Response) {
+                        ESP_LOGI(TAG, "got response status=%d on stream %lld",
+                                 frame.response.status, (long long)frame.stream_id);
+                        if (frame.response.status != 200) {
+                            if (is_tunnel) {
+                                ESP_LOGW(TAG, "server rejected /link-tunnel: %d",
+                                         frame.response.status);
+                                noise_tunnel_on_session_down();
+                            } else {
+                                ESP_LOGE(TAG, "server rejected /link-control: %d",
+                                         frame.response.status);
+                                error = true;
+                                break;
+                            }
+                        }
                     }
                 }
+            } else if (n == 0) {
+                ESP_LOGI(TAG, "peer closed");
+                error = true;
+                break;
+            } else if (n == -1) {
+                ESP_LOGW(TAG, "rx error");
+                error = true;
+                break;
+            } else if (n == -3) {
+                // Control frame (ping/pong) — no app data, but the peer answered,
+                // so the connection is bidirectionally alive. Reset RX liveness.
+                last_rx_us = esp_timer_get_time();
+                last_activity_us = last_rx_us;
+            } else {
+                break;  // n == -2: nothing more waiting
             }
-        } else if (n == 0) {
-            ESP_LOGI(TAG, "peer closed");
-            error = true;
-            break;
-        } else if (n == -1) {
-            ESP_LOGW(TAG, "rx error");
-            error = true;
-            break;
-        } else if (n == -3) {
-            // Control frame (ping/pong) — no app data, but the peer answered,
-            // so the connection is bidirectionally alive. Reset RX liveness.
-            last_rx_us = esp_timer_get_time();
-            last_activity_us = last_rx_us;
         }
-        // n == -2: no data available, continue
+        if (error) break;
 
         // TX: keep exactly one control message in flight across loop turns.
         // A paused slot prevents dequeue/serialization of the next result.
