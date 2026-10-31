@@ -113,11 +113,11 @@ dependencies:
   espressif/esp_lcd_st77916:
     version: "2.0.2"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_185c\", \"ostb_echoear_2st\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_185c\", \"ostb_echoear_2st\", \"viewe_smartring_plus\"]"
   espressif/esp_lcd_touch_cst816s:
     version: "==1.1.2"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_185c\", \"waveshare_s3_lcd128\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_185c\", \"waveshare_s3_lcd128\", \"viewe_smartring_plus\"]"
   espressif/esp_lcd_gc9a01:
     version: "^2.0.0"
     rules:
@@ -131,8 +131,3 @@ dependencies:
     version: ">=1.5.0,<2.0.0"
     rules:
       - if: '$CONFIG{MUSE_BOARD_ID} == "waveshare_p4_lcd35"'
-  viewesmart/smartring_plus:
-    version: "^1.1.2"
-    override_path: "../../components_vendor/viewesmart__smartring_plus"
-    rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"viewe_smartring_plus\""
