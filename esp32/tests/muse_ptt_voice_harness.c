@@ -121,10 +121,10 @@ float muse_audio_dbfs(const int16_t *p,size_t n) { (void)n; return (float)p[0]/1
 float muse_audio_level(const int16_t *p,size_t n) { assert(n); return (float)p[0]/1000; }
 
 /* Legacy path is a tripwire, not another implementation of the note engine. */
-void muse_hatch_turn_begin(void) { ++notes; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
+void muse_hatch_turn_begin(void) { ++notes; if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
 void muse_hatch_turn_audio(const int16_t *p,size_t n) { (void)p;(void)n; }
 size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) { (void)p;(void)ms;return n; }
-void muse_hatch_turn_end(void) {}
+void muse_hatch_turn_end(void) { if(scenario>=50) { ++ends; longjmp(finish,3); } }
 void muse_hatch_turn_cancel(void) {}
 muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) { (void)p;(void)n;return MUSE_HATCH_EV_NONE; }
 bool muse_hatch_turn_caption(size_t x,char *p,size_t n) { (void)x;(void)p;(void)n;return false; }
@@ -214,6 +214,12 @@ muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
 
 esp_err_t muse_audio_read(int16_t *p,size_t n) {
     ++frame; clock_us+=scenario==41?0:scenario==22?1000:20000; assert(frame<1200);
+    if(scenario>=50) {
+        if(frame==2) push(MUSE_PTT_UP);   /* first click's release must not send */
+        if(scenario!=51 && frame==25) push(MUSE_PTT_DOWN);
+        if(scenario!=51 && frame==26) push(MUSE_PTT_UP);
+        if(frame==10) assert(mode==MUSE_MODE_LISTENING && !ends);
+    }
     if(scenario==41 && frame==2) push(MUSE_PTT_UP);
     if(scenario>=22 && scenario<=28) {
         if(frame==2) push(MUSE_PTT_UP);
@@ -265,6 +271,28 @@ esp_err_t muse_audio_write(const int16_t *p,size_t n) {
 int main(int argc,char **argv) {
     assert(argc==2); scenario=atoi(argv[1]); s_queue=input_queue=&queue; ready=true;
     s_pre=calloc(PRE_CHUNKS,sizeof(*s_pre));
+    if(scenario>=50) {
+        assert(NOTE_TOGGLE && !CONFIG_MUSE_REALTIME_VOICE);
+        int outcome=setjmp(finish);
+        if(!outcome) {
+            if(scenario==52) {
+                muse_input_event_t wake={.type=MUSE_PTT_DOWN, .wake=true};
+                xQueueSend(&queue,&wake,0);
+                voice_task(NULL);   /* production dispatch, including waking */
+            } else {
+                size_t captured; char why[96];
+                assert(can_record());
+                assert(record(false,&captured,why,sizeof(why)));
+                assert(scenario==51 ? captured==MAX_FRAMES : captured==31*MUSE_AUDIO_CHUNK);
+                finish_note();
+            }
+            assert(!"toggle note failed to send");
+        }
+        assert(outcome==3 && notes==1 && ends==1 && !starts);
+        assert(scenario==51 ? frame==MAX_FRAMES/MUSE_AUDIO_CHUNK : frame==31);
+        drop_rec(); free(s_pre);
+        return 0;
+    }
     if (scenario>=20 && scenario<=21) {
         notes_mode=scenario==21; terminate_task=true; push(MUSE_PTT_DOWN); push(MUSE_PTT_UP);
         int outcome=setjmp(finish);

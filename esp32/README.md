@@ -349,6 +349,21 @@ A few things worth knowing:
 - Builds are signed with the included development key and never turn on
   Secure Boot, so you can reflash your board as often as you like.
 
+### Toggle voice-note recording
+
+Boards with a talk button normally record while it is held. For hands-free
+recording, set `CONFIG_MUSE_REALTIME_VOICE=n` and
+`CONFIG_MUSE_VOICE_NOTE_TOGGLE=y` in the build's `sdkconfig` or enable the
+option in `idf.py menuconfig`. The optional
+[`sdkconfig.muse-voice-note-toggle`](devices/sdkconfig.muse-voice-note-toggle)
+overlay can be loaded after the Muse and board overlays.
+
+Press the talk button once to record, release it and speak, then press again
+to send. Releasing the first press does not send the note. A press that wakes
+the display also starts recording; the normal 15-second limit still applies.
+Replies use the existing text-caption path. This option does not add TTS or
+enable live voice calls, and is off by default for every board.
+
 ## Tests
 
 The tests run on your computer, with no board attached:

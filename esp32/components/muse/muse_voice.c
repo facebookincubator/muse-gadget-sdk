@@ -49,6 +49,11 @@ static const char *TAG = "muse_voice";
 #define TAIL_FRAMES (MUSE_AUDIO_RATE * 12 / 100)   /* capture lag + poll interval, stops before the release click */
 #define MAX_FRAMES (MUSE_AUDIO_RATE * MAX_SECS)
 #define MIN_HELD_FRAMES (MUSE_AUDIO_RATE * 3 / 10)   /* shorter presses are taps, not speech */
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+#define NOTE_TOGGLE 1
+#else
+#define NOTE_TOGGLE 0
+#endif
 #if CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT
 #define PRE_CHUNKS 6                                   /* 120 ms; a 320 ms upload burst stalls on the ADV and C3 */
 #else
@@ -313,7 +318,7 @@ static void take(rec_stats_t *st, const int16_t *pcm)
 }
 
 /*
- * Records speech until release or MAX_SECS, starting with the pre-roll; *held
+ * Records speech until release (or the next press in toggle mode) or MAX_SECS; *held
  * gets the part after the press. It streams to Hatch as it goes if it can.
  * If not, the note is kept in s_rec to send later, and streams from partway
  * if Hatch comes within reach. Returns false if Hatch failed the turn with no
@@ -390,7 +395,8 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
          * Capture runs 60-80 ms behind real time and people let go on their
          * last syllable, so keep going briefly after release.
          */
-        if (!released && got_event(MUSE_PTT_UP)) {
+        if (!released && got_event(NOTE_TOGGLE ? MUSE_PTT_DOWN : MUSE_PTT_UP)) {
+            if (NOTE_TOGGLE) muse_input_clear_call_pending(s_press_mark);
             released = true;
             stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
         }
@@ -1206,7 +1212,7 @@ static void voice_task(void *arg)
             wake = ev.wake;
         }
         bool ptt = muse_voice_ptt_enabled();
-        if (wake && !(ptt ? ptt_held_on_waking() : held_on_waking())) {
+        if (wake && !NOTE_TOGGLE && !(ptt ? ptt_held_on_waking() : held_on_waking())) {
             /* A tap: it only woke Muse. A press posted since keeps its own mark. */
             muse_input_clear_call_pending(s_press_mark);
             continue;
@@ -1251,7 +1257,7 @@ static void voice_task(void *arg)
                 continue;
             }
 #endif
-            go_idle("HOLD LONGER TO TALK");
+            go_idle(NOTE_TOGGLE ? "RECORD A LONGER NOTE" : "HOLD LONGER TO TALK");
             continue;
         }
         if (!ok) {

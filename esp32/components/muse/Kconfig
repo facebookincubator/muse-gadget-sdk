@@ -319,6 +319,17 @@ menu "Muse"
             played for the idle limit, or at the length limit. Muse's VM
             has to accept voice calls from this gadget's credentials.
 
+    config MUSE_VOICE_NOTE_TOGGLE
+        bool "Press once to record a voice note, press again to send"
+        depends on MUSE_ENABLED && !MUSE_REALTIME_VOICE
+        default n
+        help
+            A talk-button press starts recording and the next press sends
+            the note. Releasing the button does not stop recording. A press
+            that wakes the display also starts the note. Recording still
+            ends at the normal 15-second limit. Replies remain text unless
+            a separate TTS integration is provided.
+
 if MUSE_REALTIME_VOICE
 
     config MUSE_REALTIME_VOICE_APP_ID

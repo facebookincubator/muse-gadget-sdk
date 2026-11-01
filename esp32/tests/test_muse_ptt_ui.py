@@ -38,7 +38,7 @@ class StopWatchPTT(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.binaries = {}
-        for board, realtime in ((1, 1), (0, 1), (1, 0)):
+        for board, realtime in ((1, 1), (0, 1), (1, 0), (0, 0)):
             stage = Path(cls.tmp.name) / f'{board}-{realtime}'
             stage.mkdir()
             # Byte-identical production units/headers. No function extraction or
@@ -61,6 +61,7 @@ class StopWatchPTT(unittest.TestCase):
                 '#pragma once\n'
                 f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH {board}\n'
                 f'#define CONFIG_MUSE_REALTIME_VOICE {realtime}\n'
+                f'#define CONFIG_MUSE_VOICE_NOTE_TOGGLE {int(not board and not realtime)}\n'
                 '#define CONFIG_MUSE_HATCH 1\n#define CONFIG_SPIRAM 1\n'
                 '#define CONFIG_MUSE_DEFAULT_VOLUME 20\n')
             ui = (MUSE / 'muse_ui.c').read_text()
@@ -94,6 +95,15 @@ class StopWatchPTT(unittest.TestCase):
                                 env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0:abort_on_error=1',
                                      'UBSAN_OPTIONS': 'halt_on_error=1:print_stacktrace=1'})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_toggle_note_ignores_release_and_sends_on_second_press(self):
+        self.run_case('voice', 50, board=0, realtime=0)
+
+    def test_toggle_note_still_sends_at_the_recording_limit(self):
+        self.run_case('voice', 51, board=0, realtime=0)
+
+    def test_toggle_note_starts_on_a_waking_tap(self):
+        self.run_case('voice', 52, board=0, realtime=0)
 
     def test_release_tail_is_sample_bounded_even_with_fast_reads(self):
         self.run_case('voice', 22)
