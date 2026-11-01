@@ -1320,6 +1320,17 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
+#if CONFIG_HOMEHUB_LAN_FETCH
+static cJSON *int_param(const char *description) {
+    cJSON *param = cJSON_CreateObject();
+    cJSON_AddStringToObject(param, "type", "integer");
+    if (description) {
+        cJSON_AddStringToObject(param, "description", description);
+    }
+    return param;
+}
+#endif
+
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
 // The optional `row` of display.draw_url and display.draw_file.
 static cJSON *row_params(void) {
