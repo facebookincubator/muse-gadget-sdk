@@ -154,7 +154,7 @@ static void poll_keys(void *arg) {
                 reterminal_e100x_events_button(i, gpios[i], down, presses);
                 // Include the event/activity path in the measured stack margin.
                 stack_monitor_record(&stack);
-                ESP_LOGI("e100x.buttons", "KEY%d GPIO%d %s count=%lu",
+                ESP_LOGI("link.e100x.buttons", "KEY%d GPIO%d %s count=%lu",
                          i, gpios[i], down ? "pressed" : "released",
                          (unsigned long)presses);
             }
@@ -355,7 +355,7 @@ i2c_master_bus_handle_t reterminal_e100x_i2c_bus_get(void) {
     if (err == ESP_OK) s_bus = bus;
     s_initializing = false;
     portEXIT_CRITICAL(&s_init_lock);
-    if (err != ESP_OK) ESP_LOGW("e100x.i2c", "bus init: %s", esp_err_to_name(err));
+    if (err != ESP_OK) ESP_LOGW("link.e100x.i2c", "bus init: %s", esp_err_to_name(err));
     return err == ESP_OK ? bus : NULL;
 }
 
@@ -400,24 +400,24 @@ void reterminal_e100x_battery_metrics(cJSON *payload) {
 
 void reterminal_e100x_prepare_display(void) {
 #if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE
-    if (!reterminal_e100x_sd_prepare_bus()) ESP_LOGW("e100x", "SD bus pins unavailable");
+    if (!reterminal_e100x_sd_prepare_bus()) ESP_LOGW("link.e100x", "SD bus pins unavailable");
 #endif
 }
 void reterminal_e100x_init(void) {
 #if RETERMINAL_E100X_INPUT_ENABLED
-    if (!reterminal_e100x_buttons_init()) ESP_LOGW("e100x", "buttons unavailable");
+    if (!reterminal_e100x_buttons_init()) ESP_LOGW("link.e100x", "buttons unavailable");
 #endif
 #if CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT
-    if (!e1003_touch_init()) ESP_LOGW("e100x", "touch unavailable");
+    if (!e1003_touch_init()) ESP_LOGW("link.e100x", "touch unavailable");
 #endif
 #if CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
-    if (!reterminal_e100x_led_init()) ESP_LOGW("e100x", "user LED unavailable");
+    if (!reterminal_e100x_led_init()) ESP_LOGW("link.e100x", "user LED unavailable");
 #endif
 #if RETERMINAL_E100X_HARDWARE_ENABLED
-    if (!reterminal_e100x_sd_monitor_init()) ESP_LOGW("e100x", "SD detection unavailable");
-    if (!reterminal_e100x_microphone_init()) ESP_LOGW("e100x", "microphone power unavailable");
+    if (!reterminal_e100x_sd_monitor_init()) ESP_LOGW("link.e100x", "SD detection unavailable");
+    if (!reterminal_e100x_microphone_init()) ESP_LOGW("link.e100x", "microphone power unavailable");
     if (xTaskCreate(battery_task, "e100x_battery", 3072, NULL, 2, NULL) != pdPASS)
-        ESP_LOGW("e100x", "battery sampling unavailable");
+        ESP_LOGW("link.e100x", "battery sampling unavailable");
 #endif
 }
 

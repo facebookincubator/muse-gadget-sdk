@@ -56,6 +56,7 @@ typedef struct { uint64_t pin_bit_mask; int mode,pull_up_en; } gpio_config_t;
 int gpio_config(const gpio_config_t *);
 int gpio_get_level(int);
 int gpio_set_level(int,int);
+int gpio_sleep_sel_dis(int);
 const char *esp_err_to_name(int);
 """,
                 "driver/sdspi_host.h": """#pragma once

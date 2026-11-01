@@ -149,6 +149,7 @@ int main(void) {
 #include <string.h>
 typedef int esp_err_t;
 #define ESP_OK 0
+#define ESP_ERR_INVALID_STATE -1
 #define CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951 1
 #define FULL_REFRESH_EVERY 10
 #define EPD_W 64
@@ -162,6 +163,9 @@ static bool s_partial_mode,s_partial_ready,s_status_drawn;
 static unsigned s_partial_updates;
 static int s_partial_x,s_partial_y,s_partial_w,s_partial_h,s_fast_refreshes;
 static int s_panel_lock,s_lock,fulls,partials,grays,failing;
+static int owner_acquires,owner_releases;
+static bool display_owner_acquire(void) { owner_acquires++; return true; }
+static void display_owner_release(void) { owner_releases++; }
 static uint8_t canvas[EPD_W*EPD_H],frame[EPD_FRAME_BYTES],shown[EPD_FRAME_BYTES];
 static uint8_t *s_canvas=canvas,*s_frame=frame,*s_shown=shown;
 static uint8_t *s_gray_old=frame,*s_gray4_frame=frame;
@@ -209,6 +213,7 @@ int main(void) {
         assert(canvas[y*EPD_W+x]==((x>=16 && x<32 && y>=2 && y<6)?255:7));
     s_image_dirty=true;s_gray16_mode=true;assert(led_status_draw_done());
     assert(grays==1 && !s_partial_ready && !led_status_draw_begin_partial(16,2,16,4));
+    assert(owner_acquires == owner_releases);
     return 0;
 }
 '''
@@ -631,11 +636,11 @@ int main(void) {
         cmake = (ROOT / "main/CMakeLists.txt").read_text()
         # Each e-paper backend builds the status screen with its panel driver.
         self.assertRegex(cmake, r'if\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179\)\s*'
-                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c"\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "link_power.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6\)\s*'
-                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c"\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "link_power.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951\)\s*'
-                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_it8951.c"\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_it8951.c" "link_power.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681\)\s*'

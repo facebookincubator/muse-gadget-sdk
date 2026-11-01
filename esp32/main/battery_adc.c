@@ -22,6 +22,7 @@
 
 #include <limits.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "driver/gpio.h"
@@ -40,7 +41,7 @@
 #define MAX_ADC_RANGE_MV 400
 #define BATTERY_ADC_GPIO E100X_BATTERY_ADC_GPIO
 
-static const char *TAG = "battery_adc";
+static const char *TAG = "link.battery_adc";
 
 static adc_oneshot_unit_handle_t s_adc = NULL;
 static adc_cali_handle_t s_cali = NULL;

@@ -29,6 +29,13 @@ class E100xEventsTest(unittest.TestCase):
                 "typedef void (*TaskFunction_t)(void *);\n"
                 "int xTaskCreate(TaskFunction_t,const char *,unsigned,void *,unsigned,void *);\n"
                 "void vTaskDelay(int);\nvoid vTaskDelete(void *);\n")
+            (out / "freertos/semphr.h").write_text(
+                "#pragma once\n"
+                "typedef void *SemaphoreHandle_t;\n"
+                "SemaphoreHandle_t xSemaphoreCreateBinary(void);\n"
+                "int xSemaphoreTake(SemaphoreHandle_t,int);\n"
+                "int xSemaphoreGive(SemaphoreHandle_t);\n"
+                "void vSemaphoreDelete(SemaphoreHandle_t);\n")
             (out / "esp_timer.h").write_text(
                 "#pragma once\n#include <stdint.h>\nint64_t esp_timer_get_time(void);\n")
             exe = out / "events.exe"

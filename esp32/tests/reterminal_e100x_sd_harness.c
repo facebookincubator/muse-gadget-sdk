@@ -6,8 +6,28 @@
 #include "reterminal_e100x_board.h"
 #include "freertos/semphr.h"
 #include "esp_vfs_fat.h"
+#include "link_power.h"
 
 static bool s_inserted = true, s_sd_held, s_spi_held, s_sd_deny, s_spi_deny, s_mount_fail;
+static bool s_owner_held, s_pm_held;
+bool link_power_acquire(link_power_owner_t owner) {
+    assert(owner == LINK_POWER_SD && !s_owner_held);
+    s_owner_held = true;
+    return true;
+}
+void link_power_release(link_power_owner_t owner) {
+    assert(owner == LINK_POWER_SD && s_owner_held && !s_pm_held);
+    s_owner_held = false;
+}
+bool link_power_pm_enter(link_pm_operation_t operation) {
+    assert(operation == LINK_PM_STORAGE && s_owner_held && !s_pm_held);
+    s_pm_held = true;
+    return true;
+}
+void link_power_pm_leave(link_pm_operation_t operation) {
+    assert(operation == LINK_PM_STORAGE && s_pm_held);
+    s_pm_held = false;
+}
 static int s_takes,s_gives,s_delay_300,s_power[16],s_power_n,s_contentions;
 void *xSemaphoreCreateMutex(void) { return (void *)1; }
 int xSemaphoreTake(void *m,int timeout) {
@@ -31,6 +51,7 @@ int gpio_set_level(int gpio, int level) {
     if(gpio==E100X_SD_ENABLE_GPIO) { assert(s_power_n<16);s_power[s_power_n++]=level; }
     return 0;
 }
+int gpio_sleep_sel_dis(int gpio) { assert(gpio == E100X_SD_ENABLE_GPIO); return ESP_OK; }
 const char *esp_err_to_name(int error) { (void)error; return "fake"; }
 void reterminal_e100x_events_sd(bool inserted) { (void)inserted; }
 int esp_vfs_fat_sdspi_mount(const char *path, const sdmmc_host_t *host,
@@ -67,7 +88,7 @@ int mbedtls_base64_encode(unsigned char *out, size_t cap, size_t *len,
 static cJSON *call(const char *name, const char *json) {
     cJSON *p = json ? cJSON_Parse(json) : NULL;
     cJSON *r = reterminal_e100x_sd_command(name, p);
-    cJSON_Delete(p); assert(r && !s_sd_held && !s_spi_held && s_takes==s_gives); return r;
+    cJSON_Delete(p); assert(r && !s_sd_held && !s_spi_held && !s_owner_held && !s_pm_held && s_takes==s_gives); return r;
 }
 static cJSON *payload(cJSON *r) {
     assert(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));

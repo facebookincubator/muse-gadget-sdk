@@ -24,7 +24,7 @@
 #define PIN_INT E100X_TOUCH_INT_GPIO
 #define PIN_RST E100X_TOUCH_RESET_GPIO
 
-static const char *TAG = "e1003.touch";
+static const char *TAG = "link.e1003.touch";
 static i2c_master_dev_handle_t s_dev;
 static e1003_touch_state_t s_state;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;

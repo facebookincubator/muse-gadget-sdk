@@ -4,8 +4,28 @@
 #include "reterminal_e100x_microphone.h"
 #include "driver/gpio.h"
 #include "driver/i2s_pdm.h"
+#include "link_power.h"
 
 static int s_failure, s_power, s_new, s_deleted, s_enabled, s_disabled, s_reads;
+static bool s_owner_held, s_pm_held;
+bool link_power_acquire(link_power_owner_t owner) {
+    assert(owner == LINK_POWER_MICROPHONE && !s_owner_held);
+    s_owner_held = true;
+    return true;
+}
+void link_power_release(link_power_owner_t owner) {
+    assert(owner == LINK_POWER_MICROPHONE && s_owner_held && !s_pm_held);
+    s_owner_held = false;
+}
+bool link_power_pm_enter(link_pm_operation_t operation) {
+    assert(operation == LINK_PM_MICROPHONE && s_owner_held && !s_pm_held);
+    s_pm_held = true;
+    return true;
+}
+void link_power_pm_leave(link_pm_operation_t operation) {
+    assert(operation == LINK_PM_MICROPHONE && s_pm_held);
+    s_pm_held = false;
+}
 int gpio_config(const gpio_config_t *c) {
     assert(c->pin_bit_mask == (1ULL << 38));
     return s_failure == 1 ? -1 : 0;
@@ -63,12 +83,14 @@ int main(void) {
     assert(cJSON_GetObjectItem(p, "bytes")->valueint == 3200);
     assert(cJSON_GetObjectItem(p, "channels")->valueint == 1);
     assert(!s_power && s_new == s_deleted && s_enabled == s_disabled && s_reads == 2);
+    assert(!s_owner_held && !s_pm_held);
     cJSON_Delete(r);
     for (s_failure = 1; s_failure <= 8; s_failure++) {
         s_reads = 0;
         r = record("{\"duration_ms\":100}");
         assert(cJSON_IsFalse(cJSON_GetObjectItem(r, "ok")));
         assert(!s_power && s_new == s_deleted && s_enabled == s_disabled);
+        assert(!s_owner_held && !s_pm_held);
         cJSON_Delete(r);
     }
     s_failure = 0;

@@ -209,18 +209,22 @@ int main(void) {
         ))
         with tempfile.TemporaryDirectory() as name:
             tmp = Path(name)
-            source = tmp / "registration.c"
-            # These builders use the C subset of C++, with nullptr as the only
-            # exception. Execute them with the same cJSON fake as other tests.
+            source = tmp / "registration.cpp"
+            # The production registration builder is C++; compile the fake
+            # cJSON implementation as C and link it to the extracted builder.
             source.write_text('''
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+extern "C" {
 #include "cJSON.h"
+}
 #include "esp_app_desc.h"
-#define nullptr NULL
+#define ESP_LOGE(...) ((void)0)
+#define ESP_LOGI(...) ((void)0)
+#define TAG "test"
 #define CONFIG_HOMEHUB_TUNNEL 1
 static bool enabled;
 bool ota_is_enabled(void) { return enabled; }
@@ -242,7 +246,23 @@ int main(void) {
     return 0;
 }
 ''')
-            output = self.compile_and_run([source, ROOT / "tests/link_fakes/cJSON.c"], tmp)
+            cc = shlex.split(os.environ.get("CC", "cc"))
+            cxx = shlex.split(os.environ.get("CXX", "c++"))
+            cjson = tmp / "cJSON.o"
+            built = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                                    "-I", str(ROOT / "tests/link_fakes"), "-c",
+                                    str(ROOT / "tests/link_fakes/cJSON.c"), "-o", str(cjson)],
+                                   capture_output=True, text=True)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            binary = tmp / "registration-test"
+            built = subprocess.run([*cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                                    "-I", str(tmp), "-I", str(ROOT / "tests/link_fakes"),
+                                    str(source), str(cjson), "-o", str(binary)],
+                                   capture_output=True, text=True)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(binary)], capture_output=True, text=True)
+            self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+            output = ran.stdout
             registrations = [json.loads(line)["params"] for line in output.splitlines()]
             self.assertEqual(len(registrations), 2)
             for enabled, params in zip((False, True), registrations):

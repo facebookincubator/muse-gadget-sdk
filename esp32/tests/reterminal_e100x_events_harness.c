@@ -3,6 +3,7 @@
 
 #include "reterminal_e100x_events.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "reterminal_e100x.h"
 
 void check_wire_reply(cJSON *result);
@@ -18,6 +19,21 @@ static void *s_arg;
 static cJSON *s_reply;
 static bool s_connected = true;
 static bool s_task_fail;
+static int s_signal;
+
+SemaphoreHandle_t xSemaphoreCreateBinary(void) { return &s_signal; }
+int xSemaphoreGive(SemaphoreHandle_t semaphore) {
+    assert(semaphore == &s_signal);
+    s_signal = 1;
+    return 1;
+}
+int xSemaphoreTake(SemaphoreHandle_t semaphore, int ticks) {
+    assert(semaphore == &s_signal);
+    if (s_signal) { s_signal = 0; return 1; }
+    vTaskDelay(ticks);
+    return 0;
+}
+void vSemaphoreDelete(SemaphoreHandle_t semaphore) { assert(semaphore == &s_signal); }
 
 int64_t esp_timer_get_time(void) { return s_time; }
 void vTaskDelay(int ticks) { s_time += ticks * 1000; }

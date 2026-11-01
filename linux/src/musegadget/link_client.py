@@ -369,18 +369,22 @@ class LinkSession:
     ) -> dict:
         """Post a WAV voice note, optionally including instructions in ``message``.
 
-        Muse chooses its usual reply format unless ``output_modality`` is set.
-        Its TTS endpoint requires a voice-modality assistant reply.
+        Muse reads only the items of a request that has any, so the text goes
+        first as its own item. Muse chooses its usual reply format unless
+        ``output_modality`` is set. Its TTS endpoint requires a voice-modality
+        assistant reply.
         """
         if not wav_bytes or len(wav_bytes) > MAX_VOICE_BYTES:
             raise ValueError("voice note must contain at most 2 MiB of WAV audio")
+        voice = {
+            "type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+            "data_base64": base64.b64encode(wav_bytes).decode("ascii"),
+        }
+        text = [{"type": "text", "text": message}] if message.strip() else []
         request_body = {
             "message": message,
             "device_id": self._device.node_id,
-            "items": [{
-                "type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
-                "data_base64": base64.b64encode(wav_bytes).decode("ascii"),
-            }],
+            "items": text + [voice],
         }
         if session_id:
             request_body["session_id"] = session_id

@@ -41,7 +41,7 @@ static sdmmc_card_t *s_card;
 static bool s_pins_ready;
 static portMUX_TYPE s_detect_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_removals, s_mounted_removals;
-static const char *TAG = "e100x.sd";
+static const char *TAG = "link.e100x.sd";
 
 static bool configure_pins(void) {
     const gpio_config_t output = {

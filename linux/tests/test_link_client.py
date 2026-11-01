@@ -653,6 +653,30 @@ def test_twenty_second_voice_note_uploads_in_bounded_chunks():
     asyncio.run(bounded_scenario(scenario()))
 
 
+@pytest.mark.parametrize("message, items", [
+    ("what did I just say?", [{"type": "text", "text": "what did I just say?"}]),
+    ("", []),
+    ("  \n", []),
+], ids=["with_message", "without_message", "blank_message"])
+def test_voice_note_sends_its_message_as_a_text_item_before_the_audio(message, items):
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        reply = asyncio.ensure_future(session.send_voice(b"WAV", message=message))
+        request = await vm.next_frame()
+        uploaded = json.loads(request.value.body)
+        assert uploaded["message"] == message
+        assert uploaded["items"] == items + [
+            {"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+             "data_base64": "V0FW"}]
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b"{}", end_body=True)))
+        assert (await reply)["ok"]
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
 @pytest.mark.parametrize("send, body", [
     (lambda session: session.send_chat("Hello", output_modality="voice"),
      {"message": "Hello", "device_id": "homelink-abcdef", "output_modality": "voice"}),
@@ -660,7 +684,8 @@ def test_twenty_second_voice_note_uploads_in_bounded_chunks():
         b"WAV", "existing-chat", message="Use concise robot replies.", output_modality="voice"),
      {"message": "Use concise robot replies.", "device_id": "homelink-abcdef",
       "session_id": "existing-chat", "output_modality": "voice",
-      "items": [{"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
+      "items": [{"type": "text", "text": "Use concise robot replies."},
+                {"type": "file", "mime_type": "audio/wav", "filename": "voice_note.wav",
                  "data_base64": "V0FW"}]}),
 ], ids=["send_chat", "send_voice"])
 def test_request_can_ask_for_a_spoken_reply(send, body):
