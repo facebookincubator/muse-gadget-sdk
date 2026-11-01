@@ -597,6 +597,38 @@ Keep within the session's bounds:
   slow work, and any request that depends on its result, in a task of your
   own, as `on_ws_command()`'s asynchronous commands do.
 
+## Fetching from the home network for Muse
+
+Muse's VM can't reach the user's home network. `lan.fetch`
+(`main/lan_fetch.c`, `CONFIG_HOMEHUB_LAN_FETCH`, on by default with the
+home-network tunnel and PSRAM) has the gadget GET a URL there instead: an IP
+camera's JPEG snapshot, a solar inverter's or a hub's JSON API.
+
+- Only `http://` or `https://` URLs whose host is, or resolves to, a private
+  IPv4 address (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`); every
+  address a name resolves to has to be. IPv6 literals are refused, and
+  redirects aren't followed: pass the final URL.
+- Logins: `user:pass@` in the URL, the `username` and `password` parameters
+  (Basic or Digest; the option enables both in `esp_http_client`), or a token
+  in the query. None is logged or returned: the URL in logs and results is
+  `scheme://***@host/path?***`, and the copies are wiped once used.
+- The body streams into PSRAM, capped by `max_bytes` (default 1 MiB, at most
+  2 MiB) as it arrives. The result has `bytes`, `sha256`, `content_type`,
+  `jpeg`, `http_status` and `fetch_ms`.
+- Delivery: `file` writes it to the VM with `POST /fs/write` (48 KB parts,
+  the later ones appending; default `lan-fetch/latest.<ext>`); `inline`
+  returns it as `data_base64` (up to 512 KB, as `camera.capture` does);
+  `auto` (the default) writes the file, and once the VM refuses
+  `/fs/write` to the gadget's credentials returns inline with `file_error`
+  for 10 minutes before trying the file again.
+- It runs on its own task with `display.draw_url`'s internal RAM budget, and
+  every failure is a distinct error code (`not_private`, `dns_failed`,
+  `connect_failed`, `auth_failed`, `http_status`, `too_large`, `empty_body`,
+  `timeout`, `upload_failed`, `out_of_memory`).
+- `>lan.fetch {"url": "..."}` on the USB console runs the same command and
+  prints `@lan.fetch {...}`. `tests/test_link_lan_fetch.py` runs it on the
+  host against a scripted network and VM.
+
 ## Video from a phone
 
 `MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
