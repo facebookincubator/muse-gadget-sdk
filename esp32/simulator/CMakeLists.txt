@@ -274,6 +274,12 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_settings_wide_800 COMMAND muse_settings_text_test 800 480 0 4.3 geometry)
     add_test(NAME muse_settings_xiao_switch COMMAND muse_settings_text_test 172 320 0 1.47 switch)
     add_test(NAME muse_settings_round_switch COMMAND muse_settings_text_test 466 466 1 1.75 switch)
+    add_test(NAME muse_settings_round_240_switch COMMAND muse_settings_text_test 240 240 1 1.28 switch)
+    add_test(NAME muse_settings_round_240_rows COMMAND muse_settings_text_test 240 240 1 1.28 rows)
+    add_test(NAME muse_settings_xiao_rows COMMAND muse_settings_text_test 172 320 0 1.47 rows)
+    add_test(NAME muse_settings_round_240_screen COMMAND muse_settings_text_test 240 240 1 1.28 screen)
+    add_test(NAME muse_settings_round_240_mic COMMAND muse_settings_text_test 240 240 1 1.28 mic)
+    add_test(NAME muse_settings_round_240_bench COMMAND muse_settings_text_test 240 240 1 1.28 bench)
     # The button menu's layout, in English and in Vietnamese (accented letters
     # in the 16 px caption font), on compact and full-size screens.
     foreach(lang en vi)
