@@ -66,6 +66,7 @@ session to Muse. The rest depends on the hardware.
 | **FoloToy AI Passport (experimental)** | ESP32-C3 | 240×320 LCD, rounded corners | 8 MB / none | [FoloToy repo](https://github.com/FoloToy/ai-passport) | [FoloToy](https://ai-passport.folotoy.cn/en/) |
 | **Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5** | ESP32-P4 + ESP32-C6 | 3.5" 320×480 LCD, touch | 16 MB / 32 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-3.5), [GitHub](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-3.5); [setup](waveshare-p4-lcd35.md) | [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-3.5.htm) |
 | **M5Stack StickC Plus2** | ESP32 | 1.14" 135×240 LCD | 8 MB / 2 MB | [M5Stack docs](https://docs.m5stack.com/en/core/M5StickC%20PLUS2), [M5Unified](https://github.com/m5stack/M5Unified) | [M5Stack](https://shop.m5stack.com/products/m5stickc-plus2-esp32-mini-iot-development-kit) (end of life) |
+| **Elecrow CrowPanel Advance 4.3 V1.3** | ESP32-S3 | 4.3" 800×480 RGB LCD, GT911 touch | 16 MB / 8 MB | [Elecrow wiki](https://www.elecrow.com/wiki/CrowPanel_Advance_4.3-HMI_ESP32_AI_Display.html), [factory source](https://github.com/Elecrow-RD/CrowPanel-Advance-4.3-HMI-ESP32-S3-AI-Powered-IPS-Touch-Screen-800x480) | — |
 | **M5Stack Core2 (v1.0)** | ESP32 | 2.0" 320×240 touch LCD | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/Core2), [M5Unified](https://github.com/m5stack/M5Unified) | — |
 | **Freenove FNK0104B** | ESP32-S3 | 2.8" 240×320 LCD, touch | 16 MB / 8 MB | [Freenove repo](https://github.com/Freenove/Freenove_ESP32_S3_Display) | — |
 | **VN ESP32-S3 1.83-inch NV3023** | ESP32-S3 | 1.83" 284×240 LCD (NV3023) | 16 MB / 8 MB | [xiaozhi-esp32_vietnam board](https://github.com/TienHuyIoT/xiaozhi-esp32_vietnam) | — |
@@ -102,6 +103,11 @@ provided; factory-equivalent low-power behaviour is not claimed.
 *EchoEar-2ST entries describe the one measured unit, tested on hardware for
 pairing, touch, recording and playback, sleep and wake, and reconnect. See
 [validation limits](ostb-echoear-2st.md#validation).
+
+The CrowPanel's BOOT button is push-to-talk; the GT911 touchscreen opens
+settings. Set the K1 switch to its `S1=0, S0=0` position for microphone and
+speaker operation. The board-control MCU sets the backlight from its documented
+0–245 range. This panel has no battery telemetry.
 
 Boards without PSRAM (the ideaspark, the C6 boards, the Cardputer ADV and the AI Passport) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
@@ -665,6 +671,7 @@ board's overlays, in order:
 | SenseCAP Watcher | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-sensecap-watcher`](sdkconfig.muse-sensecap-watcher) | by hand |
 | M5Stack Cardputer ADV | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-sticks3`](sdkconfig.muse-m5stack-sticks3) | by hand |
+| Elecrow CrowPanel Advance 4.3 V1.3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-crowpanel-advance-43`](sdkconfig.muse-crowpanel-advance-43) | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack StopWatch | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stopwatch`](sdkconfig.muse-m5stack-stopwatch) | by hand |
 | Seeed XIAO ESP32-S3 1.47 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-seeed-xiao-s3-147`](sdkconfig.muse-seeed-xiao-s3-147) | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-cores3`](sdkconfig.muse-m5stack-cores3) | `tools/muse/board.sh build cores3` |

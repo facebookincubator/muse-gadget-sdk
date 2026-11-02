@@ -96,10 +96,21 @@ static int s_canvas_px;     /* Muse's size on screen */
 static int s_dy;            /* full layout: offset from a 466 px tall screen */
 static lv_indev_t *s_indev;
 static lv_obj_t *s_tv;
+static bool s_swipe_enabled = true;
+static bool s_touch_talk_down;
 /* True while the face tile is the visible tile. Updated in the LVGL task;
  * read from any task (single word, benign if briefly stale). */
 static volatile bool s_face_active = true;
 static lv_obj_t *s_face;
+
+static void update_tileview_swipe(void)
+{
+    if (!s_tv) return;
+    bool enabled = s_swipe_enabled && !s_touch_talk_down;
+    if (enabled != lv_obj_has_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE)) {
+        lv_obj_set_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE, enabled);
+    }
+}
 
 static void tile_changed_cb(lv_event_t *e)
 {
@@ -462,11 +473,15 @@ static void on_touch_mic(lv_event_t *e)
 {
     switch (lv_event_get_code(e)) {
     case LV_EVENT_PRESSED:
+        s_touch_talk_down = true;
+        update_tileview_swipe();
         muse_input_touch_talk(true);
         break;
     case LV_EVENT_RELEASED:
     case LV_EVENT_PRESS_LOST:
         muse_input_touch_talk(false);
+        s_touch_talk_down = false;
+        update_tileview_swipe();
         break;
     default:
         break;
@@ -1354,10 +1369,8 @@ static void update_chrome(float now)
     if (s_tv) {
         int page = lv_tileview_get_tile_active(s_tv) == s_settings;
         bool subpage = muse_settings_ui_in_subpage();
-        bool swipe = !page || !subpage;
-        if (swipe != lv_obj_has_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE)) {
-            lv_obj_set_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE, swipe);
-        }
+        s_swipe_enabled = !page || !subpage;
+        update_tileview_swipe();
         int shown = page * 2 + subpage;
         if (shown != s_shown_page) {
             for (int i = 0; i < 2; i++) {
@@ -1812,7 +1825,8 @@ void muse_ui_show_face(void)
     if (!s_tv) {
         return;
     }
-    lv_obj_add_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE);
+    s_swipe_enabled = true;
+    update_tileview_swipe();   /* still locked while the screen mic is held */
     lv_tileview_set_tile(s_tv, s_face, muse_board->epaper ? LV_ANIM_OFF : LV_ANIM_ON);
 }
 
@@ -1821,7 +1835,8 @@ void muse_ui_set_swipe_enabled(bool enabled)
     if (!s_tv) {
         return;
     }
-    lv_obj_set_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE, enabled);
+    s_swipe_enabled = enabled;
+    update_tileview_swipe();
     s_shown_page = -1;
     s_next_settings_tick = 0;
 }
