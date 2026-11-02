@@ -45,6 +45,10 @@
 extern "C" {
 #include "cJSON.h"
 #include "led_status.h"
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+#include "reterminal_battery.h"
+#endif
 #include "ota.h"
 #if CONFIG_MUSE_ENABLED
 extern "C" {
@@ -1695,6 +1699,15 @@ static void send_device_health(
         charging = cJSON_CreateBool(power.charging);
     }
     usb_power = cJSON_CreateBool(power.usb);
+#elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+    // The status-screen boards do not populate muse_state_power().
+    // Only voltage and estimated charge are measured; other fields stay null.
+    int rt_mv, rt_pct;
+    if (reterminal_battery_read(&rt_mv, &rt_pct)) {
+        battery_pct = cJSON_CreateNumber(rt_pct);
+        battery_mv = cJSON_CreateNumber(rt_mv);
+    }
 #endif
     cJSON_AddItemToObject(metrics, "battery_pct",
                           battery_pct ? battery_pct : cJSON_CreateNull());

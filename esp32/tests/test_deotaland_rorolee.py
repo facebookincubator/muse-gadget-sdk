@@ -127,6 +127,8 @@ static const char *s_title = "title", *s_page = "page", *s_hint_down = "down";
 static char page[96];
 static void set_text(const char *l, const char *text) { if (l == s_page) snprintf(page, sizeof(page), "%s", text); }
 static void select_hint(const char *t) { (void)t; }
+static void page_hint(void) {}
+static const char *muse_lang_menu(const char *en) { return en; }
 static struct { bool keyboard; const char *aux_button, *wake_button; } board, *muse_board = &board;
 static void show(view_t view) {
     switch (view) {

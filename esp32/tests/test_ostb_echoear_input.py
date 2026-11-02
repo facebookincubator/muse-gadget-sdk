@@ -58,6 +58,9 @@ static void muse_state_poke(void) {}
 static void muse_menu_key(int key) { (void)key; }
 static void set_asleep(bool sleep, const char *why) { (void)sleep; (void)why; }
 static void post(int type, bool wake) { (void)wake; if (type==MUSE_PTT_DOWN) down++; else up++; }
+static bool s_touch_talk_down;
+static int swipe_updates;
+static void update_tileview_swipe(void) { swipe_updates++; }
 '''
         code += function(source, 'muse_input_touch_talk') + '\n' + function(source, 'talk_button')
         ui = (ROOT / 'components/muse/muse_ui.c').read_text()
@@ -83,8 +86,10 @@ int main(void) {
     assert(confirmed==1 && down==2 && up==2 && !s_talk_down);
     pending_pair=false;
     lv_event_t event=LV_EVENT_PRESSED;on_touch_mic(&event);
+    assert(s_touch_talk_down && swipe_updates==1);   /* no tile swipe while held */
     talk_button(atomic_exchange(&s_touch_talk_events,0));assert(down==3 && s_talk_down);
     event=LV_EVENT_PRESS_LOST;on_touch_mic(&event);
+    assert(!s_touch_talk_down && swipe_updates==2);
     talk_button(atomic_exchange(&s_touch_talk_events,0));assert(up==3 && !s_talk_down);
     event=LV_EVENT_PRESSED;on_touch_mic(&event);
     event=LV_EVENT_RELEASED;on_touch_mic(&event);
