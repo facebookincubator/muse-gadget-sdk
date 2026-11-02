@@ -73,6 +73,9 @@ static void refresh(void) {}
 static void open_menu(void) { s_view = VIEW_LIST; s_sel = 0; }
 static void muse_menu_close(void) { s_view = VIEW_CLOSED; }
 static void show(view_t v) { s_view = v; }
+static int page_more;   /* Down presses a page has left to scroll */
+static bool page_scroll(int d) { if (d > 0 && page_more > 0) { --page_more; return true; } return false; }
+static void page_hint(void) {}
 static void activate(int item, int dir) { activated = item; direction = dir; }
 static void muse_input_request_power_off(void) { ++power_count; }
 static void muse_link_reset_setup(void) { ++reset_count; }
@@ -125,6 +128,19 @@ static void menu_test(void) {
     s_view = VIEW_RESET; handle(MUSE_MENU_SELECT); assert(reset_count == 1);
     s_view = VIEW_STATUS; handle(MUSE_MENU_BACK); assert(s_view == VIEW_LIST);
     s_view = VIEW_BATTERY; handle(MUSE_MENU_BACK); assert(s_view == VIEW_LIST);
+    /* A page longer than the screen scrolls on Down, then Down goes back. */
+    s_view = VIEW_STATUS; page_more = 2;
+    handle(MUSE_MENU_DOWN); assert(s_view == VIEW_STATUS);
+    handle(MUSE_MENU_DOWN); assert(s_view == VIEW_STATUS);
+    handle(MUSE_MENU_DOWN); assert(s_view == VIEW_LIST);
+    s_view = VIEW_BATTERY; page_more = 1; handle(MUSE_MENU_SELECT); assert(s_view == VIEW_LIST);
+    /* Scrolling a long confirmation never confirms it. */
+    for (int v = VIEW_POWER; v <= VIEW_RESET; ++v) {
+        s_view = v; page_more = 1;
+        handle(MUSE_MENU_DOWN); assert(s_view == (view_t)v);
+        handle(MUSE_MENU_DOWN); assert(s_view == VIEW_LIST);
+        assert(power_count == 1 && reset_count == 1);
+    }
 }
 static void values_test(void) {
     const int steps[] = {10,25,50,75,100};
