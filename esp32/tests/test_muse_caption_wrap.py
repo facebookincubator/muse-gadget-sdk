@@ -163,8 +163,10 @@ class CaptionWrapTest(unittest.TestCase):
             total += w - (2 if c == "A" and line[i + 1 : i + 2] == "V" else 0)
         return total
 
-    def assert_pages_show_everything(self, text: str, cols: int, px: int, lines: int) -> list[list[str]]:
-        pages = self.pages(text, cols, px, lines)
+    def assert_pages_show_everything(
+        self, text: str, cols: int, px: int, lines: int, mode: str = "pages"
+    ) -> list[list[str]]:
+        pages = self.pages(text, cols, px, lines, mode)
         shown = []
         for page in pages:
             self.assertLessEqual(len(page), lines, page)
@@ -231,17 +233,15 @@ class CaptionWrapTest(unittest.TestCase):
         self.assertEqual([page[0] for page in pages], ["w00", "w03", "w06", "w09", "w12", "w15", "w18"])
         self.assert_lines_cover(text, pages)
 
-    def test_accented_captions_keep_the_latin_fonts_page(self) -> None:
-        # With CONFIG_MUSE_LATIN_FONT a caption with accented letters is in
-        # Unifont's fixed 8x16, so it wraps by characters, as #149 pages it,
-        # however narrow the proportional font's width.
-        text = "Thời tiết Hà Nội hôm nay đẹp, trời nắng nhẹ và có gió."
-        latin = self.pages(text, 18, 40, 12, "latin-pages")[0]
-        self.assertEqual(latin, ["Thời tiết Hà Nội", "hôm nay đẹp, trời", "nắng nhẹ và có", "gió."])
-        # Folded to plain letters (the font off), it wraps to the pixels.
-        self.assertTrue(all(self.px(self.shown(line)) <= 40 for line in self.pages(text, 18, 40, 12)[0]))
-        # A plain caption still wraps to the pixels with the latin font on.
-        self.assertEqual(self.pages("WWW WWW", 18, 60, 12, "latin-pages"), [["WWW", "WWW"]])
+    def test_accented_replies_fit_both_fonts(self) -> None:
+        # With CONFIG_MUSE_LATIN_FONT a reply with accented letters takes the
+        # Latin font's columns (Unifont's 8 px: 18 in 148), but its pages
+        # without any show in the proportional font: lines fit both.
+        text = " ".join([f"WWWWWWW{i % 10}" for i in range(30)] + ["caf\u00e9"])
+        pages = self.assert_pages_show_everything(text, 18, 148, 12, "latin-pages")
+        self.assertEqual(pages[0][:2], ["WWWWWWW0", "WWWWWWW1"])   # 136 px each, not two to a line
+        viet = "Th\u1eddi ti\u1ebft H\u00e0 N\u1ed9i h\u00f4m nay \u0111\u1eb9p, tr\u1eddi n\u1eafng nh\u1eb9 v\u00e0 c\u00f3 gi\u00f3. " * 6
+        self.assert_pages_show_everything(viet, 18, 148, 12, "latin-pages")
 
     def test_cjk_keeps_its_fixed_width_page(self) -> None:
         text = "还伴有八级左右的雷雨大风和短时强降水出门记得带伞注意安全"

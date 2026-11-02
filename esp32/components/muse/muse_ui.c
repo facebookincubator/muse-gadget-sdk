@@ -1156,15 +1156,15 @@ static void build_screen(void)
             lv_obj_set_size(s_caption_lbl, w, lines * pitch - LONG_LINE_SPACE);
             lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, top);
             muse_state_set_page(cols, lines);
+            /* A reply with CJK or accented letters takes their font's columns,
+             * but its pages without any show in Montserrat, so every page keeps
+             * Montserrat's rows. Accented replies keep its pixel widths too:
+             * the pager measures their letters as the plain ones. */
 #if CONFIG_MUSE_CJK_FONT
-            int cjk_pitch = lv_font_get_line_height(caption_font()) + LONG_LINE_SPACE;
-            muse_state_set_cjk_page(w / lv_font_get_glyph_width(caption_font(), 'M', ' '),
-                                    (lines * pitch) / cjk_pitch);
+            muse_state_set_cjk_page(w / lv_font_get_glyph_width(caption_font(), 'M', ' '), lines);
 #endif
 #if CONFIG_MUSE_LATIN_FONT
-            int latin_pitch = lv_font_get_line_height(&muse_font_latin_16) + LONG_LINE_SPACE;
-            muse_state_set_latin_page(w / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '),
-                                      (lines * pitch) / latin_pitch);
+            muse_state_set_latin_page(w / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '), lines);
 #endif
             if (muse_board->touch) {
                 build_speaker(face, s_w / 2 - 96, s_h / 2 - 75);   /* in the bottom strip, left of the key hints */
