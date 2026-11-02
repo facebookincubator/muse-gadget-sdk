@@ -29,7 +29,7 @@
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-18|s3-216|s3-206|185c|143c|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19}
+cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-18|s3-216|s3-206|185c|143c|143|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -39,6 +39,7 @@ case $board in
     s3-206)  profile=waveshare-s3-206;     target=esp32s3 ;;
     185c)    profile=waveshare-s3-185c;    target=esp32s3 ;;
     143c)    profile=waveshare-s3-143c;    target=esp32s3 ;;
+    143)     profile=waveshare-s3-143;     target=esp32s3 ;;
     # ESP-Mosaico: ESP-IDF master (IDF_EXPORT_S31, default ~/.espressif/esp-idf-s31).
     mosaico) profile=esp-mosaico;          target=esp32s31 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;

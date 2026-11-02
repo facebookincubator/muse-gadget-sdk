@@ -41,7 +41,8 @@ class EchoEarInputTest(unittest.TestCase):
 static atomic_uint s_touch_talk_events;
 static bool s_talk_down, pending_pair;
 static int down, up, confirmed;
-static struct { const char *talk_button; bool keyboard, touch_talk; } board = {"screen", false, true};
+static int fake_audio(void) { return 0; }
+static struct { const char *talk_button; bool keyboard, touch_talk; int (*audio_init)(void), (*mic_init)(void); } board = {"screen", false, true, fake_audio, 0};
 typedef int lv_event_t;
 #define LV_EVENT_PRESSED 1
 #define LV_EVENT_RELEASED 2
