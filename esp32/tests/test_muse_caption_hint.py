@@ -26,6 +26,7 @@ MUSE = ROOT / "components/muse"
 CC = shlex.split(os.environ.get("CC", "cc"))
 
 FAKES = {
+    "sdkconfig.h": "#define CONFIG_MUSE_UI_FREEINK 1\n",
     "esp_timer.h": "#include <stdint.h>\nint64_t esp_timer_get_time(void);\n",
     "freertos/FreeRTOS.h": r'''
 #include <stdint.h>
@@ -52,7 +53,6 @@ unsigned xEventGroupWaitBits(EventGroupHandle_t g, unsigned b, int c, int a, uin
 ''',
     "freertos/event_groups.h": "",
     "freertos/semphr.h": "",
-    "muse_text.h": "#include <stddef.h>\nvoid muse_text_to_ascii(char *s, size_t n);\n",
 }
 
 HARNESS = r'''
@@ -60,11 +60,20 @@ HARNESS = r'''
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
+#include "muse_lang.h"
 #include "muse_state.h"
+#include "muse_text.h"
 
 static int64_t now_us = 1000000;
 int64_t esp_timer_get_time(void) { return now_us; }
-void muse_text_to_ascii(char *s, size_t n) { (void)s; (void)n; }
+static bool translated;
+const char *muse_lang_message(const char *en) {
+    if (translated) {
+        if (!strcmp(en, "HOLD LONGER TO TALK")) return "Giữ nút lâu hơn để nói";
+        if (!strcmp(en, "LISTENING %.1fs")) return "Đang nghe %.1fs";
+    }
+    return en;
+}
 static int dummy;
 SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *s) { (void)s; return &dummy; }
 int xSemaphoreTake(SemaphoreHandle_t s, uint32_t t) { (void)s; (void)t; return 1; }
@@ -142,6 +151,25 @@ int main(int argc, char **argv) {
         muse_state_set_hint("HOLD TO MUTE");
         muse_state_set_caption("HOLD TO POWER OFF");
         assert(!muse_state_hint_pending());
+    } else if (test == 6) {   /* hints translate before keeping their accented letters */
+        translated = true;
+        muse_text_keep_latin();
+        muse_state_set_hint("HOLD LONGER TO TALK");
+        assert(look() && strcmp(shown, "Giữ nút lâu hơn để nói") == 0);
+        later(MUSE_HINT_MS + 1);
+        assert(look() && shown[0] == 0);
+    } else if (test == 7) {   /* formatted translations remain persistent */
+        translated = true;
+        muse_text_keep_latin();
+        muse_state_set_hint("HOLD LONGER TO TALK");
+        muse_state_set_caption("LISTENING %.1fs", 1.5);
+        later(MUSE_HINT_MS + 1);
+        assert(look() && strcmp(shown, "Đang nghe 1.5s") == 0);
+        assert(!muse_state_hint_pending());
+    } else if (test == 8) {   /* captions keep accents and still normalize punctuation */
+        muse_text_keep_latin();
+        muse_state_set_caption("%s", "\u201cXin chào\u201d");
+        assert(look() && strcmp(shown, "\"Xin chào\"") == 0);
     } else {
         return 2;
     }
@@ -171,7 +199,8 @@ class CaptionHint(unittest.TestCase):
         subprocess.run(
             [*CC, "-std=gnu11", "-Wall", "-Werror", "-include", str(ROOT / "tests/host_compat.h"),
              "-I", str(root / "inc"), "-I", str(MUSE),
-             str(root / "harness.c"), str(MUSE / "muse_state.c"), "-o", str(cls.exe), "-lm"],
+             str(root / "harness.c"), str(MUSE / "muse_state.c"),
+             str(MUSE / "muse_text.c"), "-o", str(cls.exe), "-lm"],
             check=True, capture_output=True, text=True, timeout=120,
         )
 
@@ -200,6 +229,15 @@ class CaptionHint(unittest.TestCase):
 
     def test_hint_pending(self):
         self.run_case(5)
+
+    def test_translated_hint_expires(self):
+        self.run_case(6)
+
+    def test_translated_format_stays_persistent(self):
+        self.run_case(7)
+
+    def test_accents_and_punctuation_are_preserved(self):
+        self.run_case(8)
 
     def test_only_transient_notices_are_hints(self):
         voice = (MUSE / "muse_voice.c").read_text()
