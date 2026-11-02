@@ -63,13 +63,24 @@ void muse_state_set_caption(const char *fmt, ...) __attribute__((format(printf, 
 /* Copies the caption if it changed since *version; returns true on change. */
 bool muse_state_caption(char *out, size_t out_len, uint32_t *version);
 
+/* A transient hint caption: cleared once MUSE_HINT_MS passes. Plain
+ * captions (replies, status) never expire; a hint set replaces any
+ * caption, and any later plain caption cancels the pending expiry. */
+#define MUSE_HINT_MS 5000
+void muse_state_set_hint(const char *text);
+/* Whether the caption is a hint that hasn't expired yet. */
+bool muse_state_hint_pending(void);
+
 /* How much reply text the screen shows at once, set by the UI: lines of up to
  * `cols` characters. The replies are wrapped and paged to fit. A screen that
  * draws CJK larger than its other caption text sets a page for replies with CJK
- * in them too; without one they get the usual page. */
+ * in them too, and one with its accented letters' font (muse_text_has_latin)
+ * for replies with those; without one they get the usual page. */
 void muse_state_set_page(int cols, int lines);
 void muse_state_set_cjk_page(int cols, int lines);
-void muse_state_page(bool cjk, int *cols, int *lines);
+void muse_state_set_latin_page(int cols, int lines);
+/* The page for `text`. */
+void muse_state_page(const char *text, int *cols, int *lines);
 
 void muse_state_set_power(const muse_power_t *power);
 muse_power_t muse_state_power(void);

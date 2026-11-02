@@ -124,6 +124,18 @@ menu "ESP32 Device SDK"
             the classic ESP32) should disable this. The control API to the VM
             keeps working; the status turns green once the control session is up.
 
+    config HOMEHUB_SETUP_TASKS_IN_PSRAM
+        bool "Put the setup tasks' stacks in PSRAM"
+        depends on SPIRAM && SPIRAM_FETCH_INSTRUCTIONS && SPIRAM_RODATA
+        default n
+        help
+            Starts the pairing timers, the Wi-Fi scan refresh and the
+            provisioning task (main/helper_task.h) with their stacks in PSRAM,
+            sparing about 16 KB of internal RAM while setup runs. For a board
+            whose overlay is short of internal RAM. It needs code and read-only
+            data in PSRAM: flash writes then leave the cache on, and
+            provisioning writes NVS, which asserts on a PSRAM stack otherwise.
+
     config HOMEHUB_BLE_PERSISTENT
         bool "Keep BLE running next to Wi-Fi and the Noise session"
         depends on BT_NIMBLE_ENABLED && !MUSE_ENABLED
@@ -533,6 +545,24 @@ menu "ESP32 Device SDK"
             Calibration offset added to the SHT4x temperature reading, in
             tenths of a degree Celsius. The E100x sensor reads warm from board
             heat; -33 (-3.3 C, about -6 F) is a starting point for those boards.
+
+    config HOMEHUB_WAVESHARE_154G_SHTC3
+        bool "Waveshare ESP32-S3-ePaper-1.54G onboard SHTC3 sensor (sensors.read)"
+        depends on HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        default y
+        help
+            Poll the onboard Sensirion SHTC3 temperature and humidity sensor
+            over I2C (SDA GPIO47, SCL GPIO48, address 0x70) and answer
+            sensors.read with the latest temperature and humidity.
+
+    config HOMEHUB_WAVESHARE_154G_SHTC3_TEMP_OFFSET
+        int "SHTC3 temperature offset, in tenths of a degree Celsius"
+        depends on HOMEHUB_WAVESHARE_154G_SHTC3
+        default -40
+        help
+            Calibration offset added to the SHTC3 temperature reading, in
+            tenths of a degree Celsius. Waveshare's own SHTC3 example for this
+            board subtracts 4 C, hence -40.
 
     config HOMEHUB_DISPLAY_COMMANDS
         bool
