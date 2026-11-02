@@ -245,7 +245,14 @@ class CaptionWrapTest(unittest.TestCase):
 
     def test_cjk_keeps_its_fixed_width_page(self) -> None:
         text = "还伴有八级左右的雷雨大风和短时强降水出门记得带伞注意安全"
-        self.assertEqual([len(line) for line in self.pages(text, 13, 20, 12)[0]], [13, 13, 2])
+        self.assertEqual([len(line) for line in self.pages(text, 13, 148, 12)[0]], [13, 13, 2])
+
+    def test_cjk_replies_still_fit_the_pixels(self) -> None:
+        # A reply with CJK takes the CJK page (or, without the CJK font, the
+        # usual one), but its pages without any show in the proportional font.
+        text = "\n".join(["WWWWWWW MMMMMM WWW"] * 12 + ["\u4e2d"])
+        pages = self.assert_pages_show_everything(text, 21, 148, 12)
+        self.assertEqual(pages[0][:3], ["WWWWWWW", "MMMMMM", "WWW"])
 
     def test_vietnamese_shows_its_plain_letters(self) -> None:
         self.assertEqual(

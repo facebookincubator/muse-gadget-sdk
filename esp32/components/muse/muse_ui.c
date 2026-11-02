@@ -1158,8 +1158,7 @@ static void build_screen(void)
             muse_state_set_page(cols, lines);
             /* A reply with CJK or accented letters takes their font's columns,
              * but its pages without any show in Montserrat, so every page keeps
-             * Montserrat's rows. Accented replies keep its pixel widths too:
-             * the pager measures their letters as the plain ones. */
+             * Montserrat's rows, and the pager its pixel widths too. */
 #if CONFIG_MUSE_CJK_FONT
             muse_state_set_cjk_page(w / lv_font_get_glyph_width(caption_font(), 'M', ' '), lines);
 #endif
