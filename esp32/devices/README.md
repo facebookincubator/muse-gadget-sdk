@@ -90,7 +90,7 @@ are documented separately; this is not a generic ESP-VoCat profile.
 | Air sensors | — | — | — | — | D1S, D1Pro | — | — | Temperature, humidity | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | Video from a phone (`MUSE_VIDEO=1`) | — | — | — | — | — | — | — | — | — | — | — | — | ✅ | Built, not run | — | — | — | — | — | — | — | — | — | — | — | Built, not run | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | Touch | — | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | — | ✅ | — | ✅ | — | ✅ |
-| Battery status | — | — | — | — | — | — | — | — | — | BQ27220 %/mV and charging checked | — | — | ✅ | ✅ | ✅ | ✅ | Unverified | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | — | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | No charging state | Unverified | — | ✅ | ✅ | Unverified |
+| Battery status | — | — | — | — | — | — | — | Voltage, estimated percent (unverified) | Voltage, estimated percent | BQ27220 %/mV and charging checked | — | — | ✅ | ✅ | ✅ | ✅ | Unverified | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | — | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | No charging state | Unverified | — | ✅ | ✅ | Unverified |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | On | On | On | On | On | On | On | On | On | On | On | Off | On | On | Off | On | On | On | Off | On | On | On | On | Off | On | On | On | On | On |
 | Buttons | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (press to talk, turn to sleep) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) | Screen mic (talk); BOOT inside the case |
 
@@ -141,6 +141,13 @@ agent's name, the character and a line of status text) that changes only when
 the status does, since each refresh takes a second or two. Images from Muse are dithered
 to black and white on the device and refresh once they are all in, with a
 brief black-and-white flash. `display.draw_url` tells Muse the bit depth.
+
+Both reTerminals report calibrated battery voltage (`battery_mv`) and an
+estimated charge percentage (`battery_pct`) through `device.health`, independently
+of the SHT4x sensor setting. Charging and USB-power state remain unavailable
+(`null`). Battery fields also stay `null` if ADC calibration or a reading fails.
+The percentage is inferred from cell voltage and varies with load and charging;
+it is not a fuel-gauge measurement. This does not add sleep or power-saving behavior.
 
 The reTerminal E1002 is the same board with a six-colour E Ink Spectra 6
 panel: black, white, yellow, red, blue and green, 4 bits per pixel. It shows
@@ -328,10 +335,13 @@ The M5Stack CoreS3 runs on Espressif's
 which brings up its ILI9342C LCD, FT6336U touch, AW88298 amp and ES7210
 microphones and switches the AXP2101's rails for each of them. It has no user
 button: PWR on the left side is push-to-talk and pairing confirmation, read
-from the AXP2101's key interrupts (its hardware power-off moves to a 10 s
-hold), and settings are on the touch screen (swipe left from Muse). RST on the
-bottom edge restarts the board, and holding it for 3 s enters the bootloader.
-Powering off from Muse switches the AXP2101 off; click PWR to turn it back on.
+from the AXP2101's key interrupts, and settings are on the touch screen (swipe
+left from Muse). RST on the bottom edge restarts the board, and holding it for
+3 s enters the bootloader. Powering off from Muse switches the AXP2101 off;
+click PWR to turn it back on. While Muse is running, holding PWR is a talk and
+never powers the board off: Muse turns off the AXP2101's power-off hold for as
+long as PWR is down. If the firmware has stopped, holding PWR for 10 s still
+cuts the power, unless it stopped during a PWR talk; RST always restarts it.
 Its 1 W speaker is quiet, so the volume starts at 100%. The camera, proximity
 sensor, IMU, RTC, SD card and Grove ports aren't used yet. It enumerates as the
 chip's own USB serial port: `tools/muse/board.sh flash cores3`. If esptool
@@ -804,6 +814,12 @@ the charge pin (GPIO47) says when it's charging.
 The mic is the ES7210's first channel (`mic_slot` 0); its second carries the
 speaker reference that xiaozhi uses for echo cancelling. Power off is deep
 sleep, and BOOT wakes it.
+
+Its overlay turns on `CONFIG_MUSE_LATIN_FONT`, so captions show Vietnamese
+with its tones, a line of GNU Unifont's 8x16 at a time, and
+`CONFIG_MUSE_UI_LANG_VI`, so the state label and the firmware's own captions
+are in Vietnamese ("SẴN SÀNG", "Không kết nối được Muse"), as are the button
+menu and the pairing card. The serial console stays in English.
 
 Coming from other firmware, erase the flash once before the first flash
 (`idf.py -p PORT erase-flash`): Muse's NVS and `prod_data` partitions sit where
