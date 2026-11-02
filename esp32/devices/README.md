@@ -649,9 +649,9 @@ board skips the light-sleep display pause that would need a reachable button.
 Muse doesn't use the BSP's GPIO47 soft power-off, which hasn't been checked
 with this port: turn the board off with its switch.
 
-Display, touch and the battery come from VIEWE's BSP, `viewesmart/smartring_plus`
-1.1.2, vendored in `components_vendor/viewesmart__smartring_plus` and pulled in
-only for this board. See [SmartRing-Plus setup](viewe-smartring-plus.md).
+The board file drives the panel, touch and battery itself, following VIEWE's
+BSP, `viewesmart/smartring_plus` 1.1.2, without depending on it. See
+[SmartRing-Plus setup](viewe-smartring-plus.md).
 
 ## Build
 

@@ -14,43 +14,37 @@ V2 boards. BOOT is GPIO0 and is inside the case. The console is the chip's
 own USB Serial/JTAG port (303a:1001). Flash is 16 MB and PSRAM is 8 MB octal,
 so the build uses `partitions_muse.csv`.
 
-## BSP
+## Driver
 
-`viewesmart/smartring_plus` 1.1.2 is vendored at
-`components_vendor/viewesmart__smartring_plus`. It sits outside `components/`
-so ESP-IDF doesn't pick it up for every build: other targets would compile its
-S3 pin map and pull in its LVGL and panel dependencies. The version in that
-directory's `idf_component.yml` is `"1.1.2"`, which satisfies `^1.1.2`. A
-prerelease tag such as `1.1.2-muse` does not.
-`components/muse/idf_component.yml` sets
-
-```yaml
-viewesmart/smartring_plus:
-  version: "^1.1.2"
-  override_path: "../../components_vendor/viewesmart__smartring_plus"
-```
-
-and pulls it in only when `MUSE_BOARD_ID` is `viewe_smartring_plus`. The
-alias in `tools/muse/board.sh` is `smartring-plus`.
-
-The vendored constraints are `lvgl >=9.4.0,<10.0.0` and
-`esp_codec_dev >=1.3.4,<2.0.0`, so the component solves against Muse's
-LVGL 9.5 and esp_codec_dev ~1.5.
+The board file, `components/muse/boards/board_viewe_smartring_plus.c`,
+drives the hardware directly. It follows VIEWE's BSP,
+`viewesmart/smartring_plus` 1.1.2, without depending on it: pins from its
+`board_config.h`, the B-panel init table from `lcd_init_seq.h`
+(`viewe_smartring_display_init.h`), and the battery handling from
+`bsp_battery.c` and `bsp_axp2101.c` (`viewe_smartring_power.h`). The ST77916
+panel, CST816S touch and LVGL adapter components are pulled in only when
+`MUSE_BOARD_ID` is `viewe_smartring_plus`. The alias in `tools/muse/board.sh`
+is `smartring-plus`.
 
 ## Display, audio and power
 
-`bsp_display_init_with_task()` starts the panel and pins LVGL's task to the
-Muse UI core. Touch is the CST816 input device the BSP registers. The vendored
-copy draws through two 10-line buffers in internal RAM, as the EchoEar-2ST does
-with the same panel, instead of the upstream BSP's 40-line PSRAM buffers: those
-need a fresh 28.8 KB internal DMA buffer on every flush, which may not be
-available once Wi-Fi, BLE and the Muse session are up.
+LVGL's task runs on the Muse UI core. Touch is the CST816S driver, which
+pulses the controller's reset (GPIO40) at start. The panel draws through two
+10-line buffers in internal RAM, as the EchoEar-2ST does with the same panel,
+instead of the BSP's 40-line PSRAM buffers: those need a fresh 28.8 KB
+internal DMA buffer on every flush, which may not be available once Wi-Fi,
+BLE and the Muse session are up.
 
-Do not call `bsp_audio_init()` from the board file. It opens the codec itself
-and leaves the speaker muted, and Muse never unmutes a handle it did not
-open. `board_viewe_smartring_plus.c` builds a 16 kHz duplex I2S
-(`MUSE_AUDIO_RATE`) and returns separate speaker and mic handles. `mic_slot`
-is 0.
+The board file doesn't use the BSP's `bsp_audio_init()`, which opens the
+codec itself and leaves the speaker muted; Muse never unmutes a handle it did
+not open. It builds a 16 kHz duplex I2S (`MUSE_AUDIO_RATE`) and returns
+separate speaker and mic handles. `mic_slot` is 0.
+
+Battery: on V2 boards the AXP2101 turns on the ALDO3 peripheral rail and
+charges the 600 mAh cell at 300 mA to 4.2 V, as the BSP sets it, and reports
+its gauge percent, voltage, charging and USB. On V1 boards GPIO1 reads the
+VCC_OUT rail; percent comes from the cell's voltage curve, and charging (and
+USB) from the rail rising above 4.25 V.
 
 The board file leaves `power_off` out, so Settings has no Power off. The BSP
 has a GPIO47 soft power-off (`bsp_power_shutdown()`), but it hasn't been
@@ -76,9 +70,8 @@ Reset pairing again within 5 seconds. The board restarts.
 
 ## Build
 
-This repository documents ESP-IDF v6.0.1. The SmartRing-Plus port was
-compiled locally with ESP-IDF v6.0.3. Hardware has been verified on the board,
-but Muse app pairing and app connection were not tested (region/app availability).
+This repository documents ESP-IDF v6.0.1. See Hardware verification below for
+what was checked on the board.
 
 On Linux or macOS, from `esp32`:
 
@@ -123,7 +116,9 @@ USB Serial/JTAG port.
 
 ## Hardware verification
 
-The local ESP-IDF v6.0.3 build finished with no warnings. Hardware has been
-verified: the screen powers on after Wi-Fi comes up, touch orientation is
-correct, and slot 0 carries the live microphone. Muse app pairing and app
+These checks were made with the earlier BSP-based port, built locally with
+ESP-IDF v6.0.3 and no warnings: the screen powers on after Wi-Fi comes up,
+touch orientation is correct, and slot 0 carries the live microphone. The
+direct driver keeps the BSP's pins, panel table, touch driver and battery
+settings but hasn't been rechecked on the board. Muse app pairing and app
 connection were not tested (region/app availability).

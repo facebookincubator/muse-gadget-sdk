@@ -3,10 +3,13 @@
  *
  * Source: VIEWESMART smartring_plus BSP v1.1.2, lcd_init_seq.h B-version panel
  * (UE018HV-RB39-A004A). Confirmed working on production hardware.
- * 
+ *
  * Board: 360×360 round QSPI panel, no DC pin.
- * License: Apache-2.0 (VIEWESMART BSP upstream license)
+ *
+ * Copyright (c) 2026 SHENZHEN VIEWE TECHNOLOGY CO.,LTD.
+ * SPDX-License-Identifier: Apache-2.0
  */
+#pragma once
 static const st77916_lcd_init_cmd_t smartring_init_cmds[] = {
     {0xF0, (uint8_t[]){0x28}, 1, 0},
     {0xF2, (uint8_t[]){0x28}, 1, 0},
