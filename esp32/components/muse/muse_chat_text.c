@@ -153,7 +153,7 @@ static bool next_line(const char **text, int cols, const char **start, size_t *l
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
 {
     int cols, lines;
-    muse_state_page(muse_text_has_cjk(text), &cols, &lines);
+    muse_state_page(text, &cols, &lines);
     const char *p = text, *start;
     size_t len;
     int line = -1, n = 0;

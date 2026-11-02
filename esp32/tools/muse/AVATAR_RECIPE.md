@@ -97,7 +97,7 @@ the serial port.
 | 3 | The board isn't on Wi-Fi or isn't connected to your Muse |
 
 When the board doesn't answer, it's usually running firmware from before
-serial chat. Add `--board s3` (or `--board s3-216`, `--board aipi`, `--board sticks3`,
+serial chat. Add `--board s3` (or `--board s3-18`, `--board s3-216`, `--board aipi`, `--board sticks3`,
 `--board stopwatch`, `--board cores3`, `--board rorolee`, `--board watcher`) and the tool flashes current firmware
 first, then carries on.
 
