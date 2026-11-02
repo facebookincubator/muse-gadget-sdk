@@ -99,6 +99,7 @@ int muse_chat_caption_page(const char *text, int, char *out, size_t cap) {
     strlcpy(out, text, cap); return 1;
 }
 void muse_text_to_ascii(char *, size_t) {}
+void muse_text_to_caption(char *, size_t) {}
 static void send_chat(const char *, const char *) { s_turn.phase = P_WAIT_REPLY; }
 #endif
 ''' + done + reset + handlers + start_tts + check + r'''

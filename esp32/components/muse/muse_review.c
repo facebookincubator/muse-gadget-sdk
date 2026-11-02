@@ -123,7 +123,7 @@ bool muse_review_page(char *out, size_t cap, int *page, int *pages)
     bool active = s_active && s_text && s_text[0];
     if (active) {
         s_pages = muse_chat_caption_page(s_text, s_page, out, cap);
-        if (s_pages) muse_text_to_ascii(out, cap);
+        if (s_pages) muse_text_to_caption(out, cap);
         if (!s_pages) {
             s_active = active = false;
             s_version++;
