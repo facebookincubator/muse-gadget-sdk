@@ -384,7 +384,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         }
         muse_state_set_progress((float)n / MAX_FRAMES);
         if (!heard && ok && tick) {
-            muse_state_set_caption("%s %.1fs", s_live ? "LISTENING" : "RECORDING", (double)n / MUSE_AUDIO_RATE);
+            muse_state_set_caption(s_live ? "LISTENING %.1fs" : "RECORDING %.1fs", (double)n / MUSE_AUDIO_RATE);
         }
         /*
          * Capture runs 60-80 ms behind real time and people let go on their
@@ -432,6 +432,7 @@ static bool hatch_reply(bool *delivered)
     int64_t t0 = esp_timer_get_time();
     *delivered = false;
     for (;;) {
+        muse_state_poke();   /* an active turn is activity: don't auto-sleep mid-reply */
         muse_hatch_ev_t ev;
         while ((ev = muse_hatch_turn_event(text, sizeof(text))) != MUSE_HATCH_EV_NONE) {
             switch (ev) {
@@ -512,6 +513,7 @@ static bool hatch_reply(bool *delivered)
 
 static void go_idle(const char *caption)
 {
+    muse_state_poke();   /* the reading clock starts when the turn ends, not at the press */
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
     muse_state_set_caption("%s", caption);

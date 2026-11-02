@@ -35,6 +35,7 @@ if(CONFIG_MUSE_ENABLED)
         "muse_adpcm.c"
         "muse_settings.c"
         "muse_text.c"
+        "muse_lang.c"
         "muse_link.c"
         "muse_ble.c")
     if(CONFIG_MUSE_UI_FREEINK)
@@ -59,6 +60,14 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "fonts/muse_font_cjk_noto_16.c")   # captions' CJK fallback
     elseif(CONFIG_MUSE_CJK_FONT)
         list(APPEND srcs "fonts/muse_font_cjk_16.c")
+    endif()
+    if(CONFIG_MUSE_LATIN_FONT)
+        list(APPEND srcs "fonts/muse_font_latin_16.c")   # captions with accented letters
+    endif()
+    if(CONFIG_MUSE_UI_LANG_VI)
+        # Montserrat's Vietnamese letters, for the menu and the pairing card
+        list(APPEND srcs "fonts/muse_font_vi_12.c" "fonts/muse_font_vi_14.c"
+                         "fonts/muse_font_vi_20.c" "fonts/muse_font_vi_28.c")
     endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
@@ -95,6 +104,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_espressif_box_3.c" "boards/box_3_microphone.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_C6_18)
         list(APPEND srcs "boards/board_waveshare_c6_18.c")
+    elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_18)
+        list(APPEND srcs "boards/board_waveshare_s3_18.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_C6_206)
         list(APPEND srcs "boards/board_waveshare_c6_206.c")
     elseif(CONFIG_MUSE_BOARD_SENSECAP_WATCHER)
@@ -106,6 +117,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_m5stack_cardputer_adv.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STICKS3)
         list(APPEND srcs "boards/board_m5stack_sticks3.c")
+    elseif(CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43)
+        list(APPEND srcs "boards/board_crowpanel_advance_43.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STICKC_PLUS2)
         list(APPEND srcs "boards/board_m5stack_stickc_plus2.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH)
@@ -132,6 +145,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_waveshare_p4_lcd35.c")
     elseif(CONFIG_MUSE_BOARD_DEOTALAND_ROROLEE)
         list(APPEND srcs "boards/board_deotaland_rorolee.c")
+    elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD19)
+        list(APPEND srcs "boards/board_waveshare_s3_lcd19.c")
     endif()
     if(CONFIG_MUSE_VIDEO)
         # Phone camera: decode and draw (muse_video), and the transports that feed it.
