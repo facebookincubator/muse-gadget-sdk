@@ -41,6 +41,9 @@
 #include "muse_mem.h"
 #include "muse_menu.h"
 #include "muse_settings.h"
+#if !CONFIG_MUSE_UI_FREEINK
+#include "muse_settings_ui.h"   /* LVGL only; e-paper builds use FreeInk */
+#endif
 #include "muse_state.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
@@ -181,9 +184,13 @@ static void toggle_phone_setup(void)
     muse_ble_status_t b;
     muse_ble_status(&b);
     if (on && b.name[0]) {
+        /* The setup name stays up: it is the instruction for pairing. */
         muse_state_set_caption("PHONE SETUP: %s", b.name);
+    } else if (on) {
+        muse_state_set_caption("PHONE SETUP ON");
     } else {
-        muse_state_set_caption("PHONE SETUP %s", on ? "ON" : "OFF");
+        /* OFF is a confirmation, not a state worth keeping on screen. */
+        muse_state_set_hint("PHONE SETUP OFF");
     }
 }
 
@@ -199,6 +206,7 @@ static void aux_button(bool pressed, bool edge)
     static bool hinted;
     static int sleep_in;    /* ticks until a pending single press sleeps */
     static char saved_caption[64];
+    static bool saved_hint;
 
     if (sleep_in && --sleep_in == 0) {
         set_asleep(true, muse_board->aux_button);
@@ -224,6 +232,7 @@ static void aux_button(bool pressed, bool edge)
         if (held == HINT_TICKS) {
             uint32_t v = UINT32_MAX;
             muse_state_caption(saved_caption, sizeof(saved_caption), &v);
+            saved_hint = muse_state_hint_pending();
             muse_state_set_caption("HOLD TO POWER OFF");
             hinted = true;
         } else if (held == LONG_TICKS) {
@@ -234,7 +243,12 @@ static void aux_button(bool pressed, bool edge)
     }
     if (edge && !pressed && !swallow) {
         if (hinted) {
-            muse_state_set_caption("%s", saved_caption);   /* let go early: cancel */
+            /* Let go early: cancel, and put back what was there, a hint as a hint. */
+            if (saved_hint) {
+                muse_state_set_hint(saved_caption);
+            } else {
+                muse_state_set_caption("%s", saved_caption);
+            }
         } else {
             sleep_in = DOUBLE_TICKS;
         }
@@ -266,10 +280,13 @@ static void aux_key(bool pressed, bool edge)
 
 /* Talk button: push-to-talk, or Select while the menu is open. Asleep, the
  * press wakes and is posted as a waking one: muse_voice records only if it's
- * still held once awake. */
+ * still held once awake. A display-only board (no audio_init or mic_init)
+ * runs no voice task to take presses off the queue, so there the press only
+ * wakes, selects or confirms pairing. */
 static void talk_button(unsigned ev)
 {
     bool talk_down = s_talk_down;
+    bool voice = muse_board->audio_init || muse_board->mic_init;
     static bool swallow;
 #if CONFIG_MUSE_WATCHER_CAMERA
     static TickType_t last_release;
@@ -304,15 +321,22 @@ static void talk_button(unsigned ev)
             swallow = true;
         } else if (muse_state_asleep()) {
             set_asleep(false, muse_board->talk_button);
-            post(MUSE_PTT_DOWN, true);
-            talk_down = true;
+            if (voice) {
+                post(MUSE_PTT_DOWN, true);
+                talk_down = true;
+            } else {
+                swallow = true;
+            }
         } else if (muse_menu_is_open()) {
             muse_state_poke();
             if (!muse_board->keyboard) muse_menu_key(MUSE_MENU_SELECT);
             swallow = true;
-        } else {
+        } else if (voice) {
             post(MUSE_PTT_DOWN, false);
             talk_down = true;
+        } else {
+            muse_state_poke();
+            swallow = true;
         }
     }
     if ((talk_down || swallow) && released) {
@@ -566,7 +590,7 @@ static void dedicated_buttons(unsigned ev)
             bool on = !muse_settings_speaker_on();
             muse_settings_set_speaker_on(on);
             if (muse_state_mode(NULL) == MUSE_MODE_IDLE) {
-                muse_state_set_caption(on ? "SPEAKER ON" : "SPEAKER OFF");
+                muse_state_set_hint(on ? "SPEAKER ON" : "SPEAKER OFF");
             }
         }
     }
@@ -826,6 +850,15 @@ static bool console_command(char *line, bool whole)
     }
     if (!strcmp(line, "ui=settings") || !strcmp(line, "ui=face")) {
         muse_ui_bench_page(!strcmp(line, "ui=settings"));
+        return true;
+    }
+    if (!strncmp(line, "ui.settings=", 12)) {
+        if (muse_settings_ui_bench_open(line + 12)) {
+            muse_ui_bench_page(true);
+        } else {
+            printf("@ui.error unknown settings page \"%s\": home wifi muse ble sound sleep battery power\n", line + 12);
+            fflush(stdout);
+        }
         return true;
     }
 #endif
