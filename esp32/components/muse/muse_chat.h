@@ -117,7 +117,7 @@ bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
  * page (muse_state_page), but its pages without any show in this font. A
  * NULL glyph_px turns it off. Set before any reply is paged.
  */
-void muse_hatch_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next));
+void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next));
 
 /* Reply speech as 16 kHz mono. Waits up to wait_ms for some; returns frames read. */
 size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms);
