@@ -38,7 +38,7 @@ class WatcherControls(unittest.TestCase):
 #include "muse_review.h"
 #include "muse_chat_priv.h"
 static int cols = 10, lines = 2;
-void muse_state_page(bool cjk, int *c, int *l) { (void)cjk; *c = cols; *l = lines; }
+void muse_state_page(const char *text, int *c, int *l) { (void)text; *c = cols; *l = lines; }
 static void click(void) {
     muse_wheel_t s = {0};
     assert(muse_wheel_update(&s, true, 100, false, false) == MUSE_WHEEL_NONE);

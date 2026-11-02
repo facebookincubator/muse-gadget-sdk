@@ -28,6 +28,7 @@
 #include "muse_input.h"
 #include "muse_settings.h"
 #include "muse_state.h"
+#include "muse_text.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
@@ -78,6 +79,9 @@ void muse_app_run(const muse_board_t *board)
     ESP_ERROR_CHECK(muse_review_init());
 #endif
     muse_battery_init();
+#if CONFIG_MUSE_LATIN_FONT
+    muse_text_keep_latin();   /* before the first caption, so it keeps its accents */
+#endif
     muse_state_set_caption("WAKING UP...");
     /* Before the UI: the touch boards' settings show Phone camera only when
      * a transport is there as they're built. Its server waits for Wi-Fi. */
