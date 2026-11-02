@@ -5,7 +5,8 @@
  *
  * VIEWE SmartRing-Plus battery arithmetic, kept free of ESP-IDF so the host
  * tests compile it. Values follow VIEWE's smartring_plus BSP 1.1.2: a
- * 3.7 V / 600 mAh cell, read through GPIO1 on V1 boards and an AXP2101 on V2.
+ * 3.7 V / 600 mAh cell, read through GPIO1 on V1 boards and an AXP2101 on V2
+ * (charged as set here, read through muse_pmu.c).
  */
 #pragma once
 #include <stdbool.h>
@@ -55,8 +56,9 @@ typedef struct {
     int streak;
 } smartring_v1_t;
 
-/* One V1 reading of the rail (after the divider): battery mV and percent,
- * and whether USB is charging it. False while the ADC isn't valid yet. */
+/* One V1 reading of the rail (after the divider): the cell's estimated mV and
+ * percent, and whether USB is charging it. False while the ADC isn't valid
+ * yet; an invalid reading leaves the charging confirmation where it was. */
 static inline bool smartring_v1_update(smartring_v1_t *s, int rail_mv, int *mv, int *pct, bool *charging)
 {
     if (rail_mv < SMARTRING_V1_VALID_MIN) {
@@ -72,21 +74,8 @@ static inline bool smartring_v1_update(smartring_v1_t *s, int rail_mv, int *mv, 
         s->streak = 0;
     }
     int cell = s->charging || rail_mv > SMARTRING_V1_CHG_ENTER ? rail_mv - SMARTRING_V1_CHG_DROP : rail_mv;
-    *mv = rail_mv;
+    *mv = cell;
     *pct = smartring_ocv_pct(cell);
     *charging = s->charging;
     return true;
-}
-
-/* AXP2101 status: REG00 (bit 5 VBUS good, bit 3 battery present), REG01
- * (bits 6:5 current direction, 01 charging), REGA4 gauge percent, REG34/35
- * VBAT (14 bits, 1 mV). No battery: percent -1, 0 mV. */
-static inline void smartring_axp_decode(uint8_t st1, uint8_t st2, uint8_t gauge, uint8_t vh, uint8_t vl,
-                                        int *mv, int *pct, bool *charging, bool *usb)
-{
-    bool present = st1 & (1u << 3);
-    *usb = st1 & (1u << 5);
-    *charging = ((st2 >> 5) & 3) == 1;
-    *pct = present ? (gauge > 100 ? 100 : gauge) : -1;
-    *mv = present ? ((vh & 0x3F) << 8) | vl : 0;
 }

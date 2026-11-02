@@ -132,6 +132,14 @@ class SmartRingPlusBoard(unittest.TestCase):
             self.assertIn('axp_write(%s, %s)' % (reg, value), setup)
         self.assertIn('axp_set_bits(0x90, 0x04)', setup)   # ALDO3 on
         self.assertIn('axp_set_bits(0x18, 0x0A)', setup)   # charger and gauge
+        # Then the shared reader, which rejects an unready gauge (> 100%).
+        self.assertIn('muse_pmu_init(s_i2c, false)', function(self.source, 'axp_detect'))
+        self.assertIn('return muse_pmu_read_power(out);', function(self.source, 'read_power'))
+
+    def test_v1_unit_kept_only_once_configured(self):
+        setup = function(self.source, 'adc_setup')
+        self.assertIn('adc_oneshot_del_unit(adc)', setup)
+        self.assertLess(setup.index('adc_oneshot_config_channel'), setup.index('s_adc = adc;'))
 
 
 class SmartRingPlusPower(unittest.TestCase):
@@ -161,24 +169,22 @@ int main(void) {
     bool chg = true;
     assert(!smartring_v1_update(&s, 1000, &mv, &pct, &chg) && pct == -2);
     assert(smartring_v1_update(&s, 3700, &mv, &pct, &chg) && mv == 3700 && pct == 40 && !chg);
-    /* USB in: the rail jumps; charging after two readings, cell estimated below the rail. */
-    assert(smartring_v1_update(&s, 4400, &mv, &pct, &chg) && !chg && pct == 93);
-    assert(smartring_v1_update(&s, 4400, &mv, &pct, &chg) && chg && pct == 93);
-    /* Hysteresis: 4.2 V is still charging; two readings under 4.15 V end it. */
-    assert(smartring_v1_update(&s, 4200, &mv, &pct, &chg) && chg);
-    assert(smartring_v1_update(&s, 4100, &mv, &pct, &chg) && chg);
-    assert(smartring_v1_update(&s, 4100, &mv, &pct, &chg) && !chg && pct == 93);
-    /* A single spike doesn't flip it. */
-    assert(smartring_v1_update(&s, 4300, &mv, &pct, &chg) && !chg);
-    assert(smartring_v1_update(&s, 4000, &mv, &pct, &chg) && !chg && pct == 82);
-
-    bool usb = false;
-    smartring_axp_decode(0x28, 0x20, 57, 0x0E, 0xD8, &mv, &pct, &chg, &usb);
-    assert(mv == 3800 && pct == 57 && chg && usb);
-    smartring_axp_decode(0x08, 0x40, 250, 0xCF, 0xA0, &mv, &pct, &chg, &usb);
-    assert(mv == 4000 && pct == 100 && !chg && !usb);
-    smartring_axp_decode(0x20, 0x00, 0, 0x0E, 0xD8, &mv, &pct, &chg, &usb);
-    assert(mv == 0 && pct == -1 && !chg && usb);
+    /* USB in: the rail jumps; charging after two readings, the cell 300 mV under the rail. */
+    assert(smartring_v1_update(&s, 4400, &mv, &pct, &chg) && !chg && mv == 4100 && pct == 93);
+    assert(smartring_v1_update(&s, 4400, &mv, &pct, &chg) && chg && mv == 4100 && pct == 93);
+    /* Hysteresis: 4.15 V is still charging; two readings under it end it. */
+    assert(smartring_v1_update(&s, 4150, &mv, &pct, &chg) && chg && mv == 3850);
+    assert(smartring_v1_update(&s, 4149, &mv, &pct, &chg) && chg);
+    /* An invalid reading between the two leaves the count where it was. */
+    assert(!smartring_v1_update(&s, 0, &mv, &pct, &chg));
+    assert(smartring_v1_update(&s, 4100, &mv, &pct, &chg) && !chg && mv == 4100 && pct == 93);
+    /* Entering needs more than 4.25 V, twice in a row; a single spike doesn't flip it. */
+    assert(smartring_v1_update(&s, 4250, &mv, &pct, &chg) && !chg && mv == 4250);
+    assert(smartring_v1_update(&s, 4250, &mv, &pct, &chg) && !chg);
+    assert(smartring_v1_update(&s, 4251, &mv, &pct, &chg) && !chg && mv == 3951);
+    assert(smartring_v1_update(&s, 4000, &mv, &pct, &chg) && !chg && mv == 4000 && pct == 82);
+    assert(smartring_v1_update(&s, 4251, &mv, &pct, &chg) && !chg);
+    assert(smartring_v1_update(&s, 4251, &mv, &pct, &chg) && chg);
     return 0;
 }
 """

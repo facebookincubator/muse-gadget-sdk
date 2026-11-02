@@ -44,6 +44,7 @@
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_mem.h"
+#include "muse_pmu.h"
 #include "viewe_smartring_display_init.h"
 #include "viewe_smartring_power.h"
 
@@ -87,7 +88,8 @@ static const char *TAG = "smartring";
 
 static esp_lcd_panel_handle_t s_panel;
 static i2c_master_bus_handle_t s_i2c;
-static i2c_master_dev_handle_t s_axp;    /* V2 only */
+static i2c_master_dev_handle_t s_axp;    /* V2 charger setup */
+static bool s_pmu;                       /* V2: the shared AXP2101 reader */
 static adc_oneshot_unit_handle_t s_adc;  /* V1 only */
 static adc_cali_handle_t s_cali;
 static smartring_v1_t s_v1;
@@ -138,25 +140,38 @@ static bool axp_detect(void)
         return false;
     }
     uint8_t id = 0;
+    esp_err_t err = ESP_ERR_NOT_FOUND;
     if (axp_read(0x03, &id) == ESP_OK && id == SMARTRING_AXP_CHIP_ID) {
-        esp_err_t err = axp_setup();
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "V2: AXP2101 battery gauge");
-            return true;
-        }
-        ESP_LOGW(TAG, "AXP2101 setup failed (%s); trying the V1 gauge", esp_err_to_name(err));
+        err = axp_setup();
     }
     i2c_master_bus_rm_device(s_axp);
     s_axp = NULL;
-    return false;
+    if (err == ESP_OK) {
+        /* Gauge, voltage and charging through the shared reader. Its PWR key
+         * hold-off change is moot: power-off here is GPIO47, not the AXP2101. */
+        err = muse_pmu_init(s_i2c, false);
+    }
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "V2: AXP2101 battery gauge");
+        s_pmu = true;
+    } else if (err != ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "AXP2101 setup failed (%s); trying the V1 gauge", esp_err_to_name(err));
+    }
+    return s_pmu;
 }
 
 static esp_err_t adc_setup(void)
 {
+    adc_oneshot_unit_handle_t adc;
     const adc_oneshot_unit_init_cfg_t unit = {.unit_id = BAT_ADC_UNIT};
-    ESP_RETURN_ON_ERROR(adc_oneshot_new_unit(&unit, &s_adc), TAG, "ADC unit");
+    ESP_RETURN_ON_ERROR(adc_oneshot_new_unit(&unit, &adc), TAG, "ADC unit");
     const adc_oneshot_chan_cfg_t chan = {.atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
-    ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(s_adc, BAT_ADC_CHAN, &chan), TAG, "ADC channel");
+    esp_err_t err = adc_oneshot_config_channel(adc, BAT_ADC_CHAN, &chan);
+    if (err != ESP_OK) {
+        adc_oneshot_del_unit(adc);
+        return err;
+    }
+    s_adc = adc; /* read_power uses it only once it's configured */
 #if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
     const adc_cali_curve_fitting_config_t cali = {
         .unit_id = BAT_ADC_UNIT, .chan = BAT_ADC_CHAN, .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
@@ -354,18 +369,8 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
 
 static esp_err_t read_power(muse_power_t *out)
 {
-    if (s_axp) {
-        uint8_t st1, st2, gauge, vh = 0, vl = 0;
-        ESP_RETURN_ON_ERROR(axp_read(0x00, &st1), TAG, "AXP status");
-        ESP_RETURN_ON_ERROR(axp_read(0x01, &st2), TAG, "AXP status");
-        ESP_RETURN_ON_ERROR(axp_read(0xA4, &gauge), TAG, "AXP gauge");
-        /* High byte first, then low. */
-        if (axp_read(0x34, &vh) != ESP_OK || axp_read(0x35, &vl) != ESP_OK) {
-            vh = vl = 0;
-        }
-        smartring_axp_decode(st1, st2, gauge, vh, vl, &out->battery_mv, &out->battery_pct, &out->charging,
-                             &out->usb);
-        return ESP_OK;
+    if (s_pmu) {
+        return muse_pmu_read_power(out);
     }
     if (!s_adc) {
         return ESP_ERR_INVALID_STATE;
