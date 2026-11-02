@@ -59,6 +59,7 @@
 #include "vm_connect.h"
 #include "noise_control.h"
 #include "image_fetch.h"
+#include "lan_fetch.h"
 #include "noise_tunnel.h"
 #include "led_status.h"
 #include "button.h"
@@ -1945,6 +1946,11 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_RETERMINAL_SHT4X
     if (strcmp(command, "sensors.read") == 0) {
         return reterminal_sht4x_command();
+    }
+#endif
+#if CONFIG_HOMEHUB_LAN_FETCH
+    if (strcmp(command, "lan.fetch") == 0) {
+        return lan_fetch_command(params, request_id, session_generation);
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {

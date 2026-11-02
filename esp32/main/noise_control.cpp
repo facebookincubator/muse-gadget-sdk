@@ -1334,6 +1334,17 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
+#if CONFIG_HOMEHUB_LAN_FETCH
+static cJSON *int_param(const char *description) {
+    cJSON *param = cJSON_CreateObject();
+    cJSON_AddStringToObject(param, "type", "integer");
+    if (description) {
+        cJSON_AddStringToObject(param, "description", description);
+    }
+    return param;
+}
+#endif
+
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
 // The optional `row` of display.draw_url and display.draw_file.
 static cJSON *row_params(void) {
@@ -1557,6 +1568,40 @@ static char *build_register_json(void) {
                 "and relative humidity in percent. Each reading has its age "
                 "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
+#endif
+
+#if CONFIG_HOMEHUB_LAN_FETCH
+    {
+        cJSON *fetch_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(fetch_required, "url",
+                              string_param("http:// or https:// URL on the gadget's home network "
+                                           "(private IPv4 only), e.g. a camera snapshot "
+                                           "http://192.168.1.20/snapshot.jpg. A login may be "
+                                           "given as http://user:pass@host/..."));
+        cJSON *fetch_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(fetch_optional, "username",
+                              string_param("Login for Basic or Digest auth, in place of the URL's."));
+        cJSON_AddItemToObject(fetch_optional, "password",
+                              string_param("Password for username. Never logged or returned."));
+        cJSON_AddItemToObject(fetch_optional, "path",
+                              string_param("File to write on your VM, relative to home "
+                                           "(default lan-fetch/latest.<ext>). Overwritten."));
+        cJSON_AddItemToObject(fetch_optional, "max_bytes",
+                              int_param("Largest body accepted, 1024-2097152 (default 1048576)."));
+        cJSON_AddItemToObject(fetch_optional, "timeout_ms",
+                              int_param("Download deadline, 1000-60000 (default 15000)."));
+        cJSON_AddItemToObject(fetch_optional, "delivery",
+                              string_param("'auto' (default): write a file on your VM, or "
+                                           "return data_base64 if the VM refuses; 'file'; "
+                                           "'inline' (data_base64, up to 512 KB)."));
+        add_command(commands, "lan.fetch",
+                    "GET a URL on the gadget's home network, which your VM can't reach (an IP "
+                    "camera's JPEG snapshot, a local device's JSON API). Returns bytes, sha256, "
+                    "content_type, jpeg, http_status, fetch_ms and delivery: 'file' with the "
+                    "path written on your VM, or 'inline' with the body as data_base64.",
+                    fetch_required, fetch_optional);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "lan.fetch"), "timeout_ms", 90000);
+    }
 #endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA
