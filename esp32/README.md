@@ -151,6 +151,11 @@ When the device asks you to confirm, briefly press its pairing button. On
 display boards, follow the on-screen prompt instead: it may show a pairing code
 to enter in the app, or ask you to press the button.
 
+On full-UI touch boards, **Settings > Bluetooth** shows the gadget's full
+pairing name even when Bluetooth is off or a phone is already connected.
+Match its final six hex digits to the device list in the Muse app. This
+identifier comes from the Wi-Fi MAC, not a manufacturer's serial number.
+
 The CrowPanel Advance has no RGB status light, so the color guide below does
 not apply to it. Use the display and its BOOT button for setup.
 

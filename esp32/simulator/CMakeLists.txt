@@ -284,6 +284,11 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_settings_round_240_screen COMMAND muse_settings_text_test 240 240 1 1.28 screen)
     add_test(NAME muse_settings_round_240_mic COMMAND muse_settings_text_test 240 240 1 1.28 mic)
     add_test(NAME muse_settings_round_240_bench COMMAND muse_settings_text_test 240 240 1 1.28 bench)
+    foreach(panel "172;320;0;1.47" "240;240;1;1.28" "412;412;1;1.45" "466;466;1;1.75" "320;240;0;2.0")
+        list(GET panel 0 width)
+        list(GET panel 1 height)
+        add_test(NAME muse_settings_ble_${width}x${height} COMMAND muse_settings_text_test ${panel} ble)
+    endforeach()
     # The button menu's layout, in English and in Vietnamese (accented letters
     # in the 16 px caption font), on compact and full-size screens.
     foreach(lang en vi)

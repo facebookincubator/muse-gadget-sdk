@@ -1215,14 +1215,14 @@ static void tick_ble(void)
     char buf[96];
     switch (b.state) {
     case MUSE_BLE_OFF:
-        strlcpy(buf, "Off", sizeof(buf));
+        snprintf(buf, sizeof(buf), "Off\n%s", b.name);
         break;
     case MUSE_BLE_ADVERTISING:
-        snprintf(buf, sizeof(buf), "Visible as %s", b.name);
+        snprintf(buf, sizeof(buf), "Visible as\n%s", b.name);
         break;
     case MUSE_BLE_CONNECTED:
     default:
-        snprintf(buf, sizeof(buf), "Phone connected\n%s", b.secure ? "Paired" : "Waiting for pairing");
+        snprintf(buf, sizeof(buf), "Phone connected\n%s\n%s", b.secure ? "Paired" : "Waiting for pairing", b.name);
         break;
     }
     set_text(s_ble_status, buf);

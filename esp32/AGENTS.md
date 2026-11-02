@@ -481,7 +481,10 @@ paired (or has a token set by hand), the name goes, and the mic icon and the
 touch boards' speaker button appear. They're hidden until then, since a press
 can't reach Muse and there are no replies to mute. The StopWatch is an exception:
 its dedicated microphone, speaker/mute and power rim icons stay visible before
-pairing as well, identifying its three physical controls.
+pairing as well, identifying its three physical controls. The Bluetooth settings
+page always shows the full pairing name, including its final six hex digits,
+when advertising, connected or off. Match that identifier to the Muse app's
+device list; it is derived from the Wi-Fi MAC, not a manufacturer's serial number.
 
 To skip BLE Wi-Fi provisioning while you iterate, set
 `CONFIG_HOMEHUB_WIFI_SSID` and `CONFIG_HOMEHUB_WIFI_PASSWORD` in `menuconfig`.

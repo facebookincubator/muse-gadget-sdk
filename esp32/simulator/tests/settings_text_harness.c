@@ -15,6 +15,10 @@ static muse_board_t test_board;
 const muse_board_t *muse_board = &test_board;
 static char saved_ssid[MUSE_SSID_MAX + 1], saved_pass[MUSE_PASS_MAX + 1];
 static unsigned saves;
+static muse_ble_status_t ble_status;
+static bool ble_on;
+
+void muse_ble_status(muse_ble_status_t *out) { *out = ble_status; }
 
 void muse_voice_set_monitor(bool on) { (void)on; }
 float muse_voice_monitor_db(void) { abort(); }   /* no meter without a microphone */
@@ -29,7 +33,7 @@ void muse_hatch_test(void) { abort(); }
 void muse_input_request_power_off(void) { abort(); }
 void muse_link_reset_setup(void) { abort(); }
 bool muse_link_sdk_token_set(const char *s) { (void)s; abort(); }
-bool muse_settings_ble_on(void) { abort(); }
+bool muse_settings_ble_on(void) { return ble_on; }
 int muse_settings_brightness(void) { return 60; }
 void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]) { (void)out; abort(); }
 void muse_settings_hatch_vm(char out[MUSE_VM_MAX + 1]) { (void)out; abort(); }
@@ -229,7 +233,35 @@ int main(int argc, char **argv)
         s_text_scale = test_board.height;
     }
     s_tiny = test_board.round && test_board.width < 300;   /* as muse_settings_ui_build */
-    if (!strcmp(scenario, "other")) {
+    if (!strcmp(scenario, "ble")) {
+        /* The phone's six-hex-digit identifier survives every connection state
+         * and wraps rather than losing its tail on compact screens. */
+        strlcpy(ble_status.name, "MuseGadget-Test-A1B2C3", sizeof(ble_status.name));
+        build_ble_page(s_tile);
+        lv_obj_remove_flag(s_ble, LV_OBJ_FLAG_HIDDEN);
+        const muse_ble_state_t states[] = { MUSE_BLE_OFF, MUSE_BLE_ADVERTISING,
+                                           MUSE_BLE_CONNECTED, MUSE_BLE_CONNECTED };
+        const char *statuses[] = { "Off", "Visible as", "Waiting for pairing", "Paired" };
+        for (unsigned i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
+            ble_status.state = states[i];
+            ble_status.secure = i == 3;
+            ble_on = i != 0;
+            tick_ble();
+            const char *text = lv_label_get_text(s_ble_status);
+            assert(strstr(text, ble_status.name) && strstr(text, statuses[i]));
+            assert(lv_label_get_long_mode(s_ble_status) == LV_LABEL_LONG_MODE_WRAP);
+            assert(lv_obj_has_state(s_ble_sw, LV_STATE_CHECKED) == ble_on);
+            lv_area_t b = area(s_ble_status);
+            assert(b.x1 >= 0 && b.x2 < test_board.width);
+        }
+        /* The unpaired device in the app's list: no BLE bond is needed to read
+         * its name on the device, and disabling phone setup must not hide it. */
+        ble_status.state = MUSE_BLE_ADVERTISING;
+        ble_status.secure = false;
+        ble_on = false;
+        tick_ble();
+        assert(strstr(lv_label_get_text(s_ble_status), "A1B2C3"));
+    } else if (!strcmp(scenario, "other")) {
         on_wifi_other(NULL);
         check_entry();
         assert(!lv_textarea_get_password_mode(s_text_ta));

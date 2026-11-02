@@ -48,6 +48,7 @@ class MuseEinkTest(unittest.TestCase):
             "eink_handle_touch.inc": section(ui, "static void handle_touch(", "static void ui_task("),
             "eink_done.inc": section(ui, 'extern "C" void muse_ui_image_done(', 'extern "C" void muse_ui_image_hide('),
             "eink_fit.inc": section(settings, "static void fit(", "static void note("),
+            "eink_ble.inc": section(settings, "static void tick_ble(", "static void tick_sound("),
         }
         for name, content in parts.items():
             (out / name).write_text(content)
@@ -59,7 +60,7 @@ class MuseEinkTest(unittest.TestCase):
         compiled = subprocess.run(
             [*cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread", "-g",
              "-fno-omit-frame-pointer", f"-fsanitize={sanitizer}", "-fno-sanitize-recover=all",
-             "-I", str(out), "-I", str(EINK),
+             "-I", str(out), "-I", str(EINK), "-I", str(ROOT / "tests/power_test_fakes"),
              str(ROOT / "tests/muse_eink_harness.cpp"), "-o", str(cls.binary)],
             capture_output=True, text=True, timeout=120,
         )
@@ -99,6 +100,9 @@ class MuseEinkTest(unittest.TestCase):
 
     def test_queued_press_duration_uses_physical_edge_timestamps(self):
         self.run_case("touch_longpress")
+
+    def test_bluetooth_name_survives_all_connection_states(self):
+        self.run_case("ble_identity")
 
     def test_utf8_width_and_capacity_truncation_preserve_codepoints(self):
         self.run_case("utf8")

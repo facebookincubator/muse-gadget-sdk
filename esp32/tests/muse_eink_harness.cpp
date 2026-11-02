@@ -25,6 +25,8 @@
 #include <thread>
 #include <vector>
 #include "muse_eink_text.h"
+#include "../components/muse/muse_ble.h"
+#include <cstdio>
 using namespace muse_eink;
 
 #define pdTRUE 1
@@ -205,6 +207,40 @@ static size_t muse_test_strlcat(char *out, const char *src, size_t cap) {
 }
 #include "eink_fit.inc"
 
+static muse_ble_status_t ble_status;
+static char s_ble_status[96];
+static bool s_ble_on, ble_on;
+void muse_ble_status(muse_ble_status_t *out) { *out = ble_status; }
+static bool muse_settings_ble_on() { return ble_on; }
+static void set_flag(bool *out, bool value) { *out = value; }
+static bool set_ble_note(char *out, size_t cap, const char *text) {
+    bool changed = strcmp(out, text) != 0;
+    snprintf(out, cap, "%s", text);
+    return changed;
+}
+#define SET_NOTE(out, text) set_ble_note(out, sizeof(out), text)
+#include "eink_ble.inc"
+#undef SET_NOTE
+
+static void test_ble_identity() {
+    snprintf(ble_status.name, sizeof(ble_status.name), "%s", "MuseGadget-Test-A1B2C3");
+    const muse_ble_state_t states[] = {MUSE_BLE_OFF, MUSE_BLE_ADVERTISING,
+                                       MUSE_BLE_CONNECTED, MUSE_BLE_CONNECTED};
+    const char *statuses[] = {"Off", "Visible as", "Waiting for pairing", "Paired"};
+    for (unsigned i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
+        ble_status.state = states[i];
+        ble_status.secure = i == 3;
+        ble_on = i != 0;
+        tick_ble();
+        assert(strstr(s_ble_status, ble_status.name) && strstr(s_ble_status, statuses[i]));
+        assert(s_ble_on == ble_on);
+    }
+    ble_status.state = MUSE_BLE_ADVERTISING;
+    ble_on = false;
+    tick_ble();
+    assert(strstr(s_ble_status, "A1B2C3") && !s_ble_on);
+}
+
 static void init_image() {
     static Mutex mutex;
     s_image_mutex = &mutex;
@@ -297,5 +333,6 @@ int main(int argc, char **argv) {
         init_image(); fail_planes = true; assert(present_image()); assert(s_display.refreshes == 1); image_hide();
     } else if (name.compare(0,6,"touch_") == 0) test_touch(name);
     else if (name == "utf8") test_utf8();
+    else if (name == "ble_identity") test_ble_identity();
     else assert(false);
 }

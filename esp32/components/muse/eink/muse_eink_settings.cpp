@@ -821,10 +821,10 @@ static void tick_ble(void)
     muse_ble_status(&b);
     char buf[96];
     switch (b.state) {
-    case MUSE_BLE_OFF: strlcpy(buf, "Off", sizeof(buf)); break;
-    case MUSE_BLE_ADVERTISING: snprintf(buf, sizeof(buf), "Visible as %s", b.name); break;
+    case MUSE_BLE_OFF: snprintf(buf, sizeof(buf), "Off\n%s", b.name); break;
+    case MUSE_BLE_ADVERTISING: snprintf(buf, sizeof(buf), "Visible as\n%s", b.name); break;
     case MUSE_BLE_CONNECTED:
-    default: snprintf(buf, sizeof(buf), "Phone connected\n%s", b.secure ? "Paired" : "Waiting for pairing"); break;
+    default: snprintf(buf, sizeof(buf), "Phone connected\n%s\n%s", b.secure ? "Paired" : "Waiting for pairing", b.name); break;
     }
     if (SET_NOTE(s_ble_status, buf)) navigation_changed();
     set_flag(&s_ble_on, muse_settings_ble_on());
