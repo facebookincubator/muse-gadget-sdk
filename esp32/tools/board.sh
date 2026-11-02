@@ -20,6 +20,8 @@
 #
 #   devkit     ESP32-C5 DevKitC-1 (status LED, no display)
 #   ideaspark  ideaspark ESP32 with a 1.9 inch ST7789 display
+#   c3-oled-042
+#              ESP32-C3 with a 0.42 inch 72x40 OLED status screen
 #   esp32-2432s028
 #              ESP32-2432S028 Cheap Yellow Display with a 240x320 status screen
 #   sensecap-indicator
@@ -50,7 +52,7 @@
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,48p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,50p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -77,6 +79,12 @@ case "$BOARD" in
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # CH340 bridge. The SenseCAP Indicator's RP2040 shows up as a usbmodem, not here.
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
+    ;;
+  c3-oled-042)
+    TARGET=esp32c3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    # The C3's own USB-Serial-JTAG (no UART bridge on this board).
+    PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
   esp32-2432s028)
     TARGET=esp32
