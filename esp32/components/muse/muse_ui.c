@@ -958,6 +958,16 @@ static int long_glyph_px(uint32_t letter, uint32_t next)
     return lv_font_get_glyph_width(&lv_font_montserrat_16, letter, next);
 }
 
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
+/* The long layout's font for a caption: Montserrat, or as caption_font_for()
+ * picks for one with CJK or accented letters, which are paged by characters. */
+static const lv_font_t *long_caption_font(const char *text)
+{
+#if CONFIG_MUSE_CJK_FONT
+    if (muse_text_has_cjk(text)) {
+        return caption_font();
+    }
+#endif
 #if CONFIG_MUSE_LATIN_FONT
     if (muse_text_has_latin(text)) {
         return &muse_font_latin_16;
@@ -1150,6 +1160,11 @@ static void build_screen(void)
             int cjk_pitch = lv_font_get_line_height(caption_font()) + LONG_LINE_SPACE;
             muse_state_set_cjk_page(w / lv_font_get_glyph_width(caption_font(), 'M', ' '),
                                     (lines * pitch) / cjk_pitch);
+#endif
+#if CONFIG_MUSE_LATIN_FONT
+            int latin_pitch = lv_font_get_line_height(&muse_font_latin_16) + LONG_LINE_SPACE;
+            muse_state_set_latin_page(w / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '),
+                                      (lines * pitch) / latin_pitch);
 #endif
             if (muse_board->touch) {
                 build_speaker(face, s_w / 2 - 96, s_h / 2 - 75);   /* in the bottom strip, left of the key hints */
@@ -1754,8 +1769,7 @@ static void update_status(muse_mode_t mode, float now)
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
 #if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
         if (s_long) {
-            lv_obj_set_style_text_font(s_caption_lbl, muse_text_has_cjk(caption) ? caption_font()
-                                                      : &lv_font_montserrat_16, 0);
+            lv_obj_set_style_text_font(s_caption_lbl, long_caption_font(caption), 0);
         } else if (s_small) {
             set_caption_font(caption);
         }

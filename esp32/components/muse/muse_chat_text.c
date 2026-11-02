@@ -209,7 +209,8 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
     int cols, lines;
     muse_state_page(text, &cols, &lines);
     lines = lines > 1 ? lines : 1;
-    int px = muse_text_has_cjk(text) ? 0 : s_caption_px;   /* CJK captions are in a fixed-width font */
+    /* CJK and accented captions are in fixed-width fonts (muse_hatch_set_caption_px) */
+    int px = muse_text_has_cjk(text) || muse_text_has_latin(text) ? 0 : s_caption_px;
     const char *page = text;
     for (;;) {
         const char *p = page, *start, *last = NULL;

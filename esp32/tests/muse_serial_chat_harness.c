@@ -116,10 +116,14 @@ int main(int argc, char **argv)
         if (muse_hatch_caption_at(in, 0, page, sizeof(page))) {
             fputs(page, stdout);
         }
-    } else if (argc > 4 && !strcmp(argv[1], "pages")) {
+    } else if (argc > 4 && (!strcmp(argv[1], "pages") || !strcmp(argv[1], "latin-pages"))) {
         /* Every page the reply turns through, pixel-wrapped (PX 0: by
          * characters only), one per offset where it changes, separated by form
-         * feeds. CAP is the page buffer, the voice task's by default. */
+         * feeds. CAP is the page buffer, the voice task's by default.
+         * latin-pages keeps CONFIG_MUSE_LATIN_FONT's accented letters. */
+        if (argv[1][0] == 'l') {
+            muse_text_keep_latin();
+        }
         s_cols = atoi(argv[2]);
         muse_hatch_set_caption_px(atoi(argv[3]), fake_glyph_px);
         s_lines = atoi(argv[4]);
@@ -150,7 +154,7 @@ int main(int argc, char **argv)
         muse_hatch_caption_at(in, 0, page, sizeof(page));
         printf("%s %s\n", muse_text_has_cjk(in) ? "cjk" : "latin", s_page_cjk ? "cjk" : "latin");
     } else {
-        fprintf(stderr, "usage: %s console|unescape|caption COLS|pages COLS PX LINES [CAP]|ascii|latin|page < input\n", argv[0]);
+        fprintf(stderr, "usage: %s console|unescape|caption COLS|[latin-]pages COLS PX LINES [CAP]|ascii|latin|page < input\n", argv[0]);
         return 2;
     }
     free(in);

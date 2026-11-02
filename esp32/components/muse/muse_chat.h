@@ -113,8 +113,9 @@ bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
  * to width_px, measuring it with glyph_px (a glyph's advance in pixels,
  * kerned towards the next one, 0 at the line's end) as the label will, so no
  * line wraps again on screen and a page holds exactly its lines. Not for CJK,
- * which captions show in a fixed-width font. A NULL glyph_px turns it off.
- * Set before any reply is paged.
+ * or accented letters with CONFIG_MUSE_LATIN_FONT (muse_text_has_latin), which
+ * captions show in fixed-width fonts. A NULL glyph_px turns it off. Set
+ * before any reply is paged.
  */
 void muse_hatch_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next));
 

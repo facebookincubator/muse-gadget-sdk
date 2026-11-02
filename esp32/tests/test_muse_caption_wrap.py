@@ -145,9 +145,9 @@ class CaptionWrapTest(unittest.TestCase):
         )
         return proc.stdout.decode()
 
-    def pages(self, text: str, cols: int, px: int, lines: int) -> list[list[str]]:
+    def pages(self, text: str, cols: int, px: int, lines: int, mode: str = "pages") -> list[list[str]]:
         proc = subprocess.run(
-            [str(self.binary), "pages", str(cols), str(px), str(lines)],
+            [str(self.binary), mode, str(cols), str(px), str(lines)],
             input=text.encode(),
             capture_output=True,
             check=True,
@@ -230,6 +230,18 @@ class CaptionWrapTest(unittest.TestCase):
         pages = self.pages(text, 3, 0, 4)
         self.assertEqual([page[0] for page in pages], ["w00", "w03", "w06", "w09", "w12", "w15", "w18"])
         self.assert_lines_cover(text, pages)
+
+    def test_accented_captions_keep_the_latin_fonts_page(self) -> None:
+        # With CONFIG_MUSE_LATIN_FONT a caption with accented letters is in
+        # Unifont's fixed 8x16, so it wraps by characters, as #149 pages it,
+        # however narrow the proportional font's width.
+        text = "Thời tiết Hà Nội hôm nay đẹp, trời nắng nhẹ và có gió."
+        latin = self.pages(text, 18, 40, 12, "latin-pages")[0]
+        self.assertEqual(latin, ["Thời tiết Hà Nội", "hôm nay đẹp, trời", "nắng nhẹ và có", "gió."])
+        # Folded to plain letters (the font off), it wraps to the pixels.
+        self.assertTrue(all(self.px(self.shown(line)) <= 40 for line in self.pages(text, 18, 40, 12)[0]))
+        # A plain caption still wraps to the pixels with the latin font on.
+        self.assertEqual(self.pages("WWW WWW", 18, 60, 12, "latin-pages"), [["WWW", "WWW"]])
 
     def test_cjk_keeps_its_fixed_width_page(self) -> None:
         text = "还伴有八级左右的雷雨大风和短时强降水出门记得带伞注意安全"
