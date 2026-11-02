@@ -179,7 +179,14 @@ static bool s_ble_started = false;
 static bool s_ota_pending_verify = false;
 static uint32_t s_confirm_generation = 0;
 static uint32_t s_confirm_session_generation = 0;
-static TaskHandle_t s_confirm_timeout_task = NULL;
+// The setup confirmation's two timeouts (the press window, then the confirmed
+// session's idle limit) are one-shot esp_timers, not tasks that sleep them out:
+// that kept a 4 KB stack parked through every setup.
+typedef enum { CONFIRM_TO_NONE, CONFIRM_TO_PRESS, CONFIRM_TO_IDLE } confirm_to_t;
+static esp_timer_handle_t s_confirm_timer, s_confirm_dc_timer;
+static confirm_to_t s_confirm_to = CONFIRM_TO_NONE;   // under the setup window lock
+static uint32_t s_confirm_to_generation;
+static volatile uint32_t s_confirm_dc_session;
 #if CONFIG_MUSE_ENABLED
 static volatile bool s_muse_napping = false;   // app_wifi_nap(), or no network nearby, until the next join
 static volatile bool s_muse_resume_vm = false;  // napped with a VM session: resume it
@@ -250,24 +257,41 @@ static void setup_window_lock_give(void) {
 }
 
 static uint32_t advance_confirm_generation_locked(void) {
-    if (s_confirm_timeout_task) {
-        // The waiter owns no resources until it clears this handle under
-        // the same lock after its delay.
-        helper_task_delete(s_confirm_timeout_task);
-        s_confirm_timeout_task = NULL;
+    if (s_confirm_to != CONFIRM_TO_NONE) {
+        esp_timer_stop(s_confirm_timer);   // the generation check guards a callback already running
+        s_confirm_to = CONFIRM_TO_NONE;
     }
     return ++s_confirm_generation;
 }
 
-static BaseType_t start_confirm_timeout(TaskFunction_t task, const char *name,
-                                        uint32_t generation, uint32_t session_generation) {
+static void confirm_timer_fire(void *arg);
+static void confirm_dc_fire(void *arg);
+static void confirmed_idle_timeout_fire(uint32_t generation);
+
+static BaseType_t start_confirm_timeout(confirm_to_t kind, uint32_t generation, uint32_t session_generation) {
     setup_window_lock_take();
     BaseType_t rc = pdPASS;
     if (s_confirm_generation == generation
         && link_pairing_session_is_current(session_generation)) {
         s_confirm_session_generation = session_generation;
-        rc = helper_task_create(task, name, 4096, (void *)(uintptr_t)generation, 4,
-                                &s_confirm_timeout_task);
+        if (!s_confirm_timer) {
+            const esp_timer_create_args_t t = { .callback = confirm_timer_fire, .name = "pair_to" };
+            const esp_timer_create_args_t d = { .callback = confirm_dc_fire, .name = "pair_to_dc" };
+            if (esp_timer_create(&t, &s_confirm_timer) != ESP_OK
+                || esp_timer_create(&d, &s_confirm_dc_timer) != ESP_OK) {
+                rc = pdFAIL;
+            }
+        }
+        if (rc == pdPASS) {
+            uint32_t ms = kind == CONFIRM_TO_PRESS ? PAIRING_CONFIRM_WINDOW_MS : PAIRING_CONFIRMED_IDLE_TIMEOUT_MS;
+            esp_timer_stop(s_confirm_timer);
+            s_confirm_to = kind;
+            s_confirm_to_generation = generation;
+            if (esp_timer_start_once(s_confirm_timer, (uint64_t)ms * 1000) != ESP_OK) {
+                s_confirm_to = CONFIRM_TO_NONE;
+                rc = pdFAIL;
+            }
+        }
     }
     setup_window_lock_give();
     return rc;
@@ -275,7 +299,6 @@ static BaseType_t start_confirm_timeout(TaskFunction_t task, const char *name,
 
 static void open_setup_window(const char *reason);
 static void heap_snapshot(const char *label);
-static void confirmed_idle_timeout_task(void *arg);
 
 // ---- Helpers ---------------------------------------------------------------
 
@@ -708,7 +731,7 @@ static void setup_fail_for_session(const char *stage, const char *status,
         }
         uint32_t generation = advance_confirm_generation_locked();
         setup_window_lock_give();
-        start_confirm_timeout(confirmed_idle_timeout_task, "pair_idle_to", generation,
+        start_confirm_timeout(CONFIRM_TO_IDLE, generation,
                               session_generation != 0 ? session_generation
                                   : link_pairing_session_generation());
     } else if (session_generation != 0) {
@@ -2170,14 +2193,11 @@ static void enter_advertising_state(const char *reason) {
     ble_server_begin_advertising();
 }
 
-static void confirm_timeout_task(void *arg) {
-    uint32_t generation = (uint32_t)(uintptr_t)arg;
-    vTaskDelay(pdMS_TO_TICKS(PAIRING_CONFIRM_WINDOW_MS));
-
+// The press window ran out (on the esp_timer task).
+static void confirm_timeout_fire(uint32_t generation) {
     setup_window_lock_take();
     bool current = s_confirm_generation == generation;
     uint32_t session_generation = current ? s_confirm_session_generation : 0;
-    if (current) s_confirm_timeout_task = NULL;
     current = current && link_pairing_session_is_current(session_generation);
     if (current) ui_set_status("pairing_confirm_timeout");
     setup_window_lock_give();
@@ -2185,21 +2205,35 @@ static void confirm_timeout_task(void *arg) {
     if (current) {
         ESP_LOGW(TAG, "pairing confirmation timed out");
         ble_server_send_pairing_status("pairing_confirm_timeout", session_generation);
-        vTaskDelay(pdMS_TO_TICKS(100));
-        ble_server_disconnect_pairing_session(session_generation);
+        s_confirm_dc_session = session_generation;   // confirm_dc_fire disconnects it 100 ms later
+        esp_timer_start_once(s_confirm_dc_timer, 100 * 1000);
     }
-    stack_monitor_record(NULL);
-    helper_task_delete(NULL);
 }
 
-static void confirmed_idle_timeout_task(void *arg) {
-    uint32_t generation = (uint32_t)(uintptr_t)arg;
-    vTaskDelay(pdMS_TO_TICKS(PAIRING_CONFIRMED_IDLE_TIMEOUT_MS));
+static void confirm_timer_fire(void *arg) {
+    (void)arg;
+    setup_window_lock_take();
+    confirm_to_t kind = s_confirm_to;
+    uint32_t generation = s_confirm_to_generation;
+    s_confirm_to = CONFIRM_TO_NONE;
+    setup_window_lock_give();
+    if (kind == CONFIRM_TO_PRESS) {
+        confirm_timeout_fire(generation);
+    } else if (kind == CONFIRM_TO_IDLE) {
+        confirmed_idle_timeout_fire(generation);
+    }
+}
 
+static void confirm_dc_fire(void *arg) {
+    (void)arg;
+    ble_server_disconnect_pairing_session(s_confirm_dc_session);
+}
+
+// The confirmed session's idle limit: no provisioning in time (on the esp_timer task).
+static void confirmed_idle_timeout_fire(uint32_t generation) {
     setup_window_lock_take();
     bool current = s_confirm_generation == generation;
     uint32_t session_generation = current ? s_confirm_session_generation : 0;
-    if (current) s_confirm_timeout_task = NULL;
     current = current && link_pairing_session_is_current(session_generation)
               && !link_pairing_provisioning_session_valid(0);
     if (current) ui_set_status("pairing_confirm_timeout");
@@ -2208,11 +2242,9 @@ static void confirmed_idle_timeout_task(void *arg) {
     if (current) {
         ESP_LOGW(TAG, "confirmed pairing session timed out before provisioning");
         ble_server_send_pairing_status("pairing_confirm_timeout", session_generation);
-        vTaskDelay(pdMS_TO_TICKS(100));
-        ble_server_disconnect_pairing_session(session_generation);
+        s_confirm_dc_session = session_generation;   // confirm_dc_fire disconnects it 100 ms later
+        esp_timer_start_once(s_confirm_dc_timer, 100 * 1000);
     }
-    stack_monitor_record(NULL);
-    helper_task_delete(NULL);
 }
 
 static void notify_pairing_confirmed(uint32_t session_generation) {
@@ -2230,7 +2262,7 @@ static void notify_pairing_confirmed(uint32_t session_generation) {
     ui_set_status("pairing_confirmed");
     led_status_set_state(LED_STATE_WIFI_CONNECTING);
     setup_window_lock_give();
-    if (start_confirm_timeout(confirmed_idle_timeout_task, "pair_idle_to", generation,
+    if (start_confirm_timeout(CONFIRM_TO_IDLE, generation,
                               session_generation) != pdPASS) {
         ESP_LOGE(TAG, "failed to start confirmed-session idle timer");
         ble_server_send_pairing_status("error_pairing_unavailable", session_generation);
@@ -2263,7 +2295,7 @@ static void on_pairing_client_finished(uint32_t session_generation) {
     led_status_set_state(LED_STATE_PAIRING_CONFIRM_REQUIRED);
     setup_window_lock_give();
 
-    if (start_confirm_timeout(confirm_timeout_task, "pair_confirm_to", generation,
+    if (start_confirm_timeout(CONFIRM_TO_PRESS, generation,
                               session_generation) != pdPASS) {
         ESP_LOGE(TAG, "failed to start pairing confirmation timer");
         ble_server_send_pairing_status("error_pairing_unavailable", session_generation);
