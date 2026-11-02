@@ -143,14 +143,18 @@ run `idf.py -p PORT erase-flash` first.
 
 ### 4. Set it up with Muse
 
-Once flashed, the status light breathes **orange**: the device is ready for
-setup. In the Muse app, turn on **Settings > Devices > Developer mode**, then
-add the device (**Settings > Devices > Add Device**, the **+** icon in the top
-right). It shows up as `MuseGadget-XXXXXX`. When the light breathes **blue**, press the **BOOT**
-button to confirm it's really you. The light turns **green** when Muse is
-connected.
+In the Muse app, turn on **Settings > Devices > Developer mode**, then add the
+device (**Settings > Devices > Add Device**, the **+** icon in the top right).
+It shows up as `MuseGadget-XXXXXX`. On boards with a status light, orange means
+ready for setup and blue means the app is waiting for button confirmation.
+When the device asks you to confirm, briefly press its pairing button. On
+display boards, follow the on-screen prompt instead: it may show a pairing code
+to enter in the app, or ask you to press the button.
 
-| Light | What it means |
+The CrowPanel Advance has no RGB status light, so the color guide below does
+not apply to it. Use the display and its BOOT button for setup.
+
+| Status light | What it means |
 |---|---|
 | Orange, breathing | Ready for setup |
 | Blue, breathing | Press the button to confirm pairing |
@@ -215,6 +219,7 @@ status screen.
 | Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Elecrow CrowPanel Advance 4.3 V1.3 | UI, touch, BOOT push-to-talk, settings, speaker and mic, images | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
 | VN ESP32-S3 1.83-inch NV3023 | UI, BOOT push-to-talk, Vol+/Vol- menu, images | `tools/muse/board.sh build vn183` |
@@ -392,6 +397,10 @@ their upstream licenses:
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- [`components/muse/fonts/`](components/muse/fonts/), the caption and
+  button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
+  the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
+  Medium (SIL OFL 1.1); see its README.
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.

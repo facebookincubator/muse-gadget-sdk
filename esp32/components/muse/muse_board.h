@@ -79,7 +79,7 @@ typedef struct {
     bool no_ring;           /* square panel: progress as a bar along the bottom edge, no ring around Muse */
     bool touch;             /* no touch: no settings screen, set up over BLE */
     float diagonal_in;      /* screen size; under 2" typing uses a keypad with bigger keys */
-    bool touch_talk;        /* on-screen mic supplies talk edges; no physical talk button */
+    bool touch_talk;        /* on-screen mic supplies talk edges alongside buttons */
     bool keyboard;          /* dedicated menu navigation keys */
     const char *talk_button;    /* where the buttons are, for captions: "top" */
     const char *aux_button;     /* "bottom" */
@@ -128,12 +128,17 @@ typedef struct {
     void (*draw_frame)(int x1, int y1, int x2, int y2, int rows,
                        void (*fill)(uint8_t *dst, int stride, int row, int rows, void *arg), void *arg);
 
-    /* Codec handles for one duplex, 2-slot I2S bus, not yet opened. */
+    /* Speaker codec and mic codec, not yet opened. A mic without a codec (a
+     * PDM mic) leaves *mic NULL and is read through mic_read below. */
     esp_err_t (*audio_init)(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic);
     /* A microphone without a codec or speaker (a PDM mic), in place of
      * audio_init: set up once, powered on and off with the audio
      * (muse_audio_power), read as mono at MUSE_AUDIO_RATE.
-     * A board with mic_init has no speaker: replies are read, not heard. */
+     * A board with mic_init has no speaker: replies are read, not heard.
+     * mic_read also serves a board whose audio_init returns a speaker but
+     * no mic codec, which sets the mic up there (mic_init and mic_power
+     * stay NULL). muse_audio applies the mic gain to what mic_read returns,
+     * in both cases. */
     esp_err_t (*mic_init)(void);
     esp_err_t (*mic_power)(bool on);
     esp_err_t (*mic_read)(int16_t *mono, size_t frames);
