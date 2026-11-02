@@ -471,9 +471,11 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
 
 /* Hold-to-talk on the face tile: a finger held on the avatar for
  * TOUCH_HOLD_MS acts as the talk button. Taps and touches on other tiles
- * (e.g. settings) never trigger talk. Touch state comes from LVGL's input
- * device, which reads poll_touch's cached point; reading the driver here
- * would race poll_touch's reads. */
+ * (e.g. settings) never trigger talk, and neither does a slow swipe off
+ * the face: once LVGL starts scrolling, or the face is no longer the
+ * visible tile, the pending hold is dropped until the finger lifts. Touch
+ * state comes from LVGL's input device, which reads poll_touch's cached
+ * point; reading the driver here would race poll_touch's reads. */
 #define TOUCH_HOLD_MS 500
 
 static unsigned poll_buttons(void)
@@ -505,7 +507,9 @@ static unsigned poll_buttons(void)
         tp_talking = false;
     } else if (pressed && tp_down && tp_on_face && !tp_talking) {
         /* Still held on the face: start talking once the hold threshold passes. */
-        if ((xTaskGetTickCount() - tp_press_tick) >= pdMS_TO_TICKS(TOUCH_HOLD_MS)) {
+        if (lv_indev_get_scroll_obj(s_touch_indev) || !muse_ui_face_active()) {
+            tp_on_face = false;
+        } else if ((xTaskGetTickCount() - tp_press_tick) >= pdMS_TO_TICKS(TOUCH_HOLD_MS)) {
             tp_talking = true;
             ev |= MUSE_BTN_TALK_PRESS;
         }
