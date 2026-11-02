@@ -207,10 +207,9 @@ static bool next_line(const char **text, int cols, int px, const char **start, s
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
 {
     int cols, lines;
-    bool cjk = muse_text_has_cjk(text);
-    muse_state_page(cjk, &cols, &lines);
+    muse_state_page(text, &cols, &lines);
     lines = lines > 1 ? lines : 1;
-    int px = cjk ? 0 : s_caption_px;   /* CJK captions are in a fixed-width font */
+    int px = muse_text_has_cjk(text) ? 0 : s_caption_px;   /* CJK captions are in a fixed-width font */
     const char *page = text;
     for (;;) {
         const char *p = page, *start, *last = NULL;
