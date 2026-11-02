@@ -126,6 +126,9 @@ jobs:
           - board: waveshare-c6-lcd-147
             target: esp32c6
             overlays: ";devices/sdkconfig.waveshare-c6-lcd-147"
+          - board: c3-oled-042
+            target: esp32c3
+            overlays: ";devices/sdkconfig.c3-oled-042"
           - board: ideaspark
             target: esp32
             overlays: ";devices/sdkconfig.ideaspark"
