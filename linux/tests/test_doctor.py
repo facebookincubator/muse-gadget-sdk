@@ -130,7 +130,7 @@ def test_service_checks_both_state_and_exit_code(
     assert "secret" not in doctor.format_check(result)
     run.assert_called_once_with(
         ["/usr/bin/systemctl", "--no-pager", "is-active", "musegadget.service"],
-        capture_output=True, text=True, timeout=5, check=False,
+        capture_output=True, text=True, errors="replace", timeout=5, check=False,
     )
 
 
@@ -167,7 +167,7 @@ def test_bluetooth_checks_default_controller_power(
     assert result["status"] == status
     assert "secret" not in doctor.format_check(result)
     run.assert_called_once_with(
-        ["/usr/bin/bluetoothctl", "show"], capture_output=True, text=True,
+        ["/usr/bin/bluetoothctl", "show"], capture_output=True, text=True, errors="replace",
         timeout=5, check=False,
     )
 
