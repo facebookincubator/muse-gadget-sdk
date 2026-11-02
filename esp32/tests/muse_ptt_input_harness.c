@@ -181,7 +181,7 @@ int main(int argc,char **argv) {
         dedicated_buttons(MUSE_BTN_POWER_PRESS); dedicated_buttons(MUSE_BTN_POWER_LONG);
         assert(!s_talk_down && shutdown==1 && powered_off==1 && !call);
         assert(queue.items[queue.n-1].type==MUSE_PTT_UP);
-    } else if(scenario==15) {
+    } else if(scenario==16) {
         /* Display-only: nothing reads the queue, so a talk press never posts.
          * It still wakes the screen, selects in the menu and confirms pairing. */
         muse_board=&display_board;
