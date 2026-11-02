@@ -81,6 +81,9 @@
     CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
 #include "reterminal_battery.h"
 #endif
+#if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
+#include "waveshare_154g_shtc3.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -1947,6 +1950,11 @@ static cJSON *on_ws_command(
         return reterminal_sht4x_command();
     }
 #endif
+#if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
+    if (strcmp(command, "sensors.read") == 0) {
+        return waveshare_154g_shtc3_command();
+    }
+#endif
     if (strcmp(command, "device.reset_vm") == 0) {
         return queue_ws_control(WS_CONTROL_RESET_VM, NULL);
     }
@@ -2759,6 +2767,10 @@ void app_run(void) {
                      on_button_long_press)) {
         ESP_LOGW(TAG, "button init failed — physical setup reset unavailable");
     }
+#endif
+#if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
+    // Before voice_init(): the voice task may use the same I2C bus.
+    waveshare_154g_shtc3_init();
 #endif
 #if CONFIG_HOMEHUB_VOICE
     voice_init();

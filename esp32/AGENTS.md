@@ -50,6 +50,8 @@ before adding a feature to one.
 | Espressif ESP32-S3-DevKitC-1 v1.1 (N8R8) | `esp32s3` | `devices/sdkconfig.espressif-s3-devkitc-1` | `tools/board.sh espressif-s3-devkitc-1` |
 | ideaspark ESP32 + 1.9" ST7789 | `esp32` | `devices/sdkconfig.ideaspark` | `tools/board.sh ideaspark` |
 | Waveshare ESP32-C6-LCD-1.47 | `esp32c6` | `devices/sdkconfig.waveshare-c6-lcd-147` | `tools/board.sh waveshare-c6-lcd-147` |
+| ESP32-2432S028 Cheap Yellow Display (experimental) | `esp32` | `devices/sdkconfig.esp32-2432s028` | `tools/board.sh esp32-2432s028` |
+| ESP32-C3 with 0.42" OLED | `esp32c3` | `devices/sdkconfig.c3-oled-042` | `tools/board.sh c3-oled-042` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | `esp32s3` | `devices/sdkconfig.waveshare-s3-epaper-154` | `tools/board.sh waveshare-s3-epaper-154` |
 | Waveshare ESP32-S3-ePaper-1.54G | `esp32s3` | `devices/sdkconfig.waveshare-s3-epaper-154g` | `tools/board.sh waveshare-s3-epaper-154g` |
 | Seeed SenseCAP Indicator | `esp32s3` | `devices/sdkconfig.sensecap-indicator` | `tools/board.sh sensecap-indicator` |
@@ -86,6 +88,7 @@ before adding a feature to one.
 | Waveshare ESP32-S3-Touch-LCD-7 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd7` | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd128` | `tools/muse/board.sh build lcd128` |
 | Waveshare ESP32-S3-Touch-LCD-1.46 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-146` | `tools/muse/board.sh build 146` |
+| Waveshare ESP32-S3-Touch-AMOLED-1.43 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-143` | `tools/muse/board.sh build 143` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | `esp32p4` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35` | `tools/muse/board.sh build p4lcd35` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
 | M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
@@ -162,7 +165,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|143c|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -259,8 +262,8 @@ flash size and status backend.
 
    | Descriptor | Board |
    |---|---|
-   | Espressif `303a:1001`, "USB JTAG/serial debug unit" | the chip's own USB: C5, C6, S3 and the S3 boards with the full UI. Its serial number is the MAC |
-   | CH340 (`1a86:7523`) | ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002 |
+   | Espressif `303a:1001`, "USB JTAG/serial debug unit" | the chip's own USB: C3, C5, C6, S3 and the S3 boards with the full UI. Its serial number is the MAC |
+   | CH340 (`1a86:7523`) | ideaspark, CYD, SenseCAP Indicator, reTerminal E1001 and E1002 |
    | CH340 (`1a86:7522`) | Elecrow CrowPanel Advance 4.3 V1.3 |
    | CH9102 | M5Stack StickC Plus2 |
    | CH343 (`1a86:55d3`), "USB Single Serial" | Seeed reTerminal Sticky, Waveshare ESP32-S3-Touch-LCD-7, ESP32-S3-Touch-LCD-1.28 or ESP32-P4-WIFI6-Touch-LCD-3.5: `chip-id` and `flash-id` tell them apart (the P4 is an `esp32p4`; 8 MB of PSRAM on the Sticky and the 7-inch, 2 MB on the 1.28-inch; 32 MB of flash on the Sticky, which `flash-id` shows) |
@@ -273,7 +276,9 @@ flash size and status backend.
    ```
 
    The target narrows it a long way: `esp32c5` is the DevKitC-1, `esp32c6` the
-   Waveshare C6 or a C6 devkit, `esp32` the ideaspark or the StickC Plus2.
+   Waveshare C6 or a C6 devkit, `esp32c3` the AI Passport or the C3 with a
+   0.42" OLED (`flash-id`: 8 MB on the AI Passport, 4 MB on the OLED board),
+   `esp32` the ideaspark, the CYD or the StickC Plus2.
 
 4. **Fall back to a read-only capture.** If the board is mid-run and you can't
    write to the port, the `## Monitor` recipe below reads it without resetting,
@@ -290,7 +295,7 @@ flash size and status backend.
    | `key` | Waveshare ESP32-S3-Touch-AMOLED-2.16 |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
-   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06 or 1.43C, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee or the Waveshare ESP32-S3-Touch-LCD-1.9 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
+   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee or the Waveshare ESP32-S3-Touch-LCD-1.9 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
@@ -304,9 +309,9 @@ cd build && python -m esptool --chip esp32c5 -b 460800 \
   --before default-reset --after hard-reset write-flash "@flash_args"
 ```
 
-Typical ports: `/dev/cu.usbmodem*` or `/dev/ttyACM*` for native USB (C5, S3 and
-C6 boards), and `/dev/cu.usbserial-*`, `/dev/cu.wchusbserial*` or `/dev/ttyUSB*`
-for CH340 bridges (ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002,
+Typical ports: `/dev/cu.usbmodem*` or `/dev/ttyACM*` for native USB (C3, C5, S3
+and C6 boards), and `/dev/cu.usbserial-*`, `/dev/cu.wchusbserial*` or `/dev/ttyUSB*`
+for CH340 bridges (ideaspark, CYD, SenseCAP Indicator, reTerminal E1001 and E1002,
 and CrowPanel Advance 4.3). On Linux,
 add yourself to the `dialout` (or `uucp`) group. If the chip won't enter the
 bootloader, hold BOOT, tap RESET, release BOOT, and flash again.
@@ -463,8 +468,9 @@ on-screen microphone to record and release it to send once paired. It has no
 physical talk/setup button, so the GPIO button reset gesture does not apply.
 
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
-ideaspark, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
-Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite). It uses
+ideaspark, CYD, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
+Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
+`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). It uses
 **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.
@@ -594,13 +600,14 @@ There are no list or stat routes for gadgets.
 Keep within the session's bounds:
 
 - Up to 3 requests at once; another is refused (its callback gets -1).
-- Send a body in pieces of at most 8 KB (4 KB on Muse boards without PSRAM,
-  2 KB on the Cardputer ADV and AI Passport): a larger piece ends that request.
+- Send a body in pieces of at most 8 KB (4 KB on Muse boards without PSRAM
+  and the CYD, 2 KB on the Cardputer ADV and AI Passport): a larger piece ends
+  that request.
   Queued body bytes are capped at 16 KB with PSRAM and 4 KB without, and
   `noise_ctrl_req_send()` waits up to `wait_ms` for room.
 - Each response frame has to fit the session's inbound buffer (12 KB, 17 KB on
-  Muse boards without PSRAM). A larger one ends the whole session, which
-  reconnects, and the request with `NOISE_CTRL_REQ_TOO_LARGE`. Ask for
+  Muse boards without PSRAM and the CYD). A larger one ends the whole session,
+  which reconnects, and the request with `NOISE_CTRL_REQ_TOO_LARGE`. Ask for
   responses that stay under it: read large files in parts.
 - The callback runs on the session task: copy what you need and return. Do
   slow work, and any request that depends on its result, in a task of your

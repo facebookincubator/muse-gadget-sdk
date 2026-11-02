@@ -37,7 +37,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 | [waveshareteam/ESP32-S3-Touch-AMOLED-2.06](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.06) | `Schematic/ESP32-S3-Touch-AMOLED-2.06-Schematic-V1.0.pdf` for BOOT GPIO0, the PWR circuit (AXP2101 PWRON only), the GD25Q256 flash and ES7210 MIC1/MIC2. `examples/esp-idf/01_AXP2101` for the power chip (it switches no rails), `04_Immersive_block` for the QMI8658 IMU. Muse uses the published v2.0.0 BSP, `waveshare/esp32_s3_touch_amoled_2_06`, for the panel (CO5300 through the SH8601 driver, 22-column gap), FT3168 touch (ft5x06 driver) and codecs, and draws through `muse_lcd_bands` as on the 2.16. The BSP opens I2S mono at 22.05 kHz unless `bsp_audio_init()` gets a config first. |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | [waveshareteam/ESP32-S3-Touch-AMOLED-2.16](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16) | `schematic/`. `examples/esp-idf/` for the AXP2101 power chip (`01_AXP2101`) and the QMI8658 IMU (`04_Immersive_block`). Muse drives the display, touch and codec through its BSP, `waveshare/esp32_s3_touch_amoled_2_16`. |
 | Waveshare ESP32-S3-Touch-LCD-1.46 | [waveshareteam/ESP32-S3-Touch-LCD-1.46](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.46) | `example/ESP-IDF-5.3.2/ESP32-S3-Touch-LCD-1.46-Test/main/`: `LCD_Driver/` and `Touch_Driver/` for the SPD2010 and its TCA9554 resets (LCD EXIO2, touch EXIO1), `Audio_Driver/` (PCM5101) and `MIC_Driver/` for the I2S pins, `BAT_Driver/` (GPIO8) and `PWR_Key/` (PWR GPIO6, power hold GPIO7). The wiki covers the 1.46, 1.46B and 1.46C. |
-| Waveshare ESP32-S3-ePaper-1.54G | [waveshareteam/ESP32-S3-ePaper-1.54G](https://github.com/waveshareteam/ESP32-S3-ePaper-1.54G) | `Hardware/schematics/` for the pins, the battery latch (GPIO17) and the panel supply switch (GPIO6). `Example/ESP-IDF_5.5.1/09_E_Paper_Test` for the panel's commands (`components/epaper_port/`). |
+| Waveshare ESP32-S3-ePaper-1.54G | [waveshareteam/ESP32-S3-ePaper-1.54G](https://github.com/waveshareteam/ESP32-S3-ePaper-1.54G) | `Hardware/schematics/` for the pins, the battery latch (GPIO17) and the panel supply switch (GPIO6). `Example/ESP-IDF_5.5.1/09_E_Paper_Test` for the panel's commands (`components/epaper_port/`). `Example/ESP-IDF_5.5.1/03_I2C_SHTC3` for the SHTC3 sensor (`components/i2c_equipment/`). |
 | Seeed SenseCAP Watcher | [Seeed-Studio/SenseCAP-Watcher-Firmware](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware) | `components/sensecap-watcher/` is Seeed's BSP. `include/sensecap-watcher.h` has the pins for the LCD, touch, knob, IO expander, audio, battery, SD card and the Himax camera chip (driven through `components/sscma_client/`). `examples/factory_firmware/` is the firmware it ships with. xiaozhi-esp32's [sensecap-watcher board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/sensecap-watcher) is a second reference. |
 | Seeed reTerminal Sticky | Seeed's `Seeed-reTerminal-E10xx-Firmware` `factory_fw` checkout; [hardware overview](https://www.seeedstudio.com/sticky/docs/en/device-guide/hardware-overview/) | `main/boards/reterminal_e1005/config.h` defines GPIOs; `reterminal_e1005.cpp` drives GPIO45/46 power hold and selects a 480×800 portrait UI (270° rotation and panel X mirror). `components/seeed_epaper/driver/ssd1677.c` supplies SSD1677 full/partial refresh on SPI2 (GPIO13–18, enable GPIO47, active-high BUSY); the SHT40 is on I2C1 (SDA GPIO1, SCL GPIO0), AI button on GPIO4. |
 | Every M5Stack board (StickS3, StickC Plus2, Cardputer ADV, StopWatch, CoreS3, Core2) | [m5stack/M5Unified](https://github.com/m5stack/M5Unified), and [M5GFX](https://github.com/m5stack/M5GFX) for the panels | `src/M5Unified.inl` for pins, buttons and audio. `src/utility/` for power and the battery (`Power_Class.inl`), the IMU, RTC, mic, speaker and LEDs. `src/M5GFX.cpp` in M5GFX for the panel. Search both for the model's `board_M5...` name. For the StopWatch, M5's factory firmware [m5stack/M5StopWatch-UserDemo](https://github.com/m5stack/M5StopWatch-UserDemo): `main/hal/` for the power chip, IO expander, buttons and audio, and `main/apps/app_stopwatch/view/view.cpp` for where the buttons sit. For the Core2, Espressif's BSP [esp-bsp/bsp/m5stack_core_2](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_2): `m5stack_core_2.c` for the AXP rail setup, display, touch and speaker init. |
@@ -96,7 +96,10 @@ A board with a screen, mic and speaker should run the full UI. The UI needs 8 MB
 of flash or more: 16 MB boards use `partitions_muse.csv`, and 8 MB boards
 `partitions_muse_8mb.csv`. Without PSRAM it loses the tunnel and images, and voice
 notes go over Link's session with text-only replies. Link builds need 8 MB or
-more, since `partitions.csv` ends past 4 MB and its offsets must not move.
+more, since `partitions.csv` ends past 4 MB and its offsets must not move. A
+4 MB board needs its own single-app table and has no OTA, as the Waveshare C6
+LCD 1.47 and the CYD do (`partitions_waveshare_c6_lcd_147.csv`,
+`partitions_cyd_4mb.csv`).
 
 ## 3. Name it
 
@@ -162,11 +165,12 @@ In `main/led_status.c`:
 - The panel functions: `lcd_draw()` (it returns once `buf` can be reused),
   `lcd_from_be()` (the panel's RGB565 byte order), `lcd_panel_init()` (it
   creates `s_panel`) and `lcd_panel_on()`.
-- Four places split `#if ..._IDEASPARK_ST7789` / `#else`, with the SenseCAP
-  Indicator as the `#else`: the includes, `lcd_draw()` and `lcd_from_be()`,
-  `lcd_panel_init()` and `lcd_panel_on()`, and the pixel copy in
-  `lcd_draw_image_rect()`. Turn each `#else` into
-  `#elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701` and add yours. The pixel
+- Four places split by backend, the SPI panels first and
+  `#elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701` last: the includes,
+  `lcd_draw()` and `lcd_from_be()`, `lcd_panel_init()` and `lcd_panel_on()`,
+  and the pixel copy in `lcd_draw_image_rect()`. Add yours to each: another
+  SPI panel joins the SPI branches (pick its driver in `lcd_panel_init()`, as
+  the CYD does), and anything else gets its own `#elif`. The pixel
   copy depends only on byte order. SPI panels usually take big-endian like the
   ideaspark, and RGB frame buffers take native order like the SenseCAP
   Indicator.
@@ -225,7 +229,7 @@ The fields of `muse_board_t`:
 |---|---|
 | `name`, `width`, `height` | The panel as the UI draws it |
 | `round`, `touch` | Round panel; `touch` only if `display_start` returns an input device |
-| `touch_talk` | Optional touch-only push-to-talk: the LVGL microphone sends press/release edges through the existing input handler, and an explicit screen press confirms pending pairing. Defaults to false; requires `touch`. |
+| `touch_talk` | Optional on-screen push-to-talk, alone or beside a physical talk button: the LVGL microphone sends press/release edges through the existing input handler, and an explicit screen press confirms pending pairing. Both sources share one talk state, so releasing either ends the recording. Defaults to false; requires `touch`. |
 | `keyboard` | Dedicated navigation keys: `poll_buttons` emits `MUSE_BTN_UP/DOWN/LEFT/RIGHT/ENTER/ESCAPE` presses. Enter selects and confirms pairing; Talk is not repurposed as Select while the menu is open. Defaults to false for two-button boards. |
 | `talk_button`, `aux_button` | On-screen captions ("boot", "pwr"). `talk_hint` and `aux_hint` place them next to the physical button |
 | `wake_button` | The menu's power-off page names this button as the one that turns the board back on, when that isn't `aux_button` (and the board has no `keyboard`). May be NULL |
