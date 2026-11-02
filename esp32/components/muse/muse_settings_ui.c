@@ -741,8 +741,8 @@ static void build_text_page(lv_obj_t *tile)
         lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 10);
     }
 
-    /* A full keyboard's keys are too small to hit on a screen under 2". */
-    if (muse_board->diagonal_in >= 2.0f) {
+    /* A full keyboard's keys are too small to hit on a screen under 2", or a narrow one. */
+    if (muse_board->diagonal_in >= 2.0f && !narrow_panel()) {
         build_keyboard();
         return;
     }

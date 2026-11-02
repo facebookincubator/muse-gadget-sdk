@@ -189,6 +189,8 @@ status screen.
 | Espressif ESP32-S3-DevKitC-1 | Status light and button | `tools/board.sh espressif-s3-devkitc-1 build` |
 | ideaspark ESP32 with 1.9" display | Status on screen, images | `tools/board.sh ideaspark build` |
 | Waveshare ESP32-C6-LCD-1.47 | Status on screen, images | `tools/board.sh waveshare-c6-lcd-147 build` |
+| ESP32-2432S028 Cheap Yellow Display (experimental) | Status on screen, images | `tools/board.sh esp32-2432s028 build` |
+| ESP32-C3 with 0.42" OLED | Status and agent name as text | `tools/board.sh c3-oled-042 build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
 | Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours | `tools/board.sh waveshare-s3-epaper-154g build` |
@@ -217,9 +219,12 @@ status screen.
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
-| Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
+| Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added PDM or I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
+| Waveshare ESP32-S3-Touch-LCD-3.49 V2 | UI, touch, push-to-talk, settings, images | `tools/muse/board.sh build lcd349` |
+| Waveshare ESP32-S3-Touch-LCD-1.46 | UI, touch, hold-the-face or BOOT push-to-talk, settings, images | `tools/muse/board.sh build 146` |
+| Waveshare ESP32-S3-Touch-AMOLED-1.43 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build 143` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Elecrow CrowPanel Advance 4.3 V1.3 | UI, touch, BOOT push-to-talk, settings, speaker and mic, images | `tools/muse/board.sh build crowpanel-43` |
