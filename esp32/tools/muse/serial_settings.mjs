@@ -1,4 +1,16 @@
-// Copyright (c) Meta Platforms, Inc. and affiliates. Apache-2.0.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 // Muse's existing USB console protocol. No SDK tokens or firmware writes.
 export class MuseSerialError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -111,6 +123,8 @@ export class MuseSerial {
     const wire = validateSetting(key, value);
     return this.enqueue(async () => {
       const command = `${key}=${wire}`;
+      // The firmware acknowledges a setting only in its INFO log line
+      // ("cmd key=value -> ok"); the status readback below confirms the write.
       await this.request(command, line => {
         const at = line.indexOf(`cmd ${command} -> `);
         if (at < 0) return null;
@@ -125,7 +139,13 @@ export class MuseSerial {
   }
   wake() {
     return this.enqueue(async () => {
-      await this.writer.write(new TextEncoder().encode('w'));
+      // Bound the write like request(): a stalled port must not leave the page busy.
+      let timer;
+      const stalled = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new MuseSerialError('TIMEOUT', 'No response was confirmed. Reload the device values.')), this.timeout);
+      });
+      try { await Promise.race([this.writer.write(new TextEncoder().encode('w')), stalled]); }
+      finally { clearTimeout(timer); }
       return this.queryNow();
     });
   }

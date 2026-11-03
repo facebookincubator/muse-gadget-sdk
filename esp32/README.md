@@ -178,7 +178,7 @@ attack. Set it up on a network you trust.
 ## USB settings in a browser
 
 The [Web Serial settings page](tools/muse/SERIAL_SETUP.md) reads a connected
-Muse board's current settings and changes display sleep, brightness, volume,
+board's current settings (boards with the full UI only) and changes display sleep, brightness, volume,
 speaker enable and mic gain. It also shows every status field and the original
 JSON, including read-only connection details. English is the default; a language
 picker switches to Japanese without reconnecting or discarding edits.

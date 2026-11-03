@@ -1,5 +1,19 @@
 <!doctype html>
-<!-- Copyright (c) Meta Platforms, Inc. and affiliates. Apache-2.0. -->
+<!--
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -43,7 +57,7 @@
             <div class="scale"><span>0%</span><span>100%</span></div>
             <label class="switch-row" for="speaker"><span data-i18n="setting.speaker">Enable speaker</span><input id="speaker" type="checkbox" role="switch"></label>
             <label for="mic_gain"><span data-i18n="setting.mic_gain">Microphone gain</span><output id="mic_gain-value">—</output></label>
-            <input id="mic_gain" type="range" min="0" max="36" step="1" value="0">
+            <input id="mic_gain" type="range" min="0" max="36" step="3" value="0">
             <p class="hint" data-i18n="micHint">Adjust microphone sensitivity. This does not add text-to-speech.</p>
           </section>
         </div>

@@ -5,6 +5,10 @@ brightness, speaker volume, speaker enable and microphone gain in a browser.
 The page uses the existing `>status` and settings commands; no firmware change
 is required. This USB page is separate from `ble_setup.html` and the web flasher.
 
+It works with boards that run the full Muse UI (`CONFIG_MUSE_ENABLED`), whose
+console takes these commands. Link-only builds, such as the default DevKitC-1,
+don't answer `>status`, so the page times out on them.
+
 English is the default on every load. The Language picker switches to Japanese
 without reconnecting or discarding unsaved edits. The language is not persisted.
 

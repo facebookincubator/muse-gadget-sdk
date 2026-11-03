@@ -1,4 +1,16 @@
-// Copyright (c) Meta Platforms, Inc. and affiliates. Apache-2.0.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -46,4 +58,8 @@ test('all static UI labels reference defined translations and English markup', a
   assert.match(html,/<html lang="en">/);
   assert.match(html,/<option value="en" selected>/);
   for(const [,key] of html.matchAll(/data-i18n(?:-aria)?="([^"]+)"/g)) assert.ok(TEXT[key],key);
+});
+test('mic gain slider uses the firmware\'s 3 dB steps', async () => {
+  const html=await readFile(new URL('serial_setup.html',import.meta.url),'utf8');
+  assert.match(html,/<input id="mic_gain"[^>]*\bstep="3"/);
 });
