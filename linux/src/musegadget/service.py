@@ -51,6 +51,7 @@ BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
 UNPAIRED_POLL_S = 30.0
+LOCAL_WRITE_TIMEOUT_S = 10
 MAX_LOCAL_REQUEST = 4 * 1024 * 1024  # room for a 2 MiB image in base64
 MAX_WAIT_S = 600
 REPLY_POLL_S = 0.5
@@ -257,6 +258,11 @@ class Service:
         connection open for the Muse's answer, and gets one JSON line back
         (with ``"reply"`` when it waited). Only root and the command
         account's group can connect.
+
+        ``{"op": "subscribe_chat", "session_id": "..."}`` instead opens an
+        NDJSON stream of ``type: ready``, ``type: chat_event`` (with ``event``)
+        and terminal ``type: error`` (with ``error``) records. The session ID
+        is optional. A subscription ends on client or transport disconnect.
         """
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if path.exists():
@@ -279,6 +285,10 @@ class Service:
                 reply = {"ok": False,
                          "error": f"the request is over {MAX_LOCAL_REQUEST // (1024 * 1024)} MiB"}
             else:
+                request = json.loads(line)
+                if isinstance(request, dict) and request.get("op") == "subscribe_chat":
+                    await self._local_subscribe(request, reader, writer)
+                    return
                 reply = await self._local_request(line)
         except Exception as exc:
             reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -290,6 +300,59 @@ class Service:
                 # lose the reply before the sender reads it.
                 await _discard_line(reader)
         finally:
+            writer.close()
+
+    async def _local_subscribe(self, request, reader, writer) -> None:
+        """Stream one chat on the current transport, never across reconnects."""
+        tasks = []
+
+        def record(value):
+            writer.write(json.dumps(value).encode() + b"\n")
+
+        async def write(value):
+            record(value)
+            await asyncio.wait_for(writer.drain(), LOCAL_WRITE_TIMEOUT_S)
+
+        try:
+            session_id = request.get("session_id")
+            if session_id is not None and not (
+                isinstance(session_id, str) and _SESSION_ID_RE.fullmatch(session_id)
+            ):
+                raise ValueError("session_id must be letters, digits and dashes")
+            session = self._current
+            if session is None or session.registered_at is None:
+                raise ConnectionError("not connected to the Muse")
+
+            async def forward():
+                subscription = session.subscribe_chat(
+                    session_id, on_ready=lambda: record({"type": "ready"}))
+                try:
+                    async for event in subscription:
+                        await write({"type": "chat_event", "event": event})
+                finally:
+                    await subscription.aclose()
+                raise ConnectionError("Muse chat subscription ended")
+
+            async def disconnected():
+                while self._current is session and not self._stop.is_set():
+                    await asyncio.sleep(0.25)
+                raise ConnectionError("Muse connection ended")
+
+            tasks = [asyncio.create_task(forward()), asyncio.create_task(reader.read(1)),
+                     asyncio.create_task(disconnected())]
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        except Exception as exc:
+            error = str(exc) if isinstance(exc, (ValueError, ConnectionError)) else "Muse chat subscription failed"
+            try:
+                await write({"type": "error", "error": error})
+            except (OSError, asyncio.TimeoutError):
+                pass
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             writer.close()
 
     async def _local_request(self, line: bytes) -> dict:

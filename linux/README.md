@@ -282,6 +282,34 @@ musegadget send-user-msg --session-id 6f1c2d4e-0b7a-4c3e-9f5d-2a8b1e0c7d93 "Post
 musegadget send-user-msg --image porch.jpg "Who is at the door?"
 ```
 
+For an interactive text conversation in your terminal:
+
+```sh
+musegadget chat
+musegadget chat --session-id YOUR_EXISTING_SIDE_CHAT_ID
+```
+
+`chat` uses the running service's connection and needs the same socket access
+as `send-user-msg`, without sudo or credentials of its own. It defaults to your
+main Muse chat and displays live assistant replies, including replies to phone
+messages. Type one message per line; you can send follow-ups while Muse is
+thinking or replying. Messages are sent in typing order, waiting only for each
+send acknowledgement. Muse decides whether to combine them into one response.
+The terminal shows waiting, public activity, responding and ready status lines.
+Up to 16 messages can wait to be sent; additional input is rejected with a notice.
+`/quit`, Ctrl-C or EOF exits; already submitted work continues in Muse. Queued messages that were not sent are discarded with a
+notice; an unconfirmed send may already have reached Muse. Replies and status
+lines can arrive while you type. Final text corrections appear as a new message when they cannot be appended to the streamed text.
+
+Update the installed package and restart the service once to enable terminal
+chat. Restarting interrupts running device commands, so check the service log
+for recent `invoke` lines first. Socket access is limited to root and the
+configured command account's group. Connection loss ends terminal chat; run
+it again to reconnect. Messages are never automatically resent. This version
+shows subscription events without fetching chat history, and supports text
+only. `--session-id` selects an existing side chat; use `send-user-msg` first
+if you need to create one.
+
 `--image` attaches a JPEG, PNG, GIF or WebP picture of at most 2 MiB for
 Muse to look at.
 

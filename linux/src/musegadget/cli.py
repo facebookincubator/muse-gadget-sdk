@@ -332,6 +332,12 @@ def main(argv: list[str] | None = None) -> int:
                      help="attach a JPEG, PNG, GIF or WebP picture of at most 2 MiB for Muse to look at")
     send.set_defaults(func=cmd_send_user_msg)
 
+    from musegadget.terminal_chat import command as chat_command
+
+    chat = sub.add_parser("chat", help="chat with your Muse through the running service")
+    chat.add_argument("--session-id", help="use this side chat instead of the main chat")
+    chat.set_defaults(func=chat_command)
+
     from musegadget.link_client import validate_app_id
     from musegadget.voice_call import positive_seconds
 
