@@ -1331,6 +1331,8 @@ static void identity_on_frame(identity_fetch &f, const DecodedServiceFrame &fram
 #define MUSE_DEVICE_FAMILY "gadget"
 #endif
 
+extern "C" const char muse_device_guide_md[];
+
 static cJSON *string_param(const char *description) {
     cJSON *param = cJSON_CreateObject();
     cJSON_AddStringToObject(param, "type", "string");
@@ -1415,6 +1417,10 @@ static char *build_register_json(void) {
                 "Report basic Link health, including battery level (percent), "
                 "voltage, and whether it is charging or on USB power; each is "
                 "null when the device has no battery or can't measure it",
+                nullptr, nullptr);
+    add_command(commands, "device.guide",
+                "This device's usage guide (Markdown): what it is, its "
+                "controls and limits.",
                 nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
@@ -1765,6 +1771,27 @@ static void send_device_health(
     queue_result(session_generation, request_id, result);
 }
 
+static void send_device_guide(
+    noise_ctrl_session_generation_t session_generation,
+    const char *request_id) {
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+    cJSON *guide = cJSON_CreateStringReference(muse_device_guide_md);
+    if (!cJSON_AddBoolToObject(result, "ok", true) || !payload
+        || !cJSON_AddStringToObject(payload, "format", "markdown")
+        || !cJSON_AddItemToObject(payload, "guide", guide)) {
+        cJSON_Delete(guide);
+        cJSON_Delete(result);
+        result = cJSON_CreateObject();
+        cJSON *error = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(error, "code", "out_of_memory");
+        cJSON_AddStringToObject(error, "message", "could not build the device guide");
+        if (!cJSON_AddItemToObject(result, "error", error)) cJSON_Delete(error);
+    }
+    queue_result(session_generation, request_id, result);
+}
+
 static void handle_invoke_request(
     const char *data, size_t len,
     noise_ctrl_session_generation_t session_generation) {
@@ -1840,6 +1867,8 @@ static void handle_invoke_request(
         }
     } else if (strcmp(command, "device.health") == 0) {
         send_device_health(session_generation, request_id);
+    } else if (strcmp(command, "device.guide") == 0) {
+        send_device_guide(session_generation, request_id);
     } else if (s_command_cb) {
         cJSON *result = s_command_cb(command, cmd_params, request_id,
                                      session_generation);

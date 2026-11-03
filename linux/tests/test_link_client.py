@@ -24,6 +24,7 @@ import wave
 
 import pytest
 
+from musegadget import device_guide
 from musegadget.link_client import (
     DeviceDescription, HttpStreamError, LinkSession, MAX_CONCURRENT_INVOKES, MAX_IMAGE_BYTES,
     MessageDecoder, Outcome, RequestRejected, SideChat, acknowledgement, check_image, describe_result,
@@ -173,19 +174,62 @@ def test_register_describes_the_model():
     params = DEVICE.register_params()
     assert (params["device_family"], params["model_id"]) == ("gadget", "muse-gadget-linux")
     assert params["metadata"] == {"model_name": "Linux gadget"}
+    assert device_guide.COMMAND not in params["commands_v2"]
 
-    robot = dataclasses.replace(DEVICE, model_id="acme-robot-2", model_name="Acme Robot 2")
+    robot = dataclasses.replace(DEVICE, model_id="acme-robot-2", model_name="Acme Robot 2",
+                                guide="# Acme Robot 2\n\nIt rolls.\n")
     params = robot.register_params()
     assert (params["model_id"], params["metadata"]) == ("acme-robot-2", {"model_name": "Acme Robot 2"})
+    assert params["commands_v2"] == {**DEVICE.commands, "device.guide": device_guide.SPEC}
+    assert "device.guide" not in DEVICE.commands
 
 
 @pytest.mark.parametrize("field, value", [
     ("model_id", ""), ("model_id", "Acme"), ("model_id", "a" * 65), ("model_id", "acme_robot"),
     ("model_name", ""), ("model_name", "é" * 65), ("model_name", "Acme\nRobot"), ("model_name", "Acme\x85"),
+    ("guide", ""), ("guide", "x" * (device_guide.MAX_BYTES + 1)),
 ])
 def test_description_rejects_what_muse_would_not_take(field, value):
     with pytest.raises(ValueError):
         dataclasses.replace(DEVICE, **{field: value})
+
+
+
+def test_the_session_answers_device_guide_from_the_description():
+    async def scenario():
+        calls = []
+
+        def run_command(command, params, timeout_ms):
+            calls.append(command)
+            return {"ok": True, "payload": {}}
+
+        to_device, to_vm = asyncio.Queue(), asyncio.Queue()
+        device_ws, vm_ws = Pipe(to_device, to_vm), Pipe(to_vm, to_device)
+
+        async def connect(url, headers):
+            return device_ws
+
+        session = LinkSession(noise_host="gw.example", vm_id="vm", vm_auth_token="tok",
+                              device=dataclasses.replace(DEVICE, guide="# Lamp\n\nTap to toggle.\n"),
+                              run_command=run_command, connect=connect)
+        vm = FakeVm(vm_ws)
+        stop = asyncio.Event()
+        task = asyncio.ensure_future(session.run(stop))
+        await vm.handshake()
+        await vm.accept_control_stream()
+        register = await vm.next_message()
+        assert register["params"]["commands_v2"]["device.guide"] == device_guide.SPEC
+        await vm.send_message({"type": "res", "id": register["id"], "ok": True})
+        await vm.send_message({"method": "link.invoke", "id": "inv-1", "command": "device.guide"})
+        assert await vm.next_message() == {
+            "method": "link.result", "id": "inv-1", "ok": True,
+            "payload": {"format": "markdown", "guide": "# Lamp\n\nTap to toggle.\n"},
+        }
+        assert calls == []
+        stop.set()
+        assert await asyncio.wait_for(task, 2) is Outcome.STOPPED
+
+    asyncio.run(bounded_scenario(scenario()))
 
 
 def test_forbidden_control_stream():

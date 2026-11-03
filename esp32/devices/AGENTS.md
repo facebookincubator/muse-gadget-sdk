@@ -126,7 +126,11 @@ settings grouped under short comments saying why. Set:
   `CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-<name>"` and
   `CONFIG_MUSE_DEVICE_MODEL_NAME` with its name from `devices/README.md`.
   Another profile of the same hardware uses the same two lines
-  (`../../protocols/DEVICE.md`).
+  (`../../protocols/DEVICE.md`). Light and status-screen boards use the guide
+  `main/guide.md`, and full-UI boards `devices/guides/muse.md`. If that guide
+  would be wrong about the board's controls, write `devices/guides/<name>.md`
+  and set `CONFIG_MUSE_DEVICE_GUIDE` to it (`../AGENTS.md`, Describe your
+  device).
 - `CONFIG_HOMEHUB_BUTTON_GPIO`. The button is active low with an internal
   pull-up. Boards with the full UI ignore it, because their talk button or touch control confirms pairing.
 - The status backend, `CONFIG_HOMEHUB_LED_BACKEND_*=y` (`..._NONE` for no

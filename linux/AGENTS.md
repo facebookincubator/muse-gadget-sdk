@@ -44,8 +44,9 @@ pairing and control protocols, so the same app pairs either.
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
 | `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |
+| `device_guide.py` | `device.guide`'s spec and the Linux client's own guide |
 | `noise/` | Noise XX handshake, framing and service envelopes |
-| `data/` | The systemd unit and the hash-pinned `requirements.lock`, shipped in the package |
+| `data/` | The systemd unit, the hash-pinned `requirements.lock` and the default `guide.md`, shipped in the package |
 
 ## Prerequisites
 
@@ -306,18 +307,25 @@ listed here. Everything else is internal and can change.
   close. The socket forwards to the registered session while `serve()` runs.
   `Service.run()` does not start this socket itself.
 - `link_client.DeviceDescription(node_id, display_name, version, commands,
-  model_id=..., model_name=...)` describes the device to Muse. `commands` maps
-  each command name to its spec: a `description`, `required` and `optional`
-  parameters, and an optional `timeout_ms`.
+  model_id=..., model_name=..., guide=None)` describes the device to Muse.
+  `commands` maps each command name to its spec: a `description`, `required`
+  and `optional` parameters, and an optional `timeout_ms`.
 - `model_id` and `model_name` name your hardware (`../protocols/DEVICE.md`);
   the defaults are `muse-gadget-linux` and `Linux gadget`.
-  `DeviceDescription` raises `ValueError` for values outside the rules, and
+- `guide` is the Markdown `device.guide` returns, at most 4096 bytes. When
+  it's set, the session advertises `device.guide` and answers it itself.
+  `Service.describe()` sets the Linux client's own guide
+  (`device_guide.default_guide()`, from `data/guide.md`); a gadget that
+  changes what the device does should set its own. Write facts about the
+  device and don't instruct Muse beyond how to use it (`../protocols/DEVICE.md`).
+- `DeviceDescription` raises `ValueError` for values outside the rules, and
   `Service.run()` checks `describe()` before it connects. For example:
 
   ```python
   def describe(self):
       return dataclasses.replace(
-          super().describe(), model_id="acme-robot", model_name="Acme Robot")
+          super().describe(), model_id="acme-robot", model_name="Acme Robot",
+          guide=Path("guide.md").read_text())
   ```
 - `link_client.Outcome` says how a session ended: `CLOSED`, `AUTH_REJECTED`, `FORBIDDEN`,
   `UNPAIRED` or `STOPPED`.

@@ -138,6 +138,7 @@ class LinkTransportContractTest(unittest.TestCase):
         self.assertIn('"model_name"', register)
         self.assertIn("CONFIG_MUSE_DEVICE_MODEL_NAME", register)
         self.assertIn('"device.health"', register)
+        self.assertIn('"device.guide"', register)
         self.assertIn('"device.discover"', register)
         self.assertIn('"timeout_ms"', register)
         # Management commands remain handled by on_ws_command, but are not

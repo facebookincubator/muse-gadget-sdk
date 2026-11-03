@@ -16,14 +16,15 @@ limitations under the License.
 
 # How a gadget describes itself to Muse
 
-A gadget tells Muse what it is in `link.register`. This is the contract for
-those fields. The ESP32 firmware (`../esp32`) and the Linux client
-(`../linux`) follow it, and so should a client of your own.
+A gadget tells Muse what it is in `link.register`, and how to use it through
+the `device.guide` command. This is the contract for both. The ESP32 firmware
+(`../esp32`) and the Linux client (`../linux`) follow it, and so should a
+client of your own.
 
 | Where | How to set it |
 |---|---|
-| ESP32 | `CONFIG_MUSE_DEVICE_MODEL_ID` and `CONFIG_MUSE_DEVICE_MODEL_NAME` in the board's overlay (`../esp32/AGENTS.md`, Describe your device) |
-| Linux | `model_id` and `model_name` of `DeviceDescription` (`../linux/AGENTS.md`, Building a gadget) |
+| ESP32 | `CONFIG_MUSE_DEVICE_MODEL_ID`, `CONFIG_MUSE_DEVICE_MODEL_NAME` and `CONFIG_MUSE_DEVICE_GUIDE` in the board's overlay (`../esp32/AGENTS.md`, Describe your device) |
+| Linux | `model_id`, `model_name` and `guide` of `DeviceDescription` (`../linux/AGENTS.md`, Building a gadget) |
 
 ## Identity in `link.register`
 
@@ -47,10 +48,32 @@ Beside the node id, display name, version and commands, `params` carry:
 - A device that doesn't set one reports the SDK's default: `muse-gadget`
   (`Muse Gadget`) on ESP32, `muse-gadget-linux` (`Linux gadget`) on Linux.
 
-Both clients refuse values outside these rules: the ESP32 build fails, and
-Linux's `DeviceDescription` raises `ValueError`.
+## `device.guide`
 
-## Compatibility
+An ordinary command, listed in `commands_v2` like any other. It takes no
+parameters, and its result's `payload` is:
 
-Firmware built before this contract may register another family and model id,
-and no `metadata.model_name`, until it's reflashed.
+```json
+{"format": "markdown", "guide": "# Acme Lamp\n\nThe lamp on the desk ..."}
+```
+
+`guide` is at most 4096 bytes of UTF-8 Markdown, written for Muse. What
+belongs in it:
+
+- What the device is, in a sentence or two.
+- Its controls and what it shows: buttons, lights, screen, switches.
+- How to recover it: what each error state means and how to reset it.
+- Rules a command's description can't carry, phrased so they hold on every
+  build: "if it lists `device.discover`, a scan takes up to 90 seconds".
+
+What doesn't: what each command does (its description says that), notes for
+people building the firmware, instructions to Muse beyond how to use the
+device, and anything meant to override what the user asks for.
+
+## Validation and compatibility
+
+- Both clients refuse values outside these rules: the ESP32 build fails, and
+  Linux's `DeviceDescription` raises `ValueError`.
+- Firmware built before this contract may register another family and model
+  id, and no `metadata.model_name` or `device.guide`, until it's reflashed.
+- `device.guide` is an ordinary command, so it works wherever commands do.

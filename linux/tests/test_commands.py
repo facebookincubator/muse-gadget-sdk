@@ -529,7 +529,7 @@ def test_drop_in_returns_when_parent_exits_with_descendant_holding_pipes(account
 
 
 REGISTER_METADATA = {"node_id": "homelink-abcdef", "display_name": "pi", "version": "0.1.0",
-                     "model_id": "acme-robot", "model_name": "Acme Robot"}
+                     "model_id": "acme-robot", "model_name": "Acme Robot", "guide": "# Acme Robot\n"}
 
 
 def registration_size(specs, metadata=REGISTER_METADATA):

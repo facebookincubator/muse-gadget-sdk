@@ -143,14 +143,15 @@ class Executor:
         self.drop_ins = dict(self._drop_ins)
 
     def specs(self, *, node_id: str = "", display_name: str = "", version: str = __version__,
-              model_id: str = DEFAULT_MODEL_ID, model_name: str = DEFAULT_MODEL_NAME) -> dict:
+              model_id: str = DEFAULT_MODEL_ID, model_name: str = DEFAULT_MODEL_NAME,
+              guide: str | None = None) -> dict:
         """Admit whole definitions in name order using the actual register envelope.
 
         Service supplies its metadata. Refused definitions aren't executable; the
         built-ins are always retained. No command count or character-count estimate.
         """
         specs = dict(COMMAND_SPECS)
-        device = DeviceDescription(node_id, display_name, version, specs, model_id, model_name)
+        device = DeviceDescription(node_id, display_name, version, specs, model_id, model_name, guide)
 
         def fits() -> bool:
             encoded = encode_message(device.register_message("0" * REGISTER_ID_BYTES))

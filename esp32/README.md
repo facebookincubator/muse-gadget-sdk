@@ -308,7 +308,7 @@ VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../pro
 [`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
 
 [`../protocols/DEVICE.md`](../protocols/DEVICE.md) says how a gadget describes
-itself to Muse: its family and model.
+itself to Muse: its family, its model and its usage guide.
 
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI

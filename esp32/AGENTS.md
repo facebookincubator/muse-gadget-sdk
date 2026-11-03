@@ -748,8 +748,8 @@ the design, the Wi-Fi protocol and the numbers.
 
 ## Describe your device
 
-Muse learns what a gadget is from its `link.register`;
-`../protocols/DEVICE.md` has the rules. Every device built with this SDK
+Muse learns what a gadget is from its `link.register`, and how to use it from
+its `device.guide` command; `../protocols/DEVICE.md` has the rules. Every device built with this SDK
 registers `device_family: "gadget"`; other families are reserved for Muse's
 own devices.
 
@@ -758,14 +758,30 @@ own devices.
   hardware, so every profile of a board uses the same one; boards in
   `devices/` use `muse-gadget-<board>`. A build without them reports
   `muse-gadget` ("Muse Gadget"). The build fails on a value outside the rules.
+- **Guide.** `device.guide` returns the Markdown file `CONFIG_MUSE_DEVICE_GUIDE`
+  names. `main/guide.md` covers boards with a status light or status screen,
+  `devices/guides/muse.md` (set in `devices/sdkconfig.muse`) the boards with
+  the full UI, and `devices/guides/voice.md` the Voice PE and reSpeaker Lite.
+  Give a board its own guide in `devices/guides/` when these would be wrong
+  about it, and set it in its overlay. A relative path is looked up in the
+  project directory, then in `esp32/`. A leading HTML comment (the license
+  header) is left out, and a guide over 4096 bytes fails the build.
+- **What goes in it.** Write facts about the device: its light or screen, its
+  controls and how to recover it. Don't instruct Muse beyond how to use the
+  device. Command descriptions already say what each command does: add only
+  rules they don't carry, phrased so they hold on every build ("if it lists
+  `device.discover`, ...").
+
+`tests/test_link_device_description.py` checks the model lines, that every
+guide an overlay names embeds within the limit, and `link.register`'s size.
 
 ## Adding a command
 
 Muse calls a gadget's commands by name: the firmware lists them in
 `link.register` and answers each `link.invoke`. A command you add lives in two
-places, which must use the same name. (`device.health` and `device.ota` are
-handled in `noise_control.cpp` itself; everything else goes through
-`on_ws_command()`.)
+places, which must use the same name. (`device.health`, `device.guide` and
+`device.ota` are handled in `noise_control.cpp` itself; everything else goes
+through `on_ws_command()`.)
 
 1. **Advertise it** in `build_register_json()` in `main/noise_control.cpp`:
    `add_command(commands, "relay.set", "<description>", required, optional)`.
@@ -804,6 +820,8 @@ handled in `noise_control.cpp` itself; everything else goes through
 6. **Add a host test** in `tests/`. `test_link_sensecap_sensors.py` checks
    that `sensors.read` is advertised and dispatched under the same option, and
    runs its parser against a harness.
+7. **Update the guides** (Describe your device, above) only if the command
+   needs a rule its description can't carry.
 
 Report environmental sensors (temperature, humidity, CO2, tVOC, light and so
 on) through `sensors.read`, on every board that has them, so Muse has one

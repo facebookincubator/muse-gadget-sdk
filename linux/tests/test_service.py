@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from musegadget import config, muse_api, service as service_module
+from musegadget import config, device_guide, muse_api, service as service_module
 from musegadget.executor import Account, Executor
 from musegadget.identity import Identity
 from musegadget.link_client import MAX_IMAGE_BYTES, DeviceDescription, Outcome
@@ -259,6 +259,19 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
 
     asyncio.run(bounded_scenario(scenario()))
     assert served == (["vm-1", "vm-1"] if failure else ["vm-1"])
+
+
+
+def test_the_service_describes_the_linux_client_with_its_guide():
+    async def describe():
+        return Service(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current())).describe()
+
+    params = asyncio.run(describe()).register_params()
+    assert params["commands_v2"]["device.guide"] == device_guide.SPEC
+    guide = device_guide.default_guide()
+    assert guide.startswith("# Linux gadget\n")
+    assert "<!--" not in guide and "Hatch" not in guide
+    assert 0 < len(guide.encode()) <= device_guide.MAX_BYTES
 
 
 def test_an_invalid_description_fails_before_any_request(paired_device, monkeypatch):

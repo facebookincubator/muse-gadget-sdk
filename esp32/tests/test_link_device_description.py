@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-"""What a gadget tells Muse about itself: its family and model."""
+"""What a gadget tells Muse about itself: family, model and device.guide."""
 
 from __future__ import annotations
 
@@ -34,6 +34,8 @@ KCONFIG = (ROOT / "main" / "Kconfig.projbuild").read_text()
 OVERLAYS = sorted((ROOT / "devices").glob("sdkconfig.*"))
 CJSON = Path(os.environ.get("CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"))
 REGISTER_LIMIT = 8192
+GUIDE_LIMIT = 4096
+GUIDE_DESCRIPTION = "This device's usage guide (Markdown): what it is, its controls and limits."
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 BLE_CLIENT_STUBS = """
 #include "ble_client.h"
@@ -75,6 +77,13 @@ def overlay_values(key: str) -> dict[str, str]:
         if match:
             values[overlay.name] = match.group(1)
     return values
+
+
+def assemble_guide(out: Path, guide: str | None = None) -> subprocess.CompletedProcess:
+    defines = [f"-DCONFIG_MUSE_DEVICE_GUIDE={guide}"] if guide else []
+    return subprocess.run(
+        ["cmake", f"-DGUIDE_OUT={out}", *defines, "-P", str(ROOT / "cmake/device_guide.cmake")],
+        capture_output=True, text=True)
 
 
 class DeviceDescriptionTest(unittest.TestCase):
@@ -158,6 +167,8 @@ int main(void) {{
         ])[0])["params"]
         self.assertEqual((params["device_family"], params["model_id"]), ("gadget", "acme-lamp"))
         self.assertEqual(params["metadata"]["model_name"], "Acme Lamp")
+        self.assertEqual(params["commands_v2"]["device.guide"],
+                         {"description": GUIDE_DESCRIPTION, "required": {}, "optional": {}})
 
     def test_register_fits_its_buffer_in_the_largest_builds(self) -> None:
         # The richest option sets a board can build with, plus the opt-in BLE
@@ -186,6 +197,7 @@ int main(void) {{
                     [*common, *(f"-D{option}=1" for option in options)], "n" * 31, "d" * 31, ble=True)
                 for line in lines:
                     commands = json.loads(line)["params"]["commands_v2"]
+                    self.assertIn("device.guide", commands)
                     self.assertIn("ble.subscribe", commands)
                 size = max(len(line) for line in lines)
                 print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
@@ -221,6 +233,104 @@ int main(void) {{
                      f"-DCONFIG_MUSE_DEVICE_MODEL_NAME={name}", "-P", str(ROOT / "cmake/validate_config.cmake")],
                     capture_output=True, text=True)
                 self.assertEqual(ran.returncode == 0, accepted, ran.stderr)
+
+    def test_guide_command_returns_the_embedded_markdown(self) -> None:
+        # Fails the Nth allocation once: every run sends a result, the guide
+        # or an error, and leaks nothing.
+        harness = '''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "cJSON.h"
+typedef uint64_t noise_ctrl_session_generation_t;
+const char muse_device_guide_md[] = "# Test\\n\\nA \\"quoted\\" guide.\\n";
+static cJSON *queued;
+static int allocations, fail_at;
+static void *test_malloc(size_t size) { return ++allocations == fail_at ? NULL : malloc(size); }
+static void queue_result(noise_ctrl_session_generation_t generation, const char *id, cJSON *r) {
+    assert(generation == 7 && !strcmp(id, "req-1") && !queued);
+    queued = r;
+}
+''' + function_source(NOISE, "static void send_device_guide(") + '''
+int main(void) {
+    cJSON_Hooks hooks = { test_malloc, free };
+    cJSON_InitHooks(&hooks);
+    for (int n = 0; n < 16; n++) {
+        allocations = 0;
+        fail_at = n;
+        send_device_guide(7, "req-1");
+        fail_at = 0;
+        char *json = queued ? cJSON_PrintUnformatted(queued) : NULL;
+        puts(json ? json : "null");
+        free(json);
+        cJSON_Delete(queued);
+        queued = NULL;
+    }
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as name:
+            results = [json.loads(line) for line in self.compile_and_run(Path(name), harness).splitlines()]
+        guide = {"ok": True, "payload": {"format": "markdown", "guide": '# Test\n\nA "quoted" guide.\n'}}
+        self.assertEqual(results[0], guide)
+        for result in results[1:]:
+            self.assertIn(result, (guide, {"ok": False, "error": {
+                "code": "out_of_memory", "message": "could not build the device guide"}}))
+        self.assertIn(False, [result["ok"] for result in results])
+
+    def test_guide_is_dispatched_by_the_control_session(self) -> None:
+        invoke = function_source(NOISE, "static void handle_invoke_request(")
+        self.assertIn('strcmp(command, "device.guide") == 0', invoke)
+        self.assertIn("send_device_guide(session_generation, request_id);", invoke)
+        self.assertLess(invoke.index('"device.guide"'), invoke.index("s_command_cb("))
+        cmake = (ROOT / "main" / "CMakeLists.txt").read_text()
+        self.assertIn("muse_device_guide_assemble(", cmake)
+        self.assertIn('target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" TEXT)',
+                      cmake)
+
+    def test_every_configured_guide_embeds_within_the_cap(self) -> None:
+        if shutil.which("cmake") is None:
+            self.skipTest("cmake unavailable")
+        guides = {kconfig_default("MUSE_DEVICE_GUIDE"), *overlay_values("MUSE_DEVICE_GUIDE").values()}
+        with tempfile.TemporaryDirectory() as name:
+            for i, guide in enumerate(sorted(guides)):
+                with self.subTest(guide=guide):
+                    out = Path(name) / f"{i}.md"
+                    ran = assemble_guide(out, guide)
+                    self.assertEqual(ran.returncode, 0, ran.stderr)
+                    text = out.read_text()
+                    print(f"{guide}: {len(text.encode())} of {GUIDE_LIMIT} bytes")
+                    self.assertLessEqual(len(text.encode()), GUIDE_LIMIT)
+                    self.assertTrue(text.startswith("# "), text[:40])
+                    self.assertNotIn("<!--", text)
+                    self.assertNotIn("Hatch", text)
+
+    def test_a_custom_guide_embeds_and_a_bad_one_fails_the_build(self) -> None:
+        if shutil.which("cmake") is None:
+            self.skipTest("cmake unavailable")
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            cases = {
+                "board.md": ("<!--\nlicense\n-->\r\n\n# My board\n\nPress *Go*; $5; ${X} @Y@.\n", None),
+                "big.md": ("x" * (GUIDE_LIMIT + 1), "4097 bytes"),
+                "open.md": ("<!-- no end\n# Board\n", "comment"),
+            }
+            for file, (text, error) in cases.items():
+                with self.subTest(file=file):
+                    (tmp / file).write_text(text)
+                    ran = assemble_guide(tmp / f"out-{file}", str(tmp / file))
+                    if error:
+                        self.assertNotEqual(ran.returncode, 0)
+                        self.assertIn(error, ran.stderr)
+                    else:
+                        self.assertEqual(ran.returncode, 0, ran.stderr)
+                        self.assertEqual((tmp / f"out-{file}").read_text(), "# My board\n\nPress *Go*; $5; ${X} @Y@.\n")
+            ran = assemble_guide(tmp / "missing.md", str(tmp / "none.md"))
+            self.assertNotEqual(ran.returncode, 0)
+            self.assertIn("not found", ran.stderr)
 
 
 if __name__ == "__main__":

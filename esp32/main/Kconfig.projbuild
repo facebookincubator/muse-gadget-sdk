@@ -40,6 +40,15 @@ menu "ESP32 Device SDK"
             metadata.model_name in link.register: 1 to 128 bytes, no control
             characters. Each board overlay in devices/ sets its own.
 
+    config MUSE_DEVICE_GUIDE
+        string "Device guide (Markdown file)"
+        default "main/guide.md"
+        help
+            The Markdown file device.guide returns to Muse: what the device
+            is, its controls and its limits. A relative path is looked up in
+            the project directory, then in esp32/. The build fails if the
+            guide is over 4096 bytes. See protocols/DEVICE.md.
+
     config GADGET_SDK_TOKEN
         string "Muse Gadgets SDK token"
         default ""
