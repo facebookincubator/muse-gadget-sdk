@@ -285,6 +285,13 @@ musegadget send-user-msg --image porch.jpg "Who is at the door?"
 `--image` attaches a JPEG, PNG, GIF or WebP picture of at most 2 MiB for
 Muse to look at.
 
+`--wait SECONDS` (1 to 600) waits that long for Muse's answer and prints it.
+It exits with status 3 if no answer came in time, or if Muse was still
+answering (what arrived is printed). On the main chat, Muse's replies don't
+name the message they answer, so an answer to something sent there at the same
+moment, from the Muse app say, can be taken for this one. With `--session-id`
+the answer comes from that side chat only.
+
 `--session-id` posts into a side chat: a new id starts one, and reusing it
 keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_ring_bridge.py)
 is a complete example: a webhook listener that sends every note from a Pebble
