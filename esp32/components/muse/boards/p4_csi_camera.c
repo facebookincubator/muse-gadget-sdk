@@ -85,10 +85,10 @@ static esp_err_t open_camera(void)
     };
     esp_video_init_config_t cfg = { .csi = &csi };
     ESP_RETURN_ON_ERROR(esp_video_init(&cfg), TAG, "esp_video init");
+    esp_err_t ret = ESP_FAIL;
     /* Without a sensor esp_video_init succeeds but registers no device. */
     s_fd = open(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, O_RDONLY);
-    ESP_RETURN_ON_FALSE(s_fd >= 0, ESP_ERR_NOT_FOUND, TAG, "no camera sensor");
-    esp_err_t ret = ESP_FAIL;
+    ESP_GOTO_ON_FALSE(s_fd >= 0, ESP_ERR_NOT_FOUND, fail, TAG, "no camera sensor");
     struct timeval wait = { .tv_sec = FRAME_WAIT_S };
     struct v4l2_format fmt = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE };
     ESP_GOTO_ON_FALSE(ioctl(s_fd, VIDIOC_S_DQBUF_TIMEOUT, &wait) == 0, ESP_FAIL, fail, TAG, "DQBUF timeout");
