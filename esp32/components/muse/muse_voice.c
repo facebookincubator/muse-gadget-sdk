@@ -539,7 +539,7 @@ static void too_short(void)
 {
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
-    muse_state_set_hint("HOLD LONGER TO RECORD");
+    muse_state_set_hint("HOLD LONGER TO TALK");
 }
 
 /* Why a press can't go to Hatch; voice notes only go there. */

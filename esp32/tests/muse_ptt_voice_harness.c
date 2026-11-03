@@ -364,7 +364,7 @@ int main(int argc,char **argv) {
             if(scenario==70 || scenario==71 || scenario==72 || scenario==81)
                 assert(!strcmp(caption,"MICROPHONE ERROR - TRY AGAIN"));
             if(scenario==73 || (scenario==74 && !call_expected))
-                assert(!strcmp(caption,"HOLD LONGER TO RECORD"));
+                assert(!strcmp(caption,"HOLD LONGER TO TALK"));
             if(scenario==75) assert(mode==MUSE_MODE_OFF && !strcmp(caption,"POWERING OFF"));
             if(scenario==76 || scenario==77 || scenario==78 || scenario==80) assert(!caption[0]);
             if(scenario==77 || scenario==81) {

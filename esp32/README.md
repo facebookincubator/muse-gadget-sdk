@@ -307,7 +307,7 @@ On boards with the full UI other than the Watcher, voice notes require a
 least 500 ms of audio captured during that hold before uploading starts.
 Pre-roll and the release tail are preserved in accepted notes but do not count
 toward either minimum. These checks measure duration, not whether speech is
-present; a shorter press shows "Hold longer to record" (or only wakes an asleep
+present; a shorter press shows "Hold longer to talk" (or only wakes an asleep
 screen). The Watcher keeps its existing wheel click/hold gesture.
 
 Two things you can change:
