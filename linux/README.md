@@ -291,13 +291,17 @@ musegadget chat --session-id YOUR_EXISTING_SIDE_CHAT_ID
 
 `chat` uses the running service's connection and needs the same socket access
 as `send-user-msg`, without sudo or credentials of its own. It defaults to your
-main Muse chat and displays live assistant replies, including replies to phone
-messages. Type one message per line; you can send follow-ups while Muse is
+main Muse chat and displays live user messages and assistant replies, including
+messages sent from the phone or web app while connected. Echoes of messages
+typed in this terminal are suppressed by their acknowledged message IDs.
+Type one message per line; you can send follow-ups while Muse is
 thinking or replying. Messages are sent in typing order, waiting only for each
 send acknowledgement. Muse decides whether to combine them into one response.
-The conversation uses compact `User:` and `Muse:` lines. A single status line
-at the bottom shows waiting, public activity, responding and ready updates,
-above an input row that stays editable while replies arrive. Arrow keys,
+The conversation uses compact `User:` and `Muse:` lines, with colored speaker
+labels and wrapped text aligned after the label. Colors use the terminal's
+palette and default background; terminals without color support use bold labels.
+The input row stays editable while replies arrive. A dim status line beneath it
+shows waiting, public activity, responding and ready updates. Arrow keys,
 Home/End and Backspace/Delete edit your message; Page Up/Down scroll the recent
 transcript. The view keeps up to 512 transcript entries and 8192 wrapped lines.
 Up to 16 messages can wait to be sent; additional input is rejected with a notice.

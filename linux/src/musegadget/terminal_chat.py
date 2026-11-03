@@ -25,13 +25,81 @@ import time
 
 from musegadget import config
 from musegadget.link_client import acknowledgement
-from musegadget.muse_turn import AgentStatus, MuseTurn, Reply, _strip_controls, _update_reply
+from musegadget.muse_turn import (AgentStatus, MuseTurn, Reply, _acknowledged_message_ids,
+                                 _strip_controls, _update_reply)
 from musegadget.terminal_ui import PlainDisplay, TerminalDisplay
 
 MAX_RECORD = 2 * 1024 * 1024  # JSON escaping can expand a 256 KiB upstream event.
 MAX_INPUT = 64 * 1024
 TURN_TIMEOUT = 15 * 60
 MAX_QUEUED_MESSAGES = 16
+
+
+class LiveUsers:
+    """Live user messages, with bounded ID-based suppression of local echoes."""
+
+    def __init__(self, session_id=None):
+        self.session_id = session_id
+        self.seen = OrderedDict()
+        self.pending = []
+        self.sending = False
+        self.sequence = None
+
+    def remember(self, identifier):
+        self.seen[identifier] = None
+        self.seen.move_to_end(identifier)
+        while len(self.seen) > 256:
+            self.seen.popitem(last=False)
+
+    def feed(self, event):
+        payload = event.get('payload')
+        if (event.get('type') != 'event' or event.get('event') != 'message.user'
+                or not isinstance(payload, dict) or payload.get('role') not in (None, 'user')):
+            return []
+        session = payload.get('session_id') or event.get('session_id')
+        if self.session_id and session and session != self.session_id:
+            return []
+        seq = event.get('seq')
+        if isinstance(seq, int):
+            if self.sequence is not None and seq <= self.sequence:
+                return []
+            self.sequence = seq
+        identifier = payload.get('message_id') or event.get('message_id') or payload.get('id')
+        if (not isinstance(identifier, str) or not identifier or len(identifier) > 512
+                or identifier in self.seen or payload.get('display_text_ready') is False):
+            return []
+        text = payload.get('display_text')
+        if not isinstance(text, str):
+            text = payload.get('content')
+        if not isinstance(text, str):
+            return []
+        text = _strip_controls(text)
+        if len(text.encode('utf-8')) > MAX_INPUT:
+            raise ValueError('Muse returned more than 64 KiB of user message text')
+        if not text:
+            return []
+        if self.sending:
+            # The acknowledgement supplies IDs; matching text could hide an
+            # unrelated phone/web message with the same words.
+            if len(self.pending) >= 64:
+                raise ValueError('Too many user messages arrived before the send acknowledgement')
+            self.pending.append((identifier, text))
+            return []
+        self.remember(identifier)
+        return [text]
+
+    def finish_send(self, response=None):
+        if response is not None:
+            for identifier in _acknowledged_message_ids(response):
+                self.remember(identifier)
+        self.sending = False
+        pending, self.pending = self.pending, []
+        messages = []
+        for identifier, text in pending:
+            if identifier not in self.seen:
+                self.remember(identifier)
+                messages.append(text)
+        return messages
 
 
 class LiveReplies:
@@ -128,6 +196,7 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
     turn = None
     started = 0.0
     view = LiveReplies(session_id)
+    users = LiveUsers(session_id)
     display = PlainDisplay(output)
 
     def show(text):
@@ -175,6 +244,9 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                 if record.get("type") != "chat_event" or not isinstance(record.get("event"), dict):
                     raise ValueError("invalid chat event from the musegadget service")
                 event = record["event"]
+                for text in users.feed(event):
+                    view.current = None
+                    display.user(text)
                 if turn is not None:
                     progress(turn.feed(event))
                 rendered = view.feed(event)
@@ -188,6 +260,7 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
             while True:
                 message = await messages.get()
                 sending = True
+                users.sending = True
                 try:
                     follow_up = turn is not None
                     if follow_up:
@@ -199,10 +272,17 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                     response = await asyncio.wait_for(_send(path, message, session_id), 90)
                     unconfirmed = False
                     submitted += 1
+                    for text in users.finish_send(response):
+                        view.current = None
+                        display.user(text)
                     show_status("Waiting for Muse…")
                     progress(turn.acknowledge(response, follow_up=follow_up))
                     view.session_id = turn.session_id
+                    users.session_id = turn.session_id
                 finally:
+                    for text in users.finish_send():
+                        view.current = None
+                        display.user(text)
                     sending = False
                     messages.task_done()
 
@@ -226,6 +306,7 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                 except asyncio.QueueFull:
                     show("\n[Message not accepted: send queue is full. Try again shortly.]\n")
                 else:
+                    view.current = None
                     display.user(_strip_controls(message))
                     show_status("Waiting for Muse…")
 

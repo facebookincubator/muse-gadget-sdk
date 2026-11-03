@@ -26,6 +26,8 @@ class Screen:
     def __init__(self):
         self.size = (8, 40)
         self.rows = {}
+        self.styles = {}
+        self.cursor = None
         self.keys = deque()
         self.keypad_enabled = False
 
@@ -40,14 +42,18 @@ class Screen:
 
     def erase(self):
         self.rows.clear()
+        self.styles.clear()
 
     def addstr(self, row, column, text, style):
         assert 0 <= row < self.size[0]
-        self.rows[row] = text
+        previous = self.rows.get(row, '')
+        self.rows[row] = previous.ljust(column)[:column] + text + previous[column + len(text):]
+        self.styles[row, column] = style
 
     def move(self, row, column):
         assert 0 <= row < self.size[0]
         assert 0 <= column < self.size[1]
+        self.cursor = (row, column)
 
     def refresh(self):
         pass
@@ -64,6 +70,9 @@ def display(monkeypatch):
     monkeypatch.setattr(curses, 'initscr', lambda: screen)
     for name in ('noecho', 'cbreak', 'nocbreak', 'echo', 'endwin'):
         monkeypatch.setattr(curses, name, lambda: None)
+    def no_colors():
+        raise curses.error()
+    monkeypatch.setattr(curses, 'start_color', no_colors)
     view = TerminalDisplay()
     yield view
     view.close()
@@ -78,8 +87,12 @@ def test_status_and_reply_updates_preserve_draft_and_transcript(display):
         display.status('Working ' + str(i))
     display.reply(Reply('r', text='Hello!', done=True), '')
     assert list(display.entries) == [(None, 'User: hello'), ('r', 'Muse: Hello!')]
-    assert display.screen.rows[6] == 'Working 29'
-    assert display.screen.rows[7] == 'User: a follow-up'
+    assert display.screen.rows[7] == 'Working 29'
+    assert display.screen.rows[6] == 'User: a follow-up'
+    assert display.screen.cursor == (6, 11)
+    assert display.screen.styles[7, 0] == curses.A_DIM
+    assert display.screen.styles[6, 0] == curses.A_BOLD
+    assert display.screen.styles[6, 6] == 0
     assert display.cursor == 5
     # Corrections update the original reply even after a follow-up is entered.
     display.user('another question')
@@ -140,11 +153,47 @@ def test_wrap_counts_wide_and_combining_characters():
     assert list(_wrap('a界bé\u0301c\nend', 4)) == ['a界b', 'é\u0301c', 'end']
 
 
+def test_message_continuations_align_after_labels_on_resize(display):
+    display.screen.size = (12, 15)
+    display.user('12345678more\nnext')
+    display.reply(Reply('r', text='a界bé\u0301cdeZ\nlast'), '')
+    assert [display.screen.rows[i] for i in range(6)] == [
+        'User: 12345678', '      more', '      next',
+        'Muse: a界bé\u0301cde', '      Z', '      last']
+    display.screen.size = (12, 21)
+    display.draw()
+    assert display.screen.rows[0] == 'User: 12345678more'
+    assert display.screen.rows[1] == '      next'
+    # Very narrow terminals still render without reserving an impossible indent.
+    display.screen.size = (4, 5)
+    display.draw()
+    assert all(len(line) <= 4 for line in display.screen.rows.values())
+
+
+def test_speaker_colors_use_terminal_background(display, monkeypatch):
+    pairs = []
+    monkeypatch.setattr(curses, 'start_color', lambda: None)
+    monkeypatch.setattr(curses, 'use_default_colors', lambda: None)
+    monkeypatch.setattr(curses, 'init_pair', lambda *args: pairs.append(args))
+    monkeypatch.setattr(curses, 'color_pair', lambda n: n << 8)
+    view = TerminalDisplay()
+    try:
+        view.user('hello')
+        view.reply(Reply('r', text='reply'), '')
+        assert pairs == [(1, curses.COLOR_CYAN, -1), (2, curses.COLOR_MAGENTA, -1)]
+        assert view.screen.styles[0, 0] == curses.A_BOLD | (1 << 8)
+        assert view.screen.styles[1, 0] == curses.A_BOLD | (2 << 8)
+        assert view.screen.styles[0, 6] == view.screen.styles[1, 6] == 0
+    finally:
+        view.close()
+
+
 @pytest.mark.parametrize('ending', ['quit', 'eof', 'interrupt'])
 def test_real_terminal_chat_restores_echo_and_line_input(ending):
     """Exercise curses and run_chat together, with real terminal line discipline."""
     import os
     import pty
+    import re
     import select
     import signal
     import subprocess
@@ -200,7 +249,9 @@ asyncio.run(main())
 
     def wait_for(text):
         deadline = time.monotonic() + 5
-        while text not in captured:
+        # Curses changes both SGR colors and character sets between label/body.
+        while text not in re.sub(rb'\x1b(?:\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])',
+                                 b'', captured):
             assert time.monotonic() < deadline, captured.decode(errors='replace')
             if select.select([master], [], [], 0.1)[0]:
                 captured.extend(os.read(master, 65536))

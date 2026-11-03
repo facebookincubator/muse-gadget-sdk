@@ -27,7 +27,7 @@ from musegadget.executor import Account, Executor
 from musegadget.identity import Identity
 from musegadget.noise import ApplicationResponse, BodyChunk, ServiceFrame
 from musegadget.service import Service
-from musegadget.terminal_chat import LiveReplies, run_chat
+from musegadget.terminal_chat import LiveReplies, LiveUsers, run_chat
 from test_link_client import registered_session
 from test_muse_turn import event
 from test_service import run_with_socket
@@ -57,6 +57,44 @@ def test_live_replies_deduplicate_sequences_and_bound_storage():
         view.feed(event("message.assistant", "large", content="x" * 65537))
 
 
+def test_live_users_include_remote_messages_and_suppress_local_echoes_by_id():
+    users = LiveUsers('chat')
+    assert users.feed(event('message.user', 'web', display_text='Web\x1b message')) == ['Web message']
+    assert users.feed(event('message.user', 'web', content='duplicate')) == []
+    users.sending = True
+    assert users.feed(event('message.user', 'local', content='same words')) == []
+    assert users.feed(event('message.user', 'phone', content='same words')) == []
+    assert users.finish_send({'result': {'message_id': 'local'}}) == ['same words']
+    assert users.feed(event('message.user', 'local', content='same words')) == []
+    assert users.feed(event('message.user', 'other', session='elsewhere', content='skip')) == []
+    assert users.feed(event('message.user', 'bad-role', role='assistant', content='skip')) == []
+    assert users.feed(event('message.user', None, content='skip')) == []
+    assert users.feed(event('message.user', 'incomplete', display_text_ready=False, content='wait')) == []
+    assert users.feed(event('message.user', 'incomplete', display_text='Ready')) == ['Ready']
+
+
+def test_live_users_bound_text_storage_and_sequences():
+    users = LiveUsers()
+    item = event('message.user', 'first', content='hello')
+    item['seq'] = 2
+    assert users.feed(item) == ['hello']
+    item = event('message.user', 'stale', content='skip')
+    item['seq'] = 1
+    assert users.feed(item) == []
+    for i in range(300):
+        users.feed(event('message.user', str(i), content='x'))
+    assert len(users.seen) == 256
+    with pytest.raises(ValueError, match='64 KiB'):
+        users.feed(event('message.user', 'huge', content='é' * 32769))
+    users.sending = True
+    for i in range(64):
+        assert users.feed(event('message.user', 'pending-' + str(i), content='x')) == []
+    with pytest.raises(ValueError, match='Too many user messages'):
+        users.feed(event('message.user', 'overflow', content='x'))
+    assert len(users.finish_send()) == 64
+    assert users.pending == []
+
+
 @pytest.mark.parametrize("exit_line", [b"/quit\n", b"", None])
 @pytest.mark.parametrize("session_id", [None, "chat"])
 def test_repl_uses_service_transport_and_receives_before_ack(monkeypatch, exit_line, session_id):
@@ -83,16 +121,27 @@ def test_repl_uses_service_transport_and_receives_before_ack(monkeypatch, exit_l
                 request = await vm.next_frame()
                 assert request.value.path == "/chat/stream"
                 assert json.loads(request.value.body)["message"] == "hello"
-                for item in [event("delta.text_append", "r", parent="u", text="Early reply"),
+                for item in [event('message.user', 'u', display_text='hello'),
+                             event('message.user', 'web', display_text='Web question'),
+                             event("delta.text_append", "r", parent="u", text="Early reply"),
                              event("delta.message_done", "r", parent="u", content="Early reply"),
                              event("message.assistant", "phone-reply", parent="phone", content="Phone reply")]:
                     await vm.send_frame(ServiceFrame.body_chunk(subscription.stream_id, BodyChunk(
                         data=json.dumps(item).encode() + b"\n")))
                 await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
                     status=200, body=b'{"message_id":"u","session_id":"chat"}', end_body=True)))
-                while "Phone reply" not in output.getvalue():
+                for item in [event('message.user', 'u', display_text='hello'),
+                             event('message.user', 'phone', content='Phone question'),
+                             event('message.assistant', 'after', content='After ack')]:
+                    await vm.send_frame(ServiceFrame.body_chunk(subscription.stream_id, BodyChunk(
+                        data=json.dumps(item).encode() + b'\n')))
+                while ('After ack' not in output.getvalue()
+                       or 'User: Web question' not in output.getvalue()):
                     await asyncio.sleep(0.01)
                 assert "Early reply" in output.getvalue()
+                assert 'Phone reply' in output.getvalue()
+                assert 'User: Phone question' in output.getvalue()
+                assert output.getvalue().count('User: hello') == 1
                 if exit_line is None:
                     client.cancel()
                     with pytest.raises(asyncio.CancelledError):

@@ -85,12 +85,23 @@ class TerminalDisplay:
         self.notice = []
         self.dirty = True
         self.size = None
+        self.user_style = curses.A_BOLD
+        self.muse_style = curses.A_BOLD
         try:
             self.screen = curses.initscr()
             curses.noecho()
             curses.cbreak()
             self.screen.keypad(True)
             self.screen.nodelay(True)
+            try:
+                curses.start_color()
+                curses.use_default_colors()
+                curses.init_pair(1, curses.COLOR_CYAN, -1)
+                curses.init_pair(2, curses.COLOR_MAGENTA, -1)
+                self.user_style |= curses.color_pair(1)
+                self.muse_style |= curses.color_pair(2)
+            except curses.error:
+                pass  # Keep bold labels when default-background colors aren't supported.
         except BaseException:
             self.close()
             raise
@@ -137,31 +148,47 @@ class TerminalDisplay:
         height = max(0, rows - 2)
         lines = deque(maxlen=8192)
         for _, text in self.entries:
-            lines.extend(_wrap(text, width))
+            label = text[:6] if text.startswith(('User: ', 'Muse: ')) else ''
+            style = self.user_style if label == 'User: ' else self.muse_style
+            if label and width > len(label):
+                for i, line in enumerate(_wrap(text[6:], width - 6)):
+                    lines.append((label + line if i == 0 else ' ' * 6 + line,
+                                  style if i == 0 else 0))
+            else:
+                lines.extend((line, 0) for line in _wrap(text, width))
         self.scroll = min(self.scroll, max(0, len(lines) - height))
         end = len(lines) - self.scroll
         visible = list(lines)[max(0, end - height):end]
         self.screen.erase()
 
-        def put(row, text, style=0):
+        def put(row, text, style=0, column=0):
             if 0 <= row < rows:
                 try:
-                    self.screen.addstr(row, 0, next(_wrap(text, width)), style)
+                    self.screen.addstr(row, column, next(_wrap(text, width - column)), style)
                 except curses.error:
                     pass  # Resize may race a draw.
 
-        for row, line in enumerate(visible):
-            put(row, line)
-        put(rows - 2, self.status_text, curses.A_REVERSE)
+        for row, (line, style) in enumerate(visible):
+            if style:
+                put(row, line[:6], style)
+                put(row, line[6:], column=6)
+            else:
+                put(row, line)
+        put(rows - 1, self.status_text, curses.A_DIM)
         # Horizontally scroll long input while keeping its insertion point visible.
         start = self.cursor
         cells = 0
         while start and cells + _width(self.draft[start - 1]) < max(1, width - 6):
             start -= 1
             cells += _width(self.draft[start])
-        put(rows - 1, "User: " + self.draft[start:])
+        input_row = rows - 2
+        if width > 6:
+            put(input_row, 'User: ', self.user_style)
+            put(input_row, self.draft[start:], column=6)
+        else:
+            put(input_row, 'User: ' + self.draft[start:], self.user_style)
         try:
-            self.screen.move(rows - 1, min(width - 1, 6 + cells))
+            self.screen.move(input_row, min(width - 1, 6 + cells))
             self.screen.refresh()
         except curses.error:
             pass
