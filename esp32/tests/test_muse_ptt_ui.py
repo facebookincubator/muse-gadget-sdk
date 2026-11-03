@@ -111,6 +111,12 @@ class StopWatchPTT(unittest.TestCase):
     def test_failed_tail_reads_cannot_extend_release_deadline(self):
         self.run_case('voice', 23)
 
+    def test_qualification_failure_never_becomes_tap_to_call(self):
+        for board, realtime in ((0, 1), (1, 0), (1, 1), (0, 0), (2, 0)):
+            for scenario in range(70, 82):
+                with self.subTest(board=board, realtime=realtime, scenario=scenario):
+                    self.run_case('voice', scenario, board=board, realtime=realtime)
+
     def test_note_preserves_buffered_order_and_streams_fresh_pcm_exactly(self):
         # PSRAM PCM, low-memory 320 ms pre-roll, low-memory 120 ms pre-roll.
         for board in (1, 0, 2):

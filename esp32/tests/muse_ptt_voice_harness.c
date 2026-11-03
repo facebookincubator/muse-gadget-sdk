@@ -135,7 +135,7 @@ float muse_audio_dbfs(const int16_t *p,size_t n) { (void)n; return (float)p[0]/1
 float muse_audio_level(const int16_t *p,size_t n) { assert(n); return (float)p[0]/1000; }
 
 /* Legacy path is a tripwire, not another implementation of the note engine. */
-void muse_hatch_turn_begin(void) { ++notes; if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
+void muse_hatch_turn_begin(void) { ++notes; if(scenario>=70) longjmp(finish,3); if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
 void muse_hatch_turn_audio(const int16_t *p,size_t n) {
     if(verify_pcm) {
         assert(note_frames+n<=MAX_FRAMES);
@@ -166,7 +166,7 @@ size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) { (void)p;(void)n;(void)
 #if CONFIG_MUSE_REALTIME_VOICE
 static int pending_at_ready = -1;
 bool muse_voice_call_ready(void) { pending_at_ready = (atomic_load(&s_call_pending)!=0); return ready; }
-void muse_voice_call_start(void) { ++starts; held=false; }
+void muse_voice_call_start(void) { ++starts; held=false; if(scenario>=70) longjmp(finish,2); }
 void muse_voice_call_start_ptt(void) {
     ++starts; held=true;
     if(scenario==33) overflow_input(MUSE_PTT_UP);
@@ -246,6 +246,30 @@ muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
 #endif
 
 esp_err_t muse_audio_read(int16_t *p,size_t n) {
+    if(scenario>=70) {
+        /* Stop after the actual outer voice loop has handled the attempt,
+         * before it can consume a newer DOWN or overwrite its result. */
+        if(frame>1 && (mode==MUSE_MODE_IDLE || atomic_load(&s_shutdown))) longjmp(finish,1);
+        ++frame;
+        clock_us+=(scenario==70 || scenario==72 || scenario==73)?40000:20000;
+        assert(frame<100);
+        if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
+        if(scenario==73 && frame==18) post(MUSE_PTT_UP,false);
+        if(frame==10) {
+            if(scenario==75) {
+                mode=MUSE_MODE_OFF; snprintf(caption,sizeof(caption),"POWERING OFF");
+                atomic_store(&s_shutdown,true);
+            }
+            if(scenario==76) atomic_fetch_add(&s_call_epoch,1);
+            if(scenario==77 || scenario==81) {
+                notes_mode=false; post(MUSE_PTT_DOWN,false);
+            }
+            if(scenario==80) post(MUSE_PTT_END_CALL,false);
+        }
+        for(size_t i=0;i<n;i++) p[i]=10000;
+        return ((scenario==70 || scenario==72) && frame==22) ||
+            ((scenario==71 || scenario==81) && frame==10) ? ESP_FAIL:ESP_OK;
+    }
     ++frame; clock_us+=scenario==41?0:scenario==22?1000:20000; assert(frame<1200);
     if(scenario>=50) {
         note_burst=0;
@@ -326,6 +350,31 @@ esp_err_t muse_audio_write(const int16_t *p,size_t n) {
 int main(int argc,char **argv) {
     assert(argc==2); scenario=atoi(argv[1]); s_queue=input_queue=&queue; ready=true;
     s_pre=calloc(PRE_CAP_CHUNKS,sizeof(*s_pre));
+    if(scenario>=70) {
+        notes_mode=true; clock_us=1000000;
+        post(MUSE_PTT_DOWN,scenario==72 || scenario==78);
+        int outcome=setjmp(finish);
+        if(!outcome) voice_task(NULL);
+        bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
+        if(scenario==79) {
+            assert(outcome==3 && notes==1 && !starts && clock_us>=1600000);
+        } else {
+            assert(!notes && !note_frames && !s_rec && !s_pre_fill && !level);
+            assert(starts==(call_expected?1:0) && outcome==(call_expected?2:1));
+            if(scenario==70 || scenario==71 || scenario==72 || scenario==81)
+                assert(!strcmp(caption,"MICROPHONE ERROR - TRY AGAIN"));
+            if(scenario==73 || (scenario==74 && !call_expected))
+                assert(!strcmp(caption,"HOLD LONGER TO RECORD"));
+            if(scenario==75) assert(mode==MUSE_MODE_OFF && !strcmp(caption,"POWERING OFF"));
+            if(scenario==76 || scenario==77 || scenario==78 || scenario==80) assert(!caption[0]);
+            if(scenario==77 || scenario==81) {
+                assert(queue.n==1 && queue.items[0].type==MUSE_PTT_DOWN);
+                assert(!CONFIG_MUSE_REALTIME_VOICE || !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH || atomic_load(&s_call_pending));
+            }
+            if(scenario==70) assert(clock_us==1880000 && !queue.n); /* no release: 880 ms hold */
+        }
+        drop_rec(); free(s_pre); return 0;
+    }
     if(scenario>=50) {
         /* Run the actual note admission/recording path: no transport call is
          * allowed before both thresholds, even without a whole-note buffer. */
@@ -348,9 +397,14 @@ int main(int argc,char **argv) {
         }
         if(scenario==54 || scenario==55) clock_us+=600000; /* delayed voice task */
         if(scenario==56) note_read_fail_frame=10;
-        bool admitted=note_held(scenario==53,scenario==57);
+        note_result_t result=note_held(scenario==53,scenario==57);
+        bool admitted=result==NOTE_ACCEPTED;
         bool expected=!(scenario==50 || scenario==52 || scenario==55 || scenario==56 || scenario==58 || scenario==59);
         assert(admitted==expected && !notes && !note_frames);
+        if(scenario==50 || scenario==52) assert(result==NOTE_SHORT_TAP);
+        if(scenario==55) assert(result==NOTE_INSUFFICIENT_CAPTURE);
+        if(scenario==56) assert(result==NOTE_CAPTURE_ERROR);
+        if(scenario==58 || scenario==59) assert(result==NOTE_CANCELLED);
         if(admitted) {
             assert(clock_us-s_press_us>=600000);
             assert(frame>=(scenario==57?35:25));

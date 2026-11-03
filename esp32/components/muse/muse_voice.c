@@ -597,13 +597,21 @@ static bool note_requires_hold(void)
 #endif
 }
 
+typedef enum {
+    NOTE_ACCEPTED,
+    NOTE_SHORT_TAP,
+    NOTE_INSUFFICIENT_CAPTURE,
+    NOTE_CAPTURE_ERROR,
+    NOTE_CANCELLED,
+} note_result_t;
+
 /*
  * Buffer locally until this press has lasted 600 ms AND supplied 500 ms of
  * successful capture while held. Idle pre-roll, playback settling and release
- * tail never count. No turn is opened until this returns true; the ring keeps
+ * tail never count. No turn is opened until NOTE_ACCEPTED; the ring keeps
  * the first words on boards both with and without a whole-note buffer.
  */
-static bool note_held(bool wake, bool barge_in)
+static note_result_t note_held(bool wake, bool barge_in)
 {
     if (wake || barge_in) s_pre_fill = 0;
     int settle = barge_in ? SETTLE_CHUNKS : 0;
@@ -611,7 +619,7 @@ static bool note_held(bool wake, bool barge_in)
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_caption("RECORDING...");
     for (;;) {
-        if (atomic_load(&s_shutdown) || s_press_input_epoch != muse_input_call_epoch()) return false;
+        if (atomic_load(&s_shutdown) || s_press_input_epoch != muse_input_call_epoch()) return NOTE_CANCELLED;
         muse_input_event_t ev;
         bool edge = xQueuePeek(s_queue, &ev, 0) == pdTRUE;
         int64_t until = edge ? ev.at_us : esp_timer_get_time();
@@ -621,16 +629,21 @@ static bool note_held(bool wake, bool barge_in)
             /* Leave an admitted release for record()'s capture-lag tail, and
              * a later DOWN for the next gesture. Never borrow its hold time. */
             if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP) {
-                if (!eligible) xQueueReceive(s_queue, &ev, 0);
-                return eligible;
+                if (eligible) return NOTE_ACCEPTED;
+                xQueueReceive(s_queue, &ev, 0);
+                return until - s_press_us < NOTE_MIN_HOLD_US ? NOTE_SHORT_TAP : NOTE_INSUFFICIENT_CAPTURE;
             }
-            if (ev.type == MUSE_PTT_DOWN) return false;
+            if (ev.type == MUSE_PTT_DOWN) return NOTE_CANCELLED;
             xQueueReceive(s_queue, &ev, 0);
             muse_input_clear_call_pending(ev.mark);
+            if (ev.type == MUSE_PTT_END_CALL) return NOTE_CANCELLED;
             continue;
         }
-        if (eligible) return true;
-        if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) return false;
+        if (eligible) return NOTE_ACCEPTED;
+        if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
+            return atomic_load(&s_shutdown) || s_press_input_epoch != muse_input_call_epoch() ?
+                NOTE_CANCELLED : NOTE_CAPTURE_ERROR;
+        }
         if (settle) {
             settle--;
             continue;
@@ -1301,21 +1314,24 @@ static void voice_task(void *arg)
             pending_down = false;
             continue;
         }
-        bool admitted = note_held(wake, pending_down);
+        note_result_t result = note_held(wake, pending_down);
         pending_down = false;
-        if (!admitted) {
+        if (result != NOTE_ACCEPTED) {
             drop_rec();
             pre_reset();
+            muse_state_set_level(0);
+            if (atomic_load(&s_shutdown) || muse_state_mode(NULL) == MUSE_MODE_OFF) continue;
 #if CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH
             /* Other boards retain tap-to-call beside holding for a note. */
-            if (!wake && !atomic_load(&s_shutdown) && s_press_input_epoch == muse_input_call_epoch()
+            if (result == NOTE_SHORT_TAP && !wake && s_press_input_epoch == muse_input_call_epoch()
                 && muse_voice_call_ready()) {
                 run_call(false, 0);
                 pre_reset();
                 continue;
             }
 #endif
-            if (wake) go_idle("");
+            if (result == NOTE_CAPTURE_ERROR) go_idle("MICROPHONE ERROR - TRY AGAIN");
+            else if (result == NOTE_CANCELLED || (result == NOTE_SHORT_TAP && wake)) go_idle("");
             else too_short();
             continue;
         }
