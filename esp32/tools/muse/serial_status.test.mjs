@@ -59,7 +59,9 @@ test('all static UI labels reference defined translations and English markup', a
   assert.match(html,/<option value="en" selected>/);
   for(const [,key] of html.matchAll(/data-i18n(?:-aria)?="([^"]+)"/g)) assert.ok(TEXT[key],key);
 });
-test('mic gain slider uses the firmware\'s 3 dB steps', async () => {
+test('every integer setting the firmware stores loads without rounding', async () => {
+  // A coarser step would snap a stored value (e.g. mic_gain 32) and turn it
+  // into a phantom edit that the next save writes back.
   const html=await readFile(new URL('serial_setup.html',import.meta.url),'utf8');
-  assert.match(html,/<input id="mic_gain"[^>]*\bstep="3"/);
+  for(const id of ['brightness','sleep','volume','mic_gain']) assert.match(html,new RegExp(`<input id="${id}"[^>]*\\bstep="1"`),id);
 });
