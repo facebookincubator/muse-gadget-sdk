@@ -13,8 +13,9 @@
 # limitations under the License.
 
 # Embeds the Markdown device.guide returns: CONFIG_MUSE_DEVICE_GUIDE (default
-# main/guide.md), looked up in the project directory, then in esp32/. Also runs
-# as a script for the host tests:
+# main/guide.md), looked up in the project directory, then in esp32/. Sets
+# MUSE_DEVICE_GUIDE_HASH, the first 16 hex characters of its SHA-256. Also runs
+# as a script for the host tests, which writes the hash to <file>.hash:
 #   cmake -DGUIDE_OUT=<file> [-DCONFIG_MUSE_DEVICE_GUIDE=<path>] -P cmake/device_guide.cmake
 set(MUSE_DEVICE_GUIDE_MAX_BYTES 4096)
 get_filename_component(MUSE_DEVICE_GUIDE_SDK_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
@@ -52,6 +53,9 @@ function(muse_device_guide_assemble out project_dir)
     endif()
     file(WRITE "${out}.tmp" "${guide}")
     configure_file("${out}.tmp" "${out}" COPYONLY)
+    string(SHA256 hash "${guide}")
+    string(SUBSTRING "${hash}" 0 16 hash)
+    set(MUSE_DEVICE_GUIDE_HASH "${hash}" PARENT_SCOPE)
     if(NOT CMAKE_SCRIPT_MODE_FILE)
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
     endif()
@@ -59,4 +63,5 @@ endfunction()
 
 if(CMAKE_SCRIPT_MODE_FILE STREQUAL CMAKE_CURRENT_LIST_FILE)
     muse_device_guide_assemble("${GUIDE_OUT}" "${MUSE_DEVICE_GUIDE_SDK_DIR}")
+    file(WRITE "${GUIDE_OUT}.hash" "${MUSE_DEVICE_GUIDE_HASH}")
 endif()

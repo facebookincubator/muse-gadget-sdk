@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -170,17 +171,27 @@ int main(void) {{
     return 0;
 }}
 '''
+        if not any(define.startswith("-DMUSE_DEVICE_GUIDE_HASH=") for define in defines):
+            defines = [*defines, '-DMUSE_DEVICE_GUIDE_HASH="0123456789abcdef"']
         with tempfile.TemporaryDirectory() as name:
             output = self.compile_and_run(Path(name), harness, defines, ble)
         return output.splitlines()
 
     def test_register_describes_the_device(self) -> None:
+        if shutil.which("cmake") is None:
+            self.skipTest("cmake unavailable")
+        with tempfile.TemporaryDirectory() as name:
+            guide = Path(name) / "guide.md"
+            self.assertEqual(assemble_guide(guide).returncode, 0)
+            guide_hash = Path(f"{guide}.hash").read_text()
+            self.assertEqual(guide_hash, hashlib.sha256(guide.read_bytes()).hexdigest()[:16])
         params = json.loads(self.registrations([
-            "-DCONFIG_HOMEHUB_TUNNEL=1",
+            "-DCONFIG_HOMEHUB_TUNNEL=1", f'-DMUSE_DEVICE_GUIDE_HASH="{guide_hash}"',
             '-DCONFIG_MUSE_DEVICE_MODEL_ID="acme-lamp"', '-DCONFIG_MUSE_DEVICE_MODEL_NAME="Acme Lamp"',
         ])[0])["params"]
         self.assertEqual((params["device_family"], params["model_id"]), ("gadget", "acme-lamp"))
         self.assertEqual(params["metadata"]["model_name"], "Acme Lamp")
+        self.assertEqual(params["metadata"]["guide_hash"], guide_hash)
         self.assertEqual(params["commands_v2"]["device.guide"],
                          {"description": GUIDE_DESCRIPTION, "required": {}, "optional": {}})
 

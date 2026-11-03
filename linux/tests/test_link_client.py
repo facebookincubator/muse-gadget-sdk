@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import dataclasses
+import hashlib
 import io
 import json
 import struct
@@ -176,10 +177,11 @@ def test_register_describes_the_model():
     assert params["metadata"] == {"model_name": "Linux gadget"}
     assert device_guide.COMMAND not in params["commands_v2"]
 
-    robot = dataclasses.replace(DEVICE, model_id="acme-robot-2", model_name="Acme Robot 2",
-                                guide="# Acme Robot 2\n\nIt rolls.\n")
+    guide = "# Acme Robot 2\n\nIt rolls, café to café.\n"
+    robot = dataclasses.replace(DEVICE, model_id="acme-robot-2", model_name="Acme Robot 2", guide=guide)
     params = robot.register_params()
-    assert (params["model_id"], params["metadata"]) == ("acme-robot-2", {"model_name": "Acme Robot 2"})
+    assert (params["model_id"], params["metadata"]) == ("acme-robot-2", {
+        "model_name": "Acme Robot 2", "guide_hash": hashlib.sha256(guide.encode("utf-8")).hexdigest()[:16]})
     assert params["commands_v2"] == {**DEVICE.commands, "device.guide": device_guide.SPEC}
     assert "device.guide" not in DEVICE.commands
 

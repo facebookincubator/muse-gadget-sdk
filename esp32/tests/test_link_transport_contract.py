@@ -137,6 +137,8 @@ class LinkTransportContractTest(unittest.TestCase):
         self.assertIn('"model_id", CONFIG_MUSE_DEVICE_MODEL_ID', register)
         self.assertIn('"model_name"', register)
         self.assertIn("CONFIG_MUSE_DEVICE_MODEL_NAME", register)
+        self.assertIn('"guide_hash"', register)
+        self.assertIn("MUSE_DEVICE_GUIDE_HASH", register)
         self.assertIn('"device.health"', register)
         self.assertIn('"device.guide"', register)
         self.assertIn('"device.discover"', register)
