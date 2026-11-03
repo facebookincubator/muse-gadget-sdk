@@ -38,7 +38,7 @@ class StopWatchPTT(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.binaries = {}
-        for board, realtime in ((1, 1), (0, 1), (1, 0), (0, 0)):
+        for board, realtime in ((1, 1), (0, 1), (1, 0), (0, 0), (2, 0)):
             stage = Path(cls.tmp.name) / f'{board}-{realtime}'
             stage.mkdir()
             # Byte-identical production units/headers. No function extraction or
@@ -59,10 +59,11 @@ class StopWatchPTT(unittest.TestCase):
                 path.write_text('#include "muse_ptt_ui_fakes.h"\n')
             (stage / 'sdkconfig.h').write_text(
                 '#pragma once\n'
-                f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH {board}\n'
+                f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH {int(board == 1)}\n'
+                f'#define CONFIG_MUSE_BOARD_AI_PASSPORT {int(board == 2)}\n'
                 f'#define CONFIG_MUSE_REALTIME_VOICE {realtime}\n'
-                f'#define CONFIG_MUSE_HATCH {int(board or realtime)}\n'
-                f'#define CONFIG_SPIRAM {int(board or realtime)}\n'
+                f'#define CONFIG_MUSE_HATCH {int(board == 1 or realtime)}\n'
+                f'#define CONFIG_SPIRAM {int(board == 1 or realtime)}\n'
                 '#define CONFIG_MUSE_DEFAULT_VOLUME 20\n')
             ui = (MUSE / 'muse_ui.c').read_text()
             start = ui.index('static void frame_tick(')
@@ -109,6 +110,13 @@ class StopWatchPTT(unittest.TestCase):
 
     def test_failed_tail_reads_cannot_extend_release_deadline(self):
         self.run_case('voice', 23)
+
+    def test_note_preserves_buffered_order_and_streams_fresh_pcm_exactly(self):
+        # PSRAM PCM, low-memory 320 ms pre-roll, low-memory 120 ms pre-roll.
+        for board in (1, 0, 2):
+            for scenario in (60, 61, 62, 63):
+                with self.subTest(board=board, scenario=scenario):
+                    self.run_case('voice', scenario, board=board, realtime=0)
 
     def test_blue_shutdown_hold_and_remote_end_cancel_capture_tail(self):
         for scenario in (24, 25, 26, 27):

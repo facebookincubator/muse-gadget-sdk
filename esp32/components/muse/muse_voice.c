@@ -363,11 +363,15 @@ static bool record(char *why, size_t cap)
         }
         muse_state_set_level(muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK));
 #if MUSE_LOW_MEM
-        pre_put();
-        take_pre(&st, PRE_CHUNKS);
-#else
-        take(&st, s_chunk);
+        if (s_pre_fill) {
+            /* Keep new input behind the opening backlog until it drains. */
+            pre_put();
+            take_pre(&st, PRE_CHUNKS);
+        } else
 #endif
+        {
+            take(&st, s_chunk);   /* fresh PCM needs no lossy buffer round-trip */
+        }
         /* Live transcript as the caption. A failure stops the streaming; the
          * kept note goes later, or without one the failure is the caption. */
         muse_hatch_ev_t ev;

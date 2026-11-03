@@ -34,6 +34,13 @@ static int64_t accepted_at[2048];
 static int note_release_frame, note_read_fail_frame;
 static size_t note_frames;
 static size_t note_burst, note_max_burst;
+static bool verify_pcm;
+static int16_t *expected_pcm, *uploaded_pcm;
+static size_t expected_frames, direct_blocks;
+static size_t pending_chunks;
+#if MUSE_LOW_MEM
+static muse_adpcm_t expected_encoder;
+#endif
 static void overflow_input(muse_ptt_t type)
 {
     while(queue.n<16) post(MUSE_PTT_DOWN,false);
@@ -130,10 +137,16 @@ float muse_audio_level(const int16_t *p,size_t n) { assert(n); return (float)p[0
 /* Legacy path is a tripwire, not another implementation of the note engine. */
 void muse_hatch_turn_begin(void) { ++notes; if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
 void muse_hatch_turn_audio(const int16_t *p,size_t n) {
-    (void)p; note_frames+=n; note_burst+=n;
+    if(verify_pcm) {
+        assert(note_frames+n<=MAX_FRAMES);
+        memcpy(uploaded_pcm+note_frames,p,n*sizeof(*p));
+    }
+    note_frames+=n; note_burst+=n;
     if(note_burst>note_max_burst) note_max_burst=note_burst;
 }
-size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) { (void)p;(void)ms;note_frames+=n;return n; }
+size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) {
+    (void)ms; muse_hatch_turn_audio(p,n); return n;
+}
 void muse_hatch_turn_end(void) {}
 void muse_hatch_turn_cancel(void) {}
 /* One scripted way for hatch_reply() to end, arriving after a long turn. */
@@ -239,7 +252,27 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(frame==note_release_frame) push(MUSE_PTT_UP);
         if(scenario==58 && frame==10) atomic_store(&s_shutdown,true);
         if(scenario==59 && frame==10) atomic_fetch_add(&s_call_epoch,1);
-        for(size_t i=0;i<n;i++) p[i]=(int16_t)(100+frame);
+        for(size_t i=0;i<n;i++) p[i]=scenario>=60 ?
+            (int16_t)((int)((i*113+frame*97)%50000)-25000) : (int16_t)(100+frame);
+        if(verify_pcm && frame!=note_read_fail_frame) {
+            assert(expected_frames+n<=MAX_FRAMES);
+#if MUSE_LOW_MEM
+            if(pending_chunks) {
+                /* Independently encode each backlogged input block, then
+                 * compare the complete ordered upload against this reference. */
+                uint8_t codes[MUSE_AUDIO_CHUNK/2];
+                muse_adpcm_t decoder=expected_encoder;
+                muse_adpcm_encode_block(&expected_encoder,p,n,codes);
+                muse_adpcm_decode_block(&decoder,codes,n,expected_pcm+expected_frames);
+                pending_chunks=pending_chunks+1>PRE_CHUNKS ? pending_chunks+1-PRE_CHUNKS : 0;
+            } else
+#endif
+            {
+                memcpy(expected_pcm+expected_frames,p,n*sizeof(*p));
+                direct_blocks++;
+            }
+            expected_frames+=n;
+        }
         return frame==note_read_fail_frame?ESP_FAIL:ESP_OK;
     }
     if(scenario==41 && frame==2) push(MUSE_PTT_UP);
@@ -305,6 +338,10 @@ int main(int argc,char **argv) {
         assert(queue.items[0].at_us==clock_us);
         assert(got_event(MUSE_PTT_DOWN) && s_press_us==clock_us);
         note_release_frame=scenario==50?29:scenario==51?30:scenario==54?31:scenario==55?25:36;
+        if(scenario==60) note_release_frame=100;  /* steady direct PCM after draining */
+        if(scenario==61) note_release_frame=30;   /* release at admission, with backlog */
+        if(scenario==62) note_release_frame=1100; /* recording reaches MAX_FRAMES */
+        if(scenario==63) note_read_fail_frame=32; /* final drain with backlog remaining */
         if(scenario==52) {
             /* A release queued at 580 ms stays short when handled much later. */
             clock_us+=580000; post(MUSE_PTT_UP,false); clock_us+=1000000;
@@ -327,6 +364,20 @@ int main(int argc,char **argv) {
                 }
             }
             size_t prefix=s_pre_fill*MUSE_AUDIO_CHUNK;
+            if(scenario>=60) {
+                expected_pcm=calloc(MAX_FRAMES,sizeof(*expected_pcm));
+                uploaded_pcm=calloc(MAX_FRAMES,sizeof(*uploaded_pcm));
+                assert(expected_pcm && uploaded_pcm);
+                for(size_t i=0;i<s_pre_fill;i++) {
+                    pre_get(i,expected_pcm+expected_frames);
+                    expected_frames+=MUSE_AUDIO_CHUNK;
+                }
+#if MUSE_LOW_MEM
+                pending_chunks=s_pre_fill>PRE_CHUNKS ? s_pre_fill-PRE_CHUNKS : 0;
+                expected_encoder=s_pre_enc;
+#endif
+                verify_pcm=true;
+            }
 #if HOLD_NOTES
             s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
 #endif
@@ -334,10 +385,18 @@ int main(int argc,char **argv) {
             assert(record(why,sizeof(why)) && notes==1);
             /* Prefix and capture-lag tail remain in the sent audio. Neither
              * was used to make a short press eligible. */
-            assert(note_frames>=prefix+TAIL_FRAMES);
+            if(scenario==63) assert(note_frames==prefix+MUSE_AUDIO_CHUNK);
+            else assert(note_frames>=prefix+TAIL_FRAMES);
             assert(frame<=note_release_frame+7);
+            if(verify_pcm) {
+                assert(note_frames==expected_frames);
+                assert(!memcmp(uploaded_pcm,expected_pcm,note_frames*sizeof(*uploaded_pcm)));
+                if(scenario==60 || scenario==62) assert(direct_blocks>0);
+                if(scenario==62) assert(note_frames==MAX_FRAMES);
+                free(expected_pcm); free(uploaded_pcm);
+            }
 #if MUSE_LOW_MEM
-            assert(note_max_burst<=2*PRE_CHUNKS*MUSE_AUDIO_CHUNK);
+            if(scenario!=63) assert(note_max_burst<=2*PRE_CHUNKS*MUSE_AUDIO_CHUNK);
 #endif
             drop_rec();
         }
