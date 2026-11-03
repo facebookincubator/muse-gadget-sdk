@@ -24,9 +24,11 @@ own directory.
 ## Defaults this work changed
 
 - `sdkconfig.defaults.esp32c5` (C5 only): lwIP and Wi-Fi heap buffers prefer
-  PSRAM (`SPIRAM_TRY_ALLOCATE_WIFI_LWIP`), the TCP windows grow to 64 KiB,
-  and the receive path deepens to take a whole window in one burst (64
-  dynamic RX buffers, 12 queued out-of-order segments).
+  PSRAM (`SPIRAM_TRY_ALLOCATE_WIFI_LWIP`), the TCP windows grow to 96 KiB
+  with window scaling (PSRAM required at boot, 4 static Wi-Fi TX buffers),
+  and the receive path deepens to take a whole window in one burst (96
+  dynamic RX buffers, a 96-entry receive mailbox, 12 queued out-of-order
+  segments).
 - `CONFIG_HOMEHUB_BLE_COEX` (on for C5 with `CONFIG_HOMEHUB_BLE_PERSISTENT`):
   Wi-Fi first radio sharing once setup is complete (`main/ble_coex.c`).
 - `CONFIG_HOMEHUB_FAST_GCM` (on for C5 with PSRAM): faster AES-GCM for TLS and
