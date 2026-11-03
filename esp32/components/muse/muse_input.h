@@ -48,6 +48,7 @@ typedef struct {
     bool wake;   /* a press that woke the screen: a tap only wakes */
     uint32_t epoch;   /* a dropped call edge invalidates this and all older gestures */
     uint32_t mark;    /* DOWN: its pending-call mark (muse_input_clear_call_pending), or 0 */
+    int64_t at_us;    /* input edge time, before queueing or voice-task delays */
 } muse_input_event_t;
 
 /*

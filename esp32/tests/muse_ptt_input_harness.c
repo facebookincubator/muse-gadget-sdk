@@ -57,6 +57,7 @@ bool muse_ui_dark(void) { return false; }
 void xTaskNotifyGive(TaskHandle_t t) { (void)t; }
 void vTaskDelay(int ms) { clock_us+=ms*1000; }
 TickType_t xTaskGetTickCount(void) { return clock_us/1000; }
+int64_t esp_timer_get_time(void) { return clock_us; }
 const char *esp_err_to_name(esp_err_t e) { (void)e; return "failed"; }
 bool muse_settings_ble_on(void) { return ble; }
 void muse_settings_set_ble_on(bool v) { ble=v; ++toggled; }

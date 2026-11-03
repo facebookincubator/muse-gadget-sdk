@@ -243,7 +243,7 @@ class CaptionHint(unittest.TestCase):
         voice = (MUSE / "muse_voice.c").read_text()
         # Replies, errors from Muse and status stay up: go_idle() keeps a plain caption.
         self.assertNotIn("muse_state_set_hint", function(voice, "go_idle"))
-        self.assertEqual(re.findall(r'muse_state_set_hint\("([^"]*)"\)', voice), ["HOLD LONGER TO TALK"])
+        self.assertEqual(re.findall(r'muse_state_set_hint\("([^"]*)"\)', voice), ["HOLD LONGER TO RECORD"])
         self.assertNotIn('go_idle("HOLD LONGER TO TALK")', voice)
         inp = (MUSE / "muse_input.c").read_text()
         hints = re.findall(r"muse_state_set_hint\(([^;]*)\);", inp)
