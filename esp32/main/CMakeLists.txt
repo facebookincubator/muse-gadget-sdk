@@ -64,6 +64,7 @@ set(GADGET_REQUIRES
     esp_psram
     esp_coex
     driver
+    esp_adc
     esp_driver_gpio
     esp_driver_i2c
     esp_driver_ledc
@@ -79,7 +80,6 @@ set(GADGET_REQUIRES
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
     esp_driver_pcnt
-    esp_adc
     fatfs
     esp_driver_sdspi
     sdmmc
@@ -91,9 +91,9 @@ if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 OR CONFIG_HOMEHUB_LED_BACKEND_RE
     list(APPEND GADGET_REQUIRES esp_pm)
 endif()
 if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "link_power.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "reterminal_battery.c" "link_power.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "link_power.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "reterminal_battery.c" "link_power.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_it8951.c" "link_power.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677)
@@ -113,7 +113,10 @@ endif()
 # Keep the legacy switches (including explicit n values); normalize their
 # source ownership here rather than duplicating a source list per model.
 if(CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE OR CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE)
-    list(APPEND GADGET_SRCS "reterminal_e100x_rtc.c" "reterminal_e100x_sd.c" "reterminal_e100x_microphone.c" "battery_adc.c")
+    list(APPEND GADGET_SRCS "reterminal_e100x_rtc.c" "reterminal_e100x_sd.c" "reterminal_e100x_microphone.c")
+endif()
+if(CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE)
+    list(APPEND GADGET_SRCS "battery_adc.c")
 endif()
 if(CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE OR CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT OR CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE)
     list(APPEND GADGET_SRCS "reterminal_e100x_events.c")
@@ -133,11 +136,18 @@ if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_
     list(APPEND GADGET_REQUIRES led_strip)
 endif()
 
+if(CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341)
+    list(APPEND GADGET_REQUIRES esp_lcd_ili9341)
+endif()
+
 if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
     list(APPEND GADGET_SRCS "sensecap_sensors.c")
 endif()
 if(CONFIG_HOMEHUB_RETERMINAL_SHT4X)
     list(APPEND GADGET_SRCS "reterminal_sht4x.c")
+endif()
+if(CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3)
+    list(APPEND GADGET_SRCS "waveshare_154g_shtc3.c")
 endif()
 
 if(CONFIG_HOMEHUB_VOICE)

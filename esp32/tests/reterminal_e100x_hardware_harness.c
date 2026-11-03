@@ -2,6 +2,7 @@
 #include <string.h>
 #include "reterminal_e100x.h"
 #include "reterminal_e100x_board.h"
+#include "reterminal_battery.h"
 #include "reterminal_e100x_rtc.h"
 #include "freertos/task.h"
 #include "e1003_touch.h"
@@ -28,11 +29,23 @@ static cJSON *s_reply;
 static bool s_task_fail;
 static int s_hz, s_ms;
 
-static int64_t s_clock = 1000, s_battery_at;
+static int64_t s_clock = 1000;
 static int s_battery_mv, s_battery_pct;
 static bool s_battery_valid;
 #include "freertos/FreeRTOS.h"
+#if RETERMINAL_E100X_BOARD_ID == 3
+static int64_t s_battery_at;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+#else
+static int s_battery_reads;
+bool reterminal_battery_read(int *mv, int *pct) {
+    s_battery_reads++;
+    if (!s_battery_valid) return false;
+    *mv = s_battery_mv;
+    *pct = s_battery_pct;
+    return true;
+}
+#endif
 int64_t esp_timer_get_time(void) { return s_clock; }
 int esp_wifi_get_ps(wifi_ps_type_t *ps) { *ps = WIFI_PS_MIN_MODEM; return ESP_OK; }
 bool link_power_acquire(link_power_owner_t owner) { (void)owner; return true; }
@@ -118,13 +131,29 @@ int main(void) {
     r = call("battery.read", NULL);
     assert(cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetObjectItem(r, "payload"), "battery_mv")));
     cJSON_Delete(r);
-    s_battery_valid=true;s_battery_mv=3800;s_battery_pct=66;s_battery_at=s_clock;
+    s_battery_valid=true;s_battery_mv=3800;s_battery_pct=66;
+#if RETERMINAL_E100X_BOARD_ID == 3
+    s_battery_at=s_clock;
+#endif
     r=call("battery.read",NULL);
     assert(cJSON_GetObjectItem(cJSON_GetObjectItem(r,"payload"),"battery_mv")->valueint==3800);
     cJSON_Delete(r);s_clock+=60000001;
     r=call("battery.read",NULL);
+#if RETERMINAL_E100X_BOARD_ID == 3
     assert(cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetObjectItem(r,"payload"),"battery_mv")));
+#else
+    assert(cJSON_GetObjectItem(cJSON_GetObjectItem(r,"payload"),"battery_mv")->valueint==3800);
+    assert(s_battery_reads == 3);
+#endif
     cJSON_Delete(r);s_battery_valid=false;s_clock=1000;
+#if RETERMINAL_E100X_BOARD_ID != 3
+    r=cJSON_Parse("{\"battery_mv\":3900,\"battery_pct\":78,\"charging\":null,\"usb_power\":null}");
+    reterminal_e100x_health(r);
+    assert(cJSON_GetObjectItem(r,"battery_mv")->valueint==3900);
+    assert(cJSON_GetObjectItem(r,"battery_pct")->valueint==78);
+    assert(s_battery_reads == 3);
+    cJSON_Delete(r);
+#endif
     r = run("rtc.read", NULL);
     assert(cJSON_GetObjectItem(cJSON_GetObjectItem(r, "payload"), "year")->valueint == 2026);
     cJSON_Delete(r);

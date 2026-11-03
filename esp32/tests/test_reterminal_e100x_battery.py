@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -10,8 +11,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class E100xBatteryTest(unittest.TestCase):
+    def test_battery_backend_selection(self):
+        cmake = shutil.which("cmake")
+        if cmake is None:
+            self.skipTest("CMake not available")
+        for panel, inputs, hardware in [("UC8179", 0, 0), ("UC8179", 0, 1),
+                                        ("SPECTRA6", 0, 0), ("SPECTRA6", 0, 1),
+                                        ("IT8951", 1, 1), ("IT8951", 1, 0),
+                                        ("IT8951", 0, 1)]:
+            with self.subTest(panel=panel, inputs=inputs, hardware=hardware):
+                with tempfile.TemporaryDirectory() as directory:
+                    script = Path(directory) / "sources.cmake"
+                    config = f"set(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_{panel} ON)\n"
+                    if panel == "IT8951":
+                        config += f"set(CONFIG_HOMEHUB_RETERMINAL_E1003_INPUT {inputs})\n"
+                        config += f"set(CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE {hardware})\n"
+                    else:
+                        config += f"set(CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE {hardware})\n"
+                    script.write_text(
+                        "function(idf_component_register)\nendfunction()\n" + config +
+                        f'include("{(ROOT / "main/CMakeLists.txt").as_posix()}")\n'
+                        'message("SOURCES=${GADGET_SRCS}")\n', encoding="utf-8")
+                    result = subprocess.run([cmake, "-P", str(script)],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    sources = result.stderr.split("SOURCES=", 1)[1].strip().split(";")
+                    self.assertEqual(sources.count("reterminal_battery.c"), int(panel != "IT8951"))
+                    self.assertEqual(sources.count("battery_adc.c"), int(panel == "IT8951" and hardware))
+                    self.assertEqual(sources.count("link_power.c"), 1)
+
     def test_sampling_and_curve(self):
-        for model in (1,2,3):
+        # E1001/E1002 use reterminal_battery, covered by test_reterminal_battery.
+        for model in (3,):
             with self.subTest(model=model): self.check_model(model)
 
     def check_model(self, model):

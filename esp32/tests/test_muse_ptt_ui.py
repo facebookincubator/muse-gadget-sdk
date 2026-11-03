@@ -210,6 +210,10 @@ class StopWatchPTT(unittest.TestCase):
     def test_talk_quick_tap_wake_menu_and_pairing(self):
         self.run_case('input', 7)
 
+    def test_display_only_talk_press_never_posts(self):
+        self.run_case('input', 16)
+        self.run_case('input', 16, board=0)
+
     def test_blue_call_routing_is_stopwatch_only(self):
         self.run_case('input', 8)
         self.run_case('input', 8, board=0)
@@ -217,6 +221,14 @@ class StopWatchPTT(unittest.TestCase):
 
     def test_active_call_prevents_auto_sleep(self):
         self.run_case('input', 9)
+
+    def test_auto_sleep_only_when_truly_idle(self):
+        for board, realtime in ((1, 1), (0, 1), (1, 0)):
+            self.run_case('input', 15, board=board, realtime=realtime)
+
+    def test_active_turn_pokes_idle_clock(self):
+        for board, realtime in ((1, 1), (0, 1), (1, 0)):
+            self.run_case('voice', 42, board=board, realtime=realtime)
 
     def test_explicit_notes_and_other_boards_keep_notes(self):
         self.run_case('voice', 21)

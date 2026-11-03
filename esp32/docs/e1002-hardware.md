@@ -24,8 +24,9 @@ the active Noise session. `power.status` reports online power-management
 state; neither board exposes a Deep Sleep command.
 
 - `buttons.read` returns each key's current state and press count since boot.
-- `battery.read` returns cached `battery_mv` and estimated `battery_pct`.
-  Failed or stale readings are null; these boards do not report charging.
+- `battery.read` samples calibrated `battery_mv` and estimated `battery_pct`
+  using `reterminal_battery`, as `device.health` does. Unavailable readings
+  are null; these boards do not report charging.
 - `rtc.read` returns calendar fields and `valid`. `rtc.set` requires
   `year`, `month`, `day`, `hour`, `minute`, `second` (2000–2099).
 - `buzzer.beep` takes `frequency_hz` (100–5000) and `duration_ms` (20–1000).

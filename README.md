@@ -77,6 +77,7 @@ upstream licenses:
 | [`esp32/main/reterminal_e100x.c`](esp32/main/reterminal_e100x.c) | Seeed-reTerminal-E10xx-Firmware E1001/E1002 and E1003 battery curves | MIT, retained in the file header |
 | [`esp32/main/epd_it8951.c`](esp32/main/epd_it8951.c) | Seeed_GFX2 IT8951 / ED103TC2 panel commands and image order | MIT, retained in the file header |
 | [`esp32/main/uc8179_gray4_lut.h`](esp32/main/uc8179_gray4_lut.h) | Seeed_GFX2 UC8179 four-gray waveforms | MIT, retained in the file header |
+| [`esp32/components/muse/fonts/`](esp32/components/muse/fonts) | GNU Unifont 16.0.04, Noto Sans SC, and Montserrat Medium via LVGL, subsets (see its README) | SIL Open Font License 1.1 (Unifont also GPL-2.0+ with the font embedding exception) |
 | [`esp32/components/muse/eink/fonts/montserrat.ttf`](esp32/components/muse/eink/fonts) | Montserrat Medium, via LVGL v9.5.0 | SIL Open Font License 1.1 |
 | [`esp32/components/muse/eink/fonts/unscii.ttf`](esp32/components/muse/eink/fonts) | unscii-8 | Public domain |
 | [`esp32/components/muse/eink/fonts/symbols.ttf`](esp32/components/muse/eink/fonts) | Font Awesome 5 Free, via LVGL v9.5.0 | SIL Open Font License 1.1 (icons CC BY 4.0) |

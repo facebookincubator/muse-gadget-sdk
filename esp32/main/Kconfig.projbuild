@@ -107,11 +107,12 @@ menu "ESP32 Device SDK"
 
     config HOMEHUB_SHOW_AGENT_NAME
         bool "Show the agent's name on the display"
-        default y if HOMEHUB_DISPLAY
+        default y if HOMEHUB_DISPLAY || HOMEHUB_LED_BACKEND_C3_SSD1306
         help
             After the device registers, fetch GET /identity over the Noise
             session and show the agent's name on the status display. Only
-            display backends can show it, so it is off for LED-only builds.
+            display backends (and the C3's text OLED) can show it, so it is
+            off for LED-only builds.
 
     config HOMEHUB_TUNNEL
         bool "Enable the home-network tunnel and network discovery"
@@ -123,6 +124,18 @@ menu "ESP32 Device SDK"
             up to 256 KB for discovery results, so boards without PSRAM (e.g.
             the classic ESP32) should disable this. The control API to the VM
             keeps working; the status turns green once the control session is up.
+
+    config HOMEHUB_SETUP_TASKS_IN_PSRAM
+        bool "Put the setup tasks' stacks in PSRAM"
+        depends on SPIRAM && SPIRAM_FETCH_INSTRUCTIONS && SPIRAM_RODATA
+        default n
+        help
+            Starts the pairing timers, the Wi-Fi scan refresh and the
+            provisioning task (main/helper_task.h) with their stacks in PSRAM,
+            sparing about 16 KB of internal RAM while setup runs. For a board
+            whose overlay is short of internal RAM. It needs code and read-only
+            data in PSRAM: flash writes then leave the cache on, and
+            provisioning writes NVS, which asserts on a PSRAM stack otherwise.
 
     config HOMEHUB_BLE_PERSISTENT
         bool "Keep BLE running next to Wi-Fi and the Noise session"
@@ -378,8 +391,9 @@ menu "ESP32 Device SDK"
             ESP32-C5 DevKitC-1 has a single addressable RGB LED on GPIO27;
             other boards with one set HOMEHUB_LED_STRIP_GPIO.
             The always-on red power LED on the DevKitC-1 is not firmware
-            controlled. The ideaspark ESP32 board and the SenseCAP Indicator
-            have no status LED; their displays show the status colour in bars
+            controlled. The ideaspark ESP32 board, the SenseCAP Indicator and
+            the ESP32-2432S028 Cheap Yellow Display have no status LED;
+            their displays show the status colour in bars
             along the top and bottom edges, with an animation in between. The
             Home Assistant Voice PE shows the status colour on its LED ring.
             Seeed reSpeaker Lite shows it on a single RGB LED.
@@ -387,6 +401,8 @@ menu "ESP32 Device SDK"
             their e-paper instead (black and white on the E1001, six colours
             on the E1002).
             The Waveshare ESP32-S3-ePaper-1.54G does the same in four colours.
+            The ESP32-C3 with a 0.42 inch OLED shows the status and the
+            agent's name as text.
             Boards with the full UI have no status LED; their screen shows Link's pairing
             and connection state instead.
 
@@ -402,6 +418,9 @@ menu "ESP32 Device SDK"
         config HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
             bool "Waveshare ESP32-C6-LCD-1.47 inch ST7789 display (status bars)"
             depends on IDF_TARGET_ESP32C6
+        config HOMEHUB_LED_BACKEND_CYD_ILI9341
+            bool "ESP32-2432S028 Cheap Yellow Display ILI9341 (status bars)"
+            depends on IDF_TARGET_ESP32
 
         config HOMEHUB_LED_BACKEND_SENSECAP_ST7701
             bool "SenseCAP Indicator 4 inch ST7701S RGB display (status bars)"
@@ -443,6 +462,10 @@ menu "ESP32 Device SDK"
             bool "Muse display"
             depends on MUSE_ENABLED
 
+        config HOMEHUB_LED_BACKEND_C3_SSD1306
+            bool "ESP32-C3 0.42 inch SSD1306 OLED (72x40 text status)"
+            depends on IDF_TARGET_ESP32C3
+
         config HOMEHUB_LED_BACKEND_NONE
             bool "No status LED"
     endchoice
@@ -482,6 +505,7 @@ menu "ESP32 Device SDK"
         bool
         default y if HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+        default y if HOMEHUB_LED_BACKEND_CYD_ILI9341
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
@@ -565,6 +589,24 @@ menu "ESP32 Device SDK"
             Calibration offset added to the SHT4x temperature reading, in
             tenths of a degree Celsius. The E100x sensor reads warm from board
             heat; -33 (-3.3 C, about -6 F) is a starting point for those boards.
+
+    config HOMEHUB_WAVESHARE_154G_SHTC3
+        bool "Waveshare ESP32-S3-ePaper-1.54G onboard SHTC3 sensor (sensors.read)"
+        depends on HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
+        default y
+        help
+            Poll the onboard Sensirion SHTC3 temperature and humidity sensor
+            over I2C (SDA GPIO47, SCL GPIO48, address 0x70) and answer
+            sensors.read with the latest temperature and humidity.
+
+    config HOMEHUB_WAVESHARE_154G_SHTC3_TEMP_OFFSET
+        int "SHTC3 temperature offset, in tenths of a degree Celsius"
+        depends on HOMEHUB_WAVESHARE_154G_SHTC3
+        default -40
+        help
+            Calibration offset added to the SHTC3 temperature reading, in
+            tenths of a degree Celsius. Waveshare's own SHTC3 example for this
+            board subtracts 4 C, hence -40.
 
     config HOMEHUB_DISPLAY_COMMANDS
         bool

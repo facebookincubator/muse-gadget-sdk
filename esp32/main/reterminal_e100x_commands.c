@@ -49,7 +49,7 @@ bool reterminal_e100x_handles(const char *command) {
     return false;
 }
 void reterminal_e100x_health(cJSON *metrics) {
-#if RETERMINAL_E100X_HARDWARE_ENABLED
+#if CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
     cJSON_DeleteItemFromObjectCaseSensitive(metrics, "battery_mv");
     cJSON_DeleteItemFromObjectCaseSensitive(metrics, "battery_pct");
     reterminal_e100x_battery_metrics(metrics);
@@ -334,7 +334,7 @@ void reterminal_e100x_register(cJSON *commands) {
 #if CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
     const char *battery_description = "GPIO1/40 voltage and E1003-specific voltage-curve percentage; null until sampled. No capacity estimate.";
 #else
-    const char *battery_description = "Cached battery_mv and estimated battery_pct using Seeed's E1001/E1002 voltage curve and averaged ADC samples. Sampled every 30s, null if unavailable. Not charging state.";
+    const char *battery_description = "Read calibrated battery_mv and estimated battery_pct using the reTerminal battery driver. Null if unavailable. Not charging state.";
 #endif
     advertise(commands, "battery.read", battery_description, NULL, NULL);
     cJSON *beep = cJSON_CreateObject();

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "reterminal_e100x.h"
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+#include "reterminal_battery.h"
+#else
 #include "battery_adc.h"
+#endif
 #include "reterminal_e100x_board.h"
 #include "link_power.h"
 #include "driver/gpio.h"
@@ -359,11 +363,12 @@ i2c_master_bus_handle_t reterminal_e100x_i2c_bus_get(void) {
     return err == ESP_OK ? bus : NULL;
 }
 
+#if RETERMINAL_E100X_BOARD_ID == 3
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_battery_valid;
 static int s_battery_mv, s_battery_pct;
 static int64_t s_battery_at;
-#if RETERMINAL_E100X_HARDWARE_ENABLED
+#if CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
 static void battery_task(void *arg) {
     (void)arg;
     for (;;) {
@@ -381,13 +386,19 @@ static void battery_task(void *arg) {
 }
 
 #endif
+#endif
 void reterminal_e100x_battery_metrics(cJSON *payload) {
+#if RETERMINAL_E100X_BOARD_ID == 3
     portENTER_CRITICAL(&s_lock);
     bool valid = s_battery_valid;
     int mv = s_battery_mv, pct = s_battery_pct;
     int64_t at = s_battery_at;
     portEXIT_CRITICAL(&s_lock);
     valid = valid && esp_timer_get_time() - at < 60000000;
+#else
+    int mv, pct;
+    bool valid = reterminal_battery_read(&mv, &pct);
+#endif
     if (valid) {
         cJSON_AddNumberToObject(payload, "battery_mv", mv);
         cJSON_AddNumberToObject(payload, "battery_pct", pct);
@@ -416,8 +427,10 @@ void reterminal_e100x_init(void) {
 #if RETERMINAL_E100X_HARDWARE_ENABLED
     if (!reterminal_e100x_sd_monitor_init()) ESP_LOGW("link.e100x", "SD detection unavailable");
     if (!reterminal_e100x_microphone_init()) ESP_LOGW("link.e100x", "microphone power unavailable");
+#if CONFIG_HOMEHUB_RETERMINAL_E1003_HARDWARE
     if (xTaskCreate(battery_task, "e100x_battery", 3072, NULL, 2, NULL) != pdPASS)
         ESP_LOGW("link.e100x", "battery sampling unavailable");
+#endif
 #endif
 }
 
