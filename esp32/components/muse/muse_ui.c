@@ -580,6 +580,13 @@ static const lv_font_t *caption_font(void)
 #endif
 }
 
+/* The small screen's caption band: two lines of unscii-8, as replies are paged
+ * there, 2 px apart with 2 px above and below. */
+static int caption_band_h(void)
+{
+    return 2 * lv_font_get_line_height(&lv_font_unscii_8) + 2 + 2 * 2;
+}
+
 #if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
 /* A caption's font off a small screen's band: caption_font(), or with
  * CONFIG_MUSE_LATIN_FONT, Unifont's 8x16 for the whole of a caption with
@@ -638,7 +645,7 @@ static void set_caption_font(const char *caption)
     lv_obj_set_style_text_font(s_caption_lbl, font, 0);
     lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
     lv_obj_set_style_pad_hor(s_caption_lbl, 0, 0);
-    lv_obj_set_height(s_caption_lbl, 2 * 8 + 2 + 4);
+    lv_obj_set_height(s_caption_lbl, caption_band_h());
     /* Replies are paged to fit; the firmware's own captions are whole, so an
      * accented one longer than the line rolls by rather than ending in dots. */
     lv_label_set_long_mode(s_caption_lbl, font == &lv_font_unscii_8 ? LV_LABEL_LONG_MODE_DOTS
@@ -1233,7 +1240,7 @@ static void build_screen(void)
     if (s_small) {
         /* Two lines over the bottom of the face, on a dark band so they stay
          * legible. A tall screen has room to keep them above the mic icon. */
-        lv_obj_set_size(s_caption_lbl, s_w, 2 * 8 + 2 + 4);
+        lv_obj_set_size(s_caption_lbl, s_w, caption_band_h());
         lv_obj_set_style_pad_ver(s_caption_lbl, 2, 0);
         lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
         lv_obj_set_style_bg_color(s_caption_lbl, lv_color_black(), 0);
@@ -1811,7 +1818,7 @@ static void set_full_reply(bool on)
         lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, FULL_REPLY_TOP);
         set_full_font();
     } else {
-        lv_obj_set_size(s_caption_lbl, s_w, 2 * 8 + 2 + 4);
+        lv_obj_set_size(s_caption_lbl, s_w, caption_band_h());
         lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
         lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);

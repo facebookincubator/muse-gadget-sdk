@@ -17,9 +17,10 @@ caption keeps the screen for every page of a reply, every line of a reply
 reaches the screen through the caption buffer, accented and CJK ones included,
 every page fits the screen in the Text size font (capitals and lines of W too)
 or, for a page with CJK or accented letters, in the font that draws them, and
-the band comes back when the reply ends.
+the band comes back when the reply ends, as tall as build_screen made it and
+tall enough for its lines: two of unscii-8, the CJK band's, or one accented.
 
-The layout functions and build_screen's setup are compiled from muse_ui.c
+The layout functions and build_screen's band and setup are compiled from muse_ui.c
 unchanged, against a fake LVGL with LVGL 9.5's font metrics (glyph advances of
 Montserrat 14 and 20, the fixed cells of unscii and Unifont, and the box LVGL
 measures for a glyph a font lacks) that records the caption label's geometry
@@ -142,10 +143,11 @@ static void lv_text_get_size(lv_point_t *size, const char *text, const lv_font_t
     size->y = rows * f->line_h + (rows - 1) * line_space;
 }
 
-typedef struct { int w, h, pad_hor, line_space, opa, long_mode, align, y; bool hidden; const lv_font_t *font; char text[512]; } lv_obj_t;
+typedef struct { int w, h, pad_hor, pad_ver, line_space, opa, long_mode, align, y; bool hidden; const lv_font_t *font; char text[512]; } lv_obj_t;
 static void lv_label_set_text(lv_obj_t *o, const char *t) { snprintf(o->text, sizeof(o->text), "%s", t); }
 static char *lv_label_get_text(lv_obj_t *o) { return o->text; }
 enum { LV_OPA_70 = 178, LV_OPA_COVER = 255 };
+static int lv_color_black(void) { return 0; }
 enum { LV_LABEL_LONG_MODE_WRAP, LV_LABEL_LONG_MODE_DOTS, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR };
 enum { LV_ALIGN_TOP_MID, LV_ALIGN_BOTTOM_MID };
 enum { LV_OBJ_FLAG_HIDDEN = 1 };
@@ -154,6 +156,8 @@ static void lv_obj_set_height(lv_obj_t *o, int h) { o->h = h; }
 static void lv_obj_set_style_text_font(lv_obj_t *o, const lv_font_t *f, int s) { (void)s; o->font = f; }
 static void lv_obj_set_style_text_line_space(lv_obj_t *o, int v, int s) { (void)s; o->line_space = v; }
 static void lv_obj_set_style_pad_hor(lv_obj_t *o, int v, int s) { (void)s; o->pad_hor = v; }
+static void lv_obj_set_style_pad_ver(lv_obj_t *o, int v, int s) { (void)s; o->pad_ver = v; }
+static void lv_obj_set_style_bg_color(lv_obj_t *o, int c, int s) { (void)o; (void)c; (void)s; }
 static void lv_obj_set_style_bg_opa(lv_obj_t *o, int v, int s) { (void)s; o->opa = v; }
 static void lv_label_set_long_mode(lv_obj_t *o, int m) { o->long_mode = m; }
 static void lv_obj_align(lv_obj_t *o, int a, int x, int y) { (void)x; o->align = a; o->y = y; }
@@ -342,10 +346,21 @@ static void full(const char *step)
     CHECK(canvas_obj.hidden, "%s: Muse still shown", step);
 }
 
+/* The band holds its lines inside its padding: two of unscii-8, as replies
+ * are paged there, s_cjk_lines of CJK, or one accented line. */
 static void band(const char *step)
 {
     CHECK(!canvas_obj.hidden && caption_obj.opa == LV_OPA_70 && caption_obj.align == LV_ALIGN_BOTTOM_MID, "%s: no band", step);
     CHECK(caption_obj.long_mode != LV_LABEL_LONG_MODE_WRAP, "%s: the band wraps", step);
+    int rows = caption_obj.font == &lv_font_unscii_8 ? 2 : 1;
+#if CONFIG_MUSE_CJK_FONT
+    if (caption_obj.font == &cjk_font) {
+        rows = s_cjk_lines;
+    }
+#endif
+    int need = rows * lv_font_get_line_height(caption_obj.font) + (rows - 1) * caption_obj.line_space;
+    CHECK(caption_obj.h - 2 * caption_obj.pad_ver >= need, "%s: a %d px band can't hold %d lines (%d px) of its font", step,
+          caption_obj.h, rows, need);
 }
 
 int main(int argc, char **argv)
@@ -365,12 +380,10 @@ int main(int argc, char **argv)
                              "bu\xe1\xbb\x95i s\xc3\xa1ng v\xc3\xa0 n\xe1\xba\xafng v\xe1\xbb\x81 chi\xe1\xbb\x81u. ";
 
     /* build_screen's band, then the option's setup. */
-    lv_obj_set_size(s_caption_lbl, s_w, 2 * 8 + 2 + 4);
     lv_obj_set_style_text_font(s_caption_lbl, &lv_font_unscii_8, 0);
-    lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
-    lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
-    lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+#include "band.inc"
+    const int band_h = caption_obj.h;
+    band("the band");
 #if CONFIG_MUSE_CJK_FONT
     s_cjk_lines = !s_tall && s_h >= 200 ? 2 : 1;
     muse_state_set_cjk_page((s_w - 2 * CJK_BAND_PAD) / 16, s_cjk_lines);
@@ -471,7 +484,7 @@ int main(int argc, char **argv)
     full("last page");
     show("Bye.", false);
     band("reply over");
-    CHECK(caption_obj.font == &lv_font_unscii_8 && caption_obj.h == 2 * 8 + 2 + 4 && caption_obj.pad_hor == 0 &&
+    CHECK(caption_obj.font == &lv_font_unscii_8 && caption_obj.h == band_h && caption_obj.pad_hor == 0 &&
           caption_obj.long_mode == LV_LABEL_LONG_MODE_DOTS, "reply over: not the band");
     return failures != 0;
 }
@@ -492,13 +505,22 @@ def function(source: str, name: str) -> str:
     return source[start:end] + "\n"
 
 
+def band(source: str) -> str:
+    """build_screen's caption band on a small screen, up to its CJK setup."""
+    match = re.search(r"^ +s_caption_lbl = make_label\(.*?\n +if \(s_small\) \{\n(.*?)^#if CONFIG_MUSE_CJK_FONT\n", source,
+                      re.M | re.S)
+    if not match:
+        raise AssertionError("muse_ui.c no longer has build_screen's caption band")
+    return match.group(1)
+
+
 def extract(source: str) -> str:
     statics = re.search(r"^#if CONFIG_MUSE_SMALL_FULL_REPLY\n#define FULL_REPLY_TOP.*?^#endif\n", source, re.M | re.S)
     cjk = re.search(r"^#define CJK_BAND_PAD.*?^#endif\n", source, re.M | re.S)
     setup = re.search(r"^#if CONFIG_MUSE_SMALL_FULL_REPLY\n( +if \(!s_long\) \{.*?\n +\}\n)#endif\n", source, re.M | re.S)
     if not statics or not cjk or not setup:
         raise AssertionError("muse_ui.c no longer has the full-reply statics, the CJK band or build_screen's setup")
-    parts = [statics.group(0), "#if CONFIG_MUSE_CJK_FONT\n", cjk.group(0)]
+    parts = [statics.group(0), "#if CONFIG_MUSE_CJK_FONT\n", cjk.group(0), function(source, "caption_band_h")]
     parts += ["#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT\n", function(source, "set_caption_font"), "#endif\n"]
     for name in ("set_full_font", "full_glyph_px", "full_rows", "apply_text_size", "set_full_reply"):
         body = function(source, name)
@@ -516,7 +538,9 @@ class FullReplyTest(unittest.TestCase):
             stage = Path(tmp)
             (stage / "esp_err.h").write_text("#pragma once\ntypedef int esp_err_t;\n")
             (stage / "sdkconfig.h").write_text("#pragma once\n")
-            (stage / "extracted.inc").write_text(extract((MUSE / "muse_ui.c").read_text()))
+            source = (MUSE / "muse_ui.c").read_text()
+            (stage / "extracted.inc").write_text(extract(source))
+            (stage / "band.inc").write_text(band(source))
             (stage / "harness.c").write_text(HARNESS)
             binary = stage / "harness"
             build = subprocess.run(
