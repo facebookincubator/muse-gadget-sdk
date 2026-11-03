@@ -680,10 +680,11 @@ the design, the Wi-Fi protocol and the numbers.
   builds only (ESP-IDF's target-specific defaults): it moves lwIP and Wi-Fi
   heap buffers to PSRAM, raises the TCP windows to 96 KiB with window scaling
   and deepens the receive path to match (96 dynamic RX buffers, a 96-entry
-  receive mailbox, 12 queued out-of-order segments). Window scaling needs PSRAM required at boot, so a C5
-  whose PSRAM doesn't start resets instead of running without it, and Wi-Fi
-  uses 4 static TX buffers in internal RAM. Other chips keep 16 KiB windows in
-  internal RAM; `cmake/validate_config.cmake` enforces both.
+  receive mailbox, 12 queued out-of-order segments). Window scaling needs
+  PSRAM required at boot, so a C5 whose PSRAM doesn't start resets instead of
+  running without it, and Wi-Fi uses 4 static TX buffers in internal RAM.
+  Other chips keep 16 KiB windows in internal RAM;
+  `cmake/validate_config.cmake` enforces both.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides
   later edits to `sdkconfig.defaults` or the overlays. After changing those,

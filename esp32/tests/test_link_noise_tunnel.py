@@ -237,6 +237,11 @@ class LinkNoiseTunnelTest(unittest.TestCase):
         # Over 64 KiB needs window scaling, which needs PSRAM required at boot.
         self.assertEqual(cfg["CONFIG_LWIP_WND_SCALE"], "y")
         self.assertEqual(cfg["CONFIG_SPIRAM_IGNORE_NOTFOUND"], "n")
+        # The scaled window field (16 bits) has to reach the whole window.
+        self.assertLessEqual(int(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"]),
+                             0xFFFF << int(cfg["CONFIG_LWIP_TCP_RCV_SCALE"]))
+        # Required PSRAM makes Wi-Fi's TX buffers static, in internal RAM.
+        self.assertEqual(cfg["CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM"], "4")
         self.assertIn(int(cfg["CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS"]), range(1, 13))
         # The block-ack window may be at most twice the static RX buffers.
         self.assertLessEqual(int(cfg["CONFIG_ESP_WIFI_RX_BA_WIN"]),
