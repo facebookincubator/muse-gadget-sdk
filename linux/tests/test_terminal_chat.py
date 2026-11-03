@@ -332,7 +332,8 @@ def test_follow_ups_are_ordered_and_progress_is_shown(monkeypatch, session_id, c
                                                     "session_id": "chat"}).encode(), end_body=True)))
                 await wait_text("Answer 2")
                 await wait_text("Muse is ready")
-                assert output.getvalue().count("Message submitted.") == 3
+                assert output.getvalue().count("User: ") == 3
+                assert "Message submitted." not in output.getvalue()
                 assert "Waiting for Muse" in output.getvalue()
                 # A new turn receives public progress, but not unrelated status.
                 stdin.feed_data(b"dessert\n")

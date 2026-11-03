@@ -17,13 +17,16 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+import curses
 import json
+import os
 import sys
 import time
 
 from musegadget import config
 from musegadget.link_client import acknowledgement
-from musegadget.muse_turn import AgentStatus, MuseTurn, Reply, _update_reply
+from musegadget.muse_turn import AgentStatus, MuseTurn, Reply, _strip_controls, _update_reply
+from musegadget.terminal_ui import PlainDisplay, TerminalDisplay
 
 MAX_RECORD = 2 * 1024 * 1024  # JSON escaping can expand a 256 KiB upstream event.
 MAX_INPUT = 64 * 1024
@@ -39,6 +42,7 @@ class LiveReplies:
         self.messages = OrderedDict()
         self.sequence = None
         self.current = None
+        self.last_reply = None
 
     def feed(self, event):
         payload = event.get("payload")
@@ -67,6 +71,7 @@ class LiveReplies:
             self.messages.popitem(last=False)
         if reply == previous:
             return ""
+        self.last_reply = reply
         output = ""
         if reply.text != previous.text:
             if self.current != identifier:
@@ -123,16 +128,16 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
     turn = None
     started = 0.0
     view = LiveReplies(session_id)
+    display = PlainDisplay(output)
 
     def show(text):
-        output.write(text)
-        output.flush()
+        display.write(text)
 
     def show_status(text):
         nonlocal status
         if text != status:
             status = text
-            show("\n[" + text + "]\n")
+            display.status(text)
 
     def progress(events):
         for item in events:
@@ -149,11 +154,20 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
         ready = await asyncio.wait_for(_record(reader), 90)
         if ready.get("type") != "ready":
             raise ConnectionError("Service does not support terminal chat; update and restart it")
-        if input_reader is None:
+        if (input_reader is None and sys.stdin.isatty() and output is sys.stdout
+                and output.isatty() and os.environ.get("TERM", "dumb") != "dumb"):
+            try:
+                display = TerminalDisplay()
+            except curses.error:
+                pass  # Missing terminal capabilities: retain the plain-text client.
+            else:
+                show_status("Muse is ready · /quit to exit")
+        if input_reader is None and isinstance(display, PlainDisplay):
             input_reader = asyncio.StreamReader(limit=MAX_INPUT)
             stdin_transport, _ = await asyncio.get_running_loop().connect_read_pipe(
                 lambda: asyncio.StreamReaderProtocol(input_reader), sys.stdin)
-        show("Chatting with your Muse. /quit, Ctrl-C or EOF exits.\n> ")
+        if isinstance(display, PlainDisplay):
+            show("Chatting with your Muse. /quit, Ctrl-C or EOF exits.\n")
 
         async def receive():
             while True:
@@ -167,7 +181,7 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                 if rendered:
                     if turn is not None:
                         show_status("Muse is responding")
-                    show(rendered)
+                    display.reply(view.last_reply, rendered)
 
         async def send():
             nonlocal turn, started, sending, submitted, unconfirmed
@@ -185,7 +199,6 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                     response = await asyncio.wait_for(_send(path, message, session_id), 90)
                     unconfirmed = False
                     submitted += 1
-                    show("\n[Message submitted.]\n")
                     show_status("Waiting for Muse…")
                     progress(turn.acknowledge(response, follow_up=follow_up))
                     view.session_id = turn.session_id
@@ -195,7 +208,10 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
 
         async def inputs():
             while True:
-                raw = await input_reader.readline()
+                if isinstance(display, TerminalDisplay):
+                    raw = await display.readline(MAX_INPUT)
+                else:
+                    raw = await input_reader.readline()
                 if not raw:
                     return
                 if len(raw) > MAX_INPUT:
@@ -210,8 +226,8 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                 except asyncio.QueueFull:
                     show("\n[Message not accepted: send queue is full. Try again shortly.]\n")
                 else:
+                    display.user(_strip_controls(message))
                     show_status("Waiting for Muse…")
-                    show("> ")
 
         async def completion():
             nonlocal turn
@@ -223,7 +239,6 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                     if not sending and messages.empty() and turn.complete(time.monotonic()):
                         turn = None
                         show_status("Muse is ready")
-                        show("\n> ")
 
         tasks.extend([asyncio.create_task(receive()), asyncio.create_task(inputs()),
                       asyncio.create_task(completion()), asyncio.create_task(send())])
@@ -231,21 +246,29 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
         for task in done:
             task.result()
     finally:
-        if messages.qsize():
-            show("\n[" + str(messages.qsize()) + " queued message(s) were not sent.]\n")
-        if unconfirmed:
-            show("\n[The last send was not confirmed; Muse may have received it. It will not be resent.]\n")
-        if submitted:
-            show("\n[Submitted messages remain with Muse.]\n")
-        show_status("Chat closed")
-        pending = tasks
-        for task in pending:
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-        if stdin_transport is not None:
-            stdin_transport.close()
-        writer.close()
-        await writer.wait_closed()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            if messages.qsize():
+                show("\n[" + str(messages.qsize()) + " queued message(s) were not sent.]\n")
+            if unconfirmed:
+                show("\n[The last send was not confirmed; Muse may have received it. It will not be resent.]\n")
+            if submitted:
+                show("\n[Submitted messages remain with Muse.]\n")
+            show_status("Chat closed")
+        finally:
+            try:
+                display.close()
+            finally:
+                if stdin_transport is not None:
+                    stdin_transport.close()
+                writer.close()
+                await writer.wait_closed()
+        if isinstance(display, TerminalDisplay):
+            for notice in display.notice:
+                output.write(notice + "\n")
+            output.flush()
 
 
 def command(args):

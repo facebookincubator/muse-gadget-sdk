@@ -295,11 +295,17 @@ main Muse chat and displays live assistant replies, including replies to phone
 messages. Type one message per line; you can send follow-ups while Muse is
 thinking or replying. Messages are sent in typing order, waiting only for each
 send acknowledgement. Muse decides whether to combine them into one response.
-The terminal shows waiting, public activity, responding and ready status lines.
+The conversation uses compact `User:` and `Muse:` lines. A single status line
+at the bottom shows waiting, public activity, responding and ready updates,
+above an input row that stays editable while replies arrive. Arrow keys,
+Home/End and Backspace/Delete edit your message; Page Up/Down scroll the recent
+transcript. The view keeps up to 512 transcript entries and 8192 wrapped lines.
 Up to 16 messages can wait to be sent; additional input is rejected with a notice.
 `/quit`, Ctrl-C or EOF exits; already submitted work continues in Muse. Queued messages that were not sent are discarded with a
-notice; an unconfirmed send may already have reached Muse. Replies and status
-lines can arrive while you type. Final text corrections appear as a new message when they cannot be appended to the streamed text.
+notice; an unconfirmed send may already have reached Muse. Streamed replies and
+final corrections update in place. Interactive terminals use a full-screen view
+and restore the terminal on exit. Redirected output and `TERM=dumb` use plain
+text, with progress printed as lines and corrections labeled when necessary.
 
 Update the installed package and restart the service once to enable terminal
 chat. Restarting interrupts running device commands, so check the service log
