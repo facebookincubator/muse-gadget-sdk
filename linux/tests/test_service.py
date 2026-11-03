@@ -215,7 +215,7 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
                 assert register["method"] == "link.register"
                 assert register["params"] == {
                     "node_id": "homelink-000001", "display_name": "Lamp", "version": "2.0",
-                    "platform": "linux", "device_family": "homehub", "model_id": "linux",
+                    "platform": "linux", "device_family": "gadget", "model_id": "linux",
                     "is_wakeup_supported": False,
                     "commands_v2": {"lamp.on": {"description": "Turn on the lamp", "required": {}, "optional": {}}},
                 }

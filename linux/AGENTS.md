@@ -22,7 +22,7 @@ How to work on this Linux client, test it, and deploy it to a device. See
 ## What this is
 
 A Python package (`musegadget`) that makes any Linux computer into a Muse
-Home Link. It pairs with the Muse phone app over BLE, then holds an encrypted
+Gadget. It pairs with the Muse phone app over BLE, then holds an encrypted
 Noise session to the user's Muse VM and runs the commands Muse sends it. It is
 the Linux counterpart of the ESP32 firmware in `../esp32` and speaks the same
 pairing and control protocols, so the same app pairs either.
@@ -156,9 +156,10 @@ never has a command's parameters, output or error message.
   Both directions carry JSON messages, each prefixed with a little-endian u32
   length. The device sends `link.register`, then a `link.result` for each
   `link.invoke`. `link.unpaired` means the Muse removed the device.
-- Register as `platform: "linux"`, `device_family: "homehub"`. Never use family
-  `link` or advertise `device.ota`: the server pushes ESP32 firmware updates to
-  every `link` device.
+- Register as `platform: "linux"` and `device_family: "gadget"`. Every device
+  built with this SDK registers `device_family: "gadget"`; other families are
+  reserved for Muse's own devices. Don't advertise `device.ota`: it installs
+  ESP32 firmware.
 - Messages from the device to the Muse (`musegadget send-user-msg`) go as separate
   `POST /chat/stream` requests on the same session, with `device_id` set to the
   node id and `"output_modality": "text"`. `session_id` picks the chat;

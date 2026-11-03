@@ -98,7 +98,7 @@ class DeviceDescription:
             "display_name": self.display_name,
             "platform": "linux",
             "version": self.version,
-            "device_family": "homehub",
+            "device_family": "gadget",
             "model_id": "linux",
             "is_wakeup_supported": False,
             "commands_v2": self.commands,

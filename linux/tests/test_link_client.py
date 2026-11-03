@@ -144,7 +144,7 @@ def test_register_invoke_result_and_unpair():
         assert register["method"] == "link.register"
         params = register["params"]
         assert params["node_id"] == "homelink-abcdef"
-        assert (params["platform"], params["device_family"]) == ("linux", "homehub")
+        assert (params["platform"], params["device_family"]) == ("linux", "gadget")
         assert "system.run" in params["commands_v2"]
         await vm.send_message({"type": "res", "id": register["id"], "ok": True})
 

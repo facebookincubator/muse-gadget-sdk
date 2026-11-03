@@ -746,6 +746,12 @@ the design, the Wi-Fi protocol and the numbers.
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
   output: app slots are 2 MB (4 MB on Muse).
 
+## Describe your device
+
+Muse learns what a gadget is from its `link.register`. Every device built with
+this SDK registers `device_family: "gadget"`; other families are reserved for
+Muse's own devices.
+
 ## Adding a command
 
 Muse calls a gadget's commands by name: the firmware lists them in

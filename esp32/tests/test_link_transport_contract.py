@@ -132,7 +132,8 @@ class LinkTransportContractTest(unittest.TestCase):
         upgrade = _function_body(source, "static noise_upgrade_result_t ws_upgrade(")
 
         self.assertIn('"link.register"', register)
-        self.assertIn('"device_family", "link"', register)
+        self.assertIn('#define MUSE_DEVICE_FAMILY "gadget"', source)
+        self.assertIn('"device_family", MUSE_DEVICE_FAMILY', register)
         self.assertIn('"model_id", "esp-link"', register)
         self.assertIn('"device.health"', register)
         self.assertIn('"device.discover"', register)

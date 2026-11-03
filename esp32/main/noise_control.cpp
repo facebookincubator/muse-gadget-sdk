@@ -1327,6 +1327,10 @@ static void identity_on_frame(identity_fetch &f, const DecodedServiceFrame &fram
 
 // ---- JSON message builders -------------------------------------------------
 
+#ifndef MUSE_DEVICE_FAMILY
+#define MUSE_DEVICE_FAMILY "gadget"
+#endif
+
 static cJSON *string_param(const char *description) {
     cJSON *param = cJSON_CreateObject();
     cJSON_AddStringToObject(param, "type", "string");
@@ -1398,7 +1402,7 @@ static char *build_register_json(void) {
     cJSON_AddStringToObject(params, "platform", "esp32");
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON_AddStringToObject(params, "version", desc ? desc->version : "unknown");
-    cJSON_AddStringToObject(params, "device_family", "link");
+    cJSON_AddStringToObject(params, "device_family", MUSE_DEVICE_FAMILY);
     cJSON_AddStringToObject(params, "model_id", "esp-link");
     cJSON_AddBoolToObject(params, "is_wakeup_supported", false);
     cJSON *metadata = nullptr;
