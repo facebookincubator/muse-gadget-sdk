@@ -432,6 +432,7 @@ static bool hatch_reply(bool *delivered)
     int64_t t0 = esp_timer_get_time();
     *delivered = false;
     for (;;) {
+        muse_state_poke();   /* an active turn is activity: don't auto-sleep mid-reply */
         muse_hatch_ev_t ev;
         while ((ev = muse_hatch_turn_event(text, sizeof(text))) != MUSE_HATCH_EV_NONE) {
             switch (ev) {
@@ -512,9 +513,18 @@ static bool hatch_reply(bool *delivered)
 
 static void go_idle(const char *caption)
 {
+    muse_state_poke();   /* the reading clock starts when the turn ends, not at the press */
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
     muse_state_set_caption("%s", caption);
+}
+
+/* Errors and status stay up; a press too short to count only needs a hint. */
+static void too_short(void)
+{
+    muse_state_set_progress(0);
+    muse_state_set_mode(MUSE_MODE_IDLE);
+    muse_state_set_hint("HOLD LONGER TO TALK");
 }
 
 /* Why a press can't go to Hatch; voice notes only go there. */
@@ -559,6 +569,20 @@ static void set_resting(bool rest)
         pre_reset();
     }
     ESP_LOGI(TAG, "%s", rest ? "resting: codecs off, Wi-Fi modem sleep" : "awake: codecs on");
+}
+
+/* A press released before a tap's length: it only woke Muse, or starts a call.
+ * The Watcher's wheel posts its press once held MUSE_WHEEL_HOLD_MS, which
+ * already tells a click from a hold; another tap's length on top would make
+ * holds up to twice that too short. With live calls it keeps the tap. */
+static bool short_press(size_t held)
+{
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER && !CONFIG_MUSE_REALTIME_VOICE
+    (void)held;
+    return false;
+#else
+    return held < MIN_HELD_FRAMES;
+#endif
 }
 
 /*
@@ -641,7 +665,7 @@ static void hold_rec(bool tried)
     }
     if (!s_rec_n) {   /* nothing captured: realloc to 0 would free s_rec and return NULL */
         drop_rec();
-        go_idle("HOLD LONGER TO TALK");
+        too_short();
         return;
     }
     int16_t *pcm = heap_caps_realloc(s_rec, s_rec_n * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1239,7 +1263,7 @@ static void voice_task(void *arg)
         char why[96];
         bool ok = record(pending_down, &held, why, sizeof(why));
         pending_down = false;
-        if (held < MIN_HELD_FRAMES && !wake) {
+        if (short_press(held) && !wake) {
             muse_hatch_turn_cancel();
             drop_rec();
             pre_reset();
@@ -1251,7 +1275,7 @@ static void voice_task(void *arg)
                 continue;
             }
 #endif
-            go_idle("HOLD LONGER TO TALK");
+            too_short();
             continue;
         }
         if (!ok) {
