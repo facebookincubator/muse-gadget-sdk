@@ -19,6 +19,8 @@
 # main/boards/xiaozhi-ai-iot-vietnam-1st/
 # Load last, after sdkconfig.defaults and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-vn-s3-183"
+CONFIG_MUSE_DEVICE_MODEL_NAME="VN ESP32-S3 1.83-inch NV3023"
 CONFIG_MUSE_BOARD_VN_S3_183=y
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

@@ -748,9 +748,16 @@ the design, the Wi-Fi protocol and the numbers.
 
 ## Describe your device
 
-Muse learns what a gadget is from its `link.register`. Every device built with
-this SDK registers `device_family: "gadget"`; other families are reserved for
-Muse's own devices.
+Muse learns what a gadget is from its `link.register`;
+`../protocols/DEVICE.md` has the rules. Every device built with this SDK
+registers `device_family: "gadget"`; other families are reserved for Muse's
+own devices.
+
+- **Model.** Each board's overlay sets `CONFIG_MUSE_DEVICE_MODEL_ID` and
+  `CONFIG_MUSE_DEVICE_MODEL_NAME` after `CONFIG_IDF_TARGET`. The id names the
+  hardware, so every profile of a board uses the same one; boards in
+  `devices/` use `muse-gadget-<board>`. A build without them reports
+  `muse-gadget` ("Muse Gadget"). The build fails on a value outside the rules.
 
 ## Adding a command
 

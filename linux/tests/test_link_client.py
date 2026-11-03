@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import io
 import json
 import struct
@@ -165,6 +166,26 @@ def test_register_invoke_result_and_unpair():
         assert headers == {"Authorization": "Bearer tok"}
 
     asyncio.run(scenario())
+
+
+
+def test_register_describes_the_model():
+    params = DEVICE.register_params()
+    assert (params["device_family"], params["model_id"]) == ("gadget", "muse-gadget-linux")
+    assert params["metadata"] == {"model_name": "Linux gadget"}
+
+    robot = dataclasses.replace(DEVICE, model_id="acme-robot-2", model_name="Acme Robot 2")
+    params = robot.register_params()
+    assert (params["model_id"], params["metadata"]) == ("acme-robot-2", {"model_name": "Acme Robot 2"})
+
+
+@pytest.mark.parametrize("field, value", [
+    ("model_id", ""), ("model_id", "Acme"), ("model_id", "a" * 65), ("model_id", "acme_robot"),
+    ("model_name", ""), ("model_name", "é" * 65), ("model_name", "Acme\nRobot"), ("model_name", "Acme\x85"),
+])
+def test_description_rejects_what_muse_would_not_take(field, value):
+    with pytest.raises(ValueError):
+        dataclasses.replace(DEVICE, **{field: value})
 
 
 def test_forbidden_control_stream():

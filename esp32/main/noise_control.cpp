@@ -1403,9 +1403,11 @@ static char *build_register_json(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON_AddStringToObject(params, "version", desc ? desc->version : "unknown");
     cJSON_AddStringToObject(params, "device_family", MUSE_DEVICE_FAMILY);
-    cJSON_AddStringToObject(params, "model_id", "esp-link");
+    cJSON_AddStringToObject(params, "model_id", CONFIG_MUSE_DEVICE_MODEL_ID);
     cJSON_AddBoolToObject(params, "is_wakeup_supported", false);
     cJSON *metadata = nullptr;
+    add_register_metadata_string(&metadata, params, "model_name",
+                                 CONFIG_MUSE_DEVICE_MODEL_NAME);
     add_register_metadata_string(&metadata, params, "network_ssid", wifi_ssid);
 
     cJSON *commands = cJSON_CreateObject();

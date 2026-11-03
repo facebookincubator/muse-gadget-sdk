@@ -223,6 +223,8 @@ int main(void) {
 #define nullptr NULL
 #define CONFIG_HOMEHUB_TUNNEL 1
 #define MUSE_DEVICE_FAMILY "gadget"
+#define CONFIG_MUSE_DEVICE_MODEL_ID "muse-gadget-test"
+#define CONFIG_MUSE_DEVICE_MODEL_NAME "Test board"
 static bool enabled;
 bool ota_is_enabled(void) { return enabled; }
 static esp_app_desc_t app = { .version = "999.0.0" };

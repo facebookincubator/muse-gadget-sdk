@@ -18,6 +18,8 @@
 # Source: https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3
 # Load last, after sdkconfig.defaults and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-espressif-box-3"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Espressif ESP32-S3-BOX-3"
 CONFIG_MUSE_BOARD_ESPRESSIF_BOX_3=y
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

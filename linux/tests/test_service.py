@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import os
 import stat
@@ -215,8 +216,8 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
                 assert register["method"] == "link.register"
                 assert register["params"] == {
                     "node_id": "homelink-000001", "display_name": "Lamp", "version": "2.0",
-                    "platform": "linux", "device_family": "gadget", "model_id": "linux",
-                    "is_wakeup_supported": False,
+                    "platform": "linux", "device_family": "gadget", "model_id": "muse-gadget-linux",
+                    "metadata": {"model_name": "Linux gadget"}, "is_wakeup_supported": False,
                     "commands_v2": {"lamp.on": {"description": "Turn on the lamp", "required": {}, "optional": {}}},
                 }
                 await vm.send_message({"type": "res", "id": register["id"], "ok": True})
@@ -258,6 +259,23 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
 
     asyncio.run(bounded_scenario(scenario()))
     assert served == (["vm-1", "vm-1"] if failure else ["vm-1"])
+
+
+def test_an_invalid_description_fails_before_any_request(paired_device, monkeypatch):
+    def fetch(*args):
+        raise AssertionError("fetched VMs")
+
+    monkeypatch.setattr(muse_api, "fetch_vms_with_status", fetch)
+
+    class Robot(Service):
+        def describe(self):
+            return dataclasses.replace(super().describe(), model_id="Acme Robot")
+
+    async def scenario():
+        await Robot(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current())).run()
+
+    with pytest.raises(ValueError, match="model_id"):
+        asyncio.run(scenario())
 
 
 def test_cancelling_a_service_does_not_reconnect(paired_device):

@@ -528,7 +528,8 @@ def test_drop_in_returns_when_parent_exits_with_descendant_holding_pipes(account
                 pass
 
 
-REGISTER_METADATA = {"node_id": "homelink-abcdef", "display_name": "pi", "version": "0.1.0"}
+REGISTER_METADATA = {"node_id": "homelink-abcdef", "display_name": "pi", "version": "0.1.0",
+                     "model_id": "acme-robot", "model_name": "Acme Robot"}
 
 
 def registration_size(specs, metadata=REGISTER_METADATA):
@@ -603,7 +604,7 @@ def test_no_drop_in_registration_remains_byte_identical(account):
     from musegadget.link_client import DeviceDescription, encode_message
     device = DeviceDescription(commands=Executor(account).specs(**REGISTER_METADATA), **REGISTER_METADATA)
     original = {"type": "req", "id": "0" * 36, "method": "link.register", "params": {
-        **REGISTER_METADATA, "platform": "linux", "device_family": "homehub", "model_id": "linux",
+        **REGISTER_METADATA, "platform": "linux", "device_family": "gadget",
         "is_wakeup_supported": False, "commands_v2": COMMAND_SPECS,
     }}
     # Object-key order in the original wire is the register_params order.

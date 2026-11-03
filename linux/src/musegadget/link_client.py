@@ -35,6 +35,7 @@ import base64
 import enum
 import json
 import logging
+import re
 import struct
 import time
 import uuid
@@ -75,6 +76,11 @@ REQUEST_CHUNK_BYTES = 16 * 1024
 MAX_INLINE_REQUEST_BYTES = 64 * 1024
 # Matches JavaScript's encodeURIComponent, as the firmware does.
 _URI_COMPONENT_SAFE = "-_.!~*'()"
+DEFAULT_MODEL_ID = "muse-gadget-linux"
+DEFAULT_MODEL_NAME = "Linux gadget"
+MAX_MODEL_NAME_BYTES = 128
+_MODEL_ID = re.compile(r"[a-z0-9-]{1,64}")
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 class Outcome(enum.Enum):
@@ -91,6 +97,15 @@ class DeviceDescription:
     display_name: str
     version: str
     commands: dict
+    model_id: str = DEFAULT_MODEL_ID
+    model_name: str = DEFAULT_MODEL_NAME
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model_id, str) or not _MODEL_ID.fullmatch(self.model_id):
+            raise ValueError("model_id must be 1 to 64 lowercase letters, digits and hyphens")
+        name_bytes = len(self.model_name.encode("utf-8")) if isinstance(self.model_name, str) else 0
+        if not 0 < name_bytes <= MAX_MODEL_NAME_BYTES or _CONTROL_CHARACTERS.search(self.model_name):
+            raise ValueError(f"model_name must be 1 to {MAX_MODEL_NAME_BYTES} bytes with no control characters")
 
     def register_params(self) -> dict:
         return {
@@ -99,7 +114,8 @@ class DeviceDescription:
             "platform": "linux",
             "version": self.version,
             "device_family": "gadget",
-            "model_id": "linux",
+            "model_id": self.model_id,
+            "metadata": {"model_name": self.model_name},
             "is_wakeup_supported": False,
             "commands_v2": self.commands,
         }

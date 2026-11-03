@@ -122,7 +122,11 @@ Copy the closest overlay and keep its layout: a header comment naming the
 board, its chip, flash, PSRAM and USB bridge, which file it loads after, then
 settings grouped under short comments saying why. Set:
 
-- `CONFIG_IDF_TARGET="esp32xx"`.
+- `CONFIG_IDF_TARGET="esp32xx"`, followed by the board's model:
+  `CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-<name>"` and
+  `CONFIG_MUSE_DEVICE_MODEL_NAME` with its name from `devices/README.md`.
+  Another profile of the same hardware uses the same two lines
+  (`../../protocols/DEVICE.md`).
 - `CONFIG_HOMEHUB_BUTTON_GPIO`. The button is active low with an internal
   pull-up. Boards with the full UI ignore it, because their talk button or touch control confirms pairing.
 - The status backend, `CONFIG_HOMEHUB_LED_BACKEND_*=y` (`..._NONE` for no
@@ -212,8 +216,9 @@ follows the same two steps. Copy `DEVKIT_GPIO27` (addressable) or `PWM_RGB`.
    codec and PMU. Start from `board_aipi.c` when you drive `esp_lcd`, the codec
    and GPIOs yourself.
 5. **Overlay.** Write `devices/sdkconfig.muse-<name>`, loaded after
-   `sdkconfig.muse`. It holds the target, `CONFIG_MUSE_BOARD_<NAME>=y`, PSRAM,
-   the flash size if it isn't 16 MB (with 8 MB, also
+   `sdkconfig.muse`. It holds the target and model (step 4),
+   `CONFIG_MUSE_BOARD_<NAME>=y`, PSRAM, the flash size if it isn't 16 MB (with
+   8 MB, also
    `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"`), and any
    LVGL fonts or options the board needs. Leave bench options, like
    screenshots, to `sdkconfig.muse-bench` (`MUSE_BENCH=1`).

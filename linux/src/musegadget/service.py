@@ -102,6 +102,11 @@ class Service:
         self._stop.set()
 
     async def run(self) -> None:
+        try:
+            self.describe()
+        except ValueError as exc:
+            log.error("invalid device description: %s", exc)
+            raise
         backoff = Backoff()
         token_rejected = False
         while not self._stop.is_set():

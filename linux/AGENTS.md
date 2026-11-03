@@ -156,10 +156,11 @@ never has a command's parameters, output or error message.
   Both directions carry JSON messages, each prefixed with a little-endian u32
   length. The device sends `link.register`, then a `link.result` for each
   `link.invoke`. `link.unpaired` means the Muse removed the device.
-- Register as `platform: "linux"` and `device_family: "gadget"`. Every device
-  built with this SDK registers `device_family: "gadget"`; other families are
-  reserved for Muse's own devices. Don't advertise `device.ota`: it installs
-  ESP32 firmware.
+- Register as `platform: "linux"` and `device_family: "gadget"`, with
+  `model_id` and `metadata.model_name` from the `DeviceDescription`
+  (`../protocols/DEVICE.md`). Every device built with this SDK registers
+  `device_family: "gadget"`; other families are reserved for Muse's own
+  devices. Don't advertise `device.ota`: it installs ESP32 firmware.
 - Messages from the device to the Muse (`musegadget send-user-msg`) go as separate
   `POST /chat/stream` requests on the same session, with `device_id` set to the
   node id and `"output_modality": "text"`. `session_id` picks the chat;
@@ -304,10 +305,20 @@ listed here. Everything else is internal and can change.
   at a `pathlib.Path`. It returns an `asyncio.Server` that the caller must
   close. The socket forwards to the registered session while `serve()` runs.
   `Service.run()` does not start this socket itself.
-- `link_client.DeviceDescription(node_id, display_name, version, commands)` describes the
-  device to Muse. `commands` maps each command name to its spec: a
-  `description`, `required` and `optional` parameters, and an optional
-  `timeout_ms`.
+- `link_client.DeviceDescription(node_id, display_name, version, commands,
+  model_id=..., model_name=...)` describes the device to Muse. `commands` maps
+  each command name to its spec: a `description`, `required` and `optional`
+  parameters, and an optional `timeout_ms`.
+- `model_id` and `model_name` name your hardware (`../protocols/DEVICE.md`);
+  the defaults are `muse-gadget-linux` and `Linux gadget`.
+  `DeviceDescription` raises `ValueError` for values outside the rules, and
+  `Service.run()` checks `describe()` before it connects. For example:
+
+  ```python
+  def describe(self):
+      return dataclasses.replace(
+          super().describe(), model_id="acme-robot", model_name="Acme Robot")
+  ```
 - `link_client.Outcome` says how a session ended: `CLOSED`, `AUTH_REJECTED`, `FORBIDDEN`,
   `UNPAIRED` or `STOPPED`.
 
