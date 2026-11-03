@@ -298,9 +298,11 @@ Type one message per line; you can send follow-ups while Muse is
 thinking or replying. Messages are sent in typing order, waiting only for each
 send acknowledgement. Muse decides whether to combine them into one response.
 The conversation uses compact `User:` and `Muse:` lines, with colored speaker
-labels and wrapped text aligned after the label. Colors use the terminal's
+labels and word-wrapped text aligned after the label. Colors use the terminal's
 palette and default background; terminals without color support use bold labels.
-The input row stays editable while replies arrive. A dim status line beneath it
+The input area wraps at word boundaries and grows as you type, staying editable
+while replies arrive. Drafts taller than the available space scroll vertically
+to keep the cursor visible. A dim status line beneath it
 shows waiting, public activity, responding and ready updates. Arrow keys,
 Home/End and Backspace/Delete edit your message; Page Up/Down scroll the recent
 transcript. The view keeps up to 512 transcript entries and 8192 wrapped lines.

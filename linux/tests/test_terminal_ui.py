@@ -170,6 +170,105 @@ def test_message_continuations_align_after_labels_on_resize(display):
     assert all(len(line) <= 4 for line in display.screen.rows.values())
 
 
+@pytest.mark.parametrize(('text', 'width', 'expected'), [
+    ('hello world again', 8, ['hello', 'world', 'again']),
+    ('hello world', 5, ['hello', 'world']),
+    ('one two\n\nthree four\n', 9, ['one two', '', 'three', 'four', '']),
+    ('abcdefghijk', 4, ['abcd', 'efgh', 'ijk']),
+    ('界界 next e\u0301cho', 7, ['界界', 'next', 'e\u0301cho']),
+])
+def test_wrap_prefers_whole_words(text, width, expected):
+    assert list(_wrap(text, width)) == expected
+
+
+def test_transcript_wraps_words_and_preserves_hanging_indent(display):
+    display.screen.size = (12, 21)
+    display.user('hello wonderful world')
+    display.reply(Reply('r', text='a response with words'), '')
+    assert [display.screen.rows[i] for i in range(5)] == [
+        'User: hello', '      wonderful', '      world',
+        'Muse: a response', '      with words']
+
+
+def test_draft_grows_to_six_rows_and_shrinks_after_submission(display):
+    display.screen.size = (12, 21)
+    display.user('earlier')
+    display.draft = ' '.join(['hello world'] * 6)
+    display.cursor = len(display.draft)
+    display.dirty = True
+    display.draw()
+    assert [display.screen.rows[i] for i in range(5, 11)] == [
+        'User: hello world', *['      hello world'] * 5]
+    assert display.screen.cursor == (10, 17)
+    display.status('Muse is responding')
+    assert display.screen.rows[11] == 'Muse is responding'
+    assert display.screen.rows[0] == 'User: earlier'
+    submitted = display.draft
+    display.screen.keys.append('\n')
+    assert asyncio.run(display.readline(65536)) == (submitted + '\n').encode()
+    display.draw()
+    assert display.screen.rows[10] == 'User: '
+    assert display.screen.cursor == (10, 6)
+
+
+def test_tall_draft_scrolls_vertically_with_cursor_and_resize(display):
+    display.screen.size = (6, 21)
+    display.draft = ' '.join('word%02d' % i for i in range(20))
+    display.cursor = len(display.draft)
+    display.dirty = True
+    display.draw()
+    assert display.screen.rows[4] == '      word18 word19'
+    assert display.screen.cursor == (4, 19)
+    display.cursor = 0
+    display.dirty = True
+    display.draw()
+    assert display.screen.rows[1] == 'User: word00 word01'
+    assert display.screen.cursor == (1, 6)
+    display.screen.size = (10, 40)
+    display.draw()
+    assert display.screen.rows[4].startswith('User: word00')
+    assert display.screen.cursor == (4, 6)
+    assert display.draft.endswith('word19')
+
+
+
+def test_editing_across_wrapped_rows_preserves_message(display):
+    async def scenario():
+        display.screen.size = (8, 21)
+        display.screen.keys.extend('hello wonderful world')
+        reader = asyncio.create_task(display.readline(65536))
+        await asyncio.sleep(0.05)
+        assert display.screen.rows[4] == 'User: hello'
+        assert display.screen.rows[5] == '      wonderful'
+        assert display.screen.rows[6] == '      world'
+        display.status('Muse is responding')
+        display.screen.keys.extend([curses.KEY_HOME, curses.KEY_RIGHT,
+                                    curses.KEY_DC, 'a', curses.KEY_END,
+                                    curses.KEY_BACKSPACE, '!'])
+        await asyncio.sleep(0.05)
+        display.screen.size = (8, 40)
+        display.draw()
+        assert display.screen.rows[6] == 'User: hallo wonderful worl!'
+        display.screen.keys.append('\n')
+        assert await reader == b'hallo wonderful worl!\n'
+    asyncio.run(scenario())
+
+def test_full_width_and_unicode_draft_cursor(display):
+    display.screen.size = (8, 15)
+    display.draft = '界界界界'
+    display.cursor = len(display.draft)
+    display.dirty = True
+    display.draw()
+    assert display.screen.rows[5] == 'User: 界界界界'
+    assert display.screen.rows[6] == '      '
+    assert display.screen.cursor == (6, 6)
+    display.draft = '界界 e\u0301cho world'
+    display.cursor = 6  # after two letters and the combining accent in echo
+    display.dirty = True
+    display.draw()
+    assert display.screen.cursor == (5, 8)
+
+
 def test_speaker_colors_use_terminal_background(display, monkeypatch):
     pairs = []
     monkeypatch.setattr(curses, 'start_color', lambda: None)

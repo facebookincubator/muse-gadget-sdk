@@ -27,21 +27,45 @@ def _width(char):
     return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
 
 
+def _wrap_positions(text, width):
+    """Yield (source offset, line) with word breaks measured in terminal cells."""
+    width = max(1, width)
+    start = 0
+    while start < len(text):
+        end, cells = start, 0
+        while end < len(text) and text[end] != "\n":
+            size = _width(text[end])
+            if cells + size > width:
+                break
+            cells += size
+            end += 1
+        following = end
+        if end < len(text) and text[end] == "\n":
+            following += 1
+        elif end < len(text):
+            # Prefer the last separator, including one just beyond a full row.
+            split = end
+            while split > start and not text[split].isspace():
+                split -= 1
+            if split > start and text[start:split].strip():
+                end = split
+                following = split
+                while following < len(text) and text[following] == " ":
+                    following += 1
+            elif end == start:
+                # A wide glyph cannot fit in a one-cell terminal. Consume it
+                # without asking curses to draw outside the available cells.
+                following += 1
+        yield start, text[start:end]
+        start = following
+    if not text or text.endswith("\n"):
+        yield len(text), ""
+
+
 def _wrap(text, width):
-    """Wrap by terminal cells, preserving explicit newlines."""
-    line, cells = "", 0
-    for char in text.expandtabs(4):
-        size = _width(char)
-        if char == "\n":
-            yield line
-            line, cells = "", 0
-            continue
-        if cells + size > width:
-            yield line
-            line, cells = "", 0
-        line += char
-        cells += size
-    yield line
+    """Wrap whole words by terminal cells, preserving explicit newlines."""
+    for _, line in _wrap_positions(text.expandtabs(4), width):
+        yield line
 
 
 class PlainDisplay:
@@ -73,7 +97,7 @@ class PlainDisplay:
 
 
 class TerminalDisplay:
-    """A bounded transcript above two fixed rows; curses owns terminal echo."""
+    """A bounded transcript above a growing editor and a fixed status row."""
 
     def __init__(self):
         self.screen = None
@@ -145,7 +169,27 @@ class TerminalDisplay:
         self.size = (rows, columns)
         # Leave the last column free, avoiding curses' bottom-right-cell error.
         width = max(1, columns - 1)
-        height = max(0, rows - 2)
+        indent = 6 if width > 6 else 0
+        input_width = width - indent
+        draft_lines = list(_wrap_positions(self.draft, input_width))
+        cursor_line = 0
+        for i, (offset, _) in enumerate(draft_lines):
+            if offset <= self.cursor:
+                cursor_line = i
+        offset, line = draft_lines[cursor_line]
+        cursor_cells = sum(_width(c) for c in line[:self.cursor - offset])
+        # Reserve a cell for the insertion cursor after a completely full row.
+        if cursor_cells >= input_width:
+            if cursor_line == len(draft_lines) - 1:
+                draft_lines.append((self.cursor, ""))
+            cursor_line += 1
+            cursor_cells = 0
+        input_height = min(len(draft_lines), max(1, rows - 2))
+        input_start = min(max(0, cursor_line - input_height + 1),
+                          len(draft_lines) - input_height)
+        input_row = max(0, rows - 1 - input_height)
+        height = input_row
+        self.transcript_height = height
         lines = deque(maxlen=8192)
         for _, text in self.entries:
             label = text[:6] if text.startswith(('User: ', 'Muse: ')) else ''
@@ -175,20 +219,17 @@ class TerminalDisplay:
             else:
                 put(row, line)
         put(rows - 1, self.status_text, curses.A_DIM)
-        # Horizontally scroll long input while keeping its insertion point visible.
-        start = self.cursor
-        cells = 0
-        while start and cells + _width(self.draft[start - 1]) < max(1, width - 6):
-            start -= 1
-            cells += _width(self.draft[start])
-        input_row = rows - 2
-        if width > 6:
-            put(input_row, 'User: ', self.user_style)
-            put(input_row, self.draft[start:], column=6)
-        else:
-            put(input_row, 'User: ' + self.draft[start:], self.user_style)
+        for i, (_, line) in enumerate(draft_lines[input_start:input_start + input_height]):
+            row = input_row + i
+            if indent:
+                put(row, 'User: ' if input_start + i == 0 else ' ' * indent,
+                    self.user_style)
+                put(row, line, column=indent)
+            else:
+                put(row, line)
         try:
-            self.screen.move(input_row, min(width - 1, 6 + cells))
+            self.screen.move(input_row + cursor_line - input_start,
+                             min(width - 1, indent + cursor_cells))
             self.screen.refresh()
         except curses.error:
             pass
@@ -228,7 +269,7 @@ class TerminalDisplay:
                 self.draft = self.draft[self.cursor:]
                 self.cursor = 0
             elif key in (curses.KEY_PPAGE, curses.KEY_NPAGE):
-                step = max(1, self.screen.getmaxyx()[0] - 2)
+                step = max(1, self.transcript_height)
                 self.scroll = max(0, self.scroll + (step if key == curses.KEY_PPAGE else -step))
             elif isinstance(key, str) and key.isprintable():
                 if len(self.draft.encode("utf-8")) + len(key.encode("utf-8")) >= limit:
