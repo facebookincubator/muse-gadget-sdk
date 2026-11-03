@@ -189,7 +189,8 @@ class LinkNoiseTunnelTest(unittest.TestCase):
                 (dict(c5_scaled, ignore_notfound=True), False),
                 (dict(c5_scaled, dyn_rx=64), False),
                 (dict(c5_scaled, mbox=64), False),
-                (dict(c5_scaled, wnd=131072), False),
+                (dict(c5_scaled, wnd=98305), False),
+                (dict(c5_scaled, snd=98305), False),
                 # The data-path bench (never shipped) may try anything.
                 (dict(base, snd=131072, wnd=131072, bench=True), True),
             ]

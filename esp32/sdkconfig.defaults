@@ -190,6 +190,7 @@ CONFIG_LWIP_TCPIP_CORE_LOCKING_INPUT=y
 CONFIG_FREERTOS_HZ=1000
 
 # Don't abort if PSRAM init fails on first boot (can happen on power-on reset).
+# The C5 requires PSRAM instead, for TCP window scaling (sdkconfig.defaults.esp32c5).
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 # Skip PSRAM memtest — intermittent 3/262144 failures on first power-on reset
 # with C5 rev 1.2 cause abort; succeeds on warm reboot. Not worth blocking boot.
