@@ -961,7 +961,7 @@ static void on_ring_draw(lv_event_t *e)
     layer->_clip_area = clip;
 }
 
-/* The long layout's caption font, for the pager (muse_hatch_set_caption_px):
+/* The long layout's caption font, for the pager (muse_chat_set_caption_px):
  * LVGL measures a label's lines the same way, and its built-in fonts are
  * read-only, so this is safe off the LVGL task. */
 static int long_glyph_px(uint32_t letter, uint32_t next)
@@ -1154,11 +1154,14 @@ static void build_screen(void)
             int top = LONG_MUSE_TOP + s_canvas_px - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W) + 14;
             int pitch = lv_font_get_line_height(font) + LONG_LINE_SPACE;
             int lines = (s_h - LONG_HINTS_H - top + LONG_LINE_SPACE) / pitch;
+            if (lines < 1) {
+                lines = 1;   /* the columns below divide by it */
+            }
             int w = s_w - 24;
             /* A third of the caption spare for characters wider than a byte:
              * this caps a line of narrow letters. */
             int cols = MUSE_CAPTION_MAX * 2 / 3 / lines - 1;
-            muse_hatch_set_caption_px(w, long_glyph_px);
+            muse_chat_set_caption_px(w, long_glyph_px);
             lv_obj_set_style_text_font(s_caption_lbl, font, 0);
             lv_obj_set_style_text_line_space(s_caption_lbl, LONG_LINE_SPACE, 0);
             lv_obj_set_style_pad_all(s_caption_lbl, 0, 0);
