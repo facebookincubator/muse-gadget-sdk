@@ -98,7 +98,7 @@ def check_service() -> CheckResult:
     try:
         result: subprocess.CompletedProcess[str] = subprocess.run(
             [executable, "--no-pager", "is-active", "musegadget.service"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True, text=True, errors="replace", timeout=5, check=False,
         )
     except subprocess.TimeoutExpired:
         return {"name": "Service", "status": "FAIL", "detail": "systemctl timed out after 5 seconds.",
@@ -123,7 +123,7 @@ def check_bluetooth() -> CheckResult:
                 "hint": "Install BlueZ before pairing. An already-paired gadget can still connect."}
     try:
         result: subprocess.CompletedProcess[str] = subprocess.run(
-            [executable, "show"], capture_output=True, text=True, timeout=5, check=False,
+            [executable, "show"], capture_output=True, text=True, errors="replace", timeout=5, check=False,
         )
     except subprocess.TimeoutExpired:
         return {"name": "Bluetooth", "status": "WARN",
