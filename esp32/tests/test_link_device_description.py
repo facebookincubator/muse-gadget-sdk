@@ -37,6 +37,7 @@ REGISTER_LIMIT = 8192
 GUIDE_LIMIT = 4096
 GUIDE_DESCRIPTION = "This device's usage guide (Markdown): what it is, its controls and limits."
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+REPOSITORY_GUIDE_LIMIT = 2048
 BLE_CLIENT_STUBS = """
 #include "ble_client.h"
 #define FAIL { return -1; }
@@ -77,6 +78,19 @@ def overlay_values(key: str) -> dict[str, str]:
         if match:
             values[overlay.name] = match.group(1)
     return values
+
+
+def policy_problems(guide: str) -> list[str]:
+    """What breaks the mechanical rules for this repository's guides (protocols/DEVICE.md)."""
+    checks = {
+        "a link": re.search(r"https?://|www\.", guide),
+        "HTML": re.search(r"<[A-Za-z!/]", guide),
+        "a code block": re.search(r"^\s*(```|~~~)", guide, re.M),
+        "a control character": re.search(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]", guide),
+        "not one top-level heading first": not guide.startswith("# ") or len(re.findall(r"^# ", guide, re.M)) != 1,
+        f"over {REPOSITORY_GUIDE_LIMIT} bytes": len(guide.encode()) > REPOSITORY_GUIDE_LIMIT,
+    }
+    return [problem for problem, found in checks.items() if found]
 
 
 def assemble_guide(out: Path, guide: str | None = None) -> subprocess.CompletedProcess:
@@ -307,6 +321,21 @@ int main(void) {
                     self.assertTrue(text.startswith("# "), text[:40])
                     self.assertNotIn("<!--", text)
                     self.assertNotIn("Hatch", text)
+
+    def test_this_repositorys_guides_follow_the_policy(self) -> None:
+        if shutil.which("cmake") is None:
+            self.skipTest("cmake unavailable")
+        guides = [ROOT / "main" / "guide.md", *sorted((ROOT / "devices" / "guides").glob("*.md"))]
+        with tempfile.TemporaryDirectory() as name:
+            for i, path in enumerate(guides):
+                with self.subTest(guide=path.name):
+                    out = Path(name) / f"{i}.md"
+                    self.assertEqual(assemble_guide(out, str(path)).returncode, 0)
+                    self.assertEqual(policy_problems(out.read_text()), [])
+        for bad in ("# A\n\nSee https://example.com\n", "# A\n\n<b>B</b>\n", "# A\n\n```\nx\n```\n",
+                    "# A\tB\n", "Intro\n# A\n", "# A\n# B\n", "# A\n" + "x" * REPOSITORY_GUIDE_LIMIT):
+            with self.subTest(bad=bad[:30]):
+                self.assertNotEqual(policy_problems(bad), [])
 
     def test_a_custom_guide_embeds_and_a_bad_one_fails_the_build(self) -> None:
         if shutil.which("cmake") is None:

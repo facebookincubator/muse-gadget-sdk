@@ -316,8 +316,11 @@ listed here. Everything else is internal and can change.
   it's set, the session advertises `device.guide` and answers it itself.
   `Service.describe()` sets the Linux client's own guide
   (`device_guide.default_guide()`, from `data/guide.md`); a gadget that
-  changes what the device does should set its own. Write facts about the
-  device and don't instruct Muse beyond how to use it (`../protocols/DEVICE.md`).
+  changes what the device does should set its own.
+  - `data/guide.md` is generic and follows "Guides in this repository" in
+    `../protocols/DEVICE.md`, which the tests check.
+  - Your own gadget's guide is free-form: say what it's for and how you want
+    Muse to use its commands. Only the 4096-byte limit is checked.
 - `DeviceDescription` raises `ValueError` for values outside the rules, and
   `Service.run()` checks `describe()` before it connects. For example:
 

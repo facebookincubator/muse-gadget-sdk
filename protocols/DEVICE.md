@@ -57,18 +57,47 @@ parameters, and its result's `payload` is:
 {"format": "markdown", "guide": "# Acme Lamp\n\nThe lamp on the desk ..."}
 ```
 
-`guide` is at most 4096 bytes of UTF-8 Markdown, written for Muse. What
-belongs in it:
+The guide tells Muse what the device is and how to use it. It may describe
+the device's purpose, what its owner uses it for and how Muse should use its
+commands for that: a gadget can be generic or built for one job.
 
-- What the device is, in a sentence or two.
-- Its controls and what it shows: buttons, lights, screen, switches.
-- How to recover it: what each error state means and how to reset it.
-- Rules a command's description can't carry, phrased so they hold on every
-  build: "if it lists `device.discover`, a scan takes up to 90 seconds".
+A command's description carries its contract (what it does, its arguments,
+what it returns, its timeout) and always matches the build. The guide carries
+what no single command can say: the device itself, rules across commands and,
+for your own gadget, what it's for. A rule about one command goes in its
+description, unless `link.register` (at most 8 KB, sent again on every
+reconnect) is short on space; then the guide, fetched only when needed, can
+carry it.
 
-What doesn't: what each command does (its description says that), notes for
-people building the firmware, instructions to Muse beyond how to use the
-device, and anything meant to override what the user asks for.
+Limits:
+
+- At most 4096 bytes of UTF-8 Markdown.
+- It can't override what the user asks or Muse's own rules, and it grants no
+  permissions.
+- No secrets: it's compiled into the firmware, and anyone with the device can
+  read it.
+
+## Guides in this repository
+
+The guides committed here (`esp32/main/guide.md`, `esp32/devices/guides/` and
+`linux/src/musegadget/data/guide.md`) ship in every gadget built from this
+SDK, so they follow stricter rules:
+
+- Generic to the board: true for anyone who owns that hardware. Nothing from
+  someone's own setup: no home, rooms, people, routines, schedules, names,
+  accounts or other devices.
+- A board gets its own guide only when a shared one is wrong about it, checked
+  on the hardware, and the pull request says so.
+- Content: what the device is, what it shows, its controls, how to recover it,
+  its limits, and "if it lists `device.discover`, ..." rules a command's
+  description can't carry.
+- No purpose or behavior instructions, links, code blocks, HTML or marketing.
+- At most 2048 bytes.
+- Every change gets a maintainer review.
+
+CI checks the mechanical rules for these files: no links, HTML (other than the
+leading license comment), code blocks or control characters, one top-level
+heading on the first line, and the size.
 
 ## Validation and compatibility
 

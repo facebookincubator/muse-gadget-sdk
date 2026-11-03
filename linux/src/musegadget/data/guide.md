@@ -26,14 +26,14 @@ does and returns.
 
 - Commands run as the account the owner chose at install, not as root, with
   no terminal.
-- Find out what the machine is before acting on it, e.g. `uname -a` and
-  `cat /etc/os-release`.
+- It can run any Linux distribution: `uname -a` and `cat /etc/os-release`
+  say which.
 - Nothing can answer a prompt: use non-interactive flags (`apt-get -y`), and
   start long work in the background with its output in a file to read later.
 - The account has only its own permissions; `sudo` works only if the owner
   set it up.
-- Ask the user before changes that are hard to undo, such as installing or
-  removing software, editing system files or rebooting.
+- Installing or removing software, editing system files and rebooting change
+  the owner's computer and are hard to undo.
 
 ## Limits
 

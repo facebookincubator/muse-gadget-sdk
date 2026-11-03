@@ -749,9 +749,9 @@ the design, the Wi-Fi protocol and the numbers.
 ## Describe your device
 
 Muse learns what a gadget is from its `link.register`, and how to use it from
-its `device.guide` command; `../protocols/DEVICE.md` has the rules. Every device built with this SDK
-registers `device_family: "gadget"`; other families are reserved for Muse's
-own devices.
+its `device.guide` command; `../protocols/DEVICE.md` has the rules. Every
+device built with this SDK registers `device_family: "gadget"`; other families
+are reserved for Muse's own devices.
 
 - **Model.** Each board's overlay sets `CONFIG_MUSE_DEVICE_MODEL_ID` and
   `CONFIG_MUSE_DEVICE_MODEL_NAME` after `CONFIG_IDF_TARGET`. The id names the
@@ -766,14 +766,26 @@ own devices.
   about it, and set it in its overlay. A relative path is looked up in the
   project directory, then in `esp32/`. A leading HTML comment (the license
   header) is left out, and a guide over 4096 bytes fails the build.
-- **What goes in it.** Write facts about the device: its light or screen, its
-  controls and how to recover it. Don't instruct Muse beyond how to use the
-  device. Command descriptions already say what each command does: add only
-  rules they don't carry, phrased so they hold on every build ("if it lists
-  `device.discover`, ...").
+- **Guides in this repository** are generic to the board: what it is, what it
+  shows, its controls, recovery and limits, in at most 2048 bytes. They follow
+  "Guides in this repository" in `../protocols/DEVICE.md`, and CI checks them.
+- **Your own gadget's guide** is free-form: say what it's for and how you want
+  Muse to use it. Keep the file anywhere in your project and point
+  `CONFIG_MUSE_DEVICE_GUIDE` at it; only the 4096-byte limit is checked. For
+  a desk light whose firmware adds `light.set` and `timer.start`:
+
+  ```markdown
+  # Focus light
+
+  The lamp on my desk, used as a focus timer. "Focus" means 25 minutes of
+  work: call `light.set` with red, then `timer.start` with 1500 seconds.
+  The light turns green by itself when the timer ends. A press on the
+  button ends a focus session early.
+  ```
 
 `tests/test_link_device_description.py` checks the model lines, that every
-guide an overlay names embeds within the limit, and `link.register`'s size.
+guide an overlay names embeds within the limit, this repository's guides
+against the policy, and `link.register`'s size.
 
 ## Adding a command
 

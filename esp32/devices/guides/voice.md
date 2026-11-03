@@ -47,8 +47,7 @@ The LED ring (Voice PE) or RGB LED (reSpeaker Lite) shows its state:
 
 ## Using its commands
 
-- If it lists `voice.configure`, it sets the speaker volume, kept across
-  restarts.
+- If it lists `voice.configure`, the volume it sets is kept across restarts.
 - If it lists `device.discover`, a scan takes up to 90 seconds: work from the
   last result rather than starting another.
 - If it lists `ble.*` commands, run them one at a time, and connect only to

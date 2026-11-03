@@ -37,9 +37,9 @@ commands it lists; each command's description says what it does and returns.
 
 - If it lists `device.discover`, a scan takes up to 90 seconds: work from the
   last result rather than starting another.
-- If it lists `display.*` commands, an image replaces the usual screen until
-  `display.show_animation` or a press on the device; bring it back when the
-  user is done.
+- If it lists `display.*` commands, bring the usual screen back with
+  `display.show_animation` when the user is done; a press on the device also
+  brings it back.
 - If it lists `ble.*` commands, run them one at a time, and connect only to
   devices the user means.
 

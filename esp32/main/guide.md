@@ -44,8 +44,8 @@ The status light (or the status screen, on boards with one) shows its state:
 
 - If it lists `device.discover`, a scan takes up to 90 seconds: work from the
   last result rather than starting another.
-- If it lists `display.*` commands, an image stays up until
-  `display.show_animation`; bring the status screen back when the user is done.
+- If it lists `display.*` commands, bring the status screen back with
+  `display.show_animation` when the user is done.
 - If it lists `ble.*` commands, run them one at a time, and connect only to
   devices the user means.
 

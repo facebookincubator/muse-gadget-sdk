@@ -19,6 +19,7 @@ import base64
 import dataclasses
 import json
 import os
+import re
 import stat
 import tempfile
 import time
@@ -270,8 +271,10 @@ def test_the_service_describes_the_linux_client_with_its_guide():
     assert params["commands_v2"]["device.guide"] == device_guide.SPEC
     guide = device_guide.default_guide()
     assert guide.startswith("# Linux gadget\n")
-    assert "<!--" not in guide and "Hatch" not in guide
-    assert 0 < len(guide.encode()) <= device_guide.MAX_BYTES
+    assert "Hatch" not in guide and len(guide.encode()) <= 2048
+    # The rules for this repository's guides (protocols/DEVICE.md, Guides in this repository).
+    assert not re.search(r"https?://|www\.|<[A-Za-z!/]|^\s*(```|~~~)|[\x00-\x09\x0b-\x1f\x7f-\x9f]", guide, re.M)
+    assert len(re.findall(r"^# ", guide, re.M)) == 1
 
 
 def test_an_invalid_description_fails_before_any_request(paired_device, monkeypatch):
