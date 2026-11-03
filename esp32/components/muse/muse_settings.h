@@ -25,7 +25,8 @@
 /*
  * User settings, persisted in NVS. Setters save immediately and then notify the
  * change listener (from the caller's task), which applies the setting to the
- * hardware. Brightness, auto-sleep and the speaker are polled where they're used.
+ * hardware. Brightness, auto-sleep and the speaker are polled where they're used,
+ * as is the reply text size, which notifies nothing.
  */
 
 #define MUSE_SSID_MAX 32
@@ -58,6 +59,9 @@ bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */
 int muse_settings_mic_gain(void);       /* dB, 0..MUSE_MIC_GAIN_MAX */
 int muse_settings_brightness(void);     /* 10..100 */
 int muse_settings_sleep_s(void);        /* 0 = never */
+/* Reply text size on small screens with full-screen replies. */
+enum { MUSE_TEXT_SMALL, MUSE_TEXT_MEDIUM, MUSE_TEXT_LARGE };
+int muse_settings_text_size(void);
 bool muse_settings_wifi_on(void);
 bool muse_settings_ble_on(void);
 /* StopWatch: false selects realtime PTT; true selects voice notes only. */
@@ -75,6 +79,7 @@ void muse_settings_set_speaker_on(bool on);
 void muse_settings_set_mic_gain(int db);
 void muse_settings_set_brightness(int pct);
 void muse_settings_set_sleep_s(int secs);
+void muse_settings_set_text_size(int size);
 void muse_settings_set_wifi_on(bool on);
 void muse_settings_set_ble_on(bool on);
 /* A network name is remembered first among the saved ones and joined now;
