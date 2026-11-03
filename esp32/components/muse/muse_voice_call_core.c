@@ -570,6 +570,23 @@ static bool number_is(muse_vc_span_t s, long want)
     return *end == '\0' && v == (double)want;
 }
 
+/* A count as the server writes one: plain digits, no sign, fraction or
+ * exponent, within 32 bits. -1 for anything else. */
+static int64_t count_value(muse_vc_span_t s)
+{
+    if (!s.n || s.n > 10 || (s.n > 1 && s.p[0] == '0')) {
+        return -1;
+    }
+    int64_t v = 0;
+    for (size_t i = 0; i < s.n; i++) {
+        if (s.p[i] < '0' || s.p[i] > '9') {
+            return -1;
+        }
+        v = v * 10 + (s.p[i] - '0');
+    }
+    return v <= UINT32_MAX ? v : -1;
+}
+
 static void get_id(const char *line, size_t len, const char *path, muse_vc_span_t *out)
 {
     muse_vc_span_t v;
@@ -642,8 +659,11 @@ bool muse_vc_parse_event(const char *line, size_t len, muse_vc_event_t *ev)
         muse_vc_span_t n;
         ev->kind = MUSE_VC_EV_TURN_SETTLED;
         get_string(line, len, "response_message_id", &ev->response_message_id);
-        ev->handoffs_none = get_checked(line, len, "async_handoffs_pending", &n) == MUSE_VC_J_NUMBER &&
-                            number_is(n, 0);
+        if (get_checked(line, len, "async_handoffs_pending", &n) == MUSE_VC_J_NUMBER) {
+            int64_t count = count_value(n);
+            ev->handoffs_none = count == 0;
+            ev->handoffs_open = count > 0;
+        }
     } else if (span_is(type, "hatch.voice.input_suppressed")) {
         ev->kind = MUSE_VC_EV_INPUT_SUPPRESSED;
         get_string(line, len, "item_id", &ev->item_id);
@@ -1372,6 +1392,27 @@ static bool item_seen_before(const muse_vc_turns_t *t, const char *item)
     return false;
 }
 
+/* True if this settlement names a submission already settled and not active
+ * again: a repeat, which changes nothing. */
+static bool settled_before(const muse_vc_turns_t *t, const muse_vc_event_t *ev)
+{
+    char submission[MUSE_VC_TURN_ID_MAX];
+    if (!take_id(ev->response_message_id, submission, sizeof(submission))) {
+        return false;
+    }
+    for (int i = 0; i < t->n_active; i++) {
+        if (!strcmp(t->active[i].submission, submission)) {
+            return false;
+        }
+    }
+    for (int i = 0; i < t->n_settled; i++) {
+        if (!strcmp(t->settled[i].submission, submission)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Retires every active turn except those for item `keep` (NULL keeps none). */
 static void settle_all(muse_vc_turns_t *t, const char *keep)
 {
@@ -1484,8 +1525,12 @@ uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_
         /* Validated first; then only a turn for the speaking item itself ends
          * its speech (a delayed reply's turn names an older item). */
         char item[MUSE_VC_TURN_ID_MAX];
+        uint8_t was_active = c->turns->n_active;
         if (!turn_started(c->turns, ev, item)) {
             return muse_vc_call_hang_up(c, MUSE_VC_END_FAILED, now_us);
+        }
+        if (c->turns->n_active != was_active) {
+            c->awaiting_caller = false;   /* a new turn, not a repeat */
         }
         if (c->speaking && c->speaking_item[0] && !strcmp(item, c->speaking_item)) {
             c->speaking = false;
@@ -1507,17 +1552,29 @@ uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_
         return 0;
     }
     case MUSE_VC_EV_TURN_SETTLED:
+        if (settled_before(c->turns, ev)) {
+            return 0;   /* a repeat: it can't retire newer turns or use up a kept one */
+        }
         if (turn_settled(c->turns, ev)) {
             muse_vc_call_activity(c, now_us);   /* a fresh idle window after it */
         }
+        if (ev->handoffs_open) {
+            /* A boundary (a spoken approval prompt) with delegated work still
+             * open: Muse waits on the caller until a new turn starts. Its
+             * settlement may name none of the caller's turns, so they stay
+             * open (and the idle limit with them) but don't show WORKING. */
+            c->awaiting_caller = true;
+        } else if (ev->handoffs_none) {
+            c->awaiting_caller = false;
+        }
         if (ev->handoffs_none && c->turns->n_active) {
-            /* Nothing pending: no handoff in the call remains, and Jarvis
+            /* Nothing pending: no handoff in the call remains, and Muse
              * doesn't settle every caller turn by name, so a turn asked while
              * a handoff ran would otherwise stay active (working, never idle)
              * for the rest of the call. A turn not answered yet stays: an
-             * interrupted reply's settlement can follow the next turn's start. */
-            /* Keep an unanswered turn through one such settlement only, so a
-             * reply never seen can't hold the call open past its idle limit. */
+             * interrupted reply's settlement can follow the next turn's start.
+             * It stays through one such settlement only, so a reply never
+             * seen can't hold the call open past its idle limit. */
             bool keep = c->awaiting_reply && !c->reply_kept;
             settle_all(c->turns, keep ? c->reply_item : NULL);
             if (keep) {
@@ -1649,7 +1706,7 @@ uint32_t muse_vc_call_lost(muse_vc_call_t *c, int64_t now_us)
 
 bool muse_vc_call_working(const muse_vc_call_t *c)
 {
-    return c->state == MUSE_VC_LIVE && c->turns->n_active;
+    return c->state == MUSE_VC_LIVE && c->turns->n_active && !c->awaiting_caller;
 }
 
 uint32_t muse_vc_call_poll(muse_vc_call_t *c, int64_t now_us)

@@ -555,20 +555,25 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   back, and older work arriving while a newer reply is still going is
   dropped. Approvals work by voice: Muse asks in the call and you hold to
   answer; the gadget has no approval card.
-- On boards with the full UI, a call shows WORKING (the thinking avatar's
-  working variant) when nothing is playing, the caller isn't holding or
-  talking, and Muse still has a caller turn open
-  (`hatch.voice.turn_started` without its `turn_settled`; Jarvis keeps a
+- On boards with the full LVGL UI (the e-paper UI keeps THINKING), a call
+  shows WORKING (the thinking avatar's working variant) when nothing is
+  playing, the caller isn't holding or talking, and Muse still has a caller
+  turn open
+  (`hatch.voice.turn_started` without its `turn_settled`; Muse keeps a
   delegating turn open until its result has been spoken). A settlement with
-  `async_handoffs_pending` above 0 is a conversational boundary, such as a
-  spoken approval prompt, where Muse waits on the caller: READY, not WORKING.
-  One reporting exactly 0 retires every open turn, since Jarvis doesn't
+  `async_handoffs_pending` of 1 or more is a conversational boundary, such as
+  a spoken approval prompt, where Muse waits on the caller: not WORKING
+  (READY on push-to-talk, LISTENING hands-free) until a new caller turn
+  starts, even though such a settlement may name none of the caller's turns.
+  One reporting 0 retires every open turn, since Muse doesn't
   settle each caller turn by name, except the latest caller turn while its
   reply hasn't finished (an interrupted reply's settlement can arrive after
-  the next caller turn started), and that only once. Its reply is a response
+  the next caller turn started), and that only once. A repeat of an earlier
+  settlement changes nothing. Its reply is a response
   whose `response.submission_message_id` names a turn for its item, or one
   that names none (early media the turn adopts, older VMs); older work's
-  responses don't count. `muse_vc_call_working()` decides it; talking,
+  responses don't count. Only plain digits count: a string, sign, fraction
+  or exponent, or no count, changes nothing. `muse_vc_call_working()` decides it; talking,
   Muse speaking and a pending reply still take precedence. On a hands-free
   call it waits for the turn's first reply to finish (before that the call
   shows LISTENING, as it always has), the mic stays open while it shows, and
