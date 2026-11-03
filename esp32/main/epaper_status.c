@@ -118,7 +118,7 @@ static void dither_gray4(const uint8_t *gray, uint8_t *codes, int w, int h, int1
 }
 
 // The Spectra 6 inks: the controller's 4-bit code and exact RGB primaries.
-// Black and white come first and win ties.
+// Black and white come first and win ties; 2-bit panels use the first four.
 static const struct {
     uint8_t code, r, g, b;
 } s_inks[] = {
@@ -139,9 +139,9 @@ static const uint8_t s_ink_targets[][3] = {
 // Black and white come first and win ties; gray input is limited to them.
 // A direct RGB distance over all six inks would turn mid grays green,
 // so color dithering handles neutral pixels separately.
-static int nearest_ink(int r, int g, int b) {
+static int nearest_ink(int r, int g, int b, int ink_count) {
     int best = 0, best_d = 0;
-    for (int i = 0; i < (int)(sizeof(s_inks) / sizeof(s_inks[0])); i++) {
+    for (int i = 0; i < ink_count; i++) {
         int dr = r - s_ink_targets[i][0];
         int dg = g - s_ink_targets[i][1];
         int db = b - s_ink_targets[i][2];
@@ -167,22 +167,24 @@ static int exact_ink(uint16_t px) {
 }
 
 // Dither w x h native RGB565 pixels to the inks with Floyd-Steinberg, packed
-// 2 to a byte, left pixel in the high nibble (the controller's order). `w` is
-// even. `err` holds 6 * (w + 2) values: red, green and blue per pixel.
-static void dither_color(const uint16_t *rgb, uint8_t *codes, int w, int h, int16_t *err) {
+// 2 or 4 to a byte, leftmost pixel in the top bits (the controller's order).
+// `w` is a multiple of pixels per byte. `err` holds 6 * (w + 2) values.
+static void dither_color(const uint16_t *rgb, uint8_t *codes, int w, int h, int16_t *err, int bits_per_pixel) {
+    int pixels_per_byte = 8 / bits_per_pixel;
+    int ink_count = bits_per_pixel == 2 ? 4 : (int)(sizeof(s_inks) / sizeof(s_inks[0]));
     int16_t *cur = err, *next = err + 3 * (w + 2);
     memset(err, 0, 6 * (size_t)(w + 2) * sizeof(*err));
     for (int y = 0; y < h; y++) {
         const uint16_t *row = rgb + (size_t)y * w;
-        uint8_t *out = codes + (size_t)y * (w / 2);
+        uint8_t *out = codes + (size_t)y * (w / pixels_per_byte);
         bool rtl = y & 1;
         int forward = rtl ? -1 : 1;
         memset(next, 0, 3 * (size_t)(w + 2) * sizeof(*next));
-        memset(out, 0, (size_t)w / 2);
+        memset(out, 0, (size_t)w / pixels_per_byte);
         for (int xi = 0; xi < w; xi++) {
             int x = rtl ? w - 1 - xi : xi;
             int ink = exact_ink(row[x]);
-            if (ink < 0) {
+            if (ink < 0 || ink >= ink_count) {
                 int r = (row[x] >> 11) & 0x1F, g = (row[x] >> 5) & 0x3F, b = row[x] & 0x1F;
                 // cur and next are offset by one pixel so that x - 1 stays in range.
                 int c[3] = {r << 3 | r >> 2, g << 2 | g >> 4, b << 3 | b >> 2};
@@ -200,7 +202,7 @@ static void dither_color(const uint16_t *rgb, uint8_t *codes, int w, int h, int1
                     if (c[k] > 510) c[k] = 510;
                 }
                 ink = neutral ? ((77 * c[0] + 150 * c[1] + 29 * c[2]) >> 8) >= 128
-                              : nearest_ink(c[0], c[1], c[2]);
+                              : nearest_ink(c[0], c[1], c[2], ink_count);
                 for (int k = 0; k < 3; k++) {
                     int target = neutral ? (ink ? 255 : 0) : s_ink_targets[ink][k];
                     int e = c[k] - target;
@@ -210,8 +212,8 @@ static void dither_color(const uint16_t *rgb, uint8_t *codes, int w, int h, int1
                     next[3 * (x + 1 + forward) + k] += (int16_t)(e / 16);
                 }
             }
-            if (x & 1) out[x / 2] |= s_inks[ink].code;
-            else out[x / 2] |= (uint8_t)(s_inks[ink].code << 4);
+            int shift = 8 - bits_per_pixel * (x % pixels_per_byte + 1);
+            out[x / pixels_per_byte] |= (uint8_t)(s_inks[ink].code << shift);
         }
         int16_t *t = cur;
         cur = next;
@@ -226,7 +228,7 @@ static const epd_panel_t *s_panel;
 #define EPD_W       (s_panel->width)
 #define EPD_H       (s_panel->height)
 #define EPD_COLOR   (s_panel->bits_per_pixel > 1)
-#define EPD_ROW_BYTES (EPD_COLOR ? (EPD_W / 2) : (EPD_W / 8))
+#define EPD_ROW_BYTES (EPD_W * s_panel->bits_per_pixel / 8)
 #define EPD_FRAME_BYTES (EPD_ROW_BYTES * EPD_H)
 
 // A status change waits this long for the next, so that the burst while
@@ -259,7 +261,7 @@ static TaskHandle_t s_task;
 
 static void epd_dither(void) {
     if (EPD_COLOR) {
-        dither_color((const uint16_t *)s_canvas, s_frame, EPD_W, EPD_H, s_err);
+        dither_color((const uint16_t *)s_canvas, s_frame, EPD_W, EPD_H, s_err, s_panel->bits_per_pixel);
     } else {
         dither_frame(s_canvas, s_frame, EPD_W, EPD_H, s_err);
     }
@@ -367,8 +369,9 @@ static void epd_task(void *arg) {
         bool full = !s_status_drawn || s_fast_refreshes >= FULL_REFRESH_EVERY;
         if (redraw) {
             memset(s_canvas, 255, s_canvas_bytes);
-            draw_text(title, s_panel->title_y, s_panel->title_max_scale);
+            // The title may sit in the character's blank top rows.
             draw_character();
+            draw_text(title, s_panel->title_y, s_panel->title_max_scale);
             draw_text(label, s_panel->status_y, s_panel->status_scale);
             epd_dither();
             s_status_drawn = true;

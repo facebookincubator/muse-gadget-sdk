@@ -139,6 +139,12 @@ board-neutral core and board hooks:
   compatibility. Acquisition/collect provenance, wire schema 1, matrix versions,
   journal layout/budget, prefix analysis and comparison semantics are unchanged.
 
+Waveshare ESP32-S3-Touch-AMOLED-1.75C, 2.16 and AIPI Lite are ported through
+one shared backend, `boards/board_power_test_generic.c` on `muse_board_t`, with
+an overlay per board. With `"usb_powered":1` a sweep runs with USB attached, so
+the board can be measured on its 5 V input with a POWER-Z KM003C: see
+[km003c.md](km003c.md).
+
 ### Steps
 
 1. **Gather the power facts** (section 0) plus, per peripheral, which rail,
@@ -165,6 +171,8 @@ board-neutral core and board hooks:
    | `prepare_deep(held)`, `release_deep_holds`, `deep_holds_owned` | Pad holds for deep-sleep states, and their recovery after any reset. Only needed for deep-sleep states. |
    | `codec_regs`, `codec_history`, `restore_codec_history`, `warm_seen` | Retained evidence for reset-surviving peripheral history. Boards without codecs return zeroed/unknown snapshots and cold history; do not remove the shared hooks or claim unknown registers are verified. |
    | `usb_dryrun(on)` | Allow diagnostic USB rehearsal where board-safe, without changing PM or quantitative run state; clear on exit. |
+   | `console_init`, `console_write`, `console_getc`, `console_flush` | Optional, weak: the default is the configured UART. Override for a board whose console is elsewhere (native USB Serial/JTAG on the generic backend). |
+   | `charging_supported`, `charging(off, guard_ms)` | Optional, weak: the default rejects `charging_off`. Disable charging only with readback and a guard that restores it; restore on finish/abort/error and at boot. |
 
 4. **Define the board-owned matrix** in your BSP, returned by
    `muse_ptest_board_matrix`; never insert board tables in the core. Each entry

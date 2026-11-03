@@ -92,7 +92,8 @@ typedef enum {
     MUSE_HATCH_EV_NONE,
     MUSE_HATCH_EV_HEARD,    /* transcript so far (partial while talking, then final) */
     MUSE_HATCH_EV_REPLY,    /* reply text so far */
-    MUSE_HATCH_EV_DONE,     /* reply complete; the audio stream is drained after this */
+    MUSE_HATCH_EV_DONE,     /* turn ended; empty text = complete, nonempty text = incomplete reason;
+                            * drain remaining audio after either outcome */
     MUSE_HATCH_EV_ERROR,    /* turn failed; text says why */
     MUSE_HATCH_EV_SENT,     /* the VM has acknowledged the note */
 } muse_hatch_ev_t;
@@ -106,6 +107,17 @@ muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap);
  * page. False until there's reply text to page.
  */
 bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
+
+/*
+ * For a caption font whose letters differ in width: pages also wrap each line
+ * to width_px, measuring it with glyph_px (a glyph's advance in pixels,
+ * kerned towards the next one, 0 at the line's end) as the label will, so no
+ * line wraps again on screen and a page holds exactly its lines. Every reply
+ * is measured: one with CJK or accented letters also keeps to their font's
+ * page (muse_state_page), but its pages without any show in this font. A
+ * NULL glyph_px turns it off. Set before any reply is paged.
+ */
+void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next));
 
 /* Reply speech as 16 kHz mono. Waits up to wait_ms for some; returns frames read. */
 size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms);

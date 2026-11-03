@@ -384,7 +384,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         }
         muse_state_set_progress((float)n / MAX_FRAMES);
         if (!heard && ok && tick) {
-            muse_state_set_caption("%s %.1fs", s_live ? "LISTENING" : "RECORDING", (double)n / MUSE_AUDIO_RATE);
+            muse_state_set_caption(s_live ? "LISTENING %.1fs" : "RECORDING %.1fs", (double)n / MUSE_AUDIO_RATE);
         }
         /*
          * Capture runs 60-80 ms behind real time and people let go on their
@@ -426,11 +426,13 @@ static bool hatch_reply(bool *delivered)
     static const int16_t silence[MUSE_AUDIO_CHUNK];
     char text[96];
     static char page[MUSE_CAPTION_MAX];
+    char incomplete[sizeof(text)] = "";
     bool done = false, speaking = false, replied = false;
     size_t played = 0;
     int64_t t0 = esp_timer_get_time();
     *delivered = false;
     for (;;) {
+        muse_state_poke();   /* an active turn is activity: don't auto-sleep mid-reply */
         muse_hatch_ev_t ev;
         while ((ev = muse_hatch_turn_event(text, sizeof(text))) != MUSE_HATCH_EV_NONE) {
             switch (ev) {
@@ -455,6 +457,7 @@ static bool hatch_reply(bool *delivered)
                 break;
             case MUSE_HATCH_EV_DONE:
                 done = *delivered = true;
+                strlcpy(incomplete, text, sizeof(incomplete));
                 break;
             case MUSE_HATCH_EV_ERROR:
                 ESP_LOGW(TAG, "muse: %s", text);
@@ -496,6 +499,11 @@ static bool hatch_reply(bool *delivered)
     muse_state_set_level(0);
     ESP_LOGI(TAG, "muse reply: %.2fs of audio, %.2fs total", (double)played / MUSE_AUDIO_RATE,
              (esp_timer_get_time() - t0) / 1e6);
+    if (incomplete[0]) {
+        ESP_LOGW(TAG, "muse: %s", incomplete);
+        go_idle(incomplete);
+        return false;
+    }
     if (!played) {
         /* No speech (TTS unavailable): leave the reply text up for a moment. */
         vTaskDelay(pdMS_TO_TICKS(2500));
@@ -505,9 +513,18 @@ static bool hatch_reply(bool *delivered)
 
 static void go_idle(const char *caption)
 {
+    muse_state_poke();   /* the reading clock starts when the turn ends, not at the press */
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
     muse_state_set_caption("%s", caption);
+}
+
+/* Errors and status stay up; a press too short to count only needs a hint. */
+static void too_short(void)
+{
+    muse_state_set_progress(0);
+    muse_state_set_mode(MUSE_MODE_IDLE);
+    muse_state_set_hint("HOLD LONGER TO TALK");
 }
 
 /* Why a press can't go to Hatch; voice notes only go there. */
@@ -552,6 +569,20 @@ static void set_resting(bool rest)
         pre_reset();
     }
     ESP_LOGI(TAG, "%s", rest ? "resting: codecs off, Wi-Fi modem sleep" : "awake: codecs on");
+}
+
+/* A press released before a tap's length: it only woke Muse, or starts a call.
+ * The Watcher's wheel posts its press once held MUSE_WHEEL_HOLD_MS, which
+ * already tells a click from a hold; another tap's length on top would make
+ * holds up to twice that too short. With live calls it keeps the tap. */
+static bool short_press(size_t held)
+{
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER && !CONFIG_MUSE_REALTIME_VOICE
+    (void)held;
+    return false;
+#else
+    return held < MIN_HELD_FRAMES;
+#endif
 }
 
 /*
@@ -634,7 +665,7 @@ static void hold_rec(bool tried)
     }
     if (!s_rec_n) {   /* nothing captured: realloc to 0 would free s_rec and return NULL */
         drop_rec();
-        go_idle("HOLD LONGER TO TALK");
+        too_short();
         return;
     }
     int16_t *pcm = heap_caps_realloc(s_rec, s_rec_n * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1232,7 +1263,7 @@ static void voice_task(void *arg)
         char why[96];
         bool ok = record(pending_down, &held, why, sizeof(why));
         pending_down = false;
-        if (held < MIN_HELD_FRAMES && !wake) {
+        if (short_press(held) && !wake) {
             muse_hatch_turn_cancel();
             drop_rec();
             pre_reset();
@@ -1244,7 +1275,7 @@ static void voice_task(void *arg)
                 continue;
             }
 #endif
-            go_idle("HOLD LONGER TO TALK");
+            too_short();
             continue;
         }
         if (!ok) {

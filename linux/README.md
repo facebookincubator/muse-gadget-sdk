@@ -279,7 +279,11 @@ their own:
 ```sh
 musegadget send-user-msg "The garage door has been open for an hour."
 musegadget send-user-msg --session-id 6f1c2d4e-0b7a-4c3e-9f5d-2a8b1e0c7d93 "Posted to a side chat"
+musegadget send-user-msg --image porch.jpg "Who is at the door?"
 ```
+
+`--image` attaches a JPEG, PNG, GIF or WebP picture of at most 2 MiB for
+Muse to look at.
 
 `--session-id` posts into a side chat: a new id starts one, and reusing it
 keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_ring_bridge.py)
@@ -290,9 +294,8 @@ A few other ways to build on it:
 
 - **Let Muse do it.** Muse can run commands on the machine, so you can ask it to
   set up the rest: "Write a service that tells me when the Pi gets too hot."
-- **Add a command.** Commands live in [`src/musegadget/executor.py`](src/musegadget/executor.py):
-  add a spec to `COMMAND_SPECS` and a branch in `Executor.run`.
-  [`AGENTS.md`](AGENTS.md) walks through it.
+- **Add a command.** Give Muse a command of its own, like "switch the pump",
+  without changing the package: see [Add your own commands](#add-your-own-commands).
 - **Build your own gadget.** A program on its own hardware can pair, stay
   connected and talk to Muse through the `musegadget` package.
   [`AGENTS.md`](AGENTS.md#building-a-gadget) lists what it can use.
@@ -303,6 +306,55 @@ A few other ways to build on it:
   records a device's token only when it pairs, so pair again afterwards with
   `sudo musegadget pair --force`. Do the same if you revoke the token the device
   paired with: it can't reach Muse until it pairs with a new one.
+
+## Add your own commands
+
+Drop a JSON file in `/etc/musegadget/commands.d/`, named after the command,
+and restart the service. `pump.set.json`:
+
+```json
+{
+  "description": "Switch the garden pump on or off.",
+  "exec": ["/usr/local/bin/pump"],
+  "required": {"on": {"type": "boolean", "description": "true to switch it on."}},
+  "timeout_ms": 10000
+}
+```
+
+```sh
+sudo systemctl restart musegadget
+sudo journalctl -u musegadget | grep commands   # commands from /etc/musegadget/commands.d: pump.set
+```
+
+Muse sees `pump.set` next to the built-in commands and calls it when you ask
+for it. The program runs like `system.run`: as the same account, with no
+shell, and killed after `timeout_ms` (default 30 seconds). It gets the
+parameters as a JSON object on stdin, `{"on": true}`. Print a JSON object to
+return it to Muse; any other output comes back as text. Exit non-zero to
+report an error, with the last captured line on stderr as the reason.
+Both output streams are retained up to 96 KiB (with JSON escaping accounted
+for). Once the program itself exits, inherited pipes are drained for at most
+0.5 seconds; background descendants do not turn success into a timeout.
+
+- **Names** are lowercase words joined by dots, like `pump.set`. Names
+  starting with `system.`, `file.`, `device.` or `link.` are reserved.
+- **Parameters** go under `required` and `optional`, each with a `type`
+  (`string`, `integer`, `number`, `boolean`, `object` or `array`) and a
+  `description`. Muse reads the descriptions, so say what each one does.
+- **Files and directory:** when the service runs as root, both must be owned
+  by root and neither may be group- or world-writable. Directory and file
+  symlinks are refused. Non-root development still permits your own files
+  and directory; `MUSEGADGET_COMMANDS_DIR` selects it. This is a trust check,
+  not a sandbox or a guarantee against changes by another root process.
+- **Bad definitions** are diagnosed and skipped individually; other commands
+  remain usable. Diagnostics omit configuration contents and unexpected
+  exception text.
+- **Registration:** built-ins are kept. Complete custom specs are considered
+  in command-name order, skipping any that would put the serialized
+  `link.register` (metadata, escaping and four-byte prefix included) above
+  256 KiB. Later smaller definitions may still fit. Skipped commands are
+  neither advertised nor executable. Check the log for `skipping command`;
+  a VM registration rejection is still reported as a rejection.
 
 ## Community device notes
 
