@@ -333,7 +333,7 @@ static void text_modality(void) {
     assert(text);
     assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(text,"output_modality")),"text"));
     const char *device=cJSON_GetStringValue(cJSON_GetObjectItem(text,"device"));
-    assert(device && !strcmp(device,"micro"));
+    assert(device && !strcmp(device,"mcu-wearable"));
     cJSON_Delete(text);
 }
 int main(int argc,char **argv) {

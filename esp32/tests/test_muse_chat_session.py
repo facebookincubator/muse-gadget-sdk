@@ -339,7 +339,7 @@ static void chat_request(bool spoken) {
         text_begin("Hi");
     }
     assert(s_turn.phase == P_WAIT_REPLY && s_turn.text == !spoken);
-    assert(!strcmp(chat_body, spoken ? "{\"message\":\"Hi\",\"output_modality\":\"text\",\"device\":\"micro\"}"
+    assert(!strcmp(chat_body, spoken ? "{\"message\":\"Hi\",\"output_modality\":\"text\",\"device\":\"mcu-wearable\"}"
                                      : "{\"message\":\"Hi\",\"output_modality\":\"text\"}"));
 }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER

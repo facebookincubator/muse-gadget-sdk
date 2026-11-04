@@ -73,10 +73,10 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
     memcpy(rejected->ids[rejected->count++], id, len + 1);
 }
 
-/* Spoken turns (voice notes and dictation) name the gadget as a small voice
- * device, so Muse answers them as it does other voice devices asking for text:
- * short and plain, without Markdown. Typed turns leave it out. */
-#define MUSE_CHAT_SPOKEN_DEVICE "micro"
+/* Identifies spoken turns (voice notes and dictation) as coming from a small
+ * microcontroller voice device, so Muse answers in short plain sentences.
+ * Typed turns leave it out. */
+#define MUSE_CHAT_SPOKEN_DEVICE "mcu-wearable"
 
 /* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
 #define MUSE_HATCH_NOTE_HEAD \
