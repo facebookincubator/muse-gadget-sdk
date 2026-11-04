@@ -149,6 +149,9 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_ai_passport.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_P4_LCD35)
         list(APPEND srcs "boards/board_waveshare_p4_lcd35.c")
+        if(CONFIG_MUSE_P4_CSI_CAMERA)
+            list(APPEND srcs "boards/p4_csi_camera.c")
+        endif()
     elseif(CONFIG_MUSE_BOARD_DEOTALAND_ROROLEE)
         list(APPEND srcs "boards/board_deotaland_rorolee.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD19)
@@ -194,6 +197,10 @@ set(muse_priv_requires
     # before Kconfig values exist, so these can't depend on it; only the code does.
     fatfs esp_driver_sdspi sdmmc)
 list(APPEND muse_priv_requires camera)
+# The P4 camera's JPEG encoder; Kconfig is not loaded yet when requirements expand.
+if(IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND muse_priv_requires esp_driver_jpeg)
+endif()
 
 idf_component_register(
     SRCS ${srcs}
