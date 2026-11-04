@@ -20,7 +20,7 @@ from collections import deque
 import pytest
 
 from musegadget.muse_turn import Reply
-from musegadget.terminal_ui import PlainDisplay, TerminalDisplay, _wrap
+from musegadget.terminal_chat_ui import PlainDisplay, TerminalDisplay, _wrap
 
 
 class Screen:
@@ -68,6 +68,9 @@ class Screen:
 @pytest.fixture
 def display(monkeypatch):
     screen = Screen()
+    # Exercise both wheel directions even on Python 3.9, which lacks BUTTON5.
+    monkeypatch.setattr(curses, 'BUTTON4_PRESSED', 1 << 16, raising=False)
+    monkeypatch.setattr(curses, 'BUTTON5_PRESSED', 1 << 21, raising=False)
     monkeypatch.setattr(curses, 'initscr', lambda: screen)
     monkeypatch.setattr(curses, 'mousemask', lambda mask: (mask, 0))
     for name in ('noecho', 'cbreak', 'nocbreak', 'echo', 'endwin'):

@@ -41,6 +41,7 @@ pairing and control protocols, so the same app pairs either.
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
+| `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
 | `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |

@@ -27,7 +27,7 @@ from musegadget import config
 from musegadget.link_client import acknowledgement
 from musegadget.muse_turn import (AgentStatus, MuseTurn, Reply, _acknowledged_message_ids,
                                  _strip_controls, _update_reply)
-from musegadget.terminal_ui import PlainDisplay, TerminalDisplay
+from musegadget.terminal_chat_ui import PlainDisplay, TerminalDisplay
 
 MAX_RECORD = 2 * 1024 * 1024  # JSON escaping can expand a 256 KiB upstream event.
 MAX_INPUT = 64 * 1024
