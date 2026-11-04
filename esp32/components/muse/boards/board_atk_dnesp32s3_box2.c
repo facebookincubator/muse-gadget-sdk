@@ -115,6 +115,7 @@ static const char *TAG = "board";
 #define ACC_AUTO_INC 0x80
 #define TURN_MG 700                /* past this on Y the box is upright or turned over */
 #define TURN_POLLS 50              /* poll_buttons() calls between readings: 0.5 s */
+#define AVATAR_PX 192
 
 static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_xl;
@@ -627,6 +628,7 @@ static const muse_board_t s_board = {
     /* Keys L, M and R, left to right; where their icons sit isn't checked on a unit yet. */
     .talk_hint = { LV_ALIGN_TOP_MID, 0, 8 },
     .aux_hint = { LV_ALIGN_TOP_RIGHT, -8, 8 },
+    .avatar_px = AVATAR_PX,
     .frame_ms = 40,
     .init = init,
     .display_start = display_start,

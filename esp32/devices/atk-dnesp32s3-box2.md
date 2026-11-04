@@ -62,7 +62,8 @@ turns them on.
 
 ## Screen
 
-- Landscape, 320×240, the way the box sits on a desk. Turned over, the
+- Landscape, 320×240, the way the box sits on a desk. Muse is 192 px wide,
+  three screen pixels to each of its 64. Turned over, the
   picture turns with it within a second: the accelerometer is read twice a
   second, and a turn counts after two readings. Lying flat or on a side keeps
   it as it is.
