@@ -542,6 +542,8 @@ limitations under the License.
           return;   // no port picked
         }
         const session = new DeviceSettingsSession(port, {
+          // The card keeps the port until it has closed; meanwhile it says why.
+          onCloseStuck: (e) => showStatus($("settings-status"), e, "error"),
           onDisconnect: (e) => {
             if (settings !== session) return;
             settings = null;

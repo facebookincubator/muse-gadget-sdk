@@ -107,10 +107,11 @@ const MAX_LINE = 65536;
 // One open console. Requests run one at a time; every write waits for its
 // answer, or fails after `timeout` ms.
 export class DeviceSettingsSession {
-  constructor(port, { timeout = 4000, onDisconnect = () => {} } = {}) {
+  constructor(port, { timeout = 4000, onDisconnect = () => {}, onCloseStuck = () => {} } = {}) {
     this.port = port;
     this.timeout = timeout;
     this.onDisconnect = onDisconnect;
+    this.onCloseStuck = onCloseStuck;
     this.online = false;
     this.waiters = new Set();
     this.queue = Promise.resolve();
@@ -257,7 +258,9 @@ export class DeviceSettingsSession {
     });
   }
 
-  // Gives the port back. Throws if it stays open, so the page can say so.
+  // Gives the port back. A write still under way can keep it open: then
+  // onCloseStuck(error) says so and the port closes once that write ends
+  // (unplugging ends it). Throws if it stays open, so the page can say so.
   async close() {
     if (this.closed) return this.closed;
     this.closing = true;
@@ -277,6 +280,15 @@ export class DeviceSettingsSession {
       await Promise.race([this.writing, new Promise((resolve) => { timer = setTimeout(resolve, this.timeout); })]);
       clearTimeout(timer);
       this.writer?.releaseLock();
+      try {
+        await this.port.close();
+        return;
+      } catch (e) {
+        this.onCloseStuck(new DeviceSettingsError("CLOSE", { error: e.message }));
+      }
+      // paced-serial.js still holds the port's own writer: try again once
+      // the write has ended, rather than leave the port open.
+      await this.writing;
       try {
         await this.port.close();
       } catch (e) {

@@ -239,6 +239,33 @@ test("closing mid-way through a paced write waits for it, then closes the port",
   assert.equal((await saving).code, "CLOSED");
 });
 
+test("a paced write stalled past the close deadline keeps the port until it ends, then closes it", async () => {
+  class PacedPort extends Port {
+    get writable() { return this._writable; }
+    async open(options) { return super.open(options); }
+  }
+  installPacedSerial(PacedPort).set({ chunk: 64, factor: 0 });
+  const port = new PacedPort();
+  let stuck = null;
+  const { session } = await connect(port, { onCloseStuck: (e) => { stuck = e; } });
+  // The bridge stops taking bytes: paced-serial.js holds the port's own
+  // writer for longer than close() waits (50 ms here).
+  let finish;
+  port.onWrite = () => new Promise((resolve) => { finish = resolve; });
+  const querying = session.query(1000).catch((e) => e);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(finish, "the write is under way");
+  let closed = false;
+  const closing = session.close().then(() => { closed = true; });
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(stuck?.code, "CLOSE", "the page is told why the port is still open");
+  assert.ok(!port.closed && !closed, "the session still owns the open port");
+  finish();   // the write ends (or the gadget is unplugged)
+  await closing;
+  assert.ok(port.closed);
+  assert.equal((await querying).code, "CLOSED");
+});
+
 test("every status field is shown, with Muse names for the firmware's keys", () => {
   const status = {
     board: "StickS3", chat: false,

@@ -25,7 +25,7 @@
 //   write throws.
 // - onInstalled(port) runs when a write finishes, with the port it used.
 
-import { t } from "./i18n.js";
+import { LocalizedError } from "./i18n.js";
 
 // "303a:1001" -> { usbVendorId, usbProductId }
 const usbFilter = (id) => {
@@ -53,7 +53,7 @@ export function installFlasherHooks({ getSelection, onInstalled }) {
     get: () => loader,
     set(value) {
       loader = value;
-      let problem;   // undefined until checked, then null or what's wrong
+      let problem;   // undefined until checked, then null or the sizes in MB
       const checkFlash = async () => {
         if (problem !== undefined) return problem;
         const { minFlashBytes } = getSelection();
@@ -65,7 +65,7 @@ export function installFlasherHooks({ getSelection, onInstalled }) {
         if (size > 0 && size < minFlashBytes) {
           let needed = MB;
           while (needed < minFlashBytes) needed *= 2;
-          problem = t("flash.tooSmall", { needed: needed / MB, size: size / MB });
+          problem = { needed: needed / MB, size: size / MB };
         }
         return problem;
       };
@@ -76,7 +76,7 @@ export function installFlasherHooks({ getSelection, onInstalled }) {
       const writeFlash = value.writeFlash.bind(value);
       value.writeFlash = async (options) => {
         const problem = await checkFlash();
-        if (problem) throw new Error(problem);
+        if (problem) throw new LocalizedError("flash.tooSmall", problem);
         await writeFlash(options);
         onInstalled?.(lastPort);
       };

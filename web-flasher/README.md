@@ -103,8 +103,8 @@ To try changes to the page itself, copy `index.html` and the `.js` and
 `boards.json` files over the unpacked site and reload.
 
 Run the offline regression tests (the installer hooks, the Device settings
-protocol and the languages) with Node.js 22 or later (no board or package
-installation needed):
+protocol and the languages) with Node.js 22.7 or later, which loads the
+page's modules as ES modules (no board or package installation needed):
 
 ```sh
 node --test web-flasher/tests/*.test.mjs
