@@ -62,7 +62,9 @@ def open_audio(monkeypatch, input_rates, output_rates):
     monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(
         RawStream=output_stream, RawInputStream=FakeStream, RawOutputStream=output_stream,
         PortAudioError=PortAudioError, check_input_settings=checker(input_rates),
-        query_devices=lambda kind: {"name": "USB Mic", "default_samplerate": 44100.0}))
+        check_output_settings=checker(output_rates),
+        query_devices=lambda kind: {"name": "USB Mic" if kind == "input" else "USB Speaker",
+                                    "default_samplerate": 44100.0}))
     return LiveAudio()
 
 
@@ -85,19 +87,21 @@ def resampled_audio(monkeypatch):
 
 
 def playback(audio):
-    output = bytearray(FRAME_BYTES)
+    blocksize = audio._output_stream.options["blocksize"]
+    output = bytearray(blocksize * 2)
     callback = audio._output_stream.options["callback"]
     if audio._input_stream is audio._output_stream:
         callback(b"\0" * FRAME_BYTES, output, 960, None, None)
     else:
-        callback(output, 960, None, None)
+        callback(output, blocksize, None, None)
     return bytes(output)
 
 
 def test_capture_prefers_native_24k(monkeypatch):
     monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(
         RawStream=FakeStream, PortAudioError=PortAudioError,
-        check_input_settings=lambda **options: None))
+        check_input_settings=lambda **options: None,
+        check_output_settings=lambda **options: None))
     audio = LiveAudio()
     try:
         assert audio._input_stream is audio._output_stream
@@ -268,11 +272,53 @@ def test_initialization_failure_closes_opened_streams(monkeypatch, failure):
         if failure != "duplex_start" and options["samplerate"] == 24000:
             raise PortAudioError("Invalid sample rate")
 
+    def check_output_settings(**options):
+        if failure != "duplex_start" and options["samplerate"] == 24000:
+            raise PortAudioError("Invalid sample rate")
+
     monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(
         RawStream=DuplexStream, RawInputStream=InputStream, RawOutputStream=OutputStream,
-        PortAudioError=PortAudioError, check_input_settings=check_input_settings))
+        PortAudioError=PortAudioError, check_input_settings=check_input_settings,
+        check_output_settings=check_output_settings))
     with pytest.raises(PortAudioError):
         LiveAudio()
     assert len(streams) == (1 if failure in ("duplex_start", "output_open") else 2)
     assert all(stream.closed and not stream.active for stream in streams)
     assert all(stream.calls.count("close") == 1 for stream in streams)
+
+
+def test_playback_falls_back_to_48k_with_interpolation(monkeypatch):
+    audio = open_audio(monkeypatch, (48000, 44100), (48000,))
+    try:
+        assert audio._input_stream.options["samplerate"] == 48000
+        assert audio._input_stream.options["blocksize"] == 1920
+        assert audio._output_stream.options["samplerate"] == 48000
+        assert audio._output_stream.options["blocksize"] == 1920
+        audio.write(struct.pack("<hh", 1000, 3000))
+        out = playback(audio)
+        assert len(out) == 2 * FRAME_BYTES
+        assert struct.unpack("<4h", out[:8]) == (1000, 2000, 3000, 1500)
+        assert audio._playback_bytes == 0
+    finally:
+        audio.close()
+
+
+def test_playback_rejects_speaker_without_24k_or_48k(monkeypatch):
+    with pytest.raises(OSError, match=r"'USB Speaker' supports neither 24 kHz nor 48 kHz \(native rate: 44100 Hz\)"):
+        open_audio(monkeypatch, (48000,), (44100,))
+
+
+def test_split_streams_for_native_capture_and_resampled_playback(monkeypatch):
+    audio = open_audio(monkeypatch, (24000, 48000), (48000,))
+    try:
+        assert audio._input_stream is not audio._output_stream
+        assert audio._input_stream.options["samplerate"] == 24000
+        assert audio._decimator is None
+        assert audio._output_stream.options["samplerate"] == 48000
+        assert audio._output_stream.options["blocksize"] == 1920
+        audio.write(struct.pack("<hh", 1000, 3000))
+        out = playback(audio)
+        assert len(out) == 2 * FRAME_BYTES
+        assert struct.unpack("<4h", out[:8]) == (1000, 2000, 3000, 1500)
+    finally:
+        audio.close()
