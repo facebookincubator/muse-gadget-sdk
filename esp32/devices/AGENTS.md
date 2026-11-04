@@ -179,7 +179,7 @@ In `main/led_status.c`:
 - `led_hw_init()` turns the backlight on by driving `LCD_PIN_BL` high. A
   backlight that is active low, PWM or behind an expander needs a change there.
 
-If the panel driver isn't part of `esp_lcd` in IDF v6.0.1 (check
+If the panel driver isn't part of `esp_lcd` in IDF v6.0.3 (check
 `$IDF_PATH/components/esp_lcd`), add it to `main/idf_component.yml`, and to
 `GADGET_REQUIRES` in `main/CMakeLists.txt` under an `if()` for your backend, as
 `led_strip` is. Images from Muse are sized with

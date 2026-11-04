@@ -572,7 +572,7 @@ eFuse. Run on a v1.2 board: display, touch, buttons, audio, battery and
 installs through Vibe Mode. Muse's progress shows as a bar along the bottom
 edge (`no_ring`): the panel is square.
 
-- **ESP-IDF:** the S31 isn't in v6.0.1. Use the master revision Espressif
+- **ESP-IDF:** the S31 isn't in v6.0.3. Use the master revision Espressif
   pins for the board, `7b9cc1ac79f865983f59bb8ff3ff43eb74ff1dbe`, installed
   for `esp32s31`; `tools/muse/board.sh` looks for it in
   `~/.espressif/esp-idf-s31` (or set `IDF_EXPORT_S31` to its `export.sh`).

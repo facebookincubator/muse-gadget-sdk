@@ -82,23 +82,28 @@ commands outside the sandbox.
 
 ## Or do it yourself
 
-### 1. Install ESP-IDF v6.0.1
+### 1. Install ESP-IDF v6.0.3
 
-This firmware is built with Espressif's ESP-IDF, **version 6.0.1**. Other
+This firmware is built with Espressif's ESP-IDF, **version 6.0.3**. Other
 versions aren't supported. If you already have it installed, skip ahead.
 
 On macOS, install the prerequisites first with `brew install cmake ninja
 dfu-util python3`. On Linux, follow
-[Espressif's prerequisites](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32c5/get-started/linux-macos-setup.html).
+[Espressif's prerequisites](https://docs.espressif.com/projects/esp-idf/en/v6.0.3/esp32c5/get-started/linux-macos-setup.html).
 Then:
 
 ```sh
-git clone -b v6.0.1 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v6
+git clone -b v6.0.3 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v6
 ~/esp/esp-idf-v6/install.sh esp32c5,esp32s3,esp32c6,esp32
 . ~/esp/esp-idf-v6/export.sh
 ```
 
 Run the last line in every new terminal you build from.
+
+To move an existing clone from an earlier v6.0 release, run
+`git fetch --tags && git checkout v6.0.3 && git submodule update --init --recursive`
+in it, then its `install.sh` again. Delete each build directory's generated
+`sdkconfig` afterwards (see Configuration gotchas in `AGENTS.md`).
 
 ### 2. Build
 

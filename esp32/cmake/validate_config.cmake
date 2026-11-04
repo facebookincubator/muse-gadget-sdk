@@ -118,3 +118,14 @@ if(CONFIG_HOMEHUB_PAIRING_EFUSE_AUTH)
             "Manufacturer pairing builds must use production epoch 1. ${GADGET_CONFIG_REGEN_HINT}")
     endif()
 endif()
+
+# Cross-signed bundle verification: before v6.0.3, ESP-IDF's bundle callback
+# allocates the subject of each root it offers and nothing frees it, so every
+# TLS handshake, including one with a forged certificate, leaks heap. Those
+# releases also reject every bundle-anchored chain with it on once
+# CONFIG_MBEDTLS_HAVE_TIME_DATE is set.
+if(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY AND
+   "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}" VERSION_LESS 6.0.3)
+    message(FATAL_ERROR
+        "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY needs ESP-IDF v6.0.3 or later (this is v${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}): earlier releases leak heap on every TLS handshake with it on.")
+endif()

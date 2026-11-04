@@ -29,7 +29,7 @@ avatar/voice/settings UI on boards with a display.
 
 ## Prerequisites
 
-- **ESP-IDF v6.0.1**, installed and activated (`. $IDF_PATH/export.sh`) so
+- **ESP-IDF v6.0.3**, installed and activated (`. $IDF_PATH/export.sh`) so
   `idf.py` is on `PATH`. Other versions are unsupported. Errors about missing
   IDF headers such as `gcm.h` or `gpio_ll.h` usually mean the wrong IDF tag.
 - Python 3 and a C/C++ compiler (`cc`, `c++`) for the host tests.
@@ -143,7 +143,7 @@ tools/board.sh ideaspark flash-monitor /dev/cu.usbserial-110
 
 Without a port it uses the only matching serial port, and fails if it finds
 none or more than one. If `idf.py` is not on `PATH`, it sources `export.sh`
-from `$IDF_PATH`, `~/esp/esp-idf-v6.0.1`, `~/esp/esp-idf-v6` or `~/esp/esp-idf`.
+from `$IDF_PATH`, `~/esp/esp-idf-v6.0.3`, `~/esp/esp-idf-v6` or `~/esp/esp-idf`.
 The Sticky's Muse and Link status profiles build in `build-reterminal-sticky/`
 and `build-reterminal-sticky-link/`. Set the SDK token in the chosen build
 directory through `idf.py -B <dir> menuconfig`.
@@ -176,7 +176,7 @@ than the port name, which changes when boards are re-cabled. With several
 boards of one kind attached, pass the device's USB serial number (on the chip's
 own USB serial port, its MAC) or the port; `tools/muse/ports.py --list` shows
 them. It finds ESP-IDF the way `tools/board.sh` does, trying
-`~/.espressif/esp-idf-v6.0.1` first. For an install anywhere else, set
+`~/.espressif/esp-idf-v6.0.3` first. For an install anywhere else, set
 `IDF_EXPORT` to its `export.sh`, e.g. in your shell profile:
 `export IDF_EXPORT=/path/to/esp-idf/export.sh`. `tools/muse/avatar.py` builds
 through `board.sh`, so it needs the same.
