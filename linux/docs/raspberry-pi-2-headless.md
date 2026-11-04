@@ -68,8 +68,8 @@ cd muse-gadget-sdk/linux
 bash install.sh --from . --sdk-token mgst_... --no-pair --yes
 ```
 
-`--no-pair` is required: without it the installer tries to open advertising on
-a board with no controller. Expect the warning:
+`--no-pair` skips the pairing attempt, which can't work on a board with no
+controller. Expect the warning:
 
 ```
 no Bluetooth adapter found. You can install, but pairing with the Muse app needs Bluetooth LE.
@@ -86,11 +86,16 @@ sudo musegadget info
 
 ## Pair on the machine with Bluetooth
 
+Use a machine that is not already a Muse gadget. Copying the Pi's identity
+over another gadget's state would replace that gadget's identity and keep its
+old pairing, so the installer would not open pairing at all; the `mkdir` below
+fails if `/var/lib/musegadget` already exists.
+
 Copy the identity to the pairing machine first, so the app pairs the Pi's
 existing node instead of creating a second device:
 
 ```sh
-sudo install -d -m 0700 /var/lib/musegadget
+sudo mkdir -m 0700 /var/lib/musegadget &&
 ssh USER@PI 'sudo tar -C /var/lib/musegadget -cf - identity.json sdk_token' \
   | sudo tar -C /var/lib/musegadget -xf -
 ```
@@ -104,10 +109,11 @@ cd muse-gadget-sdk/linux
 bash install.sh --from . --yes
 ```
 
-In the Muse app, within the ten-minute window: **Settings > Devices > Add
-Device**, pick `MuseGadgetXXXXXX`, accept the community-device warning, and
-pick the network shown when asked for Wi-Fi. If the window closes, reopen it
-with `sudo musegadget pair`.
+In the Muse app, within the ten-minute window, turn on **Settings > Devices >
+Developer mode**, then **Settings > Devices > Add Device**, pick
+`MuseGadgetXXXXXX`, accept the community-device warning, and pick the network
+shown when asked for Wi-Fi. If the window closes, reopen it with
+`sudo musegadget pair`.
 
 Confirm, then stop the pairing machine so only one host holds the identity:
 
@@ -127,9 +133,14 @@ sudo systemctl restart musegadget
 ```
 
 Run as root, the extract keeps `0600 root:root` inside a `0700` directory, and
-no archive is left behind. A small script that does the same checks — token
-format, matching identity, refusal to overwrite a different device — is at
-[alston808/muse-gadget-headless](https://github.com/alston808/muse-gadget-headless).
+no archive is left behind. Both `ssh ... sudo tar` pipelines run sudo on the
+remote host without a terminal, so they need passwordless sudo there.
+
+A community script that does the same transfer with extra checks (token
+format, matching identity, refusal to overwrite a different device) is at
+[alston808/muse-gadget-headless](https://github.com/alston808/muse-gadget-headless/tree/17076b748044548cbc2b42d427f518151f03179a)
+(snapshot `17076b7`). It runs with sudo and handles device credentials, so
+read it before you run it.
 
 ## Verify
 
@@ -149,16 +160,28 @@ link_client: sent link.register as homelink-XXXXXX
 link_client: registered with the Muse
 ```
 
-`doctor` reports Pairing, SDK token, Service and TCP 443 as `OK`, and Bluetooth
-as `WARN`. The end-to-end check is from the Muse app: ask it to run `hostname`
-on the device. It must return the Pi's hostname, not the pairing machine's.
+`doctor` reports Pairing, SDK token, Service and Muse API TCP as `OK`, and
+Bluetooth as `WARN`. The end-to-end check is from the Muse app: ask it to run
+`hostname` on the device. It must return the Pi's hostname, not the pairing
+machine's.
+
+Once the Pi is registered, delete the pairing machine's copy of the device
+tokens there:
+
+```sh
+sudo musegadget unpair
+```
+
+This only removes its local `pairing.json`; Muse is not told, and the Pi stays
+paired.
 
 ## Limitations
 
 - Re-pairing needs the Bluetooth machine again. The Pi cannot pair on its own,
-  so keep that machine's install (its state can be discarded) for as long as
-  the pairing might need to be redone.
-- Only one host may hold an identity at a time. Leaving the pairing machine's
+  so keep that machine's install and `identity.json` for as long as the
+  pairing might need to be redone: run `sudo musegadget pair` there, then
+  repeat the move and the unpair.
+- Only one host may hold a pairing at a time. Leaving the pairing machine's
   service enabled gives two live `link-control` sessions for the same device.
 - Tested on one board and one image. 1 GB of RAM is sufficient because the
   only PyPI dependency is `websockets`, but heavier models of the same
@@ -168,7 +191,7 @@ on the device. It must return the Pi's hostname, not the pairing machine's.
 
 ```sh
 cd muse-gadget-sdk/linux
-sudo bash install.sh --uninstall --purge
+bash install.sh --uninstall --purge
 ```
 
 Then remove the device in the Muse app.
