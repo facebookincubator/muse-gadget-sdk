@@ -22,7 +22,8 @@ One complete C file in a single ```c fenced block, and nothing after it.
 Keep the "// Copyright (c) Meta Platforms, Inc. and affiliates." line at
 the top. The file must compile without warnings with `cc -O2 -Wall` on a
 desktop and with ESP-IDF's GCC. Include only <math.h>, <stdbool.h>,
-<stdint.h>, <stdlib.h>, <string.h> and "muse_pixel.h".
+<stdint.h>, <stdlib.h>, <string.h>, "muse_pixel.h" and "muse_speaking.h"
+(the speaking gestures the current file uses).
 
 HARDWARE
 ESP32-S3 at 240 MHz renders at 25 fps (40 ms per frame). ESP32-C6 at 160 MHz
@@ -100,9 +101,11 @@ ANIMATION BEATS (every one of these, adapted to your body)
 - THINKING: eyes glance up and side to side, "hmm" mouth, one paw to the
   chin, gentle lean, three thought dots stepping up beside the head, faster
   sparkles.
-- SPEAKING: mouth opens with `level` (plus a tiny flutter so it never
-  freezes), body bobs with the voice, arms gesture, feet shuffle, rings and
-  waves, extra blush.
+- SPEAKING: mouth opens with `level`, closes in real pauses, and keeps a
+  speaking rhythm when the reply is silent; arms make single gestures with
+  rests between them (hand raises, beats, open arms) and settle when the
+  voice pauses; brows, gaze and small nods follow the gesture; gentle bob,
+  feet planted, rings and waves, extra blush.
 - ERROR: X eyes, flat mouth, quick side-to-side shake for the first 0.6 s,
   "!" beside the head, red scheme. `happy` is ignored in ERROR.
 - OFF (powering down, ~1.3 s): waves goodbye, eyes close, glow fades out.

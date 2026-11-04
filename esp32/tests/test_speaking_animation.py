@@ -6,6 +6,9 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 """Exercise real speaking controller and renderer without ESP-IDF or hardware."""
+import os
+import re
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -114,11 +117,20 @@ int main(void) {
 '''
         self.compile_run(source, renderer=True)
 
+    def test_avatar_prompt_allows_the_default_avatars_includes(self):
+        """avatar.py sends the default renderer as the file to start from."""
+        prompt = (ROOT / 'tools/muse/avatar_prompt.md').read_text()
+        rule = prompt.split('Include only', 1)[1].split('\n\n', 1)[0]
+        allowed = set(re.findall(r'(<[\w./]+>|"[\w./]+")', rule))
+        used = set(re.findall(r'^#include\s+(<[^>]+>|"[^"]+")', (ROOT / 'avatar/muse_pixel.c').read_text(), re.M))
+        self.assertLessEqual(used, allowed)
+
     def compile_run(self, source, renderer=False):
         with tempfile.TemporaryDirectory() as directory:
             p=Path(directory)
             (p/'test.c').write_text(source)
-            cmd=['cc','-O1','-g','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
+            cmd=shlex.split(os.environ.get('CC','cc'))+['-O1','-g','-Wall','-Wextra','-Werror',
+                 '-fsanitize=address,undefined','-fno-sanitize-recover=all',
                  '-I',str(ROOT/'components/muse'),str(p/'test.c')]
             if renderer: cmd.append(str(ROOT/'avatar/muse_pixel.c'))
             subprocess.run(cmd+['-lm','-o',str(p/'test')],check=True,capture_output=True,text=True)
