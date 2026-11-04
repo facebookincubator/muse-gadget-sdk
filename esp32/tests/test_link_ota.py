@@ -222,13 +222,17 @@ extern "C" {
 #include "cJSON.h"
 }
 #include "esp_app_desc.h"
-#define ESP_LOGE(...) ((void)0)
-#define ESP_LOGI(...) ((void)0)
+static void test_log(const char *tag, const char *format, ...) {
+    (void)tag;
+    (void)format;
+}
+#define ESP_LOGE(...) test_log(__VA_ARGS__)
+#define ESP_LOGI(...) test_log(__VA_ARGS__)
 #define TAG "test"
 #define CONFIG_HOMEHUB_TUNNEL 1
 static bool enabled;
 bool ota_is_enabled(void) { return enabled; }
-static esp_app_desc_t app = { .version = "999.0.0" };
+static esp_app_desc_t app = {};
 const esp_app_desc_t *esp_app_get_description(void) { return &app; }
 static char s_wifi_ssid[33] = "test-wifi", s_register_req_id[40];
 static const char *s_node_id = "test-node", *s_display_name = "Test device";
@@ -236,6 +240,7 @@ static void copy_wifi_ssid(char *out, size_t size) { snprintf(out, size, "%s", s
 static void make_uuid(char *out, size_t size) { snprintf(out, size, "test-request"); }
 ''' + functions + '''
 int main(void) {
+    snprintf(app.version, sizeof(app.version), "%s", "999.0.0");
     for (int on = 0; on <= 1; on++) {
         enabled = on;
         char *json = build_register_json();
