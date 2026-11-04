@@ -106,6 +106,9 @@ class TerminalDisplay:
         self.draft = ""
         self.cursor = 0
         self.scroll = 0
+        self.mouse_mask = None
+        self.wheel_up = getattr(curses, "BUTTON4_PRESSED", 0)
+        self.wheel_down = getattr(curses, "BUTTON5_PRESSED", 0)
         self.notice = []
         self.dirty = True
         self.size = None
@@ -117,6 +120,11 @@ class TerminalDisplay:
             curses.cbreak()
             self.screen.keypad(True)
             self.screen.nodelay(True)
+            if self.wheel_up and self.wheel_down:
+                try:
+                    _, self.mouse_mask = curses.mousemask(self.wheel_up | self.wheel_down)
+                except curses.error:
+                    pass  # Keyboard scrolling remains available without mouse support.
             try:
                 curses.start_color()
                 curses.use_default_colors()
@@ -268,6 +276,15 @@ class TerminalDisplay:
             elif key == "\x15":
                 self.draft = self.draft[self.cursor:]
                 self.cursor = 0
+            elif key == curses.KEY_MOUSE:
+                try:
+                    _, _, _, _, buttons = curses.getmouse()
+                except curses.error:
+                    continue
+                if buttons & self.wheel_up:
+                    self.scroll += 3
+                elif buttons & self.wheel_down:
+                    self.scroll = max(0, self.scroll - 3)
             elif key in (curses.KEY_PPAGE, curses.KEY_NPAGE):
                 step = max(1, self.transcript_height)
                 self.scroll = max(0, self.scroll + (step if key == curses.KEY_PPAGE else -step))
@@ -281,6 +298,12 @@ class TerminalDisplay:
     def close(self):
         if self.screen is not None:
             try:
+                if self.mouse_mask is not None:
+                    try:
+                        curses.mousemask(self.mouse_mask)
+                    except curses.error:
+                        pass
+                    self.mouse_mask = None
                 self.screen.keypad(False)
                 curses.nocbreak()
                 curses.echo()

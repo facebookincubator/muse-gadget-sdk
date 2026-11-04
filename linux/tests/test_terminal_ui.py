@@ -68,6 +68,7 @@ class Screen:
 def display(monkeypatch):
     screen = Screen()
     monkeypatch.setattr(curses, 'initscr', lambda: screen)
+    monkeypatch.setattr(curses, 'mousemask', lambda mask: (mask, 0))
     for name in ('noecho', 'cbreak', 'nocbreak', 'echo', 'endwin'):
         monkeypatch.setattr(curses, name, lambda: None)
     def no_colors():
@@ -116,6 +117,90 @@ def test_scrolling_resize_and_bounded_transcript(display):
     asyncio.run(display.readline(65536))
     display.draw()
     assert display.screen.rows[2] == 'User: 519'
+
+
+def test_mouse_wheel_scrolls_transcript_and_preserves_draft(display, monkeypatch):
+    for i in range(20):
+        display.user(str(i))
+    display.draft, display.cursor = 'unfinished message', 4
+    mouse_events = deque([
+        (0, 10, 2, 0, display.wheel_up),
+        (0, 10, 2, 0, curses.BUTTON1_PRESSED),  # Clicks do not edit or scroll.
+        (0, 10, 2, 0, display.wheel_down),
+    ])
+    monkeypatch.setattr(curses, 'getmouse', mouse_events.popleft)
+
+    async def read_one_mouse_event():
+        display.screen.keys.append(curses.KEY_MOUSE)
+        task = asyncio.create_task(display.readline(65536))
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(read_one_mouse_event())
+    assert display.scroll == 3
+    assert display.screen.rows[0] == 'User: 11'
+    assert (display.draft, display.cursor) == ('unfinished message', 4)
+    asyncio.run(read_one_mouse_event())
+    assert display.scroll == 3
+    asyncio.run(read_one_mouse_event())
+    assert display.scroll == 0
+    assert display.screen.rows[5] == 'User: 19'
+    assert (display.draft, display.cursor) == ('unfinished message', 4)
+
+    # Both ends clamp to the retained transcript, even with repeated gestures.
+    monkeypatch.setattr(curses, 'getmouse', lambda: (0, 0, 0, 0, display.wheel_up))
+    display.screen.keys.extend([curses.KEY_MOUSE] * 30 + ['\n'])
+    assert asyncio.run(display.readline(65536)) == b'unfinished message\n'
+    display.draw()
+    assert display.scroll == 14
+    assert display.screen.rows[0] == 'User: 0'
+    monkeypatch.setattr(curses, 'getmouse', lambda: (0, 0, 0, 0, display.wheel_down))
+    display.screen.keys.extend([curses.KEY_MOUSE] * 30 + ['\n'])
+    asyncio.run(display.readline(65536))
+    assert display.scroll == 0
+
+
+def test_mouse_errors_leave_keyboard_scrolling_available(display, monkeypatch):
+    def unavailable(*args):
+        raise curses.error()
+    monkeypatch.setattr(curses, 'mousemask', unavailable)
+    monkeypatch.setattr(curses, 'getmouse', unavailable)
+    view = TerminalDisplay()
+    try:
+        for i in range(20):
+            view.user(str(i))
+        view.screen.keys.extend([curses.KEY_MOUSE, curses.KEY_PPAGE, '\n'])
+        assert asyncio.run(view.readline(65536)) == b'\n'
+        assert view.scroll == 6
+    finally:
+        view.close()
+
+
+def test_mouse_mask_is_restored_on_exit(display, monkeypatch):
+    masks = []
+    def mousemask(mask):
+        masks.append(mask)
+        return mask, curses.BUTTON1_PRESSED
+    monkeypatch.setattr(curses, 'mousemask', mousemask)
+    view = TerminalDisplay()
+    view.close()
+    assert masks == [view.wheel_up | view.wheel_down, curses.BUTTON1_PRESSED]
+
+
+def test_missing_wheel_constants_preserve_keyboard_support(display, monkeypatch):
+    with monkeypatch.context() as patch:
+        patch.delattr(curses, 'BUTTON5_PRESSED', raising=False)
+        def unexpected(mask):
+            pytest.fail('mouse capture enabled without both wheel directions')
+        patch.setattr(curses, 'mousemask', unexpected)
+        view = TerminalDisplay()
+        try:
+            assert view.mouse_mask is None
+        finally:
+            view.close()
 
 
 def test_editor_unicode_delete_and_exit(display):

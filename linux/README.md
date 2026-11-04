@@ -305,7 +305,10 @@ while replies arrive. Drafts taller than the available space scroll vertically
 to keep the cursor visible. A dim status line beneath it
 shows waiting, public activity, responding and ready updates. Arrow keys,
 Home/End and Backspace/Delete edit your message; Page Up/Down scroll the recent
-transcript. The view keeps up to 512 transcript entries and 8192 wrapped lines.
+transcript. Mouse wheels and touchpad scrolling also move through the transcript
+in terminals that report mouse events, when supported by Python's curses library.
+Each wheel event scrolls three lines; Page Up/Down remain available otherwise.
+The view keeps up to 512 transcript entries and 8192 wrapped lines.
 Up to 16 messages can wait to be sent; additional input is rejected with a notice.
 `/quit`, Ctrl-C or EOF exits; already submitted work continues in Muse. Queued messages that were not sent are discarded with a
 notice; an unconfirmed send may already have reached Muse. Streamed replies and
