@@ -43,6 +43,16 @@ menu "ESP32 Device SDK"
             Internal builds that intentionally ship without an SDK token
             turn this off.
 
+    config HOMEHUB_WIFI_MIN_MODEM
+        bool "Wi-Fi minimum modem power saving at startup"
+        default n
+        help
+            Let the station sleep between access-point DTIM beacons while
+            keeping its Wi-Fi connection. Incoming traffic may wait until
+            the next DTIM. Enabled by the reTerminal E1002 profile after
+            battery runtime testing; other profiles retain their defaults.
+            Boards with a runtime Wi-Fi power policy may override this mode.
+
     config HOMEHUB_WIFI_SSID
         string "WiFi SSID override (dev iteration)"
         default ""
