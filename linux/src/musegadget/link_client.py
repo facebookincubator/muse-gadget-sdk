@@ -344,6 +344,7 @@ class LinkSession:
 
     async def send_chat(
         self, message: str, session_id: str | None = None, *, output_modality: str = "text",
+        device: str | None = None,
     ) -> dict:
         """Post a user message to the Muse as coming from this device.
 
@@ -352,7 +353,9 @@ class LinkSession:
         commands back here. ``session_id`` targets a side chat; an id the Muse
         has not seen before starts a new one. Without it the message goes to
         the main chat. Pass ``output_modality="voice"`` to get a reply that
-        ``stream_tts`` can speak.
+        ``stream_tts`` can speak. For dictation, ``device="mcu-wearable"`` asks
+        Muse for short plain sentences without changing the output modality
+        or this session's device identity.
         """
         request_body = {
             "message": message,
@@ -361,18 +364,21 @@ class LinkSession:
         }
         if session_id:
             request_body["session_id"] = session_id
+        if device is not None:
+            request_body["device"] = device
         return await self._post_chat(request_body)
 
     async def send_voice(
         self, wav_bytes: bytes, session_id: str | None = None, *, message: str = "",
-        output_modality: str | None = None,
+        output_modality: str | None = None, device: str | None = None,
     ) -> dict:
         """Post a WAV voice note, optionally including instructions in ``message``.
 
         Muse reads only the items of a request that has any, so the text goes
         first as its own item. Muse chooses its usual reply format unless
         ``output_modality`` is set. Its TTS endpoint requires a voice-modality
-        assistant reply.
+        assistant reply. Pass ``device="mcu-wearable"`` to ask for short plain
+        sentences, independently of the output modality and device identity.
         """
         if not wav_bytes or len(wav_bytes) > MAX_VOICE_BYTES:
             raise ValueError("voice note must contain at most 2 MiB of WAV audio")
@@ -390,6 +396,8 @@ class LinkSession:
             request_body["session_id"] = session_id
         if output_modality is not None:
             request_body["output_modality"] = output_modality
+        if device is not None:
+            request_body["device"] = device
         return await self._post_chat(request_body)
 
     async def send_image(
