@@ -170,6 +170,25 @@ test("closing while the port is still opening gives it back and writes nothing",
   assert.equal(session.online, false);
 });
 
+test("closing while the port's signals are being set takes no streams and writes nothing", async () => {
+  const port = new Port();
+  let signalled;
+  port.setSignals = () => new Promise((resolve) => { signalled = resolve; });
+  const session = new DeviceSettingsSession(port, { timeout: 50 });
+  const connecting = session.connect({ readyTimeout: 100 });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.ok(signalled, "connect() is waiting on setSignals()");
+  const closing = session.close();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  signalled();
+  await assert.rejects(connecting, { code: "CLOSED" });
+  await closing;
+  assert.ok(port.closed);
+  assert.ok(!port.readable.locked && !port.writable.locked);
+  assert.deepEqual(port.commands, []);
+  assert.equal(session.online, false);
+});
+
 test("a port that won't close is reported, not hidden", async () => {
   const { port, session } = await connect();
   port.close = async () => { throw new Error("busy"); };

@@ -138,6 +138,9 @@ export class DeviceSettingsSession {
       if (this.closing) throw new DeviceSettingsError("CLOSED");
       // Leave EN and BOOT alone on boards whose bridge drives them, as sdk-token.js does.
       await this.port.setSignals?.({ dataTerminalReady: false, requestToSend: false }).catch(() => {});
+      // Closed meanwhile: close() has gone past the streams, so don't take
+      // them. From here to readLoop() nothing waits, so close() sees them.
+      if (this.closing) throw new DeviceSettingsError("CLOSED");
       this.reader = this.port.readable.getReader();
       this.writer = this.port.writable.getWriter();
       this.online = true;
