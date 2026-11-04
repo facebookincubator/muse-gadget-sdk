@@ -73,11 +73,14 @@ export function parseStatus(line) {
 }
 
 // Status JSON -> [{ path, value }] for every leaf, false, 0, null and empty
-// containers included, so nothing the gadget reports is hidden.
-export function flattenStatus(value, path = "") {
+// containers included, so nothing the gadget reports is hidden. Anything
+// nested deeper than the firmware's three levels shows as "…".
+const MAX_DEPTH = 6;
+export function flattenStatus(value, path = "", depth = 0) {
   if (value !== null && typeof value === "object" && Object.keys(value).length) {
+    if (depth >= MAX_DEPTH) return [{ path, value: "…" }];
     return Object.entries(value).flatMap(([key, child]) =>
-      flattenStatus(child, Array.isArray(value) ? `${path}[${key}]` : path ? `${path}.${key}` : key),
+      flattenStatus(child, Array.isArray(value) ? `${path}[${key}]` : path ? `${path}.${key}` : key, depth + 1),
     );
   }
   return [{ path, value }];
@@ -113,7 +116,7 @@ export const STATUS_LABELS = Object.freeze({
 // Rows for the status table, as plain strings (the page sets them as text).
 export function statusRows(status) {
   return flattenStatus(status).map(({ path, value }) => [
-    STATUS_LABELS[path] ?? path,
+    Object.hasOwn(STATUS_LABELS, path) ? STATUS_LABELS[path] : path,
     typeof value === "string" ? value : JSON.stringify(value),
   ]);
 }
@@ -133,17 +136,25 @@ export class DeviceSettingsSession {
     this.queue = Promise.resolve();
     this.buffer = "";
     this.decoder = new TextDecoder();
+    this.closing = false;
+    this.opening = null;   // port.open() while it runs
+    this.writing = Promise.resolve();   // the last write
   }
 
   // Opens the port and reads the status. Opening can restart the gadget, so
   // ">status" goes again until it answers, for up to `readyTimeout` ms.
   async connect({ readyTimeout = 18000 } = {}) {
     try {
+      this.opening = this.port.open({ baudRate: 115200 });
       try {
-        await this.port.open({ baudRate: 115200 });
+        await this.opening;
       } catch (e) {
+        this.opening = null;
         throw new DeviceSettingsError("OPEN", `Couldn't open the port (${e.message}). Close other serial monitors and try again.`);
       }
+      // Closed while opening (the board changed, an install started): give
+      // the port back rather than keep a session nobody holds.
+      if (this.closing) throw new DeviceSettingsError("CLOSED", "Disconnected.");
       // Leave EN and BOOT alone on boards whose bridge drives them, as sdk-token.js does.
       await this.port.setSignals?.({ dataTerminalReady: false, requestToSend: false }).catch(() => {});
       this.reader = this.port.readable.getReader();
@@ -164,7 +175,7 @@ export class DeviceSettingsSession {
           "check you picked its console port, or unplug it, plug it back in and try again.",
       );
     } catch (error) {
-      await this.close();
+      await this.close().catch(() => {});
       throw error;
     }
   }
@@ -236,7 +247,9 @@ export class DeviceSettingsSession {
       this.waiters.add(waiter);
     });
     // Listen before writing, so an immediate answer isn't missed.
-    this.writer.write(new TextEncoder().encode(`\n>${command}\n`)).catch((e) => waiter.reject(e));
+    const write = this.writer.write(new TextEncoder().encode(`\n>${command}\n`));
+    write.catch((e) => waiter.reject(e));
+    this.writing = write.catch(() => {});
     return response;
   }
 
@@ -268,14 +281,32 @@ export class DeviceSettingsSession {
     });
   }
 
+  // Gives the port back. Throws if it stays open, so the page can say so.
   async close() {
+    if (this.closed) return this.closed;
+    this.closing = true;
     this.online = false;
     for (const waiter of [...this.waiters]) {
       waiter.reject(new DeviceSettingsError("CLOSED", "Disconnected."));
     }
-    await this.reader?.cancel().catch(() => {});
-    await this.reading;
-    this.writer?.releaseLock();
-    await this.port.close().catch(() => {});
+    this.closed = (async () => {
+      // A port still opening is closed once it has opened.
+      const opened = await this.opening?.then(() => true, () => false);
+      if (!opened) return;
+      await this.reader?.cancel().catch(() => {});
+      await this.reading;
+      // Let the last write finish: paced-serial.js holds the port's own
+      // writer through each write, and the port can't close while it's held.
+      let timer;
+      await Promise.race([this.writing, new Promise((resolve) => { timer = setTimeout(resolve, this.timeout); })]);
+      clearTimeout(timer);
+      this.writer?.releaseLock();
+      try {
+        await this.port.close();
+      } catch (e) {
+        throw new DeviceSettingsError("CLOSE", `Couldn't close the port (${e.message}). Unplug the gadget and plug it back in.`);
+      }
+    })();
+    return this.closed;
   }
 }

@@ -68,9 +68,9 @@ class Port {
   async open(options) { this.options = options; }
   async setSignals(signals) { this.signals = signals; }
   async close() {
+    // Web Serial refuses to close a port whose streams are locked.
+    if (this._readable.locked || this._writable.locked) throw new TypeError("locked stream");
     this.closed = true;
-    assert.equal(this._readable.locked, false);
-    assert.equal(this._writable.locked, false);
   }
   emit(text) {
     // One byte at a time, splitting UTF-8 and the "@status" prefix.
@@ -148,14 +148,35 @@ test("another setting's ok doesn't count, and a timeout leaves no listener", asy
   assert.equal(session.waiters.size, 0);
 });
 
-test("a stalled write times out and the port still closes", async () => {
+test("a stalled write times out, and the port closes while it's still stalled", async () => {
   const { port, session } = await connect();
   let finish;
   port.onWrite = () => new Promise((resolve) => { finish = resolve; });
   await assert.rejects(session.query(15), { code: "TIMEOUT" });
-  finish();
-  await session.close();
+  await session.close();   // Port.close() refuses locked streams
   assert.ok(port.closed);
+  finish();
+});
+
+test("closing while the port is still opening gives it back and writes nothing", async () => {
+  const port = new Port();
+  let opened;
+  port.open = () => new Promise((resolve) => { opened = resolve; });
+  const session = new DeviceSettingsSession(port, { timeout: 50 });
+  const connecting = session.connect({ readyTimeout: 100 });
+  const closing = session.close();
+  opened();
+  await assert.rejects(connecting, { code: "CLOSED" });
+  await closing;
+  assert.ok(port.closed);
+  assert.deepEqual(port.commands, []);
+  assert.equal(session.online, false);
+});
+
+test("a port that won't close is reported, not hidden", async () => {
+  const { port, session } = await connect();
+  port.close = async () => { throw new Error("busy"); };
+  await assert.rejects(session.close(), { code: "CLOSE" });
 });
 
 test("unplugging fails the request in flight and releases the port", async () => {
@@ -201,6 +222,26 @@ test("writes go through the page's paced serial for bridges like the Watcher's",
   assert.ok(port.chunks.length > 3 && port.chunks.every((n) => n <= 4), String(port.chunks));
 });
 
+test("closing mid-way through a paced write waits for it, then closes the port", async () => {
+  class PacedPort extends Port {
+    get writable() { return this._writable; }
+    async open(options) { return super.open(options); }
+  }
+  // One byte at a time, about 2 ms each: a command takes ~25 ms on the wire,
+  // during which paced-serial.js holds the port's own writer.
+  installPacedSerial(PacedPort).set({ chunk: 1, factor: 20 });
+  const port = new PacedPort();
+  const { session } = await connect(port);
+  const before = port.chunks.length;
+  const saving = session.set("volume", 42).catch((e) => e);
+  await new Promise((resolve) => setTimeout(resolve, 8));
+  const sent = port.chunks.length - before;
+  assert.ok(sent > 0 && sent < "\n>volume=42\n".length, `the write is under way (${sent} bytes sent)`);
+  await session.close();   // Port.close() refuses locked streams
+  assert.ok(port.closed);
+  assert.equal((await saving).code, "CLOSED");
+});
+
 test("every status field is shown, with Muse names for the firmware's keys", () => {
   const status = {
     board: "StickS3", chat: false,
@@ -221,6 +262,11 @@ test("every status field is shown, with Muse names for the firmware's keys", () 
   assert.equal(shown["Wi-Fi network"], "日本語SSID");
   assert.equal(shown["device.future.list"], "[]");
   for (const [label] of rows.slice(0, -1)) assert.doesNotMatch(label, /hatch/i);
+  // A gadget's own keys never pick up inherited names, and deep nesting stops.
+  assert.deepEqual(statusRows({ constructor: 1, toString: 2 }), [["constructor", "1"], ["toString", "2"]]);
+  let deep = {};
+  for (let i = 0; i < 5000; i++) deep = { d: deep };
+  assert.equal(statusRows(deep).length, 1);
 });
 
 test("the card loads every stored value without rounding, and draws device text as text", () => {

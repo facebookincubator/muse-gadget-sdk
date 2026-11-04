@@ -468,9 +468,12 @@ limitations under the License.
       const old = settings;
       settings = null;
       showSettings(null);
-      if (old) {
+      if (!old) return;
+      try {
         await old.close();
         showStatus($("settings-status"), "Disconnected.");
+      } catch (e) {
+        showStatus($("settings-status"), e.message, "error");
       }
     };
     $("settings-connect").addEventListener("click", () =>
@@ -488,23 +491,32 @@ limitations under the License.
             settings = null;
             showSettings(null);
             showStatus($("settings-status"), e.message || "The gadget was unplugged.", "error");
-            void session.close();
+            session.close().catch(() => {});
           },
         });
         settings = session;
         showStatus($("settings-status"), "Reading the gadget's settings…");
+        let status;
         try {
-          showSettings(await session.connect());
+          status = await session.connect();
         } catch (e) {
-          if (settings === session) settings = null;
+          if (settings !== session) return;   // closed meanwhile; it said so
+          settings = null;
           throw e;
         }
+        if (settings !== session) return;
+        showSettings(status);
         showStatus($("settings-status"), "These are the gadget's current settings.", "ok");
       }),
     );
+    // Results from a session closed meanwhile (board changed, install
+    // started) are dropped: closeSettings() already cleared the card.
     $("settings-reload").addEventListener("click", () =>
       settingsTask(async () => {
-        showSettings(await settings.query());
+        const session = settings;
+        const status = await session.query();
+        if (settings !== session) return;
+        showSettings(status);
         showStatus($("settings-status"), "These are the gadget's current settings.", "ok");
       }),
     );
@@ -512,23 +524,26 @@ limitations under the License.
       e.preventDefault();
       if (settingsBusy || !settings || !$("settings-form").reportValidity()) return;
       void settingsTask(async () => {
+        const session = settings;
         const values = draft();
-        const changed = edits();
+        let status = confirmed;
         let key;
         try {
-          for (key of changed) {
+          for (key of edits()) {
             showStatus($("settings-status"), "Saving…");
-            confirmed = await settings.set(key, values[key]);
+            status = await session.set(key, values[key]);
           }
         } catch (e) {
+          if (settings !== session) return;
           // Show what the gadget has now; edits not yet saved are dropped.
           const label = document.querySelector(`label[for="set-${key}"]`)?.textContent ?? key;
           try {
-            if (settings?.online) showSettings(await settings.query());
+            if (session.online) showSettings(await session.query());
           } catch {}
           throw Object.assign(new Error(`${label}: ${e.code ? e.message : "couldn't save it."}`), { code: "SAVE" });
         }
-        showSettings(confirmed);
+        if (settings !== session) return;
+        showSettings(status);
         showStatus($("settings-status"), "Saved. The gadget confirmed every change.", "ok");
       });
     });
@@ -537,7 +552,7 @@ limitations under the License.
     // starting an install, closes the gadget's port first.
     select.addEventListener("change", closeSettings);
     button.addEventListener("click", closeSettings, true);
-    window.addEventListener("pagehide", () => void settings?.close());
+    window.addEventListener("pagehide", () => settings?.close().catch(() => {}));
     renderSettings();
 
     if (build?.commit) {
