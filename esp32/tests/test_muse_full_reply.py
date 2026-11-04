@@ -52,6 +52,8 @@ SCREENS = {
     "ATK box": (320, 240, 0),
     "RoRoLee": (240, 120, 0),
 }
+# The SpotPear ESP32-AI-1.28 keeps a narrower, higher band inside its circle.
+SPOTPEAR = {"SpotPear 1.28": (240, 240, 0)}
 
 HARNESS = r"""
 #include <stdbool.h>
@@ -382,7 +384,7 @@ int main(int argc, char **argv)
     /* build_screen's band, then the option's setup. */
     lv_obj_set_style_text_font(s_caption_lbl, &lv_font_unscii_8, 0);
 #include "band.inc"
-    const int band_h = caption_obj.h;
+    const int band_h = caption_obj.h, band_w = caption_obj.w, band_y = caption_obj.y;
     band("the band");
 #if CONFIG_MUSE_CJK_FONT
     s_cjk_lines = !s_tall && s_h >= 200 ? 2 : 1;
@@ -486,6 +488,8 @@ int main(int argc, char **argv)
     band("reply over");
     CHECK(caption_obj.font == &lv_font_unscii_8 && caption_obj.h == band_h && caption_obj.pad_hor == 0 &&
           caption_obj.long_mode == LV_LABEL_LONG_MODE_DOTS, "reply over: not the band");
+    CHECK(caption_obj.w == band_w && caption_obj.y == band_y, "reply over: band %d wide at %d, not build_screen's %d at %d",
+          caption_obj.w, caption_obj.y, band_w, band_y);
     return failures != 0;
 }
 """
@@ -520,7 +524,10 @@ def extract(source: str) -> str:
     setup = re.search(r"^#if CONFIG_MUSE_SMALL_FULL_REPLY\n( +if \(!s_long\) \{.*?\n +\}\n)#endif\n", source, re.M | re.S)
     if not statics or not cjk or not setup:
         raise AssertionError("muse_ui.c no longer has the full-reply statics, the CJK band or build_screen's setup")
-    parts = [statics.group(0), "#if CONFIG_MUSE_CJK_FONT\n", cjk.group(0), function(source, "caption_band_h")]
+    place = re.search(r"^#if CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128\n#define SMALL_BAND_W.*?^#endif\n", source, re.M | re.S)
+    if not place:
+        raise AssertionError("muse_ui.c no longer has the small band's place")
+    parts = [statics.group(0), "#if CONFIG_MUSE_CJK_FONT\n", cjk.group(0), function(source, "caption_band_h"), place.group(0)]
     parts += ["#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT\n", function(source, "set_caption_font"), "#endif\n"]
     for name in ("set_full_font", "full_glyph_px", "full_rows", "apply_text_size", "set_full_reply"):
         body = function(source, name)
@@ -533,7 +540,7 @@ def extract(source: str) -> str:
 
 @unittest.skipUnless(shutil.which(shlex.split(os.environ.get("CC", "cc"))[0]), "C compiler not available")
 class FullReplyTest(unittest.TestCase):
-    def run_harness(self, cjk: bool, latin: bool) -> None:
+    def run_harness(self, cjk: bool, latin: bool, spotpear: bool = False) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             stage = Path(tmp)
             (stage / "esp_err.h").write_text("#pragma once\ntypedef int esp_err_t;\n")
@@ -549,12 +556,13 @@ class FullReplyTest(unittest.TestCase):
                  "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-but-set-variable",
                  "-DCONFIG_MUSE_SMALL_FULL_REPLY=1", f"-DCONFIG_MUSE_CJK_FONT={int(cjk)}",
                  f"-DCONFIG_MUSE_LATIN_FONT={int(latin)}",
+                 f"-DCONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128={int(spotpear)}",
                  "-I", str(stage), "-I", str(MUSE), str(stage / "harness.c"),
                  str(MUSE / "muse_chat_text.c"), str(MUSE / "muse_text.c"), "-o", str(binary)],
                 text=True, capture_output=True,
             )
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
-            for name, (w, h, tall) in SCREENS.items():
+            for name, (w, h, tall) in (SPOTPEAR if spotpear else SCREENS).items():
                 with self.subTest(screen=name):
                     run = subprocess.run([str(binary), str(w), str(h), str(tall)], text=True, capture_output=True)
                     self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
@@ -571,6 +579,12 @@ class FullReplyTest(unittest.TestCase):
 
     def test_with_both_fonts(self) -> None:
         self.run_harness(cjk=True, latin=True)
+
+    def test_spotpear_band_comes_back_in_place(self) -> None:
+        """A reply that took the screen gives the SpotPear its own band back."""
+        for cjk, latin in ((False, False), (True, False), (True, True)):
+            with self.subTest(cjk=cjk, latin=latin):
+                self.run_harness(cjk=cjk, latin=latin, spotpear=True)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ They need to be baseline JPEGs, as on the other boards.
 
 ## Build
 
-Activate ESP-IDF **v6.0.1** with the `esp32p4` tools installed:
+Activate ESP-IDF **v6.0.3** with the `esp32p4` tools installed:
 
 ```sh
 tools/muse/board.sh build p4lcd35
