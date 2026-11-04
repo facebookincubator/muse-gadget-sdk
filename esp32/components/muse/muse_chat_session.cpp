@@ -2196,7 +2196,10 @@ extern "C" void muse_hatch_start(void)
     if (!s_events) {
         s_events = xQueueCreate(16, sizeof(ev_t));
     }
-    s_in = xStreamBufferCreateWithCaps(IN_BYTES, 1, MALLOC_CAP_SPIRAM);
+    /* A byte over: a stream buffer made with caps keeps one back (FreeRTOS's
+     * static buffers do), and with an odd room left, a send that fills it stops
+     * halfway through a sample. */
+    s_in = xStreamBufferCreateWithCaps(IN_BYTES + 1, 1, MALLOC_CAP_SPIRAM);
     s_out = xStreamBufferCreateWithCaps(OUT_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_turn.chunk = static_cast<uint8_t *>(psram_alloc(DICT_CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL)));
     s_turn.mp3 = static_cast<uint8_t *>(psram_alloc(MP3_BUF));
@@ -2251,7 +2254,8 @@ extern "C" void muse_hatch_turn_audio(const int16_t *pcm, size_t frames)
     }
 }
 
-/* Both ends move whole frames, so the buffer never splits one. */
+/* Both ends move whole frames, and the buffer holds a whole number of them (see
+ * its creation), so a send that fills it never splits one. */
 extern "C" size_t muse_hatch_turn_audio_wait(const int16_t *pcm, size_t frames, int wait_ms)
 {
     return xStreamBufferSend(s_in, pcm, frames * sizeof(int16_t), pdMS_TO_TICKS(wait_ms)) / sizeof(int16_t);
