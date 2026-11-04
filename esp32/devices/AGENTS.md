@@ -58,6 +58,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Seeed XIAO ESP32-S3 1.47 Touch Display | [Seeed-Studio/Seeed_GFX2](https://github.com/Seeed-Studio/Seeed_GFX2), the [Seeed board guide](https://wiki.seeedstudio.com/getting_started_1.47_inch_touch_display_esp32s3/) | `src/driver/tft/Driver_JD9853A.cpp` for the panel sequence, `src/touch/Touch_AXS5106L.cpp` for touch, and the `0519_DashBoard_147_ESP32` example for the PDM mic. The XIAO ESP32-S3 Plus wiki for D pin to GPIO. |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | [waveshareteam/ESP32-P4-WIFI6-Touch-LCD-3.5](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-3.5) | `schematic/`, and the BSP component `waveshare/esp32_p4_wifi6_touch_lcd_3_5` for the pin map, LCD, touch and ES8311. C6 SDIO GPIO14–19, C6 enable GPIO54; the AXP2101 on I2C GPIO7/8 reports PWR. |
 | Seeed reSpeaker Lite | [respeaker/reSpeaker_Lite](https://github.com/respeaker/reSpeaker_Lite) | `doc/images/pinout.png`, the I2C examples, `xmos_firmwares/`. |
+| SpotPear ESP32-AI-1.28 v1.0 | [Pinned reference firmware](https://github.com/tomorrow56/xiaozhi-esp32/tree/fed7f14669fddecc7a658c806ab072a972a2af97/main/boards/spotpear/spotpear-esp32-ai-1.28) | `config.h` for the old non-legged MAX98357A/NP0557 pin map; the board `.cc` for the GC9A01 and separate I2S clocks. Not the ES8311 box revision. |
 
 For the Cardputer ADV keyboard, also read [m5stack/M5Cardputer](https://github.com/m5stack/M5Cardputer), especially `src/utility/Keyboard/KeyboardReader/TCA8418.cpp` and `src/utility/Adafruit_TCA8418/`.
 
