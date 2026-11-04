@@ -625,7 +625,7 @@ static const muse_board_t s_board = {
     .wake_button = "M",
     .speaker_button = "L",
     .power_button = "Q",
-    /* Keys L, M and R, left to right; where their icons sit isn't checked on a unit yet. */
+    /* Keys L, M and R, left to right. */
     .talk_hint = { LV_ALIGN_TOP_MID, 0, 8 },
     .aux_hint = { LV_ALIGN_TOP_RIGHT, -8, 8 },
     .avatar_px = AVATAR_PX,

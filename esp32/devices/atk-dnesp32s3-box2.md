@@ -100,18 +100,18 @@ Checked on one unit, powered over USB:
 - The speaker plays the built-in MP3 (console key `m`) and the
   `>test.loopback` tones; the mic records voice notes that reach Muse.
 - Keys M, R, L and Q as above.
-- The picture turns over with the box.
+- The picture turns over with the box, and the key icons sit along the top
+  edge by keys M and R.
 
 Still to check:
 
-1. Where the key icons should sit.
-2. Internal RAM with the 8-line strips, through a live call and a voice note
+1. Internal RAM with the 8-line strips, through a live call and a voice note
    (`min=` in the heartbeat should stay above about 8K).
-3. A boot on battery: the board stays on after the power key is released.
-4. Playback after the audio has rested on battery (asleep, unplugged) and
+2. A boot on battery: the board stays on after the power key is released.
+3. Playback after the audio has rested on battery (asleep, unplugged) and
    reopened: xiaozhi keeps the ES8389's output open for fear that reopening
    the duplex bus leaves it silent on IDF 6. On USB the audio never rests.
-5. The menu: volume changes and is kept across a restart.
-6. Battery: the percentage and the charging state.
-7. Power off on battery, and which key turns it back on; on USB, deep sleep
+4. The menu: volume changes and is kept across a restart.
+5. Battery: the percentage and the charging state.
+6. Power off on battery, and which key turns it back on; on USB, deep sleep
    and waking on R, M and Q.
