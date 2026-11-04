@@ -129,3 +129,10 @@ if(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY AND
     message(FATAL_ERROR
         "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY needs ESP-IDF v6.0.3 or later (this is v${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}): earlier releases leak heap on every TLS handshake with it on.")
 endif()
+
+# Stale bundle choice: a build directory configured before sdkconfig.defaults
+# picked the common bundle still trusts the full one.
+if(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL)
+    message(WARNING
+        "This build trusts ESP-IDF's full root CA bundle, but sdkconfig.defaults picks the common one. If you didn't choose it in menuconfig: ${GADGET_CONFIG_REGEN_HINT}")
+endif()

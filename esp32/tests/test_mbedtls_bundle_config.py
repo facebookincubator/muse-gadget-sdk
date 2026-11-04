@@ -8,7 +8,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The build refuses cross-signed bundle verification on ESP-IDF that leaks."""
+"""Certificate bundle checks in validate_config.cmake: the build refuses
+cross-signed verification on ESP-IDF that leaks, and warns about a stale full
+bundle."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,7 +20,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class CrossSignedBundleGuardTest(unittest.TestCase):
+class CertificateBundleConfigTest(unittest.TestCase):
     def guard(self):
         source = (ROOT / "cmake" / "validate_config.cmake").read_text()
         start = source.index("# Cross-signed bundle verification")
@@ -53,6 +55,27 @@ class CrossSignedBundleGuardTest(unittest.TestCase):
             for enabled, version, expected in cases:
                 with self.subTest(enabled=enabled, version=version):
                     self.assertEqual(self.accepts(cmake, directory, enabled, version), expected)
+
+    def test_stale_full_bundle_warns(self):
+        cmake = shutil.which("cmake")
+        if not cmake:
+            self.skipTest("cmake is required")
+        source = (ROOT / "cmake" / "validate_config.cmake").read_text()
+        start = source.index("# Stale bundle choice")
+        block = source[start:source.index("endif()", start) + len("endif()")]
+        defaults = (ROOT / "sdkconfig.defaults").read_text().splitlines()
+        self.assertIn("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y", defaults)
+        self.assertIn("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y", defaults)
+        with tempfile.TemporaryDirectory() as directory:
+            for full in (True, False):
+                with self.subTest(full=full):
+                    script = Path(directory) / "stale.cmake"
+                    script.write_text(
+                        f"set(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL {'y' if full else ''})\n"
+                        "set(GADGET_CONFIG_REGEN_HINT regenerate)\n" + block + "\n")
+                    result = subprocess.run([cmake, "-P", str(script)], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual("full root CA bundle" in " ".join(result.stderr.split()), full)
 
 
 if __name__ == "__main__":

@@ -688,7 +688,15 @@ the design, the Wi-Fi protocol and the numbers.
   later edits to `sdkconfig.defaults` or the overlays. After changing those,
   delete the generated `sdkconfig` (or the whole build directory) and rebuild.
   `cmake/validate_config.cmake` stops the build if a stale config has the old
-  TCP buffer sizes or cJSON nesting limit.
+  TCP buffer sizes or cJSON nesting limit, and warns if it still has the full
+  root CA bundle.
+- HTTPS trusts ESP-IDF's common root CAs only (`sdkconfig.defaults`), with
+  cross-signed verification so chains that reach one of them through a
+  cross-sign still verify. A server whose chain ends at another root (some
+  `display.draw_url` image hosts, an OTA URL you host yourself) fails to
+  connect. If you need one, select the full bundle in menuconfig
+  (Component config > mbedTLS > Certificates > Certificate Bundle
+  Configuration).
 - Edit per-build settings with `idf.py -B <dir> menuconfig` (under "ESP32
   Device SDK"). Don't commit a generated `sdkconfig`: it's gitignored for a reason.
 - The e-ink UI's task stack (`muse_eink`) must be in internal RAM: Settings'
