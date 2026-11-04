@@ -63,7 +63,7 @@ are unverified and are not enabled by this port.
 
 ## Build
 
-Activate **ESP-IDF v6.0.1** and run from `esp32/`:
+Activate **ESP-IDF v6.0.3** and run from `esp32/`:
 
 ```sh
 tools/muse/board.sh build echoear
