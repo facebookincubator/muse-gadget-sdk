@@ -93,6 +93,27 @@ limitations under the License.
     .status.ok { color: var(--ok); }
     .status.error { color: var(--error); }
 
+    .settings-grid {
+      display: grid; grid-template-columns: max-content 1fr; gap: 0.75rem 1rem; align-items: center; margin: 1rem 0;
+    }
+    .settings-grid label { font-size: 0.9rem; font-weight: 600; }
+    .settings-grid .control { display: flex; align-items: center; gap: 0.75rem; }
+    .settings-grid input[type="range"] { flex: 1; accent-color: var(--accent); }
+    .settings-grid input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--accent); }
+    .settings-grid input[type="number"] {
+      width: 6.5rem; font: inherit; color: inherit; background: var(--bg);
+      border: 1px solid var(--line); border-radius: 8px; padding: 0.35rem 0.5rem;
+    }
+    .settings-grid output { min-width: 3.5rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+    fieldset.bare { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .device-line { margin: 0.75rem 0 0; font-size: 0.9rem; }
+    details.fields { margin-top: 1rem; font-size: 0.875rem; }
+    details.fields summary { cursor: pointer; color: var(--muted); }
+    .status-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    .status-table td { border-top: 1px solid var(--line); padding: 0.3rem 0.5rem 0.3rem 0; vertical-align: top; overflow-wrap: anywhere; }
+    .status-table td:first-child { color: var(--muted); width: 45%; }
+
     details.card summary { cursor: pointer; font-weight: 600; }
     details.card[open] summary { margin-bottom: 0.75rem; }
     footer { text-align: center; margin-top: 2rem; }
@@ -168,6 +189,59 @@ limitations under the License.
       <p id="token-status" class="status"></p>
     </details>
 
+    <details class="card" id="settings">
+      <summary>Device settings</summary>
+      <p class="note">
+        Read a gadget's screen and sound settings over USB and change them. For
+        boards with the Muse screen UI, running firmware from this page. Pick its
+        port when asked. Nothing else on the gadget changes.
+      </p>
+      <div class="button-row">
+        <button id="settings-connect" class="button secondary">Connect to gadget</button>
+        <button id="settings-reload" class="button secondary" hidden>Reload</button>
+      </div>
+      <p id="settings-device" class="device-line" hidden></p>
+      <form id="settings-form" hidden>
+        <fieldset id="settings-fields" class="bare">
+          <div class="settings-grid">
+            <label for="set-brightness">Brightness</label>
+            <div class="control">
+              <input id="set-brightness" type="range" min="10" max="100" step="1">
+              <output id="out-brightness" for="set-brightness"></output>
+            </div>
+            <label for="set-sleep">Screen sleep</label>
+            <div class="control">
+              <input id="set-sleep" type="number" min="0" max="3600" step="1" inputmode="numeric" required>
+              <span class="note">seconds; 0 keeps it on</span>
+            </div>
+            <label for="set-volume">Speaker volume</label>
+            <div class="control">
+              <input id="set-volume" type="range" min="0" max="100" step="1">
+              <output id="out-volume" for="set-volume"></output>
+            </div>
+            <label for="set-speaker">Speaker</label>
+            <div class="control">
+              <input id="set-speaker" type="checkbox"> <span class="note">On</span>
+            </div>
+            <label for="set-mic_gain">Microphone gain</label>
+            <div class="control">
+              <input id="set-mic_gain" type="range" min="0" max="36" step="1">
+              <output id="out-mic_gain" for="set-mic_gain"></output>
+            </div>
+          </div>
+        </fieldset>
+        <div class="button-row">
+          <button id="settings-save" type="submit" class="button">Save changes</button>
+          <span id="settings-changes" class="note"></span>
+        </div>
+      </form>
+      <p id="settings-status" class="status"></p>
+      <details class="fields" id="settings-all" hidden>
+        <summary>Everything the gadget reports</summary>
+        <table class="status-table"><tbody id="settings-rows"></tbody></table>
+      </details>
+    </details>
+
     <footer class="note">
       Board not showing up? Some boards need you to hold <strong>BOOT</strong>
       while plugging in USB. Built from
@@ -179,6 +253,7 @@ limitations under the License.
     import { installFlasherHooks } from "./flasher-hooks.js";
     import { installPacedSerial } from "./paced-serial.js";
     import { isSdkToken, sendSdkToken } from "./sdk-token.js";
+    import { DeviceSettingsSession, SETTINGS, statusRows } from "./device-settings.js";
 
     const $ = (id) => document.getElementById(id);
     const select = $("board");
@@ -301,6 +376,7 @@ limitations under the License.
 
     $("send-token").disabled = !pacing;
     $("send-token").addEventListener("click", async () => {
+      await closeSettings();
       if (!token()) {
         showStatus($("token-status"), "Enter your SDK token in step 1 first.", "error");
         tokenInput.focus();
@@ -314,6 +390,155 @@ limitations under the License.
       }
       await send(port, $("token-status"));
     });
+
+    // Device settings: reads ">status" and changes the five settings
+    // device-settings.js allows, each confirmed by the gadget and read back.
+    const SETTING_KEYS = Object.keys(SETTINGS);
+    const field = (key) => $(`set-${key}`);
+    let settings = null;   // the open DeviceSettingsSession
+    let confirmed = null;  // the gadget's last status
+    let settingsBusy = false;
+    const draft = () =>
+      Object.fromEntries(SETTING_KEYS.map((key) => [
+        key,
+        key === "speaker" ? field(key).checked : field(key).value === "" ? NaN : Number(field(key).value),
+      ]));
+    const edits = () => {
+      if (!confirmed) return [];
+      const values = draft();
+      return SETTING_KEYS.filter((key) => values[key] !== confirmed.device[key]);
+    };
+    const renderSettings = () => {
+      const online = Boolean(settings?.online);
+      const changed = edits();
+      $("settings-connect").textContent = online ? "Disconnect" : "Connect to gadget";
+      $("settings-connect").disabled = settingsBusy || !pacing;
+      $("settings-reload").hidden = !online;
+      $("settings-reload").disabled = settingsBusy;
+      $("settings-form").hidden = !confirmed;
+      $("settings-fields").disabled = settingsBusy || !online;
+      $("settings-save").disabled =
+        settingsBusy || !online || !changed.length || !$("settings-form").checkValidity();
+      $("settings-changes").textContent = changed.length ? `${changed.length} unsaved` : "";
+      $("out-brightness").textContent = `${field("brightness").value}%`;
+      $("out-volume").textContent = `${field("volume").value}%`;
+      $("out-mic_gain").textContent = `${field("mic_gain").value} dB`;
+      $("settings-device").hidden = $("settings-all").hidden = !confirmed;
+      if (confirmed) {
+        const { name, fw, wifi } = confirmed.device;
+        $("settings-device").textContent =
+          `${confirmed.board} · ${name || "Muse Gadget"} · firmware ${fw || "unknown"} · Wi-Fi ${wifi?.state || "unknown"}`;
+      }
+      $("settings-rows").replaceChildren(
+        ...(confirmed ? statusRows(confirmed) : []).map((cells) => {
+          const tr = document.createElement("tr");
+          for (const text of cells) {
+            const td = document.createElement("td");
+            td.textContent = text;
+            tr.append(td);
+          }
+          return tr;
+        }),
+      );
+    };
+    const showSettings = (status) => {
+      confirmed = status;
+      if (status) {
+        for (const key of SETTING_KEYS) {
+          if (key === "speaker") field(key).checked = status.device[key];
+          else field(key).value = status.device[key];
+        }
+      }
+      renderSettings();
+    };
+    const settingsTask = async (fn) => {
+      settingsBusy = true;
+      renderSettings();
+      try {
+        await fn();
+      } catch (e) {
+        showStatus($("settings-status"), e instanceof Error && e.code ? e.message : "Couldn't talk to the gadget. Check the cable and try again.", "error");
+      } finally {
+        settingsBusy = false;
+        renderSettings();
+      }
+    };
+    // Frees the port for the installer or the token step.
+    const closeSettings = async () => {
+      const old = settings;
+      settings = null;
+      showSettings(null);
+      if (old) {
+        await old.close();
+        showStatus($("settings-status"), "Disconnected.");
+      }
+    };
+    $("settings-connect").addEventListener("click", () =>
+      settingsTask(async () => {
+        if (settings) return closeSettings();
+        let port;
+        try {
+          port = await navigator.serial.requestPort();
+        } catch {
+          return;   // no port picked
+        }
+        const session = new DeviceSettingsSession(port, {
+          onDisconnect: (e) => {
+            if (settings !== session) return;
+            settings = null;
+            showSettings(null);
+            showStatus($("settings-status"), e.message || "The gadget was unplugged.", "error");
+            void session.close();
+          },
+        });
+        settings = session;
+        showStatus($("settings-status"), "Reading the gadget's settings…");
+        try {
+          showSettings(await session.connect());
+        } catch (e) {
+          if (settings === session) settings = null;
+          throw e;
+        }
+        showStatus($("settings-status"), "These are the gadget's current settings.", "ok");
+      }),
+    );
+    $("settings-reload").addEventListener("click", () =>
+      settingsTask(async () => {
+        showSettings(await settings.query());
+        showStatus($("settings-status"), "These are the gadget's current settings.", "ok");
+      }),
+    );
+    $("settings-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (settingsBusy || !settings || !$("settings-form").reportValidity()) return;
+      void settingsTask(async () => {
+        const values = draft();
+        const changed = edits();
+        let key;
+        try {
+          for (key of changed) {
+            showStatus($("settings-status"), "Saving…");
+            confirmed = await settings.set(key, values[key]);
+          }
+        } catch (e) {
+          // Show what the gadget has now; edits not yet saved are dropped.
+          const label = document.querySelector(`label[for="set-${key}"]`)?.textContent ?? key;
+          try {
+            if (settings?.online) showSettings(await settings.query());
+          } catch {}
+          throw Object.assign(new Error(`${label}: ${e.code ? e.message : "couldn't save it."}`), { code: "SAVE" });
+        }
+        showSettings(confirmed);
+        showStatus($("settings-status"), "Saved. The gadget confirmed every change.", "ok");
+      });
+    });
+    for (const key of SETTING_KEYS) field(key).addEventListener("input", renderSettings);
+    // The selected board sets the port filter and pacing; changing it, or
+    // starting an install, closes the gadget's port first.
+    select.addEventListener("change", closeSettings);
+    button.addEventListener("click", closeSettings, true);
+    window.addEventListener("pagehide", () => void settings?.close());
+    renderSettings();
 
     if (build?.commit) {
       const link = $("commit");

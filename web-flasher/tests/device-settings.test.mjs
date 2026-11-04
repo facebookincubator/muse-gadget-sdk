@@ -1,0 +1,240 @@
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+// Import the browser modules without changing the site's module configuration.
+const load = async (name) => {
+  const source = await readFile(new URL(`../${name}`, import.meta.url), "utf8");
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+};
+const { DeviceSettingsSession, SETTINGS, flattenStatus, parseStatus, statusRows, validateSetting } =
+  await load("device-settings.js");
+const { installPacedSerial } = await load("paced-serial.js");
+const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+
+const initial = () => ({
+  board: "M5Stack StickS3",
+  chat: true,
+  device: { name: "MuseGadget-test", fw: "test", sleep: 0, brightness: 80, volume: 70, mic_gain: 30, speaker: true },
+});
+
+// A gadget's console: answers ">status" and ">key=value" the way the firmware does.
+class Port {
+  constructor() {
+    this.state = initial();
+    this.commands = [];
+    this.chunks = [];
+    this.pending = "";
+    this._readable = new ReadableStream({ start: (c) => { this.controller = c; } });
+    this._writable = new WritableStream({
+      write: (bytes) => {
+        this.chunks.push(bytes.length);
+        this.pending += new TextDecoder().decode(bytes);
+        let nl;
+        let result;
+        while ((nl = this.pending.indexOf("\n")) >= 0) {
+          const command = this.pending.slice(0, nl).trim();
+          this.pending = this.pending.slice(nl + 1);
+          if (command) result = this.command(command);
+        }
+        return result;
+      },
+    });
+  }
+  get readable() { return this._readable; }
+  get writable() { return this._writable; }
+  command(command) {
+    this.commands.push(command);
+    if (this.onWrite) return this.onWrite(command);
+    if (command === ">status") return this.status();
+    const [key, raw] = command.slice(1).split("=");
+    this.state.device[key] = key === "speaker" ? raw === "1" : Number(raw);
+    this.emit(`\x1b[0;32mI (12) muse_ble: cmd ${key}=${raw} -> ok\x1b[0m\r\n`);
+  }
+  async open(options) { this.options = options; }
+  async setSignals(signals) { this.signals = signals; }
+  async close() {
+    this.closed = true;
+    assert.equal(this._readable.locked, false);
+    assert.equal(this._writable.locked, false);
+  }
+  emit(text) {
+    // One byte at a time, splitting UTF-8 and the "@status" prefix.
+    for (const byte of new TextEncoder().encode(text)) this.controller.enqueue(Uint8Array.of(byte));
+  }
+  status() { this.emit(`I (5) other: log line\n@status ${JSON.stringify(this.state)}\r\n`); }
+}
+
+async function connect(port = new Port(), options = {}) {
+  const session = new DeviceSettingsSession(port, { timeout: 50, ...options });
+  await session.connect({ readyTimeout: 100 });
+  return { port, session };
+}
+
+test("connecting reads the status and changes nothing", async (t) => {
+  const port = new Port();
+  port.state.board = "日本語のMuse";
+  const { session } = await connect(port);
+  t.after(() => session.close());
+  assert.equal((await session.query()).board, "日本語のMuse");
+  assert.deepEqual(port.commands, [">status", ">status"]);
+  assert.equal(port.options.baudRate, 115200);
+  assert.deepEqual(port.signals, { dataTerminalReady: false, requestToSend: false });
+});
+
+test("a change waits for the gadget's ok, then reads it back, zero and false included", async (t) => {
+  const { port, session } = await connect();
+  t.after(() => session.close());
+  assert.equal((await session.set("sleep", 0)).device.sleep, 0);
+  assert.equal((await session.set("speaker", false)).device.speaker, false);
+  assert.deepEqual(port.commands, [">status", ">sleep=0", ">status", ">speaker=0", ">status"]);
+});
+
+test("changes made together go one at a time", async (t) => {
+  const { port, session } = await connect();
+  t.after(() => session.close());
+  await Promise.all([session.set("brightness", 55), session.set("volume", 42)]);
+  assert.deepEqual(port.commands.slice(1), [">brightness=55", ">status", ">volume=42", ">status"]);
+});
+
+test("only the five settings, in range, ever reach the gadget", async (t) => {
+  const { port, session } = await connect();
+  t.after(() => session.close());
+  const bad = [
+    ["sleep", -1], ["sleep", 3601], ["sleep", NaN], ["sleep", 1.5], ["sleep", "10"], ["brightness", 9],
+    ["volume", 101], ["mic_gain", 37], ["speaker", 1], ["wifi.forget", 1], ["wifi.pass", "x"],
+    ["hatch.token", "x"], ["sdk_token", "x"], ["__proto__", 0], ["constructor", 0], ["toString", 0],
+  ];
+  for (const [key, value] of bad) assert.throws(() => session.set(key, value), `${key}=${value}`);
+  assert.deepEqual(port.commands, [">status"]);
+  assert.deepEqual(Object.keys(SETTINGS).sort(), ["brightness", "mic_gain", "sleep", "speaker", "volume"]);
+  assert.ok(Object.isFrozen(SETTINGS) && Object.values(SETTINGS).every(Object.isFrozen));
+  assert.equal(validateSetting("speaker", true), 1);
+});
+
+test("a refused value isn't reported as saved", async (t) => {
+  const { port, session } = await connect();
+  t.after(() => session.close());
+  port.onWrite = () => port.emit("I (9) muse_ble: cmd volume=20 -> error: unknown command or bad value\n");
+  await assert.rejects(session.set("volume", 20), { code: "REJECTED" });
+});
+
+test("an ok whose readback differs is an error", async (t) => {
+  const { port, session } = await connect();
+  t.after(() => session.close());
+  port.onWrite = (c) => (c === ">status" ? port.status() : port.emit("muse_ble: cmd volume=20 -> ok\n"));
+  await assert.rejects(session.set("volume", 20), { code: "READBACK" });
+});
+
+test("another setting's ok doesn't count, and a timeout leaves no listener", async (t) => {
+  const { port, session } = await connect();
+  t.after(() => session.close());
+  port.onWrite = () => port.emit("muse_ble: cmd sleep=0 -> ok\n");
+  await assert.rejects(session.set("volume", 20), { code: "TIMEOUT" });
+  assert.equal(session.waiters.size, 0);
+});
+
+test("a stalled write times out and the port still closes", async () => {
+  const { port, session } = await connect();
+  let finish;
+  port.onWrite = () => new Promise((resolve) => { finish = resolve; });
+  await assert.rejects(session.query(15), { code: "TIMEOUT" });
+  finish();
+  await session.close();
+  assert.ok(port.closed);
+});
+
+test("unplugging fails the request in flight and releases the port", async () => {
+  let disconnected = false;
+  const { port, session } = await connect(new Port(), { onDisconnect: () => { disconnected = true; } });
+  port.onWrite = () => port.controller.close();
+  await assert.rejects(session.query(), { code: "DISCONNECTED" });
+  await session.close();
+  assert.ok(disconnected);
+  assert.ok(port.closed);
+});
+
+test("a board without the console times out, closes the port and changes nothing", async () => {
+  const port = new Port();
+  port.onWrite = () => {};
+  const session = new DeviceSettingsSession(port);
+  await assert.rejects(session.connect({ readyTimeout: 20 }), { code: "CONNECT_TIMEOUT" });
+  assert.ok(port.closed);
+  assert.deepEqual(port.commands, [">status"]);
+});
+
+test("bad status lines are rejected", () => {
+  assert.equal(parseStatus("some log"), null);
+  assert.throws(() => parseStatus("@status {bad}"), { code: "STATUS" });
+  assert.throws(() => parseStatus('@status {"board":"x","device":{}}'), { code: "STATUS" });
+  assert.throws(() => parseStatus('@status {"board":"x","device":{"sleep":0,"brightness":5,"volume":0,"mic_gain":0,"speaker":true}}'), { code: "STATUS" });
+});
+
+test("writes go through the page's paced serial for bridges like the Watcher's", async (t) => {
+  // paced-serial.js wraps the class's own writable getter and open(), as on
+  // the browser's SerialPort.
+  class PacedPort extends Port {
+    get writable() { return this._writable; }
+    async open(options) { return super.open(options); }
+  }
+  const pacing = installPacedSerial(PacedPort);
+  pacing.set({ chunk: 4, factor: 0 });
+  const port = new PacedPort();
+  const { session } = await connect(port);
+  t.after(() => session.close());
+  await session.set("volume", 42);
+  assert.deepEqual(port.commands, [">status", ">volume=42", ">status"]);
+  assert.ok(port.chunks.length > 3 && port.chunks.every((n) => n <= 4), String(port.chunks));
+});
+
+test("every status field is shown, with Muse names for the firmware's keys", () => {
+  const status = {
+    board: "StickS3", chat: false,
+    device: {
+      name: "Muse", fw: "test", battery: -1,
+      wifi: { on: true, state: "connected", ssid: "日本語SSID", ip: "192.0.2.1", rssi: -54 },
+      hatch: { host: "example.test", vm: "", token: true, state: "Connected" },
+      link: { paired: true, state: "ready" },
+      volume: 0, speaker: false, mic_gain: 30, brightness: 100, sleep: 0, last: "ready", future: { list: [] },
+    },
+  };
+  const rows = statusRows(status);
+  assert.equal(rows.length, flattenStatus(status).length);
+  const shown = Object.fromEntries(rows);
+  assert.equal(shown["Has a Muse credential"], "true");
+  assert.equal(shown["Muse VM"], "");
+  assert.equal(shown["Speaker on"], "false");
+  assert.equal(shown["Wi-Fi network"], "日本語SSID");
+  assert.equal(shown["device.future.list"], "[]");
+  for (const [label] of rows.slice(0, -1)) assert.doesNotMatch(label, /hatch/i);
+});
+
+test("the card loads every stored value without rounding, and draws device text as text", () => {
+  // A coarser step would snap a stored value (mic_gain 32 on a 3 dB step) into
+  // an edit the next save writes back.
+  for (const key of Object.keys(SETTINGS).filter((k) => k !== "speaker")) {
+    const input = html.match(new RegExp(`<input id="set-${key}"[^>]*>`))?.[0];
+    assert.ok(input, key);
+    assert.match(input, /\bstep="1"/, key);
+    assert.match(input, new RegExp(`\\bmin="${SETTINGS[key].min}"`), key);
+    assert.match(input, new RegExp(`\\bmax="${SETTINGS[key].max}"`), key);
+  }
+  assert.match(html, /<input id="set-speaker" type="checkbox">/);
+  const script = html.slice(html.indexOf("// Device settings:"), html.indexOf("if (build?.commit)"));
+  assert.ok(script.length > 1000);
+  assert.doesNotMatch(script, /innerHTML|insertAdjacentHTML|outerHTML|eval\(|console\./);
+});

@@ -26,6 +26,28 @@ build's partitions (`min_flash_bytes`, which `make_manifest.py` reads from the
 partition table). It doesn't check PSRAM: esptool only sees PSRAM inside the
 chip's package, and some boards have it beside the chip.
 
+## Device settings
+
+The Device settings card reads a gadget's settings over its USB console and
+changes five of them: screen brightness, screen sleep, speaker volume, speaker
+on/off and microphone gain (`device-settings.js`). It uses the console
+commands boards with the full UI already have
+(`esp32/components/muse/muse_input.c` and `muse_ble.c`): `>status` answers
+`@status {json}`, and `>key=value` logs `cmd key=value -> ok`. Each change
+waits for that line, then reads the status back and checks the value. Changes
+go one at a time, and a failed one shows what the gadget has instead.
+
+- It sends only `>status` and those five keys, as integers or booleans in the
+  firmware's ranges; never Wi-Fi, pairing or token commands. The SDK token goes
+  only through the token step above.
+- The status shows whether the gadget has a Muse credential, never the
+  credential, plus its Wi-Fi network name and IP address. The page draws
+  what the gadget sends as text and keeps none of it.
+- It picks the port and paces writes like the token step, from the selected
+  board. Changing the board, installing or sending the token closes its port.
+- The `ok` line is logged at INFO, every board's default. A build that logs
+  less makes each save time out rather than report success.
+
 ## Adding a board
 
 Add an entry to `boards.json`. `board` must match a `board` in the build
@@ -54,8 +76,8 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory /tmp/flasher/site
 To try changes to the page itself, copy `index.html` and the `.js` and
 `boards.json` files over the unpacked site and reload.
 
-Run the offline hook regression tests with Node.js 22 or later (no board or
-package installation needed):
+Run the offline regression tests (the installer hooks and the Device settings
+protocol) with Node.js 22 or later (no board or package installation needed):
 
 ```sh
 node --test web-flasher/tests/*.test.mjs

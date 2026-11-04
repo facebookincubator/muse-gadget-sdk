@@ -177,14 +177,10 @@ attack. Set it up on a network you trust.
 
 ## USB settings in a browser
 
-The [Web Serial settings page](tools/muse/SERIAL_SETUP.md) reads a connected
-board's current settings (boards with the full UI only) and changes display sleep, brightness, volume,
-speaker enable and mic gain. It also shows every status field and the original
-JSON, including read-only connection details. English is the default; a language
-picker switches to Japanese without reconnecting or discarding edits.
-It uses the existing USB console protocol; no
-firmware update is needed. Start its localhost server and open the page in
-Chrome. It is separate from the Web Bluetooth setup page and the web flasher.
+The [web flasher](../web-flasher/README.md#device-settings)'s Device settings
+card reads a connected board's settings over USB and changes its screen
+brightness, screen sleep, speaker volume, speaker on/off and microphone gain.
+It works on boards with the full UI, using their existing console commands.
 
 ## Boards
 
