@@ -41,6 +41,9 @@
 
 #include "muse_link.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#endif
 
 static const char *TAG = "muse_chat_link";
 
@@ -118,6 +121,9 @@ static struct {
     char error[EV_TEXT];                /* why the turn failed, repeated at the release */
     char text[TEXT_MAX];
     char shown[EV_TEXT];
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    uint32_t review;                    /* this turn's identity for reply review */
+#endif
 } s_turn;
 
 /* ---- Subscription rows, read in place ---- */
@@ -665,6 +671,9 @@ static void on_row(row_t *r)
         strlcpy(s_turn.seen[s_turn.seen_count++], r->msg, sizeof(s_turn.seen[0]));
         if (s_turn.text[0]) text_append(s_turn.text, sizeof(s_turn.text), " ");
         text_append(s_turn.text, sizeof(s_turn.text), r->text);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+        muse_review_store(s_turn.review, r->text);
+#endif
         ESP_LOGI(TAG, "reply after %.2fs: %.80s", (esp_timer_get_time() - s_turn.t_end) / 1e6, r->text);
         if (!s_turn.replied) {
             s_turn.t_show = esp_timer_get_time();
@@ -826,6 +835,9 @@ void muse_hatch_turn_begin(void)
     end_turn();
     xQueueReset(s_events);
     memset(&s_turn, 0, sizeof(s_turn));
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    s_turn.review = muse_review_turn();
+#endif
     s_turn.stage = malloc(STAGE_BYTES);
     s_turn.chunk = malloc(CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL));
     if (!s_turn.stage || !s_turn.chunk) {
