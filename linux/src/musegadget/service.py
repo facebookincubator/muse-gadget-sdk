@@ -50,6 +50,7 @@ BACKOFF_BASE_S = 2.0
 BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
+HEALTHY_RECONNECT_S = 1.0
 UNPAIRED_POLL_S = 30.0
 MAX_LOCAL_REQUEST = 4 * 1024 * 1024  # room for a 2 MiB image in base64
 MAX_WAIT_S = 600
@@ -144,11 +145,13 @@ class Service:
                 config.delete_json(config.PAIRING_FILE)
                 log.warning("pairing removed; run `musegadget pair` to set up again")
                 continue
-            if lasted >= HEALTHY_SESSION_S:
+            healthy = lasted >= HEALTHY_SESSION_S
+            if healthy:
                 backoff.reset()
             if outcome in (Outcome.AUTH_REJECTED, Outcome.FORBIDDEN):
                 backoff.floor = AUTH_BACKOFF_MIN_S
-            delay = backoff.next_delay()
+            delay = (HEALTHY_RECONNECT_S if healthy and outcome is Outcome.CLOSED
+                     else backoff.next_delay())
             log.info("reconnecting in %.0fs", delay)
             await self._sleep(delay)
 
