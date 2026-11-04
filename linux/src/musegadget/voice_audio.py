@@ -25,6 +25,7 @@ import threading
 import wave
 from collections import deque
 from contextlib import ExitStack
+from operator import mul
 from pathlib import Path
 
 from musegadget.voice_call import FRAME_BYTES, FRAME_SAMPLES, SAMPLE_RATE
@@ -112,24 +113,25 @@ class Pcm48To24:
 
     def __init__(self):
         # 64 taps, cutoff 10.8 kHz (0.45 of the 24 kHz input Nyquist), just
-        # below the 12 kHz Nyquist of the 24 kHz output.
-        self._taps = _lowpass_taps(64, 0.45)
-        self._history = deque([0] * 64, maxlen=64)
-        self._count = 0
+        # below the 12 kHz Nyquist of the 24 kHz output. Reversed so each
+        # oldest-first window lines up with taps[0] on its newest sample.
+        self._taps = _lowpass_taps(64, 0.45)[::-1]
+        self._history = [0] * 63  # previous 63 input samples, oldest first
+        self._phase = 1  # every second input sample completes an output
 
     def feed(self, pcm: bytes) -> bytes:
         if len(pcm) % 2:
             raise ValueError("48 kHz audio must contain whole PCM16LE samples")
-        output = []
-        for (sample,) in struct.iter_unpack("<h", pcm):
-            self._history.appendleft(sample)
-            self._count += 1
-            if self._count % 2 == 0:
-                value = round(
-                    sum(s * t for s, t in zip(self._history, self._taps))
-                )
-                output.append(_clamp16(value))
-        return struct.pack("<" + "h" * len(output), *output)
+        # This runs in the audio callback: map/sum over slices keeps the
+        # multiply-accumulate loop in C, about half the cost of a Python
+        # generator per output sample.
+        samples = self._history + list(struct.unpack(f"<{len(pcm) // 2}h", pcm))
+        taps = self._taps
+        output = [_clamp16(round(sum(map(mul, taps, samples[i:i + 64]))))
+                  for i in range(self._phase, len(samples) - 63, 2)]
+        self._phase = (self._phase - (len(samples) - 63)) % 2
+        self._history = samples[-63:]
+        return struct.pack(f"<{len(output)}h", *output)
 
 
 class LiveAudio:

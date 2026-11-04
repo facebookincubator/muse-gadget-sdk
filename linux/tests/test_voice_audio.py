@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import struct
 import sys
 from types import SimpleNamespace
 
 import pytest
 
-from musegadget.voice_audio import LiveAudio, Pcm48To24
+from musegadget.voice_audio import LiveAudio, Pcm48To24, _lowpass_taps
 from musegadget.voice_call import FRAME_BYTES
 
 
@@ -145,6 +146,51 @@ def test_decimator_ignores_chunk_boundaries():
         offset += size
     pieces.append(chunked.feed(pcm[offset:]))
     assert b"".join(pieces) == whole
+
+
+def test_decimator_matches_direct_convolution():
+    # Output n is the 64-tap FIR over input samples 2n+1-63 .. 2n+1, with
+    # silence before the first sample.
+    pcm = [(i * 7919) % 65536 - 32768 for i in range(1001)]
+    taps = _lowpass_taps(64, 0.45)
+    padded = [0] * 63 + pcm
+    expected = [
+        max(-32768, min(32767, round(sum(t * padded[n + 63 - k] for k, t in enumerate(taps)))))
+        for n in range(1, len(pcm), 2)
+    ]
+    decimator, out, offset = Pcm48To24(), b"", 0
+    for size in (1, 3, 64, 333, 600):
+        out += decimator.feed(struct.pack(f"<{size}h", *pcm[offset:offset + size]))
+        offset += size
+    actual = struct.unpack(f"<{len(out) // 2}h", out)
+    assert len(actual) == len(expected)
+    # Float summation order may move a rounding boundary by one step.
+    assert max(abs(a - e) for a, e in zip(actual, expected)) <= 1
+
+
+def tone_level_db(frequency):
+    """Steady-state output level of a 48 kHz tone after decimation."""
+    amplitude = 16000
+    tone = struct.pack("<9600h", *(
+        round(amplitude * math.sin(2 * math.pi * frequency * i / 48000)) for i in range(9600)))
+    out = struct.unpack("<4800h", Pcm48To24().feed(tone))[200:]
+    rms = math.sqrt(sum(v * v for v in out) / len(out))
+    return 20 * math.log10(max(rms, 1e-9) / (amplitude / math.sqrt(2)))
+
+
+def test_decimator_passes_speech_band_and_rejects_aliases():
+    for frequency in (300, 1000, 4000, 8000):
+        assert abs(tone_level_db(frequency)) < 0.2
+    # Above the 24 kHz output's 12 kHz Nyquist a tone would fold back into
+    # the speech band; the low-pass must suppress it first.
+    for frequency in (13000, 15000, 20000):
+        assert tone_level_db(frequency) < -50
+
+
+def test_decimator_output_is_clamped_to_pcm16():
+    square = struct.pack("<h", 32767) * 64 + struct.pack("<h", -32768) * 64
+    out = struct.unpack("<256h", Pcm48To24().feed(square * 4))
+    assert max(out) == 32767 and min(out) == -32768
 
 
 def test_playback_preserves_pcm(audio):
