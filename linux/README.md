@@ -367,6 +367,9 @@ for). Once the program itself exits, inherited pipes are drained for at most
 
 - [RDK X5](docs/rdk-x5.md): Ubuntu ARM64 deployment notes and an optional
   community touchscreen UI, with its tested configuration and limitations.
+- [Raspberry Pi 2](docs/raspberry-pi-2-headless.md): running the gadget on a
+  board with no Bluetooth, by pairing once on another machine and copying
+  the pairing state.
 
 ## Manage it
 

@@ -145,6 +145,10 @@ dependencies:
     version: ">=1.5.0,<2.0.0"
     rules:
       - if: '$CONFIG{MUSE_BOARD_ID} == "waveshare_p4_lcd35"'
+  espressif/esp_video:
+    version: "~2.5.0"
+    rules:
+      - if: '$CONFIG{MUSE_BOARD_ID} == "waveshare_p4_lcd35"'
   # The 1.9's panel is an SH8601 (its touch controller, a CST816S, is above).
   # This board drives esp_lcd itself rather than through a vendor BSP.
   # The 1.43C's panel uses it too.
