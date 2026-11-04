@@ -302,6 +302,7 @@ class LinkSession:
                 self._url,
                 additional_headers=headers,
                 user_agent_header=user_agent(),
+                compression=None,
                 open_timeout=HANDSHAKE_TIMEOUT_S,
                 ping_interval=PING_INTERVAL_S,
                 ping_timeout=PING_INTERVAL_S,
