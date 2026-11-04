@@ -230,13 +230,13 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
             except curses.error:
                 pass  # Missing terminal capabilities: retain the plain-text client.
             else:
-                show_status("Muse is ready · /quit to exit")
+                show_status("Muse is ready · /quit or /exit · /clear")
         if input_reader is None and isinstance(display, PlainDisplay):
             input_reader = asyncio.StreamReader(limit=MAX_INPUT)
             stdin_transport, _ = await asyncio.get_running_loop().connect_read_pipe(
                 lambda: asyncio.StreamReaderProtocol(input_reader), sys.stdin)
         if isinstance(display, PlainDisplay):
-            show("Chatting with your Muse. /quit, Ctrl-C or EOF exits.\n")
+            show("Chatting with your Muse. /quit or /exit, Ctrl-C or EOF exits. /clear clears the screen.\n")
 
         async def receive():
             while True:
@@ -297,8 +297,12 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                 if len(raw) > MAX_INPUT:
                     raise ValueError("terminal message exceeds 64 KiB")
                 message = raw.decode("utf-8").strip()
-                if message == "/quit":
+                if message in ("/quit", "/exit"):
                     return
+                if message == "/clear":
+                    display.clear()
+                    view.current = None
+                    continue
                 if not message:
                     continue
                 try:

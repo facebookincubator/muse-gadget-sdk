@@ -95,7 +95,7 @@ def test_live_users_bound_text_storage_and_sequences():
     assert users.pending == []
 
 
-@pytest.mark.parametrize("exit_line", [b"/quit\n", b"", None])
+@pytest.mark.parametrize("exit_line", [b"/quit\n", b"/exit\n", b"", None])
 @pytest.mark.parametrize("session_id", [None, "chat"])
 def test_repl_uses_service_transport_and_receives_before_ack(monkeypatch, exit_line, session_id):
     async def scenario():
@@ -114,7 +114,7 @@ def test_repl_uses_service_transport_and_receives_before_ack(monkeypatch, exit_l
                 assert subscription.value.path == "/chat/subscribe"
                 assert json.loads(subscription.value.body) == ({"session_id": session_id} if session_id else {})
                 # No terminal send until subscription readiness.
-                stdin.feed_data(b"hello\n")
+                stdin.feed_data(b"/clear\nhello\n")
                 assert not client.done()
                 await vm.send_frame(ServiceFrame.response(subscription.stream_id, ApplicationResponse(
                     status=200, end_body=False)))
@@ -142,6 +142,8 @@ def test_repl_uses_service_transport_and_receives_before_ack(monkeypatch, exit_l
                 assert 'Phone reply' in output.getvalue()
                 assert 'User: Phone question' in output.getvalue()
                 assert output.getvalue().count('User: hello') == 1
+                assert 'Screen clearing is unavailable' in output.getvalue()
+                assert 'User: /clear' not in output.getvalue()
                 if exit_line is None:
                     client.cancel()
                     with pytest.raises(asyncio.CancelledError):

@@ -310,7 +310,10 @@ in terminals that report mouse events, when supported by Python's curses library
 Each wheel event scrolls three lines; Page Up/Down remain available otherwise.
 The view keeps up to 512 transcript entries and 8192 wrapped lines.
 Up to 16 messages can wait to be sent; additional input is rejected with a notice.
-`/quit`, Ctrl-C or EOF exits; already submitted work continues in Muse. Queued messages that were not sent are discarded with a
+`/clear` clears the local screen and retained transcript; the conversation stays
+connected and new replies continue to appear. It does not delete chat history
+in Muse. Screen clearing is unavailable for redirected output or `TERM=dumb`.
+`/quit` or `/exit`, Ctrl-C or EOF exits; already submitted work continues in Muse. Queued messages that were not sent are discarded with a
 notice; an unconfirmed send may already have reached Muse. Streamed replies and
 final corrections update in place. Interactive terminals use a full-screen view
 and restore the terminal on exit. Redirected output and `TERM=dumb` use plain

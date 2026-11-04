@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 import curses
+import os
 import unicodedata
 
 
@@ -92,6 +93,14 @@ class PlainDisplay:
     def reply(self, reply, rendered):
         self.write(rendered)
 
+    def clear(self):
+        if self.output.isatty() and os.environ.get("TERM", "dumb") != "dumb":
+            self.output.write("\x1b[2J\x1b[H")
+            self.output.flush()
+            self.at_start = True
+        else:
+            self.status("Screen clearing is unavailable for plain-text output")
+
     def close(self):
         pass
 
@@ -102,7 +111,7 @@ class TerminalDisplay:
     def __init__(self):
         self.screen = None
         self.entries = deque(maxlen=512)
-        self.status_text = "Muse is ready · /quit to exit"
+        self.status_text = "Muse is ready · /quit or /exit · /clear"
         self.draft = ""
         self.cursor = 0
         self.scroll = 0
@@ -166,6 +175,12 @@ class TerminalDisplay:
                 break
         else:
             self.entries.append((reply.message_id, "Muse: " + reply.text))
+        self.dirty = True
+        self.draw()
+
+    def clear(self):
+        self.entries.clear()
+        self.scroll = 0
         self.dirty = True
         self.draw()
 

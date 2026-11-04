@@ -14,12 +14,13 @@
 
 import asyncio
 import curses
+import io
 from collections import deque
 
 import pytest
 
 from musegadget.muse_turn import Reply
-from musegadget.terminal_ui import TerminalDisplay, _wrap
+from musegadget.terminal_ui import PlainDisplay, TerminalDisplay, _wrap
 
 
 class Screen:
@@ -117,6 +118,42 @@ def test_scrolling_resize_and_bounded_transcript(display):
     asyncio.run(display.readline(65536))
     display.draw()
     assert display.screen.rows[2] == 'User: 519'
+
+
+def test_clear_removes_transcript_and_resets_scroll_without_interrupting_reply(display):
+    for i in range(20):
+        display.user(str(i))
+    display.reply(Reply('r', text='Hello'), '')
+    display.scroll = 3
+    display.draft, display.cursor = 'draft', 2
+    display.status('Muse is responding')
+    display.clear()
+    assert not display.entries
+    assert display.scroll == 0
+    assert display.screen.rows == {6: 'User: draft', 7: 'Muse is responding'}
+    assert display.screen.cursor == (6, 8)
+    display.draw()  # Old entries must not reappear on redraw.
+    assert not display.entries
+    display.reply(Reply('r', text='Hello again', done=True), '')
+    assert list(display.entries) == [('r', 'Muse: Hello again')]
+
+
+@pytest.mark.parametrize('tty,term,clears', [(True, 'xterm', True),
+                                           (True, 'dumb', False),
+                                           (False, 'xterm', False)])
+def test_plain_clear_uses_terminal_controls_only_for_capable_terminals(monkeypatch, tty, term, clears):
+    output = io.StringIO()
+    monkeypatch.setattr(output, 'isatty', lambda: tty)
+    monkeypatch.setenv('TERM', term)
+    view = PlainDisplay(output)
+    view.reply(Reply('r', text='Hello'), '\nMuse: Hello')
+    view.clear()
+    if clears:
+        assert output.getvalue().endswith('\x1b[2J\x1b[H')
+        assert view.at_start
+    else:
+        assert '\x1b' not in output.getvalue()
+        assert 'Screen clearing is unavailable' in output.getvalue()
 
 
 def test_mouse_wheel_scrolls_transcript_and_preserves_draft(display, monkeypatch):
@@ -372,7 +409,7 @@ def test_speaker_colors_use_terminal_background(display, monkeypatch):
         view.close()
 
 
-@pytest.mark.parametrize('ending', ['quit', 'eof', 'interrupt'])
+@pytest.mark.parametrize('ending', ['quit', 'exit', 'eof', 'interrupt'])
 def test_real_terminal_chat_restores_echo_and_line_input(ending):
     """Exercise curses and run_chat together, with real terminal line discipline."""
     import os
@@ -448,7 +485,7 @@ asyncio.run(main())
         if ending == 'interrupt':
             process.send_signal(signal.SIGINT)
         else:
-            os.write(master, b'/quit\n' if ending == 'quit' else b'\x04')
+            os.write(master, ('/' + ending + '\n').encode() if ending in ('quit', 'exit') else b'\x04')
         process.wait(timeout=5)
         assert process.returncode in (0, -signal.SIGINT)
         restored = termios.tcgetattr(slave)
