@@ -1,6 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
 #include "muse_pixel.h"
+#include "muse_speaking.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -531,6 +532,15 @@ static void draw_avatar(const avatar_t *j, const limb_t arms[2], const limb_t fe
     /* Only rows/columns that can hold the avatar are shaded. */
     int x0 = (int)(j->cx - j->a * 1.1f - 8), x1 = (int)(j->cx + j->a * 1.1f + 8);
     int y0 = (int)(j->cy - j->b - 8), y1 = (int)(j->cy + j->b + 5);
+    /* Raised/outstretched paws can reach beyond the body's old shading box. */
+    for (int i = 0; i < 2; i++) {
+        int lx = (int)(arms[i].x - 6), rx = (int)(arms[i].x + 6);
+        int ty = (int)(arms[i].y - 6), by = (int)(arms[i].y + 6);
+        if (lx < x0) x0 = lx;
+        if (rx > x1) x1 = rx;
+        if (ty < y0) y0 = ty;
+        if (by > y1) y1 = by;
+    }
     x0 = x0 < 0 ? 0 : x0;
     y0 = y0 < 0 ? 0 : y0;
     x1 = x1 >= W ? W - 1 : x1;
@@ -705,8 +715,8 @@ static void draw_mouth(int x, int y, mouth_t m, float open)
         break;
     }
     case MOUTH_TALK: {
-        int h = 1 + iround(clampf(open, 0, 1) * 3.0f);
-        int w = h > 2 ? 4 : 3;
+        int h = 1 + iround(clampf(open, 0, 1) * 4.0f);
+        int w = h > 2 ? 5 : 4;
         for (int j = 0; j < h; j++) {
             int inset = (j == 0 || j == h - 1) && h > 2 ? 1 : 0;
             for (int i = inset; i < w - inset; i++) {
@@ -881,6 +891,7 @@ void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int 
 
 void muse_pixel_render(const muse_pose_t *p)
 {
+    static muse_speaking_t speech;
     static bool s_luts;
     if (!s_luts) {
         init_luts();
@@ -895,6 +906,7 @@ void muse_pixel_render(const muse_pose_t *p)
     float happy = p->happy;
     float level = p->level;
     float t = p->t;
+    muse_speaking_update(&speech, mode == MUSE_MODE_SPEAKING, dt, p->mode_t, level);
 
     update_palette(&SCHEMES[mode], dt);
     float blink = eyes_update(p, dt);
@@ -912,7 +924,8 @@ void muse_pixel_render(const muse_pose_t *p)
         lean = sinf(t * 1.3f) * 1.2f;
         break;
     case MUSE_MODE_SPEAKING:
-        bob = sinf(t * 5.0f) * 0.6f - level * 1.5f;
+        bob = sinf(t * 2.5f) * 0.25f - speech.energy * 0.65f;
+        lean = (speech.lift[1] - speech.lift[0]) * .65f;
         break;
     case MUSE_MODE_ERROR:
         bob = 1.0f;
@@ -941,6 +954,7 @@ void muse_pixel_render(const muse_pose_t *p)
     j.fb = 7.4f * squash;
     j.fx = j.cx + lean * 0.3f;
     j.fy = j.cy - j.b * 0.30f + bob * 0.3f;
+    if (mode == MUSE_MODE_SPEAKING) j.fy += speech.nod * .8f;
 
     /* ---- background layers ---- */
     float aura_r = 29.0f + level * 4.0f + sinf(t * 1.5f) * 1.0f;
@@ -961,7 +975,7 @@ void muse_pixel_render(const muse_pose_t *p)
     /* ---- limbs ---- */
     float base = j.cy + j.b;
     limb_t feet[2];
-    float step = mode == MUSE_MODE_SPEAKING ? sinf(t * 5.0f) * 0.6f : 0.0f;
+    float step = 0;   /* planted feet keep the hands and face easy to follow */
     feet[0] = (limb_t){ j.cx - 7.0f, base - 0.5f + (happy > 0 ? hop * 0.3f : step), -0.15f };
     feet[1] = (limb_t){ j.cx + 7.0f, base - 0.5f + (happy > 0 ? hop * 0.3f : -step), 0.15f };
 
@@ -986,9 +1000,12 @@ void muse_pixel_render(const muse_pose_t *p)
         break;
     }
     case MUSE_MODE_SPEAKING: {
-        float w = sinf(t * 7.0f) * (0.25f + level * 0.45f);
-        arms[0] = (limb_t){ j.cx - adx, ay - 1.0f, -0.4f - w };
-        arms[1] = (limb_t){ j.cx + adx, ay - 1.0f, 0.4f - w };
+        for (int i = 0; i < 2; i++) {
+            float side = i ? 1 : -1;
+            arms[i] = (limb_t){j.cx + side * (adx + speech.extend[i] * 3.2f - speech.inward[i] * 8.5f),
+                ay - speech.lift[i] * 10.0f - speech.extend[i] * 2.0f,
+                side * (.30f + speech.lift[i] * 1.05f) + speech.wrist[i]};
+        }
         break;
     }
     default: {
@@ -1005,6 +1022,29 @@ void muse_pixel_render(const muse_pose_t *p)
         break;
     }
     }
+    /* Blend from the last visible hand positions when entering or leaving
+     * speaking, including a cut-off short reply. Other states retain their poses. */
+    static limb_t previous_arms[2], from_arms[2];
+    static muse_mode_t previous_mode;
+    static float previous_t, arm_transition = 1;
+    if (previous_t > 0 && p->t - previous_t < .25f && mode != previous_mode &&
+        (mode == MUSE_MODE_SPEAKING || previous_mode == MUSE_MODE_SPEAKING)) {
+        memcpy(from_arms, previous_arms, sizeof(from_arms));
+        arm_transition = 0;
+    }
+    if (p->t - previous_t > .25f) arm_transition = 1;
+    if (arm_transition < 1) {
+        arm_transition = clampf(arm_transition + dt / .28f, 0, 1);
+        float blend = muse_speak_ease(arm_transition);
+        for (int i = 0; i < 2; i++) {
+            arms[i].x = from_arms[i].x + (arms[i].x - from_arms[i].x) * blend;
+            arms[i].y = from_arms[i].y + (arms[i].y - from_arms[i].y) * blend;
+            arms[i].angle = from_arms[i].angle + (arms[i].angle - from_arms[i].angle) * blend;
+        }
+    }
+    memcpy(previous_arms, arms, sizeof(arms));
+    previous_mode = mode;
+    previous_t = p->t;
     draw_avatar(&j, arms, feet);
 
     /* ---- face ---- */
@@ -1029,7 +1069,12 @@ void muse_pixel_render(const muse_pose_t *p)
         break;
     case MUSE_MODE_SPEAKING:
         mouth = MOUTH_TALK;
-        mouth_open = level * 1.3f + 0.1f * (0.5f + 0.5f * sinf(t * 22.0f));
+        /* Real audio drives articulation; caption-only replies have a visual
+         * speaking rhythm so their mouth no longer stays fixed shut. */
+        mouth_open = speech.mouth;
+        if (mouth_open > .16f && mouth_open < .55f &&
+            (!speech.heard_voice || level < speech.energy * .8f)) mouth = MOUTH_O;
+        if (speech.eye_wide > .4f) style = EYES_WIDE;
         break;
     case MUSE_MODE_ERROR:
         style = EYES_X;
@@ -1047,8 +1092,10 @@ void muse_pixel_render(const muse_pose_t *p)
         mouth = MOUTH_GRIN;
     }
 
-    draw_eye(j.fx - eye_dx, eye_y, open, style, s_eyes.gx, s_eyes.gy);
-    draw_eye(j.fx + eye_dx, eye_y, open, style, s_eyes.gx, s_eyes.gy);
+    float gaze_x = s_eyes.gx;
+    if (mode == MUSE_MODE_SPEAKING) gaze_x = clampf(gaze_x + speech.gaze, -1, 1);
+    draw_eye(j.fx - eye_dx, eye_y, open, style, gaze_x, s_eyes.gy);
+    draw_eye(j.fx + eye_dx, eye_y, open, style, gaze_x, s_eyes.gy);
 
     /* Tiny brows for the expressive states. */
     int bl = iround(j.fx - eye_dx), br = iround(j.fx + eye_dx), by = iround(eye_y) - 4;
@@ -1058,6 +1105,10 @@ void muse_pixel_render(const muse_pose_t *p)
     } else if (mode == MUSE_MODE_LISTENING) {
         px(bl - 1, by - 1, C_BROW); px(bl, by - 1, C_BROW);
         px(br - 1, by - 1, C_BROW); px(br, by - 1, C_BROW);
+    } else if (mode == MUSE_MODE_SPEAKING) {
+        int raise = iround(speech.brow * 2);
+        px(bl - 1, by - raise, C_BROW); px(bl, by - raise, C_BROW);
+        px(br - 1, by - raise, C_BROW); px(br, by - raise, C_BROW);
     }
 
     float blush = 0.55f + happy * 0.45f + (mode == MUSE_MODE_SPEAKING ? 0.15f : 0.0f);
