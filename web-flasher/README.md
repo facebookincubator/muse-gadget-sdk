@@ -44,7 +44,10 @@ go one at a time, and a failed one shows what the gadget has instead.
   credential, plus its Wi-Fi network name and IP address. The page draws
   what the gadget sends as text and keeps none of it.
 - It picks the port and paces writes like the token step, from the selected
-  board. Changing the board, installing or sending the token closes its port.
+  board. Changing the board closes its port. While it holds a port, or is
+  still closing one, Connect & install and Send token are off (their port
+  pickers need the click itself, so the card can't close first), and while the
+  token goes out the card can't connect.
 - The `ok` line is logged at INFO, every board's default. A build that logs
   less makes each save time out rather than report success.
 
