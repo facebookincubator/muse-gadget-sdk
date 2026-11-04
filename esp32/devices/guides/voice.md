@@ -15,43 +15,39 @@ limitations under the License.
 -->
 # Muse voice gadget
 
-This device is a Muse Gadget for voice: a Home Assistant Voice Preview Edition
-or a Seeed reSpeaker Lite running the Muse Gadget SDK firmware. It pairs with
-the Muse app over Bluetooth, joins Wi-Fi and keeps an encrypted Link session
-with Muse. Muse uses it only through the commands it lists; each command's
-description says what it does and returns.
+A speaker-and-microphone device for talking to Muse, with no screen: a Home
+Assistant Voice Preview Edition or a Seeed reSpeaker Lite running the Muse
+Gadget SDK firmware. Muse uses it through the commands it lists.
+
+## What it can do
+
+- People talk to Muse from it: holding the talk button (the centre button on
+  the Voice PE, the XIAO's BOOT button on the reSpeaker Lite) records a voice
+  note, sent on release. Muse answers in the Muse app.
+- The dial sets the speaker volume on the Voice PE. If it lists
+  `voice.configure`, the volume it sets is kept across restarts.
+- If it lists `device.discover`, it's a bridge to the home network. The scan
+  runs from the gadget and takes up to about 90 seconds: work from the last
+  result rather than starting another. Muse can reach the devices it finds
+  through the gadget's network tunnel.
+- If it lists `ble.*` commands, it can scan for and talk to nearby Bluetooth
+  LE devices: one at a time, and only devices the user means.
 
 ## Status light
 
-The LED ring (Voice PE) or RGB LED (reSpeaker Lite) shows its state:
+The LED ring (Voice PE) or RGB LED (reSpeaker Lite):
 
 | Colour | Meaning |
 |---|---|
-| Orange, breathing | Waiting for setup in the Muse app |
-| Blue, breathing | Pairing needs a press on the device |
-| Blue | Joining Wi-Fi or connecting to Muse |
 | Green | Connected |
 | Yellow, blinking | Reconnecting |
-| Purple | Not paired |
 | Red, blinking | Error |
+| Any other colour | It needs setup in the Muse app |
 
-## Controls
+## Recovery
 
-- The talk button is the centre button on the Voice PE and the XIAO's BOOT
-  button on the reSpeaker Lite. Once it's connected, holding it records a
-  voice note for Muse, sent on release. Muse answers in the Muse app.
-- With the mute switch on, the talk button does setup instead: a short press
-  confirms a pending pairing, and a 5-second hold forgets the pairing and
-  Wi-Fi so it can be set up again. Before it's set up, it does setup anyway.
-- On the Voice PE, the dial sets the speaker volume, shown on the ring.
-
-## Using its commands
-
-- If it lists `voice.configure`, the volume it sets is kept across restarts.
-- If it lists `device.discover`, a scan takes up to 90 seconds: work from the
-  last result rather than starting another.
-- If it lists `ble.*` commands, run them one at a time, and connect only to
-  devices the user means.
+- With the mute switch on, holding the talk button for 5 seconds forgets its
+  pairing and Wi-Fi; set it up again in the Muse app.
 
 ## Limits
 

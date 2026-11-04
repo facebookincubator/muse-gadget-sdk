@@ -127,7 +127,9 @@ settings grouped under short comments saying why. Set:
   `CONFIG_MUSE_DEVICE_MODEL_NAME` with its name from `devices/README.md`.
   Another profile of the same hardware uses the same two lines
   (`../../protocols/DEVICE.md`). Light and status-screen boards use the guide
-  `main/guide.md`, and full-UI boards `devices/guides/muse.md`. If that guide
+  `main/guide.md`, and full-UI boards `devices/guides/muse.md`. Guides say
+  what the board is and can do, what it shows, its controls, recovery and
+  limits, not how to set it up or pair it. If that guide
   would be wrong about the board's controls, write `devices/guides/<name>.md`
   following "Guides in this repository" in `../../protocols/DEVICE.md`, and set
   `CONFIG_MUSE_DEVICE_GUIDE` to it.

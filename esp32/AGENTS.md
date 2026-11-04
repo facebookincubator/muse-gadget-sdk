@@ -766,9 +766,11 @@ are reserved for Muse's own devices.
   about it, and set it in its overlay. A relative path is looked up in the
   project directory, then in `esp32/`. A leading HTML comment (the license
   header) is left out, and a guide over 4096 bytes fails the build.
-- **Guides in this repository** are generic to the board: what it is, what it
-  shows, its controls, recovery and limits, in at most 2048 bytes. They follow
-  "Guides in this repository" in `../protocols/DEVICE.md`, and CI checks them.
+- **Guides in this repository** are generic to the board: what it is and what
+  it can do, what it shows, its controls, recovery and limits, in at most 2048
+  bytes. They skip setup and pairing, since Muse only sees a device that's
+  already set up. They follow "Guides in this repository" in
+  `../protocols/DEVICE.md`, and CI checks them.
 - **Your own gadget's guide** is free-form: say what it's for and how you want
   Muse to use it. Keep the file anywhere in your project and point
   `CONFIG_MUSE_DEVICE_GUIDE` at it; only the 4096-byte limit is checked. For

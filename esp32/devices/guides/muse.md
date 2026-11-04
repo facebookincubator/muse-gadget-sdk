@@ -15,37 +15,42 @@ limitations under the License.
 -->
 # Muse Gadget with a screen
 
-This device is a Muse Gadget running the Muse Gadget SDK firmware with its
-on-screen interface. It pairs with the Muse app over Bluetooth, joins Wi-Fi
-and keeps an encrypted Link session with Muse. Muse uses it only through the
-commands it lists; each command's description says what it does and returns.
+An ESP32 board running the Muse Gadget SDK firmware with its own screen: it
+shows Muse's avatar, and people talk to Muse from it with voice notes whose
+replies show on the screen. Muse uses it through the commands it lists.
 
-## Screen and controls
+## What it can do
 
-- The screen shows the connection state: orange while waiting for setup, blue
-  while connecting, green when connected, yellow when reconnecting, red on an
-  error. Until it's paired, it also shows the name to pick in the Muse app.
-- A pending pairing is confirmed on the device: the talk button, the Enter key
-  on boards with a keyboard, or a tap on the screen.
-- On boards with a microphone, holding the talk button (or the on-screen
-  microphone on touch-only boards) records a voice note for Muse, sent on
-  release. Replies show on the screen.
-- The settings menu has the device's options, including Reset pairing, which
-  forgets Wi-Fi and the pairing so it can be set up again.
+- People talk to Muse from it: holding the talk button (or the on-screen
+  microphone on touch-only boards) records a voice note, sent on release.
+  Replies show on the screen.
+- If it lists `display.*` commands, Muse can show images on its screen. An
+  image replaces the usual screen until `display.show_animation` or a press
+  on the device; bring it back when the user is done.
+- If it lists `camera.capture`, it has a camera Muse can take a still photo
+  with when the user asks.
+- If it lists `sensors.read`, it reports the room's air readings.
+- If it lists `device.discover`, it's a bridge to the home network. The scan
+  runs from the gadget and takes up to about 90 seconds: work from the last
+  result rather than starting another. Muse can reach the devices it finds
+  through the gadget's network tunnel.
+- If it lists `ble.*` commands, it can scan for and talk to nearby Bluetooth
+  LE devices: one at a time, and only devices the user means.
+- `device.health` reports battery and charging on boards with a battery.
 
-## Using its commands
+## Controls
 
-- If it lists `device.discover`, a scan takes up to 90 seconds: work from the
-  last result rather than starting another.
-- If it lists `display.*` commands, bring the usual screen back with
-  `display.show_animation` when the user is done; a press on the device also
-  brings it back.
-- If it lists `ble.*` commands, run them one at a time, and connect only to
-  devices the user means.
+- The talk button, or the on-screen microphone on touch-only boards.
+- The settings menu, with the device's options.
+
+## Recovery
+
+- Settings > Reset pairing forgets Wi-Fi and the pairing; set it up again in
+  the Muse app.
+- If it's frozen, turn it off and on again.
 
 ## Limits
 
-- It's a microcontroller with no shell or files Muse can reach: it does only
-  what its commands offer.
-- Commands work only while it's connected. While it's reconnecting or not
-  paired, wait or ask the user to check its Wi-Fi or set it up again.
+- It has no shell or files Muse can reach: it does only what its commands
+  offer.
+- Commands work only while it's connected.

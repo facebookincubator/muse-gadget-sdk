@@ -15,43 +15,42 @@ limitations under the License.
 -->
 # Muse Gadget
 
-This device is a Muse Gadget: an ESP32 board running the Muse Gadget SDK
-firmware. It pairs with the Muse app over Bluetooth, joins Wi-Fi and keeps an
-encrypted Link session with Muse. Muse uses it only through the commands it
-lists; each command's description says what it does and returns.
+An ESP32 board running the Muse Gadget SDK firmware, connected to Muse over
+Wi-Fi. Muse uses it through the commands it lists.
+
+## What it can do
+
+- If it lists `device.discover`, it's a bridge to the home network. The scan
+  runs from the gadget and takes up to about 90 seconds: work from the last
+  result rather than starting another. Muse can reach the devices it finds
+  through the gadget's network tunnel.
+- If it lists `display.*` commands, it has a screen Muse can draw on. An image
+  stays up until `display.show_animation`; bring the status screen back when
+  the user is done.
+- If it lists `sensors.read`, it reports the room's air readings.
+- If it lists `ble.*` commands, it can scan for and talk to nearby Bluetooth
+  LE devices: one at a time, and only devices the user means.
+- `device.health` covers its battery, power and network.
 
 ## Status light
 
-The status light (or the status screen, on boards with one) shows its state:
+The status light (or the status screen, on boards with one):
 
 | Colour | Meaning |
 |---|---|
-| Orange, breathing | Waiting for setup in the Muse app |
-| Blue, breathing | Pairing needs a press on the device |
-| Blue | Joining Wi-Fi or connecting to Muse |
 | Green | Connected |
 | Yellow, blinking | Reconnecting |
-| Purple | Not paired |
 | Red, blinking | Error |
+| Any other colour | It needs setup in the Muse app |
 
-## Button
+## Recovery
 
-- Short press: confirm a pending pairing, or reopen setup if it isn't done.
-- Hold for 5 seconds: reset setup. The device forgets its pairing and Wi-Fi
-  and has to be set up again in the Muse app.
-
-## Using its commands
-
-- If it lists `device.discover`, a scan takes up to 90 seconds: work from the
-  last result rather than starting another.
-- If it lists `display.*` commands, bring the status screen back with
-  `display.show_animation` when the user is done.
-- If it lists `ble.*` commands, run them one at a time, and connect only to
-  devices the user means.
+- If it stops responding, unplug it and plug it back in.
+- Holding the button for 5 seconds forgets its pairing and Wi-Fi; set it up
+  again in the Muse app.
 
 ## Limits
 
-- It's a microcontroller with no shell or files Muse can reach: it does only
-  what its commands offer.
-- Commands work only while it's connected (green). While it's reconnecting
-  or not paired, wait or ask the user to check its Wi-Fi or set it up again.
+- It has no shell or files Muse can reach: it does only what its commands
+  offer.
+- Commands work only while it's connected (green).

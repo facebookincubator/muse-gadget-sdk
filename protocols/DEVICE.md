@@ -58,8 +58,10 @@ parameters, and its result's `payload` is:
 {"format": "markdown", "guide": "# Acme Lamp\n\nThe lamp on the desk ..."}
 ```
 
-The guide tells Muse what the device is and how to use it. It may describe
-the device's purpose, what its owner uses it for and how Muse should use its
+The guide tells Muse what the device is and how to use it: what it can do,
+what it shows, its controls, how to recover it and its limits. Skip setup and
+pairing: Muse only sees a device that's already set up. It may describe the
+device's purpose, what its owner uses it for and how Muse should use its
 commands for that: a gadget can be generic or built for one job.
 
 A command's description carries its contract (what it does, its arguments,
@@ -89,10 +91,13 @@ SDK, so they follow stricter rules:
   accounts or other devices.
 - A board gets its own guide only when a shared one is wrong about it, checked
   on the hardware, and the pull request says so.
-- Content: what the device is, what it shows, its controls, how to recover it,
-  its limits, and "if it lists `device.discover`, ..." rules a command's
-  description can't carry.
-- No purpose or behavior instructions, links, code blocks, HTML or marketing.
+- Content: what the device is and what it can do, what it shows, its
+  controls, how to recover it, its limits, and "if it lists
+  `device.discover`, ..." rules a command's description can't carry. No setup
+  or pairing steps.
+- What the device is for, in terms true for every owner, is fine. Nothing from
+  someone's own setup, and no behavior instructions beyond how to use the
+  device, links, code blocks, HTML or marketing.
 - At most 2048 bytes.
 - Every change gets a maintainer review.
 
