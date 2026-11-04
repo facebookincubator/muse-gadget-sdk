@@ -166,7 +166,7 @@ limitations under the License.
         </p>
         <div class="install-row">
           <esp-web-install-button id="install">
-            <button slot="activate" class="button">Connect &amp; install</button>
+            <button slot="activate" class="button" id="install-activate">Connect &amp; install</button>
             <span slot="unsupported">
               Your browser doesn't support Web Serial. Use Chrome or Edge on a desktop computer.
             </span>
@@ -179,6 +179,7 @@ limitations under the License.
           page sends your token, and you set the gadget up in the Muse app.
         </p>
         <p id="install-status" class="status"></p>
+        <p id="settings-holds-port" class="note" hidden>Device settings below is connected to a gadget. Disconnect it there to install.</p>
       </div>
     </section>
 
@@ -186,6 +187,7 @@ limitations under the License.
       <summary>Already installed? Send your token to a gadget</summary>
       <p class="note">For a gadget running firmware from this page. Pick its port when asked.</p>
       <button id="send-token" class="button secondary">Send token to gadget</button>
+      <p class="note" id="settings-holds-token" hidden>Disconnect Device settings below first.</p>
       <p id="token-status" class="status"></p>
     </details>
 
@@ -376,7 +378,6 @@ limitations under the License.
 
     $("send-token").disabled = !pacing;
     $("send-token").addEventListener("click", async () => {
-      await closeSettings();
       if (!token()) {
         showStatus($("token-status"), "Enter your SDK token in step 1 first.", "error");
         tokenInput.focus();
@@ -398,6 +399,7 @@ limitations under the License.
     let settings = null;   // the open DeviceSettingsSession
     let confirmed = null;  // the gadget's last status
     let settingsBusy = false;
+    let settingsClosing = null;   // close() of the last session, until it finishes
     const draft = () =>
       Object.fromEntries(SETTING_KEYS.map((key) => [
         key,
@@ -412,7 +414,15 @@ limitations under the License.
       const online = Boolean(settings?.online);
       const changed = edits();
       $("settings-connect").textContent = online ? "Disconnect" : "Connect to gadget";
-      $("settings-connect").disabled = settingsBusy || !pacing;
+      $("settings-connect").disabled = settingsBusy || !pacing || Boolean(settingsClosing);
+      // While the card holds a port, or is still giving one back, the
+      // installer and the token step can't open it: they stay off until then.
+      // (Closing first on their click wouldn't do: the port picker needs the
+      // click's user activation, and closing can take a moment.)
+      const holding = Boolean(settings || settingsClosing);
+      $("install-activate").disabled = holding;
+      $("send-token").disabled = !pacing || holding;
+      $("settings-holds-port").hidden = $("settings-holds-token").hidden = !holding;
       $("settings-reload").hidden = !online;
       $("settings-reload").disabled = settingsBusy;
       $("settings-form").hidden = !confirmed;
@@ -463,17 +473,22 @@ limitations under the License.
         renderSettings();
       }
     };
-    // Frees the port for the installer or the token step.
+    // Gives the port back; the installer and token step wait for it.
     const closeSettings = async () => {
       const old = settings;
       settings = null;
-      showSettings(null);
       if (!old) return;
+      const closing = old.close();
+      settingsClosing = closing;
+      showSettings(null);
       try {
-        await old.close();
+        await closing;
         showStatus($("settings-status"), "Disconnected.");
       } catch (e) {
         showStatus($("settings-status"), e.message, "error");
+      } finally {
+        if (settingsClosing === closing) settingsClosing = null;
+        renderSettings();
       }
     };
     $("settings-connect").addEventListener("click", () =>
@@ -489,9 +504,14 @@ limitations under the License.
           onDisconnect: (e) => {
             if (settings !== session) return;
             settings = null;
+            const closing = session.close().catch(() => {});
+            settingsClosing = closing;
             showSettings(null);
             showStatus($("settings-status"), e.message || "The gadget was unplugged.", "error");
-            session.close().catch(() => {});
+            closing.then(() => {
+              if (settingsClosing === closing) settingsClosing = null;
+              renderSettings();
+            });
           },
         });
         settings = session;
@@ -548,10 +568,9 @@ limitations under the License.
       });
     });
     for (const key of SETTING_KEYS) field(key).addEventListener("input", renderSettings);
-    // The selected board sets the port filter and pacing; changing it, or
-    // starting an install, closes the gadget's port first.
+    // The selected board sets the port filter and pacing; changing it closes
+    // the gadget's port.
     select.addEventListener("change", closeSettings);
-    button.addEventListener("click", closeSettings, true);
     window.addEventListener("pagehide", () => settings?.close().catch(() => {}));
     renderSettings();
 

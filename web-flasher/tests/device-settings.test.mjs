@@ -284,3 +284,15 @@ test("the card loads every stored value without rounding, and draws device text 
   assert.ok(script.length > 1000);
   assert.doesNotMatch(script, /innerHTML|insertAdjacentHTML|outerHTML|eval\(|console\./);
 });
+
+test("the installer and the token step stay off while the card holds or is closing a port", () => {
+  // Their port pickers need the click's user activation, so the card can't
+  // close its port on their click; they're disabled until it has.
+  assert.match(html, /<button slot="activate" class="button" id="install-activate">/);
+  const render = html.slice(html.indexOf("const renderSettings"), html.indexOf("const showSettings"));
+  assert.match(render, /const holding = Boolean\(settings \|\| settingsClosing\);/);
+  assert.match(render, /\$\("install-activate"\)\.disabled = holding;/);
+  assert.match(render, /\$\("send-token"\)\.disabled = !pacing \|\| holding;/);
+  const close = html.slice(html.indexOf("const closeSettings"), html.indexOf('$("settings-connect").addEventListener'));
+  assert.match(close, /settingsClosing = closing;[\s\S]*await closing;[\s\S]*settingsClosing = null;[\s\S]*renderSettings\(\);/);
+});
