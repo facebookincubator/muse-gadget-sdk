@@ -48,9 +48,13 @@ def _usbs(usb):
 USB = {
     "s3": USJ,
     "s3n": USJ,
+    "s3-18": USJ,
     "s3-216": USJ,
     "s3-206": USJ,
     "185c": USJ,
+    "143c": USJ,
+    "143": USJ,
+    "146": USJ,
     "aipi": USJ,
     "atk-box": USJ,
     "box3": USJ,
@@ -67,17 +71,19 @@ USB = {
     "jc3248w535": USJ,
     "lcd7": CH343,
     "lcd128": CH343,
+    "lcd349": USJ,
     "vn183": USJ,
     "ai-passport": USJ,
     "p4lcd35": CH343,
     "rorolee": USJ,
+    "lcd19": USJ,
     "watcher": CH342,   # the ESP32-S3 on the second port; the Himax camera chip is on the first
     "plus2": CH9102,
     "core2": (CP210X, CH9102),
 }
 # Boards whose console takes Muse's serial commands (tools/muse/chat.py). The
 # Watcher reads them on its CH342 port with MUSE_CONSOLE_UART.
-COMMANDS = ("s3", "s3n", "s3-216", "s3-206", "185c", "aipi", "atk-box", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "vn183", "ai-passport", "echoear", "p4lcd35", "rorolee")
+COMMANDS = ("s3", "s3n", "s3-18", "s3-216", "s3-206", "185c", "143c", "143", "146", "aipi", "atk-box", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "vn183", "ai-passport", "echoear", "p4lcd35", "rorolee", "lcd19")
 # Bridges that drop bytes when a whole packet arrives at once, so writes to them
 # go 64 bytes at a time at the line rate (paced_esptool.py, chat.Board.write).
 PACED = (CH342,)
