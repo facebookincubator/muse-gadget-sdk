@@ -16,7 +16,7 @@
 # Usage: run_variant.sh BUILD_DIR PORT LOG [SECS]
 set -u
 cd "$(dirname "$0")/../../.."
-. "${IDF_EXPORT:-$HOME/.espressif/esp-idf-v6.0.1/export.sh}" >/dev/null 2>&1
+. "${IDF_EXPORT:-$HOME/.espressif/esp-idf-v6.0.3/export.sh}" >/dev/null 2>&1
 idf.py -B "$1" -p "$2" flash > "$3.flash" 2>&1 || { echo "flash failed: see $3.flash"; exit 1; }
 nohup python -u tools/coexist/bench/serial_log.py "$2" "${4:-900}" > "$3" 2>&1 &
 echo "flashed $1; logging to $3"
