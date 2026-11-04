@@ -189,8 +189,8 @@ def test_subscription_disconnect_releases_upstream():
         class Session:
             registered_at = 1
 
-            async def subscribe_chat(self, session_id, *, on_ready):
-                on_ready()
+            async def subscribe_chat(self, session_id, *, opened):
+                opened.set()
                 try:
                     await asyncio.Event().wait()
                     yield {}
@@ -206,6 +206,52 @@ def test_subscription_disconnect_releases_upstream():
         await writer.wait_closed()
         await asyncio.wait_for(closed.wait(), 1)
     run_with_socket(check)
+
+
+def test_subscription_ready_precedes_an_event_arriving_with_headers():
+    async def scenario():
+        service = Service(Identity("02:00:00:00:00:01"), Executor(Account.current()))
+        reader = asyncio.StreamReader()
+        closed = asyncio.Event()
+        item = event("message.assistant", "r", content="Immediate reply")
+
+        class Session:
+            registered_at = 1
+
+            async def subscribe_chat(self, session_id, *, opened):
+                try:
+                    opened.set()
+                    yield item
+                    await asyncio.Event().wait()
+                finally:
+                    closed.set()
+
+        class Writer:
+            def __init__(self):
+                self.records = []
+                self.was_closed = False
+
+            def write(self, raw):
+                self.records.append(json.loads(raw))
+
+            async def drain(self):
+                await asyncio.sleep(0)
+                if len(self.records) == 2:
+                    reader.feed_eof()
+
+            def close(self):
+                self.was_closed = True
+
+        service._current = Session()
+        writer = Writer()
+        await asyncio.wait_for(service._local_subscribe({}, reader, writer), 1)
+        assert writer.records == [
+            {"type": "ready"}, {"type": "chat_event", "event": item},
+        ]
+        assert closed.is_set()
+        assert writer.was_closed
+
+    asyncio.run(scenario())
 
 
 def test_cli_chat_never_reads_pairing(monkeypatch):
@@ -228,12 +274,12 @@ def test_subscription_failure_ends_client_without_resending(failure):
         class Session:
             registered_at = 1
 
-            async def subscribe_chat(self, session_id, *, on_ready):
+            async def subscribe_chat(self, session_id, *, opened):
                 try:
                     if failure == "refused":
                         from musegadget.link_client import HttpStreamError
                         raise HttpStreamError(403, "/chat/subscribe")
-                    on_ready()
+                    opened.set()
                     await asyncio.Event().wait()
                     yield {}
                 finally:
@@ -266,8 +312,8 @@ def test_slow_local_reader_releases_upstream(monkeypatch):
         class Session:
             registered_at = 1
 
-            async def subscribe_chat(self, session_id, *, on_ready):
-                on_ready()
+            async def subscribe_chat(self, session_id, *, opened):
+                opened.set()
                 try:
                     yield event("message.assistant", "r", content="reply")
                     await asyncio.Event().wait()
@@ -430,8 +476,8 @@ def test_pending_queue_is_bounded_and_exit_reports_unsent(monkeypatch, ending):
         class Session:
             registered_at = 1
 
-            async def subscribe_chat(self, session_id, *, on_ready):
-                on_ready()
+            async def subscribe_chat(self, session_id, *, opened):
+                opened.set()
                 ready.set()
                 await release.wait()
                 if ending == "reject":

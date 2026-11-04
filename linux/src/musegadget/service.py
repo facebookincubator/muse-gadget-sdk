@@ -323,11 +323,16 @@ class Service:
             if session is None or session.registered_at is None:
                 raise ConnectionError("not connected to the Muse")
 
+            opened = asyncio.Event()
+            ready_sent = asyncio.Event()
+
             async def forward():
-                subscription = session.subscribe_chat(
-                    session_id, on_ready=lambda: record({"type": "ready"}))
+                subscription = session.subscribe_chat(session_id, opened=opened)
                 try:
                     async for event in subscription:
+                        # Headers and the first event can arrive together. Keep
+                        # the local ready record ahead of every chat event.
+                        await ready_sent.wait()
                         await write({"type": "chat_event", "event": event})
                 finally:
                     await subscription.aclose()
@@ -338,9 +343,14 @@ class Service:
                     await asyncio.sleep(0.25)
                 raise ConnectionError("Muse connection ended")
 
+            ready = asyncio.create_task(opened.wait())
             tasks = [asyncio.create_task(forward()), asyncio.create_task(reader.read(1)),
-                     asyncio.create_task(disconnected())]
+                     asyncio.create_task(disconnected()), ready]
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            if ready in done:
+                await write({"type": "ready"})
+                ready_sent.set()
+                done, _ = await asyncio.wait(tasks[:-1], return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 task.result()
         except Exception as exc:

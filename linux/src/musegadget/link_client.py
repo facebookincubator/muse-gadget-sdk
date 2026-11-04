@@ -549,12 +549,11 @@ class LinkSession:
 
     async def subscribe_chat(
         self, session_id: str | None = None, *, opened: asyncio.Event | None = None,
-        on_ready: Callable[[], None] | None = None,
     ) -> AsyncIterator[dict]:
         """Yield Muse chat events from its NDJSON subscription.
 
-        ``opened`` is set and ``on_ready`` is called once Muse accepts this
-        subscription, so events from then on reach it.
+        ``opened`` is set once Muse accepts this subscription, so events from
+        then on reach it.
         """
         body = json.dumps({"session_id": session_id} if session_id else {}).encode()
         path = "/chat/subscribe"
@@ -567,8 +566,6 @@ class LinkSession:
             if opened is not None:
                 opened.set()
             try:
-                if on_ready is not None:
-                    on_ready()
                 buffered = bytearray()
                 async for chunk in stream:
                     for part in chunk.splitlines(keepends=True):
