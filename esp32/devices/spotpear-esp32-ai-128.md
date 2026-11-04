@@ -34,7 +34,7 @@ Audio close/open stops and restarts the two I2S controllers independently.
 
 ## Build
 
-Use ESP-IDF **v6.0.1**, as required by this repository, separately from the
+Use ESP-IDF **v6.0.3**, as required by this repository, separately from the
 reference Xiaozhi project's v6.1 installation.
 
 ```sh
