@@ -377,11 +377,14 @@ limitations under the License.
     // While the token goes out, Device settings can't take a port.
     let tokenSending = false;
     const send = async (port, statusEl) => {
+      if (tokenSending) return;
       showStatus(statusEl, message("token.sending"));
       tokenSending = true;
       renderSettings();
       try {
-        await sendSdkToken(port, token());
+        await sendSdkToken(port, token(), {
+          onWriteTimeout: (error) => showStatus(statusEl, error, "error"),
+        });
         showStatus(statusEl, message("token.sent"), "ok");
       } catch (e) {
         showStatus(statusEl, e, "error");
@@ -459,8 +462,8 @@ limitations under the License.
       // (Closing first on their click wouldn't do: the port picker needs the
       // click's user activation, and closing can take a moment.)
       const holding = Boolean(settings || settingsClosing);
-      $("install-activate").disabled = holding;
-      $("send-token").disabled = !pacing || holding;
+      $("install-activate").disabled = holding || tokenSending;
+      $("send-token").disabled = !pacing || holding || tokenSending;
       $("settings-holds-port").hidden = $("settings-holds-token").hidden = !holding;
       $("settings-reload").hidden = !online;
       $("settings-reload").disabled = settingsBusy;
