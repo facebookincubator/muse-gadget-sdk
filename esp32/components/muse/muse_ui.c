@@ -587,6 +587,17 @@ static int caption_band_h(void)
     return 2 * lv_font_get_line_height(&lv_font_unscii_8) + 2 + 2 * 2;
 }
 
+/* Where the small screen's band sits: full width along the bottom, above the
+ * navigation dots on touch screens. The SpotPear's band sits higher, under
+ * its avatar, and narrower, so every corner stays inside its 240 px circle. */
+#if CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+#define SMALL_BAND_W 160
+#define SMALL_BAND_Y (-34)
+#else
+#define SMALL_BAND_W s_w
+#define SMALL_BAND_Y ((s_tall || s_tv) ? -30 : -3)
+#endif
+
 #if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
 /* A caption's font off a small screen's band: caption_font(), or with
  * CONFIG_MUSE_LATIN_FONT, Unifont's 8x16 for the whole of a caption with
@@ -1181,6 +1192,10 @@ static void build_screen(void)
     int meter_y = cap_top - 6 - METER_SEG_PX / 2;
     int art_bottom = meter_y - METER_SEG_PX / 2 - 4;
     s_big_y = s_small ? 0 : art_bottom - (s_canvas_px / 2 - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W));
+#if CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+    /* The 128 px avatar ends at y=159; Japanese captions start at y=164. */
+    s_big_y = -25;
+#endif
 
     /* The character. */
     muse_image_init();
@@ -1240,21 +1255,21 @@ static void build_screen(void)
     if (s_small) {
         /* Two lines over the bottom of the face, on a dark band so they stay
          * legible. A tall screen has room to keep them above the mic icon. */
-        lv_obj_set_size(s_caption_lbl, s_w, caption_band_h());
+        lv_obj_set_size(s_caption_lbl, SMALL_BAND_W, caption_band_h());
         lv_obj_set_style_pad_ver(s_caption_lbl, 2, 0);
         lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
         lv_obj_set_style_bg_color(s_caption_lbl, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
         /* Touch screens need the caption above the navigation dots too. */
-        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, SMALL_BAND_Y);
 #if CONFIG_MUSE_CJK_FONT
         /* CJK doesn't fit unscii-8's cell, so a reply with CJK in it fills the
          * band in the 16 px caption font instead: one line at a time, or two
          * on a landscape screen with the height for them, such as the
          * BOX-3's 320x240 (set_caption_font). */
         s_cjk_lines = !s_tall && s_h >= 200 ? 2 : 1;
-        muse_state_set_cjk_page((s_w - 2 * CJK_BAND_PAD) / lv_font_get_glyph_width(caption_font(), 'M', ' '),
+        muse_state_set_cjk_page((SMALL_BAND_W - 2 * CJK_BAND_PAD) / lv_font_get_glyph_width(caption_font(), 'M', ' '),
                                 s_cjk_lines);
 #endif
 #if CONFIG_MUSE_LATIN_FONT
@@ -1264,7 +1279,7 @@ static void build_screen(void)
          * Unifont being the narrower. So those pages fill half their width; a
          * page of their own there needs MUSE_CAPTION_MAX to allow for 3-byte
          * letters. */
-        muse_state_set_latin_page((s_w - 2 * LATIN_BAND_MARGIN) / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '), 1);
+        muse_state_set_latin_page((SMALL_BAND_W - 2 * LATIN_BAND_MARGIN) / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '), 1);
 #endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
         if (!s_long) {   /* the long layout has its own page of the reply */
@@ -1818,10 +1833,10 @@ static void set_full_reply(bool on)
         lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, FULL_REPLY_TOP);
         set_full_font();
     } else {
-        lv_obj_set_size(s_caption_lbl, s_w, caption_band_h());
+        lv_obj_set_size(s_caption_lbl, SMALL_BAND_W, caption_band_h());
         lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, SMALL_BAND_Y);
 #if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
         set_caption_font(lv_label_get_text(s_caption_lbl));   /* the band's font, padding, height and long mode */
 #else
