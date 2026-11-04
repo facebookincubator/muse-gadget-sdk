@@ -1212,14 +1212,18 @@ static bool record_note(void)
 
 /*
  * Posts `text` to the chat and waits for the reply. A long message goes up in
- * parts, since each frame has to fit SCRATCH.
+ * parts, since each frame has to fit SCRATCH. A spoken turn names the device
+ * (MUSE_CHAT_SPOKEN_DEVICE); a typed one doesn't.
  */
-static void send_chat(const char *text, const char *modality)
+static void send_chat(const char *text, const char *modality, bool spoken)
 {
     s_turn.chat_posted = true;
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "message", text);
     cJSON_AddStringToObject(body, "output_modality", modality);
+    if (spoken) {
+        cJSON_AddStringToObject(body, "device", MUSE_CHAT_SPOKEN_DEVICE);
+    }
     char *json = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     size_t len = json ? strlen(json) : 0;
@@ -1259,7 +1263,7 @@ static void post_chat(const char *text)
     }
     ESP_LOGI(TAG, "heard: \"%s\"", text);
     emit(MUSE_HATCH_EV_HEARD, text);
-    send_chat(text, "text");
+    send_chat(text, "text", true);
 }
 
 /* A typed turn: the text goes straight to the chat. */
@@ -1269,7 +1273,7 @@ static void text_begin(const char *text)
         return;
     }
     ESP_LOGI(TAG, "typed turn: %u bytes", (unsigned)strlen(text));
-    send_chat(text, "text");
+    send_chat(text, "text", false);
     if (s_turn.phase == P_WAIT_REPLY) {
         mark(M_SENT);
         muse_hatch_console("sent", nullptr, "\"bytes\":%u", (unsigned)strlen(text));
@@ -2192,7 +2196,10 @@ extern "C" void muse_hatch_start(void)
     if (!s_events) {
         s_events = xQueueCreate(16, sizeof(ev_t));
     }
-    s_in = xStreamBufferCreateWithCaps(IN_BYTES, 1, MALLOC_CAP_SPIRAM);
+    /* A byte over: a stream buffer made with caps keeps one back (FreeRTOS's
+     * static buffers do), and with an odd room left, a send that fills it stops
+     * halfway through a sample. */
+    s_in = xStreamBufferCreateWithCaps(IN_BYTES + 1, 1, MALLOC_CAP_SPIRAM);
     s_out = xStreamBufferCreateWithCaps(OUT_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_turn.chunk = static_cast<uint8_t *>(psram_alloc(DICT_CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL)));
     s_turn.mp3 = static_cast<uint8_t *>(psram_alloc(MP3_BUF));
@@ -2247,7 +2254,8 @@ extern "C" void muse_hatch_turn_audio(const int16_t *pcm, size_t frames)
     }
 }
 
-/* Both ends move whole frames, so the buffer never splits one. */
+/* Both ends move whole frames, and the buffer holds a whole number of them (see
+ * its creation), so a send that fills it never splits one. */
 extern "C" size_t muse_hatch_turn_audio_wait(const int16_t *pcm, size_t frames, int wait_ms)
 {
     return xStreamBufferSend(s_in, pcm, frames * sizeof(int16_t), pdMS_TO_TICKS(wait_ms)) / sizeof(int16_t);
