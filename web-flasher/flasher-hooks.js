@@ -25,6 +25,8 @@
 //   write throws.
 // - onInstalled(port) runs when a write finishes, with the port it used.
 
+import { t } from "./i18n.js";
+
 // "303a:1001" -> { usbVendorId, usbProductId }
 const usbFilter = (id) => {
   const [vid, pid] = id.split(":").map((h) => parseInt(h, 16));
@@ -63,9 +65,7 @@ export function installFlasherHooks({ getSelection, onInstalled }) {
         if (size > 0 && size < minFlashBytes) {
           let needed = MB;
           while (needed < minFlashBytes) needed *= 2;
-          problem =
-            `This build needs ${needed / MB} MB of flash, but this board has ${size / MB} MB. ` +
-            "Check you picked the right board; nothing was changed on it.";
+          problem = t("flash.tooSmall", { needed: needed / MB, size: size / MB });
         }
         return problem;
       };

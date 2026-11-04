@@ -51,10 +51,34 @@ go one at a time, and a failed one shows what the gadget has instead.
 - The `ok` line is logged at INFO, every board's default. A build that logs
   less makes each save time out rather than report success.
 
+## Languages
+
+The page is in English, with a Japanese switch in the header. The visitor's
+choice is kept in this browser (`localStorage`); until they choose, a browser
+whose first language is Japanese gets Japanese. Every piece of text is in
+`i18n.js`, by key, in both languages: index.html marks elements with
+`data-i18n="key"` (or `data-i18n-label` for an `aria-label`), and the scripts
+call `t(key, params)`. Switching redraws all of it, status lines included.
+Text is only ever set as text, never as HTML.
+
+- Add new text to both tables. `tests/i18n.test.mjs` fails on a key missing
+  from either, on placeholders (`{name}`) or code that differ, and on visible
+  text in index.html that isn't in the table.
+- Keep names, domains, URLs, console commands and token formats as they are.
+- ESP Web Tools' install dialog has no language setting (10.4.0), so it stays
+  in English; the page says so in Japanese.
+- The Japanese was machine-translated and reviewed, reusing the contributor's
+  own Japanese for the Device settings terms. Corrections from native
+  speakers are welcome.
+
 ## Adding a board
 
 Add an entry to `boards.json`. `board` must match a `board` in the build
 matrix in `esp32.yml`; the site job fails if it doesn't.
+
+A note shown under the picker when the board is selected (which port to pick,
+backups to take first, and so on) goes in `i18n.js` as `note.<board>`, in both
+languages, with `**bold**` and `` `code` ``.
 
 | Field    | Required | Meaning |
 |----------|----------|---------|
@@ -62,7 +86,6 @@ matrix in `esp32.yml`; the site job fails if it doesn't.
 | `name`   | yes      | Name shown in the board picker. |
 | `usb`    | no       | USB devices the board's console can show up as, as `"vid:pid"` strings (see `esp32/tools/muse/ports.py`). The port picker shows only these; leave it out if you're not sure, so the right port isn't hidden. |
 | `pacing` | no       | Paced serial writes for USB bridges that drop bytes, as `{"chunk": 32, "factor": 2}`: bytes per write, and how many times as long as a chunk takes on the wire to wait after it. Leave it out for boards that flash fine without. |
-| `note`   | no       | HTML shown under the picker when the board is selected: which port to pick, backups to take first, and so on. |
 
 ## Testing locally
 
@@ -79,8 +102,9 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory /tmp/flasher/site
 To try changes to the page itself, copy `index.html` and the `.js` and
 `boards.json` files over the unpacked site and reload.
 
-Run the offline regression tests (the installer hooks and the Device settings
-protocol) with Node.js 22 or later (no board or package installation needed):
+Run the offline regression tests (the installer hooks, the Device settings
+protocol and the languages) with Node.js 22 or later (no board or package
+installation needed):
 
 ```sh
 node --test web-flasher/tests/*.test.mjs

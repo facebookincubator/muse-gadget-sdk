@@ -22,9 +22,12 @@
 // here first: never Wi-Fi, pairing or token commands (the SDK token goes
 // through sdk-token.js).
 
-export class DeviceSettingsError extends Error {
-  constructor(code, message) {
-    super(message);
+import { LocalizedError, hasString, t } from "./i18n.js";
+
+// `code` says what went wrong; the message is "error.<code>" in i18n.js.
+export class DeviceSettingsError extends LocalizedError {
+  constructor(code, params = {}) {
+    super(`error.${code}`, params);
     this.code = code;
   }
 }
@@ -41,11 +44,11 @@ export const SETTINGS = Object.freeze({
 // Returns the value as the console takes it, or throws.
 export function validateSetting(key, value) {
   const rule = Object.hasOwn(SETTINGS, key) ? SETTINGS[key] : null;
-  if (!rule) throw new DeviceSettingsError("KEY", "This page can't change that setting.");
+  if (!rule) throw new DeviceSettingsError("KEY");
   const ok = rule.boolean
     ? typeof value === "boolean"
     : Number.isInteger(value) && value >= rule.min && value <= rule.max;
-  if (!ok) throw new DeviceSettingsError("VALUE", "That value is out of range.");
+  if (!ok) throw new DeviceSettingsError("VALUE");
   return rule.boolean ? Number(value) : value;
 }
 
@@ -60,13 +63,13 @@ export function parseStatus(line) {
     status = null;
   }
   if (typeof status?.board !== "string" || !status.device || typeof status.device !== "object") {
-    throw new DeviceSettingsError("STATUS", "The gadget's status didn't make sense. Reload to try again.");
+    throw new DeviceSettingsError("STATUS");
   }
   for (const key of Object.keys(SETTINGS)) {
     try {
       validateSetting(key, status.device[key]);
     } catch {
-      throw new DeviceSettingsError("STATUS", "The gadget's status didn't make sense. Reload to try again.");
+      throw new DeviceSettingsError("STATUS");
     }
   }
   return status;
@@ -86,37 +89,14 @@ export function flattenStatus(value, path = "", depth = 0) {
   return [{ path, value }];
 }
 
-// Names for the status fields the firmware sends today. The "hatch" key is
-// the firmware's compatibility name for the Muse connection.
-export const STATUS_LABELS = Object.freeze({
-  board: "Board",
-  chat: "Chat over USB",
-  "device.name": "Name",
-  "device.fw": "Firmware",
-  "device.battery": "Battery (%)",
-  "device.wifi.on": "Wi-Fi on",
-  "device.wifi.state": "Wi-Fi",
-  "device.wifi.ssid": "Wi-Fi network",
-  "device.wifi.ip": "IP address",
-  "device.wifi.rssi": "Wi-Fi signal (dBm)",
-  "device.hatch.host": "Muse host",
-  "device.hatch.vm": "Muse VM",
-  "device.hatch.token": "Has a Muse credential",
-  "device.hatch.state": "Muse connection",
-  "device.link.paired": "Paired",
-  "device.link.state": "Link",
-  "device.volume": "Speaker volume (%)",
-  "device.speaker": "Speaker on",
-  "device.mic_gain": "Microphone gain (dB)",
-  "device.brightness": "Brightness (%)",
-  "device.sleep": "Screen sleep (seconds)",
-  "device.last": "Last command",
-});
+// Labels for the status fields the firmware sends today are
+// "status.<path>" in i18n.js. The "hatch" key is the firmware's
+// compatibility name for the Muse connection.
 
 // Rows for the status table, as plain strings (the page sets them as text).
 export function statusRows(status) {
   return flattenStatus(status).map(({ path, value }) => [
-    Object.hasOwn(STATUS_LABELS, path) ? STATUS_LABELS[path] : path,
+    hasString(`status.${path}`) ? t(`status.${path}`) : path,
     typeof value === "string" ? value : JSON.stringify(value),
   ]);
 }
@@ -150,11 +130,11 @@ export class DeviceSettingsSession {
         await this.opening;
       } catch (e) {
         this.opening = null;
-        throw new DeviceSettingsError("OPEN", `Couldn't open the port (${e.message}). Close other serial monitors and try again.`);
+        throw new DeviceSettingsError("OPEN", { error: e.message });
       }
       // Closed while opening (the board changed, an install started): give
       // the port back rather than keep a session nobody holds.
-      if (this.closing) throw new DeviceSettingsError("CLOSED", "Disconnected.");
+      if (this.closing) throw new DeviceSettingsError("CLOSED");
       // Leave EN and BOOT alone on boards whose bridge drives them, as sdk-token.js does.
       await this.port.setSignals?.({ dataTerminalReady: false, requestToSend: false }).catch(() => {});
       this.reader = this.port.readable.getReader();
@@ -169,11 +149,7 @@ export class DeviceSettingsSession {
           if (error.code !== "TIMEOUT" || !this.online) throw error;
         }
       } while (Date.now() < deadline);
-      throw new DeviceSettingsError(
-        "CONNECT_TIMEOUT",
-        "The gadget didn't answer. Settings work on boards with the Muse screen UI running firmware from this page; " +
-          "check you picked its console port, or unplug it, plug it back in and try again.",
-      );
+      throw new DeviceSettingsError("CONNECT_TIMEOUT");
     } catch (error) {
       await this.close().catch(() => {});
       throw error;
@@ -187,7 +163,7 @@ export class DeviceSettingsSession {
         if (done) break;
         this.feed(value);
       }
-      if (this.online) this.fail(new DeviceSettingsError("DISCONNECTED", "The gadget was unplugged. Connect it again."));
+      if (this.online) this.fail(new DeviceSettingsError("DISCONNECTED"));
     } catch (error) {
       if (this.online) this.fail(error);
     } finally {
@@ -222,7 +198,7 @@ export class DeviceSettingsSession {
 
   enqueue(action) {
     const task = this.queue.then(() => {
-      if (!this.online) throw new DeviceSettingsError("NOT_CONNECTED", "Connect the gadget first.");
+      if (!this.online) throw new DeviceSettingsError("NOT_CONNECTED");
       return action();
     });
     this.queue = task.catch(() => {});
@@ -241,7 +217,7 @@ export class DeviceSettingsSession {
       };
       waiter = { match, resolve: (v) => finish(resolve, v), reject: (e) => finish(reject, e) };
       waiter.timer = setTimeout(
-        () => waiter.reject(new DeviceSettingsError("TIMEOUT", "The gadget didn't answer. Reload to see its settings.")),
+        () => waiter.reject(new DeviceSettingsError("TIMEOUT")),
         timeout,
       );
       this.waiters.add(waiter);
@@ -269,13 +245,13 @@ export class DeviceSettingsSession {
         const at = line.indexOf(prefix);
         if (at < 0) return null;
         if (line.slice(at + prefix.length).trim() !== "ok") {
-          throw new DeviceSettingsError("REJECTED", "The gadget didn't accept that value.");
+          throw new DeviceSettingsError("REJECTED");
         }
         return true;
       });
       const status = await this.request("status", parseStatus);
       if (status.device[key] !== value) {
-        throw new DeviceSettingsError("READBACK", "The gadget reports a different value. Reload to see its settings.");
+        throw new DeviceSettingsError("READBACK");
       }
       return status;
     });
@@ -287,7 +263,7 @@ export class DeviceSettingsSession {
     this.closing = true;
     this.online = false;
     for (const waiter of [...this.waiters]) {
-      waiter.reject(new DeviceSettingsError("CLOSED", "Disconnected."));
+      waiter.reject(new DeviceSettingsError("CLOSED"));
     }
     this.closed = (async () => {
       // A port still opening is closed once it has opened.
@@ -304,7 +280,7 @@ export class DeviceSettingsSession {
       try {
         await this.port.close();
       } catch (e) {
-        throw new DeviceSettingsError("CLOSE", `Couldn't close the port (${e.message}). Unplug the gadget and plug it back in.`);
+        throw new DeviceSettingsError("CLOSE", { error: e.message });
       }
     })();
     return this.closed;

@@ -16,11 +16,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-// Import the browser modules without changing the site's module configuration.
-const load = async (name) => {
-  const source = await readFile(new URL(`../${name}`, import.meta.url), "utf8");
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-};
+// The browser modules, as they are (Node 22 loads them as ES modules).
+const load = (name) => import(new URL(`../${name}`, import.meta.url));
 const { DeviceSettingsSession, SETTINGS, flattenStatus, parseStatus, statusRows, validateSetting } =
   await load("device-settings.js");
 const { installPacedSerial } = await load("paced-serial.js");
@@ -288,7 +285,7 @@ test("the card loads every stored value without rounding, and draws device text 
 test("the installer and the token step stay off while the card holds or is closing a port", () => {
   // Their port pickers need the click's user activation, so the card can't
   // close its port on their click; they're disabled until it has.
-  assert.match(html, /<button slot="activate" class="button" id="install-activate">/);
+  assert.match(html, /<button slot="activate" class="button" id="install-activate"[^>]*>/);
   const render = html.slice(html.indexOf("const renderSettings"), html.indexOf("const showSettings"));
   assert.match(render, /const holding = Boolean\(settings \|\| settingsClosing\);/);
   assert.match(render, /\$\("install-activate"\)\.disabled = holding;/);
