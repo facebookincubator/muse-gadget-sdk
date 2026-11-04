@@ -8,7 +8,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The build refuses cross-signed bundle verification on ESP-IDF that leaks."""
+"""Certificate bundle checks in validate_config.cmake: the build refuses
+cross-signed verification on ESP-IDF that leaks, and warns about a stale full
+bundle."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,7 +20,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class CrossSignedBundleGuardTest(unittest.TestCase):
+class CertificateBundleConfigTest(unittest.TestCase):
     def guard(self):
         source = (ROOT / "cmake" / "validate_config.cmake").read_text()
         start = source.index("# Cross-signed bundle verification")
