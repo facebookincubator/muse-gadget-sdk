@@ -199,6 +199,38 @@ def test_decoder_handles_split_and_batched_messages():
     assert decoder.feed(data[5:]) == [{"a": 1}, {"b": 2}]
 
 
+
+@pytest.mark.parametrize("fragmented", [False, True])
+def test_decoder_handles_json_depth_limit_and_keeps_adjacent_messages(fragmented, caplog):
+    # Below the record byte limit. Older Python JSON parsers reject this depth.
+    raw = b'{"nested":' + b'[' * 10000 + b'0' + b']' * 10000 + b'}'
+    try:
+        json.loads(raw)
+    except RecursionError:
+        accepts_depth = False
+    else:
+        accepts_depth = True
+    record = struct.pack("<I", len(raw)) + raw
+    before = encode_message({"id": "before"})
+    after = encode_message({"id": "after"})
+    decoder = MessageDecoder()
+    if fragmented:
+        midpoint = len(record) // 2
+        messages = decoder.feed(before + record[:midpoint])
+        messages += decoder.feed(record[midpoint:] + after)
+    else:
+        messages = decoder.feed(before + record + after)
+    assert messages[0] == {"id": "before"}
+    assert messages[-1] == {"id": "after"}
+    if accepts_depth:
+        assert len(messages) == 3
+        assert "nested" in messages[1]
+    else:
+        assert len(messages) == 2
+        assert "dropping malformed control message" in caplog.text
+    assert decoder.feed(encode_message({"id": "later"})) == [{"id": "later"}]
+
+
 def test_decoder_rejects_oversize_messages():
     with pytest.raises(ValueError):
         MessageDecoder().feed(struct.pack("<I", 1 << 30))
