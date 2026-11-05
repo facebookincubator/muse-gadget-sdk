@@ -100,7 +100,7 @@ void muse_hatch_tail_words(const char *src, char *out, size_t cap)
 static int s_caption_px;
 static int (*s_glyph_px)(uint32_t letter, uint32_t next);
 
-void muse_hatch_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next))
+void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next))
 {
     s_caption_px = glyph_px ? width_px : 0;
     s_glyph_px = glyph_px;
@@ -147,7 +147,7 @@ static int add_glyphs(line_px_t *l, const char *s, size_t bytes, const char *sho
  * them (an ellipsis as three dots, muse_text.h), splitting only words longer
  * than a line. CJK has no spaces: it breaks between characters, but never
  * before closing punctuation. With `px`, a line also stays within px pixels
- * of the caption's font (muse_hatch_set_caption_px).
+ * of the caption's font (muse_chat_set_caption_px).
  */
 static bool next_line(const char **text, int cols, int px, const char **start, size_t *len)
 {

@@ -125,7 +125,7 @@ int main(int argc, char **argv)
             muse_text_keep_latin();
         }
         s_cols = atoi(argv[2]);
-        muse_hatch_set_caption_px(atoi(argv[3]), fake_glyph_px);
+        muse_chat_set_caption_px(atoi(argv[3]), fake_glyph_px);
         s_lines = atoi(argv[4]);
         size_t cap = argc > 5 ? (size_t)atoi(argv[5]) : MUSE_CAPTION_MAX;
         static char page[1 << 16], last[1 << 16];

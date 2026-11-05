@@ -59,6 +59,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | [waveshareteam/ESP32-P4-WIFI6-Touch-LCD-3.5](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-3.5) | `schematic/`, and the BSP component `waveshare/esp32_p4_wifi6_touch_lcd_3_5` for the pin map, LCD, touch and ES8311. C6 SDIO GPIO14–19, C6 enable GPIO54; the AXP2101 on I2C GPIO7/8 reports PWR. |
 | VIEWE SmartRing-Plus | [VIEWESMART/SmartRing-Plus](https://github.com/VIEWESMART/SmartRing-Plus). Buy: [VIEWE](https://viewedisplay.com/product/smart-ring-plus-esp32-ai-chatbot-1-8-inch-smart-touch-display/). BSP `viewesmart/smartring_plus` 1.1.2 | `schematic/` and `examples/esp-idf/` for the hardware. The BSP's `board_config.h` for pins, `lcd_init_seq.h` (B panel) for the init table, `bsp_battery.c` and `bsp_axp2101.c` for the V1 and V2 battery. Muse drives these directly, without the BSP. Audio is the board file's own 16 kHz I2S, not `bsp_audio_init()`. Muse leaves the BSP's GPIO47 soft power-off unused; power-off is the switch. See [`viewe-smartring-plus.md`](viewe-smartring-plus.md). |
 | Seeed reSpeaker Lite | [respeaker/reSpeaker_Lite](https://github.com/respeaker/reSpeaker_Lite) | `doc/images/pinout.png`, the I2C examples, `xmos_firmwares/`. |
+| SpotPear ESP32-AI-1.28 v1.0 | [Pinned reference firmware](https://github.com/tomorrow56/xiaozhi-esp32/tree/fed7f14669fddecc7a658c806ab072a972a2af97/main/boards/spotpear/spotpear-esp32-ai-1.28) | `config.h` for the old non-legged MAX98357A/NP0557 pin map; the board `.cc` for the GC9A01 and separate I2S clocks. Not the ES8311 box revision. |
 
 For the Cardputer ADV keyboard, also read [m5stack/M5Cardputer](https://github.com/m5stack/M5Cardputer), especially `src/utility/Keyboard/KeyboardReader/TCA8418.cpp` and `src/utility/Adafruit_TCA8418/`.
 
@@ -179,7 +180,7 @@ In `main/led_status.c`:
 - `led_hw_init()` turns the backlight on by driving `LCD_PIN_BL` high. A
   backlight that is active low, PWM or behind an expander needs a change there.
 
-If the panel driver isn't part of `esp_lcd` in IDF v6.0.1 (check
+If the panel driver isn't part of `esp_lcd` in IDF v6.0.3 (check
 `$IDF_PATH/components/esp_lcd`), add it to `main/idf_component.yml`, and to
 `GADGET_REQUIRES` in `main/CMakeLists.txt` under an `if()` for your backend, as
 `led_strip` is. Images from Muse are sized with

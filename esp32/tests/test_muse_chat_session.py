@@ -27,7 +27,9 @@ class ChatSession(unittest.TestCase):
         reset = source[source.index('static bool turn_start('):source.index('static void turn_begin(')]
         done = source[source.index('static void turn_done('):source.index('/* Ends any turn')]
         check = source[source.index('static void check_turn('):source.index('/* ---- Inbound dispatch')]
-        typed = source[source.index('static void text_begin('):source.index('static void on_dictation_line(')]
+        chat = source[source.index('static void send_chat('):source.index('static void on_dictation_line(')]
+        kinds = source.index('enum kind_t')
+        kinds = source[kinds:source.index('\n', kinds) + 1]
         tts = source.index('static void start_tts(void)')
         start_tts = source[tts:source.index('\n}\n', tts) + 3]
         code = r'''
@@ -100,12 +102,18 @@ int muse_chat_caption_page(const char *text, int, char *out, size_t cap) {
 }
 void muse_text_to_ascii(char *, size_t) {}
 void muse_text_to_caption(char *, size_t) {}
-static void send_chat(const char *, const char *) { s_turn.phase = P_WAIT_REPLY; }
 #endif
-''' + done + reset + handlers + start_tts + check + r'''
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-''' + typed + r'''
-#endif
+''' + kinds + r'''static char chat_body[256];
+static int64_t open_stream(kind_t kind, const char *verb, const char *path, const char *, const char *,
+                           const char *body, bool end_body) {
+    assert(kind == K_CHAT && !strcmp(verb, "POST") && !strcmp(path, "/chat/stream") && body && end_body);
+    strlcpy(chat_body, body, sizeof(chat_body));
+    return 7;
+}
+static bool send_body(int64_t, const uint8_t *, size_t, bool) { return true; }
+static void disconnect(const char *) {}
+static bool send_reset(int64_t) { return true; }
+''' + done + reset + handlers + start_tts + check + chat + r'''
 static void begin(bool typed = false) {
     clock_us = 12345;
     assert(turn_start(s_turn.gen + 1, typed));
@@ -320,6 +328,20 @@ static void typed_reply_at_cap(bool finished, bool busy) {
     assert(!strcmp(console_fields, finished && !busy ? "\"messages\":1,\"complete\":true"
                                                      : "\"messages\":1,\"complete\":false"));
 }
+/* A dictated turn names the device, so Muse keeps its reply short and plain;
+ * a typed one doesn't. Both still ask for text. */
+static void chat_request(bool spoken) {
+    chat_body[0] = '\0';
+    if (spoken) {
+        assert(turn_start(s_turn.gen + 1, false));
+        post_chat(" Hi");
+    } else {
+        text_begin("Hi");
+    }
+    assert(s_turn.phase == P_WAIT_REPLY && s_turn.text == !spoken);
+    assert(!strcmp(chat_body, spoken ? "{\"message\":\"Hi\",\"output_modality\":\"text\",\"device\":\"mcu-wearable\"}"
+                                     : "{\"message\":\"Hi\",\"output_modality\":\"text\"}"));
+}
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 static char review[40000];
 static const char *reviewed() {
@@ -431,6 +453,8 @@ int main(int argc, char **argv) {
     case 15: typed_reply_at_cap(true, false); break;
     case 16: typed_reply_at_cap(true, true); break;
     case 17: typed_reply_at_cap(false, false); break;
+    case 21: chat_request(true); break;
+    case 22: chat_request(false); break;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -539,3 +563,9 @@ int main(int argc, char **argv) {
 
     def test_watcher_review_keeps_the_caption_pace_inside_the_turn_cap(self):
         self.run_case(20, watcher=True)
+
+    def test_dictated_turns_name_the_device_and_typed_turns_do_not(self):
+        for watcher in (False, True):
+            for name, case in [('dictated', 21), ('typed', 22)]:
+                with self.subTest(turn=name, watcher=watcher):
+                    self.run_case(case, watcher=watcher)
