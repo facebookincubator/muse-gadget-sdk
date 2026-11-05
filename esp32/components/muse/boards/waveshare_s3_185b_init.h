@@ -382,4 +382,3 @@ static const st77916_lcd_init_cmd_t s_lcd_init_v2[] = {
     {0x11, (uint8_t []){0x00}, 1, 120},
     {0x29, (uint8_t []){0x00}, 1, 0},
 };
-

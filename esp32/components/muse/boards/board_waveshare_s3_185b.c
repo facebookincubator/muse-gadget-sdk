@@ -349,7 +349,7 @@ static void panel_off(void *arg)
     esp_lcd_panel_disp_on_off(s_panel, false);
 }
 
-/* There's no power latch: screen, amp and codecs off, then deep sleep until BOOT. */
+/* No verified software power latch: screen, amp and codecs off, then sleep until BOOT. */
 static esp_err_t power_off(void)
 {
     set_brightness(0);
