@@ -499,6 +499,18 @@ endif
             (about 220 KB), which still covers a push-to-talk turn. Board
             overlays with 2 MB of PSRAM turn it on.
 
+    config MUSE_TTS_STREAMING
+        bool "Stream spoken replies through a TTS provider"
+        depends on MUSE_HATCH
+        default n
+        help
+            Feed finished reply text to a provider adapter and decode its MP3
+            response while it downloads. A bounded queue applies backpressure
+            instead of discarding audio when replies exceed the staging buffer.
+            No provider is bundled. Implement muse_tts_get_provider() to select
+            an adapter; without one, replies retain reading-paced captions.
+            Provider authentication and transport belong in the adapter.
+
     config MUSE_VIDEO
         bool "Video streaming from a phone to the display"
         depends on MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31) && !MUSE_UI_FREEINK

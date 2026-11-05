@@ -165,6 +165,11 @@ jobs:
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"
+          # Compile the provider-neutral streaming path without an adapter.
+          - board: muse-waveshare-s3-175c-streaming-tts
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"
+            streaming_tts: true
           - board: muse-waveshare-s3-175
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175"
@@ -300,8 +305,13 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           DEFAULTS: sdkconfig.defaults${{ matrix.overlays }}
+          STREAMING_TTS: ${{ matrix.streaming_tts }}
         run: |
           . "$IDF_PATH/export.sh" > /dev/null
+          if [ "$STREAMING_TTS" = true ]; then
+            printf '%s\n' 'CONFIG_MUSE_TTS_STREAMING=y' > /tmp/sdkconfig.streaming-tts
+            DEFAULTS="$DEFAULTS;/tmp/sdkconfig.streaming-tts"
+          fi
           idf.py -B build -DIDF_TARGET="$TARGET" -DSDKCONFIG=build/sdkconfig \
             -DSDKCONFIG_DEFAULTS="$DEFAULTS" build
 
