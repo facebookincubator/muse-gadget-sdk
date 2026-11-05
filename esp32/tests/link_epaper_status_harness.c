@@ -15,7 +15,7 @@
  */
 
 // Host e-paper pixel harness: RGB565 to gray, gray to packed 1-bit frames,
-// and RGB565 to packed 4-bit Spectra 6 ink codes.
+// and RGB565 to packed 2-bit and 4-bit ink codes.
 // The runner extracts the production pixel code into epaper_pixels.inc.
 #include <assert.h>
 #include <stdbool.h>
@@ -89,7 +89,7 @@ static void check_rgb565_be(void) {
     assert(rgb[3] == 0x8410);
     assert(luma565(rgb[3]) >= 126 && luma565(rgb[3]) <= 134);
     for (int i = 4; i < W * H; i++) rgb[i] = 0xFFFF;
-    dither_color(rgb, codes, W, H, color_err);
+    dither_color(rgb, codes, W, H, color_err, 4);
     assert(codes[0] == 0x36);
     assert(codes[1] >> 4 == 5);
     assert((codes[1] & 0x0F) <= 1);
@@ -130,14 +130,14 @@ static void check_dither(void) {
 }
 
 static void check_color_dither(void) {
-    assert(nearest_ink(0, 255, 255) == 4);
+    assert(nearest_ink(0, 255, 255, 6) == 4);
     // Each ink's own colour comes through exactly, as its controller code.
     const struct { uint16_t px; int code; } inks[] = {
         {0x0000, 0}, {0xFFFF, 1}, {0xFFE0, 2}, {0xF800, 3}, {0x001F, 5}, {0x07E0, 6},
     };
     for (size_t i = 0; i < sizeof(inks) / sizeof(inks[0]); i++) {
         fill_rgb(inks[i].px);
-        dither_color(rgb, codes, W, H, color_err);
+        dither_color(rgb, codes, W, H, color_err, 4);
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) assert(code_at(x, y) == inks[i].code);
         }
@@ -149,7 +149,7 @@ static void check_color_dither(void) {
     rgb[1] = 0x001F;
     rgb[W] = 0xF800;
     rgb[W + 1] = 0x001F;
-    dither_color(rgb, codes, W, H, color_err);
+    dither_color(rgb, codes, W, H, color_err, 4);
     assert(codes[0] == 0x35);
     assert(codes[1] == 0x11);
     assert(codes[W / 2] == 0x35);
@@ -159,7 +159,7 @@ static void check_color_dither(void) {
     const uint16_t grays[] = {0x2104, 0x8410, 0x8411, 0xC618};
     for (size_t g = 0; g < sizeof(grays) / sizeof(grays[0]); g++) {
         fill_rgb(grays[g]);
-        dither_color(rgb, codes, W, H, color_err);
+        dither_color(rgb, codes, W, H, color_err, 4);
         int white = 0;
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
@@ -173,7 +173,7 @@ static void check_color_dither(void) {
     }
 
     fill_rgb(0x07FF);
-    dither_color(rgb, codes, W, H, color_err);
+    dither_color(rgb, codes, W, H, color_err, 4);
     int blue = 0;
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) blue += code_at(x, y) == 5;
@@ -182,7 +182,7 @@ static void check_color_dither(void) {
 
     // Orange mixes red and yellow, and nothing else.
     fill_rgb(0xFC00);
-    dither_color(rgb, codes, W, H, color_err);
+    dither_color(rgb, codes, W, H, color_err, 4);
     int red = 0, yellow = 0;
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
@@ -195,13 +195,51 @@ static void check_color_dither(void) {
     assert(red > W * H / 4 && yellow > W * H / 4);
 }
 
+static void check_four_color_dither(void) {
+    uint8_t packed[W * H / 4 + 1];
+    const struct { uint16_t px; uint8_t byte; } inks[] = {
+        {0x0000, 0x00}, {0xFFFF, 0x55}, {0xFFE0, 0xAA}, {0xF800, 0xFF},
+    };
+    for (size_t i = 0; i < sizeof(inks) / sizeof(inks[0]); i++) {
+        fill_rgb(inks[i].px);
+        memset(packed, 0xA5, sizeof(packed));
+        dither_color(rgb, packed, W, H, color_err, 2);
+        for (size_t j = 0; j < sizeof(packed) - 1; j++) assert(packed[j] == inks[i].byte);
+        assert(packed[sizeof(packed) - 1] == 0xA5);
+    }
+
+    // Black/white split within a byte: leftmost pixel in the top two bits.
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) rgb[y * W + x] = x < 2 ? 0x0000 : 0xFFFF;
+    }
+    dither_color(rgb, packed, W, H, color_err, 2);
+    for (int y = 0; y < H; y++) {
+        assert(packed[y * W / 4] == 0x05);
+        for (int x = 1; x < W / 4; x++) assert(packed[y * W / 4 + x] == 0x55);
+    }
+
+    // Blue must be dithered to the four inks, not packed as Spectra 6 code 5:
+    // nearly all black, the rest white.
+    fill_rgb(0x001F);
+    dither_color(rgb, packed, W, H, color_err, 2);
+    int black = 0;
+    for (int i = 0; i < W * H; i++) {
+        int c = packed[i / 4] >> (6 - 2 * (i % 4)) & 3;
+        assert(c == 0 || c == 1);
+        black += c == 0;
+    }
+    assert(black > W * H * 9 / 10);
+}
+
 int main(void) {
     check_luma();
     check_rgb565_be();
     check_dither();
     check_gray4();
     check_color_dither();
+    check_four_color_dither();
     puts("PASS epaper pixels: RGB565 luma, exact black and white, bit order, checkerboard, gray levels as dot density; "
-         "exact Spectra 6 inks, nibble order, grays in black and white, orange as red and yellow");
+         "exact Spectra 6 inks, nibble order, grays in black and white, orange as red and yellow; "
+         "four-colour inks, packed byte count and pixel order");
     return 0;
 }

@@ -93,12 +93,11 @@ class LinkPairingHandshakeTest(unittest.TestCase):
                 crypto / "include", crypto / "drivers/builtin/include", crypto / "core",
                 crypto / "drivers/builtin/src", built_crypto / "core",
             ]
-            libraries = [
-                built_crypto / "core/libtfpsacrypto.a",
-                built_crypto / "drivers/builtin/libbuiltin.a",
-                built_crypto / "drivers/everest/libeverest.a",
-                built_crypto / "drivers/p256-m/libp256m.a",
-            ]
+            # Every archive the tfpsacrypto target built: the set and the names
+            # differ between TF-PSA-Crypto releases (ESP-IDF v6.0.1 has 1.0,
+            # v6.0.3 has 1.1).
+            core = built_crypto / "core/libtfpsacrypto.a"
+            libraries = [core, *sorted(set(built_crypto.rglob("*.a")) - {core})]
             for enabled in (False, True):
                 with self.subTest(manufacturer_attestation=enabled):
                     executable = temp / f"pairing-{int(enabled)}"

@@ -1,0 +1,12 @@
+{
+  "description": "Self-authored synthetic voice protocol fixture; no captured calls or user data.",
+  "session_id": "00000000-0000-0000-0000-000000000001",
+  "thread_id": "00000000-0000-0000-0000-000000000002",
+  "events": [
+    {"type": "session.created", "session": {"id": "synthetic"}},
+    {"type": "response.done", "response": {"id": "synthetic-greeting", "status": "cancelled"}},
+    {"type": "future.synthetic.event", "extra": {"ignored": true}},
+    {"type": "hatch.voice.turn_settled"}
+  ],
+  "audio_format": {"type": "", "rate": 24000}
+}

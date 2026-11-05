@@ -6,40 +6,33 @@
  * GT911, PDM mic, BQ27220 and SD on the panel's SPI2 bus.
  * Hardware reference: Seeed-reTerminal-E10xx-Firmware, factory_fw
  * main/boards/reterminal_e1005/config.h and reterminal_e1005.cpp (MIT,
- * Copyright (c) 2026 JoJang2u). The panel sequence is separately licensed
- * in main/epd_ssd1677.c.
+ * Copyright (c) 2026 JoJang2u). FreeInk drives the panel (its "sticky"
+ * profile), and Muse's e-ink layer draws on it (eink/).
  */
-#include <string.h>
-
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_pdm.h"
 #include "esp_check.h"
-#include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
-#include "esp_sleep.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_link.h"
-#include "muse_mem.h"
-#include "../../../main/epd_panel.h"
+#include "eink/muse_eink.h"
 #if CONFIG_MUSE_STICKY_SD
+#include "driver/spi_master.h"
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #endif
 
 #define SCREEN_W 480
 #define SCREEN_H 800
-#define FRAME_BYTES (SCREEN_W * SCREEN_H * 2)
-#define GRAY_BYTES (SCREEN_W * SCREEN_H / 4)
 
 static const char *TAG = "sticky";
 static muse_gpio_button_t s_ai, s_up, s_down;
@@ -51,15 +44,8 @@ static i2s_chan_handle_t s_mic;
 static sdmmc_card_t *s_card;
 static SemaphoreHandle_t s_sd_lock;
 #endif
-static lv_display_t *s_disp;
-static lv_indev_t *s_indev;
-static SemaphoreHandle_t s_lv_lock, s_started;
-static TaskHandle_t s_ui_task, s_epd_task;
-static esp_err_t s_start_err;
-static uint16_t *s_frame;
-static uint8_t *s_gray, *s_shown;
-static bool s_dirty, s_shown_valid, s_paused, s_was_pressed, s_mic_on;
-static int64_t s_last_flush_us, s_dirty_since_us, s_gauge_log_us;
+static bool s_was_pressed, s_mic_on;
+static int64_t s_gauge_log_us;
 
 static esp_err_t gauge_connect(void)
 {
@@ -72,6 +58,26 @@ static esp_err_t gauge_connect(void)
     };
     return i2c_master_bus_add_device(s_sensor_bus, &gauge, &s_gauge);
 }
+
+static esp_err_t touch_start(void);
+#if CONFIG_MUSE_STICKY_SD
+static esp_err_t sd_bus_init(void)
+{
+    /* The panel is write-only; the SD card also needs its MISO line. FreeInk
+     * reuses this already-initialized bus without changing its pins. */
+    const spi_bus_config_t bus = {
+        .mosi_io_num = GPIO_NUM_14,
+        .miso_io_num = GPIO_NUM_12,
+        .sclk_io_num = GPIO_NUM_13,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4096,
+    };
+    return spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO);
+}
+
+static void sd_task(void *arg);
+#endif
 
 static esp_err_t init(void)
 {
@@ -118,6 +124,14 @@ static esp_err_t init(void)
     if (err != ESP_OK) err = i2c_new_master_bus(&cfg, &s_sensor_bus);
     ESP_RETURN_ON_ERROR(err, TAG, "sensor I2C");
     if (gauge_connect() != ESP_OK) ESP_LOGW(TAG, "BQ27220 not responding; retrying later");
+    if (touch_start() != ESP_OK) ESP_LOGW(TAG, "GT911 unavailable; buttons remain active");
+#if CONFIG_MUSE_STICKY_SD
+    ESP_RETURN_ON_ERROR(sd_bus_init(), TAG, "shared SD/panel SPI bus");
+    s_sd_lock = xSemaphoreCreateMutex();
+    if (!s_sd_lock || xTaskCreate(sd_task, "sticky_sd", 4096, NULL, 2, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "SD hotplug monitor unavailable");
+    }
+#endif
     return ESP_OK;
 }
 
@@ -162,71 +176,26 @@ static esp_err_t touch_start(void)
     return esp_lcd_touch_new_i2c_gt911(io, &tp, &s_touch);
 }
 
+/* The digitizer counts rows from the bottom. */
 static uint16_t sticky_touch_y(uint16_t raw)
 {
     return raw < SCREEN_H ? SCREEN_H - 1 - raw : 0;
 }
 
-static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
+static bool touch_read(int16_t *x, int16_t *y)
 {
-    (void)indev;
-    data->state = LV_INDEV_STATE_RELEASED;
-    if (!s_touch || esp_lcd_touch_read_data(s_touch) != ESP_OK) return;
     esp_lcd_touch_point_data_t point;
     uint8_t count = 0;
-    if (esp_lcd_touch_get_data(s_touch, &point, &count, 1) != ESP_OK || !count) {
+    if (!s_touch || esp_lcd_touch_read_data(s_touch) != ESP_OK ||
+        esp_lcd_touch_get_data(s_touch, &point, &count, 1) != ESP_OK || !count) {
         s_was_pressed = false;
-        return;
+        return false;
     }
-    data->point.x = point.x < SCREEN_W ? point.x : SCREEN_W - 1;
-    data->point.y = sticky_touch_y(point.y);
-    data->state = LV_INDEV_STATE_PRESSED;
+    *x = point.x < SCREEN_W ? point.x : SCREEN_W - 1;
+    *y = sticky_touch_y(point.y);
     if (!s_was_pressed && muse_link_state() == MUSE_LINK_CONFIRM) muse_link_talk_press();
     s_was_pressed = true;
-}
-
-static uint32_t tick_ms(void)
-{
-    return (uint32_t)(esp_timer_get_time() / 1000);
-}
-
-static void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
-{
-    (void)area;
-    (void)px;
-    int64_t now = esp_timer_get_time();
-    if (!s_dirty) s_dirty_since_us = now;
-    s_dirty = true;
-    s_last_flush_us = now;
-    lv_display_flush_ready(disp);
-    if (s_epd_task) xTaskNotifyGive(s_epd_task);
-}
-
-static esp_err_t display_init(void)
-{
-    const epd_panel_t *panel = epd_panel_get();
-    ESP_RETURN_ON_FALSE(panel->update_gray4, ESP_ERR_NOT_SUPPORTED, TAG, "gray4 panel");
-    ESP_RETURN_ON_ERROR(panel->init(), TAG, "SSD1677");
-    s_frame = heap_caps_calloc(FRAME_BYTES, 1, MALLOC_CAP_SPIRAM);
-    s_gray = heap_caps_malloc(GRAY_BYTES, MALLOC_CAP_SPIRAM);
-    s_shown = heap_caps_malloc(GRAY_BYTES, MALLOC_CAP_SPIRAM);
-    ESP_RETURN_ON_FALSE(s_frame && s_gray && s_shown, ESP_ERR_NO_MEM, TAG, "e-paper buffers");
-    if (touch_start() != ESP_OK) ESP_LOGW(TAG, "GT911 unavailable; buttons remain active");
-    lv_init();
-    lv_tick_set_cb(tick_ms);
-    s_disp = lv_display_create(SCREEN_W, SCREEN_H);
-    ESP_RETURN_ON_FALSE(s_disp, ESP_ERR_NO_MEM, TAG, "LVGL display");
-    lv_display_set_color_format(s_disp, LV_COLOR_FORMAT_RGB565);
-    lv_display_set_buffers(s_disp, s_frame, NULL, FRAME_BYTES, LV_DISPLAY_RENDER_MODE_DIRECT);
-    lv_display_set_flush_cb(s_disp, flush);
-    if (s_touch) {
-        s_indev = lv_indev_create();
-        ESP_RETURN_ON_FALSE(s_indev, ESP_ERR_NO_MEM, TAG, "LVGL touch");
-        lv_indev_set_type(s_indev, LV_INDEV_TYPE_POINTER);
-        lv_indev_set_read_cb(s_indev, touch_read);
-        lv_indev_set_display(s_indev, s_disp);
-    }
-    return ESP_OK;
+    return true;
 }
 
 #if CONFIG_MUSE_STICKY_SD
@@ -266,143 +235,6 @@ static void sd_task(void *arg)
     }
 }
 #endif
-
-static void rgb565_to_gray4(uint8_t *dst, const uint16_t *src, int width, int height)
-{
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x += 4) {
-            uint8_t packed = 0;
-            for (int k = 0; k < 4; k++) {
-                uint16_t px = src[(size_t)y * width + x + k];
-                int r = (px >> 11) & 31, g = (px >> 5) & 63, b = px & 31;
-                int luma = (77 * (r * 255 / 31) + 150 * (g * 255 / 63)
-                            + 29 * (b * 255 / 31)) >> 8;
-                packed = (uint8_t)(packed << 2 | (luma * 3 + 127) / 255);
-            }
-            dst[(size_t)y * (width / 4) + x / 4] = packed;
-        }
-    }
-}
-
-static bool gray4_needs_refresh(const uint8_t *frame, const uint8_t *shown,
-                                size_t bytes, bool shown_valid)
-{
-    return !shown_valid || memcmp(frame, shown, bytes) != 0;
-}
-
-/* Refresh once the screen has been still for 700 ms, so a burst of LVGL
- * changes costs one panel refresh. Something that never stops changing
- * (an animation) still gets one every 3 s rather than none. */
-static bool gray4_refresh_due(int64_t now_us, int64_t last_flush_us, int64_t dirty_since_us)
-{
-    return now_us - last_flush_us >= 700000 || now_us - dirty_since_us >= 3000000;
-}
-
-static void epd_task(void *arg)
-{
-    (void)arg;
-    const epd_panel_t *panel = epd_panel_get();
-    bool settling = true;   /* LVGL may have flushed before this task existed */
-    for (;;) {
-        /* A change still settling needs a timer; otherwise (paused, or
-         * nothing new) the next flush wakes us, so the chip can sleep. */
-        ulTaskNotifyTake(pdTRUE, settling ? pdMS_TO_TICKS(250) : portMAX_DELAY);
-        xSemaphoreTakeRecursive(s_lv_lock, portMAX_DELAY);
-        bool update = s_dirty && !s_paused &&
-                      gray4_refresh_due(esp_timer_get_time(), s_last_flush_us, s_dirty_since_us);
-        if (update) {
-            s_dirty = false;
-            rgb565_to_gray4(s_gray, s_frame, SCREEN_W, SCREEN_H);
-            update = gray4_needs_refresh(s_gray, s_shown, GRAY_BYTES, s_shown_valid);
-        }
-        settling = s_dirty && !s_paused;
-        xSemaphoreGiveRecursive(s_lv_lock);
-        if (update) {
-            esp_err_t err = panel->update_gray4(s_gray);
-            if (err == ESP_OK) {
-                memcpy(s_shown, s_gray, GRAY_BYTES);
-                s_shown_valid = true;
-            } else {
-                xSemaphoreTakeRecursive(s_lv_lock, portMAX_DELAY);
-                s_dirty = true;
-                xSemaphoreGiveRecursive(s_lv_lock);
-                settling = true;   /* try again */
-                vTaskDelay(pdMS_TO_TICKS(1000));
-            }
-        }
-    }
-}
-
-static void lvgl_task(void *arg)
-{
-    (void)arg;
-    s_start_err = display_init();
-    xSemaphoreGive(s_started);
-    if (s_start_err != ESP_OK) vTaskDelete(NULL);
-    for (;;) {
-        if (s_paused) {
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-            continue;
-        }
-        xSemaphoreTakeRecursive(s_lv_lock, portMAX_DELAY);
-        uint32_t ms = lv_timer_handler();
-        xSemaphoreGiveRecursive(s_lv_lock);
-        ms = ms < 10 ? 10 : ms > 100 ? 100 : ms;
-        vTaskDelay(pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1);
-    }
-}
-
-static lv_display_t *display_start(lv_indev_t **touch)
-{
-    s_lv_lock = xSemaphoreCreateRecursiveMutex();
-    s_started = xSemaphoreCreateBinary();
-    if (!s_lv_lock || !s_started ||
-        xTaskCreatePinnedToCoreWithCaps(lvgl_task, "sticky_ui", 8192, NULL, MUSE_UI_PRIORITY,
-                                        &s_ui_task, MUSE_UI_CORE,
-                                        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) != pdPASS) return NULL;
-    xSemaphoreTake(s_started, portMAX_DELAY);
-    if (s_start_err != ESP_OK) return NULL;
-    *touch = s_indev;
-    if (xTaskCreatePinnedToCore(epd_task, "sticky_epd", 4096, NULL, 3, &s_epd_task,
-                                MUSE_UI_CORE) != pdPASS) return NULL;
-#if CONFIG_MUSE_STICKY_SD
-    s_sd_lock = xSemaphoreCreateMutex();
-    if (!s_sd_lock || xTaskCreate(sd_task, "sticky_sd", 4096, NULL, 2, NULL) != pdPASS) {
-        ESP_LOGW(TAG, "SD hotplug monitor unavailable");
-    }
-#endif
-    return s_disp;
-}
-
-static bool display_lock(int timeout_ms)
-{
-    return xSemaphoreTakeRecursive(s_lv_lock,
-                                   timeout_ms < 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
-}
-
-static void display_unlock(void)
-{
-    xSemaphoreGiveRecursive(s_lv_lock);
-}
-
-static void display_pause(bool pause)
-{
-    xSemaphoreTakeRecursive(s_lv_lock, portMAX_DELAY);
-    s_paused = pause;
-    if (!pause) s_dirty = false;
-    xSemaphoreGiveRecursive(s_lv_lock);
-    if (!pause) xTaskNotifyGive(s_ui_task);
-}
-
-static void set_brightness(int pct)
-{
-    (void)pct;
-}
-
-static void panel_sleep(bool sleep)
-{
-    (void)sleep;
-}
 
 static esp_err_t mic_init(void)
 {
@@ -529,15 +361,10 @@ static const muse_board_t s_board = {
     .touch_talk = true,
     .diagonal_in = 3.97f,
     .talk_button = "AI button",
-    .talk_hint = {LV_ALIGN_BOTTOM_MID, 0, -50},
-    .frame_ms = 1000,
+    .frame_ms = 700,    /* about the fastest a fast refresh (610 ms) keeps up with */
     .init = init,
-    .display_start = display_start,
-    .display_lock = display_lock,
-    .display_unlock = display_unlock,
-    .set_brightness = set_brightness,
-    .panel_sleep = panel_sleep,
-    .display_pause = display_pause,
+    .display_pause = muse_eink_display_pause,
+    .touch_read = touch_read,
     .mic_init = mic_init,
     .mic_power = mic_power,
     .mic_read = mic_read,

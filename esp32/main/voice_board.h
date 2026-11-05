@@ -51,5 +51,10 @@ void voice_board_set_volume(int percent);
 // Hardware mute state: true when the microphones are off or unreadable.
 bool voice_board_muted(void);
 
+// True when the audio chip reported at start-up that the channel this board
+// reads is echo-cancelled against the speaker, so the mic can stay open while
+// it plays. False when it didn't say, or the board can't tell.
+bool voice_board_echo_cancelled(void);
+
 // Dial detents since the last call: positive clockwise, zero without a dial.
 int voice_board_dial_steps(void);

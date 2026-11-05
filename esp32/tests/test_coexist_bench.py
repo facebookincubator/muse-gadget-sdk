@@ -48,15 +48,23 @@ class BenchServerTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.server = _load_server()
 
+    @contextlib.contextmanager
     def _http(self):
         httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self.server.TunnelHTTP)
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        self.addCleanup(httpd.shutdown)
-        return http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=10)
+        httpd.daemon_threads = False
+        worker = threading.Thread(target=httpd.serve_forever, daemon=True)
+        worker.start()
+        conn = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=10)
+        try:
+            yield conn
+        finally:
+            conn.close()
+            httpd.shutdown()
+            httpd.server_close()  # Join handlers before stdout capture ends.
+            worker.join()
 
     def test_blob_streams_the_requested_bytes(self) -> None:
-        conn = self._http()
-        with contextlib.redirect_stdout(io.StringIO()) as out:
+        with contextlib.redirect_stdout(io.StringIO()) as out, self._http() as conn:
             conn.request("GET", "/blob?bytes=200000")
             resp = conn.getresponse()
             body = resp.read()
@@ -66,8 +74,7 @@ class BenchServerTest(unittest.TestCase):
         self.assertRegex(out.getvalue(), r"http GET /blob 200000 B in [0-9.]+ s")
 
     def test_sink_counts_the_body(self) -> None:
-        conn = self._http()
-        with contextlib.redirect_stdout(io.StringIO()) as out:
+        with contextlib.redirect_stdout(io.StringIO()) as out, self._http() as conn:
             conn.request("POST", "/sink", body=b"x" * 150000)
             resp = conn.getresponse()
             body = resp.read().decode()
@@ -76,10 +83,11 @@ class BenchServerTest(unittest.TestCase):
         self.assertRegex(out.getvalue(), r"http POST /sink 150000 B in")
 
     def test_other_paths_are_not_found(self) -> None:
-        conn = self._http()
-        with contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()), self._http() as conn:
             conn.request("GET", "/nope")
-            self.assertEqual(conn.getresponse().status, 404)
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 404)
 
     def test_tcp_directions(self) -> None:
         # "TX": the device sends and the server counts; "RX": the server sends.

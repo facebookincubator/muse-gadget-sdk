@@ -271,7 +271,10 @@ class MuseTurn:
         return held
 
     def expect_follow_up(self) -> None:
-        """Hold events until :meth:`acknowledge` binds one more user message to this request."""
+        """Hold events until :meth:`acknowledge` binds one more user message to this request.
+
+        Until then the turn is neither complete nor settled.
+        """
         self.acknowledged = False
 
     def feed(self, event: dict) -> list[TurnEvent]:
@@ -322,8 +325,11 @@ class MuseTurn:
         self._replies[message_id] = replace(self._replies[message_id], done=True)
 
     def complete(self, now: float) -> bool:
-        """Muse is done answering: every reply is done and Muse is idle, finished or quiet."""
-        return (not self.busy
+        """Muse is done answering: every reply is done and Muse is idle, finished or quiet.
+
+        Never true while an acknowledgement is outstanding.
+        """
+        return (self.acknowledged and not self.busy
                 and (not self._unanswered_follow_up_ids or now - self.last_activity >= DETAIL_REPLY_QUIET_S)
                 and all(reply.done for reply in self._replies.values())
                 and (self.task_finished or now - self.last_activity >= REPLY_QUIET_S))
@@ -331,9 +337,10 @@ class MuseTurn:
     def settled(self, now: float) -> bool:
         """Muse finished the task, every reply is done, and no late text arrived within the grace period.
 
-        A settled turn whose replies hold nothing to present is an empty answer.
+        A settled turn whose replies hold nothing to present is an empty answer. Never true
+        while an acknowledgement is outstanding.
         """
-        return (self.task_finished and not self.busy and not self._unanswered_follow_up_ids
+        return (self.acknowledged and self.task_finished and not self.busy and not self._unanswered_follow_up_ids
                 and all(reply.done for reply in self._replies.values())
                 and now - self.last_activity >= (EMPTY_REPLY_GRACE_S if self._replies else REPLY_QUIET_S))
 
@@ -351,7 +358,14 @@ class MuseTurn:
         parent = payload.get("reply_to_message_id") or payload.get("parent_message_id")
         message_id = payload.get("message_id")
         reply = self._replies.get(message_id) if isinstance(message_id, str) else None
-        explicitly_linked = parent in self._user_ids or (reply is not None and reply.bound)
+        parent_reply = self._replies.get(parent) if isinstance(parent, str) else None
+        parent_linked = parent in self._user_ids or (parent_reply is not None and parent_reply.bound)
+        # Shared chats also carry statuses for other requests. Reject an explicit
+        # foreign parent before it can change completion, activity or follow-ups.
+        # Parentless statuses retain the existing compatibility behavior.
+        if not scoped and parent and not parent_linked:
+            return []
+        explicitly_linked = parent_linked or (reply is not None and reply.bound)
         terminal = isinstance(status, str) and status in _TERMINAL_TASK_STATUSES
         was_finished = self.task_finished
         task_id = payload.get("task_id")
