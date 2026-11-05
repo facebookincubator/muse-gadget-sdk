@@ -43,6 +43,7 @@ typedef struct {
     bool interrupt;
     bool pause;
     bool steady;            /* sustained voice to show every gesture family */
+    bool working;           /* a call's Muse busy on work (pose.working) */
 } anim_t;
 
 static const anim_t ANIMS[] = {
@@ -50,6 +51,7 @@ static const anim_t ANIMS[] = {
     { "idle", MUSE_MODE_IDLE, 6.0f, 5 },
     { "listening", MUSE_MODE_LISTENING, 4.0f, 0, .talky = true },
     { "thinking", MUSE_MODE_THINKING, 4.0f, 0 },
+    { "working", MUSE_MODE_THINKING, 4.0f, 0, .working = true },
     { "speaking_caption", MUSE_MODE_SPEAKING, 12.0f, 0 },
     { "speaking_variety", MUSE_MODE_SPEAKING, 12.0f, 0, .talky = true, .steady = true },
     { "speaking", MUSE_MODE_SPEAKING, 4.0f, 0, .talky = true },
@@ -116,6 +118,7 @@ int main(int argc, char **argv)
                 .mode_t = an->start_mode_t + rt,
                 .level = an->talky ? speech_level(rt) : 0,
                 .happy = an->pet ? happiness(rt - 0.5f) : 0,
+                .working = an->working ? 1.0f : 0,
             };
             /* Modes that start at 0 hold their first frame during warm-up. */
             if (p.mode_t < 0) {
