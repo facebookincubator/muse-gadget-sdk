@@ -38,10 +38,17 @@ typedef struct {
     float mode_t;    /* seconds in current mode */
     float level;     /* 0..1 live audio level */
     float happy;     /* 0..1 pet reaction */
+    float working;   /* 0 or 1 in THINKING: a call's Muse is busy on work it was asked
+                      * for, nothing playing. A renderer that ignores it shows THINKING. */
 } muse_pose_t;
 
 /* Accent colour of a mode (for the surrounding UI), as 0xRRGGBB. */
 uint32_t muse_pixel_accent(muse_mode_t mode);
+
+/* Optional: the accent of the working pose (pose->working), as 0xRRGGBB, so
+ * the UI around the avatar matches it. 0, or a renderer without it (the UI
+ * links a weak default), keeps THINKING's accent. */
+uint32_t muse_pixel_working_accent(void);
 
 /* Render one frame into Muse's own MUSE_PX_W x MUSE_PX_H grid. */
 void muse_pixel_render(const muse_pose_t *pose);
