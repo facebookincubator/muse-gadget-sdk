@@ -10,7 +10,7 @@
  * No control commands, unsealing, calibration or capacity writes here.
  */
 static inline esp_err_t waveshare_185b_gauge_word(i2c_master_dev_handle_t gauge,
-                                                uint8_t reg, uint16_t *value)
+                                               uint8_t reg, uint16_t *value)
 {
     uint8_t data[2];
     esp_err_t err = i2c_master_transmit_receive(gauge, &reg, 1, data, sizeof(data), 100);
@@ -21,7 +21,7 @@ static inline esp_err_t waveshare_185b_gauge_word(i2c_master_dev_handle_t gauge,
 }
 
 static inline esp_err_t waveshare_185b_read_power(i2c_master_dev_handle_t gauge,
-                                                bool usb, muse_power_t *out)
+                                               bool usb, muse_power_t *out)
 {
     /* A failed/partial read must clear the previous sample, never become 0%.
      * Keep USB detection independent of the gauge so unplugging still works.

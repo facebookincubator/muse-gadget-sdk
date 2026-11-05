@@ -78,6 +78,16 @@ static esp_lcd_touch_handle_t s_tp;
 static esp_codec_dev_handle_t s_spk, s_mic;
 static muse_gpio_button_t s_boot;
 
+/* Match the ST77916 QSPI update windows used by the 1.85C driver. */
+static void round_area(lv_event_t *e)
+{
+    lv_area_t *a = lv_event_get_param(e);
+    a->x1 &= ~1;
+    a->y1 &= ~1;
+    a->x2 |= 1;
+    a->y2 |= 1;
+}
+
 static esp_err_t init(void)
 {
     /* Release the amp and backlight pins held low by power_off(). */
@@ -138,12 +148,18 @@ static void pick_init(const uint8_t id[4], st77916_vendor_config_t *vendor)
 /* As on the Waveshare 1.75C, the bands go out through fixed internal buffers. */
 static lv_display_t *display_start(lv_indev_t **touch)
 {
+    *touch = NULL;
     /* Reset the panel first so its ID reads back, as the BSP does. */
     const gpio_config_t rst = { .pin_bit_mask = BIT64(LCD_RST), .mode = GPIO_MODE_OUTPUT };
-    gpio_config(&rst);
-    gpio_set_level(LCD_RST, 0);
+    if (gpio_config(&rst) != ESP_OK || gpio_set_level(LCD_RST, 0) != ESP_OK) {
+        ESP_LOGE(TAG, "panel reset low");
+        return NULL;
+    }
     vTaskDelay(pdMS_TO_TICKS(10));
-    gpio_set_level(LCD_RST, 1);
+    if (gpio_set_level(LCD_RST, 1) != ESP_OK) {
+        ESP_LOGE(TAG, "panel reset high");
+        return NULL;
+    }
     vTaskDelay(pdMS_TO_TICKS(10));
 
     const spi_bus_config_t bus =
@@ -160,7 +176,11 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (esp_lcd_panel_io_rx_param(s_io, (0x0B << 24) | (0x04 << 8), id, sizeof(id)) != ESP_OK) {
         ESP_LOGW(TAG, "panel id unreadable");
     }
-    esp_lcd_panel_io_del(s_io);
+    if (esp_lcd_panel_io_del(s_io) != ESP_OK) {
+        ESP_LOGE(TAG, "panel ID IO cleanup");
+        return NULL;
+    }
+    s_io = NULL;
     io_cfg.pclk_hz = LCD_HZ;
     if (esp_lcd_new_panel_io_spi(LCD_HOST, &io_cfg, &s_io) != ESP_OK) {
         return NULL;
@@ -176,9 +196,12 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (esp_lcd_new_panel_st77916(s_io, &panel_cfg, &s_panel) != ESP_OK) {
         return NULL;
     }
-    esp_lcd_panel_reset(s_panel);
-    esp_lcd_panel_init(s_panel);
-    esp_lcd_panel_disp_on_off(s_panel, true);
+    if (esp_lcd_panel_reset(s_panel) != ESP_OK ||
+        esp_lcd_panel_init(s_panel) != ESP_OK ||
+        esp_lcd_panel_disp_on_off(s_panel, true) != ESP_OK) {
+        ESP_LOGE(TAG, "panel initialization");
+        return NULL;
+    }
 
     esp_lv_adapter_config_t adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
     adapter_cfg.task_core_id = MUSE_UI_CORE;
@@ -201,6 +224,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (!disp) {
         return NULL;
     }
+    lv_display_add_event_cb(disp, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
 
     esp_lcd_panel_io_handle_t tp_io;
     esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
@@ -316,6 +340,9 @@ static unsigned poll_buttons(void)
 
 static esp_err_t read_power(muse_power_t *out)
 {
+    /* Native USB detects a host, not VBUS from a charge-only adapter. */
+    *out = (muse_power_t){ .battery_pct = -1, .usb = usb_serial_jtag_is_connected() };
+    esp_err_t err = ESP_OK;
     if (!s_gauge) {
         const i2c_device_config_t cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -324,12 +351,14 @@ static esp_err_t read_power(muse_power_t *out)
         };
         /* Optional gauge: a failed allocation/read must not prevent the UI
          * from starting. Retry on the next normal power poll. */
-        i2c_master_bus_add_device(s_i2c, &cfg, &s_gauge);
+        err = i2c_master_bus_add_device(s_i2c, &cfg, &s_gauge);
     }
-    /* Native USB detects a host, not VBUS from a charge-only adapter. */
-    esp_err_t err = waveshare_185b_read_power(s_gauge, usb_serial_jtag_is_connected(), out);
-    static esp_err_t last_err = ESP_FAIL;
-    if (err != last_err) {
+    if (err == ESP_OK) {
+        err = waveshare_185b_read_power(s_gauge, out->usb, out);
+    }
+    static esp_err_t last_err;
+    static bool logged;
+    if (!logged || err != last_err) {
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "BQ27220: battery %d%%, %d mV, charging=%d", out->battery_pct,
                      out->battery_mv, out->charging);
@@ -337,6 +366,7 @@ static esp_err_t read_power(muse_power_t *out)
             ESP_LOGW(TAG, "BQ27220 reading unavailable: %s", esp_err_to_name(err));
         }
         last_err = err;
+        logged = true;
     }
     /* Publish unknown on failure instead of leaving a stale percentage/USB
      * flag in shared state. The helper initializes every output field. */

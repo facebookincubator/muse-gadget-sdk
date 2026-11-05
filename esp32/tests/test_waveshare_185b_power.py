@@ -14,16 +14,15 @@ class Waveshare185bPower(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
         cls.binary = Path(cls.tmp.name) / "185b_power"
-        subprocess.run([
+        built = subprocess.run([
             *shlex.split(os.environ.get("CC", "cc")), "-std=c11", "-Wall", "-Wextra", "-Werror",
             "-I", str(ROOT / "tests/pmu_fakes"), "-I", str(ROOT / "components/muse"),
             str(ROOT / "tests/waveshare_185b_power_harness.c"), "-o", str(cls.binary),
-        ], check=True, capture_output=True, text=True)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
+        ], capture_output=True, text=True)
+        if built.returncode:
+            raise AssertionError(built.stderr)
 
     def samples(self, *samples):
         defaults = dict(status=8, operation=32, mv=3876, soc=57, current=0,
