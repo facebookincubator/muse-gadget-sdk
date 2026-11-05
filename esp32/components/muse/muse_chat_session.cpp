@@ -78,6 +78,9 @@ extern "C" {
 }
 #include "muse_chat_priv.h"
 #include "sdkconfig.h"
+#if CONFIG_MUSE_TTS_STREAMING
+#include "muse_tts_stream.h"
+#endif
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call_priv.h"
 #endif
@@ -267,6 +270,15 @@ struct turn_t {
     int tts_msg;             /* message being fetched (or shown, speaker off), or -1 */
     bool silent;             /* speaker off: tts_msg is paced by silence, not fetched */
     uint8_t *mp3;            /* MP3_BUF */
+#if CONFIG_MUSE_TTS_STREAMING
+    char *speech[MAX_MSGS];
+    bool speech_overflow[MAX_MSGS];
+    size_t speech_bytes, speech_received;
+    uint64_t speech_id;
+    bool speech_failed;
+    int64_t speech_start_us, speech_progress_us, speech_total_us;
+    uint32_t speech_pcm;
+#endif
     size_t mp3_len;
     bool mp3_ended;
     mp3dec_t dec;
@@ -995,6 +1007,11 @@ static void turn_reset_streams(void)
 
 static void turn_finish(void)
 {
+#if CONFIG_MUSE_TTS_STREAMING
+    muse_tts_cancel();
+    for (auto &text : s_turn.speech) { heap_caps_free(text); text = nullptr; }
+    s_turn.speech_bytes = 0;
+#endif
     turn_reset_streams();
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
@@ -1016,6 +1033,9 @@ static void turn_fail(const char *why)
 /* Ends the turn once its reply is in; `complete` is false when it was cut off. */
 static void turn_done(bool complete)
 {
+#if CONFIG_MUSE_TTS_STREAMING
+    complete = complete && !s_turn.speech_failed;
+#endif
     if (s_turn.text) {
         muse_hatch_console("done", nullptr, "\"messages\":%d,\"complete\":%s", s_turn.nmsgs,
                            complete ? "true" : "false");
@@ -1388,9 +1408,35 @@ static size_t whole_chars(const char *s, size_t n)
     return c >= 0xc0 && n - (lead - 1) < need ? lead - 1 : n;
 }
 
+#if CONFIG_MUSE_TTS_STREAMING
+// Separate from captions: bounded, full text for synthesis; never speak a prefix.
+static void retain_speech(msg_t &m, const char *text, bool replace)
+{
+    if (s_turn.text) return;
+    int i = &m - s_turn.msgs;
+    if (s_turn.speech_overflow[i] && !replace) return;
+    size_t old = s_turn.speech[i] ? strlen(s_turn.speech[i]) + 1 : 0;
+    size_t used = replace || !old ? 0 : old - 1;
+    size_t need = used + strlen(text) + 1;
+    if (need > 32 * 1024 || s_turn.speech_bytes - old + need > 128 * 1024) {
+        s_turn.speech_overflow[i] = true;
+        return;
+    }
+    auto *grown = static_cast<char *>(heap_caps_realloc(s_turn.speech[i], need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!grown) { s_turn.speech_overflow[i] = true; return; }
+    memcpy(grown + used, text, strlen(text) + 1);
+    s_turn.speech[i] = grown;
+    s_turn.speech_bytes = s_turn.speech_bytes - old + need;
+    s_turn.speech_overflow[i] = false;
+}
+#endif
+
 static void append_text(msg_t &m, const char *text)
 {
     size_t add = strlen(text);
+#if CONFIG_MUSE_TTS_STREAMING
+    retain_speech(m, text, false);
+#endif
     if (s_turn.texts) {
         char *full = s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX;
         if (!m.len) {
@@ -1468,6 +1514,9 @@ static void message_done(int i, const char *final_text)
     if (!m.len && final_text && final_text[0]) {
         append_text(m, final_text);
     }
+#if CONFIG_MUSE_TTS_STREAMING
+    if (final_text && final_text[0]) retain_speech(m, final_text, true);
+#endif
     if (m.len && m.tts == TTS_NONE) {
         m.tts = TTS_QUEUED;
     }
@@ -1593,21 +1642,36 @@ static void start_tts(void)
         if (m.tts != TTS_QUEUED) {
             continue;
         }
-        /*
-         * Replies are text, shown at reading pace: silence in place of speech
-         * paces the captions and ends the turn. To speak them instead, send
-         * the message's text (s_turn.texts + i * TEXT_MAX, if texts was
-         * allocated; up to TEXT_MAX - 1 bytes) to a TTS API of your choice and
-         * play the MP3 it returns. In place of the silence below: keep
-         * m.tts = TTS_ACTIVE and s_turn.tts_msg = i, set s_turn.silent = false,
-         * m.pcm_start = s_turn.pcm_out, m.pcm_frames = 0, s_turn.mp3_len = 0,
-         * s_turn.mp3_ended = false, s_turn.kbps = 0, s_turn.down_rate = 0 and
-         * mp3dec_init(&s_turn.dec). Then, on this task, pass the MP3 to
-         * tts_data() as it arrives (it buffers up to MP3_BUF and drops the
-         * rest, so hold off while it's full) and set s_turn.mp3_ended at the
-         * end. decode() plays it at the speaker's volume, captions following,
-         * and finishes the message once it's drained.
-         */
+#if CONFIG_MUSE_TTS_STREAMING
+        muse_tts_provider provider = muse_tts_get_provider();
+        if (muse_settings_speaker_on() && provider) {
+            if (muse_tts_busy()) return; // Wait for cancelled worker cleanup.
+            static uint64_t next_id;
+            uint64_t id = ++next_id;
+            if (!s_turn.speech_overflow[i] && s_turn.speech[i] &&
+                muse_tts_start(id, s_turn.speech[i], provider)) {
+                s_turn.speech_id = id;
+                s_turn.speech_received = 0;
+                ESP_LOGI(TAG, "TTS stream started (%u text bytes)", (unsigned)strlen(s_turn.speech[i]));
+                s_turn.speech_start_us = s_turn.speech_progress_us = now_us();
+                s_turn.speech_pcm = s_turn.pcm_out;
+                s_turn.tts_msg = i;
+                s_turn.silent = false;
+                m.tts = TTS_ACTIVE;
+                m.pcm_start = s_turn.pcm_out;
+                m.pcm_frames = 0;
+                s_turn.mp3_len = 0;
+                s_turn.mp3_ended = false;
+                s_turn.kbps = s_turn.down_rate = 0;
+                mp3dec_init(&s_turn.dec);
+                mark(M_TTS);
+                show_reply_start(m);
+                return;
+            }
+            ESP_LOGW(TAG, "TTS text unavailable, limit exceeded, or worker allocation failed");
+            s_turn.speech_failed = true;
+        }
+#endif
         m.pcm_start = s_turn.pcm_out;
         /* Paced to the text kept: a reply longer than CAPTION_TEXT shows what
          * was kept at reading pace, not stretched over the whole reply's time
@@ -1633,6 +1697,43 @@ static void tts_data(const uint8_t *data, size_t len)
     memcpy(s_turn.mp3 + s_turn.mp3_len, data, len);
     s_turn.mp3_len += len;
 }
+
+#if CONFIG_MUSE_TTS_STREAMING
+static void poll_tts(void)
+{
+    if (s_turn.tts_msg < 0 || s_turn.silent) return;
+    // Speaker off mutes PCM in muse_audio_write(); keep the stream and captions progressing.
+    size_t n = muse_tts_read(s_turn.speech_id, s_turn.mp3 + s_turn.mp3_len, MP3_BUF - s_turn.mp3_len);
+    if (n) { mark(M_MP3); s_turn.mp3_len += n; s_turn.speech_received += n; }
+    if (s_turn.pcm_out != s_turn.speech_pcm) {
+        s_turn.speech_pcm = s_turn.pcm_out;
+        s_turn.speech_progress_us = now_us();
+    }
+    int64_t elapsed = now_us() - s_turn.speech_start_us;
+    if (now_us() - s_turn.speech_progress_us > 30000000LL ||
+        s_turn.speech_total_us + elapsed > 600000000LL) {
+        ESP_LOGW(TAG, "TTS playback stalled or exceeded speech limit");
+        turn_done(false);
+        return;
+    }
+    muse_tts_result result;
+    if (!s_turn.mp3_ended && muse_tts_end(s_turn.speech_id, &result)) {
+        s_turn.mp3_ended = true;
+        ESP_LOGI(TAG, "TTS stream ended: %u MP3 bytes, %s", (unsigned)s_turn.speech_received,
+                 result == muse_tts_result::ok ? "complete" : "interrupted");
+        if (result != muse_tts_result::ok) {
+            ESP_LOGW(TAG, "TTS stream interrupted");
+            s_turn.speech_failed = true;
+            // Before any audio arrived, preserve reading-paced fallback.
+            if (!s_turn.mp3_len && s_turn.pcm_out == s_turn.msgs[s_turn.tts_msg].pcm_start) {
+                auto &m = s_turn.msgs[s_turn.tts_msg];
+                m.pcm_frames = (uint32_t)((s_turn.texts ? CAPTION_LEN(s_turn.texts + s_turn.tts_msg * TEXT_MAX) : m.len) * MIC_RATE / TEXT_CHARS_PER_S);
+                s_turn.silent = true;
+            }
+        }
+    }
+}
+#endif
 
 static void tts_end(stream_t *s, bool ok)
 {
@@ -1728,6 +1829,13 @@ static void decode(void)
     }
     if (s_turn.mp3_ended && !s_turn.mp3_len) {
         m.pcm_frames = s_turn.pcm_out - m.pcm_start;
+#if CONFIG_MUSE_TTS_STREAMING
+        if (!s_turn.kbps) {
+            ESP_LOGW(TAG, "TTS stream contained no decodable MP3 audio");
+            s_turn.speech_failed = true;
+        }
+        s_turn.speech_total_us += now_us() - s_turn.speech_start_us;
+#endif
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
     }
@@ -1752,7 +1860,11 @@ static void check_turn(void)
             break;
         }
     }
-    if (t - s_turn.start_us > (text ? TEXT_TURN_CAP_US : TURN_CAP_US)) {
+    bool speaking = false;
+#if CONFIG_MUSE_TTS_STREAMING
+    speaking = s_turn.tts_msg >= 0 && !s_turn.silent;
+#endif
+    if (!speaking && t - s_turn.start_us > (text ? TEXT_TURN_CAP_US : TURN_CAP_US)) {
         ESP_LOGW(TAG, "turn hit the time cap");
         /* A voice turn that waited out the cap on a busy agent got no reply at all. */
         if (!text && !s_turn.nmsgs) {
@@ -1962,7 +2074,11 @@ static bool poll_socket(void)
     static HeaderView hdrs[16];
     for (int budget = 0; budget < 8; budget++) {
         /* Hold off while the MP3 buffer is nearly full: TCP pushes back on the VM. */
-        if (s_turn.tts_msg >= 0 && MP3_BUF - s_turn.mp3_len < MP3_POLL_ROOM) {
+        if (s_turn.tts_msg >= 0
+#if CONFIG_MUSE_TTS_STREAMING
+            && !s_turn.speech_id
+#endif
+            && MP3_BUF - s_turn.mp3_len < MP3_POLL_ROOM) {
             return true;
         }
 #if CONFIG_MUSE_REALTIME_VOICE
@@ -2137,6 +2253,9 @@ static void hatch_task(void *arg)
         }
         if (s_turn.phase == P_WAIT_REPLY) {
             start_tts();
+#if CONFIG_MUSE_TTS_STREAMING
+            poll_tts();
+#endif
             decode();
         }
         if (!s_connected) {
