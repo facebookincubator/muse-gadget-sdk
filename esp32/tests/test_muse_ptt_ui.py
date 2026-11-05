@@ -95,6 +95,17 @@ class StopWatchPTT(unittest.TestCase):
                                      'UBSAN_OPTIONS': 'halt_on_error=1:print_stacktrace=1'})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_reply_ring_advances_without_rewinding_and_resets_per_message(self):
+        self.run_case('voice', 43)
+
+    def test_reply_ring_clears_on_incomplete_error_and_interruption(self):
+        for scenario in (44, 45, 46):
+            self.run_case('voice', scenario)
+
+    def test_reply_completion_is_visible_but_ptt_still_interrupts(self):
+        self.run_case('voice', 43)
+        self.run_case('voice', 47)
+
     def test_release_tail_is_sample_bounded_even_with_fast_reads(self):
         self.run_case('voice', 22)
 

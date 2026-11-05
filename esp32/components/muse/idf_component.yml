@@ -18,7 +18,9 @@ dependencies:
   espressif/cjson: "~1.7"
   # Video over Wi-Fi announces itself with it (muse_video_wifi.c).
   espressif/mdns:
-    version: "^1.8"
+    # 1.15.0 fails GCC's -Werror=stringop-truncation in mdns_receive.c.
+    # Keep the version verified by the ESP-IDF v6.0.3 video builds.
+    version: "1.14.1"
     rules:
       - if: "$CONFIG{MUSE_VIDEO_MDNS} == \"y\""
   lvgl/lvgl:
