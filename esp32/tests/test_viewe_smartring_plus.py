@@ -102,6 +102,12 @@ class SmartRingPlusBoard(unittest.TestCase):
         self.assertIn('disp_cfg.profile.require_double_buffer = true;', start)
         self.assertRegex(self.source, r'#define DRAW_BUF_LINES 10\b')
 
+    def test_screen_size_matches_the_vendor(self):
+        # VIEWE's SmartRing-Plus README: a 1.85-inch round 360x360 panel.
+        self.assertIn('.diagonal_in = 1.85f,', self.source)
+        devices = (ROOT / 'devices/README.md').read_text()
+        self.assertIn('| **VIEWE SmartRing-Plus** | ESP32-S3 | 1.85" 360×360 round LCD', devices)
+
     def test_panel_keeps_the_vendor_table_inversion(self):
         # VIEWE's B-panel table ends with INVON; a later invert_color(false)
         # would send INVOFF and invert every colour.

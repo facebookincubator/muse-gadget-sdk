@@ -400,7 +400,7 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .touch_talk = true,
-    .diagonal_in = 1.39f,
+    .diagonal_in = 1.85f,
     .talk_button = "screen microphone",
     /* The talk button's centre: under the caption, above the page dots. */
     .talk_hint = {LV_ALIGN_CENTER, 0, 132},

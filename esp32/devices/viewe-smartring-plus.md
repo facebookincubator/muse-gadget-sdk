@@ -70,8 +70,8 @@ Reset pairing again within 5 seconds. The board restarts.
 
 ## Build
 
-This repository documents ESP-IDF v6.0.1. See Hardware verification below for
-what was checked on the board.
+Activate **ESP-IDF v6.0.3**, as this repository requires. See Hardware
+verification below for what was checked on the board.
 
 On Linux or macOS, from `esp32`:
 
