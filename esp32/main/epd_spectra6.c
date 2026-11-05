@@ -22,6 +22,7 @@
 // (github.com/esphome/esphome, esphome/components/epaper_spi).
 
 #include "epd_panel.h"
+#include "reterminal_e100x_board.h"
 
 #include <string.h>
 
@@ -36,15 +37,15 @@
 static const char *TAG = "link.led";
 
 #define EPD_HOST        SPI2_HOST
-#define EPD_PIN_SCLK    7
-#define EPD_PIN_MOSI    9
-#define EPD_PIN_CS      10
-#define EPD_PIN_DC      11
-#define EPD_PIN_RST     12
-#define EPD_PIN_BUSY    13
+#define EPD_PIN_SCLK    E100X_SPI_SCLK_GPIO
+#define EPD_PIN_MOSI    E100X_SPI_MOSI_GPIO
+#define EPD_PIN_CS      E100X_PANEL_CS_GPIO
+#define EPD_PIN_DC      E100X_PANEL_DC_OR_DRIVE_GPIO
+#define EPD_PIN_RST     E100X_PANEL_RESET_GPIO
+#define EPD_PIN_BUSY    E100X_PANEL_READY_GPIO
 #define EPD_SPI_HZ      (10 * 1000 * 1000)
-#define EPD_W           800
-#define EPD_H           480
+#define EPD_W           E100X_WIDTH
+#define EPD_H           E100X_HEIGHT
 #define EPD_ROW_BYTES   (EPD_W / 2)
 #define EPD_FRAME_BYTES (EPD_ROW_BYTES * EPD_H)
 #define EPD_CHUNK_BYTES 4000
@@ -116,7 +117,11 @@ static esp_err_t spectra6_init(void) {
     const spi_bus_config_t bus = {
         .sclk_io_num = EPD_PIN_SCLK,
         .mosi_io_num = EPD_PIN_MOSI,
+#if CONFIG_HOMEHUB_RETERMINAL_E100X_HARDWARE
+        .miso_io_num = E100X_SPI_MISO_GPIO, // SD shares SPI2 with the panel.
+#else
         .miso_io_num = -1,
+#endif
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = EPD_CHUNK_BYTES,

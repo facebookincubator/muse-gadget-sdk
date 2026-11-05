@@ -32,6 +32,8 @@
 
 static uint8_t gray[W * H];
 static uint8_t bits[W / 8 * H];
+static uint8_t gray_old[W / 8 * H];
+static uint8_t gray_new[W / 8 * H];
 static int16_t err[2 * (W + 2)];
 static uint16_t rgb[W * H];
 static uint8_t codes[W / 2 * H];
@@ -126,6 +128,30 @@ static void check_dither(void) {
         int expect = W * H * levels[l] / 255;
         int got = white_count();
         assert(got > expect - W * H / 50 && got < expect + W * H / 50);
+    }
+}
+
+static void check_gray4_planes(void) {
+    memset(gray, 0, sizeof(gray));
+    dither_gray4_planes(gray, gray_old, gray_new, W, H, err);
+    for (size_t i = 0; i < sizeof(gray_old); i++) {
+        assert(gray_old[i] == 0xFF && gray_new[i] == 0xFF);
+    }
+    memset(gray, 255, sizeof(gray));
+    dither_gray4_planes(gray, gray_old, gray_new, W, H, err);
+    for (size_t i = 0; i < sizeof(gray_old); i++) {
+        assert(gray_old[i] == 0x00 && gray_new[i] == 0x00);
+    }
+    const uint8_t levels[] = {0, 85, 170, 255, 0, 85, 170, 255};
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) gray[y * W + x] = levels[x % 8];
+    }
+    dither_gray4_planes(gray, gray_old, gray_new, W, H, err);
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W / 8; x++) {
+            assert(gray_old[y * W / 8 + x] == 0xAA);
+            assert(gray_new[y * W / 8 + x] == 0xCC);
+        }
     }
 }
 
@@ -236,6 +262,7 @@ int main(void) {
     check_rgb565_be();
     check_dither();
     check_gray4();
+    check_gray4_planes();
     check_color_dither();
     check_four_color_dither();
     puts("PASS epaper pixels: RGB565 luma, exact black and white, bit order, checkerboard, gray levels as dot density; "

@@ -77,6 +77,7 @@ static size_t g_largest_block = 100000;
 static size_t g_min_dma_free;
 static unsigned g_alloc_calls, g_fail_alloc;
 static bool g_fail_task;
+static bool g_draw_done_ok = true;
 static size_t g_body_bytes, g_pressure_after_body;
 static int g_width = WIDTH;
 
@@ -93,6 +94,7 @@ static void reset_memory(void) {
     g_min_dma_free = 200000;
     g_alloc_calls = g_fail_alloc = 0;
     g_fail_task = false;
+    g_draw_done_ok = true;
     g_body_bytes = g_pressure_after_body = 0;
     g_width = WIDTH;
 }
@@ -511,10 +513,35 @@ bool led_status_display_info(int *width, int *height) {
 }
 
 static int g_rows_drawn;
+static int g_gray_begins;
+static int g_mono_begins, g_gray16_begins, g_partial_begins, g_partial_cancels;
+static bool g_partial_baseline_ready = true;
 static size_t g_next_byte;
 
 // Every body is the pattern (uint8_t)offset, so the screen must get it in
 // order, nothing lost or repeated.
+void led_status_draw_begin(void) {
+    g_mono_begins++;
+}
+
+void led_status_draw_begin_gray4(void) {
+    g_gray_begins++;
+}
+
+void led_status_draw_begin_gray16(void) {
+    g_gray16_begins++;
+}
+
+bool led_status_draw_begin_partial(int x, int y, int w, int h) {
+    (void)x; (void)y; (void)w; (void)h;
+    g_partial_begins++;
+    return g_partial_baseline_ready;
+}
+
+void led_status_draw_cancel_partial(void) {
+    g_partial_cancels++;
+}
+
 bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
     (void)x;
     (void)y;
@@ -526,7 +553,8 @@ bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
     return true;
 }
 
-void led_status_draw_done(void) {
+bool led_status_draw_done(void) {
+    return g_draw_done_ok;
 }
 
 JRESULT jd_prepare(JDEC *jd, UINT (*infunc)(JDEC *, BYTE *, UINT), void *pool,
@@ -554,6 +582,9 @@ static bool g_done;
 
 static void on_done(const image_fetch_result_t *result, void *user) {
     (void)user;
+    CHECK(g_internal_used == g_stack && !g_external_used,
+          "completion ran before fetch buffers were freed: %zu internal / %zu external",
+          g_internal_used, g_external_used);
     g_result = *result;
     snprintf(g_message, sizeof(g_message), "%s", result->message ? result->message : "");
     g_result.message = g_message;
@@ -623,6 +654,79 @@ static void test_same_scheme_redirects_are_followed(void) {
     CHECK(g_opens == 3, "expected 3 opens, got %d", g_opens);
     CHECK(g_rows_drawn == 6, "expected 6 rows, got %d", g_rows_drawn);
 }
+
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+static void test_gray4_entry_uses_gray_canvas(void) {
+    reset_server();
+    add_response((response_t){.status = 200, .body_len = ROW_BYTES});
+    const char *code = NULL, *message = NULL;
+    int before = g_gray_begins;
+    g_done = false;
+    g_next_byte = 0;
+    CHECK(image_fetch_start_gray4("http://host/gray", 0, on_done, NULL, &code, &message),
+          "gray start refused: %s", message ? message : "");
+    CHECK(g_done && g_result.ok, "gray download failed");
+    CHECK(g_gray_begins == before + 1, "gray image did not select gray canvas");
+}
+#endif
+
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+static void test_e1003_partial_requires_monochrome_baseline(void) {
+    reset_server();
+    g_width = 16;
+    add_response((response_t){.status = 200, .body_len = ROW_BYTES});
+    const char *code = NULL, *message = NULL;
+    g_partial_baseline_ready = false;
+    g_done = false;
+    CHECK(image_fetch_start_partial("http://host/partial", 0, 0, 16, 1,
+                                    on_done, NULL, &code, &message),
+          "partial start refused: %s", message ? message : "");
+    CHECK(g_done && !g_result.ok && strcmp(g_result.code, "invalid_state") == 0,
+          "missing monochrome baseline code: %s", g_result.code);
+    expect_failure("partial refresh requires a full monochrome image first");
+    g_partial_baseline_ready = true;
+
+    CHECK(!image_fetch_start_partial("http://host/partial", 1, 0, 16, 1,
+                                     on_done, NULL, &code, &message),
+          "misaligned partial rectangle was accepted");
+    CHECK(strcmp(code, "invalid_params") == 0, "invalid rectangle code: %s", code);
+}
+
+static void test_e1003_modes_stay_independent_of_vm_source(void) {
+    reset_server();
+    add_response((response_t){.status = 200, .body_len = ROW_BYTES});
+    const char *code = NULL, *message = NULL;
+    int before = g_gray16_begins;
+    g_done = false;
+    g_next_byte = 0;
+    CHECK(image_fetch_start_gray16("http://host/gray16", 0, on_done, NULL, &code, &message),
+          "gray16 start refused: %s", message ? message : "");
+    CHECK(g_done && g_result.ok && g_gray16_begins == before + 1,
+          "gray16 image did not use its canvas");
+
+    reset_server();
+    g_width = 16;
+    add_response((response_t){.status = 200, .body_len = ROW_BYTES});
+    before = g_partial_cancels;
+    g_done = false;
+    g_next_byte = 0;
+    CHECK(image_fetch_start_partial("http://host/partial", 0, 0, 16, 1,
+                                    on_done, NULL, &code, &message),
+          "partial start refused: %s", message ? message : "");
+    CHECK(g_done && !g_result.ok && g_partial_begins > 0
+          && g_partial_cancels == before + 1, "partial failure did not roll back");
+
+    reset_server();
+    reset_vm(ROW_BYTES);
+    int mono_before = g_mono_begins;
+    int gray_before = g_gray16_begins;
+    int partial_before = g_partial_begins;
+    fetch_vm("ordinary.raw");
+    CHECK(g_result.ok && g_mono_begins == mono_before + 1
+          && g_gray16_begins == gray_before && g_partial_begins == partial_before,
+          "draw_file changed the E1003 display mode");
+}
+#endif
 
 static void test_trickled_body_hits_the_deadline(void) {
     reset_server();
@@ -910,6 +1014,15 @@ static void test_vm_session_drop(void) {
     CHECK(g_rows_drawn == 0, "a partial file is not drawn");
 }
 
+static void test_vm_display_failure_is_reported(void) {
+    reset_server();
+    reset_vm(2 * ROW_BYTES);
+    g_draw_done_ok = false;
+    fetch_vm("display-fails.raw");
+    expect_failure("display refresh failed");
+    CHECK(strcmp(g_result.code, "invalid_image") == 0, "code %s", g_result.code);
+}
+
 static void test_vm_timeout_drops_late_frames(void) {
     reset_server();
     reset_vm(5 * ROW_BYTES);
@@ -953,6 +1066,13 @@ int main(void) {
     test_https_redirect_to_http_is_refused();
     test_scheme_check_ignores_case();
     test_same_scheme_redirects_are_followed();
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+    test_gray4_entry_uses_gray_canvas();
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    test_e1003_partial_requires_monochrome_baseline();
+    test_e1003_modes_stay_independent_of_vm_source();
+#endif
     test_trickled_body_hits_the_deadline();
     test_slow_redirect_chain_stops_at_the_limit();
     test_vm_file_is_drawn();
@@ -968,6 +1088,7 @@ int main(void) {
     test_vm_post_allocation_budget();
     test_vm_startup_failures_release_memory();
     test_vm_session_drop();
+    test_vm_display_failure_is_reported();
     test_vm_timeout_drops_late_frames();
     test_vm_refusals();
     puts("image_fetch harness: ok");

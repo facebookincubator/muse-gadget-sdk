@@ -198,12 +198,17 @@ class LinkUnpairStorageContractTest(unittest.TestCase):
 #define xTaskCreate(...) create_restart_task()
 #define stack_monitor_record(...) ((void)0)
 typedef struct { bool setup_credentials_cleared; } ws_control_args_t;
-static bool gate_held;
-static int task_result, releases, restarts, reboots, frees;
+static bool gate_held, power_held;
+static int task_result, releases, power_releases, restarts, reboots, frees;
 static void operation_gate_give(void) {
     assert(gate_held);
     gate_held = false;
     releases++;
+}
+static void setup_control_power_end(void) {
+    assert(power_held);
+    power_held = false;
+    power_releases++;
 }
 static int create_restart_task(void) {
     assert(gate_held);
@@ -231,10 +236,12 @@ static void check(bool cleared, int restart_result, bool expect_held,
                   int expect_reboots) {
     ws_control_args_t args = {.setup_credentials_cleared = cleared};
     gate_held = true;
+    power_held = true;
     task_result = restart_result;
-    releases = restarts = reboots = frees = 0;
+    releases = power_releases = restarts = reboots = frees = 0;
     assert(worker_failed(&args) == -1);
     assert(gate_held == expect_held && releases == !expect_held);
+    assert(power_held == expect_held && power_releases == !expect_held);
     assert(restarts == cleared && reboots == expect_reboots);
     assert(frees == 1);
 }

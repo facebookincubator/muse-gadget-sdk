@@ -38,12 +38,12 @@ typedef struct {
 
 typedef void (*image_fetch_done_cb)(const image_fetch_result_t *result, void *user);
 
-// `row` for a JPEG centred down the screen, on boards with the full UI only.
+// `row` for a JPEG centred down the screen on Muse UI and E1002.
 #define IMAGE_FETCH_CENTRE (-1)
 
-// `row` when the command gives none: boards with the full UI centre a JPEG, and the display
-// backends draw from the top.
-#if CONFIG_HOMEHUB_LED_BACKEND_MUSE
+// `row` when the command gives none: Muse UI and E1002 centre a JPEG;
+// other display backends draw from the top.
+#if CONFIG_HOMEHUB_LED_BACKEND_MUSE || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
 #define IMAGE_FETCH_DEFAULT_ROW IMAGE_FETCH_CENTRE
 #else
 #define IMAGE_FETCH_DEFAULT_ROW 0
@@ -52,7 +52,7 @@ typedef void (*image_fetch_done_cb)(const image_fetch_result_t *result, void *us
 // Download an image over HTTP(S) and draw it as it arrives, starting at
 // `row`, with the status on top. Takes a baseline JPEG, shrunk 1/2, 1/4 or
 // 1/8 as needed to fit and centred across, or raw RGB565 (high byte first)
-// in whole screen-width rows. On boards with the full UI, `row` may also be
+// in whole screen-width rows. On Muse UI and E1002, `row` may also be
 // IMAGE_FETCH_CENTRE, which centres a JPEG down the screen (raw data starts at
 // the top). E-paper shows it once it is all in. One download runs at a time,
 // on its own task, and only when there is memory to spare.
@@ -70,6 +70,15 @@ bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
 // image_fetch_start.
 bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
                           void *user, const char **code, const char **message);
+// E1001 only: the same input formats, rendered with its physical four-gray waveform.
+bool image_fetch_start_gray4(const char *url, int row, image_fetch_done_cb done,
+                             void *user, const char **code, const char **message);
+bool image_fetch_start_gray16(const char *url, int row, image_fetch_done_cb done,
+                              void *user, const char **code, const char **message);
+// E1003: image dimensions must exactly match the aligned update rectangle.
+bool image_fetch_start_partial(const char *url, int x, int y, int w, int h,
+                               image_fetch_done_cb done, void *user,
+                               const char **code, const char **message);
 
 #ifdef __cplusplus
 }
