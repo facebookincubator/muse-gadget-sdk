@@ -468,15 +468,24 @@ class _ReplyReader:
         self.user_ids: set[str] | None = None
         self.after_note = False
         self.last_seq = 0
+        self.last_user_seq = 0
         self.held: list[dict] = []
         self.held_text = 0
 
     def take(self, event: dict) -> None:
         seq = event.get("seq")
         if isinstance(seq, int) and not isinstance(seq, bool):
-            if seq <= self.last_seq:
-                return
-            self.last_seq = seq
+            # Persisted user messages can have lower sequence numbers than
+            # live status/delta events already received on this subscription.
+            # Comparing the two drops our own message and never opens the answer.
+            if event.get("event") == "message.user":
+                if seq <= self.last_user_seq:
+                    return
+                self.last_user_seq = seq
+            else:
+                if seq <= self.last_seq:
+                    return
+                self.last_seq = seq
         if self.user_ids is None:
             if len(self.held) >= MAX_HELD_EVENTS:
                 raise ValueError("too many chat events before Muse acknowledged the message")

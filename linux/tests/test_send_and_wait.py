@@ -268,6 +268,56 @@ def test_a_new_side_chat_is_created_by_the_message_then_followed():
     run(scenario())
 
 
+@pytest.mark.parametrize("ack_first", [False, True])
+def test_user_sequence_below_live_sequence_opens_the_answer(ack_first):
+    reader = service_module._ReplyReader(service_module.MuseTurn("main"))
+    if ack_first:
+        reader.acknowledge(ACK["response"], fresh=False)
+    # The user event's persisted sequence can trail status events already seen.
+    reader.take(dict(event("task.status", status="running"), seq=100))
+    reader.take(dict(NOTE, seq=90))
+    reader.take(dict(event("delta.message_start", "r1"), seq=101))
+    delta = dict(event("delta.text_append", "r1", parent="r1", text="Four."), seq=102)
+    reader.take(delta)
+    reader.take(delta)  # duplicate suppression must still protect streamed text
+    reader.take(dict(event("delta.message_done", "r1"), seq=103))
+    if not ack_first:
+        reader.acknowledge(ACK["response"], fresh=False)
+    assert reader.turn.replies["r1"].text == "Four."
+    assert reader.turn.replies["r1"].done
+
+
+def test_replayed_user_event_does_not_reopen_an_answer_closed_by_another_user():
+    reader = service_module._ReplyReader(service_module.MuseTurn("main"))
+    reader.acknowledge(ACK["response"], fresh=False)
+    own_note = dict(NOTE, seq=90)
+    reader.take(own_note)
+    reader.take(dict(event("agent.status", activity_code="thinking"), seq=100))
+    reader.take(dict(event("message.user", "app-1", role="user"), seq=91))
+    assert not reader.after_note
+    reader.take(own_note)
+    assert not reader.after_note
+    reader.take(dict(event("message.assistant", "app-answer", display_text="For the app"), seq=101))
+    assert not reader.turn.replies
+
+
+def test_existing_side_chat_returns_reply_after_lower_sequence_user_event():
+    async def scenario():
+        ack = {**ACK, "response": {"message_id": "u1", "session_id": "side", "is_thread": True}}
+        session = ChatSession(ack=ack)
+        rows = [event("task.status", status="completed"), *ANSWER]
+        sequences = [100, 90, *range(101, 101 + len(ANSWER) - 1)]
+        session.answer([
+            {**row, "seq": seq, "payload": {**row["payload"], "session_id": "side"}}
+            for row, seq in zip(rows, sequences)
+        ])
+        result = await send_and_wait(session, send_of(session, session_id="side"), "side", 5)
+        assert result == {**ack, "reply": "Four."}
+        assert [entry[0] for entry in session.log] == ["subscribe", "send"]
+
+    run(scenario())
+
+
 def test_a_stalled_transport_cannot_hold_the_caller_past_its_deadline():
     async def scenario():
         release = asyncio.Event()
