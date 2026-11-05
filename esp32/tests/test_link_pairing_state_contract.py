@@ -55,13 +55,14 @@ class LinkPairingStateContractTest(unittest.TestCase):
         self.assertIn("setup_disconnect_to_clean()", body)
         self.assertIn("disconnect_vm_transports()", disconnect)
         self.assertIn("wifi_mgr_disconnect()", disconnect)
-        self.assertIn("clear_setup_credentials()", body)
+        self.assertIn("clear_setup_credentials(scope)", body)
         self.assertIn("config_unpair()", clear)
-        self.assertNotIn("config_clear_setup()", clear)
+        self.assertIn("config_clear_setup()", clear)
         # Device tokens now refresh on rejection, not on a timer. Reset every
         # part of the VM-auth retry cadence so a later pair starts fresh.
         locked = clear[clear.index("auth_lock_take()") : clear.index("auth_lock_give()")]
         self.assertIn("s_last_vm_auth_refresh_attempt_us = 0", locked)
+        self.assertIn("s_last_vm_auth_refusal_us = 0", locked)
         self.assertIn("s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US", locked)
         self.assertIn("s_vm_auth_refusals = 0", locked)
 
@@ -94,7 +95,8 @@ class LinkPairingStateContractTest(unittest.TestCase):
         body = _function_body(APP_C.read_text(), "static void setup_fail_for_session(")
 
         self.assertIn('setup_stage_set("failed")', body)
-        self.assertIn("setup_wipe_to_clean()", body)
+        # A failed (re-)pair keeps saved Wi-Fi.
+        self.assertIn("setup_wipe_to_clean(SETUP_RESET_KEEP_WIFI)", body)
         self.assertIn("ble_server_send_status(reported_status)", body)
         self.assertIn('cleared ? status : "error_storage"', body)
         self.assertIn("led_status_set_state(LED_STATE_ERROR)", body)
@@ -134,8 +136,8 @@ class LinkPairingStateContractTest(unittest.TestCase):
         # Unpair goes through the shared wipe, which also clears the
         # setup-complete marker: leaving that behind is what left a device
         # half-unpaired (pairing refused). Wi-Fi survives so it can pair again.
-        self.assertIn('reset_setup_with_gate_held("BLE unpair")', body)
-        self.assertIn("setup_wipe_to_clean()", reset)
+        self.assertIn('reset_setup_with_gate_held("BLE unpair", SETUP_RESET_KEEP_WIFI)', body)
+        self.assertIn("setup_wipe_to_clean(scope)", reset)
         self.assertNotIn("config_clear_pairing()", reset)
         self.assertIn("config_clear_pairing()", unpair)
         self.assertIn("config_clear_setup_complete()", unpair)
@@ -171,15 +173,14 @@ class LinkPairingStateContractTest(unittest.TestCase):
         self.assertNotIn("partial setup at boot", override_branch)
         self.assertNotIn("config_clear_setup()", override_branch)
 
-    def test_boot_keeps_tokens_with_wifi_and_clears_tokens_without(self) -> None:
+    def test_boot_migrates_tokens_with_wifi_and_clears_tokens_without(self) -> None:
         body = _function_body(APP_C.read_text(), "void app_run(")
-        # Tokens and Wi-Fi without the marker are kept, with pairing open,
-        # until a token is accepted; boot must not mark them complete (a
-        # refused device would restart into the same refusal). A token without
-        # Wi-Fi is a partial pair, and only its pairing is cleared.
+        # Legacy provisioned->setup_complete migration only fires when Wi-Fi
+        # creds are also present. A token without Wi-Fi is a partial pair, and
+        # only its pairing is cleared; saved Wi-Fi alone (an unpaired device)
+        # is never wiped at boot.
         kept = _function_body(body, "if (!setup_complete && provisioned && have_wifi)")
-        self.assertNotIn("config_mark_setup_complete", kept)
-        self.assertNotIn("config_clear", kept)
+        self.assertIn("config_mark_setup_complete()", kept)
         partial = _function_body(body, "} else if (!setup_complete && provisioned)")
         self.assertIn("config_clear_pairing()", partial)
         self.assertNotIn("config_clear_setup()", body)

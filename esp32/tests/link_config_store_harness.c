@@ -311,8 +311,8 @@ static void test_unpair_keeps_marker_until_pairing_is_gone(void) {
     fake_put("setup_complete", "1");
     s_commit_error_key = "refresh_token";
 
-    // Tokens without the marker would read as credentials kept after a
-    // refusal; a failed unpair must leave the device paired instead.
+    // A failed unpair must leave the device paired, marker included, rather
+    // than tokens without it (which boot would mark complete again).
     CHECK(!config_unpair(), "unpair must fail when a token erase is uncommitted");
     CHECK(config_key_lookup("refresh_token") == CONFIG_KEY_FOUND,
           "uncommitted credential unexpectedly disappeared");

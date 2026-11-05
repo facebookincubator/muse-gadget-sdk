@@ -168,8 +168,8 @@ bool config_clear_pairing(void) {
 
 bool config_unpair(void) {
     // The marker goes last, and only once the pairing is verifiably gone:
-    // tokens left without it read at boot as credentials kept after a
-    // refusal, not as the unpair that was asked for.
+    // boot treats tokens and Wi-Fi without the marker as a legacy pair and
+    // marks it complete again, which would undo a half-finished unpair.
     return config_clear_pairing() && config_clear_setup_complete();
 }
 

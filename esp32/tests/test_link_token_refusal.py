@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A refused device token must never cost the device its Wi-Fi or pairing.
+"""A refused device token must not cost the device its Wi-Fi.
 
-Runs app.c's real token refresh, unpair and boot-validation code against the
-real config_store.c (link_token_refusal_harness.c): refresh 401/403, network
-failures, a refused mint, explicit unpair, reboot in each resulting state, and
-re-pairing, for both the Link and the Muse build.
+Runs app.c's real token refresh, refresh scheduler, unpair, reset and
+boot-validation code against the real config_store.c
+(link_token_refusal_harness.c), for both the Link and the Muse build: a 401 on
+a refresh or mint unpairs but keeps Wi-Fi and stops retrying; a 403 or a
+network failure keeps everything and backs off, also through
+schedule_vm_auth_refresh(); explicit unpairs keep Wi-Fi; the user's factory
+reset (5 s hold, Muse menu/Settings) forgets it; reboot in each state.
 """
 
 from __future__ import annotations
@@ -52,16 +55,25 @@ FUNCTIONS = (
     "static char *load_token(",
     "static bool store_token_pair_unlocked(",
     "static void store_pairing_username_unlocked(",
+    "static void handle_device_token_revoked_unlocked(",
     "static void note_device_token_refused_unlocked(",
-    "static void defer_pairing_reopen(",
+    "static void defer_unpair_after_revocation(",
     "static bool mint_and_store_device_tokens_unlocked(",
     "static bool accept_pairing_credentials(",
     "static bool migrate_legacy_auth_token_locked(",
     "static bool ensure_access_token_ready_with_gate_held(",
     "static int fetch_vms_with_refresh_with_gate_held(",
+    "static bool connect_preferred_vm_with_gate_held(",
+    "static void finish_vm_auth_refresh_task(",
+    "static void vm_auth_refresh_task(",
+    "static void schedule_vm_auth_refresh(",
     "static bool reset_setup_with_gate_held(",
-    "static void reopen_pairing_after_token_refusal(",
-    "static void close_pairing_after_token_accepted(",
+    "static void on_unpair(",
+    "static bool reset_setup_from_control(",
+    "static void on_button_long_press(",
+    "static void reset_setup_task(",
+    "void app_reset_setup_async(",
+    "static void ws_unpaired_task(",
 )
 
 
@@ -72,7 +84,7 @@ def _function(source: str, prefix: str) -> str:
 
 
 class LinkTokenRefusalTest(unittest.TestCase):
-    def test_token_refusal_keeps_wifi_and_pairing(self) -> None:
+    def test_token_refusal_and_resets(self) -> None:
         cc = shlex.split(os.environ.get("CC", "cc"))
         if not cc or shutil.which(cc[0]) is None:
             self.skipTest("C compiler not available")
@@ -82,25 +94,32 @@ class LinkTokenRefusalTest(unittest.TestCase):
             r"^#define (?:TOKEN_BUF_BYTES|VM_AUTH_REFRESH_\w+|"
             r"TOKEN_PERIODIC_REFRESH_INTERVAL_US)\b(?:.*\\\n)*.*$",
             app, re.MULTILINE))
+        defines += "\n" + re.search(
+            r"^typedef enum \{[^}]*\} setup_reset_scope_t;$", app, re.MULTILINE
+        ).group(0)
         paths = "".join(_function(app, prefix)
                         for prefix in sorted(FUNCTIONS, key=app.index))
-        boot = _function_body(app, "void app_run(")
-        boot = boot[boot.index("bool setup_complete = config_setup_complete();"):]
+        app_run = _function_body(app, "void app_run(")
+        boot = app_run[app_run.index("bool setup_complete = config_setup_complete();"):]
         boot = boot.split("bool skip_boot_scan", 1)[0]
+        # The heartbeat's deferred resets and Link's disconnected retry.
+        heartbeat = app_run[app_run.index("while (1) {") + len("while (1) {"):]
+        heartbeat = heartbeat.split("        // Runs on every heartbeat tick", 1)[0]
 
         with tempfile.TemporaryDirectory() as directory:
             generated = Path(directory)
             (generated / "app_defines.inc").write_text(defines + "\n")
             (generated / "app_token_paths.inc").write_text(paths)
             (generated / "app_boot_setup.inc").write_text(boot)
-            for name, in_place, unpaired_wifi in (("link", 0, 0), ("muse", 1, 1)):
+            (generated / "app_heartbeat.inc").write_text(heartbeat)
+            for name, muse, unpaired_wifi in (("link", 0, 0), ("muse", 1, 1)):
                 with self.subTest(profile=name):
                     binary = generated / name
                     compiled = subprocess.run(
                         # config_store.c's TAG and the eFuse fake are only used by
                         # logging and NVS encryption, which link_fakes compile out.
                         [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
-                         f"-DREOPEN_IN_PLACE={in_place}",
+                         f"-DMUSE_BUILD={muse}",
                          f"-DWIFI_WITHOUT_PAIRING={unpaired_wifi}",
                          "-I", str(generated),
                          "-I", str(ROOT / "tests" / "link_fakes"),

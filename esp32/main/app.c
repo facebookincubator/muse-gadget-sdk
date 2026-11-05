@@ -149,15 +149,20 @@ static SemaphoreHandle_t s_operation_gate = NULL;
 static SemaphoreHandle_t s_auth_lock = NULL;
 static SemaphoreHandle_t s_setup_window_lock = NULL;
 static int64_t s_last_vm_auth_refresh_attempt_us = 0;
+// When device credentials were last refused. The refusal backoff runs from
+// this, not from s_last_vm_auth_refresh_attempt_us: schedule_vm_auth_refresh()
+// stamps that just before its worker refreshes, so a shared stamp would make
+// every scheduled refresh find the backoff active and skip itself.
+static int64_t s_last_vm_auth_refusal_us = 0;
 // Uptime of the last proactive-refresh attempt. 0 = none this boot, so the
 // first one falls due once uptime alone exceeds the interval.
 static int64_t s_last_periodic_token_refresh_us = 0;
 static int64_t s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
 static uint8_t s_vm_auth_refusals = 0;
 static bool s_vm_auth_refresh_pending = false;
+// Deferred to the app task: a factory reset forgets Wi-Fi, an unpair keeps it.
 static atomic_bool s_setup_reset_pending = ATOMIC_VAR_INIT(false);
-static atomic_bool s_pairing_reopen_pending = ATOMIC_VAR_INIT(false);
-static atomic_bool s_vm_credentials_accepted = ATOMIC_VAR_INIT(false);
+static atomic_bool s_unpair_pending = ATOMIC_VAR_INIT(false);
 static bool s_ble_started = false;
 static bool s_ota_pending_verify = false;
 static uint32_t s_confirm_generation = 0;
@@ -313,8 +318,8 @@ static void auth_lock_give(void) {
 // 15 s cap, i.e. a refresh roughly every 45 s, indefinitely.
 //
 // A 401 from fetch_vms no longer unpairs the device, so nothing else
-// terminates that loop. This is what bounds it. A refused refresh or mint
-// counts here too (note_device_token_refused_unlocked()).
+// terminates that loop. This is what bounds it. A refresh or mint refused
+// with a 403 counts here too (note_device_token_refused_unlocked()).
 static void count_vm_auth_refusal_unlocked(void) {
     if (s_vm_auth_refusals < UINT8_MAX) s_vm_auth_refusals++;
     unsigned doublings = s_vm_auth_refusals - 1u;
@@ -325,6 +330,7 @@ static void count_vm_auth_refusal_unlocked(void) {
     }
     s_vm_auth_refresh_interval_us = interval;
     s_last_vm_auth_refresh_attempt_us = esp_timer_get_time();
+    s_last_vm_auth_refusal_us = s_last_vm_auth_refresh_attempt_us;
     ESP_LOGW(TAG,
              "VM credentials refused %u time(s) in a row; next refresh no "
              "sooner than %llds",
@@ -338,8 +344,8 @@ static void note_vm_credentials_refused(void) {
 }
 
 static bool vm_auth_backoff_active_unlocked(void) {
-    return s_vm_auth_refusals > 0 && s_last_vm_auth_refresh_attempt_us
-           && (esp_timer_get_time() - s_last_vm_auth_refresh_attempt_us)
+    return s_vm_auth_refusals > 0 && s_last_vm_auth_refusal_us
+           && (esp_timer_get_time() - s_last_vm_auth_refusal_us)
               < s_vm_auth_refresh_interval_us;
 }
 
@@ -349,7 +355,7 @@ static void note_vm_credentials_accepted(void) {
     s_vm_auth_refusals = 0;
     s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
     s_last_vm_auth_refresh_attempt_us = 0;
-    atomic_store_explicit(&s_vm_credentials_accepted, true, memory_order_release);
+    s_last_vm_auth_refusal_us = 0;
     auth_lock_give();
     if (was_backing_off) {
         ESP_LOGI(TAG, "VM credentials accepted; refresh backoff reset");
@@ -594,14 +600,23 @@ static void disconnect_vm_transports(void) {
     strcpy(s_ui_raw, "down");
 }
 
-static bool clear_setup_credentials(void) {
+// What a reset erases. Saved Wi-Fi is not pairing state: an unpair keeps it,
+// so the device can be paired again from the app alone. Only a factory reset
+// the user asks for on the device (the 5 s hold, or Reset pairing in the Muse
+// menu or Settings) forgets it, e.g. before giving the device away.
+typedef enum {
+    SETUP_RESET_KEEP_WIFI,
+    SETUP_RESET_FORGET_WIFI,
+} setup_reset_scope_t;
+
+static bool clear_setup_credentials(setup_reset_scope_t scope) {
     auth_lock_take();
     s_last_vm_auth_refresh_attempt_us = 0;
+    s_last_vm_auth_refusal_us = 0;
     s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
     s_vm_auth_refusals = 0;
-    // Saved Wi-Fi is not pairing state: keep it so an unpaired device can be
-    // paired again without first being set up from scratch.
-    bool cleared = config_unpair();
+    bool cleared = scope == SETUP_RESET_FORGET_WIFI ? config_clear_setup()
+                                                    : config_unpair();
     auth_lock_give();
     if (!cleared) {
         ESP_LOGE(TAG, "setup credential deletion could not be verified");
@@ -610,10 +625,10 @@ static bool clear_setup_credentials(void) {
 }
 
 // Reset to a clean, unpaired state: drop transports, disconnect Wi-Fi, and
-// clear the pairing (saved Wi-Fi networks are kept). Every pairing-recovery
-// path funnels through here; BLE is left as-is for the caller to keep
-// advertising or reboot. Success means NVS committed every erase and readback
-// verified each credential absent.
+// clear the pairing (and saved Wi-Fi too on a factory reset). Every
+// pairing-recovery path funnels through here; BLE is left as-is for the caller
+// to keep advertising or reboot. Success means NVS committed every erase and
+// readback verified each credential absent.
 static void setup_disconnect_to_clean(void) {
     disconnect_vm_transports();
     vm_api_set_base_url(NULL);
@@ -629,9 +644,9 @@ static void setup_disconnect_to_clean(void) {
 #endif
 }
 
-static bool setup_wipe_to_clean(void) {
+static bool setup_wipe_to_clean(setup_reset_scope_t scope) {
     setup_disconnect_to_clean();
-    return clear_setup_credentials();
+    return clear_setup_credentials(scope);
 }
 
 static void setup_fail_for_session(const char *stage, const char *status,
@@ -641,7 +656,7 @@ static void setup_fail_for_session(const char *stage, const char *status,
     // The operation gate still belongs to this worker, so a replacement
     // request cannot have stored credentials. Roll back this worker's partial
     // state even when its BLE session has already gone away.
-    bool cleared = setup_wipe_to_clean();
+    bool cleared = setup_wipe_to_clean(SETUP_RESET_KEEP_WIFI);
     const char *reported_status = cleared ? status : "error_storage";
     setup_window_lock_take();
     if (session_generation != 0
@@ -790,32 +805,44 @@ static void store_pairing_username_unlocked(const char *username) {
     }
 }
 
-// A refused refresh or mint does not prove revocation: an outage, a proxy or a
-// server fault refuses valid credentials too, and erasing them turns that into
-// a lost pairing. Keep every key and back off further attempts. The caller
-// reopens pairing (defer_pairing_reopen()), so a device that really was
-// revoked can be paired again at once, and the next authenticated session
-// closes it again if it was not.
+// The token service refused a refresh or mint with a 401: the credential was
+// revoked, replaced by a newer pairing or already used, and will never work
+// again, so retrying it would only loop. Erase it, keeping saved Wi-Fi, so the
+// device can be paired again from the app alone. The caller hands the rest of
+// the unpair to the app task (defer_unpair_after_revocation()).
+static void handle_device_token_revoked_unlocked(const char *context) {
+    ESP_LOGW(TAG, "%s: device credentials revoked; unpairing (Wi-Fi kept)", context);
+    s_last_vm_auth_refresh_attempt_us = 0;
+    s_last_vm_auth_refusal_us = 0;
+    s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
+    s_vm_auth_refusals = 0;
+    if (!config_unpair()) {
+        ESP_LOGE(TAG, "%s: pairing credential deletion could not be verified",
+                 context);
+    }
+}
+
+// A 403 does not prove the credential is dead, and erasing it would turn a
+// refusal that passes into a lost pairing. Keep it and back off.
 static void note_device_token_refused_unlocked(const char *context) {
     ESP_LOGW(TAG, "%s: device credentials refused; keeping them", context);
-    atomic_store_explicit(&s_vm_credentials_accepted, false, memory_order_release);
     count_vm_auth_refusal_unlocked();
 }
 
-static void defer_pairing_reopen(void) {
+static void defer_unpair_after_revocation(void) {
     ui_set_status("auth_failed");
     led_status_set_state(LED_STATE_ERROR);
     if (strcmp(s_setup_stage, "done") != 0) {
-        ESP_LOGW(TAG, "token refused outside a completed setup; nothing to reopen");
+        ESP_LOGW(TAG, "token revoked during setup; setup failure will clean state");
         return;
     }
-    ESP_LOGW(TAG, "token refused - reopening pairing from app task");
-    atomic_store_explicit(&s_pairing_reopen_pending, true, memory_order_release);
+    ESP_LOGW(TAG, "token revoked - deferring unpair to app task");
+    atomic_store_explicit(&s_unpair_pending, true, memory_order_release);
 }
 
 static bool mint_and_store_device_tokens_unlocked(const char *source_token,
                                                   const char *username,
-                                                  bool *refused) {
+                                                  bool *revoked) {
     vm_device_tokens_t tokens = {0};
     int rc = vm_api_mint_device_token(source_token, identity_node_id(), &tokens);
     if (rc == 0) {
@@ -826,9 +853,11 @@ static bool mint_and_store_device_tokens_unlocked(const char *source_token,
         return ok;
     }
     vm_device_tokens_free(&tokens);
-    if (rc == VM_API_ERR_AUTH) {
+    if (rc == VM_API_ERR_REVOKED) {
+        handle_device_token_revoked_unlocked("device token mint");
+        if (revoked) *revoked = true;
+    } else if (rc == VM_API_ERR_AUTH) {
         note_device_token_refused_unlocked("device token mint");
-        if (refused) *refused = true;
     } else {
         ESP_LOGW(TAG, "device token mint failed");
     }
@@ -858,7 +887,7 @@ static bool accept_pairing_credentials(const char *access_token,
     return ok;
 }
 
-static bool migrate_legacy_auth_token_locked(bool *refused) {
+static bool migrate_legacy_auth_token_locked(bool *revoked) {
     char *access = load_token_unlocked("access_token");
     if (access) {
         free(access);
@@ -874,7 +903,7 @@ static bool migrate_legacy_auth_token_locked(bool *refused) {
         return false;
     }
     ESP_LOGI(TAG, "migrating legacy auth_token to device token pair");
-    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, refused);
+    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, revoked);
     free(legacy);
     return ok;
 }
@@ -891,10 +920,10 @@ static bool migrate_legacy_auth_token_locked(bool *refused) {
 //
 // access_token_rejected           the caller just had the stored token refused.
 //                                 The primary refresh trigger.
-// allow_stale_on_refresh_failure  when a refresh is itself refused, report
-//                                 success with the existing token (true)
-//                                 instead of failing and reopening pairing
-//                                 (false). Neither erases credentials.
+// allow_stale_on_refresh_failure  when a refresh is itself refused, keep the
+//                                 existing token (true) instead of failing
+//                                 (false). On false, a 401 unpairs the device
+//                                 (Wi-Fi kept) and a 403 backs off.
 //
 // Refreshing is otherwise avoided. The 45-minute timer this replaced came from
 // expires_in=14400 in the refresh response, which does not describe this
@@ -903,23 +932,23 @@ static bool migrate_legacy_auth_token_locked(bool *refused) {
 // one endpoint that mints unusable tokens after an idle period.
 // CONFIG_HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS (default 30, uptime-based) keeps a
 // safety net against that 365-day figure being wrong, at a thousandth the
-// exposure. It cannot reopen pairing: every caller reaching it passes
+// exposure. It cannot unpair: every caller reaching it passes
 // allow_stale_on_refresh_failure = true.
 static bool ensure_access_token_ready_with_gate_held(
     bool access_token_rejected, bool allow_stale_on_refresh_failure) {
     auth_lock_take();
 
     bool ok = false;
-    bool refused = false;
+    bool revoked = false;
     char *access = NULL;
     char *refresh = NULL;
 
-    // A refused mint keeps its source token, and the heartbeat calls here every
-    // few seconds: wait out the refusal backoff before minting again.
+    // A mint refused with a 403 keeps its source token, and the heartbeat calls
+    // here every few seconds: wait out the refusal backoff before minting again.
     access = load_token_unlocked("access_token");
     if (!access) {
         ok = !vm_auth_backoff_active_unlocked()
-             && migrate_legacy_auth_token_locked(&refused);
+             && migrate_legacy_auth_token_locked(&revoked);
         goto done;
     }
 
@@ -927,7 +956,7 @@ static bool ensure_access_token_ready_with_gate_held(
     if (!refresh) {
         if (vm_auth_backoff_active_unlocked()) goto done;
         ESP_LOGI(TAG, "access_token has no refresh_token; minting device pair");
-        ok = mint_and_store_device_tokens_unlocked(access, NULL, &refused);
+        ok = mint_and_store_device_tokens_unlocked(access, NULL, &revoked);
         goto done;
     }
 
@@ -977,14 +1006,18 @@ static bool ensure_access_token_ready_with_gate_held(
         goto done;
     }
     vm_device_tokens_free(&tokens);
-    if (rc == VM_API_ERR_AUTH) {
+    if (rc == VM_API_ERR_AUTH || rc == VM_API_ERR_REVOKED) {
         if (allow_stale_on_refresh_failure) {
             ESP_LOGW(TAG, "device token refresh rejected; keeping stale token");
             ok = true;
             goto done;
         }
-        note_device_token_refused_unlocked("device token refresh");
-        refused = true;
+        if (rc == VM_API_ERR_REVOKED) {
+            handle_device_token_revoked_unlocked("device token refresh");
+            revoked = true;
+        } else {
+            note_device_token_refused_unlocked("device token refresh");
+        }
         ok = false;
         goto done;
     }
@@ -995,8 +1028,8 @@ done:
     free(access);
     free(refresh);
     auth_lock_give();
-    if (refused) {
-        defer_pairing_reopen();
+    if (revoked) {
+        defer_unpair_after_revocation();
     }
     return ok;
 }
@@ -1031,9 +1064,9 @@ static int fetch_vms_with_refresh_with_gate_held(vm_info_t *vms, int max) {
         // Deliberately NOT a revocation. A 401 from USING a token means "get a
         // new one", and we already did — so this says the credential we were
         // just handed does not work, not that this device has lost its
-        // pairing. Only the refresh token being refused suggests that, and
-        // ensure_access_token_ready_with_gate_held() already reopens pairing
-        // on it (allow_stale_on_refresh_failure is false on the call above).
+        // pairing. Only the refresh being refused with a 401 proves that, and
+        // ensure_access_token_ready_with_gate_held() already unpairs on it
+        // (allow_stale_on_refresh_failure is false on the call above).
         //
         // The distinction is not academic: the API can return 200 from a
         // refresh and hand back an access token that every endpoint then
@@ -1128,10 +1161,10 @@ static void vm_auth_refresh_task(void *arg) {
         }
     }
 
-    ESP_LOGI(TAG, "refreshing VM credentials after tunnel auth rejection");
+    ESP_LOGI(TAG, "refreshing VM credentials and reconnecting");
     if (wifi_mgr_is_connected() && config_is_provisioned()) {
         if (!connect_preferred_vm_with_gate_held(0)) {
-            ESP_LOGW(TAG, "VM credential refresh failed after tunnel auth rejection");
+            ESP_LOGW(TAG, "VM credential refresh or reconnect failed");
         }
     } else {
         ESP_LOGW(TAG, "cannot refresh VM credentials without WiFi and pairing");
@@ -1442,10 +1475,11 @@ static void finish_setup_reset_with_gate_held(void) {
     link_pairing_reset();
 }
 
-static bool reset_setup_with_gate_held(const char *source) {
+static bool reset_setup_with_gate_held(const char *source,
+                                       setup_reset_scope_t scope) {
     ESP_LOGI(TAG, "%s - reset setup", source);
     setup_stage_set("reset");
-    if (!setup_wipe_to_clean()) {
+    if (!setup_wipe_to_clean(scope)) {
         ESP_LOGE(TAG, "%s - setup deletion failed; reset aborted", source);
         ui_set_status("error_storage");
         led_status_set_state(LED_STATE_ERROR);
@@ -1461,7 +1495,7 @@ static void on_unpair(void) {
         ble_server_send_status("error_operation_in_progress");
         return;
     }
-    if (!reset_setup_with_gate_held("BLE unpair")) {
+    if (!reset_setup_with_gate_held("BLE unpair", SETUP_RESET_KEEP_WIFI)) {
         operation_gate_give();
         return;
     }
@@ -1716,12 +1750,13 @@ static void restart_after_setup_reset(void) {
     }
 }
 
-static bool reset_setup_from_control(const char *source) {
+static bool reset_setup_from_control(const char *source,
+                                     setup_reset_scope_t scope) {
     if (!operation_gate_take(portMAX_DELAY, source)) {
         ESP_LOGE(TAG, "%s could not acquire the setup operation gate", source);
         return false;
     }
-    bool reset = reset_setup_with_gate_held(source);
+    bool reset = reset_setup_with_gate_held(source, scope);
     if (!reset) {
         operation_gate_give();
         return false;
@@ -1730,57 +1765,6 @@ static bool reset_setup_from_control(const char *source) {
     // credentials after the verified erase.
     restart_after_setup_reset();
     return true;
-}
-
-// Runs on the app task after a refused device token. Clears only the setup
-// marker, so the device advertises for pairing and a revoked one can be paired
-// again at once, while its tokens and Wi-Fi stay: it keeps retrying them, and
-// close_pairing_after_token_accepted() completes setup again if they work.
-// Tokens without the marker mean exactly this state at boot too.
-static void reopen_pairing_after_token_refusal(void) {
-    if (!operation_gate_take(0, "reopen pairing")) {
-        atomic_store_explicit(&s_pairing_reopen_pending, true, memory_order_release);
-        return;
-    }
-    // Nothing to reopen if setup is already open, or if a token has been
-    // accepted since the refusal (a refusal clears that flag).
-    if (!config_setup_complete()
-        || atomic_load_explicit(&s_vm_credentials_accepted, memory_order_acquire)) {
-        operation_gate_give();
-        return;
-    }
-    if (!config_clear_setup_complete()) {
-        ESP_LOGE(TAG, "token refused but the setup marker could not be cleared");
-        operation_gate_give();
-        return;
-    }
-#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
-    open_setup_window("device token refused");
-    operation_gate_give();
-#else
-    // Setup BLE was released once paired; boot brings it back, tokens intact.
-    ESP_LOGW(TAG, "device token refused; restarting to reopen pairing");
-    restart_after_setup_reset();
-#endif
-}
-
-// Runs on the app task once fetch_vms has accepted the device token.
-static void close_pairing_after_token_accepted(void) {
-    if (!atomic_load_explicit(&s_vm_credentials_accepted, memory_order_acquire)
-        || ble_server_has_connection()) {
-        return;
-    }
-    if (!operation_gate_take(0, "close pairing")) return;
-    // Re-check under the gate: a pairing session may have finished meanwhile.
-    if (atomic_exchange_explicit(&s_vm_credentials_accepted, false,
-                                 memory_order_acq_rel)
-        && !config_setup_complete() && config_is_provisioned()
-        && !ble_server_has_connection()) {
-        ESP_LOGI(TAG, "kept device credentials accepted; closing pairing");
-        setup_stage_set("done");
-        complete_setup_and_stop_ble("device token accepted", 0);
-    }
-    operation_gate_give();
 }
 
 static void reset_default_vm_with_gate_held(void) {
@@ -1850,7 +1834,7 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
     // gate stays reserved across the worker handoff, so no setup writer can
     // recreate credentials before the delayed disconnect and reboot.
     if (action == WS_CONTROL_UNPAIR) {
-        if (!clear_setup_credentials()) {
+        if (!clear_setup_credentials(SETUP_RESET_KEEP_WIFI)) {
             operation_gate_give();
             free_ws_control_args(args);
             return command_error("storage_error",
@@ -2326,7 +2310,7 @@ static void on_button_double_press(void) {
 }
 
 static void on_button_long_press(void) {
-    reset_setup_from_control("button long-press");
+    reset_setup_from_control("button long-press", SETUP_RESET_FORGET_WIFI);
 }
 
 
@@ -2531,7 +2515,7 @@ bool app_confirm_pairing_press(void) {
 
 static void reset_setup_task(void *arg) {
     (void)arg;
-    reset_setup_from_control("Muse menu reset");
+    reset_setup_from_control("Muse menu reset", SETUP_RESET_FORGET_WIFI);
     stack_monitor_record(NULL);
     vTaskDelete(NULL);
 }
@@ -2548,7 +2532,7 @@ void app_reset_setup_async(void) {
 static void ws_unpaired_task(void *arg) {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(300));
-    reset_setup_from_control("server unpair (node.unpaired)");
+    reset_setup_from_control("server unpair (node.unpaired)", SETUP_RESET_KEEP_WIFI);
     stack_monitor_record(NULL);
     vTaskDelete(NULL);
 }
@@ -2589,8 +2573,7 @@ static void on_ws_control_status(const char *status) {
             // This callback runs on the Noise control task. Resetting inline
             // would make noise_ctrl_disconnect() wait for its own task to exit.
             ESP_LOGE(TAG, "server unpair worker unavailable; deferring reset");
-            atomic_store_explicit(&s_setup_reset_pending, true,
-                                  memory_order_release);
+            atomic_store_explicit(&s_unpair_pending, true, memory_order_release);
         }
     } else if (strcmp(status, "ws_auth_failed") == 0
                || strcmp(status, "ws_refresh_needed") == 0) {
@@ -2771,23 +2754,22 @@ void app_run(void) {
 
     if (CONFIG_HOMEHUB_WIFI_SSID[0]) {
         // Dev override supplies Wi-Fi from menuconfig and may run token-only in
-        // NVS, so don't treat that as a partial pair to wipe. Like any tokens
-        // kept without the marker, the first accepted token completes setup.
+        // NVS, so don't treat that as a partial pair to wipe.
+        if (!setup_complete && provisioned) {
+            setup_complete = config_mark_setup_complete();
+        }
     } else {
         char probe_ssid[33] = {0};
         bool have_wifi = config_get_str("ssid", probe_ssid, sizeof(probe_ssid))
                          && probe_ssid[0];
         if (!setup_complete && provisioned && have_wifi) {
-            // Tokens and Wi-Fi without the marker: a refused device token
-            // reopened pairing (reopen_pairing_after_token_refusal()), or a
-            // legacy pair from firmware predating the marker. Keep both and
-            // advertise for pairing while retrying the tokens; the first time
-            // they are accepted completes setup again.
-            ESP_LOGW(TAG, "device credentials kept without setup marker; pairing open");
+            // Legacy pair from firmware predating the setup_complete marker.
+            setup_complete = config_mark_setup_complete();
         } else if (!setup_complete && provisioned) {
             // Tokens without Wi-Fi or marker: a half-written pair. Clear it so
             // we boot clean instead of auto-reconnecting half-paired. Saved
-            // Wi-Fi alone is an unpaired device, not a partial pair: keep it.
+            // Wi-Fi alone is an unpaired device (an unpair keeps it), not a
+            // partial pair: keep it.
             ESP_LOGW(TAG, "partial setup at boot (token without wifi); clearing for clean pair");
             if (!config_clear_pairing()) {
                 ESP_LOGE(TAG, "partial setup deletion could not be verified");
@@ -2818,7 +2800,7 @@ void app_run(void) {
     }
 
     // Restore endpoints only after saved setup has been validated or repaired.
-    if (provisioned) {
+    if (setup_complete && provisioned) {
         char url_buf[256] = {0};
         if (config_get_str("api_url_v2", url_buf, sizeof(url_buf)) && url_buf[0]) {
             vm_api_set_base_url(url_buf);
@@ -3011,23 +2993,25 @@ void app_run(void) {
     stack_monitor_t stack = STACK_MONITOR_INIT;
     tunnel_stats_t prev_tun = {0};
     while (1) {
-        if (atomic_exchange_explicit(&s_setup_reset_pending, false,
-                                     memory_order_acq_rel)) {
-            reset_setup_from_control("deferred setup reset");
+        // A factory reset covers an unpair queued alongside it.
+        bool factory_reset = atomic_exchange_explicit(&s_setup_reset_pending, false,
+                                                      memory_order_acq_rel);
+        bool unpair = atomic_exchange_explicit(&s_unpair_pending, false,
+                                               memory_order_acq_rel);
+        if (factory_reset) {
+            reset_setup_from_control("deferred setup reset", SETUP_RESET_FORGET_WIFI);
+        } else if (unpair) {
+            reset_setup_from_control("deferred unpair", SETUP_RESET_KEEP_WIFI);
         }
-        if (atomic_exchange_explicit(&s_pairing_reopen_pending, false,
-                                     memory_order_acq_rel)) {
-            reopen_pairing_after_token_refusal();
-        }
-        close_pairing_after_token_accepted();
 
 #if CONFIG_MUSE_ENABLED
         muse_keep_vm_session();
 #else
-        // Kept device credentials with pairing open: nothing else retries them
-        // once the boot attempt failed. The refusal backoff paces this.
+        // Paired, but with no VM session: the boot attempt failed (a refusal
+        // that keeps the credentials, or the network). Nothing else retries
+        // it; the scheduler's floor and the refusal backoff pace this.
         if (!noise_ctrl_is_running() && wifi_mgr_is_connected()
-            && config_is_provisioned() && !config_setup_complete()) {
+            && config_is_provisioned() && config_setup_complete()) {
             schedule_vm_auth_refresh();
         }
 #endif
