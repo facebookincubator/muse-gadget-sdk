@@ -70,19 +70,25 @@ time on a charge-only adapter as battery time.
 On two 1.85B units, the initial board port boots with 16 MB flash and 8 MB
 PSRAM, selects panel revision 2 (`00 02 7f 7f`), registers display/touch and
 initializes both audio codecs. The shared Muse runtime reaches ready-to-pair
-without a panic or reboot loop. Physical touch, recording/playback, pairing,
-OTA and power-off/wake have not yet been exercised for this contribution.
+without a panic or reboot loop. Recording/playback, pairing, OTA and
+power-off/wake have not yet been exercised for this contribution.
 
 Battery-reader host tests cover valid endpoints, signed current, relaxation,
 missing batteries, uninitialized/config-update states, invalid data, every
 register-read failure and recovery. On two units the battery-enabled firmware
 reports 19% / 4,187 mV and 9% / 3,805 mV respectively, with positive charging
 current while attached to a USB host. Serial status confirms both percentages.
-Calibration accuracy and USB unplug/reconnect behavior have not yet been verified.
-These hardware observations precede the final initialization error checks and
-display-window alignment callback. Those refinements have build and host-test
-coverage, but have not yet been flashed to a board. Board-callback tests cover
-pixel alignment at every screen position and gauge allocation failure/recovery.
+Calibration accuracy has not yet been verified.
+
+The final initialization error checks and display-window alignment callback
+were subsequently flashed to one of those units. App and OTA-selector flash
+digests matched; a 30-second boot capture showed normal display/touch/audio
+initialization and no panic or reboot loop. The gauge reported 13% / 3,937 mV,
+charging, and serial status confirmed 13%. The device owner confirmed normal
+display rendering and touch navigation into Settings. With USB unplugged for
+20 seconds, the unit stayed on and the charging symbol disappeared; reconnecting
+USB restored the symbol. Board-callback tests additionally cover pixel alignment
+at every screen position and gauge allocation failure/recovery.
 
 ESP-IDF v6.0.3 builds pass for this profile and the 1.75C regression profile,
 with 48% of the 4 MB app slot free. The host suite passes (1,045 tests; two
