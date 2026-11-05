@@ -86,3 +86,26 @@ For a new adapter, capture serial logs and verify:
 | Repeated long replies | Endings remain intact with no allocation failure, watchdog, or reset. |
 
 Full firmware builds require the repository's supported ESP-IDF v6.0.3 toolchain.
+
+## Reply progress ring
+
+The rim (or bottom bar on rectangular displays) follows the caption/playback
+cursor for the current reply message. Its initial duration estimate uses the
+full synthesis text, rather than the clipped caption prefix. Received MP3 refines
+that estimate and decoding supplies the final audio duration.
+
+The ring moves forward only within a message, resetting for the next one.
+Unfinished progress is capped at 99%; if a duration estimate was too short, it
+can hold there until playback completes. Completion is based on consumed PCM,
+not download completion or decoded-ahead audio. Caption-only playback includes
+the final-page hold before successful completion. Muting keeps this clock
+advancing; network buffering does not. Recording, errors, and interruption clear
+the reply progress. Link-only caption paging and real-time calls are unchanged.
+
+This is approximate presentation progress, not word-level speech alignment.
+
+For device verification, the voice task logs `reply progress: message N, P%`
+at approximately 10% intervals, at the unfinished 99% cap, and at completion.
+These values are published to the same state read by the UI ring. A monotonic
+sequence verifies the software's progress value; visually inspect the ring too.
+A short hold at 99% is expected if the initial duration estimate was too short.

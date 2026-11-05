@@ -41,7 +41,7 @@ static size_t xStreamBufferSpacesAvailable(int) { return 100000; }
 static size_t xStreamBufferSend(int,const void *,size_t n,int) { written+=n/2; return n; }
 static void resampler_init(int *,int,int) {}
 static size_t resample(int *,const int16_t *,int n,int16_t *) { return n; }
-struct msg_t { uint32_t pcm_start,pcm_frames; int tts; };
+struct msg_t { uint32_t pcm_start,pcm_frames,pcm_end; int tts; };
 static struct {
  int tts_msg,gen=1;
  bool silent,mp3_ended;
@@ -63,7 +63,7 @@ static size_t run(const std::vector<uint8_t> &mp3,size_t chunk) {
  }
  s_turn.mp3_ended=true; decode();
  assert(s_turn.tts_msg==-1 && !s_turn.mp3_len);
- assert(s_turn.msgs[0].pcm_frames==written);
+ assert(s_turn.msgs[0].pcm_frames==written && s_turn.msgs[0].pcm_end==written);
  return written;
 }
 int main(int argc,char **argv) {

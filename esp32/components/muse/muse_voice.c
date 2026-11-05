@@ -71,6 +71,8 @@ static const char *TAG = "muse_voice";
 #define RETRY_MAX_US (120LL * 1000000)
 #define STALL_US (30LL * 1000000)               /* Hatch took none of a note this long: give up */
 #define ACK_WAIT_US (30LL * 1000000)            /* asleep, waiting for the VM to have a note */
+#define REPLY_COMPLETE_HOLD_MS 300
+#define REPLY_COMPLETE_POLL_MS 10
 
 static QueueHandle_t s_queue;
 static uint32_t s_press_input_epoch;
@@ -420,6 +422,7 @@ static void go_idle(const char *caption);
  */
 static bool hatch_reply(bool *delivered)
 {
+    muse_state_set_progress(0); // Recording progress must not carry into the reply.
     muse_state_set_mode(MUSE_MODE_THINKING);
     muse_state_set_caption("SENDING VOICE NOTE");   /* until there's a transcript or reply */
     static int16_t buf[MUSE_AUDIO_CHUNK];
@@ -429,6 +432,9 @@ static bool hatch_reply(bool *delivered)
     char incomplete[sizeof(text)] = "";
     bool done = false, speaking = false, replied = false;
     size_t played = 0;
+    int progress_message = -1;
+    int progress_logged = -1;
+    float progress = 0;
     int64_t t0 = esp_timer_get_time();
     *delivered = false;
     for (;;) {
@@ -471,6 +477,7 @@ static bool hatch_reply(bool *delivered)
         if (got_event(MUSE_PTT_DOWN)) {
             ESP_LOGI(TAG, "reply interrupted");
             muse_hatch_turn_cancel();
+            muse_state_set_progress(0);
             muse_state_set_level(0);
             return true;
         }
@@ -485,11 +492,32 @@ static bool hatch_reply(bool *delivered)
             muse_audio_write(buf, n);
             played += n;
         } else if (done) {
+            muse_state_set_progress(!incomplete[0] && played ? 1 : 0);
+            ESP_LOGI(TAG, "reply progress: %s", incomplete[0] ? "incomplete" : "complete");
             break;
         } else if (speaking) {
             /* Between messages: keep the speaker fed so it doesn't replay stale DMA. */
             muse_state_set_level(0);
             muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+        }
+        if (speaking) {
+            int message;
+            float next = muse_hatch_turn_progress(played, &message);
+            if (message != progress_message) {
+                progress_message = message;
+                progress_logged = -1;
+                progress = 0;
+            }
+            // Duration estimates can grow; keep this message's ring forward-only.
+            if (next > progress) progress = next;
+            muse_state_set_progress(incomplete[0] ? 0 : progress);
+            int percent = (int)(progress * 100);
+            int bucket = percent == 99 ? 99 : percent / 10 * 10;
+            if (!incomplete[0] && message >= 0 && bucket != progress_logged) {
+                progress_logged = bucket;
+                ESP_LOGI(TAG, "reply progress: message %d, %d%% (PCM cursor %.2fs)",
+                         message, percent, (double)played / MUSE_AUDIO_RATE);
+            }
         }
         /* The page being said, or before the speech the reply's opening page. */
         if ((speaking || replied) && muse_hatch_turn_caption(played, page, sizeof(page))) {
@@ -507,6 +535,20 @@ static bool hatch_reply(bool *delivered)
     if (!played) {
         /* No speech (TTS unavailable): leave the reply text up for a moment. */
         vTaskDelay(pdMS_TO_TICKS(2500));
+    } else {
+        /* Keep the final caption and full ring visible long enough to register.
+         * A new press still interrupts immediately and starts the next note. */
+        for (int elapsed = 0; elapsed < REPLY_COMPLETE_HOLD_MS;
+             elapsed += REPLY_COMPLETE_POLL_MS) {
+            if (got_event(MUSE_PTT_DOWN)) {
+                ESP_LOGI(TAG, "reply interrupted after completion");
+                muse_hatch_turn_cancel();
+                muse_state_set_progress(0);
+                muse_state_set_level(0);
+                return true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(REPLY_COMPLETE_POLL_MS));
+        }
     }
     return false;
 }
