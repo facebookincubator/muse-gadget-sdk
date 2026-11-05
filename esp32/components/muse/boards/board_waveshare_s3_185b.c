@@ -1,16 +1,16 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /*
  * Waveshare ESP32-S3-Touch-LCD-1.85B: ESP32-S3R8 (16 MB flash, 8 MB octal
  * PSRAM), round 1.85" 360 px ST77916 LCD on QSPI with CST816S touch, ES8311
  * speaker codec (amp enable on GPIO9) and ES7210 dual mic. BOOT (GPIO0) is
- * the only user button. There's no PMU: the battery gauge (BQ27220) isn't
- * read yet, and power-off is deep sleep until BOOT.
+ * the only readable user button. BQ27220 reports battery percent/voltage;
+ * power-off is deep sleep until BOOT.
  *
  * Pins, the panel's two init sequences (waveshare_s3_185b_init.h) and the
- * codec setup are from Waveshare's BSP for the board,
- * waveshareteam/ESP32-S3-Touch-LCD-1.85B (Examples/ESP-IDF-V5.5.3/
- * 02_lvgl_demo/components/waveshare__esp32_s3_touch_lcd_1_85B). That BSP
- * isn't in the registry and needs IDF 5's legacy I2C driver, so this drives
- * the registry ST77916 and CST816S drivers directly.
+ * codec setup are from Waveshare's Apache-2.0 BSP for the board. Reference:
+ * https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.85B/tree/7232af4c501c64d34215b73e1d8319376dfd9c19/examples/esp-idf/05_bq27220/components/esp32_s3_touch_lcd_1_85B
+ * The panel tables originated in its earlier ESP-IDF-V5.5.3 BSP. This port
+ * uses the registry ST77916/CST816S drivers and IDF's master I2C API directly.
  */
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -18,6 +18,7 @@
 #include "driver/ledc.h"
 #include "driver/rtc_io.h"
 #include "driver/spi_master.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_lcd_panel_io.h"
@@ -35,6 +36,7 @@
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "waveshare_s3_185b_init.h"
+#include "waveshare_s3_185b_power.h"
 
 static const char *TAG = "board";
 
@@ -69,6 +71,7 @@ static const char *TAG = "board";
 #define BOOT_GPIO GPIO_NUM_0
 
 static i2c_master_bus_handle_t s_i2c;
+static i2c_master_dev_handle_t s_gauge;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_touch_handle_t s_tp;
@@ -311,6 +314,35 @@ static unsigned poll_buttons(void)
     return muse_gpio_button_poll(&s_boot);
 }
 
+static esp_err_t read_power(muse_power_t *out)
+{
+    if (!s_gauge) {
+        const i2c_device_config_t cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = 0x55,
+            .scl_speed_hz = 100000,
+        };
+        /* Optional gauge: a failed allocation/read must not prevent the UI
+         * from starting. Retry on the next normal power poll. */
+        i2c_master_bus_add_device(s_i2c, &cfg, &s_gauge);
+    }
+    /* Native USB detects a host, not VBUS from a charge-only adapter. */
+    esp_err_t err = waveshare_185b_read_power(s_gauge, usb_serial_jtag_is_connected(), out);
+    static esp_err_t last_err = ESP_FAIL;
+    if (err != last_err) {
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "BQ27220: battery %d%%, %d mV, charging=%d", out->battery_pct,
+                     out->battery_mv, out->charging);
+        } else {
+            ESP_LOGW(TAG, "BQ27220 reading unavailable: %s", esp_err_to_name(err));
+        }
+        last_err = err;
+    }
+    /* Publish unknown on failure instead of leaving a stale percentage/USB
+     * flag in shared state. The helper initializes every output field. */
+    return ESP_OK;
+}
+
 static void panel_off(void *arg)
 {
     (void)arg;
@@ -363,6 +395,7 @@ static const muse_board_t s_board = {
     .mic_slot = -1,
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
+    .read_power = read_power,
     .power_off = power_off,
 };
 
