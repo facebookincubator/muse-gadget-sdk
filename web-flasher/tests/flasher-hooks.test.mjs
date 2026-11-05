@@ -13,14 +13,10 @@
 // limitations under the License.
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-// Import the browser module without changing the site's module configuration.
-const source = await readFile(new URL("../flasher-hooks.js", import.meta.url), "utf8");
-const { installFlasherHooks } = await import(
-  `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
-);
+// The browser module, as it is (Node 22 loads it as an ES module).
+const { installFlasherHooks } = await import(new URL("../flasher-hooks.js", import.meta.url));
 const MB = 1024 * 1024;
 
 function fixture({ minFlashBytes = 4 * MB, size = MB, failures = 0 } = {}) {
