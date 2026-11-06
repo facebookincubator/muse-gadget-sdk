@@ -20,6 +20,7 @@ from collections import OrderedDict
 import curses
 import json
 import os
+import signal
 import sys
 import time
 
@@ -382,10 +383,30 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
             output.flush()
 
 
+async def run_until_interrupted(session_id=None):
+    """run_chat, ending through cancellation on Ctrl-C so its cleanup always runs.
+
+    A KeyboardInterrupt raised inside the event loop (Python before 3.11) can
+    strand tasks and hang cleanup. A second Ctrl-C interrupts as usual.
+    """
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+
+    def interrupt():
+        loop.remove_signal_handler(signal.SIGINT)
+        task.cancel()
+
+    loop.add_signal_handler(signal.SIGINT, interrupt)
+    try:
+        await run_chat(session_id)
+    finally:
+        loop.remove_signal_handler(signal.SIGINT)
+
+
 def command(args):
     try:
-        asyncio.run(run_chat(args.session_id))
-    except KeyboardInterrupt:
+        asyncio.run(run_until_interrupted(args.session_id))
+    except (KeyboardInterrupt, asyncio.CancelledError):
         print()
         return 0
     except (OSError, ValueError, asyncio.TimeoutError) as exc:

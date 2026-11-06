@@ -724,3 +724,23 @@ def test_streaming_during_an_unacknowledged_follow_up_keeps_the_chat_open(monkey
     async def bounded_check(service, path):
         await asyncio.wait_for(check(service, path), 5)
     run_with_socket(bounded_check)
+
+
+def test_ctrl_c_cancels_the_chat_so_cleanup_runs(monkeypatch):
+    import os
+    import signal
+    cleaned = []
+
+    async def chat(session_id):
+        try:
+            os.kill(os.getpid(), signal.SIGINT)
+            await asyncio.sleep(5)
+        finally:
+            cleaned.append(session_id)
+
+    monkeypatch.setattr(terminal_chat, "run_chat", chat)
+    # Not a KeyboardInterrupt raised inside the loop: the chat is cancelled.
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(asyncio.wait_for(terminal_chat.run_until_interrupted("side"), 3))
+    assert cleaned == ["side"]
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler

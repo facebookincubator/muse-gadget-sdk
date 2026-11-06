@@ -428,7 +428,7 @@ def test_real_terminal_chat_restores_echo_and_line_input(ending):
     script = '''
 import asyncio, json, os, tempfile
 from musegadget import config
-from musegadget.terminal_chat import run_chat
+from musegadget.terminal_chat import run_until_interrupted
 
 async def main():
     peers = set()
@@ -458,11 +458,14 @@ async def main():
         os.environ[config.SOCKET_ENV] = path
         server = await asyncio.start_unix_server(handle, path)
         try:
-            await run_chat()
+            await run_until_interrupted()
         finally:
             server.close()
             await server.wait_closed()
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except asyncio.CancelledError:
+    pass  # Ctrl-C ends the chat by cancellation, as in the CLI.
 '''
     master, slave = pty.openpty()
     original = termios.tcgetattr(slave)
