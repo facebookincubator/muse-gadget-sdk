@@ -71,12 +71,14 @@ def run_call(script):
     return events
 
 
+@pytest.mark.parametrize("observe", [False, True], ids=["audio_only", "observed"])
 @pytest.mark.parametrize("words", [said, transcript])
-def test_audio_only_call_keeps_five_seconds_of_held_pcm_with_transcripts(words):
+def test_call_keeps_five_seconds_of_held_pcm_with_transcripts(words, observe):
     async def scenario():
         async with connected(register_device=False) as (session, vm, unused):
             output = Output()
-            call = VoiceCall(session, device_id="homelink-synthetic")
+            call = VoiceCall(session, device_id="homelink-synthetic",
+                             on_event=[].append if observe else None)
             task = asyncio.create_task(call.run(silent_source(), output))
             media, start = await admit(vm)
             await chunk(vm, media, line(speech()) + line(created("r1")))
@@ -88,6 +90,32 @@ def test_audio_only_call_keeps_five_seconds_of_held_pcm_with_transcripts(words):
             assert output.pcm == TONE * 125
 
     asyncio.run(asyncio.wait_for(scenario(), 10))
+
+
+def test_held_words_have_their_own_byte_and_count_bounds():
+    call = VoiceCall(None, device_id="homelink-synthetic", on_event=[].append)
+    call._reply_gate.event(speech())
+    call._reply_gate.event(created("r1"))
+    with pytest.raises(ValueError, match="buffer full"):
+        call._words(TranscriptDone("r1", "a" * (voice.MAX_HELD_TEXT_BYTES + 1)))
+    for _ in range(voice.MAX_HELD_ITEMS):
+        call._words(TranscriptDelta("r1", "a"))
+    with pytest.raises(ValueError, match="buffer full"):
+        call._words(TranscriptDelta("r1", "a"))
+    assert len(call._waiting) == voice.MAX_HELD_ITEMS
+
+
+def test_empty_transcript_deltas_are_neither_held_nor_delivered():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [speech(), created("r1")] + [said("")] * 50)))
+        await chunk(vm, media, line(said("Hi")))
+        await wait_until(lambda: len(call._waiting) == 1)
+        await chunk(vm, media, b"".join(map(line, [audio("p1", TONE), turn(), said("")])))
+        await wait_until(lambda: output.pcm == TONE)
+
+    events = run_call(script)
+    assert [event for event in events if isinstance(event, TranscriptDelta)] == [
+        TranscriptDelta("r1", "Hi")]
 
 
 def test_audio_only_call_builds_no_events(monkeypatch):

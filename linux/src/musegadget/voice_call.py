@@ -51,6 +51,10 @@ FRAME_BYTES = FRAME_SAMPLES * 2
 FRAME_SECONDS = FRAME_SAMPLES / SAMPLE_RATE
 MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 4
 MAX_PLAYBACK_BYTES = SAMPLE_RATE * 2 * 5
+# Words held with an unconfirmed reply have their own budget, so observing a
+# call never shrinks its held audio, and a count bound covers tiny entries.
+MAX_HELD_TEXT_BYTES = 64 * 1024
+MAX_HELD_ITEMS = 4096
 SETTLE_SECONDS = 0.2
 MAX_TRACKED_TURNS = 64
 MAX_SETTLED_TURNS = 1024
@@ -212,7 +216,8 @@ class VoiceCall:
         self._audio_sources: dict[str, str | None] = {}  # provider id -> response it started in
         self._audio_offsets: dict[str | None, int] = {}
         self._waiting: list[tuple[bytes, str | None] | TranscriptDelta | TranscriptDone] = []
-        self._waiting_bytes = 0
+        self._waiting_bytes = 0  # held PCM
+        self._waiting_text_bytes = 0
         self._waiting_audio = False
         self._playback = deque()
         self._pending_output = deque()
@@ -452,8 +457,9 @@ class VoiceCall:
                 if self._on_event is not None:
                     self._response_event(kind, event)
             elif kind == "response.output_audio_transcript.delta":
-                if self._on_event is not None and isinstance(event.get("delta"), str):
-                    self._words(TranscriptDelta(self._response_id, event["delta"]))
+                delta = event.get("delta")
+                if self._on_event is not None and isinstance(delta, str) and delta:
+                    self._words(TranscriptDelta(self._response_id, delta))
             elif kind == "response.output_audio_transcript.done":
                 if self._on_event is not None and isinstance(event.get("transcript"), str):
                     self._words(TranscriptDone(self._response_id, event["transcript"]))
@@ -520,12 +526,17 @@ class VoiceCall:
             self._emit(event)
 
     def _hold(self, held, size: int) -> None:
-        if self._waiting_bytes + size > MAX_PLAYBACK_BYTES:
+        audio = isinstance(held, tuple)
+        if (len(self._waiting) >= MAX_HELD_ITEMS
+                or audio and self._waiting_bytes + size > MAX_PLAYBACK_BYTES
+                or not audio and self._waiting_text_bytes + size > MAX_HELD_TEXT_BYTES):
             raise ValueError("unconfirmed voice reply buffer full")
         self._waiting.append(held)
-        self._waiting_bytes += size
-        if isinstance(held, tuple):
+        if audio:
+            self._waiting_bytes += size
             self._waiting_audio = True
+        else:
+            self._waiting_text_bytes += size
 
     def _audio_response_id(self, event: dict) -> str | None:
         if self._on_event is None:
@@ -537,7 +548,7 @@ class VoiceCall:
 
     def _clear_waiting(self) -> None:
         self._waiting.clear()
-        self._waiting_bytes = 0
+        self._waiting_bytes = self._waiting_text_bytes = 0
         self._waiting_audio = False
 
     def _queue_pcm(self, pcm: bytes, response_id: str | None) -> None:
@@ -574,7 +585,8 @@ class VoiceCall:
                 self._waiting = [held for held in self._waiting
                                  if not isinstance(held, tuple)
                                  and held.response_id not in stale_responses]
-                self._waiting_bytes = sum(len(held.text.encode()) for held in self._waiting)
+                self._waiting_bytes = 0
+                self._waiting_text_bytes = sum(len(held.text.encode()) for held in self._waiting)
                 self._waiting_audio = False
             else:
                 self._clear_waiting()

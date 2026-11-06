@@ -390,9 +390,9 @@ run_command=...)` is one encrypted session with a Muse VM.
   `voice_call.VoiceEvent`, on the event loop. It must not block. An
   exception it raises ends the call. Without `on_event` nothing changes.
 - `ResponseStarted(response_id)` and `ResponseDone(response_id, status)` come
-  from `response.created` and `response.done`. `status` is as Muse reports
-  it, such as `"completed"` or `"cancelled"`, or None. Audio of a response
-  can still arrive after its `ResponseDone`.
+  from `response.created` and `response.done` (or `response.completed`).
+  `status` is as Muse reports it, such as `"completed"` or `"cancelled"`, or
+  None. Audio of a response can still arrive after its `ResponseDone`.
 - `TranscriptDelta(response_id, text)` and `TranscriptDone(response_id, text)`
   carry the words Muse speaks. The wire events name no response, so
   `response_id` is that of the latest `ResponseStarted`. Transcripts are
