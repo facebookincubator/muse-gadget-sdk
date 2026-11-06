@@ -84,7 +84,7 @@ HARNESS = r'''
 
 typedef struct {
     int attempts, receives;
-    int tx_errors[16], rx_errors[16], status[16];
+    int tx_errors[128], rx_errors[128], status[128];
     uint8_t version[3];
 } script_t;
 
@@ -117,7 +117,11 @@ void xSemaphoreTake(SemaphoreHandle_t h, uint32_t timeout) {
     locked = 1;
 }
 void xSemaphoreGive(SemaphoreHandle_t h) { assert(h == &lock && locked); locked = 0; }
-void vTaskDelay(uint32_t ms) { assert(ms == 10); }
+static int boot_waits;
+void vTaskDelay(uint32_t ms) {
+    assert(ms == 10 || ms == 250);
+    if (ms == 250) boot_waits++;
+}
 
 esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *cfg, void **handle) {
     bus_new_calls++;
@@ -155,7 +159,7 @@ esp_err_t i2c_master_transmit(void *handle, const uint8_t *data, size_t len, int
         pending_attempt = pending_script->attempts++;
         pending_receive = true;
         if (pending_resource == 20 && expect_post_capture) assert(i2s_read_calls > 0);
-        return pending_attempt < 16 ? pending_script->tx_errors[pending_attempt] : ESP_OK;
+        return pending_attempt < 128 ? pending_script->tx_errors[pending_attempt] : ESP_OK;
     }
     assert(len == 5 && data[0] == 20 && data[1] == 1 && data[2] == 2 && data[3] == 31);
     assert(amp_attempts < 16);
@@ -170,13 +174,13 @@ esp_err_t i2c_master_receive(void *handle, uint8_t *data, size_t len, int timeou
     pending_script->receives++;
     assert(len == (pending_resource == 48 ? 4u : 6u));
     memset(data, 0, len);
-    data[0] = pending_attempt < 16 ? (uint8_t)pending_script->status[pending_attempt] : 0;
+    data[0] = pending_attempt < 128 ? (uint8_t)pending_script->status[pending_attempt] : 0;
     if (pending_resource == 48) {
         for (int i = 0; i < 3; i++) data[i + 1] = version_script.version[i];
     } else {
         for (int i = 0; i < 5; i++) data[i + 1] = gpo_values[i];
     }
-    return pending_attempt < 16 ? pending_script->rx_errors[pending_attempt] : ESP_OK;
+    return pending_attempt < 128 ? pending_script->rx_errors[pending_attempt] : ESP_OK;
 }
 
 esp_err_t i2s_new_channel(const i2s_chan_config_t *cfg, void **out, void **in) {
@@ -286,22 +290,30 @@ int main(int argc, char **argv) {
         version_script.tx_errors[0] = ESP_FAIL;
         version_script.status[1] = 64;
         expect_init();
-        assert(version_script.attempts == 3 && version_script.receives == 2);
+        assert(version_script.attempts == 3 && version_script.receives == 2 && boot_waits == 0);
+    } else if (!strcmp(scenario, "cold_boot")) {
+        for (int i = 0; i < 7; i++) version_script.tx_errors[i] = ESP_FAIL;
+        expect_init();
+        assert(version_script.attempts == 8 && boot_waits == 1);
     } else if (!strcmp(scenario, "retry_exhausted")) {
-        for (int i = 0; i < 16; i++) version_script.status[i] = 64;
+        for (int i = 0; i < 128; i++) version_script.status[i] = 64;
         assert(voice_board_init() == ESP_ERR_TIMEOUT);
-        assert(version_script.attempts == 5 && version_script.receives == 5);
+        assert(version_script.attempts == 65 && version_script.receives == 65 && boot_waits == 12);
         expect_failed_safe();
     } else if (!strcmp(scenario, "transient_exhausted")) {
-        for (int i = 0; i < 16; i++) version_script.tx_errors[i] = ESP_FAIL;
+        for (int i = 0; i < 128; i++) version_script.tx_errors[i] = ESP_FAIL;
         assert(voice_board_init() == ESP_FAIL);
-        assert(version_script.attempts == 5 && version_script.receives == 0);
+        assert(version_script.attempts == 65 && version_script.receives == 0 && boot_waits == 12);
         expect_failed_safe();
     } else if (!strcmp(scenario, "status_error")) {
-        version_script.status[0] = 1;
+        for (int i = 0; i < 128; i++) version_script.status[i] = 1;
         assert(voice_board_init() == ESP_ERR_INVALID_RESPONSE);
-        assert(version_script.attempts == 1);
+        assert(version_script.attempts == 13 && boot_waits == 12);
         expect_failed_safe();
+    } else if (!strcmp(scenario, "cold_boot_nack")) {
+        for (int i = 0; i < 7; i++) version_script.tx_errors[i] = ESP_ERR_INVALID_RESPONSE;
+        expect_init();
+        assert(version_script.attempts == 8 && boot_waits == 1);
     } else if (!strcmp(scenario, "bus_failure")) {
         bus_error = ESP_FAIL;
         assert(voice_board_init() == ESP_FAIL && bus_add_calls == 0);
@@ -444,6 +456,8 @@ COMMON_SCENARIOS = (
     "old",
     "major",
     "retry",
+    "cold_boot",
+    "cold_boot_nack",
     "retry_exhausted",
     "transient_exhausted",
     "status_error",

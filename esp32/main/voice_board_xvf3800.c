@@ -49,6 +49,8 @@
 #define XVF_CONTROL_ATTEMPTS 5
 #define XVF_CONTROL_TIMEOUT_MS 100
 #define XVF_CONTROL_RETRY_MS 10
+#define XVF_BOOT_WAIT_MS 3000
+#define XVF_BOOT_RETRY_MS 250
 #define XVF_MIC_CHUNK_FRAMES 320
 #define XVF_PLAYBACK_CHUNK_FRAMES 32
 #define XVF_MIN_VERSION_MAJOR 1
@@ -180,8 +182,7 @@ size_t voice_board_mic_read(int16_t *pcm, size_t frames, int *peak) {
     if (!s_ready || !s_mic_on || frames == 0) return 0;
     if (frames > XVF_MIC_CHUNK_FRAMES) frames = XVF_MIC_CHUNK_FRAMES;
     size_t bytes = 0;
-    esp_err_t err = i2s_channel_read(s_rx, s_raw, frames * 2 * sizeof(int32_t), &bytes,
-                                     pdMS_TO_TICKS(500));
+    esp_err_t err = i2s_channel_read(s_rx, s_raw, frames * 2 * sizeof(int32_t), &bytes, 500);
     if (err != ESP_OK) return 0;
     size_t count = bytes / (2 * sizeof(int32_t));
     if (voice_board_muted()) return 0;
@@ -211,7 +212,7 @@ esp_err_t voice_board_speaker_write(const int32_t *frames, size_t count) {
         }
         size_t bytes = n * 2 * sizeof(int32_t);
         size_t written = 0;
-        esp_err_t err = i2s_channel_write(s_tx, out, bytes, &written, pdMS_TO_TICKS(1000));
+        esp_err_t err = i2s_channel_write(s_tx, out, bytes, &written, 1000);
         if (err != ESP_OK) return err;
         if (written != bytes) return ESP_ERR_TIMEOUT;
         frames += 6 * n;
@@ -252,8 +253,14 @@ esp_err_t voice_board_init(void) {
     if (err == ESP_OK) err = i2c_master_bus_add_device(s_bus, &device, &s_codec);
     if (err != ESP_OK) return err;
 
+    /* The XMOS boots from its own flash at power-up and may not answer (or may
+     * NACK) yet, so keep asking for its version for a few seconds. */
     uint8_t version[3];
-    err = xmos_read(XVF_VERSION_RESOURCE, XVF_VERSION_COMMAND, version, sizeof(version));
+    for (int waited = 0;; waited += XVF_BOOT_RETRY_MS) {
+        err = xmos_read(XVF_VERSION_RESOURCE, XVF_VERSION_COMMAND, version, sizeof(version));
+        if (err == ESP_OK || waited >= XVF_BOOT_WAIT_MS) break;
+        vTaskDelay(pdMS_TO_TICKS(XVF_BOOT_RETRY_MS));
+    }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "reSpeaker XVF3800 VERSION: %s", esp_err_to_name(err));
         return err;
