@@ -455,8 +455,10 @@ async def _follow(session: LinkSession, session_id: str | None, opened: asyncio.
 class _ReplyReader:
     """Passes MuseTurn the events that follow one request's own message.
 
-    Events repeating an earlier ``seq`` are dropped. Until Muse acknowledges
-    the message, events wait here (bounded). Then a ``message.user`` event
+    Events repeating an earlier ``seq`` are dropped; ``message.user`` keeps its
+    own order, since on an existing chat it was seen numbered apart from the
+    other events (#327). Until Muse acknowledges the message, events wait here
+    (bounded). Then a ``message.user`` event
     for the acknowledged message opens the answer, and one for any other
     message on the chat closes it again; events of a reply already taken, and
     events naming the message or a taken reply as their parent, always count.
@@ -468,15 +470,23 @@ class _ReplyReader:
         self.user_ids: set[str] | None = None
         self.after_note = False
         self.last_seq = 0
+        self.last_user_seq = 0
         self.held: list[dict] = []
         self.held_text = 0
 
     def take(self, event: dict) -> None:
         seq = event.get("seq")
         if isinstance(seq, int) and not isinstance(seq, bool):
-            if seq <= self.last_seq:
-                return
-            self.last_seq = seq
+            # Observed on an existing chat (#327): the request's own message.user came with seq 976
+            # after other events at 1145. Comparing it with them dropped it, and the answer never opened.
+            if event.get("event") == "message.user":
+                if seq <= self.last_user_seq:
+                    return
+                self.last_user_seq = seq
+            else:
+                if seq <= self.last_seq:
+                    return
+                self.last_seq = seq
         if self.user_ids is None:
             if len(self.held) >= MAX_HELD_EVENTS:
                 raise ValueError("too many chat events before Muse acknowledged the message")
