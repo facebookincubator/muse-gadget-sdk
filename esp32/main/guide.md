@@ -32,16 +32,17 @@ Wi-Fi. Muse uses it through the commands it lists.
   LE devices: one at a time, and only devices the user means.
 - `device.health` covers its battery, power and network.
 
-## Status light
+## Status
 
-The status light (or the status screen, on boards with one):
+The status light shows the state as a colour. Boards with a status screen show
+the colour or, on e-paper and small text screens, the words:
 
-| Colour | Meaning |
-|---|---|
-| Green | Connected |
-| Yellow, blinking | Reconnecting |
-| Red, blinking | Error |
-| Any other colour | It needs setup in the Muse app |
+| Light | Words | Meaning |
+|---|---|---|
+| Green | Connected | Connected |
+| Yellow, blinking | Reconnecting | Reconnecting |
+| Red, blinking | Error | Error |
+| Any other colour | Any other words | Starting up, or it needs setup in the Muse app |
 
 ## Recovery
 
@@ -53,4 +54,4 @@ The status light (or the status screen, on boards with one):
 
 - It has no shell or files Muse can reach: it does only what its commands
   offer.
-- Commands work only while it's connected (green).
+- Commands work only while it's connected (green, or "Connected").
