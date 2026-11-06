@@ -318,6 +318,22 @@ def test_existing_side_chat_returns_reply_after_lower_sequence_user_event():
     run(scenario())
 
 
+def test_an_answer_row_below_live_sequence_is_the_reply():
+    # An answer sent only as a message.assistant row, numbered like the message rows.
+    async def scenario():
+        session = ChatSession()
+        session.answer([
+            dict(event("task.status", status="running"), seq=1145),
+            dict(NOTE, seq=976),
+            dict(event("message.assistant", "r1", parent="u1", display_text="Four."), seq=977),
+            dict(event("task.status", status="completed"), seq=1146),
+        ])
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Four."
+
+    run(scenario())
+
+
 def test_a_stalled_transport_cannot_hold_the_caller_past_its_deadline():
     async def scenario():
         release = asyncio.Event()
