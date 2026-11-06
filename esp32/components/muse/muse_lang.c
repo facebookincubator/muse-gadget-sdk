@@ -126,6 +126,7 @@ static const muse_lang_entry_t MENU[] = {
     { "Brightness", "Độ sáng" },
     { "Mic gain", "Độ nhạy mic" },
     { "Auto-sleep", "Tự ngủ" },
+    { "Text size", "Cỡ chữ" },
     { "Phone setup", "Cài qua điện thoại" },
     { "Status", "Trạng thái" },
     { "Battery", "Pin" },
@@ -159,6 +160,9 @@ static const muse_lang_entry_t MENU[] = {
     { "2 min", "2 phút" },
     { "5 min", "5 phút" },
     { "10 min", "10 phút" },
+    { "Small", "Nhỏ" },
+    { "Medium", "Vừa" },
+    { "Large", "Lớn" },
     { "Custom", "Tuỳ chỉnh" },
     /* Titles, upper case */
     { "MENU", "CÀI ĐẶT" },

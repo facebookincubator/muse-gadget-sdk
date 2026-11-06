@@ -140,6 +140,9 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD7
             bool "Waveshare ESP32-S3-Touch-LCD-7 (800x480 touch LCD, no audio)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+            bool "SpotPear ESP32-AI-1.28 v1.0 (GC9A01, MAX98357A, NP0557)"
+            depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_WAVESHARE_S3_LCD128
             bool "Waveshare ESP32-S3-Touch-LCD-1.28 (240x240 round touch LCD, no audio)"
             depends on IDF_TARGET_ESP32S3
@@ -158,6 +161,10 @@ menu "Muse"
 
         config MUSE_BOARD_DEOTALAND_ROROLEE
             bool "Deotaland RoRoLee (ESP32-S3, 240x120 AMOLED, three buttons, no touch)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_VIEWE_SMARTRING_PLUS
+            bool "VIEWE SmartRing-Plus (ESP32-S3, 360x360 round)"
             depends on IDF_TARGET_ESP32S3
 
         config MUSE_BOARD_WAVESHARE_S3_LCD19
@@ -209,7 +216,9 @@ menu "Muse"
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "waveshare_p4_lcd35" if MUSE_BOARD_WAVESHARE_P4_LCD35
         default "deotaland_rorolee" if MUSE_BOARD_DEOTALAND_ROROLEE
+        default "viewe_smartring_plus" if MUSE_BOARD_VIEWE_SMARTRING_PLUS
         default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
+        default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -272,6 +281,17 @@ menu "Muse"
             double-click camera preview. Camera buffers and tasks consume
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
+
+    config MUSE_P4_CSI_CAMERA
+        bool "ESP32-P4 MIPI-CSI camera capture"
+        depends on MUSE_BOARD_WAVESHARE_P4_LCD35 && SPIRAM
+        default n
+        help
+            Enable the camera.capture Home Link command on an OV5647 module
+            on the board's MIPI-CSI connector: esp_video runs the sensor
+            through the ISP and the P4's JPEG encoder compresses one frame
+            per capture. devices/sdkconfig.muse-waveshare-p4-lcd35-camera
+            turns it on with the sensor's settings.
 
     config MUSE_CJK_FONT
         bool "Show Chinese, Japanese and Korean in captions"
@@ -381,6 +401,24 @@ menu "Muse"
             it on where internal RAM is short, as the SenseCAP Watcher does
             to pay for the CPU's light-sleep retention memory, which it
             takes at boot and keeps.
+
+    config MUSE_SMALL_FULL_REPLY
+        bool "Full-screen replies on small screens"
+        depends on MUSE_ENABLED
+        default n
+        help
+            On screens with the compact layout (under 200 px or so), Muse
+            normally keeps the avatar and pages replies two lines at a time
+            in a band along the bottom. With this on, the avatar steps aside
+            while Muse thinks or answers, and the reply fills the screen
+            below the status line. Muse comes back when the reply ends.
+            On boards with the two-button menu, the menu gains a Text size
+            setting (Small, Medium, Large) for the reply's font, kept across
+            restarts; touch boards have no such control and keep Medium.
+            Lines wrap to the screen's width in pixels, so every page fits
+            at any size. A page with Chinese, Japanese or Korean in it
+            (MUSE_CJK_FONT) or accented letters (MUSE_LATIN_FONT) shows in
+            that font, as on the band, whatever the Text size.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

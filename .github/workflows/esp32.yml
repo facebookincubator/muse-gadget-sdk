@@ -32,7 +32,7 @@ jobs:
   host-tests:
     name: Host tests
     runs-on: ubuntu-latest
-    container: espressif/idf:v6.0.1
+    container: espressif/idf:v6.0.3
     defaults:
       run:
         shell: bash
@@ -109,7 +109,7 @@ jobs:
   build:
     name: Build ${{ matrix.board }}
     runs-on: ubuntu-latest
-    container: espressif/idf:v6.0.1
+    container: espressif/idf:v6.0.3
     strategy:
       fail-fast: false
       matrix:
@@ -190,6 +190,9 @@ jobs:
           - board: muse-waveshare-s3-lcd349
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd349"
+          - board: muse-spotpear-esp32-ai-128
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-spotpear-esp32-ai-128"
           - board: muse-waveshare-s3-216
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216"
@@ -202,6 +205,9 @@ jobs:
           - board: muse-waveshare-p4-lcd35
             target: esp32p4
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35"
+          - board: muse-waveshare-p4-lcd35-camera
+            target: esp32p4
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35;devices/sdkconfig.muse-waveshare-p4-lcd35-camera"
           - board: muse-aipi
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-aipi"
@@ -277,6 +283,9 @@ jobs:
           - board: muse-deotaland-rorolee
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-deotaland-rorolee"
+          - board: muse-viewe-smartring-plus
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-viewe-smartring-plus"
           - board: muse-waveshare-s3-lcd19
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19"

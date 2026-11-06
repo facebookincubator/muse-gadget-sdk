@@ -547,8 +547,14 @@ class LinkSession:
                 raise HttpStreamError(stream.status, path)
         return SideChat(session_id, exists)
 
-    async def subscribe_chat(self, session_id: str | None = None) -> AsyncIterator[dict]:
-        """Yield Muse chat events from its NDJSON subscription."""
+    async def subscribe_chat(
+        self, session_id: str | None = None, *, opened: asyncio.Event | None = None,
+    ) -> AsyncIterator[dict]:
+        """Yield Muse chat events from its NDJSON subscription.
+
+        ``opened`` is set once Muse accepts this subscription, so events from
+        then on reach it.
+        """
         body = json.dumps({"session_id": session_id} if session_id else {}).encode()
         path = "/chat/subscribe"
         async with self.stream_http("POST", path, body, headers=[
@@ -557,6 +563,8 @@ class LinkSession:
             if not 200 <= stream.status < 300:
                 raise HttpStreamError(stream.status, path)
             self.chat_subscribed.set()
+            if opened is not None:
+                opened.set()
             try:
                 buffered = bytearray()
                 async for chunk in stream:
