@@ -49,13 +49,15 @@ static const char *TAG = "muse_voice";
 #define TAIL_FRAMES (MUSE_AUDIO_RATE * 12 / 100)   /* capture lag + poll interval, stops before the release click */
 #define MAX_FRAMES (MUSE_AUDIO_RATE * MAX_SECS)
 #define NOTE_MIN_HOLD_US 600000
+#define CALL_TAP_US 300000   /* tap-to-call keeps its tap length, as a waking PTT tap */
+#define CHUNK_US (MUSE_AUDIO_CHUNK * 1000000 / MUSE_AUDIO_RATE)
 #define NOTE_MIN_RECORD_FRAMES (MUSE_AUDIO_RATE / 2)   /* duration, not detected speech */
 #if CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT
 #define PRE_CHUNKS 6                                   /* 120 ms; a 320 ms upload burst stalls on the ADV and C3 */
 #else
 #define PRE_CHUNKS 16                                  /* 320 ms of audio kept from before the press */
 #endif
-#define PRE_CAP_CHUNKS (PRE_CHUNKS + NOTE_MIN_HOLD_US / 20000)
+#define PRE_CAP_CHUNKS (PRE_CHUNKS + NOTE_MIN_HOLD_US / CHUNK_US)
 #define SETTLE_CHUNKS 10   /* after Muse makes a sound, 200 ms of capture is its own tail */
 #define REST_BACKSTOP_MS 60000
 
@@ -218,6 +220,13 @@ static void pre_put(void)
     s_pre_fill = s_pre_fill < PRE_CAP_CHUNKS ? s_pre_fill + 1 : PRE_CAP_CHUNKS;
 }
 
+/* Outside a note's hold, the ring keeps only PRE_CHUNKS of pre-roll. */
+static void pre_put_preroll(void)
+{
+    pre_put();
+    if (s_pre_fill > PRE_CHUNKS) s_pre_fill = PRE_CHUNKS;
+}
+
 /* One 20 ms idle read: feeds the pre-roll ring and the settings mic meter. */
 static void idle_capture(void)
 {
@@ -233,8 +242,7 @@ static void idle_capture(void)
         s_settle--;
         return;
     }
-    pre_put();
-    if (s_pre_fill > PRE_CHUNKS) s_pre_fill = PRE_CHUNKS;
+    pre_put_preroll();
 }
 
 /* Consume through the requested edge, leaving later edges for the next
@@ -600,7 +608,8 @@ static bool note_requires_hold(void)
 
 typedef enum {
     NOTE_ACCEPTED,
-    NOTE_SHORT_TAP,
+    NOTE_TAP,          /* released within CALL_TAP_US: may start a call */
+    NOTE_SHORT_HOLD,   /* released after a tap but before NOTE_MIN_HOLD_US */
     NOTE_INSUFFICIENT_CAPTURE,
     NOTE_CAPTURE_ERROR,
     NOTE_CANCELLED,
@@ -611,14 +620,17 @@ typedef enum {
  * successful capture while held. Idle pre-roll, playback settling and release
  * tail never count. No turn is opened until NOTE_ACCEPTED; the ring keeps
  * the first words on boards both with and without a whole-note buffer.
+ * A waking press changes nothing on screen until it qualifies: a tap only wakes.
  */
 static note_result_t note_held(bool wake, bool barge_in)
 {
     if (wake || barge_in) s_pre_fill = 0;
     int settle = barge_in ? SETTLE_CHUNKS : 0;
     size_t captured = 0;
-    muse_state_set_mode(MUSE_MODE_LISTENING);
-    muse_state_set_caption("RECORDING...");
+    if (!wake) {
+        muse_state_set_mode(MUSE_MODE_LISTENING);
+        muse_state_set_caption("RECORDING...");
+    }
     for (;;) {
         if (atomic_load(&s_shutdown) || s_press_input_epoch != muse_input_call_epoch()) return NOTE_CANCELLED;
         muse_input_event_t ev;
@@ -632,7 +644,9 @@ static note_result_t note_held(bool wake, bool barge_in)
             if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP) {
                 if (eligible) return NOTE_ACCEPTED;
                 xQueueReceive(s_queue, &ev, 0);
-                return until - s_press_us < NOTE_MIN_HOLD_US ? NOTE_SHORT_TAP : NOTE_INSUFFICIENT_CAPTURE;
+                int64_t held_us = until - s_press_us;
+                return held_us < CALL_TAP_US ? NOTE_TAP :
+                    held_us < NOTE_MIN_HOLD_US ? NOTE_SHORT_HOLD : NOTE_INSUFFICIENT_CAPTURE;
             }
             if (ev.type == MUSE_PTT_DOWN) return NOTE_CANCELLED;
             xQueueReceive(s_queue, &ev, 0);
@@ -650,7 +664,7 @@ static note_result_t note_held(bool wake, bool barge_in)
             continue;
         }
         pre_put();
-        muse_state_set_level(muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK));
+        if (!wake) muse_state_set_level(muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK));
         /* Conservatively exclude a block whose read overlapped release. */
         if (xQueuePeek(s_queue, &ev, 0) != pdTRUE) captured += MUSE_AUDIO_CHUNK;
     }
@@ -678,8 +692,7 @@ static bool ptt_held_on_waking(void)
         if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
             vTaskDelay(pdMS_TO_TICKS(20));
         } else if (xQueuePeek(s_queue, &ev, 0) != pdTRUE) {
-            pre_put();   /* still held after the blocking read */
-            if (s_pre_fill > PRE_CHUNKS) s_pre_fill = PRE_CHUNKS;
+            pre_put_preroll();   /* still held after the blocking read */
         }
     }
 }
@@ -1292,6 +1305,22 @@ static void voice_task(void *arg)
             muse_input_clear_call_pending(s_press_mark);
             continue;
         }
+        note_result_t result = NOTE_CANCELLED;
+        if (wake && !ptt) {
+            /* A waking press only wakes until it qualifies as a note: no
+             * readiness check, call, mode or caption change before that. */
+            muse_input_clear_call_pending(s_press_mark);
+            result = note_held(true, false);
+            if (result != NOTE_ACCEPTED) {
+                pre_reset();
+                muse_state_set_level(0);
+                if (result == NOTE_CAPTURE_ERROR && !atomic_load(&s_shutdown)
+                    && muse_state_mode(NULL) != MUSE_MODE_OFF) {
+                    go_idle("MICROPHONE ERROR - TRY AGAIN");
+                }
+                continue;
+            }
+        }
         if (atomic_load(&s_shutdown)) {
             pending_down = false;
             muse_input_clear_call_pending(s_press_mark);
@@ -1314,9 +1343,10 @@ static void voice_task(void *arg)
         muse_input_clear_call_pending(s_press_mark);
         if (!can_record()) {
             pending_down = false;
+            pre_reset();
             continue;
         }
-        note_result_t result = note_held(wake, pending_down);
+        if (!wake) result = note_held(false, pending_down);
         pending_down = false;
         if (result != NOTE_ACCEPTED) {
             drop_rec();
@@ -1325,7 +1355,7 @@ static void voice_task(void *arg)
             if (atomic_load(&s_shutdown) || muse_state_mode(NULL) == MUSE_MODE_OFF) continue;
 #if CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH
             /* Other boards retain tap-to-call beside holding for a note. */
-            if (result == NOTE_SHORT_TAP && !wake && s_press_input_epoch == muse_input_call_epoch()
+            if (result == NOTE_TAP && s_press_input_epoch == muse_input_call_epoch()
                 && muse_voice_call_ready()) {
                 run_call(false, 0);
                 pre_reset();
@@ -1333,7 +1363,7 @@ static void voice_task(void *arg)
             }
 #endif
             if (result == NOTE_CAPTURE_ERROR) go_idle("MICROPHONE ERROR - TRY AGAIN");
-            else if (result == NOTE_CANCELLED || (result == NOTE_SHORT_TAP && wake)) go_idle("");
+            else if (result == NOTE_CANCELLED) go_idle("");
             else too_short();
             continue;
         }

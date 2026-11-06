@@ -54,6 +54,8 @@ static int mic_at[128], speaker_at[128];
 static float level_at[128], level;
 static muse_voice_view_t views[128];
 static muse_mode_t mode;
+static int mode_sets;
+static int64_t first_mode_us = -1;
 static char caption[400];
 static jmp_buf finish;
 static int injected_pending;   /* 1: an injected press is held back, delivered by deliver_injected() */
@@ -97,7 +99,8 @@ void *heap_caps_realloc(void *p, size_t n, unsigned caps) { (void)caps; return r
 static int pokes;
 static int64_t poked_us, idle_clock_at_idle = -1;
 void muse_state_set_mode(muse_mode_t m) {
-    mode=m;
+    mode=m; ++mode_sets;
+    if(first_mode_us<0) first_mode_us=clock_us;
     if (m==MUSE_MODE_IDLE) idle_clock_at_idle = clock_us - poked_us;   /* what check_sleep() would see */
     if (frame<128) { views[frame]=muse_voice_call_view(); level_at[frame]=level; }
 }
@@ -250,11 +253,14 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
     if(scenario>=70) {
         /* Stop after the actual outer voice loop has handled the attempt,
          * before it can consume a newer DOWN or overwrite its result. */
-        if(frame>1 && (mode==MUSE_MODE_IDLE || atomic_load(&s_shutdown))) longjmp(finish,1);
+        /* A waking tap leaves the screen as it was (IDLE): stop once it's handled. */
+        int quiet_until=scenario==78?6:scenario==84?21:1;
+        if(frame>quiet_until && (mode==MUSE_MODE_IDLE || atomic_load(&s_shutdown))) longjmp(finish,1);
         ++frame;
         clock_us+=(scenario==70 || scenario==72 || scenario==73)?40000:20000;
         assert(frame<100);
         if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
+        if((scenario==82 || scenario==84) && frame==20) post(MUSE_PTT_UP,false);   /* 400 ms */
         if(scenario==73 && frame==18) post(MUSE_PTT_UP,false);
         if(frame==10) {
             if(scenario==75) {
@@ -359,21 +365,30 @@ int main(int argc,char **argv) {
     s_pre=calloc(PRE_CAP_CHUNKS,sizeof(*s_pre));
     if(scenario>=70) {
         notes_mode=true; clock_us=1000000;
-        post(MUSE_PTT_DOWN,scenario==72 || scenario==78);
+        if(scenario==78 || scenario==84) {
+            /* Woken to re-read a reply, while Muse is out of reach. */
+            mode=MUSE_MODE_IDLE; snprintf(caption,sizeof(caption),"PREVIOUS REPLY"); ready=false;
+        }
+        post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario==83 || scenario==84);
         int outcome=setjmp(finish);
         if(!outcome) voice_task(NULL);
         bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
-        if(scenario==79) {
+        if(scenario==79 || scenario==83) {
             assert(outcome==3 && notes==1 && !starts && clock_us>=1600000);
+            /* A waking press shows nothing until it qualifies as a note. */
+            if(scenario==83) assert(first_mode_us>=1600000);
         } else {
             assert(!notes && !note_frames && !s_rec && !s_pre_fill && !level);
             assert(starts==(call_expected?1:0) && outcome==(call_expected?2:1));
             if(scenario==70 || scenario==71 || scenario==72 || scenario==81)
                 assert(!strcmp(caption,"MICROPHONE ERROR - TRY AGAIN"));
-            if(scenario==73 || (scenario==74 && !call_expected))
+            if(scenario==73 || scenario==82 || (scenario==74 && !call_expected))
                 assert(!strcmp(caption,"HOLD LONGER TO TALK"));
+            /* A waking tap only wakes: no readiness check, mode or caption change. */
+            if(scenario==78 || scenario==84)
+                assert(!mode_sets && mode==MUSE_MODE_IDLE && !strcmp(caption,"PREVIOUS REPLY"));
             if(scenario==75) assert(mode==MUSE_MODE_OFF && !strcmp(caption,"POWERING OFF"));
-            if(scenario==76 || scenario==77 || scenario==78 || scenario==80) assert(!caption[0]);
+            if(scenario==76 || scenario==77 || scenario==80) assert(!caption[0]);
             if(scenario==77 || scenario==81) {
                 assert(queue.n==1 && queue.items[0].type==MUSE_PTT_DOWN);
                 assert(!CONFIG_MUSE_REALTIME_VOICE || !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH || atomic_load(&s_call_pending));
@@ -408,7 +423,7 @@ int main(int argc,char **argv) {
         bool admitted=result==NOTE_ACCEPTED;
         bool expected=!(scenario==50 || scenario==52 || scenario==55 || scenario==56 || scenario==58 || scenario==59);
         assert(admitted==expected && !notes && !note_frames);
-        if(scenario==50 || scenario==52) assert(result==NOTE_SHORT_TAP);
+        if(scenario==50 || scenario==52) assert(result==NOTE_SHORT_HOLD);
         if(scenario==55) assert(result==NOTE_INSUFFICIENT_CAPTURE);
         if(scenario==56) assert(result==NOTE_CAPTURE_ERROR);
         if(scenario==58 || scenario==59) assert(result==NOTE_CANCELLED);

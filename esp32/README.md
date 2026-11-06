@@ -321,8 +321,12 @@ On boards with the full UI other than the Watcher, voice notes require a
 least 500 ms of audio captured during that hold before uploading starts.
 Pre-roll and the release tail are preserved in accepted notes but do not count
 toward either minimum. These checks measure duration, not whether speech is
-present; a shorter press shows "Hold longer to talk" (or only wakes an asleep
-screen). The Watcher keeps its existing wheel click/hold gesture.
+present; a shorter press shows "Hold longer to talk". A press that wakes the
+screen only wakes it unless it is held long enough for a note. With live calls,
+a tap released within 300 ms still starts a call on boards other than the
+StopWatch. The Watcher keeps its existing wheel click/hold gesture. Buffering
+the hold costs about 5 KB more internal RAM on boards without PSRAM, and about
+19 KB more PSRAM on the others.
 
 Two things you can change:
 

@@ -113,7 +113,7 @@ class StopWatchPTT(unittest.TestCase):
 
     def test_qualification_failure_never_becomes_tap_to_call(self):
         for board, realtime in ((0, 1), (1, 0), (1, 1), (0, 0), (2, 0)):
-            for scenario in range(70, 82):
+            for scenario in range(70, 85):
                 with self.subTest(board=board, realtime=realtime, scenario=scenario):
                     self.run_case('voice', scenario, board=board, realtime=realtime)
 
