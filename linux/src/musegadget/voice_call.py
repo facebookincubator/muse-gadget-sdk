@@ -40,7 +40,7 @@ from urllib.parse import urlencode
 
 from musegadget.noise import Header
 from musegadget.streaming import read_ndjson
-from musegadget.voice_gate import DROP, HOLD, ReplyGate, identifier
+from musegadget.voice_gate import DROP, HOLD, MAX_IDS, ReplyGate, identifier, provider_id
 
 log = logging.getLogger(__name__)
 SAMPLE_RATE = 24000
@@ -138,9 +138,11 @@ class ResponseDone:
 class AudioChunk:
     """Reply PCM accepted for playback, delivered before the output writes it.
 
-    ``offset`` is the number of samples delivered for ``response_id`` before
-    this chunk, so ``offset / SAMPLE_RATE`` is where the chunk starts in that
-    response's speech.
+    ``response_id`` is the latest response when the chunk's provider audio
+    stream was first heard, so a reply still playing when the next response
+    opens keeps its own. ``offset`` is the number of samples delivered for
+    ``response_id`` before this chunk, so ``offset / SAMPLE_RATE`` is where the
+    chunk starts in that response's speech.
     """
 
     response_id: Optional[str]
@@ -199,8 +201,8 @@ class VoiceCall:
         self._reply_gate = ReplyGate()
         self._on_event = on_event
         self._response_id: str | None = None  # the latest response.created
-        self._audio_response: str | None = None
-        self._audio_offset = 0
+        self._audio_sources: dict[str, str | None] = {}  # provider id -> response it started in
+        self._audio_offsets: dict[str | None, int] = {}
         self._waiting_pcm: list[tuple[str | None, bytes]] = []
         self._waiting_bytes = 0
         self._playback = deque()
@@ -467,13 +469,14 @@ class VoiceCall:
                 self._apply_reply_flush()
                 if verdict == DROP:
                     continue
+                response_id = self._audio_response_id(event)
                 if verdict == HOLD:
                     if self._waiting_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
                         raise ValueError("unconfirmed voice reply buffer full")
-                    self._waiting_pcm.append((self._response_id, pcm))
+                    self._waiting_pcm.append((response_id, pcm))
                     self._waiting_bytes += len(pcm)
                 else:
-                    self._queue_pcm(pcm, self._response_id)
+                    self._queue_pcm(pcm, response_id)
         if not self.ready.is_set():
             raise ConnectionError("voice response ended before readiness")
         await self._drain_playback()
@@ -495,6 +498,12 @@ class VoiceCall:
             status = response.get("status")
             self._emit(ResponseDone(response_id, status if isinstance(status, str) else None))
 
+    def _audio_response_id(self, event: dict) -> str | None:
+        source = provider_id(event)
+        if source is None:
+            return self._response_id
+        return self._audio_sources.setdefault(source, self._response_id)
+
     def _clear_waiting(self) -> None:
         self._waiting_pcm.clear()
         self._waiting_bytes = 0
@@ -503,10 +512,11 @@ class VoiceCall:
         self._received_audio = True
         if self._playback_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
             raise ValueError("voice playback buffer full")
-        if response_id != self._audio_response:
-            self._audio_response, self._audio_offset = response_id, 0
-        self._emit(AudioChunk(response_id, self._audio_offset, pcm))
-        self._audio_offset += len(pcm) // 2
+        offset = self._audio_offsets.pop(response_id, 0)
+        self._emit(AudioChunk(response_id, offset, pcm))
+        self._audio_offsets[response_id] = offset + len(pcm) // 2
+        if len(self._audio_offsets) > MAX_IDS:
+            del self._audio_offsets[next(iter(self._audio_offsets))]
         for offset in range(0, len(pcm), FRAME_BYTES):
             part = pcm[offset:offset + FRAME_BYTES]
             audible = pcm_rms(part) >= 300

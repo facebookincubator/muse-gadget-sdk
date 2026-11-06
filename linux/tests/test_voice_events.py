@@ -90,6 +90,22 @@ def test_events_follow_a_reply_and_audio_offsets_count_samples_per_response():
     ]
 
 
+def test_audio_keeps_the_response_it_started_in_when_the_next_response_opens():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            created("r1"), audio("p1", TONE), created("r2"), audio("p1", HALF), audio("p2", HALF),
+        ])))
+        await wait_until(lambda: len(output.pcm) == len(TONE) + 2 * len(HALF))
+
+    assert run_call(script) == [
+        ResponseStarted("r1"),
+        AudioChunk("r1", 0, TONE),
+        ResponseStarted("r2"),
+        AudioChunk("r1", 960, HALF),
+        AudioChunk("r2", 0, HALF),
+    ]
+
+
 def test_held_reply_audio_is_delivered_when_its_turn_confirms_it():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, b"".join(map(line, [speech("item-1"), created("r1"), audio("p1", TONE)])))

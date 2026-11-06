@@ -402,7 +402,9 @@ run_command=...)` is one encrypted session with a Muse VM.
   turn confirms it. Dropped audio never is. `offset` counts the samples
   delivered for `response_id` before this chunk, so `offset / SAMPLE_RATE`
   is where it starts in that response's speech. `response_id` is the latest
-  `ResponseStarted`'s when the audio arrived.
+  `ResponseStarted`'s when the chunk's provider audio stream was first heard,
+  so a reply still playing when the next response opens keeps its own.
+  Audio without a provider response id takes the latest at arrival.
 - `Working(working)` changes when Muse starts having, or stops having, a
   caller turn that has not settled.
 - `PlaybackFlushed()` says audio already delivered, still queued or playing,

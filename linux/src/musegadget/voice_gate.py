@@ -33,6 +33,12 @@ def identifier(value):
         return None
 
 
+def provider_id(event):
+    if event.get("type") != "continuous_audio_video.delta":
+        return None
+    return identifier(event.get("response_id"))
+
+
 class ReplyGate:
     def __init__(self):
         self.ids = {}
@@ -110,8 +116,7 @@ class ReplyGate:
                     self.open_response = None
 
     def audio(self, event):
-        response_id = (identifier(event.get("response_id"))
-                       if event.get("type") == "continuous_audio_video.delta" else None)
+        response_id = provider_id(event)
         if response_id is None:
             return DROP if self.fenced else PLAY
         if response_id in self.ids:
