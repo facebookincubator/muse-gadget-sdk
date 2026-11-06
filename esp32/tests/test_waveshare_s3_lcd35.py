@@ -91,11 +91,13 @@ class Board(unittest.TestCase):
         self.assertIn('.use_psram = true,', start)
         self.assertIn('.flags.psram_dma_direct = 1,', start)
 
-    def test_no_battery_reads_as_none(self):
-        power = function(self.source, 'read_power')
-        self.assertIn('out->battery_pct = -1;', power)
-        self.assertIn('bool battery = s1 & (1u << 3);', power)
-        self.assertIn('pct <= 100', power)
+    def test_battery_through_the_shared_reader(self):
+        # The rails first, then muse_pmu takes the chip: it reports no
+        # battery as -1, skips an unready gauge and reads the voltage.
+        init = function(self.source, 'init')
+        self.assertLess(init.index('pmic_init()'), init.index('muse_pmu_init(s_i2c, false)'))
+        self.assertLess(init.index('i2c_master_bus_rm_device(s_pmic)'), init.index('muse_pmu_init(s_i2c, false)'))
+        self.assertIn('muse_pmu_read_power(out)', function(self.source, 'read_power'))
 
     def test_boot_is_talk(self):
         self.assertIn('muse_gpio_button_init(&s_talk, TALK_GPIO)', self.source)
@@ -112,6 +114,20 @@ class StatusScreen(unittest.TestCase):
         scale = int(re.search(r'#define LCD_ANIM_SCALE\s+(\d+)', block).group(1))
         width = int(re.search(r'#define LCD_H_RES\s+(\d+)', block).group(1))
         self.assertLessEqual(56 * scale, width)
+
+    def test_powers_the_panel_like_the_full_ui(self):
+        # The panel's rails are off until the AXP2101 is set up; the status
+        # build doesn't run the board file's init(), so it does the same.
+        led = (ROOT / 'main/led_status.c').read_text()
+        pair = r'\{(0x[0-9a-f]+), ([^}]+)\}'
+        status = re.findall(pair, led[led.index('s_pmic_seq[][2] = {'):led.index('};', led.index('s_pmic_seq[][2] = {'))])
+        board = BOARD.read_text()
+        start = board.index('seq[][2] = {')
+        ui = [(r, re.sub(r'\s*/\*.*', '', v).strip().rstrip(',')) for r, v in re.findall(pair, board[start:board.index('};', start)])]
+        self.assertEqual(len(status), 14)
+        self.assertEqual([(r, v.strip()) for r, v in status], ui)
+        init = function(led, 'exp_lcd_init')
+        self.assertLess(init.index('pmic_rails_init(bus)'), init.index('EXP_ADDR'))
 
     def test_overlay_selects_the_backend(self):
         overlay = (ROOT / 'devices/sdkconfig.waveshare-s3-lcd-35').read_text()

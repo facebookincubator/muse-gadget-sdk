@@ -538,8 +538,9 @@ alone cannot verify these behaviors.
 A 3.5" 320×480 ST7796 panel over SPI (run landscape as 480×320), an FT6336
 capacitive touch, an ES8311 codec for speaker and mic, an AXP2101 PMIC and a
 TCA9554 I/O expander. The PMIC's codec and panel rails are off at boot until
-`init()` programs them, and the LCD's chip-select and reset sit on the
-expander's P0/P1, so the panel doesn't exist until both chips are up. The
+the firmware programs them (both builds do), and the LCD's chip-select and
+reset sit on the expander's P0/P1, so the panel doesn't exist until both chips
+are up. The
 touch reports in the panel's portrait frame and is polled over the shared
 I2C bus — it has no interrupt or reset line — with coordinates mirrored into
 landscape and clamped at the edges, where it can report one past the last

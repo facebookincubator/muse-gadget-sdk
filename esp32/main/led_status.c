@@ -974,6 +974,45 @@ static esp_err_t exp_lcd_write(uint8_t reg, uint8_t val) {
     return i2c_master_transmit(s_exp, buf, sizeof(buf), 100);
 }
 
+// The AXP2101 (7-bit address 0x34) keeps the panel's rails off until it is
+// set up. The same sequence as pmic_init() in the full UI's
+// components/muse/boards/board_waveshare_s3_lcd_35.c, from xiaozhi-esp32's
+// Pmic: DC1 at 3.3 V, ALDO1/BLDO1/BLDO2 on, charger for a small Li-Po.
+#define PMIC_ADDR        0x34
+static const uint8_t s_pmic_seq[][2] = {
+    {0x22, 0b110},
+    {0x27, 0x10},
+    {0x80, 0x01},
+    {0x90, 0x00},
+    {0x91, 0x00},
+    {0x82, (3300 - 1500) / 100},
+    {0x92, (3300 - 500) / 100},
+    {0x96, (1500 - 500) / 100},
+    {0x97, (2800 - 500) / 100},
+    {0x90, 0x31},
+    {0x64, 0x02},
+    {0x61, 0x02},
+    {0x62, 0x08},
+    {0x63, 0x01},
+};
+
+static esp_err_t pmic_rails_init(i2c_master_bus_handle_t bus) {
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = PMIC_ADDR,
+        .scl_speed_hz = 400000,
+    };
+    i2c_master_dev_handle_t pmic = NULL;
+    esp_err_t err = i2c_master_bus_add_device(bus, &dev_cfg, &pmic);
+    for (size_t i = 0; err == ESP_OK && i < sizeof(s_pmic_seq) / sizeof(s_pmic_seq[0]); i++) {
+        err = i2c_master_transmit(pmic, s_pmic_seq[i], 2, 100);
+    }
+    if (pmic) i2c_master_bus_rm_device(pmic);
+    if (err != ESP_OK) ESP_LOGE(TAG, "AXP2101 at 0x%02x: %s", PMIC_ADDR, esp_err_to_name(err));
+    return err;
+}
+
+// Powers the panel, then takes its chip select and reset on the TCA9554:
 // P0 is the panel's chip select (kept low: always selected), P1 its reset.
 // Mirrors xiaozhi-esp32's InitializeTca9554: both low, reset held, then
 // released.
@@ -988,6 +1027,7 @@ static esp_err_t exp_lcd_init(void) {
     };
     i2c_master_bus_handle_t bus = NULL;
     esp_err_t err = i2c_new_master_bus(&bus_cfg, &bus);
+    if (err == ESP_OK) err = pmic_rails_init(bus);
     if (err != ESP_OK) return err;
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,

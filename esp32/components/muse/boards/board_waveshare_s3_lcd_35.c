@@ -45,6 +45,7 @@
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_mem.h"
+#include "muse_pmu.h"
 
 static const char *TAG = "board";
 
@@ -81,7 +82,8 @@ static const char *TAG = "board";
 #define TALK_GPIO GPIO_NUM_0    /* BOOT button */
 
 static i2c_master_bus_handle_t s_i2c;
-static i2c_master_dev_handle_t s_pmic;
+static i2c_master_dev_handle_t s_pmic;    /* until muse_pmu_init() takes the chip */
+static bool s_pmu;
 static i2c_master_dev_handle_t s_exp;
 static i2c_master_dev_handle_t s_touch_dev;
 static esp_lcd_panel_handle_t s_panel;
@@ -99,7 +101,9 @@ static esp_err_t reg_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t *val
 }
 
 /* xiaozhi-esp32's Pmic constructor: DC1 at 3.3 V, ALDO1/BLDO1/BLDO2 on for the
- * codec and panel, charger tuned for a small Li-Po, 4 s power-key hold-off. */
+ * codec and panel, charger tuned for a small Li-Po. muse_pmu_init() then sets
+ * the 10 s PWR hold-off the other AXP2101 boards use. main/led_status.c powers
+ * the status-screen build with the same sequence. */
 static esp_err_t pmic_init(void)
 {
     static const uint8_t seq[][2] = {
@@ -164,6 +168,16 @@ static esp_err_t init(void)
 
     ESP_RETURN_ON_ERROR(pmic_init(), TAG, "pmic");
     ESP_RETURN_ON_ERROR(expander_init(), TAG, "expander");
+
+    /* Battery and USB status through the shared AXP2101 reader, which takes
+     * the chip from here. */
+    i2c_master_bus_rm_device(s_pmic);
+    s_pmic = NULL;
+    esp_err_t err = muse_pmu_init(s_i2c, false);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "PMU unavailable (%s): no battery status", esp_err_to_name(err));
+    }
+    s_pmu = err == ESP_OK;
 
     return muse_gpio_button_init(&s_talk, TALK_GPIO);
 }
@@ -373,23 +387,9 @@ static unsigned poll_buttons(void)
     return muse_gpio_button_poll(&s_talk);
 }
 
-/* The AXP2101's battery gauge: reg 0x00 bit 3 is a battery present and bit 5
- * VBUS, reg 0x01 bits [6:5] charging (1), and reg 0xA4 the percentage, over
- * 100 until the gauge is ready. The same reading as muse_pmu_read_power(). */
 static esp_err_t read_power(muse_power_t *out)
 {
-    uint8_t s1 = 0, s2 = 0, pct = 0;
-    ESP_RETURN_ON_ERROR(reg_read(s_pmic, 0x00, &s1), TAG, "pmic status1");
-    ESP_RETURN_ON_ERROR(reg_read(s_pmic, 0x01, &s2), TAG, "pmic status2");
-    bool battery = s1 & (1u << 3);
-    out->usb = s1 & (1u << 5);
-    out->charging = battery && ((s2 >> 5) & 0x3) == 1;
-    out->battery_pct = -1;
-    out->battery_mv = 0;
-    if (battery && reg_read(s_pmic, 0xA4, &pct) == ESP_OK && pct <= 100) {
-        out->battery_pct = pct;
-    }
-    return ESP_OK;
+    return s_pmu ? muse_pmu_read_power(out) : ESP_ERR_INVALID_STATE;
 }
 
 static esp_err_t power_off(void)
