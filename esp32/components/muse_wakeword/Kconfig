@@ -1,0 +1,120 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+menu "Muse wake word"
+    depends on MUSE_ENABLED
+
+    config MUSE_WAKEWORD_ENABLE
+        bool "Compile in hands-free wake word support"
+        default n
+        help
+            Saying "Hey Muse" (or "Ok Muse") starts the same voice note
+            as holding the talk button. This only compiles the feature
+            in: listening also needs a runtime opt-in, so flashing this
+            firmware never starts listening on its own.
+
+            The session core, audio rings, energy endpointing, LFBE
+            frontend, detector, and ExecuTorch runner are built here;
+            the runtime comes from the generated components/executorch
+            component. No board overlay enables this yet; enablement
+            is per-board and opt-in. The current model is a
+            synthetic-data research checkpoint, not a
+            production-tuned detector.
+
+    choice MUSE_WAKEWORD_RUNNER
+        prompt "Wake word runner"
+        default MUSE_WAKEWORD_RUNNER_EXECUTORCH
+        depends on MUSE_WAKEWORD_ENABLE
+        help
+            What sits behind the runner interface. Exactly one
+            implementation is linked, and the boot log names it so a
+            test double is never mistaken for real detection.
+
+        config MUSE_WAKEWORD_RUNNER_EXECUTORCH
+            bool "ExecuTorch Hey Muse model"
+            select ET_ENABLE
+            help
+                SDK-owned LFBE frontend and posterior detector driving
+                the embedded models/hey_muse.pte through the generated
+                ExecuTorch component. Selects ET_ENABLE; the bench
+                choice below leaves the vendored runtime empty.
+
+        config MUSE_WAKEWORD_RUNNER_BENCH
+            bool "Bench triggers (serial key or loud burst, no detection)"
+            help
+                Fires a wake on the serial bench keys "wake=1" and
+                "wake.test=1", or on a loud-then-quiet energy burst (a
+                clap). For bring-up of the audio tap, wake task, and
+                turn plumbing only: it detects no speech at all. No
+                board overlay selects this.
+    endchoice
+
+    choice MUSE_WAKEWORD_SENSITIVITY
+        prompt "Wake word sensitivity"
+        default MUSE_WAKEWORD_SENSITIVITY_DEFAULT
+        depends on MUSE_WAKEWORD_ENABLE
+        help
+            Passed to the runner as a preset. Raw detection thresholds are
+            the runner's, never Kconfig values.
+
+        config MUSE_WAKEWORD_SENSITIVITY_LOW
+            bool "Low (fewest false triggers)"
+
+        config MUSE_WAKEWORD_SENSITIVITY_DEFAULT
+            bool "Default"
+
+        config MUSE_WAKEWORD_SENSITIVITY_HIGH
+            bool "High (easiest to trigger)"
+    endchoice
+
+    choice MUSE_WAKEWORD_VAD
+        prompt "Speech endpointing after a wake"
+        default MUSE_WAKEWORD_VAD_ENERGY
+        depends on MUSE_WAKEWORD_ENABLE
+        help
+            How the end of a hands-free turn is judged. Higher tiers are
+            only offered when their model is integrated and the board's
+            budgets allow them.
+
+        config MUSE_WAKEWORD_VAD_ENERGY
+            bool "Energy (audio level, no model)"
+    endchoice
+
+    config MUSE_WAKEWORD_START_TIMEOUT_MS
+        int "No speech after a wake cancels the turn (ms)"
+        default 2500
+        range 100 10000
+        depends on MUSE_WAKEWORD_ENABLE
+        help
+            The main false-trigger defence: if no speech follows the wake
+            word within this time, the attempt is dropped and no audio
+            leaves the device.
+
+    config MUSE_WAKEWORD_END_SILENCE_MS
+        int "Trailing silence that ends a hands-free turn (ms)"
+        default 700
+        range 100 5000
+        depends on MUSE_WAKEWORD_ENABLE
+
+    config MUSE_WAKEWORD_MAX_CAPTURE_MS
+        int "Longest hands-free turn (ms)"
+        default 15000
+        range 1000 15000
+        depends on MUSE_WAKEWORD_ENABLE
+        help
+            Hard cap even if endpointing never fires. The top of the range
+            is the push-to-talk cap in muse_voice.c; a longer hands-free
+            turn than a held button could record makes no sense.
+
+endmenu

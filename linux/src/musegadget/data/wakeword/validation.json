@@ -1,0 +1,42 @@
+{
+  "atol": 1e-05,
+  "checkpoint_epoch": 11,
+  "checkpoint_sha256": "cafa78914c2280b653c2589b11985b5a6116c63a3bfdabd0d446c1a59febc5d3",
+  "class_names": [
+    "wakeword",
+    "silence",
+    "other"
+  ],
+  "clips": 3,
+  "eager_torch_version": "2.14.0",
+  "encoding": "little-endian float32",
+  "expected_file": "validation_expected.f32",
+  "expected_sha256": "2747a45a825287a5d727bb8b9b3e3069d9dba1fa4f985c6cc3ae075d809e957a",
+  "features_per_frame": 40,
+  "frames_file": "validation_frames.f32",
+  "frames_per_clip": 100,
+  "frames_sha256": "76c873a429b0d16e80b504c07d01b9c1f815d89446551d5479c813b5767cbd78",
+  "includes_warmup": true,
+  "input_shape": [
+    1,
+    40,
+    1,
+    1
+  ],
+  "kinds": [
+    "zeros",
+    "sinusoid",
+    "modular_ramp"
+  ],
+  "output_shape": [
+    1,
+    3
+  ],
+  "posteriors_per_frame": 3,
+  "provenance": "Self-authored arithmetic LFBE-shaped sequences; no recordings or calibration data",
+  "pte_sha256": "ab7ecd0708523788e8a64d2959140c5f8f7586ed147fc774737375aa009af9b1",
+  "purpose": "Synthetic wheel compatibility fixture, not accuracy evaluation",
+  "reset": "fresh program/method before each independent stream",
+  "rtol": 0.0001,
+  "schema_version": 1
+}

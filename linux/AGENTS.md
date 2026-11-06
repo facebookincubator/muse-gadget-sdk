@@ -212,6 +212,16 @@ never has a command's parameters, output or error message.
   bounded, restart idle after settlement, and never suspend the overall timer.
 - A validated end-call ACK is not undone by a delayed media EOF if a bounded
   stream reset succeeds; report the incomplete drain separately.
+- `voice-call --wake-word` waits for local detection before admitting a call;
+  the default is unchanged. `WakeWordInput` owns the capture iterator and a
+  bounded one-second pre-roll/four-second startup queue; always await `aclose()`.
+  Its detector tap alone uses a streaming 24-to-16 kHz FIR. Active calls never
+  run detection, and live mode resets/re-arms only after successful cleanup.
+  Inference uses the supplied wheel's public ExecuTorch runtime; native code is
+  only the shared C frontend/detector. See `wakeword/README.md` and
+  `../skills/gadget-linux-wakeword/SKILL.md` for isolated setup. The helper requires
+  an explicit trusted wheel and verifies it locally before any microphone use.
+  Hardware-free tests use synthetic detectors and tones, never recordings.
 - Tests use self-authored tones/zeros and synthetic identities only. Never put
   real recordings, credentials, internal documents or captured events here.
   `test_streaming.py`, `test_voice_call.py` and `test_voice_cli.py` exercise real

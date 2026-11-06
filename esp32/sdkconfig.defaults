@@ -201,3 +201,10 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 # Skip PSRAM memtest — intermittent 3/262144 failures on first power-on reset
 # with C5 rev 1.2 cause abort; succeeds on warm reboot. Not worth blocking boot.
 CONFIG_SPIRAM_MEMTEST=n
+
+# ExecuTorch (components/executorch) is vendored for the wake word work
+# but no board uses it yet. ESP-IDF links every component under
+# components/ and the runtime's kernel registration is GC-proof
+# (whole-archive), so keep it out of shipped firmware until
+# muse_wakeword's ExecuTorch runner lands and selects ET_ENABLE.
+CONFIG_ET_ENABLE=n
