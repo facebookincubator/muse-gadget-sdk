@@ -423,6 +423,9 @@ their upstream licenses:
 - [`components/muse/boards/viewe_smartring_display_init.h`](components/muse/boards/viewe_smartring_display_init.h),
   the SmartRing-Plus panel initialization table from VIEWE's BSP, is
   Apache-2.0 under VIEWE's copyright, as its header says.
+- [`components/muse/boards/waveshare_s3_185b_init.h`](components/muse/boards/waveshare_s3_185b_init.h),
+  the Waveshare 1.85B panel initialization tables from Waveshare's BSP, is
+  Apache-2.0, as its header says.
 - [`components/muse/fonts/`](components/muse/fonts/), the caption and
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat

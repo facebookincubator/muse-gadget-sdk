@@ -3,8 +3,10 @@
  * ST77916 init sequences for the Waveshare ESP32-S3-Touch-LCD-1.85B's two panel
  * revisions, told apart by register 0x04 (board_waveshare_s3_185b.c). Copied
  * from Waveshare's Apache-2.0 BSP for the board
- * (waveshareteam/ESP32-S3-Touch-LCD-1.85B, Examples/ESP-IDF-V5.5.3/02_lvgl_demo/
- * components/waveshare__esp32_s3_touch_lcd_1_85B/esp32_s3_touch_lcd_1_85B.c).
+ * (waveshareteam/ESP32-S3-Touch-LCD-1.85B at 139e6db584f3737fcfc6a958ee83b79fb69d317c,
+ * Examples/ESP-IDF-V5.5.3/02_lvgl_demo/components/
+ * waveshare__esp32_s3_touch_lcd_1_85B/esp32_s3_touch_lcd_1_85B.c). The same
+ * tables are in examples/esp-idf/05_bq27220 at 7232af4c501c64d34215b73e1d8319376dfd9c19.
  */
 #pragma once
 
