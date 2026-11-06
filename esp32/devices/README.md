@@ -545,7 +545,8 @@ I2C bus — it has no interrupt or reset line — with coordinates mirrored into
 landscape and clamped at the edges, where it can report one past the last
 row. The two LVGL draw buffers live in PSRAM: in internal RAM their ~60 KB
 is what the I2S DMA descriptors also need, and the codec then fails to
-start.
+start. The panel IO sends them straight from PSRAM (`psram_dma_direct`),
+which ESP-IDF v6.0.3 no longer does unasked.
 
 BOOT on GPIO0 is the only button: push-to-talk, pairing confirmation and
 waking the screen. Power-off is a deep sleep woken by BOOT. The touchscreen

@@ -30,7 +30,6 @@
 #include "driver/i2s_std.h"
 #include "driver/ledc.h"
 #include "driver/spi_master.h"
-#include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_lcd_panel_io.h"
@@ -242,6 +241,11 @@ static lv_display_t *display_start(lv_indev_t **touch)
         .trans_queue_depth = 10,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
+        /* LVGL draws into PSRAM (below). From ESP-IDF v6.0.3 the SPI panel IO
+         * sends from PSRAM by DMA only when asked; otherwise every chunk is
+         * first copied into an internal bounce buffer, the RAM the I2S DMA
+         * descriptors need. */
+        .flags.psram_dma_direct = 1,
     };
     if (esp_lcd_new_panel_io_spi(LCD_HOST, &io_cfg, &io) != ESP_OK) {
         return NULL;
@@ -369,17 +373,22 @@ static unsigned poll_buttons(void)
     return muse_gpio_button_poll(&s_talk);
 }
 
-/* The AXP2101 has a battery gauge: reg 0xA4 is the percentage, reg 0x01
- * bits [6:5] report charging (1) or discharging (2). */
+/* The AXP2101's battery gauge: reg 0x00 bit 3 is a battery present and bit 5
+ * VBUS, reg 0x01 bits [6:5] charging (1), and reg 0xA4 the percentage, over
+ * 100 until the gauge is ready. The same reading as muse_pmu_read_power(). */
 static esp_err_t read_power(muse_power_t *out)
 {
-    uint8_t pct = 0, status = 0;
-    ESP_RETURN_ON_ERROR(reg_read(s_pmic, 0xA4, &pct), TAG, "pmic pct");
-    ESP_RETURN_ON_ERROR(reg_read(s_pmic, 0x01, &status), TAG, "pmic status");
-    out->battery_pct = pct > 100 ? 100 : pct;
+    uint8_t s1 = 0, s2 = 0, pct = 0;
+    ESP_RETURN_ON_ERROR(reg_read(s_pmic, 0x00, &s1), TAG, "pmic status1");
+    ESP_RETURN_ON_ERROR(reg_read(s_pmic, 0x01, &s2), TAG, "pmic status2");
+    bool battery = s1 & (1u << 3);
+    out->usb = s1 & (1u << 5);
+    out->charging = battery && ((s2 >> 5) & 0x3) == 1;
+    out->battery_pct = -1;
     out->battery_mv = 0;
-    out->charging = ((status >> 5) & 0x3) == 1;
-    out->usb = usb_serial_jtag_is_connected();
+    if (battery && reg_read(s_pmic, 0xA4, &pct) == ESP_OK && pct <= 100) {
+        out->battery_pct = pct;
+    }
     return ESP_OK;
 }
 
