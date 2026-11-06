@@ -345,3 +345,20 @@ test("the installer and the token step stay off while the card holds or is closi
   const close = html.slice(html.indexOf("const closeSettings"), html.indexOf('$("settings-connect").addEventListener'));
   assert.match(close, /settingsClosing = closing;[\s\S]*await closing;[\s\S]*settingsClosing = null;[\s\S]*renderSettings\(\);/);
 });
+
+test("failed writer acquisition releases the session's reader", async () => {
+  const port = new Port();
+  const otherWriter = port.writable.getWriter();
+  const session = new DeviceSettingsSession(port);
+  try {
+    await assert.rejects(session.connect(), TypeError);
+    assert.equal(port.readable.locked, false, "the session must release its own reader");
+    assert.equal(port.writable.locked, true, "the other owner's writer is still held");
+  } finally {
+    otherWriter.releaseLock();
+    // Keep the test fixture tidy even on the unpatched source.
+    session.reader?.releaseLock();
+  }
+  await port.close();
+  assert.equal(port.closed, true);
+});
