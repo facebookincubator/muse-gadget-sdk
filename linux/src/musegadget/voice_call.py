@@ -15,8 +15,10 @@
 """One bounded, half-duplex-by-default MCU voice call over Noise.
 
 Input is an async iterator of PCM16LE mono 24 kHz frames (up to 960 samples).
-Output implements write(pcm) and flush(), both nonblocking. The WAV and optional
-sounddevice adapters are in voice_audio. No device commands are advertised.
+Output implements write(pcm) and flush(), both nonblocking. Buffered outputs
+can return queued bytes from write() and discarded bytes from flush() for exact
+flush events; None assumes immediate playback. The WAV and optional sounddevice
+adapters are in voice_audio. No device commands are advertised.
 An optional on_event callback receives the reply's lifecycle, transcript and
 accepted audio as VoiceEvent values.
 """
@@ -215,6 +217,7 @@ class VoiceCall:
         self._playback = deque()
         self._in_flight_response: str | None = None
         self._in_flight_until = 0.0
+        self._pending_output = deque()
         self._playback_bytes = 0
         self._audible_frames = 0
         self._received_audio = False
@@ -611,7 +614,7 @@ class VoiceCall:
 
     def _flush(self) -> None:
         cut = [self._in_flight_response] if time.monotonic() < self._in_flight_until else []
-        cut += [response_id for _, _, response_id in self._playback]
+        queued = [response_id for _, _, response_id in self._playback]
         self._clear_waiting()
         self._playback.clear()
         self._playback_bytes = 0
@@ -619,9 +622,24 @@ class VoiceCall:
         self._received_audio = False
         self._playing_until = 0
         self._in_flight_until = 0
-        self._output.flush()
+        discarded = self._output.flush()
+        if discarded is not None:
+            self._trim_output(discarded)
+            cut = [response_id for _, response_id in self._pending_output]
+        self._pending_output.clear()
+        cut += queued
         if self._on_event is not None and cut:
             self._emit(PlaybackFlushed(tuple(dict.fromkeys(cut))))
+
+    def _trim_output(self, pending: int) -> None:
+        kept = deque()
+        for size, response_id in reversed(self._pending_output):
+            if pending <= 0:
+                break
+            count = min(size, pending)
+            kept.appendleft((count, response_id))
+            pending -= count
+        self._pending_output = kept
 
     def _gated(self) -> bool:
         return self._remote_ended or self.held or (self.half_duplex and
@@ -688,7 +706,10 @@ class VoiceCall:
             pcm, audible, response_id = self._playback.popleft()
             self._playback_bytes -= len(pcm)
             self._audible_frames -= int(audible)
-            self._output.write(pcm)
+            pending = self._output.write(pcm)
+            if self._on_event is not None and pending is not None:
+                self._pending_output.append((len(pcm), response_id))
+                self._trim_output(pending)
             duration = len(pcm) / (SAMPLE_RATE * 2)
             self._in_flight_response = response_id
             self._in_flight_until = time.monotonic() + duration

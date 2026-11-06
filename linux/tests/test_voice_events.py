@@ -22,6 +22,7 @@ from musegadget import voice_call as voice
 from musegadget.voice_call import (AudioChunk, PlaybackFlushed, ResponseDone, ResponseStarted,
                                    TranscriptDelta, TranscriptDone, VoiceCall, Working)
 from test_streaming import chunk, connected
+from test_voice_audio import open_audio, playback
 from test_voice_call import TONE, Output, admit, hangup, line, next_event
 from test_voice_gate import audio, silent_source, speech, turn
 from test_voice_lifecycle import wait_until
@@ -336,6 +337,48 @@ def test_microphone_settling_tail_is_not_reported_as_flushed_audio(monkeypatch):
             await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(asyncio.wait_for(scenario(), 2))
+
+
+@pytest.mark.parametrize("consumption, flushed", [
+    ("none", [PlaybackFlushed(("r1", "r2"))]),
+    ("first", [PlaybackFlushed(("r2",))]),
+    ("partial", [PlaybackFlushed(("r2",))]),
+    ("all", []),
+])
+def test_playback_flush_tracks_delayed_live_audio_callbacks(monkeypatch, consumption, flushed):
+    clock = [1000.0]
+    monkeypatch.setattr(voice, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    output = open_audio(monkeypatch, (24000,), (24000,))
+
+    async def scenario():
+        events = []
+        call = VoiceCall(None, device_id="homelink-synthetic", on_event=events.append)
+        call._output = output
+        call._queue_pcm(HALF, "r1")
+        task = asyncio.create_task(call._play())
+        try:
+            await wait_until(lambda: output._playback_bytes == len(HALF))
+            clock[0] += 0.03
+            if consumption == "first":
+                assert playback(output) == HALF + b"\0" * len(HALF)
+            call._queue_pcm(TONE, "r2")
+            await wait_until(lambda: not call._playback)
+            clock[0] += 0.05
+            if consumption in ("partial", "all"):
+                assert playback(output) == HALF + TONE[:960]
+            if consumption == "all":
+                assert playback(output) == TONE[960:] + b"\0" * len(HALF)
+            await call.barge_in()
+            assert playback(output) == b"\0" * voice.FRAME_BYTES
+            assert [event for event in events if isinstance(event, PlaybackFlushed)] == flushed
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    try:
+        asyncio.run(asyncio.wait_for(scenario(), 2))
+    finally:
+        output.close()
 
 
 def test_barge_in_silences_the_words_of_the_reply_it_cuts_before_its_audio():
