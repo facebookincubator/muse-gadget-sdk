@@ -282,6 +282,40 @@ def test_caller_speech_flushes_delivered_audio_and_drops_the_rest_of_the_reply()
     ]
 
 
+@pytest.mark.parametrize("failure", ["stopped", "full"])
+def test_rejected_playback_is_reported_as_flushed_when_run_ends(monkeypatch, failure):
+    output = open_audio(monkeypatch, (24000,), (24000,))
+    if failure == "stopped":
+        output._output_stream.active = False
+        message = "audio device stopped"
+    else:
+        for _ in range(8):
+            output.write(TONE)
+        message = "audio device playback queue full"
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            events = []
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=events.append)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, line(created("r1")) + line(audio("p1", HALF)))
+            await hangup(vm, media, start)
+            with pytest.raises(OSError, match=message):
+                await task
+            assert call.end_call_acknowledged
+            assert call.cleanup_error is None
+            assert not session._requests
+            assert events == [
+                ResponseStarted("r1"), AudioChunk("r1", 0, HALF), PlaybackFlushed(("r1",)),
+            ]
+
+    try:
+        asyncio.run(asyncio.wait_for(scenario(), 5))
+    finally:
+        output.close()
+
+
 @pytest.mark.parametrize("preceding_audio", [b"", TONE], ids=["quiet_only", "after_tone"])
 def test_playback_flush_names_the_quiet_frame_in_flight(monkeypatch, preceding_audio):
     clock = [1000.0]

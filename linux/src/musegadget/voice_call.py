@@ -703,10 +703,11 @@ class VoiceCall:
             if not self._playback:
                 await asyncio.sleep(0.01)
                 continue
-            pcm, audible, response_id = self._playback.popleft()
+            pcm, audible, response_id = self._playback[0]
+            pending = self._output.write(pcm)
+            self._playback.popleft()
             self._playback_bytes -= len(pcm)
             self._audible_frames -= int(audible)
-            pending = self._output.write(pcm)
             if self._on_event is not None and pending is not None:
                 self._pending_output.append((len(pcm), response_id))
                 self._trim_output(pending)
