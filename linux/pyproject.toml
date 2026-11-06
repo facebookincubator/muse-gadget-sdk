@@ -33,12 +33,14 @@ musegadget = "musegadget.cli:main"
 [project.optional-dependencies]
 test = ["pytest"]
 voice = ["sounddevice>=0.5,<1"]
+# The setup helper installs the explicitly supplied ExecuTorch wheel separately.
+# Do not resolve an unrelated latest runtime just by installing the voice extra.
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-musegadget = ["data/*"]
+musegadget = ["data/*", "data/wakeword/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
