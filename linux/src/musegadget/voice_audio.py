@@ -156,7 +156,8 @@ def _upsample24_to_48(samples, previous):
 
     Each 24 kHz sample is preceded by its midpoint with the one before it,
     `previous` being the last sample of the prior call, so frame boundaries
-    interpolate like any other pair (a half-sample delay).
+    interpolate like any other pair (a half-sample delay). Enough for
+    speech: about -2.5 dB at 8 kHz, with images above 12 kHz attenuated.
     """
     output = [0] * (2 * len(samples))
     output[0::2] = [(a + b) >> 1 for a, b in zip([previous] + samples[:-1], samples)]
@@ -203,7 +204,6 @@ class LiveAudio:
                 f"(native rate: {device['default_samplerate']:.0f} Hz)"
             )
         self._decimator = Pcm48To24() if capture_rate != SAMPLE_RATE else None
-        self._playback_rate = playback_rate
         self._interpolate = playback_rate != SAMPLE_RATE
         self._upsample_previous = 0
         self._streams = ExitStack()
@@ -273,9 +273,9 @@ class LiveAudio:
                         self._playback.popleft()
                     else:
                         self._playback[0] = pcm[consumed:]
-            samples.extend([0] * (FRAME_SAMPLES - len(samples)))
-            output = _upsample24_to_48(samples, self._upsample_previous)
-            self._upsample_previous = samples[-1]
+                samples.extend([0] * (FRAME_SAMPLES - len(samples)))
+                previous, self._upsample_previous = self._upsample_previous, samples[-1]
+            output = _upsample24_to_48(samples, previous)
             outdata[:] = struct.pack(f"<{len(output)}h", *output)
             return
         # The server may emit short PCM fragments. Fill the callback's whole

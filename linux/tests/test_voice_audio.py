@@ -338,3 +338,18 @@ def test_playback_interpolation_is_continuous_across_callbacks(monkeypatch):
         assert out[1:] == tuple(4 * i for i in range(3839))
     finally:
         audio.close()
+
+
+def test_flush_clears_48k_interpolation_history(monkeypatch):
+    audio = open_audio(monkeypatch, (48000,), (48000,))
+    try:
+        audio.write(struct.pack("<960h", *[1000] * 960))
+        audio.write(struct.pack("<960h", *[1000] * 960))
+        assert struct.unpack("<1920h", playback(audio))[-1] == 1000
+        audio.flush()
+        assert audio._playback_bytes == 0
+        audio.write(struct.pack("<h", 2000))
+        # The next frame starts from silence, not from the discarded audio.
+        assert struct.unpack("<4h", playback(audio)[:8]) == (1000, 2000, 1000, 0)
+    finally:
+        audio.close()
