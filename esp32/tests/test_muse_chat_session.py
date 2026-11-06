@@ -55,6 +55,7 @@ class ChatSession(unittest.TestCase):
 static turn_t s_turn;
 static pending_t s_pending;
 static std::atomic<bool> s_incoming{false};
+static std::atomic<bool> s_incoming_used{true};
 static char s_reply_shown[EV_TEXT];
 static int64_t s_last_seq, s_marks[4];
 static int captions, console_events;
@@ -460,7 +461,11 @@ static void detach() {
     clock_us += DETACH_US + 1;
     check_turn();
     assert(s_turn.detached && s_turn.nmsgs == 1 && s_turn.msgs[0].done && captions == 1);
-    settle();
+    s_turn.msgs[0].tts = TTS_FINISHED;
+    clock_us += SETTLE_US - 1000000;
+    status("working");   /* Muse's status keeps coming: the notice still ends the turn */
+    clock_us += 1000001;
+    check_turn();
     assert(s_turn.phase == P_IDLE && s_pending.active && s_pending.busy && done_events == 1);
 }
 static void detaches_only_while_muse_works() {
@@ -471,6 +476,13 @@ static void detaches_only_while_muse_works() {
     clock_us = s_turn.chat_us + REPLY_TIMEOUT_US + 1;
     check_turn();
     assert(fail_events == 1 && !strcmp(fail_text, "NO REPLY FROM MUSE") && !s_pending.active);
+    s_incoming_used = false;   /* no voice task plays late replies (Voice PE): it waits as before */
+    begin();
+    status("working");
+    clock_us += DETACH_US + 1;
+    check_turn();
+    assert(!s_turn.detached && !s_turn.nmsgs && s_turn.phase == P_WAIT_REPLY);
+    s_incoming_used = true;
     detach();
 }
 static void late_reply_matched_by_its_request() {
@@ -542,6 +554,12 @@ static void played_messages_are_not_replayed() {
     incoming_play(s_turn.gen + 1);
     event("message.assistant", "first", "note", "On it");
     assert(s_turn.nmsgs == 1 && !strcmp(s_turn.msgs[0].id, "second"));
+    int64_t armed = s_pending.armed_us;
+    settle();   /* still working: armed again for the same request, as of its first turn */
+    assert(s_pending.active && s_pending.nplayed == 2 && s_pending.armed_us == armed);
+    event("message.assistant", "first", "note", "On it");
+    event("message.assistant", "second", "note", "Done now");
+    assert(!s_incoming && !s_pending.replies);
 }
 int main(int argc, char **argv) {
     assert(argc == 2);

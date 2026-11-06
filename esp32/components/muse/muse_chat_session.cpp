@@ -303,6 +303,7 @@ struct pending_t {
 EXT_RAM_BSS_ATTR static turn_t s_turn;
 EXT_RAM_BSS_ATTR static pending_t s_pending;
 static std::atomic<bool> s_incoming{false};   /* a reply is held: muse_hatch_incoming() */
+static std::atomic<bool> s_incoming_used{false};   /* a voice task plays them (the Voice PE's doesn't) */
 
 /* Turn milestones, logged together when the turn ends. */
 enum mark_t : uint8_t { M_RELEASE, M_SENT, M_ACK, M_TEXT, M_DONE, M_TTS, M_MP3, M_AUDIO, M_COUNT };
@@ -1605,17 +1606,33 @@ static void pending_event(const char *event, cJSON *payload)
     }
 }
 
-/* Remembers the request that just ended its turn, and what it played, to announce the rest. */
+/*
+ * Remembers the request that just ended its turn, and what it played, to
+ * announce the rest. Again after one of its late turns: the same request,
+ * still timed from the first, and what played before stays played (the
+ * latest MAX_MSGS).
+ */
 static void pending_arm(void)
 {
-    memcpy(s_pending.ids, s_turn.user_ids, sizeof(s_pending.ids));
-    s_pending.nplayed = 0;
+    bool same = s_turn.incoming && !memcmp(s_pending.ids, s_turn.user_ids, sizeof(s_pending.ids));
+    if (!same) {
+        memcpy(s_pending.ids, s_turn.user_ids, sizeof(s_pending.ids));
+        s_pending.nplayed = 0;
+        s_pending.armed_us = now_us();
+    }
     for (int i = 0; i < s_turn.nmsgs; i++) {
+        if (pending_played(s_turn.msgs[i].id)) {
+            continue;
+        }
+        if (s_pending.nplayed == MAX_MSGS) {
+            memmove(s_pending.played[0], s_pending.played[1], sizeof(s_pending.played[0]) * (MAX_MSGS - 1));
+            s_pending.nplayed--;
+        }
         strlcpy(s_pending.played[s_pending.nplayed++], s_turn.msgs[i].id, sizeof(s_pending.played[0]));
     }
     s_pending.active = s_pending.ids[0][0] || s_pending.ids[1][0];
     s_pending.busy = s_turn.agent_busy;
-    s_pending.armed_us = s_pending.status_us = now_us();
+    s_pending.status_us = now_us();
 }
 
 /*
@@ -1709,7 +1726,9 @@ static void on_event(cJSON *line)
         if (s_turn.text && s_turn.agent_busy != was) {
             muse_hatch_console("busy", nullptr, "\"on\":%s", s_turn.agent_busy ? "true" : "false");
         }
-        s_turn.last_event_us = now_us();
+        if (!s_turn.detached) {   /* told and done: a stream of status mustn't keep it open */
+            s_turn.last_event_us = now_us();
+        }
         return;
     }
     on_message(event, payload, line);
@@ -1961,7 +1980,7 @@ static void check_turn(void)
     }
     if (!s_turn.nmsgs) {
         /* Muse says it's still on it: say so, and play its reply when it comes. */
-        if (!text && s_turn.acked && s_turn.agent_busy && t - s_turn.chat_us > DETACH_US) {
+        if (!text && s_turn.acked && s_turn.agent_busy && s_incoming_used && t - s_turn.chat_us > DETACH_US) {
             turn_detach();
             return;
         }
@@ -2556,6 +2575,7 @@ extern "C" void muse_hatch_text_cancel(void)
 
 extern "C" bool muse_hatch_incoming(void)
 {
+    s_incoming_used = true;
     if (!s_incoming.exchange(false)) {
         return false;
     }

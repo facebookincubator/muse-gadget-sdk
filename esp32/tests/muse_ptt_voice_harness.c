@@ -131,6 +131,7 @@ size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) { (void)p;(v
 void muse_hatch_turn_end(void) {}
 void muse_hatch_turn_cancel(void) {}
 bool muse_hatch_incoming(void) { return false; }
+void muse_state_set_asleep(bool v) { (void)v; }
 /* One scripted way for hatch_reply() to end, arriving after a long turn. */
 static muse_hatch_ev_t hatch_end = MUSE_HATCH_EV_NONE;
 static const char *hatch_end_text = "";
