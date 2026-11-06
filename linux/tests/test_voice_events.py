@@ -18,7 +18,7 @@ import base64
 from musegadget.voice_call import (AudioChunk, PlaybackFlushed, ResponseDone, ResponseStarted,
                                    TranscriptDelta, TranscriptDone, VoiceCall, Working)
 from test_streaming import chunk, connected
-from test_voice_call import TONE, Output, admit, hangup, line
+from test_voice_call import TONE, Output, admit, hangup, line, next_event
 from test_voice_gate import audio, silent_source, speech, turn
 from test_voice_lifecycle import wait_until
 
@@ -106,34 +106,75 @@ def test_audio_keeps_the_response_it_started_in_when_the_next_response_opens():
     ]
 
 
-def test_held_reply_audio_is_delivered_when_its_turn_confirms_it():
+def test_held_reply_words_and_audio_are_delivered_when_its_turn_confirms_it():
     async def script(vm, media, call, output, events):
-        await chunk(vm, media, b"".join(map(line, [speech("item-1"), created("r1"), audio("p1", TONE)])))
-        await wait_until(lambda: bool(call._waiting_pcm))
+        await chunk(vm, media, b"".join(map(line, [
+            speech("item-1"), created("r1"), said("Hi "), audio("p1", TONE),
+        ])))
+        await wait_until(lambda: bool(call._waiting))
         assert events == [ResponseStarted("r1")]
-        await chunk(vm, media, line(turn("item-1", "sub-1")) + line(audio("p1", HALF)))
+        await chunk(vm, media, b"".join(map(line, [turn("item-1", "sub-1"), said("there"), audio("p1", HALF)])))
         await wait_until(lambda: len(output.pcm) == len(TONE) + len(HALF))
 
     assert run_call(script) == [
         ResponseStarted("r1"),
         Working(True),
+        TranscriptDelta("r1", "Hi "),
         AudioChunk("r1", 0, TONE),
+        TranscriptDelta("r1", "there"),
         AudioChunk("r1", 960, HALF),
+    ]
+
+
+def test_a_held_reply_dropped_for_another_callers_turn_says_nothing():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech("item-2"), created("r2"), said("lost "), audio("p2", TONE),
+            turn("item-1", "sub-1"), said("words"), transcript("lost words"), done("r2"),
+        ])))
+        await wait_until(lambda: ResponseDone("r2", "completed") in events)
+
+    assert run_call(script) == [
+        ResponseStarted("r2"),
+        Working(True),
+        ResponseDone("r2", "completed"),
     ]
 
 
 def test_caller_speech_flushes_delivered_audio_and_drops_the_rest_of_the_reply():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE * 5)) + line(speech("item-2")))
-        await wait_until(lambda: PlaybackFlushed() in events)
-        await chunk(vm, media, b"".join(map(line, [said("stale"), audio("p1", TONE), done("r1", "cancelled")])))
-        await wait_until(lambda: ResponseDone("r1", "cancelled") in events)
+        await wait_until(lambda: PlaybackFlushed(("r1",)) in events)
+        await chunk(vm, media, b"".join(map(line, [
+            said("stale"), audio("p1", TONE), transcript("stale"), done("r1", "cancelled"),
+            turn("item-2", "sub-2"), created("r2"), said("Yes"), audio("p2", HALF),
+        ])))
+        await wait_until(lambda: AudioChunk("r2", 0, HALF) in events)
 
     assert run_call(script) == [
         ResponseStarted("r1"),
         AudioChunk("r1", 0, TONE * 5),
-        PlaybackFlushed(),
-        TranscriptDelta("r1", "stale"),
+        PlaybackFlushed(("r1",)),
+        ResponseDone("r1", "cancelled"),
+        Working(True),
+        ResponseStarted("r2"),
+        TranscriptDelta("r2", "Yes"),
+        AudioChunk("r2", 0, HALF),
+    ]
+
+
+def test_barge_in_silences_the_words_of_the_reply_it_cuts_before_its_audio():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, line(created("r1")) + line(said("Sure ")))
+        await wait_until(lambda: TranscriptDelta("r1", "Sure ") in events)
+        await call.barge_in()
+        assert await next_event(vm) == {"type": "response.cancel", "response_id": "r1"}
+        await chunk(vm, media, b"".join(map(line, [said("thing"), audio("p1", TONE), done("r1", "cancelled")])))
+        await wait_until(lambda: ResponseDone("r1", "cancelled") in events)
+
+    assert run_call(script) == [
+        ResponseStarted("r1"),
+        TranscriptDelta("r1", "Sure "),
         ResponseDone("r1", "cancelled"),
     ]
 

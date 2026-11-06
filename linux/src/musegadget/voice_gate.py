@@ -17,6 +17,9 @@
 CAVD provider IDs, not mapper response.created IDs, identify stale PCM. A new
 caller's matching turn admits its reply and later continuations. Output without
 lineage after a confirmed turn is indistinguishable from that turn's continuation.
+Transcript text names no provider response, so it gets the verdict a new provider
+ID would, except that words after a fence stay dropped until the next
+response.created.
 """
 
 MAX_IDS = 128
@@ -48,9 +51,10 @@ class ReplyGate:
         self.confirmed = self.blocked = self.turn_fresh = False
         self.flush_playing = self.flush_waiting = False
         self.open_response = None
+        self.words_fenced = False
 
     def interrupt(self, item=None):
-        self.fenced = True
+        self.fenced = self.words_fenced = True
         self.ids = dict.fromkeys(self.ids, STALE)
         self.item = item
         self.confirmed = self.blocked = self.turn_fresh = False
@@ -72,6 +76,10 @@ class ReplyGate:
     @property
     def playing(self):
         return self._has(PLAYING, CONTINUING)
+
+    @property
+    def holding(self):
+        return self.fenced and bool(self.item) and not self.blocked and not self.confirmed
 
     def take_flush(self):
         flags = self.flush_playing, self.flush_waiting
@@ -107,6 +115,8 @@ class ReplyGate:
             if self.item and identifier(event.get("item_id")) == self.item:
                 self.interrupt()
         elif kind in ("response.created", "response.done", "response.completed"):
+            if kind == "response.created":
+                self.words_fenced = False
             response = event.get("response")
             response_id = identifier(response.get("id")) if isinstance(response, dict) else None
             if response_id:
@@ -114,6 +124,11 @@ class ReplyGate:
                     self.open_response = response_id
                 elif response_id == self.open_response:
                     self.open_response = None
+
+    def words(self):
+        if self.words_fenced or self.fenced and (not self.item or self.blocked):
+            return DROP
+        return HOLD if self.holding else PLAY
 
     def audio(self, event):
         response_id = provider_id(event)

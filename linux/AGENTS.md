@@ -395,8 +395,11 @@ run_command=...)` is one encrypted session with a Muse VM.
   can still arrive after its `ResponseDone`.
 - `TranscriptDelta(response_id, text)` and `TranscriptDone(response_id, text)`
   carry the words Muse speaks. The wire events name no response, so
-  `response_id` is that of the latest `ResponseStarted`. Transcripts are not
-  fenced: text of a reply whose audio was dropped still arrives.
+  `response_id` is that of the latest `ResponseStarted`. Transcripts are
+  fenced like the reply's audio. Words of the response open at a barge-in or
+  the caller's speech never arrive. Words that come while a reply waits for
+  its caller's turn are held, then delivered in order with its audio or
+  dropped with it.
 - `AudioChunk(response_id, offset, pcm)` is reply PCM accepted for playback,
   delivered before the output writes it. Held audio is delivered when its
   turn confirms it. Dropped audio never is. `offset` counts the samples
@@ -407,9 +410,10 @@ run_command=...)` is one encrypted session with a Muse VM.
   Audio without a provider response id takes the latest at arrival.
 - `Working(working)` changes when Muse starts having, or stops having, a
   caller turn that has not settled.
-- `PlaybackFlushed()` says audio already delivered, still queued or playing,
-  was discarded: a barge-in, the caller talking over the reply, or the call
-  ending.
+- `PlaybackFlushed(response_ids)` says audio already delivered, still queued
+  or playing, was discarded: a barge-in, the caller talking over the reply,
+  a continuation replacing it, or the call ending. `response_ids` names the
+  responses that audio belonged to, in playback order.
 
 ## Say Muse, never Hatch
 
