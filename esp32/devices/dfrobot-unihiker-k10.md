@@ -24,7 +24,7 @@ its features are not covered here; follow the instructions below for this port.
 
 ## Build and flash
 
-Use ESP-IDF v6.0.1 and run commands from `esp32/`. The included USB data cable
+Use ESP-IDF v6.0.3 and run commands from `esp32/`. The included USB data cable
 connects to the ESP32-S3's native USB Serial/JTAG (`303a:1001`). Several ESP32
 boards share that ID; verify the board and port before flashing.
 

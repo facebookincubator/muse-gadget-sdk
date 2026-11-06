@@ -20,7 +20,7 @@
  * libraries/TFT_eSPI/User_Setup.h, variants/unihiker_k10/pins_arduino.h.
  * XL9535 @ 0x20: P00 backlight, P01 camera reset, P02 B, P14 A.
  * ES7243E stereo ADC + NS4168 amplifier, no touch controller.
- * ESP-IDF 6.0.1 port, using the same display adapter as board_aipi.c.
+ * ESP-IDF v6.0.3 port, using the same display adapter as board_aipi.c.
  */
 #include <math.h>
 #include "driver/gpio.h"
