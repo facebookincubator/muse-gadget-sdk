@@ -170,6 +170,7 @@ not apply to it. Use the display and its BOOT button for setup.
 | Red, blinking | Something went wrong: check the log |
 
 To reset the device and set it up again, hold the button for 5 seconds.
+
 On the experimental EchoEar-2ST, press the screen to confirm pairing; after
 pairing, hold the screen microphone to record and release it to send. See
 [EchoEar setup](devices/ostb-echoear-2st.md) for its controls and validation limits.

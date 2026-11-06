@@ -285,6 +285,7 @@ static TaskHandle_t s_task = NULL;
 static char s_title[48];
 static bool s_title_dirty = false;
 #if CONFIG_HOMEHUB_VOICE
+// How long the volume stays up after the dial stops.
 #define VOICE_VOLUME_MS 1500
 static led_voice_t s_voice = LED_VOICE_IDLE;
 static float s_level = 0;

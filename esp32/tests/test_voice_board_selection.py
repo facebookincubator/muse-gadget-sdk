@@ -92,6 +92,28 @@ class VoiceBoardSelectionTests(unittest.TestCase):
                     [product], [] if status is None else [status], error="requires HOMEHUB_LED_BACKEND"
                 )
 
+    def test_listed_product_without_a_source_branch_is_rejected(self):
+        selector = SELECTOR.read_text().replace(
+            "    RESPEAKER_XVF3800\n", "    RESPEAKER_XVF3800\n    NEW_BOARD\n", 1
+        )
+        self.assertIn("NEW_BOARD", selector)
+        with tempfile.TemporaryDirectory() as directory:
+            copy = Path(directory) / "voice_board_select.cmake"
+            copy.write_text(selector)
+            script = Path(directory) / "select.cmake"
+            script.write_text(
+                "cmake_minimum_required(VERSION 3.16)\nset(GADGET_SRCS)\n"
+                "set(CONFIG_HOMEHUB_VOICE_BOARD_NEW_BOARD TRUE)\n"
+                "set(CONFIG_HOMEHUB_LED_BACKEND_NONE TRUE)\n"
+                f'include("{copy.as_posix()}")\n'
+            )
+            result = subprocess.run(
+                ["cmake", "-P", str(script)], capture_output=True, text=True, timeout=10
+            )
+        output = " ".join((result.stdout + result.stderr).split())
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("HOMEHUB_VOICE_BOARD_NEW_BOARD has no driver source", output)
+
     def test_kconfig_covers_selector_and_preserves_legacy_defaults(self):
         kconfig = (ROOT / "main" / "Kconfig.projbuild").read_text()
         selector = SELECTOR.read_text()
