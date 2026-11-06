@@ -17,8 +17,13 @@
 (sdkconfig.waveshare-s3-lcd-35). Its ST7796 driver comes in only for those
 builds, CI builds both, LVGL's PSRAM buffers go out by DMA from PSRAM, and the
 tools agree on the board's alias."""
+import os
 from pathlib import Path
 import re
+import shlex
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +103,36 @@ class Board(unittest.TestCase):
         self.assertLess(init.index('pmic_init()'), init.index('muse_pmu_init(s_i2c, false)'))
         self.assertLess(init.index('i2c_master_bus_rm_device(s_pmic)'), init.index('muse_pmu_init(s_i2c, false)'))
         self.assertIn('muse_pmu_read_power(out)', function(self.source, 'read_power'))
+
+    def test_landscape_layout_fits(self):
+        # muse_ui_start()'s own layout choice, compiled: at 480x320 the full
+        # layout (laid out for 466 px) would put the status line and state
+        # above the screen, so this panel takes the compact one. Taller and
+        # wider panels keep theirs.
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        if not cc or not shutil.which(cc[0]):
+            self.skipTest('C compiler unavailable')
+        w = int(re.search(r'#define LCD_H_RES (\d+)', self.source).group(1))
+        h = int(re.search(r'#define LCD_V_RES (\d+)', self.source).group(1))
+        self.assertIn('.width = LCD_H_RES,', self.source)
+        self.assertIn('.height = LCD_V_RES,', self.source)
+        start = function((MUSE / 'muse_ui.c').read_text(), 'muse_ui_start')
+        choice = re.search(r'    bool short_landscape = [^;]+;\n    s_small = [^;]+;\n', start).group(0)
+        code = ('#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n'
+                'int main(int argc, char **argv) {\n    (void)argc;\n'
+                '    int s_w = atoi(argv[1]), s_h = atoi(argv[2]);\n    bool s_small;\n'
+                + choice + '    printf("%d", s_small);\n    return 0;\n}\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            src, exe = Path(tmp) / 't.c', Path(tmp) / 't'
+            src.write_text(code)
+            subprocess.run(cc + ['-std=c11', '-Wall', '-Werror', str(src), '-o', str(exe)], check=True)
+            small = lambda sw, sh: subprocess.run([str(exe), str(sw), str(sh)], capture_output=True,
+                                                  text=True, check=True).stdout == '1'
+            self.assertTrue(small(w, h))
+            self.assertTrue(small(320, 240))      # BOX-3
+            self.assertFalse(small(320, 480))     # JC3248W535, portrait
+            self.assertFalse(small(800, 480))     # LCD-7
+            self.assertFalse(small(466, 466))
 
     def test_boot_is_talk(self):
         self.assertIn('muse_gpio_button_init(&s_talk, TALK_GPIO)', self.source)
