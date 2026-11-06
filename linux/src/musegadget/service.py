@@ -110,6 +110,11 @@ class Service:
                 log.info("not paired; run `musegadget pair` to set up")
                 await self._sleep(UNPAIRED_POLL_S)
                 continue
+            problem = config.pairing_problem(pairing)
+            if problem is not None:
+                log.warning("%s Run `musegadget pair --force` to pair again.", problem)
+                await self._sleep(UNPAIRED_POLL_S)
+                continue
             self._warn_if_sdk_token_changed(pairing)
             pairing = await self._maybe_refresh(pairing)
             if pairing is None:
@@ -216,8 +221,7 @@ class Service:
         not be used yet; the pairing file is removed when the pairing itself
         has been revoked.
         """
-        age = time.time() - pairing.get("access_token_saved_at", 0)
-        if not force and age < TOKEN_REFRESH_AGE_S:
+        if not force and pairing.get("access_token_saved_at", 0) > time.time() - TOKEN_REFRESH_AGE_S:
             return pairing
         if not force and time.monotonic() - self._last_refresh_attempt < TOKEN_RETRY_S:
             return pairing

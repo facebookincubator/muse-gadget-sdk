@@ -52,11 +52,9 @@ def check_pairing(directory: Path) -> CheckResult:
         return {"name": "Pairing", "status": "FAIL",
                 "detail": f"Cannot read saved pairing (OS error {exc.errno}).",
                 "hint": f"Check the state directory: {directory}."}
-    if not isinstance(saved, dict) or not all(
-        isinstance(saved.get(key), str) and saved[key].strip()
-        for key in ("access_token", "refresh_token")
-    ):
-        return {"name": "Pairing", "status": "FAIL", "detail": "Saved pairing lacks device tokens.",
+    problem = config.pairing_problem(saved)
+    if problem is not None:
+        return {"name": "Pairing", "status": "FAIL", "detail": problem,
                 "hint": "Run sudo musegadget pair --force to pair again."}
     return {"name": "Pairing", "status": "OK", "detail": "Device tokens are saved.",
             "hint": "This checks local structure, not whether Muse accepts the tokens."}
