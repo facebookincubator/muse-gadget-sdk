@@ -81,6 +81,9 @@ extern "C" {
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call_priv.h"
 #endif
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#endif
 
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
@@ -114,7 +117,14 @@ static const char *TAG = "muse_chat_session";
 #define MP3_POLL_ROOM (SCRATCH + 8192)     /* stop reading the socket below this much MP3 room */
 static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP3 buffer empty");
 #define EV_TEXT 72
-#define TEXT_MAX 1024                      /* a message's text, for captions timed to its speech */
+#define CAPTION_TEXT 1024                  /* a message's text, for captions timed to its speech */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#define TEXT_MAX (32 * 1024)               /* the whole reply, kept for wheel review, in PSRAM */
+#else
+#define TEXT_MAX CAPTION_TEXT
+#endif
+/* The part of a message's kept text the automatic captions pace and show. */
+#define CAPTION_LEN(text) strnlen((text), CAPTION_TEXT - 1)
 #define SPEECH_CHARS_PER_S 14              /* until the speech's length is known */
 #define TEXT_CHARS_PER_S 16                /* speaker off: reading pace, a little over speech */
 #define TEXT_HOLD_S 2                      /* speaker off: how long a message's last lines stay up */
@@ -229,6 +239,9 @@ struct resampler_t {
 struct turn_t {
     phase_t phase;
     uint32_t gen;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    uint32_t review;         /* this turn's identity for reply review (typed turns all have gen 0) */
+#endif
     bool text;               /* typed at the console: the reply goes there, unspoken */
     bool end_requested, end_sent, chat_posted, acked;
     int64_t dict_id, chat_id;
@@ -1029,6 +1042,9 @@ static bool turn_start(uint32_t gen, bool text)
     s_turn.note = note;
     s_turn.texts = texts;
     s_turn.gen = gen;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    s_turn.review = muse_review_turn();
+#endif
     s_turn.text = text;
     s_turn.tts_msg = -1;
     memset(s_marks, 0, sizeof(s_marks));
@@ -1196,14 +1212,18 @@ static bool record_note(void)
 
 /*
  * Posts `text` to the chat and waits for the reply. A long message goes up in
- * parts, since each frame has to fit SCRATCH.
+ * parts, since each frame has to fit SCRATCH. A spoken turn names the device
+ * (MUSE_CHAT_SPOKEN_DEVICE); a typed one doesn't.
  */
-static void send_chat(const char *text, const char *modality)
+static void send_chat(const char *text, const char *modality, bool spoken)
 {
     s_turn.chat_posted = true;
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "message", text);
     cJSON_AddStringToObject(body, "output_modality", modality);
+    if (spoken) {
+        cJSON_AddStringToObject(body, "device", MUSE_CHAT_SPOKEN_DEVICE);
+    }
     char *json = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     size_t len = json ? strlen(json) : 0;
@@ -1243,7 +1263,7 @@ static void post_chat(const char *text)
     }
     ESP_LOGI(TAG, "heard: \"%s\"", text);
     emit(MUSE_HATCH_EV_HEARD, text);
-    send_chat(text, "text");
+    send_chat(text, "text", true);
 }
 
 /* A typed turn: the text goes straight to the chat. */
@@ -1253,7 +1273,7 @@ static void text_begin(const char *text)
         return;
     }
     ESP_LOGI(TAG, "typed turn: %u bytes", (unsigned)strlen(text));
-    send_chat(text, "text");
+    send_chat(text, "text", false);
     if (s_turn.phase == P_WAIT_REPLY) {
         mark(M_SENT);
         muse_hatch_console("sent", nullptr, "\"bytes\":%u", (unsigned)strlen(text));
@@ -1428,6 +1448,12 @@ static void message_done(int i, const char *final_text)
     }
     m.done = true;
     mark(M_DONE);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    /* Keep complete final text, rather than the 1 KB automatic-caption copy. */
+    const char *review = final_text && final_text[0] ? final_text
+        : m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+    muse_review_store(s_turn.review, review);
+#endif
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */
         size_t n = m.len;
@@ -1512,7 +1538,11 @@ static void on_event(cJSON *line)
         const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "text"));
         if (text && text[0] && s_turn.text) {
             mark(M_TEXT);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+            append_text(m, text);
+#else
             m.len += strlen(text);
+#endif
             muse_hatch_console("text", text, "\"msg\":%d", i);
         } else if (text && text[0]) {
             mark(M_TEXT);
@@ -1579,9 +1609,10 @@ static void start_tts(void)
          * and finishes the message once it's drained.
          */
         m.pcm_start = s_turn.pcm_out;
-        /* Paced to the text kept: a reply longer than TEXT_MAX shows what was
-         * kept at reading pace, not stretched over the whole reply's time. */
-        size_t shown = s_turn.texts ? strlen(s_turn.texts + i * TEXT_MAX) : m.len;
+        /* Paced to the text kept: a reply longer than CAPTION_TEXT shows what
+         * was kept at reading pace, not stretched over the whole reply's time
+         * (the Watcher keeps the rest for review). */
+        size_t shown = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
         m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
@@ -2165,7 +2196,10 @@ extern "C" void muse_hatch_start(void)
     if (!s_events) {
         s_events = xQueueCreate(16, sizeof(ev_t));
     }
-    s_in = xStreamBufferCreateWithCaps(IN_BYTES, 1, MALLOC_CAP_SPIRAM);
+    /* A byte over: a stream buffer made with caps keeps one back (FreeRTOS's
+     * static buffers do), and with an odd room left, a send that fills it stops
+     * halfway through a sample. */
+    s_in = xStreamBufferCreateWithCaps(IN_BYTES + 1, 1, MALLOC_CAP_SPIRAM);
     s_out = xStreamBufferCreateWithCaps(OUT_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_turn.chunk = static_cast<uint8_t *>(psram_alloc(DICT_CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL)));
     s_turn.mp3 = static_cast<uint8_t *>(psram_alloc(MP3_BUF));
@@ -2220,7 +2254,8 @@ extern "C" void muse_hatch_turn_audio(const int16_t *pcm, size_t frames)
     }
 }
 
-/* Both ends move whole frames, so the buffer never splits one. */
+/* Both ends move whole frames, and the buffer holds a whole number of them (see
+ * its creation), so a send that fills it never splits one. */
 extern "C" size_t muse_hatch_turn_audio_wait(const int16_t *pcm, size_t frames, int wait_ms)
 {
     return xStreamBufferSend(s_in, pcm, frames * sizeof(int16_t), pdMS_TO_TICKS(wait_ms)) / sizeof(int16_t);
@@ -2339,7 +2374,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         }
         return false;
     }
-    size_t len = strlen(text);
+    size_t len = CAPTION_LEN(text);
     uint32_t frames = m->pcm_frames ? m->pcm_frames : (uint32_t)(len * MIC_RATE / SPEECH_CHARS_PER_S);
     size_t at = frames ? (size_t)((uint64_t)(played - m->pcm_start) * len / frames) : 0;
     if (at >= len) {

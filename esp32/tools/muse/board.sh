@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <s3|s3n|s3-216|s3-206|s3-132|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee> [serial|port]
+#   tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|s3-132|185c|143c|146|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -29,7 +29,7 @@
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|s3-206|s3-132|185c|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee}
+cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-18|s3-216|s3-206|s3-132|185c|143c|143|146|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus}
 case $cmd in
     build|flash) ;;
     *) echo "unknown action $cmd (expected build or flash)" >&2; exit 2 ;;
@@ -38,10 +38,14 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
     s3n)     profile=waveshare-s3-175;     target=esp32s3 ;;
+    s3-18)   profile=waveshare-s3-18;      target=esp32s3 ;;
     s3-216)  profile=waveshare-s3-216;     target=esp32s3 ;;
     s3-206)  profile=waveshare-s3-206;     target=esp32s3 ;;
     s3-132)  profile=waveshare-s3-132;     target=esp32s3 ;;
     185c)    profile=waveshare-s3-185c;    target=esp32s3 ;;
+    143c)    profile=waveshare-s3-143c;    target=esp32s3 ;;
+    143)     profile=waveshare-s3-143;     target=esp32s3 ;;
+    146)     profile=waveshare-s3-146;     target=esp32s3 ;;
     # ESP-Mosaico: ESP-IDF master (IDF_EXPORT_S31, default ~/.espressif/esp-idf-s31).
     mosaico) profile=esp-mosaico;          target=esp32s31 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;
@@ -55,16 +59,21 @@ case $board in
     watcher) profile=sensecap-watcher;     target=esp32s3; baud=115200; paced=1 ;;
     cardputer-adv) profile=m5stack-cardputer-adv; target=esp32s3 ;;
     sticks3) profile=m5stack-sticks3;      target=esp32s3 ;;
+    crowpanel-43) profile=crowpanel-advance-43; target=esp32s3 ;;
     stopwatch) profile=m5stack-stopwatch;  target=esp32s3 ;;
     xiao147) profile=seeed-xiao-s3-147;    target=esp32s3 ;;
     cores3)  profile=m5stack-cores3;       target=esp32s3 ;;
     fnk0104b) profile=fnk0104b;            target=esp32s3 ;;
     jc3248w535) profile=guition-jc3248w535; target=esp32s3 ;;
     lcd7) profile=waveshare-s3-lcd7; target=esp32s3 ;;
+    spotpear) profile=spotpear-esp32-ai-128; target=esp32s3 ;;
     lcd128) profile=waveshare-s3-lcd128; target=esp32s3 ;;
+    lcd349) profile=waveshare-s3-lcd349; target=esp32s3 ;;
     vn183)   profile=vn-s3-183;            target=esp32s3 ;;
     p4lcd35) profile=waveshare-p4-lcd35;   target=esp32p4 ;;
     rorolee) profile=deotaland-rorolee;    target=esp32s3 ;;
+    smartring-plus) profile=viewe-smartring-plus; target=esp32s3 ;;
+    lcd19)   profile=waveshare-s3-lcd19;   target=esp32s3 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.
@@ -86,11 +95,11 @@ fi
 if [ -n "${IDF_EXPORT:-}" ]; then
     . "$IDF_EXPORT" >/dev/null 2>&1
 elif ! command -v idf.py >/dev/null 2>&1; then
-    for d in "$HOME/.espressif/esp-idf-v6.0.1" "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.1" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
+    for d in "$HOME/.espressif/esp-idf-v6.0.3" "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.3" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
         [ -n "$d" ] && [ -f "$d/export.sh" ] && { . "$d/export.sh" >/dev/null 2>&1; break; }
     done
 fi
-command -v idf.py >/dev/null 2>&1 || { echo "idf.py not found; activate ESP-IDF v6.0.1 first" >&2; exit 1; }
+command -v idf.py >/dev/null 2>&1 || { echo "idf.py not found; activate ESP-IDF v6.0.3 first" >&2; exit 1; }
 cd "$root"
 B=build-muse-$profile
 defaults="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-$profile"

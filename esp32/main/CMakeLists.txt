@@ -64,6 +64,7 @@ set(GADGET_REQUIRES
     esp_psram
     esp_coex
     driver
+    esp_adc
     esp_driver_gpio
     esp_driver_i2c
     esp_driver_ledc
@@ -84,9 +85,9 @@ set(GADGET_REQUIRES
 # E-paper has its own status screen in place of led_status.c, with
 # a per-panel driver behind epd_panel.h.
 if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "reterminal_battery.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "reterminal_battery.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681)
@@ -101,8 +102,18 @@ if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
 endif()
 
+# image_fetch.c: the P4 has no JPEG decoder in ROM, so it uses the peripheral.
+# Kconfig is not loaded yet when requirements expand.
+if(IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND GADGET_REQUIRES esp_driver_jpeg)
+endif()
+
 if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING OR CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
     list(APPEND GADGET_REQUIRES led_strip)
+endif()
+
+if(CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341)
+    list(APPEND GADGET_REQUIRES esp_lcd_ili9341)
 endif()
 
 if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
@@ -110,6 +121,9 @@ if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
 endif()
 if(CONFIG_HOMEHUB_RETERMINAL_SHT4X)
     list(APPEND GADGET_SRCS "reterminal_sht4x.c")
+endif()
+if(CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3)
+    list(APPEND GADGET_SRCS "waveshare_154g_shtc3.c")
 endif()
 
 if(CONFIG_HOMEHUB_VOICE)

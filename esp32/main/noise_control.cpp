@@ -45,6 +45,10 @@
 extern "C" {
 #include "cJSON.h"
 #include "led_status.h"
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+#include "reterminal_battery.h"
+#endif
 #include "ota.h"
 #if CONFIG_MUSE_ENABLED
 extern "C" {
@@ -86,14 +90,26 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define POWER_SAVE_POLL_MS        100     // then poll this often
 #define IDLE_QUIET_MS             50      // otherwise quiet this long,
 #define IDLE_POLL_MS              10      // then wait on the socket at most this long
+// Inbound frames the session reads per loop turn: everything waiting, up to
+// these bounds (always at least one frame). Reading one frame per turn let
+// small inbound frames (acknowledgements, requests to home devices) queue
+// behind a turn's tunnel sends during a download. The byte bound keeps large
+// frames (an upload's data) from taking a whole turn, so queued tunnel batches
+// still go out often. Only tunnel data keeps a turn reading: a control-stream
+// frame (a command, a daemon response) ends the turn's reads, as before, since
+// a command's result waits in a short queue the turn drains one at a time.
+#define SESSION_RX_FRAMES_PER_TURN 32
+#define SESSION_RX_BYTES_PER_TURN  (16 * 1024)
 #define STABLE_SESSION_MS         30000
 #define VM_REFRESH_FAILURES       3
 
 // On a board with the full UI but no PSRAM or tunnel, only control JSON and Muse's
 // voice notes and live chat replies cross this session, and the whole session has
 // to fit in what internal RAM Wi-Fi, TLS and the display leave, so the buffers
-// below are smaller.
-#if CONFIG_MUSE_ENABLED && !CONFIG_SPIRAM && !CONFIG_HOMEHUB_TUNNEL
+// below are smaller. The CYD's status screen leaves too little internal RAM for
+// the usual Link buffers, so it takes the smaller ones too.
+#if (CONFIG_MUSE_ENABLED && !CONFIG_SPIRAM && !CONFIG_HOMEHUB_TUNNEL) || \
+    CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
 #define SMALL_CONTROL_SESSION 1
 #else
 #define SMALL_CONTROL_SESSION 0
@@ -1544,10 +1560,21 @@ static char *build_register_json(void) {
                 "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
 #endif
+#if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
+    add_command(commands, "sensors.read",
+                "Read the onboard air sensor: temperature in degrees Celsius "
+                "and relative humidity in percent. Each reading has its age "
+                "in seconds; a sensor with no recent reading is null.",
+                nullptr, nullptr);
+#endif
 
-#if CONFIG_MUSE_WATCHER_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
     add_command(commands, "camera.capture",
+#if CONFIG_MUSE_WATCHER_CAMERA
                 "Capture one still JPEG frame from the SenseCAP Watcher camera. "
+#else
+                "Capture one still 1280x960 JPEG frame from the device camera. "
+#endif
                 "The frame is returned as base64 only when this command is explicitly invoked.",
                 nullptr, nullptr);
     cJSON_AddNumberToObject(
@@ -1695,6 +1722,15 @@ static void send_device_health(
         charging = cJSON_CreateBool(power.charging);
     }
     usb_power = cJSON_CreateBool(power.usb);
+#elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+    // The status-screen boards do not populate muse_state_power().
+    // Only voltage and estimated charge are measured; other fields stay null.
+    int rt_mv, rt_pct;
+    if (reterminal_battery_read(&rt_mv, &rt_pct)) {
+        battery_pct = cJSON_CreateNumber(rt_pct);
+        battery_mv = cJSON_CreateNumber(rt_mv);
+    }
 #endif
     cJSON_AddItemToObject(metrics, "battery_pct",
                           battery_pct ? battery_pct : cJSON_CreateNull());
@@ -2035,6 +2071,19 @@ static session_result_t run_session(stack_monitor_t *stack) {
         return SESSION_FAILED;
     }
     ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s)", s_noise_host, NOISE_PORT, s_vm_id);
+    // Send each write at once. With Nagle's algorithm on, a small write (a
+    // tunnel batch holding a lone handshake packet or a short reply) waited
+    // until everything sent before it was acknowledged, adding ~100 ms to
+    // every exchange through the tunnel that sent two small writes in a row,
+    // such as each new connection's handshake. Every write here is a whole
+    // TLS record, so this adds no tiny segments.
+    {
+        int fd = -1, one = 1;
+        if (esp_tls_get_conn_sockfd(tls, &fd) != ESP_OK || fd < 0
+            || setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) != 0) {
+            ESP_LOGW(TAG, "TCP_NODELAY not set on the Muse connection");
+        }
+    }
 
     // 2. WebSocket upgrade
     noise_upgrade_result_t upgrade = ws_upgrade(tls);
@@ -2208,89 +2257,100 @@ static session_result_t run_session(stack_monitor_t *stack) {
         }
 #endif
 
-        // RX: try to receive a WS frame (non-blocking)
-        ssize_t n = ws_recv_frame_nonblock(tls, rx_buf, WS_RX_BUF_SIZE);
-        if (n > 0) {
-            did = true;
-            last_activity_us = esp_timer_get_time();
-            last_rx_us = last_activity_us;
+        // RX: read the waiting inbound WS frames (non-blocking), up to
+        // SESSION_RX_FRAMES_PER_TURN frames or SESSION_RX_BYTES_PER_TURN bytes.
+        size_t rx_bytes = 0;
+        bool rx_drain = true;  // cleared by a control-stream frame
+        for (int rx_frame = 0; rx_drain && rx_frame < SESSION_RX_FRAMES_PER_TURN
+                               && (rx_frame == 0 || rx_bytes < SESSION_RX_BYTES_PER_TURN);
+             rx_frame++) {
+            ssize_t n = ws_recv_frame_nonblock(tls, rx_buf, WS_RX_BUF_SIZE);
+            if (n > 0) {
+                rx_bytes += static_cast<size_t>(n);
+                did = true;
+                last_activity_us = esp_timer_get_time();
+                last_rx_us = last_activity_us;
 
-            auto inbound = session.ProcessInboundWebSocketPayload(
-                ConstByteSpan(rx_buf, static_cast<size_t>(n)),
-                ByteSpan(tf_scratch, SVC_FRAME_SCRATCH),
-                ByteSpan(sr_scratch, SVC_FRAME_SCRATCH),
-                Span<HeaderView>(hdr_storage, 16));
+                auto inbound = session.ProcessInboundWebSocketPayload(
+                    ConstByteSpan(rx_buf, static_cast<size_t>(n)),
+                    ByteSpan(tf_scratch, SVC_FRAME_SCRATCH),
+                    ByteSpan(sr_scratch, SVC_FRAME_SCRATCH),
+                    Span<HeaderView>(hdr_storage, 16));
 
-            if (!inbound.ok()) {
-                ESP_LOGW(TAG, "ProcessInbound failed: %s", inbound.status.str());
-                // Too large only if the frame's plaintext can't fit the scratch:
-                // a PSA allocation failure is ResourceExhausted too, and isn't.
-                if (inbound.status.IsResourceExhausted() &&
-                    static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
-                    s_req_too_large = true;
+                if (!inbound.ok()) {
+                    ESP_LOGW(TAG, "ProcessInbound failed: %s", inbound.status.str());
+                    // Too large only if the frame's plaintext can't fit the scratch:
+                    // a PSA allocation failure is ResourceExhausted too, and isn't.
+                    if (inbound.status.IsResourceExhausted() &&
+                        static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
+                        s_req_too_large = true;
+                    }
+                    error = true;
+                    break;
                 }
-                error = true;
-                break;
-            }
-            if (inbound.frame_status == InboundFrameStatus::Complete) {
-                auto &frame = inbound.frame;
-                bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
-                if (req_on_frame(frame)) {
-                    // One of the extra daemon requests.
-                } else if (frame.stream_id == IDENTITY_STREAM_ID) {
-                    identity_on_frame(identity, frame);
-                } else if (frame.kind == ServiceFrameKind::BodyChunk) {
-                    if (is_tunnel) {
-                        noise_tunnel_on_inbound(frame.body_chunk.data.data(),
-                                                frame.body_chunk.data.size());
-                    } else {
-                        process_inbound_body_chunk(frame.body_chunk.data,
-                                                   session_generation);
-                    }
-                } else if (frame.kind == ServiceFrameKind::Reset) {
-                    if (is_tunnel) {
-                        // Tunnel stream reset is non-fatal for the control
-                        // session; drop the tunnel and keep control alive.
-                        ESP_LOGW(TAG, "server reset tunnel stream");
-                        noise_tunnel_on_session_down();
-                    } else {
-                        ESP_LOGW(TAG, "server reset stream %lld",
-                                 (long long)frame.stream_id);
-                        error = true;
-                        break;
-                    }
-                } else if (frame.kind == ServiceFrameKind::Response) {
-                    ESP_LOGI(TAG, "got response status=%d on stream %lld",
-                             frame.response.status, (long long)frame.stream_id);
-                    if (frame.response.status != 200) {
+                if (inbound.frame_status == InboundFrameStatus::Complete) {
+                    auto &frame = inbound.frame;
+                    bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
+                    if (!is_tunnel) rx_drain = false;
+                    if (req_on_frame(frame)) {
+                        // One of the extra daemon requests.
+                    } else if (frame.stream_id == IDENTITY_STREAM_ID) {
+                        identity_on_frame(identity, frame);
+                    } else if (frame.kind == ServiceFrameKind::BodyChunk) {
                         if (is_tunnel) {
-                            ESP_LOGW(TAG, "server rejected /link-tunnel: %d",
-                                     frame.response.status);
+                            noise_tunnel_on_inbound(frame.body_chunk.data.data(),
+                                                    frame.body_chunk.data.size());
+                        } else {
+                            process_inbound_body_chunk(frame.body_chunk.data,
+                                                       session_generation);
+                        }
+                    } else if (frame.kind == ServiceFrameKind::Reset) {
+                        if (is_tunnel) {
+                            // Tunnel stream reset is non-fatal for the control
+                            // session; drop the tunnel and keep control alive.
+                            ESP_LOGW(TAG, "server reset tunnel stream");
                             noise_tunnel_on_session_down();
                         } else {
-                            ESP_LOGE(TAG, "server rejected /link-control: %d",
-                                     frame.response.status);
+                            ESP_LOGW(TAG, "server reset stream %lld",
+                                     (long long)frame.stream_id);
                             error = true;
                             break;
                         }
+                    } else if (frame.kind == ServiceFrameKind::Response) {
+                        ESP_LOGI(TAG, "got response status=%d on stream %lld",
+                                 frame.response.status, (long long)frame.stream_id);
+                        if (frame.response.status != 200) {
+                            if (is_tunnel) {
+                                ESP_LOGW(TAG, "server rejected /link-tunnel: %d",
+                                         frame.response.status);
+                                noise_tunnel_on_session_down();
+                            } else {
+                                ESP_LOGE(TAG, "server rejected /link-control: %d",
+                                         frame.response.status);
+                                error = true;
+                                break;
+                            }
+                        }
                     }
                 }
+            } else if (n == 0) {
+                ESP_LOGI(TAG, "peer closed");
+                error = true;
+                break;
+            } else if (n == -1) {
+                ESP_LOGW(TAG, "rx error");
+                error = true;
+                break;
+            } else if (n == -3) {
+                // Control frame (ping/pong) — no app data, but the peer answered,
+                // so the connection is bidirectionally alive. Reset RX liveness.
+                last_rx_us = esp_timer_get_time();
+                last_activity_us = last_rx_us;
+            } else {
+                break;  // n == -2: nothing more waiting
             }
-        } else if (n == 0) {
-            ESP_LOGI(TAG, "peer closed");
-            error = true;
-            break;
-        } else if (n == -1) {
-            ESP_LOGW(TAG, "rx error");
-            error = true;
-            break;
-        } else if (n == -3) {
-            // Control frame (ping/pong) — no app data, but the peer answered,
-            // so the connection is bidirectionally alive. Reset RX liveness.
-            last_rx_us = esp_timer_get_time();
-            last_activity_us = last_rx_us;
         }
-        // n == -2: no data available, continue
+        if (error) break;
 
         // TX: keep exactly one control message in flight across loop turns.
         // A paused slot prevents dequeue/serialization of the next result.
