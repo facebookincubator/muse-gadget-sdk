@@ -23,10 +23,11 @@
  * rails, the charger lines and keys L, M and Q; key R is GPIO0 (BOOT). Pins,
  * the panel's init table, the expander's lines and the battery table follow
  * xiaozhi-esp32's alientek/atk-dnesp32s3-box2-wifi board (config.h,
- * atk_dnesp32s3_box2.cc, power_manager.h). M is talk, R steps the menu, L turns the speaker on and
- * off and Q is power: a tap sleeps or wakes, a 2 s hold powers off. An SC7A20
- * accelerometer at 0x19, found on a unit (xiaozhi doesn't use it), turns the
- * picture the right way up when the box is turned over.
+ * atk_dnesp32s3_box2.cc, power_manager.h). M is talk, R steps the menu, L
+ * turns the speaker on and off and Q is power: a tap sleeps or wakes, a 2 s
+ * hold powers off. An SC7A20 accelerometer at 0x19, found on a unit (xiaozhi
+ * doesn't use it), turns the picture the right way up when the box is turned
+ * over.
  */
 #include <stdlib.h>
 
@@ -164,6 +165,9 @@ static esp_err_t xl_set(uint8_t mask, bool on)
 
 static esp_err_t init(void)
 {
+    /* power_off() holds the backlight low through deep sleep; let it go. */
+    gpio_hold_dis(LCD_BL);
+    gpio_deep_sleep_hold_dis();
     rtc_gpio_deinit(AUX_GPIO);
     rtc_gpio_deinit(XL_INT_GPIO);
     const i2c_master_bus_config_t i2c_cfg = {
@@ -588,9 +592,9 @@ static esp_err_t power_off(void)
     vTaskDelay(pdMS_TO_TICKS(500));
 
     /* Still here, so on USB: deep sleep until R or a change on the expander
-     * (M, which pulls its interrupt low). CHG_CTRL goes back to an input, as
-     * xiaozhi leaves it, so the battery charges meanwhile; reading the inputs
-     * then clears the interrupt. */
+     * (M, Q, L or CHRG, which pull its interrupt low). CHG_CTRL goes back to
+     * an input, as xiaozhi leaves it, so the battery charges meanwhile;
+     * reading the inputs then clears the interrupt. */
     ESP_LOGI(TAG, "on USB power: deep sleep");
     xSemaphoreTake(s_xl_lock, portMAX_DELAY);
     s_xl_cfg1 |= XL_CHG_CTRL;

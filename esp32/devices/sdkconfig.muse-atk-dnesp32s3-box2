@@ -14,8 +14,8 @@
 
 # ALIENTEK ATK-DNESP32S3-BOX2 (Wi-Fi), not the V1.1 box: ESP32-S3 with 16 MB
 # flash and 8 MB octal PSRAM, native USB Serial/JTAG (303a:1001), 240x320
-# ST7789 on an 8-bit i80 bus run as 320x240 landscape, ES8389 codec, keys L and M (XL9555) and R
-# (GPIO0), a battery, no touch. Pins: xiaozhi-esp32's
+# ST7789 on an 8-bit i80 bus run as 320x240 landscape, ES8389 codec, keys L,
+# M and Q (XL9555) and R (GPIO0), a battery, no touch. Pins: xiaozhi-esp32's
 # alientek/atk-dnesp32s3-box2-wifi board, which builds with xiaozhi's S3
 # defaults (16 MB flash, octal PSRAM). Load last, after sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"

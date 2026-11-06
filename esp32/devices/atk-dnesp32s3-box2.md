@@ -40,7 +40,7 @@ python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 atk-box2-factory
 
 ### Options
 
-The overlay keeps the avatar's and audio's static buffers (about 18 KB) in
+The overlay keeps the avatar's and audio's static buffers (about 17 KB) in
 PSRAM (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`), for the internal RAM Link and
 Muse's sessions need. Live voice calls (`CONFIG_MUSE_REALTIME_VOICE=y`, see
 "Live voice calls" in [`../AGENTS.md`](../AGENTS.md)) are off unless the
@@ -79,7 +79,9 @@ turns them on.
 - Power off, on battery, drives CHG_CTRL low and opens the power latch
   (XL9555 P1.2), as xiaozhi does. On USB power the chip keeps running, so it
   falls back to deep sleep with the backlight and amplifier off; R, or M or Q
-  through the expander's interrupt on GPIO2, wakes it.
+  through the expander's interrupt on GPIO2, wakes it. That interrupt follows
+  every expander input, so the charger finishing (CHRG) or key L wakes it
+  too.
 - The battery percentage comes from xiaozhi's table of raw ADC counts; no
   voltage is reported. Charging is the charger's CHRG line (P1.7). While
   charging, the reading is raised by the charge current.
