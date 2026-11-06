@@ -15,9 +15,9 @@
  */
 
 // Host harness for the 1.54G's reply page against display.draw_url: the
-// page task draws nothing while an image downloads, holds the download slot
-// while it draws, and leaves an image drawn this turn up until the next
-// turn. The runner extracts the production rendering and page task code into
+// page task draws nothing while an image downloads but keeps the request for
+// when it ends, holds the download slot while it draws, and leaves an image
+// drawn this turn up until the next turn. The runner extracts the production rendering and page task code into
 // page_render.inc and page_task.inc; FreeRTOS, the display, the download
 // slot and Muse's captions are fakes here.
 #include <assert.h>
@@ -41,6 +41,7 @@ typedef void *TaskHandle_t;
 typedef void *SemaphoreHandle_t;
 #define pdTRUE 1
 #define portMAX_DELAY 0
+#define pdMS_TO_TICKS(ms) (ms)
 static int xSemaphoreTake(SemaphoreHandle_t lock, int ticks) {
     (void)lock, (void)ticks;
     return 1;
@@ -113,7 +114,7 @@ static void reset_counts(void) { s_page_bands = s_draw_done = s_animation = 0; }
 static void turn_until_speaking(const char *reply) {
     s_reply = NULL;
     page_follow_voice(LED_VOICE_LISTENING);
-    page_serve();
+    (void)page_serve();
     page_follow_voice(LED_VOICE_TRANSCRIBING);
     page_follow_voice(LED_VOICE_THINKING);
     s_reply = reply;
@@ -121,9 +122,9 @@ static void turn_until_speaking(const char *reply) {
 
 static void speak_and_end(void) {
     page_follow_voice(LED_VOICE_SPEAKING);
-    page_serve();
+    (void)page_serve();
     page_follow_voice(LED_VOICE_IDLE);
-    page_serve();
+    (void)page_serve();
 }
 
 // A download that draws a whole image and finishes.
@@ -153,17 +154,30 @@ int main(void) {
     assert(s_animation == 1 && s_page_bands == 0);
 
     // A reply that arrives while an image downloads draws nothing: not a row
-    // into the image, and no refresh.
+    // into the image, and no refresh. The request waits for the download.
     s_fetching = true;
     reset_counts();
     speak_and_end();
     assert(s_page_bands == 0 && s_draw_done == 0);
+    assert(page_serve());
     // The image that download draws stays up for the rest of the turn.
     s_image_bands += 13;
     s_fetching = false;
-    queue_page_request(PAGE_SHOW);
-    page_serve();
+    assert(!page_serve());
     assert(s_page_bands == 0 && s_draw_done == 0);
+
+    // A download that fails before drawing anything: once it ends, the
+    // reply's page goes up after all.
+    reset_counts();
+    turn_until_speaking("Here is the map");
+    s_fetching = true;
+    speak_and_end();
+    assert(s_page_bands == 0 && s_draw_done == 0);
+    s_fetching = false;
+    assert(!page_serve());
+    assert(s_page_bands > 0 && s_draw_done == 1);
+    assert(!page_serve());  // and only once
+    assert(s_draw_done == 1);
 
     // An image Muse drew earlier in this turn, before the reply: kept.
     reset_counts();
@@ -181,14 +195,18 @@ int main(void) {
     assert(s_page_bands > 0 && s_draw_done == 1);
 
     // A new turn that begins while an image downloads leaves the screen to
-    // it, status screen included.
+    // it, status screen included, and the image it draws stays up.
     reset_counts();
     s_fetching = true;
     turn_until_speaking("Third reply");
     assert(s_animation == 0 && s_page_bands == 0);
+    s_image_bands += 13;
     s_fetching = false;
+    assert(!page_serve());
+    assert(s_animation == 0 && s_page_bands == 0);
 
     puts("PASS waveshare 1.54G page vs display.draw_url: no drawing during a download, "
-         "slot held while drawing, a same-turn image kept until the next turn");
+         "the request kept for when it ends, slot held while drawing, "
+         "a same-turn image kept until the next turn");
     return 0;
 }
