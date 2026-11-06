@@ -652,12 +652,17 @@ Keep within the session's bounds:
 
 ## Slow replies
 
-On a board with the full UI and Muse's own voice session (PSRAM), a push-to-talk turn whose request Muse took
-but hasn't answered after 20 s adds a notice to the turn ("Muse is working on it. I'll tell you when it's
-done."), lets go of the turn so you can ask something else, and remembers the request for 30 minutes. A message
-that then arrives with no turn running and doesn't name another request starts a turn of its own, which wakes the
-screen and plays like any reply (`muse_hatch_incoming()` tells the voice task). A reply that arrives in the
-middle of another turn is still rejected, as before, and only one request is remembered at a time.
+On a board with the full UI and Muse's own voice session (PSRAM), a voice-note turn whose request Muse took
+and still says it's working on (`agent.status` / `task.status`) after 20 s adds a notice to the turn ("Muse is
+working on it. I'll tell you when it's done."), lets go of the turn so you can ask something else, and
+remembers the request. If Muse isn't working on it, the turn waits and fails with NO REPLY FROM MUSE as before.
+Streamed pieces name no request, so the late reply is known by its finished `message.assistant` row, whose
+`reply_to_message_id` names the request. With no turn running, that row is held until the voice task is idle
+(`muse_hatch_incoming()`), then played as a turn of its own that wakes the screen. Messages the turn already
+played aren't announced again. The request is forgotten once its reply plays, 10 s after Muse stops saying it's
+working, or after 30 minutes. A battery board resting when the reply comes plays it when it wakes, if its
+connection survived. A late reply that arrives during another turn follows that turn's usual rules, and only
+one request is remembered at a time.
 
 ## Video from a phone
 

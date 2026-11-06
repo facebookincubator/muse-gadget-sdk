@@ -53,7 +53,8 @@ class ChatSession(unittest.TestCase):
 #define ESP_LOGW(...) ((void)0)
 ''' + constants + types + r'''
 static turn_t s_turn;
-static std::atomic<uint32_t> s_gen{0};
+static pending_t s_pending;
+static std::atomic<bool> s_incoming{false};
 static char s_reply_shown[EV_TEXT];
 static int64_t s_last_seq, s_marks[4];
 static int captions, console_events;
@@ -240,6 +241,8 @@ static void paced_to_the_kept_text() {
 static void capped_voice(bool partial) {
     begin();
     s_turn.agent_busy = true;
+    /* An acked request Muse is working on lets go at DETACH_US instead (detach()). */
+    s_turn.acked = partial;
     if (partial) {
         event("delta.message_start", "reply", "note");
         event("delta.text_append", "reply", "", "Partial reply");
@@ -434,6 +437,100 @@ static void review_keeps_caption_pace() {
     s_turn.texts = nullptr;
 }
 #endif
+static void status(const char *code) {
+    cJSON *root = cJSON_CreateObject(), *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "event");
+    cJSON_AddStringToObject(root, "event", "agent.status");
+    cJSON_AddItemToObject(root, "payload", payload);
+    cJSON_AddStringToObject(payload, "activity_code", code);
+    on_event(root);
+    cJSON_Delete(root);
+}
+/* Plays out the turn's messages and lets it settle, as check_turn sees it. */
+static void settle() {
+    for (int i = 0; i < s_turn.nmsgs; i++) s_turn.msgs[i].tts = TTS_FINISHED;
+    clock_us += BUSY_HOLD_US + 1;
+    check_turn();
+}
+/* A spoken turn Muse acked and is still working on, 21 s on: it says so and lets go. */
+static void detach() {
+    pending_clear();
+    begin();
+    status("working");
+    clock_us += DETACH_US + 1;
+    check_turn();
+    assert(s_turn.detached && s_turn.nmsgs == 1 && s_turn.msgs[0].done && captions == 1);
+    settle();
+    assert(s_turn.phase == P_IDLE && s_pending.active && s_pending.busy && done_events == 1);
+}
+static void detaches_only_while_muse_works() {
+    begin();   /* Muse doesn't say it's working: the turn waits, then fails as before */
+    clock_us += DETACH_US + 1;
+    check_turn();
+    assert(!s_turn.detached && !s_turn.nmsgs && s_turn.phase == P_WAIT_REPLY);
+    clock_us = s_turn.chat_us + REPLY_TIMEOUT_US + 1;
+    check_turn();
+    assert(fail_events == 1 && !strcmp(fail_text, "NO REPLY FROM MUSE") && !s_pending.active);
+    detach();
+}
+static void late_reply_matched_by_its_request() {
+    detach();
+    s_incoming = false;
+    /* Live deltas name no request; another chat's row, or one naming nothing, isn't it. */
+    event("delta.message_start", "late");
+    event("delta.text_append", "late", "", "Streaming");
+    event("delta.message_done", "late");
+    event("message.assistant", "phone", "elsewhere", "Another chat");
+    event("message.assistant", "proactive", "", "Unprompted");
+    event("message.assistant", "late", "note", "");   /* text not ready yet */
+    assert(s_turn.phase == P_IDLE && !s_incoming && !s_pending.reply);
+    event("message.assistant", "late", "note", "The document is ready");
+    assert(s_incoming.exchange(false) && s_pending.reply && s_turn.phase == P_IDLE);
+    event("message.assistant", "later", "note", "A second one");   /* one at a time */
+    incoming_play(s_turn.gen + 1);
+    assert(s_turn.phase == P_WAIT_REPLY && s_turn.incoming && s_turn.agent_busy);
+    assert(s_turn.nmsgs == 1 && !strcmp(s_turn.msgs[0].id, "late") && s_turn.msgs[0].done);
+    assert(s_turn.msgs[0].len == 21 && !s_pending.active && !s_pending.reply);
+    /* Delivered, and Muse is done: nothing more is waited for. */
+    status("online");
+    settle();
+    assert(s_turn.phase == P_IDLE && !s_pending.active);
+    event("message.assistant", "after", "note", "Too late");
+    assert(!s_incoming && !s_pending.reply);
+}
+static void pending_is_forgotten() {
+    detach();   /* Muse stops working and nothing comes: forgotten soon after */
+    status("online");
+    pending_expire(clock_us + PENDING_IDLE_US - 1);
+    assert(s_pending.active);
+    pending_expire(clock_us + PENDING_IDLE_US + 1);
+    assert(!s_pending.active);
+    event("message.assistant", "late", "note", "Too late");
+    assert(!s_incoming && !s_pending.reply);
+    detach();   /* still working, but not for ever */
+    pending_expire(clock_us + PENDING_US - 1);
+    assert(s_pending.active);
+    pending_expire(clock_us + PENDING_US + 1);
+    assert(!s_pending.active);
+}
+static void played_messages_are_not_replayed() {
+    pending_clear();
+    begin();
+    status("working");
+    event("delta.message_start", "first");
+    event("delta.text_append", "first", "", "On it");
+    event("delta.message_done", "first");
+    settle();   /* still working after the hold: the rest comes later */
+    assert(s_turn.phase == P_IDLE && done_events == 1 && s_pending.active && s_pending.nplayed == 1);
+    s_incoming = false;
+    event("message.assistant", "first", "note", "On it");   /* its row, after it played */
+    assert(!s_incoming && !s_pending.reply);
+    event("message.assistant", "second", "note", "Done now");
+    assert(s_incoming.exchange(false));
+    incoming_play(s_turn.gen + 1);
+    event("message.assistant", "first", "note", "On it");
+    assert(s_turn.nmsgs == 1 && !strcmp(s_turn.msgs[0].id, "second"));
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
@@ -457,6 +554,10 @@ int main(int argc, char **argv) {
     case 17: typed_reply_at_cap(false, false); break;
     case 21: chat_request(true); break;
     case 22: chat_request(false); break;
+    case 23: detaches_only_while_muse_works(); break;
+    case 24: late_reply_matched_by_its_request(); break;
+    case 25: pending_is_forgotten(); break;
+    case 26: played_messages_are_not_replayed(); break;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -571,3 +672,15 @@ int main(int argc, char **argv) {
             for name, case in [('dictated', 21), ('typed', 22)]:
                 with self.subTest(turn=name, watcher=watcher):
                     self.run_case(case, watcher=watcher)
+
+    def test_slow_reply_detaches_only_while_muse_says_it_is_working(self):
+        self.run_case(23)
+
+    def test_late_reply_is_the_row_naming_the_request_and_plays_once(self):
+        self.run_case(24)
+
+    def test_pending_request_is_forgotten_when_muse_stops_or_after_the_cap(self):
+        self.run_case(25)
+
+    def test_messages_the_turn_played_are_not_announced_again(self):
+        self.run_case(26)
