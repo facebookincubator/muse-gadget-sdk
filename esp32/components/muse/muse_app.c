@@ -28,9 +28,16 @@
 #include "muse_input.h"
 #include "muse_settings.h"
 #include "muse_state.h"
+#include "muse_text.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VIDEO_WIFI
+#include "muse_video_wifi.h"
+#endif
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#endif
 
 static const char *TAG = "muse";
 
@@ -68,8 +75,19 @@ void muse_app_run(const muse_board_t *board)
     ESP_ERROR_CHECK(muse_settings_init());
     muse_settings_set_listener(on_setting);
     muse_state_init();
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    ESP_ERROR_CHECK(muse_review_init());
+#endif
     muse_battery_init();
+#if CONFIG_MUSE_LATIN_FONT
+    muse_text_keep_latin();   /* before the first caption, so it keeps its accents */
+#endif
     muse_state_set_caption("WAKING UP...");
+    /* Before the UI: the touch boards' settings show Phone camera only when
+     * a transport is there as they're built. Its server waits for Wi-Fi. */
+#if CONFIG_MUSE_VIDEO_WIFI
+    muse_video_wifi_start();
+#endif
     ESP_ERROR_CHECK(muse_ui_start());
     ESP_LOGI(TAG, "UI built: free internal %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
@@ -78,7 +96,7 @@ void muse_app_run(const muse_board_t *board)
 
     /* Let the boot animation (flame ignites, eyes open) play out. */
     vTaskDelay(pdMS_TO_TICKS(1400));
-    if (!board->audio_init) {
+    if (!board->audio_init && !board->mic_init) {
         ESP_LOGI(TAG, "display-only board: no microphone or speaker");
         muse_state_set_mode(MUSE_MODE_IDLE);
         muse_state_set_caption("%s", "");

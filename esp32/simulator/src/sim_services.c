@@ -24,6 +24,11 @@
 #include "muse_menu.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
+#include "muse_voice.h"
+
+/* The preview drives modes directly; it has no live call transport. */
+bool muse_voice_in_call(void) { return false; }
+muse_voice_view_t muse_voice_call_view(void) { return MUSE_VOICE_VIEW_NONE; }
 
 #define SIM_DEFAULT_NAME "MuseGadget-SIM001"
 #define SIM_DEFAULT_SSID "Muse Simulator"
@@ -182,6 +187,13 @@ void muse_hatch_status(muse_hatch_status_t *out)
     }
 }
 
+/* The simulator pages no replies (muse_chat_text.c isn't built). */
+void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next))
+{
+    (void)width_px;
+    (void)glyph_px;
+}
+
 muse_link_state_t muse_link_state(void)
 {
     return s_link;
@@ -232,12 +244,12 @@ void muse_menu_close(void)
 {
 }
 
-void muse_console_write(const void *buf, size_t n)
+bool muse_console_write(const void *buf, size_t n)
 {
-    if (buf && n) {
-        (void)fwrite(buf, 1, n, stdout);
-        (void)fflush(stdout);
+    if (!n) {
+        return true;
     }
+    return buf && fwrite(buf, 1, n, stdout) == n && fflush(stdout) == 0;
 }
 
 void muse_input_touch_talk(bool pressed)

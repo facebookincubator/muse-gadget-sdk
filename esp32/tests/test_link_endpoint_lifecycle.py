@@ -56,7 +56,7 @@ class LinkEndpointLifecycleTest(unittest.TestCase):
             (api, "static void make_api_url(char *out, size_t out_cap, const char *path)"),
             (noise, "void noise_ctrl_set_host(const char *host)"),
             (app, "static void setup_disconnect_to_clean(void)"),
-            (app, "static bool setup_wipe_to_clean(void)"),
+            (app, "static bool setup_wipe_to_clean(setup_reset_scope_t scope)"),
         ):
             production += "\n" + signature + " {" + _function_body(source, signature) + "}\n"
 
@@ -75,6 +75,10 @@ class LinkEndpointLifecycleTest(unittest.TestCase):
 #define ESP_OTA_IMG_PENDING_VERIFY 1
 #define esp_ota_get_running_partition() NULL
 #define esp_ota_get_state_partition(p, s) ((void)(p), (void)(s), -1)
+#define esp_ota_mark_app_valid_cancel_rollback() ESP_OK
+#define ota_installed_by_vibe_mode() false
+#define ota_verify_forget() ((void)0)
+#define ESP_LOGI(...) ((void)0)
 #define xTaskCreate(...) ((void)0)
 typedef int esp_partition_t;
 typedef int esp_ota_img_states_t;
@@ -114,7 +118,25 @@ static bool config_clear_setup(void) {
     complete = provisioned = false;
     return true;
 }
-static bool clear_setup_credentials(void) { return config_clear_setup(); }
+static bool config_clear_pairing(void) {
+    for (int i = 1; i < 4; i++) stored[i][0] = '\0';
+    provisioned = false;
+    return true;
+}
+static bool config_unpair(void) {
+    if (!config_clear_pairing()) return false;
+    complete = false;
+    return true;
+}
+typedef enum { SETUP_RESET_KEEP_WIFI, SETUP_RESET_FORGET_WIFI } setup_reset_scope_t;
+static bool clear_setup_credentials(setup_reset_scope_t scope) {
+    return scope == SETUP_RESET_FORGET_WIFI ? config_clear_setup() : config_unpair();
+}
+#define CONFIG_KEY_NOT_FOUND 0
+static int config_key_lookup(const char *key) {
+    (void)key;
+    return provisioned ? 1 : CONFIG_KEY_NOT_FOUND;
+}
 static void disconnect_vm_transports(void) { disconnects++; }
 void diagnostic_log_clear(void) {
     assert(disconnects > log_clears);
@@ -129,7 +151,7 @@ static void setup_fail_for_session(const char *stage, const char *status,
     assert(!strcmp(stage, "storage") && !strcmp(status, "error_storage"));
     assert(generation == 1);
     failures++;
-    assert(setup_wipe_to_clean());
+    assert(setup_wipe_to_clean(SETUP_RESET_KEEP_WIFI));
 }
 static bool apply_endpoints_v2(const char *api_url_v2, const char *api_url,
                                const char *noise_host) {
@@ -179,7 +201,13 @@ static void check_boot_v2(bool setup, bool token, bool wifi, bool keep_endpoints
     assert((stored[1][0] != '\0') == keep_endpoints);
     assert((stored[2][0] != '\0') == keep_endpoints);
     assert((stored[3][0] != '\0') == (keep_endpoints && with_v2));
-    if (WIFI_WITHOUT_PAIRING && !setup && !token && wifi) assert(stored[0][0]);
+    // Boot never forgets Wi-Fi: saved Wi-Fi without a pairing is an unpaired
+    // device (an unpair keeps it), not a half-written pair.
+    assert((stored[0][0] != '\0') == wifi);
+    // Tokens and Wi-Fi without the marker are a legacy pair: boot marks it.
+    if (!setup && token && (wifi || CONFIG_HOMEHUB_WIFI_SSID[0])) assert(complete);
+    // A marker without credentials is an unpair cut short: boot finishes it.
+    if (setup && !token && !CONFIG_HOMEHUB_WIFI_SSID[0]) assert(!complete);
 }
 static void check_boot(bool setup, bool token, bool wifi, bool keep_endpoints) {
     check_boot_v2(setup, token, wifi, keep_endpoints, false);
@@ -188,7 +216,7 @@ static void check_boot(bool setup, bool token, bool wifi, bool keep_endpoints) {
 int main(void) {
     reset_fixture();
     assert(apply_endpoints(custom_api, custom_noise));
-    assert(setup_wipe_to_clean());
+    assert(setup_wipe_to_clean(SETUP_RESET_FORGET_WIFI));
     assert(disconnects == 1 && log_clears == CONFIG_HOMEHUB_SUPPORT_BUG_REPORT);
     expect_endpoints(VM_API_DEFAULT_BASE_URL, NOISE_DEFAULT_HOST);
     assert(apply_endpoints(NULL, NULL));
@@ -216,7 +244,7 @@ int main(void) {
     expect_endpoints(VM_API_DEFAULT_BASE_URL, custom_noise);
     assert(stored[1][0] && !stored[3][0]);
     assert(apply_endpoints_v2(custom_api_v2, NULL, NULL));
-    assert(setup_wipe_to_clean());
+    assert(setup_wipe_to_clean(SETUP_RESET_KEEP_WIFI));
     expect_endpoints(VM_API_DEFAULT_BASE_URL, NOISE_DEFAULT_HOST);
 
     const char *failed_keys[] = {"api_url", "api_url_v2", "noise_host"};
@@ -229,8 +257,8 @@ int main(void) {
         expect_endpoints(VM_API_DEFAULT_BASE_URL, NOISE_DEFAULT_HOST);
     }
     check_boot(false, false, false, false);  // Orphan endpoint keys.
-    check_boot(false, false, true, false);   // Unpaired Wi-Fi on Muse.
-    check_boot(true, false, true, false);    // Marker without credentials.
+    check_boot(false, false, true, false);   // Unpaired, Wi-Fi kept.
+    check_boot(true, false, true, false);    // Marker without credentials: unpaired.
     check_boot(true, true, true, true);     // Complete custom setup.
     check_boot(false, true, true, true);    // Legacy marker migration.
     check_boot(false, true, false, CONFIG_HOMEHUB_WIFI_SSID[0] != '\0');

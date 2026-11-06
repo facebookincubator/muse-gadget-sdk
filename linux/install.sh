@@ -35,6 +35,7 @@ BLUEZ_DROPIN="/etc/systemd/system/bluetooth.service.d/zz-musegadget.conf"
 DEFAULT_SOURCE="git+https://github.com/facebookincubator/muse-gadget-sdk@main#subdirectory=linux"
 APT_PACKAGES=(bluez python3 python3-dbus python3-gi python3-cryptography curl ca-certificates)
 ARCH_PACKAGES=(bluez python python-dbus python-gobject python-cryptography curl ca-certificates)
+FEDORA_PACKAGES=(bluez python3 python3-dbus python3-gobject python3-cryptography curl ca-certificates)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -93,18 +94,27 @@ check_system() {
                 die "$PRETTY_NAME is too old. Upgrade to Ubuntu 22.04 or later." ;;
         arch)
             DISTRO_FAMILY=arch ;;
+        fedora)
+            DISTRO_FAMILY=fedora ;;
         *)
             case " ${ID_LIKE:-} " in
+                *" fedora "*|*" rhel "*)
+                    DISTRO_FAMILY=fedora
+                    warn "$PRETTY_NAME is untested; continuing because it is Fedora-based." ;;
                 *" arch "*)
                     DISTRO_FAMILY=arch
                     warn "$PRETTY_NAME is untested; continuing because it is Arch-based." ;;
                 *" debian "*|*" ubuntu "*)
                     DISTRO_FAMILY=debian
                     warn "$PRETTY_NAME is untested; continuing because it is Debian-based." ;;
-                *) die "$PRETTY_NAME is not supported. This installer needs Debian/Ubuntu or Arch Linux." ;;
+                *) die "$PRETTY_NAME is not supported. This installer needs Debian/Ubuntu, Arch or Fedora Linux." ;;
             esac ;;
     esac
-    if [ "$DISTRO_FAMILY" = arch ]; then
+    if [ "$DISTRO_FAMILY" = fedora ]; then
+        command -v dnf >/dev/null || die "dnf not found."
+        ARCH="$(uname -m)"
+        case "$ARCH" in x86_64|aarch64) ;; *) die "unsupported Fedora architecture: $ARCH" ;; esac
+    elif [ "$DISTRO_FAMILY" = arch ]; then
         command -v pacman >/dev/null || die "pacman not found."
         ARCH="$(uname -m)"
         case "$ARCH" in x86_64|aarch64) ;; *) die "unsupported Arch architecture: $ARCH" ;; esac
@@ -144,7 +154,11 @@ choose_account() {
 
 install_packages() {
     local missing=() pkg
-    if [ "$DISTRO_FAMILY" = arch ]; then
+    if [ "$DISTRO_FAMILY" = fedora ]; then
+        for pkg in "${FEDORA_PACKAGES[@]}"; do
+            rpm -q "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+        done
+    elif [ "$DISTRO_FAMILY" = arch ]; then
         for pkg in "${ARCH_PACKAGES[@]}"; do
             pacman -Qq "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
         done
@@ -156,7 +170,9 @@ install_packages() {
     case "$SOURCE" in git+*) command -v git >/dev/null || missing+=(git) ;; esac
     if [ "${#missing[@]}" -eq 0 ]; then return; fi
     say "Installing system packages: ${missing[*]}"
-    if [ "$DISTRO_FAMILY" = arch ]; then
+    if [ "$DISTRO_FAMILY" = fedora ]; then
+        as_root dnf install -y "${missing[@]}"
+    elif [ "$DISTRO_FAMILY" = arch ]; then
         as_root pacman -S --needed --noconfirm "${missing[@]}"
     else
         as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
@@ -175,7 +191,7 @@ install_uv() {
 }
 
 enable_bluez() {
-    if [ "$DISTRO_FAMILY" = arch ] && systemd_running; then
+    if { [ "$DISTRO_FAMILY" = arch ] || [ "$DISTRO_FAMILY" = fedora ]; } && systemd_running; then
         say "Enabling the BlueZ service"
         as_root systemctl enable --now bluetooth.service
     fi

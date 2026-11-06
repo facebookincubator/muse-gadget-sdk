@@ -59,6 +59,9 @@ typedef struct {
     void (*ble_apply)(void);                      /* BLE phone setup setting changed */
     bool (*ble_started)(void);
     bool (*hatch_linked)(void);                   /* paired to a Hatch account */
+    const char *(*sdk_token)(void);               /* the maker's SDK token, or NULL */
+    bool (*sdk_token_set)(const char *token);     /* stores it and restarts; false if invalid */
+    bool (*sdk_token_changed)(void);              /* paired with another token: pair again to use this one */
     /* Fills the VM whose id is want_vm (empty: Link's preferred VM). *vm_token is heap. */
     bool (*hatch_vm)(const char *want_vm, char *vm_id, size_t id_cap, char *vm_name, size_t name_cap,
                      char **vm_token);
@@ -72,9 +75,16 @@ typedef struct {
     void (*req_cancel)(int64_t id);
     void (*power_save)(bool on);                  /* screen off: the session polls less */
     void (*wifi_nap)(bool nap);                   /* screen off a while: leave Wi-Fi until false */
+    void (*ble_quiet)(bool quiet);                /* a Wi-Fi video stream: no BLE advertising until false */
     int (*wifi_saved)(muse_wifi_saved_t *out, int max);   /* most recently joined first */
     void (*wifi_forget)(const char *ssid);        /* one saved network; empty forgets them all */
 } muse_link_ops_t;
+
+/* Pauses BLE advertising (setup's, or the companion's) while a Wi-Fi video
+ * stream plays: the radio's scheduler gives an advertising BLE half of every
+ * beacon period, and the stream's packets wait out that half. Connections
+ * stay up. Calls nest; false releases one. */
+void muse_link_ble_quiet(bool quiet);
 
 void muse_link_register(const muse_link_ops_t *ops);
 
@@ -84,6 +94,9 @@ muse_link_state_t muse_link_state(void);
 const char *muse_link_state_name(muse_link_state_t state);
 
 bool muse_link_hatch_linked(void);
+const char *muse_link_sdk_token(void);
+bool muse_link_sdk_token_set(const char *token);
+bool muse_link_sdk_token_changed(void);
 bool muse_link_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *vm_name, size_t name_cap,
                         char **vm_token);
 bool muse_link_talk_press(void);

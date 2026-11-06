@@ -48,7 +48,7 @@ def riff_header(rate):
 
 # The POST /chat/stream envelope around the base64 WAV, written out rather than
 # read from muse_chat_priv.h: changing what the device sends must change this.
-HEAD = (b'{"message":"","output_modality":"text","items":[{"type":"file",'
+HEAD = (b'{"message":"","output_modality":"text","device":"mcu-wearable","items":[{"type":"file",'
         b'"mime_type":"audio/wav","filename":"voice_note.wav","data_base64":"')
 TAIL = b'"}]}'
 
@@ -198,7 +198,7 @@ class VoiceNoteHelpers(unittest.TestCase):
         self.assertEqual(body, HEAD + base64.b64encode(riff_header(16000) + pcm) + TAIL)
         request = json.loads(body)
         wav = base64.b64decode(request['items'][0].pop('data_base64'), validate=True)
-        self.assertEqual(request, {'message': '', 'output_modality': 'text', 'items': [
+        self.assertEqual(request, {'message': '', 'output_modality': 'text', 'device': 'mcu-wearable', 'items': [
             {'type': 'file', 'mime_type': 'audio/wav', 'filename': 'voice_note.wav'}]})
         self.assertEqual(wav, riff_header(16000) + pcm)
         with wave.open(io.BytesIO(wav)) as w:
@@ -248,7 +248,7 @@ static void mark(mark_t) {}
 static int64_t now_us(void) { return 4242; }
 static const char *failed = "-";
 static void turn_fail(const char *why) { failed = why; s_turn.phase = P_IDLE; }
-extern "C" void muse_state_page(bool, int *cols, int *lines) { *cols = 16; *lines = 2; }
+extern "C" void muse_state_page(const char *, int *cols, int *lines) { *cols = 16; *lines = 2; }
 '''
 
 HATCH_MAIN = r'''

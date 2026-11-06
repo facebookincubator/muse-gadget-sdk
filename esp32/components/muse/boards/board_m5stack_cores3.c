@@ -51,6 +51,9 @@ static esp_err_t init(void)
         return ESP_OK;
     }
     s_pmu = true;
+    /* PWR talks: the 10 s hold-off back on, whatever a reset in a held talk
+     * left (a 16 s shutdown cleared then stays off, the datasheet default). */
+    (void)muse_pmu_set_key_shutdown(true);   /* logs if it can't */
     return ESP_OK;
 }
 
@@ -66,6 +69,9 @@ static lv_display_t *display_start(lv_indev_t **touch)
     };
     cfg.lvgl_port_cfg.task_affinity = MUSE_UI_CORE;
     cfg.lvgl_port_cfg.task_priority = MUSE_UI_PRIORITY;
+    /* The port's 7168-byte default overflows when settings lists Wi-Fi scan
+     * results (taskLVGL stack overflow, reboot loop). */
+    cfg.lvgl_port_cfg.task_stack = 10240;
     lv_display_t *disp = bsp_display_start_with_config(&cfg);
     if (!disp) {
         return NULL;
@@ -120,8 +126,13 @@ static unsigned poll_buttons(void)
         return 0;
     }
     unsigned key = muse_pmu_poll_key();
-    return (key & MUSE_PMU_KEY_PRESS ? MUSE_BTN_TALK_PRESS : 0) |
-           (key & MUSE_PMU_KEY_RELEASE ? MUSE_BTN_TALK_RELEASE : 0);
+    bool press = key & MUSE_PMU_KEY_PRESS, release = key & MUSE_PMU_KEY_RELEASE;
+    /* A talk can outlast the PMU's hold-off: held, PWR mustn't power off.
+     * Both edges in one read leave PWR as it was (talk_button's order). */
+    if (press != release) {
+        (void)muse_pmu_set_key_shutdown(release);   /* logs if it can't */
+    }
+    return (press ? MUSE_BTN_TALK_PRESS : 0) | (release ? MUSE_BTN_TALK_RELEASE : 0);
 }
 
 static esp_err_t read_power(muse_power_t *out)

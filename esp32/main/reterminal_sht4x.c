@@ -124,9 +124,16 @@ static cJSON *readings_result(const reading_t *readings, int64_t now_us) {
 
 // ---- I2C driver --------------------------------------------------------------
 
-// Seeed's E100x pinout: the onboard SHT4x hangs off I2C0.
+// Seeed's E100x and Sticky boards use different I2C pins for the SHT4x.
+#if CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677 || CONFIG_MUSE_BOARD_RETERMINAL_STICKY
+#define SHT4X_SDA_GPIO 1
+#define SHT4X_SCL_GPIO 0
+#define SHT4X_I2C_PORT I2C_NUM_1
+#else
 #define SHT4X_SDA_GPIO 19
 #define SHT4X_SCL_GPIO 20
+#define SHT4X_I2C_PORT -1
+#endif
 
 // Poll period: the sensor answers in ~10 ms, so this is cheap.
 #define POLL_MS 10000
@@ -185,7 +192,7 @@ static void sensors_task(void *arg) {
 
 void reterminal_sht4x_init(void) {
     i2c_master_bus_config_t bus_cfg = {
-        .i2c_port = -1,
+        .i2c_port = SHT4X_I2C_PORT,
         .sda_io_num = SHT4X_SDA_GPIO,
         .scl_io_num = SHT4X_SCL_GPIO,
         .clk_source = I2C_CLK_SRC_DEFAULT,
@@ -193,9 +200,12 @@ void reterminal_sht4x_init(void) {
         .flags.enable_internal_pullup = true,
     };
     i2c_master_bus_handle_t bus = NULL;
-    esp_err_t err = i2c_new_master_bus(&bus_cfg, &bus);
+    esp_err_t err = ESP_ERR_NOT_FOUND;
+    if (SHT4X_I2C_PORT >= 0) err = i2c_master_get_bus_handle(SHT4X_I2C_PORT, &bus);
+    bool owns_bus = err != ESP_OK;
+    if (owns_bus) err = i2c_new_master_bus(&bus_cfg, &bus);
     if (err == ESP_OK && i2c_master_probe(bus, SHT4X_ADDR, 100) != ESP_OK) {
-        err = ESP_ERR_NOT_FOUND;
+        ESP_LOGW(TAG, "SHT4x not responding at boot; will retry reads");
     }
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -205,7 +215,7 @@ void reterminal_sht4x_init(void) {
     if (err == ESP_OK) err = i2c_master_bus_add_device(bus, &dev_cfg, &s_dev);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "no SHT4x at 0x%02x: %s", SHT4X_ADDR, esp_err_to_name(err));
-        if (bus) i2c_del_master_bus(bus);
+        if (owns_bus && bus) i2c_del_master_bus(bus);
         return;
     }
     if (xTaskCreate(sensors_task, "sht4x", 3072, NULL, 2, NULL) != pdPASS) {

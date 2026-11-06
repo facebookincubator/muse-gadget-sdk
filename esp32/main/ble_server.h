@@ -79,6 +79,10 @@ int ble_server_companion_interval_ms(void);
 void ble_server_start(const char *device_name, const ble_callbacks_t *cb);
 void ble_server_begin_advertising(void);
 void ble_server_stop_advertising(bool disconnect_client);
+// Quiet: no advertising at all (a Wi-Fi video stream wants the shared radio)
+// until called with false, which resumes whatever advertising was on.
+// Connections are left alone.
+void ble_server_set_quiet(bool quiet);
 
 // Disconnect the current GATT client without changing advertising policy.
 void ble_server_disconnect_client(void);

@@ -1,0 +1,57 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-S3-ePaper-1.54G: ESP32-S3-PICO-1-N8R8 (8 MB flash, 8 MB
+# octal PSRAM) on native USB, a 1.54 inch 200x200 four-colour e-paper (black,
+# white, yellow and red) on SPI, and a battery whose power the board latches.
+# Load last, after sdkconfig.defaults (see README.md in this directory).
+#
+# Sources: Waveshare's schematic and ESP-IDF examples
+# (github.com/waveshareteam/ESP32-S3-ePaper-1.54G) for the pins, the power
+# switches and the panel; esptool chip-id on the board for the chip, flash
+# and PSRAM.
+#
+# It overrides the ESP32-C5 assumptions in sdkconfig.defaults; C5-only options
+# there are ignored for this target.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# E-paper shows status.
+CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G=y
+# The -Disp suffix distinguishes display boards during pairing.
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# BOOT button on GPIO0 confirms pairing and opens setup.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+CONFIG_HOMEHUB_BUTTON_LABEL="BOOT"
+
+# 8 MB of embedded flash; use the 8 MB partition table.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"
+
+# The USB-C port goes straight to the chip's USB Serial/JTAG; UART0 (GPIO43
+# and 44) only reaches the expansion header, so use USB as the console.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Octal PSRAM, as Waveshare's ESP-IDF examples set it, holds the 78 KB RGB565
+# canvas and the 10 KB panel frame.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+# The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
+# NimBLE host's allocations in PSRAM so pairing has room.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y

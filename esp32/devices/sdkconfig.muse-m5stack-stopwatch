@@ -16,8 +16,9 @@
 # round touch AMOLED. Load last, after sdkconfig.muse, which has the 16 MB
 # flash size and partition table.
 # Controls with USB down: GPIO1 / blue top-right = PTT, GPIO2 / yellow
-# top-left = speaker toggle; red bottom-left = M5PM1 BTN (0x48 bit0), not
-# an ESP GPIO. See factory hal_button.cpp/view.cpp and M5PM1 1.0.6.
+# top-left = speaker toggle (swapped with CONFIG_MUSE_REALTIME_VOICE: yellow
+# talks, blue mutes or hangs up); red bottom-left = M5PM1 BTN (0x48 bit0),
+# not an ESP GPIO. See factory hal_button.cpp/view.cpp and M5PM1 1.0.6.
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_MUSE_BOARD_M5STACK_STOPWATCH=y
 

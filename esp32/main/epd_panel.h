@@ -40,6 +40,7 @@ typedef struct {
     // Show `frame` on the panel. `prev` is what the panel currently shows
     // (NULL on colour panels). Both are `row_bytes * height` long.
     esp_err_t (*update)(const uint8_t *frame, const uint8_t *prev, bool full);
+    esp_err_t (*update_gray4)(const uint8_t *frame);
 } epd_panel_t;
 
 const epd_panel_t *epd_panel_get(void);

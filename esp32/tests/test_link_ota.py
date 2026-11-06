@@ -60,12 +60,21 @@ class LinkOtaTest(unittest.TestCase):
         return ran.stdout
 
     def test_ota_disabled_and_enabled(self) -> None:
-        for enabled, dev in ((False, True), (True, True), (True, False)):
-            with self.subTest(enabled=enabled, dev=dev), tempfile.TemporaryDirectory() as name:
+        # mosaico: "" (another board), "board" (the ESP-Mosaico without its
+        # Vibe Mode overlay) or "vibe" (its Vibe Mode build).
+        for enabled, dev, mosaico in (
+            (False, True, ""), (True, True, ""), (True, False, ""),
+            (True, True, "board"), (False, True, "vibe"), (True, True, "vibe"),
+        ):
+            with self.subTest(enabled=enabled, dev=dev, mosaico=mosaico), \
+                    tempfile.TemporaryDirectory() as name:
                 tmp = Path(name)
                 (tmp / "sdkconfig.h").write_text(
                     ("#define CONFIG_HOMEHUB_OTA_ENABLED 1\n" if enabled else "")
                     + f"#define CONFIG_HOMEHUB_DEV_BUILD {int(dev)}\n"
+                    + ("#define CONFIG_MUSE_BOARD_ESP_MOSAICO 1\n" if mosaico else "")
+                    + ("#define CONFIG_ESP_IRIS_OTA_DEFAULT_VIA_RECOVERY 1\n"
+                       if mosaico == "vibe" else "")
                 )
                 # Type-check log arguments without printing or making them unused.
                 (tmp / "esp_log.h").write_text(
@@ -139,6 +148,56 @@ int main(void) {
 }
 ''')
             self.compile_and_run([source, ROOT / "main/ota.c"], tmp)
+
+    def test_boot_checks_only_recorded_updates(self) -> None:
+        # app_run's arming block: every PENDING_VERIFY image gets the health
+        # check (and its rollback) except the ESP-Mosaico's Vibe Mode install,
+        # which is marked valid at once.
+        app = (ROOT / "main/app.c").read_text()
+        start = app.index("    // Arm OTA rollback verification.")
+        block = app[start : app.index("    xTaskCreate(ota_verify_task", start)]
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            (tmp / "sdkconfig.h").write_text("")
+            source = tmp / "arm.c"
+            source.write_text("""
+#include <assert.h>
+#include <stdbool.h>
+#include "esp_ota_ops.h"
+#define TAG "test"
+#define ESP_LOGI(...) ((void)0)
+#define ESP_LOGW(...) ((void)0)
+static const esp_partition_t part = { .address = 0x20000 };
+static esp_ota_img_states_t state;
+static bool vibe_mode, s_ota_pending_verify;
+static int marked, forgotten;
+const esp_partition_t *esp_ota_get_running_partition(void) { return &part; }
+esp_err_t esp_ota_get_state_partition(const esp_partition_t *p, esp_ota_img_states_t *s) {
+    assert(p == &part);
+    *s = state;
+    return ESP_OK;
+}
+esp_err_t esp_ota_mark_app_valid_cancel_rollback(void) { marked++; return ESP_OK; }
+static bool ota_installed_by_vibe_mode(void) { return vibe_mode; }
+static void ota_verify_forget(void) { forgotten++; }
+static void arm(esp_ota_img_states_t st, bool vibe) {
+    state = st; vibe_mode = vibe;
+    s_ota_pending_verify = false; marked = forgotten = 0;
+""" + block + """
+}
+int main(void) {
+    arm(ESP_OTA_IMG_PENDING_VERIFY, false);   /* any other install: checked */
+    assert(s_ota_pending_verify && !marked && !forgotten);
+    arm(ESP_OTA_IMG_PENDING_VERIFY, true);    /* Vibe Mode's install: valid now */
+    assert(!s_ota_pending_verify && marked == 1 && forgotten == 1);
+    arm(ESP_OTA_IMG_VALID, false);            /* an update that never booted */
+    assert(!s_ota_pending_verify && !marked && forgotten == 1);
+    arm(ESP_OTA_IMG_VALID, true);
+    assert(!s_ota_pending_verify && !marked);
+    return 0;
+}
+""")
+            self.compile_and_run([source], tmp)
 
     def test_registration_only_advertises_enabled_ota(self) -> None:
         noise = (ROOT / "main/noise_control.cpp").read_text()

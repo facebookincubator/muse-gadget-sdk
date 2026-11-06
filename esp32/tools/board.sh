@@ -20,6 +20,10 @@
 #
 #   devkit     ESP32-C5 DevKitC-1 (status LED, no display)
 #   ideaspark  ideaspark ESP32 with a 1.9 inch ST7789 display
+#   c3-oled-042
+#              ESP32-C3 with a 0.42 inch 72x40 OLED status screen
+#   esp32-2432s028
+#              ESP32-2432S028 Cheap Yellow Display with a 240x320 status screen
 #   sensecap-indicator
 #              Seeed SenseCAP Indicator (ESP32-S3) with a 4 inch display
 #   home-assistant-voice
@@ -30,6 +34,10 @@
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
 #   reterminal-e1002
 #              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
+#   reterminal-sticky
+#              Seeed reTerminal Sticky (ESP32-S3) with a 3.97 inch e-paper
+#   reterminal-sticky-link
+#              Seeed reTerminal Sticky with a Link-only status screen
 #   c6-nopsram ESP32-C6 devkit without PSRAM (status LED on GPIO8, no display)
 #   espressif-s3-devkitc-1
 #              ESP32-S3-DevKitC-1 v1.1 N8R8 (status LED, no display)
@@ -37,12 +45,14 @@
 #              Waveshare ESP32-C6-LCD-1.47 with a 172x320 status screen
 #   waveshare-s3-epaper-154
 #              Waveshare ESP32-S3-1.54inch-ePaper V2 with a 200x200 e-paper
+#   waveshare-s3-epaper-154g
+#              Waveshare ESP32-S3-ePaper-1.54G with a 200x200 four-colour e-paper
 #
 # The action defaults to build. Without PORT, flash and monitor use the only
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,50p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -70,10 +80,32 @@ case "$BOARD" in
     # CH340 bridge. The SenseCAP Indicator's RP2040 shows up as a usbmodem, not here.
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
     ;;
+  c3-oled-042)
+    TARGET=esp32c3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    # The C3's own USB-Serial-JTAG (no UART bridge on this board).
+    PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
+    ;;
+  esp32-2432s028)
+    TARGET=esp32
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    # CH340 bridge.
+    PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
+    ;;
   reterminal-e1001|reterminal-e1002)
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
+    ;;
+  reterminal-sticky)
+    TARGET=esp32s3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.muse;devices/sdkconfig.$BOARD"
+    PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB* /dev/cu.usbmodem* /dev/ttyACM*"
+    ;;
+  reterminal-sticky-link)
+    TARGET=esp32s3
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB* /dev/cu.usbmodem* /dev/ttyACM*"
     ;;
   home-assistant-voice|seeed-respeaker-lite)
     TARGET=esp32s3
@@ -95,7 +127,7 @@ case "$BOARD" in
     # USB-to-UART port works too; pass it explicitly.
     PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
-  waveshare-s3-epaper-154)
+  waveshare-s3-epaper-154|waveshare-s3-epaper-154g)
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # The S3's own USB-Serial-JTAG.
@@ -113,7 +145,7 @@ case "$ACTION" in
 esac
 
 if ! command -v idf.py >/dev/null 2>&1; then
-  for d in "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.1" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
+  for d in "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.3" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
     if [ -n "$d" ] && [ -f "$d/export.sh" ]; then
       # shellcheck disable=SC1091
       . "$d/export.sh" >/dev/null 2>&1

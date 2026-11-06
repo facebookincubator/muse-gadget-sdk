@@ -161,8 +161,16 @@ bool config_clear_pairing(void) {
         "auth_token",
         "vm_url",
         "username",
+        "pair_sdk_hint",
     };
     return clear_and_verify(keys, sizeof(keys) / sizeof(keys[0]));
+}
+
+bool config_unpair(void) {
+    // The marker goes last, and only once the pairing is verifiably gone:
+    // boot treats tokens and Wi-Fi without the marker as a legacy pair and
+    // marks it complete again, which would undo a half-finished unpair.
+    return config_clear_pairing() && config_clear_setup_complete();
 }
 
 bool config_clear_setup(void) {
@@ -175,6 +183,7 @@ bool config_clear_setup(void) {
         "auth_token",
         "vm_url",
         "username",
+        "pair_sdk_hint",
         "ssid",
         "password",
         "wifi_channel",

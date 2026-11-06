@@ -44,6 +44,7 @@
 static const char *TAG = "board";
 
 #define DRAW_BUF_LINES 118      /* four bands to the screen (muse_lcd_bands.h) */
+#define LCD_TE GPIO_NUM_13      /* the panel's tearing effect, on both boards */
 #define LCD_CHUNK_BYTES (BSP_LCD_H_RES * 8 * 2)
 #if CONFIG_MUSE_BOARD_WAVESHARE_S3_175
 #define PMU_KEY_EVERY 2         /* poll the PMU over I2C every 20 ms */
@@ -77,6 +78,11 @@ static esp_err_t init(void)
         ESP_LOGW(TAG, "PMU unavailable (%s): battery status disabled", esp_err_to_name(err));
         return ESP_OK;
     }
+#if !CONFIG_MUSE_BOARD_WAVESHARE_S3_175
+    /* PWR talks: the 10 s hold-off back on, whatever a reset in a held talk
+     * left (a 16 s shutdown cleared then stays off, the datasheet default). */
+    (void)muse_pmu_set_key_shutdown(true);   /* logs if it can't */
+#endif
     /* Only DCDC1 (VCC3V3) and ALDO1 (A3V3, for the codecs) feed anything; the
      * schematic leaves the rest unconnected. Waveshare's AXP2101 example and
      * xiaozhi's board turn them off too. */
@@ -119,6 +125,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (bsp_display_new(&panel_cfg, &panel, &s_io) != ESP_OK) {
         return NULL;
     }
+    muse_lcd_bands_set_gap(6, 0);   /* the BSP's panel gap, for video's direct writes */
     const esp_lv_adapter_display_config_t disp_cfg = {
         .panel = panel,
         .panel_io = s_io,
@@ -135,6 +142,9 @@ static lv_display_t *display_start(lv_indev_t **touch)
         return NULL;
     }
     lv_display_add_event_cb(disp, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
+    /* Tearing effect on (V-blank only), as the 1.75C's BSP already asks. */
+    esp_lcd_panel_io_tx_param(s_io, (0x02 << 24) | (0x35 << 8), (uint8_t[]){ 0x00 }, 1);
+    muse_lcd_bands_set_te(LCD_TE);
 
     const bsp_display_cfg_t touch_cfg = {
         .touch_flags = { .mirror_x = 1, .mirror_y = 1 },
@@ -229,7 +239,15 @@ static unsigned poll_buttons(void)
 #else
 static unsigned poll_buttons(void)
 {
-    return muse_gpio_button_poll(&s_pwr) | muse_gpio_button_poll(&s_boot) << 2;   /* BOOT is aux */
+    unsigned pwr = muse_gpio_button_poll(&s_pwr);
+    /* A talk can outlast the PMU's hold-off: held, PWR mustn't power off. */
+    if (pwr & MUSE_BTN_TALK_PRESS) {
+        (void)muse_pmu_set_key_shutdown(false);   /* logs if it can't */
+    }
+    if (pwr & MUSE_BTN_TALK_RELEASE) {
+        (void)muse_pmu_set_key_shutdown(true);    /* logs if it can't */
+    }
+    return pwr | muse_gpio_button_poll(&s_boot) << 2;   /* BOOT is aux */
 }
 
 static void wait_buttons(int timeout_ms)
@@ -270,6 +288,7 @@ static const muse_board_t s_board = {
     .set_brightness = set_brightness,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
+    .draw_frame = muse_lcd_bands_frame,
     .audio_init = audio_init,
     .mic_slot = -1,
     .set_mic_gain = set_mic_gain,

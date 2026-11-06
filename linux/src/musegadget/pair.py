@@ -60,7 +60,8 @@ class _SystemNetwork:
     current_connection_entry = staticmethod(network.current_connection_entry)
 
 
-def _verify_and_save(credentials: Credentials, commit: Callable[[Callable[[], bool]], bool]) -> None:
+def _verify_and_save(credentials: Credentials, commit: Callable[[Callable[[], bool]], bool],
+                     sdk_token: str | None = None) -> None:
     api_url = credentials.api_url if credentials.api_url.startswith("https://") else ""
     api_url_v2 = credentials.api_url_v2 if credentials.api_url_v2.startswith("https://") else ""
     vms, status = muse_api.fetch_vms_with_status(
@@ -79,6 +80,8 @@ def _verify_and_save(credentials: Credentials, commit: Callable[[Callable[[], bo
         "api_url_v2": api_url_v2,
         "noise_host": credentials.noise_host,
         "access_token_saved_at": int(time.time()),
+        # Muse records the SDK token only at pairing; see Service.
+        "sdk_token_hint": config.sdk_token_hint(sdk_token),
     }
 
     def save() -> bool:
@@ -134,7 +137,7 @@ def pair(*, on_open: Callable[[SetupWindow], None], force: bool = False,
         version=__version__,
         transport=server,
         network=_SystemNetwork(),
-        provision=_verify_and_save,
+        provision=lambda credentials, commit: _verify_and_save(credentials, commit, sdk_token),
         on_complete=finish,
     )
     window = threading.Timer(timeout_s, server.stop)
