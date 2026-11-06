@@ -14,6 +14,7 @@
 
 import asyncio
 import base64
+from types import SimpleNamespace
 
 import pytest
 
@@ -208,6 +209,7 @@ def test_replacement_of_a_held_reply_keeps_the_new_responses_transcript(replacem
         ])))
         await wait_until(lambda: len(output.pcm) == len(replacement_pcm))
         assert output.pcm == replacement_pcm
+        await asyncio.sleep(len(replacement_pcm) / (voice.SAMPLE_RATE * 2))
 
     assert run_call(script) == [
         ResponseStarted("r1"),
@@ -254,6 +256,63 @@ def test_caller_speech_flushes_delivered_audio_and_drops_the_rest_of_the_reply()
         TranscriptDelta("r2", "Yes"),
         AudioChunk("r2", 0, HALF),
     ]
+
+
+@pytest.mark.parametrize("preceding_audio", [b"", TONE], ids=["quiet_only", "after_tone"])
+def test_playback_flush_names_the_quiet_frame_in_flight(monkeypatch, preceding_audio):
+    clock = [1000.0]
+    monkeypatch.setattr(voice, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def scenario():
+        events = []
+        output = Output()
+        call = VoiceCall(None, device_id="homelink-synthetic", on_event=events.append)
+        call._output = output
+        if preceding_audio:
+            call._queue_pcm(preceding_audio, "r1")
+        task = asyncio.create_task(call._play())
+        try:
+            if preceding_audio:
+                await output.written.wait()
+                clock[0] += 0.05  # The tone ended, but its microphone settling tail remains.
+                output.written.clear()
+            call._queue_pcm(QUIET, "r2")
+            await output.written.wait()
+            assert output.pcm == preceding_audio + QUIET
+            assert call._gated() == bool(preceding_audio)
+            await call.barge_in()
+            assert [event for event in events if isinstance(event, PlaybackFlushed)] == [
+                PlaybackFlushed(("r2",)),
+            ]
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(asyncio.wait_for(scenario(), 2))
+
+
+def test_microphone_settling_tail_is_not_reported_as_flushed_audio(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(voice, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def scenario():
+        events = []
+        output = Output()
+        call = VoiceCall(None, device_id="homelink-synthetic", on_event=events.append)
+        call._output = output
+        call._queue_pcm(TONE, "r1")
+        task = asyncio.create_task(call._play())
+        try:
+            await output.written.wait()
+            clock[0] += 0.1
+            assert call._gated()
+            await call.barge_in()
+            assert [event for event in events if isinstance(event, PlaybackFlushed)] == []
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(asyncio.wait_for(scenario(), 2))
 
 
 def test_barge_in_silences_the_words_of_the_reply_it_cuts_before_its_audio():

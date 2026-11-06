@@ -211,7 +211,8 @@ class VoiceCall:
         self._waiting: list[tuple[bytes, str | None] | TranscriptDelta | TranscriptDone] = []
         self._waiting_bytes = 0
         self._playback = deque()
-        self._playing_response: str | None = None
+        self._in_flight_response: str | None = None
+        self._in_flight_until = 0.0
         self._playback_bytes = 0
         self._audible_frames = 0
         self._received_audio = False
@@ -590,7 +591,7 @@ class VoiceCall:
                 log.warning("could not cancel interrupted response")
 
     def _flush(self) -> None:
-        cut = [self._playing_response] if time.monotonic() < self._playing_until else []
+        cut = [self._in_flight_response] if time.monotonic() < self._in_flight_until else []
         cut += [response_id for _, _, response_id in self._playback]
         self._clear_waiting()
         self._playback.clear()
@@ -598,6 +599,7 @@ class VoiceCall:
         self._audible_frames = 0
         self._received_audio = False
         self._playing_until = 0
+        self._in_flight_until = 0
         self._output.flush()
         if self._on_event is not None and cut:
             self._emit(PlaybackFlushed(tuple(dict.fromkeys(cut))))
@@ -669,9 +671,10 @@ class VoiceCall:
             self._audible_frames -= int(audible)
             self._output.write(pcm)
             duration = len(pcm) / (SAMPLE_RATE * 2)
+            self._in_flight_response = response_id
+            self._in_flight_until = time.monotonic() + duration
             if audible:
                 self._playing_until = time.monotonic() + duration + SETTLE_SECONDS
-                self._playing_response = response_id
                 self._activity = time.monotonic()
             await asyncio.sleep(duration)
 
