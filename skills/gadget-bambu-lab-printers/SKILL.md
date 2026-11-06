@@ -28,7 +28,9 @@ improvising around it.
 
 1. **LAN access code.** The owner reads the access code from the printer's network
    settings screen and stores it with the host's other device credentials. Credentials
-   are never pasted into chat.
+   are never pasted into chat, logged or passed in a command-line URL. Validate the
+   printer's TLS identity with a configured or pinned trust path before sending the
+   code; do not disable certificate validation.
 2. **Developer Mode is the owner's decision, made knowingly.** Starting prints from
    third-party tools requires LAN Only mode plus Developer Mode, enabled by the owner on
    the printer's touchscreen. Before they decide, state the trade plainly: while it is on,
