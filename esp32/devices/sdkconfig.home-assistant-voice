@@ -28,6 +28,7 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # The LED ring shows the status colours; push-to-talk voice chat is on.
 CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING=y
 CONFIG_HOMEHUB_VOICE=y
+CONFIG_HOMEHUB_VOICE_BOARD_VOICE_PE=y
 # Advertise as <prefix>-ha-voice-XXXXXX to tell this board apart from real
 # devices: MuseGadget-ha-voice in the open-source build, HomeLink-ha-voice in the
 # internal one.
