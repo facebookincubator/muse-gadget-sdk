@@ -458,10 +458,11 @@ class _ReplyReader:
     Events repeating an earlier ``seq`` are dropped. Message rows
     (``message.user``, ``message.assistant``) are numbered apart from the
     live status and delta events, so each kind keeps its own order. Until
-    Muse acknowledges the message, events wait here (bounded). Then a ``message.user`` event
-    for the acknowledged message opens the answer, and one for any other
-    message on the chat closes it again; events of a reply already taken, and
-    events naming the message or a taken reply as their parent, always count.
+    Muse acknowledges the message, events wait here (bounded). Then a
+    ``message.user`` event for the acknowledged message opens the answer,
+    and one for any other message on the chat closes it again; events of a
+    reply already taken, and events naming the message or a taken reply as
+    their parent, always count.
     """
 
     def __init__(self, turn: MuseTurn) -> None:
