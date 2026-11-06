@@ -1121,14 +1121,16 @@ void muse_pixel_render(const muse_pose_t *p)
     case MUSE_MODE_SPEAKING:
         mouth = MOUTH_TALK;
         /* Real audio drives articulation; caption-only replies have a visual
-         * speaking rhythm so their mouth no longer stays fixed shut. */
-        mouth_open = speech.mouth;
+         * speaking rhythm so their mouth no longer stays fixed shut. This
+         * avatar keeps the mouth small: muse_speaking.h's 0..1 range is
+         * shared with custom avatars, so the scaling stays here. */
+        mouth_open = clampf(speech.mouth * (speech.heard_voice ? 2.0f / 3.0f : .5f), 0, .45f);
         if (speech.heard_voice && speech.quiet > .52f) {
             /* A small closed-eye smile softens a genuine pause in speech. */
             style = EYES_HAPPY;
             mouth = MOUTH_GRIN;
             mouth_open = 0;
-        } else if (mouth_open > .16f && mouth_open < .55f &&
+        } else if (mouth_open > .16f &&
             (!speech.heard_voice || level < speech.energy * .8f)) mouth = MOUTH_O;
         if (speech.eye_wide > .4f) style = EYES_WIDE;
         break;
