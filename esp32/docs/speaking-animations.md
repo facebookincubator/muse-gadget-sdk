@@ -39,7 +39,8 @@ playback gets both hand gestures and a visual speaking rhythm when replies are
 paced with silent PCM. The mouth varies between closed, rounded and open shapes,
 with short phrase breaths. This adds no audio. Once actual voice energy is
 detected, audio drives the mouth for the
-rest of that reply, including closing during real pauses. Visible mouth shapes
+rest of that reply, including closing during real pauses; the default avatar
+smiles with closed eyes once a pause passes about half a second. Visible mouth shapes
 approximate articulation; they are not phoneme lip sync.
 
 Brows, gaze and small face nods follow the active gesture. Raises briefly lift
