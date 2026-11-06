@@ -3,7 +3,8 @@
 This profile runs Muse's avatar, push-to-talk, a two-key menu, images, BLE
 setup, Wi-Fi and the home-network tunnel on the **ATK-DNESP32S3-BOX V1.1**
 (the silkscreen on the back of the board says V1.1). It is not a profile for
-ALIENTEK's BOX0, BOX2 or BOX3, which use other pins.
+ALIENTEK's BOX0, BOX2 or BOX3, which use other pins; the BOX2 has its own
+([setup](atk-dnesp32s3-box2.md)).
 
 The box has an ATK-MWS3S N16R8 module (16 MB flash, 8 MB octal PSRAM), a
 320×240 ST7789 LCD on an 8-bit i80 bus, one ES8311 codec for the speaker and
