@@ -293,6 +293,21 @@ def test_a_held_reply_dropped_for_another_callers_turn_says_nothing():
     ]
 
 
+def test_words_of_a_reply_dropped_for_another_callers_turn_stay_dropped_after_the_callers_turn():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech("item-2"), created("r2"), audio("p2", TONE), turn("item-1", "sub-1"),
+            turn("item-2", "sub-2"), transcript("lost words"), audio("p2", TONE),
+            created("r3"), audio("p3", HALF), said("kept"),
+        ])))
+        await wait_until(lambda: output.pcm == HALF and TranscriptDelta("r3", "kept") in events)
+
+    events = run_call(script)
+    spoken = (TranscriptDelta, TranscriptDone, AudioChunk)
+    assert [event for event in events if isinstance(event, spoken)] == [
+        AudioChunk("r3", 0, HALF), TranscriptDelta("r3", "kept")]
+
+
 def test_caller_speech_flushes_delivered_audio_and_drops_the_rest_of_the_reply():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE * 5)) + line(speech("item-2")))

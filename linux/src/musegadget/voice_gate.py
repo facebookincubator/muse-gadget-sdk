@@ -102,6 +102,8 @@ class ReplyGate:
             if not self.item or not item or not identifier(event.get("submission_message_id")):
                 return
             if item != self.item:
+                # Words of the reply this drops stay dropped until a new response opens.
+                self.words_fenced |= self._has(WAITING, CONTINUING)
                 self.flush_waiting |= self.waiting
                 self.flush_playing |= self._has(CONTINUING)
                 self._replace((WAITING, CONTINUING), STALE)
