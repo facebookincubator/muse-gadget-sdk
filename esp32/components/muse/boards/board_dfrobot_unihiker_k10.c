@@ -70,7 +70,6 @@ static void set_brightness(int pct)
     if (err != ESP_OK) ESP_LOGW(TAG, "backlight: %s", esp_err_to_name(err));
 }
 
-
 static void rgb_task(void *arg)
 {
     (void)arg;
