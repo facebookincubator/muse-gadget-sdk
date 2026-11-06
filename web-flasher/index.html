@@ -305,7 +305,9 @@ limitations under the License.
     // The selected board, and how much flash its build needs (its manifest).
     let board;
     let minFlashBytes = 0;
+    let manifestRequest = 0;
     const update = async () => {
+      const request = ++manifestRequest;
       board = boards.find((b) => b.board === select.value);
       const manifestPath = `firmware/${board.board}/manifest.json`;
       button.setAttribute("manifest", manifestPath);
@@ -315,7 +317,8 @@ limitations under the License.
       $("all-ports-row").hidden = !board.usb;
       minFlashBytes = 0;
       const manifest = await fetch(manifestPath).then((r) => r.json()).catch(() => null);
-      if (board.board === select.value) minFlashBytes = manifest?.min_flash_bytes ?? 0;
+      // The selection may have changed while this request was pending.
+      if (request === manifestRequest) minFlashBytes = manifest?.min_flash_bytes ?? 0;
     };
     // A board's note is "note.<board>" in i18n.js, if it has one.
     const showBoardNote = () => {
