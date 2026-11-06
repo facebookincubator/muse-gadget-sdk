@@ -243,6 +243,17 @@ int main(void) {{
                 self.assertIsNone(CONTROL.search(name), name)
                 self.assertNotIn("Hatch", name)
 
+    def test_every_board_overlay_sets_its_model(self) -> None:
+        # A board overlay sets the target; stacked profiles (bench, video,
+        # power-test, camera) inherit their board's model.
+        for overlay in OVERLAYS:
+            text = overlay.read_text()
+            if not re.search(r'^CONFIG_IDF_TARGET=', text, re.M):
+                continue
+            with self.subTest(overlay=overlay.name):
+                self.assertRegex(text, r'(?m)^CONFIG_MUSE_DEVICE_MODEL_ID="[^"]+"$')
+                self.assertRegex(text, r'(?m)^CONFIG_MUSE_DEVICE_MODEL_NAME="[^"]+"$')
+
     def test_the_build_refuses_a_model_muse_would_not_take(self) -> None:
         if shutil.which("cmake") is None:
             self.skipTest("cmake unavailable")
@@ -370,7 +381,7 @@ int main(void) {
                         self.assertEqual((tmp / f"out-{file}").read_text(), "# My board\n\nPress *Go*; $5; ${X} @Y@.\n")
             ran = assemble_guide(tmp / "missing.md", str(tmp / "none.md"))
             self.assertNotEqual(ran.returncode, 0)
-            self.assertIn("not found", ran.stderr)
+            self.assertIn("not found", " ".join(ran.stderr.split()))
 
 
 if __name__ == "__main__":
