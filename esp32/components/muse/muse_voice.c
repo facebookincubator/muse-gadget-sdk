@@ -1219,7 +1219,9 @@ static void voice_task(void *arg)
                 muse_audio_loopback_test(muse_settings_volume());
                 pre_reset();
             }
-            if (muse_hatch_incoming()) {
+            /* A press goes first (a waking one too: it may only wake Muse). */
+            muse_input_event_t next;
+            if (xQueuePeek(s_queue, &next, 0) != pdTRUE && muse_hatch_incoming()) {
                 /* Muse took long and has the answer now: light the screen, say it. */
                 bool delivered;
                 muse_state_set_asleep(false);

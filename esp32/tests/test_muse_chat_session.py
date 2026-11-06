@@ -564,6 +564,32 @@ static void played_messages_are_not_replayed() {
     event("message.assistant", "second", "note", "Done now");
     assert(!s_incoming && !s_pending.replies);
 }
+static void status_event(const char *parent, const char *code) {
+    cJSON *root = cJSON_CreateObject(), *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "event");
+    cJSON_AddStringToObject(root, "event", "task.status");
+    cJSON_AddItemToObject(root, "payload", payload);
+    cJSON_AddStringToObject(payload, "status", code);
+    cJSON_AddStringToObject(payload, "reply_to_message_id", parent);
+    on_event(root);
+    cJSON_Delete(root);
+}
+static void others_status_and_late_play() {
+    detach();   /* another request finishing doesn't end the wait for this one */
+    status_event("someone-else", "completed");
+    assert(s_pending.busy);
+    pending_expire(clock_us + PENDING_IDLE_US + 1);
+    assert(s_pending.active);
+    status_event("note", "completed");   /* its own does */
+    assert(!s_pending.busy);
+    detach();   /* a row held past the cap (a long rest, no connection) doesn't play */
+    event("message.assistant", "late", "note", "Too old");
+    clock_us += PENDING_US + 1;
+    fail_events = 0;
+    incoming_play(s_turn.gen + 1);
+    assert(!s_turn.nmsgs && s_turn.phase == P_IDLE && fail_events == 1 && !fail_text[0]);
+    assert(!s_pending.active && !s_pending.replies && !s_incoming);
+}
 static void held_rows_outlive_a_newer_request() {
     detach();   /* request A: its reply is held, then a press comes first */
     event("message.assistant", "a1", "note", "A's answer");
@@ -610,6 +636,7 @@ int main(int argc, char **argv) {
     case 25: pending_is_forgotten(); break;
     case 26: played_messages_are_not_replayed(); break;
     case 27: held_rows_outlive_a_newer_request(); break;
+    case 28: others_status_and_late_play(); break;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -739,3 +766,6 @@ int main(int argc, char **argv) {
 
     def test_held_rows_still_play_after_a_newer_request_is_remembered(self):
         self.run_case(27)
+
+    def test_other_requests_status_and_overdue_rows_do_not_count(self):
+        self.run_case(28)

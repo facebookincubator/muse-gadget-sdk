@@ -1579,6 +1579,12 @@ static void pending_event(const char *event, cJSON *payload)
     if (!s_pending.active) {
         return;
     }
+    const char *parent = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "reply_to_message_id"));
+    bool ours = parent && parent[0] && (!strcmp(parent, s_pending.ids[0]) || !strcmp(parent, s_pending.ids[1]));
+    bool status = !strcmp(event, "agent.status") || !strcmp(event, "task.status");
+    if (status && parent && parent[0] && !ours) {
+        return;   /* another request's status */
+    }
     if (agent_status(event, payload, &s_pending.busy)) {
         s_pending.status_us = now_us();
         return;
@@ -1586,11 +1592,9 @@ static void pending_event(const char *event, cJSON *payload)
     if (strcmp(event, "message.assistant")) {
         return;   /* only the finished row names the request */
     }
-    const char *parent = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "reply_to_message_id"));
     const char *id = msg_id(payload, nullptr);
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
-    if (!parent || !parent[0] || (strcmp(parent, s_pending.ids[0]) && strcmp(parent, s_pending.ids[1])) || !id ||
-        pending_played(id) || pending_held(id) || cJSON_GetArraySize(s_pending.replies) >= MAX_MSGS ||
+    if (!ours || !id || pending_played(id) || pending_held(id) || cJSON_GetArraySize(s_pending.replies) >= MAX_MSGS ||
         cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready")) || !text || !text[0]) {
         return;
     }
@@ -1676,6 +1680,7 @@ static void on_message(const char *event, cJSON *payload, cJSON *line);
 /* The voice task is idle and ready for the held rows: a turn of their own, that nobody pressed for. */
 static void incoming_play(uint32_t gen)
 {
+    pending_expire(now_us());   /* held through a disconnect or a long rest: maybe too late now */
     cJSON *replies = s_pending.replies;
     s_pending.replies = nullptr;
     s_incoming = false;   /* all of them play here */
@@ -1700,7 +1705,7 @@ static void incoming_play(uint32_t gen)
     memcpy(s_turn.user_ids, s_pending.ids, sizeof(s_turn.user_ids));
     cJSON_Delete(replies);
     if (!s_turn.nmsgs) {
-        turn_done(true);   /* forgotten meanwhile: the voice task still needs the end */
+        turn_fail("");   /* forgotten meanwhile: end the voice task's wait quietly */
     }
 }
 
@@ -2346,6 +2351,7 @@ static void hatch_task(void *arg)
             continue;
         }
 #endif
+        pending_expire(now_us());   /* connected or not */
         if (!s_connected) {
             if (!muse_wifi_connected()) {
                 s_auto_next_us = 0;
@@ -2393,7 +2399,6 @@ static void hatch_task(void *arg)
         }
 
         int64_t t = now_us();
-        pending_expire(t);
         if (t - s_conn.last_rx_us > DEAD_US) {
             drop_connection("server went quiet");
         } else if (s_turn.phase == P_IDLE && !call_busy() && !s_pending.active && t - s_conn.last_use_us > IDLE_CLOSE_US) {
