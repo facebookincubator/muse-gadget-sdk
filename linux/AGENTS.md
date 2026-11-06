@@ -37,6 +37,7 @@ pairing and control protocols, so the same app pairs either.
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store minus distrusted root CAs |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
