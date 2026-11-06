@@ -114,8 +114,15 @@ CONFIG_BT_NIMBLE_EXT_ADV=n
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 
 # TLS: root CA bundle for HTTPS / WSS / OTA.
+# Use the common, not full bundle to trust only the most common roots.
+# Cross-signed verification lets a server's chain reach one of them through a
+# cross-sign (Google Trust Services via GlobalSign, Sectigo via USERTrust),
+# which the common bundle alone would reject, and leaves out ESP-IDF's two
+# legacy local roots. It needs ESP-IDF v6.0.3 or later (see
+# cmake/validate_config.cmake); recheck both choices when moving ESP-IDF.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
-CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
 
 # TLS record sizes. Outbound was 4 KB but each TLS record carries
 # encrypt/MAC/header overhead — 16 KB records cut that overhead 4x.

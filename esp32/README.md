@@ -82,23 +82,28 @@ commands outside the sandbox.
 
 ## Or do it yourself
 
-### 1. Install ESP-IDF v6.0.1
+### 1. Install ESP-IDF v6.0.3
 
-This firmware is built with Espressif's ESP-IDF, **version 6.0.1**. Other
+This firmware is built with Espressif's ESP-IDF, **version 6.0.3**. Other
 versions aren't supported. If you already have it installed, skip ahead.
 
 On macOS, install the prerequisites first with `brew install cmake ninja
 dfu-util python3`. On Linux, follow
-[Espressif's prerequisites](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32c5/get-started/linux-macos-setup.html).
+[Espressif's prerequisites](https://docs.espressif.com/projects/esp-idf/en/v6.0.3/esp32c5/get-started/linux-macos-setup.html).
 Then:
 
 ```sh
-git clone -b v6.0.1 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v6
+git clone -b v6.0.3 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v6
 ~/esp/esp-idf-v6/install.sh esp32c5,esp32s3,esp32c6,esp32
 . ~/esp/esp-idf-v6/export.sh
 ```
 
 Run the last line in every new terminal you build from.
+
+To move an existing clone from an earlier v6.0 release, run
+`git fetch --tags && git checkout v6.0.3 && git submodule update --init --recursive`
+in it, then its `install.sh` again. Delete each build directory's generated
+`sdkconfig` afterwards (see Configuration gotchas in `AGENTS.md`).
 
 ### 2. Build
 
@@ -175,6 +180,13 @@ a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
 
+## USB settings in a browser
+
+The [web flasher](../web-flasher/README.md#device-settings)'s Device settings
+card reads a connected board's settings over USB and changes its screen
+brightness, screen sleep, speaker volume, speaker on/off and microphone gain.
+It works on boards with the full UI, using their existing console commands.
+
 ## Boards
 
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
@@ -225,7 +237,9 @@ status screen.
 | Waveshare ESP32-S3-Touch-LCD-3.49 V2 | UI, touch, push-to-talk, settings, images | `tools/muse/board.sh build lcd349` |
 | Waveshare ESP32-S3-Touch-LCD-1.46 | UI, touch, hold-the-face or BOOT push-to-talk, settings, images | `tools/muse/board.sh build 146` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build 143` |
-| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
+| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings, images; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
+| SpotPear ESP32-AI-1.28 v1.0 (experimental) | Round UI, BOOT push-to-talk, MAX98357A speaker and NP0557 mic | `tools/muse/board.sh build spotpear` |
+| VIEWE SmartRing-Plus | UI, round touch, on-screen mic, settings, images | `tools/muse/board.sh build smartring-plus` |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Elecrow CrowPanel Advance 4.3 V1.3 | UI, touch, BOOT push-to-talk, settings, speaker and mic, images | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
@@ -405,6 +419,9 @@ their upstream licenses:
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- [`components/muse/boards/viewe_smartring_display_init.h`](components/muse/boards/viewe_smartring_display_init.h),
+  the SmartRing-Plus panel initialization table from VIEWE's BSP, is
+  Apache-2.0 under VIEWE's copyright, as its header says.
 - [`components/muse/fonts/`](components/muse/fonts/), the caption and
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat

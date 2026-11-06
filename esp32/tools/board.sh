@@ -145,7 +145,7 @@ case "$ACTION" in
 esac
 
 if ! command -v idf.py >/dev/null 2>&1; then
-  for d in "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.1" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
+  for d in "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.3" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
     if [ -n "$d" ] && [ -f "$d/export.sh" ]; then
       # shellcheck disable=SC1091
       . "$d/export.sh" >/dev/null 2>&1

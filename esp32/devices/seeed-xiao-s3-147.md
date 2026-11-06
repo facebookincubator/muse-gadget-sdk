@@ -63,7 +63,7 @@ touch interrupt.
 
 ## Build and flash
 
-Use ESP-IDF v6.0.1. From `esp32/`:
+Use ESP-IDF v6.0.3. From `esp32/`:
 
 ```sh
 tools/muse/board.sh build xiao147

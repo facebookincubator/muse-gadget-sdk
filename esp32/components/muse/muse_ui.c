@@ -196,6 +196,7 @@ static const char *s_shown_name;
 static const char *s_idle_name = "READY";   /* idle's label: set by the Wi-Fi state */
 static int s_shown_lit = -1;
 static uint32_t s_shown_accent;
+static uint32_t s_shown_status_accent;   /* the label and ring: WORKING recolours within THINKING */
 static bool s_meter_visible = true;
 static int s_ring_value = -1;
 static uint32_t s_caption_version;
@@ -586,6 +587,17 @@ static int caption_band_h(void)
 {
     return 2 * lv_font_get_line_height(&lv_font_unscii_8) + 2 + 2 * 2;
 }
+
+/* Where the small screen's band sits: full width along the bottom, above the
+ * navigation dots on touch screens. The SpotPear's band sits higher, under
+ * its avatar, and narrower, so every corner stays inside its 240 px circle. */
+#if CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+#define SMALL_BAND_W 160
+#define SMALL_BAND_Y (-34)
+#else
+#define SMALL_BAND_W s_w
+#define SMALL_BAND_Y ((s_tall || s_tv) ? -30 : -3)
+#endif
 
 #if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
 /* A caption's font off a small screen's band: caption_font(), or with
@@ -1181,6 +1193,10 @@ static void build_screen(void)
     int meter_y = cap_top - 6 - METER_SEG_PX / 2;
     int art_bottom = meter_y - METER_SEG_PX / 2 - 4;
     s_big_y = s_small ? 0 : art_bottom - (s_canvas_px / 2 - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W));
+#if CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+    /* The 128 px avatar ends at y=159; Japanese captions start at y=164. */
+    s_big_y = -25;
+#endif
 
     /* The character. */
     muse_image_init();
@@ -1240,21 +1256,21 @@ static void build_screen(void)
     if (s_small) {
         /* Two lines over the bottom of the face, on a dark band so they stay
          * legible. A tall screen has room to keep them above the mic icon. */
-        lv_obj_set_size(s_caption_lbl, s_w, caption_band_h());
+        lv_obj_set_size(s_caption_lbl, SMALL_BAND_W, caption_band_h());
         lv_obj_set_style_pad_ver(s_caption_lbl, 2, 0);
         lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
         lv_obj_set_style_bg_color(s_caption_lbl, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
         /* Touch screens need the caption above the navigation dots too. */
-        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, SMALL_BAND_Y);
 #if CONFIG_MUSE_CJK_FONT
         /* CJK doesn't fit unscii-8's cell, so a reply with CJK in it fills the
          * band in the 16 px caption font instead: one line at a time, or two
          * on a landscape screen with the height for them, such as the
          * BOX-3's 320x240 (set_caption_font). */
         s_cjk_lines = !s_tall && s_h >= 200 ? 2 : 1;
-        muse_state_set_cjk_page((s_w - 2 * CJK_BAND_PAD) / lv_font_get_glyph_width(caption_font(), 'M', ' '),
+        muse_state_set_cjk_page((SMALL_BAND_W - 2 * CJK_BAND_PAD) / lv_font_get_glyph_width(caption_font(), 'M', ' '),
                                 s_cjk_lines);
 #endif
 #if CONFIG_MUSE_LATIN_FONT
@@ -1264,7 +1280,7 @@ static void build_screen(void)
          * Unifont being the narrower. So those pages fill half their width; a
          * page of their own there needs MUSE_CAPTION_MAX to allow for 3-byte
          * letters. */
-        muse_state_set_latin_page((s_w - 2 * LATIN_BAND_MARGIN) / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '), 1);
+        muse_state_set_latin_page((SMALL_BAND_W - 2 * LATIN_BAND_MARGIN) / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '), 1);
 #endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
         if (!s_long) {   /* the long layout has its own page of the reply */
@@ -1800,6 +1816,12 @@ static void update_power(float now)
     }
 }
 
+/* An avatar without a working pose keeps THINKING's accent. */
+__attribute__((weak)) uint32_t muse_pixel_working_accent(void)
+{
+    return 0;
+}
+
 #if CONFIG_MUSE_SMALL_FULL_REPLY
 /* While Muse thinks or answers, the caption takes the screen and Muse steps
  * aside; otherwise it's the usual two-line band over the bottom of the face. */
@@ -1818,10 +1840,10 @@ static void set_full_reply(bool on)
         lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, FULL_REPLY_TOP);
         set_full_font();
     } else {
-        lv_obj_set_size(s_caption_lbl, s_w, caption_band_h());
+        lv_obj_set_size(s_caption_lbl, SMALL_BAND_W, caption_band_h());
         lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, SMALL_BAND_Y);
 #if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
         set_caption_font(lv_label_get_text(s_caption_lbl));   /* the band's font, padding, height and long mode */
 #else
@@ -1836,6 +1858,11 @@ static void update_status(muse_mode_t mode, float now)
 {
     uint32_t accent = muse_pixel_accent(mode);
     const char *name = mode == MUSE_MODE_IDLE ? s_idle_name : MODE_NAMES[mode];
+    if (mode == MUSE_MODE_THINKING && muse_voice_call_view() == MUSE_VOICE_VIEW_WORKING) {
+        name = "WORKING";
+        uint32_t working = muse_pixel_working_accent();
+        if (working) accent = working;   /* the ring and label match the working avatar */
+    }
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     const char *call_name = muse_voice_call_label();
     const char *hint = muse_voice_call_hint();
@@ -1858,7 +1885,7 @@ static void update_status(muse_mode_t mode, float now)
         lv_label_set_text(s_state_lbl, shown);
         s_shown_name = name;
     }
-    if ((int)mode != s_shown_state) {
+    if ((int)mode != s_shown_state || accent != s_shown_status_accent) {
         lv_obj_set_style_text_color(s_state_lbl, lv_color_hex(accent), 0);
         if (s_ring) {
             lv_obj_set_style_arc_color(s_ring, lv_color_hex(accent), LV_PART_INDICATOR);
@@ -1867,6 +1894,7 @@ static void update_status(muse_mode_t mode, float now)
         }
         set_mic_color(mode == MUSE_MODE_LISTENING ? accent : COLOR_DIM);   /* legacy face icon */
         s_shown_state = (int)mode;
+        s_shown_status_accent = accent;
         s_shown_lit = -1;
     }
 
@@ -2124,6 +2152,7 @@ static void frame_tick(lv_timer_t *timer)
         .mode_t = mode_t,
         .level = s_level,
         .happy = muse_state_happiness(),
+        .working = muse_voice_call_view() == MUSE_VOICE_VIEW_WORKING ? 1.0f : 0,
     };
     if (!muse_board->epaper || mode != s_last_epaper_pose) {
         muse_pixel_render(&pose);

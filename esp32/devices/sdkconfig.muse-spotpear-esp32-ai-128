@@ -1,0 +1,26 @@
+# SpotPear ESP32-AI-1.28 v1.0: old non-legged MAX98357A + NP0557 revision.
+# Reference: tomorrow56/xiaozhi-esp32 fed7f14, spotpear board config.h.
+# ESP32-S3, 16 MB flash, 8 MB octal PSRAM; native USB Serial/JTAG 303a:1001.
+# Load after sdkconfig.defaults and sdkconfig.muse.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128=y
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=n
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_ESP_PHY_INIT_DATA_IN_PARTITION=n
+# Store the SDK token only in the ignored build directory's sdkconfig.
+
+# Use standard hold-to-record voice notes with text replies.
+CONFIG_MUSE_REALTIME_VOICE=n
+
+# Japanese captions: Unifont covers kana and the full BMP CJK ideograph range.
+CONFIG_MUSE_CJK_FONT=y
+CONFIG_MUSE_CJK_FONT_NOTO=n
