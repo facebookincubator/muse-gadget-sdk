@@ -1241,3 +1241,27 @@ def test_acknowledgement_raises_for_a_refused_request():
 def test_acknowledgement_requires_a_response_object(response):
     with pytest.raises(ValueError, match="^Muse did not acknowledge the request$"):
         acknowledgement({"ok": True, "status": 200, "response": response})
+
+
+def test_the_websocket_upgrade_uses_the_filtered_tls_context(monkeypatch):
+    import websockets.asyncio.client
+
+    from musegadget import tls
+
+    context, seen = object(), {}
+
+    async def connect(url, **options):
+        seen.update(options, url=url)
+        return "ws"
+
+    monkeypatch.setattr(tls, "client_context", lambda: context)
+    monkeypatch.setattr(websockets.asyncio.client, "connect", connect)
+
+    async def scenario():
+        session = LinkSession(noise_host="gw.example", vm_id="vm", vm_auth_token="tok",
+                              device=DEVICE, run_command=lambda *args: {"ok": True, "payload": {}})
+        return await session._open()
+
+    assert asyncio.run(scenario()) == "ws"
+    assert seen["ssl"] is context
+    assert seen["url"].startswith("wss://gw.example/")

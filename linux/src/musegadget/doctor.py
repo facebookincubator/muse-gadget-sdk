@@ -23,7 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from musegadget import config, network
+from musegadget import config, network, tls
 from musegadget.muse_api import API_BASE
 
 
@@ -154,6 +154,19 @@ def check_network() -> CheckResult:
             "hint": "Check DNS, internet access, and outbound HTTPS firewall rules."}
 
 
+def check_trust_store() -> CheckResult:
+    """Report distrusted root CAs left in the OS trust store; musegadget skips them anyway."""
+    present: list[str] = tls.distrusted_system_roots()
+    if not present:
+        return {"name": "Root CAs", "status": "OK",
+                "detail": "The system trust store has none of the root CAs that musegadget refuses.",
+                "hint": "musegadget refuses them itself if a later update brings one back."}
+    return {"name": "Root CAs", "status": "WARN",
+            "detail": f"The system trust store still trusts {', '.join(present)}.",
+            "hint": "musegadget refuses them, but other software here doesn't. "
+                    "Update the ca-certificates package."}
+
+
 def run_checks() -> tuple[CheckResult, ...]:
     """Collect independent checks, leaving device files and services unchanged."""
     if platform.system() != "Linux":
@@ -161,7 +174,7 @@ def run_checks() -> tuple[CheckResult, ...]:
                  "hint": "Run sudo musegadget doctor on the Linux gadget itself."},)
     directory: Path = config.state_dir()
     return (check_pairing(directory), check_sdk_token(directory), check_service(),
-            check_bluetooth(), check_network())
+            check_bluetooth(), check_network(), check_trust_store())
 
 
 def format_check(result: CheckResult) -> str:
