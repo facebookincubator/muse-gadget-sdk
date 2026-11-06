@@ -45,6 +45,10 @@ deep sleep until BOOT. It does not claim to disconnect the battery or achieve
 the vendor firmware's standby current. The physical PWR button is not a Muse
 input. The SD slot, RTC and IMU are not used by this port.
 
+The port has no display pause or light sleep: with the screen off on
+battery, LVGL and the CPU keep running, so standby lasts less than on the
+1.85C.
+
 ## Battery reporting
 
 The board reads the BQ27220's battery presence, initialization state,

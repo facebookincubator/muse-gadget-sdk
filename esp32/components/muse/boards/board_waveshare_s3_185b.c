@@ -314,7 +314,10 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     };
     const audio_codec_if_t *es8311 = es8311_codec_new(&es8311_cfg);
     ESP_RETURN_ON_FALSE(es8311, ESP_FAIL, TAG, "ES8311 not responding");
-    es7210_codec_cfg_t es7210_cfg = { .ctrl_if = mic_ctrl };
+    es7210_codec_cfg_t es7210_cfg = {
+        .ctrl_if = mic_ctrl,
+        .mic_selected = ES7210_SEL_MIC1 | ES7210_SEL_MIC2,
+    };
     const audio_codec_if_t *es7210 = es7210_codec_new(&es7210_cfg);
     ESP_RETURN_ON_FALSE(es7210, ESP_FAIL, TAG, "ES7210 not responding");
 
