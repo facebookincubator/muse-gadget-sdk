@@ -57,8 +57,7 @@ extern "C" bool noise_tx_has_dma_headroom(size_t *dma_free) {
     return available >= NOISE_TX_DMA_RESERVE_BYTES;
 }
 
-// For the extra daemon requests (Muse, display.draw_file).
-#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_DISPLAY_COMMANDS
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
 extern "C" bool noise_tx_has_dma_headroom_reclaiming(size_t reclaimable) {
     return heap_caps_get_free_size(MALLOC_CAP_DMA) + reclaimable
         >= NOISE_TX_DMA_RESERVE_BYTES;

@@ -45,3 +45,16 @@ void muse_ptest_board_codec_regs(muse_ptest_codec_regs_t *out);
 void muse_ptest_board_usb_dryrun(bool on);
 unsigned muse_ptest_board_codec_history(void);
 void muse_ptest_board_restore_codec_history(unsigned history);
+
+/* Optional console hooks: weak defaults use the configured UART. init/flush
+ * return ESP_OK or an error; getc returns whether it read one byte; write sends n. */
+esp_err_t muse_ptest_board_console_init(void);
+void muse_ptest_board_console_write(const char *buf, size_t n);
+bool muse_ptest_board_console_getc(uint8_t *c);
+esp_err_t muse_ptest_board_console_flush(void);
+/* Optional charging hooks: weak defaults return false / ESP_ERR_NOT_SUPPORTED.
+ * supported reports capability only; charging returns ESP_OK after readback.
+ * off arms a nonzero guard_ms before disabling; !off restores (guard ignored).
+ * After guard expiry the board's service returns ESP_ERR_TIMEOUT for that run. */
+bool muse_ptest_board_charging_supported(void);
+esp_err_t muse_ptest_board_charging(bool off, uint32_t guard_ms);

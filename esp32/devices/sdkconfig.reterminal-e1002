@@ -53,3 +53,6 @@ CONFIG_SPIRAM_SPEED_80M=y
 # The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
 # NimBLE host's allocations in PSRAM so pairing has room.
 CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+
+# Keep Wi-Fi connected while sleeping between AP DTIM beacons.
+CONFIG_HOMEHUB_WIFI_MIN_MODEM=y

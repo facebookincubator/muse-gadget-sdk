@@ -127,7 +127,7 @@ recovery.
 
 ## Software setup
 
-Use ESP-IDF **v6.0.1** and the existing Watcher board overlay. Host acquisition:
+Use ESP-IDF **v6.0.3** and the existing Watcher board overlay. Host acquisition:
 
 ```sh
 cd esp32
@@ -152,7 +152,7 @@ the Himax interface with an ESP32 image.
 Activate ESP-IDF, then build in a separate directory:
 
 ```sh
-. "$HOME/.espressif/esp-idf-v6.0.1/export.sh"
+. "$HOME/.espressif/esp-idf-v6.0.3/export.sh"
 idf.py -B build-muse-watcher-power-test -DIDF_TARGET=esp32s3 \
   -DSDKCONFIG=build-muse-watcher-power-test/sdkconfig \
   -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test" build

@@ -166,6 +166,13 @@ bool config_clear_pairing(void) {
     return clear_and_verify(keys, sizeof(keys) / sizeof(keys[0]));
 }
 
+bool config_unpair(void) {
+    // The marker goes last, and only once the pairing is verifiably gone:
+    // boot treats tokens and Wi-Fi without the marker as a legacy pair and
+    // marks it complete again, which would undo a half-finished unpair.
+    return config_clear_pairing() && config_clear_setup_complete();
+}
+
 bool config_clear_setup(void) {
     static const char *const keys[] = {
         "api_url",

@@ -45,6 +45,9 @@
 #include "muse_mem.h"
 #include "muse_settings.h"
 #include "muse_state.h"
+#if CONFIG_MUSE_REALTIME_VOICE
+#include "muse_voice_call.h"
+#endif
 
 static const char *TAG = "link.muse";
 
@@ -709,3 +712,10 @@ void muse_glue_led_state(led_state_t state) {
     // Pairing, provisioning and unpair all move the LED; pick up their config.
     keeper_kick(KEEP_RELOAD);
 }
+
+#if CONFIG_MUSE_REALTIME_VOICE
+// The call names Link's node as its device (a RAM string set at boot).
+const char *muse_voice_call_device_id(void) {
+    return identity_node_id();
+}
+#endif
