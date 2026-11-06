@@ -313,6 +313,12 @@ To work on the UI without a board, use the
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
 
+[`components/executorch`](components/executorch) vendors the ExecuTorch
+runtime for on-device ML (wake word, in progress; not enabled on any board
+yet). It is generated, never hand-edited —
+[`docs/executorch.md`](docs/executorch.md) says how to regenerate and update
+it.
+
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
 answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app). Two

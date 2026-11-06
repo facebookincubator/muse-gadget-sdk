@@ -94,6 +94,7 @@
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
 #include "muse_input.h"
+#include "muse_wakeword_glue.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
 #else
@@ -1941,6 +1942,31 @@ static cJSON *bug_report_command(
 
 #endif  // CONFIG_HOMEHUB_BLE_COMMANDS
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+static cJSON *wakeword_command(bool on) {
+    muse_wakeword_set_enabled(on);
+    muse_wakeword_status_t st;
+    muse_wakeword_status(&st);
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_CreateObject();
+    if (!result || !payload) {
+        cJSON_Delete(result);
+        cJSON_Delete(payload);
+        return command_error("out_of_memory", "failed to allocate wake word result");
+    }
+    cJSON_AddBoolToObject(payload, "enabled", st.enabled);
+    cJSON_AddBoolToObject(payload, "listening", st.listening);
+    cJSON_AddStringToObject(payload, "runner", st.runner);
+    cJSON_AddNumberToObject(payload, "wakes", st.wakes);
+    cJSON_AddNumberToObject(payload, "cancels", st.cancels);
+    cJSON_AddNumberToObject(payload, "submits", st.submits);
+    cJSON_AddNumberToObject(payload, "dropped_frames", st.dropped_frames);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddItemToObject(result, "payload", payload);
+    return result;
+}
+#endif
+
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
@@ -2025,6 +2051,14 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
     if (strcmp(command, "sensors.read") == 0) {
         return waveshare_154g_shtc3_command();
+    }
+#endif
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if (strcmp(command, "enable_wakeword") == 0) {
+        return wakeword_command(true);
+    }
+    if (strcmp(command, "disable_wakeword") == 0) {
+        return wakeword_command(false);
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {
