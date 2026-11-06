@@ -63,6 +63,14 @@ typedef void (*image_fetch_done_cb)(const image_fetch_result_t *result, void *us
 bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
                        void *user, const char **code, const char **message);
 
+// The same for a file on the VM, fetched with GET /fs/raw/<path> over the
+// Noise session rather than from the internet, in Range requests small enough
+// that no reply overflows the session's buffers. Each range is drawn before
+// the next is asked for. Shares the one-download limit with
+// image_fetch_start.
+bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
+                          void *user, const char **code, const char **message);
+
 #ifdef __cplusplus
 }
 #endif

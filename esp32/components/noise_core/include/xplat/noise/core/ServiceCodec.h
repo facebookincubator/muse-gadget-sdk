@@ -163,6 +163,16 @@ struct ServiceCodecResult {
 [[nodiscard]] StatusWithSize
 EncodeResetFrame(int64_t streamId, ResetView reset, ByteSpan out) noexcept;
 
+// Writes the bytes that come before the data in a request envelope carrying
+// one BodyChunk frame with end_body false. That envelope is exactly this
+// prefix followed by the data, so a caller can encode a chunk around data that
+// is already in place. Returns the prefix size; dataSize must be non-zero.
+[[nodiscard]] StatusWithSize EncodeBodyChunkRequestPrefix(
+    ServiceType service,
+    int64_t streamId,
+    size_t dataSize,
+    ByteSpan out) noexcept;
+
 [[nodiscard]] ServiceCodecResult DecodeServiceRequestEnvelopeDetailed(
     ConstByteSpan bytes,
     DecodedServiceRequestEnvelope& out) noexcept;

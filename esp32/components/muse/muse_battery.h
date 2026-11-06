@@ -54,6 +54,9 @@ void muse_battery_init(void);
 void muse_battery_note_power(const muse_power_t *p, bool on_battery);
 void muse_battery_note_state(bool screen_off, bool resting);
 
+/* Whether the CPU powers down in light sleep, for the JSON; may come before init. */
+void muse_battery_note_cpu_pd(bool on);
+
 /* Starts over: from now if on battery, else at the next unplug. */
 void muse_battery_reset(void);
 
@@ -63,10 +66,18 @@ void muse_battery_read(muse_battery_t *out);
  * percent an hour, and how many hours a full charge lasts at that rate. */
 bool muse_battery_drain(const muse_battery_t *b, int *rate10, int *full_h);
 
-/* The same with every lock and CPU mode, as one line of JSON. */
+/* The same with every lock and CPU mode, as one line of JSON, and internal RAM
+ * ("heap": free, largest block and lowest since boot now, the lowest seen
+ * resting on battery in this run, what's left of the retention-capable RAM,
+ * free and largest block, and "cpu_pd"). With cpu_pd the CPU's retention
+ * memory was taken at boot and kept, so it's out of all of them, and
+ * "resting_min" is the headroom while resting rather than a dip for it.
+ * Too long for cap, it loses whole pieces from the end, the lock list first,
+ * and stays valid JSON. Returns its length, always under cap. */
 int muse_battery_json(char *buf, size_t cap);
 
 /* The JSON last saved before this boot, kept in RTC memory across resets (not
  * power loss) until muse_battery_reset(); NULL if none. It survives a board
- * that resets when its port opens, or one that crashed on battery. */
+ * that resets when its port opens, or one that crashed on battery. It's
+ * muse_battery_json() without "retention_free" and "retention_largest". */
 const char *muse_battery_saved_json(void);

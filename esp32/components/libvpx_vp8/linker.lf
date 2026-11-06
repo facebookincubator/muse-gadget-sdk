@@ -1,0 +1,73 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# How much of the decoder runs from IRAM (CONFIG_MUSE_VP8_IRAM, Kconfig):
+# from flash it shares the instruction cache with Wi-Fi, BLE and the panel.
+# The choice defaults to compact when CONFIG_MUSE_VIDEO_DECODER_IRAM puts
+# tinyh264's code in IRAM, and to none otherwise.
+[mapping:libvpx_vp8]
+archive: liblibvpx_vp8.a
+entries:
+    if MUSE_VP8_IRAM_FULL = y:
+        decodeframe (noflash)
+        decodemv (noflash)
+        detokenize (noflash)
+        dboolhuff (noflash)
+        filter (noflash)
+        reconinter (noflash)
+        reconintra (noflash)
+        reconintra4x4 (noflash)
+        intrapred (noflash)
+        idct_blk (noflash)
+        idctllm (noflash)
+        dequantize (noflash)
+        findnearmv (noflash)
+        extend (noflash)
+        yv12extend (noflash)
+    elif MUSE_VP8_IRAM_COMPACT = y:
+        decodeframe (noflash)
+        decodemv (noflash)
+        detokenize (noflash)
+        dboolhuff (noflash)
+        filter (noflash)
+        reconinter (noflash)
+        reconintra (noflash)
+        reconintra4x4 (noflash)
+        intrapred (noflash)
+        idct_blk (noflash)
+        idctllm (noflash)
+        dequantize (noflash)
+        findnearmv (noflash)
+        extend (noflash)
+        yv12extend (noflash)
+        # The low-memory mode's code (decodeframe.c, MGX_LOWMEM_FN) stays in flash.
+        decodeframe:lowmem_fits (default)
+        decodeframe:lowmem_ring_alloc (default)
+        decodeframe:lowmem_plan (default)
+        decodeframe:lowmem_put (default)
+        decodeframe:lowmem_prestash (default)
+        decodeframe:ring_guard (default)
+    elif MUSE_VP8_IRAM_HOT = y:
+        detokenize (noflash)
+        dboolhuff (noflash)
+        reconinter (noflash)
+        idct_blk (noflash)
+        idctllm (noflash)
+        dequantize (noflash)
+        filter:vp8_bilinear_predict16x16_c (noflash)
+        filter:vp8_bilinear_predict8x8_c (noflash)
+        filter:vp8_bilinear_predict8x4_c (noflash)
+        filter:vp8_bilinear_predict4x4_c (noflash)
+    else:
+        * (default)

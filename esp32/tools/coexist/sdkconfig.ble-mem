@@ -1,0 +1,32 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Experiment: win back internal RAM with BLE resident (load after
+# sdkconfig.ble-persist and sdkconfig.nimble-tuned).
+# NimBLE host allocations in PSRAM, controller code in flash.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y
+CONFIG_SPI_FLASH_AUTO_SUSPEND=y
+# Host/controller buffers sized for a few links instead of the defaults
+# (24 ACL, 30+8 events, 24+24 mbufs).
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=16
+CONFIG_BT_NIMBLE_TRANSPORT_EVT_DISCARD_COUNT=6
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=16
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=16
+# Wi-Fi RX: fewer always-allocated buffers (the on-demand ones come from
+# sdkconfig.defaults.esp32c5 and are in PSRAM). The block-ack window may be
+# at most twice the static buffers.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_RX_BA_WIN=20

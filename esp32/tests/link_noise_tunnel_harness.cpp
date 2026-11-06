@@ -122,7 +122,24 @@ static bool send_body(void *, const uint8_t *data, size_t len) {
     if (fail_send) { session_alive = false; poison_noise_session(); }
     return !fail_send;
 }
-static const noise_tunnel_emit_t emit = {nullptr, open_stream, send_body};
+static const noise_tunnel_emit_t emit = {nullptr, open_stream, send_body, nullptr};
+
+// In-place emit: the batch arrives inside its slot with room around it.
+static unsigned inplace_calls;
+static bool send_body_inplace(void *, uint8_t *buf, size_t headroom, size_t len,
+                              size_t tailroom) {
+    assert(headroom == NOISE_TUNNEL_TX_HEADROOM);
+    assert(tailroom == NOISE_TUNNEL_TX_TAILROOM);
+    assert(len == 1);
+    // The headroom and tailroom are the caller's to overwrite.
+    memset(buf, 0xA5, headroom);
+    memset(buf + headroom + len, 0x5A, tailroom);
+    sent.push_back(buf[headroom]);
+    ++inplace_calls;
+    return true;
+}
+static const noise_tunnel_emit_t emit_inplace = {
+    nullptr, open_stream, send_body, send_body_inplace};
 static void enqueue(uint8_t value) {
     assert(noise_tunnel_send_packet(&value, 1));
 }
@@ -193,6 +210,11 @@ static bool ws_send_binary(esp_tls_t *, const uint8_t *data, size_t len) {
     chunk_ends.push_back(frame.body_chunk.end_body);
     if (pressure_after_chunk) dma_largest = 1;
     return true;
+}
+// Production masks the payload in place and writes the header in front of
+// it; the harness decodes the unmasked payload, so it skips the masking.
+static bool ws_send_frame_inplace(esp_tls_t *tls, uint8_t *data, size_t len) {
+    return ws_send_binary(tls, data, len);
 }
 
 // Instrument allocations/copies in the production sender without changing
@@ -676,6 +698,23 @@ static void test_heartbeat() {
 
 int main(int argc, char **argv) {
     assert(argc == 2);
+    if (strcmp(argv[1], "inplace") == 0) {
+        reopen();
+        dma_free = 64 * 1024;
+        dma_largest = 32 * 1024;
+        for (uint8_t i = 1; i <= 8; ++i) enqueue(i);
+        assert(noise_tunnel_pump_tx(&emit_inplace) == 8);
+        assert(inplace_calls == 8);
+        assert(sent.size() == 8);
+        for (uint8_t i = 1; i <= 8; ++i) assert(sent[i - 1] == i);
+        // Slots go back to the pool and carry new batches intact.
+        for (uint8_t i = 11; i <= 18; ++i) enqueue(i);
+        assert(noise_tunnel_pump_tx(&emit_inplace) == 8);
+        for (uint8_t i = 11; i <= 18; ++i) assert(sent[i - 3] == i);
+        for (void *p : allocations) free(p);
+        for (Queue *q : queues) delete q;
+        return 0;
+    }
     if (strcmp(argv[1], "tunnel") != 0) {
         if (strcmp(argv[1], "heartbeat") == 0) test_heartbeat();
         else if (strcmp(argv[1], "stream") == 0) test_control_stream();

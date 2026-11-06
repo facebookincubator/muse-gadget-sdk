@@ -15,6 +15,7 @@
 """Exercise production tunnel/control TX with deterministic DMA pressure and failures."""
 from pathlib import Path
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -67,7 +68,8 @@ class LinkNoiseTunnelTest(unittest.TestCase):
                                   if line.startswith(("#define CTRL_STREAM_ID",
                                                       "#define CTRL_BODY_CHUNK_MAX",
                                                       "#define OUT_SVC_SCRATCH",
-                                                      "#define OUT_ENV_SCRATCH")))
+                                                      "#define OUT_ENV_SCRATCH",
+                                                      "#define WS_HEADROOM")))
             ws_start = control.index("#if CONFIG_SPIRAM\n#define WS_BUF_SIZE")
             ws_end = control.index("#endif", ws_start) + len("#endif")
             constants += "\n" + control[ws_start:ws_end]
@@ -117,6 +119,9 @@ class LinkNoiseTunnelTest(unittest.TestCase):
     def test_backpressure_ownership_fairness_and_failure(self):
         self.run_harness("tunnel")
 
+    def test_in_place_batches_keep_their_room_and_order(self) -> None:
+        self.run_harness("inplace")
+
     def test_control_prefix_stream_and_no_whole_payload_copy(self):
         self.run_harness("stream")
 
@@ -148,22 +153,46 @@ class LinkNoiseTunnelTest(unittest.TestCase):
         cache.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=cache) as tmpdir:
             script = Path(tmpdir) / "guard.cmake"
-            for snd, wnd, cardputer, tunnel, psram, accepted in (
-                (16384, 16384, False, True, True, True),
-                (65535, 16384, False, True, True, False),
-                (16384, 65535, False, True, True, False),
-                (5760, 5760, True, False, False, True),
-                (5760, 5760, True, True, False, False),
-                (5760, 5760, True, False, True, False),
-                (5760, 5760, False, False, False, False),
-            ):
-                with self.subTest(snd=snd, wnd=wnd):
+            base = dict(snd=16384, wnd=16384, cardputer=False, tunnel=True, psram=True,
+                        c5=False, lwip_psram=False, dyn_rx=32, ooseq=4)
+            c5 = dict(base, snd=65535, wnd=65535, c5=True, lwip_psram=True, dyn_rx=64, ooseq=12)
+            cases = [
+                (base, True),
+                (dict(base, snd=65535), False),
+                (dict(base, wnd=65535), False),
+                (dict(base, snd=5760, wnd=5760, cardputer=True, tunnel=False, psram=False), True),
+                (dict(base, snd=5760, wnd=5760, cardputer=True, psram=False), False),
+                (dict(base, snd=5760, wnd=5760, cardputer=True, tunnel=False), False),
+                (dict(base, snd=5760, wnd=5760, tunnel=False, psram=False), False),
+                # Other boards get no larger windows, PSRAM or not.
+                (dict(base, snd=32768, wnd=32768, lwip_psram=True), False),
+                (dict(base, snd=65535, wnd=65535, lwip_psram=True, dyn_rx=64, ooseq=12), False),
+                # The C5 with the measured setup, and with each part missing.
+                (c5, True),
+                (dict(c5, snd=32768, wnd=32768), True),
+                (dict(c5, ooseq=0), False),          # unbounded out-of-order queue
+                (dict(c5, ooseq=13), False),
+                (dict(c5, dyn_rx=32), False),        # receive path too shallow
+                (dict(c5, lwip_psram=False), False),
+                (dict(c5, psram=False), False),
+                (dict(c5, snd=131072), False),
+                # The data-path bench (never shipped) may try anything.
+                (dict(base, snd=131072, wnd=131072, bench=True), True),
+            ]
+            on = lambda v: "ON" if v else "OFF"
+            for cfg, accepted in cases:
+                with self.subTest(**cfg):
                     script.write_text(
-                        f"set(CONFIG_LWIP_TCP_SND_BUF_DEFAULT {snd})\n"
-                        f"set(CONFIG_LWIP_TCP_WND_DEFAULT {wnd})\n"
-                        f"set(CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV {'ON' if cardputer else 'OFF'})\n"
-                        f"set(CONFIG_HOMEHUB_TUNNEL {'ON' if tunnel else 'OFF'})\n"
-                        f"set(CONFIG_SPIRAM {'ON' if psram else 'OFF'})\n" + guard
+                        f"set(CONFIG_LWIP_TCP_SND_BUF_DEFAULT {cfg['snd']})\n"
+                        f"set(CONFIG_LWIP_TCP_WND_DEFAULT {cfg['wnd']})\n"
+                        f"set(CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV {on(cfg['cardputer'])})\n"
+                        f"set(CONFIG_HOMEHUB_TUNNEL {on(cfg['tunnel'])})\n"
+                        f"set(CONFIG_SPIRAM {on(cfg['psram'])})\n"
+                        f"set(CONFIG_IDF_TARGET_ESP32C5 {on(cfg['c5'])})\n"
+                        f"set(CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP {on(cfg['lwip_psram'])})\n"
+                        f"set(CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM {cfg['dyn_rx']})\n"
+                        f"set(CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS {cfg['ooseq']})\n"
+                        f"set(CONFIG_HOMEHUB_PIPELINE_BENCH {on(cfg.get('bench'))})\n" + guard
                     )
                     ran = subprocess.run(
                         ["cmake", "-P", str(script)],
@@ -174,6 +203,41 @@ class LinkNoiseTunnelTest(unittest.TestCase):
                                      ran.stdout + ran.stderr)
                     if not accepted:
                         self.assertIn("DMA headroom", " ".join(ran.stderr.split()))
+
+    def test_c5_defaults_pass_the_config_guard(self):
+        def values(path):
+            out = {}
+            for line in path.read_text().splitlines():
+                if line.startswith("CONFIG_") and "=" in line:
+                    key, _, value = line.partition("=")
+                    out[key] = value
+            return out
+        cfg = values(ROOT / "sdkconfig.defaults")
+        cfg.update(values(ROOT / "sdkconfig.defaults.esp32c5"))
+        cfg["CONFIG_IDF_TARGET_ESP32C5"] = "y"
+        self.assertEqual(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"], "65535")
+        self.assertIn(int(cfg["CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS"]), range(1, 13))
+        # The block-ack window may be at most twice the static RX buffers.
+        self.assertLessEqual(int(cfg["CONFIG_ESP_WIFI_RX_BA_WIN"]),
+                             2 * int(cfg.get("CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM", "16")))
+        source = (ROOT / "cmake" / "validate_config.cmake").read_text()
+        start = source.index("# TCP limits:")
+        guard = source[start:source.index("endif()", start) + len("endif()")]
+        names = sorted(set(re.findall(r"CONFIG_[A-Z0-9_]+", guard)))
+        lines = []
+        for name in names:
+            value = cfg.get(name, "")
+            if value in ("y", ""):
+                value = "ON" if value == "y" else "OFF"
+            lines.append(f"set({name} {value})")
+        cache = ROOT / ".cache" / "tunnel-throughput"
+        cache.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=cache) as tmpdir:
+            script = Path(tmpdir) / "guard.cmake"
+            script.write_text("\n".join(lines) + "\nset(GADGET_CONFIG_REGEN_HINT x)\n" + guard)
+            ran = subprocess.run(["cmake", "-P", str(script)], capture_output=True, text=True,
+                                 env={**os.environ, "TMPDIR": tmpdir})
+            self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
 
 
 if __name__ == "__main__":
