@@ -213,8 +213,8 @@ status screen.
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
-| Waveshare ESP32-S3-Touch-LCD-1.85B | UI, push-to-talk, settings, images | `tools/muse/board.sh build s3b` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Waveshare ESP32-S3-Touch-LCD-1.85B | UI, push-to-talk, settings, images | `tools/muse/board.sh build 185b` |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | UI, touch, push-to-talk, settings, images (unverified) | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 | UI, touch, push-to-talk, settings, images (unverified) | [S3 2.06 setup](devices/waveshare-s3-206.md) |

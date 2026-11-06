@@ -745,8 +745,8 @@ board's overlays, in order:
 | Home Assistant Voice PE | `esp32s3` | [`devices/sdkconfig.home-assistant-voice`](sdkconfig.home-assistant-voice) | `tools/board.sh home-assistant-voice build` |
 | Seeed reSpeaker Lite (experimental) | `esp32s3` | [`devices/sdkconfig.seeed-respeaker-lite`](sdkconfig.seeed-respeaker-lite) | `tools/board.sh seeed-respeaker-lite build` |
 | Waveshare S3 1.75C | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175c`](sdkconfig.muse-waveshare-s3-175c) | by hand |
-| Waveshare S3 1.85B | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-185b`](sdkconfig.muse-waveshare-s3-185b) | `tools/muse/board.sh build s3b` |
 | Waveshare S3 1.75 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175`](sdkconfig.muse-waveshare-s3-175) | by hand |
+| Waveshare S3 1.85B | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-185b`](sdkconfig.muse-waveshare-s3-185b) | `tools/muse/board.sh build 185b` |
 | Waveshare S3 2.16 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-216`](sdkconfig.muse-waveshare-s3-216) | `tools/muse/board.sh build s3-216` |
 | Waveshare S3 1.46 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-146`](sdkconfig.muse-waveshare-s3-146) | `tools/muse/board.sh build 146` |
 | Waveshare S3 1.43 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-143`](sdkconfig.muse-waveshare-s3-143) | `tools/muse/board.sh build 143` |

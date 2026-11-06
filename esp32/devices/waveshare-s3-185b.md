@@ -13,9 +13,9 @@ Use ESP-IDF v6.0.3, then follow the SDK token and backup instructions in
 USB Serial/JTAG (`303a:1001`); that USB ID alone does not identify the model.
 
 ```sh
-tools/muse/board.sh build s3b
+tools/muse/board.sh build 185b
 tools/muse/ports.py --list
-tools/muse/board.sh flash s3b DEVICE_USB_SERIAL
+tools/muse/board.sh flash 185b DEVICE_USB_SERIAL
 ```
 
 The overlay is `sdkconfig.muse-waveshare-s3-185b`, loaded after
