@@ -119,14 +119,16 @@ class LiveReplies:
         session = payload.get("session_id") or event.get("session_id")
         if self.session_id and session and session != self.session_id:
             return ""
+        name = event.get("event")
+        if name not in ("delta.message_start", "delta.text_append", "delta.message_done", "message.assistant"):
+            return ""
+        # Only reply events share this order: message.user has been seen
+        # numbered apart from the chat's other events.
         seq = event.get("seq")
         if isinstance(seq, int):
             if self.sequence is not None and seq <= self.sequence:
                 return ""
             self.sequence = seq
-        name = event.get("event")
-        if name not in ("delta.message_start", "delta.text_append", "delta.message_done", "message.assistant"):
-            return ""
         if payload.get("role") not in (None, "assistant"):
             return ""
         identifier = payload.get("message_id") or event.get("message_id") or payload.get("id")
@@ -319,8 +321,12 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
             while True:
                 await asyncio.sleep(0.1)
                 if turn is not None:
-                    if time.monotonic() - started > TURN_TIMEOUT:
-                        raise TimeoutError("Muse reply timed out; the message may still be running")
+                    if not sending and time.monotonic() - started > TURN_TIMEOUT:
+                        # Stop tracking progress, but keep the chat open:
+                        # replies still appear whenever they arrive.
+                        turn = None
+                        show_status("Still no sign Muse finished; replies will appear as they arrive")
+                        continue
                     if not sending and messages.empty() and turn.complete(time.monotonic()):
                         turn = None
                         show_status("Muse is ready")

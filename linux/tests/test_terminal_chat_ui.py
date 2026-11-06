@@ -489,9 +489,23 @@ asyncio.run(main())
             process.send_signal(signal.SIGINT)
         else:
             os.write(master, ('/' + ending + '\n').encode() if ending in ('quit', 'exit') else b'\x04')
+        # Keep reading: a small pty buffer (macOS) would otherwise block the
+        # child's final redraw before it can restore the terminal and exit.
+        deadline = time.monotonic() + 5
+        while process.poll() is None:
+            assert time.monotonic() < deadline, captured.decode(errors='replace')
+            if select.select([master], [], [], 0.1)[0]:
+                try:
+                    captured.extend(os.read(master, 65536))
+                except OSError:
+                    break
         process.wait(timeout=5)
         assert process.returncode in (0, -signal.SIGINT)
         restored = termios.tcgetattr(slave)
+        # PENDIN is kernel bookkeeping (macOS sets it on leaving raw input).
+        pendin = getattr(termios, 'PENDIN', 0)
+        restored[3] &= ~pendin
+        original[3] &= ~pendin
         assert restored == original
     finally:
         if process.poll() is None:

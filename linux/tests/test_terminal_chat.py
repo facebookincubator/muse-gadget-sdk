@@ -57,6 +57,16 @@ def test_live_replies_deduplicate_sequences_and_bound_storage():
         view.feed(event("message.assistant", "large", content="x" * 65537))
 
 
+def test_live_replies_keep_their_order_apart_from_user_events():
+    view = LiveReplies("chat")
+    user = event("message.user", "u1", content="hi")
+    user["seq"] = 2000
+    assert view.feed(user) == ""
+    reply = event("delta.text_append", "r1", parent="u1", text="Hello")
+    reply["seq"] = 1147
+    assert view.feed(reply) == "\nMuse: Hello"
+
+
 def test_live_users_include_remote_messages_and_suppress_local_echoes_by_id():
     users = LiveUsers('chat')
     assert users.feed(event('message.user', 'web', display_text='Web\x1b message')) == ['Web message']
@@ -533,4 +543,55 @@ def test_pending_queue_is_bounded_and_exit_reports_unsent(monkeypatch, ending):
             await asyncio.gather(client, return_exceptions=True)
     async def bounded_check(service, path):
         await asyncio.wait_for(check(service, path), 3)
+    run_with_socket(bounded_check)
+
+
+def test_unfinished_turn_stops_tracking_but_keeps_the_chat_open(monkeypatch):
+    async def check(service, path):
+        events, ready = asyncio.Queue(), asyncio.Event()
+
+        class Session:
+            registered_at = 1
+
+            async def subscribe_chat(self, session_id, *, opened):
+                opened.set()
+                ready.set()
+                while True:
+                    yield await events.get()
+
+        async def send(*args):
+            return {"message_id": "u1", "session_id": "chat"}
+
+        service._current = Session()
+        monkeypatch.setenv(config.SOCKET_ENV, str(path))
+        monkeypatch.setattr(terminal_chat, "_send", send)
+        monkeypatch.setattr(terminal_chat, "TURN_TIMEOUT", 0.3)
+        stdin, output = asyncio.StreamReader(), io.StringIO()
+        client = asyncio.create_task(run_chat(input_reader=stdin, output=output))
+
+        async def wait_text(text):
+            while text not in output.getvalue():
+                assert not client.done(), output.getvalue()
+                await asyncio.sleep(0.01)
+
+        try:
+            await ready.wait()
+            stdin.feed_data(b"long task\n")
+            await wait_text("Waiting for Muse")
+            # Muse stays busy past the timeout: the chat must stay open.
+            await events.put(event("agent.status", parent="u1", activity_code="working",
+                                   activity_text="Working"))
+            await wait_text("replies will appear as they arrive")
+            await asyncio.sleep(0.2)
+            assert not client.done()
+            await events.put(event("delta.message_done", "r1", parent="u1", content="Done at last"))
+            await wait_text("Done at last")
+            stdin.feed_data(b"/quit\n")
+            await client
+        finally:
+            client.cancel()
+            await asyncio.gather(client, return_exceptions=True)
+
+    async def bounded_check(service, path):
+        await asyncio.wait_for(check(service, path), 5)
     run_with_socket(bounded_check)
