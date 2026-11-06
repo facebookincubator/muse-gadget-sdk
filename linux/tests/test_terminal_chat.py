@@ -809,7 +809,8 @@ def test_chat_errors_from_muse_cannot_reach_the_terminal_raw(monkeypatch, capsys
     assert "]52;c;b3duZWQ=" in err
 
 
-def test_plain_mode_restores_blocking_stdin(monkeypatch):
+@pytest.mark.parametrize("ending", ["quit", "eof"])
+def test_plain_mode_restores_blocking_stdin(monkeypatch, ending):
     import os
     import sys
 
@@ -824,12 +825,17 @@ def test_plain_mode_restores_blocking_stdin(monkeypatch):
         monkeypatch.setattr(sys, "stdin", stdin)
         try:
             assert os.get_blocking(shared)
-            os.write(write_fd, b"/quit\n")
+            if ending == "quit":
+                os.write(write_fd, b"/quit\n")
+            else:
+                os.close(write_fd)  # EOF: the transport closes what it reads.
             await asyncio.wait_for(run_chat(output=io.StringIO()), 3)
             assert os.get_blocking(shared)
+            assert not stdin.closed
         finally:
             os.close(shared)
-            os.close(write_fd)
+            if ending == "quit":
+                os.close(write_fd)
             stdin.close()
 
     run_with_socket(check)

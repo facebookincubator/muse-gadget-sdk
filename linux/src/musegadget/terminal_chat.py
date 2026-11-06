@@ -248,11 +248,17 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                 show_status("Muse is ready · /quit or /exit · /clear")
         if input_reader is None and isinstance(display, PlainDisplay):
             input_reader = asyncio.StreamReader(limit=MAX_INPUT)
-            # The pipe transport makes stdin non-blocking; a terminal shares
-            # that flag with the shell, so it is restored on exit.
+            # The pipe transport makes stdin non-blocking (a terminal shares
+            # that flag with the shell) and closes what it reads at EOF. Give
+            # it a duplicate, so stdin stays open to restore the flag on exit.
             stdin_blocking = os.get_blocking(sys.stdin.fileno())
-            stdin_transport, _ = await asyncio.get_running_loop().connect_read_pipe(
-                lambda: asyncio.StreamReaderProtocol(input_reader), sys.stdin)
+            pipe = os.fdopen(os.dup(sys.stdin.fileno()), "rb", buffering=0)
+            try:
+                stdin_transport, _ = await asyncio.get_running_loop().connect_read_pipe(
+                    lambda: asyncio.StreamReaderProtocol(input_reader), pipe)
+            except BaseException:
+                pipe.close()
+                raise
         if isinstance(display, PlainDisplay):
             show("Chatting with your Muse. /quit or /exit, Ctrl-C or EOF exits. /clear clears the screen.\n")
 

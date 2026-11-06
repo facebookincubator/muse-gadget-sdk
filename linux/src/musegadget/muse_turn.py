@@ -456,7 +456,8 @@ class MuseTurn:
         self.last_activity = time.monotonic()
         reply = _update_reply(replace(reply, bound=bound), name, payload)
         self._replies[message_id] = reply
-        if name in ("delta.message_done", "message.assistant") and reply.done:
+        if name == "delta.message_done" or (
+                name == "message.assistant" and payload.get("display_text_ready") is not False):
             self._unanswered_follow_up_ids.discard(parent)
         return [reply]
 
