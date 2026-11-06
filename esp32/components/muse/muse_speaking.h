@@ -176,7 +176,7 @@ static inline void muse_speaking_update(muse_speaking_t *s, bool speaking, float
         float phase = syllable - index;
         float phrase = t - floorf(t / 2.8f) * 2.8f;
         float pulse = muse_speak_pulse(phase, .90f, .18f, .40f);
-        mouth = phrase < 2.38f ? pulse * syllables[index % 7] * .55f : 0;
+        mouth = phrase < 2.38f ? pulse * syllables[index % 7] * .50f : 0;
     }
     s->mouth += (mouth - s->mouth) * muse_speak_clamp(dt * 22, 0, 1);
     if (s->mouth < .001f) s->mouth = 0;
