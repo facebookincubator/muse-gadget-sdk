@@ -172,7 +172,6 @@ static const char *const MODE_NAMES[MUSE_MODE_COUNT] = {
     [MUSE_MODE_LISTENING] = "LISTENING",
     [MUSE_MODE_THINKING] = "THINKING",
     [MUSE_MODE_SPEAKING] = "SPEAKING",
-    [MUSE_MODE_READING] = "READING",
     [MUSE_MODE_ERROR] = "ERROR",
     [MUSE_MODE_OFF] = "GOODBYE",
 };
@@ -1395,13 +1394,12 @@ static void update_status(muse_mode_t mode, float now)
     int answer = -1;
     if (s_reply_lbl) {
         /* The speaker picks the layout, even mid-reply: the voice task pages to fit. */
-        /* Reading a finished reply always takes the big page, speaker or not. */
-        int layout = mode == MUSE_MODE_READING || !muse_settings_speaker_on() ? ANSWER_READ : ANSWER_HEARD;
+        int layout = muse_settings_speaker_on() ? ANSWER_HEARD : ANSWER_READ;
         if (layout != s_page_for) {
             muse_state_set_page(s_answers[layout].cols, s_answers[layout].lines);
             s_page_for = layout;
         }
-        if (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING || mode == MUSE_MODE_READING) {
+        if (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING) {
             answer = layout;
         }
     }
