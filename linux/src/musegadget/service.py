@@ -455,11 +455,14 @@ async def _follow(session: LinkSession, session_id: str | None, opened: asyncio.
 class _ReplyReader:
     """Passes MuseTurn the events that follow one request's own message.
 
-    Events repeating an earlier ``seq`` are dropped. Until Muse acknowledges
-    the message, events wait here (bounded). Then a ``message.user`` event
-    for the acknowledged message opens the answer, and one for any other
-    message on the chat closes it again; events of a reply already taken, and
-    events naming the message or a taken reply as their parent, always count.
+    Events repeating an earlier ``seq`` are dropped. Message rows
+    (``message.user``, ``message.assistant``) are numbered apart from the
+    live status and delta events, so each kind keeps its own order. Until
+    Muse acknowledges the message, events wait here (bounded). Then a
+    ``message.user`` event for the acknowledged message opens the answer,
+    and one for any other message on the chat closes it again; events of a
+    reply already taken, and events naming the message or a taken reply as
+    their parent, always count.
     """
 
     def __init__(self, turn: MuseTurn) -> None:
@@ -468,15 +471,24 @@ class _ReplyReader:
         self.user_ids: set[str] | None = None
         self.after_note = False
         self.last_seq = 0
+        self.last_row_seq = 0
         self.held: list[dict] = []
         self.held_text = 0
 
     def take(self, event: dict) -> None:
         seq = event.get("seq")
         if isinstance(seq, int) and not isinstance(seq, bool):
-            if seq <= self.last_seq:
-                return
-            self.last_seq = seq
+            # Message rows carry the chat's own sequence, which can be lower
+            # than that of live status/delta events already received here.
+            # Comparing the two drops our own message and never opens the answer.
+            if event.get("event") in ("message.user", "message.assistant"):
+                if seq <= self.last_row_seq:
+                    return
+                self.last_row_seq = seq
+            else:
+                if seq <= self.last_seq:
+                    return
+                self.last_seq = seq
         if self.user_ids is None:
             if len(self.held) >= MAX_HELD_EVENTS:
                 raise ValueError("too many chat events before Muse acknowledged the message")
