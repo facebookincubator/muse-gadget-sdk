@@ -199,6 +199,26 @@ def test_held_reply_words_and_audio_are_delivered_when_its_turn_confirms_it():
     ]
 
 
+@pytest.mark.parametrize("replacement_pcm", [HALF, b"\0" * len(HALF)], ids=["tone", "quiet"])
+def test_replacement_of_a_held_reply_keeps_the_new_responses_transcript(replacement_pcm):
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech(), created("r1"), said("old"), audio("p1", TONE),
+            created("r2"), said("Olá"), transcript("Olá"), audio("p2", replacement_pcm), turn(),
+        ])))
+        await wait_until(lambda: len(output.pcm) == len(replacement_pcm))
+        assert output.pcm == replacement_pcm
+
+    assert run_call(script) == [
+        ResponseStarted("r1"),
+        ResponseStarted("r2"),
+        Working(True),
+        TranscriptDelta("r2", "Olá"),
+        TranscriptDone("r2", "Olá"),
+        AudioChunk("r2", 0, replacement_pcm),
+    ]
+
+
 def test_a_held_reply_dropped_for_another_callers_turn_says_nothing():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, b"".join(map(line, [

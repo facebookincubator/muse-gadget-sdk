@@ -40,7 +40,7 @@ from urllib.parse import urlencode
 
 from musegadget.noise import Header
 from musegadget.streaming import read_ndjson
-from musegadget.voice_gate import DROP, HOLD, MAX_IDS, PLAY, ReplyGate, identifier, provider_id
+from musegadget.voice_gate import DROP, HOLD, MAX_IDS, PLAY, STALE, ReplyGate, identifier, provider_id
 
 log = logging.getLogger(__name__)
 SAMPLE_RATE = 24000
@@ -557,7 +557,17 @@ class VoiceCall:
         if playing:
             self._flush()
         elif waiting:
-            self._clear_waiting()
+            if self._reply_gate.holding:
+                # A new provider replaces held PCM, but later responses may
+                # already have words waiting for their own audio.
+                stale_responses = {response_id for source, response_id in self._audio_sources.items()
+                                   if self._reply_gate.ids[source] == STALE}
+                self._waiting = [held for held in self._waiting
+                                 if not isinstance(held, tuple)
+                                 and held.response_id not in stale_responses]
+                self._waiting_bytes = sum(len(held.text.encode()) for held in self._waiting)
+            else:
+                self._clear_waiting()
 
     async def _drain_playback(self) -> None:
         self._remote_ended = True
