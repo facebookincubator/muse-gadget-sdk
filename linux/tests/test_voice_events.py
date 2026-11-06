@@ -93,16 +93,19 @@ def test_call_keeps_five_seconds_of_held_pcm_with_transcripts(words, observe):
 
 
 def test_held_words_have_their_own_byte_and_count_bounds():
-    call = VoiceCall(None, device_id="homelink-synthetic", on_event=[].append)
-    call._reply_gate.event(speech())
-    call._reply_gate.event(created("r1"))
-    with pytest.raises(ValueError, match="buffer full"):
-        call._words(TranscriptDone("r1", "a" * (voice.MAX_HELD_TEXT_BYTES + 1)))
-    for _ in range(voice.MAX_HELD_ITEMS):
-        call._words(TranscriptDelta("r1", "a"))
-    with pytest.raises(ValueError, match="buffer full"):
-        call._words(TranscriptDelta("r1", "a"))
-    assert len(call._waiting) == voice.MAX_HELD_ITEMS
+    async def scenario():  # VoiceCall needs a running loop on Python 3.9
+        call = VoiceCall(None, device_id="homelink-synthetic", on_event=[].append)
+        call._reply_gate.event(speech())
+        call._reply_gate.event(created("r1"))
+        with pytest.raises(ValueError, match="buffer full"):
+            call._words(TranscriptDone("r1", "a" * (voice.MAX_HELD_TEXT_BYTES + 1)))
+        for _ in range(voice.MAX_HELD_ITEMS):
+            call._words(TranscriptDelta("r1", "a"))
+        with pytest.raises(ValueError, match="buffer full"):
+            call._words(TranscriptDelta("r1", "a"))
+        assert len(call._waiting) == voice.MAX_HELD_ITEMS
+
+    asyncio.run(scenario())
 
 
 def test_empty_transcript_deltas_are_neither_held_nor_delivered():
