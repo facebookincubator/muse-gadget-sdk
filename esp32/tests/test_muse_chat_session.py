@@ -482,6 +482,9 @@ static void detaches_only_while_muse_works() {
     clock_us += DETACH_US + 1;
     check_turn();
     assert(!s_turn.detached && !s_turn.nmsgs && s_turn.phase == P_WAIT_REPLY);
+    event("message.assistant", "reply", "note", "Answer");
+    settle();   /* ends while Muse is still busy, but nothing would play the rest */
+    assert(s_turn.phase == P_IDLE && done_events == 1 && !s_pending.active);
     s_incoming_used = true;
     detach();
 }

@@ -2002,7 +2002,7 @@ static void check_turn(void)
     ESP_LOGI(TAG, "turn done: %d message(s) in %.1fs", s_turn.nmsgs, (t - s_turn.start_us) / 1e6);
     log_marks();
     /* Still working (or told so): its next message comes in the background. */
-    bool more = !text && (s_turn.detached || s_turn.agent_busy);
+    bool more = !text && s_incoming_used && (s_turn.detached || s_turn.agent_busy);
     turn_done(true);
     if (more) {
         pending_arm();
@@ -2299,9 +2299,18 @@ static void handle(const cmd_t &cmd)
     case CMD_WAKE:   /* only ends hatch_task's resting wait */
         break;
     case CMD_INCOMING:
-        if (cmd.gen == s_gen.load()) {
-            incoming_play(cmd.gen);
+        if (cmd.gen != s_gen.load()) {
+            break;   /* a press came first: the rows stay held, offered again once idle */
         }
+        if (s_turn.phase != P_IDLE) {
+            /* A typed turn has the session: end the voice task's wait, and offer them after it. */
+            ev_t ev = {};
+            ev.type = MUSE_HATCH_EV_ERROR;
+            ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, pdMS_TO_TICKS(200));
+            break;
+        }
+        incoming_play(cmd.gen);
         break;
     }
 }
@@ -2374,6 +2383,9 @@ static void hatch_task(void *arg)
             continue;
         }
         check_turn();
+        if (s_turn.phase == P_IDLE && s_pending.replies) {
+            s_incoming = true;   /* held rows not played yet (a press or a typed turn came first) */
+        }
 
         int64_t t = now_us();
         pending_expire(t);
