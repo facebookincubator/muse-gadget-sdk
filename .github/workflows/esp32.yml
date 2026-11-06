@@ -165,9 +165,6 @@ jobs:
           - board: seeed-respeaker-xvf3800
             target: esp32s3
             overlays: ";devices/sdkconfig.seeed-respeaker-xvf3800"
-          - board: seeed-respeaker-flex
-            target: esp32s3
-            overlays: ";devices/sdkconfig.seeed-respeaker-flex"
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"

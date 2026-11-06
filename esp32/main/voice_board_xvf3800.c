@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-/* Experimental reSpeaker XVF3800/Flex with XIAO ESP32-S3.
- * Requires the product's 16 kHz, two-channel I2S-slave XMOS firmware.
+/* Experimental reSpeaker XVF3800 with pre-soldered XIAO ESP32-S3.
+ * Requires same-major 16 kHz, two-channel I2S-slave XMOS firmware >= 1.0.9.
+ * The vendor firmware retains ownership of XMOS reset and audio routing.
  * https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY
- * https://github.com/respeaker/reSpeaker_Flex
  */
 #include "voice_board.h"
 
@@ -28,12 +28,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#if !defined(CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800) && \
-    !defined(CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_FLEX)
-#error "voice_board_xvf3800.c requires one reSpeaker XVF3800-family board"
-#elif defined(CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800) && \
-    defined(CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_FLEX)
-#error "reSpeaker XVF3800 and Flex profiles are mutually exclusive"
+#ifndef CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800
+#error "voice_board_xvf3800.c requires CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800"
 #endif
 
 #define XVF_I2C_SDA 5
@@ -55,36 +51,9 @@
 #define XVF_CONTROL_RETRY_MS 10
 #define XVF_MIC_CHUNK_FRAMES 320
 #define XVF_PLAYBACK_CHUNK_FRAMES 32
-
-typedef enum { XVF_SLOT_LEFT = 0, XVF_SLOT_RIGHT = 1 } xvf_slot_t;
-typedef enum { XVF_MUTE_NONE, XVF_MUTE_X0D30_HIGH } xvf_mute_mode_t;
-typedef enum { XVF_AMP_XMOS_OWNED, XVF_AMP_X0D31_ACTIVE_LOW } xvf_amp_mode_t;
-
-typedef struct {
-    const char *product;
-    uint8_t min_version[3];
-    xvf_slot_t capture_slot;
-    xvf_mute_mode_t mute_mode;
-    xvf_amp_mode_t amp_mode;
-} xvf_profile_t;
-
-#if defined(CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800)
-static const xvf_profile_t s_profile = {
-    .product = "reSpeaker XVF3800",
-    .min_version = {1, 0, 9},
-    .capture_slot = XVF_SLOT_RIGHT,
-    .mute_mode = XVF_MUTE_X0D30_HIGH,
-    .amp_mode = XVF_AMP_X0D31_ACTIVE_LOW,
-};
-#else
-static const xvf_profile_t s_profile = {
-    .product = "reSpeaker Flex",
-    .min_version = {1, 0, 4},
-    .capture_slot = XVF_SLOT_LEFT,
-    .mute_mode = XVF_MUTE_NONE,
-    .amp_mode = XVF_AMP_XMOS_OWNED,
-};
-#endif
+#define XVF_MIN_VERSION_MAJOR 1
+#define XVF_MIN_VERSION_MINOR 0
+#define XVF_MIN_VERSION_PATCH 9
 
 static const char *TAG = "link.respeaker";
 static i2c_master_bus_handle_t s_bus;
@@ -147,7 +116,6 @@ static esp_err_t xmos_write(uint8_t resource, uint8_t command, const uint8_t *da
 }
 
 static esp_err_t amp_set(bool on) {
-    if (s_profile.amp_mode == XVF_AMP_XMOS_OWNED) return ESP_OK;
     uint8_t payload[] = {XVF_AMP_PIN, on ? 0 : 1};
     return xmos_write(XVF_GPO_RESOURCE, XVF_GPO_WRITE_COMMAND, payload, sizeof(payload));
 }
@@ -179,7 +147,6 @@ void voice_board_set_volume(int percent) {
 }
 
 bool voice_board_muted(void) {
-    if (s_profile.mute_mode == XVF_MUTE_NONE) return false;
     if (!s_ready) return true;
     uint8_t values[5];
     return xmos_read(XVF_GPO_RESOURCE, XVF_GPO_READ_COMMAND, values, sizeof(values)) != ESP_OK ||
@@ -219,7 +186,8 @@ size_t voice_board_mic_read(int16_t *pcm, size_t frames, int *peak) {
     size_t count = bytes / (2 * sizeof(int32_t));
     if (voice_board_muted()) return 0;
     for (size_t i = 0; i < count; i++) {
-        int16_t sample = (int16_t)(s_raw[2 * i + s_profile.capture_slot] >> 16);
+        /* The XVF3800's processed ASR stream is the right slot's high 16 bits. */
+        int16_t sample = (int16_t)(s_raw[2 * i + 1] >> 16);
         pcm[i] = sample;
         int magnitude = sample == INT16_MIN ? 32768 : sample < 0 ? -sample : sample;
         if (magnitude > *peak) *peak = magnitude;
@@ -253,11 +221,11 @@ esp_err_t voice_board_speaker_write(const int32_t *frames, size_t count) {
 }
 
 static bool version_supported(const uint8_t version[3]) {
-    if (version[0] != s_profile.min_version[0]) return false;
-    if (version[1] != s_profile.min_version[1]) {
-        return version[1] > s_profile.min_version[1];
+    if (version[0] != XVF_MIN_VERSION_MAJOR) return false;
+    if (version[1] != XVF_MIN_VERSION_MINOR) {
+        return version[1] > XVF_MIN_VERSION_MINOR;
     }
-    return version[2] >= s_profile.min_version[2];
+    return version[2] >= XVF_MIN_VERSION_PATCH;
 }
 
 esp_err_t voice_board_init(void) {
@@ -287,14 +255,14 @@ esp_err_t voice_board_init(void) {
     uint8_t version[3];
     err = xmos_read(XVF_VERSION_RESOURCE, XVF_VERSION_COMMAND, version, sizeof(version));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "%s VERSION: %s", s_profile.product, esp_err_to_name(err));
+        ESP_LOGE(TAG, "reSpeaker XVF3800 VERSION: %s", esp_err_to_name(err));
         return err;
     }
-    ESP_LOGI(TAG, "%s XMOS firmware %u.%u.%u", s_profile.product,
+    ESP_LOGI(TAG, "reSpeaker XVF3800 XMOS firmware %u.%u.%u",
              version[0], version[1], version[2]);
     if (!version_supported(version)) {
         ESP_LOGE(TAG, "requires same-major firmware >= %u.%u.%u",
-                 s_profile.min_version[0], s_profile.min_version[1], s_profile.min_version[2]);
+                 XVF_MIN_VERSION_MAJOR, XVF_MIN_VERSION_MINOR, XVF_MIN_VERSION_PATCH);
         return ESP_ERR_INVALID_RESPONSE;
     }
     err = amp_set(false);
@@ -322,6 +290,6 @@ esp_err_t voice_board_init(void) {
     if (err == ESP_OK) err = i2s_channel_enable(s_tx);
     if (err != ESP_OK) return err;
     s_ready = true;
-    ESP_LOGI(TAG, "%s audio ready; XIAO BOOT is push-to-talk", s_profile.product);
+    ESP_LOGI(TAG, "reSpeaker XVF3800 audio ready; XIAO BOOT is push-to-talk");
     return ESP_OK;
 }

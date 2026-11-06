@@ -17,13 +17,11 @@ PRODUCT_SOURCES = {
     "VOICE_PE": "voice_board.c",
     "RESPEAKER_LITE": "voice_board_respeaker_lite.c",
     "RESPEAKER_XVF3800": "voice_board_xvf3800.c",
-    "RESPEAKER_FLEX": "voice_board_xvf3800.c",
 }
 PRODUCT_STATUS = {
     "VOICE_PE": "VOICE_RING",
     "RESPEAKER_LITE": "RESPEAKER_LITE",
     "RESPEAKER_XVF3800": "NONE",
-    "RESPEAKER_FLEX": "NONE",
 }
 
 
@@ -85,8 +83,7 @@ class VoiceBoardSelectionTests(unittest.TestCase):
             ("RESPEAKER_LITE", "NONE"),
         ]
         cases += [
-            (product, status)
-            for product in ("RESPEAKER_XVF3800", "RESPEAKER_FLEX")
+            ("RESPEAKER_XVF3800", status)
             for status in (None, "VOICE_RING", "RESPEAKER_LITE")
         ]
         for product, status in cases:
@@ -165,7 +162,6 @@ class VoiceBoardSelectionTests(unittest.TestCase):
                 "home-assistant-voice",
                 "seeed-respeaker-lite",
                 "seeed-respeaker-xvf3800",
-                "seeed-respeaker-flex",
             ):
                 with self.subTest(board=board):
                     self.assertIn(board, usage.stdout)

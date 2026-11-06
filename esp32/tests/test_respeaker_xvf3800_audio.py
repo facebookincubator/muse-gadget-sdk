@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compile and exercise both reSpeaker XVF3800-family product profiles."""
+"""Compile and exercise the reSpeaker XVF3800 audio board."""
 
 import os
 from pathlib import Path
@@ -81,15 +81,6 @@ HARNESS = r'''
 #include "fake.h"
 #include <string.h>
 #include "voice_board.h"
-
-#ifndef CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800
-#define CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800 0
-#endif
-#ifndef CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_FLEX
-#define CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_FLEX 0
-#endif
-#define IS_XVF CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800
-#define BASE_PATCH (IS_XVF ? 9 : 4)
 
 typedef struct {
     int attempts, receives;
@@ -245,8 +236,7 @@ static void expect_init(void) {
     assert(mutex_create_calls == 1 && bus_new_calls == 1);
     assert(bus_add_calls == 2 && device_addresses[0] == 0x2c && device_addresses[1] == 0x18);
     assert(version_script.attempts >= 1 && !pending_receive && !locked);
-    assert(amp_attempts == (IS_XVF ? 1 : 0));
-    if (IS_XVF) assert(amp_values[0] == 1);
+    assert(amp_attempts == 1 && amp_values[0] == 1);
     assert(i2s_new_calls == 1 && i2s_mode_calls == 2);
     assert(tx_enable_calls == 1 && rx_enable_calls == 0 && rx_disable_calls == 0);
     assert(!voice_board_echo_cancelled() && voice_board_dial_steps() == 0);
@@ -266,7 +256,7 @@ static void expect_failed_safe(void) {
     voice_board_amp(true);
     voice_board_amp(false);
     voice_board_set_volume(50);
-    assert(voice_board_muted() == (IS_XVF != 0));
+    assert(voice_board_muted());
     assert(!voice_board_echo_cancelled() && voice_board_dial_steps() == 0);
     assert(version_script.attempts + gpo_script.attempts + amp_attempts == xmos_calls);
     assert(codec_calls == codec_before && write_calls == writes_before && !locked);
@@ -276,7 +266,7 @@ int main(int argc, char **argv) {
     assert(argc == 2);
     version_script.version[0] = 1;
     version_script.version[1] = 0;
-    version_script.version[2] = BASE_PATCH;
+    version_script.version[2] = 9;
     const char *scenario = argv[1];
     if (!strcmp(scenario, "init")) {
         expect_init();
@@ -325,7 +315,6 @@ int main(int argc, char **argv) {
         assert(voice_board_init() == ESP_ERR_NO_MEM && bus_add_calls == 0);
         expect_failed_safe();
     } else if (!strcmp(scenario, "amp_failure")) {
-        assert(IS_XVF);
         for (int i = 0; i < 16; i++) amp_errors[i] = ESP_FAIL;
         assert(voice_board_init() == ESP_FAIL && amp_attempts == 5 && i2s_new_calls == 0);
         expect_failed_safe();
@@ -342,7 +331,6 @@ int main(int argc, char **argv) {
         assert(voice_board_init() == ESP_FAIL && rx_enable_calls == 0);
         expect_failed_safe();
     } else if (!strcmp(scenario, "mute")) {
-        assert(IS_XVF);
         expect_init();
         gpo_values[0] = gpo_values[2] = gpo_values[3] = gpo_values[4] = 1;
         assert(!voice_board_muted());
@@ -358,18 +346,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 16; i++) { gpo_script.rx_errors[i] = 0; gpo_script.status[i] = 1; }
         before = gpo_script.attempts;
         assert(voice_board_muted() && gpo_script.attempts == before + 1 && !locked);
-    } else if (!strcmp(scenario, "flex_mute_amp")) {
-        assert(!IS_XVF);
-        expect_init();
-        int gpo_before = gpo_script.attempts;
-        int amp_before = amp_attempts;
-        for (int i = 0; i < 3; i++) {
-            assert(!voice_board_muted());
-            voice_board_amp(i & 1);
-        }
-        assert(gpo_script.attempts == gpo_before && amp_attempts == amp_before);
     } else if (!strcmp(scenario, "amp")) {
-        assert(IS_XVF);
         expect_init();
         voice_board_amp(true);
         voice_board_amp(false);
@@ -384,13 +361,8 @@ int main(int argc, char **argv) {
         assert(voice_board_mic_start() == ESP_OK && rx_enable_calls == 1);
         int gpo_before = gpo_script.attempts;
         assert(voice_board_mic_read(pcm, 324, &peak) == 320 && peak == 32768);
-        if (IS_XVF) {
-            assert(pcm[0] == 32767 && pcm[1] == INT16_MIN && pcm[2] == 2 && pcm[3] == 0);
-            assert(gpo_script.attempts == gpo_before + 1);
-        } else {
-            assert(pcm[0] == 0x1111 && pcm[1] == INT16_MIN && pcm[2] == 1 && pcm[3] == -1);
-            assert(gpo_script.attempts == gpo_before);
-        }
+        assert(pcm[0] == 32767 && pcm[1] == INT16_MIN && pcm[2] == 2 && pcm[3] == 0);
+        assert(gpo_script.attempts == gpo_before + 1);
         for (int i = 320; i < 324; i++) assert(pcm[i] == 42);
         voice_board_mic_stop();
         voice_board_mic_stop();
@@ -406,7 +378,6 @@ int main(int argc, char **argv) {
         assert(voice_board_mic_read(pcm, 4, &peak) == 0 && peak == 0);
         assert(gpo_script.attempts == gpo_before);
     } else if (!strcmp(scenario, "capture_muted")) {
-        assert(IS_XVF);
         expect_init();
         assert(voice_board_mic_start() == ESP_OK);
         expect_post_capture = 1;
@@ -487,10 +458,7 @@ COMMON_SCENARIOS = (
     "speaker",
     "volume",
 )
-PRODUCT_SCENARIOS = {
-    "xvf3800": COMMON_SCENARIOS + ("amp_failure", "amp", "mute", "capture_muted"),
-    "flex": COMMON_SCENARIOS + ("flex_mute_amp",),
-}
+SCENARIOS = COMMON_SCENARIOS + ("amp_failure", "amp", "mute", "capture_muted")
 
 
 class RespeakerXvf3800AudioTests(unittest.TestCase):
@@ -514,74 +482,63 @@ class RespeakerXvf3800AudioTests(unittest.TestCase):
             path.write_text('#include "fake.h"\n')
         (tmp / "test.c").write_text(HARNESS)
         cls.tmp = tmp
-        cls.executables = {}
-        for product, symbol in (
-            ("xvf3800", "CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800"),
-            ("flex", "CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_FLEX"),
-        ):
-            exe = tmp / f"test-{product}"
-            result = subprocess.run(
-                shlex.split(os.environ.get("CC", "cc"))
-                + [
-                    "-std=c11",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    f"-D{symbol}=1",
-                    "-I",
-                    str(tmp),
-                    "-I",
-                    str(ROOT / "main"),
-                    str(ROOT / "main" / "voice_board_xvf3800.c"),
-                    str(tmp / "test.c"),
-                    "-o",
-                    str(exe),
-                ],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode:
-                raise RuntimeError(result.stdout + result.stderr)
-            cls.executables[product] = exe
-
-    def run_scenario(self, product, scenario):
+        cls.executable = tmp / "test-xvf3800"
         result = subprocess.run(
-            [str(self.executables[product]), scenario],
+            shlex.split(os.environ.get("CC", "cc"))
+            + [
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-DCONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800=1",
+                "-I",
+                str(tmp),
+                "-I",
+                str(ROOT / "main"),
+                str(ROOT / "main" / "voice_board_xvf3800.c"),
+                str(tmp / "test.c"),
+                "-o",
+                str(cls.executable),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    def run_scenario(self, scenario):
+        result = subprocess.run(
+            [str(self.executable), scenario],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        self.assertEqual(result.returncode, 0, f"{product}/{scenario}\n{result.stdout}{result.stderr}")
+        self.assertEqual(result.returncode, 0, f"XVF3800/{scenario}\n{result.stdout}{result.stderr}")
 
     def test_initialization_version_retry_and_pcm_behavior(self):
-        for product, scenarios in PRODUCT_SCENARIOS.items():
-            for scenario in scenarios:
-                with self.subTest(product=product, scenario=scenario):
-                    self.run_scenario(product, scenario)
+        for scenario in SCENARIOS:
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
 
-    def test_compile_time_profile_guards(self):
-        for symbols in ((), ("CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800=1",
-                             "CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_FLEX=1")):
-            with self.subTest(symbols=symbols):
-                result = subprocess.run(
-                    shlex.split(os.environ.get("CC", "cc"))
-                    + ["-std=c11", "-Wall", "-Wextra", "-Werror"]
-                    + [f"-D{symbol}" for symbol in symbols]
-                    + [
-                        "-I",
-                        str(self.tmp),
-                        "-I",
-                        str(ROOT / "main"),
-                        "-c",
-                        str(ROOT / "main" / "voice_board_xvf3800.c"),
-                        "-o",
-                        str(self.tmp / "guard.o"),
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("reSpeaker", result.stderr)
+    def test_compile_time_profile_guard(self):
+        result = subprocess.run(
+            shlex.split(os.environ.get("CC", "cc"))
+            + ["-std=c11", "-Wall", "-Wextra", "-Werror"]
+            + [
+                "-I",
+                str(self.tmp),
+                "-I",
+                str(ROOT / "main"),
+                "-c",
+                str(ROOT / "main" / "voice_board_xvf3800.c"),
+                "-o",
+                str(self.tmp / "guard.o"),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("requires CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800", result.stderr)
 
 
 if __name__ == "__main__":

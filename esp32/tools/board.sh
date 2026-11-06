@@ -32,8 +32,6 @@
 #              reSpeaker Lite with XIAO ESP32-S3 (experimental voice profile)
 #   seeed-respeaker-xvf3800
 #              reSpeaker XVF3800 with XIAO ESP32-S3 (experimental voice)
-#   seeed-respeaker-flex
-#              reSpeaker Flex with XIAO ESP32-S3 (experimental voice)
 #   reterminal-e1001
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
 #   reterminal-e1002
@@ -56,7 +54,7 @@
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,54p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,52p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -111,7 +109,7 @@ case "$BOARD" in
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB* /dev/cu.usbmodem* /dev/ttyACM*"
     ;;
-  home-assistant-voice|seeed-respeaker-lite|seeed-respeaker-xvf3800|seeed-respeaker-flex)
+  home-assistant-voice|seeed-respeaker-lite|seeed-respeaker-xvf3800)
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # The S3's own USB-Serial-JTAG, which looks like a DevKitC-1's; check

@@ -564,9 +564,6 @@ menu "ESP32 Device SDK"
             bool "Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental)"
             depends on IDF_TARGET_ESP32S3
 
-        config HOMEHUB_VOICE_BOARD_RESPEAKER_FLEX
-            bool "Seeed reSpeaker Flex with XIAO ESP32-S3 (experimental)"
-            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config HOMEHUB_SENSECAP_SENSORS
