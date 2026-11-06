@@ -959,7 +959,8 @@ static void ui_task(void *arg)
             if (!s_settings && !s_image_shown) {
                 float mode_t;
                 muse_state_mode(&mode_t);
-                muse_pose_t pose = {s_face.mode, now, mode_t, s_level, muse_state_happiness()};
+                muse_pose_t pose = {.mode = s_face.mode, .t = now, .mode_t = mode_t,
+                                    .level = s_level, .happy = muse_state_happiness(), .working = 0};
                 muse_pixel_render(&pose);
                 render_art(s_face.answering ? s_read.px : s_canvas_px);
                 redraw = true;
