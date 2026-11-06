@@ -360,10 +360,15 @@ class Service:
             except (OSError, asyncio.TimeoutError):
                 pass
         finally:
+            # Bounded, as in send_and_wait: a stalled transport can delay
+            # closing the upstream stream, but not the local client.
+            writer.close()
             for task in tasks:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            writer.close()
+                task.add_done_callback(_retrieve)
+            pending = [task for task in tasks if not task.done()]
+            if pending:
+                await asyncio.wait(pending, timeout=CLEANUP_S)
 
     async def _local_request(self, line: bytes) -> dict:
         request = json.loads(line)

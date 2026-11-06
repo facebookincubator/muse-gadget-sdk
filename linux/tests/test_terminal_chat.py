@@ -744,3 +744,66 @@ def test_ctrl_c_cancels_the_chat_so_cleanup_runs(monkeypatch):
         asyncio.run(asyncio.wait_for(terminal_chat.run_until_interrupted("side"), 3))
     assert cleaned == ["side"]
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+
+def test_subscription_cleanup_is_bounded_when_the_upstream_close_stalls(monkeypatch):
+    from musegadget import service as service_module
+    monkeypatch.setattr(service_module, "CLEANUP_S", 0.1)
+
+    async def scenario():
+        service = Service(Identity("02:00:00:00:00:01"), Executor(Account.current()))
+        release = asyncio.Event()
+
+        class Session:
+            registered_at = 1
+
+            async def subscribe_chat(self, session_id, *, opened):
+                opened.set()
+                try:
+                    await asyncio.Event().wait()
+                    yield {}
+                finally:
+                    # Like a reset waiting out a stalled transport write.
+                    while not release.is_set():
+                        try:
+                            await asyncio.shield(release.wait())
+                        except asyncio.CancelledError:
+                            pass
+
+        class Writer:
+            records = []
+            was_closed = False
+
+            def write(self, raw):
+                self.records.append(json.loads(raw))
+
+            async def drain(self):
+                pass
+
+            def close(self):
+                self.was_closed = True
+
+        service._current = Session()
+        reader, writer = asyncio.StreamReader(), Writer()
+        handler = asyncio.create_task(service._local_subscribe({}, reader, writer))
+        while not writer.records:
+            await asyncio.sleep(0.01)
+        reader.feed_eof()  # The local client disconnects.
+        try:
+            await asyncio.wait({handler}, timeout=1)
+            assert handler.done() and writer.was_closed
+        finally:
+            release.set()
+            await asyncio.wait({handler}, timeout=1)
+    asyncio.run(scenario())
+
+
+def test_chat_errors_from_muse_cannot_reach_the_terminal_raw(monkeypatch, capsys):
+    async def chat(session_id):
+        raise ConnectionError("stream reset: \x1b]52;c;b3duZWQ=\x07")
+
+    monkeypatch.setattr(terminal_chat, "run_chat", chat)
+    assert terminal_chat.command(type("Args", (), {"session_id": None})()) == 1
+    err = capsys.readouterr().err
+    assert "\x1b" not in err and "\x07" not in err
+    assert "]52;c;b3duZWQ=" in err

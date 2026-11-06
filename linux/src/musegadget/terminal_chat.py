@@ -25,7 +25,7 @@ import sys
 import time
 
 from musegadget import config
-from musegadget.link_client import acknowledgement
+from musegadget.link_client import acknowledgement, printable
 from musegadget.muse_turn import (AgentStatus, MuseTurn, Reply, _acknowledged_message_ids,
                                  _strip_controls, _update_reply)
 from musegadget.terminal_chat_ui import PlainDisplay, TerminalDisplay
@@ -410,6 +410,7 @@ def command(args):
         print()
         return 0
     except (OSError, ValueError, asyncio.TimeoutError) as exc:
-        print(f"Could not continue Muse chat: {exc}", file=sys.stderr)
+        # The text can come from Muse (a stream reset reason): keep controls out.
+        print(f"Could not continue Muse chat: {printable(str(exc))}", file=sys.stderr)
         return 1
     return 0
