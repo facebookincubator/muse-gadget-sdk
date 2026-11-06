@@ -170,6 +170,10 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD19
             bool "Waveshare ESP32-S3-Touch-LCD-1.9 (170x320 SH8601, one button)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_LCD_35
+            bool "Waveshare ESP32-S3-Touch-LCD-3.5 (ESP32-S3, 480x320 touch LCD, ES8311 speaker and mic)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -219,6 +223,7 @@ menu "Muse"
         default "viewe_smartring_plus" if MUSE_BOARD_VIEWE_SMARTRING_PLUS
         default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
         default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+        default "waveshare_s3_lcd_35" if MUSE_BOARD_WAVESHARE_S3_LCD_35
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
