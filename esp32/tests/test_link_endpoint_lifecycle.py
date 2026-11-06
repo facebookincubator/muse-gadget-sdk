@@ -124,8 +124,9 @@ static bool config_clear_pairing(void) {
     return true;
 }
 static bool config_unpair(void) {
+    if (!config_clear_pairing()) return false;
     complete = false;
-    return config_clear_pairing();
+    return true;
 }
 typedef enum { SETUP_RESET_KEEP_WIFI, SETUP_RESET_FORGET_WIFI } setup_reset_scope_t;
 static bool clear_setup_credentials(setup_reset_scope_t scope) {

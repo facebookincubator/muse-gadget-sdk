@@ -154,6 +154,8 @@ static int64_t s_last_vm_auth_refresh_attempt_us = 0;
 // stamps that just before its worker refreshes, so a shared stamp would make
 // every scheduled refresh find the backoff active and skip itself.
 static int64_t s_last_vm_auth_refusal_us = 0;
+// When a Link heartbeat last retried a paired device's missing VM session.
+static int64_t s_last_link_session_retry_us = 0;
 // Uptime of the last proactive-refresh attempt. 0 = none this boot, so the
 // first one falls due once uptime alone exceeds the interval.
 static int64_t s_last_periodic_token_refresh_us = 0;
@@ -3009,9 +3011,15 @@ void app_run(void) {
 #else
         // Paired, but with no VM session: the boot attempt failed (a refusal
         // that keeps the credentials, or the network). Nothing else retries
-        // it; the scheduler's floor and the refusal backoff pace this.
+        // it. It keeps its own floor: a fetch that succeeds without starting a
+        // session (an empty VM list) clears the scheduler's. The refusal
+        // backoff still paces the refreshes.
+        int64_t now_us = esp_timer_get_time();
         if (!noise_ctrl_is_running() && wifi_mgr_is_connected()
-            && config_is_provisioned() && config_setup_complete()) {
+            && config_is_provisioned() && config_setup_complete()
+            && now_us - s_last_link_session_retry_us
+                   >= VM_AUTH_REFRESH_RETRY_INTERVAL_US) {
+            s_last_link_session_retry_us = now_us;
             schedule_vm_auth_refresh();
         }
 #endif

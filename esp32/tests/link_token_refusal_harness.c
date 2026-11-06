@@ -201,6 +201,7 @@ static void noise_ctrl_set_host(const char *host) {
 // mint), VM_API_ERR_AUTH (a 403 on them, or a 401/403 from fetch_vms), or
 // VM_API_ERR_FAILED (network or 5xx).
 static int s_fetch_rc, s_refresh_rc, s_mint_rc;
+static int s_fetch_vm_count = 1;  // VMs a successful fetch lists
 static int s_fetches, s_refreshes, s_mints, s_connects;
 static const char *s_issued_access = "access-2";
 static const char *s_issued_refresh = "refresh-2";
@@ -217,6 +218,7 @@ int vm_api_fetch_vms(const char *access, vm_info_t *out, int max) {
     (void)access;
     s_fetches++;
     if (s_fetch_rc != 0) return s_fetch_rc;
+    if (s_fetch_vm_count == 0) return 0;
     CHECK(max > 0, "fetch max");
     memset(out, 0, sizeof(*out));
     out->vm_url = s_vm_url;
@@ -271,6 +273,7 @@ void vm_device_tokens_free(vm_device_tokens_t *tokens) {
 static SemaphoreHandle_t s_auth_lock = NULL;
 static int64_t s_last_vm_auth_refresh_attempt_us = 0;
 static int64_t s_last_vm_auth_refusal_us = 0;
+static int64_t s_last_link_session_retry_us = 0;
 static int64_t s_last_periodic_token_refresh_us = 0;
 static int64_t s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
 static uint8_t s_vm_auth_refusals = 0;
@@ -334,6 +337,8 @@ static void paired_device(void) {
     nvs_put("username", "user");
     nvs_put("setup_complete", "1");
     s_fetch_rc = s_refresh_rc = s_mint_rc = 0;
+    s_fetch_vm_count = 1;
+    s_last_link_session_retry_us = 0;
     s_ble_connected = s_gate_busy = s_task_create_fails = false;
     s_noise_running = true;
     s_issued_access = "access-2";
@@ -602,15 +607,27 @@ static void link_heartbeat_retries_a_disconnected_pairing(void) {
 #else
     CHECK(s_tasks_started == 1 && s_fetches == 1, "heartbeat retry: tasks=%d fetches=%d",
           s_tasks_started, s_fetches);
+    // A fetch that succeeds but lists no VM accepts the credentials, which
+    // clears the scheduler's floor: the retry keeps its own.
     s_now += VM_AUTH_REFRESH_RETRY_INTERVAL_US;
     s_fetch_rc = 0;
+    s_fetch_vm_count = 0;
     app_tick();
-    CHECK(s_tasks_started == 2 && s_connects == 1, "heartbeat retry did not reconnect");
+    CHECK(s_tasks_started == 2 && s_fetches == 2 && s_connects == 0, "empty list retry");
+    for (int i = 0; i < 6; i++) {
+        s_now += 5 * 1000000LL;
+        app_tick();
+    }
+    CHECK(s_fetches == 2, "heartbeat refetched every tick after an empty list: %d", s_fetches);
+    s_now += VM_AUTH_REFRESH_RETRY_INTERVAL_US;
+    s_fetch_vm_count = 1;
+    app_tick();
+    CHECK(s_tasks_started == 3 && s_connects == 1, "heartbeat retry did not reconnect");
     // Not while unpaired: nothing to retry.
     CHECK(clear_setup_credentials(SETUP_RESET_KEEP_WIFI), "unpair");
     s_now += VM_AUTH_REFRESH_RETRY_INTERVAL_US;
     app_tick();
-    CHECK(s_tasks_started == 2, "heartbeat retried an unpaired device");
+    CHECK(s_tasks_started == 3, "heartbeat retried an unpaired device");
 #endif
 }
 
