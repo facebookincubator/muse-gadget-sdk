@@ -564,6 +564,24 @@ static void played_messages_are_not_replayed() {
     event("message.assistant", "second", "note", "Done now");
     assert(!s_incoming && !s_pending.replies);
 }
+static void held_rows_outlive_a_newer_request() {
+    detach();   /* request A: its reply is held, then a press comes first */
+    event("message.assistant", "a1", "note", "A's answer");
+    assert(s_pending.replies);
+    begin();   /* request B, which Muse is also still working on */
+    strlcpy(s_turn.user_ids[0], "b", sizeof(s_turn.user_ids[0]));
+    strlcpy(s_turn.user_ids[1], "b", sizeof(s_turn.user_ids[1]));
+    status("working");
+    clock_us += DETACH_US + 1;
+    check_turn();
+    settle();
+    assert(s_pending.active && !strcmp(s_pending.ids[0], "b") && s_pending.replies);
+    event("message.assistant", "b1", "b", "B's answer");
+    event("message.assistant", "a2", "note", "Not A's any more");   /* A is no longer remembered */
+    incoming_play(s_turn.gen + 1);
+    assert(s_turn.nmsgs == 2 && !strcmp(s_turn.msgs[0].id, "a1") && !strcmp(s_turn.msgs[1].id, "b1"));
+    assert(!strcmp(s_turn.user_ids[0], "b") && !strcmp(s_turn.user_ids[1], "b"));
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
@@ -591,6 +609,7 @@ int main(int argc, char **argv) {
     case 24: late_reply_matched_by_its_request(); break;
     case 25: pending_is_forgotten(); break;
     case 26: played_messages_are_not_replayed(); break;
+    case 27: held_rows_outlive_a_newer_request(); break;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -717,3 +736,6 @@ int main(int argc, char **argv) {
 
     def test_messages_the_turn_played_are_not_announced_again(self):
         self.run_case(26)
+
+    def test_held_rows_still_play_after_a_newer_request_is_remembered(self):
+        self.run_case(27)

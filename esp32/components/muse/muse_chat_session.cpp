@@ -1689,10 +1689,15 @@ static void incoming_play(uint32_t gen)
     s_turn.agent_busy = s_pending.busy;
     s_turn.chat_us = s_turn.last_event_us = now_us();
     s_pending.active = false;   /* delivered; the turn arms it again if Muse is still working */
+    /* Each row was matched to its request when held, which may be an earlier one
+     * than s_pending's now (a press came first): bind it under that request. */
     cJSON *row;
     cJSON_ArrayForEach(row, replies) {
+        const char *parent = cJSON_GetStringValue(cJSON_GetObjectItem(row, "reply_to_message_id"));
+        strlcpy(s_turn.user_ids[1], parent ? parent : "", sizeof(s_turn.user_ids[1]));
         on_message("message.assistant", row, nullptr);
     }
+    memcpy(s_turn.user_ids, s_pending.ids, sizeof(s_turn.user_ids));
     cJSON_Delete(replies);
     if (!s_turn.nmsgs) {
         turn_done(true);   /* forgotten meanwhile: the voice task still needs the end */
