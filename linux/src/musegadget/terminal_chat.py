@@ -210,10 +210,17 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
             status = text
             display.status(text)
 
+    def stop_tracking(text):
+        # The turn only drives the status line; losing it never ends the chat.
+        nonlocal turn
+        turn = None
+        show_status(text)
+
     def progress(events):
         for item in events:
             if isinstance(item, AgentStatus):
-                text = " ".join((item.activity_text or item.activity_code or "Working").split())
+                text = _strip_controls(item.activity_text or item.activity_code or "Working")
+                text = " ".join(text.split())
                 show_status("Muse: " + text[:200])
 
     try:
@@ -250,7 +257,10 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                     view.current = None
                     display.user(text)
                 if turn is not None:
-                    progress(turn.feed(event))
+                    try:
+                        progress(turn.feed(event))
+                    except ValueError:
+                        stop_tracking("Lost track of Muse's progress; replies will appear as they arrive")
                 rendered = view.feed(event)
                 if rendered:
                     if turn is not None:
@@ -269,6 +279,7 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                         turn.expect_follow_up()
                     else:
                         turn = MuseTurn(session_id)
+                    current = turn
                     started = time.monotonic()
                     unconfirmed = True
                     response = await asyncio.wait_for(_send(path, message, session_id), 90)
@@ -278,9 +289,14 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                         view.current = None
                         display.user(text)
                     show_status("Waiting for Muse…")
-                    progress(turn.acknowledge(response, follow_up=follow_up))
-                    view.session_id = turn.session_id
-                    users.session_id = turn.session_id
+                    if turn is current:
+                        try:
+                            progress(current.acknowledge(response, follow_up=follow_up))
+                        except ValueError:
+                            stop_tracking("Lost track of Muse's progress; replies will appear as they arrive")
+                        else:
+                            view.session_id = current.session_id
+                            users.session_id = current.session_id
                 finally:
                     for text in users.finish_send():
                         view.current = None
@@ -324,8 +340,7 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                     if not sending and time.monotonic() - started > TURN_TIMEOUT:
                         # Stop tracking progress, but keep the chat open:
                         # replies still appear whenever they arrive.
-                        turn = None
-                        show_status("Still no sign Muse finished; replies will appear as they arrive")
+                        stop_tracking("Still no sign Muse finished; replies will appear as they arrive")
                         continue
                     if not sending and messages.empty() and turn.complete(time.monotonic()):
                         turn = None

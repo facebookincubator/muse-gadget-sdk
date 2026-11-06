@@ -282,6 +282,21 @@ musegadget send-user-msg --session-id 6f1c2d4e-0b7a-4c3e-9f5d-2a8b1e0c7d93 "Post
 musegadget send-user-msg --image porch.jpg "Who is at the door?"
 ```
 
+`--image` attaches a JPEG, PNG, GIF or WebP picture of at most 2 MiB for
+Muse to look at.
+
+`--wait SECONDS` (1 to 600) waits that long for Muse's answer and prints it.
+It exits with status 3 if no answer came in time, or if Muse was still
+answering (what arrived is printed). On the main chat, Muse's replies don't
+name the message they answer, so an answer to something sent there at the same
+moment, from the Muse app say, can be taken for this one. With `--session-id`
+the answer comes from that side chat only.
+
+`--session-id` posts into a side chat: a new id starts one, and reusing it
+keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_ring_bridge.py)
+is a complete example: a webhook listener that sends every note from a Pebble
+ring to its own Muse chat.
+
 For an interactive text conversation in your terminal:
 
 ```sh
@@ -322,26 +337,11 @@ text, with progress printed as lines and corrections labeled when necessary.
 Update the installed package and restart the service once to enable terminal
 chat. Restarting interrupts running device commands, so check the service log
 for recent `invoke` lines first. Socket access is limited to root and the
-configured command account's group. Connection loss ends terminal chat; run
-it again to reconnect. Messages are never automatically resent. This version
+configured command account's group. Connection loss or a refused send ends
+terminal chat; run it again to reconnect. Messages are never automatically resent. This version
 shows subscription events without fetching chat history, and supports text
 only. `--session-id` selects an existing side chat; use `send-user-msg` first
 if you need to create one.
-
-`--image` attaches a JPEG, PNG, GIF or WebP picture of at most 2 MiB for
-Muse to look at.
-
-`--wait SECONDS` (1 to 600) waits that long for Muse's answer and prints it.
-It exits with status 3 if no answer came in time, or if Muse was still
-answering (what arrived is printed). On the main chat, Muse's replies don't
-name the message they answer, so an answer to something sent there at the same
-moment, from the Muse app say, can be taken for this one. With `--session-id`
-the answer comes from that side chat only.
-
-`--session-id` posts into a side chat: a new id starts one, and reusing it
-keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_ring_bridge.py)
-is a complete example: a webhook listener that sends every note from a Pebble
-ring to its own Muse chat.
 
 A few other ways to build on it:
 

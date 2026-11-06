@@ -75,8 +75,14 @@ class PlainDisplay:
     def __init__(self, output):
         self.output = output
         self.at_start = True
+        self.interrupted = False
 
     def write(self, text):
+        self._write(text)
+        # A later reply chunk must not continue unlabeled after this line.
+        self.interrupted = True
+
+    def _write(self, text):
         if text.startswith("\n") and self.at_start:
             text = text[1:]
         self.output.write(text)
@@ -91,7 +97,10 @@ class PlainDisplay:
         self.write("\nUser: " + text + "\n")
 
     def reply(self, reply, rendered):
-        self.write(rendered)
+        if self.interrupted and rendered and not rendered.startswith("\n"):
+            rendered = "\nMuse: " + reply.text + ("\n" if rendered.endswith("\n") else "")
+        self.interrupted = False
+        self._write(rendered)
 
     def clear(self):
         if self.output.isatty() and os.environ.get("TERM", "dumb") != "dumb":

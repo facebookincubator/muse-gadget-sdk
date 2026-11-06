@@ -595,3 +595,120 @@ def test_unfinished_turn_stops_tracking_but_keeps_the_chat_open(monkeypatch):
     async def bounded_check(service, path):
         await asyncio.wait_for(check(service, path), 5)
     run_with_socket(bounded_check)
+
+
+def test_other_commands_never_load_the_terminal_ui():
+    import subprocess
+    import sys
+    code = ("import sys\n"
+            "from musegadget import cli\n"
+            "try:\n"
+            "    cli.main(['--help'])\n"
+            "except SystemExit:\n"
+            "    pass\n"
+            "assert 'curses' not in sys.modules, 'curses loaded'\n"
+            "assert 'musegadget.terminal_chat' not in sys.modules\n")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def _scripted_chat(monkeypatch, path, send):
+    events, ready = asyncio.Queue(), asyncio.Event()
+
+    class Session:
+        registered_at = 1
+
+        async def subscribe_chat(self, session_id, *, opened):
+            opened.set()
+            ready.set()
+            while True:
+                yield await events.get()
+
+    monkeypatch.setenv(config.SOCKET_ENV, str(path))
+    monkeypatch.setattr(terminal_chat, "_send", send)
+    return Session(), events, ready
+
+
+def test_plain_output_strips_status_controls_and_relabels_interrupted_replies(monkeypatch):
+    async def check(service, path):
+        async def send(*args):
+            return {"message_id": "u1", "session_id": "chat"}
+
+        service._current, events, ready = _scripted_chat(monkeypatch, path, send)
+        stdin, output = asyncio.StreamReader(), io.StringIO()
+        client = asyncio.create_task(run_chat(input_reader=stdin, output=output))
+
+        async def wait_text(text):
+            while text not in output.getvalue():
+                assert not client.done(), output.getvalue()
+                await asyncio.sleep(0.01)
+
+        try:
+            await ready.wait()
+            stdin.feed_data(b"hi\n")
+            await wait_text("Waiting for Muse")
+            await events.put(event("delta.text_append", "r1", parent="u1", text="Hello"))
+            await wait_text("Muse: Hello")
+            # A status code with no text, carrying a clipboard-writing escape.
+            await events.put(event("agent.status", parent="u1",
+                                   activity_code="\x1b]52;c;b3duZWQ=\x07"))
+            await wait_text("]52;c;b3duZWQ=")
+            await events.put(event("delta.text_append", "r1", parent="u1", text=" world"))
+            await wait_text("Muse: Hello world")
+            stdin.feed_data(b"/quit\n")
+            await client
+            assert "\x1b" not in output.getvalue() and "\x07" not in output.getvalue()
+        finally:
+            client.cancel()
+            await asyncio.gather(client, return_exceptions=True)
+
+    async def bounded_check(service, path):
+        await asyncio.wait_for(check(service, path), 5)
+    run_with_socket(bounded_check)
+
+
+def test_streaming_during_an_unacknowledged_follow_up_keeps_the_chat_open(monkeypatch):
+    async def check(service, path):
+        release = asyncio.Event()
+        sends = []
+
+        async def send(path, message, session_id):
+            sends.append(message)
+            if len(sends) == 2:
+                await release.wait()
+            return {"message_id": "u" + str(len(sends)), "session_id": "chat"}
+
+        service._current, events, ready = _scripted_chat(monkeypatch, path, send)
+        stdin, output = asyncio.StreamReader(), io.StringIO()
+        client = asyncio.create_task(run_chat(input_reader=stdin, output=output))
+
+        async def wait_text(text):
+            while text not in output.getvalue():
+                assert not client.done(), output.getvalue()
+                await asyncio.sleep(0.01)
+
+        try:
+            await ready.wait()
+            stdin.feed_data(b"first\n")
+            await events.put(event("delta.text_append", "r1", parent="u1", text="a"))
+            await wait_text("Muse: a")
+            stdin.feed_data(b"second\n")
+            while len(sends) < 2:
+                await asyncio.sleep(0.01)
+            # More streamed chunks than the turn holds before an acknowledgement.
+            for _ in range(80):
+                await events.put(event("delta.text_append", "r1", parent="u1", text="b"))
+            await wait_text("a" + "b" * 80)
+            release.set()
+            await events.put(event("delta.message_done", "r2", parent="u2", content="Second answer"))
+            await wait_text("Second answer")
+            assert not client.done()
+            stdin.feed_data(b"/quit\n")
+            await client
+        finally:
+            client.cancel()
+            await asyncio.gather(client, return_exceptions=True)
+
+    async def bounded_check(service, path):
+        await asyncio.wait_for(check(service, path), 5)
+    run_with_socket(bounded_check)
