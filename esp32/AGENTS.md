@@ -65,6 +65,7 @@ before adding a feature to one.
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19` | `tools/muse/board.sh build lcd19` |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216` | `tools/muse/board.sh build s3-216` |
+| Waveshare ESP32-S3-Touch-AMOLED-1.32 (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-132` | `tools/muse/board.sh build s3-132` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-143c` | `tools/muse/board.sh build 143c` |
 | Espressif ESP-Mosaico (experimental; ESP-IDF master, see `devices/README.md`) | `esp32s31` | `devices/sdkconfig.muse;devices/sdkconfig.muse-esp-mosaico;devices/sdkconfig.muse-esp-mosaico-iris` | `tools/muse/board.sh build mosaico` |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-206` | `tools/muse/board.sh build s3-206` |
@@ -168,7 +169,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-132|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -203,7 +204,7 @@ arguments, except on the SenseCAP Watcher: `idf.py flash` runs plain esptool,
 which fails on its USB bridge (see "Flash it"). Build the Watcher with
 `idf.py`, flash it with `tools/muse/board.sh flash watcher`, then
 `idf.py … -p PORT monitor` as usual; reading from the bridge works. Muse builds use `partitions_muse.csv` and need 16 MB of flash or
-more, except the StickS3, StickC Plus2, Cardputer ADV, AI Passport and Waveshare 1.43C, which have 8 MB and use
+more, except the Waveshare S3 1.32, StickS3, StickC Plus2, Cardputer ADV, AI Passport and Waveshare 1.43C, which have 8 MB and use
 `partitions_muse_8mb.csv`.
 
 On the Watcher, rotation opens and pages through the latest reply. A short
@@ -302,6 +303,7 @@ flash size and status backend.
    | `front` | M5Stack StickS3, or StickC Plus2 — tell them apart by the port: the StickS3 is native USB, the Plus2 is a CH9102 `usbserial` |
    | `top` | Waveshare ESP32-S3-Touch-AMOLED-1.75C |
    | `key` | Waveshare ESP32-S3-Touch-AMOLED-2.16 |
+   | `pwr` | Waveshare ESP32-S3-Touch-AMOLED-1.32 (experimental) |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
    | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the Waveshare ESP32-S3-Touch-LCD-3.49, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee, the Waveshare ESP32-S3-Touch-LCD-1.9 or the SpotPear ESP32-AI-1.28 v1.0 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
@@ -441,6 +443,9 @@ its animation (`jollybot.gif`, and `happy_anim.c/.h` made from it by
 Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `main/pixel_font.c` (BSD-2-Clause, Adafruit),
 `components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
+`components/muse/boards/waveshare_s3_132_display_init.h` (Apache-2.0, Waveshare
+BSP v1.0.1; fixed source and local changes in its header, license in the
+adjacent `waveshare_s3_132_display_init.LICENSE`),
 `components/muse/boards/viewe_smartring_display_init.h` (Apache-2.0, VIEWE),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
@@ -662,7 +667,7 @@ draws it full screen. `../protocols/VIDEO.md` has
 the design, the Wi-Fi protocol and the numbers.
 
 - **Boards:** those whose panel driver has `draw_frame` and that have PSRAM:
-  the Waveshare S3 1.75C (tested) and 1.75, the StopWatch and the
+  the Waveshare S3 1.75C (tested) and 1.75, the experimental 1.32 (not built with video), the StopWatch and the
   ESP-Mosaico. Another QSPI AMOLED driven by `boards/muse_lcd_bands.c` gets
   it with `.draw_frame = muse_lcd_bands_frame` and its panel gap
   (`muse_lcd_bands_set_gap`); `muse_lcd_bands_set_te` if the TE line is wired.

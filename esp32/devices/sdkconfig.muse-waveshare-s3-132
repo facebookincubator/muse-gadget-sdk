@@ -1,0 +1,60 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-S3-Touch-AMOLED-1.32: ESP32-S3-PICO-1-N8R8,
+# 8 MB flash, 8 MB octal PSRAM, native USB.
+# Load last, after sdkconfig.muse.
+# Source: waveshareteam/ESP32-S3-Touch-AMOLED-1.32 at b3d6546,
+# Example/ESP-IDF/07_LVGL_V9_Test/sdkconfig.defaults (QIO, octal PSRAM),
+# and 05_Audio_Test/components/button_bsp (BOOT GPIO0, PWR GPIO17).
+
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_BOARD_WAVESHARE_S3_132=y
+# Muse's full UI uses its board buttons; keep the fallback on the real BOOT pin.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+CONFIG_LV_FONT_MONTSERRAT_12=y
+
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_BT_CTRL_MODEM_SLEEP=y
+CONFIG_BT_CTRL_MODEM_SLEEP_MODE_1=y
+CONFIG_BT_CTRL_LPCLK_SEL_MAIN_XTAL=y
+CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP=y
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set
+# CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND is not set
+CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
+CONFIG_PM_PROFILING=y
