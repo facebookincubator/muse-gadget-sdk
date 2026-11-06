@@ -286,12 +286,9 @@ start.
 
 BOOT on GPIO0 is the only button: push-to-talk, pairing confirmation and
 waking the screen. Power-off is a deep sleep woken by BOOT. The touchscreen
-taps Muse's face and swipes left to the settings tile. While a reply's
-speech plays, its text follows along in three lines under Muse; once it ends
-the reply pages through the full screen at reading pace, and a press
-interrupts it into the next note. The AXP2101 reports a battery percentage
-and charge state; the board's camera connector and SD-slot headers are
-unused.
+taps Muse's face and swipes left to the settings tile. The AXP2101 reports
+a battery percentage and charge state; the board's camera connector and
+SD-slot headers are unused.
 
 Two builds: `tools/board.sh waveshare-s3-lcd-35` shows Link's status bars,
 and `tools/muse/board.sh build s3lcd35` the full UI. It enumerates as the

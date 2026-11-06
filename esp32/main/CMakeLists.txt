@@ -112,9 +112,3 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}
 )
-
-# Resolve every hostname to the SNI relay address (see wifi_mgr.c) so no DNS
-# packets leave the radio on networks where UDP/53 is hijacked or poisoned.
-if(NOT "${CONFIG_HOMEHUB_DNS_MAP_IP}" STREQUAL "")
-    target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=lwip_getaddrinfo")
-endif()
