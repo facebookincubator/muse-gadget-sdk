@@ -203,6 +203,7 @@ class VoiceCall:
         self._stream = None
         self._admission_sent = False
         self._remote_ended = False
+        self._barge_in_failure = None
         self._reply_gate = ReplyGate()
         self._on_event = on_event
         self._response_id: str | None = None  # the latest response.created
@@ -238,10 +239,12 @@ class VoiceCall:
         tasks = []
         error = None
         try:
+            self._barge_in_failure = asyncio.get_running_loop().create_future()
             tasks = [asyncio.create_task(self._receive()),
                      asyncio.create_task(self._input(source, realtime_input)),
                      asyncio.create_task(self._play()),
-                     asyncio.create_task(self._watchdog())]
+                     asyncio.create_task(self._watchdog()),
+                     self._barge_in_failure]
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             # Prefer a real failure when EOF and another task finish together.
             for task in done:
@@ -587,13 +590,24 @@ class VoiceCall:
         """Fence interrupted audio until a new caller turn; cancel agent work best-effort."""
         response_id = self._reply_gate.open_response
         self._reply_gate.interrupt()
-        self._apply_reply_flush()
-        if response_id and not self._remote_ended:
-            try:
-                await asyncio.wait_for(self._event({"type": "response.cancel",
-                                                   "response_id": response_id}), 1)
-            except Exception:
-                log.warning("could not cancel interrupted response")
+        error = None
+        try:
+            self._apply_reply_flush()
+        except Exception as exc:
+            error = exc
+        try:
+            if response_id and not self._remote_ended:
+                try:
+                    await asyncio.wait_for(self._event({"type": "response.cancel",
+                                                       "response_id": response_id}), 1)
+                except Exception:
+                    log.warning("could not cancel interrupted response")
+        finally:
+            if error is not None:
+                if self._barge_in_failure is None:
+                    raise error
+                if not self._barge_in_failure.done():
+                    self._barge_in_failure.set_exception(error)
 
     def _flush(self) -> None:
         cut = [self._in_flight_response] if time.monotonic() < self._in_flight_until else []

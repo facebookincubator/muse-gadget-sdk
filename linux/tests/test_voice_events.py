@@ -354,6 +354,44 @@ def test_barge_in_silences_the_words_of_the_reply_it_cuts_before_its_audio():
     ]
 
 
+def test_barge_in_callback_failure_cancels_response_and_ends_call():
+    failure = RuntimeError("synthetic observer failure")
+    events = []
+
+    def observe(event):
+        events.append(event)
+        if isinstance(event, PlaybackFlushed):
+            raise failure
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = Output()
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=observe,
+                             cleanup_timeout=0.2)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            try:
+                media, start = await admit(vm)
+                await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE * 5)))
+                await output.written.wait()
+                await call.barge_in()
+                assert await next_event(vm) == {"type": "response.cancel", "response_id": "r1"}
+                await hangup(vm, media, start)
+                with pytest.raises(RuntimeError, match="synthetic observer failure") as caught:
+                    await task
+                assert caught.value is failure
+                assert call.end_call_acknowledged
+                assert call.cleanup_error is None
+                assert not session._requests
+                assert [event for event in events if isinstance(event, PlaybackFlushed)] == [
+                    PlaybackFlushed(("r1",)),
+                ]
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
 def test_unidentified_responses_and_legacy_audio_report_no_id():
     legacy = {"type": "response.output_audio.delta", "delta": base64.b64encode(HALF).decode()}
 
