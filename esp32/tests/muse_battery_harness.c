@@ -20,13 +20,20 @@
  *   p <usb> <pct> <mv>     a battery reading
  *   s <off> <resting>      the screen and CPU state
  *   w <us>                 a wake from light sleep, after <us> asleep
+ *   h <free> <min> <largest> [<ret_free> <ret_largest>]   internal RAM: free now, lowest since boot,
+ *                          largest block; retention-capable free and largest block
+ *   c <0|1>                muse_battery_note_cpu_pd()
+ *   n <count>              the light-sleep count, as if that many wakes had come (callbacks only)
+ *   b <count>              the boots on battery, as if read from flash
  *   x                      muse_battery_reset()
- *   j                      prints muse_battery_json()
+ *   j [<cap>]              prints muse_battery_json(), into 2048 bytes or <cap>
  *   r                      prints muse_battery_read() as JSON
  *   k                      prints muse_battery_saved_json(), or null
+ *   rtc                    prints the record in RTC memory now, as the next boot would find it
  *   save <file>            writes the RTC memory, for a later run to boot with
  * and before any of those, a boot:
  *   load <file>            the RTC memory a run saved
+ *   flash <file>           the NVS, kept in the file as it's committed (none: no NVS)
  *   boot <reason>          esp_reset_reason(), ESP_RST_POWERON by default */
 #include <stdbool.h>
 #include <stdio.h>
@@ -47,6 +54,23 @@ esp_reset_reason_t esp_reset_reason(void)
     return s_boot_reason;
 }
 static char s_dump_text[4096];
+static size_t s_heap_free = 60000, s_heap_min = 40000, s_heap_largest = 30000;
+static size_t s_ret_free = 20000, s_ret_largest = 12000;
+
+size_t heap_caps_get_free_size(int caps)
+{
+    return caps == MALLOC_CAP_INTERNAL ? s_heap_free : caps == MALLOC_CAP_RETENTION ? s_ret_free : 0;
+}
+
+size_t heap_caps_get_minimum_free_size(int caps)
+{
+    return caps == MALLOC_CAP_INTERNAL ? s_heap_min : 0;
+}
+
+size_t heap_caps_get_largest_free_block(int caps)
+{
+    return caps == MALLOC_CAP_INTERNAL ? s_heap_largest : caps == MALLOC_CAP_RETENTION ? s_ret_largest : 0;
+}
 static esp_pm_light_sleep_cb_t s_wake_cb;
 
 int64_t esp_timer_get_time(void)
@@ -66,6 +90,105 @@ esp_err_t esp_pm_dump_locks(FILE *stream)
     return ESP_OK;
 }
 
+/* One namespace, a few keys; a u16 is a two-byte blob. */
+typedef struct {
+    char key[16];
+    size_t len;
+    char value[SAVED_MAX];
+} nvs_key_t;
+static nvs_key_t s_nvs_keys[4];
+static char s_flash[512];
+
+static nvs_key_t *nvs_find(const char *key, bool add)
+{
+    nvs_key_t *unused = NULL;
+    for (size_t i = 0; i < sizeof(s_nvs_keys) / sizeof(s_nvs_keys[0]); i++) {
+        if (!strcmp(s_nvs_keys[i].key, key)) {
+            return &s_nvs_keys[i];
+        }
+        if (!unused && !s_nvs_keys[i].key[0]) {
+            unused = &s_nvs_keys[i];
+        }
+    }
+    if (!add || !unused) {
+        return NULL;
+    }
+    strlcpy(unused->key, key, sizeof(unused->key));
+    return unused;
+}
+
+esp_err_t nvs_open(const char *name, nvs_open_mode_t mode, nvs_handle_t *handle)
+{
+    (void)name;
+    (void)mode;
+    *handle = 1;
+    return s_flash[0] ? ESP_OK : ESP_ERR_NVS_NOT_INITIALIZED;
+}
+
+esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *value, size_t *length)
+{
+    (void)handle;
+    nvs_key_t *k = nvs_find(key, false);
+    if (!k) {
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+    if (value && *length < k->len) {
+        return ESP_ERR_NVS_INVALID_LENGTH;
+    }
+    if (value) {
+        memcpy(value, k->value, k->len);
+    }
+    *length = k->len;
+    return ESP_OK;
+}
+
+esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value, size_t length)
+{
+    (void)handle;
+    nvs_key_t *k = nvs_find(key, true);
+    if (!k || length > sizeof(k->value)) {
+        return ESP_ERR_NVS_INVALID_LENGTH;
+    }
+    memcpy(k->value, value, length);
+    k->len = length;
+    return ESP_OK;
+}
+
+esp_err_t nvs_get_u16(nvs_handle_t handle, const char *key, uint16_t *value)
+{
+    size_t length = sizeof(*value);
+    return nvs_get_blob(handle, key, value, &length);
+}
+
+esp_err_t nvs_set_u16(nvs_handle_t handle, const char *key, uint16_t value)
+{
+    return nvs_set_blob(handle, key, &value, sizeof(value));
+}
+
+esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key)
+{
+    (void)handle;
+    nvs_key_t *k = nvs_find(key, false);
+    if (!k) {
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+    memset(k, 0, sizeof(*k));
+    return ESP_OK;
+}
+
+/* Only what's committed is there for the next run. */
+esp_err_t nvs_commit(nvs_handle_t handle)
+{
+    (void)handle;
+    FILE *f = fopen(s_flash, "wb");
+    if (!f || fwrite(s_nvs_keys, sizeof(s_nvs_keys), 1, f) != 1) {
+        fprintf(stderr, "can't write %s\n", s_flash);
+        exit(2);
+    }
+    fclose(f);
+    return ESP_OK;
+}
+
 int main(void)
 {
     char line[512];
@@ -79,6 +202,18 @@ int main(void)
                 return 2;
             }
             fclose(f);
+            continue;
+        }
+        if (!booted && !strncmp(line, "flash ", 6)) {
+            strlcpy(s_flash, line + 6, sizeof(s_flash));
+            FILE *f = fopen(s_flash, "rb");   /* none yet: blank */
+            if (f && fread(s_nvs_keys, sizeof(s_nvs_keys), 1, f) != 1) {
+                fprintf(stderr, "can't read %s\n", s_flash);
+                return 2;
+            }
+            if (f) {
+                fclose(f);
+            }
             continue;
         }
         if (!booted && !strncmp(line, "boot ", 5)) {
@@ -108,12 +243,38 @@ int main(void)
             muse_battery_note_state(off, resting);
         } else if (!strncmp(line, "w ", 2)) {
             s_wake_cb(strtoll(line + 2, NULL, 10), NULL);
+        } else if (!strncmp(line, "h ", 2)) {
+            sscanf(line + 2, "%zu %zu %zu %zu %zu", &s_heap_free, &s_heap_min, &s_heap_largest, &s_ret_free,
+                   &s_ret_largest);
+        } else if (!strncmp(line, "c ", 2)) {
+            muse_battery_note_cpu_pd(atoi(line + 2));
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+        } else if (!strncmp(line, "n ", 2)) {
+            s_sleeps = (uint32_t)strtoul(line + 2, NULL, 10);
+#endif
+        } else if (!strncmp(line, "b ", 2)) {
+            s_boots = (uint16_t)atoi(line + 2);
+        } else if (!strcmp(line, "rtc")) {
+            /* As muse_battery_init() would take it: length, checksum and all. */
+            bool ok = s_saved.magic == SAVED_MAGIC && s_saved.len < SAVED_MAX
+                      && s_saved.sum == checksum(s_saved.json, s_saved.len);
+            printf("%.*s\n", ok ? (int)s_saved.len : 4, ok ? s_saved.json : "null");
         } else if (!strcmp(line, "x")) {
             muse_battery_reset();
-        } else if (!strcmp(line, "j")) {
-            static char json[2048];
-            muse_battery_json(json, sizeof(json));
-            puts(json);
+        } else if (!strcmp(line, "j") || !strncmp(line, "j ", 2)) {
+            static char json[4096 + 1];   /* and a byte past cap, to check it's left alone */
+            size_t cap = line[1] ? strtoul(line + 2, NULL, 10) : 2048;   /* muse_input's ">power" */
+            if (cap > sizeof(json) - 1) {
+                fprintf(stderr, "j: at most %zu\n", sizeof(json) - 1);
+                return 2;
+            }
+            memset(json, '#', sizeof(json));
+            int len = muse_battery_json(json, cap);
+            if (cap && (len < 0 || (size_t)len >= cap || json[len] || memchr(json, '#', len + 1) || json[cap] != '#')) {
+                fprintf(stderr, "muse_battery_json(%zu) wrote %d bytes, or past them\n", cap, len);
+                return 2;
+            }
+            puts(cap ? json : "");
         } else if (!strcmp(line, "r")) {
             muse_battery_t m;
             muse_battery_read(&m);

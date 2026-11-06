@@ -1,0 +1,68 @@
+[
+  {
+    "board": "devkit",
+    "name": "Espressif ESP32-C5 DevKitC-1"
+  },
+  {
+    "board": "espressif-s3-devkitc-1",
+    "name": "Espressif ESP32-S3-DevKitC-1 (N8R8)"
+  },
+  {
+    "board": "muse-espressif-box-3",
+    "name": "Espressif ESP32-S3-BOX-3",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-m5stack-cores3",
+    "name": "M5Stack CoreS3",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-waveshare-s3-185c",
+    "name": "Waveshare ESP32-S3-Touch-LCD-1.85C",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-seeed-xiao-s3-147",
+    "name": "Seeed Studio XIAO ESP32-S3 1.47\" Touch Display",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-sensecap-watcher",
+    "name": "Seeed Studio SenseCAP Watcher",
+    "usb": [
+      "1a86:55d2"
+    ],
+    "pacing": {
+      "chunk": 32,
+      "factor": 2
+    }
+  },
+  {
+    "board": "sensecap-indicator",
+    "name": "Seeed Studio SenseCAP Indicator"
+  },
+  {
+    "board": "reterminal-e1001",
+    "name": "Seeed Studio reTerminal E1001 (7.5\" e-paper)"
+  },
+  {
+    "board": "reterminal-e1002",
+    "name": "Seeed Studio reTerminal E1002 (7.3\" colour e-paper)"
+  },
+  {
+    "board": "reterminal-sticky",
+    "name": "Seeed Studio reTerminal Sticky (3.97\" e-paper, experimental)",
+    "usb": [
+      "1a86:55d3"
+    ]
+  }
+]

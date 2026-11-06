@@ -44,7 +44,7 @@ def _ssid_from_nmcli() -> str | None:
     try:
         out = subprocess.run(
             ["nmcli", "-t", "-f", "ACTIVE,SSID", "device", "wifi", "list", "--rescan", "no"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True, text=True, errors="replace", timeout=5, check=False,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -103,7 +103,7 @@ def _ssid_from_wpa_cli() -> str | None:
         try:
             out = subprocess.run(
                 ["wpa_cli", "-i", iface, "status"],
-                capture_output=True, text=True, timeout=5, check=False,
+                capture_output=True, text=True, errors="replace", timeout=5, check=False,
             ).stdout
         except (OSError, subprocess.TimeoutExpired):
             continue

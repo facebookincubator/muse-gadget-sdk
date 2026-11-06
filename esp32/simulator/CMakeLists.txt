@@ -146,6 +146,16 @@ endif()
 
 set(MUSE_COMPONENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../components/muse")
 
+# Match the firmware's custom avatar override, including additions/removals
+# after configure. Keep exactly one renderer in the executable.
+file(GLOB MUSE_SIM_CUSTOM_AVATAR CONFIGURE_DEPENDS
+     "${MUSE_COMPONENT_DIR}/avatar/muse_pixel.c")
+if(MUSE_SIM_CUSTOM_AVATAR)
+    set(MUSE_SIM_AVATAR_SOURCE "${MUSE_COMPONENT_DIR}/avatar/muse_pixel.c")
+else()
+    set(MUSE_SIM_AVATAR_SOURCE "${MUSE_COMPONENT_DIR}/../../avatar/muse_pixel.c")
+endif()
+
 add_executable(muse_simulator
     src/main.c
     src/sim_board.c
@@ -154,7 +164,8 @@ add_executable(muse_simulator
     "${MUSE_COMPONENT_DIR}/muse_ui.c"
     "${MUSE_COMPONENT_DIR}/muse_state.c"
     "${MUSE_COMPONENT_DIR}/muse_text.c"
-    "${MUSE_COMPONENT_DIR}/../../avatar/muse_pixel.c"
+    "${MUSE_COMPONENT_DIR}/muse_lang.c"
+    "${MUSE_SIM_AVATAR_SOURCE}"
 )
 
 target_include_directories(muse_simulator PRIVATE
@@ -225,6 +236,98 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
         ENVIRONMENT "${MUSE_SIM_TEST_ENVIRONMENT}"
         TIMEOUT 60
     )
+
+    add_executable(muse_settings_text_test
+        tests/settings_text_harness.c
+        "${MUSE_COMPONENT_DIR}/muse_keypad.c"
+        "${MUSE_COMPONENT_DIR}/muse_text.c"
+    )
+    target_include_directories(muse_settings_text_test PRIVATE
+        tests/settings_fakes compat ../tests/link_fakes "${MUSE_COMPONENT_DIR}"
+    )
+    target_compile_definitions(muse_settings_text_test PRIVATE _POSIX_C_SOURCE=200809L)
+    target_compile_options(muse_settings_text_test PRIVATE -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections)
+    target_link_libraries(muse_settings_text_test PRIVATE ${MUSE_SIM_LVGL_TARGET} ${MUSE_SIM_SDL_TARGET} Threads::Threads m)
+    if(APPLE)
+        target_compile_definitions(muse_settings_text_test PRIVATE _DARWIN_C_SOURCE)
+        target_link_options(muse_settings_text_test PRIVATE -Wl,-dead_strip)
+        target_link_libraries(muse_settings_text_test PRIVATE ${MUSE_SIM_IOKIT_FRAMEWORK})
+    else()
+        target_link_options(muse_settings_text_test PRIVATE -Wl,--gc-sections)
+    endif()
+    if(MUSE_SIM_WARNINGS_AS_ERRORS)
+        target_compile_options(muse_settings_text_test PRIVATE -Werror)
+    endif()
+    if(MUSE_SIM_SANITIZERS)
+        target_compile_options(muse_settings_text_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(muse_settings_text_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    foreach(scenario other secure saved back)
+        add_test(NAME muse_settings_xiao_${scenario}
+                 COMMAND muse_settings_text_test 172 320 0 1.47 ${scenario})
+    endforeach()
+    add_test(NAME muse_settings_round_466 COMMAND muse_settings_text_test 466 466 1 1.75 geometry)
+    add_test(NAME muse_settings_round_412 COMMAND muse_settings_text_test 412 412 1 1.45 geometry)
+    add_test(NAME muse_settings_round_240 COMMAND muse_settings_text_test 240 240 1 1.28 geometry)
+    add_test(NAME muse_settings_flat_keyboard COMMAND muse_settings_text_test 320 240 0 2.0 geometry)
+    add_test(NAME muse_settings_flat_keyboard_password COMMAND muse_settings_text_test 320 240 0 2.0 password)
+    add_test(NAME muse_settings_portrait_keyboard COMMAND muse_settings_text_test 240 320 0 2.8 geometry)
+    add_test(NAME muse_settings_portrait_keyboard_password COMMAND muse_settings_text_test 240 320 0 2.8 password)
+    add_test(NAME muse_settings_tall_keyboard COMMAND muse_settings_text_test 320 480 0 3.5 geometry)
+    add_test(NAME muse_settings_epaper_keyboard COMMAND muse_settings_text_test 480 800 0 3.97 geometry)
+    add_test(NAME muse_settings_wide_800 COMMAND muse_settings_text_test 800 480 0 4.3 geometry)
+    add_test(NAME muse_settings_long_keypad COMMAND muse_settings_text_test 172 640 0 3.49 geometry)
+    add_test(NAME muse_settings_xiao_switch COMMAND muse_settings_text_test 172 320 0 1.47 switch)
+    add_test(NAME muse_settings_round_switch COMMAND muse_settings_text_test 466 466 1 1.75 switch)
+    add_test(NAME muse_settings_round_240_switch COMMAND muse_settings_text_test 240 240 1 1.28 switch)
+    add_test(NAME muse_settings_round_240_rows COMMAND muse_settings_text_test 240 240 1 1.28 rows)
+    add_test(NAME muse_settings_xiao_rows COMMAND muse_settings_text_test 172 320 0 1.47 rows)
+    add_test(NAME muse_settings_round_240_screen COMMAND muse_settings_text_test 240 240 1 1.28 screen)
+    add_test(NAME muse_settings_round_240_mic COMMAND muse_settings_text_test 240 240 1 1.28 mic)
+    add_test(NAME muse_settings_round_240_bench COMMAND muse_settings_text_test 240 240 1 1.28 bench)
+    # The button menu's layout, in English and in Vietnamese (accented letters
+    # in the 16 px caption font), on compact and full-size screens.
+    foreach(lang en vi)
+        add_executable(muse_menu_layout_${lang}
+            tests/menu_layout_harness.c
+            "${MUSE_COMPONENT_DIR}/muse_lang.c"
+            "${MUSE_COMPONENT_DIR}/muse_text.c"
+        )
+        target_include_directories(muse_menu_layout_${lang} PRIVATE
+            tests/settings_fakes compat ../tests/link_fakes "${MUSE_COMPONENT_DIR}"
+        )
+        target_compile_definitions(muse_menu_layout_${lang} PRIVATE _POSIX_C_SOURCE=200809L)
+        if(lang STREQUAL "vi")
+            target_sources(muse_menu_layout_${lang} PRIVATE
+                "${MUSE_COMPONENT_DIR}/fonts/muse_font_latin_16.c"
+                "${MUSE_COMPONENT_DIR}/fonts/muse_font_vi_14.c"
+                "${MUSE_COMPONENT_DIR}/fonts/muse_font_vi_20.c"
+                "${MUSE_COMPONENT_DIR}/fonts/muse_font_vi_28.c"
+            )
+            target_compile_definitions(muse_menu_layout_${lang} PRIVATE
+                CONFIG_MUSE_LATIN_FONT=1 CONFIG_MUSE_UI_LANG_VI=1)
+        endif()
+        target_compile_options(muse_menu_layout_${lang} PRIVATE -Wall -Wextra -Wpedantic)
+        target_link_libraries(muse_menu_layout_${lang} PRIVATE ${MUSE_SIM_LVGL_TARGET} ${MUSE_SIM_SDL_TARGET} Threads::Threads m)
+        if(APPLE)
+            target_compile_definitions(muse_menu_layout_${lang} PRIVATE _DARWIN_C_SOURCE)
+            target_link_libraries(muse_menu_layout_${lang} PRIVATE ${MUSE_SIM_IOKIT_FRAMEWORK})
+        endif()
+        if(MUSE_SIM_WARNINGS_AS_ERRORS)
+            target_compile_options(muse_menu_layout_${lang} PRIVATE -Werror)
+        endif()
+        if(MUSE_SIM_SANITIZERS)
+            target_compile_options(muse_menu_layout_${lang} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(muse_menu_layout_${lang} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        endif()
+        foreach(size 128x128 240x135 284x240 320x240 240x240)
+            string(REPLACE "x" ";" wh ${size})
+            add_test(NAME muse_settings_menu_${lang}_${size} COMMAND muse_menu_layout_${lang} ${wh})
+        endforeach()
+    endforeach()
+    get_property(settings_tests DIRECTORY PROPERTY TESTS)
+    list(FILTER settings_tests INCLUDE REGEX "^muse_settings_")
+    set_tests_properties(${settings_tests} PROPERTIES ENVIRONMENT "${MUSE_SIM_TEST_ENVIRONMENT}" TIMEOUT 30)
 endif()
 
 message(STATUS "Muse simulator LVGL target: ${MUSE_SIM_LVGL_TARGET}")

@@ -36,6 +36,7 @@ CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
 # The green button on top, active low. The two white ones (GPIO4 and 5) are
 # not used.
 CONFIG_HOMEHUB_BUTTON_GPIO=3
+CONFIG_HOMEHUB_BUTTON_LABEL="the green button"
 
 # 32 MB flash, of which the first 16 MB are used: beyond that needs 32-bit
 # flash addressing, and the partitions end at 4.3 MB.
@@ -52,3 +53,6 @@ CONFIG_SPIRAM_SPEED_80M=y
 # The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
 # NimBLE host's allocations in PSRAM so pairing has room.
 CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+
+# Keep Wi-Fi connected while sleeping between AP DTIM beacons.
+CONFIG_HOMEHUB_WIFI_MIN_MODEM=y

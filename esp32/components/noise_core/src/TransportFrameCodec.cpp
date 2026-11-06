@@ -527,9 +527,94 @@ StatusWithSize OrderedTransportFramer::EncodeNextOutboundFrame(
   return result;
 }
 
+OrderedTransportFramer::InPlaceFrame
+OrderedTransportFramer::EncodeSingleFrameInPlace(
+    ByteSpan buffer,
+    size_t messageOffset,
+    size_t messageSize) noexcept {
+  if (outboundActive_) {
+    return InPlaceFrame{Status::FailedPrecondition(), 0, 0};
+  }
+  if (!IsValidOutput(buffer) || messageSize == 0 ||
+      messageOffset > buffer.size() ||
+      messageSize > buffer.size() - messageOffset) {
+    return InPlaceFrame{Status::InvalidArgument(), 0, 0};
+  }
+  if (messageSize > kMaxChunkPayload) {
+    return InPlaceFrame{Status::ResourceExhausted(), 0, 0};
+  }
+
+  uint64_t chunkId = 0;
+  Status status = GenerateChunkId(chunkId);
+  if (!status.ok()) {
+    return InPlaceFrame{status, 0, 0};
+  }
+  const TransportFrameView frame{
+      chunkId,
+      0,
+      1,
+      ConstByteSpan(buffer.data() + messageOffset, messageSize)};
+  size_t frameSize = 0;
+  if (!ComputeEncodedTransportFrameSize(frame, frameSize) ||
+      frameSize <= messageSize) {
+    return InPlaceFrame{Status::ResourceExhausted(), 0, 0};
+  }
+  const size_t prefixSize = frameSize - messageSize;
+  if (prefixSize > messageOffset) {
+    return InPlaceFrame{Status::ResourceExhausted(), 0, 0};
+  }
+
+  // The same fields, in the same order, as EncodeTransportFrame writes ahead
+  // of the payload (chunk_index 0 is omitted).
+  const size_t start = messageOffset - prefixSize;
+  BufferWriter writer(buffer.subspan(start, prefixSize));
+  if (chunkId != 0) {
+    status = WriteKey(writer, kChunkIdField, kWireTypeVarint);
+    if (status.ok()) {
+      status = WriteVarint(writer, chunkId);
+    }
+  }
+  if (status.ok()) {
+    status = WriteKey(writer, kTotalChunksField, kWireTypeVarint);
+  }
+  if (status.ok()) {
+    status = WriteVarint(writer, 1);
+  }
+  if (status.ok()) {
+    status = WriteKey(writer, kPayloadField, kWireTypeDelimited);
+  }
+  if (status.ok()) {
+    status = WriteVarint(writer, messageSize);
+  }
+  if (!status.ok() || writer.written() != prefixSize) {
+    return InPlaceFrame{status.ok() ? Status::Internal() : status, 0, 0};
+  }
+  return InPlaceFrame{OkStatus(), start, frameSize};
+}
+
 InboundFrameResult OrderedTransportFramer::DecodeAndAppendInboundFrame(
     ConstByteSpan frameBytes,
     ByteSpan messageOut) noexcept {
+  return DecodeInbound(frameBytes, messageOut, nullptr);
+}
+
+InboundFrameResult OrderedTransportFramer::DecodeInboundFrame(
+    ConstByteSpan frameBytes,
+    ByteSpan messageOut,
+    ConstByteSpan& message) noexcept {
+  message = ConstByteSpan();
+  InboundFrameResult result = DecodeInbound(frameBytes, messageOut, &message);
+  if (result.frame_status == InboundFrameStatus::Complete &&
+      message.data() == nullptr && result.size != 0) {
+    message = ConstByteSpan(messageOut.data(), result.size);
+  }
+  return result;
+}
+
+InboundFrameResult OrderedTransportFramer::DecodeInbound(
+    ConstByteSpan frameBytes,
+    ByteSpan messageOut,
+    ConstByteSpan* view) noexcept {
   if (inboundPoisoned_) {
     return InboundResult(
         InboundFrameStatus::Violation, Status::FailedPrecondition(), 0);
@@ -563,6 +648,12 @@ InboundFrameResult OrderedTransportFramer::DecodeAndAppendInboundFrame(
 
   if (frame.payload.size() > kMaxReassembledLen - inboundBytes_) {
     return PoisonInbound(Status::ResourceExhausted());
+  }
+  if (view != nullptr && starting && frame.total_chunks == 1) {
+    // The whole message is in this frame: hand it back where it is.
+    *view = frame.payload;
+    return InboundResult(
+        InboundFrameStatus::Complete, OkStatus(), frame.payload.size());
   }
   const size_t newSize = inboundBytes_ + frame.payload.size();
   if (messageOut.size() < newSize) {

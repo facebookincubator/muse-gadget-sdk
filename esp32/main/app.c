@@ -30,7 +30,7 @@
 #include "cJSON.h"
 
 #include "esp_heap_caps.h"
-#if CONFIG_MUSE_WATCHER_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
 #include "freertos/idf_additions.h"
 #endif
 #include "esp_timer.h"
@@ -43,11 +43,17 @@
 #include "lwip/ip4_addr.h"
 
 #include "identity.h"
+#include "sdk_token_console.h"
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
 #include "customer_product_info.h"
+#include "ble_coex.h"
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+#include "ble_commands.h"
+#endif
 #include "ble_server.h"
+#include "helper_task.h"
 #include "factory_test.h"
 #include "vm_api.h"
 #include "vm_connect.h"
@@ -68,15 +74,34 @@
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
 #include "sensecap_sensors.h"
 #endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+#include "reterminal_sht4x.h"
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+#include "reterminal_battery.h"
+#endif
+#if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
+#include "waveshare_154g_shtc3.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
+#define camera_capture_base64 watcher_camera_capture
+#elif CONFIG_MUSE_P4_CSI_CAMERA
+#include "boards/p4_csi_camera.h"
+#define camera_capture_base64 p4_csi_camera_capture
 #endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
+#include "muse_input.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
 #else
 #define WIFI_WITHOUT_PAIRING 0
+#endif
+
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+#include "ble_basic.h"
 #endif
 
 static const char *TAG = "link.app";
@@ -106,7 +131,8 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 #define PAIRING_CONFIRMED_IDLE_TIMEOUT_MS (120 * 1000)
 
 // OTA rollback: how long a freshly-installed (PENDING_VERIFY) image has to
-// reach the authenticated control WebSocket before the bootloader reverts it.
+// reach the authenticated control WebSocket before the bootloader reverts it
+// (on every board; on the ESP-Mosaico, not for a Vibe Mode install).
 // The control WS is the recovery channel — if a new image can't reach it,
 // no future device.ota could repair the device, so rolling back is correct.
 #define OTA_VERIFY_TIMEOUT_US (300LL * 1000000LL)
@@ -123,16 +149,22 @@ static SemaphoreHandle_t s_operation_gate = NULL;
 static SemaphoreHandle_t s_auth_lock = NULL;
 static SemaphoreHandle_t s_setup_window_lock = NULL;
 static int64_t s_last_vm_auth_refresh_attempt_us = 0;
+// When device credentials were last refused. The refusal backoff runs from
+// this, not from s_last_vm_auth_refresh_attempt_us: schedule_vm_auth_refresh()
+// stamps that just before its worker refreshes, so a shared stamp would make
+// every scheduled refresh find the backoff active and skip itself.
+static int64_t s_last_vm_auth_refusal_us = 0;
+// When a Link heartbeat last retried a paired device's missing VM session.
+static int64_t s_last_link_session_retry_us = 0;
 // Uptime of the last proactive-refresh attempt. 0 = none this boot, so the
 // first one falls due once uptime alone exceeds the interval.
 static int64_t s_last_periodic_token_refresh_us = 0;
-// The SDK token reaches Muse only in refresh bodies until apps forward it at
-// mint, so each boot of a token-bearing build attempts one refresh to report it.
-static bool s_sdk_token_report_attempted = false;
 static int64_t s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
 static uint8_t s_vm_auth_refusals = 0;
 static bool s_vm_auth_refresh_pending = false;
+// Deferred to the app task: a factory reset forgets Wi-Fi, an unpair keeps it.
 static atomic_bool s_setup_reset_pending = ATOMIC_VAR_INIT(false);
+static atomic_bool s_unpair_pending = ATOMIC_VAR_INIT(false);
 static bool s_ble_started = false;
 static bool s_ota_pending_verify = false;
 static uint32_t s_confirm_generation = 0;
@@ -211,7 +243,7 @@ static uint32_t advance_confirm_generation_locked(void) {
     if (s_confirm_timeout_task) {
         // The waiter owns no resources until it clears this handle under
         // the same lock after its delay.
-        vTaskDelete(s_confirm_timeout_task);
+        helper_task_delete(s_confirm_timeout_task);
         s_confirm_timeout_task = NULL;
     }
     return ++s_confirm_generation;
@@ -224,8 +256,8 @@ static BaseType_t start_confirm_timeout(TaskFunction_t task, const char *name,
     if (s_confirm_generation == generation
         && link_pairing_session_is_current(session_generation)) {
         s_confirm_session_generation = session_generation;
-        rc = xTaskCreate(task, name, 4096, (void *)(uintptr_t)generation, 4,
-                         &s_confirm_timeout_task);
+        rc = helper_task_create(task, name, 4096, (void *)(uintptr_t)generation, 4,
+                                &s_confirm_timeout_task);
     }
     setup_window_lock_give();
     return rc;
@@ -288,9 +320,9 @@ static void auth_lock_give(void) {
 // 15 s cap, i.e. a refresh roughly every 45 s, indefinitely.
 //
 // A 401 from fetch_vms no longer unpairs the device, so nothing else
-// terminates that loop. This is what bounds it.
-static void note_vm_credentials_refused(void) {
-    auth_lock_take();
+// terminates that loop. This is what bounds it. A refresh or mint refused
+// with a 403 counts here too (note_device_token_refused_unlocked()).
+static void count_vm_auth_refusal_unlocked(void) {
     if (s_vm_auth_refusals < UINT8_MAX) s_vm_auth_refusals++;
     unsigned doublings = s_vm_auth_refusals - 1u;
     if (doublings > 5u) doublings = 5u;
@@ -300,12 +332,23 @@ static void note_vm_credentials_refused(void) {
     }
     s_vm_auth_refresh_interval_us = interval;
     s_last_vm_auth_refresh_attempt_us = esp_timer_get_time();
-    unsigned refusals = s_vm_auth_refusals;
-    auth_lock_give();
+    s_last_vm_auth_refusal_us = s_last_vm_auth_refresh_attempt_us;
     ESP_LOGW(TAG,
              "VM credentials refused %u time(s) in a row; next refresh no "
              "sooner than %llds",
-             refusals, (long long)(interval / 1000000));
+             (unsigned)s_vm_auth_refusals, (long long)(interval / 1000000));
+}
+
+static void note_vm_credentials_refused(void) {
+    auth_lock_take();
+    count_vm_auth_refusal_unlocked();
+    auth_lock_give();
+}
+
+static bool vm_auth_backoff_active_unlocked(void) {
+    return s_vm_auth_refusals > 0 && s_last_vm_auth_refusal_us
+           && (esp_timer_get_time() - s_last_vm_auth_refusal_us)
+              < s_vm_auth_refresh_interval_us;
 }
 
 static void note_vm_credentials_accepted(void) {
@@ -314,6 +357,7 @@ static void note_vm_credentials_accepted(void) {
     s_vm_auth_refusals = 0;
     s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
     s_last_vm_auth_refresh_attempt_us = 0;
+    s_last_vm_auth_refusal_us = 0;
     auth_lock_give();
     if (was_backing_off) {
         ESP_LOGI(TAG, "VM credentials accepted; refresh backoff reset");
@@ -558,12 +602,23 @@ static void disconnect_vm_transports(void) {
     strcpy(s_ui_raw, "down");
 }
 
-static bool clear_setup_credentials(void) {
+// What a reset erases. Saved Wi-Fi is not pairing state: an unpair keeps it,
+// so the device can be paired again from the app alone. Only a factory reset
+// the user asks for on the device (the 5 s hold, or Reset pairing in the Muse
+// menu or Settings) forgets it, e.g. before giving the device away.
+typedef enum {
+    SETUP_RESET_KEEP_WIFI,
+    SETUP_RESET_FORGET_WIFI,
+} setup_reset_scope_t;
+
+static bool clear_setup_credentials(setup_reset_scope_t scope) {
     auth_lock_take();
     s_last_vm_auth_refresh_attempt_us = 0;
+    s_last_vm_auth_refusal_us = 0;
     s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
     s_vm_auth_refusals = 0;
-    bool cleared = config_clear_setup();
+    bool cleared = scope == SETUP_RESET_FORGET_WIFI ? config_clear_setup()
+                                                    : config_unpair();
     auth_lock_give();
     if (!cleared) {
         ESP_LOGE(TAG, "setup credential deletion could not be verified");
@@ -571,10 +626,11 @@ static bool clear_setup_credentials(void) {
     return cleared;
 }
 
-// Reset to a clean, unprovisioned state: drop transports, disconnect Wi-Fi, and
-// clear all local setup config. Every pairing-recovery path funnels through
-// here; BLE is left as-is for the caller to keep advertising or reboot. Success
-// means NVS committed every erase and readback verified each credential absent.
+// Reset to a clean, unpaired state: drop transports, disconnect Wi-Fi, and
+// clear the pairing (and saved Wi-Fi too on a factory reset). Every
+// pairing-recovery path funnels through here; BLE is left as-is for the caller
+// to keep advertising or reboot. Success means NVS committed every erase and
+// readback verified each credential absent.
 static void setup_disconnect_to_clean(void) {
     disconnect_vm_transports();
     vm_api_set_base_url(NULL);
@@ -585,12 +641,14 @@ static void setup_disconnect_to_clean(void) {
     wifi_mgr_disconnect();
     ui_set_vm(NULL);
     ui_set_wifi(NULL);
+#if CONFIG_HOMEHUB_SUPPORT_BUG_REPORT
     diagnostic_log_clear();
+#endif
 }
 
-static bool setup_wipe_to_clean(void) {
+static bool setup_wipe_to_clean(setup_reset_scope_t scope) {
     setup_disconnect_to_clean();
-    return clear_setup_credentials();
+    return clear_setup_credentials(scope);
 }
 
 static void setup_fail_for_session(const char *stage, const char *status,
@@ -600,7 +658,7 @@ static void setup_fail_for_session(const char *stage, const char *status,
     // The operation gate still belongs to this worker, so a replacement
     // request cannot have stored credentials. Roll back this worker's partial
     // state even when its BLE session has already gone away.
-    bool cleared = setup_wipe_to_clean();
+    bool cleared = setup_wipe_to_clean(SETUP_RESET_KEEP_WIFI);
     const char *reported_status = cleared ? status : "error_storage";
     setup_window_lock_take();
     if (session_generation != 0
@@ -647,9 +705,16 @@ static void shutdown_ble_task(void *arg) {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(1000));
     ui_set_ble("off");
-#if CONFIG_MUSE_ENABLED
-    // Muse's phone-setup service shares the server: stop setup advertising only.
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
+    // A companion service shares the server (Muse's phone setup, or the
+    // basic service that keeps BLE up beside Wi-Fi): stop setup advertising
+    // only, and let the companion advertise slowly.
     ble_server_stop_advertising(false);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    ble_server_set_companion_advertising(true);
+    ble_coex_set_active(true);
+    ui_set_ble("companion");
+#endif
 #else
     ble_server_full_shutdown();
 #endif
@@ -674,8 +739,12 @@ static bool complete_setup_and_stop_ble(const char *reason, uint32_t session_gen
         ESP_LOGW(TAG, "failed to start BLE stop task");
         vTaskDelay(pdMS_TO_TICKS(1000));
         ui_set_ble("off");
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_BLE_PERSISTENT
         ble_server_stop_advertising(false);
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        ble_server_set_companion_advertising(true);
+        ble_coex_set_active(true);
+#endif
 #else
         ble_server_full_shutdown();
 #endif
@@ -738,41 +807,59 @@ static void store_pairing_username_unlocked(const char *username) {
     }
 }
 
-static void handle_token_revoked_unlocked(const char *context) {
-    ESP_LOGW(TAG, "%s: device credentials rejected; clearing pairing", context);
+// The token service refused a refresh or mint with a 401: the credential was
+// revoked, replaced by a newer pairing or already used, and will never work
+// again, so retrying it would only loop. Erase it, keeping saved Wi-Fi, so the
+// device can be paired again from the app alone. The caller hands the rest of
+// the unpair to the app task (defer_unpair_after_revocation()).
+static void handle_device_token_revoked_unlocked(const char *context) {
+    ESP_LOGW(TAG, "%s: device credentials revoked; unpairing (Wi-Fi kept)", context);
     s_last_vm_auth_refresh_attempt_us = 0;
+    s_last_vm_auth_refusal_us = 0;
     s_vm_auth_refresh_interval_us = VM_AUTH_REFRESH_RETRY_INTERVAL_US;
     s_vm_auth_refusals = 0;
-    if (!config_clear_pairing()) {
+    if (!config_unpair()) {
         ESP_LOGE(TAG, "%s: pairing credential deletion could not be verified",
                  context);
     }
 }
 
-static void defer_token_revocation_reset(void) {
+// A 403 does not prove the credential is dead, and erasing it would turn a
+// refusal that passes into a lost pairing. Keep it and back off.
+static void note_device_token_refused_unlocked(const char *context) {
+    ESP_LOGW(TAG, "%s: device credentials refused; keeping them", context);
+    count_vm_auth_refusal_unlocked();
+}
+
+static void defer_unpair_after_revocation(void) {
     ui_set_status("auth_failed");
     led_status_set_state(LED_STATE_ERROR);
     if (strcmp(s_setup_stage, "done") != 0) {
-        ESP_LOGW(TAG, "token rejected during setup; setup failure will clean state");
+        ESP_LOGW(TAG, "token revoked during setup; setup failure will clean state");
         return;
     }
-    ESP_LOGW(TAG, "token revoked - deferring setup reset to app task");
-    atomic_store_explicit(&s_setup_reset_pending, true, memory_order_release);
+    ESP_LOGW(TAG, "token revoked - deferring unpair to app task");
+    atomic_store_explicit(&s_unpair_pending, true, memory_order_release);
 }
 
 static bool mint_and_store_device_tokens_unlocked(const char *source_token,
-                                                  const char *username) {
+                                                  const char *username,
+                                                  bool *revoked) {
     vm_device_tokens_t tokens = {0};
     int rc = vm_api_mint_device_token(source_token, identity_node_id(), &tokens);
     if (rc == 0) {
         bool ok = store_token_pair_unlocked(tokens.access_token, tokens.refresh_token);
+        if (ok) identity_note_paired_sdk_token();
         if (ok && username) store_pairing_username_unlocked(username);
         vm_device_tokens_free(&tokens);
         return ok;
     }
     vm_device_tokens_free(&tokens);
-    if (rc == VM_API_ERR_AUTH) {
-        handle_token_revoked_unlocked("device token mint");
+    if (rc == VM_API_ERR_REVOKED) {
+        handle_device_token_revoked_unlocked("device token mint");
+        if (revoked) *revoked = true;
+    } else if (rc == VM_API_ERR_AUTH) {
+        note_device_token_refused_unlocked("device token mint");
     } else {
         ESP_LOGW(TAG, "device token mint failed");
     }
@@ -787,19 +874,22 @@ static bool accept_pairing_credentials(const char *access_token,
     bool ok = false;
     if (refresh_token && *refresh_token) {
         ok = store_token_pair_unlocked(access_token, refresh_token);
-        if (ok) store_pairing_username_unlocked(username);
+        if (ok) {
+            identity_note_paired_sdk_token();
+            store_pairing_username_unlocked(username);
+        }
     } else if (!wifi_mgr_is_connected()) {
         ESP_LOGW(TAG, "cannot mint device token before WiFi is connected");
         ok = false;
     } else {
         ESP_LOGI(TAG, "no refresh_token supplied; minting device token pair");
-        ok = mint_and_store_device_tokens_unlocked(access_token, username);
+        ok = mint_and_store_device_tokens_unlocked(access_token, username, NULL);
     }
     auth_lock_give();
     return ok;
 }
 
-static bool migrate_legacy_auth_token_locked(void) {
+static bool migrate_legacy_auth_token_locked(bool *revoked) {
     char *access = load_token_unlocked("access_token");
     if (access) {
         free(access);
@@ -815,7 +905,7 @@ static bool migrate_legacy_auth_token_locked(void) {
         return false;
     }
     ESP_LOGI(TAG, "migrating legacy auth_token to device token pair");
-    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL);
+    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, revoked);
     free(legacy);
     return ok;
 }
@@ -833,8 +923,9 @@ static bool migrate_legacy_auth_token_locked(void) {
 // access_token_rejected           the caller just had the stored token refused.
 //                                 The primary refresh trigger.
 // allow_stale_on_refresh_failure  when a refresh is itself refused, keep the
-//                                 existing token (true) instead of treating
-//                                 the device as revoked and unpairing (false).
+//                                 existing token (true) instead of failing
+//                                 (false). On false, a 401 unpairs the device
+//                                 (Wi-Fi kept) and a 403 backs off.
 //
 // Refreshing is otherwise avoided. The 45-minute timer this replaced came from
 // expires_in=14400 in the refresh response, which does not describe this
@@ -854,16 +945,20 @@ static bool ensure_access_token_ready_with_gate_held(
     char *access = NULL;
     char *refresh = NULL;
 
+    // A mint refused with a 403 keeps its source token, and the heartbeat calls
+    // here every few seconds: wait out the refusal backoff before minting again.
     access = load_token_unlocked("access_token");
     if (!access) {
-        ok = migrate_legacy_auth_token_locked();
+        ok = !vm_auth_backoff_active_unlocked()
+             && migrate_legacy_auth_token_locked(&revoked);
         goto done;
     }
 
     refresh = load_token_unlocked("refresh_token");
     if (!refresh) {
+        if (vm_auth_backoff_active_unlocked()) goto done;
         ESP_LOGI(TAG, "access_token has no refresh_token; minting device pair");
-        ok = mint_and_store_device_tokens_unlocked(access, NULL);
+        ok = mint_and_store_device_tokens_unlocked(access, NULL, &revoked);
         goto done;
     }
 
@@ -873,11 +968,16 @@ static bool ensure_access_token_ready_with_gate_held(
                    >= TOKEN_PERIODIC_REFRESH_INTERVAL_US;
 #endif
 
-    bool sdk_token_report_due = identity_sdk_token() && !s_sdk_token_report_attempted;
-
-    if (!access_token_rejected && !periodic_due && !sdk_token_report_due) {
+    if (!access_token_rejected && !periodic_due) {
         // Nothing has complained about this token, so keep using it.
         ok = true;
+        goto done;
+    }
+
+    if (access_token_rejected && vm_auth_backoff_active_unlocked()) {
+        // Credentials were refused moments ago. Asking again on every
+        // reconnect (Muse retries each minute) only hammers the refresh
+        // endpoint; wait out the refusal backoff.
         goto done;
     }
 
@@ -888,12 +988,7 @@ static bool ensure_access_token_ready_with_gate_held(
         s_last_periodic_token_refresh_us = esp_timer_get_time();
         ESP_LOGI(TAG, "proactive device token refresh (every %d days of uptime)",
                  CONFIG_HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS);
-    } else if (sdk_token_report_due && !access_token_rejected) {
-        ESP_LOGI(TAG, "refreshing device token to report the SDK token");
     }
-    // Stamped on the attempt, like the periodic refresh, so failures don't
-    // retry on every fetch_vms.
-    if (sdk_token_report_due) s_sdk_token_report_attempted = true;
 
     vm_device_tokens_t tokens = {0};
     vm_token_refresh_method_t method = VM_TOKEN_REFRESH_NONE;
@@ -913,14 +1008,18 @@ static bool ensure_access_token_ready_with_gate_held(
         goto done;
     }
     vm_device_tokens_free(&tokens);
-    if (rc == VM_API_ERR_AUTH) {
+    if (rc == VM_API_ERR_AUTH || rc == VM_API_ERR_REVOKED) {
         if (allow_stale_on_refresh_failure) {
             ESP_LOGW(TAG, "device token refresh rejected; keeping stale token");
             ok = true;
             goto done;
         }
-        handle_token_revoked_unlocked("device token refresh");
-        revoked = true;
+        if (rc == VM_API_ERR_REVOKED) {
+            handle_device_token_revoked_unlocked("device token refresh");
+            revoked = true;
+        } else {
+            note_device_token_refused_unlocked("device token refresh");
+        }
         ok = false;
         goto done;
     }
@@ -932,7 +1031,7 @@ done:
     free(refresh);
     auth_lock_give();
     if (revoked) {
-        defer_token_revocation_reset();
+        defer_unpair_after_revocation();
     }
     return ok;
 }
@@ -967,7 +1066,7 @@ static int fetch_vms_with_refresh_with_gate_held(vm_info_t *vms, int max) {
         // Deliberately NOT a revocation. A 401 from USING a token means "get a
         // new one", and we already did — so this says the credential we were
         // just handed does not work, not that this device has lost its
-        // pairing. Only the refresh token being refused proves that, and
+        // pairing. Only the refresh being refused with a 401 proves that, and
         // ensure_access_token_ready_with_gate_held() already unpairs on it
         // (allow_stale_on_refresh_failure is false on the call above).
         //
@@ -1064,10 +1163,10 @@ static void vm_auth_refresh_task(void *arg) {
         }
     }
 
-    ESP_LOGI(TAG, "refreshing VM credentials after tunnel auth rejection");
+    ESP_LOGI(TAG, "refreshing VM credentials and reconnecting");
     if (wifi_mgr_is_connected() && config_is_provisioned()) {
         if (!connect_preferred_vm_with_gate_held(0)) {
-            ESP_LOGW(TAG, "VM credential refresh failed after tunnel auth rejection");
+            ESP_LOGW(TAG, "VM credential refresh or reconnect failed");
         }
     } else {
         ESP_LOGW(TAG, "cannot refresh VM credentials without WiFi and pairing");
@@ -1282,7 +1381,7 @@ static void scan_refresh_task(void *arg) {
     }
     heap_snapshot("after wifi_scan");
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static bool schedule_scan_refresh(bool reply_requested, bool *joined) {
@@ -1300,7 +1399,7 @@ static bool schedule_scan_refresh(bool reply_requested, bool *joined) {
         return true;
     }
 
-    if (xTaskCreate(scan_refresh_task, "scan_rfsh", 4096, NULL, 4, NULL)
+    if (helper_task_create(scan_refresh_task, "scan_rfsh", 4096, NULL, 4, NULL)
         != pdPASS) {
         atomic_store_explicit(&s_scan_refresh_flags, 0, memory_order_release);
         ESP_LOGE(TAG, "failed to start wifi scan task");
@@ -1378,10 +1477,11 @@ static void finish_setup_reset_with_gate_held(void) {
     link_pairing_reset();
 }
 
-static bool reset_setup_with_gate_held(const char *source) {
+static bool reset_setup_with_gate_held(const char *source,
+                                       setup_reset_scope_t scope) {
     ESP_LOGI(TAG, "%s - reset setup", source);
     setup_stage_set("reset");
-    if (!setup_wipe_to_clean()) {
+    if (!setup_wipe_to_clean(scope)) {
         ESP_LOGE(TAG, "%s - setup deletion failed; reset aborted", source);
         ui_set_status("error_storage");
         led_status_set_state(LED_STATE_ERROR);
@@ -1397,7 +1497,7 @@ static void on_unpair(void) {
         ble_server_send_status("error_operation_in_progress");
         return;
     }
-    if (!reset_setup_with_gate_held("BLE unpair")) {
+    if (!reset_setup_with_gate_held("BLE unpair", SETUP_RESET_KEEP_WIFI)) {
         operation_gate_give();
         return;
     }
@@ -1554,7 +1654,7 @@ static void draw_url_done(const image_fetch_result_t *r, void *user) {
 }
 #endif
 
-#if CONFIG_MUSE_WATCHER_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
 typedef struct {
     noise_ctrl_session_generation_t session_generation;
     char request_id[64];
@@ -1565,7 +1665,7 @@ static void watcher_camera_capture_task(void *arg) {
     char *image = NULL;
     const char *error = NULL;
     cJSON *result = cJSON_CreateObject();
-    bool ok = watcher_camera_capture(&image, &error);
+    bool ok = camera_capture_base64(&image, &error);
     cJSON_AddBoolToObject(result, "ok", ok);
     if (ok) {
         cJSON *payload = cJSON_AddObjectToObject(result, "payload");
@@ -1652,12 +1752,13 @@ static void restart_after_setup_reset(void) {
     }
 }
 
-static bool reset_setup_from_control(const char *source) {
+static bool reset_setup_from_control(const char *source,
+                                     setup_reset_scope_t scope) {
     if (!operation_gate_take(portMAX_DELAY, source)) {
         ESP_LOGE(TAG, "%s could not acquire the setup operation gate", source);
         return false;
     }
-    bool reset = reset_setup_with_gate_held(source);
+    bool reset = reset_setup_with_gate_held(source, scope);
     if (!reset) {
         operation_gate_give();
         return false;
@@ -1735,7 +1836,7 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
     // gate stays reserved across the worker handoff, so no setup writer can
     // recreate credentials before the delayed disconnect and reboot.
     if (action == WS_CONTROL_UNPAIR) {
-        if (!clear_setup_credentials()) {
+        if (!clear_setup_credentials(SETUP_RESET_KEEP_WIFI)) {
             operation_gate_give();
             free_ws_control_args(args);
             return command_error("storage_error",
@@ -1835,9 +1936,19 @@ static cJSON *bug_report_command(
 }
 #endif
 
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+// ---- BLE commands' hooks (main/ble_commands.c) ----
+
+#endif  // CONFIG_HOMEHUB_BLE_COMMANDS
+
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+    if (ble_commands_handles(command)) {
+        return ble_commands_handle(command, params, request_id, session_generation);
+    }
+#endif
     if (strcmp(command, "device.list_vms") == 0) {
         return list_vms_command();
     }
@@ -1847,19 +1958,25 @@ static cJSON *on_ws_command(
         return queue_ws_control(WS_CONTROL_SET_VM, url);
     }
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
-    if (strcmp(command, "display.draw_url") == 0) {
-        cJSON *url = cJSON_GetObjectItem(params, "url");
+    bool draw_file = strcmp(command, "display.draw_file") == 0;
+    if (draw_file || strcmp(command, "display.draw_url") == 0) {
+        // draw_file takes a path on the VM, fetched over this session.
+        cJSON *target = cJSON_GetObjectItem(params, draw_file ? "path" : "url");
         cJSON *row = cJSON_GetObjectItem(params, "row");
-        if (!cJSON_IsString(url) || !url->valuestring || !url->valuestring[0]) {
-            return command_error("missing_param", "url is required");
+        if (!cJSON_IsString(target) || !target->valuestring || !target->valuestring[0]) {
+            return command_error("missing_param",
+                                 draw_file ? "path is required" : "url is required");
         }
         draw_url_ctx_t *ctx = calloc(1, sizeof(*ctx));
         if (!ctx) return command_error("out_of_memory", "failed to allocate");
         ctx->session_generation = session_generation;
         strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
         const char *code, *message;
-        if (!image_fetch_start(url->valuestring, cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW,
-                               draw_url_done, ctx, &code, &message)) {
+        int top = cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW;
+        bool started = draw_file
+            ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
+            : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        if (!started) {
             free(ctx);
             return command_error(code, message);
         }
@@ -1874,7 +1991,7 @@ static cJSON *on_ws_command(
         return result;
     }
 #endif
-#if CONFIG_MUSE_WATCHER_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
     if (strcmp(command, "camera.capture") == 0) {
         watcher_camera_task_args_t *args = calloc(1, sizeof(*args));
         if (!args) return command_error("out_of_memory", "failed to allocate camera request");
@@ -1898,6 +2015,16 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
     if (strcmp(command, "sensors.read") == 0) {
         return sensecap_sensors_command();
+    }
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    if (strcmp(command, "sensors.read") == 0) {
+        return reterminal_sht4x_command();
+    }
+#endif
+#if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
+    if (strcmp(command, "sensors.read") == 0) {
+        return waveshare_154g_shtc3_command();
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {
@@ -1945,6 +2072,7 @@ static void enter_advertising_state(const char *reason) {
     ui_set_ble("advertising");
     ui_set_status("pairing_advertising");
     led_status_set_state(LED_STATE_BLE_ADVERTISING);
+    ble_coex_set_active(false);  // setup keeps ESP-IDF's balanced sharing
     ble_server_begin_advertising();
 }
 
@@ -1967,7 +2095,7 @@ static void confirm_timeout_task(void *arg) {
         ble_server_disconnect_pairing_session(session_generation);
     }
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static void confirmed_idle_timeout_task(void *arg) {
@@ -1990,7 +2118,7 @@ static void confirmed_idle_timeout_task(void *arg) {
         ble_server_disconnect_pairing_session(session_generation);
     }
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static void notify_pairing_confirmed(uint32_t session_generation) {
@@ -2070,6 +2198,7 @@ static void on_client_disconnected(void) {
     ui_set_status("pairing_advertising");
     led_status_set_state(LED_STATE_BLE_ADVERTISING);
     setup_window_lock_give();
+    ble_coex_set_active(false);
     ble_server_begin_advertising();
 }
 
@@ -2090,6 +2219,59 @@ static void start_ble_setup_server_if_needed(void) {
     s_ble_started = true;
     heap_snapshot("after ble_start");
 }
+
+
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+// Muse drives the Link's BLE through ble.* commands (main/ble_commands.c).
+static bool ble_cmd_power(bool on) {
+    if (!on) {
+        if (!s_ble_started) return true;
+        if (!ble_server_power_off()) return false;
+        s_ble_started = false;
+        ui_set_ble("off");
+        return true;
+    }
+    if (!s_ble_started) start_ble_setup_server_if_needed();
+    if (!ble_server_is_started()) return false;
+    if (config_setup_complete()) {
+        ble_server_set_companion_advertising(true);
+        ui_set_ble("companion");
+    }
+    for (int i = 0; i < 30 && !ble_server_is_synced(); i++) vTaskDelay(pdMS_TO_TICKS(100));
+    return ble_server_is_synced();
+}
+
+static bool ble_cmd_is_on(void) {
+    return s_ble_started && ble_server_is_started();
+}
+
+static void ble_cmd_advertise(bool on, int interval_ms) {
+    if (interval_ms) ble_server_set_companion_interval_ms(interval_ms);
+    ble_server_set_companion_advertising(on);
+    if (config_setup_complete()) ui_set_ble(on ? "companion" : "on");
+}
+
+static void ble_cmd_set_wifi_first(bool on) {
+    ble_coex_set_withheld(on ? (BLE_COEX_ADV | BLE_COEX_CONN) : 0);
+}
+
+static bool ble_cmd_wifi_first(void) {
+    return ble_coex_active() && ble_coex_withheld() != 0;
+}
+
+static const ble_commands_ops_t s_ble_cmd_ops = {
+    .power = ble_cmd_power,
+    .is_on = ble_cmd_is_on,
+    .advertise = ble_cmd_advertise,
+    .is_advertising = ble_server_is_advertising,
+    .adv_interval_ms = ble_server_companion_interval_ms,
+    .own_address = ble_server_own_address,
+    .name = identity_ble_name,
+    .peripheral_connected = ble_server_has_connection,
+    .set_wifi_first = ble_cmd_set_wifi_first,
+    .wifi_first = ble_cmd_wifi_first,
+};
+#endif
 
 static void open_setup_window(const char *reason) {
     if (config_setup_complete()) {
@@ -2130,7 +2312,7 @@ static void on_button_double_press(void) {
 }
 
 static void on_button_long_press(void) {
-    reset_setup_from_control("button long-press");
+    reset_setup_from_control("button long-press", SETUP_RESET_FORGET_WIFI);
 }
 
 
@@ -2335,7 +2517,7 @@ bool app_confirm_pairing_press(void) {
 
 static void reset_setup_task(void *arg) {
     (void)arg;
-    reset_setup_from_control("Muse menu reset");
+    reset_setup_from_control("Muse menu reset", SETUP_RESET_FORGET_WIFI);
     stack_monitor_record(NULL);
     vTaskDelete(NULL);
 }
@@ -2352,7 +2534,7 @@ void app_reset_setup_async(void) {
 static void ws_unpaired_task(void *arg) {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(300));
-    reset_setup_from_control("server unpair (node.unpaired)");
+    reset_setup_from_control("server unpair (node.unpaired)", SETUP_RESET_KEEP_WIFI);
     stack_monitor_record(NULL);
     vTaskDelete(NULL);
 }
@@ -2382,6 +2564,9 @@ static void on_ws_control_status(const char *status) {
         ESP_LOGI(TAG, "control WebSocket disconnected");
         led_status_set_state(LED_STATE_WS_DISCONNECTED);
         tunnel_netif_set_link(false);
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+        ble_commands_session_ended();   // close what Muse's BLE commands opened
+#endif
     } else if (strcmp(status, "ws_unpaired") == 0) {
         strcpy(s_ui_ws, "down");
         ESP_LOGW(TAG, "server sent node.unpaired — clearing credentials and restarting");
@@ -2390,8 +2575,7 @@ static void on_ws_control_status(const char *status) {
             // This callback runs on the Noise control task. Resetting inline
             // would make noise_ctrl_disconnect() wait for its own task to exit.
             ESP_LOGE(TAG, "server unpair worker unavailable; deferring reset");
-            atomic_store_explicit(&s_setup_reset_pending, true,
-                                  memory_order_release);
+            atomic_store_explicit(&s_unpair_pending, true, memory_order_release);
         }
     } else if (strcmp(status, "ws_auth_failed") == 0
                || strcmp(status, "ws_refresh_needed") == 0) {
@@ -2418,6 +2602,7 @@ static void ota_verify_task(void *arg) {
         if (noise_ctrl_is_connected()) {
             if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
                 ESP_LOGI(TAG, "OTA image validated (control WS up)");
+                ota_verify_forget();
             } else {
                 ESP_LOGE(TAG, "esp_ota_mark_app_valid_cancel_rollback failed");
             }
@@ -2429,6 +2614,7 @@ static void ota_verify_task(void *arg) {
     }
     if (s_ota_pending_verify) {
         ESP_LOGE(TAG, "OTA verify timed out; rolling back to previous firmware");
+        ota_verify_forget();
         stack_monitor_record(NULL);
         esp_ota_mark_app_invalid_rollback_and_reboot();
         // Only returns when there is no valid partition to revert to.
@@ -2481,6 +2667,9 @@ void app_run(void) {
     config_store_init();
     wifi_known_init();
 
+#if CONFIG_ESP_HOSTED_ENABLED
+    wifi_mgr_init();   /* identity_init() reads the STA MAC from the coprocessor */
+#endif
     identity_init();
 #if CONFIG_MUSE_ENABLED
     muse_glue_storage_ready();
@@ -2502,11 +2691,20 @@ void app_run(void) {
     ESP_LOGI(TAG, "  Verify:   %s", link_pairing_sign_factory_test());
     // Only the hint gadgets.muse.ai displays; the full token is never logged.
     ESP_LOGI(TAG, "  SDK token:  %.12s", identity_sdk_token() ? identity_sdk_token() : "(none)");
+    char paired_sdk_hint[IDENTITY_SDK_TOKEN_HINT_LEN + 1];
+    if (identity_sdk_token_changed_since_pairing(paired_sdk_hint, sizeof(paired_sdk_hint))) {
+        ESP_LOGW(TAG, "  Paired with SDK token %s, not this one. Pair again in the "
+                      "Muse app to use it.", paired_sdk_hint);
+    }
     ESP_LOGI(TAG, "========================");
 
     link_pairing_init(identity_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
+#if !CONFIG_MUSE_ENABLED
+    // Muse boards' own console takes the command (muse_glue_start).
+    sdk_token_console_start();
+#endif
 
     if (!led_status_init()) {
         ESP_LOGW(TAG, "LED init failed — continuing without status LED");
@@ -2522,16 +2720,34 @@ void app_run(void) {
     noise_ctrl_set_command_cb(on_ws_command);
     noise_ctrl_set_agent_name_cb(led_status_set_title);
     heap_snapshot("after noise_ctrl_init");
+#if CONFIG_HOMEHUB_BLE_COMMANDS
+    ble_commands_init(&s_ble_cmd_ops);
+#endif
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+    ble_basic_register();
+#endif
 
     // Arm OTA rollback verification. If the running image was just installed
     // by device.ota it boots as PENDING_VERIFY and must reach the control WS
     // within OTA_VERIFY_TIMEOUT_US, else the bootloader reverts it on reboot.
+    // The one exception is the ESP-Mosaico in Vibe Mode: its Vibe Mode
+    // firmware installs apps itself and leaves them PENDING_VERIFY, and that
+    // is nothing to roll back (ota_installed_by_vibe_mode checks the board,
+    // the build and the flash layout). Every other PENDING_VERIFY image, on
+    // every board, is checked.
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
     if (running && esp_ota_get_state_partition(running, &ota_state) == ESP_OK
         && ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-        s_ota_pending_verify = true;
-        ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
+        if (!ota_installed_by_vibe_mode()) {
+            s_ota_pending_verify = true;
+            ESP_LOGW(TAG, "running a PENDING_VERIFY OTA image; awaiting health check");
+        } else if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+            ESP_LOGI(TAG, "PENDING_VERIFY image installed by Vibe Mode; marked valid");
+        }
+    }
+    if (!s_ota_pending_verify) {
+        ota_verify_forget();   // an update that never booted
     }
     xTaskCreate(ota_verify_task, "ota_verify", 4096, NULL, 4, NULL);
 
@@ -2551,25 +2767,37 @@ void app_run(void) {
         if (!setup_complete && provisioned && have_wifi) {
             // Legacy pair from firmware predating the setup_complete marker.
             setup_complete = config_mark_setup_complete();
-        } else if (!setup_complete && (provisioned || (have_wifi && !WIFI_WITHOUT_PAIRING))) {
-            // Muse joins Wi-Fi from its own settings before (or without)
-            // pairing, so Wi-Fi alone isn't a half-written pair there.
-            // Half-written pair (only one of Wi-Fi creds / tokens, no marker):
-            // clear it so we boot clean instead of auto-reconnecting half-paired.
-            ESP_LOGW(TAG, "partial setup at boot (wifi=%d token=%d); clearing for clean pair",
-                     have_wifi, provisioned);
-            if (!config_clear_setup()) {
+        } else if (!setup_complete && provisioned) {
+            // Tokens without Wi-Fi or marker: a half-written pair. Clear it so
+            // we boot clean instead of auto-reconnecting half-paired. Saved
+            // Wi-Fi alone is an unpaired device (an unpair keeps it), not a
+            // partial pair: keep it.
+            ESP_LOGW(TAG, "partial setup at boot (token without wifi); clearing for clean pair");
+            if (!config_clear_pairing()) {
                 ESP_LOGE(TAG, "partial setup deletion could not be verified");
             }
+            provisioned = false;
+        } else if (setup_complete && !provisioned
+                   && config_key_lookup("access_token") == CONFIG_KEY_NOT_FOUND
+                   && config_key_lookup("auth_token") == CONFIG_KEY_NOT_FOUND) {
+            // The marker with no device credentials: an unpair cut short after
+            // erasing them (config_unpair() erases the marker last). Finish it
+            // so the device can pair again; Wi-Fi stays.
+            ESP_LOGW(TAG, "setup done but no device credentials; finishing the unpair");
+            if (!config_unpair()) {
+                ESP_LOGE(TAG, "setup deletion could not be verified");
+            }
+            setup_complete = false;
         } else if (setup_complete && !have_wifi && WIFI_WITHOUT_PAIRING) {
             // Muse can forget the network after pairing. With no Wi-Fi and
             // pairing refused once setup is done, the device would be stuck,
             // so start over and let the app pair it again.
             ESP_LOGW(TAG, "setup done but no saved wifi; clearing for a fresh pair");
-            if (!config_clear_setup()) {
+            if (!config_unpair()) {
                 ESP_LOGE(TAG, "setup deletion could not be verified");
             }
             setup_complete = false;
+            provisioned = false;
         }
     }
 
@@ -2623,11 +2851,22 @@ void app_run(void) {
         ESP_LOGW(TAG, "button init failed — physical setup reset unavailable");
     }
 #endif
+#if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
+    // Before voice_init(): the voice task may use the same I2C bus.
+    waveshare_154g_shtc3_init();
+#endif
 #if CONFIG_HOMEHUB_VOICE
     voice_init();
 #endif
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
     sensecap_sensors_init();
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    reterminal_sht4x_init();
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+    reterminal_battery_init();
 #endif
 
     if (!setup_complete) {
@@ -2642,10 +2881,20 @@ void app_run(void) {
     } else {
         ui_set_ble("off");
         ESP_LOGI(TAG, "BLE setup disabled; long-press reset to pair again");
-#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        // BLE stays up beside Wi-Fi: bring the stack up before the VM session
+        // fragments internal RAM, and advertise the basic service slowly.
+        start_ble_setup_server_if_needed();
+        ble_server_set_companion_advertising(true);
+        ble_coex_set_active(true);
+        ui_set_ble("companion");
+#endif
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
         // so bring the stack up now; it stays silent until advertising is on.
+        // The CrowPanel starts it lazily instead, after muse_app_run() has
+        // reserved its internal I2S DMA buffers.
         start_ble_setup_server_if_needed();
 #endif
     }
@@ -2672,10 +2921,12 @@ void app_run(void) {
         wifi_ssid = ovr_ssid;
         wifi_pwd = ovr_pwd;
         ESP_LOGI(TAG, "wifi override active, connecting to %s", wifi_ssid);
-    } else if (config_get_str("ssid", nvs_ssid, sizeof(nvs_ssid))
+    } else if ((setup_complete || provisioned || WIFI_WITHOUT_PAIRING)
+               && config_get_str("ssid", nvs_ssid, sizeof(nvs_ssid))
                && config_get_str("password", nvs_pwd, sizeof(nvs_pwd))) {
         // Previously provisioned via BLE — auto-reconnect, to whichever saved
-        // network is in range.
+        // network is in range. An unpaired Link keeps its saved networks but
+        // joins only while pairing provisions one.
         memset(nvs_pwd, 0, sizeof(nvs_pwd));
         wifi_ssid = nvs_ssid;
         ESP_LOGI(TAG, "found provisioned creds in NVS, reconnecting (first: %s)", wifi_ssid);
@@ -2744,13 +2995,33 @@ void app_run(void) {
     stack_monitor_t stack = STACK_MONITOR_INIT;
     tunnel_stats_t prev_tun = {0};
     while (1) {
-        if (atomic_exchange_explicit(&s_setup_reset_pending, false,
-                                     memory_order_acq_rel)) {
-            reset_setup_from_control("deferred setup reset");
+        // A factory reset covers an unpair queued alongside it.
+        bool factory_reset = atomic_exchange_explicit(&s_setup_reset_pending, false,
+                                                      memory_order_acq_rel);
+        bool unpair = atomic_exchange_explicit(&s_unpair_pending, false,
+                                               memory_order_acq_rel);
+        if (factory_reset) {
+            reset_setup_from_control("deferred setup reset", SETUP_RESET_FORGET_WIFI);
+        } else if (unpair) {
+            reset_setup_from_control("deferred unpair", SETUP_RESET_KEEP_WIFI);
         }
 
 #if CONFIG_MUSE_ENABLED
         muse_keep_vm_session();
+#else
+        // Paired, but with no VM session: the boot attempt failed (a refusal
+        // that keeps the credentials, or the network). Nothing else retries
+        // it. It keeps its own floor: a fetch that succeeds without starting a
+        // session (an empty VM list) clears the scheduler's. The refusal
+        // backoff still paces the refreshes.
+        int64_t now_us = esp_timer_get_time();
+        if (!noise_ctrl_is_running() && wifi_mgr_is_connected()
+            && config_is_provisioned() && config_setup_complete()
+            && now_us - s_last_link_session_retry_us
+                   >= VM_AUTH_REFRESH_RETRY_INTERVAL_US) {
+            s_last_link_session_retry_us = now_us;
+            schedule_vm_auth_refresh();
+        }
 #endif
 
         // Runs on every heartbeat tick, and does two things.
@@ -2790,13 +3061,24 @@ void app_run(void) {
 
         size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        size_t min_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+        // What's left of the RAM light sleep's CPU retention memory comes
+        // from (not the reserved DMA pool), after muse_input_power_init()
+        // took it at boot for good, and whether it got it (cpu_pd).
+        char retention[48] = "";
+#if CONFIG_MUSE_ENABLED && CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP
+        snprintf(retention, sizeof(retention), " ret=%uK/%uK cpu_pd=%s",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_RETENTION) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_RETENTION) / 1024),
+                 muse_input_cpu_pd() ? "on" : "off");
+#endif
         size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA);
         size_t largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
         size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
         tunnel_stats_t tun;
         tunnel_netif_get_stats(&tun);
         ESP_LOGI(HEARTBEAT_TAG, "hb t=%llds setup=%s wifi=%s ws=%s raw=%s ble=%s "
-                       "int=%uK/%uK dma=%uK/%uK psram=%uK "
+                       "int=%uK/%uK min=%uK%s dma=%uK/%uK psram=%uK "
                        "tun rx+%lu/%luB tx+%lu/%luB drop+%lu",
                  esp_timer_get_time() / 1000000,
                  s_setup_stage,
@@ -2806,6 +3088,8 @@ void app_run(void) {
                  s_ui_ble,
                  (unsigned)(free_int / 1024),
                  (unsigned)(largest_int / 1024),
+                 (unsigned)(min_int / 1024),
+                 retention,
                  (unsigned)(free_dma / 1024),
                  (unsigned)(largest_dma / 1024),
                  (unsigned)(free_psram / 1024),
@@ -2815,6 +3099,9 @@ void app_run(void) {
                  (unsigned long)(tun.tx_bytes - prev_tun.tx_bytes),
                  (unsigned long)(tun.tx_dropped - prev_tun.tx_dropped));
         prev_tun = tun;
+#if CONFIG_HOMEHUB_BLE_PERSISTENT
+        ble_basic_notify_status();
+#endif
         stack_monitor_record(&stack);
 #if CONFIG_MUSE_ENABLED
         muse_heartbeat_pause();

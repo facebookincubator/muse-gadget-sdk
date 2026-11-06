@@ -41,6 +41,9 @@
 
 #include "muse_link.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#endif
 
 static const char *TAG = "muse_chat_link";
 
@@ -51,6 +54,9 @@ static const char *TAG = "muse_chat_link";
 #define ROW_MAX 12288                   /* maximum subscription line gathered across frames */
 #define TEXT_MAX 1024                   /* reply text kept for the captions */
 #define EV_TEXT 72
+/* A reply frame bigger than this board's session buffers: the session
+ * reconnects, and the reply is in the Muse app. */
+#define TOO_LONG "REPLY TOO LONG: SEE MUSE APP"
 #define SEND_WAIT_MS 200               /* the press queues the pre-roll all at once */
 #define SETTLE_US 3000000               /* quiet after a reply before the turn ends */
 #define REPLY_TIMEOUT_US 60000000
@@ -115,6 +121,9 @@ static struct {
     char error[EV_TEXT];                /* why the turn failed, repeated at the release */
     char text[TEXT_MAX];
     char shown[EV_TEXT];
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    uint32_t review;                    /* this turn's identity for reply review */
+#endif
 } s_turn;
 
 /* ---- Subscription rows, read in place ---- */
@@ -592,7 +601,8 @@ static void on_ack(void)
     rx_t *rx = &s_rx[RX_NOTE];
     if (rx->status != 200 || rx->overflow) {
         ESP_LOGW(TAG, "chat/stream: %d", rx->status);
-        fail(rx->status < 0 ? "LOST CONNECTION TO MUSE" : "MUSE DIDN'T TAKE IT");
+        fail(rx->status == MUSE_LINK_REQ_TOO_LARGE ? TOO_LONG
+             : rx->status < 0 ? "LOST CONNECTION TO MUSE" : "MUSE DIDN'T TAKE IT");
         return;
     }
     cJSON *root = cJSON_Parse(rx->body);
@@ -661,6 +671,9 @@ static void on_row(row_t *r)
         strlcpy(s_turn.seen[s_turn.seen_count++], r->msg, sizeof(s_turn.seen[0]));
         if (s_turn.text[0]) text_append(s_turn.text, sizeof(s_turn.text), " ");
         text_append(s_turn.text, sizeof(s_turn.text), r->text);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+        muse_review_store(s_turn.review, r->text);
+#endif
         ESP_LOGI(TAG, "reply after %.2fs: %.80s", (esp_timer_get_time() - s_turn.t_end) / 1e6, r->text);
         if (!s_turn.replied) {
             s_turn.t_show = esp_timer_get_time();
@@ -675,6 +688,7 @@ static void subscription_error(int status)
 {
     if (status == 403) fail("MUSE REPLY ACCESS DENIED (403)");
     else if (status == 401) fail("MUSE REPLY AUTH REQUIRED (401)");
+    else if (status == MUSE_LINK_REQ_TOO_LARGE) fail(TOO_LONG);
     else if (status <= 0 || status == 200) fail("LOST CONNECTION TO MUSE");
     else {
         char why[EV_TEXT];
@@ -769,6 +783,7 @@ void muse_hatch_start(void)
 
 void muse_hatch_status(muse_hatch_status_t *out)
 {
+    out->vm_id[0] = '\0';   /* Home Link picks the VM */
     if (!muse_link_hatch_linked()) {
         out->state = MUSE_HATCH_NOT_SET;
         strlcpy(out->detail, "Pair in the Muse app", sizeof(out->detail));
@@ -820,6 +835,9 @@ void muse_hatch_turn_begin(void)
     end_turn();
     xQueueReset(s_events);
     memset(&s_turn, 0, sizeof(s_turn));
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    s_turn.review = muse_review_turn();
+#endif
     s_turn.stage = malloc(STAGE_BYTES);
     s_turn.chunk = malloc(CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL));
     if (!s_turn.stage || !s_turn.chunk) {

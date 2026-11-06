@@ -36,6 +36,7 @@ CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
 # The green button on top, active low. The two white ones (GPIO4 and 5) are
 # not used.
 CONFIG_HOMEHUB_BUTTON_GPIO=3
+CONFIG_HOMEHUB_BUTTON_LABEL="the green button"
 
 # 32 MB flash, of which the first 16 MB are used: beyond that needs 32-bit
 # flash addressing, and the partitions end at 4.3 MB.

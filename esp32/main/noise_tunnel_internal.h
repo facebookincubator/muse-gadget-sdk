@@ -48,17 +48,37 @@ typedef struct {
     // Send a BodyChunk on the tunnel stream carrying `data`/`len` (the
     // [u16-LE len][pkt]... batch). Returns true on success.
     bool (*send_body)(void *ctx, const uint8_t *data, size_t len);
+
+    // Optional: the same, encoding and encrypting the batch where it sits.
+    // The batch is buf[headroom, +len); the bytes before it (at least
+    // NOISE_TUNNEL_TX_HEADROOM) and after it (NOISE_TUNNEL_TX_TAILROOM) are
+    // scratch for the frame headers and the tag. NULL: send_body is used.
+    bool (*send_body_inplace)(void *ctx, uint8_t *buf, size_t headroom,
+                              size_t len, size_t tailroom);
 } noise_tunnel_emit_t;
 
+// Room around each outbound batch for in-place encoding: the WebSocket header
+// (up to 14 bytes) and the Noise frame headers (at most 64) in front, the AEAD
+// tag behind.
+#define NOISE_TUNNEL_TX_HEADROOM 96
+#define NOISE_TUNNEL_TX_TAILROOM 16
+
 // ---- Called by the session owner (noise_control.cpp) ------------------------
+
+// TOTAL free DMA is the burst margin: roughly two 8 KiB batches (or ten
+// MTU-sized buffers) for the chunk plus concurrent WiFi/lwIP churn. Keep this
+// at the result-queue boundary, before every control chunk, tunnel batch and
+// ping. Download admission also leaves this margin after its allocations.
+// It is not a contiguous-allocation requirement or a reservation.
+#define NOISE_TX_DMA_RESERVE_BYTES (16 * 1024)
 
 // Total-free burst margin for tunnel batches, result dequeue, every control
 // chunk and tunnel pings. Optionally return the same sample for diagnostics.
 bool noise_tx_has_dma_headroom(size_t *dma_free);
 
-// The same margin, counting `reclaimable` bytes the send itself frees (Muse's
-// queued request payloads; on boards without PSRAM they are DMA-capable too).
-// Muse builds only.
+// The same margin, counting `reclaimable` bytes the send itself frees (queued
+// daemon request payloads; on boards without PSRAM they are DMA-capable too).
+// CONFIG_HOMEHUB_DAEMON_REQUESTS builds only.
 bool noise_tx_has_dma_headroom_reclaiming(size_t reclaimable);
 
 // Small contiguous AES-allocation floor, independent of the total-free burst

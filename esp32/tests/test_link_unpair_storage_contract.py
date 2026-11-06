@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -55,13 +56,13 @@ class LinkUnpairStorageContractTest(unittest.TestCase):
         reset = _function_body(self.app, "static bool reset_setup_with_gate_held(")
         finish = _function_body(self.app, "static void finish_setup_reset_with_gate_held(")
         gate = body.index('operation_gate_take(0, "BLE unpair")')
-        shared = body.index('reset_setup_with_gate_held("BLE unpair")')
+        shared = body.index('reset_setup_with_gate_held("BLE unpair", SETUP_RESET_KEEP_WIFI)')
         disconnect = body.index("ble_server_disconnect_client()")
         self.assertLess(gate, shared)
         self.assertLess(shared, disconnect)
-        self.assertIn("if (!setup_wipe_to_clean())", reset)
+        self.assertIn("if (!setup_wipe_to_clean(scope))", reset)
         self.assertIn('ble_server_send_status("error_storage")', reset)
-        self.assertLess(reset.index("if (!setup_wipe_to_clean())"),
+        self.assertLess(reset.index("if (!setup_wipe_to_clean(scope))"),
                         reset.index("finish_setup_reset_with_gate_held()"))
         self.assertIn('ble_server_send_status("unpaired")', finish)
         # Invalidate the old confirmation while locked, before any success
@@ -122,9 +123,11 @@ class LinkUnpairStorageContractTest(unittest.TestCase):
         reset = _function_body(self.app, "static bool reset_setup_from_control(")
         helper = _function_body(self.app, "static bool reset_setup_with_gate_held(")
 
-        self.assertIn('reset_setup_from_control("button long-press")', button)
-        self.assertIn("if (!setup_wipe_to_clean())", helper)
-        self.assertLess(helper.index("if (!setup_wipe_to_clean())"),
+        self.assertIn(
+            'reset_setup_from_control("button long-press", SETUP_RESET_FORGET_WIFI)', button
+        )
+        self.assertIn("if (!setup_wipe_to_clean(scope))", helper)
+        self.assertLess(helper.index("if (!setup_wipe_to_clean(scope))"),
                         helper.index("finish_setup_reset_with_gate_held()"))
         self.assertIn("if (!reset) {", reset)
         self.assertIn("operation_gate_take(portMAX_DELAY", reset)
@@ -138,7 +141,7 @@ class LinkUnpairStorageContractTest(unittest.TestCase):
         worker = _function_body(self.app, "static void ws_control_task(")
         queue = _function_body(self.app, "static cJSON *queue_ws_control(")
         branch = worker[worker.index("case WS_CONTROL_UNPAIR:") :]
-        clear = queue.index("if (!clear_setup_credentials())")
+        clear = queue.index("if (!clear_setup_credentials(SETUP_RESET_KEEP_WIFI))")
         task = queue.index("xTaskCreate(ws_control_task")
         accepted = queue.index("return command_ok_accepted()")
         self.assertLess(clear, task)
@@ -164,23 +167,22 @@ class LinkUnpairStorageContractTest(unittest.TestCase):
         status = _function_body(self.app, "static void on_ws_control_status(")
         reset = _function_body(self.app, "static bool reset_setup_from_control(")
 
-        self.assertIn('reset_setup_from_control("server unpair (node.unpaired)")',
-                      worker)
+        self.assertIn(
+            'reset_setup_from_control("server unpair (node.unpaired)", '
+            "SETUP_RESET_KEEP_WIFI)",
+            worker,
+        )
         self.assertIn("operation_gate_take(portMAX_DELAY", reset)
         self.assertIn("if (xTaskCreate(ws_unpaired_task", status)
         self.assertIn("!= pdPASS", status)
-        self.assertIn(
-            "atomic_store_explicit(&s_setup_reset_pending, true",
-            status,
-        )
+        self.assertIn("atomic_store_explicit(&s_unpair_pending, true", status)
+        self.assertNotIn("s_setup_reset_pending", status)
         self.assertNotIn("reset_setup_from_control", status)
 
         app_run = _function_body(self.app, "void app_run(")
-        deferred = app_run.index(
-            "atomic_exchange_explicit(&s_setup_reset_pending, false"
-        )
+        deferred = app_run.index("atomic_exchange_explicit(&s_unpair_pending, false")
         reset_call = app_run.index(
-            'reset_setup_from_control("deferred setup reset")'
+            'reset_setup_from_control("deferred unpair", SETUP_RESET_KEEP_WIFI)'
         )
         self.assertLess(deferred, reset_call)
 
@@ -260,7 +262,7 @@ int main(void) {
 
     def test_token_revocation_is_serialized_through_reboot(self) -> None:
         defer = _function_body(
-            self.app, "static void defer_token_revocation_reset("
+            self.app, "static void defer_unpair_after_revocation("
         )
         ensure = _function_body(
             self.app, "static bool ensure_access_token_ready_with_gate_held("
@@ -271,15 +273,12 @@ int main(void) {
         self.assertNotIn("noise_ctrl_disconnect", defer)
         self.assertNotIn("esp_restart", defer)
         setup_guard = defer.index('strcmp(s_setup_stage, "done") != 0')
-        pending = defer.index(
-            "atomic_store_explicit(&s_setup_reset_pending, true"
-        )
+        pending = defer.index("atomic_store_explicit(&s_unpair_pending, true")
         self.assertLess(setup_guard, pending)
         self.assertIn("return;", defer[setup_guard:pending])
-        self.assertIn(
-            "atomic_store_explicit(&s_setup_reset_pending, true", defer
-        )
-        self.assertIn("defer_token_revocation_reset()", ensure)
+        # A revoked token unpairs but keeps Wi-Fi: never the factory reset.
+        self.assertNotIn("s_setup_reset_pending", defer)
+        self.assertIn("defer_unpair_after_revocation()", ensure)
         self.assertIn('operation_gate_take(portMAX_DELAY, "boot VM connect")',
                       app_run)
         # The token-maintenance call in the heartbeat loop must take the gate
@@ -313,6 +312,32 @@ int main(void) {
         source = CONFIG_STORE_C.read_text()
         self.assertIn('"wifi_channel"', _function_body(source, "bool config_clear_setup("))
         self.assertNotIn('"wifi_channel"', _function_body(source, "bool config_clear_pairing("))
+        self.assertNotIn('"wifi_channel"', _function_body(source, "bool config_unpair("))
+
+    def test_only_the_users_factory_reset_forgets_wifi(self) -> None:
+        # The 5 s hold and the Muse menu/Settings reset (directly, or deferred
+        # when its task can't start) forget Wi-Fi. Every unpair and recovery
+        # path keeps it, and nothing else calls the full setup clear.
+        forget = re.findall(r'"([^"]+)", SETUP_RESET_FORGET_WIFI\)', self.app)
+        self.assertEqual(
+            sorted(forget),
+            ["Muse menu reset", "button long-press", "deferred setup reset"],
+        )
+        self.assertEqual(
+            self.app.count("atomic_store_explicit(&s_setup_reset_pending, true"), 1
+        )
+        self.assertIn(
+            "atomic_store_explicit(&s_setup_reset_pending, true",
+            _function_body(self.app, "void app_reset_setup_async("),
+        )
+        clear = _function_body(self.app, "static bool clear_setup_credentials(")
+        self.assertEqual(self.app.count("config_clear_setup()"), 1)
+        self.assertIn("config_clear_setup()", clear)
+        keep = re.findall(r'"([^"]+)", SETUP_RESET_KEEP_WIFI\)', self.app)
+        self.assertEqual(
+            sorted(keep),
+            ["BLE unpair", "deferred unpair", "server unpair (node.unpaired)"],
+        )
 
     def test_endpoint_urls_cleared_on_pairing_and_setup_reset(self) -> None:
         source = CONFIG_STORE_C.read_text()
