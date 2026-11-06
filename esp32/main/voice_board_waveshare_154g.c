@@ -36,6 +36,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "image_fetch.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -201,8 +202,6 @@ static void cue(bool end) {
     if (err != ESP_OK) ESP_LOGW(TAG, "cue failed: %s", esp_err_to_name(err));
 }
 
-// ---- Reply on the e-paper ----------------------------------------------------
-
 // ---- Page rendering (host-tested) -------------------------------------------
 
 // The 5x8 font at twice its size, 12 x 18 pixel cells with spacing: 16
@@ -278,6 +277,9 @@ static portMUX_TYPE s_page_mux = portMUX_INITIALIZER_UNLOCKED;
 static page_want_t s_want;         // under s_page_mux
 static TaskHandle_t s_page_task;
 static uint8_t *s_strip;
+// image_fetch_drawn() when the turn began: an image Muse drew after that
+// stays up instead of the reply's page until the next turn.
+static atomic_uint s_turn_images;
 // The reply's pages: written on the voice task, read on the page task.
 static SemaphoreHandle_t s_cache_lock;
 static char *s_cache;              // CACHE_PAGES pages of PAGE_BYTES
@@ -302,35 +304,49 @@ static void draw_band(int y, int height, const uint8_t *rgb565) {
     led_status_draw_rect(0, y, PAGE_W, height, (const uint16_t *)rgb565);
 }
 
-// Draws through the same calls as display.draw_url; the e-paper refresh
-// blocks here, not on the voice task.
+// The last request, drawn through the same calls as display.draw_url. The
+// screen is display.draw_url's while a download runs, so this draws nothing
+// then, and holds the download slot while it draws so that none starts
+// halfway through the page. A reply's page doesn't replace an image drawn
+// since the turn began.
+static void page_serve(void) {
+    static char page[PAGE_BYTES];
+    taskENTER_CRITICAL(&s_page_mux);
+    page_want_t want = s_want;
+    s_want = PAGE_NONE;
+    taskEXIT_CRITICAL(&s_page_mux);
+    if (want == PAGE_NONE || !image_fetch_claim()) return;
+    if (want == PAGE_STATUS) {
+        led_status_show_animation();
+        image_fetch_release();
+        return;
+    }
+    char count[COUNT_BYTES] = "";
+    xSemaphoreTake(s_cache_lock, portMAX_DELAY);
+    bool any = s_cache_pages > 0;
+    if (any) {
+        memcpy(page, s_cache + (size_t)s_cache_shown * PAGE_BYTES, PAGE_BYTES);
+        if (s_cache_pages > 1) {
+            snprintf(count, sizeof(count), "%d/%d", s_cache_shown + 1, s_cache_pages);
+        }
+    }
+    xSemaphoreGive(s_cache_lock);
+    if (any && image_fetch_drawn() == atomic_load(&s_turn_images)) {
+        render_page(page, count, s_strip, draw_band);
+    } else {
+        any = false;
+    }
+    image_fetch_release();
+    // The e-paper refresh blocks here, not on the voice task. A download that
+    // starts now draws over the page, and its own refresh shows the image.
+    if (any) led_status_draw_done();
+}
+
 static void page_task(void *arg) {
     (void)arg;
-    static char page[PAGE_BYTES];
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        taskENTER_CRITICAL(&s_page_mux);
-        page_want_t want = s_want;
-        s_want = PAGE_NONE;
-        taskEXIT_CRITICAL(&s_page_mux);
-        if (want == PAGE_STATUS) {
-            led_status_show_animation();
-            continue;
-        }
-        if (want != PAGE_SHOW) continue;
-        char count[COUNT_BYTES] = "";
-        xSemaphoreTake(s_cache_lock, portMAX_DELAY);
-        bool any = s_cache_pages > 0;
-        if (any) {
-            memcpy(page, s_cache + (size_t)s_cache_shown * PAGE_BYTES, PAGE_BYTES);
-            if (s_cache_pages > 1) {
-                snprintf(count, sizeof(count), "%d/%d", s_cache_shown + 1, s_cache_pages);
-            }
-        }
-        xSemaphoreGive(s_cache_lock);
-        if (!any) continue;
-        render_page(page, count, s_strip, draw_band);
-        led_status_draw_done();
+        page_serve();
     }
 }
 
@@ -384,6 +400,7 @@ static int cache_reply_pages(size_t until) {
 static void page_follow_voice(led_voice_t state) {
     if (!s_page_task) return;
     if (state == LED_VOICE_LISTENING) {
+        atomic_store(&s_turn_images, image_fetch_drawn());
         s_replied = false;
         atomic_store(&s_played, 0);
         s_scan_end = 0;

@@ -31,6 +31,9 @@ class LinkWaveshare154gPageTest(unittest.TestCase):
         source = (ROOT / "main/voice_board_waveshare_154g.c").read_text()
         start = source.index("// ---- Page rendering (host-tested)")
         (out / "page_render.inc").write_text(source[start:source.index("// ---- Page task", start)])
+        task = source.index("// ---- Page task")
+        (out / "page_task.inc").write_text(source[task:source.index("// ---- Green LED", task)])
+        (out / "sdkconfig.h").write_text("")
         cc = shlex.split(os.environ.get("CC", "cc"))
         cmd = [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(out), "-I", str(ROOT / "main"),
                str(ROOT / "tests/link_waveshare_154g_page_harness.c"), str(ROOT / "main/pixel_font.c"),
@@ -38,7 +41,18 @@ class LinkWaveshare154gPageTest(unittest.TestCase):
         compiled = subprocess.run(cmd, capture_output=True, text=True)
         if compiled.returncode:
             raise AssertionError(compiled.stdout + compiled.stderr)
+        policy = [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(out), "-I", str(ROOT / "main"),
+                  "-I", str(ROOT / "components/muse"),
+                  str(ROOT / "tests/link_waveshare_154g_page_policy_harness.c"), str(ROOT / "main/pixel_font.c"),
+                  "-o", str(out / "policy")]
+        compiled = subprocess.run(policy, capture_output=True, text=True)
+        if compiled.returncode:
+            raise AssertionError(compiled.stdout + compiled.stderr)
         cls.out = out
+
+    def test_page_leaves_the_screen_to_images(self):
+        result = subprocess.run([str(self.out / "policy")], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_page_rendering(self):
         result = subprocess.run([str(self.out / "page")], capture_output=True, text=True)
