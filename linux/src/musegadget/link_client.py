@@ -591,7 +591,7 @@ class LinkSession:
             return None
         try:
             event = json.loads(raw)
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
+        except (ValueError, RecursionError):  # malformed, overdeep, or non-UTF-8 JSON
             log.warning("dropping malformed chat event (%d bytes)", len(raw))
             return None
         return event if isinstance(event, dict) and event.get("type") == "event" else None
