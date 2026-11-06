@@ -248,6 +248,9 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                 show_status("Muse is ready · /quit or /exit · /clear")
         if input_reader is None and isinstance(display, PlainDisplay):
             input_reader = asyncio.StreamReader(limit=MAX_INPUT)
+            # The pipe transport makes stdin non-blocking; a terminal shares
+            # that flag with the shell, so it is restored on exit.
+            stdin_blocking = os.get_blocking(sys.stdin.fileno())
             stdin_transport, _ = await asyncio.get_running_loop().connect_read_pipe(
                 lambda: asyncio.StreamReaderProtocol(input_reader), sys.stdin)
         if isinstance(display, PlainDisplay):
@@ -374,6 +377,10 @@ async def run_chat(session_id=None, *, input_reader=None, output=None):
                 display.close()
             finally:
                 if stdin_transport is not None:
+                    try:
+                        os.set_blocking(sys.stdin.fileno(), stdin_blocking)
+                    except (OSError, ValueError):
+                        pass
                     stdin_transport.close()
                 writer.close()
                 await writer.wait_closed()

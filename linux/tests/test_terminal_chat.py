@@ -807,3 +807,29 @@ def test_chat_errors_from_muse_cannot_reach_the_terminal_raw(monkeypatch, capsys
     err = capsys.readouterr().err
     assert "\x1b" not in err and "\x07" not in err
     assert "]52;c;b3duZWQ=" in err
+
+
+def test_plain_mode_restores_blocking_stdin(monkeypatch):
+    import os
+    import sys
+
+    async def check(service, path):
+        async def send(*args):
+            return {"message_id": "u1", "session_id": "chat"}
+
+        service._current, events, ready = _scripted_chat(monkeypatch, path, send)
+        read_fd, write_fd = os.pipe()
+        shared = os.dup(read_fd)  # Same open file, like a shell's terminal.
+        stdin = os.fdopen(read_fd, "rb", buffering=0)
+        monkeypatch.setattr(sys, "stdin", stdin)
+        try:
+            assert os.get_blocking(shared)
+            os.write(write_fd, b"/quit\n")
+            await asyncio.wait_for(run_chat(output=io.StringIO()), 3)
+            assert os.get_blocking(shared)
+        finally:
+            os.close(shared)
+            os.close(write_fd)
+            stdin.close()
+
+    run_with_socket(check)
