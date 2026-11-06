@@ -163,6 +163,10 @@ menu "Muse"
             bool "Deotaland RoRoLee (ESP32-S3, 240x120 AMOLED, three buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_VIEWE_SMARTRING_PLUS
+            bool "VIEWE SmartRing-Plus (ESP32-S3, 360x360 round)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_S3_LCD19
             bool "Waveshare ESP32-S3-Touch-LCD-1.9 (170x320 SH8601, one button)"
             depends on IDF_TARGET_ESP32S3
@@ -212,6 +216,7 @@ menu "Muse"
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "waveshare_p4_lcd35" if MUSE_BOARD_WAVESHARE_P4_LCD35
         default "deotaland_rorolee" if MUSE_BOARD_DEOTALAND_ROROLEE
+        default "viewe_smartring_plus" if MUSE_BOARD_VIEWE_SMARTRING_PLUS
         default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
         default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
         default "none"
