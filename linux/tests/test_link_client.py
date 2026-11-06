@@ -199,11 +199,12 @@ def test_decoder_handles_split_and_batched_messages():
     assert decoder.feed(data[5:]) == [{"a": 1}, {"b": 2}]
 
 
-
 @pytest.mark.parametrize("fragmented", [False, True])
 def test_decoder_handles_json_depth_limit_and_keeps_adjacent_messages(fragmented, caplog):
-    # Below the record byte limit. Older Python JSON parsers reject this depth.
-    raw = b'{"nested":' + b'[' * 10000 + b'0' + b']' * 10000 + b'}'
+    # About 2 MB, below the record byte limit, and too deep for every
+    # supported Python's JSON parser (3.14 still accepts 100,000 levels).
+    depth = 1_000_000
+    raw = b'{"nested":' + b'[' * depth + b'0' + b']' * depth + b'}'
     try:
         json.loads(raw)
     except RecursionError:
@@ -229,6 +230,31 @@ def test_decoder_handles_json_depth_limit_and_keeps_adjacent_messages(fragmented
         assert len(messages) == 2
         assert "dropping malformed control message" in caplog.text
     assert decoder.feed(encode_message({"id": "later"})) == [{"id": "later"}]
+
+
+def test_overdeep_chat_event_is_dropped_like_malformed_json(caplog):
+    depth = 1_000_000
+    raw = b'{"type":"event","payload":' + b'[' * depth + b']' * depth + b'}\n'
+    assert LinkSession._chat_event(raw) is None
+    assert "dropping malformed chat event" in caplog.text
+
+
+def test_overdeep_response_falls_back_to_text_like_malformed_json():
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        reply = asyncio.ensure_future(session.send_chat("hello"))
+        request = await vm.next_frame()
+        depth = 500_000  # about 1 MB, within the response limit
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=b'[' * depth + b']' * depth, end_body=True,
+        )))
+        result = await reply
+        assert result["ok"] and result["status"] == 200
+        assert result["response"] == "[" * 2000
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))
 
 
 def test_decoder_rejects_oversize_messages():
