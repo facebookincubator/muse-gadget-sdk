@@ -146,6 +146,13 @@ idf_component_register(
     REQUIRES ${GADGET_REQUIRES}
 )
 
+# device.guide's Markdown, embedded as muse_device_guide_md (NUL-terminated).
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/device_guide.cmake")
+idf_build_get_property(gadget_project_dir PROJECT_DIR)
+muse_device_guide_assemble("${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" "${gadget_project_dir}")
+target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" TEXT)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE MUSE_DEVICE_GUIDE_HASH="${MUSE_DEVICE_GUIDE_HASH}")
+
 # fast_gcm.c takes over ESP-IDF's one-shot AES-GCM entry points (PSA's AES-GCM
 # driver calls them across archives, so the linker can redirect them).
 if(CONFIG_HOMEHUB_FAST_GCM)

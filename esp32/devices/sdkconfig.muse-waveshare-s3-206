@@ -29,6 +29,8 @@
 # Load last, after sdkconfig.muse.
 
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-s3-206"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-S3-Touch-AMOLED-2.06"
 CONFIG_MUSE_BOARD_WAVESHARE_S3_206=y
 # The schematic's GD25Q256 is 32 MB; Waveshare's own examples only claim 16.
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y

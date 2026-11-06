@@ -6,6 +6,8 @@
 # config.h and reterminal_e1005.cpp (MIT, Copyright (c) 2026 JoJang2u).
 # Load after sdkconfig.defaults, without devices/sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-reterminal-sticky"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Seeed reTerminal Sticky"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 CONFIG_MUSE_BOARD_NONE=y

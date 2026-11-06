@@ -19,6 +19,8 @@
 # real unit by Vibe Buddy (https://github.com/second-state/vibebuddy,
 # docs/hardware.md). Load last, after sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-atk-dnesp32s3-box"
+CONFIG_MUSE_DEVICE_MODEL_NAME="ALIENTEK ATK-DNESP32S3-BOX V1.1"
 CONFIG_MUSE_BOARD_ATK_DNESP32S3_BOX=y
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y

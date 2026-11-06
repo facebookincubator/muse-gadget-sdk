@@ -34,7 +34,7 @@ import socket
 import time
 from dataclasses import dataclass, field
 
-from musegadget import __version__, config, muse_api
+from musegadget import __version__, config, device_guide, muse_api
 from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import (
@@ -102,6 +102,11 @@ class Service:
         self._stop.set()
 
     async def run(self) -> None:
+        try:
+            self.describe()
+        except ValueError as exc:
+            log.error("invalid device description: %s", exc)
+            raise
         backoff = Backoff()
         token_rejected = False
         while not self._stop.is_set():
@@ -154,12 +159,15 @@ class Service:
 
     def describe(self) -> DeviceDescription:
         """Describe the device to register with Muse for each session."""
+        guide = device_guide.default_guide()
         return DeviceDescription(
             node_id=self.identity.node_id,
             display_name=self.display_name,
             version=__version__,
             commands=self.executor.specs(node_id=self.identity.node_id,
-                                         display_name=self.display_name, version=__version__),
+                                         display_name=self.display_name, version=__version__,
+                                         guide=guide),
+            guide=guide,
         )
 
     def run_command(self, name: str, params: dict, timeout_ms: int | None = None) -> dict:

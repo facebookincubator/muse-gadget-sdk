@@ -17,6 +17,8 @@
 # Watcher's factory data (nvsfactory, 0x9000-0x3B000), so back that up before
 # the first flash (see README.md).
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-sensecap-watcher"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Seeed SenseCAP Watcher"
 CONFIG_MUSE_BOARD_SENSECAP_WATCHER=y
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="32MB"

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import os
+import re
 import stat
 import tempfile
 import time
@@ -25,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from musegadget import config, muse_api, service as service_module
+from musegadget import config, device_guide, muse_api, service as service_module
 from musegadget.executor import Account, Executor
 from musegadget.identity import Identity
 from musegadget.link_client import MAX_IMAGE_BYTES, DeviceDescription, Outcome
@@ -215,8 +217,8 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
                 assert register["method"] == "link.register"
                 assert register["params"] == {
                     "node_id": "homelink-000001", "display_name": "Lamp", "version": "2.0",
-                    "platform": "linux", "device_family": "homehub", "model_id": "linux",
-                    "is_wakeup_supported": False,
+                    "platform": "linux", "device_family": "gadget", "model_id": "muse-gadget-linux",
+                    "metadata": {"model_name": "Linux gadget"}, "is_wakeup_supported": False,
                     "commands_v2": {"lamp.on": {"description": "Turn on the lamp", "required": {}, "optional": {}}},
                 }
                 await vm.send_message({"type": "res", "id": register["id"], "ok": True})
@@ -258,6 +260,38 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
 
     asyncio.run(bounded_scenario(scenario()))
     assert served == (["vm-1", "vm-1"] if failure else ["vm-1"])
+
+
+
+def test_the_service_describes_the_linux_client_with_its_guide():
+    async def describe():
+        return Service(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current())).describe()
+
+    params = asyncio.run(describe()).register_params()
+    assert params["commands_v2"]["device.guide"] == device_guide.SPEC
+    guide = device_guide.default_guide()
+    assert guide.startswith("# Linux gadget\n")
+    assert "Hatch" not in guide and len(guide.encode()) <= 2048
+    # The rules for this repository's guides (protocols/DEVICE.md, Guides in this repository).
+    assert not re.search(r"https?://|www\.|<[A-Za-z!/]|^\s*(```|~~~)|[\x00-\x09\x0b-\x1f\x7f-\x9f]", guide, re.M)
+    assert len(re.findall(r"^# ", guide, re.M)) == 1
+
+
+def test_an_invalid_description_fails_before_any_request(paired_device, monkeypatch):
+    def fetch(*args):
+        raise AssertionError("fetched VMs")
+
+    monkeypatch.setattr(muse_api, "fetch_vms_with_status", fetch)
+
+    class Robot(Service):
+        def describe(self):
+            return dataclasses.replace(super().describe(), model_id="Acme Robot")
+
+    async def scenario():
+        await Robot(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current())).run()
+
+    with pytest.raises(ValueError, match="model_id"):
+        asyncio.run(scenario())
 
 
 def test_cancelling_a_service_does_not_reconnect(paired_device):
