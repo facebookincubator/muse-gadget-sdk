@@ -93,6 +93,7 @@ before adding a feature to one.
 | Waveshare ESP32-S3-Touch-LCD-3.49 V2 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd349` | `tools/muse/board.sh build lcd349` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | `esp32p4` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35` | `tools/muse/board.sh build p4lcd35` |
 | SpotPear ESP32-AI-1.28 v1.0 (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-spotpear-esp32-ai-128` | `tools/muse/board.sh build spotpear` |
+| VIEWE SmartRing-Plus | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-viewe-smartring-plus` | `tools/muse/board.sh build smartring-plus` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
 | M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
 | FoloToy AI Passport (experimental) | `esp32c3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport` | `tools/muse/board.sh build ai-passport` |
@@ -168,7 +169,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3b|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3b|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -441,6 +442,7 @@ its animation (`jollybot.gif`, and `happy_anim.c/.h` made from it by
 Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `main/pixel_font.c` (BSD-2-Clause, Adafruit),
 `components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
+`components/muse/boards/viewe_smartring_display_init.h` (Apache-2.0, VIEWE),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
@@ -475,6 +477,7 @@ Button (BOOT on the dev boards):
 EchoEar-2ST confirms pending pairing with an explicit screen press; hold the
 on-screen microphone to record and release it to send once paired. It has no
 physical talk/setup button, so the GPIO button reset gesture does not apply.
+The VIEWE SmartRing-Plus works the same way; its BOOT button is inside the case.
 
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
 ideaspark, CYD, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
@@ -557,6 +560,32 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   back, and older work arriving while a newer reply is still going is
   dropped. Approvals work by voice: Muse asks in the call and you hold to
   answer; the gadget has no approval card.
+- On boards with the full LVGL UI (the e-paper UI keeps THINKING), a call
+  shows WORKING (the thinking avatar's working variant) when nothing is
+  playing, the caller isn't holding or talking, and Muse still has a caller
+  turn open
+  (`hatch.voice.turn_started` without its `turn_settled`; Muse keeps a
+  delegating turn open until its result has been spoken). A settlement with
+  `async_handoffs_pending` of 1 or more is a conversational boundary, such as
+  a spoken approval prompt, where Muse waits on the caller: not WORKING
+  (READY on push-to-talk, LISTENING hands-free) until a new caller turn
+  starts, even though such a settlement may name none of the caller's turns.
+  One reporting 0 retires every open turn, since Muse doesn't
+  settle each caller turn by name, except the latest caller turn while its
+  reply hasn't finished (an interrupted reply's settlement can arrive after
+  the next caller turn started), and that only once. A repeat of an earlier
+  settlement changes nothing. Its reply is a response
+  whose `response.submission_message_id` names a turn for its item, or one
+  that names none (early media the turn adopts, older VMs); older work's
+  responses don't count. Only plain digits count: a string, sign, fraction
+  or exponent, or no count, changes nothing. `muse_vc_call_working()` decides it; talking,
+  Muse speaking and a pending reply still take precedence. On a hands-free
+  call it waits for the turn's first reply to finish (before that the call
+  shows LISTENING, as it always has), the mic stays open while it shows, and
+  speech the server hears brings back LISTENING. The avatar gets
+  `muse_pose_t.working`: the default one types on a little keyboard with a
+  spinner beside its head in a warm scheme; an avatar that ignores the field
+  shows THINKING.
 - Nothing plays and the mic doesn't open until `hatch.voice.session` names this
   call's exact `call_id` and a `session_id`; a missing or wrong one fails the
   call. Before that, an `error` event fails it too; after, only `session_dead`
