@@ -170,6 +170,9 @@ not apply to it. Use the display and its BOOT button for setup.
 | Red, blinking | Something went wrong: check the log |
 
 To reset the device and set it up again, hold the button for 5 seconds.
+On reSpeaker Flex, use the Muse app to unpair instead. Once voice is ready,
+XIAO BOOT is the talk control and no ready-state five-second reset is claimed.
+Its separate SafeMode button is for XMOS firmware recovery, not Muse.
 
 On the experimental EchoEar-2ST, press the screen to confirm pairing; after
 pairing, hold the screen microphone to record and release it to send. See
@@ -192,7 +195,8 @@ It works on boards with the full UI, using their existing console commands.
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
 settings. Audio and image support vary by board, so check the feature table in
 [`devices/`](devices). The others show status on a light, a ring or a simple
-status screen.
+status screen. The experimental reSpeaker XVF3800 and Flex profiles use app
+prompts and serial logs because their LEDs are not Muse status indicators.
 
 | Board | What you get | Build it |
 |---|---|---|
@@ -212,6 +216,8 @@ status screen.
 | Seeed reTerminal Sticky Link status (experimental) | 3.97" e-paper status screen and SHT40 only; no Muse UI | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
+| Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental) | No Muse status LED, BOOT push-to-talk; 16 kHz I2S-slave XMOS 1.0.9 baseline | [Setup](devices/seeed-respeaker-xvf3800.md) |
+| Seeed reSpeaker Flex with XIAO ESP32-S3 (experimental) | No Muse status LED, BOOT push-to-talk; geometry-matched 16 kHz I2S-slave XMOS 1.0.4 baseline | [Setup](devices/seeed-respeaker-flex.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | UI, touch, push-to-talk, settings, images (unverified) | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |

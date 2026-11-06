@@ -285,6 +285,7 @@ static TaskHandle_t s_task = NULL;
 static char s_title[48];
 static bool s_title_dirty = false;
 #if CONFIG_HOMEHUB_VOICE
+#define VOICE_VOLUME_MS 1500
 static led_voice_t s_voice = LED_VOICE_IDLE;
 static float s_level = 0;
 static int s_volume = 0;
@@ -1208,12 +1209,10 @@ static void led_wait(int ms) {
 #endif
 }
 
-#if CONFIG_HOMEHUB_VOICE
+#if CONFIG_HOMEHUB_VOICE && (CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
 #define VOICE_FRAME_MS 40
 // Three 200 ms flashes.
 #define VOICE_ERROR_FRAMES 30
-// How long the volume stays up after the dial stops.
-#define VOICE_VOLUME_MS 1500
 
 static rgb_t scaled(rgb_t c, float level) {
     return (rgb_t){c.r * level, c.g * level, c.b * level};
@@ -1328,7 +1327,7 @@ static void led_task(void *arg) {
         led_wait(200);
         continue;
 #endif
-#if CONFIG_HOMEHUB_VOICE
+#if CONFIG_HOMEHUB_VOICE && (CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
         if (voice_render()) continue;
 #endif
 

@@ -61,6 +61,8 @@ before adding a feature to one.
 | Seeed reTerminal Sticky Link status (experimental) | `esp32s3` | `devices/sdkconfig.reterminal-sticky-link` | `tools/board.sh reterminal-sticky-link` |
 | Home Assistant Voice Preview Edition | `esp32s3` | `devices/sdkconfig.home-assistant-voice` | `tools/board.sh home-assistant-voice` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-lite` | `tools/board.sh seeed-respeaker-lite` |
+| Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-xvf3800` | `tools/board.sh seeed-respeaker-xvf3800` |
+| Seeed reSpeaker Flex with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-flex` | `tools/board.sh seeed-respeaker-flex` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19` | `tools/muse/board.sh build lcd19` |
@@ -165,6 +167,19 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 - While voice chat is ready, the centre button is push-to-talk. Turn the mute
   switch on to get its setup role back (pairing confirmation, the 5 s
   factory-reset hold).
+
+### Seeed reSpeaker XVF3800 and Flex (experimental)
+
+`tools/board.sh seeed-respeaker-xvf3800 build` and
+`tools/board.sh seeed-respeaker-flex build` build Link-only voice profiles for
+the XIAO ESP32-S3 SKUs. XVF3800 needs its 16 kHz I2S-slave firmware at the
+1.0.9 baseline. Flex needs the geometry-matched 16 kHz two-channel I2S-slave
+firmware at the 1.0.4 baseline. Both use XIAO BOOT for pairing and
+push-to-talk, with app prompts and serial logs instead of a Muse status light.
+The XVF3800 vendor ring is unused, and the Flex power LED remains power-only.
+See the [XVF3800 guide](devices/seeed-respeaker-xvf3800.md) and
+[Flex guide](devices/seeed-respeaker-flex.md) for firmware files, controls and
+unverified hardware behavior.
 
 ### Boards with the full UI, by hand
 
@@ -473,6 +488,11 @@ Button (BOOT on the dev boards):
   setup isn't complete
 - **hold for 5 s**: reset setup (unpair and forget Wi-Fi)
 
+On reSpeaker Flex, XIAO BOOT becomes the talk control once voice is ready.
+Do not rely on a ready-state five-second BOOT reset; unpair through the Muse
+app. The Flex SafeMode button belongs to XMOS firmware recovery and is not a
+Muse button.
+
 EchoEar-2ST confirms pending pairing with an explicit screen press; hold the
 on-screen microphone to record and release it to send once paired. It has no
 physical talk/setup button, so the GPIO button reset gesture does not apply.
@@ -481,6 +501,8 @@ The VIEWE SmartRing-Plus works the same way; its BOOT button is inside the case.
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
 ideaspark, CYD, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
+`MuseGadget-xvf3800-XXXXXX` on the reSpeaker XVF3800 and
+`MuseGadget-flex-XXXXXX` on the reSpeaker Flex,
 `MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). It uses
 **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
