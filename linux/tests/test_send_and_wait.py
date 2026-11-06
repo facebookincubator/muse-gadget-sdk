@@ -253,6 +253,34 @@ def test_a_repeated_seq_is_dropped():
     run(scenario())
 
 
+def test_the_message_event_counts_even_when_its_seq_is_lower_than_the_chats():
+    # Seen on an existing side chat: other events at seq 1145, then message.user at 976 (#327).
+    async def scenario():
+        session = ChatSession()
+        rows = [dict(event("task.status", status="running"), seq=1145), dict(NOTE, seq=976)]
+        rows += [dict(item, seq=number) for number, item in enumerate(ANSWER[1:], 1146)]
+        session.answer(rows)
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Four."
+
+    run(scenario())
+
+
+def test_an_earlier_message_event_repeated_mid_answer_does_not_end_it():
+    # message.user keeps its own order, so a repeat of an earlier message is still dropped.
+    async def scenario():
+        session = ChatSession()
+        earlier = event("message.user", "u0", role="user", text="hi")
+        rows = [dict(earlier, seq=975), dict(NOTE, seq=976), dict(ANSWER[1], seq=1146),
+                dict(earlier, seq=975)]
+        rows += [dict(item, seq=number) for number, item in enumerate(ANSWER[2:], 1147)]
+        session.answer(rows)
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Four."
+
+    run(scenario())
+
+
 def test_a_new_side_chat_is_created_by_the_message_then_followed():
     async def scenario():
         session = ChatSession(refuse=404, refuse_once=True,
