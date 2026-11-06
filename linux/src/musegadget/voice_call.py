@@ -471,6 +471,7 @@ class VoiceCall:
                 if not any(pcm) and not self._received_audio and not self._waiting:
                     if self.ready.is_set():
                         self._reply_gate.audio(event)
+                        self._audio_response_id(event)
                         self._apply_reply_flush()
                     continue
                 if not self.ready.is_set():

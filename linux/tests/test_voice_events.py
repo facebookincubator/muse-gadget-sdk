@@ -163,6 +163,22 @@ def test_audio_keeps_the_response_it_started_in_when_the_next_response_opens():
     ]
 
 
+def test_zero_keepalive_binds_provider_to_the_response_open_at_first_audio():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            created("r1"), audio("p1", b"\0" * len(TONE)), created("r2"),
+            audio("p1", TONE), audio("p2", HALF),
+        ])))
+        await wait_until(lambda: len(output.pcm) == len(TONE) + len(HALF))
+
+    assert run_call(script) == [
+        ResponseStarted("r1"),
+        ResponseStarted("r2"),
+        AudioChunk("r1", 0, TONE),
+        AudioChunk("r2", 0, HALF),
+    ]
+
+
 def test_held_reply_words_and_audio_are_delivered_when_its_turn_confirms_it():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, b"".join(map(line, [
