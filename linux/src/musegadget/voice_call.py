@@ -437,18 +437,19 @@ class VoiceCall:
                 was_working = bool(self._active_turns)
                 if not self._track_turn(event):
                     continue
-                if was_working != bool(self._active_turns):
+                if self._on_event is not None and was_working != bool(self._active_turns):
                     self._emit(Working(not was_working))
             elif kind in ("response.created", "response.done", "response.completed"):
                 # A response (including cancelled/failed) is NOT the call and
                 # does not settle a caller turn's asynchronous work.
                 self._activity = time.monotonic()
-                self._response_event(kind, event)
+                if self._on_event is not None:
+                    self._response_event(kind, event)
             elif kind == "response.output_audio_transcript.delta":
-                if isinstance(event.get("delta"), str):
+                if self._on_event is not None and isinstance(event.get("delta"), str):
                     self._words(TranscriptDelta(self._response_id, event["delta"]))
             elif kind == "response.output_audio_transcript.done":
-                if isinstance(event.get("transcript"), str):
+                if self._on_event is not None and isinstance(event.get("transcript"), str):
                     self._words(TranscriptDone(self._response_id, event["transcript"]))
             was_holding = self._reply_gate.holding
             self._reply_gate.event(event)
@@ -518,6 +519,8 @@ class VoiceCall:
         self._waiting_bytes += size
 
     def _audio_response_id(self, event: dict) -> str | None:
+        if self._on_event is None:
+            return None
         source = provider_id(event)
         if source is None:
             return self._response_id
@@ -531,11 +534,12 @@ class VoiceCall:
         self._received_audio = True
         if self._playback_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
             raise ValueError("voice playback buffer full")
-        offset = self._audio_offsets.pop(response_id, 0)
-        self._emit(AudioChunk(response_id, offset, pcm))
-        self._audio_offsets[response_id] = offset + len(pcm) // 2
-        if len(self._audio_offsets) > MAX_IDS:
-            del self._audio_offsets[next(iter(self._audio_offsets))]
+        if self._on_event is not None:
+            offset = self._audio_offsets.pop(response_id, 0)
+            self._emit(AudioChunk(response_id, offset, pcm))
+            self._audio_offsets[response_id] = offset + len(pcm) // 2
+            if len(self._audio_offsets) > MAX_IDS:
+                del self._audio_offsets[next(iter(self._audio_offsets))]
         for offset in range(0, len(pcm), FRAME_BYTES):
             part = pcm[offset:offset + FRAME_BYTES]
             audible = pcm_rms(part) >= 300
@@ -584,7 +588,7 @@ class VoiceCall:
         self._received_audio = False
         self._playing_until = 0
         self._output.flush()
-        if cut:
+        if self._on_event is not None and cut:
             self._emit(PlaybackFlushed(tuple(dict.fromkeys(cut))))
 
     def _gated(self) -> bool:

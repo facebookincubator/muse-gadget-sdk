@@ -15,6 +15,9 @@
 import asyncio
 import base64
 
+import pytest
+
+from musegadget import voice_call as voice
 from musegadget.voice_call import (AudioChunk, PlaybackFlushed, ResponseDone, ResponseStarted,
                                    TranscriptDelta, TranscriptDone, VoiceCall, Working)
 from test_streaming import chunk, connected
@@ -62,6 +65,60 @@ def run_call(script):
 
     asyncio.run(asyncio.wait_for(scenario(), 5))
     return events
+
+
+@pytest.mark.parametrize("words", [said, transcript])
+def test_audio_only_call_keeps_five_seconds_of_held_pcm_with_transcripts(words):
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = Output()
+            call = VoiceCall(session, device_id="homelink-synthetic")
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, line(speech()) + line(created("r1")))
+            for _ in range(125):
+                await chunk(vm, media, line(audio("p1", TONE)))
+            await chunk(vm, media, line(words("Hello")) + line(turn()), end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await task == "remote_end"
+            assert output.pcm == TONE * 125
+
+    asyncio.run(asyncio.wait_for(scenario(), 10))
+
+
+def test_audio_only_call_builds_no_events(monkeypatch):
+    built = []
+
+    def observe(event_type):
+        def build(*args):
+            event = event_type(*args)
+            built.append(event)
+            return event
+        return build
+
+    for event_type in (ResponseStarted, ResponseDone, TranscriptDelta, TranscriptDone,
+                       AudioChunk, Working, PlaybackFlushed):
+        monkeypatch.setattr(voice, event_type.__name__, observe(event_type))
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = Output()
+            call = VoiceCall(session, device_id="homelink-synthetic")
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, b"".join(map(line, [
+                speech(), created("r1"), said("Hello"), transcript("Hello"),
+                audio("p1", TONE), turn(), done("r1"), settled("turn"),
+            ])))
+            await output.written.wait()
+            await call.barge_in()
+            await chunk(vm, media, end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await task == "remote_end"
+            assert output.pcm == TONE
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert built == []
 
 
 def test_events_follow_a_reply_and_audio_offsets_count_samples_per_response():
