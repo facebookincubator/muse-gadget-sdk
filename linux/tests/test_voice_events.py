@@ -14,11 +14,13 @@
 
 import asyncio
 import base64
+import wave
 from types import SimpleNamespace
 
 import pytest
 
 from musegadget import voice_call as voice
+from musegadget.voice_audio import WavAudio
 from musegadget.voice_call import (AudioChunk, PlaybackFlushed, ResponseDone, ResponseStarted,
                                    TranscriptDelta, TranscriptDone, VoiceCall, Working)
 from test_streaming import chunk, connected
@@ -317,13 +319,13 @@ def test_rejected_playback_is_reported_as_flushed_when_run_ends(monkeypatch, fai
 
 
 @pytest.mark.parametrize("preceding_audio", [b"", TONE], ids=["quiet_only", "after_tone"])
-def test_playback_flush_names_the_quiet_frame_in_flight(monkeypatch, preceding_audio):
+def test_playback_flush_names_queued_quiet_audio(monkeypatch, preceding_audio):
     clock = [1000.0]
     monkeypatch.setattr(voice, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    output = open_audio(monkeypatch, (24000,), (24000,))
 
     async def scenario():
         events = []
-        output = Output()
         call = VoiceCall(None, device_id="homelink-synthetic", on_event=events.append)
         call._output = output
         if preceding_audio:
@@ -331,14 +333,14 @@ def test_playback_flush_names_the_quiet_frame_in_flight(monkeypatch, preceding_a
         task = asyncio.create_task(call._play())
         try:
             if preceding_audio:
-                await output.written.wait()
+                await wait_until(lambda: output._playback_bytes == len(preceding_audio))
+                assert playback(output) == preceding_audio
                 clock[0] += 0.05  # The tone ended, but its microphone settling tail remains.
-                output.written.clear()
             call._queue_pcm(QUIET, "r2")
-            await output.written.wait()
-            assert output.pcm == preceding_audio + QUIET
+            await wait_until(lambda: output._playback_bytes == len(QUIET))
             assert call._gated() == bool(preceding_audio)
             await call.barge_in()
+            assert playback(output) == b"\0" * voice.FRAME_BYTES
             assert [event for event in events if isinstance(event, PlaybackFlushed)] == [
                 PlaybackFlushed(("r2",)),
             ]
@@ -346,7 +348,44 @@ def test_playback_flush_names_the_quiet_frame_in_flight(monkeypatch, preceding_a
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    asyncio.run(asyncio.wait_for(scenario(), 2))
+    try:
+        asyncio.run(asyncio.wait_for(scenario(), 2))
+    finally:
+        output.close()
+
+
+def test_barge_in_keeps_written_wav_audio_without_reporting_it_flushed(monkeypatch, tmp_path):
+    monkeypatch.setattr(voice, "time", SimpleNamespace(monotonic=lambda: 1000.0))
+    input_path, output_path = tmp_path / "in.wav", tmp_path / "out.wav"
+    with wave.open(str(input_path), "wb") as wav:
+        wav.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+        wav.writeframes(b"")
+    events = []
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = WavAudio(input_path, output_path)
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=events.append)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            try:
+                media, start = await admit(vm)
+                await chunk(vm, media, line(created("r1")) + line(audio("p1", HALF)))
+                await wait_until(lambda: output._output.getnframes() == 480)
+                await call.barge_in()
+                assert await next_event(vm) == {"type": "response.cancel", "response_id": "r1"}
+                await chunk(vm, media, end=True)
+                await hangup(vm, media, start, media_ended=True)
+                assert await task == "remote_end"
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                output.close()
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    with wave.open(str(output_path), "rb") as wav:
+        assert wav.getnframes() == 480
+        assert wav.readframes(480) == HALF
+    assert events == [ResponseStarted("r1"), AudioChunk("r1", 0, HALF)]
 
 
 def test_microphone_settling_tail_is_not_reported_as_flushed_audio(monkeypatch):

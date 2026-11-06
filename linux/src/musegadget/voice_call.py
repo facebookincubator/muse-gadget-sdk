@@ -215,8 +215,6 @@ class VoiceCall:
         self._waiting_bytes = 0
         self._waiting_audio = False
         self._playback = deque()
-        self._in_flight_response: str | None = None
-        self._in_flight_until = 0.0
         self._pending_output = deque()
         self._playback_bytes = 0
         self._audible_frames = 0
@@ -613,7 +611,6 @@ class VoiceCall:
                     self._barge_in_failure.set_exception(error)
 
     def _flush(self) -> None:
-        cut = [self._in_flight_response] if time.monotonic() < self._in_flight_until else []
         queued = [response_id for _, _, response_id in self._playback]
         self._clear_waiting()
         self._playback.clear()
@@ -621,11 +618,9 @@ class VoiceCall:
         self._audible_frames = 0
         self._received_audio = False
         self._playing_until = 0
-        self._in_flight_until = 0
         discarded = self._output.flush()
-        if discarded is not None:
-            self._trim_output(discarded)
-            cut = [response_id for _, response_id in self._pending_output]
+        self._trim_output(discarded or 0)
+        cut = [response_id for _, response_id in self._pending_output]
         self._pending_output.clear()
         cut += queued
         if self._on_event is not None and cut:
@@ -712,8 +707,6 @@ class VoiceCall:
                 self._pending_output.append((len(pcm), response_id))
                 self._trim_output(pending)
             duration = len(pcm) / (SAMPLE_RATE * 2)
-            self._in_flight_response = response_id
-            self._in_flight_until = time.monotonic() + duration
             if audible:
                 self._playing_until = time.monotonic() + duration + SETTLE_SECONDS
                 self._activity = time.monotonic()
