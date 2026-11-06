@@ -180,6 +180,29 @@ def test_zero_keepalive_binds_provider_to_the_response_open_at_first_audio():
     ]
 
 
+@pytest.mark.parametrize("observe", [False, True])
+def test_held_transcript_does_not_turn_zero_keepalives_into_reply_audio(observe):
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            events = []
+            output = Output()
+            call = VoiceCall(session, device_id="homelink-synthetic",
+                             on_event=events.append if observe else None)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, line(speech()) + line(created("r1")) + line(said("Hello")))
+            for _ in range(126):
+                await chunk(vm, media, line(audio("p1", b"\0" * len(TONE))))
+            await chunk(vm, media, line(turn()), end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await task == "remote_end"
+            assert output.pcm == b""
+            assert events == ([ResponseStarted("r1"), Working(True),
+                               TranscriptDelta("r1", "Hello")] if observe else [])
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
 def test_held_reply_words_and_audio_are_delivered_when_its_turn_confirms_it():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, b"".join(map(line, [

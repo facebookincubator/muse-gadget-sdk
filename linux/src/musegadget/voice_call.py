@@ -210,6 +210,7 @@ class VoiceCall:
         self._audio_offsets: dict[str | None, int] = {}
         self._waiting: list[tuple[bytes, str | None] | TranscriptDelta | TranscriptDone] = []
         self._waiting_bytes = 0
+        self._waiting_audio = False
         self._playback = deque()
         self._in_flight_response: str | None = None
         self._in_flight_until = 0.0
@@ -469,7 +470,7 @@ class VoiceCall:
             if pcm:
                 # Validated zero keepalives may arrive before readiness. Drop
                 # them without activating audio or renewing either deadline.
-                if not any(pcm) and not self._received_audio and not self._waiting:
+                if not any(pcm) and not self._received_audio and not self._waiting_audio:
                     if self.ready.is_set():
                         self._reply_gate.audio(event)
                         self._audio_response_id(event)
@@ -519,6 +520,8 @@ class VoiceCall:
             raise ValueError("unconfirmed voice reply buffer full")
         self._waiting.append(held)
         self._waiting_bytes += size
+        if isinstance(held, tuple):
+            self._waiting_audio = True
 
     def _audio_response_id(self, event: dict) -> str | None:
         if self._on_event is None:
@@ -531,6 +534,7 @@ class VoiceCall:
     def _clear_waiting(self) -> None:
         self._waiting.clear()
         self._waiting_bytes = 0
+        self._waiting_audio = False
 
     def _queue_pcm(self, pcm: bytes, response_id: str | None) -> None:
         self._received_audio = True
@@ -567,6 +571,7 @@ class VoiceCall:
                                  if not isinstance(held, tuple)
                                  and held.response_id not in stale_responses]
                 self._waiting_bytes = sum(len(held.text.encode()) for held in self._waiting)
+                self._waiting_audio = False
             else:
                 self._clear_waiting()
 
