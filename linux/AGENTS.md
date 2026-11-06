@@ -384,6 +384,31 @@ run_command=...)` is one encrypted session with a Muse VM.
   follows. `ReplayScope.observe_idle(event, session_id)` retires an event
   seen while no turn is open.
 
+### Voice call events
+
+- `VoiceCall(..., on_event=callback)` calls `callback(event)` for each
+  `voice_call.VoiceEvent`, on the event loop. It must not block. An
+  exception it raises ends the call. Without `on_event` nothing changes.
+- `ResponseStarted(response_id)` and `ResponseDone(response_id, status)` come
+  from `response.created` and `response.done`. `status` is as Muse reports
+  it, such as `"completed"` or `"cancelled"`, or None. Audio of a response
+  can still arrive after its `ResponseDone`.
+- `TranscriptDelta(response_id, text)` and `TranscriptDone(response_id, text)`
+  carry the words Muse speaks. The wire events name no response, so
+  `response_id` is that of the latest `ResponseStarted`. Transcripts are not
+  fenced: text of a reply whose audio was dropped still arrives.
+- `AudioChunk(response_id, offset, pcm)` is reply PCM accepted for playback,
+  delivered before the output writes it. Held audio is delivered when its
+  turn confirms it. Dropped audio never is. `offset` counts the samples
+  delivered for `response_id` before this chunk, so `offset / SAMPLE_RATE`
+  is where it starts in that response's speech. `response_id` is the latest
+  `ResponseStarted`'s when the audio arrived.
+- `Working(working)` changes when Muse starts having, or stops having, a
+  caller turn that has not settled.
+- `PlaybackFlushed()` says audio already delivered, still queued or playing,
+  was discarded: a barge-in, the caller talking over the reply, or the call
+  ending.
+
 ## Say Muse, never Hatch
 
 Users never see the name Hatch.

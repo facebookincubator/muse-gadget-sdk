@@ -17,6 +17,8 @@
 Input is an async iterator of PCM16LE mono 24 kHz frames (up to 960 samples).
 Output implements write(pcm) and flush(), both nonblocking. The WAV and optional
 sounddevice adapters are in voice_audio. No device commands are advertised.
+An optional on_event callback receives the reply's lifecycle, transcript and
+accepted audio as VoiceEvent values.
 """
 
 from __future__ import annotations
@@ -31,7 +33,9 @@ import struct
 import time
 import uuid
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional, Union
 from urllib.parse import urlencode
 
 from musegadget.noise import Header
@@ -98,12 +102,75 @@ class _InputGated(Exception):
     """A queued input frame lost admission before encryption."""
 
 
+@dataclass(frozen=True)
+class ResponseStarted:
+    """Muse opened a response (``response.created``)."""
+
+    response_id: Optional[str]
+
+
+@dataclass(frozen=True)
+class TranscriptDelta:
+    """More of the words the current response speaks."""
+
+    response_id: Optional[str]
+    text: str
+
+
+@dataclass(frozen=True)
+class TranscriptDone:
+    """The whole transcript of the current response's speech."""
+
+    response_id: Optional[str]
+    text: str
+
+
+@dataclass(frozen=True)
+class ResponseDone:
+    """Muse closed a response. ``status`` is as reported, such as ``"completed"``
+    or ``"cancelled"``, or None. Audio of the response may still follow."""
+
+    response_id: Optional[str]
+    status: Optional[str]
+
+
+@dataclass(frozen=True)
+class AudioChunk:
+    """Reply PCM accepted for playback, delivered before the output writes it.
+
+    ``offset`` is the number of samples delivered for ``response_id`` before
+    this chunk, so ``offset / SAMPLE_RATE`` is where the chunk starts in that
+    response's speech.
+    """
+
+    response_id: Optional[str]
+    offset: int
+    pcm: bytes
+
+
+@dataclass(frozen=True)
+class Working:
+    """Whether Muse has a caller turn that has not settled yet."""
+
+    working: bool
+
+
+@dataclass(frozen=True)
+class PlaybackFlushed:
+    """Delivered audio that was still queued or playing was discarded."""
+
+
+VoiceEvent = Union[ResponseStarted, TranscriptDelta, TranscriptDone, ResponseDone,
+                   AudioChunk, Working, PlaybackFlushed]
+
+
 class VoiceCall:
     def __init__(self, session, *, device_id: str, thread_id: str | None = None,
                  half_duplex: bool = True,
                  mic_threshold: int = 0, idle_timeout: float = 45,
                  overall_timeout: float = 300, ready_timeout: float = 35,
-                 cleanup_timeout: float = 10) -> None:
+                 cleanup_timeout: float = 10,
+                 on_event: Optional[Callable[[VoiceEvent], None]] = None) -> None:
         if not 0 <= mic_threshold <= 32767:
             raise ValueError("mic threshold must be between 0 and 32767")
         self.session, self.device_id = session, device_id
@@ -130,7 +197,12 @@ class VoiceCall:
         self._admission_sent = False
         self._remote_ended = False
         self._reply_gate = ReplyGate()
-        self._waiting_pcm = bytearray()
+        self._on_event = on_event
+        self._response_id: str | None = None  # the latest response.created
+        self._audio_response: str | None = None
+        self._audio_offset = 0
+        self._waiting_pcm: list[tuple[str | None, bytes]] = []
+        self._waiting_bytes = 0
         self._playback = deque()
         self._playback_bytes = 0
         self._audible_frames = 0
@@ -354,19 +426,32 @@ class VoiceCall:
                     self.reason = "remote_stop"
                     return
             elif kind in ("hatch.voice.turn_started", "hatch.voice.turn_settled"):
+                was_working = bool(self._active_turns)
                 if not self._track_turn(event):
                     continue
+                if was_working != bool(self._active_turns):
+                    self._emit(Working(not was_working))
             elif kind in ("response.created", "response.done", "response.completed"):
                 # A response (including cancelled/failed) is NOT the call and
                 # does not settle a caller turn's asynchronous work.
                 self._activity = time.monotonic()
+                self._response_event(kind, event)
+            elif kind == "response.output_audio_transcript.delta":
+                if isinstance(event.get("delta"), str):
+                    self._emit(TranscriptDelta(self._response_id, event["delta"]))
+            elif kind == "response.output_audio_transcript.done":
+                if isinstance(event.get("transcript"), str):
+                    self._emit(TranscriptDone(self._response_id, event["transcript"]))
             was_waiting = self._reply_gate.waiting
             self._reply_gate.event(event)
             self._apply_reply_flush()
             if was_waiting and not self._reply_gate.waiting:
                 if self._reply_gate.playing and self._waiting_pcm:
-                    self._queue_pcm(bytes(self._waiting_pcm))
-                self._waiting_pcm.clear()
+                    if self._playback_bytes + self._waiting_bytes > MAX_PLAYBACK_BYTES:
+                        raise ValueError("voice playback buffer full")
+                    for response_id, held in self._waiting_pcm:
+                        self._queue_pcm(held, response_id)
+                self._clear_waiting()
             pcm = audio_from_event(event)
             if pcm:
                 # Validated zero keepalives may arrive before readiness. Drop
@@ -383,20 +468,45 @@ class VoiceCall:
                 if verdict == DROP:
                     continue
                 if verdict == HOLD:
-                    if len(self._waiting_pcm) + len(pcm) > MAX_PLAYBACK_BYTES:
+                    if self._waiting_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
                         raise ValueError("unconfirmed voice reply buffer full")
-                    self._waiting_pcm.extend(pcm)
+                    self._waiting_pcm.append((self._response_id, pcm))
+                    self._waiting_bytes += len(pcm)
                 else:
-                    self._queue_pcm(pcm)
+                    self._queue_pcm(pcm, self._response_id)
         if not self.ready.is_set():
             raise ConnectionError("voice response ended before readiness")
         await self._drain_playback()
         self.reason = "remote_end"
 
-    def _queue_pcm(self, pcm: bytes) -> None:
+    def _emit(self, event) -> None:
+        if self._on_event is not None:
+            self._on_event(event)
+
+    def _response_event(self, kind: str, event: dict) -> None:
+        response = event.get("response")
+        if not isinstance(response, dict):
+            response = {}
+        response_id = identifier(response.get("id"))
+        if kind == "response.created":
+            self._response_id = response_id
+            self._emit(ResponseStarted(response_id))
+        else:
+            status = response.get("status")
+            self._emit(ResponseDone(response_id, status if isinstance(status, str) else None))
+
+    def _clear_waiting(self) -> None:
+        self._waiting_pcm.clear()
+        self._waiting_bytes = 0
+
+    def _queue_pcm(self, pcm: bytes, response_id: str | None) -> None:
         self._received_audio = True
         if self._playback_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
             raise ValueError("voice playback buffer full")
+        if response_id != self._audio_response:
+            self._audio_response, self._audio_offset = response_id, 0
+        self._emit(AudioChunk(response_id, self._audio_offset, pcm))
+        self._audio_offset += len(pcm) // 2
         for offset in range(0, len(pcm), FRAME_BYTES):
             part = pcm[offset:offset + FRAME_BYTES]
             audible = pcm_rms(part) >= 300
@@ -413,7 +523,7 @@ class VoiceCall:
         if playing:
             self._flush()
         elif waiting:
-            self._waiting_pcm.clear()
+            self._clear_waiting()
 
     async def _drain_playback(self) -> None:
         self._remote_ended = True
@@ -436,13 +546,16 @@ class VoiceCall:
                 log.warning("could not cancel interrupted response")
 
     def _flush(self) -> None:
-        self._waiting_pcm.clear()
+        cut = bool(self._playback) or time.monotonic() < self._playing_until
+        self._clear_waiting()
         self._playback.clear()
         self._playback_bytes = 0
         self._audible_frames = 0
         self._received_audio = False
         self._playing_until = 0
         self._output.flush()
+        if cut:
+            self._emit(PlaybackFlushed())
 
     def _gated(self) -> bool:
         return self._remote_ended or self.held or (self.half_duplex and
