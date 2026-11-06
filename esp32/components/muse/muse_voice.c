@@ -52,6 +52,11 @@ static const char *TAG = "muse_voice";
 #define CALL_TAP_US 300000   /* tap-to-call keeps its tap length, as a waking PTT tap */
 #define CHUNK_US (MUSE_AUDIO_CHUNK * 1000000 / MUSE_AUDIO_RATE)
 #define NOTE_MIN_RECORD_FRAMES (MUSE_AUDIO_RATE / 2)   /* duration, not detected speech */
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+#define NOTE_TOGGLE 1   /* a press starts a note and the next press sends it */
+#else
+#define NOTE_TOGGLE 0
+#endif
 #if CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT
 #define PRE_CHUNKS 6                                   /* 120 ms; a 320 ms upload burst stalls on the ADV and C3 */
 #else
@@ -337,8 +342,9 @@ static void take_pre(rec_stats_t *st, size_t chunks)
 }
 
 /*
- * Records an admitted note until release or MAX_SECS, starting with the
- * buffered pre-roll and hold. It streams to Muse as it goes if it can.
+ * Records an admitted note until release (the next press in toggle mode) or
+ * MAX_SECS, starting with the buffered pre-roll and hold. It streams to Muse
+ * as it goes if it can.
  * If not, the note is kept in s_rec to send later, and streams from partway
  * if Hatch comes within reach. Returns false if Hatch failed the turn with no
  * kept note to fall back on (why says what failed). There is no start chirp:
@@ -414,7 +420,7 @@ static bool record(char *why, size_t cap)
          * Capture runs 60-80 ms behind real time and people let go on their
          * last syllable, so keep going briefly after release.
          */
-        if (!released && got_event(MUSE_PTT_UP)) {
+        if (!released && got_event(NOTE_TOGGLE ? MUSE_PTT_DOWN : MUSE_PTT_UP)) {
             released = true;
             stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
         }
@@ -548,7 +554,11 @@ static void too_short(void)
 {
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
+#if NOTE_TOGGLE
+    muse_state_set_hint("RECORD A LONGER NOTE");
+#else
     muse_state_set_hint("HOLD LONGER TO TALK");
+#endif
 }
 
 /* Why a press can't go to Hatch; voice notes only go there. */
@@ -617,9 +627,11 @@ typedef enum {
 
 /*
  * Buffer locally until this press has lasted 600 ms AND supplied 500 ms of
- * successful capture while held. Idle pre-roll, playback settling and release
- * tail never count. No turn is opened until NOTE_ACCEPTED; the ring keeps
- * the first words on boards both with and without a whole-note buffer.
+ * successful capture while held (toggle mode: 500 ms of capture before the
+ * press that stops it; letting go of the first press doesn't count). Idle
+ * pre-roll, playback settling and release tail never count. No turn is
+ * opened until NOTE_ACCEPTED; the ring keeps the first words on boards both
+ * with and without a whole-note buffer.
  * A waking press changes nothing on screen until it qualifies: a tap only wakes.
  */
 static note_result_t note_held(bool wake, bool barge_in)
@@ -636,8 +648,19 @@ static note_result_t note_held(bool wake, bool barge_in)
         muse_input_event_t ev;
         bool edge = xQueuePeek(s_queue, &ev, 0) == pdTRUE;
         int64_t until = edge ? ev.at_us : esp_timer_get_time();
-        bool eligible = !settle && (!note_requires_hold() ||
+        bool eligible = !settle && (NOTE_TOGGLE ? captured >= NOTE_MIN_RECORD_FRAMES :
+            !note_requires_hold() ||
             (until - s_press_us >= NOTE_MIN_HOLD_US && captured >= NOTE_MIN_RECORD_FRAMES));
+        if (edge && NOTE_TOGGLE && ev.type != MUSE_PTT_END_CALL) {
+            if (ev.type == MUSE_PTT_UP) {
+                xQueueReceive(s_queue, &ev, 0);   /* letting go doesn't stop a toggled note */
+                continue;
+            }
+            /* The press that stops it: record() takes it, or it was too soon. */
+            if (eligible) return NOTE_ACCEPTED;
+            xQueueReceive(s_queue, &ev, 0);
+            return NOTE_INSUFFICIENT_CAPTURE;
+        }
         if (edge) {
             /* Leave an admitted release for record()'s capture-lag tail, and
              * a later DOWN for the next gesture. Never borrow its hold time. */
@@ -1227,6 +1250,16 @@ static void run_call(bool ptt, size_t waking_chunks)
 }
 #endif
 
+/* While a toggled note records, the buttons treat talk as held: no menu or sleep. */
+static void note_toggled(bool on)
+{
+#if NOTE_TOGGLE
+    muse_input_note_toggled(on);
+#else
+    (void)on;
+#endif
+}
+
 static void voice_task(void *arg)
 {
     bool pending_down = false;
@@ -1305,6 +1338,9 @@ static void voice_task(void *arg)
             muse_input_clear_call_pending(s_press_mark);
             continue;
         }
+        if (wake && NOTE_TOGGLE) {
+            continue;   /* a waking press only wakes: the next press starts the note */
+        }
         note_result_t result = NOTE_CANCELLED;
         if (wake && !ptt) {
             /* A waking press only wakes until it qualifies as a note: no
@@ -1346,9 +1382,11 @@ static void voice_task(void *arg)
             pre_reset();
             continue;
         }
+        note_toggled(true);
         if (!wake) result = note_held(false, pending_down);
         pending_down = false;
         if (result != NOTE_ACCEPTED) {
+            note_toggled(false);
             drop_rec();
             pre_reset();
             muse_state_set_level(0);
@@ -1369,6 +1407,7 @@ static void voice_task(void *arg)
         }
         char why[96];
         bool ok = record(why, sizeof(why));
+        note_toggled(false);
         if (!ok) {
             pre_reset();
             go_idle(why);   /* Hatch failed it while recording */

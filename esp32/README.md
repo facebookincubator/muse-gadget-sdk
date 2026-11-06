@@ -403,8 +403,10 @@ overlay can be loaded after the Muse and board overlays.
 
 Press the talk button once to record, release it and speak, then press again
 to send. Releasing the first press does not send the note. A press that wakes
-the display also starts recording; the normal 15-second limit still applies.
-Replies use the existing text-caption path. This option does not add TTS or
+the display only wakes it. A note shorter than 500 ms isn't sent ("Record a
+longer note"), and the normal 15-second limit still applies. While a note
+records, the other buttons don't open the menu or sleep the screen. Replies
+use the existing text-caption path. This option does not add TTS or
 enable live voice calls, and is off by default for every board.
 
 ## Tests

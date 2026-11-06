@@ -461,9 +461,12 @@ menu "Muse"
         help
             A talk-button press starts recording and the next press sends
             the note. Releasing the button does not stop recording. A press
-            that wakes the display also starts the note. Recording still
-            ends at the normal 15-second limit. Replies remain text unless
-            a separate TTS integration is provided.
+            that wakes the display only wakes it. A note needs at least
+            500 ms of audio before the press that sends it, and recording
+            still ends at the normal 15-second limit. While a note records,
+            the other buttons don't open the menu or sleep the screen.
+            Replies remain text unless a separate TTS integration is
+            provided.
 
 if MUSE_REALTIME_VOICE
 

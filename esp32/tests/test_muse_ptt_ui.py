@@ -38,7 +38,9 @@ class StopWatchPTT(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.binaries = {}
-        for board, realtime in ((1, 1), (0, 1), (1, 0), (0, 0), (2, 0)):
+        # Board 1 is the StopWatch, 2 the AI Passport (low memory), 3 a
+        # press-toggle voice-note build.
+        for board, realtime in ((1, 1), (0, 1), (1, 0), (0, 0), (2, 0), (3, 0)):
             stage = Path(cls.tmp.name) / f'{board}-{realtime}'
             stage.mkdir()
             # Byte-identical production units/headers. No function extraction or
@@ -62,8 +64,9 @@ class StopWatchPTT(unittest.TestCase):
                 f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH {int(board == 1)}\n'
                 f'#define CONFIG_MUSE_BOARD_AI_PASSPORT {int(board == 2)}\n'
                 f'#define CONFIG_MUSE_REALTIME_VOICE {realtime}\n'
-                f'#define CONFIG_MUSE_HATCH {int(board == 1 or realtime)}\n'
-                f'#define CONFIG_SPIRAM {int(board == 1 or realtime)}\n'
+                f'#define CONFIG_MUSE_VOICE_NOTE_TOGGLE {int(board == 3)}\n'
+                f'#define CONFIG_MUSE_HATCH {int(board in (1, 3) or realtime)}\n'
+                f'#define CONFIG_SPIRAM {int(board in (1, 3) or realtime)}\n'
                 '#define CONFIG_MUSE_DEFAULT_VOLUME 20\n')
             ui = (MUSE / 'muse_ui.c').read_text()
             start = ui.index('static void frame_tick(')
@@ -123,6 +126,25 @@ class StopWatchPTT(unittest.TestCase):
             for scenario in (60, 61, 62, 63):
                 with self.subTest(board=board, scenario=scenario):
                     self.run_case('voice', scenario, board=board, realtime=0)
+
+    def test_toggle_note_ignores_release_and_sends_on_second_press(self):
+        self.run_case('voice', 64, board=3, realtime=0)
+
+    def test_toggle_note_shorter_than_the_minimum_is_not_sent(self):
+        for scenario in (65, 86):
+            with self.subTest(scenario=scenario):
+                self.run_case('voice', scenario, board=3, realtime=0)
+
+    def test_toggle_note_still_sends_at_the_recording_limit(self):
+        self.run_case('voice', 66, board=3, realtime=0)
+
+    def test_toggle_waking_press_only_wakes(self):
+        for scenario in (78, 84, 85):
+            with self.subTest(scenario=scenario):
+                self.run_case('voice', scenario, board=3, realtime=0)
+
+    def test_toggled_note_blocks_menu_and_sleep(self):
+        self.run_case('input', 17, board=3, realtime=0)
 
     def test_blue_shutdown_hold_and_remote_end_cancel_capture_tail(self):
         for scenario in (24, 25, 26, 27):
