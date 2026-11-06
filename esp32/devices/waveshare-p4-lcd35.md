@@ -8,11 +8,12 @@ The side buttons are BOOT, RESET and PWR. BOOT (GPIO35) is push-to-talk. PWR is 
 a press turns the screen off or on, two quick presses toggle phone setup, a 1.5 s hold powers the board
 off, and a press turns it back on. RESET restarts the P4.
 
-Images from Muse (`display.draw_url`) are off: the P4's ROM has no JPEG decoder.
+The P4's ROM has no JPEG decoder, so images from Muse (`display.draw_url`) go through its JPEG peripheral.
+They need to be baseline JPEGs, as on the other boards.
 
 ## Build
 
-Activate ESP-IDF **v6.0.1** with the `esp32p4` tools installed:
+Activate ESP-IDF **v6.0.3** with the `esp32p4` tools installed:
 
 ```sh
 tools/muse/board.sh build p4lcd35
@@ -39,3 +40,15 @@ for the C6, such as Espressif's
 We tested 2.12.13 on both the P4 and the C6.
 Flashing Muse does not touch the C6. If its firmware can't take an update over SDIO, the C6's own UART
 and IO9 are on header J6: pin 25 RXD, 27 TXD, 29 IO9, 31 GND.
+
+## Camera
+
+`camera.capture` is off by default. For 1280×960 JPEG stills from an OV5647 module on the MIPI-CSI
+connector, add the camera overlay:
+
+```sh
+idf.py -B build-muse-waveshare-p4-lcd35-camera -DIDF_TARGET=esp32p4 -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35;devices/sdkconfig.muse-waveshare-p4-lcd35-camera" build
+```
+
+A capture takes about 1.75 s. The JPEG quality steps down from 90 by 10 until the frame fits in 150 KB;
+one that doesn't fit at 20 is an error.

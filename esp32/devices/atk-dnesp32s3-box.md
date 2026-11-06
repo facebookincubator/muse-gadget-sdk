@@ -15,7 +15,7 @@ and K1 and K2 were found on a unit.
 
 ## Build and flash
 
-After activating ESP-IDF v6.0.1, set your SDK token in the build directory's
+After activating ESP-IDF v6.0.3, set your SDK token in the build directory's
 `sdkconfig` (see [`../AGENTS.md`](../AGENTS.md)), then:
 
 ```sh

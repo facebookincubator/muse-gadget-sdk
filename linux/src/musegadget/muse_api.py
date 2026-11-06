@@ -77,7 +77,7 @@ def fetch_vms_with_status(
     except urllib.error.HTTPError as exc:
         log.error("VM fetch failed: HTTP %d", exc.code)
         return [], exc.code
-    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, OSError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, UnicodeError, OSError) as exc:
         log.error("VM fetch failed: %s", exc)
         return [], None
 
@@ -161,6 +161,6 @@ def refresh_device_token(
         else:
             log.warning("token refresh failed: HTTP %d", exc.code)
         return None, exc.code
-    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, OSError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, UnicodeError, OSError) as exc:
         log.warning("token refresh failed: %s", exc)
         return None, None

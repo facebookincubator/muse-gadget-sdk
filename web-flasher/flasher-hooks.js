@@ -25,6 +25,8 @@
 //   write throws.
 // - onInstalled(port) runs when a write finishes, with the port it used.
 
+import { LocalizedError } from "./i18n.js";
+
 // "303a:1001" -> { usbVendorId, usbProductId }
 const usbFilter = (id) => {
   const [vid, pid] = id.split(":").map((h) => parseInt(h, 16));
@@ -51,21 +53,19 @@ export function installFlasherHooks({ getSelection, onInstalled }) {
     get: () => loader,
     set(value) {
       loader = value;
-      let problem;   // undefined until checked, then null or what's wrong
+      let problem;   // undefined until checked, then null or the sizes in MB
       const checkFlash = async () => {
         if (problem !== undefined) return problem;
-        problem = null;
         const { minFlashBytes } = getSelection();
-        if (!minFlashBytes) return problem;
+        if (!minFlashBytes) return (problem = null);
         const id = await value.readFlashId();
         const size = value.flashSizeBytes(value.DETECTED_FLASH_SIZES[(id >> 16) & 0xff] ?? "");
+        problem = null;
         // An unknown flash chip reports no size; let it through.
         if (size > 0 && size < minFlashBytes) {
           let needed = MB;
           while (needed < minFlashBytes) needed *= 2;
-          problem =
-            `This build needs ${needed / MB} MB of flash, but this board has ${size / MB} MB. ` +
-            "Check you picked the right board; nothing was changed on it.";
+          problem = { needed: needed / MB, size: size / MB };
         }
         return problem;
       };
@@ -76,7 +76,7 @@ export function installFlasherHooks({ getSelection, onInstalled }) {
       const writeFlash = value.writeFlash.bind(value);
       value.writeFlash = async (options) => {
         const problem = await checkFlash();
-        if (problem) throw new Error(problem);
+        if (problem) throw new LocalizedError("flash.tooSmall", problem);
         await writeFlash(options);
         onInstalled?.(lastPort);
       };
