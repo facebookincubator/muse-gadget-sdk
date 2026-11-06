@@ -341,3 +341,67 @@ def test_shared_chat_unrelated_status_does_not_release_follow_up():
     assert not turn.complete(turn.last_activity + 10)
     assert turn.feed(event("task.status", parent="u2", status="completed")) == [TaskFinished()]
     assert turn.complete(turn.last_activity)
+
+
+def test_turn_is_not_complete_before_its_first_acknowledgement():
+    turn = MuseTurn("chat")
+    turn.feed(event("delta.message_done", "r1", parent="u1", content="Answer"))
+    turn.feed(event("task.status", parent="u1", status="completed"))
+    assert not turn.complete(turn.last_activity + 60) and not turn.settled(turn.last_activity + 60)
+    assert turn.acknowledge({"message_id": "u1"}) == [
+        Reply("r1", "Answer", "", done=True, bound=True), TaskFinished()]
+    assert turn.complete(turn.last_activity) and turn.settled(turn.last_activity + 1.01)
+
+
+def test_pending_follow_up_holds_a_finished_turn_open_until_its_own_answer():
+    turn = shared_turn()
+    turn.feed(event("delta.message_done", "r1", parent="u1", content="Answer one"))
+    turn.feed(event("task.status", parent="u1", status="completed"))
+    assert turn.complete(turn.last_activity) and turn.settled(turn.last_activity + 1.01)
+    turn.expect_follow_up()
+    assert not turn.complete(turn.last_activity + 60) and not turn.settled(turn.last_activity + 60)
+    assert turn.feed(event("delta.text_append", "r2", parent="u2", text="Answer")) == []
+    assert turn.feed(event("delta.message_done", "r2", parent="u2", content="Answer two")) == []
+    assert turn.feed(event("task.status", parent="u2", status="completed")) == []
+    assert not turn.complete(turn.last_activity + 60) and not turn.settled(turn.last_activity + 60)
+    assert turn.acknowledge({"message_id": "u2"}, follow_up=True) == [
+        Reply("r2", "Answer", "Answer", done=False, bound=True),
+        Reply("r2", "Answer two", "Answer", done=True, bound=True),
+        TaskFinished(),
+    ]
+    assert turn.complete(turn.last_activity)
+    assert not turn.settled(turn.last_activity + 0.9) and turn.settled(turn.last_activity + 1.01)
+
+
+def test_acknowledged_follow_up_completes_on_its_own_replies_not_the_earlier_ones():
+    turn = shared_turn()
+    turn.feed(event("delta.message_done", "r1", parent="u1", content="Answer one"))
+    turn.feed(event("task.status", parent="u1", status="completed"))
+    turn.expect_follow_up()
+    assert turn.acknowledge({"message_id": "u2"}, follow_up=True) == []
+    assert not turn.task_finished
+    assert not turn.complete(turn.last_activity + 29.9) and not turn.settled(turn.last_activity + 60)
+    turn.feed(event("delta.text_append", "r2", parent="u2", text="Answer"))
+    assert not turn.complete(turn.last_activity + 60) and not turn.settled(turn.last_activity + 60)
+    turn.feed(event("delta.message_done", "r2", parent="u2", content="Answer two"))
+    assert not turn.complete(turn.last_activity + 2.9) and turn.complete(turn.last_activity + 3.01)
+    assert not turn.settled(turn.last_activity + 60)
+    assert turn.feed(event("task.status", parent="u2", status="completed")) == [TaskFinished()]
+    assert turn.complete(turn.last_activity) and turn.settled(turn.last_activity + 1.01)
+
+
+def test_side_chat_pending_follow_up_waits_for_the_follow_up_task():
+    turn = side_turn()
+    turn.feed(event("task.status", session="side", task_id="t1", status="running"))
+    turn.feed(event("delta.message_done", "r1", session="side", content="Answer one"))
+    turn.feed(event("task.status", session="side", task_id="t1", status="completed"))
+    assert turn.complete(turn.last_activity)
+    turn.expect_follow_up()
+    for raw in [event("task.status", session="side", task_id="t2", status="running"),
+                event("delta.message_done", "r2", session="side", content="Answer two"),
+                event("task.status", session="side", task_id="t2", status="completed")]:
+        assert turn.feed(raw) == []
+    assert not turn.complete(turn.last_activity + 60) and not turn.settled(turn.last_activity + 60)
+    assert turn.acknowledge(side_ack("u2"), follow_up=True) == [
+        Reply("r2", "Answer two", "", done=True, bound=True), TaskFinished()]
+    assert turn.complete(turn.last_activity) and turn.settled(turn.last_activity + 1.01)

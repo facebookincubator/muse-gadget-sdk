@@ -187,6 +187,13 @@ void muse_hatch_status(muse_hatch_status_t *out)
     }
 }
 
+/* The simulator pages no replies (muse_chat_text.c isn't built). */
+void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next))
+{
+    (void)width_px;
+    (void)glyph_px;
+}
+
 muse_link_state_t muse_link_state(void)
 {
     return s_link;
@@ -237,12 +244,12 @@ void muse_menu_close(void)
 {
 }
 
-void muse_console_write(const void *buf, size_t n)
+bool muse_console_write(const void *buf, size_t n)
 {
-    if (buf && n) {
-        (void)fwrite(buf, 1, n, stdout);
-        (void)fflush(stdout);
+    if (!n) {
+        return true;
     }
+    return buf && fwrite(buf, 1, n, stdout) == n && fflush(stdout) == 0;
 }
 
 void muse_input_touch_talk(bool pressed)

@@ -16,6 +16,10 @@
 
 #pragma once
 
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+
 /* Between the status side (muse_chat.c) and the session task (muse_chat_session.cpp),
  * plus voice note and caption helpers shared with muse_chat_link.c. */
 
@@ -69,12 +73,15 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
     memcpy(rejected->ids[rejected->count++], id, len + 1);
 }
 
-/* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL.
- * output_modality stays "text": requesting "voice" routes the turn to a model
- * Muse no longer serves, and the assistant replies with the canned
- * "Sorry, I ran into a problem while responding". */
+/* Identifies spoken turns (voice notes and dictation) as coming from a small
+ * microcontroller voice device, so Muse answers in short plain sentences.
+ * Typed turns leave it out. */
+#define MUSE_CHAT_SPOKEN_DEVICE "mcu-wearable"
+
+/* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
 #define MUSE_HATCH_NOTE_HEAD \
-    "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
+    "{\"message\":\"\",\"output_modality\":\"text\",\"device\":\"" MUSE_CHAT_SPOKEN_DEVICE "\"," \
+    "\"items\":[{\"type\":\"file\"," \
     "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44
@@ -89,6 +96,11 @@ size_t muse_hatch_base64(const uint8_t *in, size_t n, char *out);
  * of wrapped lines holding byte `at` of `text` (false if there's no text). */
 void muse_hatch_tail_words(const char *src, char *out, size_t cap);
 bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap);
+/* Manual pages, with the same word/UTF-8 wrapping as automatic captions.
+ * Returns the total number of pages; page is clamped to that range. */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+int muse_chat_caption_page(const char *text, int page, char *out, size_t cap);
+#endif
 
 #ifdef __cplusplus
 }

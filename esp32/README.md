@@ -82,23 +82,28 @@ commands outside the sandbox.
 
 ## Or do it yourself
 
-### 1. Install ESP-IDF v6.0.1
+### 1. Install ESP-IDF v6.0.3
 
-This firmware is built with Espressif's ESP-IDF, **version 6.0.1**. Other
+This firmware is built with Espressif's ESP-IDF, **version 6.0.3**. Other
 versions aren't supported. If you already have it installed, skip ahead.
 
 On macOS, install the prerequisites first with `brew install cmake ninja
 dfu-util python3`. On Linux, follow
-[Espressif's prerequisites](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32c5/get-started/linux-macos-setup.html).
+[Espressif's prerequisites](https://docs.espressif.com/projects/esp-idf/en/v6.0.3/esp32c5/get-started/linux-macos-setup.html).
 Then:
 
 ```sh
-git clone -b v6.0.1 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v6
+git clone -b v6.0.3 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v6
 ~/esp/esp-idf-v6/install.sh esp32c5,esp32s3,esp32c6,esp32
 . ~/esp/esp-idf-v6/export.sh
 ```
 
 Run the last line in every new terminal you build from.
+
+To move an existing clone from an earlier v6.0 release, run
+`git fetch --tags && git checkout v6.0.3 && git submodule update --init --recursive`
+in it, then its `install.sh` again. Delete each build directory's generated
+`sdkconfig` afterwards (see Configuration gotchas in `AGENTS.md`).
 
 ### 2. Build
 
@@ -143,14 +148,18 @@ run `idf.py -p PORT erase-flash` first.
 
 ### 4. Set it up with Muse
 
-Once flashed, the status light breathes **orange**: the device is ready for
-setup. In the Muse app, turn on **Settings > Devices > Developer mode**, then
-add the device (**Settings > Devices > Add Device**, the **+** icon in the top
-right). It shows up as `MuseGadget-XXXXXX`. When the light breathes **blue**, press the **BOOT**
-button to confirm it's really you. The light turns **green** when Muse is
-connected.
+In the Muse app, turn on **Settings > Devices > Developer mode**, then add the
+device (**Settings > Devices > Add Device**, the **+** icon in the top right).
+It shows up as `MuseGadget-XXXXXX`. On boards with a status light, orange means
+ready for setup and blue means the app is waiting for button confirmation.
+When the device asks you to confirm, briefly press its pairing button. On
+display boards, follow the on-screen prompt instead: it may show a pairing code
+to enter in the app, or ask you to press the button.
 
-| Light | What it means |
+The CrowPanel Advance has no RGB status light, so the color guide below does
+not apply to it. Use the display and its BOOT button for setup.
+
+| Status light | What it means |
 |---|---|
 | Orange, breathing | Ready for setup |
 | Blue, breathing | Press the button to confirm pairing |
@@ -171,6 +180,13 @@ a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
 
+## USB settings in a browser
+
+The [web flasher](../web-flasher/README.md#device-settings)'s Device settings
+card reads a connected board's settings over USB and changes its screen
+brightness, screen sleep, speaker volume, speaker on/off and microphone gain.
+It works on boards with the full UI, using their existing console commands.
+
 ## Boards
 
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
@@ -185,8 +201,11 @@ status screen.
 | Espressif ESP32-S3-DevKitC-1 | Status light and button | `tools/board.sh espressif-s3-devkitc-1 build` |
 | ideaspark ESP32 with 1.9" display | Status on screen, images | `tools/board.sh ideaspark build` |
 | Waveshare ESP32-C6-LCD-1.47 | Status on screen, images | `tools/board.sh waveshare-c6-lcd-147 build` |
+| ESP32-2432S028 Cheap Yellow Display (experimental) | Status on screen, images | `tools/board.sh esp32-2432s028 build` |
+| ESP32-C3 with 0.42" OLED | Status and agent name as text | `tools/board.sh c3-oled-042 build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
+| Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours | `tools/board.sh waveshare-s3-epaper-154g build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
 | Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI on FreeInk, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
@@ -195,12 +214,16 @@ status screen.
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
-| Waveshare ESP32-S3-Touch-LCD-1.46B (experimental) | UI, touch, push-to-talk, settings, images | `tools/muse/board.sh build 146b` |
+| Waveshare ESP32-S3-Touch-LCD-1.9 | UI, touch, push-to-talk, settings, images (unverified) | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Waveshare ESP32-S3-Touch-AMOLED-2.06 | UI, touch, push-to-talk, settings, images (unverified) | [S3 2.06 setup](devices/waveshare-s3-206.md) |
+| Waveshare ESP32-S3-Touch-AMOLED-1.43C | UI, push-to-talk, settings, images (touch, mics and battery unverified) | [1.43C notes](devices/README.md#waveshare-esp32-s3-touch-amoled-143c) |
 | OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
+| ALIENTEK ATK-DNESP32S3-BOX V1.1 | UI, push-to-talk, two-key menu, images | `tools/muse/board.sh build atk-box`, see [setup](devices/atk-dnesp32s3-box.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Waveshare ESP32-S3-Touch-AMOLED-1.8 | UI, touch, push-to-talk, settings, images (unverified) | `tools/muse/board.sh build s3-18` |
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | UI, touch, push-to-talk with text replies | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Cardputer ADV (experimental) | UI, GO/Space push-to-talk with text replies, Esc/Enter/arrow menu controls | `tools/muse/board.sh build cardputer-adv` |
@@ -208,14 +231,22 @@ status screen.
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
-| Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
+| Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added PDM or I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
+| Waveshare ESP32-S3-Touch-LCD-3.49 V2 | UI, touch, push-to-talk, settings, images | `tools/muse/board.sh build lcd349` |
+| Waveshare ESP32-S3-Touch-LCD-1.46 | UI, touch, hold-the-face or BOOT push-to-talk, settings, images | `tools/muse/board.sh build 146` |
+| Waveshare ESP32-S3-Touch-AMOLED-1.43 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build 143` |
+| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings, images; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
+| SpotPear ESP32-AI-1.28 v1.0 (experimental) | Round UI, BOOT push-to-talk, MAX98357A speaker and NP0557 mic | `tools/muse/board.sh build spotpear` |
+| VIEWE SmartRing-Plus | UI, round touch, on-screen mic, settings, images | `tools/muse/board.sh build smartring-plus` |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Elecrow CrowPanel Advance 4.3 V1.3 | UI, touch, BOOT push-to-talk, settings, speaker and mic, images | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
 | VN ESP32-S3 1.83-inch NV3023 | UI, BOOT push-to-talk, Vol+/Vol- menu, images | `tools/muse/board.sh build vn183` |
 | FoloToy AI Passport (experimental) | UI, push-to-talk with text replies, three-button menu | `tools/muse/board.sh build ai-passport` |
+| Deotaland RoRoLee | UI, BOOT push-to-talk, VOL-/VOL+ menu, images | `tools/muse/board.sh build rorolee` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.
@@ -282,16 +313,18 @@ To work on the UI without a board, use the
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
 
-Push-to-talk sends your voice note; Muse transcribes it and answers. Boards
-with a screen show the answer as captions (Voice PE and reSpeaker Lite replies
-also show up in the Muse app). Muse's own TTS stream currently rejects
-gadget text replies (HTTP 400); spoken output uses [ElevenLabs](https://elevenlabs.io)
-streaming TTS from `start_tts` in
-[`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
-when `CONFIG_MUSE_ELEVENLABS_API_KEY` is set or you send `>elevenlabs.key=…`
-over USB. Speaker-off stays text-only at reading pace. Ask for shorter
-answers in the message itself if you want them brief (for example
-"Answer in one sentence.").
+Replies from Muse are text: push-to-talk sends your voice note, Muse
+transcribes it and answers in writing, and boards with a screen show the
+answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app). Two
+things you can change:
+
+- **Shorter answers.** Ask for them in the message itself, such as "Answer in
+  one sentence."
+- **Spoken answers.** Send each reply's text to a text-to-speech API of your
+  choice and play the audio it returns. On boards with PSRAM, `start_tts` in
+  [`components/muse/muse_chat_session.cpp`](components/muse/muse_chat_session.cpp)
+  is the spot: it has the reply text, and the MP3 decoder, speaker and volume
+  are already wired up there.
 
 To talk with Muse live instead (experimental), turn on "Live voice calls with
 Muse" under Muse in `idf.py menuconfig` (`CONFIG_MUSE_REALTIME_VOICE`). It's
@@ -386,6 +419,13 @@ their upstream licenses:
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- [`components/muse/boards/viewe_smartring_display_init.h`](components/muse/boards/viewe_smartring_display_init.h),
+  the SmartRing-Plus panel initialization table from VIEWE's BSP, is
+  Apache-2.0 under VIEWE's copyright, as its header says.
+- [`components/muse/fonts/`](components/muse/fonts/), the caption and
+  button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
+  the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
+  Medium (SIL OFL 1.1); see its README.
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.

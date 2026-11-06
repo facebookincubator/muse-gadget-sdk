@@ -318,7 +318,7 @@ int main(void)
             case 13: s_saved.run.deep[0].rtc_slept_us = -1; break;
             case 14: s_saved.run.codec_count = MUSE_PTEST_CODEC_SLOTS + 1; break;
             case 15: s_saved.run.records[0].codec_slot = MUSE_PTEST_CODEC_SLOTS; break;
-            case 16: s_saved.run.codec_regs[0].adc_variant = 3; break;
+            case 16: s_saved.run.codec_regs[0].adc_variant = 4; break;
             case 17: s_saved.run.codec_regs[0].dac_mask = 0x80; break;
             case 18: s_saved.run.codec_regs[0].adc_mask = 0xff; break;
             case 19: ((uint8_t *)&s_saved.run.codec_regs[0].expected)[0] = 2; break;
