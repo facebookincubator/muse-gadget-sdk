@@ -650,6 +650,27 @@ Keep within the session's bounds:
   slow work, and any request that depends on its result, in a task of your
   own, as `on_ws_command()`'s asynchronous commands do.
 
+## Slow replies
+
+On a board with the full UI and Muse's own voice session (PSRAM), a voice-note
+turn whose request Muse took and still says it's working on (`agent.status` /
+`task.status`) after 20 s adds a notice to the turn ("Muse is working on it.
+I'll tell you when it's done."), lets go of the turn so you can ask something
+else, and remembers the request. If Muse isn't working on it, the turn waits
+and fails with NO REPLY FROM MUSE as before. Turns on the Voice PE and
+reSpeaker builds, whose voice task doesn't play late replies, wait as before
+too. Streamed pieces name no request, so the late reply is known by its
+finished `message.assistant` row, whose `reply_to_message_id` names the
+request. With no turn running, that row is held until the voice task is idle
+(`muse_hatch_incoming()`), then played as a turn of its own that wakes the
+screen. Messages the turn already played aren't announced again, and rows that
+arrive together play in one turn. The request is forgotten once its reply
+plays, 10 s after Muse stops saying it's working, or 30 minutes after it was
+remembered. A battery board resting when the reply comes plays it when it
+wakes, if its connection survived. A late reply that arrives during another
+turn follows that turn's usual rules, and only one request is remembered at a
+time.
+
 ## Video from a phone
 
 `MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
