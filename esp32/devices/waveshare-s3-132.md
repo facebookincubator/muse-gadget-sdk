@@ -52,7 +52,8 @@ and battery wake have not been tested with a battery.
 
 ## Build
 
-Activate ESP-IDF v6.0.1 and run from `esp32/`:
+Activate ESP-IDF v6.0.3, the version the repository requires (earlier
+releases stop at the configuration check), and run from `esp32/`:
 
 ```sh
 tools/muse/board.sh build s3-132
