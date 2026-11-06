@@ -293,10 +293,13 @@ def test_a_held_reply_dropped_for_another_callers_turn_says_nothing():
     ]
 
 
-def test_words_of_a_reply_dropped_for_another_callers_turn_stay_dropped_after_the_callers_turn():
+@pytest.mark.parametrize("dropped", [
+    [said("lost "), audio("p2", TONE), turn("item-1", "sub-1")],
+    [said("lost "), turn("item-1", "sub-1"), audio("p2", TONE)],
+], ids=["audio_held_first", "audio_after_foreign_turn"])
+def test_words_of_a_reply_dropped_for_another_callers_turn_stay_dropped_after_the_callers_turn(dropped):
     async def script(vm, media, call, output, events):
-        await chunk(vm, media, b"".join(map(line, [
-            speech("item-2"), created("r2"), audio("p2", TONE), turn("item-1", "sub-1"),
+        await chunk(vm, media, b"".join(map(line, [speech("item-2"), created("r2")] + dropped + [
             turn("item-2", "sub-2"), transcript("lost words"), audio("p2", TONE),
             created("r3"), audio("p3", HALF), said("kept"),
         ])))

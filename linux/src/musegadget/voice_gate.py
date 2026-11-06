@@ -145,6 +145,7 @@ class ReplyGate:
             state = PLAYING
         elif not self.item or self.blocked:
             state = STALE
+            self.words_fenced = True  # its words are dropped with it
         elif self.confirmed:
             self.flush_playing |= self.playing
             self._replace((PLAYING, CONTINUING), STALE)
