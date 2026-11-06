@@ -297,7 +297,7 @@ def test_playback_falls_back_to_48k_with_interpolation(monkeypatch):
         audio.write(struct.pack("<hh", 1000, 3000))
         out = playback(audio)
         assert len(out) == 2 * FRAME_BYTES
-        assert struct.unpack("<4h", out[:8]) == (1000, 2000, 3000, 1500)
+        assert struct.unpack("<6h", out[:12]) == (500, 1000, 2000, 3000, 1500, 0)
         assert audio._playback_bytes == 0
     finally:
         audio.close()
@@ -319,6 +319,22 @@ def test_split_streams_for_native_capture_and_resampled_playback(monkeypatch):
         audio.write(struct.pack("<hh", 1000, 3000))
         out = playback(audio)
         assert len(out) == 2 * FRAME_BYTES
-        assert struct.unpack("<4h", out[:8]) == (1000, 2000, 3000, 1500)
+        assert struct.unpack("<6h", out[:12]) == (500, 1000, 2000, 3000, 1500, 0)
+    finally:
+        audio.close()
+
+
+def test_playback_interpolation_is_continuous_across_callbacks(monkeypatch):
+    audio = open_audio(monkeypatch, (48000,), (48000,))
+    try:
+        ramp = [8 * i for i in range(2 * 960)]
+        # Uneven writes also leave a fragment remainder across the boundary.
+        for start in range(0, len(ramp), 700):
+            chunk = ramp[start:start + 700]
+            audio.write(struct.pack(f"<{len(chunk)}h", *chunk))
+        out = struct.unpack("<3840h", playback(audio) + playback(audio))
+        # One continuous 24 kHz ramp gives one continuous 48 kHz ramp, with no
+        # dip where one 40 ms callback ends and the next begins.
+        assert out[1:] == tuple(4 * i for i in range(3839))
     finally:
         audio.close()

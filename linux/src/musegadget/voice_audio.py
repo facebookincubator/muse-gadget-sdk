@@ -68,10 +68,10 @@ class WavAudio:
         self._files.close()
 
 
-# PortAudio opens hardware devices directly and never resamples, so the
-# capture stream must run at a rate the microphone actually offers.
-# Prefer the call's native 24 kHz; fall back to 48 kHz with software
-# resampling on microphones with no 24 kHz mode.
+# PortAudio opens hardware devices directly and never resamples, so each
+# stream must run at a rate its device actually offers. Prefer the call's
+# native 24 kHz; fall back to 48 kHz with software resampling on a
+# microphone or speaker with no 24 kHz mode.
 _RESAMPLED_RATE = 48000
 
 
@@ -151,13 +151,16 @@ class Pcm48To24:
         return struct.pack(f"<{len(output)}h", *output)
 
 
-def _upsample24_to_48(samples):
-    """Linear interpolation from 24 kHz samples to 48 kHz samples."""
-    output = []
-    for i, sample in enumerate(samples):
-        nxt = samples[i + 1] if i + 1 < len(samples) else 0
-        output.append(sample)
-        output.append((sample + nxt) // 2)
+def _upsample24_to_48(samples, previous):
+    """Linear 1:2 interpolation, continuous across calls.
+
+    Each 24 kHz sample is preceded by its midpoint with the one before it,
+    `previous` being the last sample of the prior call, so frame boundaries
+    interpolate like any other pair (a half-sample delay).
+    """
+    output = [0] * (2 * len(samples))
+    output[0::2] = [(a + b) >> 1 for a, b in zip([previous] + samples[:-1], samples)]
+    output[1::2] = samples
     return output
 
 
@@ -202,6 +205,7 @@ class LiveAudio:
         self._decimator = Pcm48To24() if capture_rate != SAMPLE_RATE else None
         self._playback_rate = playback_rate
         self._interpolate = playback_rate != SAMPLE_RATE
+        self._upsample_previous = 0
         self._streams = ExitStack()
         try:
             if capture_rate == SAMPLE_RATE and playback_rate == SAMPLE_RATE:
@@ -262,7 +266,7 @@ class LiveAudio:
                         self._playback.popleft()
                         continue
                     take = min(len(pcm) // 2, FRAME_SAMPLES - len(samples))
-                    samples.extend(struct.unpack_from("<%dh" % take, pcm))
+                    samples.extend(struct.unpack_from(f"<{take}h", pcm))
                     consumed = take * 2
                     self._playback_bytes -= consumed
                     if consumed == len(pcm):
@@ -270,9 +274,9 @@ class LiveAudio:
                     else:
                         self._playback[0] = pcm[consumed:]
             samples.extend([0] * (FRAME_SAMPLES - len(samples)))
-            outdata[:] = struct.pack(
-                "<" + "h" * (FRAME_SAMPLES * self._playback_rate // SAMPLE_RATE),
-                *_upsample24_to_48(samples))
+            output = _upsample24_to_48(samples, self._upsample_previous)
+            self._upsample_previous = samples[-1]
+            outdata[:] = struct.pack(f"<{len(output)}h", *output)
             return
         # The server may emit short PCM fragments. Fill the callback's whole
         # frame across fragment boundaries, retaining any remainder for next
@@ -325,6 +329,7 @@ class LiveAudio:
         with self._playback_lock:
             self._playback.clear()
             self._playback_bytes = 0
+            self._upsample_previous = 0
 
     def close(self) -> None:
         try:
