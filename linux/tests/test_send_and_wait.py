@@ -318,6 +318,21 @@ def test_existing_side_chat_returns_reply_after_lower_sequence_user_event():
     run(scenario())
 
 
+def test_an_earlier_message_event_repeated_mid_answer_does_not_end_it():
+    # Message rows keep their own order, so a repeat of an earlier message is still dropped.
+    async def scenario():
+        session = ChatSession()
+        earlier = event("message.user", "u0", role="user", text="hi")
+        rows = [dict(earlier, seq=975), dict(NOTE, seq=976), dict(ANSWER[1], seq=1146),
+                dict(earlier, seq=975)]
+        rows += [dict(item, seq=number) for number, item in enumerate(ANSWER[2:], 1147)]
+        session.answer(rows)
+        result = await send_and_wait(session, send_of(session), None, 5)
+        assert result["reply"] == "Four."
+
+    run(scenario())
+
+
 def test_an_answer_row_below_live_sequence_is_the_reply():
     # An answer sent only as a message.assistant row, numbered like the message rows.
     async def scenario():
