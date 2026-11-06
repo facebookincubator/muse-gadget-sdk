@@ -388,7 +388,7 @@ run_command=...)` is one encrypted session with a Muse VM.
 
 - `VoiceCall(..., on_event=callback)` calls `callback(event)` for each
   `voice_call.VoiceEvent`, on the event loop. It must not block. An
-  exception it raises ends the call. Without `on_event` nothing changes.
+  exception it raises ends the call. Without `on_event` no events are built.
 - `ResponseStarted(response_id)` and `ResponseDone(response_id, status)` come
   from `response.created` and `response.done` (or `response.completed`).
   `status` is as Muse reports it, such as `"completed"` or `"cancelled"`, or
@@ -413,7 +413,9 @@ run_command=...)` is one encrypted session with a Muse VM.
 - `PlaybackFlushed(response_ids)` says audio already delivered, still queued
   or playing, was discarded: a barge-in, the caller talking over the reply,
   a continuation replacing it, or the call ending. `response_ids` names the
-  responses that audio belonged to, in playback order.
+  responses that audio belonged to, in playback order. An output that queues
+  audio says how much: `write(pcm)` returns the bytes still queued and
+  `flush()` the bytes it discarded. One that plays at once returns None.
 
 ## Say Muse, never Hatch
 
