@@ -483,20 +483,23 @@ static void late_reply_matched_by_its_request() {
     event("message.assistant", "phone", "elsewhere", "Another chat");
     event("message.assistant", "proactive", "", "Unprompted");
     event("message.assistant", "late", "note", "");   /* text not ready yet */
-    assert(s_turn.phase == P_IDLE && !s_incoming && !s_pending.reply);
+    assert(s_turn.phase == P_IDLE && !s_incoming && !s_pending.replies);
     event("message.assistant", "late", "note", "The document is ready");
-    assert(s_incoming.exchange(false) && s_pending.reply && s_turn.phase == P_IDLE);
-    event("message.assistant", "later", "note", "A second one");   /* one at a time */
+    assert(s_incoming.exchange(false) && s_pending.replies && s_turn.phase == P_IDLE);
+    event("message.assistant", "late", "note", "The document is ready");   /* sent again */
+    event("message.assistant", "later", "note", "And a summary");   /* before the voice task takes them */
+    assert(cJSON_GetArraySize(s_pending.replies) == 2);
     incoming_play(s_turn.gen + 1);
     assert(s_turn.phase == P_WAIT_REPLY && s_turn.incoming && s_turn.agent_busy);
-    assert(s_turn.nmsgs == 1 && !strcmp(s_turn.msgs[0].id, "late") && s_turn.msgs[0].done);
-    assert(s_turn.msgs[0].len == 21 && !s_pending.active && !s_pending.reply);
+    assert(s_turn.nmsgs == 2 && !strcmp(s_turn.msgs[0].id, "late") && !strcmp(s_turn.msgs[1].id, "later"));
+    assert(s_turn.msgs[0].done && s_turn.msgs[1].done);
+    assert(s_turn.msgs[0].len == 21 && !s_pending.active && !s_pending.replies);
     /* Delivered, and Muse is done: nothing more is waited for. */
     status("online");
     settle();
     assert(s_turn.phase == P_IDLE && !s_pending.active);
     event("message.assistant", "after", "note", "Too late");
-    assert(!s_incoming && !s_pending.reply);
+    assert(!s_incoming && !s_pending.replies);
 }
 static void pending_is_forgotten() {
     detach();   /* Muse stops working and nothing comes: forgotten soon after */
@@ -506,12 +509,21 @@ static void pending_is_forgotten() {
     pending_expire(clock_us + PENDING_IDLE_US + 1);
     assert(!s_pending.active);
     event("message.assistant", "late", "note", "Too late");
-    assert(!s_incoming && !s_pending.reply);
-    detach();   /* still working, but not for ever */
-    pending_expire(clock_us + PENDING_US - 1);
+    assert(!s_incoming && !s_pending.replies);
+    detach();   /* still working, but not for ever, however often Muse says so */
+    int64_t armed = clock_us;
+    for (clock_us = armed; clock_us < armed + PENDING_US; clock_us += 60 * 1000000LL) status("working");
+    pending_expire(armed + PENDING_US - 1);
     assert(s_pending.active);
-    pending_expire(clock_us + PENDING_US + 1);
+    pending_expire(armed + PENDING_US + 1);
     assert(!s_pending.active);
+    detach();   /* a reply held for a resting board waits out Muse going idle, then the cap */
+    event("message.assistant", "late", "note", "Held");
+    status("online");
+    pending_expire(clock_us + PENDING_IDLE_US + 1);
+    assert(s_pending.active && s_incoming);
+    pending_expire(clock_us + PENDING_US + 1);
+    assert(!s_pending.active && !s_pending.replies && !s_incoming);
 }
 static void played_messages_are_not_replayed() {
     pending_clear();
@@ -524,7 +536,7 @@ static void played_messages_are_not_replayed() {
     assert(s_turn.phase == P_IDLE && done_events == 1 && s_pending.active && s_pending.nplayed == 1);
     s_incoming = false;
     event("message.assistant", "first", "note", "On it");   /* its row, after it played */
-    assert(!s_incoming && !s_pending.reply);
+    assert(!s_incoming && !s_pending.replies);
     event("message.assistant", "second", "note", "Done now");
     assert(s_incoming.exchange(false));
     incoming_play(s_turn.gen + 1);

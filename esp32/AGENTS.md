@@ -659,8 +659,8 @@ remembers the request. If Muse isn't working on it, the turn waits and fails wit
 Streamed pieces name no request, so the late reply is known by its finished `message.assistant` row, whose
 `reply_to_message_id` names the request. With no turn running, that row is held until the voice task is idle
 (`muse_hatch_incoming()`), then played as a turn of its own that wakes the screen. Messages the turn already
-played aren't announced again. The request is forgotten once its reply plays, 10 s after Muse stops saying it's
-working, or after 30 minutes. A battery board resting when the reply comes plays it when it wakes, if its
+played aren't announced again, and rows that arrive together play in one turn. The request is forgotten once its
+reply plays, 10 s after Muse stops saying it's working, or 30 minutes after it was remembered. A battery board resting when the reply comes plays it when it wakes, if its
 connection survived. A late reply that arrives during another turn follows that turn's usual rules, and only
 one request is remembered at a time.
 

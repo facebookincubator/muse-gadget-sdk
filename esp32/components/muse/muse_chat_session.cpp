@@ -286,16 +286,16 @@ struct turn_t {
  * message row that names it (reply_to_message_id). That row is held until the
  * voice task is idle and asks for it (muse_hatch_incoming), then played as a
  * turn of its own (incoming_play). Forgotten once played, once Muse stops
- * saying it's working, or after PENDING_US.
+ * saying it's working (unless a row is held), or PENDING_US after it was armed.
  */
 struct pending_t {
     bool active;
     bool busy;                   /* Muse's last word: still working */
-    int64_t since_us;            /* armed, or Muse's last status */
+    int64_t armed_us, status_us; /* when it was armed, and Muse's last status */
     char ids[2][80];             /* the request, as the ack named it */
     char played[MAX_MSGS][80];   /* its messages already played */
     int nplayed;
-    struct cJSON *reply;         /* the row, held for the voice task */
+    struct cJSON *replies;       /* its rows, held for the voice task (an array, at most MAX_MSGS) */
 };
 
 /* 10 KB, most of it the MP3 decoder: in PSRAM on boards that let static data go
@@ -1555,8 +1555,21 @@ static bool agent_status(const char *event, cJSON *payload, bool *busy)
 static void pending_clear(void)
 {
     s_pending.active = false;
-    cJSON_Delete(s_pending.reply);
-    s_pending.reply = nullptr;
+    cJSON_Delete(s_pending.replies);
+    s_pending.replies = nullptr;
+    s_incoming = false;
+}
+
+/* A row of the request already held (sent again, updated). */
+static bool pending_held(const char *id)
+{
+    cJSON *row;
+    cJSON_ArrayForEach(row, s_pending.replies) {
+        if (!strcmp(id, msg_id(row, nullptr) ?: "")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* With no turn running: Muse's status, and the reply of a request still waiting on it. */
@@ -1566,23 +1579,29 @@ static void pending_event(const char *event, cJSON *payload)
         return;
     }
     if (agent_status(event, payload, &s_pending.busy)) {
-        s_pending.since_us = now_us();
+        s_pending.status_us = now_us();
         return;
     }
-    if (strcmp(event, "message.assistant") || s_pending.reply) {
-        return;   /* only the finished row names the request; one at a time */
+    if (strcmp(event, "message.assistant")) {
+        return;   /* only the finished row names the request */
     }
     const char *parent = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "reply_to_message_id"));
     const char *id = msg_id(payload, nullptr);
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
     if (!parent || !parent[0] || (strcmp(parent, s_pending.ids[0]) && strcmp(parent, s_pending.ids[1])) || !id ||
-        pending_played(id) || cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready")) || !text || !text[0]) {
+        pending_played(id) || pending_held(id) || cJSON_GetArraySize(s_pending.replies) >= MAX_MSGS ||
+        cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready")) || !text || !text[0]) {
         return;
     }
-    s_pending.reply = cJSON_Duplicate(payload, true);
-    if (s_pending.reply) {
+    if (!s_pending.replies) {
+        s_pending.replies = cJSON_CreateArray();
+    }
+    cJSON *row = cJSON_Duplicate(payload, true);
+    if (row && cJSON_AddItemToArray(s_pending.replies, row)) {
         ESP_LOGI(TAG, "the reply to a request that outlived its turn has come: holding it for the voice task");
         s_incoming = true;
+    } else {
+        cJSON_Delete(row);
     }
 }
 
@@ -1596,17 +1615,18 @@ static void pending_arm(void)
     }
     s_pending.active = s_pending.ids[0][0] || s_pending.ids[1][0];
     s_pending.busy = s_turn.agent_busy;
-    s_pending.since_us = now_us();
+    s_pending.armed_us = s_pending.status_us = now_us();
 }
 
 /*
- * Forgets the request once Muse has stopped working on it for a while, or
- * after PENDING_US (also a held reply the voice task hasn't taken: resting).
+ * Forgets the request once Muse has stopped working on it for a while, unless
+ * a row is held that the voice task hasn't taken yet (resting), and in any
+ * case PENDING_US after it was armed.
  */
 static void pending_expire(int64_t t)
 {
-    bool waiting = s_pending.busy || s_pending.reply;
-    if (s_pending.active && t - s_pending.since_us > (waiting ? PENDING_US : PENDING_IDLE_US)) {
+    bool idle = !s_pending.busy && !s_pending.replies && t - s_pending.status_us > PENDING_IDLE_US;
+    if (s_pending.active && (idle || t - s_pending.armed_us > PENDING_US)) {
         ESP_LOGI(TAG, "no longer waiting for a late reply");
         pending_clear();
     }
@@ -1636,13 +1656,14 @@ static void turn_detach(void)
 
 static void on_message(const char *event, cJSON *payload, cJSON *line);
 
-/* The voice task is idle and ready for the held reply: a turn of its own, that nobody pressed for. */
+/* The voice task is idle and ready for the held rows: a turn of their own, that nobody pressed for. */
 static void incoming_play(uint32_t gen)
 {
-    cJSON *reply = s_pending.reply;
-    s_pending.reply = nullptr;
+    cJSON *replies = s_pending.replies;
+    s_pending.replies = nullptr;
+    s_incoming = false;   /* all of them play here */
     if (!turn_start(gen, false)) {
-        cJSON_Delete(reply);
+        cJSON_Delete(replies);   /* the reply stays in the app */
         return;
     }
     memcpy(s_turn.user_ids, s_pending.ids, sizeof(s_turn.user_ids));
@@ -1651,10 +1672,11 @@ static void incoming_play(uint32_t gen)
     s_turn.agent_busy = s_pending.busy;
     s_turn.chat_us = s_turn.last_event_us = now_us();
     s_pending.active = false;   /* delivered; the turn arms it again if Muse is still working */
-    if (reply) {
-        on_message("message.assistant", reply, nullptr);
-        cJSON_Delete(reply);
+    cJSON *row;
+    cJSON_ArrayForEach(row, replies) {
+        on_message("message.assistant", row, nullptr);
     }
+    cJSON_Delete(replies);
     if (!s_turn.nmsgs) {
         turn_done(true);   /* forgotten meanwhile: the voice task still needs the end */
     }
