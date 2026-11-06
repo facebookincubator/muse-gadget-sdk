@@ -32,6 +32,7 @@ if(CONFIG_MUSE_ENABLED)
         "muse_pmu.c"
         "muse_input.c"
         "muse_voice.c"
+        "muse_wakeword_glue.c"   # wake word tap/task; stubs unless MUSE_WAKEWORD_ENABLE
         "muse_adpcm.c"
         "muse_settings.c"
         "muse_text.c"
@@ -205,6 +206,7 @@ list(APPEND muse_priv_requires camera)
 if(IDF_TARGET STREQUAL "esp32p4")
     list(APPEND muse_priv_requires esp_driver_jpeg)
 endif()
+list(APPEND muse_priv_requires muse_wakeword)   # empty unless MUSE_WAKEWORD_ENABLE
 
 idf_component_register(
     SRCS ${srcs}

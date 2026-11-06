@@ -41,6 +41,7 @@
 #include "muse_text.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
+#include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
@@ -122,6 +123,9 @@ static lv_obj_t *s_ble_sw, *s_ble_status;
 static lv_obj_t *s_notes_sw;
 #endif
 static lv_obj_t *s_spk_sw, *s_vol_val, *s_vol_sl, *s_gain_val, *s_gain_sl, *s_bright_val, *s_bright_sl, *s_mic_bar, *s_mic_val;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+static lv_obj_t *s_wake_sw;
+#endif
 
 /* Sleep page. */
 static const int SLEEP_CHOICES[] = { 0, 30, 60, 120, 300, 600 };
@@ -1254,6 +1258,15 @@ static void on_notes_sw(lv_event_t *e)
 }
 #endif
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* The listening opt-in, shared with wake.on / enable_wakeword and persisted
+ * by muse_wakeword_set_enabled. */
+static void on_wake_sw(lv_event_t *e)
+{
+    muse_wakeword_set_enabled(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+#endif
+
 static void on_volume(lv_event_t *e)
 {
     int v = lv_slider_get_value(s_vol_sl);
@@ -1331,6 +1344,15 @@ static void build_sound_page(lv_obj_t *tile)
         note(list, "Talk at arm's length: the bar should reach green (-30 to -15 dBFS) without going orange.");
     }
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    s_wake_sw = switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw);
+#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
+    note(list, "Model not implemented yet, clap to wake");
+#else
+    note(list, "Listens for \"Hey Muse\" so you can start a voice note without holding the talk button.");
+#endif
+#endif
+
     if (!muse_board->epaper) {
         s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
         set_val(s_bright_val, "%d%%", muse_settings_brightness());
@@ -1351,6 +1373,12 @@ static void tick_sound(void)
     if (s_spk_sw && on != lv_obj_has_state(s_spk_sw, LV_STATE_CHECKED)) {
         lv_obj_set_state(s_spk_sw, LV_STATE_CHECKED, on);
     }
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    bool wake_on = muse_wakeword_enabled();   /* also toggled over serial / by Muse */
+    if (s_wake_sw && wake_on != lv_obj_has_state(s_wake_sw, LV_STATE_CHECKED)) {
+        lv_obj_set_state(s_wake_sw, LV_STATE_CHECKED, wake_on);
+    }
+#endif
     if (muse_board->epaper) return;
     float db = muse_voice_monitor_db();
     int v = (int)(db + 70.0f);

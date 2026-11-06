@@ -1,0 +1,40 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Aligned embed of models/hey_muse.pte, configured by CMakeLists.txt.
+ *
+ * ESP-IDF EMBED_FILES emits no alignment directive, so the data lands
+ * only 4-aligned depending on rodata layout — and ExecuTorch
+ * Program::load rejects program data that is not 8-byte aligned.
+ * Embedding it ourselves with .balign 16 keeps the model in flash
+ * (zero RAM copy); ww_runner_et.cpp still copies as a fallback if a
+ * caller-supplied model is ever misaligned. Same section and symbol
+ * names as the IDF-generated embed.
+ */
+    .section .rodata.embedded, "a"
+    .balign 16
+    .global hey_muse_pte
+    .global _binary_hey_muse_pte_start
+hey_muse_pte:
+_binary_hey_muse_pte_start:
+    .incbin "@HEY_MUSE_PTE_PATH@"
+    .global _binary_hey_muse_pte_end
+_binary_hey_muse_pte_end:
+    .balign 4
+    .global hey_muse_pte_length
+hey_muse_pte_length:
+    .long @HEY_MUSE_PTE_LEN@
