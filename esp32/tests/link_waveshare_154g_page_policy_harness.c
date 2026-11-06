@@ -41,10 +41,16 @@ typedef void *TaskHandle_t;
 typedef void *SemaphoreHandle_t;
 #define pdTRUE 1
 #define portMAX_DELAY 0
-#define xSemaphoreTake(lock, ticks) ((void)(lock), (void)(ticks), 1)
-#define xSemaphoreGive(lock) ((void)(lock))
-#define xTaskNotifyGive(task) ((void)(task))
-#define ulTaskNotifyTake(clear, ticks) ((void)(clear), (void)(ticks), 1u)
+static int xSemaphoreTake(SemaphoreHandle_t lock, int ticks) {
+    (void)lock, (void)ticks;
+    return 1;
+}
+static void xSemaphoreGive(SemaphoreHandle_t lock) { (void)lock; }
+static void xTaskNotifyGive(TaskHandle_t task) { (void)task; }
+static unsigned ulTaskNotifyTake(int clear, int ticks) {
+    (void)clear, (void)ticks;
+    return 1;
+}
 #define VOICE_MIC_RATE 16000
 
 // ---- Fakes -------------------------------------------------------------------
@@ -130,7 +136,8 @@ static void image_drawn(void) {
 int main(void) {
     s_cache = s_cache_store;
     s_strip = s_strip_store;
-    s_page_task = (TaskHandle_t)1;
+    static int page_task_handle;
+    s_page_task = &page_task_handle;
     (void)page_task;
 
     // A reply with no image: its page goes up, and the slot is free after.
