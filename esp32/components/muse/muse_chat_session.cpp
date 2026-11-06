@@ -1579,8 +1579,11 @@ static void pending_event(const char *event, cJSON *payload)
     if (!s_pending.active) {
         return;
     }
-    const char *parent = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "reply_to_message_id"));
-    bool ours = parent && parent[0] && (!strcmp(parent, s_pending.ids[0]) || !strcmp(parent, s_pending.ids[1]));
+    const char *parent = parent_id(payload);
+    /* The request, or one of its messages (a reply to a reply). */
+    bool ours = parent && parent[0] &&
+                (!strcmp(parent, s_pending.ids[0]) || !strcmp(parent, s_pending.ids[1]) || pending_played(parent) ||
+                 pending_held(parent));
     bool status = !strcmp(event, "agent.status") || !strcmp(event, "task.status");
     if (status && parent && parent[0] && !ours) {
         return;   /* another request's status */
@@ -1698,7 +1701,7 @@ static void incoming_play(uint32_t gen)
      * than s_pending's now (a press came first): bind it under that request. */
     cJSON *row;
     cJSON_ArrayForEach(row, replies) {
-        const char *parent = cJSON_GetStringValue(cJSON_GetObjectItem(row, "reply_to_message_id"));
+        const char *parent = parent_id(row);
         strlcpy(s_turn.user_ids[1], parent ? parent : "", sizeof(s_turn.user_ids[1]));
         on_message("message.assistant", row, nullptr);
     }
@@ -1755,6 +1758,10 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
         return;
     }
     const char *id = msg_id(payload, line);
+    /* A late turn missed the start of anything that was already streaming: it takes that from its finished row. */
+    if (s_turn.incoming && (append || done) && id && find_msg(id) < 0) {
+        return;
+    }
     int i = id ? bind_msg(id, payload) : -1;
     if (i < 0) {
         return;

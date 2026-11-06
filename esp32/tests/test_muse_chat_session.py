@@ -590,6 +590,25 @@ static void others_status_and_late_play() {
     assert(!s_turn.nmsgs && s_turn.phase == P_IDLE && fail_events == 1 && !fail_text[0]);
     assert(!s_pending.active && !s_pending.replies && !s_incoming);
 }
+static void chained_and_mid_stream_replies() {
+    detach();   /* a reply to the request's reply belongs to it too */
+    event("message.assistant", "a", "note", "First");
+    event("message.assistant", "b", "a", "Then this");
+    event("message.assistant", "c", "elsewhere", "Not this");
+    assert(cJSON_GetArraySize(s_pending.replies) == 2);
+    event("delta.message_start", "d");   /* starts streaming before the late turn does */
+    event("delta.text_append", "d", "", "First ");
+    incoming_play(s_turn.gen + 1);
+    assert(s_turn.nmsgs == 2 && !strcmp(s_turn.msgs[1].id, "b"));
+    event("delta.text_append", "d", "", "second");   /* only its end: wait for the whole row */
+    event("delta.message_done", "d");
+    assert(s_turn.nmsgs == 2);
+    event("message.assistant", "d", "note", "First second");
+    assert(s_turn.nmsgs == 3 && s_turn.msgs[2].done && s_turn.msgs[2].len == 12);
+    event("delta.message_start", "e");   /* one that starts during the late turn streams as usual */
+    event("delta.text_append", "e", "", "More");
+    assert(s_turn.nmsgs == 4 && s_turn.msgs[3].len == 4);
+}
 static void held_rows_outlive_a_newer_request() {
     detach();   /* request A: its reply is held, then a press comes first */
     event("message.assistant", "a1", "note", "A's answer");
@@ -637,6 +656,7 @@ int main(int argc, char **argv) {
     case 26: played_messages_are_not_replayed(); break;
     case 27: held_rows_outlive_a_newer_request(); break;
     case 28: others_status_and_late_play(); break;
+    case 29: chained_and_mid_stream_replies(); break;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -769,3 +789,6 @@ int main(int argc, char **argv) {
 
     def test_other_requests_status_and_overdue_rows_do_not_count(self):
         self.run_case(28)
+
+    def test_late_turn_takes_chained_rows_and_never_half_a_message(self):
+        self.run_case(29)
