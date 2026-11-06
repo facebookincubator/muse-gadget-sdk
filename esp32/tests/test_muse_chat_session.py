@@ -557,9 +557,11 @@ static void played_messages_are_not_replayed() {
     incoming_play(s_turn.gen + 1);
     event("message.assistant", "first", "note", "On it");
     assert(s_turn.nmsgs == 1 && !strcmp(s_turn.msgs[0].id, "second"));
+    event("message.assistant", "third", "first", "Following up on it");   /* answers what played before */
+    assert(s_turn.nmsgs == 2 && !strcmp(s_turn.msgs[1].id, "third"));
     int64_t armed = s_pending.armed_us;
     settle();   /* still working: armed again for the same request, as of its first turn */
-    assert(s_pending.active && s_pending.nplayed == 2 && s_pending.armed_us == armed);
+    assert(s_pending.active && s_pending.nplayed == 3 && s_pending.armed_us == armed);
     event("message.assistant", "first", "note", "On it");
     event("message.assistant", "second", "note", "Done now");
     assert(!s_incoming && !s_pending.replies);

@@ -1398,8 +1398,10 @@ static int bind_msg(const char *id, cJSON *payload)
         return -1;   /* its row, after its turn played it */
     }
     const char *parent = parent_id(payload);
-    /* Once the ack names our message, replies to anything else are someone else's. */
-    if (parent && parent[0] && s_turn.acked && !is_user_id(parent) && find_msg(parent) < 0) {
+    /* Once the ack names our message, replies to anything else are someone else's
+     * (a late turn's request includes the messages its earlier turns played). */
+    if (parent && parent[0] && s_turn.acked && !is_user_id(parent) && find_msg(parent) < 0 &&
+        !(s_turn.incoming && pending_played(parent))) {
         muse_chat_reject(&s_turn.rejected, id);
         return -1;
     }
