@@ -15,8 +15,12 @@
 """One bounded, half-duplex-by-default MCU voice call over Noise.
 
 Input is an async iterator of PCM16LE mono 24 kHz frames (up to 960 samples).
-Output implements write(pcm) and flush(), both nonblocking. The WAV and optional
-sounddevice adapters are in voice_audio. No device commands are advertised.
+Output implements write(pcm) and flush(), both nonblocking. Buffered outputs
+can return queued bytes from write() and discarded bytes from flush() for exact
+flush events; None assumes immediate playback. The WAV and optional sounddevice
+adapters are in voice_audio. No device commands are advertised.
+An optional on_event callback receives the reply's lifecycle, transcript and
+accepted audio as VoiceEvent values.
 """
 
 from __future__ import annotations
@@ -31,12 +35,14 @@ import struct
 import time
 import uuid
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional, Tuple, Union
 from urllib.parse import urlencode
 
 from musegadget.noise import Header
 from musegadget.streaming import read_ndjson
-from musegadget.voice_gate import DROP, HOLD, ReplyGate, identifier
+from musegadget.voice_gate import DROP, HOLD, MAX_IDS, PLAY, STALE, ReplyGate, identifier, provider_id
 
 log = logging.getLogger(__name__)
 SAMPLE_RATE = 24000
@@ -45,6 +51,10 @@ FRAME_BYTES = FRAME_SAMPLES * 2
 FRAME_SECONDS = FRAME_SAMPLES / SAMPLE_RATE
 MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 4
 MAX_PLAYBACK_BYTES = SAMPLE_RATE * 2 * 5
+# Words held with an unconfirmed reply have their own budget, so observing a
+# call never shrinks its held audio, and a count bound covers tiny entries.
+MAX_HELD_TEXT_BYTES = 64 * 1024
+MAX_HELD_ITEMS = 4096
 SETTLE_SECONDS = 0.2
 MAX_TRACKED_TURNS = 64
 MAX_SETTLED_TURNS = 1024
@@ -98,12 +108,82 @@ class _InputGated(Exception):
     """A queued input frame lost admission before encryption."""
 
 
+@dataclass(frozen=True)
+class ResponseStarted:
+    """Muse opened a response (``response.created``)."""
+
+    response_id: Optional[str]
+
+
+@dataclass(frozen=True)
+class TranscriptDelta:
+    """More of the words the current response speaks. Words are fenced with
+    the reply's audio: dropped with it, or held with it until its caller's
+    turn confirms it."""
+
+    response_id: Optional[str]
+    text: str
+
+
+@dataclass(frozen=True)
+class TranscriptDone:
+    """The whole transcript of the current response's speech."""
+
+    response_id: Optional[str]
+    text: str
+
+
+@dataclass(frozen=True)
+class ResponseDone:
+    """Muse closed a response. ``status`` is as reported, such as ``"completed"``
+    or ``"cancelled"``, or None. Audio of the response may still follow."""
+
+    response_id: Optional[str]
+    status: Optional[str]
+
+
+@dataclass(frozen=True)
+class AudioChunk:
+    """Reply PCM accepted for playback, delivered before the output writes it.
+
+    ``response_id`` is the latest response when the chunk's provider audio
+    stream was first heard, so a reply still playing when the next response
+    opens keeps its own. ``offset`` is the number of samples delivered for
+    ``response_id`` before this chunk, so ``offset / SAMPLE_RATE`` is where the
+    chunk starts in that response's speech.
+    """
+
+    response_id: Optional[str]
+    offset: int
+    pcm: bytes
+
+
+@dataclass(frozen=True)
+class Working:
+    """Whether Muse has a caller turn that has not settled yet."""
+
+    working: bool
+
+
+@dataclass(frozen=True)
+class PlaybackFlushed:
+    """Delivered audio that was still queued or playing was discarded.
+    ``response_ids`` names the responses it belonged to, in playback order."""
+
+    response_ids: Tuple[Optional[str], ...]
+
+
+VoiceEvent = Union[ResponseStarted, TranscriptDelta, TranscriptDone, ResponseDone,
+                   AudioChunk, Working, PlaybackFlushed]
+
+
 class VoiceCall:
     def __init__(self, session, *, device_id: str, thread_id: str | None = None,
                  half_duplex: bool = True,
                  mic_threshold: int = 0, idle_timeout: float = 45,
                  overall_timeout: float = 300, ready_timeout: float = 35,
-                 cleanup_timeout: float = 10) -> None:
+                 cleanup_timeout: float = 10,
+                 on_event: Optional[Callable[[VoiceEvent], None]] = None) -> None:
         if not 0 <= mic_threshold <= 32767:
             raise ValueError("mic threshold must be between 0 and 32767")
         self.session, self.device_id = session, device_id
@@ -129,9 +209,18 @@ class VoiceCall:
         self._stream = None
         self._admission_sent = False
         self._remote_ended = False
+        self._barge_in_failure = None
         self._reply_gate = ReplyGate()
-        self._waiting_pcm = bytearray()
+        self._on_event = on_event
+        self._response_id: str | None = None  # the latest response.created
+        self._audio_sources: dict[str, str | None] = {}  # provider id -> response it started in
+        self._audio_offsets: dict[str | None, int] = {}
+        self._waiting: list[tuple[bytes, str | None] | TranscriptDelta | TranscriptDone] = []
+        self._waiting_bytes = 0  # held PCM
+        self._waiting_text_bytes = 0
+        self._waiting_audio = False
         self._playback = deque()
+        self._pending_output = deque()
         self._playback_bytes = 0
         self._audible_frames = 0
         self._received_audio = False
@@ -156,10 +245,12 @@ class VoiceCall:
         tasks = []
         error = None
         try:
+            self._barge_in_failure = asyncio.get_running_loop().create_future()
             tasks = [asyncio.create_task(self._receive()),
                      asyncio.create_task(self._input(source, realtime_input)),
                      asyncio.create_task(self._play()),
-                     asyncio.create_task(self._watchdog())]
+                     asyncio.create_task(self._watchdog()),
+                     self._barge_in_failure]
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             # Prefer a real failure when EOF and another task finish together.
             for task in done:
@@ -354,26 +445,45 @@ class VoiceCall:
                     self.reason = "remote_stop"
                     return
             elif kind in ("hatch.voice.turn_started", "hatch.voice.turn_settled"):
+                was_working = bool(self._active_turns)
                 if not self._track_turn(event):
                     continue
+                if self._on_event is not None and was_working != bool(self._active_turns):
+                    self._emit(Working(not was_working))
             elif kind in ("response.created", "response.done", "response.completed"):
                 # A response (including cancelled/failed) is NOT the call and
                 # does not settle a caller turn's asynchronous work.
                 self._activity = time.monotonic()
-            was_waiting = self._reply_gate.waiting
+                if self._on_event is not None:
+                    self._response_event(kind, event)
+            elif kind == "response.output_audio_transcript.delta":
+                delta = event.get("delta")
+                if self._on_event is not None and isinstance(delta, str) and delta:
+                    self._words(TranscriptDelta(self._response_id, delta))
+            elif kind == "response.output_audio_transcript.done":
+                if self._on_event is not None and isinstance(event.get("transcript"), str):
+                    self._words(TranscriptDone(self._response_id, event["transcript"]))
+            was_holding = self._reply_gate.holding
             self._reply_gate.event(event)
             self._apply_reply_flush()
-            if was_waiting and not self._reply_gate.waiting:
-                if self._reply_gate.playing and self._waiting_pcm:
-                    self._queue_pcm(bytes(self._waiting_pcm))
-                self._waiting_pcm.clear()
+            if was_holding and not self._reply_gate.holding:
+                if self._reply_gate.confirmed and self._waiting:
+                    if self._playback_bytes + self._waiting_bytes > MAX_PLAYBACK_BYTES:
+                        raise ValueError("voice playback buffer full")
+                    for held in self._waiting:
+                        if isinstance(held, tuple):
+                            self._queue_pcm(*held)
+                        else:
+                            self._emit(held)
+                self._clear_waiting()
             pcm = audio_from_event(event)
             if pcm:
                 # Validated zero keepalives may arrive before readiness. Drop
                 # them without activating audio or renewing either deadline.
-                if not any(pcm) and not self._received_audio and not self._waiting_pcm:
+                if not any(pcm) and not self._received_audio and not self._waiting_audio:
                     if self.ready.is_set():
                         self._reply_gate.audio(event)
+                        self._audio_response_id(event)
                         self._apply_reply_flush()
                     continue
                 if not self.ready.is_set():
@@ -382,25 +492,79 @@ class VoiceCall:
                 self._apply_reply_flush()
                 if verdict == DROP:
                     continue
+                response_id = self._audio_response_id(event)
                 if verdict == HOLD:
-                    if len(self._waiting_pcm) + len(pcm) > MAX_PLAYBACK_BYTES:
-                        raise ValueError("unconfirmed voice reply buffer full")
-                    self._waiting_pcm.extend(pcm)
+                    self._hold((pcm, response_id), len(pcm))
                 else:
-                    self._queue_pcm(pcm)
+                    self._queue_pcm(pcm, response_id)
         if not self.ready.is_set():
             raise ConnectionError("voice response ended before readiness")
         await self._drain_playback()
         self.reason = "remote_end"
 
-    def _queue_pcm(self, pcm: bytes) -> None:
+    def _emit(self, event) -> None:
+        if self._on_event is not None:
+            self._on_event(event)
+
+    def _response_event(self, kind: str, event: dict) -> None:
+        response = event.get("response")
+        if not isinstance(response, dict):
+            response = {}
+        response_id = identifier(response.get("id"))
+        if kind == "response.created":
+            self._response_id = response_id
+            self._emit(ResponseStarted(response_id))
+        else:
+            status = response.get("status")
+            self._emit(ResponseDone(response_id, status if isinstance(status, str) else None))
+
+    def _words(self, event: TranscriptDelta | TranscriptDone) -> None:
+        verdict = self._reply_gate.words()
+        if verdict == HOLD:
+            self._hold(event, len(event.text.encode()))
+        elif verdict == PLAY:
+            self._emit(event)
+
+    def _hold(self, held, size: int) -> None:
+        audio = isinstance(held, tuple)
+        if (len(self._waiting) >= MAX_HELD_ITEMS
+                or audio and self._waiting_bytes + size > MAX_PLAYBACK_BYTES
+                or not audio and self._waiting_text_bytes + size > MAX_HELD_TEXT_BYTES):
+            raise ValueError("unconfirmed voice reply buffer full")
+        self._waiting.append(held)
+        if audio:
+            self._waiting_bytes += size
+            self._waiting_audio = True
+        else:
+            self._waiting_text_bytes += size
+
+    def _audio_response_id(self, event: dict) -> str | None:
+        if self._on_event is None:
+            return None
+        source = provider_id(event)
+        if source is None:
+            return self._response_id
+        return self._audio_sources.setdefault(source, self._response_id)
+
+    def _clear_waiting(self) -> None:
+        self._waiting.clear()
+        self._waiting_bytes = self._waiting_text_bytes = 0
+        self._waiting_audio = False
+
+    def _queue_pcm(self, pcm: bytes, response_id: str | None) -> None:
         self._received_audio = True
         if self._playback_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
             raise ValueError("voice playback buffer full")
+        if self._on_event is not None:
+            offset = self._audio_offsets.pop(response_id, 0)
+            self._emit(AudioChunk(response_id, offset, pcm))
+            self._audio_offsets[response_id] = offset + len(pcm) // 2
+            if len(self._audio_offsets) > MAX_IDS:
+                del self._audio_offsets[next(iter(self._audio_offsets))]
         for offset in range(0, len(pcm), FRAME_BYTES):
             part = pcm[offset:offset + FRAME_BYTES]
             audible = pcm_rms(part) >= 300
-            self._playback.append((part, audible))
+            self._playback.append((part, audible, response_id))
             self._audible_frames += int(audible)
             if audible:
                 if self.half_duplex:
@@ -413,7 +577,19 @@ class VoiceCall:
         if playing:
             self._flush()
         elif waiting:
-            self._waiting_pcm.clear()
+            if self._reply_gate.holding:
+                # A new provider replaces held PCM, but later responses may
+                # already have words waiting for their own audio.
+                stale_responses = {response_id for source, response_id in self._audio_sources.items()
+                                   if self._reply_gate.ids[source] == STALE}
+                self._waiting = [held for held in self._waiting
+                                 if not isinstance(held, tuple)
+                                 and held.response_id not in stale_responses]
+                self._waiting_bytes = 0
+                self._waiting_text_bytes = sum(len(held.text.encode()) for held in self._waiting)
+                self._waiting_audio = False
+            else:
+                self._clear_waiting()
 
     async def _drain_playback(self) -> None:
         self._remote_ended = True
@@ -427,22 +603,50 @@ class VoiceCall:
         """Fence interrupted audio until a new caller turn; cancel agent work best-effort."""
         response_id = self._reply_gate.open_response
         self._reply_gate.interrupt()
-        self._apply_reply_flush()
-        if response_id and not self._remote_ended:
-            try:
-                await asyncio.wait_for(self._event({"type": "response.cancel",
-                                                   "response_id": response_id}), 1)
-            except Exception:
-                log.warning("could not cancel interrupted response")
+        error = None
+        try:
+            self._apply_reply_flush()
+        except Exception as exc:
+            error = exc
+        try:
+            if response_id and not self._remote_ended:
+                try:
+                    await asyncio.wait_for(self._event({"type": "response.cancel",
+                                                       "response_id": response_id}), 1)
+                except Exception:
+                    log.warning("could not cancel interrupted response")
+        finally:
+            if error is not None:
+                if self._barge_in_failure is None:
+                    raise error
+                if not self._barge_in_failure.done():
+                    self._barge_in_failure.set_exception(error)
 
     def _flush(self) -> None:
-        self._waiting_pcm.clear()
+        queued = [response_id for _, _, response_id in self._playback]
+        self._clear_waiting()
         self._playback.clear()
         self._playback_bytes = 0
         self._audible_frames = 0
         self._received_audio = False
         self._playing_until = 0
-        self._output.flush()
+        discarded = self._output.flush()
+        self._trim_output(discarded or 0)
+        cut = [response_id for _, response_id in self._pending_output]
+        self._pending_output.clear()
+        cut += queued
+        if self._on_event is not None and cut:
+            self._emit(PlaybackFlushed(tuple(dict.fromkeys(cut))))
+
+    def _trim_output(self, pending: int) -> None:
+        kept = deque()
+        for size, response_id in reversed(self._pending_output):
+            if pending <= 0:
+                break
+            count = min(size, pending)
+            kept.appendleft((count, response_id))
+            pending -= count
+        self._pending_output = kept
 
     def _gated(self) -> bool:
         return self._remote_ended or self.held or (self.half_duplex and
@@ -506,10 +710,14 @@ class VoiceCall:
             if not self._playback:
                 await asyncio.sleep(0.01)
                 continue
-            pcm, audible = self._playback.popleft()
+            pcm, audible, response_id = self._playback[0]
+            pending = self._output.write(pcm)
+            self._playback.popleft()
             self._playback_bytes -= len(pcm)
             self._audible_frames -= int(audible)
-            self._output.write(pcm)
+            if self._on_event is not None and pending is not None:
+                self._pending_output.append((len(pcm), response_id))
+                self._trim_output(pending)
             duration = len(pcm) / (SAMPLE_RATE * 2)
             if audible:
                 self._playing_until = time.monotonic() + duration + SETTLE_SECONDS

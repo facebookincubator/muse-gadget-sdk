@@ -17,6 +17,9 @@
 CAVD provider IDs, not mapper response.created IDs, identify stale PCM. A new
 caller's matching turn admits its reply and later continuations. Output without
 lineage after a confirmed turn is indistinguishable from that turn's continuation.
+Transcript text names no provider response, so it gets the verdict a new provider
+ID would, except that words after a fence stay dropped until the next
+response.created.
 """
 
 MAX_IDS = 128
@@ -33,6 +36,12 @@ def identifier(value):
         return None
 
 
+def provider_id(event):
+    if event.get("type") != "continuous_audio_video.delta":
+        return None
+    return identifier(event.get("response_id"))
+
+
 class ReplyGate:
     def __init__(self):
         self.ids = {}
@@ -42,9 +51,10 @@ class ReplyGate:
         self.confirmed = self.blocked = self.turn_fresh = False
         self.flush_playing = self.flush_waiting = False
         self.open_response = None
+        self.words_fenced = False
 
     def interrupt(self, item=None):
-        self.fenced = True
+        self.fenced = self.words_fenced = True
         self.ids = dict.fromkeys(self.ids, STALE)
         self.item = item
         self.confirmed = self.blocked = self.turn_fresh = False
@@ -67,6 +77,10 @@ class ReplyGate:
     def playing(self):
         return self._has(PLAYING, CONTINUING)
 
+    @property
+    def holding(self):
+        return self.fenced and bool(self.item) and not self.blocked and not self.confirmed
+
     def take_flush(self):
         flags = self.flush_playing, self.flush_waiting
         self.flush_playing = self.flush_waiting = False
@@ -88,6 +102,8 @@ class ReplyGate:
             if not self.item or not item or not identifier(event.get("submission_message_id")):
                 return
             if item != self.item:
+                # Words of the reply this drops stay dropped until a new response opens.
+                self.words_fenced |= self._has(WAITING, CONTINUING)
                 self.flush_waiting |= self.waiting
                 self.flush_playing |= self._has(CONTINUING)
                 self._replace((WAITING, CONTINUING), STALE)
@@ -101,6 +117,8 @@ class ReplyGate:
             if self.item and identifier(event.get("item_id")) == self.item:
                 self.interrupt()
         elif kind in ("response.created", "response.done", "response.completed"):
+            if kind == "response.created":
+                self.words_fenced = False
             response = event.get("response")
             response_id = identifier(response.get("id")) if isinstance(response, dict) else None
             if response_id:
@@ -109,9 +127,13 @@ class ReplyGate:
                 elif response_id == self.open_response:
                     self.open_response = None
 
+    def words(self):
+        if self.words_fenced or self.fenced and (not self.item or self.blocked):
+            return DROP
+        return HOLD if self.holding else PLAY
+
     def audio(self, event):
-        response_id = (identifier(event.get("response_id"))
-                       if event.get("type") == "continuous_audio_video.delta" else None)
+        response_id = provider_id(event)
         if response_id is None:
             return DROP if self.fenced else PLAY
         if response_id in self.ids:
@@ -123,6 +145,7 @@ class ReplyGate:
             state = PLAYING
         elif not self.item or self.blocked:
             state = STALE
+            self.words_fenced = True  # its words are dropped with it
         elif self.confirmed:
             self.flush_playing |= self.playing
             self._replace((PLAYING, CONTINUING), STALE)
