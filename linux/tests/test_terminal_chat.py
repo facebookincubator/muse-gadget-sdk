@@ -67,6 +67,18 @@ def test_live_replies_keep_their_order_apart_from_user_events():
     assert view.feed(reply) == "\nMuse: Hello"
 
 
+def test_an_answer_row_below_live_sequence_is_shown():
+    view = LiveReplies("chat")
+    delta = event("delta.text_append", "r1", parent="u1", text="Streamed")
+    delta["seq"] = 1150
+    assert view.feed(delta) == "\nMuse: Streamed"
+    # A complete answer row, with no deltas, numbered in the chat's own order.
+    row = event("message.assistant", "r2", parent="u2", content="Row answer")
+    row["seq"] = 977
+    assert view.feed(row) == "\nMuse: Row answer\n"
+    assert view.feed(row) == ""
+
+
 def test_live_users_include_remote_messages_and_suppress_local_echoes_by_id():
     users = LiveUsers('chat')
     assert users.feed(event('message.user', 'web', display_text='Web\x1b message')) == ['Web message']

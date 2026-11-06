@@ -109,6 +109,7 @@ class LiveReplies:
         self.session_id = session_id
         self.messages = OrderedDict()
         self.sequence = None
+        self.row_sequence = None
         self.current = None
         self.last_reply = None
 
@@ -122,13 +123,17 @@ class LiveReplies:
         name = event.get("event")
         if name not in ("delta.message_start", "delta.text_append", "delta.message_done", "message.assistant"):
             return ""
-        # Only reply events share this order: message.user has been seen
-        # numbered apart from the chat's other events.
+        # Message rows (message.user, message.assistant) carry the chat's own
+        # order, apart from live delta events, so each kind keeps its own.
         seq = event.get("seq")
         if isinstance(seq, int):
-            if self.sequence is not None and seq <= self.sequence:
+            last = self.row_sequence if name == "message.assistant" else self.sequence
+            if last is not None and seq <= last:
                 return ""
-            self.sequence = seq
+            if name == "message.assistant":
+                self.row_sequence = seq
+            else:
+                self.sequence = seq
         if payload.get("role") not in (None, "assistant"):
             return ""
         identifier = payload.get("message_id") or event.get("message_id") or payload.get("id")
