@@ -22,6 +22,14 @@
     ]
   },
   {
+    "board": "muse-waveshare-s3-175c",
+    "name": "Waveshare ESP32-S3-Touch-AMOLED-1.75C",
+    "usb": [
+      "303a:1001"
+    ],
+    "note": "Check that your board is the <strong>1.75C (32 MB flash)</strong> before installing. The 1.75 without the C has different wiring; its USB port looks the same."
+  },
+  {
     "board": "muse-waveshare-s3-185c",
     "name": "Waveshare ESP32-S3-Touch-LCD-1.85C",
     "usb": [
