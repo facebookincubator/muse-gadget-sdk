@@ -163,7 +163,7 @@ static inline void muse_speaking_update(muse_speaking_t *s, bool speaking, float
     s->gaze += (gaze - s->gaze) * blend;
     s->nod += (nod - s->nod) * blend;
 
-    float mouth = speaking ? muse_speak_clamp((s->energy - .035f) * 1.5f, 0, 1) : 0;
+    float mouth = speaking ? muse_speak_clamp((s->energy - .035f) * 1.0f, 0, .45f) : 0;
     if (speaking && !s->heard_voice) {
         /* Caption-paced replies may have silent PCM. Give them visible
          * articulation, with varied syllables and a short phrase breath. Once
@@ -176,7 +176,7 @@ static inline void muse_speaking_update(muse_speaking_t *s, bool speaking, float
         float phase = syllable - index;
         float phrase = t - floorf(t / 2.8f) * 2.8f;
         float pulse = muse_speak_pulse(phase, .90f, .18f, .40f);
-        mouth = phrase < 2.38f ? pulse * syllables[index % 7] : 0;
+        mouth = phrase < 2.38f ? pulse * syllables[index % 7] * .55f : 0;
     }
     s->mouth += (mouth - s->mouth) * muse_speak_clamp(dt * 22, 0, 1);
     if (s->mouth < .001f) s->mouth = 0;

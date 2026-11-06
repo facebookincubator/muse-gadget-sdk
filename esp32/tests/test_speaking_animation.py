@@ -78,7 +78,7 @@ int main(void) {
         if(fabsf(s.gaze)>gaze_max) gaze_max=fabsf(s.gaze);
     }
     assert(peak>.7f && s.energy==0);
-    assert(mouth_max>.5f && mouth_min<.05f && brow_max>.5f && wide_max>.4f && gaze_max>.4f);
+    assert(mouth_max>.3f && mouth_max<=.45f && mouth_min<.05f && brow_max>.5f && wide_max>.4f && gaze_max>.4f);
     /* Brief replies must rotate their openers too. */
     s=(muse_speaking_t){0};
     for(unsigned reply=0;reply<8;reply++) {
