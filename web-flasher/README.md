@@ -26,10 +26,59 @@ build's partitions (`min_flash_bytes`, which `make_manifest.py` reads from the
 partition table). It doesn't check PSRAM: esptool only sees PSRAM inside the
 chip's package, and some boards have it beside the chip.
 
+## Device settings
+
+The Device settings card reads a gadget's settings over its USB console and
+changes five of them: screen brightness, screen sleep, speaker volume, speaker
+on/off and microphone gain (`device-settings.js`). It uses the console
+commands boards with the full UI already have
+(`esp32/components/muse/muse_input.c` and `muse_ble.c`): `>status` answers
+`@status {json}`, and `>key=value` logs `cmd key=value -> ok`. Each change
+waits for that line, then reads the status back and checks the value. Changes
+go one at a time, and a failed one shows what the gadget has instead.
+
+- It sends only `>status` and those five keys, as integers or booleans in the
+  firmware's ranges; never Wi-Fi, pairing or token commands. The SDK token goes
+  only through the token step above.
+- The status shows whether the gadget has a Muse credential, never the
+  credential, plus its Wi-Fi network name and IP address. The page draws
+  what the gadget sends as text and keeps none of it.
+- It picks the port and paces writes like the token step, from the selected
+  board. Changing the board closes its port. While it holds a port, or is
+  still closing one, Connect & install and Send token are off (their port
+  pickers need the click itself, so the card can't close first), and while the
+  token goes out the card can't connect.
+- The `ok` line is logged at INFO, every board's default. A build that logs
+  less makes each save time out rather than report success.
+
+## Languages
+
+The page is in English, with a Japanese switch in the header. The visitor's
+choice is kept in this browser (`localStorage`); until they choose, a browser
+whose first language is Japanese gets Japanese. Every piece of text is in
+`i18n.js`, by key, in both languages: index.html marks elements with
+`data-i18n="key"` (or `data-i18n-label` for an `aria-label`), and the scripts
+call `t(key, params)`. Switching redraws all of it, status lines included.
+Text is only ever set as text, never as HTML.
+
+- Add new text to both tables. `tests/i18n.test.mjs` fails on a key missing
+  from either, on placeholders (`{name}`) or code that differ, and on visible
+  text in index.html that isn't in the table.
+- Keep names, domains, URLs, console commands and token formats as they are.
+- ESP Web Tools' install dialog has no language setting (10.4.0), so it stays
+  in English; the page says so in Japanese.
+- The Japanese was machine-translated and reviewed, reusing the contributor's
+  own Japanese for the Device settings terms. Corrections from native
+  speakers are welcome.
+
 ## Adding a board
 
 Add an entry to `boards.json`. `board` must match a `board` in the build
 matrix in `esp32.yml`; the site job fails if it doesn't.
+
+A note shown under the picker when the board is selected (which port to pick,
+backups to take first, and so on) goes in `i18n.js` as `note.<board>`, in both
+languages, with `**bold**` and `` `code` ``.
 
 | Field    | Required | Meaning |
 |----------|----------|---------|
@@ -37,7 +86,6 @@ matrix in `esp32.yml`; the site job fails if it doesn't.
 | `name`   | yes      | Name shown in the board picker. |
 | `usb`    | no       | USB devices the board's console can show up as, as `"vid:pid"` strings (see `esp32/tools/muse/ports.py`). The port picker shows only these; leave it out if you're not sure, so the right port isn't hidden. |
 | `pacing` | no       | Paced serial writes for USB bridges that drop bytes, as `{"chunk": 32, "factor": 2}`: bytes per write, and how many times as long as a chunk takes on the wire to wait after it. Leave it out for boards that flash fine without. |
-| `note`   | no       | HTML shown under the picker when the board is selected: which port to pick, backups to take first, and so on. |
 
 ## Testing locally
 
@@ -53,3 +101,11 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory /tmp/flasher/site
 
 To try changes to the page itself, copy `index.html` and the `.js` and
 `boards.json` files over the unpacked site and reload.
+
+Run the offline regression tests (the installer hooks, the Device settings
+protocol and the languages) with Node.js 22.7 or later, which loads the
+page's modules as ES modules (no board or package installation needed):
+
+```sh
+node --test web-flasher/tests/*.test.mjs
+```

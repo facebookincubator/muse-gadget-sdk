@@ -97,7 +97,7 @@ the serial port.
 | 3 | The board isn't on Wi-Fi or isn't connected to your Muse |
 
 When the board doesn't answer, it's usually running firmware from before
-serial chat. Add `--board s3` (or `--board s3-216`, `--board aipi`, `--board sticks3`,
+serial chat. Add `--board s3` (or `--board s3-18`, `--board s3-216`, `--board aipi`, `--board sticks3`,
 `--board stopwatch`, `--board cores3`, `--board rorolee`, `--board watcher`) and the tool flashes current firmware
 first, then carries on.
 
@@ -134,8 +134,9 @@ says `Custom avatar: components/muse/avatar/muse_pixel.c` when it picks up your 
 - Preview without a board:
   `python3 tools/muse/make_gifs.py /tmp/avatar_gifs` draws your avatar (or
   the default avatar, with `--default`). There's one GIF for each of boot, idle,
-  listening, thinking, speaking, happy, off and error. Check each against the
-  animation beats in `avatar_prompt.md`.
+  listening, thinking, working, speaking, happy, off and error, plus
+  `speaking_*` ones for long, short, paused, interrupted and silent replies.
+  Check each against the animation beats in `avatar_prompt.md`.
 - If a state looks wrong, run `avatar.py --edit` with the GIF's name and what
   to change. Muse then edits its file rather than starting over.
 - Timing on the device: the UI logs nothing per frame, so if the art is

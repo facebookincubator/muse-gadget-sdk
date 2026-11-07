@@ -16,6 +16,8 @@
 // flasher's builds have no token of their own, and a gadget needs one to pair.
 // The gadget stores it in NVS and restarts with it (esp32/main/sdk_token_console.h).
 
+import { LocalizedError } from "./i18n.js";
+
 // The same check as esp32/cmake/validate_config.cmake: "mgst_", then base64url
 // of 32 bytes, whose last character carries only four bits.
 export const isSdkToken = (token) => /^mgst_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(token);
@@ -26,11 +28,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // otherwise. Opening the port can restart the gadget, so the command is sent
 // again until it answers, for up to `timeoutMs`.
 export async function sendSdkToken(port, token, { timeoutMs = 25000, retryMs = 3000 } = {}) {
-  if (!isSdkToken(token)) throw new Error("That isn't an SDK token. Copy it again from gadgets.muse.ai.");
+  if (!isSdkToken(token)) throw new LocalizedError("token.invalid");
   try {
     await port.open({ baudRate: 115200 });
   } catch (e) {
-    throw new Error(`Couldn't open the port (${e.message}). Close the installer's dialog first.`);
+    throw new LocalizedError("token.openFailed", { error: e.message });
   }
   // Leave EN and BOOT alone on boards whose bridge drives them.
   await port.setSignals({ dataTerminalReady: false, requestToSend: false }).catch(() => {});
@@ -75,10 +77,7 @@ export async function sendSdkToken(port, token, { timeoutMs = 25000, retryMs = 3
   }
 
   if (answer === "ok") return;
-  if (answer === "error invalid") throw new Error("The gadget says that isn't an SDK token.");
-  if (answer) throw new Error(`The gadget couldn't store the token (${answer}).`);
-  throw new Error(
-    "The gadget didn't answer. Check it runs firmware from this page and you picked its console port. " +
-      "If it still doesn't answer, unplug it, plug it back in and try again.",
-  );
+  if (answer === "error invalid") throw new LocalizedError("token.rejected");
+  if (answer) throw new LocalizedError("token.storeFailed", { answer });
+  throw new LocalizedError("token.noAnswer");
 }
