@@ -1,6 +1,6 @@
 # Skill Catalog
 
-47 active skills: 46 device/family skills and one shared Google Cast skill.
+48 active skills: 47 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -45,6 +45,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Dyson HP04](gadget-dyson-pure-hot-cool-hp04/SKILL.md) — local status and supported fan/heating controls.
 - [Miele G 7566](gadget-miele-g7566-dishwasher/SKILL.md) — local status; commands only if supported and permitted.
 - [Moonraker 3D printers](gadget-moonraker-3d-printers/SKILL.md) — existing-service status and print/job controls.
+- [HomeWhiz laundry](gadget-homewhiz-laundry/SKILL.md) — washer, dryer, and washer-dryer state via the HomeWhiz cloud account; state reads only, no local API or remote start.
 
 ## Vacuums
 
@@ -67,9 +68,9 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
 - [Wyze RTSP cameras](gadget-wyze-rtsp-cameras/SKILL.md) — viewing/capture with compatible legacy firmware already installed.
-- [yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
+- [Yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
 
 ## Vehicles and climate
 
-- [Tesla](gadget-tesla/SKILL.md) — self-hosted status, drive/charge history and efficiency analytics via Fleet API, TeslaMate and Fleet Telemetry; read-only by default.
+- [Tesla](gadget-tesla/SKILL.md) — self-hosted status, drive/charge history and efficiency analytics via Fleet API, Teslamate and Fleet Telemetry; read-only by default.
 - [Google Nest Thermostats](gadget-google-nest-thermostats/SKILL.md) — temperature and setpoints via a Smart Device Management bridge.
