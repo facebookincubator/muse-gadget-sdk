@@ -1,6 +1,6 @@
 # Skill Catalog
 
-47 active skills: 46 device/family skills and one shared Google Cast skill.
+48 active skills: 47 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -62,6 +62,10 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [ESPHome devices](gadget-esphome-devices/SKILL.md) — entities exposed by installed firmware.
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
+
+## Computing
+
+- [Windows PC (Wake-on-LAN)](gadget-windows-pc/SKILL.md) — wake via a LAN-resident sender, verify by service.
 
 ## Read-only network and camera access
 
