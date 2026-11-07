@@ -69,6 +69,15 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "fonts/muse_font_vi_12.c" "fonts/muse_font_vi_14.c"
                          "fonts/muse_font_vi_20.c" "fonts/muse_font_vi_28.c")
     endif()
+    if(CONFIG_MUSE_APPS_DEMO)
+        list(APPEND srcs
+            "muse_apps_demo.c"
+            "app_manager.c"
+            "apps/app_launcher.c"
+            "apps/app_debugger.c"
+            "apps/app_demo.c"
+            "apps/pet_world.c")
+    endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
     # default is in avatar/ at the top of the project.
