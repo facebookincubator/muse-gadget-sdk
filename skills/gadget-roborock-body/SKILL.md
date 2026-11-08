@@ -3,13 +3,14 @@ name: gadget-roborock-body
 description: >-
   Pilot a compatible Roborock vacuum as a movable body: streamed remote
   control, segment-by-name navigation, room-to-room patrol, map and
-  obstacle-photo eyes, and live camera over the account MQTT channel.
+  obstacle-photo eyes, live camera, and two-way audio over the account
+  MQTT channel.
   Companion to gadget-roborock-vacuums, which owns cleaning and status
   over the local channel; this skill covers piloting and sensing where
   that local-only skill stops.
 ---
 
-# Roborock Piloting, Map Eyes, and Live Camera
+# Roborock Piloting, Map Eyes, Live Camera, and Two-Way Audio
 
 Use this skill when the task is to move a compatible Roborock vacuum
 to a place, look at a room through its map, obstacle photos, or live
@@ -21,8 +22,8 @@ channel. This skill adds two things on top of it:
 
 - Piloting and movement verification, using the same command family.
 - Sensing that the local-only lane does not provide: map retrieval,
-  obstacle photos, and live camera, which run over the account /
-  MQTT channel (the python-roborock cloud channel).
+  obstacle photos, live camera, and two-way audio, which run over
+  the account / MQTT channel (the python-roborock cloud channel).
 
 ## Identify the Device
 
@@ -216,6 +217,49 @@ patched or wrapping client: treat a PIN that is already a
 32-character lowercase hex string as pre-hashed and use it as the
 password as-is; hash anything else exactly once.
 
+## Ears and Voice — Two-Way Audio
+
+The preview session also carries two-way audio on the same WebRTC
+channel: a microphone feed from the robot, and a speaker feed to it.
+Verified live on the Qrevo-family device above, on current firmware.
+
+- **Gating:** no audio flows until the client opens a voice chat.
+  When the session negotiates an audio track, the client sends the
+  device RPC `start_voice_chat` with `record: true` to enable the
+  microphone feed and `play: true` to enable audio to the speaker;
+  a listen-only session enables record without play. If the gate
+  is not accepted, the session fails to establish — an established
+  audio session is the evidence the RPC was accepted.
+- **Format:** Opus at 48 kHz — stereo from the microphone, mono
+  to the speaker.
+- **In-call volume:** on models that advertise in-call volume
+  support, `set_voice_chat_volume` sets the speaker level during
+  the session and returns `["ok"]` when accepted.
+- **Half-duplex behaviour:** the intercom is half-duplex. While
+  the speaker plays, the microphone feed mutes — the recording
+  shows digital silence in stretches shaped by the speech, with
+  brief breakthroughs in the gaps. A simultaneous loopback
+  recording therefore never contains the played audio. Treat
+  wire-level verification (gate accepted, volume RPC accepted,
+  gating observed) as exactly that: the speaker's audibility can
+  only be confirmed by a listener in the room.
+- **Helpers:** wrap this in a listen helper and a speak helper.
+  The listen helper attaches an audio consumer to the stream and
+  records the microphone feed to a file; the speak helper attaches
+  an audio file (or synthesized speech) as a backchannel source
+  and plays it once. Both follow the credential hygiene below and
+  the close-out rule next.
+
+### Close-out rule for audio sessions
+
+Disconnecting the client does NOT end a voice session: the
+device-side session lingers — the connection status still reports
+a connected client — until the stop-preview RPC is sent. Always
+finish an audio session with the stop-preview RPC, then verify
+the connection status reports no client connected and the robot
+is back at its idle/charging state before reporting the session
+closed. Any future audio consumer must do the same.
+
 ## Credential Hygiene
 
 - Prefer storing only the derived MD5 hash of the camera pattern,
@@ -233,8 +277,10 @@ password as-is; hash anything else exactly once.
 - Piloting moves do not clean, except segment navigation, which
   cleans its segment while travelling — pause it on arrival for
   presence-only missions.
-- The camera is at ankle height, with no microphone and no
-  face or presence detection. Obstacle sensing does not reliably
+- The camera is at ankle height, with no face or presence
+  detection. The microphone hears its own room well, but fine
+  speech intelligibility at a distance is unverified, and the
+  speaker is half-duplex (see Ears and Voice). Obstacle sensing does not reliably
   identify people or pets; a room is located by clearing the other
   rooms and corroborating with other home evidence, not by the
   robot's obstacle types alone.
