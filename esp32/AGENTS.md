@@ -64,6 +64,7 @@ before adding a feature to one.
 | Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-xvf3800` | `tools/board.sh seeed-respeaker-xvf3800` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
+| Waveshare ESP32-S3-Touch-LCD-1.85B | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-185b` | `tools/muse/board.sh build 185b` |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19` | `tools/muse/board.sh build lcd19` |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216` | `tools/muse/board.sh build s3-216` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-143c` | `tools/muse/board.sh build 143c` |
@@ -180,7 +181,7 @@ controls and unverified hardware behavior.
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -316,7 +317,7 @@ flash size and status backend.
    | `key` | Waveshare ESP32-S3-Touch-AMOLED-2.16 |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
-   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the Waveshare ESP32-S3-Touch-LCD-3.49, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee, the Waveshare ESP32-S3-Touch-LCD-1.9, the Waveshare ESP32-S3-Touch-LCD-3.5 or the SpotPear ESP32-AI-1.28 v1.0 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
+   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the Waveshare ESP32-S3-Touch-LCD-1.85B or 3.49, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee, the Waveshare ESP32-S3-Touch-LCD-1.9, the Waveshare ESP32-S3-Touch-LCD-3.5 or the SpotPear ESP32-AI-1.28 v1.0 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
@@ -454,6 +455,7 @@ Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `main/pixel_font.c` (BSD-2-Clause, Adafruit),
 `components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
 `components/muse/boards/viewe_smartring_display_init.h` (Apache-2.0, VIEWE),
+`components/muse/boards/waveshare_s3_185b_init.h` (Apache-2.0, Waveshare),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).

@@ -216,6 +216,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental) | No Muse status LED, BOOT push-to-talk; 16 kHz I2S-slave XMOS 1.0.9 baseline | [Setup](devices/seeed-respeaker-xvf3800.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Waveshare ESP32-S3-Touch-LCD-1.85B | UI, touch, settings; push-to-talk and images (unverified) | `tools/muse/board.sh build 185b` |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | UI, touch, push-to-talk, settings, images (unverified) | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 | UI, touch, push-to-talk, settings, images (unverified) | [S3 2.06 setup](devices/waveshare-s3-206.md) |
@@ -457,6 +458,9 @@ their upstream licenses:
 - [`components/muse/boards/viewe_smartring_display_init.h`](components/muse/boards/viewe_smartring_display_init.h),
   the SmartRing-Plus panel initialization table from VIEWE's BSP, is
   Apache-2.0 under VIEWE's copyright, as its header says.
+- [`components/muse/boards/waveshare_s3_185b_init.h`](components/muse/boards/waveshare_s3_185b_init.h),
+  the Waveshare 1.85B panel initialization tables from Waveshare's BSP, is
+  Apache-2.0, as its header says.
 - [`components/muse/fonts/`](components/muse/fonts/), the caption and
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
