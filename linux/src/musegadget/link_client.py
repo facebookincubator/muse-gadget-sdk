@@ -140,7 +140,7 @@ class MessageDecoder:
                 continue  # keepalive
             try:
                 message = json.loads(raw)
-            except ValueError:  # bad JSON, or bytes that aren't UTF-8
+            except (ValueError, RecursionError):  # malformed, overdeep, or non-UTF-8 JSON
                 log.warning("dropping malformed control message (%d bytes)", length)
                 continue
             if isinstance(message, dict):
@@ -497,7 +497,7 @@ class LinkSession:
                     log.warning("could not reset abandoned request")
         try:
             decoded = json.loads(response) if response else None
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError, RecursionError):
             decoded = response.decode("utf-8", errors="replace")[:2000]
         return {"ok": 200 <= status < 300, "status": status, "response": decoded}
 
@@ -602,7 +602,7 @@ class LinkSession:
             return None
         try:
             event = json.loads(raw)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (ValueError, RecursionError):  # malformed, overdeep, or non-UTF-8 JSON
             log.warning("dropping malformed chat event (%d bytes)", len(raw))
             return None
         return event if isinstance(event, dict) and event.get("type") == "event" else None
