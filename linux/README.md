@@ -297,6 +297,59 @@ keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_r
 is a complete example: a webhook listener that sends every note from a Pebble
 ring to its own Muse chat.
 
+Gadgets can pass `device="mcu-wearable"` to `LinkSession.send_chat()` for
+dictation or to `LinkSession.send_voice()` for voice notes. This uses the same
+device-class hint as ESP32 spoken turns, asking Muse for short plain sentences.
+The hint applies to that request only. It does not change `device_id`,
+registration, or `output_modality`. Omit it for typed messages and to keep the
+server's usual reply style.
+
+For an interactive text conversation in your terminal:
+
+```sh
+musegadget chat
+musegadget chat --session-id YOUR_EXISTING_SIDE_CHAT_ID
+```
+
+`chat` uses the running service's connection and needs the same socket access
+as `send-user-msg`, without sudo or credentials of its own. It defaults to your
+main Muse chat and displays live user messages and assistant replies, including
+messages sent from the phone or web app while connected. Echoes of messages
+typed in this terminal are suppressed by their acknowledged message IDs.
+Type one message per line; you can send follow-ups while Muse is
+thinking or replying. Messages are sent in typing order, waiting only for each
+send acknowledgement. Muse decides whether to combine them into one response.
+The conversation uses compact `User:` and `Muse:` lines, with colored speaker
+labels and word-wrapped text aligned after the label. Colors use the terminal's
+palette and default background; terminals without color support use bold labels.
+The input area wraps at word boundaries and grows as you type, staying editable
+while replies arrive. Drafts taller than the available space scroll vertically
+to keep the cursor visible. A dim status line beneath it
+shows waiting, public activity, responding and ready updates. Arrow keys,
+Home/End and Backspace/Delete edit your message; Page Up/Down scroll the recent
+transcript. Mouse wheels and touchpad scrolling also move through the transcript
+in terminals that report mouse events, when supported by Python's curses library.
+Each wheel event scrolls three lines; Page Up/Down remain available otherwise.
+The view keeps up to 512 transcript entries and 8192 wrapped lines.
+Up to 16 messages can wait to be sent; additional input is rejected with a notice.
+`/clear` clears the local screen and retained transcript; the conversation stays
+connected and new replies continue to appear. It does not delete chat history
+in Muse. Screen clearing is unavailable for redirected output or `TERM=dumb`.
+`/quit` or `/exit`, Ctrl-C or EOF exits; already submitted work continues in Muse. Queued messages that were not sent are discarded with a
+notice; an unconfirmed send may already have reached Muse. Streamed replies and
+final corrections update in place. Interactive terminals use a full-screen view
+and restore the terminal on exit. Redirected output and `TERM=dumb` use plain
+text, with progress printed as lines and corrections labeled when necessary.
+
+Update the installed package and restart the service once to enable terminal
+chat. Restarting interrupts running device commands, so check the service log
+for recent `invoke` lines first. Socket access is limited to root and the
+configured command account's group. Connection loss or a refused send ends
+terminal chat; run it again to reconnect. Messages are never automatically resent. This version
+shows subscription events without fetching chat history, and supports text
+only. `--session-id` selects an existing side chat; use `send-user-msg` first
+if you need to create one.
+
 A few other ways to build on it:
 
 - **Let Muse do it.** Muse can run commands on the machine, so you can ask it to
@@ -383,10 +436,13 @@ bash install.sh --uninstall              # remove it (add --purge to forget the 
 ```
 
 `doctor` checks saved pairing credentials, SDK token format, the systemd
-service, Bluetooth controller power, and TCP connectivity to the default
-Muse API on port 443. Each check prints `OK`, `FAIL`, or `WARN` and a next
+service, Bluetooth controller power, TCP connectivity to the default
+Muse API on port 443, and whether the system still trusts root CAs that
+musegadget refuses. Each check prints `OK`, `FAIL`, or `WARN` and a next
 step. It exits with code 1 if any check fails, or 0 otherwise. Bluetooth
-problems are warnings because Bluetooth is only needed for pairing.
+problems are warnings because Bluetooth is only needed for pairing. Refused
+root CAs are warnings because musegadget skips them itself; update the
+`ca-certificates` package so the rest of the system does too.
 
 Run it on the gadget with sudo so it can read the root-owned state files.
 It never changes settings, starts services, opens pairing, or prints tokens.

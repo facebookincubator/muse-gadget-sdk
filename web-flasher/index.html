@@ -305,7 +305,9 @@ limitations under the License.
     // The selected board, and how much flash its build needs (its manifest).
     let board;
     let minFlashBytes = 0;
+    let manifestRequest = 0;
     const update = async () => {
+      const request = ++manifestRequest;
       board = boards.find((b) => b.board === select.value);
       const manifestPath = `firmware/${board.board}/manifest.json`;
       button.setAttribute("manifest", manifestPath);
@@ -315,7 +317,8 @@ limitations under the License.
       $("all-ports-row").hidden = !board.usb;
       minFlashBytes = 0;
       const manifest = await fetch(manifestPath).then((r) => r.json()).catch(() => null);
-      if (board.board === select.value) minFlashBytes = manifest?.min_flash_bytes ?? 0;
+      // The selection may have changed while this request was pending.
+      if (request === manifestRequest) minFlashBytes = manifest?.min_flash_bytes ?? 0;
     };
     // A board's note is "note.<board>" in i18n.js, if it has one.
     const showBoardNote = () => {
@@ -377,11 +380,14 @@ limitations under the License.
     // While the token goes out, Device settings can't take a port.
     let tokenSending = false;
     const send = async (port, statusEl) => {
+      if (tokenSending) return;
       showStatus(statusEl, message("token.sending"));
       tokenSending = true;
       renderSettings();
       try {
-        await sendSdkToken(port, token());
+        await sendSdkToken(port, token(), {
+          onWriteTimeout: (error) => showStatus(statusEl, error, "error"),
+        });
         showStatus(statusEl, message("token.sent"), "ok");
       } catch (e) {
         showStatus(statusEl, e, "error");
@@ -459,8 +465,8 @@ limitations under the License.
       // (Closing first on their click wouldn't do: the port picker needs the
       // click's user activation, and closing can take a moment.)
       const holding = Boolean(settings || settingsClosing);
-      $("install-activate").disabled = holding;
-      $("send-token").disabled = !pacing || holding;
+      $("install-activate").disabled = holding || tokenSending;
+      $("send-token").disabled = !pacing || holding || tokenSending;
       $("settings-holds-port").hidden = $("settings-holds-token").hidden = !holding;
       $("settings-reload").hidden = !online;
       $("settings-reload").disabled = settingsBusy;
