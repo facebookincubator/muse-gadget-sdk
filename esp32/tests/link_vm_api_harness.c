@@ -332,7 +332,14 @@ static void test_mint_auth_failure_is_not_retried(void) {
 
     int rc = vm_api_mint_device_token("token", "id", &tokens);
 
-    CHECK(rc == VM_API_ERR_AUTH, "mint auth rc=%d", rc);
+    CHECK(rc == VM_API_ERR_REVOKED, "mint 401 rc=%d", rc);
+    CHECK(g_request_count == 1, "auth failure should not retry");
+    expect_empty_tokens(&tokens);
+
+    fake_reset();
+    fake_queue_response(403, "");
+    rc = vm_api_mint_device_token("token", "id", &tokens);
+    CHECK(rc == VM_API_ERR_AUTH, "mint 403 rc=%d", rc);
     CHECK(g_request_count == 1, "auth failure should not retry");
     expect_empty_tokens(&tokens);
 }
@@ -421,7 +428,7 @@ static void test_refresh_no_fallback_without_refresh_token(void) {
 
     int rc = vm_api_refresh_device_token("expired-a", "", "link-123", &tokens, &method);
 
-    CHECK(rc == VM_API_ERR_AUTH, "refresh rc=%d", rc);
+    CHECK(rc == VM_API_ERR_REVOKED, "refresh rc=%d", rc);
     CHECK(method == VM_TOKEN_REFRESH_NONE, "method should remain none");
     CHECK(g_request_count == 1, "missing refresh token should not fallback");
     expect_empty_tokens(&tokens);
@@ -436,9 +443,30 @@ static void test_refresh_fallback_auth_failure_leaves_output_empty(void) {
     int rc = vm_api_refresh_device_token("expired-a", "expired-r", "link-123",
                                          &tokens, &method);
 
-    CHECK(rc == VM_API_ERR_AUTH, "refresh rc=%d", rc);
+    CHECK(rc == VM_API_ERR_REVOKED, "refresh rc=%d", rc);
     CHECK(method == VM_TOKEN_REFRESH_NONE, "method should remain none");
     CHECK(g_request_count == 2, "expected access + fallback attempts");
+    expect_empty_tokens(&tokens);
+}
+
+// Only the leg that answered last decides: a 403 on the refresh token is
+// VM_API_ERR_AUTH even after a 401 on the access token, and a 401 on the
+// refresh token alone (access leg skipped) is VM_API_ERR_REVOKED.
+static void test_refresh_401_and_403_on_the_refresh_leg(void) {
+    vm_device_tokens_t tokens = {0};
+    fake_queue_response(401, "");
+    fake_queue_response(403, "");
+    int rc = vm_api_refresh_device_token("expired-a", "refused-r", "link-123",
+                                         &tokens, NULL);
+    CHECK(rc == VM_API_ERR_AUTH, "refresh-leg 403 rc=%d", rc);
+    CHECK(g_request_count == 2, "expected access + fallback attempts");
+    expect_empty_tokens(&tokens);
+
+    fake_reset();
+    fake_queue_response(401, "");
+    rc = vm_api_refresh_device_token(NULL, "revoked-r", "link-123", &tokens, NULL);
+    CHECK(rc == VM_API_ERR_REVOKED, "refresh-leg 401 rc=%d", rc);
+    CHECK(g_request_count == 1, "expected the refresh leg only");
     expect_empty_tokens(&tokens);
 }
 
@@ -866,6 +894,7 @@ int main(void) {
     RUN_TEST(test_refresh_does_not_fallback_on_403);
     RUN_TEST(test_refresh_no_fallback_without_refresh_token);
     RUN_TEST(test_refresh_fallback_auth_failure_leaves_output_empty);
+    RUN_TEST(test_refresh_401_and_403_on_the_refresh_leg);
     RUN_TEST(test_refresh_fallback_400_is_not_retried);
     RUN_TEST(test_refresh_bad_inputs_do_not_send_http);
     RUN_TEST(test_refresh_skips_access_leg_when_asked);

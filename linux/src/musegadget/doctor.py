@@ -23,7 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from musegadget import config, network
+from musegadget import config, network, tls
 from musegadget.muse_api import API_BASE
 
 
@@ -52,11 +52,9 @@ def check_pairing(directory: Path) -> CheckResult:
         return {"name": "Pairing", "status": "FAIL",
                 "detail": f"Cannot read saved pairing (OS error {exc.errno}).",
                 "hint": f"Check the state directory: {directory}."}
-    if not isinstance(saved, dict) or not all(
-        isinstance(saved.get(key), str) and saved[key].strip()
-        for key in ("access_token", "refresh_token")
-    ):
-        return {"name": "Pairing", "status": "FAIL", "detail": "Saved pairing lacks device tokens.",
+    problem = config.pairing_problem(saved)
+    if problem is not None:
+        return {"name": "Pairing", "status": "FAIL", "detail": problem,
                 "hint": "Run sudo musegadget pair --force to pair again."}
     return {"name": "Pairing", "status": "OK", "detail": "Device tokens are saved.",
             "hint": "This checks local structure, not whether Muse accepts the tokens."}
@@ -98,7 +96,7 @@ def check_service() -> CheckResult:
     try:
         result: subprocess.CompletedProcess[str] = subprocess.run(
             [executable, "--no-pager", "is-active", "musegadget.service"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True, text=True, errors="replace", timeout=5, check=False,
         )
     except subprocess.TimeoutExpired:
         return {"name": "Service", "status": "FAIL", "detail": "systemctl timed out after 5 seconds.",
@@ -123,7 +121,7 @@ def check_bluetooth() -> CheckResult:
                 "hint": "Install BlueZ before pairing. An already-paired gadget can still connect."}
     try:
         result: subprocess.CompletedProcess[str] = subprocess.run(
-            [executable, "show"], capture_output=True, text=True, timeout=5, check=False,
+            [executable, "show"], capture_output=True, text=True, errors="replace", timeout=5, check=False,
         )
     except subprocess.TimeoutExpired:
         return {"name": "Bluetooth", "status": "WARN",
@@ -154,6 +152,19 @@ def check_network() -> CheckResult:
             "hint": "Check DNS, internet access, and outbound HTTPS firewall rules."}
 
 
+def check_trust_store() -> CheckResult:
+    """Report distrusted root CAs left in the OS trust store; musegadget skips them anyway."""
+    present: list[str] = tls.distrusted_system_roots()
+    if not present:
+        return {"name": "Root CAs", "status": "OK",
+                "detail": "The system trust store has none of the root CAs that musegadget refuses.",
+                "hint": "musegadget refuses them itself if a later update brings one back."}
+    return {"name": "Root CAs", "status": "WARN",
+            "detail": f"The system trust store still trusts {', '.join(present)}.",
+            "hint": "musegadget refuses them, but other software here doesn't. "
+                    "Update the ca-certificates package."}
+
+
 def run_checks() -> tuple[CheckResult, ...]:
     """Collect independent checks, leaving device files and services unchanged."""
     if platform.system() != "Linux":
@@ -161,7 +172,7 @@ def run_checks() -> tuple[CheckResult, ...]:
                  "hint": "Run sudo musegadget doctor on the Linux gadget itself."},)
     directory: Path = config.state_dir()
     return (check_pairing(directory), check_sdk_token(directory), check_service(),
-            check_bluetooth(), check_network())
+            check_bluetooth(), check_network(), check_trust_store())
 
 
 def format_check(result: CheckResult) -> str:

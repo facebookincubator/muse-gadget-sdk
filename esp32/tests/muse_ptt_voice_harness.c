@@ -31,6 +31,16 @@ static int talk_edges;
 static bool talk_values[64];
 static int64_t talk_times[64];
 static int64_t accepted_at[2048];
+static int note_release_frame, note_read_fail_frame;
+static size_t note_frames;
+static size_t note_burst, note_max_burst;
+static bool verify_pcm;
+static int16_t *expected_pcm, *uploaded_pcm;
+static size_t expected_frames, direct_blocks;
+static size_t pending_chunks;
+#if MUSE_LOW_MEM
+static muse_adpcm_t expected_encoder;
+#endif
 static void overflow_input(muse_ptt_t type)
 {
     while(queue.n<16) post(MUSE_PTT_DOWN,false);
@@ -38,12 +48,14 @@ static void overflow_input(muse_ptt_t type)
     assert(queue.n==16 && muse_input_call_epoch()==1);
 }
 static bool held, ready, ended_event, ready_event, hold_event, resume_event, notes_mode;
-static bool fail_read, fail_accept, hold_status, reply_done, terminate_task;
+static bool fail_read, fail_accept, hold_status, reply_done, working, terminate_task;
 static bool need_end, sleep_state, input_context;
 static int mic_at[128], speaker_at[128];
 static float level_at[128], level;
 static muse_voice_view_t views[128];
 static muse_mode_t mode;
+static int mode_sets;
+static int64_t first_mode_us = -1;
 static char caption[400];
 static jmp_buf finish;
 static int injected_pending;   /* 1: an injected press is held back, delivered by deliver_injected() */
@@ -52,7 +64,7 @@ static void deliver_injected(void) {
     if (injected_pending==1) { injected_pending=2; queue.items[queue.n++]=injected; }
 }
 
-static void push(muse_ptt_t type) { muse_input_event_t e = {.type=type, .epoch=muse_input_call_epoch()}; xQueueSend(&queue, &e, 0); }
+static void push(muse_ptt_t type) { muse_input_event_t e = {.type=type, .epoch=muse_input_call_epoch(), .at_us=clock_us}; xQueueSend(&queue, &e, 0); }
 BaseType_t xQueueSend(QueueHandle_t q, const void *p, TickType_t t) {
     (void)t;
     if (q->n == (scenario>=30 && scenario<=34 ? 16 : 64)) return 0;
@@ -84,8 +96,12 @@ int64_t esp_timer_get_time(void) { return clock_us; }
 void vTaskDelay(int ms) { clock_us += (int64_t)ms*1000; }
 void *heap_caps_malloc(size_t n, unsigned caps) { (void)caps; ++allocations; return malloc(n); }
 void *heap_caps_realloc(void *p, size_t n, unsigned caps) { (void)caps; return realloc(p,n); }
+static int pokes;
+static int64_t poked_us, idle_clock_at_idle = -1;
 void muse_state_set_mode(muse_mode_t m) {
-    mode=m;
+    mode=m; ++mode_sets;
+    if(first_mode_us<0) first_mode_us=clock_us;
+    if (m==MUSE_MODE_IDLE) idle_clock_at_idle = clock_us - poked_us;   /* what check_sleep() would see */
     if (frame<128) { views[frame]=muse_voice_call_view(); level_at[frame]=level; }
 }
 muse_mode_t muse_state_mode(float *s) { if(s) *s=0; return mode; }
@@ -97,7 +113,8 @@ void muse_state_set_progress(float v) { (void)v; }
 void muse_state_set_caption(const char *fmt,...) {
     va_list ap; va_start(ap,fmt); vsnprintf(caption,sizeof(caption),fmt,ap); va_end(ap);
 }
-void muse_state_poke(void) {}
+void muse_state_set_hint(const char *text) { snprintf(caption,sizeof(caption),"%s",text); }
+void muse_state_poke(void) { ++pokes; poked_us=clock_us; }
 void muse_state_nudge(void) {}
 void muse_state_make_happy(void) {}
 bool muse_state_asleep(void) { return sleep_state; }
@@ -121,19 +138,38 @@ float muse_audio_dbfs(const int16_t *p,size_t n) { (void)n; return (float)p[0]/1
 float muse_audio_level(const int16_t *p,size_t n) { assert(n); return (float)p[0]/1000; }
 
 /* Legacy path is a tripwire, not another implementation of the note engine. */
-void muse_hatch_turn_begin(void) { ++notes; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
-void muse_hatch_turn_audio(const int16_t *p,size_t n) { (void)p;(void)n; }
-size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) { (void)p;(void)ms;return n; }
+void muse_hatch_turn_begin(void) { ++notes; if(scenario>=70) longjmp(finish,3); if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
+void muse_hatch_turn_audio(const int16_t *p,size_t n) {
+    if(verify_pcm) {
+        assert(note_frames+n<=MAX_FRAMES);
+        memcpy(uploaded_pcm+note_frames,p,n*sizeof(*p));
+    }
+    note_frames+=n; note_burst+=n;
+    if(note_burst>note_max_burst) note_max_burst=note_burst;
+}
+size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) {
+    (void)ms; muse_hatch_turn_audio(p,n); return n;
+}
 void muse_hatch_turn_end(void) {}
 void muse_hatch_turn_cancel(void) {}
-muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) { (void)p;(void)n;return MUSE_HATCH_EV_NONE; }
+/* One scripted way for hatch_reply() to end, arriving after a long turn. */
+static muse_hatch_ev_t hatch_end = MUSE_HATCH_EV_NONE;
+static const char *hatch_end_text = "";
+muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) {
+    muse_hatch_ev_t ev=hatch_end;
+    if(ev==MUSE_HATCH_EV_NONE) return ev;
+    hatch_end=MUSE_HATCH_EV_NONE;
+    clock_us += 200*1000000LL;   /* well past any sleep timeout since the last poke */
+    snprintf(p,n,"%s",hatch_end_text);
+    return ev;
+}
 bool muse_hatch_turn_caption(size_t x,char *p,size_t n) { (void)x;(void)p;(void)n;return false; }
 size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) { (void)p;(void)n;(void)ms;return 0; }
 
 #if CONFIG_MUSE_REALTIME_VOICE
 static int pending_at_ready = -1;
 bool muse_voice_call_ready(void) { pending_at_ready = (atomic_load(&s_call_pending)!=0); return ready; }
-void muse_voice_call_start(void) { ++starts; held=false; }
+void muse_voice_call_start(void) { ++starts; held=false; if(scenario>=70) longjmp(finish,2); }
 void muse_voice_call_start_ptt(void) {
     ++starts; held=true;
     if(scenario==33) overflow_input(MUSE_PTT_UP);
@@ -149,11 +185,12 @@ void muse_voice_call_end(void) {
     assert(!input_context);
     ++ends; need_end=true; held=false;
 }
+bool muse_voice_call_working(void) { return working; }
 void muse_voice_call_ptt_status(muse_voice_call_ptt_status_t *s) {
     *s=(muse_voice_call_ptt_status_t){.connecting=!ready_event,.live=ready_event,.talking=held,
         .capture=held&&!need_end&&!hold_status,.hold=hold_status,
         .sending=delivered>0 && frame<(scenario==1?18:14),.heard=scenario==1,
-        .reply_done=reply_done};
+        .reply_done=reply_done,.working=working};
 }
 bool muse_voice_call_audio(const int16_t *p,size_t n) {
     assert(n==MUSE_AUDIO_CHUNK);
@@ -205,7 +242,7 @@ muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
     if (scenario>=12 && scenario<=14 && frame==4 && !ended_event) {
         ended_event=true; snprintf(p,n,"CALL ENDED"); return MUSE_VOICE_CALL_EV_ENDED;
     }
-    if (!ended_event && ((need_end && scenario!=7) || (frame>=(scenario==1?20:16) && scenario!=7) || (scenario==3 && frame==2))) {
+    if (!ended_event && ((need_end && scenario!=7) || (frame>=(scenario==1?22:16) && scenario!=7) || (scenario==3 && frame==2))) {
         ended_event=true; snprintf(p,n,"CALL ENDED"); return MUSE_VOICE_CALL_EV_ENDED;
     }
     return MUSE_VOICE_CALL_EV_NONE;
@@ -213,7 +250,73 @@ muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
 #endif
 
 esp_err_t muse_audio_read(int16_t *p,size_t n) {
+    if(scenario>=70) {
+        /* Stop after the actual outer voice loop has handled the attempt,
+         * before it can consume a newer DOWN or overwrite its result. */
+        /* A waking tap leaves the screen as it was (IDLE): stop once it's handled. */
+        int quiet_until=scenario==78?6:scenario==84?21:1;
+        if(frame>quiet_until && (mode==MUSE_MODE_IDLE || atomic_load(&s_shutdown))) longjmp(finish,1);
+        ++frame;
+        clock_us+=(scenario==70 || scenario==72 || scenario==73)?40000:20000;
+        assert(frame<100);
+        if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
+        if((scenario==82 || scenario==84) && frame==20) post(MUSE_PTT_UP,false);   /* 400 ms */
+        if(scenario==85 || scenario==86) {
+            /* Toggle: a waking tap, then a press that starts a note and is let go. */
+            if(frame==5 || frame==12) post(MUSE_PTT_UP,false);
+            if(frame==10) post(MUSE_PTT_DOWN,false);
+            if(scenario==86 && frame==20) post(MUSE_PTT_DOWN,false);   /* stops it at 200 ms */
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+            if(frame==18) assert(atomic_load(&s_note_toggled));   /* buttons treat talk as held */
+#endif
+        }
+        if(scenario==73 && frame==18) post(MUSE_PTT_UP,false);
+        if(frame==10) {
+            if(scenario==75) {
+                mode=MUSE_MODE_OFF; snprintf(caption,sizeof(caption),"POWERING OFF");
+                atomic_store(&s_shutdown,true);
+            }
+            if(scenario==76) atomic_fetch_add(&s_call_epoch,1);
+            if(scenario==77 || scenario==81) {
+                notes_mode=false; post(MUSE_PTT_DOWN,false);
+            }
+            if(scenario==80) post(MUSE_PTT_END_CALL,false);
+        }
+        for(size_t i=0;i<n;i++) p[i]=10000;
+        return ((scenario==70 || scenario==72) && frame==22) ||
+            ((scenario==71 || scenario==81) && frame==10) ? ESP_FAIL:ESP_OK;
+    }
     ++frame; clock_us+=scenario==41?0:scenario==22?1000:20000; assert(frame<1200);
+    if(scenario>=50) {
+        note_burst=0;
+        /* Toggle mode (64-66): letting go of the first press, then a press that stops. */
+        if(frame==note_release_frame) push(scenario>=64 && scenario<=66 ? MUSE_PTT_DOWN : MUSE_PTT_UP);
+        if(scenario==64 && frame==2) push(MUSE_PTT_UP);
+        if(scenario==58 && frame==10) atomic_store(&s_shutdown,true);
+        if(scenario==59 && frame==10) atomic_fetch_add(&s_call_epoch,1);
+        for(size_t i=0;i<n;i++) p[i]=scenario>=60 ?
+            (int16_t)((int)((i*113+frame*97)%50000)-25000) : (int16_t)(100+frame);
+        if(verify_pcm && frame!=note_read_fail_frame) {
+            assert(expected_frames+n<=MAX_FRAMES);
+#if MUSE_LOW_MEM
+            if(pending_chunks) {
+                /* Independently encode each backlogged input block, then
+                 * compare the complete ordered upload against this reference. */
+                uint8_t codes[MUSE_AUDIO_CHUNK/2];
+                muse_adpcm_t decoder=expected_encoder;
+                muse_adpcm_encode_block(&expected_encoder,p,n,codes);
+                muse_adpcm_decode_block(&decoder,codes,n,expected_pcm+expected_frames);
+                pending_chunks=pending_chunks+1>PRE_CHUNKS ? pending_chunks+1-PRE_CHUNKS : 0;
+            } else
+#endif
+            {
+                memcpy(expected_pcm+expected_frames,p,n*sizeof(*p));
+                direct_blocks++;
+            }
+            expected_frames+=n;
+        }
+        return frame==note_read_fail_frame?ESP_FAIL:ESP_OK;
+    }
     if(scenario==41 && frame==2) push(MUSE_PTT_UP);
     if(scenario>=22 && scenario<=28) {
         if(frame==2) push(MUSE_PTT_UP);
@@ -231,7 +334,7 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
     if(scenario>=30 && scenario<=32 && frame==2) {
         overflow_input(scenario==30?MUSE_PTT_UP:scenario==31?MUSE_PTT_END_CALL:MUSE_PTT_DOWN);
     }
-    if (terminate_task && frame>20) longjmp(finish,1);
+    if (terminate_task && frame>(scenario==20 || scenario==21 ? 40 : 20)) longjmp(finish,1);
     if (scenario==1) {
         if(frame==3 || frame==10) push(MUSE_PTT_UP);
         if(frame==8) push(MUSE_PTT_DOWN);
@@ -240,12 +343,18 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(frame==13) fail_read=true;
         if(frame==14) { fail_read=false; fail_accept=true; }
         if(frame==15) { fail_accept=false; push(MUSE_PTT_UP); }
-        if(frame==18) reply_done=true;
-        if(frame==19) push(MUSE_PTT_END_CALL);
+        if(frame==18) { reply_done=true; working=true; }   /* the reply ends; Muse's work goes on */
+        if(frame==19) working=false;
+        if(frame==21) push(MUSE_PTT_END_CALL);
     } else if(scenario==2 && frame==1) {
         push(MUSE_PTT_UP); push(MUSE_PTT_DOWN); push(MUSE_PTT_UP);
     } else if(scenario==4 && frame==2) atomic_store(&s_shutdown,true);
     else if(scenario==5 && frame==2) push(MUSE_PTT_DOWN);
+    else if(scenario==42) {   /* hands-free: Muse works on a turn, then is done */
+        if(frame==4) working=true;
+        if(frame==6) working=false;
+        if(frame==8) push(MUSE_PTT_END_CALL);
+    }
     else if(scenario==6 && frame==2) push(MUSE_PTT_UP);
     else if(scenario==7 && frame==2) { push(MUSE_PTT_END_CALL); clock_us+=20000000; }
     else if(scenario>=12 && scenario<=14 && frame==3) push(MUSE_PTT_UP);
@@ -264,12 +373,148 @@ esp_err_t muse_audio_write(const int16_t *p,size_t n) {
 
 int main(int argc,char **argv) {
     assert(argc==2); scenario=atoi(argv[1]); s_queue=input_queue=&queue; ready=true;
-    s_pre=calloc(PRE_CHUNKS,sizeof(*s_pre));
+    s_pre=calloc(PRE_CAP_CHUNKS,sizeof(*s_pre));
+    if(scenario>=70) {
+        notes_mode=true; clock_us=1000000;
+        if(scenario==78 || scenario==84) {
+            /* Woken to re-read a reply, while Muse is out of reach. */
+            mode=MUSE_MODE_IDLE; snprintf(caption,sizeof(caption),"PREVIOUS REPLY"); ready=false;
+        }
+        if(scenario==85 || scenario==86) assert(NOTE_TOGGLE);
+        post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
+        int outcome=setjmp(finish);
+        if(!outcome) voice_task(NULL);
+        bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
+        if(scenario==79 || scenario==83) {
+            assert(outcome==3 && notes==1 && !starts && clock_us>=1600000);
+            /* A waking press shows nothing until it qualifies as a note. */
+            if(scenario==83) assert(first_mode_us>=1600000);
+        } else if(scenario==85) {
+            /* Toggle: the waking press only woke; the next press recorded
+             * 500 ms before opening the note, though it was let go at once. */
+            assert(outcome==3 && notes==1 && !starts);
+            assert(first_mode_us==1200000 && clock_us>=1700000);
+        } else {
+            /* A toggle build's waking tap goes straight back to idle capture,
+             * which keeps its usual pre-roll. */
+            bool idle_preroll=NOTE_TOGGLE && (scenario==78 || scenario==84);
+            assert(!notes && !note_frames && !s_rec && (!s_pre_fill || idle_preroll) && !level);
+            assert(starts==(call_expected?1:0) && outcome==(call_expected?2:1));
+            if(scenario==70 || scenario==71 || scenario==72 || scenario==81)
+                assert(!strcmp(caption,"MICROPHONE ERROR - TRY AGAIN"));
+            if(scenario==73 || scenario==82 || (scenario==74 && !call_expected))
+                assert(!strcmp(caption,"HOLD LONGER TO TALK"));
+            if(scenario==86) assert(!strcmp(caption,"RECORD A LONGER NOTE") && mode==MUSE_MODE_IDLE);
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+            assert(!atomic_load(&s_note_toggled));
+#endif
+            /* A waking tap only wakes: no readiness check, mode or caption change. */
+            if(scenario==78 || scenario==84)
+                assert(!mode_sets && mode==MUSE_MODE_IDLE && !strcmp(caption,"PREVIOUS REPLY"));
+            if(scenario==75) assert(mode==MUSE_MODE_OFF && !strcmp(caption,"POWERING OFF"));
+            if(scenario==76 || scenario==77 || scenario==80) assert(!caption[0]);
+            if(scenario==77 || scenario==81) {
+                assert(queue.n==1 && queue.items[0].type==MUSE_PTT_DOWN);
+                assert(!CONFIG_MUSE_REALTIME_VOICE || !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH || atomic_load(&s_call_pending));
+            }
+            if(scenario==70) assert(clock_us==1880000 && !queue.n); /* no release: 880 ms hold */
+        }
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario>=50) {
+        /* Run the actual note admission/recording path: no transport call is
+         * allowed before both thresholds, even without a whole-note buffer. */
+        clock_us=1000000;
+        for(int i=0;i<PRE_CHUNKS;i++) {
+            for(int j=0;j<MUSE_AUDIO_CHUNK;j++) s_chunk[j]=-30000;
+            pre_put();
+        }
+        post(MUSE_PTT_DOWN,scenario==53);
+        assert(queue.items[0].at_us==clock_us);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_us==clock_us);
+        if(scenario>=64 && scenario<=66) assert(NOTE_TOGGLE);
+        note_release_frame=scenario==50?29:scenario==51?30:scenario==54?31:scenario==55?25:36;
+        if(scenario==64) note_release_frame=40;   /* the press that stops it */
+        if(scenario==65) note_release_frame=10;   /* too soon: 180 ms captured */
+        if(scenario==66) note_release_frame=1100; /* never stopped: the 15 s cap */
+        if(scenario==60) note_release_frame=100;  /* steady direct PCM after draining */
+        if(scenario==61) note_release_frame=30;   /* release at admission, with backlog */
+        if(scenario==62) note_release_frame=1100; /* recording reaches MAX_FRAMES */
+        if(scenario==63) note_read_fail_frame=32; /* final drain with backlog remaining */
+        if(scenario==52) {
+            /* A release queued at 580 ms stays short when handled much later. */
+            clock_us+=580000; post(MUSE_PTT_UP,false); clock_us+=1000000;
+        }
+        if(scenario==54 || scenario==55) clock_us+=600000; /* delayed voice task */
+        if(scenario==56) note_read_fail_frame=10;
+        note_result_t result=note_held(scenario==53,scenario==57);
+        bool admitted=result==NOTE_ACCEPTED;
+        bool expected=!(scenario==50 || scenario==52 || scenario==55 || scenario==56 || scenario==58 || scenario==59
+            || scenario==65);
+        assert(admitted==expected && !notes && !note_frames);
+        if(scenario==50 || scenario==52) assert(result==NOTE_SHORT_HOLD);
+        if(scenario==55 || scenario==65) assert(result==NOTE_INSUFFICIENT_CAPTURE);
+        if(scenario==56) assert(result==NOTE_CAPTURE_ERROR);
+        if(scenario==58 || scenario==59) assert(result==NOTE_CANCELLED);
+        if(admitted) {
+            assert(clock_us-s_press_us>=(NOTE_TOGGLE ? 500000 : 600000));
+            assert(frame>=(scenario==57?35:25));
+            if(scenario==54) assert(frame==25); /* 500 ms of new audio, despite idle pre-roll */
+            if(scenario==53 || scenario==57) {
+                for(size_t i=0;i<s_pre_fill;i++) {
+                    pre_get(i,s_chunk);
+                    /* ADPCM's predictor can need a few samples to follow a
+                     * sudden change from the synthetic stale idle signal. */
+                    assert(s_chunk[MUSE_AUDIO_CHUNK-1]>-1000);
+                }
+            }
+            size_t prefix=s_pre_fill*MUSE_AUDIO_CHUNK;
+            if(scenario>=60) {
+                expected_pcm=calloc(MAX_FRAMES,sizeof(*expected_pcm));
+                uploaded_pcm=calloc(MAX_FRAMES,sizeof(*uploaded_pcm));
+                assert(expected_pcm && uploaded_pcm);
+                for(size_t i=0;i<s_pre_fill;i++) {
+                    pre_get(i,expected_pcm+expected_frames);
+                    expected_frames+=MUSE_AUDIO_CHUNK;
+                }
+#if MUSE_LOW_MEM
+                pending_chunks=s_pre_fill>PRE_CHUNKS ? s_pre_fill-PRE_CHUNKS : 0;
+                expected_encoder=s_pre_enc;
+#endif
+                verify_pcm=true;
+            }
+#if HOLD_NOTES
+            s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+            char why[96];
+            assert(record(why,sizeof(why)) && notes==1);
+            /* Prefix and capture-lag tail remain in the sent audio. Neither
+             * was used to make a short press eligible. */
+            if(scenario==63) assert(note_frames==prefix+MUSE_AUDIO_CHUNK);
+            else assert(note_frames>=prefix+TAIL_FRAMES);
+            assert(frame<=note_release_frame+7);
+            if(verify_pcm) {
+                assert(note_frames==expected_frames);
+                assert(!memcmp(uploaded_pcm,expected_pcm,note_frames*sizeof(*uploaded_pcm)));
+                if(scenario==60 || scenario==62) assert(direct_blocks>0);
+                if(scenario==62 || scenario==66) assert(note_frames==MAX_FRAMES);
+                if(scenario==64) assert(frame>=40 && !queue.n);   /* letting go didn't stop it */
+                free(expected_pcm); free(uploaded_pcm);
+            }
+#if MUSE_LOW_MEM
+            if(scenario!=63) assert(note_max_burst<=2*PRE_CHUNKS*MUSE_AUDIO_CHUNK);
+#endif
+            drop_rec();
+        }
+        free(s_pre);
+        return 0;
+    }
     if (scenario>=20 && scenario<=21) {
-        notes_mode=scenario==21; terminate_task=true; push(MUSE_PTT_DOWN); push(MUSE_PTT_UP);
+        notes_mode=scenario==21; terminate_task=true; push(MUSE_PTT_DOWN);
+        bool ptt=CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE && !notes_mode;
+        if(ptt) push(MUSE_PTT_UP);
         int outcome=setjmp(finish);
         if (!outcome) voice_task(NULL);
-        bool ptt=CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE && !notes_mode;
         assert(ptt ? (outcome==1 && starts==1 && notes==0 && allocations==0) : (outcome==2 && notes==1));
         return 0;
     }
@@ -327,7 +572,9 @@ int main(int argc,char **argv) {
         post(MUSE_PTT_DOWN,false);   /* marked: posted before the call shows */
         terminate_task=true;
         if(!setjmp(finish)) voice_task(NULL);
-        assert(!atomic_load(&s_call_pending) && starts==(ptt?1:0));
+        /* A non-StopWatch tap now reaches tap-to-call without opening and
+         * cancelling a speculative voice-note request first. */
+        assert(!atomic_load(&s_call_pending) && starts==(ptt || !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH?1:0));
         return 0;
     }
     if (scenario==37) {
@@ -351,6 +598,32 @@ int main(int argc,char **argv) {
         assert(ptt_held_on_waking()); assert(clock_us>=300000 && !delivered);
         return 0;
     }
+    if (scenario==42) {
+        /* An active turn counts as activity for auto-sleep (#281): however a
+         * long turn ends (the reply done, a capped REPLY INCOMPLETE, an
+         * error), the idle clock is fresh when the mode becomes IDLE, so the
+         * caption gets a full sleep timeout instead of blanking at once. */
+        static const struct { muse_hatch_ev_t ev; const char *text; } ways[] = {
+            {MUSE_HATCH_EV_DONE, ""},
+            {MUSE_HATCH_EV_DONE, "REPLY INCOMPLETE"},
+            {MUSE_HATCH_EV_ERROR, "NO REPLY FROM MUSE"},
+        };
+        for (size_t i=0; i<sizeof(ways)/sizeof(ways[0]); i++) {
+            hatch_end=ways[i].ev; hatch_end_text=ways[i].text;
+            idle_clock_at_idle=-1;
+            bool done_delivered;
+            assert(!hatch_reply(&done_delivered));
+            assert(done_delivered==(ways[i].ev==MUSE_HATCH_EV_DONE));
+            if (!ways[i].text[0]) {
+                /* A finished reply stays THINKING; voice_task then goes idle. */
+                assert(mode==MUSE_MODE_THINKING && idle_clock_at_idle==-1);
+                go_idle("");
+            }
+            assert(mode==MUSE_MODE_IDLE && idle_clock_at_idle==0);
+            assert(!strcmp(caption, ways[i].text));
+        }
+        return 0;
+    }
 #if CONFIG_MUSE_REALTIME_VOICE
     if(scenario==0) {
         push(MUSE_PTT_DOWN); push(MUSE_PTT_UP);
@@ -367,6 +640,7 @@ int main(int argc,char **argv) {
             call_view(v); assert(muse_voice_call_label() && muse_voice_call_hint());
             assert((mode==MUSE_MODE_LISTENING)==(v==MUSE_VOICE_VIEW_LISTENING));
             assert((mode==MUSE_MODE_SPEAKING)==(v==MUSE_VOICE_VIEW_SPEAKING));
+            if(v==MUSE_VOICE_VIEW_WORKING) assert(mode==MUSE_MODE_THINKING && !strcmp(muse_voice_call_label(),"WORKING"));
         }
         atomic_store(&s_call_view,MUSE_VOICE_VIEW_NONE);
         assert(!muse_voice_call_label() && !muse_voice_call_hint()); return 0;
@@ -430,6 +704,7 @@ int main(int argc,char **argv) {
         assert(!held && !muse_voice_in_call());
         return 0;
     }
+#if !MUSE_LOW_MEM
     if(scenario>=17 && scenario<=19) {
         s_pre_fill=PRE_CHUNKS;
         for(int i=0;i<PRE_CHUNKS;i++) for(int j=0;j<MUSE_AUDIO_CHUNK;j++) s_pre[i].pcm[j]=-30000;
@@ -451,13 +726,14 @@ int main(int argc,char **argv) {
         } else assert(n==(size_t)(frame-1));
         return 0;
     }
+#endif
     if(scenario==16) {
         muse_voice_shutdown(0);
         run_call(true, 0);
         assert(!starts && !muse_voice_in_call());
         return 0;
     }
-    run_call(scenario!=5, 0);
+    run_call(scenario!=5 && scenario!=42, 0);
     assert(starts==1 && !muse_voice_in_call() && !muse_voice_ptt_call());
     assert(level==0 && !allocations && !notes);
     if(scenario==1) {
@@ -470,7 +746,7 @@ int main(int argc,char **argv) {
         assert(mic_at[9] && !speaker_at[9] && views[9]==MUSE_VOICE_VIEW_LISTENING && level_at[9]==0.109f);
         assert(mic_at[10] && !mic_at[11] && mic_at[12]);
         assert(!mic_at[13] && !mic_at[14] && !level_at[13] && !level_at[14]);
-        assert(views[18]==MUSE_VOICE_VIEW_READY && ends==1);
+        assert(views[18]==MUSE_VOICE_VIEW_WORKING && views[19]==MUSE_VOICE_VIEW_READY && ends==1);
         assert(talk_edges==5 && !talk_values[2] && talk_values[3] && talk_times[2]==talk_times[3]);
     } else if(scenario==2) {
         assert(!held && !mic_at[1] && delivered>0 && delivered<=6 && !ends); /* UP retained; only bounded new-press tail */
@@ -478,6 +754,10 @@ int main(int argc,char **argv) {
         assert(!ends); /* remote error/end is terminal */
     } else if(scenario==4 || scenario==5 || scenario==7) {
         assert(ends==1);
+    } else if(scenario==42) {
+        assert(views[3]==MUSE_VOICE_VIEW_LISTENING && views[4]==MUSE_VOICE_VIEW_WORKING);
+        assert(views[5]==MUSE_VOICE_VIEW_WORKING && views[6]==MUSE_VOICE_VIEW_LISTENING && ends==1);
+        assert(mic_at[4] && mic_at[5]);   /* the mic stays open while Muse works */
     } else if(scenario==6) {
         assert(mic_at[1] && mic_at[2] && mic_at[3] && mic_at[4] && !mic_at[5] && delivered==4);
         assert(talk_edges==1 && !talk_values[0] && talk_times[0]==180000); /* startup UP tail */

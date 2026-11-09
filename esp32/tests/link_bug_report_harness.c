@@ -216,7 +216,7 @@ void noise_ctrl_send_command_result(
 
 static const esp_app_desc_t g_app = {
     .version = "1.2.3",
-    .idf_ver = "v6.0.1",
+    .idf_ver = "v6.0.3",
 };
 
 const esp_app_desc_t *esp_app_get_description(void) { return &g_app; }

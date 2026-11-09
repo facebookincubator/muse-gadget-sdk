@@ -29,7 +29,7 @@ pairing and control protocols, so the same app pairs either.
 
 | Module | Role |
 |---|---|
-| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `info`, `unpair` |
+| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `chat`, `info`, `unpair` |
 | `pair.py` | `pair()`: opens BLE setup, checks and saves the pairing, prints nothing |
 | `pairing.py` | Community pairing v5: P-256 ECDH, HKDF-SHA256, AES-256-GCM, `confirm_app` |
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
@@ -37,10 +37,12 @@ pairing and control protocols, so the same app pairs either.
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store minus distrusted root CAs |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
+| `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
 | `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |
@@ -165,6 +167,13 @@ never has a command's parameters, output or error message.
   `chat_id` is not an API field and is ignored. The response is only the ack
   (`message_id`); the reply appears in the Muse chat. Replies are text: to
   speak them, use a text-to-speech API of your choice.
+- `send-user-msg --wait` (the local socket's `"wait"`) opens `/chat/subscribe`
+  before sending and returns the answer's text: what follows the message's own
+  `message.user` event, as on the ESP32, read through `MuseTurn`. A new side
+  chat is created by the message, so it is sent first. One waiting request per
+  chat at a time; the whole wait, queueing included, is bounded by its seconds,
+  plus at most 2 s of cleanup. On a new side chat, an answer finished before
+  the follow-up subscription opens is missed and the wait times out.
 - The VM accepts at most 256 KB per `/link-control` message, so command output
   is cut at 96 KB per stream.
 
@@ -314,11 +323,14 @@ run_command=...)` is one encrypted session with a Muse VM.
   the same threading and result contract as `Service.run_command`.
 - `registered` is an `asyncio.Event` that is set once Muse accepts the device.
   It clears when the session ends.
-- `send_chat(message, session_id=None, *, output_modality="text")` sends a
-  user message as coming from this device. Without `session_id` it goes to
-  the main chat.
-- `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None)`
-  sends a WAV voice note of at most 2 MiB.
+- `send_chat(message, session_id=None, *, output_modality="text",
+  device=None)` sends a user message as coming from this device. Without
+  `session_id` it goes to the main chat.
+- `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None,
+  device=None)` sends a WAV voice note of at most 2 MiB.
+- `device="mcu-wearable"` on a spoken turn (dictation or a voice note) asks
+  Muse for short plain sentences, for that request only. Omit it for typed
+  messages.
 - `send_image(image_bytes, mime_type, session_id=None, *, message="",
   filename=None, output_modality="text")` sends a picture of at most
   `link_client.MAX_IMAGE_BYTES` (2 MiB), with `message` as its text.
@@ -332,7 +344,8 @@ run_command=...)` is one encrypted session with a Muse VM.
   `SideChat.exists` is false for an ID that Muse does not know yet. The first
   `send_chat` to that ID creates the chat. The lookup closes its subscription
   without reading events.
-- `subscribe_chat(session_id=None)` yields Muse's chat events.
+- `subscribe_chat(session_id=None, *, opened=None)` yields Muse's chat events.
+  `opened`, an `asyncio.Event`, is set once Muse accepts that subscription.
   `chat_subscribed` is set while a subscription is open.
 - `stream_tts(message_id)` yields MP3 audio for a reply that Muse gave in voice
   mode.
