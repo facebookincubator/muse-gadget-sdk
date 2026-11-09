@@ -51,6 +51,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 - [iRobot Roomba / Braava](gadget-irobot-roomba-braava/SKILL.md) — compatible local status and cleaning commands.
 - [Roborock](gadget-roborock-vacuums/SKILL.md) — compatible encrypted local TCP control.
+- [Roborock piloting and camera](gadget-roborock-body/SKILL.md) — streamed remote control, segment navigation and patrol, map and obstacle-photo eyes, and live WebRTC camera via the account MQTT channel.
 - [eufy RoboVac, Tuya models](gadget-eufy-robovac-tuya/SKILL.md) — mapped local commands; not AIOT/X10.
 
 ## Gateways and firmware families
