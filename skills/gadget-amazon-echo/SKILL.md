@@ -4,9 +4,10 @@ description: >-
   Control Amazon Echo speakers and Alexa-linked smart home devices through
   Muse Home Link using the community alexa-remote-control script. Covers
   TTS announcements, volume, media transport, TuneIn/music playback, Alexa
-  routines, and smart-home switching via Alexa text commands. Cloud, not
-  local: needs a Linux Home Link with internet access, the user's own
-  Amazon login, and Amazon's unofficial Alexa web API.
+  routines, and smart-home switching via Alexa text commands. Cloud only:
+  needs a Linux Home Link with internet access, the user's own Amazon
+  login kept in a private file on that Home Link, and Amazon's unofficial
+  Alexa web API. State-changing actions need the user's confirmation.
 ---
 
 # Amazon Echo — Alexa Voice Control via CLI
@@ -29,8 +30,12 @@ Smart Plug, on amazon.in, 2026-10-04.
 - The script renews its session cookies from the refresh token, but
   Amazon can stop accepting the token. Expect the user to re-run the
   login tool periodically.
-- No voice purchasing, no Drop In, no multi-room changes unless the user
-  explicitly asks.
+- Never voice purchasing or Drop In. No multi-room changes unless the
+  user explicitly asks.
+- When the script renews its cookies, it passes the refresh token to
+  `curl` as an argument, so other accounts on the same machine can briefly
+  see it in the process list. Use it only on a Home Link where no
+  untrusted account has a shell.
 
 ## Identify the Device
 
@@ -56,9 +61,9 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 On a Linux Home Link (the Muse Linux client):
 
 - `alexa-remote-control.sh` installed and executable (a single shell
-  script), plus `curl` and `jq`. Commands run with a minimal `PATH`
-  (`/usr/local/bin`, `/usr/bin`, `/bin` and the `sbin` directories), so
-  install it there or call it by absolute path.
+  script), plus `curl`, `jq` and `flock` (util-linux). Commands run with
+  a minimal `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and the `sbin`
+  directories), so install it there or call it by absolute path.
 - Each command runs in a fresh non-interactive shell; exports from an
   earlier command do not persist. Keep the settings below as `export`
   lines in a private env file (mode 0600, owned by the Home Link account)
@@ -72,13 +77,29 @@ On a Linux Home Link (the Muse Linux client):
   are German (`amazon.de`, `de-DE`); do not rely on them.
 - Authentication: `REFRESH_TOKEN` (obtained via alexa-cookie-cli) is
   the script's only working login, and it avoids storing the Amazon
-  password. The user performs the login step themselves and puts the
-  token in the env file. Never place the password, OTP, or refresh token
-  in a command line, log, or chat message.
+  password. The env file is the only place the token is stored: the user
+  runs the login tool and writes the token into it themselves. Never ask
+  for the password, OTP or token in chat, never place them in a command
+  line or log, and never print, copy or search the env file; only source
+  it. If the file or token is missing, explain this setup instead.
 - Point `TMP` at a private directory (mode 0700) owned by the Home Link
   account rather than the shared `/tmp`: the script keeps its cookie jar,
   device list and volume cache there. The same OS account must run the
   script every time, or cookie/temp file ownership breaks.
+- One call at a time: the script sends every command through the same
+  `$TMP/.alexa.cmd` file and reuses its other temp files, and Muse can run
+  commands concurrently. Hold a lock on `$TMP/.alexa.lock` around every
+  call, including the cache `rm` and the readback that go with it:
+
+  ```sh
+  . ~/.config/alexa-remote-control.env && (
+    flock -w 20 9 || { echo 'ERROR: another Alexa call is running'; exit 1; }
+    SEL='Kitchen Dot=<deviceType>=<serial>=ECHO'
+    alexa-remote-control.sh -d "$SEL" -e vol:30
+  ) 9>"${TMP:?}/.alexa.lock"
+  ```
+
+  Every command below runs inside such a block.
 
 ## Workflow
 
@@ -111,15 +132,21 @@ On a Linux Home Link (the Muse Linux client):
 5. Volume: `-d "$SEL" -e vol:<0-100>`; verify with a fresh read (see
    Verify the Result).
 6. Media: `-d "$SEL" -e play` (or `pause`, `next`, `prev`, `shuffle`,
-   `repeat`). TuneIn: `-d "$SEL" -r "<station>"` or
+   `repeat`). TuneIn: `-d "$SEL" -r '<station>'` or
    `-d "$SEL" -e playmusic:TUNEIN:'<station>'`. Amazon Music:
    `-d "$SEL" -e playmusic:AMAZON_MUSIC:'<music>'`.
 7. Smart-home switching: `-d "$SEL" -e textcommand:'turn on <friendly name>'`
    (or `turn off`); Alexa answers on the selected Echo. This is a
    state-changing action — see Load safety below. Never toggle as a
    retry; use explicit on/off.
-8. Routines: `-d "$SEL" -e automation:'<routine name>'` runs an Alexa
-   routine by its exact name, with the selected Echo as its device.
+8. Routines: `-d "$SEL" -e automation:'<voice trigger>'` runs an Alexa
+   routine, with the selected Echo as its device. The script looks the
+   text up among routines' voice triggers first and only then among
+   routine names, so a routine's name can run a different routine whose
+   trigger is that phrase. Pass only the routine's exact voice trigger,
+   as the user reads it in the Alexa app ("When you say ..."). Without
+   one (a name only, or a routine with no voice trigger), run nothing and
+   ask the user to add a trigger or start it from the Alexa app.
 9. Bluetooth: `-d "$SEL" -b list` shows paired devices;
    `-d "$SEL" -b <MAC>` connects.
 10. Diagnostics: `-d "$SEL" -q` (queue), `-d "$SEL" -n`
@@ -130,6 +157,15 @@ Pass text, names and stations as one single-quoted argument (write an
 embedded `'` as `'\''`). The script inserts text into JSON without full
 escaping and turns `"` into `'`, so keep spoken and command text to plain
 words and punctuation.
+
+## Confirm before acting
+
+- Before smart-home switching, a routine, a Bluetooth connection, or a
+  `textcommand` that changes anything, read back the selected Echo, the
+  exact target and the action (for routines, the trigger phrase), and
+  wait for the user's yes. A yes covers that one action only.
+- TTS, volume and playback on the selected Echo, and read-only queries,
+  need only the user's own request.
 
 ## Load safety (smart plugs)
 
@@ -178,7 +214,8 @@ words and punctuation.
 ## Sources
 
 - [alexa-remote-control](https://github.com/thorsten-gehrig/alexa-remote-control) —
-  command-line control, device list, speak/volume/textcommand reference
+  command-line control, device list, speak/volume/textcommand reference;
+  these steps match commit `fdea2bc0`
 - [alexa-remote-control README](https://github.com/thorsten-gehrig/alexa-remote-control/blob/HEAD/README.md) —
   environment variables (AMAZON, ALEXA, SPEAKVOL, REFRESH_TOKEN)
 - [alexa-cookie-cli](https://github.com/adn77/alexa-cookie-cli) — the

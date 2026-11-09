@@ -19,7 +19,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 ## Speakers, displays and TVs
 
-- [Amazon Echo](gadget-amazon-echo/SKILL.md) — TTS, volume, media and Alexa switching via Amazon's unofficial cloud API; Linux Home Link only.
+- [Amazon Echo](gadget-amazon-echo/SKILL.md) — cloud only; needs internet, a Linux Home Link and the user's Amazon login: TTS, volume, media, routines and confirmed Alexa switching via Amazon's unofficial API.
 - [Apple HomePod mini](gadget-apple-homepod-mini/SKILL.md) — supported volume, transport and grouping controls.
 - [Apple TV 4K](gadget-apple-tv-4k/SKILL.md) — paired remote, apps and keyboard.
 - [Freebox Player Pop](gadget-freebox-player-pop/SKILL.md) — Cast and Android TV Remote v2.
