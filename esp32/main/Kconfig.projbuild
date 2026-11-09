@@ -436,6 +436,10 @@ menu "ESP32 Device SDK"
             bool "SenseCAP Indicator 4 inch ST7701S RGB display (status bars)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
+        config HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
+            bool "Waveshare ESP32-S3-Touch-LCD-3.5 ST7796 display (status bars)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
         config HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
             bool "reTerminal E1001 7.5 inch UC8179 e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
@@ -513,6 +517,7 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
         default y if HOMEHUB_LED_BACKEND_CYD_ILI9341
         default y if HOMEHUB_LED_BACKEND_SENSECAP_ST7701
+        default y if HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
         default y if HOMEHUB_LED_BACKEND_STICKY_SSD1677
