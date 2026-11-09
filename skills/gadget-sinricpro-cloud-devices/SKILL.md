@@ -4,7 +4,8 @@ description: >-
   Cloud only: needs internet access and a SinricPro account API key; does not use Muse Home
   Link or the local network. Read status and control the user's SinricPro devices through
   the SinricPro cloud REST API: homes and rooms, device state, actions with confirmation over
-  the event stream, scenes, schedules and a read-only automation list. Prefer a
+  the event stream, scenes, schedules and a read-only automation list. Device actions,
+  scene runs and scene or schedule edits need the user's confirmation. Prefer a
   device-specific or local skill when one matches.
 ---
 
@@ -58,7 +59,10 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 - **Schedules**: `GET /schedules` lists them. Create with `POST /schedules` and `{"name","enable":true,"scheduleType":"time","deviceId":"<id>","action":"...","actionValue":"...","weekdays":["monday",...],"hour":0-23,"minute":0-59}`. Schedule actions are labels, not device actions: `Turn On` and `Turn Off` (with `actionValue` `"On"` / `"Off"`), and `Set Brightness`, `Set PowerLevel`, `Set Blinds`, `Set Fan Speed` and `Set Temperature` (with a numeric string). Any other label is stored but never runs. Times are in the account's time zone. There is no enable or disable endpoint: `PUT /schedules` with `id` and every field replaces the schedule. Read it first with `GET /schedules/{id}` and rebuild the write body from it: the stored schedule names its device as `device` (an object with `id`, or the id itself), but the write needs `deviceId`, so map it; then send `name`, `description`, `enable`, `deviceId`, `action`, `actionValue`, `weekdays`, `hour` and `minute` with only the change applied. `DELETE /schedules/{id}` removes it.
 - **Automations**: `GET /automations` lists them. They are read-only here.
 
-Read planned scene and schedule changes back to the user, and confirm before any delete.
+## Confirm Before Acting
+
+- Before any device action, scene run, or scene or schedule create, update or delete, read back the device and its room (or the scene or schedule), the action and the value, and wait for the user's yes. A yes covers that one action only.
+- Exceptions: brightness, colour, volume and media control on a device the user named need only the user's own request, and reads need no confirmation.
 
 ## Verify the Result
 
