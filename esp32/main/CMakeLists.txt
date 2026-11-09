@@ -116,6 +116,10 @@ if(CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341)
     list(APPEND GADGET_REQUIRES esp_lcd_ili9341)
 endif()
 
+if(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796)
+    list(APPEND GADGET_REQUIRES esp_lcd_st7796)
+endif()
+
 if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
     list(APPEND GADGET_SRCS "sensecap_sensors.c")
 endif()
@@ -132,14 +136,7 @@ if(CONFIG_HOMEHUB_VOICE)
         "voice_muse_chat.c"
         "voice_player.c"
     )
-    if(CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
-        list(APPEND GADGET_SRCS "voice_board_respeaker_lite.c")
-    elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G)
-        list(APPEND GADGET_SRCS "voice_board_waveshare_154g.c")
-        list(APPEND GADGET_REQUIRES esp_codec_dev)
-    else()
-        list(APPEND GADGET_SRCS "voice_board.c")
-    endif()
+    include("voice_board_select.cmake")
 endif()
 
 idf_component_register(
