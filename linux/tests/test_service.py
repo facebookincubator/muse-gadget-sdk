@@ -383,6 +383,48 @@ def fresh_pairing() -> dict:
     return {"access_token": "a", "refresh_token": "r", "access_token_saved_at": int(time.time())}
 
 
+@pytest.mark.parametrize("invalid_fields", [
+    {"refresh_token": None},
+    {"access_token_saved_at": None},
+])
+def test_service_waits_for_repaired_pairing(tmp_path, monkeypatch, caplog, invalid_fields):
+    monkeypatch.setenv(config.STATE_DIR_ENV, str(tmp_path))
+    valid = fresh_pairing()
+    invalid = {**valid, **invalid_fields}
+    if invalid["refresh_token"] is None:
+        del invalid["refresh_token"]
+    config.save_json(config.PAIRING_FILE, invalid)
+    path = tmp_path / config.PAIRING_FILE
+    original = path.read_bytes()
+    fetched = []
+
+    async def scenario():
+        service = Service(identity=Identity("02:00:00:00:00:01"),
+                          executor=Executor(Account.current()))
+
+        def fetch(token, api):
+            fetched.append(token)
+            return [], 200
+
+        async def sleep(delay):
+            if not fetched:
+                assert delay == service_module.UNPAIRED_POLL_S
+                assert path.read_bytes() == original
+                config.save_json(config.PAIRING_FILE, valid)
+            else:
+                service.stop()
+
+        monkeypatch.setattr(service, "_sleep", sleep)
+        monkeypatch.setattr(muse_api, "fetch_vms_with_status", fetch)
+        monkeypatch.setattr(muse_api, "refresh_device_token",
+                            lambda *args: pytest.fail("unexpected refresh"))
+        await asyncio.wait_for(service.run(), 2)
+
+    asyncio.run(scenario())
+    assert fetched == [valid["access_token"]]
+    assert "musegadget pair --force" in caplog.text
+
+
 def test_a_start_with_an_sdk_token_keeps_a_fresh_token(monkeypatch):
     monkeypatch.setattr("musegadget.service.muse_api.refresh_device_token",
                         lambda *args: pytest.fail("unexpected refresh"))
