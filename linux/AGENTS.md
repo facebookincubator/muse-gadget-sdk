@@ -413,8 +413,14 @@ run_command=...)` is one encrypted session with a Muse VM.
   `ResponseStarted`'s when the chunk's provider audio stream was first heard,
   so a reply still playing when the next response opens keeps its own.
   Audio without a provider response id takes the latest at arrival.
-- `Working(working)` changes when Muse starts having, or stops having, a
-  caller turn that has not settled.
+- `Working(working)` changes when Muse starts or stops working on a caller
+  turn, by the ESP32 client's rule (`muse_vc_call_working()`): a turn is
+  open from its `turn_started` until a settlement names it. A settlement with
+  `async_handoffs_pending` of 1 or more (such as a spoken approval prompt) is
+  a boundary where Muse waits on the caller: not working until the next caller
+  turn starts. One reporting 0 retires every open turn, except, once, the
+  latest caller turn whose reply hasn't finished. Only a non-negative integer
+  count does either. This doesn't change the call's idle tracking.
 - `PlaybackFlushed(response_ids)` says audio already delivered, still queued
   or playing, was discarded: a barge-in, the caller talking over the reply,
   a continuation replacing it, or the call ending. `response_ids` names the

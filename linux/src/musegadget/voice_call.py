@@ -160,7 +160,8 @@ class AudioChunk:
 
 @dataclass(frozen=True)
 class Working:
-    """Whether Muse has a caller turn that has not settled yet."""
+    """Whether Muse is working on a caller turn: one has not settled, and Muse
+    is not waiting on the caller at a conversational boundary."""
 
     working: bool
 
@@ -215,6 +216,17 @@ class VoiceCall:
         self._response_id: str | None = None  # the latest response.created
         self._audio_sources: dict[str, str | None] = {}  # provider id -> response it started in
         self._audio_offsets: dict[str | None, int] = {}
+        # Working follows the ESP32 client's rule (muse_vc_call_working), only
+        # while observed. It never changes the idle tracking above.
+        self._working = False
+        self._work_retired: set[str] = set()  # open turns a nothing-pending settlement retired
+        self._awaiting_caller = False  # settled at a boundary with work open
+        self._awaiting_reply = False  # the latest new caller turn's reply hasn't finished
+        self._reply_kept = False
+        self._reply_item: str | None = None
+        self._reply_response: str | None = None
+        self._open_response: str | None = None
+        self._open_unmarked = False
         self._waiting: list[tuple[bytes, str | None] | TranscriptDelta | TranscriptDone] = []
         self._waiting_bytes = 0  # held PCM
         self._waiting_text_bytes = 0
@@ -445,11 +457,19 @@ class VoiceCall:
                     self.reason = "remote_stop"
                     return
             elif kind in ("hatch.voice.turn_started", "hatch.voice.turn_settled"):
-                was_working = bool(self._active_turns)
-                if not self._track_turn(event):
-                    continue
-                if self._on_event is not None and was_working != bool(self._active_turns):
-                    self._emit(Working(not was_working))
+                if self._on_event is None:
+                    if not self._track_turn(event):
+                        continue
+                else:
+                    message_id = identifier(event.get("response_message_id"))
+                    repeat = kind == "hatch.voice.turn_settled" and message_id is not None and (
+                        message_id in self._work_retired
+                        or message_id in self._settled_turns and message_id not in self._active_turns)
+                    turns = len(self._active_turns)
+                    tracked = self._track_turn(event)
+                    self._follow_work(event, len(self._active_turns) != turns, repeat)
+                    if not tracked:
+                        continue
             elif kind in ("response.created", "response.done", "response.completed"):
                 # A response (including cancelled/failed) is NOT the call and
                 # does not settle a caller turn's asynchronous work.
@@ -470,11 +490,23 @@ class VoiceCall:
                 if self._reply_gate.confirmed and self._waiting:
                     if self._playback_bytes + self._waiting_bytes > MAX_PLAYBACK_BYTES:
                         raise ValueError("voice playback buffer full")
+                    # Deliver events in order, but queue each response's held
+                    # PCM joined into whole frames, as before events existed:
+                    # playback sleeps once per queued fragment.
+                    joined, joined_id = bytearray(), None
                     for held in self._waiting:
-                        if isinstance(held, tuple):
-                            self._queue_pcm(*held)
-                        else:
+                        if not isinstance(held, tuple):
                             self._emit(held)
+                            continue
+                        pcm, response_id = held
+                        if joined and response_id != joined_id:
+                            self._queue_pcm(bytes(joined), joined_id, announce=False)
+                            joined.clear()
+                        self._announce_pcm(pcm, response_id)
+                        joined += pcm
+                        joined_id = response_id
+                    if joined:
+                        self._queue_pcm(bytes(joined), joined_id, announce=False)
                 self._clear_waiting()
             pcm = audio_from_event(event)
             if pcm:
@@ -506,6 +538,40 @@ class VoiceCall:
         if self._on_event is not None:
             self._on_event(event)
 
+    def _follow_work(self, event: dict, new_turn: bool, repeat: bool) -> None:
+        if event["type"] == "hatch.voice.turn_started":
+            item = identifier(event.get("item_id"))
+            if new_turn:
+                self._awaiting_caller = False
+            older = list(self._active_turns.values())[:-1]
+            if item != self._reply_item and item not in older and item not in self._settled_turns.values():
+                # A new caller turn; a delayed reply's turn names an earlier item.
+                self._awaiting_reply, self._reply_kept, self._reply_item = True, False, item
+                self._reply_response = self._open_response if self._open_unmarked else None
+        elif not repeat:
+            pending = event.get("async_handoffs_pending")
+            if isinstance(pending, int) and not isinstance(pending, bool) and pending >= 0:
+                # pending >= 1 is a boundary, such as a spoken approval prompt:
+                # Muse waits on the caller until a new caller turn starts.
+                self._awaiting_caller = pending > 0
+                open_turns = [key for key in self._active_turns if key not in self._work_retired]
+                if pending == 0 and open_turns:
+                    # Muse doesn't settle every caller turn by name. Retire the
+                    # open ones, except, once, the latest turn awaiting its reply.
+                    keep = self._awaiting_reply and not self._reply_kept
+                    self._work_retired.update(key for key in open_turns
+                                              if not keep or self._active_turns[key] != self._reply_item)
+                    if keep:
+                        self._reply_kept = True
+                    else:
+                        self._awaiting_reply = False
+        self._work_retired.intersection_update(self._active_turns)
+        working = not self._awaiting_caller and any(
+            key not in self._work_retired for key in self._active_turns)
+        if working != self._working:
+            self._working = working
+            self._emit(Working(working))
+
     def _response_event(self, kind: str, event: dict) -> None:
         response = event.get("response")
         if not isinstance(response, dict):
@@ -513,8 +579,20 @@ class VoiceCall:
         response_id = identifier(response.get("id"))
         if kind == "response.created":
             self._response_id = response_id
+            submission = identifier(response.get("submission_message_id"))
+            self._open_response, self._open_unmarked = response_id, submission is None
+            if self._awaiting_reply and response_id is not None and (
+                    submission is None
+                    or submission not in self._work_retired
+                    and self._active_turns.get(submission) == self._reply_item):
+                self._reply_response = response_id
             self._emit(ResponseStarted(response_id))
         else:
+            if response_id is not None:
+                if response_id == self._open_response:
+                    self._open_response = None
+                if self._awaiting_reply and response_id == self._reply_response:
+                    self._awaiting_reply = False
             status = response.get("status")
             self._emit(ResponseDone(response_id, status if isinstance(status, str) else None))
 
@@ -551,16 +629,20 @@ class VoiceCall:
         self._waiting_bytes = self._waiting_text_bytes = 0
         self._waiting_audio = False
 
-    def _queue_pcm(self, pcm: bytes, response_id: str | None) -> None:
-        self._received_audio = True
-        if self._playback_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
-            raise ValueError("voice playback buffer full")
+    def _announce_pcm(self, pcm: bytes, response_id: str | None) -> None:
         if self._on_event is not None:
             offset = self._audio_offsets.pop(response_id, 0)
             self._emit(AudioChunk(response_id, offset, pcm))
             self._audio_offsets[response_id] = offset + len(pcm) // 2
             if len(self._audio_offsets) > MAX_IDS:
                 del self._audio_offsets[next(iter(self._audio_offsets))]
+
+    def _queue_pcm(self, pcm: bytes, response_id: str | None, *, announce: bool = True) -> None:
+        self._received_audio = True
+        if self._playback_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
+            raise ValueError("voice playback buffer full")
+        if announce:
+            self._announce_pcm(pcm, response_id)
         for offset in range(0, len(pcm), FRAME_BYTES):
             part = pcm[offset:offset + FRAME_BYTES]
             audible = pcm_rms(part) >= 300

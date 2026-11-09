@@ -574,3 +574,104 @@ def test_unidentified_responses_and_legacy_audio_report_no_id():
         AudioChunk(None, 480, HALF),
         ResponseDone("r9", None),
     ]
+
+
+@pytest.mark.parametrize("observe", [False, True], ids=["audio_only", "observed"])
+def test_held_fragments_play_as_whole_frames(observe):
+    # Playback sleeps once per queued fragment, so held audio released in
+    # tiny pieces would play slower than real time and miss the drain deadline.
+    reply = TONE * 5
+    fragments = [reply[i:i + 48] for i in range(0, len(reply), 48)]
+    events = []
+    writes = []
+
+    class Frames(Output):
+        def write(self, data):
+            writes.append(len(data))
+            super().write(data)
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = Frames()
+            call = VoiceCall(session, device_id="homelink-synthetic",
+                             on_event=events.append if observe else None)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            held = [speech("item-1"), created("r1")]
+            for index, pcm in enumerate(fragments):
+                if index % 40 == 0:
+                    held.append(said(f"w{index}"))
+                held.append(audio("p1", pcm))
+            await chunk(vm, media, b"".join(map(line, held)))
+            await wait_until(lambda: len(call._waiting) == len(held) - 2 - (not observe) * 5)
+            await chunk(vm, media, line(turn("item-1", "sub-1")))
+            await wait_until(lambda: len(output.pcm) == len(TONE) * 5)
+            await chunk(vm, media, end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await asyncio.wait_for(task, 2) == "remote_end"
+            assert output.pcm == TONE * 5
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert writes == [voice.FRAME_BYTES] * 5
+    spoken = []
+    for index, pcm in enumerate(fragments):
+        if index % 40 == 0:
+            spoken.append(TranscriptDelta("r1", f"w{index}"))
+        spoken.append(AudioChunk("r1", index * 24, pcm))
+    assert events == ([ResponseStarted("r1"), Working(True)] + spoken if observe else [])
+
+
+def turn_settled(submission=None, pending=None):
+    event = {"type": "hatch.voice.turn_settled"}
+    if submission is not None:
+        event["response_message_id"] = submission
+    if pending is not None:
+        event["async_handoffs_pending"] = pending
+    return event
+
+
+def working_after(*batches):
+    async def script(vm, media, call, output, events):
+        for batch in batches:
+            await chunk(vm, media, b"".join(map(line, batch)) + line(created("mark")))
+            await wait_until(lambda: ResponseStarted("mark") in events)
+            events.append("|")
+            del events[events.index(ResponseStarted("mark"))]
+
+    return [event if event == "|" else event.working
+            for event in run_call(script) if event == "|" or isinstance(event, Working)]
+
+
+def test_working_stops_at_a_spoken_approval_boundary_until_the_next_caller_turn():
+    assert working_after(
+        [turn("item-1", "sub-1")],
+        [turn_settled(pending=1)],  # an approval prompt: it may name no caller turn
+        [turn_settled("sub-1", pending=1)],  # still waiting on the caller
+        [turn("item-2", "sub-2")],
+        [turn_settled("sub-2", pending=0)],  # retires sub-1 too: nothing is pending
+    ) == [True, "|", False, "|", "|", True, "|", False, "|"]
+
+
+def test_a_nothing_pending_settlement_retires_turns_it_does_not_name_except_one_awaiting_its_reply():
+    assert working_after(
+        [turn("item-1", "sub-1"), created("r1"), done("r1"), turn("item-2", "sub-2")],
+        [turn_settled(pending=0)],  # retires sub-1; keeps sub-2, whose reply hasn't finished
+        [turn_settled("sub-1", pending=0)],  # a repeat changes nothing
+        [turn_settled(pending=0)],  # keeps it only once
+    ) == [True, "|", "|", "|", False, "|"]
+
+
+def test_a_finished_reply_does_not_keep_its_turn_through_a_nothing_pending_settlement():
+    reply = {"type": "response.created", "response": {"id": "r1", "submission_message_id": "sub-1"}}
+    assert working_after(
+        [turn("item-1", "sub-1"), reply, done("r1")],
+        [turn_settled(pending=0)],
+    ) == [True, "|", False, "|"]
+
+
+@pytest.mark.parametrize("pending", ["0", -1, 0.0, 1e0, True, None])
+def test_only_plain_handoff_counts_change_working(pending):
+    assert working_after(
+        [turn("item-1", "sub-1"), created("r1"), done("r1")],
+        [turn_settled(pending=pending)],
+    ) == [True, "|", "|"]
