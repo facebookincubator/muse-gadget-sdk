@@ -2,13 +2,13 @@
 
 ## Scope and fixture
 
-The power-test image (`CONFIG_MUSE_POWER_TEST`) on four boards, swept with
+The power-test image (`CONFIG_MUSE_POWER_TEST`) on five boards, swept with
 `"usb_powered":1` and measured with a POWER-Z KM003C on each board's 5 V USB
 input. These are **USB-input currents, not battery currents**: read
 [km003c.md](km003c.md) for what USB adds and how steps compare with
 battery-side numbers. All rows are in [usb5v-profile.csv](usb5v-profile.csv).
 
-- 2026-10-10 and 2026-10-11. Two runs per board back to back, cables untouched
+- The four S3 boards, 2026-10-10 and 2026-10-11. Two runs per board back to back, cables untouched
   between them. Five seconds settling, 20 seconds capture, 1 s guard at both
   ends, meter read 20 times per second, about 18 s kept per window.
 - Firmware: images built from this change (`muse-gadget.bin` SHA-256):
@@ -83,14 +83,93 @@ Steps, from run 1 at the 5 V input:
   where both read the same register values; after the close they agreed
   within 0.13 mA, except Wi-Fi scanning (0.87 mA).
 
+## ESP-Mosaico, 2026-11-08
+
+Two runs through the existing USB-C ESP-Iris connection, with the POWER-Z
+KM003C inline and the camera module disconnected. The battery was fitted:
+100% and 0 mA before and after both runs, 4183 / 4171 mV before and
+4174 / 4169 mV afterward. Charge control is not supported. Cables stayed
+untouched between the accepted runs.
+
+Five seconds settling and 20 Hz meter polling. Run 1 used 30 s capture and
+5 s guards at both ends; run 2 used 40 s capture and 10 s guards. Both kept
+about 20 s per window. Maximum clock-anchor uncertainty was 3.882 / 2.308 s,
+below the respective guards; minimum sample coverage was 99.74 / 99.66%.
+Mean VBUS across the windows ranged from 5.231 to 5.254 V.
+Two earlier attempts at run 2 were rejected
+by the 5 s timing guard; another failed before arm on device selection.
+A later attempt exceeded the 10 s guard during high host load. None is
+included here. Run 2 used a persistent `iris run` client to keep the shared
+Gateway open between polls.
+
+Measured firmware and host collector: local revision
+`0062a77e4a4436978d7345528d53fbd9e6165388`, including the retained board-1
+partition table. `muse-gadget.bin` SHA-256:
+`d238e003aa2b6c054c01d0f3fd6dac9d95a35af5e3a3f9f9ece770e396423572`.
+The firmware and collector source files match this change; only host tests
+and documentation changed afterward. The local table is excluded from this
+change. Both accepted runs used the same boot.
+
+Run 1 / run 2, mA at the USB input. The CSV contains all 23 measured rows
+per run, adding `baseline_cpu_post` and black/white LCD rows at 0%, 25%
+and 50% brightness to the table below.
+
+| State | Run 1 | Run 2 |
+|---|---:|---:|
+| `baseline_pre` | 44.60 | 47.10 |
+| `cpu_fixed_40_idle` | 42.87 | 45.61 |
+| `cpu_fixed_80_idle` | 49.54 | 53.01 |
+| `cpu_fixed_160_idle` | 52.97 | 56.46 |
+| `cpu_fixed_240_idle` | 56.80 | 59.10 |
+| `cpu_fixed_320_idle` | 63.40 | 66.30 |
+| `lcd_black_bl_100` | 56.34 | 58.66 |
+| `lcd_white_bl_100` | 124.51 | 126.87 |
+| `lcd_anim_bl_100` | 109.54 | 112.43 |
+| `codecs_closed_pre` | 51.08 | 53.41 |
+| `codecs_open` | 80.85 | 81.37 |
+| `mic_capture_16k` | 80.97 | 81.49 |
+| `sine_1k_minus18dbfs` | 81.23 | 81.73 |
+| `codecs_closed_post` | 52.68 | 53.41 |
+| `wifi_scanning` | 91.35 | 93.11 |
+| `baseline_post` | 47.11 | 47.63 |
+
+Both runs completed with 24 records: 20 `ok` rows and four `skipped` rows.
+Iris holds a no-light-sleep lock, so the three DFS baseline rows are measured
+USB-awake idle and skipped as sleep tests. The separate amplifier-control
+row is unsupported and has no measurement window. All five fixed clocks
+read back at their requested frequencies.
+
+Before the first codec open, run 2 minus run 1 ranged from 1.61 to
+3.49 mA. Run 1 read ES8311 `0x0e=0x6a`, `0x14=0x10`; run 2 read
+`0x0e=0x7f`, `0x14=0x00`. After closing, both read the latter values.
+The closed-codec rows after audio differed by 0.73 mA; the final baselines
+differed by 0.52 mA. The cause of the earlier difference is not established.
+Run 2 began with the suspended-codec readback already present.
+
+Across all 10 shared rows in the 1.75C table above, Mosaico's USB input
+was 15.5 to 33.3 mA higher, comparing run 2 on both boards. The load
+steps were similar: CPU 40 to 240 MHz added 13.5 / 14.7 mA, and white
+minus black at 100% brightness added 68.2 / 71.9 mA (Mosaico / 1.75C).
+The cause of the higher input current is not established.
+
+In a separate connection check on the same power-test image, idle with the
+battery charging, the POWER-Z input moved from the Mac with ESP-Iris
+enumerated to a data-less charger and back. It read 5.23 V, 107.6 mA
+(563 mW), then 5.11 V, 105.1 mA (537 mW), then 5.23 V, 107.4 mA.
+These are 20 s means after 5 s settling at each connection. The Mac/Iris
+connection condition read about 2.5 mA (26 mW) higher than the charger in
+this check; the input voltage also changed.
+
 ## Limits
 
 - USB input: the board, its input path and anything powered only on USB.
   Absolute values are not battery use, and a step's size depends on where
   its load sits in the power tree (see [km003c.md](km003c.md)).
-- The tool takes single meter readings at 20 Hz, about 360 per window:
+- The tool takes single meter readings at 20 Hz, about 360 per S3 window
+  and 400 per Mosaico window:
   enough for window means, not for peaks shorter than the gap between
   readings.
 - Windows are cut from each record's own start and end times, mapped to
-  host time through the board's console replies, with 1 s guards.
+  host time through the board's console replies, with 1 s guards on S3
+  and 5 / 10 s guards on Mosaico run 1 / run 2.
 - Two runs per board give no confidence interval.
