@@ -154,8 +154,11 @@ class LinkNoiseTunnelTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=cache) as tmpdir:
             script = Path(tmpdir) / "guard.cmake"
             base = dict(snd=16384, wnd=16384, cardputer=False, tunnel=True, psram=True,
-                        c5=False, lwip_psram=False, dyn_rx=32, ooseq=4)
+                        c5=False, lwip_psram=False, dyn_rx=32, ooseq=4, mbox=64,
+                        scale=False, ignore_notfound=True)
             c5 = dict(base, snd=65535, wnd=65535, c5=True, lwip_psram=True, dyn_rx=64, ooseq=12)
+            c5_scaled = dict(c5, snd=98304, wnd=98304, scale=True, ignore_notfound=False,
+                             dyn_rx=96, mbox=96)
             cases = [
                 (base, True),
                 (dict(base, snd=65535), False),
@@ -167,6 +170,7 @@ class LinkNoiseTunnelTest(unittest.TestCase):
                 # Other boards get no larger windows, PSRAM or not.
                 (dict(base, snd=32768, wnd=32768, lwip_psram=True), False),
                 (dict(base, snd=65535, wnd=65535, lwip_psram=True, dyn_rx=64, ooseq=12), False),
+                (dict(c5_scaled, c5=False), False),
                 # The C5 with the measured setup, and with each part missing.
                 (c5, True),
                 (dict(c5, snd=32768, wnd=32768), True),
@@ -176,6 +180,17 @@ class LinkNoiseTunnelTest(unittest.TestCase):
                 (dict(c5, lwip_psram=False), False),
                 (dict(c5, psram=False), False),
                 (dict(c5, snd=131072), False),
+                # ESP-IDF drops a mailbox over 64 back to 6 without window scaling.
+                (dict(c5, mbox=6), False),
+                # Over 64 KiB: window scaling, PSRAM required at boot and a
+                # receive path for 96 KiB, each one needed.
+                (c5_scaled, True),
+                (dict(c5_scaled, scale=False), False),
+                (dict(c5_scaled, ignore_notfound=True), False),
+                (dict(c5_scaled, dyn_rx=64), False),
+                (dict(c5_scaled, mbox=64), False),
+                (dict(c5_scaled, wnd=98305), False),
+                (dict(c5_scaled, snd=98305), False),
                 # The data-path bench (never shipped) may try anything.
                 (dict(base, snd=131072, wnd=131072, bench=True), True),
             ]
@@ -192,6 +207,9 @@ class LinkNoiseTunnelTest(unittest.TestCase):
                         f"set(CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP {on(cfg['lwip_psram'])})\n"
                         f"set(CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM {cfg['dyn_rx']})\n"
                         f"set(CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS {cfg['ooseq']})\n"
+                        f"set(CONFIG_LWIP_TCP_RECVMBOX_SIZE {cfg['mbox']})\n"
+                        f"set(CONFIG_LWIP_WND_SCALE {on(cfg['scale'])})\n"
+                        f"set(CONFIG_SPIRAM_IGNORE_NOTFOUND {on(cfg['ignore_notfound'])})\n"
                         f"set(CONFIG_HOMEHUB_PIPELINE_BENCH {on(cfg.get('bench'))})\n" + guard
                     )
                     ran = subprocess.run(
@@ -215,7 +233,15 @@ class LinkNoiseTunnelTest(unittest.TestCase):
         cfg = values(ROOT / "sdkconfig.defaults")
         cfg.update(values(ROOT / "sdkconfig.defaults.esp32c5"))
         cfg["CONFIG_IDF_TARGET_ESP32C5"] = "y"
-        self.assertEqual(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"], "65535")
+        self.assertEqual(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"], "98304")
+        # Over 64 KiB needs window scaling, which needs PSRAM required at boot.
+        self.assertEqual(cfg["CONFIG_LWIP_WND_SCALE"], "y")
+        self.assertEqual(cfg["CONFIG_SPIRAM_IGNORE_NOTFOUND"], "n")
+        # The scaled window field (16 bits) has to reach the whole window.
+        self.assertLessEqual(int(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"]),
+                             0xFFFF << int(cfg["CONFIG_LWIP_TCP_RCV_SCALE"]))
+        # Required PSRAM makes Wi-Fi's TX buffers static, in internal RAM.
+        self.assertEqual(cfg["CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM"], "4")
         self.assertIn(int(cfg["CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS"]), range(1, 13))
         # The block-ack window may be at most twice the static RX buffers.
         self.assertLessEqual(int(cfg["CONFIG_ESP_WIFI_RX_BA_WIN"]),
@@ -238,6 +264,23 @@ class LinkNoiseTunnelTest(unittest.TestCase):
             ran = subprocess.run(["cmake", "-P", str(script)], capture_output=True, text=True,
                                  env={**os.environ, "TMPDIR": tmpdir})
             self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+
+    def test_internal_ram_bench_baseline_keeps_the_shared_receive_path(self):
+        # tools/coexist/sdkconfig.net-internal16 turns lwIP's PSRAM off, which
+        # also turns window scaling off; ESP-IDF then caps the TCP receive
+        # mailbox at 64 and would drop the C5's 96 back to its default of 6.
+        def values(path):
+            return dict(line.split("=", 1) for line in path.read_text().splitlines()
+                        if line.startswith("CONFIG_") and "=" in line)
+        shared = values(ROOT / "sdkconfig.defaults")
+        cfg = dict(shared)
+        cfg.update(values(ROOT / "sdkconfig.defaults.esp32c5"))
+        cfg.update(values(ROOT / "tools" / "coexist" / "sdkconfig.net-internal16"))
+        self.assertEqual(cfg["CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP"], "n")
+        self.assertEqual(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"], "16384")
+        for key in ("CONFIG_LWIP_TCP_RECVMBOX_SIZE", "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM"):
+            self.assertEqual(cfg[key], shared[key], key)
+        self.assertLessEqual(int(cfg["CONFIG_LWIP_TCP_RECVMBOX_SIZE"]), 64)
 
 
 if __name__ == "__main__":

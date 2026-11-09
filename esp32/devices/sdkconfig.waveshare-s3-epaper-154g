@@ -34,6 +34,10 @@ CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
 # BOOT button on GPIO0 confirms pairing and opens setup.
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_HOMEHUB_BUTTON_LABEL="BOOT"
+# Push-to-talk voice notes on BOOT through the board's ES8311
+# (main/voice_board_waveshare_154g.c).
+CONFIG_HOMEHUB_VOICE=y
+CONFIG_HOMEHUB_VOICE_BOARD_WAVESHARE_154G=y
 
 # 8 MB of embedded flash; use the 8 MB partition table.
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
