@@ -243,6 +243,9 @@ static esp_err_t reg_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t *buf
     esp_err_t err = ESP_FAIL;
     for (int i = 0; i < 3 && err != ESP_OK; i++) {
         err = i2c_master_transmit_receive(dev, &reg, 1, buf, n, 50);
+        if (err != ESP_OK && i < 2) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
     return err;
 }
@@ -255,6 +258,9 @@ static esp_err_t reg_write(i2c_master_dev_handle_t dev, uint8_t reg, const uint8
     esp_err_t err = ESP_FAIL;
     for (int i = 0; i < 3 && err != ESP_OK; i++) {
         err = i2c_master_transmit(dev, buf, n + 1, 50);
+        if (err != ESP_OK && i < 2) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
     return err;
 }
