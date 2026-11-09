@@ -1,11 +1,11 @@
 ---
 name: gadget-homewhiz-laundry
 description: >-
-  Read state of HomeWhiz-connected laundry appliances (Arçelik / Beko /
-  Blomberg / Grundig washer, dryer, washer-dryer) through the direct
-  HomeWhiz cloud lane. Covers cycle state, substate, program, and time
-  remaining for cycle-finished detection. There is no local API and no
-  remote start; state reads only.
+  Cloud only: needs internet access and the user's HomeWhiz account; does not use Muse
+  Home Link or the local network. Read the state of HomeWhiz-connected laundry
+  appliances (Arçelik / Beko / Blomberg / Grundig washer, dryer, washer-dryer) through
+  the HomeWhiz cloud: cycle state, substate, program and time remaining, for
+  cycle-finished detection. Read-only: never starts, stops or changes a cycle.
 ---
 
 # HomeWhiz Laundry Appliances
@@ -24,45 +24,57 @@ in a home census.
 
 ## Local Access Verdict
 
-- **There is no local API.** The HomeWhiz protocol is a cloud-account
-  protocol end to end (established by reverse engineering the shipped
-  client, 2026-10): brand-cloud login issues access/refresh tokens,
-  which exchange for temporary AWS credentials, which read the
-  appliance's AWS IoT device shadow. No documented or discovered LAN
-  endpoint serves state or control.
+- **There is no LAN API for Wi-Fi appliances.** State comes from the
+  HomeWhiz cloud: an account login issues tokens, which exchange for
+  temporary AWS credentials, which read the appliance's AWS IoT device
+  shadow. The community HomeWhiz integration implements this flow (see
+  Sources).
+- Some appliances also offer a local Bluetooth connection, used by the
+  same community integration. This skill does not cover it.
 - Appliance Wi-Fi radios are power-save devices: they appear in LAN
   sweeps only intermittently and answer no stable local service. A LAN
-  probe that finds nothing is the expected result, not a fault.
-- Do not attempt a local pairing, port scan beyond a confirmation
-  probe, or a third-party "local" integration that re-implements the
-  cloud login against the appliance — none exists.
+  probe that finds nothing is the expected result, not a fault. Do not
+  scan or pair over the LAN.
 
-## The Lane
+## Prerequisites
 
-- Direct client implementing the protocol above: login → token →
-  temporary AWS credentials → IoT shadow reads. One `state` call
-  returns every appliance on the account: connected, running, device
-  state, substate (e.g. "washing cycle complete; remove laundry"),
-  program, remaining/elapsed minutes, warnings.
-- A state call is slow (tens of seconds — per-appliance shadow reads).
+- **Cloud only.** Internet access from Muse to the HomeWhiz cloud,
+  using the normal internet path, never the Home Link proxy; a Muse
+  Home Link is not required. If the cloud is unreachable, report that
+  rather than trying a local path.
+- The user's HomeWhiz account credentials, supplied through approved
+  secret storage. Never ask for the password in chat, never put it or
+  any token on a command line, and never print, log, or transmit them.
+  An account created with "Sign in with Google" has no password until
+  the user sets one through the app's password reset.
+- A client for the cloud flow above, such as the community HomeWhiz
+  integration's cloud code (see Sources).
+
+## Workflow
+
+- One state read returns every appliance on the account: connected,
+  running, device state, substate (e.g. "washing cycle complete;
+  remove laundry"), program, remaining/elapsed minutes, warnings.
+- A state read is slow (tens of seconds — per-appliance shadow reads).
   Poll no tighter than 5 minutes; cache between polls.
 - Cycle-finished detection = a running → not-running transition
   between polls, with the substate confirming completion.
 
-## Safety Limits
+## Limits
 
-- **No remote start exists in the protocol** (the machine's own safety
-  interlock requires physical presence to start). Never claim a cycle
-  was started remotely; writes are limited to settings-class changes
-  the shadow exposes, and state reading is the supported operation.
+- **Read-only.** Never start, stop, pause or change a cycle or any
+  setting, even when the appliance's remote-control mode is enabled.
+  Never claim a cycle was started remotely.
 - State is a cloud shadow: it can lag the machine. Report the read
   timestamp with any state claim.
-- Credentials live in the deployment's secret store; never print,
-  log, or transmit them.
 
-## Verification
+## Verify the Result
 
-- A live `state` read returning both appliances with plausible
-  state/substate is the health check. Cross-check once against the
-  HomeWhiz mobile app or the appliance display before trusting a
-  new deployment.
+- A live state read that lists the account's enrolled appliances with
+  plausible state/substate is the health check. Cross-check once
+  against the HomeWhiz mobile app or the appliance display before
+  trusting a new deployment.
+
+## Sources
+
+- [Community HomeWhiz integration (cloud and Bluetooth clients)](https://github.com/home-assistant-HomeWhiz/home-assistant-HomeWhiz)
