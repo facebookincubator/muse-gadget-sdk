@@ -55,6 +55,18 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-LCD-1.85C"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_WAVESHARE_S3_143C
+            bool "Waveshare ESP32-S3-Touch-AMOLED-1.43C"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_143
+            bool "Waveshare ESP32-S3-Touch-AMOLED-1.43 (not the 1.43C; no audio)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_146
+            bool "Waveshare ESP32-S3-Touch-LCD-1.46"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_ESP_MOSAICO
             bool "Espressif ESP-Mosaico (ESP32-S31)"
             depends on IDF_TARGET_ESP32S31
@@ -75,6 +87,10 @@ menu "Muse"
             bool "Waveshare ESP32-C6-Touch-AMOLED-1.8"
             depends on IDF_TARGET_ESP32C6
 
+        config MUSE_BOARD_WAVESHARE_S3_18
+            bool "Waveshare ESP32-S3-Touch-AMOLED-1.8"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_C6_206
             bool "Waveshare ESP32-C6-Touch-AMOLED-2.06"
             depends on IDF_TARGET_ESP32C6
@@ -89,6 +105,10 @@ menu "Muse"
 
         config MUSE_BOARD_M5STACK_STICKS3
             bool "M5Stack StickS3 (ESP32-S3, two buttons, no touch)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_CROWPANEL_ADVANCE_43
+            bool "Elecrow CrowPanel Advance 4.3 V1.3 (800x480 touch, speaker and mic)"
             depends on IDF_TARGET_ESP32S3
 
         config MUSE_BOARD_M5STACK_STICKC_PLUS2
@@ -120,8 +140,14 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD7
             bool "Waveshare ESP32-S3-Touch-LCD-7 (800x480 touch LCD, no audio)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+            bool "SpotPear ESP32-AI-1.28 v1.0 (GC9A01, MAX98357A, NP0557)"
+            depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_WAVESHARE_S3_LCD128
             bool "Waveshare ESP32-S3-Touch-LCD-1.28 (240x240 round touch LCD, no audio)"
+            depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_WAVESHARE_S3_LCD349
+            bool "Waveshare ESP32-S3-Touch-LCD-3.49 V2 (172x640 touch LCD, ES8311 and ES7210)"
             depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_VN_S3_183
             bool "VN ESP32-S3 board (1.83\" 284x240 NV3023 LCD, ES8311 and ES7210)"
@@ -135,6 +161,18 @@ menu "Muse"
 
         config MUSE_BOARD_DEOTALAND_ROROLEE
             bool "Deotaland RoRoLee (ESP32-S3, 240x120 AMOLED, three buttons, no touch)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_VIEWE_SMARTRING_PLUS
+            bool "VIEWE SmartRing-Plus (ESP32-S3, 360x360 round)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_LCD19
+            bool "Waveshare ESP32-S3-Touch-LCD-1.9 (170x320 SH8601, one button)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_LCD_35
+            bool "Waveshare ESP32-S3-Touch-LCD-3.5 (ESP32-S3, 480x320 touch LCD, ES8311 speaker and mic)"
             depends on IDF_TARGET_ESP32S3
     endchoice
 
@@ -154,14 +192,19 @@ menu "Muse"
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
         default "waveshare_s3_206" if MUSE_BOARD_WAVESHARE_S3_206
         default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
+        default "waveshare_s3_143c" if MUSE_BOARD_WAVESHARE_S3_143C
+        default "waveshare_s3_143" if MUSE_BOARD_WAVESHARE_S3_143
+        default "waveshare_s3_146" if MUSE_BOARD_WAVESHARE_S3_146
         default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
         default "aipi" if MUSE_BOARD_AIPI
         default "atk_dnesp32s3_box" if MUSE_BOARD_ATK_DNESP32S3_BOX
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
+        default "waveshare_s3_18" if MUSE_BOARD_WAVESHARE_S3_18
         default "waveshare_c6_206" if MUSE_BOARD_WAVESHARE_C6_206
         default "sensecap_watcher" if MUSE_BOARD_SENSECAP_WATCHER
         default "m5stack_sticks3" if MUSE_BOARD_M5STACK_STICKS3
+        default "crowpanel_advance_43" if MUSE_BOARD_CROWPANEL_ADVANCE_43
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
@@ -172,10 +215,15 @@ menu "Muse"
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
         default "waveshare_s3_lcd7" if MUSE_BOARD_WAVESHARE_S3_LCD7
         default "waveshare_s3_lcd128" if MUSE_BOARD_WAVESHARE_S3_LCD128
+        default "waveshare_s3_lcd349" if MUSE_BOARD_WAVESHARE_S3_LCD349
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "waveshare_p4_lcd35" if MUSE_BOARD_WAVESHARE_P4_LCD35
         default "deotaland_rorolee" if MUSE_BOARD_DEOTALAND_ROROLEE
+        default "viewe_smartring_plus" if MUSE_BOARD_VIEWE_SMARTRING_PLUS
+        default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
+        default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+        default "waveshare_s3_lcd_35" if MUSE_BOARD_WAVESHARE_S3_LCD_35
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -206,7 +254,7 @@ menu "Muse"
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_WAVESHARE_P4_LCD35 || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_CROWPANEL_ADVANCE_43 || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_WAVESHARE_P4_LCD35 || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
     # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME
@@ -239,6 +287,17 @@ menu "Muse"
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
 
+    config MUSE_P4_CSI_CAMERA
+        bool "ESP32-P4 MIPI-CSI camera capture"
+        depends on MUSE_BOARD_WAVESHARE_P4_LCD35 && SPIRAM
+        default n
+        help
+            Enable the camera.capture Home Link command on an OV5647 module
+            on the board's MIPI-CSI connector: esp_video runs the sensor
+            through the ISP and the P4's JPEG encoder compresses one frame
+            per capture. devices/sdkconfig.muse-waveshare-p4-lcd35-camera
+            turns it on with the sensor's settings.
+
     config MUSE_CJK_FONT
         bool "Show Chinese, Japanese and Korean in captions"
         depends on MUSE_ENABLED
@@ -263,17 +322,75 @@ menu "Muse"
             rarer characters and Korean show as boxes. Takes about 910 KB of
             flash, against about 1.2 MB.
 
+    config MUSE_LATIN_FONT
+        bool "Show Vietnamese and other accented letters in captions"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            Without it, captions show accented Latin letters as their plain
+            ones. With it, a caption with any in it (Latin-1, Latin
+            Extended-A, the horned O and U, and Vietnamese's U+1EA0-1EF9)
+            shows in GNU Unifont's 8x16 bitmaps, the whole caption in that
+            one font. Small screens show such a caption one 16 px line at a
+            time. Takes about 10 KB of flash and no RAM.
+
+    choice MUSE_UI_LANGUAGE
+        prompt "Language of the screen's own text"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default MUSE_UI_LANG_EN
+        help
+            The state label ("READY") and the captions the firmware shows
+            itself ("CAN'T REACH MUSE"). Muse's replies are in whatever
+            language you speak to it, and the serial console stays in
+            English for the tools that read it. The button menu and the
+            pairing card are translated; the touch boards' settings pages
+            aren't yet.
+
+        config MUSE_UI_LANG_EN
+            bool "English"
+
+        config MUSE_UI_LANG_VI
+            bool "Vietnamese"
+            select MUSE_LATIN_FONT
+    endchoice
+
+    choice MUSE_JC3248W535_MIC
+        prompt "JC3248W535: added microphone"
+        depends on MUSE_BOARD_GUITION_JC3248W535
+        # A configuration from before this choice existed set only the GPIO.
+        default MUSE_JC3248W535_MIC_I2S if MUSE_JC3248W535_MIC_GPIO >= 0
+        default MUSE_JC3248W535_MIC_NONE
+        help
+            The board has a speaker amp but no microphone. Pick the one
+            you've added; with none, push-to-talk records silence.
+
+        config MUSE_JC3248W535_MIC_NONE
+            bool "None"
+
+        config MUSE_JC3248W535_MIC_PDM
+            bool "PDM MEMS mic on the 4-pin extension connector"
+            help
+                A PDM mic such as an MP34DT01 or MP34DT05 module on the 4-pin
+                extension connector: CLK to GPIO17, DATA to GPIO18, SEL to
+                GND, power to its 3.3 V and GND. The speaker moves to I2S1,
+                since only I2S0 converts PDM.
+
+        config MUSE_JC3248W535_MIC_I2S
+            bool "I2S MEMS mic on the speaker's clocks"
+            help
+                An I2S mic such as an INMP441 wired to the speaker's clocks
+                (SCK to GPIO42, WS to GPIO2), L/R to GND, power to 3.3 V, and
+                its SD line to a free GPIO, set in
+                MUSE_JC3248W535_MIC_GPIO.
+    endchoice
+
     config MUSE_JC3248W535_MIC_GPIO
-        int "JC3248W535: GPIO for an external I2S mic's data (SD) line"
+        int "JC3248W535: GPIO for the I2S mic's data (SD) line"
         depends on MUSE_BOARD_GUITION_JC3248W535
         range -1 48
         default -1
         help
-            The board has a speaker amp but no microphone. Wire an I2S MEMS
-            mic such as an INMP441 to the speaker's clocks (SCK to GPIO42, WS
-            to GPIO2), L/R to GND, power to 3.3 V, and its SD line to a free
-            GPIO, and set that GPIO here. -1 leaves push-to-talk recording
-            silence.
+            Used only with the I2S mic option; -1 leaves it unconnected.
 
     config MUSE_STATIC_BUFFERS_IN_PSRAM
         bool "Keep the avatar's and audio's static buffers in PSRAM"
@@ -289,6 +406,24 @@ menu "Muse"
             it on where internal RAM is short, as the SenseCAP Watcher does
             to pay for the CPU's light-sleep retention memory, which it
             takes at boot and keeps.
+
+    config MUSE_SMALL_FULL_REPLY
+        bool "Full-screen replies on small screens"
+        depends on MUSE_ENABLED
+        default n
+        help
+            On screens with the compact layout (under 200 px or so), Muse
+            normally keeps the avatar and pages replies two lines at a time
+            in a band along the bottom. With this on, the avatar steps aside
+            while Muse thinks or answers, and the reply fills the screen
+            below the status line. Muse comes back when the reply ends.
+            On boards with the two-button menu, the menu gains a Text size
+            setting (Small, Medium, Large) for the reply's font, kept across
+            restarts; touch boards have no such control and keep Medium.
+            Lines wrap to the screen's width in pixels, so every page fits
+            at any size. A page with Chinese, Japanese or Korean in it
+            (MUSE_CJK_FONT) or accented letters (MUSE_LATIN_FONT) shows in
+            that font, as on the band, whatever the Text size.
 
     config MUSE_HATCH
         bool "Muse's own voice session"

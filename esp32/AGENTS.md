@@ -29,7 +29,7 @@ avatar/voice/settings UI on boards with a display.
 
 ## Prerequisites
 
-- **ESP-IDF v6.0.1**, installed and activated (`. $IDF_PATH/export.sh`) so
+- **ESP-IDF v6.0.3**, installed and activated (`. $IDF_PATH/export.sh`) so
   `idf.py` is on `PATH`. Other versions are unsupported. Errors about missing
   IDF headers such as `gcm.h` or `gpio_ll.h` usually mean the wrong IDF tag.
 - Python 3 and a C/C++ compiler (`cc`, `c++`) for the host tests.
@@ -50,6 +50,8 @@ before adding a feature to one.
 | Espressif ESP32-S3-DevKitC-1 v1.1 (N8R8) | `esp32s3` | `devices/sdkconfig.espressif-s3-devkitc-1` | `tools/board.sh espressif-s3-devkitc-1` |
 | ideaspark ESP32 + 1.9" ST7789 | `esp32` | `devices/sdkconfig.ideaspark` | `tools/board.sh ideaspark` |
 | Waveshare ESP32-C6-LCD-1.47 | `esp32c6` | `devices/sdkconfig.waveshare-c6-lcd-147` | `tools/board.sh waveshare-c6-lcd-147` |
+| ESP32-2432S028 Cheap Yellow Display (experimental) | `esp32` | `devices/sdkconfig.esp32-2432s028` | `tools/board.sh esp32-2432s028` |
+| ESP32-C3 with 0.42" OLED | `esp32c3` | `devices/sdkconfig.c3-oled-042` | `tools/board.sh c3-oled-042` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | `esp32s3` | `devices/sdkconfig.waveshare-s3-epaper-154` | `tools/board.sh waveshare-s3-epaper-154` |
 | Waveshare ESP32-S3-ePaper-1.54G | `esp32s3` | `devices/sdkconfig.waveshare-s3-epaper-154g` | `tools/board.sh waveshare-s3-epaper-154g` |
 | Seeed SenseCAP Indicator | `esp32s3` | `devices/sdkconfig.sensecap-indicator` | `tools/board.sh sensecap-indicator` |
@@ -59,9 +61,12 @@ before adding a feature to one.
 | Seeed reTerminal Sticky Link status (experimental) | `esp32s3` | `devices/sdkconfig.reterminal-sticky-link` | `tools/board.sh reterminal-sticky-link` |
 | Home Assistant Voice Preview Edition | `esp32s3` | `devices/sdkconfig.home-assistant-voice` | `tools/board.sh home-assistant-voice` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-lite` | `tools/board.sh seeed-respeaker-lite` |
+| Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-xvf3800` | `tools/board.sh seeed-respeaker-xvf3800` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
+| Waveshare ESP32-S3-Touch-LCD-1.9 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19` | `tools/muse/board.sh build lcd19` |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-216` | `tools/muse/board.sh build s3-216` |
+| Waveshare ESP32-S3-Touch-AMOLED-1.43C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-143c` | `tools/muse/board.sh build 143c` |
 | Espressif ESP-Mosaico (experimental; ESP-IDF master, see `devices/README.md`) | `esp32s31` | `devices/sdkconfig.muse;devices/sdkconfig.muse-esp-mosaico;devices/sdkconfig.muse-esp-mosaico-iris` | `tools/muse/board.sh build mosaico` |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-206` | `tools/muse/board.sh build s3-206` |
 | OSTB EchoEar-2ST (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ostb-echoear-2st` | `tools/muse/board.sh build echoear` |
@@ -69,10 +74,12 @@ before adding a feature to one.
 | ALIENTEK ATK-DNESP32S3-BOX V1.1 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-atk-dnesp32s3-box` | `tools/muse/board.sh build atk-box` |
 | AIPI Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-aipi` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18` | manual |
+| Waveshare ESP32-S3-Touch-AMOLED-1.8 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-18` | `tools/muse/board.sh build s3-18` |
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-206` | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher` | manual |
 | M5Stack Cardputer ADV (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
+| Elecrow CrowPanel Advance 4.3 V1.3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-crowpanel-advance-43` | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
 | Seeed XIAO ESP32-S3 1.47 Touch Display | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147` | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
@@ -81,11 +88,18 @@ before adding a feature to one.
 | Guition JC3248W535 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535` | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd7` | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd128` | `tools/muse/board.sh build lcd128` |
+| Waveshare ESP32-S3-Touch-LCD-1.46 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-146` | `tools/muse/board.sh build 146` |
+| Waveshare ESP32-S3-Touch-AMOLED-1.43 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-143` | `tools/muse/board.sh build 143` |
+| Waveshare ESP32-S3-Touch-LCD-3.49 V2 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd349` | `tools/muse/board.sh build lcd349` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | `esp32p4` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35` | `tools/muse/board.sh build p4lcd35` |
+| SpotPear ESP32-AI-1.28 v1.0 (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-spotpear-esp32-ai-128` | `tools/muse/board.sh build spotpear` |
+| VIEWE SmartRing-Plus | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-viewe-smartring-plus` | `tools/muse/board.sh build smartring-plus` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
 | M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
 | FoloToy AI Passport (experimental) | `esp32c3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport` | `tools/muse/board.sh build ai-passport` |
 | Deotaland RoRoLee | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-deotaland-rorolee` | `tools/muse/board.sh build rorolee` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 | `esp32s3` | `devices/sdkconfig.waveshare-s3-lcd-35` | `tools/board.sh waveshare-s3-lcd-35` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd-35` | `tools/muse/board.sh build s3lcd35` |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on
 GPIO27, the BOOT button on GPIO28 (active low), 8 MB flash and quad PSRAM.
@@ -133,7 +147,7 @@ tools/board.sh ideaspark flash-monitor /dev/cu.usbserial-110
 
 Without a port it uses the only matching serial port, and fails if it finds
 none or more than one. If `idf.py` is not on `PATH`, it sources `export.sh`
-from `$IDF_PATH`, `~/esp/esp-idf-v6.0.1`, `~/esp/esp-idf-v6` or `~/esp/esp-idf`.
+from `$IDF_PATH`, `~/esp/esp-idf-v6.0.3`, `~/esp/esp-idf-v6` or `~/esp/esp-idf`.
 The Sticky's Muse and Link status profiles build in `build-reterminal-sticky/`
 and `build-reterminal-sticky-link/`. Set the SDK token in the chosen build
 directory through `idf.py -B <dir> menuconfig`.
@@ -155,9 +169,18 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
   switch on to get its setup role back (pairing confirmation, the 5 s
   factory-reset hold).
 
+### Seeed reSpeaker XVF3800 (experimental)
+
+`tools/board.sh seeed-respeaker-xvf3800 build` builds a Link-only voice profile
+for the XIAO ESP32-S3 SKU. XVF3800 needs its 16 kHz I2S-slave firmware at the
+1.0.9 baseline. It uses XIAO BOOT for pairing and push-to-talk, with app prompts
+and serial logs instead of a Muse status light. The vendor ring is unused. See
+the [XVF3800 guide](devices/seeed-respeaker-xvf3800.md) for firmware files,
+controls and unverified hardware behavior.
+
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-216|s3-206|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -166,7 +189,7 @@ than the port name, which changes when boards are re-cabled. With several
 boards of one kind attached, pass the device's USB serial number (on the chip's
 own USB serial port, its MAC) or the port; `tools/muse/ports.py --list` shows
 them. It finds ESP-IDF the way `tools/board.sh` does, trying
-`~/.espressif/esp-idf-v6.0.1` first. For an install anywhere else, set
+`~/.espressif/esp-idf-v6.0.3` first. For an install anywhere else, set
 `IDF_EXPORT` to its `export.sh`, e.g. in your shell profile:
 `export IDF_EXPORT=/path/to/esp-idf/export.sh`. `tools/muse/avatar.py` builds
 through `board.sh`, so it needs the same.
@@ -176,6 +199,8 @@ For bench testing, `MUSE_BENCH=1 tools/muse/board.sh build|flash ...` adds
 turns on screenshots: `tools/muse/snap.py PORT KEYS OUT.png` sends bench keys
 and saves the screen, and `>face=thinking` (or `idle`, `listening`,
 `speaking`, `error`, `boot`, `off`, `happy`) in KEYS picks the avatar mode first.
+On touch boards, `>ui.settings=wifi` (or `home`, `muse`, `ble`, `sound`,
+`sleep`, `battery`, `power`) opens that settings page for the shot.
 Screenshots are off in normal builds because each one takes a buffer the size
 of the screen. `>face=` works in any build. Or run `idf.py` directly:
 
@@ -190,8 +215,14 @@ arguments, except on the SenseCAP Watcher: `idf.py flash` runs plain esptool,
 which fails on its USB bridge (see "Flash it"). Build the Watcher with
 `idf.py`, flash it with `tools/muse/board.sh flash watcher`, then
 `idf.py … -p PORT monitor` as usual; reading from the bridge works. Muse builds use `partitions_muse.csv` and need 16 MB of flash or
-more, except the StickS3, StickC Plus2, Cardputer ADV and AI Passport, which have 8 MB and use
+more, except the StickS3, StickC Plus2, Cardputer ADV, AI Passport and Waveshare 1.43C, which have 8 MB and use
 `partitions_muse_8mb.csv`.
+
+On the Watcher, rotation opens and pages through the latest reply. A short
+wheel click sleeps/wakes; a 300 ms hold starts push-to-talk. Pairing still
+confirms on the initial press. `muse_review.c` keeps up to 32 KB of the reply
+in PSRAM across the end of the turn. `>review.next`, `>review.prev`, and
+`>review.close` exercise navigation over the serial console.
 
 All boards share `managed_components/` and `dependencies.lock` in this
 directory. If the component manager fails after you switch between a board
@@ -252,8 +283,9 @@ flash size and status backend.
 
    | Descriptor | Board |
    |---|---|
-   | Espressif `303a:1001`, "USB JTAG/serial debug unit" | the chip's own USB: C5, C6, S3 and the S3 boards with the full UI. Its serial number is the MAC |
-   | CH340 (`1a86:7523`) | ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002 |
+   | Espressif `303a:1001`, "USB JTAG/serial debug unit" | the chip's own USB: C3, C5, C6, S3 and the S3 boards with the full UI. Its serial number is the MAC |
+   | CH340 (`1a86:7523`) | ideaspark, CYD, SenseCAP Indicator, reTerminal E1001 and E1002 |
+   | CH340 (`1a86:7522`) | Elecrow CrowPanel Advance 4.3 V1.3 |
    | CH9102 | M5Stack StickC Plus2 |
    | CH343 (`1a86:55d3`), "USB Single Serial" | Seeed reTerminal Sticky, Waveshare ESP32-S3-Touch-LCD-7, ESP32-S3-Touch-LCD-1.28 or ESP32-P4-WIFI6-Touch-LCD-3.5: `chip-id` and `flash-id` tell them apart (the P4 is an `esp32p4`; 8 MB of PSRAM on the Sticky and the 7-inch, 2 MB on the 1.28-inch; 32 MB of flash on the Sticky, which `flash-id` shows) |
    | CH342, two `usbmodem` ports | SenseCAP Watcher: the S3 console is the one ending in `3`, the other is the Himax camera |
@@ -265,7 +297,9 @@ flash size and status backend.
    ```
 
    The target narrows it a long way: `esp32c5` is the DevKitC-1, `esp32c6` the
-   Waveshare C6 or a C6 devkit, `esp32` the ideaspark or the StickC Plus2.
+   Waveshare C6 or a C6 devkit, `esp32c3` the AI Passport or the C3 with a
+   0.42" OLED (`flash-id`: 8 MB on the AI Passport, 4 MB on the OLED board),
+   `esp32` the ideaspark, the CYD or the StickC Plus2.
 
 4. **Fall back to a read-only capture.** If the board is mid-run and you can't
    write to the port, the `## Monitor` recipe below reads it without resetting,
@@ -282,7 +316,7 @@ flash size and status backend.
    | `key` | Waveshare ESP32-S3-Touch-AMOLED-2.16 |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
-   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75 or 2.06, the Guition JC3248W535, the VN ESP32-S3 1.83-inch NV3023 or the Deotaland RoRoLee — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
+   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the Waveshare ESP32-S3-Touch-LCD-3.49, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee, the Waveshare ESP32-S3-Touch-LCD-1.9, the Waveshare ESP32-S3-Touch-LCD-3.5 or the SpotPear ESP32-AI-1.28 v1.0 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
@@ -296,9 +330,10 @@ cd build && python -m esptool --chip esp32c5 -b 460800 \
   --before default-reset --after hard-reset write-flash "@flash_args"
 ```
 
-Typical ports: `/dev/cu.usbmodem*` or `/dev/ttyACM*` for native USB (C5, S3 and
-C6 boards), and `/dev/cu.usbserial-*`, `/dev/cu.wchusbserial*` or `/dev/ttyUSB*`
-for CH340 bridges (ideaspark, SenseCAP Indicator, reTerminal E1001 and E1002). On Linux,
+Typical ports: `/dev/cu.usbmodem*` or `/dev/ttyACM*` for native USB (C3, C5, S3
+and C6 boards), and `/dev/cu.usbserial-*`, `/dev/cu.wchusbserial*` or `/dev/ttyUSB*`
+for CH340 bridges (ideaspark, CYD, SenseCAP Indicator, reTerminal E1001 and E1002,
+and CrowPanel Advance 4.3). On Linux,
 add yourself to the `dialout` (or `uucp`) group. If the chip won't enter the
 bootloader, hold BOOT, tap RESET, release BOOT, and flash again.
 
@@ -418,6 +453,7 @@ its animation (`jollybot.gif`, and `happy_anim.c/.h` made from it by
 Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `main/pixel_font.c` (BSD-2-Clause, Adafruit),
 `components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
+`components/muse/boards/viewe_smartring_display_init.h` (Apache-2.0, VIEWE),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
@@ -452,10 +488,13 @@ Button (BOOT on the dev boards):
 EchoEar-2ST confirms pending pairing with an explicit screen press; hold the
 on-screen microphone to record and release it to send once paired. It has no
 physical talk/setup button, so the GPIO button reset gesture does not apply.
+The VIEWE SmartRing-Plus works the same way; its BOOT button is inside the case.
 
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
-ideaspark, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
-Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite). It uses
+ideaspark, CYD, SenseCAP Indicator, Waveshare S3 LCD 3.5 status-screen and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
+Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
+`MuseGadget-xvf3800-XXXXXX` on the reSpeaker XVF3800,
+`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). It uses
 **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.
@@ -533,6 +572,32 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   back, and older work arriving while a newer reply is still going is
   dropped. Approvals work by voice: Muse asks in the call and you hold to
   answer; the gadget has no approval card.
+- On boards with the full LVGL UI (the e-paper UI keeps THINKING), a call
+  shows WORKING (the thinking avatar's working variant) when nothing is
+  playing, the caller isn't holding or talking, and Muse still has a caller
+  turn open
+  (`hatch.voice.turn_started` without its `turn_settled`; Muse keeps a
+  delegating turn open until its result has been spoken). A settlement with
+  `async_handoffs_pending` of 1 or more is a conversational boundary, such as
+  a spoken approval prompt, where Muse waits on the caller: not WORKING
+  (READY on push-to-talk, LISTENING hands-free) until a new caller turn
+  starts, even though such a settlement may name none of the caller's turns.
+  One reporting 0 retires every open turn, since Muse doesn't
+  settle each caller turn by name, except the latest caller turn while its
+  reply hasn't finished (an interrupted reply's settlement can arrive after
+  the next caller turn started), and that only once. A repeat of an earlier
+  settlement changes nothing. Its reply is a response
+  whose `response.submission_message_id` names a turn for its item, or one
+  that names none (early media the turn adopts, older VMs); older work's
+  responses don't count. Only plain digits count: a string, sign, fraction
+  or exponent, or no count, changes nothing. `muse_vc_call_working()` decides it; talking,
+  Muse speaking and a pending reply still take precedence. On a hands-free
+  call it waits for the turn's first reply to finish (before that the call
+  shows LISTENING, as it always has), the mic stays open while it shows, and
+  speech the server hears brings back LISTENING. The avatar gets
+  `muse_pose_t.working`: the default one types on a little keyboard with a
+  spinner beside its head in a warm scheme; an avatar that ignores the field
+  shows THINKING.
 - Nothing plays and the mic doesn't open until `hatch.voice.session` names this
   call's exact `call_id` and a `session_id`; a missing or wrong one fails the
   call. Before that, an `error` event fails it too; after, only `session_dead`
@@ -585,13 +650,14 @@ There are no list or stat routes for gadgets.
 Keep within the session's bounds:
 
 - Up to 3 requests at once; another is refused (its callback gets -1).
-- Send a body in pieces of at most 8 KB (4 KB on Muse boards without PSRAM,
-  2 KB on the Cardputer ADV and AI Passport): a larger piece ends that request.
+- Send a body in pieces of at most 8 KB (4 KB on Muse boards without PSRAM
+  and the CYD, 2 KB on the Cardputer ADV and AI Passport): a larger piece ends
+  that request.
   Queued body bytes are capped at 16 KB with PSRAM and 4 KB without, and
   `noise_ctrl_req_send()` waits up to `wait_ms` for room.
 - Each response frame has to fit the session's inbound buffer (12 KB, 17 KB on
-  Muse boards without PSRAM). A larger one ends the whole session, which
-  reconnects, and the request with `NOISE_CTRL_REQ_TOO_LARGE`. Ask for
+  Muse boards without PSRAM and the CYD). A larger one ends the whole session,
+  which reconnects, and the request with `NOISE_CTRL_REQ_TOO_LARGE`. Ask for
   responses that stay under it: read large files in parts.
 - The callback runs on the session task: copy what you need and return. Do
   slow work, and any request that depends on its result, in a task of your
@@ -655,16 +721,27 @@ the design, the Wi-Fi protocol and the numbers.
 
 - `sdkconfig.defaults.esp32c5` is loaded after `sdkconfig.defaults` for C5
   builds only (ESP-IDF's target-specific defaults): it moves lwIP and Wi-Fi
-  heap buffers to PSRAM, raises the TCP windows to 64 KiB and deepens the
-  receive path to match (64 dynamic RX buffers, 12 queued out-of-order
-  segments). Other chips keep 16 KiB windows in internal RAM;
+  heap buffers to PSRAM, raises the TCP windows to 96 KiB with window scaling
+  and deepens the receive path to match (96 dynamic RX buffers, a 96-entry
+  receive mailbox, 12 queued out-of-order segments). Window scaling needs
+  PSRAM required at boot, so a C5 whose PSRAM doesn't start resets instead of
+  running without it, and Wi-Fi uses 4 static TX buffers in internal RAM.
+  Other chips keep 16 KiB windows in internal RAM;
   `cmake/validate_config.cmake` enforces both.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides
   later edits to `sdkconfig.defaults` or the overlays. After changing those,
   delete the generated `sdkconfig` (or the whole build directory) and rebuild.
   `cmake/validate_config.cmake` stops the build if a stale config has the old
-  TCP buffer sizes or cJSON nesting limit.
+  TCP buffer sizes or cJSON nesting limit, and warns if it still has the full
+  root CA bundle.
+- HTTPS trusts ESP-IDF's common root CAs only (`sdkconfig.defaults`), with
+  cross-signed verification so chains that reach one of them through a
+  cross-sign still verify. A server whose chain ends at another root (some
+  `display.draw_url` image hosts, an OTA URL you host yourself) fails to
+  connect. If you need one, select the full bundle in menuconfig
+  (Component config > mbedTLS > Certificates > Certificate Bundle
+  Configuration).
 - Edit per-build settings with `idf.py -B <dir> menuconfig` (under "ESP32
   Device SDK"). Don't commit a generated `sdkconfig`: it's gitignored for a reason.
 - The e-ink UI's task stack (`muse_eink`) must be in internal RAM: Settings'

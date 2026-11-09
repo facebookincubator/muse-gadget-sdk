@@ -36,6 +36,7 @@
 #include "muse_input.h"
 #include "muse_chat.h"
 #include "muse_console.h"
+#include "muse_lang.h"
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
@@ -49,6 +50,9 @@
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#include "muse_review.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -61,6 +65,10 @@ static const char *TAG = "muse_ui";
 #define RING_RANGE 1000
 #define CAPTION_W 256           /* 16 columns of unscii_16, the width reply captions wrap to */
 #define CAPTION_LINE_SPACE 2
+#define LATIN_BAND_MARGIN 26    /* a small screen's accented captions clear its button icons */
+#define LONG_MUSE_TOP 44        /* long layout: Muse's top, under the state and name rows, while a reply shows */
+#define LONG_HINTS_H 135        /* long layout: the bottom strip, for the key hints, speaker and page dots */
+#define LONG_LINE_SPACE 4
 #define ART_BLANK_ROWS 3        /* Muse's art never reaches the grid's bottom rows */
 #define MINI_CELL_PX 2          /* Muse's grid cells over a reply that's read */
 #define ANSWER_MS 300           /* Muse making room for a reply, and back */
@@ -92,14 +100,26 @@ static const char *TAG = "muse_ui";
 static int s_w, s_h;
 static bool s_small;
 static bool s_tall;         /* compact, with room above and below Muse (StickS3) */
+static bool s_long;         /* tall enough for a page of the reply under Muse */
 static int s_canvas_px;     /* Muse's size on screen */
 static int s_dy;            /* full layout: offset from a 466 px tall screen */
 static lv_indev_t *s_indev;
 static lv_obj_t *s_tv;
+static bool s_swipe_enabled = true;
+static bool s_touch_talk_down;
 /* True while the face tile is the visible tile. Updated in the LVGL task;
  * read from any task (single word, benign if briefly stale). */
 static volatile bool s_face_active = true;
 static lv_obj_t *s_face;
+
+static void update_tileview_swipe(void)
+{
+    if (!s_tv) return;
+    bool enabled = s_swipe_enabled && !s_touch_talk_down;
+    if (enabled != lv_obj_has_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE)) {
+        lv_obj_set_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE, enabled);
+    }
+}
 
 static void tile_changed_cb(lv_event_t *e)
 {
@@ -133,11 +153,22 @@ void muse_ui_bench_demo(bool enabled)
 #endif
 static lv_obj_t *s_ring;
 static lv_obj_t *s_bar;     /* compact layout's stand-in for the ring */
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+#define FULL_REPLY_TOP 18   /* under the compact status line */
+static const lv_font_t *s_full_font;   /* the reply's font, from the Text size setting */
+static int s_full_size = -1;           /* the setting s_full_font was picked for */
+static int s_full_reply_h;  /* the caption's height while it fills the screen */
+static bool s_full_reply;
+static bool s_caption_shown;
+#endif
 static lv_obj_t *s_state_lbl;
 static lv_obj_t *s_name_lbl;    /* this gadget's own name, to tell it from the next one */
 static lv_obj_t *s_power_lbl;
 static lv_obj_t *s_caption_lbl;
 static lv_obj_t *s_reply_lbl;   /* full layout: the reply's page while answering */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+static lv_obj_t *s_review_position;
+#endif
 static lv_obj_t *s_meter[METER_SEGS];
 static lv_obj_t *s_speaker;
 static lv_obj_t *s_speaker_icon;
@@ -165,6 +196,7 @@ static const char *s_shown_name;
 static const char *s_idle_name = "READY";   /* idle's label: set by the Wi-Fi state */
 static int s_shown_lit = -1;
 static uint32_t s_shown_accent;
+static uint32_t s_shown_status_accent;   /* the label and ring: WORKING recolours within THINKING */
 static bool s_meter_visible = true;
 static int s_ring_value = -1;
 static uint32_t s_caption_version;
@@ -197,6 +229,7 @@ static int s_answer = -1;       /* the layout showing, or -1 */
 static int s_page_for = -1;     /* the layout the reply's page is sized for */
 static int s_big_y;             /* Muse's centre at full size */
 static int s_muse_y;            /* and now */
+static bool s_muse_up;          /* long layout: up out of the reply's way */
 static int s_from_px, s_from_y, s_to_px, s_to_y;
 
 static const char *const MODE_NAMES[MUSE_MODE_COUNT] = {
@@ -462,11 +495,15 @@ static void on_touch_mic(lv_event_t *e)
 {
     switch (lv_event_get_code(e)) {
     case LV_EVENT_PRESSED:
+        s_touch_talk_down = true;
+        update_tileview_swipe();
         muse_input_touch_talk(true);
         break;
     case LV_EVENT_RELEASED:
     case LV_EVENT_PRESS_LOST:
         muse_input_touch_talk(false);
+        s_touch_talk_down = false;
+        update_tileview_swipe();
         break;
     default:
         break;
@@ -518,6 +555,9 @@ LV_FONT_DECLARE(muse_font_cjk_noto_16)
 LV_FONT_DECLARE(muse_font_cjk_16)
 #define CJK_FONT muse_font_cjk_16
 #endif
+#if CONFIG_MUSE_LATIN_FONT
+LV_FONT_DECLARE(muse_font_latin_16)
+#endif
 
 /* unscii-16 for captions and replies; with CONFIG_MUSE_CJK_FONT, a copy that
  * falls back to Unifont's 16x16 CJK, the same cell, for what unscii lacks. */
@@ -528,6 +568,12 @@ static const lv_font_t *caption_font(void)
     if (!font.get_glyph_dsc) {
         font = lv_font_unscii_16;
         font.fallback = &CJK_FONT;
+#if CONFIG_MUSE_LATIN_FONT
+        static lv_font_t cjk;   /* and a copy of that for accented letters among CJK */
+        cjk = CJK_FONT;
+        cjk.fallback = &muse_font_latin_16;
+        font.fallback = &cjk;
+#endif
     }
     return &font;
 #else
@@ -535,22 +581,87 @@ static const lv_font_t *caption_font(void)
 #endif
 }
 
+/* The small screen's caption band: two lines of unscii-8, as replies are paged
+ * there, 2 px apart with 2 px above and below. */
+static int caption_band_h(void)
+{
+    return 2 * lv_font_get_line_height(&lv_font_unscii_8) + 2 + 2 * 2;
+}
+
+/* Where the small screen's band sits: full width along the bottom, above the
+ * navigation dots on touch screens. The SpotPear's band sits higher, under
+ * its avatar, and narrower, so every corner stays inside its 240 px circle. */
+#if CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+#define SMALL_BAND_W 160
+#define SMALL_BAND_Y (-34)
+#else
+#define SMALL_BAND_W s_w
+#define SMALL_BAND_Y ((s_tall || s_tv) ? -30 : -3)
+#endif
+
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
+/* A caption's font off a small screen's band: caption_font(), or with
+ * CONFIG_MUSE_LATIN_FONT, Unifont's 8x16 for the whole of a caption with
+ * accented letters and no CJK. */
+static const lv_font_t *caption_font_for(const char *text)
+{
+#if CONFIG_MUSE_LATIN_FONT
+#if CONFIG_MUSE_CJK_FONT
+    if (muse_text_has_cjk(text)) {
+        return caption_font();   /* its CJK falls back to the accented letters */
+    }
+#endif
+    if (muse_text_has_latin(text)) {
+        return &muse_font_latin_16;
+    }
+#endif
+    (void)text;
+    return caption_font();
+}
+
 #if CONFIG_MUSE_CJK_FONT
 #define CJK_BAND_PAD 6          /* px each side of a CJK caption on a small screen */
 #define CJK_LINE_SPACE 4
 static int s_cjk_lines;         /* lines of CJK the small screen's caption band holds */
+#endif
 
 /* The small screen's band: two lines of unscii-8, or s_cjk_lines of the 16 px
- * caption font with room between them. */
-static void set_caption_font(bool cjk)
+ * caption font with room between them for CJK, or for accented letters one
+ * line of Unifont's 8x16 in the same band as unscii-8's two. */
+static void set_caption_font(const char *caption)
 {
-    int lines = cjk ? s_cjk_lines : 2;
-    int line_h = cjk ? lv_font_get_line_height(caption_font()) : 8;
-    int space = cjk && lines > 1 ? CJK_LINE_SPACE : 2;
-    lv_obj_set_style_text_font(s_caption_lbl, cjk ? caption_font() : &lv_font_unscii_8, 0);
-    lv_obj_set_style_text_line_space(s_caption_lbl, space, 0);
-    lv_obj_set_style_pad_hor(s_caption_lbl, cjk ? CJK_BAND_PAD : 0, 0);
-    lv_obj_set_height(s_caption_lbl, lines * line_h + (lines - 1) * space + (cjk ? 6 : 4));
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    if (s_full_reply) {
+        return;   /* the reply keeps the screen: set_full_font() once its text is in */
+    }
+#endif
+#if CONFIG_MUSE_CJK_FONT
+    if (muse_text_has_cjk(caption)) {
+        int lines = s_cjk_lines;
+        int line_h = lv_font_get_line_height(caption_font());
+        int space = lines > 1 ? CJK_LINE_SPACE : 2;
+        lv_obj_set_style_text_font(s_caption_lbl, caption_font(), 0);
+        lv_obj_set_style_text_line_space(s_caption_lbl, space, 0);
+        lv_obj_set_style_pad_hor(s_caption_lbl, CJK_BAND_PAD, 0);
+        lv_obj_set_height(s_caption_lbl, lines * line_h + (lines - 1) * space + 6);
+        lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
+        return;
+    }
+#endif
+    const lv_font_t *font = &lv_font_unscii_8;
+#if CONFIG_MUSE_LATIN_FONT
+    if (muse_text_has_latin(caption)) {
+        font = &muse_font_latin_16;
+    }
+#endif
+    lv_obj_set_style_text_font(s_caption_lbl, font, 0);
+    lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
+    lv_obj_set_style_pad_hor(s_caption_lbl, 0, 0);
+    lv_obj_set_height(s_caption_lbl, caption_band_h());
+    /* Replies are paged to fit; the firmware's own captions are whole, so an
+     * accented one longer than the line rolls by rather than ending in dots. */
+    lv_label_set_long_mode(s_caption_lbl, font == &lv_font_unscii_8 ? LV_LABEL_LONG_MODE_DOTS
+                                                                    : LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
 }
 #endif
 
@@ -603,12 +714,12 @@ static void on_speaker_event(lv_event_t *e)
         muse_settings_set_speaker_on(!on);
         show_speaker(!on);
         if (idle) {
-            muse_state_set_caption(on ? "SPEAKER OFF" : "SPEAKER ON");
+            muse_state_set_hint(on ? "SPEAKER OFF" : "SPEAKER ON");
         }
         break;
     case LV_EVENT_SHORT_CLICKED:
         if (idle) {
-            muse_state_set_caption(on ? "HOLD TO MUTE" : "HOLD TO UNMUTE");
+            muse_state_set_hint(on ? "HOLD TO MUTE" : "HOLD TO UNMUTE");
         }
         break;
     case LV_EVENT_RELEASED:
@@ -826,6 +937,11 @@ static void build_answer(lv_obj_t *face, int ring_in)
     lv_label_set_long_mode(s_reply_lbl, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_remove_flag(s_reply_lbl, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    s_review_position = make_label(face, &lv_font_unscii_8, COLOR_DIM);
+    lv_obj_align(s_review_position, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_add_flag(s_review_position, LV_OBJ_FLAG_HIDDEN);
+#endif
 
     if (muse_board->touch && !muse_board->rim_controls) {
         build_speaker(face, spk_x, spk_y);
@@ -877,8 +993,139 @@ static void on_ring_draw(lv_event_t *e)
     layer->_clip_area = clip;
 }
 
+/* The long layout's caption font, for the pager (muse_chat_set_caption_px):
+ * LVGL measures a label's lines the same way, and its built-in fonts are
+ * read-only, so this is safe off the LVGL task. */
+static int long_glyph_px(uint32_t letter, uint32_t next)
+{
+    return lv_font_get_glyph_width(&lv_font_montserrat_16, letter, next);
+}
+
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
+/* The long layout's font for a caption: Montserrat, or as caption_font_for()
+ * picks for one with CJK or accented letters, which are paged by characters. */
+static const lv_font_t *long_caption_font(const char *text)
+{
+#if CONFIG_MUSE_CJK_FONT
+    if (muse_text_has_cjk(text)) {
+        return caption_font();
+    }
+#endif
+#if CONFIG_MUSE_LATIN_FONT
+    if (muse_text_has_latin(text)) {
+        return &muse_font_latin_16;
+    }
+#endif
+    return &lv_font_montserrat_16;
+}
+#endif
+
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+/* The full-screen reply's font for the page the caption has now: the Text size
+ * setting's, or as on the band, the caption font for a page with CJK and
+ * Unifont's 8x16 for one with accented letters, the fonts that draw them. */
+static void set_full_font(void)
+{
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
+    const char *text = lv_label_get_text(s_caption_lbl);
+#endif
+#if CONFIG_MUSE_CJK_FONT
+    if (muse_text_has_cjk(text)) {
+        lv_obj_set_style_text_font(s_caption_lbl, caption_font(), 0);
+        lv_obj_set_style_text_line_space(s_caption_lbl, CJK_LINE_SPACE, 0);
+        return;
+    }
+#endif
+    const lv_font_t *font = s_full_font;
+#if CONFIG_MUSE_LATIN_FONT
+    if (muse_text_has_latin(text)) {
+        font = &muse_font_latin_16;
+    }
+#endif
+    lv_obj_set_style_text_font(s_caption_lbl, font, 0);
+    lv_obj_set_style_text_line_space(s_caption_lbl, CAPTION_LINE_SPACE, 0);
+}
+
+/* The full-screen reply's font, for the pager (muse_chat_set_caption_px), as
+ * long_glyph_px() is for the long layout. */
+static int full_glyph_px(uint32_t letter, uint32_t next)
+{
+    return lv_font_get_glyph_width(s_full_font, letter, next);
+}
+
+/* Lines of `font` with `space` between them in the full-screen caption. */
+static int full_rows(const lv_font_t *font, int space)
+{
+    return (s_full_reply_h - 4 + space) / (lv_font_get_line_height(font) + space);
+}
+
+/* Picks the reply font for the Text size setting and pages replies to fit it:
+ * unscii-8's fixed cell (the band's font), or Montserrat 14 or 20. The pager
+ * wraps each line to the label's width in pixels as the label measures it
+ * (set up in build_screen): a line never wraps again on screen, and every page
+ * fits at any size, capitals included. */
+static void apply_text_size(void)
+{
+    static const lv_font_t *const SIZES[] = {
+        [MUSE_TEXT_SMALL] = &lv_font_unscii_8,
+        [MUSE_TEXT_MEDIUM] = &lv_font_montserrat_14,
+        [MUSE_TEXT_LARGE] = &lv_font_montserrat_20,
+    };
+    int size = muse_settings_text_size();
+    if (size == s_full_size) {
+        return;
+    }
+    s_full_size = size;
+    s_full_font = SIZES[size];
+    int lines = full_rows(s_full_font, CAPTION_LINE_SPACE);
+    if (lines < 1) {
+        lines = 1;   /* the columns below divide by it */
+    }
+    int cols;
+    if (s_full_font == &lv_font_unscii_8) {
+        cols = (s_w - 6) / 8;
+        /* A third of the caption spare for characters wider than a byte. */
+        while (lines > 1 && (cols + 1) * lines > MUSE_CAPTION_MAX * 2 / 3) {
+            lines--;
+        }
+    } else {
+        /* The same spare: this caps a line of narrow letters. */
+        cols = MUSE_CAPTION_MAX * 2 / 3 / lines - 1;
+    }
+    muse_state_set_page(cols, lines);
+    /* A reply with CJK or accented letters takes their font's columns, three
+     * bytes of the caption a character at most, but its pages without any
+     * show in the Text size font, so no more of its rows than that has. */
+#if CONFIG_MUSE_CJK_FONT
+    int cjk_cols = (s_w - 6) / lv_font_get_glyph_width(caption_font(), 'M', ' ');
+    int cjk_lines = full_rows(caption_font(), CJK_LINE_SPACE);
+    cjk_lines = cjk_lines < lines ? cjk_lines : lines;
+    while (cjk_lines > 1 && (3 * cjk_cols + 1) * cjk_lines > MUSE_CAPTION_MAX - 1) {
+        cjk_lines--;
+    }
+    muse_state_set_cjk_page(cjk_cols, cjk_lines);
+#endif
+#if CONFIG_MUSE_LATIN_FONT
+    int latin_cols = (s_w - 6) / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' ');
+    int latin_lines = full_rows(&muse_font_latin_16, CAPTION_LINE_SPACE);
+    latin_lines = latin_lines < lines ? latin_lines : lines;
+    while (latin_lines > 1 && (3 * latin_cols + 1) * latin_lines > MUSE_CAPTION_MAX - 1) {
+        latin_lines--;
+    }
+    muse_state_set_latin_page(latin_cols, latin_lines);
+#endif
+    if (s_full_reply) {
+        set_full_font();
+    }
+    ESP_LOGI(TAG, "full-screen reply pages: %d x %d", cols, lines);
+}
+#endif
+
 static void build_screen(void)
 {
+#if CONFIG_MUSE_LATIN_FONT
+    muse_text_keep_latin();   /* as muse_app_run() has: the fonts picked below depend on it */
+#endif
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
@@ -946,6 +1193,10 @@ static void build_screen(void)
     int meter_y = cap_top - 6 - METER_SEG_PX / 2;
     int art_bottom = meter_y - METER_SEG_PX / 2 - 4;
     s_big_y = s_small ? 0 : art_bottom - (s_canvas_px / 2 - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W));
+#if CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+    /* The 128 px avatar ends at y=159; Japanese captions start at y=164. */
+    s_big_y = -25;
+#endif
 
     /* The character. */
     muse_image_init();
@@ -986,7 +1237,10 @@ static void build_screen(void)
      * Muse app. update_chrome() fills it in, shortens it to the hex tail on a
      * screen too narrow for the whole thing, and empties it once paired. */
     s_name_lbl = make_label(face, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16, COLOR_DIM);
-    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 88 : s_small ? 32 : 60 + s_dy);
+    /* Under the state, which a small screen draws in unscii-8 or, with accented
+     * letters, the caption font's 16 px (update_status). */
+    int state_h = lv_font_get_line_height(muse_lang_label_font(muse_lang_status("READY"), &lv_font_unscii_8));
+    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 88 : s_small ? 24 + state_h : 60 + s_dy);
     if (muse_board->rim_controls) {
         /* Safe chord below the round panel's top, not the full 466 px width. */
         lv_obj_set_size(s_state_lbl, 280, lv_font_get_line_height(&lv_font_unscii_16));
@@ -1002,23 +1256,77 @@ static void build_screen(void)
     if (s_small) {
         /* Two lines over the bottom of the face, on a dark band so they stay
          * legible. A tall screen has room to keep them above the mic icon. */
-        lv_obj_set_size(s_caption_lbl, s_w, 2 * 8 + 2 + 4);
+        lv_obj_set_size(s_caption_lbl, SMALL_BAND_W, caption_band_h());
         lv_obj_set_style_pad_ver(s_caption_lbl, 2, 0);
         lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
         lv_obj_set_style_bg_color(s_caption_lbl, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
         lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
         /* Touch screens need the caption above the navigation dots too. */
-        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, (s_tall || s_tv) ? -30 : -3);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, SMALL_BAND_Y);
 #if CONFIG_MUSE_CJK_FONT
         /* CJK doesn't fit unscii-8's cell, so a reply with CJK in it fills the
          * band in the 16 px caption font instead: one line at a time, or two
          * on a landscape screen with the height for them, such as the
          * BOX-3's 320x240 (set_caption_font). */
         s_cjk_lines = !s_tall && s_h >= 200 ? 2 : 1;
-        muse_state_set_cjk_page((s_w - 2 * CJK_BAND_PAD) / lv_font_get_glyph_width(caption_font(), 'M', ' '),
+        muse_state_set_cjk_page((SMALL_BAND_W - 2 * CJK_BAND_PAD) / lv_font_get_glyph_width(caption_font(), 'M', ' '),
                                 s_cjk_lines);
 #endif
+#if CONFIG_MUSE_LATIN_FONT
+        /* Accented letters take one line of Unifont's 8x16, clear of the
+         * button icons in the band's corners (8 px in, up to 14 px wide) and
+         * of a case's bezel. Bigger screens page them as their other replies,
+         * Unifont being the narrower. So those pages fill half their width; a
+         * page of their own there needs MUSE_CAPTION_MAX to allow for 3-byte
+         * letters. */
+        muse_state_set_latin_page((SMALL_BAND_W - 2 * LATIN_BAND_MARGIN) / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '), 1);
+#endif
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+        if (!s_long) {   /* the long layout has its own page of the reply */
+            s_full_reply_h = s_h - FULL_REPLY_TOP - 6;
+            muse_chat_set_caption_px(s_w - 6, full_glyph_px);
+            apply_text_size();
+        }
+#endif
+        if (s_long) {
+            /* Not a band over Muse but a page of the reply under it. Montserrat's
+             * letters differ in width, so the pager wraps each line to the
+             * label's width in pixels as the label measures it: a line never
+             * wraps again on screen, and every page fits. */
+            const lv_font_t *font = &lv_font_montserrat_16;
+            int top = LONG_MUSE_TOP + s_canvas_px - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W) + 14;
+            int pitch = lv_font_get_line_height(font) + LONG_LINE_SPACE;
+            int lines = (s_h - LONG_HINTS_H - top + LONG_LINE_SPACE) / pitch;
+            if (lines < 1) {
+                lines = 1;   /* the columns below divide by it */
+            }
+            int w = s_w - 24;
+            /* A third of the caption spare for characters wider than a byte:
+             * this caps a line of narrow letters. */
+            int cols = MUSE_CAPTION_MAX * 2 / 3 / lines - 1;
+            muse_chat_set_caption_px(w, long_glyph_px);
+            lv_obj_set_style_text_font(s_caption_lbl, font, 0);
+            lv_obj_set_style_text_line_space(s_caption_lbl, LONG_LINE_SPACE, 0);
+            lv_obj_set_style_pad_all(s_caption_lbl, 0, 0);
+            lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_text_align(s_caption_lbl, LV_TEXT_ALIGN_LEFT, 0);
+            lv_obj_set_size(s_caption_lbl, w, lines * pitch - LONG_LINE_SPACE);
+            lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, top);
+            muse_state_set_page(cols, lines);
+            /* A reply with CJK or accented letters takes their font's columns,
+             * but its pages without any show in Montserrat, so every page keeps
+             * Montserrat's rows, and the pager its pixel widths too. */
+#if CONFIG_MUSE_CJK_FONT
+            muse_state_set_cjk_page(w / lv_font_get_glyph_width(caption_font(), 'M', ' '), lines);
+#endif
+#if CONFIG_MUSE_LATIN_FONT
+            muse_state_set_latin_page(w / lv_font_get_glyph_width(&muse_font_latin_16, 'M', ' '), lines);
+#endif
+            if (muse_board->touch) {
+                build_speaker(face, s_w / 2 - 96, s_h / 2 - 75);   /* in the bottom strip, left of the key hints */
+            }
+        }
 
         s_bar = lv_obj_create(face);
         lv_obj_remove_style_all(s_bar);
@@ -1250,12 +1558,13 @@ static void build_overlays(void)
     lv_obj_set_style_border_width(s_pair, 2, 0);
     lv_obj_remove_flag(s_pair, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_pair, LV_OBJ_FLAG_HIDDEN);
-    s_pair_title = make_label(s_pair, font_pick(&lv_font_montserrat_20, FONT_COMPACT), COLOR_LIT);
-    lv_label_set_text(s_pair_title, "Pairing code");
-    s_pair_code = make_label(s_pair, font_pick(&lv_font_montserrat_28, &lv_font_montserrat_20), COLOR_ACCENT);
+    s_pair_title = make_label(s_pair, muse_lang_montserrat(font_pick(&lv_font_montserrat_20, FONT_COMPACT)), COLOR_LIT);
+    lv_label_set_text(s_pair_title, muse_lang_menu("Pairing code"));
+    s_pair_code = make_label(s_pair, muse_lang_montserrat(font_pick(&lv_font_montserrat_28, &lv_font_montserrat_20)),
+                             COLOR_ACCENT);
     lv_obj_set_style_text_letter_space(s_pair_code, s_small ? 2 : 6, 0);
-    s_pair_hint = make_label(s_pair, font_pick(&lv_font_montserrat_14, FONT_COMPACT), COLOR_DIM);
-    lv_label_set_text(s_pair_hint, s_small ? "Enter on phone" : "Enter it on your phone");
+    s_pair_hint = make_label(s_pair, muse_lang_montserrat(font_pick(&lv_font_montserrat_14, FONT_COMPACT)), COLOR_DIM);
+    lv_label_set_text(s_pair_hint, muse_lang_menu(s_small ? "Enter on phone" : "Enter it on your phone"));
     /* Wraps: "bottom right button" is wider than the AIPI's card. */
     lv_obj_set_width(s_pair_hint, lv_pct(100));
     lv_label_set_long_mode(s_pair_hint, LV_LABEL_LONG_MODE_WRAP);
@@ -1354,10 +1663,8 @@ static void update_chrome(float now)
     if (s_tv) {
         int page = lv_tileview_get_tile_active(s_tv) == s_settings;
         bool subpage = muse_settings_ui_in_subpage();
-        bool swipe = !page || !subpage;
-        if (swipe != lv_obj_has_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE)) {
-            lv_obj_set_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE, swipe);
-        }
+        s_swipe_enabled = !page || !subpage;
+        update_tileview_swipe();
         int shown = page * 2 + subpage;
         if (shown != s_shown_page) {
             for (int i = 0; i < 2; i++) {
@@ -1423,17 +1730,19 @@ static void update_chrome(float now)
                 strlcpy(hint, "Tap to confirm pairing", sizeof(hint));
             } else {
                 strlcpy(code, s_small ? "Press" : "Press button", sizeof(code));
-                snprintf(hint, sizeof(hint), s_small ? "%s button" : "Press the %s button", muse_board->talk_button);
+                snprintf(hint, sizeof(hint), muse_lang_menu(s_small ? "%s button" : "Press the %s button"),
+                         muse_board->talk_button);
             }
         } else {
             snprintf(code, sizeof(code), "%06lu", (unsigned long)b.passkey);
             strlcpy(hint, s_small ? "Enter on phone" : "Enter it on your phone", sizeof(hint));
         }
         const char *title = confirm ? (s_small ? "Muse app" : "Pair with Muse app") : "Pairing code";
-        if (strcmp(code, lv_label_get_text(s_pair_code)) != 0) {
-            lv_label_set_text(s_pair_code, code);
-            lv_label_set_text(s_pair_title, title);
-            lv_label_set_text(s_pair_hint, hint);
+        const char *shown = muse_lang_menu(code);
+        if (strcmp(shown, lv_label_get_text(s_pair_code)) != 0) {
+            lv_label_set_text(s_pair_code, shown);
+            lv_label_set_text(s_pair_title, muse_lang_menu(title));
+            lv_label_set_text(s_pair_hint, muse_lang_menu(hint));
         }
     }
     lv_obj_set_flag(s_pair, LV_OBJ_FLAG_HIDDEN, !b.passkey && !confirm);
@@ -1493,23 +1802,67 @@ static void update_power(float now)
     muse_power_t p = muse_state_power();
     char buf[32];
     if (p.battery_pct < 0) {
-        strlcpy(buf, p.usb ? (s_small ? "USB" : "USB POWER") : "", sizeof(buf));
+        strlcpy(buf, p.usb ? (s_small ? "USB" : muse_lang_status("USB POWER")) : "", sizeof(buf));
     } else if (s_small) {
         snprintf(buf, sizeof(buf), "%s%d%%", p.charging ? "+" : "", p.battery_pct);
     } else if (p.charging) {
-        snprintf(buf, sizeof(buf), "CHARGING %d%%", p.battery_pct);
+        snprintf(buf, sizeof(buf), muse_lang_status("CHARGING %d%%"), p.battery_pct);
     } else {
-        snprintf(buf, sizeof(buf), "BATTERY %d%%", p.battery_pct);
+        snprintf(buf, sizeof(buf), muse_lang_status("BATTERY %d%%"), p.battery_pct);
     }
     if (strcmp(buf, lv_label_get_text(s_power_lbl)) != 0) {
+        lv_obj_set_style_text_font(s_power_lbl, muse_lang_label_font(buf, &lv_font_unscii_8), 0);
         lv_label_set_text(s_power_lbl, buf);
     }
 }
+
+/* An avatar without a working pose keeps THINKING's accent. */
+__attribute__((weak)) uint32_t muse_pixel_working_accent(void)
+{
+    return 0;
+}
+
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+/* While Muse thinks or answers, the caption takes the screen and Muse steps
+ * aside; otherwise it's the usual two-line band over the bottom of the face. */
+static void set_full_reply(bool on)
+{
+    if (on == s_full_reply) {
+        return;
+    }
+    s_full_reply = on;
+    lv_obj_set_flag(s_canvas, LV_OBJ_FLAG_HIDDEN, on);
+    if (on) {
+        lv_obj_set_size(s_caption_lbl, s_w, s_full_reply_h);
+        lv_obj_set_style_pad_hor(s_caption_lbl, 3, 0);
+        lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_COVER, 0);
+        lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_TOP_MID, 0, FULL_REPLY_TOP);
+        set_full_font();
+    } else {
+        lv_obj_set_size(s_caption_lbl, SMALL_BAND_W, caption_band_h());
+        lv_obj_set_style_bg_opa(s_caption_lbl, LV_OPA_70, 0);
+        lv_label_set_long_mode(s_caption_lbl, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, SMALL_BAND_Y);
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
+        set_caption_font(lv_label_get_text(s_caption_lbl));   /* the band's font, padding, height and long mode */
+#else
+        lv_obj_set_style_text_font(s_caption_lbl, &lv_font_unscii_8, 0);
+        lv_obj_set_style_pad_hor(s_caption_lbl, 0, 0);
+#endif
+    }
+}
+#endif
 
 static void update_status(muse_mode_t mode, float now)
 {
     uint32_t accent = muse_pixel_accent(mode);
     const char *name = mode == MUSE_MODE_IDLE ? s_idle_name : MODE_NAMES[mode];
+    if (mode == MUSE_MODE_THINKING && muse_voice_call_view() == MUSE_VOICE_VIEW_WORKING) {
+        name = "WORKING";
+        uint32_t working = muse_pixel_working_accent();
+        if (working) accent = working;   /* the ring and label match the working avatar */
+    }
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     const char *call_name = muse_voice_call_label();
     const char *hint = muse_voice_call_hint();
@@ -1527,10 +1880,12 @@ static void update_status(muse_mode_t mode, float now)
 #endif
 
     if (name != s_shown_name) {
-        lv_label_set_text(s_state_lbl, name);
+        const char *shown = muse_lang_status(name);
+        lv_obj_set_style_text_font(s_state_lbl, muse_lang_label_font(shown, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16), 0);
+        lv_label_set_text(s_state_lbl, shown);
         s_shown_name = name;
     }
-    if ((int)mode != s_shown_state) {
+    if ((int)mode != s_shown_state || accent != s_shown_status_accent) {
         lv_obj_set_style_text_color(s_state_lbl, lv_color_hex(accent), 0);
         if (s_ring) {
             lv_obj_set_style_arc_color(s_ring, lv_color_hex(accent), LV_PART_INDICATOR);
@@ -1539,6 +1894,7 @@ static void update_status(muse_mode_t mode, float now)
         }
         set_mic_color(mode == MUSE_MODE_LISTENING ? accent : COLOR_DIM);   /* legacy face icon */
         s_shown_state = (int)mode;
+        s_shown_status_accent = accent;
         s_shown_lit = -1;
     }
 
@@ -1594,17 +1950,48 @@ static void update_status(muse_mode_t mode, float now)
 
     static char caption[MUSE_CAPTION_MAX];
     bool fresh = muse_state_caption(caption, sizeof(caption), &s_caption_version);
+    const char *shown = caption;
     int answer = -1;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    /* The review page has its own buffer, so the live caption is still there to
+     * go back to when review ends, including any that arrived meanwhile. */
+    static char review[MUSE_CAPTION_MAX];
+    static muse_review_view_t view;
+    bool reviewing = muse_review_active();
+#endif
     if (s_reply_lbl) {
         /* The speaker picks the layout, even mid-reply: the voice task pages to fit. */
         int layout = muse_board->audio_init && muse_settings_speaker_on() ? ANSWER_HEARD : ANSWER_READ;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+        if (reviewing) layout = ANSWER_READ;
+#endif
         if (layout != s_page_for) {
             muse_state_set_page(s_answers[layout].cols, s_answers[layout].lines);
             s_page_for = layout;
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+            view.stale = true;   /* a page wrapped for the old layout is wrapped again */
+#endif
         }
         if (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING) {
             answer = layout;
         }
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+        bool review_changed;
+        reviewing = muse_review_frame(&view, review, sizeof(review), &review_changed);
+        if (reviewing) {
+            answer = ANSWER_READ;
+            shown = review;
+        }
+        if (review_changed) {
+            fresh = true;
+            if (reviewing) {
+                char position[24];
+                snprintf(position, sizeof(position), "%d / %d", view.page, view.pages);
+                lv_label_set_text(s_review_position, position);
+            }
+            lv_obj_set_flag(s_review_position, LV_OBJ_FLAG_HIDDEN, !reviewing);
+        }
+#endif
     }
     if (answer != s_answer) {
         set_answer(answer);
@@ -1612,17 +1999,40 @@ static void update_status(muse_mode_t mode, float now)
     }
     if (fresh) {
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
-#if CONFIG_MUSE_CJK_FONT
-        if (s_small) {
-            set_caption_font(muse_text_has_cjk(caption));
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
+        if (s_long) {
+            lv_obj_set_style_text_font(s_caption_lbl, long_caption_font(shown), 0);
+        } else if (s_small) {
+            set_caption_font(shown);
+        }
+        if (!s_small || lbl != s_caption_lbl) {
+            lv_obj_set_style_text_font(lbl, caption_font_for(shown), 0);
         }
 #endif
-        lv_label_set_text(lbl, caption);
-        lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !caption[0]);
+        lv_label_set_text(lbl, shown);
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+        if (s_full_reply) {
+            set_full_font();
+        }
+#endif
+        if (s_long && s_muse_up != (shown[0] != '\0')) {
+            s_muse_up = shown[0] != '\0';
+            move_muse(s_canvas_px, s_muse_up ? LONG_MUSE_TOP + s_canvas_px / 2 - s_h / 2 : s_big_y);
+        }
+        lv_obj_set_flag(lbl, LV_OBJ_FLAG_HIDDEN, !shown[0]);
         if (s_reply_lbl) {
             lv_obj_add_flag(answer >= 0 ? s_caption_lbl : s_reply_lbl, LV_OBJ_FLAG_HIDDEN);
         }
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+        s_caption_shown = shown[0] != '\0';
+#endif
     }
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    if (s_small && !s_long) {
+        apply_text_size();
+        set_full_reply(s_caption_shown && (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING));
+    }
+#endif
     update_power(now);
 }
 
@@ -1742,6 +2152,7 @@ static void frame_tick(lv_timer_t *timer)
         .mode_t = mode_t,
         .level = s_level,
         .happy = muse_state_happiness(),
+        .working = muse_voice_call_view() == MUSE_VOICE_VIEW_WORKING ? 1.0f : 0,
     };
     if (!muse_board->epaper || mode != s_last_epaper_pose) {
         muse_pixel_render(&pose);
@@ -1757,11 +2168,13 @@ esp_err_t muse_ui_start(void)
     s_w = muse_board->width;
     s_h = muse_board->height;
     /* The full layout assumes room for the 466 px board's header and bottom
-     * captions. Short landscape panels (BOX-3) need the compact layout too,
-     * as does anything narrower than its fixed 256 px captions. */
-    bool short_landscape = s_w > s_h && s_h < 320;
+     * captions. Short landscape panels (BOX-3, and 480x320, where the full
+     * layout's status line would sit above the screen) need the compact
+     * layout too, as does anything narrower than its fixed 256 px captions. */
+    bool short_landscape = s_w > s_h && s_h <= 320;
     s_small = s_h < 200 || s_w < 200 || short_landscape || s_w < 300;
     s_tall = s_small && s_h >= s_w + 64;
+    s_long = s_tall && s_h >= 3 * s_w;
     /* Small screens keep room for the status line and button icons. A narrow
      * one is as wide as Muse gets, in whole pixels. */
     s_canvas_px = s_small ? s_h * 3 / 4 : MUSE_PX_W * 5;
@@ -1812,7 +2225,8 @@ void muse_ui_show_face(void)
     if (!s_tv) {
         return;
     }
-    lv_obj_add_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE);
+    s_swipe_enabled = true;
+    update_tileview_swipe();   /* still locked while the screen mic is held */
     lv_tileview_set_tile(s_tv, s_face, muse_board->epaper ? LV_ANIM_OFF : LV_ANIM_ON);
 }
 
@@ -1821,7 +2235,8 @@ void muse_ui_set_swipe_enabled(bool enabled)
     if (!s_tv) {
         return;
     }
-    lv_obj_set_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE, enabled);
+    s_swipe_enabled = enabled;
+    update_tileview_swipe();
     s_shown_page = -1;
     s_next_settings_tick = 0;
 }
