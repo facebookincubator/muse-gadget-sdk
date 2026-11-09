@@ -1,6 +1,6 @@
 # Skill Catalog
 
-48 active skills: 47 device/family skills and one shared Google Cast skill.
+49 active skills: 48 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -46,6 +46,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Miele G 7566](gadget-miele-g7566-dishwasher/SKILL.md) — local status; commands only if supported and permitted.
 - [Moonraker 3D printers](gadget-moonraker-3d-printers/SKILL.md) — existing-service status and print/job controls.
 - [Bambu Lab printers](gadget-bambu-lab-printers/SKILL.md) — local status, filament and owner-approved prints in Developer Mode.
+- [Bambu Lab P2S](gadget-bambu-lab-p2s/SKILL.md) — status, chamber-camera snapshots, monitoring and agreed failure pauses.
 
 ## Vacuums
 
