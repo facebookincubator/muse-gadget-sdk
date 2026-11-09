@@ -102,6 +102,14 @@ class StopWatchPTT(unittest.TestCase):
                                      'UBSAN_OPTIONS': 'halt_on_error=1:print_stacktrace=1'})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_toggle_notes_are_not_offered_where_the_gesture_cannot_work(self):
+        # The Watcher's short wheel click sleeps, and the FreeInk UI has no
+        # navigation guard for a toggled note.
+        kconfig = (ROOT / "components" / "muse" / "Kconfig").read_text()
+        block = kconfig.split("config MUSE_VOICE_NOTE_TOGGLE", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("!MUSE_BOARD_SENSECAP_WATCHER", block)
+        self.assertIn("!MUSE_UI_FREEINK", block)
+
     def test_release_tail_is_sample_bounded_even_with_fast_reads(self):
         self.run_case('voice', 22)
 

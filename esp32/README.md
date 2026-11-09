@@ -407,7 +407,9 @@ the display only wakes it. A note shorter than 500 ms isn't sent ("Record a
 longer note"), and the normal 15-second limit still applies. While a note
 records, the other buttons don't open the menu or sleep the screen. Replies
 use the existing text-caption path. This option does not add TTS or
-enable live voice calls, and is off by default for every board.
+enable live voice calls, and is off by default for every board. It isn't
+available on the SenseCAP Watcher (a short wheel click sleeps) or on
+e-paper boards with the FreeInk UI.
 
 ## Tests
 

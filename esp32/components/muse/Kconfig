@@ -457,6 +457,7 @@ menu "Muse"
     config MUSE_VOICE_NOTE_TOGGLE
         bool "Press once to record a voice note, press again to send"
         depends on MUSE_ENABLED && !MUSE_REALTIME_VOICE
+        depends on !MUSE_BOARD_SENSECAP_WATCHER && !MUSE_UI_FREEINK
         default n
         help
             A talk-button press starts recording and the next press sends
@@ -466,7 +467,8 @@ menu "Muse"
             still ends at the normal 15-second limit. While a note records,
             the other buttons don't open the menu or sleep the screen.
             Replies remain text unless a separate TTS integration is
-            provided.
+            provided. Not available on the SenseCAP Watcher, whose wheel
+            click sleeps, or on e-paper (FreeInk) boards.
 
 if MUSE_REALTIME_VOICE
 
