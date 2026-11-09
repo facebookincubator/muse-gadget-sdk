@@ -50,6 +50,7 @@ BACKOFF_BASE_S = 2.0
 BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
+HEALTHY_RECONNECT_S = 1.0
 UNPAIRED_POLL_S = 30.0
 LOCAL_WRITE_TIMEOUT_S = 10
 MAX_LOCAL_REQUEST = 4 * 1024 * 1024  # room for a 2 MiB image in base64
@@ -111,6 +112,11 @@ class Service:
                 log.info("not paired; run `musegadget pair` to set up")
                 await self._sleep(UNPAIRED_POLL_S)
                 continue
+            problem = config.pairing_problem(pairing)
+            if problem is not None:
+                log.warning("%s Run `musegadget pair --force` to pair again.", problem)
+                await self._sleep(UNPAIRED_POLL_S)
+                continue
             self._warn_if_sdk_token_changed(pairing)
             pairing = await self._maybe_refresh(pairing)
             if pairing is None:
@@ -145,11 +151,13 @@ class Service:
                 config.delete_json(config.PAIRING_FILE)
                 log.warning("pairing removed; run `musegadget pair` to set up again")
                 continue
-            if lasted >= HEALTHY_SESSION_S:
+            healthy = lasted >= HEALTHY_SESSION_S
+            if healthy:
                 backoff.reset()
             if outcome in (Outcome.AUTH_REJECTED, Outcome.FORBIDDEN):
                 backoff.floor = AUTH_BACKOFF_MIN_S
-            delay = backoff.next_delay()
+            delay = (HEALTHY_RECONNECT_S if healthy and outcome is Outcome.CLOSED
+                     else backoff.next_delay())
             log.info("reconnecting in %.0fs", delay)
             await self._sleep(delay)
 
@@ -217,8 +225,7 @@ class Service:
         not be used yet; the pairing file is removed when the pairing itself
         has been revoked.
         """
-        age = time.time() - pairing.get("access_token_saved_at", 0)
-        if not force and age < TOKEN_REFRESH_AGE_S:
+        if not force and pairing.get("access_token_saved_at", 0) > time.time() - TOKEN_REFRESH_AGE_S:
             return pairing
         if not force and time.monotonic() - self._last_refresh_attempt < TOKEN_RETRY_S:
             return pairing
@@ -533,11 +540,14 @@ async def _follow(session: LinkSession, session_id: str | None, opened: asyncio.
 class _ReplyReader:
     """Passes MuseTurn the events that follow one request's own message.
 
-    Events repeating an earlier ``seq`` are dropped. Until Muse acknowledges
-    the message, events wait here (bounded). Then a ``message.user`` event
-    for the acknowledged message opens the answer, and one for any other
-    message on the chat closes it again; events of a reply already taken, and
-    events naming the message or a taken reply as their parent, always count.
+    Events repeating an earlier ``seq`` are dropped. Message rows
+    (``message.user``, ``message.assistant``) are numbered apart from the
+    live status and delta events, so each kind keeps its own order. Until
+    Muse acknowledges the message, events wait here (bounded). Then a
+    ``message.user`` event for the acknowledged message opens the answer,
+    and one for any other message on the chat closes it again; events of a
+    reply already taken, and events naming the message or a taken reply as
+    their parent, always count.
     """
 
     def __init__(self, turn: MuseTurn) -> None:
@@ -546,15 +556,24 @@ class _ReplyReader:
         self.user_ids: set[str] | None = None
         self.after_note = False
         self.last_seq = 0
+        self.last_row_seq = 0
         self.held: list[dict] = []
         self.held_text = 0
 
     def take(self, event: dict) -> None:
         seq = event.get("seq")
         if isinstance(seq, int) and not isinstance(seq, bool):
-            if seq <= self.last_seq:
-                return
-            self.last_seq = seq
+            # Message rows carry the chat's own sequence, which can be lower
+            # than that of live status/delta events already received here.
+            # Comparing the two drops our own message and never opens the answer.
+            if event.get("event") in ("message.user", "message.assistant"):
+                if seq <= self.last_row_seq:
+                    return
+                self.last_row_seq = seq
+            else:
+                if seq <= self.last_seq:
+                    return
+                self.last_seq = seq
         if self.user_ids is None:
             if len(self.held) >= MAX_HELD_EVENTS:
                 raise ValueError("too many chat events before Muse acknowledged the message")

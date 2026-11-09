@@ -297,6 +297,13 @@ keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_r
 is a complete example: a webhook listener that sends every note from a Pebble
 ring to its own Muse chat.
 
+Gadgets can pass `device="mcu-wearable"` to `LinkSession.send_chat()` for
+dictation or to `LinkSession.send_voice()` for voice notes. This uses the same
+device-class hint as ESP32 spoken turns, asking Muse for short plain sentences.
+The hint applies to that request only. It does not change `device_id`,
+registration, or `output_modality`. Omit it for typed messages and to keep the
+server's usual reply style.
+
 For an interactive text conversation in your terminal:
 
 ```sh

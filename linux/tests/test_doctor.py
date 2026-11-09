@@ -39,6 +39,18 @@ def test_invalid_pairing_is_reported_without_echoing_contents(
     assert "secret" not in doctor.format_check(result)
 
 
+@pytest.mark.parametrize("stamp", [None, "123", True, -1, float("nan"), float("inf")])
+def test_invalid_pairing_timestamp_is_reported(tmp_path: Path, stamp: object) -> None:
+    config.save_json(config.PAIRING_FILE, {
+        "access_token": "secret-access", "refresh_token": "secret-refresh",
+        "access_token_saved_at": stamp,
+    }, tmp_path)
+    result = doctor.check_pairing(tmp_path)
+    assert result["status"] == "FAIL"
+    assert "timestamp" in result["detail"]
+    assert "secret" not in doctor.format_check(result)
+
+
 def test_pairing_accepts_saved_tokens_without_creating_identity(tmp_path: Path) -> None:
     (tmp_path / config.PAIRING_FILE).write_text(
         json.dumps({"access_token": "secret-access", "refresh_token": "secret-refresh"}),
