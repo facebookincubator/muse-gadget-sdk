@@ -1,10 +1,11 @@
 ---
 name: gadget-vesync-humidifier
 description: >-
-  Read and control a VeSync-connected Levoit humidifier (e.g. Classic
-  200S / 300S) through the direct VeSync cloud lane: power, target
-  humidity, mode, mist level, current humidity, and water-empty state.
-  VeSync devices are cloud-only; there is no local API.
+  Cloud only: needs internet access and the user's VeSync account; does not use Muse
+  Home Link or the local network. Read and control a VeSync-connected Levoit humidifier
+  (e.g. Classic 200S / 300S) through the VeSync cloud API: power, target humidity,
+  mode, mist level, current humidity, and water-empty state. VeSync humidifiers have
+  no local API.
 ---
 
 # VeSync Humidifier (Levoit)
@@ -18,8 +19,11 @@ power, mode, or mist control, and water-empty alerts.
 - The humidifier is enrolled in the user's VeSync account and named
   there (the account name is the identity; the device also carries a
   model code, e.g. Classic200S).
+- Match the user's words against the device names on the account. With
+  more than one match, list the candidates and ask; never guess.
 - Confirm model before using model-dependent commands: mist-level
-  ranges and modes (auto / manual / sleep) vary by model.
+  ranges and modes (auto / manual / sleep) vary by model. Use only the
+  values the client reports for this model.
 
 ## Local Access Verdict
 
@@ -31,18 +35,41 @@ power, mode, or mist control, and water-empty alerts.
 - A LAN probe finding no service is the expected result. Do not
   attempt local pairing hacks or firmware mods for local control.
 
+## Prerequisites
+
+- **Cloud only.** Internet access from Muse to the VeSync API, using
+  the normal internet path, never the Home Link proxy; a Muse Home Link
+  is not required. If the cloud is unreachable, report that rather
+  than trying a local path.
+- The user's VeSync account credentials, supplied through approved
+  secret storage. Never ask for the password in chat, never put it or
+  the session token on a command line, and never print, log, or
+  transmit either. If no credentials are stored, explain this setup
+  instead.
+
 ## The Lane
 
-- Direct client on the VeSync account API (pyvesync or equivalent):
-  password login once → persisted token → device list → per-device
-  detail reads and commands.
+- Direct client on the VeSync account API ([pyvesync](https://github.com/webdjoe/pyvesync)
+  or equivalent): password login once → persisted token → device list
+  → per-device detail reads and commands.
 - State read returns: power, connection status, current humidity,
   target humidity, mode, mist level, water-lacks (empty tank),
   tank-lifted, humidity-high flags.
 - Commands: on/off, set target humidity, set mode, set mist level.
-  Every command is verified by a state read-back.
 - Poll no tighter than 5 minutes; the token is reused, the password
   is only needed again if the token is rejected.
+
+## Changing Settings
+
+1. Act only on the user's request for this named device. A state
+   question is never permission to change anything.
+2. Read fresh state first. If the device is offline, report that and
+   send nothing.
+3. Send one command for the requested change.
+4. Read fresh state again and report the change done only when the
+   read-back shows it. If it does not, or the response was uncertain,
+   report what the device now shows. Never resend a command
+   automatically.
 
 ## Safety Limits
 
@@ -54,8 +81,6 @@ power, mode, or mist control, and water-empty alerts.
 - An account login rejection can mean the account is SSO-only
   ("Sign in with Google") with no password set — do not retry-loop;
   surface it.
-- Credentials live in the deployment's secret store; never print,
-  log, or transmit them.
 
 ## Verification
 
@@ -63,3 +88,7 @@ power, mode, or mist control, and water-empty alerts.
   current-humidity value is the health check. Cross-check once
   against the VeSync app or the device's own display on a new
   deployment, and verify any command by read-back.
+
+## Sources
+
+- [pyvesync: VeSync account API client, including Levoit humidifiers](https://github.com/webdjoe/pyvesync)
