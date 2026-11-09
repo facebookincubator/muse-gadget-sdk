@@ -64,6 +64,10 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
 
+## Computing
+
+- [Windows PC (Wake-on-LAN)](gadget-windows-pc/SKILL.md) — wake via a LAN-resident sender, verify by service.
+
 ## Read-only network and camera access
 
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
