@@ -100,6 +100,9 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_waveshare_s3_146.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_ESP_MOSAICO)
         list(APPEND srcs "boards/board_esp_mosaico.c" "boards/muse_lcd_bands.c")
+        if(CONFIG_MUSE_MOSAICO_CAMERA)
+            list(APPEND srcs "boards/mosaico_camera.c")
+        endif()
     elseif(CONFIG_MUSE_BOARD_AIPI)
         list(APPEND srcs "boards/board_aipi.c")
     elseif(CONFIG_MUSE_BOARD_ATK_DNESP32S3_BOX)
@@ -204,6 +207,11 @@ list(APPEND muse_priv_requires camera)
 # The P4 camera's JPEG encoder; Kconfig is not loaded yet when requirements expand.
 if(IDF_TARGET STREQUAL "esp32p4")
     list(APPEND muse_priv_requires esp_driver_jpeg)
+endif()
+# The Mosaico camera's JPEG encoder and PPA; Kconfig is not loaded yet when
+# requirements expand.
+if(IDF_TARGET STREQUAL "esp32s31")
+    list(APPEND muse_priv_requires esp_driver_jpeg esp_driver_ppa)
 endif()
 
 idf_component_register(

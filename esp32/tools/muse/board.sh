@@ -24,6 +24,8 @@
 # the other's.
 # MUSE_VIDEO=1 adds devices/sdkconfig.muse-video (the phone camera over
 # Wi-Fi, on boards whose panel driver has draw_frame) in build-muse-<profile>-video/.
+# MUSE_CAMERA=1 adds devices/sdkconfig.muse-<profile>-camera (camera.capture,
+# for a board that has one) in build-muse-<profile>-camera/.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master
 # (IDF_EXPORT_S31) and Espressif's esp-mosaico-utils (MOSAICO_UTILS), and
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
@@ -105,6 +107,10 @@ B=build-muse-$profile
 defaults="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-$profile"
 if [ -n "${MUSE_VIDEO:-}" ]; then
     B=$B-video; defaults="$defaults;devices/sdkconfig.muse-video"
+fi
+if [ -n "${MUSE_CAMERA:-}" ]; then
+    [ -f "devices/sdkconfig.muse-$profile-camera" ] || { echo "no camera overlay for $board" >&2; exit 1; }
+    B=$B-camera; defaults="$defaults;devices/sdkconfig.muse-$profile-camera"
 fi
 if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"

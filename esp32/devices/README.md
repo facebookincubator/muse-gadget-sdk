@@ -624,6 +624,20 @@ edge (`no_ring`): the panel is square.
   that directory's `sdkconfig`. Run on a v1.2 board: it joins Wi-Fi beside BLE
   setup, announces `_musevideo._tcp`, and plays 480 px two-band H.264 at
   29-30 fps.
+- **Camera:** `MUSE_CAMERA=1 tools/muse/board.sh build|flash mosaico` builds
+  in `build-muse-esp-mosaico-camera/` (`-camera-vibe2/` for Vibe Mode 0.2)
+  with `devices/sdkconfig.muse-esp-mosaico-camera`, for Espressif's
+  [Camera Module](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp-mosaico/user_guide_camera.html)
+  in the left expansion slot (an OV3640 on module v1.2, an SC101IOT on
+  v1.4). `camera.capture` takes one frame, turns it upright and returns a
+  JPEG of at most 150 KB. On an SC101IOT the module's flash fires when the
+  sensor's auto exposure value reaches 1300 (288 in a lit room and 1398
+  with the lens covered, on that module). The camera's D2 and flash
+  lines are the S31's USB Serial/JTAG pins, so that port on the expansion
+  header is off once the module is found. Run on a v1.2 board with a v1.4
+  (SC101IOT) module: a 720×1280 JPEG of 80 to 135 KB in about 1.7 s, 2.4 s
+  with the flash; text on a card in the frame reads in full. The OV3640 and
+  a v1.0 board were only built.
 
 ## Waveshare ESP32-S3-Touch-AMOLED-2.16
 
@@ -761,7 +775,7 @@ board's overlays, in order:
 | Waveshare S3 2.16 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-216`](sdkconfig.muse-waveshare-s3-216) | `tools/muse/board.sh build s3-216` |
 | Waveshare S3 1.46 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-146`](sdkconfig.muse-waveshare-s3-146) | `tools/muse/board.sh build 146` |
 | Waveshare S3 1.43 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-143`](sdkconfig.muse-waveshare-s3-143) | `tools/muse/board.sh build 143` |
-| Espressif ESP-Mosaico (experimental) | `esp32s31` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-esp-mosaico`](sdkconfig.muse-esp-mosaico), [`devices/sdkconfig.muse-esp-mosaico-iris`](sdkconfig.muse-esp-mosaico-iris); video adds [`devices/sdkconfig.muse-video`](sdkconfig.muse-video) | `tools/muse/board.sh build mosaico`; video: `MUSE_VIDEO=1 tools/muse/board.sh build mosaico` |
+| Espressif ESP-Mosaico (experimental) | `esp32s31` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-esp-mosaico`](sdkconfig.muse-esp-mosaico), [`devices/sdkconfig.muse-esp-mosaico-iris`](sdkconfig.muse-esp-mosaico-iris); video adds [`devices/sdkconfig.muse-video`](sdkconfig.muse-video), the camera [`devices/sdkconfig.muse-esp-mosaico-camera`](sdkconfig.muse-esp-mosaico-camera) | `tools/muse/board.sh build mosaico`; video: `MUSE_VIDEO=1 tools/muse/board.sh build mosaico`; camera: `MUSE_CAMERA=1 tools/muse/board.sh build mosaico` |
 | Waveshare S3 2.06 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-206`](sdkconfig.muse-waveshare-s3-206) | `tools/muse/board.sh build s3-206` |
 | Waveshare S3 1.43C | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-143c`](sdkconfig.muse-waveshare-s3-143c) | `tools/muse/board.sh build 143c` |
 | OSTB EchoEar-2ST (experimental) | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-ostb-echoear-2st`](sdkconfig.muse-ostb-echoear-2st) | `tools/muse/board.sh build echoear` |

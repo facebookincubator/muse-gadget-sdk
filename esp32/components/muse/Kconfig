@@ -293,6 +293,19 @@ menu "Muse"
             per capture. devices/sdkconfig.muse-waveshare-p4-lcd35-camera
             turns it on with the sensor's settings.
 
+    config MUSE_MOSAICO_CAMERA
+        bool "ESP-Mosaico Camera Module capture"
+        depends on MUSE_BOARD_ESP_MOSAICO && SPIRAM
+        default n
+        help
+            Enable the camera.capture Home Link command on the Camera Module
+            in the board's left expansion slot (an OV3640 or SC101IOT on
+            DVP): esp_video runs the sensor, the PPA turns the frame upright
+            and the S31's JPEG encoder compresses it. On an SC101IOT the
+            module's flash fires when the sensor's auto exposure value is
+            high. devices/sdkconfig.muse-esp-mosaico-camera turns it on with
+            the sensors' settings.
+
     config MUSE_CJK_FONT
         bool "Show Chinese, Japanese and Korean in captions"
         depends on MUSE_ENABLED
