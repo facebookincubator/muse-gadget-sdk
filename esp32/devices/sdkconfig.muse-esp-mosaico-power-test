@@ -12,6 +12,5 @@
 CONFIG_MUSE_POWER_TEST=y
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
-# Keep the existing Iris USB owner and its retained update entry point.
-CONFIG_ESP_IRIS_TRANSPORT_USB=y
+# ESP-Iris stays on USB (CONFIG_ESP_IRIS_TRANSPORT_USB) from the -iris overlay.
 # CONFIG_LV_LOG_PRINTF is not set
