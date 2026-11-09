@@ -34,6 +34,7 @@
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "driver/ledc.h"
+#include "driver/rtc_io.h"
 #include "driver/spi_master.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_adc/adc_cali.h"
@@ -618,7 +619,11 @@ static esp_err_t power_off(void)
     while (gpio_get_level(PWR_GPIO) == 0) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
-    esp_sleep_enable_ext0_wakeup(PWR_GPIO, 0);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_RETURN_ON_ERROR(esp_sleep_enable_ext0_wakeup(PWR_GPIO, 0), TAG, "power button wake");
+    /* Keep PWR's pull-up through deep sleep, as while awake (muse_gpio_button_init). */
+    rtc_gpio_pullup_en(PWR_GPIO);
+    rtc_gpio_pulldown_dis(PWR_GPIO);
     esp_deep_sleep_start();
     return ESP_FAIL;
 }

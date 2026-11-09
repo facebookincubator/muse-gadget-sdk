@@ -165,3 +165,12 @@ class WaveshareTouchHold(unittest.TestCase):
 
     def test_146_pwr_key_is_the_power_button(self):
         self.run_case("3", boards=("board_waveshare_s3_146.c",))
+
+    def test_146_power_off_keeps_the_pwr_pull_up_in_deep_sleep(self):
+        source = (ROOT / "components" / "muse" / "boards" / "board_waveshare_s3_146.c").read_text()
+        body = source[source.index("static esp_err_t power_off(void)"):]
+        body = body[:body.index("\n}\n")]
+        sleep = body.index("esp_deep_sleep_start()")
+        for call in ("esp_sleep_enable_ext0_wakeup(PWR_GPIO, 0)", "rtc_gpio_pullup_en(PWR_GPIO)",
+                     "rtc_gpio_pulldown_dis(PWR_GPIO)"):
+            self.assertLess(body.index(call), sleep, call)
