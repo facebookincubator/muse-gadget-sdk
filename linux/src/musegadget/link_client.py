@@ -44,6 +44,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Callable, Sequence
 from urllib.parse import quote
 
+from musegadget import tls
 from musegadget.muse_api import user_agent
 from musegadget.noise import Header, NoiseTransport, NoiseXXInitiator
 from musegadget.streaming import MAX_BUFFER_BYTES, MAX_BUFFER_CHUNKS, StreamingRequest
@@ -309,6 +310,7 @@ class LinkSession:
                 ping_interval=PING_INTERVAL_S,
                 ping_timeout=PING_INTERVAL_S,
                 max_size=128 * 1024,
+                ssl=tls.client_context(),
             )
         except InvalidStatus as exc:
             status = exc.response.status_code
