@@ -2487,6 +2487,9 @@ bool app_hatch_vm_credentials(const char *want_vm, char *vm_id, size_t id_cap,
         .waiter = xTaskGetCurrentTaskHandle(),
     };
     if (xTaskCreate(hatch_vm_task, "muse_vm", 8192, &req, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "muse_vm task not created: internal RAM %uK free, largest block %uK",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024));
         return false;
     }
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -2889,12 +2892,15 @@ void app_run(void) {
         ble_coex_set_active(true);
         ui_set_ble("companion");
 #endif
-#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43 && \
+    !CONFIG_MUSE_BOARD_WAVESHARE_S3_175
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
         // so bring the stack up now; it stays silent until advertising is on.
         // The CrowPanel starts it lazily instead, after muse_app_run() has
-        // reserved its internal I2S DMA buffers.
+        // reserved its internal I2S DMA buffers. So does the 1.75: the idle
+        // stack leaves no 8 KB block for the muse_vm task and chat never
+        // connects (#351).
         start_ble_setup_server_if_needed();
 #endif
     }

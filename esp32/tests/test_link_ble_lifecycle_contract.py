@@ -84,6 +84,22 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         self.assertIn("LED_STATE_BLE_ADVERTISING", enter_adv)
         self.assertNotIn("setup_window_timeout_task", source)
 
+    def test_lazy_ble_boards_skip_the_paired_boot_start(self) -> None:
+        source = APP_C.read_text()
+        body = _function_body(source, "void app_run(")
+        companion = _function_body(source, "void app_ble_companion_set(bool advertise) {")
+
+        # Boards that can't spare internal RAM at boot leave BLE down once
+        # paired: the 1.75's idle stack leaves no 8 KB block for muse_vm
+        # (issue 351). The settings switch still brings it up on demand.
+        guard = next(
+            line for line in body.replace("\\\n", " ").splitlines()
+            if line.startswith("#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM")
+        )
+        self.assertIn("!CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43", guard)
+        self.assertIn("!CONFIG_MUSE_BOARD_WAVESHARE_S3_175", guard)
+        self.assertIn("if (advertise) start_ble_setup_server_if_needed();", companion)
+
     def test_successful_setup_marks_complete_and_stops_ble(self) -> None:
         source = APP_C.read_text()
         dispatch = _function_body(BLE_SERVER_C.read_text(), "static void dispatch_command_ex(")
