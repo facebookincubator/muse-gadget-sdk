@@ -312,6 +312,7 @@ class Service:
     async def _local_subscribe(self, request, reader, writer) -> None:
         """Stream one chat on the current transport, never across reconnects."""
         tasks = []
+        closing = []
 
         def record(value):
             writer.write(json.dumps(value).encode() + b"\n")
@@ -342,7 +343,10 @@ class Service:
                         await ready_sent.wait()
                         await write({"type": "chat_event", "event": event})
                 finally:
-                    await subscription.aclose()
+                    # Close upstream outside this task, under the bounded
+                    # cleanup below: a stalled reset must not hold a failed
+                    # local subscription open.
+                    closing.append(asyncio.ensure_future(subscription.aclose()))
                 raise ConnectionError("Muse chat subscription ended")
 
             async def disconnected():
@@ -373,7 +377,11 @@ class Service:
             for task in tasks:
                 task.cancel()
                 task.add_done_callback(_retrieve)
-            pending = [task for task in tasks if not task.done()]
+            if tasks:
+                await asyncio.sleep(0)  # let cancelled forwarding start its close
+            for task in closing:
+                task.add_done_callback(_retrieve)
+            pending = [task for task in tasks + closing if not task.done()]
             if pending:
                 await asyncio.wait(pending, timeout=CLEANUP_S)
 

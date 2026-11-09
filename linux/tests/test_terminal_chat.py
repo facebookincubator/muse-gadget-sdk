@@ -798,6 +798,61 @@ def test_subscription_cleanup_is_bounded_when_the_upstream_close_stalls(monkeypa
     asyncio.run(scenario())
 
 
+def test_event_write_timeout_ends_the_subscription_when_the_upstream_close_stalls(monkeypatch):
+    from musegadget import service as service_module
+    monkeypatch.setattr(service_module, "LOCAL_WRITE_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(service_module, "CLEANUP_S", 0.1)
+
+    async def scenario():
+        service = Service(Identity("02:00:00:00:00:01"), Executor(Account.current()))
+        release = asyncio.Event()
+
+        class Session:
+            registered_at = 1
+
+            async def subscribe_chat(self, session_id, *, opened):
+                opened.set()
+                try:
+                    yield event("message.assistant", "r", content="reply")
+                    await asyncio.Event().wait()
+                finally:
+                    # Like a reset waiting out a stalled transport write.
+                    while not release.is_set():
+                        try:
+                            await asyncio.shield(release.wait())
+                        except asyncio.CancelledError:
+                            pass
+
+        class Writer:
+            records = []
+            was_closed = False
+
+            def write(self, raw):
+                self.records.append(json.loads(raw))
+
+            async def drain(self):
+                # The ready record drains; the client then stops reading.
+                if len(self.records) > 1:
+                    await asyncio.Event().wait()
+
+            def close(self):
+                self.was_closed = True
+
+        service._current = Session()
+        writer = Writer()
+        # The local client stays connected (no EOF) throughout.
+        handler = asyncio.create_task(service._local_subscribe({}, asyncio.StreamReader(), writer))
+        try:
+            await asyncio.wait({handler}, timeout=1)
+            assert handler.done() and writer.was_closed
+            assert writer.records[0] == {"type": "ready"}
+            assert writer.records[1]["type"] == "chat_event"
+        finally:
+            release.set()
+            await asyncio.wait({handler}, timeout=1)
+    asyncio.run(scenario())
+
+
 def test_chat_errors_from_muse_cannot_reach_the_terminal_raw(monkeypatch, capsys):
     async def chat(session_id):
         raise ConnectionError("stream reset: \x1b]52;c;b3duZWQ=\x07")
