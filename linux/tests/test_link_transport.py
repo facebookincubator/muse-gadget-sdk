@@ -17,12 +17,16 @@ import json
 
 from websockets.asyncio.server import serve
 
+from musegadget import tls
 from musegadget.link_client import LinkSession, Outcome
 from musegadget.noise import ApplicationResponse, ServiceFrame
 from test_link_client import DEVICE, FakeVm
 
 
-def test_noise_connection_omits_compression_and_carries_chat():
+def test_noise_connection_omits_compression_and_carries_chat(monkeypatch):
+    # The loopback peer is plain ws://, which takes no TLS context.
+    monkeypatch.setattr(tls, "client_context", lambda: None)
+
     async def scenario():
         received = asyncio.get_running_loop().create_future()
 
