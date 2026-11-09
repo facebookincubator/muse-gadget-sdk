@@ -26,7 +26,7 @@ class GenericPowerTest(unittest.TestCase):
         for header in ("bsp/esp-bsp.h", "driver/uart.h", "esp_event.h", "esp_rom_sys.h", "esp_netif.h",
                        "esp_private/esp_clk.h", "esp_random.h", "esp_rtc_time.h", "esp_sleep.h", "esp_wifi.h",
                        "driver/gpio.h", "driver/i2c_master.h", "driver/usb_serial_jtag.h", "esp_codec_dev.h",
-                       "freertos/task.h", "lvgl.h"):
+                       "freertos/task.h", "lvgl.h", "esp_lv_adapter.h"):
             path = Path(cls.tmp.name) / header
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
@@ -37,20 +37,32 @@ class GenericPowerTest(unittest.TestCase):
         includes += ["-include", str(ROOT / "tests/generic_power_test_stub.h")]
         harness = str(ROOT / "tests/generic_power_test_harness.c")
         core = str(Path(cls.tmp.name) / "core.o")
-        subprocess.run(cc + includes + ["-DTEST_CORE", "-c", harness, "-o", core], check=True)
+        subprocess.run(cc + includes + ["-DTEST_CORE", "-DCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240", "-c", harness, "-o", core], check=True)
         subprocess.run(cc + includes + [harness, core, "-o", str(Path(cls.tmp.name) / "generic")], check=True)
+        mosaico_core = str(Path(cls.tmp.name) / "mosaico-core.o")
+        subprocess.run(cc + includes + ["-DTEST_CORE", "-DCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=320", "-c", harness, "-o", mosaico_core], check=True)
+        subprocess.run(cc + includes + ["-DTEST_MOSAICO", harness, mosaico_core, "-o", str(Path(cls.tmp.name) / "mosaico")], check=True)
         core_tests.PowerTest.setUpClass()
         cls.addClassCleanup(core_tests.PowerTest.tearDownClass)
     def run_commands(self, *commands, profile="175c", target="generic"):
-        proc = subprocess.run([str(core_tests.PowerTest.binary if target == "watcher" else Path(self.tmp.name) / "generic"), profile], input="\n".join(commands) + "\n",
+        binary = core_tests.PowerTest.binary if target == "watcher" else Path(self.tmp.name) / ("mosaico" if profile == "mosaico" else "generic")
+        proc = subprocess.run([str(binary), profile], input="\n".join(commands) + "\n",
                               text=True, capture_output=True, timeout=3, check=True)
         self.assertEqual(proc.stderr, "")
         return [row for line in proc.stdout.splitlines() if line.startswith("PTEST ")
                 if (row := json.loads(line[6:]))["type"] != "ready"]
     def test_charging_unsupported(self):
-        rows = self.run_commands(arm(charging_off=1), ">ptest.status", profile="aipi")
-        self.assertEqual(rows[0]["message"], "charging_off_not_supported")
-        self.assertEqual(rows[1]["state"], "idle")
+        for profile in ("aipi", "mosaico"):
+            rows = self.run_commands(arm(charging_off=1), ">ptest.status", profile=profile)
+            self.assertEqual(rows[0]["message"], "charging_off_not_supported")
+            self.assertEqual(rows[1]["state"], "idle")
+
+    def test_mosaico_matrix_and_single_codec(self):
+        rows = self.run_commands(arm(usb_powered=1), "advance 90000", "mosaico_readback", ">ptest.results", profile="mosaico")
+        self.assertEqual(rows[-1]["state"], "complete")
+        self.assertEqual(rows[-1]["records"][0]["actual"]["pm_max_mhz"], 320)
+        self.assertIn("cpu_fixed_320_idle", [row["id"] for row in rows[-1]["records"]])
+        self.assertTrue(all(not row["codec_regs"]["adc"] for row in rows[-1]["records"]))
     def test_charging_lifecycle(self):
         for board in ("175c", "216"):
             for ending, state in (("advance 90000", "complete"), ("poll >ptest.abort", "aborted"),
@@ -93,7 +105,7 @@ class GenericPowerTest(unittest.TestCase):
         self.assertEqual(rows[1]["state"], "idle")
     def test_usb_run_and_capture(self):
         # I2C fakes assert at every access; status/results also run inside capture.
-        for board in ("175c", "216", "aipi"):
+        for board in ("175c", "216", "aipi", "mosaico"):
             for ending, state in (("advance 90000", "complete"), ("poll >ptest.abort", "aborted")):
                 with self.subTest(board=board, ending=ending):
                     rows = self.run_commands(arm(usb_powered=1), "advance 1500", "capture",

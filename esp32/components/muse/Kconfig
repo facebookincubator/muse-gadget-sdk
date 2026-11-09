@@ -271,7 +271,7 @@ menu "Muse"
         bool "Isolated board BSP power-characterization firmware"
         # Boards implementing boards/muse_power_test_board.h; extend this list
         # only after the new board's diagnostic hooks and matrix pass tests.
-        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI || MUSE_BOARD_ESP_MOSAICO) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
         default n
         help
             DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
