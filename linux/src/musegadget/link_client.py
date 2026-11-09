@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import enum
-import hashlib
 import json
 import logging
 import re
@@ -116,10 +115,8 @@ class DeviceDescription:
 
     def register_params(self) -> dict:
         commands = self.commands
-        metadata = {"model_name": self.model_name}
         if self.guide is not None:
             commands = {**commands, device_guide.COMMAND: device_guide.SPEC}
-            metadata["guide_hash"] = hashlib.sha256(self.guide.encode()).hexdigest()[:16]
         return {
             "node_id": self.node_id,
             "display_name": self.display_name,
@@ -127,7 +124,7 @@ class DeviceDescription:
             "version": self.version,
             "device_family": "gadget",
             "model_id": self.model_id,
-            "metadata": metadata,
+            "metadata": {"model_name": self.model_name},
             "is_wakeup_supported": False,
             "commands_v2": commands,
         }
