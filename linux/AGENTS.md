@@ -35,7 +35,7 @@ pairing and control protocols, so the same app pairs either.
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
 | `ble_setup.py` | Setup commands behind the GATT characteristics (no BlueZ dependency) |
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
-| `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
+| `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadget-XXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
@@ -128,10 +128,12 @@ never has a command's parameters, output or error message.
 - Community mode only: `pairing_auth: "none"`, epoch 0, policy `confirm_app`.
   A Pi has no button, so the app's own confirmation stands in for it, and BLE
   only advertises while `musegadget pair` runs.
-- The BLE name is `MuseGadget` plus the last six hex digits of the identity,
-  with **no hyphen**: the apps compare the text after the prefix with the text
-  after `homelink-` in the node id. `get_device_info` must report
-  `model: "hatch_link"`.
+- The BLE name is `MuseGadget-` plus the last six hex digits of the identity.
+  Upstream this client originally shipped the no-hyphen form, but the ESP32
+  firmware ships hyphenated (`MuseGadget-XXXXXX`) and the owner's FINAL fleet
+  ruling (2026-11-08) makes the firmware form the standard everywhere — this
+  client follows it. The apps match the trailing hex digits against the node
+  id suffix either way. `get_device_info` must report `model: "hatch_link"`.
 - The apps always scan Wi-Fi and send `provision_v2` with an SSID. When the
   device is online it offers one open network, "the current connection", and
   ignores the Wi-Fi fields it gets back. It never stores them.
