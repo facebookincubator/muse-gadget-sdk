@@ -1,0 +1,49 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Waveshare ESP32-S3-Touch-LCD-3.5: ESP32-S3R8 (8 MB octal PSRAM), 16 MB quad
+# flash, a 3.5 inch 320x480 ST7796 SPI display with FT6336 capacitive touch,
+# ES8311 codec, PMIC, RTC and IMU (unused here), a BOOT button on GPIO0, the
+# chip's own USB-Serial-JTAG, and no status LED: the display shows the status
+# colour in edge bars. Load last, after sdkconfig.defaults (see README.md in
+# this directory).
+#
+# Pin and chip facts: Waveshare's ESP32-S3-Touch-LCD-3.5 wiki and schematic,
+# and xiaozhi-esp32's board config
+# (main/boards/waveshare/esp32-s3-touch-lcd-3.5).
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# No status LED: the display shows the status colour in edge bars.
+CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796=y
+# Advertise as <prefix>-Disp-XXXXXX to tell this board apart from real devices.
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# The BOOT side button, active low.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+
+# 16 MB quad flash (eFuse reports a quad, 3.3 V part: Winbond ef/4018).
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# Octal PSRAM holds the TLS buffers and keeps the home-network tunnel on.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+
+# The BLE controller already takes ~70 KB of internal RAM on the S3; keep the
+# NimBLE host's allocations in PSRAM so pairing has room.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y

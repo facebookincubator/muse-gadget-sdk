@@ -71,6 +71,14 @@ bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
 bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
                           void *user, const char **code, const char **message);
 
+// For a board that draws on the same screen: image_fetch_claim() takes the
+// one-download slot, so no download starts until image_fetch_release(); false
+// while a download runs. image_fetch_drawn() counts the bands downloads have
+// drawn: a change means an image went up.
+bool image_fetch_claim(void);
+void image_fetch_release(void);
+unsigned image_fetch_drawn(void);
+
 #ifdef __cplusplus
 }
 #endif

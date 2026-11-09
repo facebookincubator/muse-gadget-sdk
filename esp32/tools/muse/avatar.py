@@ -83,6 +83,7 @@ BOARDS = {
     "Espressif ESP32-S3-BOX-3": "box3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75C": "s3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75": "s3n",
+    "Waveshare ESP32-S3-Touch-LCD-1.85B": "185b",
     "Waveshare ESP32-S3-Touch-LCD-1.85C": "185c",
     "Waveshare ESP32-S3-Touch-AMOLED-1.43C": "143c",
     "Waveshare ESP32-S3-Touch-LCD-1.46": "146",
@@ -116,8 +117,9 @@ BOARDS = {
     "Deotaland RoRoLee": "rorolee",
     "Waveshare ESP32-S3-Touch-LCD-1.9": "lcd19",
     "VIEWE SmartRing-Plus": "smartring-plus",
+    "Waveshare ESP32-S3-Touch-LCD-3.5": "s3lcd35",
 }
-CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185c", "143c", "143", "146", "aipi", "atk-box", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus")
+CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "aipi", "atk-box", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35")
 
 
 class Stop(Exception):
