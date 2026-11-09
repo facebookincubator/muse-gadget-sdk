@@ -60,6 +60,8 @@ HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
 MAX_INBOUND_MESSAGE = 4 * 1024 * 1024
+RECEIVE_FRAMES_PER_TURN = 32
+RECEIVE_BYTES_PER_TURN = 64 * 1024
 # Documented VM limit: 256 KiB per device control message. Include the u32
 # length prefix in our budget, conservatively, not just the JSON payload.
 MAX_CONTROL_MESSAGE_BYTES = 256 * 1024
@@ -720,12 +722,20 @@ class LinkSession:
 
     async def _read_loop(self) -> Outcome:
         decoder = MessageDecoder()
+        received_frames = received_bytes = 0
         while True:
+            if (received_frames >= RECEIVE_FRAMES_PER_TURN
+                    or received_bytes >= RECEIVE_BYTES_PER_TURN):
+                # A buffered recv() may not yield to response consumers or writers.
+                await asyncio.sleep(0)
+                received_frames = received_bytes = 0
             try:
                 raw = await self._ws.recv()
             except Exception as exc:
                 log.info("control connection closed: %s", exc)
                 return Outcome.CLOSED
+            received_frames += 1
+            received_bytes += len(raw)
             if isinstance(raw, str):
                 log.warning("ignoring text frame on Noise connection")
                 continue
