@@ -44,6 +44,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Callable, Sequence
 from urllib.parse import quote
 
+from musegadget import tls
 from musegadget.muse_api import user_agent
 from musegadget.noise import Header, NoiseTransport, NoiseXXInitiator
 from musegadget.streaming import MAX_BUFFER_BYTES, MAX_BUFFER_CHUNKS, StreamingRequest
@@ -60,6 +61,8 @@ HANDSHAKE_TIMEOUT_S = 20
 PING_INTERVAL_S = 20
 MAX_CONCURRENT_INVOKES = 4
 MAX_INBOUND_MESSAGE = 4 * 1024 * 1024
+RECEIVE_FRAMES_PER_TURN = 32
+RECEIVE_BYTES_PER_TURN = 64 * 1024
 # Documented VM limit: 256 KiB per device control message. Include the u32
 # length prefix in our budget, conservatively, not just the JSON payload.
 MAX_CONTROL_MESSAGE_BYTES = 256 * 1024
@@ -138,7 +141,7 @@ class MessageDecoder:
                 continue  # keepalive
             try:
                 message = json.loads(raw)
-            except ValueError:  # bad JSON, or bytes that aren't UTF-8
+            except (ValueError, RecursionError):  # malformed, overdeep, or non-UTF-8 JSON
                 log.warning("dropping malformed control message (%d bytes)", length)
                 continue
             if isinstance(message, dict):
@@ -302,10 +305,12 @@ class LinkSession:
                 self._url,
                 additional_headers=headers,
                 user_agent_header=user_agent(),
+                compression=None,
                 open_timeout=HANDSHAKE_TIMEOUT_S,
                 ping_interval=PING_INTERVAL_S,
                 ping_timeout=PING_INTERVAL_S,
                 max_size=128 * 1024,
+                ssl=tls.client_context(),
             )
         except InvalidStatus as exc:
             status = exc.response.status_code
@@ -344,6 +349,7 @@ class LinkSession:
 
     async def send_chat(
         self, message: str, session_id: str | None = None, *, output_modality: str = "text",
+        device: str | None = None,
     ) -> dict:
         """Post a user message to the Muse as coming from this device.
 
@@ -352,7 +358,9 @@ class LinkSession:
         commands back here. ``session_id`` targets a side chat; an id the Muse
         has not seen before starts a new one. Without it the message goes to
         the main chat. Pass ``output_modality="voice"`` to get a reply that
-        ``stream_tts`` can speak.
+        ``stream_tts`` can speak. For dictation, ``device="mcu-wearable"`` asks
+        Muse for short plain sentences without changing the output modality
+        or this session's device identity.
         """
         request_body = {
             "message": message,
@@ -361,18 +369,21 @@ class LinkSession:
         }
         if session_id:
             request_body["session_id"] = session_id
+        if device is not None:
+            request_body["device"] = device
         return await self._post_chat(request_body)
 
     async def send_voice(
         self, wav_bytes: bytes, session_id: str | None = None, *, message: str = "",
-        output_modality: str | None = None,
+        output_modality: str | None = None, device: str | None = None,
     ) -> dict:
         """Post a WAV voice note, optionally including instructions in ``message``.
 
         Muse reads only the items of a request that has any, so the text goes
         first as its own item. Muse chooses its usual reply format unless
         ``output_modality`` is set. Its TTS endpoint requires a voice-modality
-        assistant reply.
+        assistant reply. Pass ``device="mcu-wearable"`` to ask for short plain
+        sentences, independently of the output modality and device identity.
         """
         if not wav_bytes or len(wav_bytes) > MAX_VOICE_BYTES:
             raise ValueError("voice note must contain at most 2 MiB of WAV audio")
@@ -390,6 +401,8 @@ class LinkSession:
             request_body["session_id"] = session_id
         if output_modality is not None:
             request_body["output_modality"] = output_modality
+        if device is not None:
+            request_body["device"] = device
         return await self._post_chat(request_body)
 
     async def send_image(
@@ -486,7 +499,7 @@ class LinkSession:
                     log.warning("could not reset abandoned request")
         try:
             decoded = json.loads(response) if response else None
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError, RecursionError):
             decoded = response.decode("utf-8", errors="replace")[:2000]
         return {"ok": 200 <= status < 300, "status": status, "response": decoded}
 
@@ -591,7 +604,7 @@ class LinkSession:
             return None
         try:
             event = json.loads(raw)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (ValueError, RecursionError):  # malformed, overdeep, or non-UTF-8 JSON
             log.warning("dropping malformed chat event (%d bytes)", len(raw))
             return None
         return event if isinstance(event, dict) and event.get("type") == "event" else None
@@ -711,12 +724,20 @@ class LinkSession:
 
     async def _read_loop(self) -> Outcome:
         decoder = MessageDecoder()
+        received_frames = received_bytes = 0
         while True:
+            if (received_frames >= RECEIVE_FRAMES_PER_TURN
+                    or received_bytes >= RECEIVE_BYTES_PER_TURN):
+                # A buffered recv() may not yield to response consumers or writers.
+                await asyncio.sleep(0)
+                received_frames = received_bytes = 0
             try:
                 raw = await self._ws.recv()
             except Exception as exc:
                 log.info("control connection closed: %s", exc)
                 return Outcome.CLOSED
+            received_frames += 1
+            received_bytes += len(raw)
             if isinstance(raw, str):
                 log.warning("ignoring text frame on Noise connection")
                 continue

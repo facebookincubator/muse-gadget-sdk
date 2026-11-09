@@ -25,6 +25,7 @@
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 #if CONFIG_PM_ENABLE
@@ -90,6 +91,17 @@ static QueueHandle_t s_queue;
 static bool (*s_console_hook)(const char *line);
 static TaskHandle_t s_input;
 static bool s_talk_down;
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+static atomic_bool s_note_toggled;   /* a toggled voice note is recording, talk released */
+
+void muse_input_note_toggled(bool on)
+{
+    atomic_store(&s_note_toggled, on);
+}
+#define NOTE_TOGGLED() atomic_load(&s_note_toggled)
+#else
+#define NOTE_TOGGLED() false
+#endif
 /* A push-to-talk press the voice task hasn't taken up yet: the speaker
  * button already ends the call it will start. Each such DOWN sets a mark of
  * its own and carries it; the voice task clears a mark only by that id, so
@@ -115,7 +127,8 @@ static volatile bool s_nap_now;   /* ">nap": asleep, as if on battery, nap witho
 
 static void post(muse_ptt_t type, bool wake)
 {
-    muse_input_event_t ev = { .type = type, .wake = wake, .epoch = muse_input_call_epoch() };
+    muse_input_event_t ev = { .type = type, .wake = wake, .epoch = muse_input_call_epoch(),
+                             .at_us = esp_timer_get_time() };
     bool pending = type == MUSE_PTT_DOWN && muse_voice_ptt_enabled() && !muse_voice_in_call();
     if (pending) {
         uint32_t mark;
@@ -168,6 +181,9 @@ static void power_off(void)
 
 static void set_asleep(bool asleep, const char *why)
 {
+    if (asleep && NOTE_TOGGLED()) {
+        return;   /* never hide a recording note */
+    }
     if (asleep != muse_state_asleep()) {
         ESP_LOGI(TAG, "%s (%s)", asleep ? "sleeping" : "waking", why);
         muse_state_set_asleep(asleep);
@@ -272,7 +288,7 @@ static void menu_button(bool pressed, bool edge)
     }
     if (muse_state_asleep()) {
         set_asleep(false, muse_board->aux_button);
-    } else if (!s_talk_down) {
+    } else if (!s_talk_down && !NOTE_TOGGLED()) {
         muse_state_poke();
         muse_menu_key(MUSE_MENU_DOWN);
     }
@@ -347,7 +363,7 @@ static void keyboard_buttons(unsigned ev)
 {
     const unsigned mask = MUSE_BTN_UP | MUSE_BTN_DOWN | MUSE_BTN_LEFT |
                           MUSE_BTN_RIGHT | MUSE_BTN_ENTER | MUSE_BTN_ESCAPE;
-    if (!(ev & mask) || s_talk_down) return;
+    if (!(ev & mask) || s_talk_down || NOTE_TOGGLED()) return;
     if ((ev & MUSE_BTN_ENTER) && muse_link_talk_press()) {
         muse_state_poke();
         return;

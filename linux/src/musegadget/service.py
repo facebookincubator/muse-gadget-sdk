@@ -50,7 +50,9 @@ BACKOFF_BASE_S = 2.0
 BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
 HEALTHY_SESSION_S = 30.0
+HEALTHY_RECONNECT_S = 1.0
 UNPAIRED_POLL_S = 30.0
+LOCAL_WRITE_TIMEOUT_S = 10
 MAX_LOCAL_REQUEST = 4 * 1024 * 1024  # room for a 2 MiB image in base64
 MAX_WAIT_S = 600
 REPLY_POLL_S = 0.5
@@ -110,6 +112,11 @@ class Service:
                 log.info("not paired; run `musegadget pair` to set up")
                 await self._sleep(UNPAIRED_POLL_S)
                 continue
+            problem = config.pairing_problem(pairing)
+            if problem is not None:
+                log.warning("%s Run `musegadget pair --force` to pair again.", problem)
+                await self._sleep(UNPAIRED_POLL_S)
+                continue
             self._warn_if_sdk_token_changed(pairing)
             pairing = await self._maybe_refresh(pairing)
             if pairing is None:
@@ -144,11 +151,13 @@ class Service:
                 config.delete_json(config.PAIRING_FILE)
                 log.warning("pairing removed; run `musegadget pair` to set up again")
                 continue
-            if lasted >= HEALTHY_SESSION_S:
+            healthy = lasted >= HEALTHY_SESSION_S
+            if healthy:
                 backoff.reset()
             if outcome in (Outcome.AUTH_REJECTED, Outcome.FORBIDDEN):
                 backoff.floor = AUTH_BACKOFF_MIN_S
-            delay = backoff.next_delay()
+            delay = (HEALTHY_RECONNECT_S if healthy and outcome is Outcome.CLOSED
+                     else backoff.next_delay())
             log.info("reconnecting in %.0fs", delay)
             await self._sleep(delay)
 
@@ -216,8 +225,7 @@ class Service:
         not be used yet; the pairing file is removed when the pairing itself
         has been revoked.
         """
-        age = time.time() - pairing.get("access_token_saved_at", 0)
-        if not force and age < TOKEN_REFRESH_AGE_S:
+        if not force and pairing.get("access_token_saved_at", 0) > time.time() - TOKEN_REFRESH_AGE_S:
             return pairing
         if not force and time.monotonic() - self._last_refresh_attempt < TOKEN_RETRY_S:
             return pairing
@@ -257,6 +265,11 @@ class Service:
         connection open for the Muse's answer, and gets one JSON line back
         (with ``"reply"`` when it waited). Only root and the command
         account's group can connect.
+
+        ``{"op": "subscribe_chat", "session_id": "..."}`` instead opens an
+        NDJSON stream of ``type: ready``, ``type: chat_event`` (with ``event``)
+        and terminal ``type: error`` (with ``error``) records. The session ID
+        is optional. A subscription ends on client or transport disconnect.
         """
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if path.exists():
@@ -279,6 +292,10 @@ class Service:
                 reply = {"ok": False,
                          "error": f"the request is over {MAX_LOCAL_REQUEST // (1024 * 1024)} MiB"}
             else:
+                request = json.loads(line)
+                if isinstance(request, dict) and request.get("op") == "subscribe_chat":
+                    await self._local_subscribe(request, reader, writer)
+                    return
                 reply = await self._local_request(line)
         except Exception as exc:
             reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -291,6 +308,82 @@ class Service:
                 await _discard_line(reader)
         finally:
             writer.close()
+
+    async def _local_subscribe(self, request, reader, writer) -> None:
+        """Stream one chat on the current transport, never across reconnects."""
+        tasks = []
+        closing = []
+
+        def record(value):
+            writer.write(json.dumps(value).encode() + b"\n")
+
+        async def write(value):
+            record(value)
+            await asyncio.wait_for(writer.drain(), LOCAL_WRITE_TIMEOUT_S)
+
+        try:
+            session_id = request.get("session_id")
+            if session_id is not None and not (
+                isinstance(session_id, str) and _SESSION_ID_RE.fullmatch(session_id)
+            ):
+                raise ValueError("session_id must be letters, digits and dashes")
+            session = self._current
+            if session is None or session.registered_at is None:
+                raise ConnectionError("not connected to the Muse")
+
+            opened = asyncio.Event()
+            ready_sent = asyncio.Event()
+
+            async def forward():
+                subscription = session.subscribe_chat(session_id, opened=opened)
+                try:
+                    async for event in subscription:
+                        # Headers and the first event can arrive together. Keep
+                        # the local ready record ahead of every chat event.
+                        await ready_sent.wait()
+                        await write({"type": "chat_event", "event": event})
+                finally:
+                    # Close upstream outside this task, under the bounded
+                    # cleanup below: a stalled reset must not hold a failed
+                    # local subscription open.
+                    closing.append(asyncio.ensure_future(subscription.aclose()))
+                raise ConnectionError("Muse chat subscription ended")
+
+            async def disconnected():
+                while self._current is session and not self._stop.is_set():
+                    await asyncio.sleep(0.25)
+                raise ConnectionError("Muse connection ended")
+
+            ready = asyncio.create_task(opened.wait())
+            tasks = [asyncio.create_task(forward()), asyncio.create_task(reader.read(1)),
+                     asyncio.create_task(disconnected()), ready]
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            if ready in done:
+                await write({"type": "ready"})
+                ready_sent.set()
+                done, _ = await asyncio.wait(tasks[:-1], return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        except Exception as exc:
+            error = str(exc) if isinstance(exc, (ValueError, ConnectionError)) else "Muse chat subscription failed"
+            try:
+                await write({"type": "error", "error": error})
+            except (OSError, asyncio.TimeoutError):
+                pass
+        finally:
+            # Bounded, as in send_and_wait: a stalled transport can delay
+            # closing the upstream stream, but not the local client.
+            writer.close()
+            for task in tasks:
+                task.cancel()
+                task.add_done_callback(_retrieve)
+            if tasks:
+                await asyncio.sleep(0)  # let cancelled forwarding start its close
+            for task in closing:
+                task.add_done_callback(_retrieve)
+            pending = [task for task in tasks + closing if not task.done()]
+            if pending:
+                await asyncio.wait(pending, timeout=CLEANUP_S)
 
     async def _local_request(self, line: bytes) -> dict:
         request = json.loads(line)
@@ -455,11 +548,14 @@ async def _follow(session: LinkSession, session_id: str | None, opened: asyncio.
 class _ReplyReader:
     """Passes MuseTurn the events that follow one request's own message.
 
-    Events repeating an earlier ``seq`` are dropped. Until Muse acknowledges
-    the message, events wait here (bounded). Then a ``message.user`` event
-    for the acknowledged message opens the answer, and one for any other
-    message on the chat closes it again; events of a reply already taken, and
-    events naming the message or a taken reply as their parent, always count.
+    Events repeating an earlier ``seq`` are dropped. Message rows
+    (``message.user``, ``message.assistant``) are numbered apart from the
+    live status and delta events, so each kind keeps its own order. Until
+    Muse acknowledges the message, events wait here (bounded). Then a
+    ``message.user`` event for the acknowledged message opens the answer,
+    and one for any other message on the chat closes it again; events of a
+    reply already taken, and events naming the message or a taken reply as
+    their parent, always count.
     """
 
     def __init__(self, turn: MuseTurn) -> None:
@@ -468,15 +564,24 @@ class _ReplyReader:
         self.user_ids: set[str] | None = None
         self.after_note = False
         self.last_seq = 0
+        self.last_row_seq = 0
         self.held: list[dict] = []
         self.held_text = 0
 
     def take(self, event: dict) -> None:
         seq = event.get("seq")
         if isinstance(seq, int) and not isinstance(seq, bool):
-            if seq <= self.last_seq:
-                return
-            self.last_seq = seq
+            # Message rows carry the chat's own sequence, which can be lower
+            # than that of live status/delta events already received here.
+            # Comparing the two drops our own message and never opens the answer.
+            if event.get("event") in ("message.user", "message.assistant"):
+                if seq <= self.last_row_seq:
+                    return
+                self.last_row_seq = seq
+            else:
+                if seq <= self.last_seq:
+                    return
+                self.last_seq = seq
         if self.user_ids is None:
             if len(self.held) >= MAX_HELD_EVENTS:
                 raise ValueError("too many chat events before Muse acknowledged the message")

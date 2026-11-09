@@ -56,8 +56,9 @@ _MAX_TEXT_BYTES = 64 * 1024
 _MAX_MESSAGES = 32
 _MAX_OBSERVED_IDS = 256
 _MAX_IGNORED_MESSAGES = 256
-# C0 and C1 controls except tab and newline, so reply text cannot drive a terminal.
-_CONTROL_CHARACTERS = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+# C0 and C1 controls except tab and newline, so reply text cannot drive a terminal,
+# and lone surrogates, which a surrogateescape stream would write as raw bytes.
+_CONTROL_CHARACTERS = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\ud800-\udfff]")
 
 
 def _strip_controls(text: str) -> str:
@@ -100,6 +101,32 @@ class TaskFinished:
 
 
 TurnEvent = Union[AgentStatus, Reply, TaskFinished]
+
+
+def _update_reply(reply: Reply, name: str, payload: dict) -> Reply:
+    text, streamed, done = reply.text, reply.streamed, reply.done
+    if name == "delta.text_append" and payload.get("text") and not done:
+        if isinstance(payload["text"], str):
+            delta = _strip_controls(payload["text"])
+            text += delta
+            streamed += delta
+    if name in ("delta.message_done", "message.assistant"):
+        completed_text = payload.get("display_text")
+        if not isinstance(completed_text, str):
+            transcript = payload.get("transcript")
+            completed_text = (transcript if isinstance(transcript, str)
+                              else transcript_text(transcript, reply.message_id))
+            if not completed_text and not isinstance(transcript, str):
+                completed_text = payload.get("content")
+        if isinstance(completed_text, str):
+            text = _strip_controls(completed_text)
+        if name == "delta.message_done" or payload.get("display_text_ready") is not False:
+            done = True
+    reply = Reply(reply.message_id, text, streamed, done, reply.bound)
+    if (len(text.encode("utf-8")) > _MAX_TEXT_BYTES
+            or len(streamed.encode("utf-8")) > _MAX_TEXT_BYTES):
+        raise ValueError("Muse returned more than 64 KiB of reply text")
+    return reply
 
 
 class ReplayScope:
@@ -427,30 +454,12 @@ class MuseTurn:
         if parent:
             parent_reply = self._replies.get(parent)
             bound = scoped or parent in self._user_ids or (parent_reply is not None and parent_reply.bound)
-        text, streamed, done = reply.text, reply.streamed, reply.done
         self.last_activity = time.monotonic()
-        if name == "delta.text_append" and payload.get("text") and not done:
-            if isinstance(payload["text"], str):
-                delta = _strip_controls(payload["text"])
-                text += delta
-                streamed += delta
-        if name in ("delta.message_done", "message.assistant"):
-            completed_text = payload.get("display_text")
-            if not isinstance(completed_text, str):
-                transcript = payload.get("transcript")
-                completed_text = (transcript if isinstance(transcript, str)
-                                  else transcript_text(transcript, message_id))
-                if not completed_text and not isinstance(transcript, str):
-                    completed_text = payload.get("content")
-            if isinstance(completed_text, str):
-                text = _strip_controls(completed_text)
-            if name == "delta.message_done" or payload.get("display_text_ready") is not False:
-                done = True
-                self._unanswered_follow_up_ids.discard(parent)
-        reply = self._replies[message_id] = Reply(message_id, text, streamed, done, bound)
-        if (len(text.encode("utf-8")) > _MAX_TEXT_BYTES
-                or len(streamed.encode("utf-8")) > _MAX_TEXT_BYTES):
-            raise ValueError("Muse returned more than 64 KiB of reply text")
+        reply = _update_reply(replace(reply, bound=bound), name, payload)
+        self._replies[message_id] = reply
+        if name == "delta.message_done" or (
+                name == "message.assistant" and payload.get("display_text_ready") is not False):
+            self._unanswered_follow_up_ids.discard(parent)
         return [reply]
 
     def _ignore(self, message_id: str) -> None:

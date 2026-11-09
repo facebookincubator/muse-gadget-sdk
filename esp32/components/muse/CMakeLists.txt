@@ -162,6 +162,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_viewe_smartring_plus.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD19)
         list(APPEND srcs "boards/board_waveshare_s3_lcd19.c")
+    elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD_35)
+        list(APPEND srcs "boards/board_waveshare_s3_lcd_35.c")
     endif()
     if(CONFIG_MUSE_VIDEO)
         # Phone camera: decode and draw (muse_video), and the transports that feed it.
