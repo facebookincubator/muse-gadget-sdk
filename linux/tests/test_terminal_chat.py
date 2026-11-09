@@ -44,6 +44,19 @@ def test_live_replies_include_phone_activity_and_final_corrections():
     assert view.feed(event("message.assistant", "r3", session="elsewhere", content="other")) == ""
 
 
+def test_lone_surrogates_cannot_reach_the_terminal_as_raw_bytes():
+    # "\udc9d" would be written as a raw C1 byte by a surrogateescape stream.
+    view = LiveReplies("chat")
+    assert view.feed(event("message.assistant", "r1", content="a\udc9d52;c;eA==\udc9cb")) == "\nMuse: a52;c;eA==b\n"
+    users = LiveUsers("chat")
+    shown = users.feed(event("message.user", "u9", content="hi\ud800"))
+    assert shown and all("\ud800" not in str(item) for item in shown)
+    output = io.StringIO()
+    from musegadget.terminal_chat_ui import PlainDisplay
+    PlainDisplay(output).status(terminal_chat._strip_controls("Muse: \udc9dx"))
+    assert "\udc9d" not in output.getvalue()
+
+
 def test_live_replies_deduplicate_sequences_and_bound_storage():
     view = LiveReplies()
     first = event("delta.text_append", "r", text="a")

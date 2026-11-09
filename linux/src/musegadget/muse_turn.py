@@ -56,8 +56,9 @@ _MAX_TEXT_BYTES = 64 * 1024
 _MAX_MESSAGES = 32
 _MAX_OBSERVED_IDS = 256
 _MAX_IGNORED_MESSAGES = 256
-# C0 and C1 controls except tab and newline, so reply text cannot drive a terminal.
-_CONTROL_CHARACTERS = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+# C0 and C1 controls except tab and newline, so reply text cannot drive a terminal,
+# and lone surrogates, which a surrogateescape stream would write as raw bytes.
+_CONTROL_CHARACTERS = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\ud800-\udfff]")
 
 
 def _strip_controls(text: str) -> str:
