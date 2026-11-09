@@ -192,7 +192,8 @@ It works on boards with the full UI, using their existing console commands.
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
 settings. Audio and image support vary by board, so check the feature table in
 [`devices/`](devices). The others show status on a light, a ring or a simple
-status screen.
+status screen. The experimental reSpeaker XVF3800 profile uses app prompts and
+serial logs because its vendor LED ring is not a Muse status indicator.
 
 | Board | What you get | Build it |
 |---|---|---|
@@ -212,6 +213,7 @@ status screen.
 | Seeed reTerminal Sticky Link status (experimental) | 3.97" e-paper status screen and SHT40 only; no Muse UI | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
+| Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental) | No Muse status LED, BOOT push-to-talk; 16 kHz I2S-slave XMOS 1.0.9 baseline | [Setup](devices/seeed-respeaker-xvf3800.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | UI, touch, push-to-talk, settings, images (unverified) | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
@@ -248,6 +250,8 @@ status screen.
 | VN ESP32-S3 1.83-inch NV3023 | UI, BOOT push-to-talk, Vol+/Vol- menu, images | `tools/muse/board.sh build vn183` |
 | FoloToy AI Passport (experimental) | UI, push-to-talk with text replies, three-button menu | `tools/muse/board.sh build ai-passport` |
 | Deotaland RoRoLee | UI, BOOT push-to-talk, VOL-/VOL+ menu, images | `tools/muse/board.sh build rorolee` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 | Status on screen, images | `tools/board.sh waveshare-s3-lcd-35 build` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build s3lcd35` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.
@@ -316,8 +320,20 @@ keyboard input, and can render scripted screenshots without a display server.
 
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
-answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app). Two
-things you can change:
+answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app).
+On boards with the full UI other than the Watcher, voice notes require a
+600 ms button hold and at
+least 500 ms of audio captured during that hold before uploading starts.
+Pre-roll and the release tail are preserved in accepted notes but do not count
+toward either minimum. These checks measure duration, not whether speech is
+present; a shorter press shows "Hold longer to talk". A press that wakes the
+screen only wakes it unless it is held long enough for a note. With live calls,
+a tap released within 300 ms still starts a call on boards other than the
+StopWatch. The Watcher keeps its existing wheel click/hold gesture. Buffering
+the hold costs about 5 KB more internal RAM on boards without PSRAM, and about
+19 KB more PSRAM on the others.
+
+Two things you can change:
 
 - **Shorter answers.** Ask for them in the message itself, such as "Answer in
   one sentence."

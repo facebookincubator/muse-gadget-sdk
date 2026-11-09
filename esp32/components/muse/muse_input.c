@@ -25,6 +25,7 @@
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 #if CONFIG_PM_ENABLE
@@ -115,7 +116,8 @@ static volatile bool s_nap_now;   /* ">nap": asleep, as if on battery, nap witho
 
 static void post(muse_ptt_t type, bool wake)
 {
-    muse_input_event_t ev = { .type = type, .wake = wake, .epoch = muse_input_call_epoch() };
+    muse_input_event_t ev = { .type = type, .wake = wake, .epoch = muse_input_call_epoch(),
+                             .at_us = esp_timer_get_time() };
     bool pending = type == MUSE_PTT_DOWN && muse_voice_ptt_enabled() && !muse_voice_in_call();
     if (pending) {
         uint32_t mark;
