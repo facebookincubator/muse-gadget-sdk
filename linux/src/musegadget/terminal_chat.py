@@ -73,6 +73,8 @@ class LiveUsers:
         if not isinstance(text, str):
             text = payload.get('content')
         if not isinstance(text, str):
+            text = payload.get('text')
+        if not isinstance(text, str):
             return []
         text = _strip_controls(text)
         if len(text.encode('utf-8')) > MAX_INPUT:

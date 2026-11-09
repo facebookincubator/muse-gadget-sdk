@@ -108,6 +108,17 @@ def test_live_users_include_remote_messages_and_suppress_local_echoes_by_id():
     assert users.feed(event('message.user', 'incomplete', display_text='Ready')) == ['Ready']
 
 
+def test_live_users_read_the_text_field_too():
+    users = LiveUsers('chat')
+    assert users.feed(event('message.user', 'remote-1', text='hello\x1b')) == ['hello']
+    users.sending = True
+    assert users.feed(event('message.user', 'local', text='typed here')) == []
+    assert users.feed(event('message.user', 'phone', text='from the phone')) == []
+    # The local echo stays hidden; the phone's message is shown.
+    assert users.finish_send({'result': {'message_id': 'local'}}) == ['from the phone']
+    assert users.feed(event('message.user', 'local', text='typed here')) == []
+
+
 def test_live_users_bound_text_storage_and_sequences():
     users = LiveUsers()
     item = event('message.user', 'first', content='hello')
