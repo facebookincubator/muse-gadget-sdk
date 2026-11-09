@@ -77,6 +77,9 @@ static const muse_board_t stopwatch_board={.touch=true,.rim_controls=true,.talk_
     .speaker_button="top-right",.power_button="red bottom-left",.power_off=board_off,.mic_init=board_mic};
 /* No speaker or microphone (the Waveshare 1.43, LCD-1.28): no voice task. */
 static const muse_board_t display_board={.touch=true,.talk_button="boot",.power_off=board_off};
+/* No touch: the aux button opens the menu (the AIPI). */
+static const muse_board_t keys_board={.talk_button="bottom right",.aux_button="bottom left",.power_off=board_off,
+    .mic_init=board_mic};
 const muse_board_t *muse_board=&board;
 
 static void tap(void) { aux_button(true,true); aux_button(false,true); }
@@ -193,6 +196,20 @@ int main(int argc,char **argv) {
         menu=true; talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE);
         assert(!queue.n && selected==MUSE_MENU_SELECT);
         menu=false; pairing=true; talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE); assert(!queue.n);
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+    } else if(scenario==17) {
+        /* A toggled note records with talk let go: no button hides it. */
+        muse_input_note_toggled(true);
+        tap(); ticks(DOUBLE_TICKS*2); assert(!asleep && !slept);              /* aux: no sleep */
+        dedicated_buttons(MUSE_BTN_POWER_PRESS); dedicated_buttons(MUSE_BTN_POWER_RELEASE);
+        assert(!asleep && !slept);                                           /* power: no sleep */
+        muse_board=&keys_board; selected=-1;
+        menu_button(true,true); menu_button(false,true); assert(selected==-1);   /* no menu */
+        talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE);
+        assert(selected==-1 && queue.n==2 && queue.items[0].type==MUSE_PTT_DOWN);   /* stops the note */
+        muse_input_note_toggled(false);
+        muse_board=&board; tap(); ticks(DOUBLE_TICKS); assert(asleep && slept==1);   /* sleeps again */
+#endif
     } else if(scenario==9) {
         call=true; check_sleep(); assert(!asleep); call=false; check_sleep(); assert(asleep);
     } else if(scenario==15) {

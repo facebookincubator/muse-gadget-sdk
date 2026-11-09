@@ -74,6 +74,10 @@ void muse_input_clear_call_pending(uint32_t mark);
  * on another queued event. Only a fresh DOWN in the new epoch can start one. */
 uint32_t muse_input_call_epoch(void);
 
+/* CONFIG_MUSE_VOICE_NOTE_TOGGLE: a toggled note is recording, so the other
+ * buttons act as if talk were held (no menu, no sleep). From the voice task. */
+void muse_input_note_toggled(bool on);
+
 /*
  * Console '>' lines go to hook first, without the '>'; it returns false for a
  * line that isn't its own. The app sets the SDK token this way

@@ -261,6 +261,15 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         assert(frame<100);
         if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
         if((scenario==82 || scenario==84) && frame==20) post(MUSE_PTT_UP,false);   /* 400 ms */
+        if(scenario==85 || scenario==86) {
+            /* Toggle: a waking tap, then a press that starts a note and is let go. */
+            if(frame==5 || frame==12) post(MUSE_PTT_UP,false);
+            if(frame==10) post(MUSE_PTT_DOWN,false);
+            if(scenario==86 && frame==20) post(MUSE_PTT_DOWN,false);   /* stops it at 200 ms */
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+            if(frame==18) assert(atomic_load(&s_note_toggled));   /* buttons treat talk as held */
+#endif
+        }
         if(scenario==73 && frame==18) post(MUSE_PTT_UP,false);
         if(frame==10) {
             if(scenario==75) {
@@ -280,7 +289,9 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
     ++frame; clock_us+=scenario==41?0:scenario==22?1000:20000; assert(frame<1200);
     if(scenario>=50) {
         note_burst=0;
-        if(frame==note_release_frame) push(MUSE_PTT_UP);
+        /* Toggle mode (64-66): letting go of the first press, then a press that stops. */
+        if(frame==note_release_frame) push(scenario>=64 && scenario<=66 ? MUSE_PTT_DOWN : MUSE_PTT_UP);
+        if(scenario==64 && frame==2) push(MUSE_PTT_UP);
         if(scenario==58 && frame==10) atomic_store(&s_shutdown,true);
         if(scenario==59 && frame==10) atomic_fetch_add(&s_call_epoch,1);
         for(size_t i=0;i<n;i++) p[i]=scenario>=60 ?
@@ -369,7 +380,8 @@ int main(int argc,char **argv) {
             /* Woken to re-read a reply, while Muse is out of reach. */
             mode=MUSE_MODE_IDLE; snprintf(caption,sizeof(caption),"PREVIOUS REPLY"); ready=false;
         }
-        post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario==83 || scenario==84);
+        if(scenario==85 || scenario==86) assert(NOTE_TOGGLE);
+        post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
         int outcome=setjmp(finish);
         if(!outcome) voice_task(NULL);
         bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
@@ -377,13 +389,25 @@ int main(int argc,char **argv) {
             assert(outcome==3 && notes==1 && !starts && clock_us>=1600000);
             /* A waking press shows nothing until it qualifies as a note. */
             if(scenario==83) assert(first_mode_us>=1600000);
+        } else if(scenario==85) {
+            /* Toggle: the waking press only woke; the next press recorded
+             * 500 ms before opening the note, though it was let go at once. */
+            assert(outcome==3 && notes==1 && !starts);
+            assert(first_mode_us==1200000 && clock_us>=1700000);
         } else {
-            assert(!notes && !note_frames && !s_rec && !s_pre_fill && !level);
+            /* A toggle build's waking tap goes straight back to idle capture,
+             * which keeps its usual pre-roll. */
+            bool idle_preroll=NOTE_TOGGLE && (scenario==78 || scenario==84);
+            assert(!notes && !note_frames && !s_rec && (!s_pre_fill || idle_preroll) && !level);
             assert(starts==(call_expected?1:0) && outcome==(call_expected?2:1));
             if(scenario==70 || scenario==71 || scenario==72 || scenario==81)
                 assert(!strcmp(caption,"MICROPHONE ERROR - TRY AGAIN"));
             if(scenario==73 || scenario==82 || (scenario==74 && !call_expected))
                 assert(!strcmp(caption,"HOLD LONGER TO TALK"));
+            if(scenario==86) assert(!strcmp(caption,"RECORD A LONGER NOTE") && mode==MUSE_MODE_IDLE);
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+            assert(!atomic_load(&s_note_toggled));
+#endif
             /* A waking tap only wakes: no readiness check, mode or caption change. */
             if(scenario==78 || scenario==84)
                 assert(!mode_sets && mode==MUSE_MODE_IDLE && !strcmp(caption,"PREVIOUS REPLY"));
@@ -408,7 +432,11 @@ int main(int argc,char **argv) {
         post(MUSE_PTT_DOWN,scenario==53);
         assert(queue.items[0].at_us==clock_us);
         assert(got_event(MUSE_PTT_DOWN) && s_press_us==clock_us);
+        if(scenario>=64 && scenario<=66) assert(NOTE_TOGGLE);
         note_release_frame=scenario==50?29:scenario==51?30:scenario==54?31:scenario==55?25:36;
+        if(scenario==64) note_release_frame=40;   /* the press that stops it */
+        if(scenario==65) note_release_frame=10;   /* too soon: 180 ms captured */
+        if(scenario==66) note_release_frame=1100; /* never stopped: the 15 s cap */
         if(scenario==60) note_release_frame=100;  /* steady direct PCM after draining */
         if(scenario==61) note_release_frame=30;   /* release at admission, with backlog */
         if(scenario==62) note_release_frame=1100; /* recording reaches MAX_FRAMES */
@@ -421,14 +449,15 @@ int main(int argc,char **argv) {
         if(scenario==56) note_read_fail_frame=10;
         note_result_t result=note_held(scenario==53,scenario==57);
         bool admitted=result==NOTE_ACCEPTED;
-        bool expected=!(scenario==50 || scenario==52 || scenario==55 || scenario==56 || scenario==58 || scenario==59);
+        bool expected=!(scenario==50 || scenario==52 || scenario==55 || scenario==56 || scenario==58 || scenario==59
+            || scenario==65);
         assert(admitted==expected && !notes && !note_frames);
         if(scenario==50 || scenario==52) assert(result==NOTE_SHORT_HOLD);
-        if(scenario==55) assert(result==NOTE_INSUFFICIENT_CAPTURE);
+        if(scenario==55 || scenario==65) assert(result==NOTE_INSUFFICIENT_CAPTURE);
         if(scenario==56) assert(result==NOTE_CAPTURE_ERROR);
         if(scenario==58 || scenario==59) assert(result==NOTE_CANCELLED);
         if(admitted) {
-            assert(clock_us-s_press_us>=600000);
+            assert(clock_us-s_press_us>=(NOTE_TOGGLE ? 500000 : 600000));
             assert(frame>=(scenario==57?35:25));
             if(scenario==54) assert(frame==25); /* 500 ms of new audio, despite idle pre-roll */
             if(scenario==53 || scenario==57) {
@@ -468,7 +497,8 @@ int main(int argc,char **argv) {
                 assert(note_frames==expected_frames);
                 assert(!memcmp(uploaded_pcm,expected_pcm,note_frames*sizeof(*uploaded_pcm)));
                 if(scenario==60 || scenario==62) assert(direct_blocks>0);
-                if(scenario==62) assert(note_frames==MAX_FRAMES);
+                if(scenario==62 || scenario==66) assert(note_frames==MAX_FRAMES);
+                if(scenario==64) assert(frame>=40 && !queue.n);   /* letting go didn't stop it */
                 free(expected_pcm); free(uploaded_pcm);
             }
 #if MUSE_LOW_MEM
