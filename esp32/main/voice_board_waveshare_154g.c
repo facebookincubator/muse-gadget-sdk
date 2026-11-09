@@ -196,6 +196,16 @@ static void cue(bool end) {
     int64_t left = tail_until - esp_timer_get_time();
     if (left > 0) vTaskDelay(pdMS_TO_TICKS((left + 999) / 1000));
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (!end && err == ESP_OK && s_recording) {
+        // Drop what the mic buffered during the tail as well, so the recording
+        // starts when this returns: a tap released during the cue must stay
+        // under voice.c's CAPTURE_MIN_MS rather than reach it on old samples.
+        for (int i = 0; i < 16; i++) {
+            size_t got = 0;
+            esp_err_t drained = i2s_channel_read(s_rx, s_stereo, sizeof(s_stereo), &got, 0);
+            if ((drained != ESP_OK && drained != ESP_ERR_TIMEOUT) || got < sizeof(s_stereo)) break;
+        }
+    }
     s_cue = false;
     release();
     xSemaphoreGive(s_lock);
