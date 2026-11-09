@@ -199,6 +199,96 @@ def test_decoder_handles_split_and_batched_messages():
     assert decoder.feed(data[5:]) == [{"a": 1}, {"b": 2}]
 
 
+def parser_rejects(raw: bytes) -> bool:
+    try:
+        json.loads(raw)
+    except (ValueError, RecursionError):
+        return True
+    return False
+
+
+@pytest.mark.parametrize("fragmented", [False, True])
+def test_decoder_handles_json_depth_limit_and_keeps_adjacent_messages(fragmented, caplog):
+    # About 2 MB, below the record byte limit. Current Python JSON parsers
+    # reject this depth; 3.14 accepts about 100,000 levels.
+    depth = 1_000_000
+    raw = b'{"nested":' + b'[' * depth + b'0' + b']' * depth + b'}'
+    accepts_depth = not parser_rejects(raw)
+    record = struct.pack("<I", len(raw)) + raw
+    before = encode_message({"id": "before"})
+    after = encode_message({"id": "after"})
+    decoder = MessageDecoder()
+    if fragmented:
+        midpoint = len(record) // 2
+        messages = decoder.feed(before + record[:midpoint])
+        messages += decoder.feed(record[midpoint:] + after)
+    else:
+        messages = decoder.feed(before + record + after)
+    assert messages[0] == {"id": "before"}
+    assert messages[-1] == {"id": "after"}
+    if accepts_depth:
+        assert len(messages) == 3
+        assert "nested" in messages[1]
+    else:
+        assert len(messages) == 2
+        assert "dropping malformed control message" in caplog.text
+    assert decoder.feed(encode_message({"id": "later"})) == [{"id": "later"}]
+
+
+def test_chat_events_the_parser_rejects_are_dropped_and_the_subscription_continues(caplog):
+    depth = 120_000  # within the chat event limit
+    rejected = [
+        b'{"type":"ack","payload":' + b'[' * depth + b']' * depth + b'}\n',
+        # Over Python's integer digit limit: ValueError, not JSONDecodeError.
+        b'{"type":"ack","n":' + b'1' * 5000 + b'}\n',
+    ]
+    events = [{"type": "event", "seq": seq, "event": "delta.text_append",
+               "payload": {"text": "ok"}} for seq in (1, 2)]
+
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        subscription = session.subscribe_chat()
+        first = asyncio.ensure_future(subscription.__anext__())
+        request = await vm.next_frame()
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(status=200)))
+        for raw, event in zip(rejected, events):
+            data = raw + json.dumps(event).encode() + b"\n"
+            for offset in range(0, len(data), 32768):
+                await vm.send_frame(ServiceFrame.body_chunk(request.stream_id, BodyChunk(
+                    data=data[offset:offset + 32768],
+                )))
+        assert await first == events[0]
+        assert await subscription.__anext__() == events[1]
+        assert "dropping malformed chat event" in caplog.text
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
+def test_overdeep_response_falls_back_to_text_like_malformed_json():
+    depth = 500_000  # about 1 MB, within the response limit
+    body = b'[' * depth + b']' * depth
+
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        reply = asyncio.ensure_future(session.send_chat("hello"))
+        request = await vm.next_frame()
+        await vm.send_frame(ServiceFrame.response(request.stream_id, ApplicationResponse(
+            status=200, body=body, end_body=True,
+        )))
+        result = await reply
+        assert result["ok"] and result["status"] == 200
+        if parser_rejects(body):
+            assert result["response"] == "[" * 2000
+        else:
+            assert isinstance(result["response"], list)
+        stop.set()
+        await task
+
+    asyncio.run(bounded_scenario(scenario()))
+
+
 def test_decoder_rejects_oversize_messages():
     with pytest.raises(ValueError):
         MessageDecoder().feed(struct.pack("<I", 1 << 30))
@@ -1241,3 +1331,27 @@ def test_acknowledgement_raises_for_a_refused_request():
 def test_acknowledgement_requires_a_response_object(response):
     with pytest.raises(ValueError, match="^Muse did not acknowledge the request$"):
         acknowledgement({"ok": True, "status": 200, "response": response})
+
+
+def test_the_websocket_upgrade_uses_the_filtered_tls_context(monkeypatch):
+    import websockets.asyncio.client
+
+    from musegadget import tls
+
+    context, seen = object(), {}
+
+    async def connect(url, **options):
+        seen.update(options, url=url)
+        return "ws"
+
+    monkeypatch.setattr(tls, "client_context", lambda: context)
+    monkeypatch.setattr(websockets.asyncio.client, "connect", connect)
+
+    async def scenario():
+        session = LinkSession(noise_host="gw.example", vm_id="vm", vm_auth_token="tok",
+                              device=DEVICE, run_command=lambda *args: {"ok": True, "payload": {}})
+        return await session._open()
+
+    assert asyncio.run(scenario()) == "ws"
+    assert seen["ssl"] is context
+    assert seen["url"].startswith("wss://gw.example/")

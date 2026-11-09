@@ -39,6 +39,18 @@ def test_invalid_pairing_is_reported_without_echoing_contents(
     assert "secret" not in doctor.format_check(result)
 
 
+@pytest.mark.parametrize("stamp", [None, "123", True, -1, float("nan"), float("inf")])
+def test_invalid_pairing_timestamp_is_reported(tmp_path: Path, stamp: object) -> None:
+    config.save_json(config.PAIRING_FILE, {
+        "access_token": "secret-access", "refresh_token": "secret-refresh",
+        "access_token_saved_at": stamp,
+    }, tmp_path)
+    result = doctor.check_pairing(tmp_path)
+    assert result["status"] == "FAIL"
+    assert "timestamp" in result["detail"]
+    assert "secret" not in doctor.format_check(result)
+
+
 def test_pairing_accepts_saved_tokens_without_creating_identity(tmp_path: Path) -> None:
     (tmp_path / config.PAIRING_FILE).write_text(
         json.dumps({"access_token": "secret-access", "refresh_token": "secret-refresh"}),
@@ -130,7 +142,7 @@ def test_service_checks_both_state_and_exit_code(
     assert "secret" not in doctor.format_check(result)
     run.assert_called_once_with(
         ["/usr/bin/systemctl", "--no-pager", "is-active", "musegadget.service"],
-        capture_output=True, text=True, timeout=5, check=False,
+        capture_output=True, text=True, errors="replace", timeout=5, check=False,
     )
 
 
@@ -167,7 +179,7 @@ def test_bluetooth_checks_default_controller_power(
     assert result["status"] == status
     assert "secret" not in doctor.format_check(result)
     run.assert_called_once_with(
-        ["/usr/bin/bluetoothctl", "show"], capture_output=True, text=True,
+        ["/usr/bin/bluetoothctl", "show"], capture_output=True, text=True, errors="replace",
         timeout=5, check=False,
     )
 
@@ -197,6 +209,17 @@ def test_network_reuses_setup_probe_with_timeout(
     monkeypatch.setattr(doctor.network, "is_online", probe)
     assert doctor.check_network()["status"] == status
     probe.assert_called_once_with(timeout=5.0)
+
+
+@pytest.mark.parametrize("present,status", [([], "OK"), (["emSign ECC Root CA - G3"], "WARN")])
+def test_trust_store_warns_about_distrusted_roots_without_failing(
+    monkeypatch: pytest.MonkeyPatch, present: list[str], status: str,
+) -> None:
+    monkeypatch.setattr(doctor.tls, "distrusted_system_roots", Mock(return_value=present))
+    result: doctor.CheckResult = doctor.check_trust_store()
+    assert result["status"] == status
+    for name in present:
+        assert name in result["detail"]
 
 
 @pytest.mark.parametrize("status,exit_code", [("OK", 0), ("FAIL", 1), ("WARN", 0)])
@@ -236,6 +259,7 @@ def test_doctor_continues_after_failures_without_changing_saved_files(
     before: dict[str, bytes] = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     monkeypatch.setattr(doctor.shutil, "which", Mock(return_value=None))
     monkeypatch.setattr(doctor.network, "is_online", Mock(return_value=True))
+    monkeypatch.setattr(doctor.tls, "distrusted_system_roots", Mock(return_value=[]))
     results: tuple[doctor.CheckResult, ...] = doctor.run_checks()
-    assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK"]
+    assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK", "OK"]
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before

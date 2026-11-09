@@ -17,12 +17,15 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import queue
+import struct
 import sys
 import threading
 import wave
 from collections import deque
 from contextlib import ExitStack
+from operator import mul
 from pathlib import Path
 
 from musegadget.voice_call import FRAME_BYTES, FRAME_SAMPLES, SAMPLE_RATE
@@ -65,12 +68,114 @@ class WavAudio:
         self._files.close()
 
 
+# PortAudio opens hardware devices directly and never resamples, so each
+# stream must run at a rate its device actually offers. Prefer the call's
+# native 24 kHz; fall back to 48 kHz with software resampling on a
+# microphone or speaker with no 24 kHz mode.
+_RESAMPLED_RATE = 48000
+
+
+def _choose_capture_rate(sounddevice):
+    """Pick the first candidate rate the default microphone supports.
+
+    Probes with Pa_IsFormatSupported via sounddevice. Any probe failure
+    (unsupported rate, missing device) rejects that rate. Returns None if
+    no candidate passes.
+    """
+    for rate in (SAMPLE_RATE, _RESAMPLED_RATE):
+        try:
+            sounddevice.check_input_settings(
+                device=None, channels=1, dtype="int16", samplerate=rate)
+        except (sounddevice.PortAudioError, ValueError):
+            continue
+        return rate
+    return None
+
+
+def _choose_playback_rate(sounddevice):
+    """Pick the first candidate rate the default speaker supports.
+
+    Probes with Pa_IsFormatSupported via sounddevice. Any probe failure
+    (unsupported rate, missing device) rejects that rate. Returns None if
+    no candidate passes.
+    """
+    for rate in (SAMPLE_RATE, _RESAMPLED_RATE):
+        try:
+            sounddevice.check_output_settings(
+                device=None, channels=1, dtype="int16", samplerate=rate)
+        except (sounddevice.PortAudioError, ValueError):
+            continue
+        return rate
+    return None
+
+
+def _lowpass_taps(count, cutoff):
+    """Hann-windowed sinc low-pass; cutoff as a fraction of input Nyquist."""
+    taps = []
+    mid = (count - 1) / 2
+    for k in range(count):
+        offset = k - mid
+        sinc = 1.0 if offset == 0 else math.sin(math.pi * cutoff * offset) / (math.pi * cutoff * offset)
+        taps.append(sinc * (0.5 - 0.5 * math.cos(2 * math.pi * k / (count - 1))))
+    total = sum(taps)
+    return tuple(tap / total for tap in taps)
+
+
+def _clamp16(value):
+    return max(-32768, min(32767, value))
+
+
+class Pcm48To24:
+    """Streaming 2:1 FIR decimator; independent of input chunk boundaries."""
+
+    def __init__(self):
+        # 64 taps, cutoff 10.8 kHz (0.45 of the 24 kHz input Nyquist), just
+        # below the 12 kHz Nyquist of the 24 kHz output. Reversed so each
+        # oldest-first window lines up with taps[0] on its newest sample.
+        self._taps = _lowpass_taps(64, 0.45)[::-1]
+        self._history = [0] * 63  # previous 63 input samples, oldest first
+        self._phase = 1  # every second input sample completes an output
+
+    def feed(self, pcm: bytes) -> bytes:
+        if len(pcm) % 2:
+            raise ValueError("48 kHz audio must contain whole PCM16LE samples")
+        # This runs in the audio callback: map/sum over slices keeps the
+        # multiply-accumulate loop in C, about half the cost of a Python
+        # generator per output sample.
+        samples = self._history + list(struct.unpack(f"<{len(pcm) // 2}h", pcm))
+        taps = self._taps
+        output = [_clamp16(round(sum(map(mul, taps, samples[i:i + 64]))))
+                  for i in range(self._phase, len(samples) - 63, 2)]
+        self._phase = (self._phase - (len(samples) - 63)) % 2
+        self._history = samples[-63:]
+        return struct.pack(f"<{len(output)}h", *output)
+
+
+def _upsample24_to_48(samples, previous):
+    """Linear 1:2 interpolation, continuous across calls.
+
+    Each 24 kHz sample is preceded by its midpoint with the one before it,
+    `previous` being the last sample of the prior call, so frame boundaries
+    interpolate like any other pair (a half-sample delay). Enough for
+    speech: about -2.5 dB at 8 kHz, with images above 12 kHz attenuated.
+    """
+    output = [0] * (2 * len(samples))
+    output[0::2] = [(a + b) >> 1 for a, b in zip([previous] + samples[:-1], samples)]
+    output[1::2] = samples
+    return output
+
+
 class LiveAudio:
     """40 ms callback I/O with bounded capture and playback queues.
 
     Never schedule one asyncio callback per captured frame: that would leave
     an unbounded event-loop queue when it stalls. Capture retains only the
     newest 320 ms; a gated mic is consumed and discarded by VoiceCall.
+
+    Native 24 kHz capture and playback share a duplex stream. Otherwise,
+    capture and playback use separate streams at their probed rates, with
+    FIR decimation on 48 kHz capture and linear interpolation on 48 kHz
+    playback. frames() and write() always speak 24 kHz.
     """
 
     def __init__(self) -> None:
@@ -84,18 +189,58 @@ class LiveAudio:
         self._playback = deque()
         self._playback_bytes = 0
         self._playback_lock = threading.Lock()
-        self._stream = sounddevice.RawStream(
-            samplerate=SAMPLE_RATE, blocksize=FRAME_SAMPLES, channels=1,
-            dtype="int16", callback=self._callback,
-        )
+        capture_rate = _choose_capture_rate(sounddevice)
+        if capture_rate is None:
+            device = sounddevice.query_devices(kind="input")
+            raise OSError(
+                f"microphone {device['name']!r} supports neither 24 kHz nor 48 kHz "
+                f"(native rate: {device['default_samplerate']:.0f} Hz)"
+            )
+        playback_rate = _choose_playback_rate(sounddevice)
+        if playback_rate is None:
+            device = sounddevice.query_devices(kind="output")
+            raise OSError(
+                f"speaker {device['name']!r} supports neither 24 kHz nor 48 kHz "
+                f"(native rate: {device['default_samplerate']:.0f} Hz)"
+            )
+        self._decimator = Pcm48To24() if capture_rate != SAMPLE_RATE else None
+        self._interpolate = playback_rate != SAMPLE_RATE
+        self._upsample_previous = 0
+        self._streams = ExitStack()
         try:
-            self._stream.start()
+            if capture_rate == SAMPLE_RATE and playback_rate == SAMPLE_RATE:
+                self._input_stream = sounddevice.RawStream(
+                    samplerate=SAMPLE_RATE, blocksize=FRAME_SAMPLES, channels=1,
+                    dtype="int16", callback=self._callback,
+                )
+                self._streams.callback(self._input_stream.close)
+                self._output_stream = self._input_stream
+            else:
+                self._input_stream = sounddevice.RawInputStream(
+                    samplerate=capture_rate, blocksize=FRAME_SAMPLES * capture_rate // SAMPLE_RATE, channels=1,
+                    dtype="int16", callback=self._capture_callback,
+                )
+                self._streams.callback(self._input_stream.close)
+                self._output_stream = sounddevice.RawOutputStream(
+                    samplerate=playback_rate, blocksize=FRAME_SAMPLES * playback_rate // SAMPLE_RATE, channels=1,
+                    dtype="int16", callback=self._playback_callback,
+                )
+                self._streams.callback(self._output_stream.close)
+            self._input_stream.start()
+            if self._output_stream is not self._input_stream:
+                self._output_stream.start()
         except BaseException:
-            self._stream.close()
+            self._streams.close()
             raise
 
     def _callback(self, indata, outdata, frames, timing, status) -> None:
+        self._capture_callback(indata, frames, timing, status)
+        self._playback_callback(outdata, frames, timing, status)
+
+    def _capture_callback(self, indata, frames, timing, status) -> None:
         data = bytes(indata)
+        if self._decimator is not None:
+            data = self._decimator.feed(data)
         try:
             self._capture.put_nowait(data)
         except queue.Full:
@@ -107,6 +252,32 @@ class LiveAudio:
                 self._capture.put_nowait(data)
             except queue.Full:
                 pass
+
+    def _playback_callback(self, outdata, frames, timing, status) -> None:
+        if self._interpolate:
+            # Gather one 24 kHz frame, then interpolate it to the output
+            # stream's 48 kHz frame; padding at 24 kHz keeps fragment
+            # boundaries silent instead of inserting audible gaps.
+            samples = []
+            with self._playback_lock:
+                while self._playback and len(samples) < FRAME_SAMPLES:
+                    pcm = self._playback[0]
+                    if not pcm:
+                        self._playback.popleft()
+                        continue
+                    take = min(len(pcm) // 2, FRAME_SAMPLES - len(samples))
+                    samples.extend(struct.unpack_from(f"<{take}h", pcm))
+                    consumed = take * 2
+                    self._playback_bytes -= consumed
+                    if consumed == len(pcm):
+                        self._playback.popleft()
+                    else:
+                        self._playback[0] = pcm[consumed:]
+                samples.extend([0] * (FRAME_SAMPLES - len(samples)))
+                previous, self._upsample_previous = self._upsample_previous, samples[-1]
+            output = _upsample24_to_48(samples, previous)
+            outdata[:] = struct.pack(f"<{len(output)}h", *output)
+            return
         # The server may emit short PCM fragments. Fill the callback's whole
         # frame across fragment boundaries, retaining any remainder for next
         # time; padding every fragment separately inserts audible gaps.
@@ -128,7 +299,7 @@ class LiveAudio:
         # Admission can take seconds: do not replay pre-call capture.
         self._clear(self._capture)
         while True:
-            if not self._stream.active:
+            if not self._input_stream.active or not self._output_stream.active:
                 raise OSError("audio device stopped")
             try:
                 yield self._capture.get_nowait()
@@ -138,7 +309,7 @@ class LiveAudio:
     def write(self, pcm: bytes) -> None:
         if not pcm or len(pcm) > FRAME_BYTES or len(pcm) % 2:
             raise ValueError("playback needs 1–960 PCM16 samples")
-        if not self._stream.active:
+        if not self._output_stream.active:
             raise OSError("audio device stopped")
         with self._playback_lock:
             if self._playback_bytes + len(pcm) > 8 * FRAME_BYTES:
@@ -158,9 +329,14 @@ class LiveAudio:
         with self._playback_lock:
             self._playback.clear()
             self._playback_bytes = 0
+            self._upsample_previous = 0
 
     def close(self) -> None:
         try:
-            self._stream.abort()
+            try:
+                self._input_stream.abort()
+            finally:
+                if self._output_stream is not self._input_stream:
+                    self._output_stream.abort()
         finally:
-            self._stream.close()
+            self._streams.close()
