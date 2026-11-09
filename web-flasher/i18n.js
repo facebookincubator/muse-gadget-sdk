@@ -52,6 +52,7 @@ export const STRINGS = Object.freeze({
     "token.openFailed": "Couldn't open the port ({error}). Close the installer's dialog first.",
     "token.rejected": "The gadget says that isn't an SDK token.",
     "token.storeFailed": "The gadget couldn't store the token ({answer}).",
+    "token.writeTimeout": "The serial write stalled. Unplug the gadget to release the port, then plug it back in and retry.",
     "token.noAnswer": "The gadget didn't answer. Check it runs firmware from this page and you picked its console port. If it still doesn't answer, unplug it, plug it back in and try again.",
 
     "already.summary": "Already installed? Send your token to a gadget",
@@ -167,6 +168,7 @@ export const STRINGS = Object.freeze({
     "token.openFailed": "ポートを開けませんでした（{error}）。先にインストーラーのダイアログを閉じてください。",
     "token.rejected": "実機により、有効なSDKトークンではないと判定されました。",
     "token.storeFailed": "実機にトークンを保存できませんでした（{answer}）。",
+    "token.writeTimeout": "シリアル書き込みが止まりました。実機のUSBを抜いてポートを解放し、挿し直してからやり直してください。",
     "token.noAnswer": "実機から応答がありませんでした。このページのファームウェアが動作していること、またコンソールポートを選択したことを確認してください。それでも応答しない場合は、USBを抜き差ししてやり直してください。",
 
     "already.summary": "インストール済みの場合：実機にトークンを送信",

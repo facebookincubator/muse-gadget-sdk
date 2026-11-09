@@ -69,6 +69,8 @@ static const muse_lang_entry_t MESSAGES[] = {
     { "SENDING VOICE NOTE", "Đang gửi tin nhắn thoại" },
     { "NOTE SENT - WAITING FOR MUSE", "Đã gửi, đang chờ Muse" },
     { "HOLD LONGER TO TALK", "Giữ nút lâu hơn để nói" },
+    { "RECORD A LONGER NOTE", "Hãy ghi âm lâu hơn" },
+    { "MICROPHONE ERROR - TRY AGAIN", "Lỗi mic - thử lại" },
     { "SET UP MUSE FIRST", "Hãy cài đặt Muse trước" },
     { "NO WI-FI", "Không có Wi-Fi" },
     { "AUDIO INIT FAILED", "Lỗi khởi động âm thanh" },

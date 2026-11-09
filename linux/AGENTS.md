@@ -29,7 +29,7 @@ pairing and control protocols, so the same app pairs either.
 
 | Module | Role |
 |---|---|
-| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `info`, `unpair` |
+| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `chat`, `info`, `unpair` |
 | `pair.py` | `pair()`: opens BLE setup, checks and saves the pairing, prints nothing |
 | `pairing.py` | Community pairing v5: P-256 ECDH, HKDF-SHA256, AES-256-GCM, `confirm_app` |
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
@@ -37,10 +37,12 @@ pairing and control protocols, so the same app pairs either.
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store minus distrusted root CAs |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
+| `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
 | `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |
@@ -321,11 +323,14 @@ run_command=...)` is one encrypted session with a Muse VM.
   the same threading and result contract as `Service.run_command`.
 - `registered` is an `asyncio.Event` that is set once Muse accepts the device.
   It clears when the session ends.
-- `send_chat(message, session_id=None, *, output_modality="text")` sends a
-  user message as coming from this device. Without `session_id` it goes to
-  the main chat.
-- `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None)`
-  sends a WAV voice note of at most 2 MiB.
+- `send_chat(message, session_id=None, *, output_modality="text",
+  device=None)` sends a user message as coming from this device. Without
+  `session_id` it goes to the main chat.
+- `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None,
+  device=None)` sends a WAV voice note of at most 2 MiB.
+- `device="mcu-wearable"` on a spoken turn (dictation or a voice note) asks
+  Muse for short plain sentences, for that request only. Omit it for typed
+  messages.
 - `send_image(image_bytes, mime_type, session_id=None, *, message="",
   filename=None, output_modality="text")` sends a picture of at most
   `link_client.MAX_IMAGE_BYTES` (2 MiB), with `message` as its text.
