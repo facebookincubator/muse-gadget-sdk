@@ -132,11 +132,7 @@ if(CONFIG_HOMEHUB_VOICE)
         "voice_muse_chat.c"
         "voice_player.c"
     )
-    if(CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
-        list(APPEND GADGET_SRCS "voice_board_respeaker_lite.c")
-    else()
-        list(APPEND GADGET_SRCS "voice_board.c")
-    endif()
+    include("voice_board_select.cmake")
 endif()
 
 idf_component_register(
