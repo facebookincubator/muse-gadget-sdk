@@ -38,7 +38,7 @@ class StopWatchPTT(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.binaries = {}
-        for board, realtime in ((1, 1), (0, 1), (1, 0)):
+        for board, realtime in ((1, 1), (0, 1), (1, 0), (0, 0), (2, 0)):
             stage = Path(cls.tmp.name) / f'{board}-{realtime}'
             stage.mkdir()
             # Byte-identical production units/headers. No function extraction or
@@ -59,9 +59,11 @@ class StopWatchPTT(unittest.TestCase):
                 path.write_text('#include "muse_ptt_ui_fakes.h"\n')
             (stage / 'sdkconfig.h').write_text(
                 '#pragma once\n'
-                f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH {board}\n'
+                f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH {int(board == 1)}\n'
+                f'#define CONFIG_MUSE_BOARD_AI_PASSPORT {int(board == 2)}\n'
                 f'#define CONFIG_MUSE_REALTIME_VOICE {realtime}\n'
-                '#define CONFIG_MUSE_HATCH 1\n#define CONFIG_SPIRAM 1\n'
+                f'#define CONFIG_MUSE_HATCH {int(board == 1 or realtime)}\n'
+                f'#define CONFIG_SPIRAM {int(board == 1 or realtime)}\n'
                 '#define CONFIG_MUSE_DEFAULT_VOLUME 20\n')
             ui = (MUSE / 'muse_ui.c').read_text()
             start = ui.index('static void frame_tick(')
@@ -83,6 +85,8 @@ class StopWatchPTT(unittest.TestCase):
                            '-I', str(stage), str(source)]
                 if kind == 'voice' and realtime:
                     command.append(str(MUSE / 'muse_voice_call_core.c'))
+                if kind == 'voice':
+                    command.append(str(MUSE / 'muse_adpcm.c'))
                 result = subprocess.run([*command, '-lm', '-o', str(out)], capture_output=True, text=True)
                 if result.returncode:
                     raise AssertionError(result.stdout + result.stderr)
@@ -98,8 +102,27 @@ class StopWatchPTT(unittest.TestCase):
     def test_release_tail_is_sample_bounded_even_with_fast_reads(self):
         self.run_case('voice', 22)
 
+    def test_notes_require_real_hold_and_new_capture_before_any_upload(self):
+        for board, realtime in ((1, 1), (0, 0)):
+            for scenario in range(50, 60):
+                with self.subTest(board=board, realtime=realtime, scenario=scenario):
+                    self.run_case('voice', scenario, board=board, realtime=realtime)
+
     def test_failed_tail_reads_cannot_extend_release_deadline(self):
         self.run_case('voice', 23)
+
+    def test_qualification_failure_never_becomes_tap_to_call(self):
+        for board, realtime in ((0, 1), (1, 0), (1, 1), (0, 0), (2, 0)):
+            for scenario in range(70, 85):
+                with self.subTest(board=board, realtime=realtime, scenario=scenario):
+                    self.run_case('voice', scenario, board=board, realtime=realtime)
+
+    def test_note_preserves_buffered_order_and_streams_fresh_pcm_exactly(self):
+        # PSRAM PCM, low-memory 320 ms pre-roll, low-memory 120 ms pre-roll.
+        for board in (1, 0, 2):
+            for scenario in (60, 61, 62, 63):
+                with self.subTest(board=board, scenario=scenario):
+                    self.run_case('voice', scenario, board=board, realtime=0)
 
     def test_blue_shutdown_hold_and_remote_end_cancel_capture_tail(self):
         for scenario in (24, 25, 26, 27):

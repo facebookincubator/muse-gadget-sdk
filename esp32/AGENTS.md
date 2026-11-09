@@ -61,6 +61,7 @@ before adding a feature to one.
 | Seeed reTerminal Sticky Link status (experimental) | `esp32s3` | `devices/sdkconfig.reterminal-sticky-link` | `tools/board.sh reterminal-sticky-link` |
 | Home Assistant Voice Preview Edition | `esp32s3` | `devices/sdkconfig.home-assistant-voice` | `tools/board.sh home-assistant-voice` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-lite` | `tools/board.sh seeed-respeaker-lite` |
+| Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental) | `esp32s3` | `devices/sdkconfig.seeed-respeaker-xvf3800` | `tools/board.sh seeed-respeaker-xvf3800` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c` | manual (below) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175` | manual (below) |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19` | `tools/muse/board.sh build lcd19` |
@@ -97,6 +98,8 @@ before adding a feature to one.
 | M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
 | FoloToy AI Passport (experimental) | `esp32c3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ai-passport` | `tools/muse/board.sh build ai-passport` |
 | Deotaland RoRoLee | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-deotaland-rorolee` | `tools/muse/board.sh build rorolee` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 | `esp32s3` | `devices/sdkconfig.waveshare-s3-lcd-35` | `tools/board.sh waveshare-s3-lcd-35` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd-35` | `tools/muse/board.sh build s3lcd35` |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on
 GPIO27, the BOOT button on GPIO28 (active low), 8 MB flash and quad PSRAM.
@@ -166,9 +169,18 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
   switch on to get its setup role back (pairing confirmation, the 5 s
   factory-reset hold).
 
+### Seeed reSpeaker XVF3800 (experimental)
+
+`tools/board.sh seeed-respeaker-xvf3800 build` builds a Link-only voice profile
+for the XIAO ESP32-S3 SKU. XVF3800 needs its 16 kHz I2S-slave firmware at the
+1.0.9 baseline. It uses XIAO BOOT for pairing and push-to-talk, with app prompts
+and serial logs instead of a Muse status light. The vendor ring is unused. See
+the [XVF3800 guide](devices/seeed-respeaker-xvf3800.md) for firmware files,
+controls and unverified hardware behavior.
+
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -304,7 +316,7 @@ flash size and status backend.
    | `key` | Waveshare ESP32-S3-Touch-AMOLED-2.16 |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
-   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the Waveshare ESP32-S3-Touch-LCD-3.49, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee, the Waveshare ESP32-S3-Touch-LCD-1.9 or the SpotPear ESP32-AI-1.28 v1.0 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
+   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the Waveshare ESP32-S3-Touch-LCD-3.49, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee, the Waveshare ESP32-S3-Touch-LCD-1.9, the Waveshare ESP32-S3-Touch-LCD-3.5 or the SpotPear ESP32-AI-1.28 v1.0 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
@@ -479,8 +491,9 @@ physical talk/setup button, so the GPIO button reset gesture does not apply.
 The VIEWE SmartRing-Plus works the same way; its BOOT button is inside the case.
 
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
-ideaspark, CYD, SenseCAP Indicator and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
+ideaspark, CYD, SenseCAP Indicator, Waveshare S3 LCD 3.5 status-screen and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
+`MuseGadget-xvf3800-XXXXXX` on the reSpeaker XVF3800,
 `MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). It uses
 **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
@@ -708,9 +721,12 @@ the design, the Wi-Fi protocol and the numbers.
 
 - `sdkconfig.defaults.esp32c5` is loaded after `sdkconfig.defaults` for C5
   builds only (ESP-IDF's target-specific defaults): it moves lwIP and Wi-Fi
-  heap buffers to PSRAM, raises the TCP windows to 64 KiB and deepens the
-  receive path to match (64 dynamic RX buffers, 12 queued out-of-order
-  segments). Other chips keep 16 KiB windows in internal RAM;
+  heap buffers to PSRAM, raises the TCP windows to 96 KiB with window scaling
+  and deepens the receive path to match (96 dynamic RX buffers, a 96-entry
+  receive mailbox, 12 queued out-of-order segments). Window scaling needs
+  PSRAM required at boot, so a C5 whose PSRAM doesn't start resets instead of
+  running without it, and Wi-Fi uses 4 static TX buffers in internal RAM.
+  Other chips keep 16 KiB windows in internal RAM;
   `cmake/validate_config.cmake` enforces both.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides

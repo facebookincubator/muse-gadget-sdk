@@ -297,6 +297,13 @@ keeps later messages there. [`examples/pebble_ring_bridge.py`](examples/pebble_r
 is a complete example: a webhook listener that sends every note from a Pebble
 ring to its own Muse chat.
 
+Gadgets can pass `device="mcu-wearable"` to `LinkSession.send_chat()` for
+dictation or to `LinkSession.send_voice()` for voice notes. This uses the same
+device-class hint as ESP32 spoken turns, asking Muse for short plain sentences.
+The hint applies to that request only. It does not change `device_id`,
+registration, or `output_modality`. Omit it for typed messages and to keep the
+server's usual reply style.
+
 A few other ways to build on it:
 
 - **Let Muse do it.** Muse can run commands on the machine, so you can ask it to
@@ -383,10 +390,13 @@ bash install.sh --uninstall              # remove it (add --purge to forget the 
 ```
 
 `doctor` checks saved pairing credentials, SDK token format, the systemd
-service, Bluetooth controller power, and TCP connectivity to the default
-Muse API on port 443. Each check prints `OK`, `FAIL`, or `WARN` and a next
+service, Bluetooth controller power, TCP connectivity to the default
+Muse API on port 443, and whether the system still trusts root CAs that
+musegadget refuses. Each check prints `OK`, `FAIL`, or `WARN` and a next
 step. It exits with code 1 if any check fails, or 0 otherwise. Bluetooth
-problems are warnings because Bluetooth is only needed for pairing.
+problems are warnings because Bluetooth is only needed for pairing. Refused
+root CAs are warnings because musegadget skips them itself; update the
+`ca-certificates` package so the rest of the system does too.
 
 Run it on the gadget with sudo so it can read the root-owned state files.
 It never changes settings, starts services, opens pairing, or prints tokens.

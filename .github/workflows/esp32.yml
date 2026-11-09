@@ -153,6 +153,9 @@ jobs:
           - board: waveshare-s3-epaper-154g
             target: esp32s3
             overlays: ";devices/sdkconfig.waveshare-s3-epaper-154g"
+          - board: waveshare-s3-lcd-35
+            target: esp32s3
+            overlays: ";devices/sdkconfig.waveshare-s3-lcd-35"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"
@@ -162,6 +165,9 @@ jobs:
           - board: seeed-respeaker-lite
             target: esp32s3
             overlays: ";devices/sdkconfig.seeed-respeaker-lite"
+          - board: seeed-respeaker-xvf3800
+            target: esp32s3
+            overlays: ";devices/sdkconfig.seeed-respeaker-xvf3800"
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"
@@ -289,6 +295,9 @@ jobs:
           - board: muse-waveshare-s3-lcd19
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19"
+          - board: muse-waveshare-s3-lcd-35
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd-35"
     defaults:
       run:
         shell: bash
