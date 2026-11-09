@@ -89,8 +89,8 @@ if [ "$target" = esp32s31 ]; then
     # Vibe Mode 0.2 tools talk only to 0.2 boards, whose layout keeps Vibe Mode
     # in `vibe_mode` (app/test) instead of `factory`: build for the checkout's
     # generation, in a directory of its own.
-    [ -d "$MOSAICO_UTILS/esp-mosaico-vibe-mode" ] && vibe2=1
-    echo "ESP-Mosaico: building for Vibe Mode ${vibe2:+0.2}${vibe2:-0.1} (utils at $MOSAICO_UTILS)" >&2
+    [ -d "$MOSAICO_UTILS/esp-mosaico-vibe-mode" ] && vibe2=0.2
+    echo "ESP-Mosaico: building for Vibe Mode ${vibe2:-0.1} (utils at $MOSAICO_UTILS)" >&2
 fi
 if [ -n "${IDF_EXPORT:-}" ]; then
     . "$IDF_EXPORT" >/dev/null 2>&1
