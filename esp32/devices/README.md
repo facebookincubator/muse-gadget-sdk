@@ -52,7 +52,7 @@ session to Muse. The rest depends on the hardware.
 | **Waveshare ESP32-S3-Touch-AMOLED-1.75** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.75), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm) |
 | **Waveshare ESP32-S3-Touch-AMOLED-1.43C** | ESP32-S3 | 1.43" 466×466 round AMOLED, touch | 8 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.43C), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.43C) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.43c.htm) |
 | **Waveshare ESP32-S3-Touch-AMOLED-2.16** | ESP32-S3 | 2.16" 480×480 AMOLED, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) |
-| **Espressif ESP-Mosaico (experimental)** | ESP32-S31 | 2.16" 480×480 AMOLED, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/esp-mosaico/esp-mosaico-bsp), [esp-mosaico-vibe](https://github.com/espressif2022/esp-mosaico-vibe) | — |
+| **Espressif ESP-Mosaico (experimental)** | ESP32-S31 | 2.16" 480×480 AMOLED, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/esp-mosaico/esp-mosaico-bsp), [esp-mosaico-vibe](https://github.com/esp-mosaico/esp-mosaico-vibe) | — |
 | **Waveshare ESP32-S3-Touch-AMOLED-2.06** | ESP32-S3 | 2.06" 410×502 AMOLED, touch | 32 MB / 8 MB | [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.06) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm) |
 | **OSTB EchoEar-2ST (experimental)** | ESP32-S3 rev 0.2 | 1.85" 360×360 round ST77916 LCD, touch | 16 MB / 8 MB octal (measured) | [Product](https://docs.yishierniao.cn/details/ai/echoear-2st/product.html), [setup](ostb-echoear-2st.md) | — |
 | **Espressif ESP32-S3-BOX-3** | ESP32-S3 | 2.4" 320×240 LCD, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3), [ESP-BOX](https://github.com/espressif/esp-box) | — |
@@ -578,16 +578,26 @@ edge (`no_ring`): the panel is square.
   pins for the board, `7b9cc1ac79f865983f59bb8ff3ff43eb74ff1dbe`, installed
   for `esp32s31`; `tools/muse/board.sh` looks for it in
   `~/.espressif/esp-idf-s31` (or set `IDF_EXPORT_S31` to its `export.sh`).
-- **Espressif's tools:** clone
-  [esp-mosaico-vibe](https://github.com/espressif2022/esp-mosaico-vibe) and
-  init its `submodule/esp-mosaico-utils` (default
-  `~/mosaico/esp-mosaico-vibe`, or set `MOSAICO_UTILS` to the utils checkout).
-  The build adds its ESP-Iris and app-side recovery components
-  (`components_mosaico/`, `devices/sdkconfig.muse-esp-mosaico-iris`).
+- **Espressif's tools:** they come in two generations, one per Vibe Mode
+  version, and each talks only to boards of its own (0.2's refuse 0.1 boards:
+  `esp-mosaico-vibe-mode/docs/migration-0.2.md` in their utils). Clone
+  [esp-mosaico-vibe](https://github.com/esp-mosaico/esp-mosaico-vibe) at tag
+  `v26.0.3` for Vibe Mode 0.2 or `v26.0.2` for 0.1, and init its
+  `submodule/esp-mosaico-utils` (default `~/mosaico/esp-mosaico-vibe`, or set
+  `MOSAICO_UTILS` to the utils checkout). In Vibe Mode, the matching tools'
+  `mosaico.py iris device-status` reports `product_contract`
+  (`esp-mosaico/v2` for 0.2). The build adds its ESP-Iris and app-side recovery
+  components (`components_mosaico/`, `devices/sdkconfig.muse-esp-mosaico-iris`).
+  A 0.2 checkout (it has `esp-mosaico-vibe-mode/`) adds
+  `devices/sdkconfig.muse-esp-mosaico-vibe2` on top and builds in
+  `build-muse-esp-mosaico-vibe2/`.
 - **Layout:** the first 2 MB is the board's retained layout, with Espressif's
   Vibe Mode firmware in `factory`; `partitions_mosaico.csv` keeps it and puts
-  the app in `ota_0` at 2 MB. Never flash with esptool or `idf.py flash`: they
-  write the app over Vibe Mode.
+  `nvs` at 2 MB and the app in `ota_0` after it. Vibe Mode 0.2 sits in
+  `vibe_mode` (app/test) and installs into `main_app`:
+  `partitions_mosaico_vibe2.csv`, whose header says which of its offsets Vibe
+  Mode depends on. Never flash with esptool or
+  `idf.py flash`: they write the app over Vibe Mode.
 - **Install:** `tools/muse/board.sh build mosaico` also makes an ESP-Iris
   System Update bundle, and `tools/muse/board.sh flash mosaico` installs it
   with Espressif's `mosaico.py iris system-update` (from the esp-mosaico-vibe
@@ -596,12 +606,18 @@ edge (`no_ring`): the panel is square.
   The USB-C port is the S31's high-speed USB: it shows up only while ESP-Iris
   runs, in Vibe Mode or in a Muse build. Espressif's demo firmware doesn't
   run it, so the first time, power the board on holding **AI** to start Vibe
-  Mode (a board without it: `mosaico.py recover`, powered on holding BOOT).
+  Mode. Boards whose demo (Claw) is 0.4.0 or older have no Vibe Mode:
+  install Espressif's current firmware over the cable first, with their web
+  flasher
+  ([mosaico.ai/en/firmware](https://mosaico.ai/en/firmware)) or
+  `mosaico.py recover`, both in ROM download mode (hold BOOT, briefly press
+  POWER). The board then has Vibe Mode 0.2 or later and needs the 0.2 tools.
   Muse builds then answer ESP-Iris and aren't signed (a signed app can't hand
   over to Vibe Mode, whose image it checks against our key), so later
   installs need no buttons.
 - **Video from a phone:** `MUSE_VIDEO=1 tools/muse/board.sh build|flash
-  mosaico` builds in `build-muse-esp-mosaico-video/` with
+  mosaico` builds in `build-muse-esp-mosaico-video/` (`-video-vibe2/` for
+  Vibe Mode 0.2) with
   `devices/sdkconfig.muse-video`: the phone camera or a clip over Wi-Fi
   (`../protocols/VIDEO.md`), up to 480 px shown one to one, as two bands
   decoded at once, one per core. Join Wi-Fi from the board's settings, or for
@@ -609,6 +625,20 @@ edge (`no_ring`): the panel is square.
   that directory's `sdkconfig`. Run on a v1.2 board: it joins Wi-Fi beside BLE
   setup, announces `_musevideo._tcp`, and plays 480 px two-band H.264 at
   29-30 fps.
+- **Camera:** `MUSE_CAMERA=1 tools/muse/board.sh build|flash mosaico` builds
+  in `build-muse-esp-mosaico-camera/` (`-camera-vibe2/` for Vibe Mode 0.2)
+  with `devices/sdkconfig.muse-esp-mosaico-camera`, for Espressif's
+  [Camera Module](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp-mosaico/user_guide_camera.html)
+  in the left expansion slot (an OV3640 on module v1.2, an SC101IOT on
+  v1.4). `camera.capture` takes one frame, turns it upright and returns a
+  JPEG of at most 150 KB. On an SC101IOT the module's flash fires when the
+  sensor's auto exposure value reaches 1300 (288 in a lit room and 1398
+  with the lens covered, on that module). The camera's D2 and flash
+  lines are the S31's USB Serial/JTAG pins, so that port on the expansion
+  header is off once the module is found. Run on a v1.2 board with a v1.4
+  (SC101IOT) module: a 720×1280 JPEG of 80 to 135 KB in about 1.7 s, 2.4 s
+  with the flash; text on a card in the frame reads in full. The OV3640 and
+  a v1.0 board were only built.
 
 ## Waveshare ESP32-S3-Touch-AMOLED-2.16
 
@@ -747,7 +777,7 @@ board's overlays, in order:
 | Waveshare S3 2.16 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-216`](sdkconfig.muse-waveshare-s3-216) | `tools/muse/board.sh build s3-216` |
 | Waveshare S3 1.46 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-146`](sdkconfig.muse-waveshare-s3-146) | `tools/muse/board.sh build 146` |
 | Waveshare S3 1.43 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-143`](sdkconfig.muse-waveshare-s3-143) | `tools/muse/board.sh build 143` |
-| Espressif ESP-Mosaico (experimental) | `esp32s31` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-esp-mosaico`](sdkconfig.muse-esp-mosaico), [`devices/sdkconfig.muse-esp-mosaico-iris`](sdkconfig.muse-esp-mosaico-iris); video adds [`devices/sdkconfig.muse-video`](sdkconfig.muse-video) | `tools/muse/board.sh build mosaico`; video: `MUSE_VIDEO=1 tools/muse/board.sh build mosaico` |
+| Espressif ESP-Mosaico (experimental) | `esp32s31` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-esp-mosaico`](sdkconfig.muse-esp-mosaico), [`devices/sdkconfig.muse-esp-mosaico-iris`](sdkconfig.muse-esp-mosaico-iris); video adds [`devices/sdkconfig.muse-video`](sdkconfig.muse-video), the camera [`devices/sdkconfig.muse-esp-mosaico-camera`](sdkconfig.muse-esp-mosaico-camera) | `tools/muse/board.sh build mosaico`; video: `MUSE_VIDEO=1 tools/muse/board.sh build mosaico`; camera: `MUSE_CAMERA=1 tools/muse/board.sh build mosaico` |
 | Waveshare S3 2.06 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-206`](sdkconfig.muse-waveshare-s3-206) | `tools/muse/board.sh build s3-206` |
 | Waveshare S3 1.43C | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-143c`](sdkconfig.muse-waveshare-s3-143c) | `tools/muse/board.sh build 143c` |
 | OSTB EchoEar-2ST (experimental) | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-ostb-echoear-2st`](sdkconfig.muse-ostb-echoear-2st) | `tools/muse/board.sh build echoear` |

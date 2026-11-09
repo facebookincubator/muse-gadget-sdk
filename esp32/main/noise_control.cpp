@@ -1568,12 +1568,14 @@ static char *build_register_json(void) {
                 nullptr, nullptr);
 #endif
 
-#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA || CONFIG_MUSE_MOSAICO_CAMERA
     add_command(commands, "camera.capture",
 #if CONFIG_MUSE_WATCHER_CAMERA
                 "Capture one still JPEG frame from the SenseCAP Watcher camera. "
-#else
+#elif CONFIG_MUSE_P4_CSI_CAMERA
                 "Capture one still 1280x960 JPEG frame from the device camera. "
+#else
+                "Capture one still JPEG frame from the device camera. "
 #endif
                 "The frame is returned as base64 only when this command is explicitly invoked.",
                 nullptr, nullptr);
