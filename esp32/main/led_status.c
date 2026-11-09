@@ -53,6 +53,11 @@
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_ili9341.h"
+#elif CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
+#include "driver/i2c_master.h"
+#include "driver/spi_master.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_st7796.h"
 #elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701
 #include "driver/i2c_master.h"
 #include "esp_lcd_panel_rgb.h"
@@ -235,6 +240,37 @@ _Static_assert((OLED_LINES - 1) * OLED_LINE_H + PIXEL_FONT_HEIGHT <= OLED_HEIGHT
 #define LCD_ANIM_SCALE   2
 #define LCD_DOT_MARGIN   4
 #define LCD_BUF_CAPS     MALLOC_CAP_DMA
+#elif CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
+// Waveshare ESP32-S3-Touch-LCD-3.5: a 320x480 ST7796 IPS panel on SPI3, no
+// status LED. The panel's chip select and reset sit on a TCA9554 I/O
+// expander (7-bit I2C address 0x20, on the bus shared with the codec, touch,
+// RTC and PMIC): P0 holds CS low so the panel is always selected, P1 is its
+// reset. The backlight is a plain GPIO, active high. Pins and expander
+// wiring from xiaozhi-esp32's board config
+// (main/boards/waveshare/esp32-s3-touch-lcd-3.5) and Waveshare's schematic.
+#define LCD_NAME         "Waveshare ESP32-S3-Touch-LCD-3.5 ST7796"
+#define LCD_HOST         SPI3_HOST
+#define LCD_PIN_SCLK     5
+#define LCD_PIN_MOSI     1
+#define LCD_PIN_DC       3
+#define LCD_PIN_BL       6
+#define LCD_PIN_I2C_SDA  8
+#define LCD_PIN_I2C_SCL  7
+#define LCD_PCLK_HZ      (40 * 1000 * 1000)
+#define LCD_H_RES        320
+#define LCD_V_RES        480
+#define LCD_X_GAP        0
+#define LCD_BAR_ROWS     20
+#define LCD_ANIM_SCALE   5
+#define LCD_DOT_MARGIN   10
+// Draw buffers are sent by SPI DMA.
+#define LCD_BUF_CAPS     MALLOC_CAP_DMA
+// The TCA9554 is an 8-bit expander: output register 0x01, config 0x03.
+#define EXP_ADDR         0x20
+#define EXP_REG_OUT      0x01
+#define EXP_REG_CFG      0x03
+#define EXP_LCD_CS       (1 << 0)
+#define EXP_LCD_RST      (1 << 1)
 #endif
 
 #if CONFIG_HOMEHUB_DISPLAY
@@ -285,6 +321,8 @@ static TaskHandle_t s_task = NULL;
 static char s_title[48];
 static bool s_title_dirty = false;
 #if CONFIG_HOMEHUB_VOICE
+// How long the volume stays up after the dial stops.
+#define VOICE_VOLUME_MS 1500
 static led_voice_t s_voice = LED_VOICE_IDLE;
 static float s_level = 0;
 static int s_volume = 0;
@@ -662,7 +700,8 @@ static bool s_dot_drawn = false;
 static bool s_image_mode = false;
 static const uint8_t s_dot_rows[LCD_DOT_CELLS] = {0x6, 0xf, 0xf, 0x6};
 
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341 \
+    || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
 static SemaphoreHandle_t s_draw_done = NULL;
 
 static bool lcd_draw_done(esp_lcd_panel_io_handle_t io,
@@ -923,6 +962,134 @@ static esp_err_t lcd_panel_init(void) {
     if (err == ESP_OK) err = esp_lcd_panel_invert_color(s_panel, true);
     if (err == ESP_OK) err = esp_lcd_panel_set_gap(s_panel, LCD_X_GAP, 0);
 #endif
+    return err;
+}
+
+static esp_err_t lcd_panel_on(void) {
+    return esp_lcd_panel_disp_on_off(s_panel, true);
+}
+#elif CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
+static i2c_master_dev_handle_t s_exp = NULL;
+
+static esp_err_t exp_lcd_write(uint8_t reg, uint8_t val) {
+    uint8_t buf[2] = {reg, val};
+    return i2c_master_transmit(s_exp, buf, sizeof(buf), 100);
+}
+
+// The AXP2101 (7-bit address 0x34) keeps the panel's rails off until it is
+// set up. The same sequence as pmic_init() in the full UI's
+// components/muse/boards/board_waveshare_s3_lcd_35.c, from xiaozhi-esp32's
+// Pmic: DC1 at 3.3 V, ALDO1/BLDO1/BLDO2 on, charger for a small Li-Po.
+#define PMIC_ADDR        0x34
+static const uint8_t s_pmic_seq[][2] = {
+    {0x22, 0b110},
+    {0x27, 0x10},
+    {0x80, 0x01},
+    {0x90, 0x00},
+    {0x91, 0x00},
+    {0x82, (3300 - 1500) / 100},
+    {0x92, (3300 - 500) / 100},
+    {0x96, (1500 - 500) / 100},
+    {0x97, (2800 - 500) / 100},
+    {0x90, 0x31},
+    {0x64, 0x02},
+    {0x61, 0x02},
+    {0x62, 0x08},
+    {0x63, 0x01},
+};
+
+static esp_err_t pmic_rails_init(i2c_master_bus_handle_t bus) {
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = PMIC_ADDR,
+        .scl_speed_hz = 400000,
+    };
+    i2c_master_dev_handle_t pmic = NULL;
+    esp_err_t err = i2c_master_bus_add_device(bus, &dev_cfg, &pmic);
+    for (size_t i = 0; err == ESP_OK && i < sizeof(s_pmic_seq) / sizeof(s_pmic_seq[0]); i++) {
+        err = i2c_master_transmit(pmic, s_pmic_seq[i], 2, 100);
+    }
+    if (pmic) i2c_master_bus_rm_device(pmic);
+    if (err != ESP_OK) ESP_LOGE(TAG, "AXP2101 at 0x%02x: %s", PMIC_ADDR, esp_err_to_name(err));
+    return err;
+}
+
+// Powers the panel, then takes its chip select and reset on the TCA9554:
+// P0 is the panel's chip select (kept low: always selected), P1 its reset.
+// Mirrors xiaozhi-esp32's InitializeTca9554: both low, reset held, then
+// released.
+static esp_err_t exp_lcd_init(void) {
+    i2c_master_bus_config_t bus_cfg = {
+        .i2c_port = -1,
+        .sda_io_num = LCD_PIN_I2C_SDA,
+        .scl_io_num = LCD_PIN_I2C_SCL,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    i2c_master_bus_handle_t bus = NULL;
+    esp_err_t err = i2c_new_master_bus(&bus_cfg, &bus);
+    if (err == ESP_OK) err = pmic_rails_init(bus);
+    if (err != ESP_OK) return err;
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = EXP_ADDR,
+        .scl_speed_hz = 400000,
+    };
+    err = i2c_master_bus_add_device(bus, &dev_cfg, &s_exp);
+    uint8_t cfg = 0xff;
+    if (err == ESP_OK) err = exp_lcd_write(EXP_REG_OUT, 0x00);
+    if (err == ESP_OK) {
+        err = i2c_master_transmit_receive(s_exp, (uint8_t[]){EXP_REG_CFG}, 1, &cfg, 1, 100);
+    }
+    if (err == ESP_OK) err = exp_lcd_write(EXP_REG_CFG, cfg & ~(EXP_LCD_CS | EXP_LCD_RST));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "TCA9554 at 0x%02x: %s", EXP_ADDR, esp_err_to_name(err));
+        return err;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+    err = exp_lcd_write(EXP_REG_OUT, EXP_LCD_RST);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    return err;
+}
+
+static esp_err_t lcd_panel_init(void) {
+    s_draw_done = xSemaphoreCreateBinary();
+    if (!s_draw_done) return ESP_ERR_NO_MEM;
+    esp_err_t err = exp_lcd_init();
+    if (err != ESP_OK) return err;
+    spi_bus_config_t bus_cfg = {
+        .sclk_io_num = LCD_PIN_SCLK,
+        .mosi_io_num = LCD_PIN_MOSI,
+        .miso_io_num = -1,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = LCD_ANIM_BUF_PIXELS * sizeof(uint16_t),
+    };
+    esp_lcd_panel_io_spi_config_t io_cfg = {
+        .cs_gpio_num = -1,
+        .dc_gpio_num = LCD_PIN_DC,
+        .spi_mode = 0,
+        .pclk_hz = LCD_PCLK_HZ,
+        .trans_queue_depth = 4,
+        .on_color_trans_done = lcd_draw_done,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+    };
+    esp_lcd_panel_dev_config_t panel_cfg = {
+        .reset_gpio_num = -1,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+        .bits_per_pixel = 16,
+    };
+    esp_lcd_panel_io_handle_t io = NULL;
+    err = spi_bus_initialize(LCD_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
+    if (err == ESP_OK) {
+        err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &io);
+    }
+    if (err == ESP_OK) err = esp_lcd_new_panel_st7796(io, &panel_cfg, &s_panel);
+    if (err == ESP_OK) err = esp_lcd_panel_reset(s_panel);
+    if (err == ESP_OK) err = esp_lcd_panel_init(s_panel);
+    if (err == ESP_OK) err = esp_lcd_panel_invert_color(s_panel, true);
     return err;
 }
 
@@ -1208,12 +1375,10 @@ static void led_wait(int ms) {
 #endif
 }
 
-#if CONFIG_HOMEHUB_VOICE
+#if CONFIG_HOMEHUB_VOICE && (CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
 #define VOICE_FRAME_MS 40
 // Three 200 ms flashes.
 #define VOICE_ERROR_FRAMES 30
-// How long the volume stays up after the dial stops.
-#define VOICE_VOLUME_MS 1500
 
 static rgb_t scaled(rgb_t c, float level) {
     return (rgb_t){c.r * level, c.g * level, c.b * level};
@@ -1328,7 +1493,7 @@ static void led_task(void *arg) {
         led_wait(200);
         continue;
 #endif
-#if CONFIG_HOMEHUB_VOICE
+#if CONFIG_HOMEHUB_VOICE && (CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
         if (voice_render()) continue;
 #endif
 
@@ -1497,7 +1662,8 @@ static bool lcd_draw_image_rect(int x, int y, int w, int h, const void *pixels) 
         s_image_mode = true;
         lcd_clear_rows(0, LCD_V_RES);
     }
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341 \
+    || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
     // Already in the panel's format; copied only to reach DMA memory.
     memcpy(s_anim_buf, pixels, (size_t)w * h * sizeof(uint16_t));
 #elif CONFIG_HOMEHUB_LED_BACKEND_SENSECAP_ST7701

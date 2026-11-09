@@ -22,6 +22,7 @@ import stat
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -295,6 +296,77 @@ def test_backoff_stays_at_the_ceiling_through_a_long_outage():
     assert delay == 60
 
 
+@pytest.mark.parametrize("sessions, delays", [
+    ([(Outcome.CLOSED, 30, True), (Outcome.CLOSED, 0, False), (Outcome.CLOSED, 0, False)],
+     [1, 2, 4]),
+    ([(Outcome.CLOSED, 29, True)] * 3, [2, 4, 8]),
+    ([(Outcome.CLOSED, 60, False)] * 3, [2, 4, 8]),
+    ([(Outcome.AUTH_REJECTED, 30, True), (Outcome.CLOSED, 0, False)], [15, 15]),
+    ([(Outcome.FORBIDDEN, 30, True), (Outcome.CLOSED, 0, False)], [15, 15]),
+    ([(Outcome.CLOSED, 0, False)] * 6 + [(Outcome.CLOSED, 30, True), (Outcome.CLOSED, 0, False)],
+     [2, 4, 8, 16, 32, 60, 1, 2]),
+])
+def test_reconnect_delay_depends_on_registered_uptime(paired_device, monkeypatch, sessions, delays):
+    clock = [100.0]
+    monkeypatch.setattr(service_module, "time", SimpleNamespace(
+        time=time.time, monotonic=lambda: clock[0],
+    ))
+    pending = iter(sessions)
+    waited = []
+
+    class Lamp(Service):
+        async def serve(self, session, vm, stop):
+            try:
+                outcome, duration, registered = next(pending)
+            except StopIteration:
+                return Outcome.STOPPED
+            if registered:
+                session.registered_at = clock[0]
+            clock[0] += duration
+            return outcome
+
+        async def _sleep(self, seconds):
+            waited.append(seconds)
+            await asyncio.sleep(0)
+
+    async def scenario():
+        lamp = Lamp(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current()))
+        await asyncio.wait_for(lamp.run(), 3)
+
+    asyncio.run(scenario())
+    assert waited == delays
+
+
+def test_stop_interrupts_the_healthy_reconnect_delay(paired_device):
+    async def scenario():
+        entered = asyncio.Event()
+        served = []
+
+        class Lamp(Service):
+            async def serve(self, session, vm, stop):
+                served.append(vm["vm_id"])
+                session.registered_at = time.monotonic() - 30
+                return Outcome.CLOSED
+
+            async def _sleep(self, seconds):
+                assert seconds == 1
+                entered.set()
+                await super()._sleep(seconds)
+
+        lamp = Lamp(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current()))
+        task = asyncio.ensure_future(lamp.run())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            lamp.stop()
+            await asyncio.wait_for(task, 0.5)
+            assert served == ["vm-1"]
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
 def refresh_with(service_kwargs, pairing, calls=1):
     """Run _maybe_refresh `calls` times on a Service built inside the loop (Python 3.9)."""
     async def scenario():
@@ -309,6 +381,48 @@ def refresh_with(service_kwargs, pairing, calls=1):
 
 def fresh_pairing() -> dict:
     return {"access_token": "a", "refresh_token": "r", "access_token_saved_at": int(time.time())}
+
+
+@pytest.mark.parametrize("invalid_fields", [
+    {"refresh_token": None},
+    {"access_token_saved_at": None},
+])
+def test_service_waits_for_repaired_pairing(tmp_path, monkeypatch, caplog, invalid_fields):
+    monkeypatch.setenv(config.STATE_DIR_ENV, str(tmp_path))
+    valid = fresh_pairing()
+    invalid = {**valid, **invalid_fields}
+    if invalid["refresh_token"] is None:
+        del invalid["refresh_token"]
+    config.save_json(config.PAIRING_FILE, invalid)
+    path = tmp_path / config.PAIRING_FILE
+    original = path.read_bytes()
+    fetched = []
+
+    async def scenario():
+        service = Service(identity=Identity("02:00:00:00:00:01"),
+                          executor=Executor(Account.current()))
+
+        def fetch(token, api):
+            fetched.append(token)
+            return [], 200
+
+        async def sleep(delay):
+            if not fetched:
+                assert delay == service_module.UNPAIRED_POLL_S
+                assert path.read_bytes() == original
+                config.save_json(config.PAIRING_FILE, valid)
+            else:
+                service.stop()
+
+        monkeypatch.setattr(service, "_sleep", sleep)
+        monkeypatch.setattr(muse_api, "fetch_vms_with_status", fetch)
+        monkeypatch.setattr(muse_api, "refresh_device_token",
+                            lambda *args: pytest.fail("unexpected refresh"))
+        await asyncio.wait_for(service.run(), 2)
+
+    asyncio.run(scenario())
+    assert fetched == [valid["access_token"]]
+    assert "musegadget pair --force" in caplog.text
 
 
 def test_a_start_with_an_sdk_token_keeps_a_fresh_token(monkeypatch):
@@ -457,7 +571,7 @@ def test_temporary_token_rejection_retries_immediately_with_the_saved_token(tmp_
 def test_healthy_session_resets_rejection_backoff(tmp_path, monkeypatch):
     trace = run_auth_cycles(tmp_path, monkeypatch, [401] * 6 + [200, 401, 401, 200],
                             [(Outcome.CLOSED, service_module.HEALTHY_SESSION_S), (Outcome.STOPPED, 0)])
-    assert [x[1] for x in trace if x[0] == "sleep"] == [15, 15, 15, 16, 32, 2, 15]
+    assert [x[1] for x in trace if x[0] == "sleep"] == [15, 15, 15, 16, 32, 1, 15]
 
 
 @pytest.mark.parametrize("refresh_status, retained", [(401, False), (503, True)])

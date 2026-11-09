@@ -334,8 +334,8 @@ test("the installer and the token step stay off while the card holds or is closi
   assert.match(html, /<button slot="activate" class="button" id="install-activate"[^>]*>/);
   const render = html.slice(html.indexOf("const renderSettings"), html.indexOf("const showSettings"));
   assert.match(render, /const holding = Boolean\(settings \|\| settingsClosing\);/);
-  assert.match(render, /\$\("install-activate"\)\.disabled = holding;/);
-  assert.match(render, /\$\("send-token"\)\.disabled = !pacing \|\| holding;/);
+  assert.match(render, /\$\("install-activate"\)\.disabled = holding \|\| tokenSending;/);
+  assert.match(render, /\$\("send-token"\)\.disabled = !pacing \|\| holding \|\| tokenSending;/);
   // From the moment the card reserves a port, not only once it has connected.
   assert.match(html, /settings = session;\n\s*renderSettings\(\);/);
   // And the card can't take a port while the token goes out.
@@ -344,4 +344,21 @@ test("the installer and the token step stay off while the card holds or is closi
   assert.match(send, /tokenSending = true;\s*renderSettings\(\);[\s\S]*finally \{\s*tokenSending = false;\s*renderSettings\(\);/);
   const close = html.slice(html.indexOf("const closeSettings"), html.indexOf('$("settings-connect").addEventListener'));
   assert.match(close, /settingsClosing = closing;[\s\S]*await closing;[\s\S]*settingsClosing = null;[\s\S]*renderSettings\(\);/);
+});
+
+test("failed writer acquisition releases the session's reader", async () => {
+  const port = new Port();
+  const otherWriter = port.writable.getWriter();
+  const session = new DeviceSettingsSession(port);
+  try {
+    await assert.rejects(session.connect(), TypeError);
+    assert.equal(port.readable.locked, false, "the session must release its own reader");
+    assert.equal(port.writable.locked, true, "the other owner's writer is still held");
+  } finally {
+    otherWriter.releaseLock();
+    // Keep the test fixture tidy even on the unpatched source.
+    session.reader?.releaseLock();
+  }
+  await port.close();
+  assert.equal(port.closed, true);
 });
