@@ -579,6 +579,7 @@ static void finish_run(run_status_t status, esp_err_t error)
     if (s_run.restore_error) { remember_error(); }
     if (s_run.restore_error && status == RUN_COMPLETE) { s_run.status = RUN_ERROR; }
     save_run();
+    muse_ptest_board_run_active(false);
 }
 
 static void abort_run(esp_err_t error, bool power_error)
@@ -714,6 +715,7 @@ static void command(const char *line)
     if (a.charging_off && !muse_ptest_board_charging_supported()) {
         emit_error("charging_off_not_supported", ESP_ERR_NOT_SUPPORTED); return;
     }
+    muse_ptest_board_run_active(true);
     memset(&s_run, 0, sizeof(s_run));
     s_run.usb_powered = a.usb_powered;
     s_run.charging_off = a.charging_off;
@@ -839,6 +841,7 @@ static void resume_run(void)
 {
     if (!s_resume_pending) { return; }
     s_resume_pending = false;
+    muse_ptest_board_run_active(true);
     record_t *r = &s_run.records[s_run.count - 1];
     deep_info_t *d = deep_for(s_run.count - 1);
     muse_ptest_readback_t p = {0};
@@ -1109,7 +1112,7 @@ static esp_err_t fw_apply(const muse_ptest_state_t *state)
     }
     const esp_pm_config_t pm = {
         .min_freq_mhz = state->cpu_mhz ? state->cpu_mhz : 40,
-        .max_freq_mhz = state->cpu_mhz ? state->cpu_mhz : 240,
+        .max_freq_mhz = state->cpu_mhz ? state->cpu_mhz : CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
         .light_sleep_enable = state->cpu_mhz == 0,
     };
     if ((e = esp_pm_configure(&pm))) { return e; }
@@ -1167,6 +1170,7 @@ static void fw_codec_regs(muse_ptest_codec_regs_t *out) { muse_ptest_board_codec
 static void fw_dryrun_mode(bool on) { muse_ptest_board_usb_dryrun(on); }
 #endif
 
+__attribute__((weak)) void muse_ptest_board_run_active(bool active) { (void)active; }
 __attribute__((weak)) bool muse_ptest_board_charging_supported(void) { return false; }
 __attribute__((weak)) esp_err_t muse_ptest_board_charging(bool off, uint32_t guard_ms)
 {

@@ -16,8 +16,12 @@
 # this directory then): starts ESP-Iris for the board file, which calls
 # muse_mosaico_iris_start() if it is linked in. WHOLE_ARCHIVE, since nothing
 # else references it and the board file only declares it weak.
+set(srcs "muse_mosaico_iris.c")
+if(CONFIG_MUSE_POWER_TEST)
+    list(APPEND srcs "muse_ptest_iris.c")
+endif()
 idf_component_register(
-    SRCS "muse_mosaico_iris.c"
-    PRIV_REQUIRES esp_iris esp_mosaico_app_recovery
+    SRCS ${srcs}
+    PRIV_REQUIRES esp_iris esp_mosaico_app_recovery esp_pm
     WHOLE_ARCHIVE
 )

@@ -19,7 +19,13 @@
 #include <string.h>
 #include "boards/muse_power_test_board.h"
 #include "muse_board.h"
+#if CONFIG_MUSE_BOARD_ESP_MOSAICO
+#include "esp_lv_adapter.h"
+/* Supplied by the Mosaico-only Iris component, linked WHOLE_ARCHIVE. */
+bool muse_ptest_iris_usb_connected(void);
+#else
 #include "driver/usb_serial_jtag.h"
+#endif
 #include "esp_pm.h"
 #include "driver/i2c_master.h"
 #include "esp_system.h"
@@ -33,6 +39,9 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#ifndef CONFIG_MUSE_BOARD_ESP_MOSAICO
+#define CONFIG_MUSE_BOARD_ESP_MOSAICO 0
+#endif
 #ifndef CONFIG_MUSE_BOARD_AIPI
 #define CONFIG_MUSE_BOARD_AIPI 0
 #endif
@@ -54,6 +63,9 @@ static const muse_ptest_state_t s_matrix[] = {
     STATE("cpu_fixed_80_idle", "fixed CPU clock, idle", MUSE_PTEST_IDLE, 80, -1, false),
     STATE("cpu_fixed_160_idle", "fixed CPU clock, idle", MUSE_PTEST_IDLE, 160, -1, false),
     STATE("cpu_fixed_240_idle", "fixed CPU clock, idle", MUSE_PTEST_IDLE, 240, -1, false),
+#if CONFIG_MUSE_BOARD_ESP_MOSAICO
+    STATE("cpu_fixed_320_idle", "fixed CPU clock, idle", MUSE_PTEST_IDLE, 320, -1, false),
+#endif
     STATE("baseline_cpu_post", "paired DFS baseline after fixed clocks (expected skipped with USB host)", MUSE_PTEST_IDLE, 0, -1, false),
     STATE("lcd_black_bl_0", "panel awake, static black, brightness 0%, CPU 80MHz", MUSE_PTEST_LCD, 80, 0, false),
     STATE("lcd_black_bl_25", "panel awake, static black, brightness 25%, CPU 80MHz", MUSE_PTEST_LCD, 80, 25, false),
@@ -138,11 +150,39 @@ static esp_err_t read_device(uint8_t address, i2c_master_dev_handle_t *device)
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+#if CONFIG_MUSE_BOARD_ESP_MOSAICO
+static i2c_master_dev_handle_t s_gauge_read;
+
+static void mosaico_display_pause(bool pause)
+{
+    if (pause) { esp_lv_adapter_pause(-1); }
+    else { esp_lv_adapter_resume(); }
+}
+
+/* A read-only handle, created after the production gauge profile task ends. */
+esp_err_t muse_mosaico_ptest_battery(int *pct, int *mv, int *ma)
+{
+    if (!s_gauge_read) { return ESP_ERR_INVALID_STATE; }
+    const uint8_t regs[] = {0x2c, 0x08, 0x0c}; /* BQ27220 SOC, voltage, signed current */
+    int values[3];
+    for (unsigned i = 0; i < 3; ++i) {
+        uint8_t bytes[2];
+        esp_err_t e = i2c_master_transmit_receive(s_gauge_read, &regs[i], 1, bytes, 2, 50);
+        if (e) { return e; }
+        values[i] = bytes[0] | bytes[1] << 8;
+    }
+    *pct = values[0]; *mv = values[1]; *ma = (int16_t)values[2];
+    return ESP_OK;
+}
+#endif
+
 static void codec_read_devices_init(void)
 {
     /* Read-only devices survive for the image lifetime; no codec constructor. */
-    (void)read_device(0x18, &s_codec_read_devices[0]);
-    (void)read_device(0x40, &s_codec_read_devices[1]);
+    (void)read_device(CONFIG_MUSE_BOARD_ESP_MOSAICO ? 0x19 : 0x18, &s_codec_read_devices[0]);
+    if (!CONFIG_MUSE_BOARD_ESP_MOSAICO) {
+        (void)read_device(0x40, &s_codec_read_devices[1]);
+    }
 }
 
 static uint8_t codec_read(bool adc, const uint8_t *regs, size_t n, uint8_t *values)
@@ -157,7 +197,7 @@ static uint8_t codec_read(bool adc, const uint8_t *regs, size_t n, uint8_t *valu
 
 static bool codec_shutdown_matches(void)
 {
-    bool has_adc = !CONFIG_MUSE_BOARD_AIPI;
+    bool has_adc = !CONFIG_MUSE_BOARD_AIPI && !CONFIG_MUSE_BOARD_ESP_MOSAICO;
     if (s_spk_needs_close || s_mic_needs_close || s_codec_regs.dac_mask != 0x7f) { return false; }
     /* Shutdown readbacks, not written values: reserved bits read as zero. */
     const uint8_t *d = s_codec_regs.dac;
@@ -175,7 +215,7 @@ static void codec_snapshot(void)
     static const uint8_t adc[] = {0x01,0x06,0x40,0x47};
     memset(&s_codec_regs, 0, sizeof(s_codec_regs));
     s_codec_regs.dac_mask = (uint8_t)codec_read(false, dac, sizeof(dac), s_codec_regs.dac);
-    bool has_adc = !CONFIG_MUSE_BOARD_AIPI;
+    bool has_adc = !CONFIG_MUSE_BOARD_AIPI && !CONFIG_MUSE_BOARD_ESP_MOSAICO;
     if (has_adc) {
         s_codec_regs.adc_variant = 3;
         s_codec_regs.adc_mask = codec_read(true, adc, sizeof(adc), s_codec_regs.adc);
@@ -324,6 +364,24 @@ static esp_err_t generic_init(void)
     s_boot_retry_us = esp_timer_get_time() + 5000000;
     if (e) { return e; }
     if (charging_error) { return charging_error; }
+#if CONFIG_MUSE_BOARD_ESP_MOSAICO
+    /* The gauge profile task owns its startup writes before any capture. */
+    muse_power_t power = {0};
+    for (unsigned i = 0; i < 150; ++i) {
+        e = s_board->read_power ? s_board->read_power(&power) : ESP_ERR_NOT_SUPPORTED;
+        if (e != ESP_ERR_INVALID_STATE) { break; }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (e) { return e; }
+    i2c_master_bus_handle_t bus;
+    const i2c_device_config_t gauge = { .device_address = 0x55, .scl_speed_hz = 100000 };
+    if ((e = i2c_master_get_bus_handle(0, &bus))) { return e; }
+    if ((e = i2c_master_bus_add_device(bus, &gauge, &s_gauge_read))) { return e; }
+    static muse_board_t diagnostic_board;
+    diagnostic_board = *s_board;
+    diagnostic_board.display_pause = mosaico_display_pause;
+    s_board = &diagnostic_board;
+#endif
     codec_read_devices_init();
     if (!s_board->display_start || !s_board->display_lock
         || !s_board->display_unlock || !s_board->set_brightness) { return ESP_ERR_NOT_SUPPORTED; }
@@ -354,7 +412,12 @@ esp_err_t muse_ptest_board_power(muse_ptest_readback_t *out)
         e = s_board->read_power(&s_power);
         if (e) { return e; }
     }
+#if CONFIG_MUSE_BOARD_ESP_MOSAICO
+    /* Gauge current is not VBUS detection, especially at full charge. */
+    out->usb = muse_ptest_iris_usb_connected();
+#else
     out->usb = CONFIG_MUSE_BOARD_AIPI ? usb_serial_jtag_is_connected() : s_power.usb;
+#endif
     out->charging = s_power.charging;
     out->battery_mv = s_power.battery_mv;
     return ESP_OK;
@@ -528,6 +591,9 @@ bool muse_ptest_board_deep_holds_owned(void) { return false; }
 void muse_ptest_board_usb_dryrun(bool on) { (void)on; }
 _Static_assert(MUSE_GENERIC_PTEST_STATES * MUSE_PTEST_MAX_REPEATS <= MUSE_PTEST_MAX_RECORDS, "result capacity");
 
+#if CONFIG_MUSE_BOARD_ESP_MOSAICO
+static esp_err_t console_lock(void) { return ESP_OK; }
+#else
 /* USB Serial/JTAG drops out in light sleep. Keep its own lock through a
  * two-second disconnect grace; physical VBUS evidence remains independent. */
 static esp_pm_lock_handle_t s_console_lock;
@@ -578,6 +644,8 @@ esp_err_t muse_ptest_board_console_flush(void)
     s_tx_failed = false;
     return e;
 }
+
+#endif
 
 #ifndef MUSE_PTEST_HOST
 #include "muse_mem.h"

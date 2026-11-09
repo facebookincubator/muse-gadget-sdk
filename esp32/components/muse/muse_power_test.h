@@ -85,7 +85,7 @@ typedef struct {
     const char *id;
     const char *note;
     muse_ptest_load_t load;
-    int cpu_mhz;             /* 0 = DFS 40..240 + automatic light sleep */
+    int cpu_mhz;             /* 0 = DFS 40..configured board ceiling + automatic light sleep */
     int backlight_pct;       /* -1 = rail off, 0 = panel black + rail on */
     bool amplifier;
     uint16_t knobs;

@@ -13,6 +13,13 @@ from pathlib import Path
 from unittest.mock import Mock, call, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.power import km003c_ptest as tool, km003c_backend as kb
+def serial_console():
+    console = Mock(spec=tool.Console)
+    for name in ("arm_timeout_s", "results_timeout_s", "clock_uncertainty_s", "status_pending", "poll_after_reply"):
+        setattr(console, name, getattr(tool.Console, name))
+    console.battery.return_value = None
+    return console
+
 class KM003CPtestTest(unittest.TestCase):
     def test_capture(self):
         for case in ("ok", "retry", "short", "sparse", "empty", "missing", "incomplete", "plan", "run"):
@@ -23,7 +30,7 @@ class KM003CPtestTest(unittest.TestCase):
                               end_us=2100000 if case == "short" else 6000000)
                 results = dict(type="results", state="error" if case == "incomplete" else "complete",
                                run_id="other" if case == "run" else "test", records=[] if case == "plan" else [record])
-                console, meter, order = Mock(), Mock(), Mock()
+                console, meter, order = serial_console(), Mock(), Mock()
                 console.lines.return_value = []; order.attach_mock(console, "console")
                 recorder = tool.Recorder(meter, 20)
                 samples = [] if case == "empty" else [(102 + i * .05, 10000, 5) for i in range(41)]
@@ -53,6 +60,22 @@ class KM003CPtestTest(unittest.TestCase):
                 else:
                     self.assertEqual(rows[-1]["type"], "partial_capture")
                     self.assertEqual(rows[-1]["samples"], json.loads(json.dumps(samples)))
+
+    def test_serial_adapter_contract(self):
+        port = Mock()
+        port.read.side_effect = [b'PTEST {"type":', b'"status"}\n']
+        with patch.dict(sys.modules, serial=Mock(Serial=Mock(return_value=port))), \
+             patch.object(tool.time, "sleep"), patch.object(tool.time, "monotonic", return_value=123):
+            console = tool.Console("PORT")
+            console.send("ptest.status")
+            console.send("ptest.abort", wake=False)
+            self.assertEqual(port.write.call_args_list, [call(b"\n"), call(b">ptest.status\n"), call(b">ptest.abort\n")])
+            self.assertEqual(next(tool.ptest_lines(console, 1)), (123, {"type": "status"}))
+            self.assertEqual((console.arm_timeout_s, console.results_timeout_s), (10, 5))
+            self.assertFalse(console.status_pending or console.poll_after_reply)
+            self.assertEqual(console.clock_uncertainty_s, 0)
+            self.assertIsNone(console.battery())
+            self.assertEqual((port.port, port.dtr, port.rts), ("PORT", False, False))
 
     def test_recorder_skips_slots_after_a_slow_read(self):
         clock, waits = [0.0], []
@@ -100,7 +123,7 @@ class CollectorCleanupTest(unittest.TestCase):
         import signal
         for case in ("exception", "keyboard", "sigterm", "sighup", "send", "meter", "timeout", "ack"):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
-                console, meter, order = Mock(), Mock(), Mock()
+                console, meter, order = serial_console(), Mock(), Mock()
                 console.lines.return_value = []
                 order.attach_mock(console, "console")
                 order.attach_mock(meter, "meter")
@@ -145,7 +168,7 @@ class CollectorCleanupTest(unittest.TestCase):
 
     def test_arm_error_names_firmware_reason(self):
         with tempfile.TemporaryDirectory() as tmp:
-            console, meter = Mock(), Mock()
+            console, meter = serial_console(), Mock()
             console.lines.return_value = []
             recorder = tool.Recorder(meter, 20)
             recorder.start, recorder.stop = Mock(), Mock(return_value=[])

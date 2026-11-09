@@ -24,6 +24,7 @@
 # the other's.
 # MUSE_VIDEO=1 adds devices/sdkconfig.muse-video (the phone camera over
 # Wi-Fi, on boards whose panel driver has draw_frame) in build-muse-<profile>-video/.
+# MUSE_POWER_TEST=1 adds the board's diagnostic overlay and a -power-test suffix.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master
 # (IDF_EXPORT_S31) and Espressif's esp-mosaico-utils (MOSAICO_UTILS), and
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
@@ -112,6 +113,13 @@ fi
 [ -n "${iris:-}" ] && defaults="$defaults;devices/sdkconfig.muse-$profile-iris"
 if [ -n "${vibe2:-}" ]; then
     B=$B-vibe2; defaults="$defaults;devices/sdkconfig.muse-$profile-vibe2"
+fi
+if [ -n "${MUSE_POWER_TEST:-}" ]; then
+    [ -z "${MUSE_VIDEO:-}${MUSE_BENCH:-}" ] || { echo "power-test cannot be combined with video/bench" >&2; exit 2; }
+    power_profile=$profile
+    [ "$board" = watcher ] && power_profile=watcher
+    [ -f "devices/sdkconfig.muse-$power_profile-power-test" ] || { echo "no power-test overlay for $board" >&2; exit 2; }
+    B=$B-power-test; defaults="$defaults;devices/sdkconfig.muse-$power_profile-power-test"
 fi
 log=/tmp/muse_build_$board.log
 # ESP-Mosaico: its Vibe Mode firmware installs an ESP-Iris System Update

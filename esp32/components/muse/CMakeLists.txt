@@ -177,7 +177,7 @@ if(CONFIG_MUSE_ENABLED)
     # Watcher's independently retained recovery markers keep their link order.
     if(CONFIG_MUSE_POWER_TEST)
         list(APPEND srcs "muse_power_test.c")
-        if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_216 OR CONFIG_MUSE_BOARD_AIPI)
+        if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_216 OR CONFIG_MUSE_BOARD_AIPI OR CONFIG_MUSE_BOARD_ESP_MOSAICO)
             list(APPEND srcs "boards/board_power_test_generic.c")
         endif()
     endif()
