@@ -130,6 +130,12 @@ def _wait_seconds(value: str) -> int:
     return seconds
 
 
+def cmd_chat(args: argparse.Namespace) -> int:
+    # Imported here so other commands, the service included, never load curses.
+    from musegadget.terminal_chat import command
+    return command(args)
+
+
 def cmd_send_user_msg(args: argparse.Namespace) -> int:
     import json
     import socket
@@ -331,6 +337,10 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("--image", metavar="FILE",
                      help="attach a JPEG, PNG, GIF or WebP picture of at most 2 MiB for Muse to look at")
     send.set_defaults(func=cmd_send_user_msg)
+
+    chat = sub.add_parser("chat", help="chat with your Muse through the running service")
+    chat.add_argument("--session-id", help="use this side chat instead of the main chat")
+    chat.set_defaults(func=cmd_chat)
 
     from musegadget.link_client import validate_app_id
     from musegadget.voice_call import positive_seconds

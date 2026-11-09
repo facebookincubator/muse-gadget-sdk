@@ -107,6 +107,9 @@ static lv_indev_t *s_indev;
 static lv_obj_t *s_tv;
 static bool s_swipe_enabled = true;
 static bool s_touch_talk_down;
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+static bool s_note_listening;   /* a toggled note is recording: keep its face up */
+#endif
 /* True while the face tile is the visible tile. Updated in the LVGL task;
  * read from any task (single word, benign if briefly stale). */
 static volatile bool s_face_active = true;
@@ -116,6 +119,9 @@ static void update_tileview_swipe(void)
 {
     if (!s_tv) return;
     bool enabled = s_swipe_enabled && !s_touch_talk_down;
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+    enabled = enabled && !s_note_listening;
+#endif
     if (enabled != lv_obj_has_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE)) {
         lv_obj_set_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE, enabled);
     }
@@ -2114,6 +2120,10 @@ static void frame_tick(lv_timer_t *timer)
             image_hide_locked();
             muse_ui_show_face();
         }
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+        s_note_listening = mode == MUSE_MODE_LISTENING;
+        update_tileview_swipe();
+#endif
         s_last_mode = mode;
     }
     if (update_sleep()) {
@@ -2168,9 +2178,10 @@ esp_err_t muse_ui_start(void)
     s_w = muse_board->width;
     s_h = muse_board->height;
     /* The full layout assumes room for the 466 px board's header and bottom
-     * captions. Short landscape panels (BOX-3) need the compact layout too,
-     * as does anything narrower than its fixed 256 px captions. */
-    bool short_landscape = s_w > s_h && s_h < 320;
+     * captions. Short landscape panels (BOX-3, and 480x320, where the full
+     * layout's status line would sit above the screen) need the compact
+     * layout too, as does anything narrower than its fixed 256 px captions. */
+    bool short_landscape = s_w > s_h && s_h <= 320;
     s_small = s_h < 200 || s_w < 200 || short_landscape || s_w < 300;
     s_tall = s_small && s_h >= s_w + 64;
     s_long = s_tall && s_h >= 3 * s_w;
