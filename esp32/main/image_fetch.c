@@ -162,6 +162,14 @@ typedef struct {
 #define TOP_ROW(f) (CENTRED(f) ? 0 : (f)->row)
 
 static atomic_bool s_busy;
+// Bands downloads have drawn, ever: see image_fetch_drawn().
+static atomic_uint s_bands_drawn;
+
+static bool draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
+    if (!led_status_draw_rect(x, y, w, h, pixels)) return false;
+    atomic_fetch_add(&s_bands_drawn, 1);
+    return true;
+}
 
 // Byte-addressable internal RAM. MALLOC_CAP_INTERNAL alone also counts
 // IRAM that only takes 32-bit accesses, which malloc() never hands out.
@@ -251,7 +259,7 @@ static const char *draw_raw(fetch_t *f, int *rows_drawn) {
             err = "image runs past the last row";
             break;
         }
-        if (rows && !led_status_draw_rect(0, y, f->width, rows, (const uint16_t *)buf)) {
+        if (rows && !draw_rect(0, y, f->width, rows, (const uint16_t *)buf)) {
             err = "display write failed";
             break;
         }
@@ -294,7 +302,7 @@ static UINT jpeg_out(JDEC *jd, void *bitmap, JRECT *rect) {
         uint16_t px = ((rgb[0] & 0xF8) << 8) | ((rgb[1] & 0xFC) << 3) | (rgb[2] >> 3);
         f->mcu[i] = (uint16_t)((px >> 8) | (px << 8));
     }
-    return led_status_draw_rect(f->x0 + rect->left, f->y0 + rect->top, w, h, f->mcu);
+    return draw_rect(f->x0 + rect->left, f->y0 + rect->top, w, h, f->mcu);
 }
 
 static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale) {
@@ -542,7 +550,7 @@ static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale)
                     o[1] = v & 0xFF;
                 }
             }
-            if (!led_status_draw_rect(f->x0, f->y0 + y, *out_w, n, (const uint16_t *)band)) {
+            if (!draw_rect(f->x0, f->y0 + y, *out_w, n, (const uint16_t *)band)) {
                 err = "display write failed";
             }
         }
@@ -1002,6 +1010,19 @@ bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
     return start(path, true, row, done, user, code, message);
 }
 
+bool image_fetch_claim(void) {
+    bool expected = false;
+    return atomic_compare_exchange_strong(&s_busy, &expected, true);
+}
+
+void image_fetch_release(void) {
+    atomic_store(&s_busy, false);
+}
+
+unsigned image_fetch_drawn(void) {
+    return atomic_load(&s_bands_drawn);
+}
+
 #else
 
 bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
@@ -1025,5 +1046,9 @@ bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
     *message = "no display";
     return false;
 }
+
+bool image_fetch_claim(void) { return true; }
+void image_fetch_release(void) {}
+unsigned image_fetch_drawn(void) { return 0; }
 
 #endif
