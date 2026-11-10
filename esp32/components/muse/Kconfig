@@ -75,6 +75,10 @@ menu "Muse"
             bool "Espressif ESP-Mosaico (ESP32-S31)"
             depends on IDF_TARGET_ESP32S31
 
+        config MUSE_BOARD_DFROBOT_UNIHIKER_K10
+            bool "DFRobot UNIHIKER K10 (240x320 LCD, two buttons, ES7243E)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_AIPI
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
@@ -205,6 +209,7 @@ menu "Muse"
         default "waveshare_s3_143" if MUSE_BOARD_WAVESHARE_S3_143
         default "waveshare_s3_146" if MUSE_BOARD_WAVESHARE_S3_146
         default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
+        default "dfrobot_unihiker_k10" if MUSE_BOARD_DFROBOT_UNIHIKER_K10
         default "aipi" if MUSE_BOARD_AIPI
         default "atk_dnesp32s3_box" if MUSE_BOARD_ATK_DNESP32S3_BOX
         default "atk_dnesp32s3_box2" if MUSE_BOARD_ATK_DNESP32S3_BOX2

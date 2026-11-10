@@ -307,6 +307,9 @@ jobs:
           - board: muse-waveshare-s3-lcd-35
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd-35"
+          - board: muse-dfrobot-unihiker-k10
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-dfrobot-unihiker-k10"
     defaults:
       run:
         shell: bash

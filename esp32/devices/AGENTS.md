@@ -64,6 +64,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | Seeed reSpeaker Lite | [respeaker/reSpeaker_Lite](https://github.com/respeaker/reSpeaker_Lite) | `doc/images/pinout.png`, the I2C examples, `xmos_firmwares/`. |
 | Seeed reSpeaker XVF3800 with XIAO ESP32-S3 | [respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY](https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY), [Seeed wiki](https://wiki.seeedstudio.com/respeaker_xvf3800_xiao_i2s/) | `xmos_firmwares/i2s/` for clock role and the 1.0.9 baseline, `host_control/README.md` and `python_control/xvf_host.py` for VERSION, GPO and output ownership. Use the pre-soldered XIAO SKU only. |
 | SpotPear ESP32-AI-1.28 v1.0 | [Pinned reference firmware](https://github.com/tomorrow56/xiaozhi-esp32/tree/fed7f14669fddecc7a658c806ab072a972a2af97/main/boards/spotpear/spotpear-esp32-ai-1.28) | `config.h` for the old non-legged MAX98357A/NP0557 pin map; the board `.cc` for the GC9A01 and separate I2S clocks. Not the ES8311 box revision. |
+| DFRobot UNIHIKER K10 | [DFRobot/framework-arduinounihiker](https://github.com/DFRobot/framework-arduinounihiker) | `libraries/unihiker_k10/src/`, `libraries/TFT_eSPI/User_Setup.h`, `variants/unihiker_k10/pins_arduino.h`, and the [schematic](https://www.unihiker.com/wiki/K10/HardwareReference/img/hardwarereference_onboard/UnihikerK10Schematic.pdf). |
 
 For the Cardputer ADV keyboard, also read [m5stack/M5Cardputer](https://github.com/m5stack/M5Cardputer), especially `src/utility/Keyboard/KeyboardReader/TCA8418.cpp` and `src/utility/Adafruit_TCA8418/`.
 
