@@ -53,7 +53,8 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # Not signed: the board's Vibe Mode firmware does the updates, and an app
 # signed with our key checks the image it switches to against that key, so
-# its enter-Vibe-Mode call (esp_ota_set_boot_partition on factory) fails
+# its enter-Vibe-Mode call (esp_ota_set_boot_partition on factory with Vibe
+# Mode 0.1, esp_image_verify on vibe_mode with 0.2) fails
 # with ESP_ERR_OTA_VALIDATE_FAILED.
 # CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT is not set
 # CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES is not set

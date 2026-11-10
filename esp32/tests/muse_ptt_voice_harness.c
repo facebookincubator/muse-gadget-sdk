@@ -157,6 +157,8 @@ size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) {
 }
 void muse_hatch_turn_end(void) {}
 void muse_hatch_turn_cancel(void) {}
+bool muse_hatch_incoming(void) { return false; }
+void muse_state_set_asleep(bool v) { (void)v; }
 /* One scripted way for hatch_reply() to end, arriving after a long turn. */
 static muse_hatch_ev_t hatch_end = MUSE_HATCH_EV_NONE;
 static const char *hatch_end_text = "";
@@ -634,7 +636,7 @@ int main(int argc,char **argv) {
             hatch_end=ways[i].ev; hatch_end_text=ways[i].text;
             idle_clock_at_idle=-1;
             bool done_delivered;
-            assert(!hatch_reply(&done_delivered));
+            assert(!hatch_reply(&done_delivered, false));
             assert(done_delivered==(ways[i].ev==MUSE_HATCH_EV_DONE));
             if (!ways[i].text[0]) {
                 /* A finished reply stays THINKING; voice_task then goes idle. */
@@ -650,7 +652,7 @@ int main(int argc,char **argv) {
     if(scenario==0) {
         push(MUSE_PTT_DOWN); push(MUSE_PTT_UP);
         bool delivered_note;
-        assert(hatch_reply(&delivered_note));
+        assert(hatch_reply(&delivered_note, false));
         assert(queue.n==1 && queue.items[0].type==MUSE_PTT_UP);
         run_call(true,0);
         assert(starts==1 && delivered>0 && delivered<=6 && !held && !notes);

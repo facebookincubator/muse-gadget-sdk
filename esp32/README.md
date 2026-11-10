@@ -206,7 +206,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | ESP32-C3 with 0.42" OLED | Status and agent name as text | `tools/board.sh c3-oled-042 build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
-| Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours | `tools/board.sh waveshare-s3-epaper-154g build` |
+| Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours, push-to-talk | `tools/board.sh waveshare-s3-epaper-154g build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
 | Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI on FreeInk, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
@@ -232,6 +232,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | M5Stack Cardputer ADV (experimental) | UI, GO/Space push-to-talk with text replies, Esc/Enter/arrow menu controls | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack StickS3 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| M5Stack TriviaPOD | UI, touch, push-to-talk, settings; sleep, wake and battery unverified | `tools/muse/board.sh build triviapod` |
 | [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added PDM or I2S mic | `tools/muse/board.sh build jc3248w535` |
@@ -252,6 +253,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Deotaland RoRoLee | UI, BOOT push-to-talk, VOL-/VOL+ menu, images | `tools/muse/board.sh build rorolee` |
 | Waveshare ESP32-S3-Touch-LCD-3.5 | Status on screen, images | `tools/board.sh waveshare-s3-lcd-35 build` |
 | Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build s3lcd35` |
+| DFRobot UNIHIKER K10 | UI, A push-to-talk, B menu, RGB status LEDs | [K10 setup](devices/dfrobot-unihiker-k10.md), `tools/muse/board.sh build k10` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.

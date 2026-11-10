@@ -37,12 +37,18 @@ bool ota_installed_by_vibe_mode(void) {
 #if CONFIG_MUSE_BOARD_ESP_MOSAICO && CONFIG_ESP_IRIS_OTA_DEFAULT_VIA_RECOVERY
     // Only an ESP-Mosaico build installed through its Vibe Mode firmware
     // (the ESP-Iris overlay, which links Espressif's app-side Recovery
-    // support). On the board, Vibe Mode sits in `factory` beside its
+    // support). On the board, Vibe Mode sits in `factory` (Vibe Mode 0.1,
+    // Recovery ABI 1) or `vibe_mode`, app/test (0.2, ABI 2), beside its
     // `sysmeta` records and writes apps into an OTA slot: check all of that
     // is there, so nothing else that boots PENDING_VERIFY passes for it.
     const esp_partition_t *running = esp_ota_get_running_partition();
+#if CONFIG_ESP_IRIS_RECOVERY_ABI >= 2
+    const esp_partition_subtype_t vibe_subtype = ESP_PARTITION_SUBTYPE_APP_TEST;
+#else
+    const esp_partition_subtype_t vibe_subtype = ESP_PARTITION_SUBTYPE_APP_FACTORY;
+#endif
     const esp_partition_t *factory = esp_partition_find_first(
-        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, NULL);
+        ESP_PARTITION_TYPE_APP, vibe_subtype, NULL);
     const esp_partition_t *sysmeta = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "sysmeta");
     esp_app_desc_t vibe_mode;
