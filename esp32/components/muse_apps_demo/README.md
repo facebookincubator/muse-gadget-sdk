@@ -82,5 +82,8 @@ idf.py -DIDF_TARGET=esp32 \
 - The hardware-showcase "audio level" is the single session level
   (`muse_state_level`: mic while listening, playback while speaking), animated
   across bars for a VU look. It is not a per-frequency spectrum.
+- Captions are drawn in a small ASCII font, so the option can't be combined
+  with `CONFIG_MUSE_CJK_FONT` or `CONFIG_MUSE_LATIN_FONT` (or with
+  `CONFIG_MUSE_SMALL_FULL_REPLY`'s full-screen pages).
 - Return-to-launcher is on-screen (the top-left control). The touch buttons
   under the screen work as in the standard UI: B is push-to-talk.

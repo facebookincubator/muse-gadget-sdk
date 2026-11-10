@@ -16,8 +16,10 @@ menu "Muse multi-app demo"
 
     config MUSE_APPS_DEMO
         bool "M5Stack multi-app demo UI (launcher + Pet World + diagnostics + hardware demo)"
-        # Its speech bubble shows a few short lines: not full-screen reply pages.
+        # Its apps draw captions in a 5x7 ASCII font, a few short lines at a
+        # time: not CJK or accented letters, nor full-screen reply pages.
         depends on MUSE_BOARD_M5STACK_CORE2 && SPIRAM && !MUSE_SMALL_FULL_REPLY
+        depends on !MUSE_CJK_FONT && !MUSE_LATIN_FONT
         default n
         help
             Draw a touch-driven launcher and three sample apps as the face,
