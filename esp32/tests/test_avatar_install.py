@@ -443,7 +443,7 @@ DRIVER = textwrap.dedent("""
     d = sys.argv[3]
     crash_at, kind = int(sys.argv[4]), sys.argv[5]
     calls = [0]
-    real = {"replace": os.replace, "fsync": os.fsync}[kind]
+    real = {"replace": os.replace, "fsync": os.fsync, "remove": os.remove}[kind]
     def hit(*a, **k):
         calls[0] += 1
         if calls[0] == crash_at:
@@ -453,7 +453,12 @@ DRIVER = textwrap.dedent("""
             mock.patch.object(avatar, "AVATAR_SRC", os.path.join(d, "muse_pixel.c")), \\
             mock.patch.object(avatar, "LAST_REPLY", os.path.join(d, "last_reply.md")), \\
             mock.patch.object(avatar, "say", lambda m: None), mock.patch.object(os, kind, hit):
-        if sys.argv[6] == "default":
+        if sys.argv[6] == "previous":
+            # The host renderer/build checks have their own tests. Isolate the
+            # real file transaction here, so every write can be killed cheaply.
+            with mock.patch.object(avatar, "host_check", lambda *a: (None, [])):
+                avatar.restore("previous", None, avatar.new_work())
+        elif sys.argv[6] == "default":
             avatar.restore("default", None, avatar.new_work())
         else:
             avatar.make_avatar(None, None, t.fenced(t.GOOD_B))
@@ -797,7 +802,8 @@ class Interrupted(unittest.TestCase):
                 prev = Path(d, "muse_pixel.c.prev")
                 if now == GOOD_B.strip():
                     self.assertEqual(prev.read_text().strip(), GOOD_A.strip())  # the old one is kept
-                with mock.patch.object(avatar, "AVATAR_DIR", d):
+                with mock.patch.object(avatar, "AVATAR_DIR", d), \
+                        mock.patch.object(avatar, "AVATAR_SRC", str(active)):
                     avatar.recover()
                 self.assertEqual([n for n in os.listdir(d) if n.endswith(avatar.TMP_SUFFIX)], [])
                 outcomes.append(now == GOOD_B.strip())
@@ -814,6 +820,53 @@ class Interrupted(unittest.TestCase):
         outcomes = self.run_until("fsync")
         self.assertGreater(len(outcomes), 2)
         self.assertTrue(outcomes[-1])
+
+
+class RestoringPreviousInterrupted(unittest.TestCase):
+    """Both slots survive a killed swap, including swaps to/from the default."""
+
+    def test_killed_at_any_write(self):
+        for before, previous in ((GOOD_A, GOOD_B), (GOOD_A, None), (None, GOOD_B)):
+            for kind in ("replace", "fsync", "remove"):
+                for crash_at in range(1, 45):
+                    with self.subTest(default_before=before is None, default_previous=previous is None,
+                                      kind=kind, crash_at=crash_at), tempfile.TemporaryDirectory() as d:
+                        active = Path(d, "muse_pixel.c")
+                        prev = Path(str(active) + ".prev")
+                        marker = Path(str(active) + ".prev-default")
+                        if before is not None:
+                            active.write_text(before)
+                        if previous is None:
+                            marker.write_text("")
+                        else:
+                            prev.write_text(previous)
+                        proc = subprocess.run([sys.executable, "-c", DRIVER, str(ROOT / "tools" / "muse"),
+                                               str(ROOT / "tests"), d, str(crash_at), kind, "previous"],
+                                              capture_output=True, text=True, timeout=60)
+                        self.assertIn(proc.returncode, (0, 70), proc.stderr)
+                        # A killed process runs no finally. Neither custom renderer may be lost,
+                        # even before recovery clears scratch files and finishes the slot swap.
+                        for code in (before, previous):
+                            if code is not None:
+                                self.assertTrue(any(p.is_file() and p.read_text(errors="replace").strip() == code.strip()
+                                                    for p in Path(d).rglob("*")), "lost a renderer before recovery")
+                        with mock.patch.object(avatar, "AVATAR_DIR", d), \
+                                mock.patch.object(avatar, "AVATAR_SRC", str(active)):
+                            avatar.recover()
+                            avatar.recover()  # startup recovery itself must be repeatable
+                        now = active.read_text().strip() if active.exists() else None
+                        old = prev.read_text().strip() if prev.exists() else None
+                        if marker.exists():
+                            old = None
+                        want_before = before.strip() if before else None
+                        want_previous = previous.strip() if previous else None
+                        self.assertIn((now, old), ((want_before, want_previous), (want_previous, want_before)))
+                        self.assertFalse(list(Path(d).glob("*.next")))
+                        if proc.returncode == 0:
+                            self.assertEqual((now, old), (want_previous, want_before))
+                            break
+                else:
+                    self.fail("never finished")
 
 
 class RestoringDefaultInterrupted(unittest.TestCase):

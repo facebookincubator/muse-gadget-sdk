@@ -417,10 +417,42 @@ def write_atomic(path, text):
     sync_dir(d)
 
 
+def recover_previous():
+    """Finishes a committed slot swap, or drops its staging file if the avatar never changed.
+
+    The outgoing avatar stays in .prev.next until the new current file is durable;
+    .prev is untouched until then, since it may be the file being restored.
+    """
+    pending = AVATAR_SRC + ".prev.next"
+    default = AVATAR_SRC + ".prev-default"
+    pending_default = default + ".next"
+    if os.path.exists(pending):
+        if os.path.exists(AVATAR_SRC) and sha256(AVATAR_SRC) == sha256(pending):
+            os.remove(pending)  # the outgoing file is still current: no swap committed
+        else:
+            if os.path.exists(default):
+                os.remove(default)
+                sync_dir(AVATAR_DIR)
+            os.replace(pending, AVATAR_SRC + ".prev")
+        sync_dir(AVATAR_DIR)
+    if os.path.exists(pending_default):
+        if os.path.exists(AVATAR_SRC):
+            # A new custom avatar replaced the default. An older .prev isn't
+            # the previous selection; the durable marker takes its place.
+            if os.path.exists(AVATAR_SRC + ".prev"):
+                os.remove(AVATAR_SRC + ".prev")
+                sync_dir(AVATAR_DIR)
+            os.replace(pending_default, default)
+        else:
+            os.remove(pending_default)  # still the default: no swap committed
+        sync_dir(AVATAR_DIR)
+
+
 def recover():
     """Clears what an interrupted run left half written. Your avatar files are whole either way."""
     if not os.path.isdir(AVATAR_DIR):
         return
+    recover_previous()
     for name in os.listdir(AVATAR_DIR):
         if name.startswith(".") and name.endswith(TMP_SUFFIX):
             path = os.path.join(AVATAR_DIR, name)
@@ -555,24 +587,19 @@ def promote(code, gifs_dir):
     """Makes the checked `code` your avatar (None: the default one), keeping the one it replaces
     as muse_pixel.c.prev."""
     if os.path.exists(AVATAR_SRC):
-        if os.path.exists(AVATAR_SRC + ".prev-default"):
-            os.remove(AVATAR_SRC + ".prev-default")
         with open(AVATAR_SRC, encoding="utf-8") as f:
             old = f.read()
-        if old != code:
-            write_atomic(AVATAR_SRC + ".prev", old)
+        if old != code:  # replacing a file with itself keeps the previous selection
+            write_atomic(AVATAR_SRC + ".prev.next", old)
     elif code is not None:
-        # What it replaces is the default avatar, so that's the previous one now, not an older one of yours.
-        write_atomic(AVATAR_SRC + ".prev-default", "")
-        if os.path.exists(AVATAR_SRC + ".prev"):
-            os.remove(AVATAR_SRC + ".prev")
-        sync_dir(AVATAR_DIR)
+        write_atomic(AVATAR_SRC + ".prev-default.next", "")
     if code is None:
         if os.path.exists(AVATAR_SRC):
             os.remove(AVATAR_SRC)
             sync_dir(AVATAR_DIR)
     else:
         write_atomic(AVATAR_SRC, code)
+    recover_previous()
     if gifs_dir and os.path.isdir(gifs_dir):
         gifs = os.path.join(AVATAR_DIR, "gifs")
         shutil.rmtree(gifs, ignore_errors=True)
@@ -639,13 +666,13 @@ def install(code, key, work):
     finally:
         shutil.rmtree(gifs_dir, ignore_errors=True)
 
+
 def make_avatar(board, key, reply, work=None):
     """Checks the avatar in `reply` (and builds the firmware for `key`'s board with it, in a copy
     of this tree under `work`, if given), sending errors back to Muse through `board`, if any.
     Only once it passes does it become your avatar. Returns Made(GIF previews, built tree)."""
     own = work is None
     work = work or new_work()
-    gifs_dir = None
     try:
         for attempt in range(FIX_ROUNDS + 1):
             save_reply(reply)
@@ -668,8 +695,6 @@ def make_avatar(board, key, reply, work=None):
             reply = ask(board, "That muse_pixel.c doesn't work:\n\n```\n" + errors + "\n```\n\nFix it and send "
                         "the whole file again, the same way: one ```c block and nothing after it.", "fix")
     finally:
-        if gifs_dir:
-            shutil.rmtree(gifs_dir, ignore_errors=True)   # a failed candidate's; a promoted one's has moved
         if own:
             shutil.rmtree(work, ignore_errors=True)
 

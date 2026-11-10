@@ -419,6 +419,9 @@ port) and let it finish. It takes several minutes, mostly waiting for Muse:
 ```sh
 python3 tools/muse/avatar.py                    # draw their avatar
 python3 tools/muse/avatar.py --edit "CHANGE"    # change the one they have
+python3 tools/muse/avatar.py --restore previous # swap back to the previous avatar
+python3 tools/muse/avatar.py --restore default  # use the bundled default avatar
+python3 tools/muse/avatar.py --status           # host selection, checked builds and flash history
 ```
 
 It checks the board, asks their Muse for the renderer through the board,
@@ -426,6 +429,11 @@ checks it on the host and builds the firmware with it in a copy of the tree,
 and only then saves it to `components/muse/avatar/muse_pixel.c` (gitignored)
 and flashes. It doesn't rebuild their own `build-muse-*/`: flashing that with
 `tools/muse/board.sh` before a `board.sh build` puts the previous avatar back.
+`--restore` rechecks the selected source and builds it before changing the
+selection. A previous default is remembered too. With `--no-flash`, only the
+host selection changes; the checked build is retained and the device stays as
+it was. `--status` needs no board and reports this computer's selection and
+this tool's flash history; it cannot identify what the attached board runs.
 Progress and errors go to stderr. Relay the line that starts with `Muse drew:`
 and the GIF paths. On failure, pass the message on. The exit status says what
 kind of failure it was:
