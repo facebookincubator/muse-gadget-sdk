@@ -425,7 +425,9 @@ run_command=...)` is one encrypted session with a Muse VM.
   a boundary where Muse waits on the caller: not working until the next caller
   turn starts. One reporting 0 retires every open turn, except, once, the
   latest caller turn whose reply hasn't finished. Only a non-negative integer
-  count does either. This doesn't change the call's idle tracking.
+  count does either. This doesn't change the call's idle tracking. No
+  `Working(False)` comes when the call ends: once `run()` returns, Muse is
+  no longer working on the call.
 - `PlaybackFlushed(response_ids)` says audio already delivered, still queued
   or playing, was discarded: a barge-in, the caller talking over the reply,
   a continuation replacing it, or the call ending. `response_ids` names the
