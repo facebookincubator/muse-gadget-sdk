@@ -52,6 +52,7 @@ typedef struct { lv_event_code_t code; } lv_event_t;
 typedef void (*lv_event_cb_t)(lv_event_t *e);
 lv_indev_t *lv_indev_active(void);
 void lv_indev_get_point(const lv_indev_t *indev, lv_point_t *p);
+lv_obj_t *lv_indev_get_scroll_obj(const lv_indev_t *indev);
 lv_event_code_t lv_event_get_code(lv_event_t *e);
 lv_obj_t *lv_canvas_create(lv_obj_t *parent);
 void lv_canvas_set_buffer(lv_obj_t *obj, void *buf, int32_t w, int32_t h, int cf);
@@ -83,6 +84,9 @@ static struct { lv_event_cb_t cb; lv_event_code_t filter; } cbs[16];
 static int ncbs;
 lv_indev_t *lv_indev_active(void) { return &indev; }
 void lv_indev_get_point(const lv_indev_t *i, lv_point_t *p) { (void)i; *p = point; }
+/* Set while a drag scrolls the tileview, as LVGL's indev does until release. */
+static lv_obj_t tileview, *scroll_obj;
+lv_obj_t *lv_indev_get_scroll_obj(const lv_indev_t *i) { (void)i; return scroll_obj; }
 lv_event_code_t lv_event_get_code(lv_event_t *e) { return e->code; }
 lv_obj_t *lv_canvas_create(lv_obj_t *parent) { (void)parent; return &canvas; }
 void lv_canvas_set_buffer(lv_obj_t *o, void *b, int32_t w, int32_t h, int cf) { (void)o; (void)b; (void)w; (void)h; (void)cf; }
@@ -189,6 +193,18 @@ int main(void)
     tap();
     assert(app == APP_DEBUGGER && chains());
 
+    /* A drag that scrolled the tileview still gets RELEASED from LVGL: it
+     * cancels the press instead of tapping. */
+    next_app = APP_LAUNCHER;
+    int ups_before = ups, cancels_before = cancels;
+    send(LV_EVENT_PRESSED);
+    scroll_obj = &tileview;
+    send(LV_EVENT_PRESSING);
+    send(LV_EVENT_RELEASED);
+    scroll_obj = NULL;
+    printf("scrolled release: ups=%d cancels=%d\n", ups - ups_before, cancels - cancels_before);
+    assert(ups == ups_before && cancels == cancels_before + 1 && app == APP_DEBUGGER);
+
     puts("ok");
     return 0;
 }
@@ -218,6 +234,9 @@ static struct { lv_event_cb_t cb; lv_event_code_t filter; } cbs[16];
 static int ncbs;
 lv_indev_t *lv_indev_active(void) { return &indev; }
 void lv_indev_get_point(const lv_indev_t *i, lv_point_t *p) { (void)i; *p = point; }
+/* Set while a drag scrolls the tileview, as LVGL's indev does until release. */
+static lv_obj_t tileview, *scroll_obj;
+lv_obj_t *lv_indev_get_scroll_obj(const lv_indev_t *i) { (void)i; return scroll_obj; }
 lv_event_code_t lv_event_get_code(lv_event_t *e) { return e->code; }
 lv_obj_t *lv_canvas_create(lv_obj_t *parent) { (void)parent; return &canvas; }
 void lv_canvas_set_buffer(lv_obj_t *o, void *b, int32_t w, int32_t h, int cf) { (void)o; (void)b; (void)w; (void)h; (void)cf; }
@@ -279,6 +298,11 @@ int main(void)
     press(160, 100); drag(160, 120); drag(160, 230); release(); frame();
     assert(app_manager_get_app() == APP_LAUNCHER);
 
+    /* Launcher: a swipe toward settings that stays inside a card opens
+     * nothing, though LVGL still sends RELEASED after the scroll. */
+    press(200, 100); scroll_obj = &tileview; drag(130, 100); release(); scroll_obj = NULL; frame();
+    assert(app_manager_get_app() == APP_LAUNCHER);
+
     /* Debugger: tap-only, so it lets swipes through to settings. */
     tap(160, 100);
     assert(app_manager_get_app() == APP_DEBUGGER && chains());
@@ -288,6 +312,9 @@ int main(void)
     press(80, 145); drag(80, 200); release(); frame();
     printf("slid off: tests=%d chirps=%d\n", hatch_tests, chirps);
     assert(hatch_tests == 0 && chirps == 0);
+    press(230, 145); scroll_obj = &tileview; drag(215, 145); release(); scroll_obj = NULL; frame();
+    printf("scrolled on a button: tests=%d\n", hatch_tests);
+    assert(hatch_tests == 0);
     press(230, 145); drag(232, 146); release(); frame();
     tap(80, 145);
     assert(hatch_tests == 1 && chirps == 1);

@@ -75,7 +75,13 @@ static void on_touch(lv_event_t *e)
         app_manager_touch_move(p.x, p.y);
         break;
     case LV_EVENT_RELEASED:
-        app_manager_touch_up();
+        /* LVGL sends RELEASED after a drag that scrolled the tileview too (it
+         * only holds back CLICKED): that was a swipe, not a tap. */
+        if (lv_indev_get_scroll_obj(indev)) {
+            app_manager_touch_cancel();
+        } else {
+            app_manager_touch_up();
+        }
         break;
     case LV_EVENT_PRESS_LOST:
         /* The finger left the widget without a clean release: cancel the press
