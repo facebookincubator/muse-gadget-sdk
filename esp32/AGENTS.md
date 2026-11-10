@@ -102,6 +102,7 @@ before adding a feature to one.
 | Waveshare ESP32-S3-Touch-LCD-3.5 | `esp32s3` | `devices/sdkconfig.waveshare-s3-lcd-35` | `tools/board.sh waveshare-s3-lcd-35` |
 | Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd-35` | `tools/muse/board.sh build s3lcd35` |
 | DFRobot UNIHIKER K10 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-dfrobot-unihiker-k10` | `tools/muse/board.sh build k10` |
+| LCDWIKI 2.8inch ESP32-S3 Display | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-lcdwiki-s3-28` | `tools/muse/board.sh build lcd28` |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on
 GPIO27, the BOOT button on GPIO28 (active low), 8 MB flash and quad PSRAM.

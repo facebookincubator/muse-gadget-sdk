@@ -31,6 +31,7 @@
 #include "muse_text.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
+#include "muse_weather.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO_WIFI
 #include "muse_video_wifi.h"
@@ -89,6 +90,7 @@ void muse_app_run(const muse_board_t *board)
     muse_video_wifi_start();
 #endif
     ESP_ERROR_CHECK(muse_ui_start());
+    muse_weather_start();   /* màn hình chờ thời tiết: SNTP + task Open-Meteo */
     ESP_LOGI(TAG, "UI built: free internal %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
     QueueHandle_t q = xQueueCreate(16, sizeof(muse_input_event_t));

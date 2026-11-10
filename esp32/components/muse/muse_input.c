@@ -341,6 +341,7 @@ static void talk_button(unsigned ev)
             if (!muse_board->keyboard) muse_menu_key(MUSE_MENU_SELECT);
             swallow = true;
         } else if (voice) {
+            muse_state_poke();
             post(MUSE_PTT_DOWN, false);
             talk_down = true;
         } else {

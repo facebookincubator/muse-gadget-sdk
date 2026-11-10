@@ -43,6 +43,7 @@ typedef enum {
     MUSE_SETTING_MIC_GAIN,
     MUSE_SETTING_BRIGHTNESS,
     MUSE_SETTING_SLEEP,
+    MUSE_SETTING_WEATHER,
     MUSE_SETTING_WIFI,          /* on/off or credentials */
     MUSE_SETTING_BLE,
     MUSE_SETTING_HATCH,
@@ -59,6 +60,7 @@ bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */
 int muse_settings_mic_gain(void);       /* dB, 0..MUSE_MIC_GAIN_MAX */
 int muse_settings_brightness(void);     /* 10..100 */
 int muse_settings_sleep_s(void);        /* 0 = never */
+int muse_settings_weather_idle_s(void); /* 0 = off: không hiện màn hình thời tiết */
 /* Reply text size on small screens with full-screen replies. */
 enum { MUSE_TEXT_SMALL, MUSE_TEXT_MEDIUM, MUSE_TEXT_LARGE };
 int muse_settings_text_size(void);
@@ -79,6 +81,7 @@ void muse_settings_set_speaker_on(bool on);
 void muse_settings_set_mic_gain(int db);
 void muse_settings_set_brightness(int pct);
 void muse_settings_set_sleep_s(int secs);
+void muse_settings_set_weather_idle_s(int secs);
 void muse_settings_set_text_size(int size);
 void muse_settings_set_wifi_on(bool on);
 void muse_settings_set_ble_on(bool on);

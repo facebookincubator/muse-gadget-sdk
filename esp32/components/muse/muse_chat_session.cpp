@@ -72,8 +72,12 @@ extern "C" {
 #include "cJSON.h"
 #include "minimp3.h"
 #include "muse_account_api.h"
+#include "muse_lang.h"
 #include "muse_link.h"
 #include "muse_settings.h"
+#if CONFIG_MUSE_TTS_GOOGLE
+#include "muse_tts.h"
+#endif
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
@@ -269,6 +273,7 @@ struct turn_t {
     /* TTS */
     int tts_msg;             /* message being fetched (or shown, speaker off), or -1 */
     bool silent;             /* speaker off: tts_msg is paced by silence, not fetched */
+    uint32_t tts_ticket;     /* muse_tts's ticket for tts_msg's speech, or 0 */
     uint8_t *mp3;            /* MP3_BUF */
     size_t mp3_len;
     bool mp3_ended;
@@ -1025,6 +1030,12 @@ static void turn_finish(void)
     turn_reset_streams();
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
+#if CONFIG_MUSE_TTS_GOOGLE
+    if (s_turn.tts_ticket) {
+        muse_tts_cancel();
+    }
+#endif
+    s_turn.tts_ticket = 0;
     s_turn.tts_msg = -1;
     s_turn.silent = false;
     s_turn.mp3_len = 0;
@@ -1694,7 +1705,7 @@ static void turn_detach(void)
     }
     ESP_LOGI(TAG, "no reply after %d s: telling the user, and waiting in the background", (int)(DETACH_US / 1000000));
     char notice[128];
-    strlcpy(notice, "Muse is working on it. I'll tell you when it's done.", sizeof(notice));
+    strlcpy(notice, muse_lang_message("Muse is working on it. I'll tell you when it's done."), sizeof(notice));
     int i = s_turn.nmsgs++;
     s_turn.msgs[i] = msg_t{};
     strlcpy(s_turn.msgs[i].id, "local-notice", sizeof(s_turn.msgs[i].id));
@@ -1839,6 +1850,36 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+/* Shows message i at reading pace: silence in place of speech paces the
+ * captions and ends the turn. */
+static void show_silently(int i)
+{
+    msg_t &m = s_turn.msgs[i];
+    m.pcm_start = s_turn.pcm_out;
+    size_t shown = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
+    m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
+    m.tts = TTS_ACTIVE;
+    s_turn.tts_msg = i;
+    s_turn.silent = true;
+    s_turn.tts_ticket = 0;
+    ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+    show_reply_start(m);
+}
+
+#if CONFIG_MUSE_TTS_GOOGLE
+/* The language a reply is read in: Vietnamese if it's written in it, whatever
+ * the device is set to; otherwise the device's language. */
+static const char *speech_lang(const char *text)
+{
+#if CONFIG_MUSE_UI_LANG_VI
+    (void)text;
+    return "vi";
+#else
+    return muse_tts_is_vietnamese(text) ? "vi" : "en";
+#endif
+}
+#endif
+
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1850,33 +1891,65 @@ static void start_tts(void)
             continue;
         }
         /*
-         * Replies are text, shown at reading pace: silence in place of speech
-         * paces the captions and ends the turn. To speak them instead, send
-         * the message's text (s_turn.texts + i * TEXT_MAX, if texts was
-         * allocated; up to TEXT_MAX - 1 bytes) to a TTS API of your choice and
-         * play the MP3 it returns. In place of the silence below: keep
-         * m.tts = TTS_ACTIVE and s_turn.tts_msg = i, set s_turn.silent = false,
-         * m.pcm_start = s_turn.pcm_out, m.pcm_frames = 0, s_turn.mp3_len = 0,
-         * s_turn.mp3_ended = false, s_turn.kbps = 0, s_turn.down_rate = 0 and
-         * mp3dec_init(&s_turn.dec). Then, on this task, pass the MP3 to
-         * tts_data() as it arrives (it buffers up to MP3_BUF and drops the
-         * rest, so hold off while it's full) and set s_turn.mp3_ended at the
-         * end. decode() plays it at the speaker's volume, captions following,
-         * and finishes the message once it's drained.
+         * Speaker on, the message's text goes to muse_tts and comes back as
+         * MP3, which pump_tts() moves into the turn's buffer and decode()
+         * plays, captions following. Speaker off, or if there's no speech to
+         * be had, the text is shown at reading pace.
          */
+        uint32_t ticket = 0;
+#if CONFIG_MUSE_TTS_GOOGLE
+        const char *text = s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+        if (text && muse_settings_speaker_on()) {
+            ticket = muse_tts_speak(text, speech_lang(text));
+        }
+#endif
+        if (!ticket) {
+            show_silently(i);
+            return;
+        }
         m.pcm_start = s_turn.pcm_out;
-        /* Paced to the text kept: a reply longer than CAPTION_TEXT shows what
-         * was kept at reading pace, not stretched over the whole reply's time
-         * (the Watcher keeps the rest for review). */
-        size_t shown = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
-        m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
+        m.pcm_frames = 0;
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
-        s_turn.silent = true;
-        ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+        s_turn.silent = false;
+        s_turn.tts_ticket = ticket;
+        s_turn.mp3_len = 0;
+        s_turn.mp3_ended = false;
+        s_turn.kbps = 0;
+        s_turn.down_rate = 0;
+        mp3dec_init(&s_turn.dec);
+        mark(M_TTS);
+        ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
         show_reply_start(m);
         return;
     }
+}
+
+/* Moves the speech that has arrived into the turn's MP3 buffer. */
+static void pump_tts(void)
+{
+#if CONFIG_MUSE_TTS_GOOGLE
+    if (s_turn.tts_msg < 0 || s_turn.silent || s_turn.mp3_ended) {
+        return;
+    }
+    size_t n = muse_tts_read(s_turn.tts_ticket, s_turn.mp3 + s_turn.mp3_len, MP3_BUF - s_turn.mp3_len);
+    if (n) {
+        mark(M_MP3);
+        s_turn.mp3_len += n;
+        return;
+    }
+    switch (muse_tts_state(s_turn.tts_ticket)) {
+    case MUSE_TTS_DONE:
+        s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
+        break;
+    case MUSE_TTS_FAILED:
+        ESP_LOGW(TAG, "no speech for this message: showing it");
+        show_silently(s_turn.tts_msg);
+        break;
+    default:
+        break;
+    }
+#endif
 }
 
 static void tts_data(const uint8_t *data, size_t len)
@@ -2419,6 +2492,7 @@ static void hatch_task(void *arg)
         }
         if (s_turn.phase == P_WAIT_REPLY) {
             start_tts();
+            pump_tts();
             decode();
         }
         if (!s_connected) {
@@ -2497,6 +2571,9 @@ extern "C" void muse_hatch_start(void)
         s.cap = NDJSON_LINE_MAX;
     }
     s_turn.tts_msg = -1;
+#if CONFIG_MUSE_TTS_GOOGLE
+    muse_tts_start();   /* without it replies are shown, not spoken */
+#endif
 #if CONFIG_MUSE_REALTIME_VOICE
     muse_voice_call_init();   /* calls stay unavailable if it fails; notes still work */
 #endif

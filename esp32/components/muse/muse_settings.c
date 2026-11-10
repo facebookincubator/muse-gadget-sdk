@@ -39,6 +39,7 @@ static struct {
     uint8_t mic_gain;
     uint8_t brightness;
     uint16_t sleep_s;
+    uint16_t weather_idle_s;
     uint8_t text_size;
     bool wifi_on;
     bool ble_on;
@@ -53,6 +54,7 @@ static struct {
     .mic_gain = 30,
     .brightness = 100,
     .sleep_s = 120,
+    .weather_idle_s = 30,
     .text_size = MUSE_TEXT_MEDIUM,
     .wifi_on = true,
     .host = DEFAULT_HOST,
@@ -132,6 +134,7 @@ esp_err_t muse_settings_init(void)
 #endif
     load_u8("bright", &s.brightness);
     nvs_get_u16(s_nvs, "sleep_s", &s.sleep_s);
+    nvs_get_u16(s_nvs, "weather_idle_s", &s.weather_idle_s);
     load_u8("text_size", &s.text_size);
     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
         s.wifi_on = b;
@@ -165,6 +168,7 @@ bool muse_settings_speaker_on(void) { return s.speaker_on; }
 int muse_settings_mic_gain(void) { return s.mic_gain; }
 int muse_settings_brightness(void) { return s.brightness; }
 int muse_settings_sleep_s(void) { return s.sleep_s; }
+int muse_settings_weather_idle_s(void) { return s.weather_idle_s; }
 int muse_settings_text_size(void) { return s.text_size; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
@@ -247,6 +251,14 @@ void muse_settings_set_sleep_s(int secs)
     nvs_set_u16(s_nvs, "sleep_s", s.sleep_s);
     nvs_commit(s_nvs);
     notify(MUSE_SETTING_SLEEP);
+}
+
+void muse_settings_set_weather_idle_s(int secs)
+{
+    s.weather_idle_s = clampi(secs, 0, 300);
+    nvs_set_u16(s_nvs, "weather_idle_s", s.weather_idle_s);
+    nvs_commit(s_nvs);
+    notify(MUSE_SETTING_WEATHER);
 }
 
 void muse_settings_set_text_size(int size)

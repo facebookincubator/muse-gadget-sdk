@@ -35,6 +35,7 @@
 #include "muse_chat.h"
 #include "muse_input.h"
 #include "muse_keypad.h"
+#include "muse_lang.h"
 #include "muse_link.h"
 #include "muse_settings.h"
 #include "muse_state.h"
@@ -130,6 +131,12 @@ static const char *const SLEEP_NAMES[] = { "Never", "30 seconds", "1 minute", "2
 static lv_obj_t *s_sleep_checks[SLEEP_COUNT], *s_sleep_rows[SLEEP_COUNT];
 static int s_sleep_shown = -1;
 
+/* Màn hình chờ thời tiết: chọn thời gian nghỉ trước khi hiện (trang Sleep). */
+static const int WEATHER_CHOICES[] = { 0, 15, 30, 60, 120 };
+static const char *const WEATHER_NAMES[] = { "Off", "15 seconds", "30 seconds", "1 minute", "2 minutes" };
+#define WEATHER_COUNT (int)(sizeof(WEATHER_CHOICES) / sizeof(WEATHER_CHOICES[0]))
+static lv_obj_t *s_weather_checks[WEATHER_COUNT];
+
 /* Battery page. */
 static lv_obj_t *s_batt_status, *s_batt_level, *s_batt_drain, *s_batt_full, *s_batt_off, *s_batt_slept, *s_batt_wakes,
     *s_batt_busy, *s_batt_awake;
@@ -154,16 +161,14 @@ static bool wide_layout(void)
 
 static const lv_font_t *settings_font(const lv_font_t *font)
 {
-    if (!wide_layout()) {
-        return font;
+    if (wide_layout()) {
+        if (font == &lv_font_unscii_16 || font == &lv_font_montserrat_16) {
+            font = &lv_font_montserrat_20;
+        } else if (font == &lv_font_montserrat_20) {
+            font = &lv_font_montserrat_28;
+        }
     }
-    if (font == &lv_font_unscii_16 || font == &lv_font_montserrat_16) {
-        return &lv_font_montserrat_20;
-    }
-    if (font == &lv_font_montserrat_20) {
-        return &lv_font_montserrat_28;
-    }
-    return font;
+    return muse_lang_montserrat(font);
 }
 
 /* A 172 px portrait panel cannot fit an icon, name and status side by side. */
@@ -220,7 +225,7 @@ static void set_text(lv_obj_t *l, const char *text)
 
 static lv_obj_t *note(lv_obj_t *list, const char *text)
 {
-    lv_obj_t *l = label(list, s_tiny ? &lv_font_montserrat_14 : &lv_font_montserrat_16, COLOR_DIM, text);
+    lv_obj_t *l = label(list, s_tiny ? &lv_font_montserrat_14 : &lv_font_montserrat_16, COLOR_DIM, T(text));
     lv_obj_set_width(l, lv_pct(100));
     lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
@@ -1372,6 +1377,15 @@ static void on_sleep_choice(lv_event_t *e)
     tick_sleep();
 }
 
+static void on_weather_choice(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    muse_settings_set_weather_idle_s(WEATHER_CHOICES[i]);
+    for (int j = 0; j < WEATHER_COUNT; j++) {
+        set_text(s_weather_checks[j], j == i ? LV_SYMBOL_OK : "");
+    }
+}
+
 static void on_sleep_now(lv_event_t *e)
 {
     (void)e;
@@ -1390,6 +1404,13 @@ static void build_sleep_page(lv_obj_t *tile)
         lv_obj_set_style_text_color(s_sleep_checks[i], lv_color_hex(COLOR_ACCENT), 0);
     }
     button(list, LV_SYMBOL_EYE_CLOSE "  Sleep now", COLOR_ACCENT, on_sleep_now, NULL);
+    note(list, "Show the weather when Muse has been idle for:");
+    for (int i = 0; i < WEATHER_COUNT; i++) {
+        row(list, NULL, T(WEATHER_NAMES[i]), &s_weather_checks[i], on_weather_choice, (void *)(intptr_t)i);
+        lv_obj_set_style_text_color(s_weather_checks[i], lv_color_hex(COLOR_ACCENT), 0);
+        set_text(s_weather_checks[i],
+                 WEATHER_CHOICES[i] == muse_settings_weather_idle_s() ? LV_SYMBOL_OK : "");
+    }
     note(list, "Tap the screen or press either button to wake.");
 }
 

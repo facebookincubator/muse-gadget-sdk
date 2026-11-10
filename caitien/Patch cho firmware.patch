@@ -1,0 +1,606 @@
+--- Màn hình chờ thời tiết — patch cho fork ledienbien-ai/muse-gadget-sdk ---
+--- Áp vào commit d2132fd (đã kiểm chứng: patch này được sinh bằng git diff
+--- từ chính commit đó, ngày 2026-11-11, và đã thử áp lại thành công).
+--- Cách áp: xem README.md cùng thư mục. File mới muse_weather.h/.c chép
+--- vào esp32/components/muse/ (không nằm trong patch này).
+---
+--- Tóm tắt thay đổi:
+---   muse_ui.c         overlay thời tiết + hiện/ẩn theo thời gian không chạm
+---   muse_settings.h/.c cài đặt weather_idle_s (NVS, mẫu theo sleep_s)
+---   muse_settings_ui.c mục chọn thời gian chờ trong trang Sleep
+---   muse_lang.c       chuỗi tiếng Việt mới
+---   muse_app.c        khởi động module thời tiết (SNTP + task fetch)
+---   CMakeLists.txt    thêm muse_weather.c vào danh sách build
+---
+diff --git a/esp32/components/muse/CMakeLists.txt b/esp32/components/muse/CMakeLists.txt
+index 9d4bba6..61fd6ef 100644
+--- a/esp32/components/muse/CMakeLists.txt
++++ b/esp32/components/muse/CMakeLists.txt
+@@ -42,6 +42,7 @@ if(CONFIG_MUSE_ENABLED)
+         "muse_adpcm.c"
+         "muse_settings.c"
+         "muse_settings_ui.c"
++        "muse_weather.c"
+         "muse_text.c"
+         "muse_lang.c"
+         "muse_fonts.c"
+diff --git a/esp32/components/muse/muse_app.c b/esp32/components/muse/muse_app.c
+index bdfbd17..7e1719a 100644
+--- a/esp32/components/muse/muse_app.c
++++ b/esp32/components/muse/muse_app.c
+@@ -33,6 +33,7 @@
+ #include "muse_state.h"
+ #include "muse_ui.h"
+ #include "muse_voice.h"
++#include "muse_weather.h"
+ #include "muse_wifi.h"
+ 
+ static const char *TAG = "muse";
+@@ -78,6 +79,7 @@ void muse_app_run(const muse_board_t *board)
+     muse_battery_init();
+     muse_state_set_caption("WAKING UP...");
+     ESP_ERROR_CHECK(muse_ui_start());
++    muse_weather_start();   /* màn hình chờ thời tiết: SNTP + task Open-Meteo */
+     ESP_LOGI(TAG, "UI built: free internal %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+ 
+     QueueHandle_t q = xQueueCreate(16, sizeof(muse_input_event_t));
+diff --git a/esp32/components/muse/muse_lang.c b/esp32/components/muse/muse_lang.c
+index 24a04a9..94e125b 100644
+--- a/esp32/components/muse/muse_lang.c
++++ b/esp32/components/muse/muse_lang.c
+@@ -232,6 +232,18 @@ static const struct {
+     { "Sleep now", "Tắt màn hình ngay" },
+     { "Tap the screen or press either button to wake.", "Chạm màn hình hoặc nhấn nút bất kỳ để đánh thức." },
+ 
++    /* Settings: màn hình chờ thời tiết. */
++    { "Show the weather when Muse has been idle for:", "Hiện thời tiết sau khi Muse nghỉ được:" },
++    { "15 seconds", "15 giây" },
++    { "Weather", "Thời tiết" },
++    { "Loading weather...", "Đang tải thời tiết…" },
++    { "Feels like", "Cảm giác như" },
++    { "Humidity", "Độ ẩm" },
++    { "Wind", "Gió" },
++    { "Updated", "Cập nhật" },
++    { "Old data", "Dữ liệu cũ" },
++    { "Tap to return to chat", "Chạm để quay lại trò chuyện" },
++
+     /* Settings: battery. */
+     { "BATTERY", "PIN" },
+     { "Used", "Đã dùng" },
+diff --git a/esp32/components/muse/muse_settings.c b/esp32/components/muse/muse_settings.c
+index 29c803b..3cf50e6 100644
+--- a/esp32/components/muse/muse_settings.c
++++ b/esp32/components/muse/muse_settings.c
+@@ -40,6 +40,7 @@ static struct {
+     uint8_t mic_gain;
+     uint8_t brightness;
+     uint16_t sleep_s;
++    uint16_t weather_idle_s;
+     bool wifi_on;
+     bool ble_on;
+     uint8_t lang;
+@@ -54,6 +55,7 @@ static struct {
+     .mic_gain = 30,
+     .brightness = 100,
+     .sleep_s = 120,
++    .weather_idle_s = 30,
+     .wifi_on = true,
+ #if CONFIG_MUSE_LANG_DEFAULT_VI
+     .lang = MUSE_LANG_VI,
+@@ -128,6 +130,7 @@ esp_err_t muse_settings_init(void)
+     load_u8("mic_gain", &s.mic_gain);
+     load_u8("bright", &s.brightness);
+     nvs_get_u16(s_nvs, "sleep_s", &s.sleep_s);
++    nvs_get_u16(s_nvs, "weather_idle_s", &s.weather_idle_s);
+     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
+         s.wifi_on = b;
+     }
+@@ -164,6 +167,7 @@ bool muse_settings_speaker_on(void) { return s.speaker_on; }
+ int muse_settings_mic_gain(void) { return s.mic_gain; }
+ int muse_settings_brightness(void) { return s.brightness; }
+ int muse_settings_sleep_s(void) { return s.sleep_s; }
++int muse_settings_weather_idle_s(void) { return s.weather_idle_s; }
+ bool muse_settings_wifi_on(void) { return s.wifi_on; }
+ bool muse_settings_ble_on(void) { return s.ble_on; }
+ muse_lang_t muse_settings_lang(void) { return (muse_lang_t)s.lang; }
+@@ -240,6 +244,14 @@ void muse_settings_set_sleep_s(int secs)
+     notify(MUSE_SETTING_SLEEP);
+ }
+ 
++void muse_settings_set_weather_idle_s(int secs)
++{
++    s.weather_idle_s = clampi(secs, 0, 300);
++    nvs_set_u16(s_nvs, "weather_idle_s", s.weather_idle_s);
++    nvs_commit(s_nvs);
++    notify(MUSE_SETTING_WEATHER);
++}
++
+ void muse_settings_set_wifi_on(bool on)
+ {
+     s.wifi_on = on;
+diff --git a/esp32/components/muse/muse_settings.h b/esp32/components/muse/muse_settings.h
+index 0d4c319..093c548 100644
+--- a/esp32/components/muse/muse_settings.h
++++ b/esp32/components/muse/muse_settings.h
+@@ -47,6 +47,7 @@ typedef enum {
+     MUSE_SETTING_MIC_GAIN,
+     MUSE_SETTING_BRIGHTNESS,
+     MUSE_SETTING_SLEEP,
++    MUSE_SETTING_WEATHER,
+     MUSE_SETTING_WIFI,          /* on/off or credentials */
+     MUSE_SETTING_BLE,
+     MUSE_SETTING_HATCH,
+@@ -62,6 +63,7 @@ bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */
+ int muse_settings_mic_gain(void);       /* dB, 0..MUSE_MIC_GAIN_MAX */
+ int muse_settings_brightness(void);     /* 10..100 */
+ int muse_settings_sleep_s(void);        /* 0 = never */
++int muse_settings_weather_idle_s(void); /* 0 = off: không hiện màn hình thời tiết */
+ bool muse_settings_wifi_on(void);
+ bool muse_settings_ble_on(void);
+ muse_lang_t muse_settings_lang(void);    /* the screen's, and the voice's for replies not in Vietnamese */
+@@ -77,6 +79,7 @@ void muse_settings_set_speaker_on(bool on);
+ void muse_settings_set_mic_gain(int db);
+ void muse_settings_set_brightness(int pct);
+ void muse_settings_set_sleep_s(int secs);
++void muse_settings_set_weather_idle_s(int secs);
+ void muse_settings_set_wifi_on(bool on);
+ void muse_settings_set_ble_on(bool on);
+ /* Saved now; the screen changes at the next start. */
+diff --git a/esp32/components/muse/muse_settings_ui.c b/esp32/components/muse/muse_settings_ui.c
+index 1d0cbcc..b09c261 100644
+--- a/esp32/components/muse/muse_settings_ui.c
++++ b/esp32/components/muse/muse_settings_ui.c
+@@ -120,6 +120,12 @@ static const char *const SLEEP_NAMES[] = { "Never", "30 seconds", "1 minute", "2
+ #define SLEEP_COUNT (int)(sizeof(SLEEP_CHOICES) / sizeof(SLEEP_CHOICES[0]))
+ static lv_obj_t *s_sleep_checks[SLEEP_COUNT];
+ 
++/* Màn hình chờ thời tiết: chọn thời gian nghỉ trước khi hiện (trang Sleep). */
++static const int WEATHER_CHOICES[] = { 0, 15, 30, 60, 120 };
++static const char *const WEATHER_NAMES[] = { "Off", "15 seconds", "30 seconds", "1 minute", "2 minutes" };
++#define WEATHER_COUNT (int)(sizeof(WEATHER_CHOICES) / sizeof(WEATHER_CHOICES[0]))
++static lv_obj_t *s_weather_checks[WEATHER_COUNT];
++
+ /* Battery page. */
+ static lv_obj_t *s_batt_status, *s_batt_level, *s_batt_drain, *s_batt_full, *s_batt_off, *s_batt_slept, *s_batt_wakes,
+     *s_batt_busy, *s_batt_awake;
+@@ -1179,6 +1185,15 @@ static void on_sleep_choice(lv_event_t *e)
+     muse_settings_set_sleep_s(SLEEP_CHOICES[(int)(intptr_t)lv_event_get_user_data(e)]);
+ }
+ 
++static void on_weather_choice(lv_event_t *e)
++{
++    int i = (int)(intptr_t)lv_event_get_user_data(e);
++    muse_settings_set_weather_idle_s(WEATHER_CHOICES[i]);
++    for (int j = 0; j < WEATHER_COUNT; j++) {
++        set_text(s_weather_checks[j], j == i ? LV_SYMBOL_OK : "");
++    }
++}
++
+ static void on_sleep_now(lv_event_t *e)
+ {
+     (void)e;
+@@ -1195,6 +1210,13 @@ static void build_sleep_page(lv_obj_t *tile)
+         lv_obj_set_style_text_color(s_sleep_checks[i], lv_color_hex(COLOR_ACCENT), 0);
+     }
+     button(list, LV_SYMBOL_EYE_CLOSE, "Sleep now", COLOR_ACCENT, on_sleep_now, NULL);
++    note(list, "Show the weather when Muse has been idle for:");
++    for (int i = 0; i < WEATHER_COUNT; i++) {
++        row(list, NULL, T(WEATHER_NAMES[i]), &s_weather_checks[i], on_weather_choice, (void *)(intptr_t)i);
++        lv_obj_set_style_text_color(s_weather_checks[i], lv_color_hex(COLOR_ACCENT), 0);
++        set_text(s_weather_checks[i],
++                 WEATHER_CHOICES[i] == muse_settings_weather_idle_s() ? LV_SYMBOL_OK : "");
++    }
+     note(list, "Tap the screen or press either button to wake.");
+ }
+ 
+diff --git a/esp32/components/muse/muse_ui.c b/esp32/components/muse/muse_ui.c
+index a417e77..cb8a437 100644
+--- a/esp32/components/muse/muse_ui.c
++++ b/esp32/components/muse/muse_ui.c
+@@ -23,6 +23,7 @@
+ #include "muse_ui.h"
+ 
+ #include <math.h>
++#include <time.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -50,6 +51,7 @@
+ #include "muse_settings.h"
+ #include "muse_settings_ui.h"
+ #include "muse_state.h"
++#include "muse_weather.h"
+ #include "muse_wifi.h"
+ #if CONFIG_MUSE_WATCHER_CAMERA
+ #include "boards/watcher_camera.h"
+@@ -134,6 +136,23 @@ static lv_obj_t *s_image;   /* display.draw_url, over the face */
+ #if CONFIG_MUSE_WATCHER_CAMERA
+ static lv_obj_t *s_camera_hint;
+ #endif
++/* --- Màn hình chờ thời tiết (weather idle screen) --- */
++static lv_obj_t *s_wx_panel;    /* overlay toàn màn hình, mặc định ẩn */
++static lv_obj_t *s_wx_place;
++static lv_obj_t *s_wx_clock;
++static lv_obj_t *s_wx_date;
++static lv_obj_t *s_wx_temp;
++static lv_obj_t *s_wx_desc;
++static lv_obj_t *s_wx_feels;
++static lv_obj_t *s_wx_icon;
++static lv_obj_t *s_wx_hum;
++static lv_obj_t *s_wx_wind;
++static lv_obj_t *s_wx_updated;
++static lv_obj_t *s_wx_stale;
++static lv_obj_t *s_wx_hint;
++static bool s_wx_shown;
++static int s_wx_shown_code = -1;
++static int s_wx_shown_clock = -1;
+ static lv_image_dsc_t s_image_dsc;  /* its data is set once the image is shown */
+ /* The download writes the pixels without the display lock, so a big JPEG isn't
+  * held up by each frame; this guards the buffer and what changed in it. */
+@@ -1048,9 +1067,331 @@ static void on_camera_hint_clicked(lv_event_t *e)
+ }
+ #endif
+ 
++/* ---------- Màn hình chờ thời tiết ----------
++ * Overlay toàn màn hình trên tile mặt Muse (không phải tile thứ 3, để khỏi
++ * đụng vuốt sang Cài đặt). Hiện khi Muse rảnh đủ lâu, ẩn khi chạm/bấm/nói.
++ * Bố cục 320x240 ngang, xem DESIGN.md mục 4. */
++
++#if LV_FONT_MONTSERRAT_48
++#define WX_TEMP_FONT (&lv_font_montserrat_48)
++#else
++#define WX_TEMP_FONT (&lv_font_montserrat_28)
++#endif
++#define WX_SUN 0xffd34d
++#define WX_CLOUD 0xcfc9e8
++#define WX_RAIN 0x6db3ff
++
++static lv_obj_t *wx_dot(lv_obj_t *parent, int x, int y, int d, uint32_t color)
++{
++    lv_obj_t *o = lv_obj_create(parent);
++    lv_obj_remove_style_all(o);
++    lv_obj_set_size(o, d, d);
++    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
++    lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
++    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
++    lv_obj_set_pos(o, x, y);
++    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
++    return o;
++}
++
++static lv_obj_t *wx_line(lv_obj_t *parent, const lv_point_precise_t *pts, int n,
++                         uint32_t color, int width)
++{
++    lv_obj_t *o = lv_line_create(parent);
++    lv_line_set_points(o, pts, n);
++    lv_obj_set_style_line_color(o, lv_color_hex(color), 0);
++    lv_obj_set_style_line_width(o, width, 0);
++    lv_obj_set_style_line_rounded(o, true, 0);
++    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
++    return o;
++}
++
++/* Vẽ lại icon khi mã thời tiết đổi. Tọa độ trong vùng 76x76. */
++static void wx_draw_icon(muse_wx_icon_t icon)
++{
++    lv_obj_clean(s_wx_icon);
++    lv_obj_t *p = s_wx_icon;
++    const lv_point_precise_t rays[8][2] = {
++        {{38, 2}, {38, 12}}, {{38, 64}, {38, 74}},
++        {{2, 38}, {12, 38}}, {{64, 38}, {74, 38}},
++        {{13, 13}, {20, 20}}, {{56, 56}, {63, 63}},
++        {{63, 13}, {56, 20}}, {{20, 56}, {13, 63}},
++    };
++    switch (icon) {
++    case MUSE_WX_SUN:
++        for (int i = 0; i < 8; i++) {
++            wx_line(p, rays[i], 2, WX_SUN, 3);
++        }
++        wx_dot(p, 21, 21, 34, WX_SUN);
++        break;
++    case MUSE_WX_MOON:
++        wx_dot(p, 20, 18, 36, WX_CLOUD);
++        wx_dot(p, 32, 12, 32, 0x000000);   /* khoét thành trăng khuyết */
++        break;
++    case MUSE_WX_PARTLY:
++        wx_dot(p, 40, 6, 20, WX_SUN);
++        wx_dot(p, 12, 40, 22, WX_CLOUD);
++        wx_dot(p, 28, 34, 28, WX_CLOUD);
++        wx_dot(p, 48, 42, 20, WX_CLOUD);
++        break;
++    case MUSE_WX_CLOUDY:
++        wx_dot(p, 10, 34, 26, WX_CLOUD);
++        wx_dot(p, 28, 24, 32, WX_CLOUD);
++        wx_dot(p, 50, 36, 22, WX_CLOUD);
++        break;
++    case MUSE_WX_FOG:
++        wx_dot(p, 12, 26, 22, WX_CLOUD);
++        wx_dot(p, 30, 18, 28, WX_CLOUD);
++        wx_dot(p, 50, 28, 20, WX_CLOUD);
++        for (int i = 0; i < 3; i++) {
++            const lv_point_precise_t ln[2] = {{14, 56 + i * 7}, {62, 56 + i * 7}};
++            wx_line(p, ln, 2, COLOR_DIM, 3);
++        }
++        break;
++    case MUSE_WX_RAIN: {
++        wx_dot(p, 12, 26, 22, WX_CLOUD);
++        wx_dot(p, 30, 18, 28, WX_CLOUD);
++        wx_dot(p, 50, 28, 20, WX_CLOUD);
++        for (int i = 0; i < 3; i++) {
++            int x = 20 + i * 18;
++            const lv_point_precise_t ln[2] = {{x, 56}, {x - 6, 68}};
++            wx_line(p, ln, 2, WX_RAIN, 3);
++        }
++        break;
++    }
++    case MUSE_WX_THUNDER: {
++        wx_dot(p, 12, 26, 22, WX_CLOUD);
++        wx_dot(p, 30, 18, 28, WX_CLOUD);
++        wx_dot(p, 50, 28, 20, WX_CLOUD);
++        const lv_point_precise_t bolt[4] = {{40, 50}, {30, 64}, {38, 64}, {30, 76}};
++        wx_line(p, bolt, 4, WX_SUN, 3);
++        break;
++    }
++    case MUSE_WX_SNOW: {
++        wx_dot(p, 12, 26, 22, WX_CLOUD);
++        wx_dot(p, 30, 18, 28, WX_CLOUD);
++        wx_dot(p, 50, 28, 20, WX_CLOUD);
++        for (int i = 0; i < 3; i++) {
++            int x = 22 + i * 16, y = 58;
++            const lv_point_precise_t a[2] = {{x - 4, y - 4}, {x + 4, y + 4}};
++            const lv_point_precise_t b[2] = {{x + 4, y - 4}, {x - 4, y + 4}};
++            wx_line(p, a, 2, 0xffffff, 2);
++            wx_line(p, b, 2, 0xffffff, 2);
++        }
++        break;
++    }
++    default:
++        break;
++    }
++}
++
++static const char *const WX_WEEKDAYS[7] = {
++    "Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy",
++};
++
++/* Cập nhật chữ trên màn hình thời tiết từ cache (gọi khi hiện + mỗi phút). */
++static void wx_update_labels(void)
++{
++    muse_weather_t w;
++    muse_weather_get(&w);
++
++    time_t now = time(NULL);
++    if (now > 1700000000) {
++        struct tm tmv;
++        localtime_r(&now, &tmv);
++        char buf[16];
++        strftime(buf, sizeof(buf), "%H:%M", &tmv);
++        lv_label_set_text(s_wx_clock, buf);
++        snprintf(buf, sizeof(buf), "%s, %02d/%02d", WX_WEEKDAYS[tmv.tm_wday],
++                 tmv.tm_mday, tmv.tm_mon + 1);
++        lv_label_set_text(s_wx_date, buf);
++        s_wx_shown_clock = tmv.tm_hour * 60 + tmv.tm_min;
++    } else {
++        lv_label_set_text(s_wx_clock, "--:--");
++        lv_label_set_text(s_wx_date, "");
++    }
++
++    if (!w.valid) {
++        lv_label_set_text(s_wx_temp, "--°");
++        lv_label_set_text(s_wx_desc, T("Loading weather..."));
++        lv_label_set_text(s_wx_feels, "");
++        lv_label_set_text(s_wx_hum, "--");
++        lv_label_set_text(s_wx_wind, "--");
++        lv_label_set_text(s_wx_updated, "--:--");
++        lv_obj_add_flag(s_wx_stale, LV_OBJ_FLAG_HIDDEN);
++        if (s_wx_shown_code != (int)MUSE_WX_UNKNOWN) {
++            wx_draw_icon(MUSE_WX_UNKNOWN);
++            s_wx_shown_code = (int)MUSE_WX_UNKNOWN;
++        }
++        return;
++    }
++    char buf[48];
++    snprintf(buf, sizeof(buf), "%d°", (int)lroundf(w.temp_c));
++    lv_label_set_text(s_wx_temp, buf);
++    lv_label_set_text(s_wx_desc, w.desc);
++    snprintf(buf, sizeof(buf), "%s %.0f°", T("Feels like"), w.feels_c);
++    lv_label_set_text(s_wx_feels, buf);
++    if (w.humidity_pct >= 0) {
++        snprintf(buf, sizeof(buf), "%d%%", w.humidity_pct);
++        lv_label_set_text(s_wx_hum, buf);
++    }
++    if (w.wind_kmh >= 0) {
++        snprintf(buf, sizeof(buf), "%.0f km/h", w.wind_kmh);
++        lv_label_set_text(s_wx_wind, buf);
++    }
++    lv_label_set_text(s_wx_updated, w.updated_hhmm);
++    if (w.stale) {
++        lv_label_set_text(s_wx_stale, T("Old data"));
++        lv_obj_clear_flag(s_wx_stale, LV_OBJ_FLAG_HIDDEN);
++    } else {
++        lv_obj_add_flag(s_wx_stale, LV_OBJ_FLAG_HIDDEN);
++    }
++    if (s_wx_shown_code != (int)w.icon) {
++        wx_draw_icon(w.icon);
++        s_wx_shown_code = (int)w.icon;
++    }
++}
++
++static void wx_hide_locked(void)
++{
++    if (s_wx_shown) {
++        lv_obj_add_flag(s_wx_panel, LV_OBJ_FLAG_HIDDEN);
++        s_wx_shown = false;
++    }
++}
++
++void muse_weather_hide(void)
++{
++    wx_hide_locked();
++}
++
++static bool muse_weather_visible(void)
++{
++    return s_wx_shown;
++}
++
++/* Gọi từ frame_tick(): trả về true khi màn thời tiết đang hiện (để khỏi vẽ
++ * avatar phía sau). Hiện khi: IDLE, màn hình sáng, không chạm đủ lâu. */
++static bool muse_weather_tick(float now)
++{
++    (void)now;
++    if (!s_wx_panel) {
++        return false;
++    }
++    float mode_t;
++    muse_mode_t mode = muse_state_mode(&mode_t);
++    int after = muse_weather_idle_timeout();
++    bool want = after > 0 && mode == MUSE_MODE_IDLE && !muse_state_asleep() &&
++                muse_state_idle_secs() >= after;
++    if (want && !s_wx_shown) {
++        wx_update_labels();
++        lv_obj_clear_flag(s_wx_panel, LV_OBJ_FLAG_HIDDEN);
++        s_wx_shown = true;
++    } else if (!want && s_wx_shown) {
++        wx_hide_locked();
++    }
++    if (s_wx_shown) {
++        /* Đồng hồ lên theo từng phút, dữ liệu mới thì cập nhật chữ. */
++        time_t t = time(NULL);
++        if (t > 1700000000) {
++            struct tm tmv;
++            localtime_r(&t, &tmv);
++            if (tmv.tm_hour * 60 + tmv.tm_min != s_wx_shown_clock) {
++                wx_update_labels();
++            }
++        }
++        return true;
++    }
++    return false;
++}
++
++static void on_weather_clicked(lv_event_t *e)
++{
++    (void)e;
++    wx_hide_locked();
++    muse_state_poke();
++}
++
++/* Tạo overlay 1 lần trong build_overlays(). Bố cục 320x240 ngang,
++ * lề 16 px, xem DESIGN.md mục 4.4. */
++static void muse_weather_build(lv_obj_t *scr)
++{
++    s_wx_panel = lv_obj_create(scr);
++    lv_obj_remove_style_all(s_wx_panel);
++    lv_obj_set_size(s_wx_panel, lv_pct(100), lv_pct(100));
++    lv_obj_set_style_bg_color(s_wx_panel, lv_color_black(), 0);
++    lv_obj_set_style_bg_opa(s_wx_panel, LV_OPA_COVER, 0);
++    lv_obj_remove_flag(s_wx_panel, LV_OBJ_FLAG_SCROLLABLE);
++    lv_obj_add_flag(s_wx_panel, LV_OBJ_FLAG_HIDDEN);
++    lv_obj_add_event_cb(s_wx_panel, on_weather_clicked, LV_EVENT_CLICKED, NULL);
++
++    s_wx_place = make_label(s_wx_panel, muse_font(14), COLOR_DIM);
++    lv_label_set_text(s_wx_place, "ĐỒNG XOÀI, BÌNH PHƯỚC");
++    lv_obj_set_style_text_letter_space(s_wx_place, 2, 0);
++    lv_obj_align(s_wx_place, LV_ALIGN_TOP_LEFT, 16, 12);
++
++    s_wx_clock = make_label(s_wx_panel, muse_font(20), COLOR_LIT);
++    lv_label_set_text(s_wx_clock, "--:--");
++    lv_obj_align(s_wx_clock, LV_ALIGN_TOP_RIGHT, -16, 10);
++
++    s_wx_date = make_label(s_wx_panel, muse_font(14), COLOR_DIM);
++    lv_label_set_text(s_wx_date, "");
++    lv_obj_align(s_wx_date, LV_ALIGN_TOP_RIGHT, -16, 34);
++
++    s_wx_temp = make_label(s_wx_panel, WX_TEMP_FONT, COLOR_LIT);
++    lv_label_set_text(s_wx_temp, "--°");
++    lv_obj_align(s_wx_temp, LV_ALIGN_TOP_LEFT, 16, 56);
++
++    s_wx_desc = make_label(s_wx_panel, muse_font(20), COLOR_ACCENT);
++    lv_label_set_text(s_wx_desc, "");
++    lv_obj_align(s_wx_desc, LV_ALIGN_TOP_LEFT, 16, 118);
++
++    s_wx_feels = make_label(s_wx_panel, muse_font(14), COLOR_DIM);
++    lv_label_set_text(s_wx_feels, "");
++    lv_obj_align(s_wx_feels, LV_ALIGN_TOP_LEFT, 16, 144);
++
++    s_wx_icon = lv_obj_create(s_wx_panel);
++    lv_obj_remove_style_all(s_wx_icon);
++    lv_obj_set_size(s_wx_icon, 76, 76);
++    lv_obj_remove_flag(s_wx_icon, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
++    lv_obj_align(s_wx_icon, LV_ALIGN_TOP_RIGHT, -16, 56);
++
++    lv_obj_t *div = lv_obj_create(s_wx_panel);
++    lv_obj_remove_style_all(div);
++    lv_obj_set_size(div, 288, 1);
++    lv_obj_set_style_bg_color(div, lv_color_hex(COLOR_DOT_OFF), 0);
++    lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
++    lv_obj_align(div, LV_ALIGN_TOP_LEFT, 16, 168);
++
++    /* 3 ô thống kê: nhãn 14px dim, số 16px trắng, tâm x = 64 / 160 / 256. */
++    const char *labels[3] = { "Humidity", "Wind", "Updated" };
++    lv_obj_t **vals[3] = { &s_wx_hum, &s_wx_wind, &s_wx_updated };
++    for (int i = 0; i < 3; i++) {
++        int cx = 64 + i * 96;
++        lv_obj_t *lb = make_label(s_wx_panel, muse_font(14), COLOR_DIM);
++        lv_label_set_text(lb, T(labels[i]));
++        lv_obj_align(lb, LV_ALIGN_TOP_MID, cx - 160, 180);
++        *vals[i] = make_label(s_wx_panel, muse_font(16), COLOR_LIT);
++        lv_label_set_text(*vals[i], "--");
++        lv_obj_align(*vals[i], LV_ALIGN_TOP_MID, cx - 160, 198);
++    }
++
++    s_wx_stale = make_label(s_wx_panel, muse_font(14), WX_SUN);
++    lv_label_set_text(s_wx_stale, "");
++    lv_obj_align(s_wx_stale, LV_ALIGN_BOTTOM_RIGHT, -16, -28);
++    lv_obj_add_flag(s_wx_stale, LV_OBJ_FLAG_HIDDEN);
++
++    s_wx_hint = make_label(s_wx_panel, muse_font(14), COLOR_DIM);
++    lv_label_set_text(s_wx_hint, T("Tap to return to chat"));
++    lv_obj_align(s_wx_hint, LV_ALIGN_BOTTOM_MID, 0, -10);
++}
++
+ static void on_any_press(lv_event_t *e)
+ {
+     (void)e;
++    if (s_wx_shown) {
++        wx_hide_locked();   /* chạm: quay lại màn hình chat ngay */
++    }
+     muse_state_poke();
+ }
+ 
+@@ -1131,6 +1472,8 @@ static void build_overlays(void)
+     lv_obj_add_event_cb(s_cover, on_cover_event, LV_EVENT_RELEASED, NULL);
+     lv_obj_add_event_cb(s_cover, on_cover_event, LV_EVENT_PRESS_LOST, NULL);
+ 
++    muse_weather_build(scr);
++
+     if (s_indev) {
+         lv_indev_add_event_cb(s_indev, on_any_press, LV_EVENT_PRESSED, NULL);
+     }
+@@ -1552,6 +1895,7 @@ static void frame_tick(lv_timer_t *timer)
+     if (mode != s_last_mode) {
+         if (mode == MUSE_MODE_LISTENING) {
+             image_hide_locked();
++            muse_weather_hide();
+             muse_ui_show_face();
+         }
+         s_last_mode = mode;
+@@ -1567,6 +1911,9 @@ static void frame_tick(lv_timer_t *timer)
+     if (s_image_dsc.data) {
+         return;   /* the image covers the face */
+     }
++    if (muse_weather_tick(now)) {
++        return;   /* màn hình thời tiết đang hiện: khỏi vẽ avatar phía sau */
++    }
+     if (s_tv && lv_obj_get_scroll_x(s_tv) != 0) {
+         /* Off screen, or sliding to or from settings: hold still so the
+          * slide gets the whole frame time. */
+@@ -1680,6 +2027,7 @@ esp_err_t muse_ui_start(void)
+ 
+ void muse_ui_show_face(void)
+ {
++    muse_weather_hide();
+     if (!s_tv) {
+         return;
+     }

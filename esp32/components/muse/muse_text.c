@@ -315,6 +315,6 @@ const char *muse_text_showable(const char *text, char *buf, size_t cap)
     if (!*p || strlcpy(buf, text, cap) >= cap) {
         return text;
     }
-    muse_text_to_ascii(buf, cap);
+    muse_text_to_caption(buf, cap);
     return buf;
 }

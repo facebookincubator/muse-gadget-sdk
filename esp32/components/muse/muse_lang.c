@@ -115,6 +115,13 @@ static const muse_lang_entry_t MESSAGES[] = {
     { "PHONE SETUP: %s", "Cài qua ĐT: %s" },
     { "PHONE SETUP OFF", "Đã tắt cài đặt qua điện thoại" },
     { "RESETTING...", "Đang đặt lại..." },
+    { "CONNECTING TO MUSE...", "Đang kết nối Muse..." },
+    { "IN A CALL - PRESS TO HANG UP", "Đang gọi - bấm để cúp" },
+    { "HANGING UP...", "Đang cúp máy..." },
+    { "CALL ENDED", "Đã kết thúc cuộc gọi" },
+    { "ONE MOMENT...", "Chờ một chút..." },
+    { "MUSE HAS AN ANSWER", "Muse đã có câu trả lời" },
+    { "Muse is working on it. I'll tell you when it's done.", "Muse đang xử lý. Xong tôi sẽ báo." },
 };
 
 /* The button menu (muse_menu.c) and the pairing card (muse_ui.c): sentence
@@ -178,6 +185,7 @@ static const muse_lang_entry_t MENU[] = {
     { "off", "tắt" },
     { "offline", "mất mạng" },
     { "Connected", "Đã kết nối" },
+    { "Muse is working on it. I'll tell you when it's done.", "Muse đang xử lý. Xong tôi sẽ báo." },
     { "Starting", "Đang khởi động" },
     { "Ready to pair", "Chờ ghép nối" },
     { "App connected", "App đã kết nối" },
@@ -208,6 +216,22 @@ static const muse_lang_entry_t MENU[] = {
     { "Press the %s button", "Bấm nút %s" },
     { "Muse app", "App Muse" },
     { "Pair with Muse app", "Ghép nối với app Muse" },
+    /* Settings: màn hình chờ thời tiết. */
+    { "Show the weather when Muse has been idle for:", "Hiện thời tiết sau khi Muse nghỉ được:" },
+    { "15 seconds", "15 giây" },
+    { "30 seconds", "30 giây" },
+    { "1 minute", "1 phút" },
+    { "2 minutes", "2 phút" },
+    { "5 minutes", "5 phút" },
+    { "10 minutes", "10 phút" },
+    { "Weather", "Thời tiết" },
+    { "Loading weather...", "Đang tải thời tiết..." },
+    { "Feels like", "Cảm giác như" },
+    { "Humidity", "Độ ẩm" },
+    { "Wind", "Gió" },
+    { "Updated", "Cập nhật" },
+    { "Old data", "Dữ liệu cũ" },
+    { "Tap to return to chat", "Chạm để quay lại trò chuyện" },
 };
 
 static const char *lookup(const muse_lang_entry_t *t, size_t n, const char *en)
@@ -241,6 +265,7 @@ const char *muse_lang_menu(const char *en)
 LV_FONT_DECLARE(muse_font_vi_12)
 #endif
 LV_FONT_DECLARE(muse_font_vi_14)
+LV_FONT_DECLARE(muse_font_vi_16)
 LV_FONT_DECLARE(muse_font_vi_20)
 LV_FONT_DECLARE(muse_font_vi_28)
 
@@ -253,6 +278,7 @@ const lv_font_t *muse_lang_montserrat(const lv_font_t *font)
         { &lv_font_montserrat_12, &muse_font_vi_12 },
 #endif
         { &lv_font_montserrat_14, &muse_font_vi_14 },
+        { &lv_font_montserrat_16, &muse_font_vi_16 },
         { &lv_font_montserrat_20, &muse_font_vi_20 },
         { &lv_font_montserrat_28, &muse_font_vi_28 },
     };
