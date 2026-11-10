@@ -114,8 +114,9 @@ On a Linux Home Link (the Muse Linux client):
    the name, as in `Sam's Echo Dot`, as `'\''`). Before acting, check
    that both `grep -c -- "$SEL" "$TMP/.alexa.devicelist.txt"` (how the
    script matches) and `grep -cxF -- "$SEL" "$TMP/.alexa.devicelist.txt"`
-   (the exact line) print `1`. Stop if either does not, or if the line
-   contains `*`, `?`, `[`, `\`, `%20` or repeated spaces (the script
+   (the exact line) print `1`. Stop if either does not, if the name
+   contains `=` (the script splits the line at the first `=`), or if the
+   line contains `*`, `?`, `[`, `\`, `%20` or repeated spaces (the script
    globs and regex-matches the selector); ask the user to rename the
    device in the Alexa app. Multi-room groups
    (family `WHA`) are out of scope for this selector.
@@ -136,7 +137,9 @@ On a Linux Home Link (the Muse Linux client):
 6. Media: `-d "$SEL" -e play` (or `pause`, `next`, `prev`, `shuffle`,
    `repeat`). TuneIn: `-d "$SEL" -r '<station>'` or
    `-d "$SEL" -e playmusic:TUNEIN:'<station>'`. Amazon Music:
-   `-d "$SEL" -e playmusic:AMAZON_MUSIC:'<music>'`.
+   `-d "$SEL" -e playmusic:AMAZON_MUSIC:'<music>'`. `playmusic` splits
+   its argument at the last `:`, so leave any `:` out of the station or
+   music text (`Piano Sonata Moonlight`, not `Piano Sonata: Moonlight`).
 7. Smart-home switching: `-d "$SEL" -e textcommand:'turn on <friendly name>'`
    (or `turn off`); Alexa answers on the selected Echo. This is a
    state-changing action — see Load safety below. Never toggle as a
@@ -161,7 +164,9 @@ On a Linux Home Link (the Muse Linux client):
 Pass text, names and stations as one single-quoted argument (write an
 embedded `'` as `'\''`). The script inserts text into JSON without full
 escaping and turns `"` into `'`, so keep spoken and command text to plain
-words and punctuation.
+words and punctuation. Leave out `*`, `?`, `[` and `\` as well: the
+script expands unquoted text as file patterns, so `*` could turn into
+file names from its working directory.
 
 ## Confirm before acting
 
