@@ -62,6 +62,7 @@ class StopWatchPTT(unittest.TestCase):
             (stage / 'sdkconfig.h').write_text(
                 '#pragma once\n'
                 f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH {int(board == 1)}\n'
+                f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY {int(board == 1)}\n'
                 f'#define CONFIG_MUSE_BOARD_AI_PASSPORT {int(board == 2)}\n'
                 f'#define CONFIG_MUSE_REALTIME_VOICE {realtime}\n'
                 f'#define CONFIG_MUSE_VOICE_NOTE_TOGGLE {int(board == 3)}\n'
@@ -127,6 +128,11 @@ class StopWatchPTT(unittest.TestCase):
             for scenario in range(70, 85):
                 with self.subTest(board=board, realtime=realtime, scenario=scenario):
                     self.run_case('voice', scenario, board=board, realtime=realtime)
+
+    def test_reply_haptic_once_and_no_motor(self):
+        for scenario in (90, 91):
+            with self.subTest(scenario=scenario):
+                self.run_case('voice', scenario, board=1, realtime=0)
 
     def test_note_preserves_buffered_order_and_streams_fresh_pcm_exactly(self):
         # PSRAM PCM, low-memory 320 ms pre-roll, low-memory 120 ms pre-roll.

@@ -42,10 +42,12 @@ void muse_settings_set_hatch_vm(const char *s) { (void)s; abort(); }
 void muse_settings_set_mic_gain(int v) { (void)v; abort(); }
 void muse_settings_set_sleep_s(int v) { (void)v; abort(); }
 void muse_settings_set_speaker_on(bool v) { (void)v; abort(); }
+void muse_settings_set_vibration_on(bool v) { (void)v; abort(); }
 void muse_settings_set_volume(int v) { (void)v; abort(); }
 void muse_settings_set_wifi_on(bool v) { (void)v; abort(); }
 int muse_settings_sleep_s(void) { abort(); }
 bool muse_settings_speaker_on(void) { abort(); }
+bool muse_settings_vibration_on(void) { abort(); }
 int muse_settings_volume(void) { abort(); }
 bool muse_settings_wifi_on(void) { abort(); }
 void muse_state_set_asleep(bool v) { (void)v; abort(); }
