@@ -49,5 +49,5 @@ CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 # CONFIG_PM_ENABLE is not set
 # CONFIG_FREERTOS_USE_TICKLESS_IDLE is not set
 
-# Set your SDK token in build-muse-waveshare-s3-143/sdkconfig (ignored by
+# Set your SDK token in build-muse-lilygo-s3-amoled-175/sdkconfig (ignored by
 # Git), not here.

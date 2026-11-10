@@ -128,11 +128,19 @@ static esp_err_t init(void)
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(s_i2c, &chg_cfg, &s_sy6970), TAG, "sy6970");
     /* Host mode: without this the charger's watchdog resets its settings
      * every 40 s. Then continuous ADC, so REG_BATV always holds a fresh
-     * conversion when read_power polls. */
-    uint8_t wdt;
+     * conversion when read_power polls; the register's other bits (input
+     * source detection, ICO) keep their values, as in LilyGO's driver. And
+     * the battery back on: power_off() leaves the BATFET open, which on USB
+     * only ends in deep sleep, and with it open the cell doesn't charge. */
+    uint8_t wdt, adc, batfet;
     if (sy6970_read(SY6970_REG_WDT, &wdt) == ESP_OK) {
         sy6970_write(SY6970_REG_WDT, wdt & ~0x30);
-        sy6970_write(SY6970_REG_ADC, 0xC0);   /* CONV_START | CONV_RATE */
+        if (sy6970_read(SY6970_REG_ADC, &adc) == ESP_OK) {
+            sy6970_write(SY6970_REG_ADC, adc | 0xC0);   /* CONV_START | CONV_RATE */
+        }
+        if (sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK && (batfet & 0x20)) {
+            sy6970_write(SY6970_REG_BATFET, batfet & ~0x20);
+        }
     } else {
         ESP_LOGW(TAG, "SY6970 not answering; battery state unavailable");
     }
