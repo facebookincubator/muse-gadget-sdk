@@ -28,7 +28,8 @@ power, mode, or mist control, and water-empty alerts.
 ## Local Access Verdict
 
 - **VeSync devices are cloud-only.** Control and state run through the
-  vendor's account API (`smartapi.vesync.com`); the device keeps a
+  vendor's account API (`smartapi.vesync.com`, or `smartapi.vesync.eu`
+  for EU accounts; the client picks the account's region); the device keeps a
   persistent outbound connection to the vendor cloud and exposes no
   LAN control or state endpoint. Community and vendor tooling
   (e.g. pyvesync) is uniformly cloud-based.
@@ -44,8 +45,8 @@ power, mode, or mist control, and water-empty alerts.
 - The user's VeSync account credentials, supplied through approved
   secret storage. Never ask for the password in chat, never put it or
   the session token on a command line, and never print, log, or
-  transmit either. If no credentials are stored, explain this setup
-  instead.
+  send either anywhere except to the VeSync API through the client. If
+  no credentials are stored, explain this setup instead.
 
 ## The Lane
 
@@ -56,8 +57,9 @@ power, mode, or mist control, and water-empty alerts.
   target humidity, mode, mist level, water-lacks (empty tank),
   tank-lifted, humidity-high flags.
 - Commands: on/off, set target humidity, set mode, set mist level.
-- Poll no tighter than 5 minutes; the token is reused, the password
-  is only needed again if the token is rejected.
+- Background polling runs no tighter than every 5 minutes; the reads
+  around a requested change (below) are separate. The token is reused;
+  the password is only needed again if the token is rejected.
 
 ## Changing Settings
 
