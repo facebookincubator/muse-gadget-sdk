@@ -1,6 +1,6 @@
 # Skill Catalog
 
-51 active skills: 50 device/family skills and one shared Google Cast skill.
+52 active skills: 51 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -66,6 +66,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
 - [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — end-user API with a supplied key: status, control, weather, stats and snapshots.
+- [SinricPro cloud devices](gadget-sinricpro-cloud-devices/SKILL.md) — cloud only; needs internet and a SinricPro API key: state, actions, scenes and schedules.
 
 ## Read-only network and camera access
 
