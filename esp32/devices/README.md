@@ -211,8 +211,8 @@ BQ27220 battery gauge and SD card on the panel's SPI2 bus. Its UI is Muse's
 e-ink layer (`components/muse/eink/`, `CONFIG_MUSE_UI_FREEINK`) rather than
 LVGL: [FreeInk](https://github.com/Free-Ink/freeink-sdk) drives the panel from
 its `sticky` profile, and the layer draws the face, Settings and FreeInk's
-keyboard in black on white. Muse animates once a second on fast partial
-refreshes, with a clean refresh every 30 frames and on page changes, images and
+keyboard in black on white. Short pulses settle changed pixels across frames,
+with a full cleanup every 120 changed frames and on page changes, images and
 sleep; images show in four grays. Asleep, the panel keeps its last picture at
 no power. Progress is a bar along the bottom edge, as on Muse's square panels.
 The AI button starts a voice note and confirms pairing; touch swipes to
