@@ -135,10 +135,16 @@ static esp_err_t init(void)
     uint8_t wdt, adc, batfet;
     if (sy6970_read(SY6970_REG_WDT, &wdt) == ESP_OK) {
         esp_err_t err = sy6970_write(SY6970_REG_WDT, wdt & ~0x30);
-        if (err == ESP_OK && sy6970_read(SY6970_REG_ADC, &adc) == ESP_OK) {
+        if (err == ESP_OK) {
+            err = sy6970_read(SY6970_REG_ADC, &adc);
+        }
+        if (err == ESP_OK) {
             err = sy6970_write(SY6970_REG_ADC, adc | 0xC0);   /* CONV_START | CONV_RATE */
         }
-        if (err == ESP_OK && sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK && (batfet & 0x20)) {
+        if (err == ESP_OK) {
+            err = sy6970_read(SY6970_REG_BATFET, &batfet);
+        }
+        if (err == ESP_OK && (batfet & 0x20)) {
             err = sy6970_write(SY6970_REG_BATFET, batfet & ~0x20);
         }
         if (err != ESP_OK) {
@@ -355,10 +361,12 @@ static esp_err_t power_off(void)
     panel_sleep(true);
     gpio_set_level(LCD_EN, 0);
     /* On battery, opening the BATFET is a real power off (plugging USB starts
-     * it again). On USB the rail stays up, so fall through to deep sleep with
-     * BOOT as the wake button. */
-    uint8_t batfet;
-    if (sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK) {
+     * it again). With input power (PG_STAT) the BATFET stays closed, so the
+     * cell keeps charging, and the board deep-sleeps with BOOT as the wake
+     * button. */
+    uint8_t status, batfet;
+    bool input = sy6970_read(SY6970_REG_STATUS, &status) == ESP_OK && (status & 0x04);
+    if (!input && sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK) {
         sy6970_write(SY6970_REG_BATFET, batfet | 0x20);
     }
     ESP_RETURN_ON_ERROR(esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0), TAG, "boot wake");

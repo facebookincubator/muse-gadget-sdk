@@ -947,8 +947,9 @@ RTC on the shared I2C bus, and no speaker or microphone: Muse's replies are
 text on screen. BOOT confirms pairing (a tap on the screen does too),
 settings on the touchscreen. The SY6970's own ADC reports the battery
 voltage and the real charging state over I2C; menu power-off opens the
-charger's BATFET, a true off on battery, and falls back to deep sleep with
-BOOT as the wake button on USB. The panel is driven like the Waveshare
+charger's BATFET, a true off on battery (plug in USB to turn it back on;
+BOOT doesn't), and on USB deep-sleeps with BOOT as the wake button while
+the battery keeps charging. The panel is driven like the Waveshare
 AMOLED-1.43 (banded flush, even-aligned windows, brightness over 0x51); the
 CST9217 reports both axes inverted, which the touch driver's mirror flags
 undo. Pins follow LilyGO's `pin_config.h` for the H0175Y003AM screen.

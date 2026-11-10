@@ -46,7 +46,11 @@ class LilygoS3Amoled175(unittest.TestCase):
         # power_off() opens the BATFET; on USB that ends in deep sleep, and
         # the next boot has to close it again or the cell never charges.
         source = BOARD.read_text()
-        self.assertIn('batfet | 0x20', function(source, 'power_off'))
+        off = function(source, 'power_off')
+        self.assertIn('batfet | 0x20', off)
+        # Only on battery: with input power the cell has to keep charging.
+        self.assertIn('(status & 0x04)', off)
+        self.assertIn('if (!input && sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK)', off)
         self.assertIn('sy6970_write(SY6970_REG_BATFET, batfet & ~0x20)', function(source, 'init'))
 
     def test_board_is_wired_into_the_lists(self):
