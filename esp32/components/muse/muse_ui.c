@@ -949,7 +949,8 @@ static void build_answer(lv_obj_t *face, int ring_in)
 
     l = &s_answers[ANSWER_READ];
     l->font = caption_font();
-    l->scale = s_w >= 400 ? 2 : 1;
+    /* Rim hints fix a narrow reading column; doubled letters wouldn't fit it. */
+    l->scale = s_w >= 400 && !muse_board->rim_controls ? 2 : 1;
     cw = lv_font_get_glyph_width(l->font, 'M', ' ') * l->scale;
     pitch = (lv_font_get_line_height(l->font) + CAPTION_LINE_SPACE) * l->scale;
     int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 - s_h / 2;

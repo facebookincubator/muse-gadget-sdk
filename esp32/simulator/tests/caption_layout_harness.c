@@ -43,6 +43,19 @@ static void check_read_caption(const char *text)
     assert(size.y * l->scale <= l->h);
 }
 
+/* Rim hints fix a narrow reading column (StopWatch): keep its compact font. */
+static void check_rim_column(void)
+{
+    muse_board_t rim = *sim_board_get();
+    rim.rim_controls = true;
+    muse_board = &rim;
+    build_answer(lv_obj_create(lv_screen_active()), (s_w < s_h ? s_w : s_h) / 2 - 10);
+    const answer_layout_t *l = &s_answers[ANSWER_READ];
+    assert(l->scale == 1);
+    assert(l->w <= 13 * lv_font_get_glyph_width(caption_font(), 'M', ' '));
+    muse_board = sim_board_get();
+}
+
 int main(void)
 {
     sim_time_reset();
@@ -64,6 +77,7 @@ int main(void)
     assert(lv_obj_get_style_transform_scale_x(s_reply_lbl, 0) == 256);
     sim_services_set_speaker(false);
     check_read_caption("Back in the centre.");
+    check_rim_column();
     lv_deinit();
     return 0;
 }
