@@ -645,10 +645,17 @@ esp_err_t voice_board_speaker_write(const int32_t *frames, size_t count) {
     bool audible = false;
     for (size_t i = 0; i < count * 2; i++) audible |= frames[i] / 65536 != 0;
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool starting = !s_playing && audible;
+    xSemaphoreGive(s_lock);
+    // The reply's first sound waits for a PWR beep to end, so none of it is
+    // lost under the beep; once it plays, cue_task leaves the speaker alone.
+    if (starting) xSemaphoreTake(s_cue_lock, portMAX_DELAY);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
     // A cue owns the speaker; a reply keeps its pace without writing over it.
     if (!s_playing && audible && !s_cue) s_playing = speaker_on();
     bool playing = s_playing && !s_cue;
     xSemaphoreGive(s_lock);
+    if (starting) xSemaphoreGive(s_cue_lock);
     if (!playing) {
         vTaskDelay(pdMS_TO_TICKS(count * 1000 / VOICE_SPEAKER_RATE));
         return ESP_OK;
