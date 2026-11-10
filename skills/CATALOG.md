@@ -1,6 +1,6 @@
 # Skill Catalog
 
-49 active skills: 48 device/family skills and one shared Google Cast skill.
+51 active skills: 50 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -19,6 +19,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 ## Speakers, displays and TVs
 
+- [Amazon Echo](gadget-amazon-echo/SKILL.md) — cloud only; needs internet, a Linux Home Link and an Amazon login: TTS, volume, media and confirmed switching.
 - [Apple HomePod mini](gadget-apple-homepod-mini/SKILL.md) — supported volume, transport and grouping controls.
 - [Apple TV 4K](gadget-apple-tv-4k/SKILL.md) — paired remote, apps and keyboard.
 - [Freebox Player Pop](gadget-freebox-player-pop/SKILL.md) — Cast and Android TV Remote v2.
@@ -63,6 +64,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [ESPHome devices](gadget-esphome-devices/SKILL.md) — entities exposed by installed firmware.
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
+- [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — end-user API with a supplied key: status, control, weather, stats and snapshots.
 
 ## Read-only network and camera access
 
