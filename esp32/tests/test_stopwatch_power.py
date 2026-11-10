@@ -90,7 +90,7 @@ class StopWatchPower(unittest.TestCase):
         code = COMMON + self.flags + "\n" + defines(self.board, r"PMIC_\w+|POWER_\w+|CLICK_\w+|REST_\w+|IRQ_\w+") + r'''
 #define GPIO_NUM_12 12
 static uint8_t regs[256];
-static int fail_reg = -1, stuck, writes_to_status;
+static int fail_reg = -1, fail_write_reg = -1, stuck, writes_to_status;
 static uint8_t key;
 static int64_t now = 10000000;
 static void *s_pmic;
@@ -103,7 +103,7 @@ static int reg_read(void *dev, uint8_t reg, uint8_t *out, size_t n) {
 }
 static int reg_write(void *dev, uint8_t reg, const uint8_t *data, size_t n) {
     (void)dev; assert(n == 1);
-    if (reg == fail_reg) return -7;
+    if (reg == fail_reg || reg == fail_write_reg) return -7;
     if (reg >= 0x40 && reg <= 0x42) { assert(data[0] == 0); ++writes_to_status; }
     regs[reg] = data[0]; return ESP_OK;
 }
@@ -211,6 +211,11 @@ int main(int argc, char **argv) {
         reset_wait(); wait_buttons(1000); assert(waited_n == 3 && waited_ms == 1000);
         reset_wait(); wait_buttons(400); assert(waited_n == 3 && waited_ms == 400);
         s_pmic_irq = false; reset_wait(); wait_buttons(10000); assert(waited_n == 2 && waited_ms == 200);
+    } else if (test == 11) {   /* a click whose status won't clear counts once, when it clears */
+        regs[0x42] = 0x01; fail_write_reg = 0x42;
+        assert(sample(0, 10000) == 0 && !line() && s_irq_stuck);
+        fail_write_reg = -1; assert(sample(0, 10000) == TAP && line());
+        assert(sample(0, 10000) == 0);
     } else {   /* a line that won't clear is distrusted until it reads high again */
         stuck = 1; assert(sample(0, 10000) == 0 && s_irq_stuck);
         reset_wait(); wait_buttons(1000); assert(waited_n == 2 && waited_ms == 200);
@@ -220,7 +225,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 '''
-        self.run_cases(self.build("irq", code), 12)
+        self.run_cases(self.build("irq", code), 13)
 
     def test_oled_rail(self):
         """The OLED's rail goes off while paused and its state comes back with it."""

@@ -360,9 +360,11 @@ static unsigned take_power_irq(void)
     }
     uint8_t st = 0;
     bool read = reg_read(s_pmic, PMIC_IRQ_STATUS3, &st, 1) == ESP_OK;
-    pmic_irq_clear();
+    /* A click whose status didn't clear is read again on the next poll:
+     * report it then, so it isn't counted twice. */
+    bool cleared = pmic_irq_clear() == ESP_OK;
     s_irq_stuck = gpio_get_level(PMIC_IRQ_GPIO) == 0;
-    if (!read) {
+    if (!read || !cleared) {
         return 0;
     }
     return (st & PMIC_IRQ_BTN_CLICK ? 1 : 0) + (st & PMIC_IRQ_BTN_DOUBLE ? 2 : 0);
