@@ -105,6 +105,9 @@ static void rgb_task(void *arg)
 
 static esp_err_t init(void)
 {
+    /* A BOOT wake (power_off) leaves GPIO0 as an RTC IO; hand it back to the
+     * digital matrix before audio_init makes it the I2S bit clock. */
+    rtc_gpio_deinit(GPIO_NUM_0);
     const i2c_master_bus_config_t bus = {
         .i2c_port = I2C_NUM_0, .sda_io_num = GPIO_NUM_47, .scl_io_num = GPIO_NUM_48,
         .clk_source = I2C_CLK_SRC_DEFAULT, .glitch_ignore_cnt = 7,
@@ -268,6 +271,7 @@ static esp_err_t read_power(muse_power_t *out)
 static esp_err_t power_off(void)
 {
     set_brightness(0);
+    if (s_panel) esp_lcd_panel_disp_on_off(s_panel, false);
     led_strip_clear(s_rgb);
     if (s_tx) (void)i2s_channel_disable(s_tx);
     if (s_rx) (void)i2s_channel_disable(s_rx);

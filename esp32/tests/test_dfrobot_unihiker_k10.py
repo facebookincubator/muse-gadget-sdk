@@ -50,6 +50,14 @@ class DFRobotUnihikerK10(unittest.TestCase):
         # GPIO0 is the I2S bit clock until power off hands it back to BOOT.
         self.assertLess(power_off.index('i2s_channel_disable(s_tx)'), power_off.index('gpio_config('))
         self.assertLess(power_off.index('gpio_config('), power_off.index('esp_sleep_enable_ext0_wakeup'))
+        self.assertLess(power_off.index('esp_lcd_panel_disp_on_off(s_panel, false)'),
+                        power_off.index('esp_deep_sleep_start()'))
+
+    def test_boot_wake_returns_the_bit_clock_pin_to_digital(self):
+        # After an EXT0 wake GPIO0 stays an RTC IO, and I2S setup doesn't undo
+        # that: init (which runs before audio_init) must, or audio is dead.
+        init = function(self.board, 'init')
+        self.assertLess(init.index('rtc_gpio_deinit(GPIO_NUM_0)'), init.index('i2c_new_master_bus'))
 
     def test_led_breathing_stays_smooth_after_weeks_of_uptime(self):
         line = re.search(r'^\s*float phase = .*;$', self.board, re.M)
