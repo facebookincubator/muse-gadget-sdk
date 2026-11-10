@@ -66,7 +66,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [ESPHome devices](gadget-esphome-devices/SKILL.md) — entities exposed by installed firmware.
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
-- [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — end-user API with a supplied key: status, control, weather, stats and snapshots.
+- [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — cloud only; needs internet and a Tuya end-user API key: status, confirmed control, weather, stats and snapshots.
 - [SinricPro cloud devices](gadget-sinricpro-cloud-devices/SKILL.md) — cloud only; needs internet and a SinricPro API key: state, actions, scenes and schedules.
 
 ## Read-only network and camera access
