@@ -108,6 +108,13 @@
         <option value="120">2 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option>
       </select>
     </section>
+
+    <section>
+      <h2>Firmware OTA Update</h2>
+      <label for="ota-url">Firmware .bin URL (GitHub Releases direct link)</label>
+      <input id="ota-url" type="text" autocomplete="off" placeholder="https://github.com/thanhtupppp/muse-gadget-sdk/releases/download/v1.0.0/muse-gadget.bin">
+      <button id="ota-btn">Update Firmware OTA</button>
+    </section>
   </fieldset>
 
   <section>
@@ -229,6 +236,13 @@ for (const [id, cmd, fmt] of [['volume', 'volume', v => `${v}%`], ['mic', 'mic_g
 }
 $('speaker').onchange = () => send('speaker', $('speaker').checked ? 1 : 0);
 $('sleep').onchange = () => send('sleep', $('sleep').value);
+
+$('ota-btn').onclick = async () => {
+  const url = $('ota-url').value.trim();
+  if (!url) { log('Please enter a firmware .bin URL', 'bad'); return; }
+  log(`Triggering OTA update from: ${url}...`, 'ok');
+  await send('ota', url);
+};
 
 // Keep Wi-Fi/Muse state fresh while connected.
 setInterval(() => { if (device?.gatt.connected && !$('controls').disabled) refresh().catch(() => {}); }, 3000);

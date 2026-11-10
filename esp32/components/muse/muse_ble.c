@@ -171,6 +171,14 @@ static void run_command(char *cmd)
         muse_settings_set_brightness(n);
     } else if (!strcmp(cmd, "sleep") && parse_int(v, 0, 3600, &n)) {
         muse_settings_set_sleep_s(n);
+    } else if (!strcmp(cmd, "ota")) {
+        if (v[0]) {
+            muse_state_set_caption("OTA: UPDATING...");
+            muse_link_ota(v);
+            res = "ota started";
+        } else {
+            res = "error: missing url";
+        }
     } else {
         res = "error: unknown command or bad value";
     }

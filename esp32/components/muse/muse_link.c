@@ -291,3 +291,10 @@ void muse_wifi_forget(const char *ssid)
         s_ops->wifi_forget(ssid);
     }
 }
+
+void muse_link_ota(const char *url)
+{
+    if (s_ops && s_ops->ota) {
+        s_ops->ota(url);
+    }
+}

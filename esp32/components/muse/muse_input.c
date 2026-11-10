@@ -897,6 +897,17 @@ static bool console_command(char *line, bool whole)
         return true;
     }
 #endif
+    if (!strncmp(line, "ota=", 4)) {
+        if (line[4]) {
+            muse_state_set_caption("OTA: UPDATING...");
+            muse_link_ota(line + 4);
+            printf("@ota started: %s\n", line + 4);
+        } else {
+            printf("@ota error: missing url\n");
+        }
+        fflush(stdout);
+        return true;
+    }
     if (!strcmp(line, "status")) {
         size_t cap = 1024;   /* long SSID, host and VM names escaped: past 512 */
         char *json = heap_caps_malloc(cap, MUSE_BIG_CAPS);

@@ -78,6 +78,7 @@ typedef struct {
     void (*ble_quiet)(bool quiet);                /* a Wi-Fi video stream: no BLE advertising until false */
     int (*wifi_saved)(muse_wifi_saved_t *out, int max);   /* most recently joined first */
     void (*wifi_forget)(const char *ssid);        /* one saved network; empty forgets them all */
+    void (*ota)(const char *url);                 /* download firmware and apply OTA */
 } muse_link_ops_t;
 
 /* Pauses BLE advertising (setup's, or the companion's) while a Wi-Fi video
@@ -85,6 +86,8 @@ typedef struct {
  * beacon period, and the stream's packets wait out that half. Connections
  * stay up. Calls nest; false releases one. */
 void muse_link_ble_quiet(bool quiet);
+
+void muse_link_ota(const char *url);
 
 void muse_link_register(const muse_link_ops_t *ops);
 
