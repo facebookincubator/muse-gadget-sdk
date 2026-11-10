@@ -62,6 +62,7 @@ class StopWatchPTT(unittest.TestCase):
             (stage / 'sdkconfig.h').write_text(
                 '#pragma once\n'
                 f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH {int(board == 1)}\n'
+                f'#define CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY {int(board == 1)}\n'
                 f'#define CONFIG_MUSE_BOARD_AI_PASSPORT {int(board == 2)}\n'
                 f'#define CONFIG_MUSE_REALTIME_VOICE {realtime}\n'
                 f'#define CONFIG_MUSE_VOICE_NOTE_TOGGLE {int(board == 3)}\n'

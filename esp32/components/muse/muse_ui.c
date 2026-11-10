@@ -179,7 +179,7 @@ static lv_obj_t *s_meter[METER_SEGS];
 static lv_obj_t *s_speaker;
 static lv_obj_t *s_speaker_icon;
 static lv_obj_t *s_aux_icon;
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
 static lv_obj_t *s_talk_hint_lbl, *s_end_hint_lbl;
 #define CALL_HINT_OUT 26   /* px outwards from the rim icon's x: the 320 px avatar's sparkles reach ~125 */
 #endif
@@ -1528,7 +1528,7 @@ static void build_overlays(void)
         lv_obj_align(s_ptt_hint, muse_board->talk_hint.align, muse_board->talk_hint.x, muse_board->talk_hint.y);
         s_spk_hint = make_control_icon(scr, &muse_board->speaker_hint, LV_SYMBOL_VOLUME_MID, 0xffd060);
         s_pwr_hint = make_control_icon(scr, &muse_board->power_hint, LV_SYMBOL_POWER, 0xff8080);
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
         /* During a push-to-talk call: what yellow does now, and that blue
          * hangs up. Under each rim icon, pushed out towards the rim, clear of
          * the avatar and its sparkles (CALL_HINT_OUT). */
@@ -1869,7 +1869,7 @@ static void update_status(muse_mode_t mode, float now)
         uint32_t working = muse_pixel_working_accent();
         if (working) accent = working;   /* the ring and label match the working avatar */
     }
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
     const char *call_name = muse_voice_call_label();
     const char *hint = muse_voice_call_hint();
     if (call_name) name = call_name;

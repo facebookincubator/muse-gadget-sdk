@@ -99,7 +99,7 @@ bool muse_voice_in_call(void) { return muse_voice_call_view() != MUSE_VOICE_VIEW
 bool muse_voice_ptt_call(void) { return muse_voice_in_call() && atomic_load(&s_ptt_call); }
 bool muse_voice_ptt_enabled(void)
 {
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
     return !muse_settings_voice_notes();
 #else
     return false;
@@ -1412,7 +1412,7 @@ static void voice_task(void *arg)
             pre_reset();
             muse_state_set_level(0);
             if (atomic_load(&s_shutdown) || muse_state_mode(NULL) == MUSE_MODE_OFF) continue;
-#if CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH
+#if CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY
             /* Other boards retain tap-to-call beside holding for a note. */
             if (result == NOTE_TAP && s_press_input_epoch == muse_input_call_epoch()
                 && muse_voice_call_ready()) {
