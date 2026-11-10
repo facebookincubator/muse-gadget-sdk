@@ -391,7 +391,7 @@ int main(int argc,char **argv) {
     if(scenario>=90) {
         if(scenario==90) test_board.vibrate=haptic;
         bool delivered;
-        assert(!hatch_reply(&delivered) && delivered && haptic_count==(scenario==90 ? 1u : 0u));
+        assert(!hatch_reply(&delivered, false) && delivered && haptic_count==(scenario==90 ? 1u : 0u));
         free(s_pre); return 0;
     }
     if(scenario>=70) {
