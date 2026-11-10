@@ -55,10 +55,12 @@ turns them on.
   select in the menu.
 - R (BOOT, GPIO0): opens the menu and steps down it. Held at reset it enters
   the ROM bootloader, as on any S3.
-- L (XL9555 P0.5): turns the speaker on and off.
-- Q (XL9555 P0.6, listed by xiaozhi but unused there): power. A tap turns
-  the screen off or on, a 2 s hold powers off. Its resting level is read at
-  boot, so either polarity works.
+- L (XL9555 P0.5, active low): turns the speaker on and off.
+- Q (XL9555 P0.6, active low; listed by xiaozhi but unused there): power. A
+  tap turns the screen off or on, a 2 s hold powers off.
+- A key still held at boot (M switches the box on from off, on battery) is a
+  press already under way: letting it go does nothing, and Q held then
+  doesn't count toward powering off.
 
 ## Screen
 
@@ -93,7 +95,7 @@ turns them on.
 
 ## Hardware verification
 
-Checked on one unit, powered over USB:
+Checked on one unit, powered over USB unless it says battery:
 
 - Boot reports the board name and 8 MB PSRAM, with no panic or reset loop.
 - BLE pairing with the Muse app (with an SDK token in the build), Wi-Fi and
@@ -101,7 +103,10 @@ Checked on one unit, powered over USB:
   `int=34K/23K min=19K` once Muse connected.
 - The speaker plays the built-in MP3 (console key `m`) and the
   `>test.loopback` tones; the mic records voice notes that reach Muse.
-- Keys M, R, L and Q as above.
+- Keys M, R, L and Q as above. Port 0 reads 0x7F with every key up, on USB
+  and on battery alike: L and Q high, M low.
+- On battery: a 2 s hold of Q powers off, M switches the box back on, and it
+  stays on once M is let go.
 - The picture turns over with the box, and the key icons sit along the top
   edge by keys M and R.
 
@@ -109,11 +114,9 @@ Still to check:
 
 1. Internal RAM with the 8-line strips, through a live call and a voice note
    (`min=` in the heartbeat should stay above about 8K).
-2. A boot on battery: the board stays on after the power key is released.
-3. Playback after the audio has rested on battery (asleep, unplugged) and
+2. Playback after the audio has rested on battery (asleep, unplugged) and
    reopened: xiaozhi keeps the ES8389's output open for fear that reopening
    the duplex bus leaves it silent on IDF 6. On USB the audio never rests.
-4. The menu: volume changes and is kept across a restart.
-5. Battery: the percentage and the charging state.
-6. Power off on battery, and which key turns it back on; on USB, deep sleep
-   and waking on R, M and Q.
+3. The menu: volume changes and is kept across a restart.
+4. Battery: the percentage and the charging state.
+5. On USB, deep sleep and waking on R, M and Q.

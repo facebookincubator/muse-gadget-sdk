@@ -16,7 +16,12 @@
 like the other boards with the full UI, its screen lit again after a wake
 from deep sleep, and its third-party panel table listed with its licence."""
 from pathlib import Path
+import os
 import re
+import shlex
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +75,120 @@ class Box2Power(unittest.TestCase):
         self.assertIn('gpio_hold_dis(LCD_BL);', init)
         self.assertIn('gpio_deep_sleep_hold_dis();', init)
         self.assertLess(init.index('gpio_hold_dis(LCD_BL);'), init.index('i2c_new_master_bus'))
+
+
+def function(source, signature):
+    start = source.index(signature)
+    pos, depth = source.index('{', start) + 1, 1
+    while depth:
+        depth += (source[pos] == '{') - (source[pos] == '}')
+        pos += 1
+    return source[start:pos]
+
+
+class Box2Keys(unittest.TestCase):
+    # The keys' own code, compiled against a fake expander and clock: Q and L
+    # read low pressed and M high, on USB and on battery (checked on a unit),
+    # and a key held at boot is a press already under way.
+    HARNESS = r'''
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+typedef int esp_err_t;
+#define ESP_OK 0
+#define XL9555_IN0 0x00
+#define MUSE_BTN_TALK_PRESS 0x01
+#define MUSE_BTN_TALK_RELEASE 0x02
+#define MUSE_BTN_SPEAKER_PRESS 0x04
+#define MUSE_BTN_SPEAKER_RELEASE 0x08
+#define MUSE_BTN_POWER_PRESS 0x10
+#define MUSE_BTN_POWER_RELEASE 0x20
+#define MUSE_BTN_POWER_LONG 0x40
+static uint8_t s_port0;
+static int64_t s_now_us;
+static esp_err_t xl_read2(uint8_t reg, uint8_t val[2])
+{
+    (void)reg;
+    val[0] = s_port0;
+    val[1] = 0xff;
+    return ESP_OK;
+}
+static int64_t esp_timer_get_time(void)
+{
+    return s_now_us;
+}
+@KEYS@
+static unsigned run(uint8_t port0, int ms)
+{
+    unsigned ev = 0;
+    s_port0 = port0;
+    for (int t = 0; t < ms; t += 10) {
+        s_now_us += 10000;
+        ev |= poll_expander();
+    }
+    return ev;
+}
+int main(void)
+{
+    keys_at_boot(0x3f);   /* Q held: it woke the box */
+    printf("q_boot_held %x\n", run(0x3f, 3000));
+    printf("q_boot_release %x\n", run(0x7f, 100));
+    printf("q_press %x\n", run(0x3f, 100));
+    printf("q_hold %x\n", run(0x3f, 2100));
+    printf("q_release %x\n", run(0x7f, 100));
+    keys_at_boot(0xff);   /* M held: it switched the box on */
+    printf("m_boot_held %x\n", run(0xff, 1000));
+    printf("m_boot_release %x\n", run(0x7f, 100));
+    printf("m_tap %x\n", run(0xff, 100) | run(0x7f, 100));
+    keys_at_boot(0x5f);   /* L held */
+    printf("l_boot_held %x\n", run(0x5f, 1000));
+    printf("l_boot_release %x\n", run(0x7f, 100));
+    keys_at_boot(0x7f);   /* nothing held */
+    printf("q_tap %x\n", run(0x3f, 100) | run(0x7f, 100));
+    printf("l_tap %x\n", run(0x5f, 100) | run(0x7f, 100));
+    return 0;
+}
+'''
+
+    def test_key_held_at_boot_is_not_a_press(self):
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        if not cc or not shutil.which(cc[0]):
+            self.skipTest('C compiler unavailable')
+        source = BOARD.read_text()
+        defines = '\n'.join(re.findall(r'^#define (?:XL_KEY_[LQM]|POWER_HOLD_US) .*$', source, re.M))
+        keys = re.search(r'typedef struct \{\n    bool pressed;\n    uint8_t stable;\n\} xl_key_t;\n'
+                         r'static xl_key_t s_m, s_l, s_q;\n', source).group(0)
+        state = 'static int64_t s_q_down_us;\nstatic bool s_q_long;\n'
+        code = '\n\n'.join(function(source, sig) for sig in (
+            'static bool m_down(', 'static bool l_down(', 'static bool q_down(', 'static void keys_at_boot(',
+            'static unsigned debounce(', 'static unsigned poll_expander('))
+        with tempfile.TemporaryDirectory() as tmp:
+            src, exe = Path(tmp) / 'keys.c', Path(tmp) / 'keys'
+            src.write_text(self.HARNESS.replace('@KEYS@', '\n'.join((defines, keys, state, code))))
+            subprocess.run(cc + ['-std=c11', '-Wall', '-Werror', '-Wno-unused-function', str(src), '-o', str(exe)],
+                           check=True)
+            out = dict(line.split() for line in subprocess.run([str(exe)], capture_output=True, text=True,
+                                                               check=True).stdout.splitlines())
+        ev = {k: int(v, 16) for k, v in out.items()}
+        self.assertEqual(ev['q_boot_held'], 0)           # no press, and no power-off hold
+        self.assertEqual(ev['q_boot_release'], 0x20)     # the held press ends, nothing more
+        self.assertEqual(ev['q_press'], 0x10)
+        self.assertEqual(ev['q_hold'], 0x40)             # a real hold still powers off
+        self.assertEqual(ev['q_release'], 0x20)
+        self.assertEqual(ev['m_boot_held'], 0)
+        self.assertEqual(ev['m_boot_release'], 0x02)
+        self.assertEqual(ev['m_tap'], 0x03)
+        self.assertEqual(ev['l_boot_held'], 0)
+        self.assertEqual(ev['l_boot_release'], 0x08)
+        self.assertEqual(ev['q_tap'], 0x30)
+        self.assertEqual(ev['l_tap'], 0x0c)
+
+    def test_power_off_waits_for_the_keys_only_so_long(self):
+        source = BOARD.read_text()
+        off = function(source, 'static esp_err_t power_off(void)')
+        self.assertIn('waited < KEYS_UP_WAIT_MS', off)
+        self.assertNotIn('do {', off)
+        self.assertNotIn('s_keys_idle', source)
 
 
 class Box2ThirdParty(unittest.TestCase):
