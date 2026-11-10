@@ -100,6 +100,20 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         self.assertIn("!CONFIG_MUSE_BOARD_WAVESHARE_S3_175", guard)
         self.assertIn("if (advertise) start_ble_setup_server_if_needed();", companion)
 
+    def test_forgetting_phones_works_before_ble_starts(self) -> None:
+        # On the lazy-BLE boards the stack may still be down when Settings'
+        # "Forget paired phones" runs. ble_store_clear() can't reach the bonds
+        # then, and NimBLE would load them again on start: clear its NVS store.
+        source = (ROOT / "components" / "muse" / "muse_ble.c").read_text()
+        forget = _function_body(source, "void muse_ble_forget_all(void)")
+        started, stopped = forget.split("return;", 1)
+        self.assertIn("if (muse_link_ble_started())", started)
+        self.assertIn("ble_store_clear();", started)
+        self.assertIn('#define NIMBLE_BOND_NS "nimble_bond"', source)
+        self.assertIn("nvs_open(NIMBLE_BOND_NS, NVS_READWRITE, &h)", stopped)
+        self.assertIn("nvs_erase_all(h)", stopped)
+        self.assertIn("nvs_commit(h)", stopped)
+
     def test_successful_setup_marks_complete_and_stops_ble(self) -> None:
         source = APP_C.read_text()
         dispatch = _function_body(BLE_SERVER_C.read_text(), "static void dispatch_command_ex(")
