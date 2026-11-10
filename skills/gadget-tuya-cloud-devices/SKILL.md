@@ -5,6 +5,7 @@ description: >-
   user-supplied API key: homes and rooms, device detail, thing-model property control, rename,
   weather, hourly statistics, self-send notifications, IPC cloud snapshots and real-time event
   subscription. Cloud only; prefer a device-specific or local-TCP skill when one matches.
+  Switching heaters, valves, openers, irrigation or unknown loads needs the user's confirmation.
 ---
 
 # Tuya Cloud Devices: End-User API Control
@@ -143,8 +144,8 @@ long-lived process for an always-on host (a Linux gadget), not a one-shot query.
 Python script using the `websockets` package:
 
 - Start it only when the user asks for ongoing monitoring or automation, and run one instance
-  per key. Read the key from a file or environment variable only the user can read instead of
-  writing it into the script, and tell the user where it runs and how to stop it.
+  per key. Read the key from the user-only file (see Prerequisites) instead of writing it into
+  the script, and tell the user where it runs and how to stop it.
 - URI by key prefix (same mapping as the REST table): AZ `wss://wsmsgs.iot-wus.com`,
   EU `wss://wsmsgs.iot-eu.com`, IN `wss://wsmsgs.iot-ap.com`, UE `wss://wsmsgs.iot-eus.com`,
   WE `wss://wsmsgs.iot-weu.com`, SG `wss://wsmsgs.iot-sea.com`.
