@@ -400,12 +400,15 @@ run_command=...)` is one encrypted session with a Muse VM.
   None. Audio of a response can still arrive after its `ResponseDone`.
 - `TranscriptDelta(response_id, text)` and `TranscriptDone(response_id, text)`
   carry the words Muse speaks. The wire events name no response, so
-  `response_id` is that of the latest `ResponseStarted`. Transcripts are
-  fenced like the reply's audio. Words of the response open at a barge-in or
-  the caller's speech never arrive. Words that come while a reply waits for
-  its caller's turn are held, then delivered in order with its audio or
-  dropped with it. The text is as Muse sent it, control characters
-  included: strip them before printing it to a terminal.
+  `response_id` is that of the latest `ResponseStarted`. Words go with that
+  response's audio, the provider audio streams first heard since it started:
+  they are delivered while one of those streams plays, held while one waits
+  for its caller's turn and then delivered in order with it, and dropped once
+  all of them are dropped. Words that come before the response's first audio
+  are delivered, held or dropped as new audio would be. Words of the response
+  open at a barge-in or the caller's speech never arrive. The text is as Muse
+  sent it, control characters included: strip them before printing it to a
+  terminal.
 - `AudioChunk(response_id, offset, pcm)` is reply PCM accepted for playback,
   delivered before the output writes it. Held audio is delivered when its
   turn confirms it, joined into one chunk per run between held words.

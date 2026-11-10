@@ -328,6 +328,61 @@ def test_a_late_foreign_turn_keeps_the_words_of_the_confirmed_reply_still_playin
         TranscriptDone("r2", "still here"), AudioChunk("r2", 960, HALF)]
 
 
+def test_a_dropped_foreign_reply_does_not_silence_the_words_of_the_reply_still_playing():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech("B"), turn("B", "SB"), created("RB"), audio("PB"),
+            turn("A", "SA"), audio("PA"),  # new after another caller's turn: dropped
+            said("still here"), transcript("still here"), audio("PB"),
+        ])))
+        await wait_until(lambda: len(output.pcm) == 2 * len(TONE))
+
+    assert run_call(script) == [
+        Working(True),
+        ResponseStarted("RB"),
+        AudioChunk("RB", 0, TONE),
+        TranscriptDelta("RB", "still here"),
+        TranscriptDone("RB", "still here"),
+        AudioChunk("RB", 960, TONE),
+    ]
+
+
+def test_words_play_with_a_continuation_that_replaces_the_confirmed_reply():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech("item-1"), turn("item-1", "sub-1"), created("r1"), audio("p1", TONE * 5),
+            audio("p2", HALF), said("more"),
+        ])))
+        await wait_until(lambda: output.pcm == HALF)
+
+    assert run_call(script) == [
+        Working(True),
+        ResponseStarted("r1"),
+        AudioChunk("r1", 0, TONE * 5),
+        PlaybackFlushed(("r1",)),
+        AudioChunk("r1", 4800, HALF),
+        TranscriptDelta("r1", "more"),
+    ]
+
+
+def test_a_reply_dropped_for_a_late_foreign_turn_does_not_silence_the_next_reply():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech("item-2"), created("r1"), said("old"), audio("p1", TONE), created("r2"),
+            turn("item-1", "sub-1"),  # drops r1's held reply
+            turn("item-2", "sub-2"), said("new"), audio("p2", HALF),
+        ])))
+        await wait_until(lambda: len(output.pcm) == len(HALF))
+
+    assert run_call(script) == [
+        ResponseStarted("r1"),
+        ResponseStarted("r2"),
+        Working(True),
+        TranscriptDelta("r2", "new"),
+        AudioChunk("r2", 0, HALF),
+    ]
+
+
 def test_caller_speech_flushes_delivered_audio_and_drops_the_rest_of_the_reply():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE * 5)) + line(speech("item-2")))
@@ -533,6 +588,24 @@ def test_barge_in_silences_the_words_of_the_reply_it_cuts_before_its_audio():
         ResponseStarted("r1"),
         TranscriptDelta("r1", "Sure "),
         ResponseDone("r1", "cancelled"),
+    ]
+
+
+def test_caller_speech_drops_only_the_words_of_the_reply_it_cuts():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            created("r1"), said("Sure "), speech("item-2"), said("thing"),
+            created("r2"), said("Yes"), audio("p2", HALF), turn("item-2", "sub-2"),
+        ])))
+        await wait_until(lambda: output.pcm == HALF)
+
+    assert run_call(script) == [
+        ResponseStarted("r1"),
+        TranscriptDelta("r1", "Sure "),
+        ResponseStarted("r2"),
+        Working(True),
+        TranscriptDelta("r2", "Yes"),
+        AudioChunk("r2", 0, HALF),
     ]
 
 

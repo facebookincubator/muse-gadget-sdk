@@ -17,10 +17,12 @@
 CAVD provider IDs, not mapper response.created IDs, identify stale PCM. A new
 caller's matching turn admits its reply and later continuations. Output without
 lineage after a confirmed turn is indistinguishable from that turn's continuation.
-Transcript text names no provider response, so it gets the verdict a new provider
-ID would, except that words after a fence stay dropped until the next
-response.created, and a confirmed reply still playing past a late foreign turn
-keeps its words.
+Transcript text names no provider response. It belongs to the latest
+response.created and goes with the audio of the providers first heard since: it
+plays while any of them plays, waits while one waits, and is dropped once all of
+them are. Before that response has audio, words get the verdict a new provider
+ID would. After an interruption, words stay dropped until the next
+response.created.
 """
 
 MAX_IDS = 128
@@ -53,6 +55,7 @@ class ReplyGate:
         self.flush_playing = self.flush_waiting = False
         self.open_response = None
         self.words_fenced = False
+        self.words_ids = []  # providers first heard since the latest response.created
 
     def interrupt(self, item=None):
         self.fenced = self.words_fenced = True
@@ -103,8 +106,6 @@ class ReplyGate:
             if not self.item or not item or not identifier(event.get("submission_message_id")):
                 return
             if item != self.item:
-                # Words of the reply this drops stay dropped until a new response opens.
-                self.words_fenced |= self._has(WAITING, CONTINUING)
                 self.flush_waiting |= self.waiting
                 self.flush_playing |= self._has(CONTINUING)
                 self._replace((WAITING, CONTINUING), STALE)
@@ -120,6 +121,7 @@ class ReplyGate:
         elif kind in ("response.created", "response.done", "response.completed"):
             if kind == "response.created":
                 self.words_fenced = False
+                self.words_ids = []
             response = event.get("response")
             response_id = identifier(response.get("id")) if isinstance(response, dict) else None
             if response_id:
@@ -128,13 +130,19 @@ class ReplyGate:
                 elif response_id == self.open_response:
                     self.open_response = None
 
-    def words(self, reply_playing=False):
-        """reply_playing: the words' response has a provider still PLAYING."""
+    def words(self):
         if self.words_fenced:
             return DROP
+        if self.words_ids:
+            # Words go with the response's own audio. A dropped provider first
+            # heard in it too, such as a late foreign turn's reply, doesn't
+            # silence one still playing.
+            states = {self.ids[response_id] for response_id in self.words_ids}
+            if PLAYING in states or CONTINUING in states:
+                return PLAY
+            return HOLD if WAITING in states else DROP
         if self.fenced and (not self.item or self.blocked):
-            # A late foreign turn keeps a confirmed reply playing; its words too.
-            return PLAY if self.blocked and self.confirmed and reply_playing else DROP
+            return DROP
         return HOLD if self.holding else PLAY
 
     def audio(self, event):
@@ -150,7 +158,6 @@ class ReplyGate:
             state = PLAYING
         elif not self.item or self.blocked:
             state = STALE
-            self.words_fenced = True  # its words are dropped with it
         elif self.confirmed:
             self.flush_playing |= self.playing
             self._replace((PLAYING, CONTINUING), STALE)
@@ -161,4 +168,5 @@ class ReplyGate:
             self._replace((WAITING,), STALE)
             state = WAITING
         self.ids[response_id] = state
+        self.words_ids.append(response_id)
         return HOLD if state == WAITING else DROP if state == STALE else PLAY
