@@ -22,6 +22,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components/muse"
+DEMO = ROOT / "components/muse_apps_demo"
 
 LVGL = r'''
 #pragma once
@@ -393,8 +394,8 @@ class Core2AppsDemo(unittest.TestCase):
         cls.binary = tmp / "harness"
         compiler = shlex.split(os.environ.get("CC", "cc"))
         subprocess.run(
-            compiler + ["-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(tmp), "-I", str(MUSE),
-                        str(tmp / "harness.c"), str(MUSE / "muse_apps_demo.c"), "-o", str(cls.binary)],
+            compiler + ["-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(tmp), "-I", str(DEMO), "-I", str(MUSE),
+                        str(tmp / "harness.c"), str(DEMO / "muse_apps_demo.c"), "-o", str(cls.binary)],
             check=True)
 
     @classmethod
@@ -424,11 +425,11 @@ class Core2Apps(unittest.TestCase):
         (tmp / "harness.c").write_text(APPS_HARNESS)
         cls.binary = tmp / "harness"
         compiler = shlex.split(os.environ.get("CC", "cc"))
-        sources = [MUSE / "muse_apps_demo.c", MUSE / "app_manager.c", MUSE / "apps/app_launcher.c",
-                   MUSE / "apps/app_demo.c"]
+        sources = [DEMO / "muse_apps_demo.c", DEMO / "app_manager.c", DEMO / "apps/app_launcher.c",
+                   DEMO / "apps/app_demo.c"]
         subprocess.run(
             compiler + ["-std=gnu11", "-Wall", "-Werror", "-Wno-unused-function", "-Wno-unused-variable",
-                        "-Wno-unused-but-set-variable", "-include", str(ROOT / "tests/host_compat.h"), "-I", str(tmp), "-I", str(MUSE), "-I", str(MUSE / "apps"),
+                        "-Wno-unused-but-set-variable", "-include", str(ROOT / "tests/host_compat.h"), "-I", str(tmp), "-I", str(DEMO), "-I", str(DEMO / "apps"), "-I", str(MUSE),
                         str(tmp / "harness.c")] + [str(s) for s in sources] + ["-lm", "-o", str(cls.binary)],
             check=True)
 
