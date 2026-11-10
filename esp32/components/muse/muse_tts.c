@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) 2026 ledienbien-ai
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -145,8 +145,11 @@ static void tts_task(void *arg)
         int bytes = 0, pieces = 0;
         bool failed = false;
         const char *p = text;
-        while (!stale(ticket) && muse_tts_next_chunk(&p, chunk, sizeof(s_work->chunk))) {
-            int n = fetch(chunk, lang, ticket);
+        char chunk_lang[sizeof(s_lang)];
+        strlcpy(chunk_lang, lang, sizeof(chunk_lang));
+        while (!stale(ticket) &&
+               muse_tts_next_chunk_lang(&p, lang, chunk, sizeof(s_work->chunk), chunk_lang, sizeof(chunk_lang))) {
+            int n = fetch(chunk, chunk_lang, ticket);
             if (n <= 0) {
                 failed = true;
                 break;
@@ -155,7 +158,7 @@ static void tts_task(void *arg)
             pieces++;
         }
         if (!stale(ticket)) {
-            ESP_LOGI(TAG, "%d bytes of speech in %d piece%s (%s)%s", bytes, pieces, pieces == 1 ? "" : "s", lang,
+            ESP_LOGI(TAG, "%d bytes of speech in %d piece%s (%s)%s", bytes, pieces, pieces == 1 ? "" : "s", chunk_lang,
                      failed ? ", then a failure" : "");
             /* A reply that lost its later pieces still has its start to say. */
             atomic_store(&s_state, bytes ? MUSE_TTS_DONE : MUSE_TTS_FAILED);

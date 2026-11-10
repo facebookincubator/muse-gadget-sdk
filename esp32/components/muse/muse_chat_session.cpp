@@ -1788,6 +1788,23 @@ static void on_event(cJSON *line)
 /* A message event of the turn's reply, from the subscription or held (incoming_play). */
 static void on_message(const char *event, cJSON *payload, cJSON *line)
 {
+    if (!strcmp(event, "message.user")) {
+        const char *id = msg_id(payload, line);
+        const char *text = reply_text(payload);
+        if (!s_turn.text && !s_turn.nmsgs && text && (!s_turn.acked || is_user_id(id))) {
+            const char *att = strstr(text, "\n[file:");
+            size_t n = att ? (size_t)(att - text) : strlen(text);
+            if (n && (n != 12 || memcmp(text, "[Voice note]", 12) != 0)) {
+                char heard[256];
+                n = whole_chars(text, n < sizeof(heard) - 1 ? n : sizeof(heard) - 1);
+                memcpy(heard, text, n);
+                heard[n] = '\0';
+                ESP_LOGI(TAG, "heard: \"%s\"", heard);
+                emit(MUSE_HATCH_EV_HEARD, heard);
+            }
+        }
+        return;
+    }
     bool start = !strcmp(event, "delta.message_start");
     bool append = !strcmp(event, "delta.text_append");
     bool done = !strcmp(event, "delta.message_done");
@@ -1867,16 +1884,12 @@ static void show_silently(int i)
 }
 
 #if CONFIG_MUSE_TTS_GOOGLE
-/* The language a reply is read in: Vietnamese if it's written in it, whatever
- * the device is set to; otherwise the device's language. */
+/* Default Latin language for a reply ("vi" when the reply contains Vietnamese
+ * letters, "en" otherwise); muse_tts_next_chunk_lang() overrides each CJK
+ * segment with "zh-CN", "ja", or "ko" automatically. */
 static const char *speech_lang(const char *text)
 {
-#if CONFIG_MUSE_UI_LANG_VI
-    (void)text;
-    return "vi";
-#else
     return muse_tts_is_vietnamese(text) ? "vi" : "en";
-#endif
 }
 #endif
 

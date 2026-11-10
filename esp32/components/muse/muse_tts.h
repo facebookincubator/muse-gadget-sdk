@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) 2026 ledienbien-ai
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -58,9 +58,22 @@ size_t muse_tts_clean(const char *text, char *out, size_t cap);
  */
 bool muse_tts_next_chunk(const char **text, char *out, size_t cap);
 
+/*
+ * Like muse_tts_next_chunk(), but also splits when the script switches between
+ * CJK (Chinese/Japanese/Korean) and Latin, and writes the piece's language tag
+ * ("zh-CN", "ja", "ko", "vi", "en") into `lang_out` (falling back to
+ * `default_lang` for Latin pieces without Vietnamese-specific letters).
+ */
+bool muse_tts_next_chunk_lang(const char **text, const char *default_lang, char *out, size_t cap,
+                              char *lang_out, size_t lang_cap);
+
 /* True if `text` has letters only Vietnamese writes (a, o, u with a horn or a
  * breve, d with a stroke, any tone mark from U+1EA0 on). */
 bool muse_tts_is_vietnamese(const char *text);
+
+/* Dominant language tag ("zh-CN", "ja", "ko", "vi", "en") for `text`, or
+ * `fallback` when no script-specific characters are present. */
+const char *muse_tts_detect_lang(const char *text, const char *fallback);
 
 /* The request for `chunk` spoken in `lang` ("vi", "en"); returns its length,
  * or 0 if it doesn't fit in cap bytes. */
