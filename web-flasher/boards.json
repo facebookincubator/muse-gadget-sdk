@@ -71,5 +71,12 @@
     "usb": [
       "1a86:55d3"
     ]
+  },
+  {
+    "board": "muse-lcdwiki-s3-28",
+    "name": "LCDWIKI 2.8inch ESP32-S3 Display",
+    "usb": [
+      "303a:1001"
+    ]
   }
 ]
