@@ -116,6 +116,14 @@ bool muse_hatch_incoming(void);
  */
 bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
 
+/* Approximate progress at the same playback cursor as captions, 0..1.
+ * message receives the current message index, or -1 before playback. Values
+ * may be revised as duration becomes known; the voice task stabilizes them.
+ * 1 means this message has drained; the ring caps at 99% until the whole
+ * turn succeeds. Voice task only.
+ * Link-only builds return 0 and -1 (their paging is unchanged). */
+float muse_turn_progress(size_t played, int *message);
+
 /*
  * For a caption font whose letters differ in width: pages also wrap each line
  * to width_px, measuring it with glyph_px (a glyph's advance in pixels,
