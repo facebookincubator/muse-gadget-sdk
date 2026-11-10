@@ -134,12 +134,15 @@ static esp_err_t init(void)
      * only ends in deep sleep, and with it open the cell doesn't charge. */
     uint8_t wdt, adc, batfet;
     if (sy6970_read(SY6970_REG_WDT, &wdt) == ESP_OK) {
-        sy6970_write(SY6970_REG_WDT, wdt & ~0x30);
-        if (sy6970_read(SY6970_REG_ADC, &adc) == ESP_OK) {
-            sy6970_write(SY6970_REG_ADC, adc | 0xC0);   /* CONV_START | CONV_RATE */
+        esp_err_t err = sy6970_write(SY6970_REG_WDT, wdt & ~0x30);
+        if (err == ESP_OK && sy6970_read(SY6970_REG_ADC, &adc) == ESP_OK) {
+            err = sy6970_write(SY6970_REG_ADC, adc | 0xC0);   /* CONV_START | CONV_RATE */
         }
-        if (sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK && (batfet & 0x20)) {
-            sy6970_write(SY6970_REG_BATFET, batfet & ~0x20);
+        if (err == ESP_OK && sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK && (batfet & 0x20)) {
+            err = sy6970_write(SY6970_REG_BATFET, batfet & ~0x20);
+        }
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "SY6970 setup failed (%s); battery state may be stale", esp_err_to_name(err));
         }
     } else {
         ESP_LOGW(TAG, "SY6970 not answering; battery state unavailable");
