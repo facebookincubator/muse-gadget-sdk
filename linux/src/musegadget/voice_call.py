@@ -509,10 +509,12 @@ class VoiceCall:
                 if not self.ready.is_set():
                     raise ValueError("audio received before voice readiness")
                 verdict = self._reply_gate.audio(event)
+                # Bound before the flush, so the response's held words survive
+                # while this provider waits.
+                response_id = None if verdict == DROP else self._audio_response_id(event)
                 self._apply_reply_flush()
                 if verdict == DROP:
                     continue
-                response_id = self._audio_response_id(event)
                 if verdict == HOLD:
                     self._hold((pcm, response_id), len(pcm))
                 else:
@@ -658,10 +660,13 @@ class VoiceCall:
             self._flush()
         elif waiting:
             if self._reply_gate.holding:
-                # A new provider replaces held PCM, but later responses may
-                # already have words waiting for their own audio.
+                # A new provider replaces held PCM. Words stay held while any
+                # provider of their response is not dropped, and later
+                # responses may already have words waiting for their own audio.
                 stale_responses = {response_id for source, response_id in self._audio_sources.items()
                                    if self._reply_gate.ids[source] == STALE}
+                stale_responses -= {response_id for source, response_id in self._audio_sources.items()
+                                    if self._reply_gate.ids[source] != STALE}
                 self._waiting = [held for held in self._waiting
                                  if not isinstance(held, tuple)
                                  and held.response_id not in stale_responses]

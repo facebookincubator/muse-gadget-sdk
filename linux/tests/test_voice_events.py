@@ -278,6 +278,23 @@ def test_replacement_of_a_held_reply_keeps_the_new_responses_transcript(replacem
     ]
 
 
+def test_a_provider_that_replaces_a_held_one_in_the_same_response_keeps_its_words():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech("item-1"), created("r1"), audio("p1", TONE), said("Hello"), transcript("Hello"),
+            audio("p2", HALF), turn("item-1", "sub-1"),
+        ])))
+        await wait_until(lambda: output.pcm == HALF)
+
+    assert run_call(script) == [
+        ResponseStarted("r1"),
+        Working(True),
+        TranscriptDelta("r1", "Hello"),
+        TranscriptDone("r1", "Hello"),
+        AudioChunk("r1", 0, HALF),
+    ]
+
+
 def test_a_held_reply_dropped_for_another_callers_turn_says_nothing():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, b"".join(map(line, [
