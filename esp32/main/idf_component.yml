@@ -21,6 +21,15 @@ dependencies:
     version: "~2.1"
     rules:
       - if: "target == esp32"
+  espressif/esp_codec_dev:
+    version: "~1.5"
+    # In this order: rules stop at the first false one, and each option
+    # exists only when the rule before it holds.
+    rules:
+      - if: "$IDF_TARGET == esp32s3"
+      - if: "$CONFIG{SPIRAM} == True"
+      - if: "$CONFIG{HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G} == True"
+      - if: "$CONFIG{HOMEHUB_VOICE} == True"
   # The Waveshare ESP32-S3-Touch-LCD-3.5 status screen. The same range as
   # components/muse, which the Waveshare P4 3.5 needs.
   espressif/esp_lcd_st7796:
