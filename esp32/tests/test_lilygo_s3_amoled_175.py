@@ -49,8 +49,9 @@ class LilygoS3Amoled175(unittest.TestCase):
         off = function(source, 'power_off')
         self.assertIn('batfet | 0x20', off)
         # Only on battery: with input power the cell has to keep charging.
-        self.assertIn('(status & 0x04)', off)
-        self.assertIn('if (!input && sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK)', off)
+        # A failed status read must not count as "on battery".
+        self.assertIn("on_battery = sy6970_read(SY6970_REG_STATUS, &status) == ESP_OK && !(status & 0x04);", off)
+        self.assertIn('if (on_battery && sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK)', off)
         self.assertIn('sy6970_write(SY6970_REG_BATFET, batfet & ~0x20)', function(source, 'init'))
 
     def test_board_is_wired_into_the_lists(self):

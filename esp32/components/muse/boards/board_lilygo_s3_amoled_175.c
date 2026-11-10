@@ -361,12 +361,13 @@ static esp_err_t power_off(void)
     panel_sleep(true);
     gpio_set_level(LCD_EN, 0);
     /* On battery, opening the BATFET is a real power off (plugging USB starts
-     * it again). With input power (PG_STAT) the BATFET stays closed, so the
-     * cell keeps charging, and the board deep-sleeps with BOOT as the wake
-     * button. */
+     * it again). Only when the charger says there's no input power (PG_STAT
+     * clear): with input, or if it can't be read, the BATFET stays closed, so
+     * the cell keeps charging, and the board deep-sleeps with BOOT as the
+     * wake button. */
     uint8_t status, batfet;
-    bool input = sy6970_read(SY6970_REG_STATUS, &status) == ESP_OK && (status & 0x04);
-    if (!input && sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK) {
+    bool on_battery = sy6970_read(SY6970_REG_STATUS, &status) == ESP_OK && !(status & 0x04);
+    if (on_battery && sy6970_read(SY6970_REG_BATFET, &batfet) == ESP_OK) {
         sy6970_write(SY6970_REG_BATFET, batfet | 0x20);
     }
     ESP_RETURN_ON_ERROR(esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0), TAG, "boot wake");
