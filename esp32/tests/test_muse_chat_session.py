@@ -57,7 +57,8 @@ static pending_t s_pending;
 static std::atomic<bool> s_incoming{false};
 static std::atomic<bool> s_incoming_used{true};
 static char s_reply_shown[EV_TEXT];
-static int64_t s_last_seq, s_marks[4];
+static int64_t s_last_seq, s_last_row_seq, s_marks[4];
+static void *psram_alloc(size_t n) { return malloc(n); }
 static int captions, console_events;
 static int done_events;
 static int64_t clock_us = 12345;
@@ -629,6 +630,43 @@ static void held_rows_outlive_a_newer_request() {
     assert(s_turn.nmsgs == 2 && !strcmp(s_turn.msgs[0].id, "a1") && !strcmp(s_turn.msgs[1].id, "b1"));
     assert(!strcmp(s_turn.user_ids[0], "b") && !strcmp(s_turn.user_ids[1], "b"));
 }
+/* A numbered event: message rows are numbered apart from live deltas. */
+static void numbered(const char *kind, const char *id, const char *parent, int seq, const char *field,
+                     const char *text, bool padded = false) {
+    cJSON *root = cJSON_CreateObject(), *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "event");
+    cJSON_AddStringToObject(root, "event", kind);
+    cJSON_AddNumberToObject(root, "seq", seq);
+    cJSON_AddItemToObject(root, "payload", payload);
+    cJSON_AddStringToObject(payload, "message_id", id);
+    if (parent[0]) cJSON_AddStringToObject(payload, "reply_to_message_id", parent);
+    cJSON_AddStringToObject(payload, field, text);
+    if (padded) cJSON_AddStringToObject(payload, "padding", "unused by playback");
+    on_event(root);
+    cJSON_Delete(root);
+}
+static void late_rows_by_their_own_order_and_content() {
+    detach();
+    s_incoming = false;
+    numbered("delta.text_append", "live", "", 1150, "text", "Streaming elsewhere");
+    /* The finished row, numbered in the chat's order (below the live one), with content only. */
+    numbered("message.assistant", "late", "note", 977, "content", "Answer", true);
+    assert(s_incoming.exchange(false) && cJSON_GetArraySize(s_pending.replies) == 1);
+    cJSON *row = cJSON_GetArrayItem(s_pending.replies, 0);
+    assert(cJSON_GetArraySize(row) == 3 && !cJSON_GetObjectItem(row, "padding"));
+    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(row, "display_text")), "Answer"));
+    numbered("message.assistant", "again", "note", 977, "content", "A replayed row");   /* same number: dropped */
+    assert(cJSON_GetArraySize(s_pending.replies) == 1);
+    /* A long answer keeps only what a turn keeps. */
+    static char longer[TEXT_MAX + 100];
+    memset(longer, 'x', sizeof(longer) - 1);
+    numbered("message.assistant", "long", "note", 978, "display_text", longer);
+    row = cJSON_GetArrayItem(s_pending.replies, 1);
+    assert(row && strlen(cJSON_GetStringValue(cJSON_GetObjectItem(row, "display_text"))) == TEXT_MAX - 1);
+    incoming_play(s_turn.gen + 1);
+    assert(s_turn.nmsgs == 2 && !strcmp(s_turn.msgs[0].id, "late") && s_turn.msgs[0].done);
+    assert(s_turn.msgs[0].len == 6 && s_turn.msgs[1].done);
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
@@ -659,6 +697,7 @@ int main(int argc, char **argv) {
     case 27: held_rows_outlive_a_newer_request(); break;
     case 28: others_status_and_late_play(); break;
     case 29: chained_and_mid_stream_replies(); break;
+    case 30: late_rows_by_their_own_order_and_content(); break;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -791,6 +830,9 @@ int main(int argc, char **argv) {
 
     def test_other_requests_status_and_overdue_rows_do_not_count(self):
         self.run_case(28)
+
+    def test_late_reply_row_numbered_below_live_events_with_content_only_is_held(self):
+        self.run_case(30)
 
     def test_late_turn_takes_chained_rows_and_never_half_a_message(self):
         self.run_case(29)

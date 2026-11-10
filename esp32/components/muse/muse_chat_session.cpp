@@ -317,6 +317,7 @@ static void log_marks(void);
 static int16_t *s_pcm;       /* MINIMP3_MAX_SAMPLES_PER_FRAME */
 static int16_t *s_pcm16;     /* resampled output */
 static int64_t s_last_seq;
+static int64_t s_last_row_seq;   /* message rows are numbered in the chat's own order, apart from live events */
 
 static int64_t now_us(void)
 {
@@ -869,7 +870,7 @@ static bool resolve_vm(char *err, size_t err_cap)
 
 static bool open_subscription(void)
 {
-    s_last_seq = 0;
+    s_last_seq = s_last_row_seq = 0;
     s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", "{}",
                                 true);
     return s_conn.sub_id != 0;
@@ -1575,6 +1576,13 @@ static bool pending_held(const char *id)
     return false;
 }
 
+/* A finished message's text: its display text, else its content. */
+static const char *reply_text(cJSON *payload)
+{
+    const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
+    return text ? text : cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
+}
+
 /* With no turn running: Muse's status, and the reply of a request still waiting on it. */
 static void pending_event(const char *event, cJSON *payload)
 {
@@ -1598,7 +1606,7 @@ static void pending_event(const char *event, cJSON *payload)
         return;   /* only the finished row names the request */
     }
     const char *id = msg_id(payload, nullptr);
-    const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
+    const char *text = reply_text(payload);
     if (!ours || !id || pending_played(id) || pending_held(id) || cJSON_GetArraySize(s_pending.replies) >= MAX_MSGS ||
         cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready")) || !text || !text[0]) {
         return;
@@ -1606,7 +1614,21 @@ static void pending_event(const char *event, cJSON *payload)
     if (!s_pending.replies) {
         s_pending.replies = cJSON_CreateArray();
     }
-    cJSON *row = cJSON_Duplicate(payload, true);
+    /* Only what playing it needs, and no more text than a turn keeps. */
+    size_t n = whole_chars(text, strnlen(text, TEXT_MAX - 1));
+    char *kept = static_cast<char *>(psram_alloc(n + 1));
+    if (kept) {
+        memcpy(kept, text, n);
+        kept[n] = '\0';
+    }
+    cJSON *row = cJSON_CreateObject();
+    if (!kept || !row || !cJSON_AddStringToObject(row, "message_id", id) ||
+        !cJSON_AddStringToObject(row, "reply_to_message_id", parent) ||
+        !cJSON_AddStringToObject(row, "display_text", kept)) {
+        cJSON_Delete(row);
+        row = nullptr;
+    }
+    free(kept);
     if (row && cJSON_AddItemToArray(s_pending.replies, row)) {
         ESP_LOGI(TAG, "the reply to a request that outlived its turn has come: holding it for the voice task");
         s_incoming = true;
@@ -1719,15 +1741,16 @@ static void on_event(cJSON *line)
     if (strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(line, "type")) ?: "", "event") != 0) {
         return;   /* the subscription ack */
     }
+    const char *event = cJSON_GetStringValue(cJSON_GetObjectItem(line, "event")) ?: "";
     cJSON *seq = cJSON_GetObjectItem(line, "seq");
     if (cJSON_IsNumber(seq)) {
+        int64_t &last = strcmp(event, "message.assistant") ? s_last_seq : s_last_row_seq;
         int64_t v = (int64_t)seq->valuedouble;
-        if (v > 0 && v <= s_last_seq) {
+        if (v > 0 && v <= last) {
             return;
         }
-        s_last_seq = v > s_last_seq ? v : s_last_seq;
+        last = v > last ? v : last;
     }
-    const char *event = cJSON_GetStringValue(cJSON_GetObjectItem(line, "event")) ?: "";
     cJSON *payload = cJSON_GetObjectItem(line, "payload");
     if (s_turn.phase == P_IDLE) {
         pending_event(event, payload);
@@ -1784,10 +1807,7 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
             add_reply_text(i, text);
         }
     } else if (done || full) {
-        const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
-        if (!text) {
-            text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
-        }
+        const char *text = reply_text(payload);
         cJSON *ready = cJSON_GetObjectItem(payload, "display_text_ready");
         if (done || !cJSON_IsFalse(ready)) {
             message_done(i, text);
