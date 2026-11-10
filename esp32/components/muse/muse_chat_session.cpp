@@ -1584,7 +1584,7 @@ static const char *reply_text(cJSON *payload)
 }
 
 /* With no turn running: Muse's status, and the reply of a request still waiting on it. */
-static void pending_event(const char *event, cJSON *payload)
+static void pending_event(const char *event, cJSON *payload, cJSON *line)
 {
     if (!s_pending.active) {
         return;
@@ -1605,9 +1605,11 @@ static void pending_event(const char *event, cJSON *payload)
     if (strcmp(event, "message.assistant")) {
         return;   /* only the finished row names the request */
     }
-    const char *id = msg_id(payload, nullptr);
+    const char *id = msg_id(payload, line);
     const char *text = reply_text(payload);
-    if (!ours || !id || pending_played(id) || pending_held(id) || cJSON_GetArraySize(s_pending.replies) >= MAX_MSGS ||
+    /* An id too long for a turn's message couldn't be played as itself. */
+    if (!ours || !id || strlen(id) >= sizeof(msg_t::id) || pending_played(id) || pending_held(id) ||
+        cJSON_GetArraySize(s_pending.replies) >= MAX_MSGS ||
         cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready")) || !text || !text[0]) {
         return;
     }
@@ -1753,7 +1755,7 @@ static void on_event(cJSON *line)
     }
     cJSON *payload = cJSON_GetObjectItem(line, "payload");
     if (s_turn.phase == P_IDLE) {
-        pending_event(event, payload);
+        pending_event(event, payload, line);
         return;
     }
     if (s_turn.phase != P_WAIT_REPLY) {

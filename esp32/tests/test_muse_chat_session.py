@@ -663,9 +663,19 @@ static void late_rows_by_their_own_order_and_content() {
     numbered("message.assistant", "long", "note", 978, "display_text", longer);
     row = cJSON_GetArrayItem(s_pending.replies, 1);
     assert(row && strlen(cJSON_GetStringValue(cJSON_GetObjectItem(row, "display_text"))) == TEXT_MAX - 1);
+    /* The message id may come on the event rather than in its payload; one too long to keep is ignored. */
+    cJSON *line = cJSON_Parse("{\"type\":\"event\",\"event\":\"message.assistant\",\"message_id\":\"outer\","
+                              "\"payload\":{\"reply_to_message_id\":\"note\",\"display_text\":\"Finished\"}}");
+    on_event(line);
+    cJSON_Delete(line);
+    char oversized[100];
+    memset(oversized, 'i', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
+    numbered("message.assistant", oversized, "note", 979, "display_text", "Too long an id");
+    assert(cJSON_GetArraySize(s_pending.replies) == 3);
     incoming_play(s_turn.gen + 1);
-    assert(s_turn.nmsgs == 2 && !strcmp(s_turn.msgs[0].id, "late") && s_turn.msgs[0].done);
-    assert(s_turn.msgs[0].len == 6 && s_turn.msgs[1].done);
+    assert(s_turn.nmsgs == 3 && !strcmp(s_turn.msgs[0].id, "late") && s_turn.msgs[0].done);
+    assert(s_turn.msgs[0].len == 6 && s_turn.msgs[1].done && !strcmp(s_turn.msgs[2].id, "outer"));
 }
 int main(int argc, char **argv) {
     assert(argc == 2);
@@ -831,7 +841,7 @@ int main(int argc, char **argv) {
     def test_other_requests_status_and_overdue_rows_do_not_count(self):
         self.run_case(28)
 
-    def test_late_reply_row_numbered_below_live_events_with_content_only_is_held(self):
+    def test_late_reply_row_numbered_below_live_events_content_only_or_envelope_id_is_held(self):
         self.run_case(30)
 
     def test_late_turn_takes_chained_rows_and_never_half_a_message(self):
