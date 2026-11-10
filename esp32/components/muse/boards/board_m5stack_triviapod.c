@@ -15,8 +15,9 @@
  */
 
 /*
- * Starts as a copy of board_m5stack_stopwatch.c: the pins, chips and rails
- * below are the StopWatch's and not yet checked on a TriviaPOD.
+ * Starts as a copy of board_m5stack_stopwatch.c. Checked on a TriviaPOD:
+ * display, touch, the three buttons, mic, speaker and power off. Not yet
+ * checked: sleep, wake and the battery.
  *
  * M5Stack TriviaPOD (TP-01-A): ESP32-S3R8 (32 MB flash, 8 MB octal PSRAM), round
  * 1.75" 466 px CO5300 AMOLED on QSPI with CST820 touch, ES8311 codec with one
