@@ -28,11 +28,14 @@ esp_err_t muse_console_install(size_t rx_buf)
     usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     cfg.rx_buffer_size = rx_buf;
     esp_err_t err = usb_serial_jtag_driver_install(&cfg);
+#if CONFIG_VFS_SUPPORT_IO && CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
+    /* IDF builds this VFS only for a USB Serial/JTAG console. */
     if (err == ESP_OK) {
         /* stdout/logs must share the driver's TX ring with console writes,
          * rather than writing directly to its hardware FIFO. */
         usb_serial_jtag_vfs_use_driver();
     }
+#endif
     return err;
 }
 
