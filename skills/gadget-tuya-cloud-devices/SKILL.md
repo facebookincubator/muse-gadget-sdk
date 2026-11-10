@@ -19,7 +19,8 @@ datapoint schema, prefer [Tuya Wi-Fi devices](../gadget-tuya-wifi-devices/SKILL.
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - A user-supplied end-user API key, applied for at https://tuya.ai/. Treat it as a credential:
-  pass it in a header, never log or echo it.
+  keep it in a file only the user can read and load it from there for REST calls as well as the
+  subscriber. Pass it in a header, never on a command line, and never log or echo it.
 - Send `Authorization: Bearer <key>` on every call. Pick the base URL from the first two
   characters after `sk-`; it must match the account's region. If the prefix is not listed, ask
   the user to confirm the key was issued for an international account at https://tuya.ai/.
@@ -67,6 +68,19 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
    value by 10% of the typeSpec range for vague amounts or by the stated amount exactly, clamp
    to `[min, max]`, honor `scale` and round to `step`. A relative ask needs a readable current
    value; for a `wr` property, ask for an absolute value instead.
+
+## Confirm Before Acting
+
+- Before switching a heater, valve, garage or door opener, irrigation controller, or a socket,
+  plug or switch whose load is unknown, read back the device, its room, the property and the
+  value, and wait for the user's yes. A yes covers that one command only.
+- Judge this by the device's `category` from the device list, not only by its name: for example
+  `qn`, `rs`, `dr` and `dbl` (heaters), `sfkzq` and `ggq` (valves and irrigation), `ckmkzq` and
+  `mk` (garage doors and access control), and `cz`, `pc` and `kg` (sockets, power strips and
+  switches, unless the user has said what they power and it is none of these). Confirm an
+  unfamiliar category the same way.
+- An automation's confirmed trigger→action mapping covers its later actions only if it names
+  the device and the action.
 
 ## Verify the Result
 
