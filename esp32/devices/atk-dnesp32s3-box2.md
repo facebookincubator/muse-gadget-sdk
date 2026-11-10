@@ -58,8 +58,8 @@ turns them on.
 - L (XL9555 P0.5, active low): turns the speaker on and off.
 - Q (XL9555 P0.6, active low; listed by xiaozhi but unused there): power. A
   tap turns the screen off or on, a 2 s hold powers off.
-- A key still held at boot (M switches the box on from off, on battery) is a
-  press already under way: letting it go does nothing, and Q held then
+- A key still held at boot (M switches the box on from off) is a press
+  already under way: letting it go does nothing, and Q held then
   doesn't count toward powering off.
 
 ## Screen
@@ -78,12 +78,13 @@ turns them on.
 
 ## Power and limits
 
-- Power off, on battery, drives CHG_CTRL low and opens the power latch
-  (XL9555 P1.2), as xiaozhi does. On USB power the chip keeps running, so it
-  falls back to deep sleep with the backlight and amplifier off; R, or M or Q
-  through the expander's interrupt on GPIO2, wakes it. That interrupt follows
-  every expander input, so the charger finishing (CHRG) or key L wakes it
-  too.
+- Power off drives CHG_CTRL low and opens the power latch (XL9555 P1.2), as
+  xiaozhi does. That cuts power on USB as well as on battery, and M switches
+  the box back on (on USB, R and Q don't). Should a box stay powered with
+  the latch open, it falls back to deep sleep with the backlight and
+  amplifier off, woken by R, or by M or Q through the expander's interrupt
+  on GPIO2. That interrupt follows every expander input, so the charger
+  finishing (CHRG) or key L would wake it too.
 - The battery percentage comes from xiaozhi's table of raw ADC counts; no
   voltage is reported. Charging is the charger's CHRG line (P1.7). While
   charging, the reading is raised by the charge current.
@@ -107,6 +108,8 @@ Checked on one unit, powered over USB unless it says battery:
   and on battery alike: L and Q high, M low.
 - On battery: a 2 s hold of Q powers off, M switches the box back on, and it
   stays on once M is let go.
+- On USB, power off cuts power too (the USB device goes away within 2 s), and
+  only M switches the box back on.
 - The picture turns over with the box, and the key icons sit along the top
   edge by keys M and R.
 
@@ -119,4 +122,3 @@ Still to check:
    the duplex bus leaves it silent on IDF 6. On USB the audio never rests.
 3. The menu: volume changes and is kept across a restart.
 4. Battery: the percentage and the charging state.
-5. On USB, deep sleep and waking on R, M and Q.

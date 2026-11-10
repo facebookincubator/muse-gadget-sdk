@@ -611,7 +611,7 @@ static esp_err_t power_off(void)
         }
     }
     /* As xiaozhi powers off: CHG_CTRL low, then the latch open. That cuts
-     * battery power; USB power keeps the chip running. */
+     * power, on USB too (checked on a unit); M switches the box back on. */
     xSemaphoreTake(s_xl_lock, portMAX_DELAY);
     s_xl_out1 &= ~XL_CHG_CTRL;
     s_xl_cfg1 &= ~XL_CHG_CTRL;
@@ -622,11 +622,11 @@ static esp_err_t power_off(void)
     xl_set(XL_SYS_POW, false);
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    /* Still here, so on USB: deep sleep until R or a change on the expander
-     * (M, Q, L or CHRG, which pull its interrupt low). CHG_CTRL goes back to
-     * an input, as xiaozhi leaves it, so the battery charges meanwhile;
-     * reading the inputs then clears the interrupt. */
-    ESP_LOGI(TAG, "on USB power: deep sleep");
+    /* Still here only if the latch didn't cut power: deep sleep until R or a
+     * change on the expander (M, Q, L or CHRG, which pull its interrupt low).
+     * CHG_CTRL goes back to an input, as xiaozhi leaves it, so the battery
+     * charges meanwhile; reading the inputs then clears the interrupt. */
+    ESP_LOGI(TAG, "still powered after the latch: deep sleep");
     xSemaphoreTake(s_xl_lock, portMAX_DELAY);
     s_xl_cfg1 |= XL_CHG_CTRL;
     xl_write(XL9555_CFG1, s_xl_cfg1);
