@@ -113,7 +113,8 @@ bool noise_tunnel_on_session_up(const noise_tunnel_emit_t *emit);
 // stream down locally, Resets it first so the server accepts the reused stream
 // id. Rate-limited and DMA-gated internally; safe to call every loop
 // iteration. No-op if already up. Returns false if the session must be torn
-// down (the Reset failed).
+// down: the Reset failed, or DMA headroom has held the reopen back for the
+// TX stall timeout (30s).
 bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit);
 
 // Session torn down: mark the tunnel down and forget the emit context.

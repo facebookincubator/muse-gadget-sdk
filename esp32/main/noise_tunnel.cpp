@@ -367,7 +367,22 @@ extern "C" bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit) {
     // a tunnel blip into a full reconnect. Retry next turn once pressure clears.
     if (!noise_tx_has_dma_headroom(nullptr)
         || !noise_tx_has_contiguous_dma_headroom()) {
-        if (!s_reopen_gated_since_us) s_reopen_gated_since_us = now;
+        if (!s_reopen_gated_since_us) {
+            s_reopen_gated_since_us = now;
+        } else if (now - s_reopen_gated_since_us >= TUN_TX_STALL_TIMEOUT_US) {
+            // Control traffic keeps the session alive, so waiting longer could
+            // leave the tunnel down indefinitely. As with a TX stall, a
+            // teardown releases the TLS buffers and socket pbufs held in
+            // DMA-capable RAM.
+            ESP_LOGW(TAG, "tunnel reopen blocked %llus on DMA headroom; tearing down session "
+                     "(dma_free=%u dma_largest=%u)",
+                     (unsigned long long)((now - s_reopen_gated_since_us) / 1000000),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+            s_outage_dma_wait_us += now - s_reopen_gated_since_us;
+            s_reopen_gated_since_us = 0;
+            return false;
+        }
         return true;
     }
     if (s_reopen_gated_since_us) {

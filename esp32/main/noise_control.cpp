@@ -276,7 +276,7 @@ static void store_wifi_ssid(const char *ssid) {
     s_wifi_ssid[len] = '\0';
 }
 
-// Longest server Reset reason kept. Enough for every noise-transport reason
+// Longest server Reset reason kept. Enough for every reason the server sends
 // ("chunk for stream with completed body" is 36) while leaving the
 // "server reset stream, code=N: " prefix room in a TUNNEL_FAILURE_MAX detail.
 static constexpr size_t RESET_REASON_MAX = 40;
@@ -2571,7 +2571,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // (e.g. transient backend 503). Rate-limited internally. Only after the
         // initial post-register open, so we never race registration.
         if (tunnel_opened && !noise_tunnel_maybe_reopen(&tun_emit)) {
-            end_reason = "tunnel stream reset failed";
+            end_reason = "tunnel reopen failed";
             error = true;
             break;
         }

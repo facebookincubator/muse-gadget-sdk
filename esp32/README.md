@@ -180,6 +180,13 @@ a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
 
+If nothing comes back from Muse, the device reconnects on its own: after about
+65 seconds when its tunnel pings go unanswered, or after 150 seconds of
+silence. Boards with PSRAM keep a short history of Wi-Fi, session and tunnel
+outages, which Muse reads with `device.health`. After a silent drop, the device
+checks the internet by opening a TCP connection to 1.1.1.1 (then 8.8.8.8) on
+port 443; it sends no data.
+
 ## USB settings in a browser
 
 The [web flasher](../web-flasher/README.md#device-settings)'s Device settings
