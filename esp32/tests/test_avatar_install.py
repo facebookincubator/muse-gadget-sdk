@@ -453,15 +453,16 @@ DRIVER = textwrap.dedent("""
             mock.patch.object(avatar, "AVATAR_SRC", os.path.join(d, "muse_pixel.c")), \\
             mock.patch.object(avatar, "LAST_REPLY", os.path.join(d, "last_reply.md")), \\
             mock.patch.object(avatar, "say", lambda m: None), mock.patch.object(os, kind, hit):
-        if sys.argv[6] == "previous":
+        if sys.argv[6] == "recover":
+            avatar.recover()
+        elif sys.argv[6] in ("previous", "default"):
             # The host renderer/build checks have their own tests. Isolate the
             # real file transaction here, so every write can be killed cheaply.
             with mock.patch.object(avatar, "host_check", lambda *a: (None, [])):
-                avatar.restore("previous", None, avatar.new_work())
-        elif sys.argv[6] == "default":
-            avatar.restore("default", None, avatar.new_work())
+                avatar.restore(sys.argv[6], None, avatar.new_work())
         else:
-            avatar.make_avatar(None, None, t.fenced(t.GOOD_B))
+            with mock.patch.object(avatar, "host_check", lambda *a: (None, [])):
+                avatar.make_avatar(None, None, t.fenced(t.GOOD_B))
 """)
 
 
@@ -801,7 +802,8 @@ class Interrupted(unittest.TestCase):
                 self.assertIn(now, (GOOD_A.strip(), GOOD_B.strip()))           # whole, old or new
                 prev = Path(d, "muse_pixel.c.prev")
                 if now == GOOD_B.strip():
-                    self.assertEqual(prev.read_text().strip(), GOOD_A.strip())  # the old one is kept
+                    saved = prev if prev.exists() else Path(str(active) + ".prev.next")
+                    self.assertEqual(saved.read_text().strip(), GOOD_A.strip())
                 with mock.patch.object(avatar, "AVATAR_DIR", d), \
                         mock.patch.object(avatar, "AVATAR_SRC", str(active)):
                     avatar.recover()
@@ -869,6 +871,51 @@ class RestoringPreviousInterrupted(unittest.TestCase):
                     self.fail("never finished")
 
 
+class RecoveringPreviousInterrupted(unittest.TestCase):
+    """Startup recovery can itself be killed, then safely run again."""
+
+    def test_killed_at_any_recovery_write(self):
+        # current, previous, staged previous, staged default, previous-is-default, expected slots
+        states = ((GOOD_A, GOOD_B, GOOD_A, False, False, GOOD_A, GOOD_B),
+                  (GOOD_B, GOOD_B, GOOD_A, False, False, GOOD_B, GOOD_A),
+                  (None, None, GOOD_A, False, True, None, GOOD_A),
+                  (GOOD_B, GOOD_B, None, True, False, GOOD_B, None),
+                  (None, GOOD_B, None, True, False, None, GOOD_B))
+        for state in states:
+            current, previous, staged, staged_default, prev_default, want, want_prev = state
+            for kind in ("replace", "fsync", "remove"):
+                for crash_at in range(1, 20):
+                    with self.subTest(state=states.index(state), kind=kind, crash_at=crash_at), \
+                            tempfile.TemporaryDirectory() as d:
+                        active = Path(d, "muse_pixel.c")
+                        for suffix, content in (("", current), (".prev", previous), (".prev.next", staged),
+                                                (".prev-default", "" if prev_default else None),
+                                                (".prev-default.next", "" if staged_default else None)):
+                            if content is not None:
+                                Path(str(active) + suffix).write_text(content)
+                        proc = subprocess.run([sys.executable, "-c", DRIVER, str(ROOT / "tools" / "muse"),
+                                               str(ROOT / "tests"), d, str(crash_at), kind, "recover"],
+                                              capture_output=True, text=True, timeout=60)
+                        self.assertIn(proc.returncode, (0, 70), proc.stderr)
+                        with mock.patch.object(avatar, "AVATAR_DIR", d), \
+                                mock.patch.object(avatar, "AVATAR_SRC", str(active)):
+                            avatar.recover()
+                            avatar.recover()
+                        self.assertEqual(active.read_text() if active.exists() else None, want)
+                        prev = Path(str(active) + ".prev")
+                        if want_prev is None:
+                            self.assertTrue(Path(str(active) + ".prev-default").exists())
+                            self.assertFalse(prev.exists())
+                        else:
+                            self.assertEqual(prev.read_text(), want_prev)
+                            self.assertFalse(Path(str(active) + ".prev-default").exists())
+                        self.assertFalse(list(Path(d).glob("*.next")))
+                        if proc.returncode == 0:
+                            break
+                else:
+                    self.fail("recovery never finished")
+
+
 class RestoringDefaultInterrupted(unittest.TestCase):
     """Going back to the default avatar, killed at any write, loses neither avatar."""
 
@@ -886,7 +933,13 @@ class RestoringDefaultInterrupted(unittest.TestCase):
                     if active.exists():
                         self.assertEqual(active.read_text(), GOOD_A)        # still yours, whole
                     else:
-                        self.assertEqual(prev.read_text(), GOOD_A)          # gone only once it's kept
+                        saved = prev if prev.exists() else Path(str(active) + ".prev.next")
+                        self.assertEqual(saved.read_text(), GOOD_A)  # durable, possibly still staged
+                    with mock.patch.object(avatar, "AVATAR_DIR", d), \
+                            mock.patch.object(avatar, "AVATAR_SRC", str(active)):
+                        avatar.recover()
+                    if not active.exists():
+                        self.assertEqual(prev.read_text(), GOOD_A)
                     if p.returncode == 0:
                         self.assertFalse(active.exists())
                         break
