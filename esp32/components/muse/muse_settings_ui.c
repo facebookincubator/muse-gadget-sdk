@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "esp_app_desc.h"
+#include "esp_ota_ops.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
@@ -93,7 +94,7 @@ typedef struct {
 } page_t;
 
 /* Home values. */
-static lv_obj_t *s_home_wifi, *s_home_hatch, *s_home_ble, *s_home_sound, *s_home_sleep, *s_home_battery, *s_about;
+static lv_obj_t *s_home_wifi, *s_home_hatch, *s_home_fw, *s_home_ble, *s_home_sound, *s_home_sleep, *s_home_battery, *s_about;
 #if CONFIG_MUSE_VIDEO
 static lv_obj_t *s_home_camera;
 #endif
@@ -1600,6 +1601,7 @@ static void build_home(lv_obj_t *tile)
     s_home = page(tile, "SETTINGS", false, &list);
     row(list, LV_SYMBOL_WIFI, "Wi-Fi", &s_home_wifi, on_nav, (void *)&WIFI);
     row(list, LV_SYMBOL_HOME, "Muse", &s_home_hatch, on_nav, (void *)&HATCH);
+    row(list, LV_SYMBOL_SETTINGS, "Firmware", &s_home_fw, NULL, NULL);
     row(list, LV_SYMBOL_BLUETOOTH, "Bluetooth", &s_home_ble, on_nav, (void *)&BLE);
     if (screen_only()) {
         row(list, LV_SYMBOL_IMAGE, "Screen", &s_home_sound, on_nav, (void *)&SOUND);
@@ -1630,6 +1632,12 @@ static void tick_home(void)
     muse_hatch_status(&h);
     set_text(s_home_hatch, muse_hatch_state_name(h.state));
 
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    char fw_buf[64];
+    snprintf(fw_buf, sizeof(fw_buf), "v%s (%s)", esp_app_get_description()->version,
+             running ? running->label : "app");
+    set_text(s_home_fw, fw_buf);
+
     muse_ble_status_t b;
     muse_ble_status(&b);
     set_text(s_home_ble, b.state == MUSE_BLE_OFF ? "Off" : (b.state == MUSE_BLE_CONNECTED ? "Connected" : "On"));
@@ -1659,7 +1667,8 @@ static void tick_home(void)
     }
 #endif
 
-    snprintf(buf, sizeof(buf), narrow_panel() ? "Muse %s\n%s" : "Muse %s  -  %s", esp_app_get_description()->version,
+    snprintf(buf, sizeof(buf), narrow_panel() ? "Muse v%s (%s)\n%s" : "Muse v%s (%s)  -  %s", esp_app_get_description()->version,
+             running ? running->label : "app",
              w.state == MUSE_WIFI_CONNECTED ? w.ip : "offline");
     set_text(s_about, buf);
 }

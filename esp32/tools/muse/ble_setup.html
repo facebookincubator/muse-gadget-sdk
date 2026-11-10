@@ -111,6 +111,7 @@
 
     <section>
       <h2>Firmware OTA Update</h2>
+      <p class="dim" style="margin-top:0">Phiên bản hiện tại trên bo: <b id="cur-ver" style="color:var(--accent)">--</b></p>
       <label for="ota-url">Firmware .bin URL (GitHub Releases direct link)</label>
       <input id="ota-url" type="text" autocomplete="off" placeholder="https://github.com/thanhtupppp/muse-gadget-sdk/releases/download/v1.0.0/muse-gadget.bin">
       <button id="ota-btn">Update Firmware OTA</button>
@@ -151,6 +152,7 @@ async function refresh() {
   const s = JSON.parse(new TextDecoder().decode(await statusChar.readValue()));
   const w = s.wifi, h = s.hatch;
   $('conn').textContent = `${s.name} · fw ${s.fw}`;
+  $('cur-ver').textContent = `v${s.fw} (${s.name})`;
   $('status').innerHTML =
     `Wi-Fi: <b>${w.on ? w.state : 'off'}</b>${w.ssid ? ` (${esc(w.ssid)}${w.ip ? `, ${w.ip}` : ''})` : ''}<br>` +
     `Muse: <b>${esc(h.state)}</b> · token ${h.token ? 'set' : 'not set'}<br>` +

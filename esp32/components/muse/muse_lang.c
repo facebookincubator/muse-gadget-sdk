@@ -137,6 +137,7 @@ static const muse_lang_entry_t MENU[] = {
     { "Text size", "Cỡ chữ" },
     { "Phone setup", "Cài qua điện thoại" },
     { "Status", "Trạng thái" },
+    { "Firmware", "Phiên bản" },
     { "Battery", "Pin" },
     { "Reset pairing", "Đặt lại ghép nối" },
     { "Screen off", "Tắt màn hình" },
