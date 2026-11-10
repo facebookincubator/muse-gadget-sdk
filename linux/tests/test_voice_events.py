@@ -711,6 +711,48 @@ def test_held_fragments_play_as_whole_frames(observe):
     assert events == ([ResponseStarted("r1"), Working(True)] + spoken if observe else [])
 
 
+def test_held_words_between_frame_boundaries_split_the_reply_where_they_fall():
+    reply = TONE * 5
+    words = {0: "One ", 25: "two ", 90: "three ", 170: "four"}  # said before these 48-byte fragments
+    events = []
+    writes = []
+
+    class Frames(Output):
+        def write(self, data):
+            writes.append(len(data))
+            super().write(data)
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = Frames()
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=events.append)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            held = [speech("item-1"), created("r1")]
+            for index in range(len(reply) // 48):
+                if index in words:
+                    held.append(said(words[index]))
+                held.append(audio("p1", reply[index * 48:(index + 1) * 48]))
+            await chunk(vm, media, b"".join(map(line, held)))
+            await wait_until(lambda: call._waiting_bytes == len(reply))
+            await chunk(vm, media, line(turn("item-1", "sub-1")))
+            await wait_until(lambda: len(output.pcm) == len(reply))
+            await chunk(vm, media, end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await asyncio.wait_for(task, 2) == "remote_end"
+            assert output.pcm == reply
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert writes == [1200, 1920, 1200, 1920, 1920, 1440]
+    assert events == [
+        ResponseStarted("r1"), Working(True),
+        TranscriptDelta("r1", "One "), AudioChunk("r1", 0, reply[:1200]),
+        TranscriptDelta("r1", "two "), AudioChunk("r1", 600, reply[1200:4320]),
+        TranscriptDelta("r1", "three "), AudioChunk("r1", 2160, reply[4320:8160]),
+        TranscriptDelta("r1", "four"), AudioChunk("r1", 4080, reply[8160:]),
+    ]
+
+
 @pytest.mark.parametrize("observe", [False, True], ids=["audio_only", "observed"])
 def test_many_held_fragments_within_the_byte_limit_still_play(observe):
     reply = (TONE * 103)[:4097 * 48]  # 4,097 fragments, about 4.1 s
