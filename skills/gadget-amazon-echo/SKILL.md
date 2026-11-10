@@ -30,8 +30,8 @@ Smart Plug, on amazon.in, 2026-10-04.
 - The script renews its session cookies from the refresh token, but
   Amazon can stop accepting the token. Expect the user to re-run the
   login tool periodically.
-- Never voice purchasing or Drop In. No multi-room changes unless the
-  user explicitly asks.
+- Never use voice purchasing or Drop In. No multi-room changes unless
+  the user explicitly asks.
 - When the script renews its cookies, it passes the refresh token to
   `curl` as an argument, so other accounts on the same machine can briefly
   see it in the process list. Use it only on a Home Link where no
@@ -112,10 +112,12 @@ On a Linux Home Link (the Muse Linux client):
 2. Select: use that whole line as the selector, e.g.
    `SEL='Kitchen Dot=<deviceType>=<serial>=ECHO'` (write an apostrophe in
    the name, as in `Sam's Echo Dot`, as `'\''`). Before acting, check
-   `grep -c -- "$SEL" "$TMP/.alexa.devicelist.txt"` prints `1`. Stop if
-   it does not, or if the line contains `*`, `?`, `[`, `\`, `%20` or
-   repeated spaces (the script globs and regex-matches the selector);
-   ask the user to rename the device in the Alexa app. Multi-room groups
+   that both `grep -c -- "$SEL" "$TMP/.alexa.devicelist.txt"` (how the
+   script matches) and `grep -cxF -- "$SEL" "$TMP/.alexa.devicelist.txt"`
+   (the exact line) print `1`. Stop if either does not, or if the line
+   contains `*`, `?`, `[`, `\`, `%20` or repeated spaces (the script
+   globs and regex-matches the selector); ask the user to rename the
+   device in the Alexa app. Multi-room groups
    (family `WHA`) are out of scope for this selector.
 3. Pass `-d "$SEL"` on every device action below and on its readback.
    `SEL`, like the sourced settings, does not carry over between commands:
@@ -147,8 +149,11 @@ On a Linux Home Link (the Muse Linux client):
    as the user reads it in the Alexa app ("When you say ..."). Without
    one (a name only, or a routine with no voice trigger), run nothing and
    ask the user to add a trigger or start it from the Alexa app.
-9. Bluetooth: `-d "$SEL" -b list` shows paired devices;
-   `-d "$SEL" -b <MAC>` connects.
+9. Bluetooth: `-d "$SEL" -b list` shows paired devices, but with more
+   than one paired device it prints every address next to every name, so
+   the pairs are not reliable. Connect with `-d "$SEL" -b <MAC>` only
+   when the list has exactly one line; otherwise ask the user to connect
+   from the Alexa app.
 10. Diagnostics: `-d "$SEL" -q` (queue), `-d "$SEL" -n`
     (notifications/alarms); `-lastalexa` and `-lastcommand` are
     account-wide.
@@ -170,9 +175,10 @@ words and punctuation.
 ## Load safety (smart plugs)
 
 - Before the first switch of any smart plug, identify the attached load
-  with the user and record it. Switching cuts power to everything on the
-  plug at once — e.g. a TV + streaming box + set-top box on one extension
-  all lose power together, and a set-top box can take minutes to recover.
+  with the user and keep a note of it for later requests. Switching cuts
+  power to everything on the plug at once — e.g. a TV + streaming box +
+  set-top box on one extension all lose power together, and a set-top box
+  can take minutes to recover.
 - Loads with motors, heaters, medical devices, or network gear need
   explicit per-action confirmation, not just first-time identification.
 - Never exceed the plug's rated amperage; adding new devices to the
