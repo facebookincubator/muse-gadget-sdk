@@ -45,8 +45,9 @@ power, mode, or mist control, and water-empty alerts.
 - The user's VeSync account credentials, supplied through approved
   secret storage. Never ask for the password in chat, never put it or
   the session token on a command line, and never print, log, or
-  send either anywhere except to the VeSync API through the client. If
-  no credentials are stored, explain this setup instead.
+  send either anywhere except to the VeSync API through the client.
+  Keep the persisted token in the same secret storage, not in a plain
+  file. If no credentials are stored, explain this setup instead.
 
 ## The Lane
 
@@ -68,10 +69,12 @@ power, mode, or mist control, and water-empty alerts.
 2. Read fresh state first. If the device is offline, report that and
    send nothing.
 3. Send one command for the requested change.
-4. Read fresh state again and report the change done only when the
-   read-back shows it. If it does not, or the response was uncertain,
-   report what the device now shows. Never resend a command
-   automatically.
+4. Wait a second or two, then read fresh state again. Report the change
+   done only when that read succeeds and shows it; the client's cached
+   state after a command does not count. If the read fails, returns
+   nothing usable, or does not show the change, say the change is
+   unconfirmed and report what the device last showed. Never resend a
+   command automatically.
 
 ## Safety Limits
 
@@ -94,3 +97,5 @@ power, mode, or mist control, and water-empty alerts.
 ## Sources
 
 - [pyvesync: VeSync account API client, including Levoit humidifiers](https://github.com/webdjoe/pyvesync)
+  (checked against 3.5.1; field names such as `water_lacks` are
+  pyvesync's)
