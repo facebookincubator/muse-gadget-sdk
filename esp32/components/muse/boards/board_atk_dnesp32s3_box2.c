@@ -507,6 +507,7 @@ static unsigned poll_expander(void)
 {
     uint8_t in[2];
     if (xl_read2(XL9555_IN0, in) != ESP_OK) {
+        s_q_down_us = esp_timer_get_time();   /* a failed read never counts toward the hold */
         return 0;
     }
     unsigned ev = debounce(&s_m, m_down(in[0]), MUSE_BTN_TALK_PRESS, MUSE_BTN_TALK_RELEASE);
@@ -516,7 +517,7 @@ static unsigned poll_expander(void)
         s_q_down_us = esp_timer_get_time();
         s_q_long = false;
     }
-    if (s_q.pressed && !s_q_long && esp_timer_get_time() - s_q_down_us >= POWER_HOLD_US) {
+    if (s_q.pressed && q_down(in[0]) && !s_q_long && esp_timer_get_time() - s_q_down_us >= POWER_HOLD_US) {
         s_q_long = true;
         q |= MUSE_BTN_POWER_LONG;
     }

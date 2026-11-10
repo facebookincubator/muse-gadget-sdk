@@ -105,10 +105,14 @@ typedef int esp_err_t;
 #define MUSE_BTN_POWER_RELEASE 0x20
 #define MUSE_BTN_POWER_LONG 0x40
 static uint8_t s_port0;
+static bool s_fail;
 static int64_t s_now_us;
 static esp_err_t xl_read2(uint8_t reg, uint8_t val[2])
 {
     (void)reg;
+    if (s_fail) {
+        return -1;
+    }
     val[0] = s_port0;
     val[1] = 0xff;
     return ESP_OK;
@@ -128,6 +132,11 @@ static unsigned run(uint8_t port0, int ms)
     }
     return ev;
 }
+static unsigned tap(uint8_t down, uint8_t up)
+{
+    unsigned ev = run(down, 100);
+    return ev | run(up, 100);
+}
 int main(void)
 {
     keys_at_boot(0x3f);   /* Q held: it woke the box */
@@ -139,13 +148,18 @@ int main(void)
     keys_at_boot(0xff);   /* M held: it switched the box on */
     printf("m_boot_held %x\n", run(0xff, 1000));
     printf("m_boot_release %x\n", run(0x7f, 100));
-    printf("m_tap %x\n", run(0xff, 100) | run(0x7f, 100));
+    printf("m_tap %x\n", tap(0xff, 0x7f));
     keys_at_boot(0x5f);   /* L held */
     printf("l_boot_held %x\n", run(0x5f, 1000));
     printf("l_boot_release %x\n", run(0x7f, 100));
     keys_at_boot(0x7f);   /* nothing held */
-    printf("q_tap %x\n", run(0x3f, 100) | run(0x7f, 100));
-    printf("l_tap %x\n", run(0x5f, 100) | run(0x7f, 100));
+    printf("q_tap %x\n", tap(0x3f, 0x7f));
+    printf("l_tap %x\n", tap(0x5f, 0x7f));
+    printf("q_press_then_fail %x\n", run(0x3f, 100));
+    s_fail = true;        /* Q let go while the expander doesn't answer */
+    printf("q_failed %x\n", run(0x7f, 2500));
+    s_fail = false;
+    printf("q_recovered %x\n", run(0x7f, 100));
     return 0;
 }
 '''
@@ -182,6 +196,10 @@ int main(void)
         self.assertEqual(ev['l_boot_release'], 0x08)
         self.assertEqual(ev['q_tap'], 0x30)
         self.assertEqual(ev['l_tap'], 0x0c)
+        # Q let go while reads fail: no power-off hold once they recover.
+        self.assertEqual(ev['q_press_then_fail'], 0x10)
+        self.assertEqual(ev['q_failed'], 0)
+        self.assertEqual(ev['q_recovered'], 0x20)
 
     def test_power_off_waits_for_the_keys_only_so_long(self):
         source = BOARD.read_text()
