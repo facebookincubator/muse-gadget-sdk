@@ -386,7 +386,7 @@ jobs:
   deploy-web-flasher:
     name: Deploy web flasher
     needs: web-flasher
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'facebookincubator/muse-gadget-sdk' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write
