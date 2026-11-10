@@ -298,7 +298,10 @@ class VoiceCall:
                     self._flush()
                 except Exception:
                     log.warning("could not flush voice playback")
-                await self._cleanup()
+                finally:
+                    # An observer raising CancelledError on PlaybackFlushed
+                    # must not skip the explicit end-call.
+                    await self._cleanup()
                 if pending:
                     raise asyncio.TimeoutError("voice worker shutdown timed out")
 

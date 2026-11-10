@@ -664,6 +664,30 @@ def test_barge_in_callback_failure_cancels_response_and_ends_call():
     asyncio.run(asyncio.wait_for(scenario(), 5))
 
 
+def test_observer_cancellation_while_shutdown_flushes_still_ends_the_call():
+    def observe(event):
+        if isinstance(event, PlaybackFlushed):
+            raise asyncio.CancelledError  # e.g. reading a cancelled task's result
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = Output()
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=observe,
+                             cleanup_timeout=0.2)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE * 5)))
+            await output.written.wait()
+            task.cancel()
+            await hangup(vm, media, start)
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert call.end_call_acknowledged
+            assert not session._requests
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
 def test_unidentified_responses_and_legacy_audio_report_no_id():
     legacy = {"type": "response.output_audio.delta", "delta": base64.b64encode(HALF).decode()}
 
