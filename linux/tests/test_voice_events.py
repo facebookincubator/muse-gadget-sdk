@@ -728,6 +728,15 @@ def test_a_finished_reply_does_not_keep_its_turn_through_a_nothing_pending_settl
     ) == [True, "|", False, "|"]
 
 
+def test_a_replayed_older_turn_does_not_become_the_turn_awaiting_its_reply():
+    assert working_after(
+        [turn("item-1", "sub-1"), created("r1"), done("r1"),
+         turn("item-2", "sub-2"), created("r2"), done("r2")],
+        [turn("item-1", "sub-1")],  # a valid replay: both replies already finished
+        [turn_settled(pending=0)],
+    ) == [True, "|", "|", False, "|"]
+
+
 @pytest.mark.parametrize("pending", ["0", -1, 0.0, 1e0, True, None])
 def test_only_plain_handoff_counts_change_working(pending):
     assert working_after(

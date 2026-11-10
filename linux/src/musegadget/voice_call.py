@@ -530,13 +530,14 @@ class VoiceCall:
         if event["type"] == "hatch.voice.turn_started":
             item = identifier(event.get("item_id"))
             if new_turn:
+                # A replay changes nothing. The new turn is the newest entry.
                 self._awaiting_caller = False
-            message_id = identifier(event.get("submission_message_id"))
-            older = [turn for key, turn in self._active_turns.items() if key != message_id]
-            if item != self._reply_item and item not in older and item not in self._settled_turns.values():
-                # A new caller turn; a delayed reply's turn names an earlier item.
-                self._awaiting_reply, self._reply_kept, self._reply_item = True, False, item
-                self._reply_response = self._open_response if self._open_unmarked else None
+                older = list(self._active_turns.values())[:-1]
+                if (item != self._reply_item and item not in older
+                        and item not in self._settled_turns.values()):
+                    # A new caller turn; a delayed reply's turn names an earlier item.
+                    self._awaiting_reply, self._reply_kept, self._reply_item = True, False, item
+                    self._reply_response = self._open_response if self._open_unmarked else None
         elif not repeat:
             pending = event.get("async_handoffs_pending")
             if isinstance(pending, int) and not isinstance(pending, bool) and pending >= 0:
