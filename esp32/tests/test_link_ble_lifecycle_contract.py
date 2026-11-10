@@ -113,6 +113,13 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         self.assertIn("nvs_open(NIMBLE_BOND_NS, NVS_READWRITE, &h)", stopped)
         self.assertIn("nvs_erase_all(h)", stopped)
         self.assertIn("nvs_commit(h)", stopped)
+        # A start racing the erase may already hold the bonds in RAM: the
+        # first connection clears them before the link can encrypt.
+        self.assertLess(stopped.index("s_forget_pending = true;"), stopped.index("nvs_open("))
+        gap = _function_body(source, "int muse_ble_gap_event(struct ble_gap_event *ev)")
+        connect = gap[gap.index("case BLE_GAP_EVENT_CONNECT:"):gap.index("case BLE_GAP_EVENT_DISCONNECT:")]
+        self.assertIn("if (s_forget_pending) {", connect)
+        self.assertLess(connect.index("s_forget_pending = false;"), connect.index("ble_store_clear();"))
 
     def test_successful_setup_marks_complete_and_stops_ble(self) -> None:
         source = APP_C.read_text()
