@@ -83,9 +83,10 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 - No arbitrary or raw G-code, firmware or configuration changes, calibration or homing
   moves, or bypassing thermal and motion protections.
 - Pause, stop or resume only on the user's explicit request for that job. Intervening
-  in someone else's print wastes filament and can ruin the part.
+  in someone else's print wastes filament and can ruin the part. The one exception is the
+  Bambu Lab P2S skill's failure pause under criteria the user agreed in advance.
 - Camera live view and timelapse review are out of scope for this skill; do not promise
-  them.
+  them. For P2S chamber-camera snapshots and print monitoring, see the Bambu Lab P2S skill.
 - Developer Mode relaxes Bambu's LAN authorization; it belongs on a trusted home network
   only.
 - Bambu can change firmware authorization or LAN behavior at any time; an update may close
