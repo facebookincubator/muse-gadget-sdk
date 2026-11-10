@@ -27,8 +27,9 @@
 #include "muse_voice.h"
 
 /* The preview drives modes directly; it has no live call transport. */
-bool muse_voice_in_call(void) { return false; }
-muse_voice_view_t muse_voice_call_view(void) { return MUSE_VOICE_VIEW_NONE; }
+static bool s_in_call;
+bool muse_voice_in_call(void) { return s_in_call; }
+muse_voice_view_t muse_voice_call_view(void) { return s_in_call ? MUSE_VOICE_VIEW_SPEAKING : MUSE_VOICE_VIEW_NONE; }
 
 #define SIM_DEFAULT_NAME "MuseGadget-SIM001"
 #define SIM_DEFAULT_SSID "Muse Simulator"
@@ -86,6 +87,7 @@ void sim_services_reset(void)
     s_link = MUSE_LINK_ONLINE;
     s_brightness = 75;
     s_speaker = true;
+    s_in_call = false;
 }
 
 void sim_services_set_wifi(muse_wifi_state_t state, const char *ssid)
@@ -255,4 +257,9 @@ bool muse_console_write(const void *buf, size_t n)
 void muse_input_touch_talk(bool pressed)
 {
     (void)pressed;
+}
+
+void sim_services_set_call(bool on)
+{
+    s_in_call = on;
 }

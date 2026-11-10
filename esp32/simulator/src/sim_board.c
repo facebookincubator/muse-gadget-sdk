@@ -74,6 +74,15 @@ static esp_err_t sim_power_off(void)
     return ESP_FAIL;
 }
 
+/* Presence tells the production UI this preview board has a speaker. No
+ * codec is opened: the simulator never starts the audio task. */
+static esp_err_t sim_audio_init(esp_codec_dev_handle_t *speaker, esp_codec_dev_handle_t *mic)
+{
+    (void)speaker;
+    (void)mic;
+    return ESP_OK;
+}
+
 static const muse_board_t s_sim_board = {
     .name = "SenseCAP Watcher Simulator",
     .width = WATCHER_RESOLUTION,
@@ -92,6 +101,7 @@ static const muse_board_t s_sim_board = {
     .set_brightness = sim_set_brightness,
     .panel_sleep = sim_panel_sleep,
     .power_off = sim_power_off,
+    .audio_init = sim_audio_init,
 };
 
 const muse_board_t *sim_board_get(void)

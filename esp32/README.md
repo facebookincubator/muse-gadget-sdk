@@ -319,6 +319,12 @@ To work on the UI without a board, use the
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
 
+On full-size LVGL displays at least 400 pixels wide, turning the speaker off
+shows replies in the original pixel caption font at twice its normal size.
+The text is centred beneath the smaller avatar; turning the speaker back on
+restores the compact captions. Live-call captions keep the latest whole words
+visible when the larger text fills the reading area.
+
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
 answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app).
