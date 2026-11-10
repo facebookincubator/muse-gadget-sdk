@@ -80,7 +80,7 @@ jobs:
       matrix:
         include:
           - name: Linux
-            os: ubuntu-24.04
+            os: ubuntu-latest
             sanitizers: "ON"
           - name: macOS (Apple silicon)
             os: macos-latest
