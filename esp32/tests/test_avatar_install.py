@@ -659,6 +659,13 @@ class Restore(unittest.TestCase):
         self.assertFalse(os.path.exists(self.active))
         self.assertEqual(Path(self.active + ".prev").read_text().strip(), GOOD_B.strip())
 
+    def test_a_new_avatar_after_the_default_says_the_older_one_went(self):
+        self.restore("default")                        # A -> default, A kept as .prev
+        del self.out[:]
+        self.run_tool("no_flash")                      # default -> B: A goes
+        self.assertFalse(os.path.exists(self.active + ".prev"))
+        self.assertIn("your older avatar", "\n".join(self.out))
+
     def test_previous_after_the_default_keeps_the_default_as_previous(self):
         self.restore("default")                        # A -> default
         self.restore("previous")                       # default -> A
@@ -869,6 +876,37 @@ class RestoringPreviousInterrupted(unittest.TestCase):
                             break
                 else:
                     self.fail("never finished")
+
+
+class RestoringPreviousWithCRLFInterrupted(unittest.TestCase):
+    """An avatar with CRLF line endings is staged byte for byte, so recovery can tell nothing was swapped."""
+
+    def test_killed_at_any_write(self):
+        crlf = GOOD_A.replace("\n", "\r\n").encode()
+        for kind in ("replace", "fsync", "remove"):
+            for crash_at in range(1, 45):
+                with self.subTest(kind=kind, crash_at=crash_at), tempfile.TemporaryDirectory() as d:
+                    active, prev = Path(d, "muse_pixel.c"), Path(d, "muse_pixel.c.prev")
+                    active.write_bytes(crlf)
+                    prev.write_text(GOOD_B)
+                    proc = subprocess.run([sys.executable, "-c", DRIVER, str(ROOT / "tools" / "muse"),
+                                           str(ROOT / "tests"), d, str(crash_at), kind, "previous"],
+                                          capture_output=True, text=True, timeout=60)
+                    self.assertIn(proc.returncode, (0, 70), proc.stderr)
+                    with mock.patch.object(avatar, "AVATAR_DIR", d), \
+                            mock.patch.object(avatar, "AVATAR_SRC", str(active)):
+                        avatar.recover()
+                    slots = (active.read_text().strip(), prev.read_text().strip())
+                    self.assertIn(slots, ((GOOD_A.strip(), GOOD_B.strip()), (GOOD_B.strip(), GOOD_A.strip())))
+                    if slots[0] == GOOD_A.strip():
+                        self.assertEqual(active.read_bytes(), crlf)     # untouched
+                    else:
+                        self.assertEqual(prev.read_bytes(), crlf)       # kept as it was
+                    if proc.returncode == 0:
+                        self.assertEqual(slots, (GOOD_B.strip(), GOOD_A.strip()))
+                        break
+            else:
+                self.fail("never finished")
 
 
 class RecoveringPreviousInterrupted(unittest.TestCase):

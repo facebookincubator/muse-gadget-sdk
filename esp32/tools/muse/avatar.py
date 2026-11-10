@@ -583,13 +583,18 @@ def save_reply(reply):
     write_atomic(LAST_REPLY, reply)
 
 
+def lf(text):
+    """`text` with the line endings reading it as text gives."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def promote(code, gifs_dir):
     """Makes the checked `code` your avatar (None: the default one), keeping the one it replaces
     as muse_pixel.c.prev."""
     if os.path.exists(AVATAR_SRC):
-        with open(AVATAR_SRC, encoding="utf-8") as f:
-            old = f.read()
-        if old != code:  # replacing a file with itself keeps the previous selection
+        with open(AVATAR_SRC, encoding="utf-8", newline="") as f:
+            old = f.read()   # as it is on disk: recover_previous() compares the staged copy's bytes with it
+        if code is None or lf(old) != lf(code):  # replacing a file with itself keeps the previous selection
             write_atomic(AVATAR_SRC + ".prev.next", old)
     elif code is not None:
         write_atomic(AVATAR_SRC + ".prev-default.next", "")
@@ -649,12 +654,17 @@ def install(code, key, work):
             raise Stop(f"{rel(DEFAULT_SRC)} changed while it was being checked, so your avatar is as it was. "
                        "Run this again.")
         had = os.path.exists(AVATAR_SRC)
+        older = code is not None and not had and os.path.exists(AVATAR_SRC + ".prev")
         promote(code, gifs_dir)
         if code is None and not had:
             say("You have no avatar of your own: builds use the default one.")
         elif code is None:
             say(f"Removed {rel(AVATAR_SRC)}: builds use the default avatar (yours is "
                 f"{rel(AVATAR_SRC + '.prev')})")
+        elif older:
+            # One previous slot: it now holds the default, so the older avatar of yours goes.
+            say(f"Saved {rel(AVATAR_SRC)} (the one before is the default avatar; your older avatar, "
+                f"{rel(AVATAR_SRC + '.prev')}, was removed)")
         else:
             say(f"Saved {rel(AVATAR_SRC)}" + (f" (the one before is {rel(AVATAR_SRC + '.prev')})"
                                               if os.path.exists(AVATAR_SRC + ".prev") else ""))
@@ -697,7 +707,6 @@ def make_avatar(board, key, reply, work=None):
     finally:
         if own:
             shutil.rmtree(work, ignore_errors=True)
-
 
 
 def restore(which, key, work):
