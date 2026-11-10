@@ -383,17 +383,19 @@ jobs:
         with:
           path: site
 
-  deploy-web-flasher:
-    name: Deploy web flasher
-    needs: web-flasher
-    if: github.repository == 'facebookincubator/muse-gadget-sdk' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+  # deploy-web-flasher is for upstream Meta GitHub Pages deployment.
+  # On personal forks, disabled to prevent "Value 'github-pages' is not valid" IDE schema warnings.
+  # deploy-web-flasher:
+  #   name: Deploy web flasher
+  #   needs: web-flasher
+  #   if: github.repository == 'facebookincubator/muse-gadget-sdk' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     pages: write
+  #     id-token: write
+  #   environment:
+  #     name: github-pages
+  #     url: ${{ steps.deploy.outputs.page_url }}
+  #   steps:
+  #     - id: deploy
+  #       uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
