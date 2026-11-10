@@ -240,6 +240,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Waveshare ESP32-S3-Touch-LCD-3.49 V2 | UI, touch, push-to-talk, settings, images | `tools/muse/board.sh build lcd349` |
 | Waveshare ESP32-S3-Touch-LCD-1.46 (also 1.46B, 1.46C) | UI, touch, hold-the-face or BOOT push-to-talk, settings, images | `tools/muse/board.sh build 146` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build 143` |
+| LilyGO T-Display-S3 AMOLED 1.75 | UI, touch, settings; text replies, no audio | `tools/muse/board.sh build lilygo175` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings, images; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
 | SpotPear ESP32-AI-1.28 v1.0 (experimental) | Round UI, BOOT push-to-talk, MAX98357A speaker and NP0557 mic | `tools/muse/board.sh build spotpear` |
 | VIEWE SmartRing-Plus | UI, round touch, on-screen mic, settings, images | `tools/muse/board.sh build smartring-plus` |
