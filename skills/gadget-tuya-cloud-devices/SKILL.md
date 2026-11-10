@@ -5,6 +5,7 @@ description: >-
   user-supplied API key: homes and rooms, device detail, thing-model property control, rename,
   weather, hourly statistics, self-send notifications, IPC cloud snapshots and real-time event
   subscription. Cloud only; prefer a device-specific or local-TCP skill when one matches.
+  Switching heaters, valves, openers, irrigation or unknown loads needs the user's confirmation.
 ---
 
 # Tuya Cloud Devices: End-User API Control
@@ -19,7 +20,8 @@ datapoint schema, prefer [Tuya Wi-Fi devices](../gadget-tuya-wifi-devices/SKILL.
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - A user-supplied end-user API key, applied for at https://tuya.ai/. Treat it as a credential:
-  pass it in a header, never log or echo it.
+  keep it in a file only the user can read and load it from there for REST calls as well as the
+  subscriber. Pass it in a header, never on a command line, and never log or echo it.
 - Send `Authorization: Bearer <key>` on every call. Pick the base URL from the first two
   characters after `sk-`; it must match the account's region. If the prefix is not listed, ask
   the user to confirm the key was issued for an international account at https://tuya.ai/.
@@ -67,6 +69,19 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
    value by 10% of the typeSpec range for vague amounts or by the stated amount exactly, clamp
    to `[min, max]`, honor `scale` and round to `step`. A relative ask needs a readable current
    value; for a `wr` property, ask for an absolute value instead.
+
+## Confirm Before Acting
+
+- Before switching a heater, valve, garage or door opener, irrigation controller, or a socket,
+  plug or switch whose load is unknown, read back the device, its room, the property and the
+  value, and wait for the user's yes. A yes covers that one command only.
+- Judge this by the device's `category` from the device list, not only by its name: for example
+  `qn`, `rs`, `dr` and `dbl` (heaters), `sfkzq` and `ggq` (valves and irrigation), `ckmkzq` and
+  `mk` (garage doors and access control), and `cz`, `pc` and `kg` (sockets, power strips and
+  switches, unless the user has said what they power and it is none of these). Confirm an
+  unfamiliar category the same way.
+- An automation's confirmed trigger→action mapping covers its later actions only if it names
+  the device and the action.
 
 ## Verify the Result
 
@@ -129,8 +144,8 @@ long-lived process for an always-on host (a Linux gadget), not a one-shot query.
 Python script using the `websockets` package:
 
 - Start it only when the user asks for ongoing monitoring or automation, and run one instance
-  per key. Read the key from a file or environment variable only the user can read instead of
-  writing it into the script, and tell the user where it runs and how to stop it.
+  per key. Read the key from the user-only file (see Prerequisites) instead of writing it into
+  the script, and tell the user where it runs and how to stop it.
 - URI by key prefix (same mapping as the REST table): AZ `wss://wsmsgs.iot-wus.com`,
   EU `wss://wsmsgs.iot-eu.com`, IN `wss://wsmsgs.iot-ap.com`, UE `wss://wsmsgs.iot-eus.com`,
   WE `wss://wsmsgs.iot-weu.com`, SG `wss://wsmsgs.iot-sea.com`.
