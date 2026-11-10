@@ -1,6 +1,6 @@
 # Skill Catalog
 
-52 active skills: 51 device/family skills and one shared Google Cast skill.
+53 active skills: 52 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -48,6 +48,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Moonraker 3D printers](gadget-moonraker-3d-printers/SKILL.md) — existing-service status and print/job controls.
 - [Bambu Lab printers](gadget-bambu-lab-printers/SKILL.md) — local status, filament and owner-approved prints in Developer Mode.
 - [Bambu Lab P2S](gadget-bambu-lab-p2s/SKILL.md) — status, chamber-camera snapshots, monitoring and agreed failure pauses.
+- [HomeWhiz laundry](gadget-homewhiz-laundry/SKILL.md) — cloud only; needs internet and a HomeWhiz account: washer and dryer cycle state, read-only.
 
 ## Vacuums
 
@@ -65,7 +66,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [ESPHome devices](gadget-esphome-devices/SKILL.md) — entities exposed by installed firmware.
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
-- [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — end-user API with a supplied key: status, control, weather, stats and snapshots.
+- [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — cloud only; needs internet and a Tuya end-user API key: status, confirmed control, weather, stats and snapshots.
 - [SinricPro cloud devices](gadget-sinricpro-cloud-devices/SKILL.md) — cloud only; needs internet and a SinricPro API key: state, actions, scenes and schedules.
 
 ## Read-only network and camera access
