@@ -630,7 +630,7 @@ static void dedicated_buttons(unsigned ev)
         power_off();
     }
     if (release) power_release();
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
     /* In a push-to-talk call, or with its press still on the way, the speaker
      * button (blue) hangs up, on the press, and wakes the screen. A quick
      * second press just after doesn't toggle the speaker. If the hang-up

@@ -188,6 +188,13 @@ menu "Muse"
             depends on IDF_TARGET_ESP32S3
     endchoice
 
+    config MUSE_BOARD_M5STACK_STOPWATCH_FAMILY
+        bool
+        default y if MUSE_BOARD_M5STACK_STOPWATCH || MUSE_BOARD_M5STACK_TRIVIAPOD
+        help
+            The StopWatch and the TriviaPOD, whose board files set up the
+            same keys: the StopWatch's call controls apply to both.
+
     config MUSE_ENABLED
         bool
         default y if !MUSE_BOARD_NONE

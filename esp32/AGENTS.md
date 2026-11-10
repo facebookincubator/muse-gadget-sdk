@@ -522,7 +522,8 @@ The device still needs to be paired once for its token.
 `CONFIG_MUSE_REALTIME_VOICE` (off by default, "Live voice calls with Muse"
 under Muse in menuconfig) adds calls beside voice notes on boards with Muse's
 own voice session: the full-UI boards with PSRAM and the Voice PE (and
-reSpeaker Lite) builds. On StopWatch, hold yellow to talk or interrupt, release
+reSpeaker Lite) builds. On StopWatch (and the TriviaPOD, whose board file
+sets up the same keys), hold yellow to talk or interrupt, release
 to keep the call open, and tap blue to hang up; voice notes are an explicit
 Sound setting. With the option on, the StopWatch's yellow key is its talk
 button and blue its speaker button (`board_m5stack_stopwatch.c`), swapped from
