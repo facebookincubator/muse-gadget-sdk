@@ -14,7 +14,9 @@
 
 """Compile the 1.54G's start cue against a fake I2S microphone: when
 voice_board_mic_start() returns, nothing the mic buffered during the cue is
-left for voice.c to count, so a tap released during the cue stays a tap."""
+left for voice.c to count, so a tap released during the cue stays a tap.
+Also compile its speaker write against a PWR beep that is playing: the
+reply's first sound waits for the beep instead of being lost under it."""
 from pathlib import Path
 import os
 import re
@@ -100,6 +102,68 @@ int main(void) {
 '''
 
 
+SPEAKER_HARNESS = r'''
+#include <assert.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_ERR_INVALID_SIZE 0x104
+typedef int *SemaphoreHandle_t;
+#define portMAX_DELAY 0
+#define pdMS_TO_TICKS(ms) (ms)
+#define VOICE_SPEAKER_RATE 48000
+#define AUDIO_CHUNK 320
+
+static int s_lock_obj, s_cue_lock_obj;
+static SemaphoreHandle_t s_lock = &s_lock_obj, s_cue_lock = &s_cue_lock_obj;
+static bool s_playing, s_cue;
+static atomic_size_t s_played;
+static int16_t s_stereo[AUDIO_CHUNK * 2];
+static int cue_lock_takes;
+static size_t audible_written, delayed_ms;
+
+/* cue_task holds s_cue_lock for a whole beep, so taking it waits the beep out. */
+static int xSemaphoreTake(SemaphoreHandle_t l, int t) {
+    (void)t;
+    if (l == s_cue_lock) {
+        cue_lock_takes++;
+        s_cue = false;
+    }
+    return 1;
+}
+static void xSemaphoreGive(SemaphoreHandle_t l) { (void)l; }
+static void vTaskDelay(size_t ms) { delayed_ms += ms; }
+static bool speaker_on(void) { return true; }
+static esp_err_t write_stereo(const int16_t *stereo, size_t frames) {
+    for (size_t i = 0; i < frames * 2; i++) audible_written += stereo[i] != 0;
+    return ESP_OK;
+}
+
+%(write)s
+
+int main(void) {
+    static int32_t frames[96 * 2];
+    for (size_t i = 0; i < 96 * 2; i++) frames[i] = 1000 * 65536;
+
+    /* A PWR beep is playing when the reply's first sound arrives. */
+    s_cue = true;
+    assert(voice_board_speaker_write(frames, 96) == ESP_OK);
+    assert(cue_lock_takes == 1 && s_playing && audible_written > 0 && delayed_ms == 0);
+
+    /* Once the reply plays, its writes don't wait on beeps. */
+    audible_written = 0;
+    assert(voice_board_speaker_write(frames, 96) == ESP_OK);
+    assert(cue_lock_takes == 1 && audible_written > 0);
+    puts("PASS 1.54G reply waits for a PWR beep");
+    return 0;
+}
+'''
+
 def function(source, signature):
     start = source.index(signature)
     end = source.index("{", start) + 1
@@ -125,6 +189,20 @@ class LinkWaveshare154gAudioTest(unittest.TestCase):
             result = subprocess.run([str(out / "cue")], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+
+    def test_reply_waits_for_a_pwr_beep(self):
+        source = (ROOT / "main/voice_board_waveshare_154g.c").read_text()
+        write = function(source, "esp_err_t voice_board_speaker_write(const int32_t *frames, size_t count)")
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            (out / "write.c").write_text(SPEAKER_HARNESS.replace("%(write)s", write))
+            cc = shlex.split(os.environ.get("CC", "cc"))
+            compiled = subprocess.run(
+                [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", str(out / "write.c"), "-o", str(out / "write")],
+                capture_output=True, text=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            result = subprocess.run([str(out / "write")], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 if __name__ == "__main__":
     unittest.main()
