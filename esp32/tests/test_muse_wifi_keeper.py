@@ -24,6 +24,8 @@ class MuseWifiKeeper(unittest.TestCase):
         wifi = (ROOT / "main/wifi_mgr.c").read_text()
         constants = glue[glue.index("#define CONNECT_TIMEOUT_MS"):glue.index("_Static_assert")]
         code = r'''
+#define CONFIG_HOMEHUB_WIFI_SSID ""
+#define WIFI_OVERRIDE (CONFIG_HOMEHUB_WIFI_SSID[0] != '\0')
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
