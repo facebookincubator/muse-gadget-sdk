@@ -1159,14 +1159,18 @@ static esp_err_t read_power(muse_power_t *out)
  * button turns it back on. Do not substitute an ESP GPIO or deep-sleep wake. */
 static esp_err_t power_off(void)
 {
+    /* Stop the motor first, best effort: the PMIC cuts its rail anyway, so a
+     * failed stop mustn't keep the board from powering off. */
     xSemaphoreTake(s_ioe_lock, portMAX_DELAY);
     s_motor_enabled = false;
-    esp_err_t err = s_motor_on ? motor_off_locked() : ESP_OK;
+    if (s_motor_on && motor_off_locked() != ESP_OK) {
+        ESP_LOGW(TAG, "vibration stop failed before power off");
+    }
     xSemaphoreGive(s_ioe_lock);
     uint8_t cmd = PMIC_SHUTDOWN;
     /* Don't turn off peripheral rails first: on a failed command the shared
      * input/UI must be able to display COULDN'T POWER OFF and remain usable. */
-    if (err == ESP_OK) err = reg_write(s_pmic, PMIC_SYS_CMD, &cmd, 1);
+    esp_err_t err = reg_write(s_pmic, PMIC_SYS_CMD, &cmd, 1);
     if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(500));
     xSemaphoreTake(s_ioe_lock, portMAX_DELAY);
     s_motor_enabled = s_motor_task != NULL;

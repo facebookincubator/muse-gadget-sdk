@@ -42,8 +42,8 @@ class TriviaPODHaptics(unittest.TestCase):
 enum { ESP_OK=0, ESP_FAIL=-1, pdTRUE=1, eSetValueWithOverwrite=1 };
 typedef int esp_err_t;
 static void *s_motor_task=(void *)1;
-static int s_ioe=1, s_pmic=2, s_ioe_lock=3, elapsed, writes, duty;
-static bool s_motor_enabled=true, s_motor_on, setting=true, shutdown;
+static int s_ioe=1, s_pmic=2, s_ioe_lock=3, elapsed, writes, duty, delays;
+static bool s_motor_enabled=true, s_motor_on, setting=true, shutdown, stop_fails;
 static uint32_t pending;
 static jmp_buf done;
 static esp_err_t power_off(void);
@@ -57,21 +57,28 @@ static int xTaskNotifyWait(uint32_t a,uint32_t b,uint32_t *ms,uint32_t wait) {
     *ms=pending; pending=0; return pdTRUE;
 }
 static esp_err_t reg_write(int dev,uint8_t reg,const uint8_t *data,size_t n) {
-    if(dev==s_pmic) { assert(!duty && !s_motor_enabled); longjmp(done,2); }
+    if(dev==s_pmic) { assert((stop_fails || !duty) && !s_motor_enabled); longjmp(done,2); }
     assert(dev==s_ioe && reg==IOE_PWM1_DUTY && n==2);
+    if(stop_fails && !data[0] && !data[1]) return ESP_FAIL;   /* the expander refuses the stop */
     duty=data[0] | data[1]<<8; assert(duty==(writes++ ? 0 : MOTOR_DUTY)); return ESP_OK;
 }
-static void vTaskDelay(int ms) { if(shutdown) power_off(); elapsed+=ms; }
+static void vTaskDelay(int ms) { assert(++delays<10); if(shutdown) power_off(); elapsed+=ms; }
 ''' + ''.join(function(source, name) for name in ('motor_off_locked', 'motor_task', 'vibrate', 'power_off')) + r'''
 static void run(int scenario) {
-    elapsed=writes=0; setting=scenario!=2; shutdown=scenario==3;
+    elapsed=writes=delays=0; setting=scenario!=2; shutdown=scenario>=3; stop_fails=scenario==4;
+    s_motor_enabled=true;   /* a power off that reached the PMIC never came back */
     vibrate(scenario==1 ? 999 : 30);
     assert(!writes && !elapsed); /* requests do not wait or touch I2C */
     int result=setjmp(done); if(!result) motor_task(NULL);
+    if(stop_fails) {
+        /* The stop failed, and power off still reached the PMIC. */
+        assert(result==2 && s_motor_on && duty==MOTOR_DUTY && writes==1 && !elapsed);
+        return;
+    }
     assert(result==(shutdown ? 2 : 1) && !s_motor_on && !duty);
     assert(writes==(setting ? 2 : 0) && elapsed==(setting && !shutdown ? (scenario==1 ? 120 : 30) : 0));
 }
-int main(void) { for(int scenario=0;scenario<4;scenario++) run(scenario); }
+int main(void) { for(int scenario=0;scenario<5;scenario++) run(scenario); }
 '''
         with tempfile.TemporaryDirectory() as tmp:
             c = Path(tmp) / 'motor.c'
