@@ -20,6 +20,12 @@
  * mic and an AW8737A speaker amp, two buttons on the rim (yellow upper left,
  * blue upper right) and a power button wired to the power chip.
  *
+ * The M5Stack TriviaPOD (TP-01-A, CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD) runs
+ * this file too. M5Stack hasn't published its pin map; M5's docs list it next
+ * to the StopWatch, its I2C bus answers at the same six addresses, and it has
+ * 32 MB of flash (its overlay). Checked on one TriviaPOD: display, touch, the
+ * three buttons, mic, speaker and power off; not yet sleep, wake or battery.
+ *
  * Everything shares one I2C bus (GPIO 47/48). M5's power chip (M5PM1, 0x6E)
  * measures the battery and USB; its GPIO2 is the charger's CHG_STAT and its
  * GPIO1 the IRQ line to GPIO12 that wakes the paused input task on a red key
@@ -234,12 +240,17 @@ static bool s_pmic_irq;                 /* the PM1's IRQ output is set up */
 static bool s_irq_stuck;                /* the line stayed low after clearing */
 static unsigned poll_power_button(void);
 
-/* Both chips are microcontrollers and now and then miss a transfer; retry. */
+/* Both chips are microcontrollers and now and then miss a transfer; retry,
+ * 10 ms apart: on a TriviaPOD after a USB reset the power chip refused a
+ * write three times in a row without the pause. */
 static esp_err_t reg_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t *buf, size_t n)
 {
     esp_err_t err = ESP_FAIL;
     for (int i = 0; i < 3 && err != ESP_OK; i++) {
         err = i2c_master_transmit_receive(dev, &reg, 1, buf, n, 50);
+        if (err != ESP_OK && i < 2) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
     return err;
 }
@@ -252,6 +263,9 @@ static esp_err_t reg_write(i2c_master_dev_handle_t dev, uint8_t reg, const uint8
     esp_err_t err = ESP_FAIL;
     for (int i = 0; i < 3 && err != ESP_OK; i++) {
         err = i2c_master_transmit(dev, buf, n + 1, 50);
+        if (err != ESP_OK && i < 2) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
     return err;
 }
@@ -1090,7 +1104,11 @@ static esp_err_t power_off(void)
 }
 
 static const muse_board_t s_board = {
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    .name = "M5Stack TriviaPOD",
+#else
     .name = "M5Stack StopWatch",
+#endif
     .width = LCD_RES,
     .height = LCD_RES,
     .round = true,

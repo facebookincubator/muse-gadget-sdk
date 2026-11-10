@@ -124,8 +124,8 @@ provided; factory-equivalent low-power behaviour is not claimed.
 pairing, touch, recording and playback, sleep and wake, and reconnect. See
 [validation limits](ostb-echoear-2st.md#validation).
 
-*TriviaPOD entries describe one unit, running a copy of the StopWatch's
-driver (M5Stack hasn't published a pin map). Display, touch, the three
+*TriviaPOD entries describe one unit, running the StopWatch's board file
+and controls (M5Stack hasn't published a pin map). Display, touch, the three
 buttons, mic, speaker and power off were checked; sleep, wake and the
 battery weren't.
 

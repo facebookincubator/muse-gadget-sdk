@@ -52,7 +52,7 @@ CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 
 # As on the Waveshare 1.75C, the same chip and panel. Screen off on battery: the CPU drops to the crystal clock and light-sleeps
 # until a rim key or the M5PM1's click interrupt (GPIO12) wakes it, with the
-# OLED and audio rails off (board_m5stack_triviapod.c). BLE has to allow that with modem sleep;
+# OLED and audio rails off (board_m5stack_stopwatch.c). BLE has to allow that with modem sleep;
 # there's no 32 kHz crystal, so its sleep clock is the main crystal, kept
 # powered. On USB power the chip stays awake at full speed.
 CONFIG_PM_ENABLE=y
