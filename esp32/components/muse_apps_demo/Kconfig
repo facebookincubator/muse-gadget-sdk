@@ -16,7 +16,8 @@ menu "Muse multi-app demo"
 
     config MUSE_APPS_DEMO
         bool "M5Stack multi-app demo UI (launcher + Pet World + diagnostics + hardware demo)"
-        depends on MUSE_BOARD_M5STACK_CORE2 && SPIRAM
+        # Its speech bubble shows a few short lines: not full-screen reply pages.
+        depends on MUSE_BOARD_M5STACK_CORE2 && SPIRAM && !MUSE_SMALL_FULL_REPLY
         default n
         help
             Draw a touch-driven launcher and three sample apps as the face,

@@ -264,17 +264,18 @@ static void send(lv_event_code_t code)
 
 int64_t fake_now_us = 1000000;
 static muse_hatch_state_t link_state = MUSE_HATCH_UNREACHABLE;
-static int hatch_tests, chirps;
+static int link_tests, chirps;
+static char fake_caption[64];
 void muse_state_poke(void) {}
 muse_mode_t muse_state_mode(float *t) { if (t) *t = 0; return MUSE_MODE_IDLE; }
 float muse_state_level(void) { return 0; }
-bool muse_state_caption(char *out, size_t len, uint32_t *v) { (void)v; if (len) out[0] = 0; return false; }
+bool muse_state_caption(char *out, size_t len, uint32_t *v) { (void)v; snprintf(out, len, "%s", fake_caption); return true; }
 muse_power_t muse_state_power(void) { muse_power_t p; memset(&p, 0, sizeof(p)); p.battery_pct = -1; return p; }
 void muse_wifi_status(muse_wifi_status_t *out) { memset(out, 0, sizeof(*out)); out->state = MUSE_WIFI_CONNECTED; }
 bool muse_wifi_connected(void) { return true; }
 void muse_hatch_status(muse_hatch_status_t *out) { memset(out, 0, sizeof(*out)); out->state = link_state; }
 const char *muse_hatch_state_name(muse_hatch_state_t s) { (void)s; return "state"; }
-void muse_hatch_test(void) { hatch_tests++; }
+void muse_hatch_test(void) { link_tests++; }
 void muse_voice_request_chirp(void) { chirps++; }
 int muse_settings_mic_gain(void) { return 0; }
 void esp_chip_info(esp_chip_info_t *c) { memset(c, 0, sizeof(*c)); c->cores = 2; }
@@ -310,14 +311,14 @@ int main(void)
     /* Its buttons fire on release over them, never after sliding off. */
     press(230, 145); drag(230, 190); release(); frame();
     press(80, 145); drag(80, 200); release(); frame();
-    printf("slid off: tests=%d chirps=%d\n", hatch_tests, chirps);
-    assert(hatch_tests == 0 && chirps == 0);
+    printf("slid off: tests=%d chirps=%d\n", link_tests, chirps);
+    assert(link_tests == 0 && chirps == 0);
     press(230, 145); scroll_obj = &tileview; drag(215, 145); release(); scroll_obj = NULL; frame();
-    printf("scrolled on a button: tests=%d\n", hatch_tests);
-    assert(hatch_tests == 0);
+    printf("scrolled on a button: tests=%d\n", link_tests);
+    assert(link_tests == 0);
     press(230, 145); drag(232, 146); release(); frame();
     tap(80, 145);
-    assert(hatch_tests == 1 && chirps == 1);
+    assert(link_tests == 1 && chirps == 1);
 
     /* A button's message expires back to ready, not a stale "Testing". */
     assert(strcmp(dbg_last_action(), "Ready") != 0);
@@ -352,6 +353,16 @@ int main(void)
     link_state = MUSE_HATCH_REACHABLE;
     for (int i = 0; i < 15; i++) frame();
     assert(s_world.muse_connected);
+
+    /* An idle caption, such as a refused press's, shows in the bubble. */
+    strcpy(fake_caption, "SET UP MUSE FIRST");
+    frame();
+    printf("idle caption: [%s]\n", s_world.speech_text);
+    assert(strcmp(s_world.speech_text, "SET UP MUSE FIRST") == 0);
+    for (int i = 0; i < 150; i++) frame();
+    assert(s_world.speech_text[0] == 0);   /* and goes after a few seconds */
+    fake_caption[0] = 0;
+    frame();
 
     /* A lost press is no pat. */
     s_world.state = PET_ST_IDLE;

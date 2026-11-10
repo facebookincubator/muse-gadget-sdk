@@ -710,6 +710,13 @@ void pet_world_update(uint32_t now_ms, int muse_mode, float audio_level, const c
 
     // Handle Muse Assistant state overrides
     s_world.audio_level = audio_level;
+    /* A caption that changes while idle (an error such as SET UP MUSE FIRST,
+     * or the next page of a reply) shows in the bubble, as the avatar's would. */
+    static char last_caption[MUSE_CAPTION_MAX];
+    bool caption_changed = caption && strcmp(caption, last_caption) != 0;
+    if (caption_changed) {
+        strlcpy(last_caption, caption, sizeof(last_caption));
+    }
     if (s_world.is_talk_pressed || muse_mode == MUSE_MODE_LISTENING) {
         s_world.state = PET_ST_LISTENING;
         snprintf(s_world.speech_text, sizeof(s_world.speech_text), "Listening...");
@@ -741,6 +748,11 @@ void pet_world_update(uint32_t now_ms, int muse_mode, float audio_level, const c
             } else {
                 s_world.speech_text[0] = '\0';
                 s_world.speech_timer = 0;
+            }
+        } else if (caption_changed && caption[0] && strcmp(caption, "SENDING VOICE NOTE") != 0 && strcmp(caption, "THINKING") != 0) {
+            snprintf(s_world.speech_text, sizeof(s_world.speech_text), "%s", caption);
+            if (s_world.speech_timer < now_ms + 5000) {
+                s_world.speech_timer = now_ms + 5000;
             }
         }
         if (now_ms > s_world.speech_timer) {
