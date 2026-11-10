@@ -128,6 +128,11 @@ class StopWatchPTT(unittest.TestCase):
                 with self.subTest(board=board, realtime=realtime, scenario=scenario):
                     self.run_case('voice', scenario, board=board, realtime=realtime)
 
+    def test_reply_haptic_once_and_no_motor(self):
+        for scenario in (90, 91):
+            with self.subTest(scenario=scenario):
+                self.run_case('voice', scenario, board=1, realtime=0)
+
     def test_note_preserves_buffered_order_and_streams_fresh_pcm_exactly(self):
         # PSRAM PCM, low-memory 320 ms pre-roll, low-memory 120 ms pre-roll.
         for board in (1, 0, 2):

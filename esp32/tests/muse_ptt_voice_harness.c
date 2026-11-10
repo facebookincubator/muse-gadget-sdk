@@ -58,6 +58,11 @@ static int mode_sets;
 static int64_t first_mode_us = -1;
 static char caption[400];
 static jmp_buf finish;
+static unsigned haptic_count;
+static void haptic(unsigned ms) { assert(ms==(scenario>=90 ? 70u : 30u)); ++haptic_count; }
+static muse_board_t test_board;
+const muse_board_t *muse_board=&test_board;
+static int reply_event, reply_reads;
 static int injected_pending;   /* 1: an injected press is held back, delivered by deliver_injected() */
 static muse_input_event_t injected;
 static void deliver_injected(void) {
@@ -156,6 +161,9 @@ void muse_hatch_turn_cancel(void) {}
 static muse_hatch_ev_t hatch_end = MUSE_HATCH_EV_NONE;
 static const char *hatch_end_text = "";
 muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) {
+    if(scenario>=90 && reply_event<3) {
+        snprintf(p,n,"reply"); return reply_event++<2 ? MUSE_HATCH_EV_REPLY : MUSE_HATCH_EV_DONE;
+    }
     muse_hatch_ev_t ev=hatch_end;
     if(ev==MUSE_HATCH_EV_NONE) return ev;
     hatch_end=MUSE_HATCH_EV_NONE;
@@ -164,7 +172,11 @@ muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) {
     return ev;
 }
 bool muse_hatch_turn_caption(size_t x,char *p,size_t n) { (void)x;(void)p;(void)n;return false; }
-size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) { (void)p;(void)n;(void)ms;return 0; }
+size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) {
+    (void)ms;
+    if(scenario>=90 && reply_reads++<2) { memset(p,0,n*sizeof(*p)); return n; }
+    return 0;
+}
 
 #if CONFIG_MUSE_REALTIME_VOICE
 static int pending_at_ready = -1;
@@ -374,7 +386,14 @@ esp_err_t muse_audio_write(const int16_t *p,size_t n) {
 int main(int argc,char **argv) {
     assert(argc==2); scenario=atoi(argv[1]); s_queue=input_queue=&queue; ready=true;
     s_pre=calloc(PRE_CAP_CHUNKS,sizeof(*s_pre));
+    if(scenario>=90) {
+        if(scenario==90) test_board.vibrate=haptic;
+        bool delivered;
+        assert(!hatch_reply(&delivered) && delivered && haptic_count==(scenario==90 ? 1u : 0u));
+        free(s_pre); return 0;
+    }
     if(scenario>=70) {
+        if(scenario==79) test_board.vibrate=haptic;
         notes_mode=true; clock_us=1000000;
         if(scenario==78 || scenario==84) {
             /* Woken to re-read a reply, while Muse is out of reach. */
@@ -419,6 +438,7 @@ int main(int argc,char **argv) {
             }
             if(scenario==70) assert(clock_us==1880000 && !queue.n); /* no release: 880 ms hold */
         }
+        assert(haptic_count==(scenario==79 ? 1u : 0u));
         drop_rec(); free(s_pre); return 0;
     }
     if(scenario>=50) {
@@ -487,7 +507,9 @@ int main(int argc,char **argv) {
             s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
 #endif
             char why[96];
-            assert(record(why,sizeof(why)) && notes==1);
+            test_board.vibrate=haptic;
+            assert(record(scenario==53,why,sizeof(why)) && notes==1);
+            assert(haptic_count==(scenario==53 ? 1u : 0u));
             /* Prefix and capture-lag tail remain in the sent audio. Neither
              * was used to make a short press eligible. */
             if(scenario==63) assert(note_frames==prefix+MUSE_AUDIO_CHUNK);

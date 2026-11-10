@@ -69,6 +69,7 @@
 #include "esp_rom_gpio.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -77,6 +78,7 @@
 #include "muse_board.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
+#include "muse_settings.h"
 #include "soc/spi_periph.h"
 
 static const char *TAG = "board";
@@ -199,6 +201,9 @@ static const char *TAG = "board";
 #define IOE_IN 0x07
 #define IOE_OD 0x13                /* 1 = open drain */
 #define IOE_PWM1_DUTY 0x1B         /* the motor's PWM; bit 15 enables */
+#define IOE_PWM_FREQ 0x25          /* M5IOE1_Class: shared 16-bit LE frequency in Hz */
+#define MOTOR_DUTY 0x8999          /* PWM1 enabled, 60% of the 12-bit duty range */
+#define MOTOR_MAX_MS 120
 #define IOE_I2C_CFG 0x23           /* 0: no I2C idle sleep */
 #define IOE_PIN(n) ((uint16_t)BIT((n) - 1))
 #define IOE_AUDIO IOE_PIN(3)
@@ -213,6 +218,8 @@ static const char *TAG = "board";
 static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_pmic, s_ioe, s_tp;
 static SemaphoreHandle_t s_ioe_lock;
+static TaskHandle_t s_motor_task;
+static bool s_motor_enabled, s_motor_on;   /* protected by s_ioe_lock */
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static const audio_codec_if_t *s_codec;
@@ -390,6 +397,66 @@ static esp_err_t ioe_set(uint16_t pins, bool high)
     return ioe_update(IOE_OUT, pins, high ? pins : 0);
 }
 
+/* The caller holds s_ioe_lock, including when shutdown cancels an active pulse. */
+static esp_err_t motor_off_locked(void)
+{
+    esp_err_t err = reg_write(s_ioe, IOE_PWM1_DUTY, (uint8_t[]){ 0, 0 }, 2);
+    if (err == ESP_OK) s_motor_on = false;
+    return err;
+}
+
+static void motor_task(void *arg)
+{
+    (void)arg;
+    uint32_t ms;
+    for (;;) {
+        if (xTaskNotifyWait(0, UINT32_MAX, &ms, portMAX_DELAY) != pdTRUE) continue;
+        if (!ms) continue;
+        if (ms > MOTOR_MAX_MS) ms = MOTOR_MAX_MS;
+        xSemaphoreTake(s_ioe_lock, portMAX_DELAY);
+        bool enabled = s_motor_enabled && muse_settings_vibration_on();
+        esp_err_t err = ESP_OK;
+        if (enabled) {
+            s_motor_on = true;
+            err = reg_write(s_ioe, IOE_PWM1_DUTY, (uint8_t[]){ MOTOR_DUTY & 0xFF, MOTOR_DUTY >> 8 }, 2);
+        }
+        xSemaphoreGive(s_ioe_lock);
+        if (!enabled) continue;
+        if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(ms));
+
+        bool warned = false;
+        for (;;) {
+            xSemaphoreTake(s_ioe_lock, portMAX_DELAY);
+            err = motor_off_locked();
+            xSemaphoreGive(s_ioe_lock);
+            if (err == ESP_OK) break;
+            if (!warned) ESP_LOGW(TAG, "vibration stop failed: retrying");
+            warned = true;
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+}
+
+static void motor_init(void)
+{
+    /* M5Unified Power_Class: StopWatch PWM1 on IO9 at 2000 Hz. */
+    if (reg_write(s_ioe, IOE_PWM_FREQ, (uint8_t[]){ 0xD0, 0x07 }, 2) != ESP_OK ||
+        xTaskCreateWithCaps(motor_task, "muse_motor", 3072, NULL, 3, &s_motor_task,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        ESP_LOGW(TAG, "vibration feedback unavailable");
+        return;
+    }
+    s_motor_enabled = true;
+}
+
+static void vibrate(unsigned duration_ms)
+{
+    if (s_motor_task && duration_ms && muse_settings_vibration_on()) {
+        xTaskNotify(s_motor_task, duration_ms > MOTOR_MAX_MS ? MOTOR_MAX_MS : duration_ms,
+                    eSetValueWithOverwrite);
+    }
+}
+
 /* The codec driver switches the amp through this as the speaker opens and closes. */
 static int ioe_gpio_setup(int16_t gpio, audio_gpio_dir_t dir, audio_gpio_mode_t mode)
 {
@@ -528,6 +595,7 @@ static esp_err_t init(void)
     if (!s_pmic_irq) {
         ESP_LOGW(TAG, "power key interrupt not set up: polling the power key at rest");
     }
+    motor_init();
     return ESP_OK;
 }
 
@@ -1091,12 +1159,19 @@ static esp_err_t read_power(muse_power_t *out)
  * button turns it back on. Do not substitute an ESP GPIO or deep-sleep wake. */
 static esp_err_t power_off(void)
 {
+    xSemaphoreTake(s_ioe_lock, portMAX_DELAY);
+    s_motor_enabled = false;
+    esp_err_t err = s_motor_on ? motor_off_locked() : ESP_OK;
+    xSemaphoreGive(s_ioe_lock);
     uint8_t cmd = PMIC_SHUTDOWN;
     /* Don't turn off peripheral rails first: on a failed command the shared
      * input/UI must be able to display COULDN'T POWER OFF and remain usable. */
-    ESP_RETURN_ON_ERROR(reg_write(s_pmic, PMIC_SYS_CMD, &cmd, 1), TAG, "pmic shutdown");
-    vTaskDelay(pdMS_TO_TICKS(500));
-    return ESP_FAIL;   /* still running: the PMIC didn't cut power */
+    if (err == ESP_OK) err = reg_write(s_pmic, PMIC_SYS_CMD, &cmd, 1);
+    if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(500));
+    xSemaphoreTake(s_ioe_lock, portMAX_DELAY);
+    s_motor_enabled = s_motor_task != NULL;
+    xSemaphoreGive(s_ioe_lock);
+    return err == ESP_OK ? ESP_FAIL : err;   /* still running: the PMIC didn't cut power */
 }
 
 static const muse_board_t s_board = {
@@ -1138,6 +1213,7 @@ static const muse_board_t s_board = {
     .poll_buttons = poll_buttons,
     /* Red POWER is on the PMIC: its click interrupt (GPIO12) wakes the wait. */
     .wait_buttons = wait_buttons,
+    .vibrate = vibrate,
     .read_power = read_power,
     .power_off = power_off,
 };

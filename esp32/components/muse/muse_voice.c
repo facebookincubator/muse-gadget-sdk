@@ -350,9 +350,10 @@ static void take_pre(rec_stats_t *st, size_t chunks)
  * kept note to fall back on (why says what failed). There is no start chirp:
  * anything played now would land on top of the first words.
  */
-static bool record(char *why, size_t cap)
+static bool record(bool wake, char *why, size_t cap)
 {
     muse_state_set_mode(MUSE_MODE_LISTENING);
+    if (wake && muse_board->vibrate) muse_board->vibrate(30);
     muse_state_set_progress(0);
     s_rec_n = s_sent = 0;
     s_live = s_tried = false;
@@ -478,6 +479,7 @@ static bool hatch_reply(bool *delivered)
                 }
                 break;
             case MUSE_HATCH_EV_REPLY:
+                if (!replied && !speaking && muse_board->vibrate) muse_board->vibrate(70);
                 replied = *delivered = true;
                 /* Once speech starts, the caption follows it. The event only
                  * has room for the page's start; the page itself comes below. */
@@ -507,6 +509,7 @@ static bool hatch_reply(bool *delivered)
         size_t n = muse_hatch_turn_read(buf, MUSE_AUDIO_CHUNK, speaking || done ? 0 : 20);
         if (n) {
             if (!speaking) {
+                if (!replied && muse_board->vibrate) muse_board->vibrate(70);
                 speaking = true;
                 muse_state_set_mode(MUSE_MODE_SPEAKING);
                 ESP_LOGI(TAG, "reply audio after %.2fs", (esp_timer_get_time() - t0) / 1e6);
@@ -641,6 +644,7 @@ static note_result_t note_held(bool wake, bool barge_in)
     size_t captured = 0;
     if (!wake) {
         muse_state_set_mode(MUSE_MODE_LISTENING);
+        if (muse_board->vibrate) muse_board->vibrate(30);
         muse_state_set_caption("RECORDING...");
     }
     for (;;) {
@@ -1406,7 +1410,7 @@ static void voice_task(void *arg)
             continue;
         }
         char why[96];
-        bool ok = record(why, sizeof(why));
+        bool ok = record(wake, why, sizeof(why));
         note_toggled(false);
         if (!ok) {
             pre_reset();

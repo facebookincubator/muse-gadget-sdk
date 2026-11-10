@@ -1247,6 +1247,11 @@ static void on_speaker_sw(lv_event_t *e)
     muse_settings_set_speaker_on(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
 
+static void on_vibration_sw(lv_event_t *e)
+{
+    muse_settings_set_vibration_on(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
 static void on_notes_sw(lv_event_t *e)
 {
@@ -1307,6 +1312,9 @@ static void build_sound_page(lv_obj_t *tile)
     if (muse_board->audio_init) {
         s_spk_sw = switch_row(list, "Speaker", muse_settings_speaker_on(), on_speaker_sw);
         s_vol_sl = slider(list, "Volume", 0, 100, muse_settings_volume(), &s_vol_val, on_volume);
+    }
+    if (muse_board->vibrate) {
+        switch_row(list, "Vibration", muse_settings_vibration_on(), on_vibration_sw);
     }
     s_gain_sl = slider(list, "Mic gain", 0, MUSE_MIC_GAIN_MAX / 3, muse_settings_mic_gain() / 3, &s_gain_val, on_gain);
 
