@@ -404,10 +404,12 @@ run_command=...)` is one encrypted session with a Muse VM.
   fenced like the reply's audio. Words of the response open at a barge-in or
   the caller's speech never arrive. Words that come while a reply waits for
   its caller's turn are held, then delivered in order with its audio or
-  dropped with it.
+  dropped with it. The text is as Muse sent it, control characters
+  included: strip them before printing it to a terminal.
 - `AudioChunk(response_id, offset, pcm)` is reply PCM accepted for playback,
   delivered before the output writes it. Held audio is delivered when its
-  turn confirms it. Dropped audio never is. `offset` counts the samples
+  turn confirms it, joined into one chunk per run between held words.
+  Dropped audio never is. `offset` counts the samples
   delivered for `response_id` before this chunk, so `offset / SAMPLE_RATE`
   is where it starts in that response's speech. `response_id` is the latest
   `ResponseStarted`'s when the chunk's provider audio stream was first heard,

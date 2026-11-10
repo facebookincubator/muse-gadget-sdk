@@ -227,7 +227,7 @@ class VoiceCall:
         self._reply_response: str | None = None
         self._open_response: str | None = None
         self._open_unmarked = False
-        self._waiting: list[tuple[bytes, str | None] | TranscriptDelta | TranscriptDone] = []
+        self._waiting: list[tuple[bytearray, str | None] | TranscriptDelta | TranscriptDone] = []
         self._waiting_bytes = 0  # held PCM
         self._waiting_text_bytes = 0
         self._waiting_audio = False
@@ -490,23 +490,11 @@ class VoiceCall:
                 if self._reply_gate.confirmed and self._waiting:
                     if self._playback_bytes + self._waiting_bytes > MAX_PLAYBACK_BYTES:
                         raise ValueError("voice playback buffer full")
-                    # Deliver events in order, but queue each response's held
-                    # PCM joined into whole frames, as before events existed:
-                    # playback sleeps once per queued fragment.
-                    joined, joined_id = bytearray(), None
                     for held in self._waiting:
-                        if not isinstance(held, tuple):
+                        if isinstance(held, tuple):
+                            self._queue_pcm(bytes(held[0]), held[1])
+                        else:
                             self._emit(held)
-                            continue
-                        pcm, response_id = held
-                        if joined and response_id != joined_id:
-                            self._queue_pcm(bytes(joined), joined_id, announce=False)
-                            joined.clear()
-                        self._announce_pcm(pcm, response_id)
-                        joined += pcm
-                        joined_id = response_id
-                    if joined:
-                        self._queue_pcm(bytes(joined), joined_id, announce=False)
                 self._clear_waiting()
             pcm = audio_from_event(event)
             if pcm:
@@ -543,7 +531,8 @@ class VoiceCall:
             item = identifier(event.get("item_id"))
             if new_turn:
                 self._awaiting_caller = False
-            older = list(self._active_turns.values())[:-1]
+            message_id = identifier(event.get("submission_message_id"))
+            older = [turn for key, turn in self._active_turns.items() if key != message_id]
             if item != self._reply_item and item not in older and item not in self._settled_turns.values():
                 # A new caller turn; a delayed reply's turn names an earlier item.
                 self._awaiting_reply, self._reply_kept, self._reply_item = True, False, item
@@ -605,11 +594,21 @@ class VoiceCall:
 
     def _hold(self, held, size: int) -> None:
         audio = isinstance(held, tuple)
-        if (len(self._waiting) >= MAX_HELD_ITEMS
+        # Held PCM joins the run before it, as one buffer did before events
+        # existed: playback sleeps once per queued fragment, and fragments
+        # don't count against the item bound.
+        joins = (audio and self._waiting and isinstance(self._waiting[-1], tuple)
+                 and self._waiting[-1][1] == held[1])
+        if (not joins and len(self._waiting) >= MAX_HELD_ITEMS
                 or audio and self._waiting_bytes + size > MAX_PLAYBACK_BYTES
                 or not audio and self._waiting_text_bytes + size > MAX_HELD_TEXT_BYTES):
             raise ValueError("unconfirmed voice reply buffer full")
-        self._waiting.append(held)
+        if joins:
+            self._waiting[-1][0].extend(held[0])
+        elif audio:
+            self._waiting.append((bytearray(held[0]), held[1]))
+        else:
+            self._waiting.append(held)
         if audio:
             self._waiting_bytes += size
             self._waiting_audio = True
@@ -629,20 +628,10 @@ class VoiceCall:
         self._waiting_bytes = self._waiting_text_bytes = 0
         self._waiting_audio = False
 
-    def _announce_pcm(self, pcm: bytes, response_id: str | None) -> None:
-        if self._on_event is not None:
-            offset = self._audio_offsets.pop(response_id, 0)
-            self._emit(AudioChunk(response_id, offset, pcm))
-            self._audio_offsets[response_id] = offset + len(pcm) // 2
-            if len(self._audio_offsets) > MAX_IDS:
-                del self._audio_offsets[next(iter(self._audio_offsets))]
-
-    def _queue_pcm(self, pcm: bytes, response_id: str | None, *, announce: bool = True) -> None:
+    def _queue_pcm(self, pcm: bytes, response_id: str | None) -> None:
         self._received_audio = True
         if self._playback_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
             raise ValueError("voice playback buffer full")
-        if announce:
-            self._announce_pcm(pcm, response_id)
         for offset in range(0, len(pcm), FRAME_BYTES):
             part = pcm[offset:offset + FRAME_BYTES]
             audible = pcm_rms(part) >= 300
@@ -653,6 +642,14 @@ class VoiceCall:
                     self._mic_epoch += 1
                 self._activity = time.monotonic()
         self._playback_bytes += len(pcm)
+        if self._on_event is not None:
+            # Queued first: if the callback raises, cleanup still reports
+            # this audio in PlaybackFlushed. Nothing plays before it returns.
+            offset = self._audio_offsets.pop(response_id, 0)
+            self._audio_offsets[response_id] = offset + len(pcm) // 2
+            if len(self._audio_offsets) > MAX_IDS:
+                del self._audio_offsets[next(iter(self._audio_offsets))]
+            self._emit(AudioChunk(response_id, offset, pcm))
 
     def _apply_reply_flush(self) -> None:
         playing, waiting = self._reply_gate.take_flush()
@@ -699,10 +696,10 @@ class VoiceCall:
                     log.warning("could not cancel interrupted response")
         finally:
             if error is not None:
-                if self._barge_in_failure is None:
+                # After run() ends, nothing awaits the failure: raise it here.
+                if self._barge_in_failure is None or self._barge_in_failure.done():
                     raise error
-                if not self._barge_in_failure.done():
-                    self._barge_in_failure.set_exception(error)
+                self._barge_in_failure.set_exception(error)
 
     def _flush(self) -> None:
         queued = [response_id for _, _, response_id in self._playback]

@@ -603,22 +603,81 @@ def test_held_fragments_play_as_whole_frames(observe):
                     held.append(said(f"w{index}"))
                 held.append(audio("p1", pcm))
             await chunk(vm, media, b"".join(map(line, held)))
-            await wait_until(lambda: len(call._waiting) == len(held) - 2 - (not observe) * 5)
+            await wait_until(lambda: call._waiting_bytes == len(reply))
+            assert len(call._waiting) == (10 if observe else 1)
             await chunk(vm, media, line(turn("item-1", "sub-1")))
-            await wait_until(lambda: len(output.pcm) == len(TONE) * 5)
+            await wait_until(lambda: len(output.pcm) == len(reply))
             await chunk(vm, media, end=True)
             await hangup(vm, media, start, media_ended=True)
             assert await asyncio.wait_for(task, 2) == "remote_end"
-            assert output.pcm == TONE * 5
+            assert output.pcm == reply
 
     asyncio.run(asyncio.wait_for(scenario(), 5))
     assert writes == [voice.FRAME_BYTES] * 5
     spoken = []
-    for index, pcm in enumerate(fragments):
-        if index % 40 == 0:
-            spoken.append(TranscriptDelta("r1", f"w{index}"))
-        spoken.append(AudioChunk("r1", index * 24, pcm))
+    for index in range(0, len(fragments), 40):
+        spoken.append(TranscriptDelta("r1", f"w{index}"))
+        spoken.append(AudioChunk("r1", index * 24, reply[index * 48:(index + 40) * 48]))
     assert events == ([ResponseStarted("r1"), Working(True)] + spoken if observe else [])
+
+
+@pytest.mark.parametrize("observe", [False, True], ids=["audio_only", "observed"])
+def test_many_held_fragments_within_the_byte_limit_still_play(observe):
+    reply = (TONE * 103)[:4097 * 48]  # 4,097 fragments, about 4.1 s
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = Output()
+            call = VoiceCall(session, device_id="homelink-synthetic",
+                             on_event=[].append if observe else None)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, line(speech("item-1")) + line(created("r1")))
+            for start_at in range(0, len(reply), 48 * 200):
+                part = reply[start_at:start_at + 48 * 200]
+                await chunk(vm, media, b"".join(
+                    line(audio("p1", part[i:i + 48])) for i in range(0, len(part), 48)))
+            while call._waiting_bytes < len(reply):
+                await asyncio.sleep(0.01)
+            await chunk(vm, media, line(turn("item-1", "sub-1")), end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await task == "remote_end"
+            assert output.pcm == reply
+
+    asyncio.run(asyncio.wait_for(scenario(), 15))
+
+
+def test_audio_announced_before_a_callback_failure_is_reported_flushed():
+    failure = RuntimeError("synthetic observer failure")
+    events = []
+
+    def observe(event):
+        events.append(event)
+        if event == TranscriptDelta("r1", "boom"):
+            raise failure
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=observe,
+                             cleanup_timeout=0.2)
+            task = asyncio.create_task(call.run(silent_source(), Output()))
+            try:
+                media, start = await admit(vm)
+                await chunk(vm, media, b"".join(map(line, [
+                    speech("item-1"), created("r1"), audio("p1", TONE * 5), said("boom"),
+                ])))
+                await wait_until(lambda: len(call._waiting) == 2)
+                await chunk(vm, media, line(turn("item-1", "sub-1")))
+                await hangup(vm, media, start)
+                with pytest.raises(RuntimeError, match="synthetic observer failure"):
+                    await task
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert events[-3:] == [AudioChunk("r1", 0, TONE * 5), TranscriptDelta("r1", "boom"),
+                           PlaybackFlushed(("r1",))]
 
 
 def turn_settled(submission=None, pending=None):
@@ -675,3 +734,23 @@ def test_only_plain_handoff_counts_change_working(pending):
         [turn("item-1", "sub-1"), created("r1"), done("r1")],
         [turn_settled(pending=pending)],
     ) == [True, "|", "|"]
+
+
+def test_a_barge_in_flush_failure_after_the_call_ended_is_raised_to_the_caller():
+    failure = RuntimeError("synthetic flush failure")
+
+    async def scenario():
+        call = VoiceCall(None, device_id="homelink-synthetic", on_event=[].append)
+        call._remote_ended = True
+
+        def fail():
+            raise failure
+
+        call._apply_reply_flush = fail
+        call._barge_in_failure = asyncio.get_running_loop().create_future()
+        await call.barge_in()  # a running call ends with it instead
+        assert call._barge_in_failure.exception() is failure
+        with pytest.raises(RuntimeError, match="synthetic flush failure"):
+            await call.barge_in()  # nothing awaits the finished call's future
+
+    asyncio.run(scenario())
