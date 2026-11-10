@@ -42,7 +42,8 @@ from urllib.parse import urlencode
 
 from musegadget.noise import Header
 from musegadget.streaming import read_ndjson
-from musegadget.voice_gate import DROP, HOLD, MAX_IDS, PLAY, STALE, ReplyGate, identifier, provider_id
+from musegadget.voice_gate import (DROP, HOLD, MAX_IDS, PLAY, PLAYING, STALE, ReplyGate, identifier,
+                                   provider_id)
 
 log = logging.getLogger(__name__)
 SAMPLE_RATE = 24000
@@ -587,7 +588,9 @@ class VoiceCall:
             self._emit(ResponseDone(response_id, status if isinstance(status, str) else None))
 
     def _words(self, event: TranscriptDelta | TranscriptDone) -> None:
-        verdict = self._reply_gate.words()
+        verdict = self._reply_gate.words(any(
+            response_id == event.response_id and self._reply_gate.ids.get(source) == PLAYING
+            for source, response_id in self._audio_sources.items()))
         if verdict == HOLD:
             self._hold(event, len(event.text.encode()))
         elif verdict == PLAY:

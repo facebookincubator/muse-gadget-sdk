@@ -19,7 +19,8 @@ caller's matching turn admits its reply and later continuations. Output without
 lineage after a confirmed turn is indistinguishable from that turn's continuation.
 Transcript text names no provider response, so it gets the verdict a new provider
 ID would, except that words after a fence stay dropped until the next
-response.created.
+response.created, and a confirmed reply still playing past a late foreign turn
+keeps its words.
 """
 
 MAX_IDS = 128
@@ -127,9 +128,13 @@ class ReplyGate:
                 elif response_id == self.open_response:
                     self.open_response = None
 
-    def words(self):
-        if self.words_fenced or self.fenced and (not self.item or self.blocked):
+    def words(self, reply_playing=False):
+        """reply_playing: the words' response has a provider still PLAYING."""
+        if self.words_fenced:
             return DROP
+        if self.fenced and (not self.item or self.blocked):
+            # A late foreign turn keeps a confirmed reply playing; its words too.
+            return PLAY if self.blocked and self.confirmed and reply_playing else DROP
         return HOLD if self.holding else PLAY
 
     def audio(self, event):
