@@ -89,6 +89,11 @@ if [ "$target" = esp32s31 ]; then
     MOSAICO_UTILS=${MOSAICO_UTILS:-$HOME/mosaico/esp-mosaico-vibe/submodule/esp-mosaico-utils}
     [ -d "$MOSAICO_UTILS/ESP-Iris/components/esp_iris" ] || { echo "esp-mosaico-utils not found at $MOSAICO_UTILS (set MOSAICO_UTILS)" >&2; exit 1; }
     iris="-DMOSAICO_UTILS=$MOSAICO_UTILS"
+    # Vibe Mode 0.2 tools talk only to 0.2 boards, whose layout keeps Vibe Mode
+    # in `vibe_mode` (app/test) instead of `factory`: build for the checkout's
+    # generation, in a directory of its own.
+    [ -d "$MOSAICO_UTILS/esp-mosaico-vibe-mode" ] && vibe2=0.2
+    echo "ESP-Mosaico: building for Vibe Mode ${vibe2:-0.1} (utils at $MOSAICO_UTILS)" >&2
 fi
 if [ -n "${IDF_EXPORT:-}" ]; then
     . "$IDF_EXPORT" >/dev/null 2>&1
@@ -108,18 +113,22 @@ if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"
 fi
 [ -n "${iris:-}" ] && defaults="$defaults;devices/sdkconfig.muse-$profile-iris"
+if [ -n "${vibe2:-}" ]; then
+    B=$B-vibe2; defaults="$defaults;devices/sdkconfig.muse-$profile-vibe2"
+fi
 log=/tmp/muse_build_$board.log
 # ESP-Mosaico: its Vibe Mode firmware installs an ESP-Iris System Update
-# bundle (the app and this partition table; never the bootloader or the
+# bundle (the app and its partition table; never the bootloader or the
 # retained first 2 MB). Built with Espressif's tools, in a venv of their own.
 mosaico_bundle() {
     local venv=${MOSAICO_IRIS_VENV:-$HOME/.cache/muse-mosaico-iris} tools="$MOSAICO_UTILS/ESP-Iris/components/esp_iris/tools"
     if [ ! -x "$venv/bin/python" ]; then
         python3 -m venv "$venv" && "$venv/bin/pip" -q install -r "$tools/requirements.lock" || return 1
     fi
+    local csv; csv=$(sed -n 's/^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="\(.*\)"$/\1/p' $B/sdkconfig)
     rm -rf "$B/system-update"
     "$venv/bin/python" "$MOSAICO_UTILS/mosaico-tools/tools/prepare_system_update.py" \
-        --partition-csv partitions_mosaico.csv --partition-table $B/partition_table/partition-table.bin \
+        --partition-csv "$csv" --partition-table $B/partition_table/partition-table.bin \
         --application $B/muse-gadget.bin --stage-dir $B/system-update --release 1.0.0 >> $log 2>&1 &&
     "$venv/bin/python" "$tools/esp_iris.py" bundle build $B/system-update/manifest.json \
         --component-root $B/system-update --output $B/muse-gadget-system-update.irisfw >> $log 2>&1 || { tail -5 $log; return 1; }
@@ -145,8 +154,8 @@ fi
 if [ -n "${iris:-}" ]; then
     # Through the board's Vibe Mode firmware, with Espressif's product command:
     # it switches the running app to Vibe Mode over ESP-Iris (or uses Vibe Mode
-    # if the board is in it), installs the bundle into ota_0 and checks the app
-    # comes up healthy. Never esptool: `factory` holds Vibe Mode.
+    # if the board is in it), installs the bundle into the app slot and checks
+    # the app comes up healthy. Never esptool: the first 2 MB hold Vibe Mode.
     # mosaico.py runs a Gateway per application project in its workspace:
     # this directory is that project (projects/muse_gadget, a link here).
     ws=${MOSAICO_WORKSPACE:-$(cd "$MOSAICO_UTILS/../.." && pwd)}
