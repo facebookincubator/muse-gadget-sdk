@@ -46,7 +46,7 @@ jobs:
       - name: Install host crypto library
         working-directory: .
         run: |
-          apt-get update -qq
+          apt-get -o Acquire::http::No-Cache=true update -qq
           apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config
 
       # The discovery and pairing tests compile cJSON from managed_components/,
