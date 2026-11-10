@@ -53,14 +53,15 @@ slide to settings mid-gesture; open the launcher to reach settings.
 
 ## The apps
 
+Screenshots of all four screens are in the pull request that added the demo
+([#131](https://github.com/facebookincubator/muse-gadget-sdk/pull/131)).
+
 | Launcher | Pet World |
 |---|---|
-| ![Launcher](screenshots/01-launcher.png) | ![Pet World](screenshots/02-pet-world.png) |
 | Three cards with pixel-art icons, a battery gauge and a Wi-Fi dot. Tap a card to open; tap an app's top-left control (`< APPS`, or the menu icon in Pet World) to return. | An animated pet across three rooms with day/night lighting and speech bubbles driven by the voice session. |
 
 | Diagnostics | Hardware showcase |
 |---|---|
-| ![Debugger](screenshots/03-debugger.png) | ![Hardware demo](screenshots/04-hardware-demo.png) |
 | Live Wi-Fi state (`muse_wifi_status`), the real Noise/session state (`muse_hatch_status`), a signal-level meter, a speaker beep, and a connection test (`muse_hatch_test`, not a chat turn). | Battery/power from `muse_state_power`, CPU/PSRAM read from the running chip (flash size from the build config), a touch physics canvas, and an audio-level meter. |
 
 ## Build

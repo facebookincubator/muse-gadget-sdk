@@ -57,7 +57,10 @@
 #include "boards/watcher_camera.h"
 #endif
 #if CONFIG_MUSE_APPS_DEMO
-#include "muse_apps_demo.h"
+/* From the optional muse_apps_demo component; declared here so muse does not
+ * depend on it (the component itself depends on muse). */
+lv_obj_t *muse_apps_demo_build(lv_obj_t *parent, lv_indev_t *indev);
+void muse_apps_demo_tick(void);
 static lv_obj_t *s_demo_canvas;   /* the multi-app demo face, or NULL to use the avatar */
 #endif
 
