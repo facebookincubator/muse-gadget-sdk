@@ -180,6 +180,13 @@ a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
 
+If nothing comes back from Muse, the device reconnects on its own: after about
+65 seconds when its tunnel pings go unanswered, or after 150 seconds of
+silence. Boards with PSRAM keep a short history of Wi-Fi, session and tunnel
+outages, which Muse reads with `device.health`. After a silent drop, the device
+checks the internet by opening a TCP connection to 1.1.1.1 (then 8.8.8.8) on
+port 443; it sends no data.
+
 ## USB settings in a browser
 
 The [web flasher](../web-flasher/README.md#device-settings)'s Device settings
@@ -224,6 +231,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
 | ALIENTEK ATK-DNESP32S3-BOX V1.1 | UI, push-to-talk, two-key menu, images | `tools/muse/board.sh build atk-box`, see [setup](devices/atk-dnesp32s3-box.md) |
+| ALIENTEK ATK-DNESP32S3-BOX2 (experimental) | UI, push-to-talk, menu, speaker and power keys, turns over with the box (battery unverified) | `tools/muse/board.sh build atk-box2`, see [setup](devices/atk-dnesp32s3-box2.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.8 | UI, touch, push-to-talk, settings, images (unverified) | `tools/muse/board.sh build s3-18` |
@@ -315,10 +323,20 @@ same Wi-Fi, then open Phone camera on the board: the phone encodes H.264 or
 VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and
 [`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
 
+[`../protocols/DEVICE.md`](../protocols/DEVICE.md) says how a gadget describes
+itself to Muse: its family, its model and its usage guide.
+
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
+
+On full-size LVGL displays at least 400 pixels wide, turning the speaker off
+shows replies in the original pixel caption font at twice its normal size
+(always on such boards without a speaker; not on boards with rim controls,
+such as the StopWatch). The text is centred beneath the smaller avatar;
+turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
+visible when the larger text fills the reading area.
 
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
@@ -453,6 +471,10 @@ their upstream licenses:
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
   Sticky's Link status profile), is MIT and retains the source's copyright and
   license notice.
+- The ST7789 tuning table in
+  [`components/muse/boards/board_atk_dnesp32s3_box2.c`](components/muse/boards/board_atk_dnesp32s3_box2.c),
+  from 78/xiaozhi-esp32's ATK-DNESP32S3-BOX2 board, is MIT. See
+  [`devices/licenses/xiaozhi-esp32.txt`](devices/licenses/xiaozhi-esp32.txt).
 - The JD9853A initialization sequence in
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See

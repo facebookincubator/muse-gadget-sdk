@@ -17,6 +17,8 @@
 # Pins and panel geometry: M5Stack M5Unified, M5GFX and M5Cardputer sources;
 # see components/muse/boards/board_m5stack_cardputer_adv.c.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-m5stack-cardputer-adv"
+CONFIG_MUSE_DEVICE_MODEL_NAME="M5Stack Cardputer ADV"
 CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y

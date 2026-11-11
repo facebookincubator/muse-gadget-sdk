@@ -39,8 +39,6 @@
 
 #include "diagnostic_log.h"
 #include "identity.h"
-#include "noise_tunnel.h"
-#include "tunnel_netif.h"
 #include "wifi_mgr.h"
 
 #define BUG_REPORT_SCHEMA_VERSION 1
@@ -70,8 +68,6 @@ typedef struct {
     bool wifi_connected;
     bool has_rssi;
     int8_t rssi_dbm;
-    bool tunnel_connected;
-    tunnel_stats_t tunnel;
     char running_partition[17];
     char boot_partition[17];
     const char *ota_state;
@@ -146,9 +142,6 @@ static void collect_snapshot(bug_report_snapshot_t *snapshot) {
         snapshot->rssi_dbm = ap.rssi;
     }
 
-    snapshot->tunnel_connected = noise_tunnel_is_connected();
-    tunnel_netif_get_stats(&snapshot->tunnel);
-
     const esp_partition_t *running = esp_ota_get_running_partition();
     const esp_partition_t *boot = esp_ota_get_boot_partition();
     snprintf(snapshot->running_partition, sizeof(snapshot->running_partition),
@@ -209,6 +202,22 @@ static char *encode_log_tail(const diagnostic_log_snapshot_t *logs) {
     return encoded;
 }
 
+// Drops the oldest device_health connectivity events until about `excess`
+// bytes of serialized report are gone. False if there was nothing to drop.
+static bool drop_oldest_events(cJSON *root, size_t excess) {
+    cJSON *health = cJSON_GetObjectItem(root, "device_health");
+    cJSON *events = cJSON_GetObjectItem(health, "connectivity_events");
+    size_t dropped = 0;
+    while (dropped < excess && cJSON_IsArray(events)) {
+        cJSON *oldest = events->child;
+        if (!oldest) break;
+        // The string, its quotes and a comma.
+        dropped += (cJSON_IsString(oldest) ? strlen(oldest->valuestring) : 0) + 3;
+        cJSON_DeleteItemFromArray(events, 0);
+    }
+    return dropped > 0;
+}
+
 static char *build_report_json(const bug_report_snapshot_t *snapshot,
                                const char *source_request_id,
                                const diagnostic_log_snapshot_t *logs,
@@ -254,20 +263,22 @@ static char *build_report_json(const bug_report_snapshot_t *snapshot,
         ok = add_number(network, "rssi_dbm", snapshot->rssi_dbm);
     }
 
-    cJSON *tunnel = ok ? add_object(root, "tunnel") : NULL;
-    ok = tunnel
-         && add_bool(tunnel, "connected", snapshot->tunnel_connected)
-         && add_number(tunnel, "rx_pkts", snapshot->tunnel.rx_pkts)
-         && add_number(tunnel, "rx_bytes", snapshot->tunnel.rx_bytes)
-         && add_number(tunnel, "tx_pkts", snapshot->tunnel.tx_pkts)
-         && add_number(tunnel, "tx_bytes", snapshot->tunnel.tx_bytes)
-         && add_number(tunnel, "tx_dropped", snapshot->tunnel.tx_dropped);
-
     cJSON *ota = ok ? add_object(root, "ota") : NULL;
     ok = ota
          && add_string(ota, "running_partition", snapshot->running_partition)
          && add_string(ota, "boot_partition", snapshot->boot_partition)
          && add_string(ota, "state", snapshot->ota_state);
+
+    // The device.health payload: connectivity history and tunnel state.
+    // Optional: a report without it still beats no report.
+    if (ok) {
+        cJSON *health = noise_ctrl_device_health_json(true);
+        if (health) {
+            if (!cJSON_AddItemToObject(root, "device_health", health)) {
+                cJSON_Delete(health);
+            }
+        }
+    }
 
     cJSON *log_object = ok ? add_object(root, "logs") : NULL;
     ok = log_object
@@ -293,12 +304,23 @@ static char *build_report_json(const bug_report_snapshot_t *snapshot,
         free(encoded_logs);
     }
 
-    char *report = ok ? cJSON_PrintUnformatted(root) : NULL;
+    // Over the cap, keep the newest connectivity events that fit rather than
+    // lose the whole report.
+    char *report = NULL;
+    size_t report_len = 0;
+    while (ok) {
+        report = cJSON_PrintUnformatted(root);
+        if (!report) break;
+        report_len = strlen(report);
+        if (report_len <= BUG_REPORT_MAX_BYTES) break;
+        secure_zero(report, report_len);
+        cJSON_free(report);
+        report = NULL;
+        if (!drop_oldest_events(root, report_len - BUG_REPORT_MAX_BYTES)) break;
+    }
     cJSON_Delete(root);
     if (!report) return NULL;
-    size_t report_len = strlen(report);
-    if (report_len == 0 || report_len > BUG_REPORT_MAX_BYTES) {
-        secure_zero(report, report_len);
+    if (report_len == 0) {
         cJSON_free(report);
         return NULL;
     }

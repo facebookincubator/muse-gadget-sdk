@@ -47,6 +47,7 @@ code for it. Clone the repo rather than reading it on the web, and search it.
 | OSTB EchoEar-2ST (experimental) | [Official product](https://docs.yishierniao.cn/details/ai/echoear-2st/product.html), [user guide](https://docs.yishierniao.cn/details/ai/echoear-2st/user_guide.html), xiaozhi-esp32 [ESP-VoCat reference](https://github.com/78/xiaozhi-esp32/blob/0d576d3d4c049c6f55eaf879725dc23e516511b4/main/boards/espressif/esp-vocat/esp_vocat.cc) | The public ST77916 panel sequence is reused with its MIT notice. Stock ESP-VoCat pins differ from the measured EchoEar unit; use [the variant pin map](ostb-echoear-2st.md), not its generic pin configuration or an N32R8 box label. |
 | Espressif ESP32-S3-BOX-3 | [espressif/esp-bsp](https://github.com/espressif/esp-bsp) | `bsp/esp-box-3/`: pins in `include/bsp/esp-box-3.h`, LCD/touch revision detection and codecs in `esp-box-3.c`, duplex I2S in `esp-box-3_idf5.c`. |
 | ALIENTEK ATK-DNESP32S3-BOX | No vendor repo for this board. xiaozhi-esp32's [atk-dnesp32s3-box board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/alientek/atk-dnesp32s3-box) | `config.h` for the i80 LCD, I2S and button pins, then `atk_dnesp32s3_box.cc` for the XL9555 (address 0x20: P0.5 speaker enable, P0.7 backlight) and the ES8311. K1 and K2 are XL9555 P0.4 and P0.3, active low, found on a unit. Other ALIENTEK boxes (BOX0, BOX2, BOX3) sit beside it there with different pins. |
+| ALIENTEK ATK-DNESP32S3-BOX2 | No vendor repo for this board. xiaozhi-esp32's [atk-dnesp32s3-box2-wifi board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/alientek/atk-dnesp32s3-box2-wifi) | `config.h` for the i80 LCD, I2S, button and XL9555 lines (16-bit, 0x20: P1.2 power latch, P1.1 speaker enable, P1.7 charge state, P0.5 key L active low, P0.7 key M active high), `atk_dnesp32s3_box2.cc` for the ST7789 tuning table, the ES8389 and the power-off sequence, `power_manager.h` for the battery ADC (GPIO1) table. The `-4g` board beside it is the same hardware with a 4G modem. Not in xiaozhi: an SC7A20 accelerometer (WHO_AM_I 0x11, LIS2DH registers) answers at 0x19 on the same bus, found by an I2C scan on a unit. Key Q (P0.6) is the power key, active low on USB and battery; also found on a unit. |
 | M5Stack CoreS3 | [espressif/esp-bsp](https://github.com/espressif/esp-bsp) | `bsp/m5stack_core_s3/`: pins in `include/bsp/m5stack_core_s3.h`, the AXP2101 rails and AW9523 lines each part needs in `src/bsp_feature_en.c` and `src/bsp_io_expander.c`, codecs in `src/bsp_audio.c`. Muse drives it through that BSP, `espressif/m5stack_core_s3`. |
 | FoloToy AI Passport | [FoloToy/ai-passport](https://github.com/FoloToy/ai-passport) | `components/bsp/include/bsp_pins.h` for every pin, the button ladder's windows and the I2C addresses. `components/bsp/src/` for the ST7789P3's init table (`bsp_display.c`), the ES8311 setup (`bsp_audio.c`, keep `no_dac_ref`) and the CW2017 gauge (`bsp_battery.c`). `docs/hardware-design/` has the hardware guide. |
 | AIPI Lite | xiaozhi-esp32's [aipi-lite board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/xorigin/aipi-lite) | `config.h` for pins, then `aipi-lite.cc` and `power_manager.h`. |
@@ -128,7 +129,17 @@ Copy the closest overlay and keep its layout: a header comment naming the
 board, its chip, flash, PSRAM and USB bridge, which file it loads after, then
 settings grouped under short comments saying why. Set:
 
-- `CONFIG_IDF_TARGET="esp32xx"`.
+- `CONFIG_IDF_TARGET="esp32xx"`, followed by the board's model:
+  `CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-<name>"` and
+  `CONFIG_MUSE_DEVICE_MODEL_NAME` with its name from `devices/README.md`.
+  Another profile of the same hardware uses the same two lines
+  (`../../protocols/DEVICE.md`). Light and status-screen boards use the guide
+  `main/guide.md`, and full-UI boards `devices/guides/muse.md`. Guides say
+  what the board is and can do, what it shows, its controls, recovery and
+  limits, not how to set it up or pair it. If that guide
+  would be wrong about the board's controls, write `devices/guides/<name>.md`
+  following "Guides in this repository" in `../../protocols/DEVICE.md`, and set
+  `CONFIG_MUSE_DEVICE_GUIDE` to it.
 - `CONFIG_HOMEHUB_BUTTON_GPIO`. The button is active low with an internal
   pull-up. Boards with the full UI ignore it, because their talk button or touch control confirms pairing.
 - The status backend, `CONFIG_HOMEHUB_LED_BACKEND_*=y` (`..._NONE` for no
@@ -218,8 +229,9 @@ follows the same two steps. Copy `DEVKIT_GPIO27` (addressable) or `PWM_RGB`.
    codec and PMU. Start from `board_aipi.c` when you drive `esp_lcd`, the codec
    and GPIOs yourself.
 5. **Overlay.** Write `devices/sdkconfig.muse-<name>`, loaded after
-   `sdkconfig.muse`. It holds the target, `CONFIG_MUSE_BOARD_<NAME>=y`, PSRAM,
-   the flash size if it isn't 16 MB (with 8 MB, also
+   `sdkconfig.muse`. It holds the target and model (step 4),
+   `CONFIG_MUSE_BOARD_<NAME>=y`, PSRAM, the flash size if it isn't 16 MB (with
+   8 MB, also
    `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"`), and any
    LVGL fonts or options the board needs. Leave bench options, like
    screenshots, to `sdkconfig.muse-bench` (`MUSE_BENCH=1`).

@@ -222,6 +222,8 @@ static muse_mode_t s_last_epaper_pose = MUSE_MODE_COUNT;
  * to the top when it's only read, over a page.
  */
 typedef struct {
+    const lv_font_t *font;
+    int scale;               /* integer magnification keeps the caption typeface */
     int px, y;                /* Muse's size and centre */
     int cols, lines;          /* the reply's page */
     int w, h, top;            /* and where it goes */
@@ -795,6 +797,32 @@ static void move_muse(int px, int y)
     lv_anim_start(&a);
 }
 
+static int reply_glyph_px(uint32_t letter, uint32_t next)
+{
+    int layout = s_page_for >= 0 ? s_page_for : ANSWER_HEARD;
+    return lv_font_get_glyph_width(s_answers[layout].font, letter, next) * s_answers[layout].scale;
+}
+
+/* Live captions are a rolling tail, not paged voice-note replies. Keep the
+ * latest whole words visible when the larger reading font fills its box. */
+static const char *live_caption_tail(const char *text, const answer_layout_t *layout)
+{
+    lv_point_t size;
+    for (;;) {
+        lv_text_get_size(&size, text, layout->font, 0, CAPTION_LINE_SPACE,
+                         layout->w / layout->scale, LV_TEXT_FLAG_NONE);
+        if (size.y * layout->scale <= layout->h || !*text) return text;
+        const char *next = text;
+        while (*next && *next != ' ' && *next != '\n') next++;
+        if (!*next) {   /* a long word: discard one complete UTF-8 character */
+            next = text + 1;
+            while ((*next & 0xc0) == 0x80) next++;
+        }
+        while (*next == ' ' || *next == '\n') next++;
+        text = next;
+    }
+}
+
 /* Switches to answer layout `which`, or back to the usual one for -1. */
 static void set_answer(int which)
 {
@@ -816,7 +844,11 @@ static void set_answer(int which)
         lv_obj_set_flag(s_ring, LV_OBJ_FLAG_HIDDEN, l != NULL);   /* the reply runs past a rectangle's ring */
     }
     if (l) {
-        lv_obj_set_size(s_reply_lbl, l->w, l->h);
+        lv_obj_set_style_transform_scale_x(s_reply_lbl, l->scale * 256, 0);
+        lv_obj_set_style_transform_scale_y(s_reply_lbl, l->scale * 256, 0);
+        lv_obj_set_size(s_reply_lbl, l->w / l->scale, l->h / l->scale);
+        lv_obj_set_style_transform_pivot_x(s_reply_lbl, l->w / l->scale / 2, 0);
+        lv_obj_set_style_transform_pivot_y(s_reply_lbl, l->h / l->scale / 2, 0);
         lv_obj_align(s_reply_lbl, LV_ALIGN_CENTER, 0, l->top + l->h / 2);
         lv_obj_set_style_text_align(s_reply_lbl, l->align, 0);
     }
@@ -850,7 +882,7 @@ static void set_reply_box(answer_layout_t *l, int cols, int lines, int top, int 
     l->cols = cols;
     l->lines = lines;
     l->w = cols * cw;
-    l->h = lines * pitch - CAPTION_LINE_SPACE;
+    l->h = lines * pitch - CAPTION_LINE_SPACE * l->scale;
     l->top = top;
 }
 
@@ -896,6 +928,8 @@ static void build_answer(lv_obj_t *face, int ring_in)
     answer_layout_t *l = &s_answers[ANSWER_HEARD];
     int cell = s_canvas_px / MUSE_PX_W - 1;
     cell = cell > MINI_CELL_PX ? cell : MINI_CELL_PX;
+    l->font = font;
+    l->scale = 1;
     l->px = MUSE_PX_W * cell;
     l->y = s_big_y;
     l->align = LV_TEXT_ALIGN_CENTER;
@@ -914,17 +948,22 @@ static void build_answer(lv_obj_t *face, int ring_in)
     }
 
     l = &s_answers[ANSWER_READ];
+    l->font = caption_font();
+    /* Rim hints fix a narrow reading column; doubled letters wouldn't fit it. */
+    l->scale = s_w >= 400 && !muse_board->rim_controls ? 2 : 1;
+    cw = lv_font_get_glyph_width(l->font, 'M', ' ') * l->scale;
+    pitch = (lv_font_get_line_height(l->font) + CAPTION_LINE_SPACE) * l->scale;
     int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 - s_h / 2;
     l->px = MUSE_PX_W * MINI_CELL_PX;
     l->y = status_bottom + 2 + l->px / 2;   /* its sparkles clear of the status line */
-    l->align = LV_TEXT_ALIGN_LEFT;
+    l->align = LV_TEXT_ALIGN_CENTER;
     art_bottom = l->y + l->px / 2 - ART_BLANK_ROWS * MINI_CELL_PX;
     int top = (art_bottom > spk_y + spk_r ? art_bottom : spk_y + spk_r) + 8;
-    set_reply_box(l, muse_board->rim_controls ? 13 : 16, 2, top, cw, pitch);
+    set_reply_box(l, 4, 1, top, cw, pitch);
     /* The widest page isn't the biggest: a round screen narrows towards the bottom. */
     /* Keep read replies in a central column clear of dedicated rim hints. */
     int max_cols = muse_board->rim_controls ? 13 : 24;
-    for (int c = 12; c <= max_cols && fits_across(c * cw, top, ring_in); c++) {
+    for (int c = 4; c <= max_cols && fits_across(c * cw, top, ring_in); c++) {
         int n = (reply_bottom(c * cw, ring_in) - top + CAPTION_LINE_SPACE) / pitch;
         /* A third of the caption spare for characters wider than a byte. */
         while ((c + 1) * n > MUSE_CAPTION_MAX * 2 / 3) {
@@ -934,6 +973,9 @@ static void build_answer(lv_obj_t *face, int ring_in)
             set_reply_box(l, c, n, top, cw, pitch);
         }
     }
+    /* Centre the reading area between the avatar and the round bezel. */
+    int available = reply_bottom(l->w, ring_in) - top;
+    l->top = top + (available - l->h) / 2;
     ESP_LOGI(TAG, "reply pages: %d x %d heard, %d x %d read", s_answers[ANSWER_HEARD].cols,
              s_answers[ANSWER_HEARD].lines, l->cols, l->lines);
 
@@ -1972,8 +2014,10 @@ static void update_status(muse_mode_t mode, float now)
         if (reviewing) layout = ANSWER_READ;
 #endif
         if (layout != s_page_for) {
-            muse_state_set_page(s_answers[layout].cols, s_answers[layout].lines);
             s_page_for = layout;
+            muse_chat_set_caption_px(s_answers[layout].w, reply_glyph_px);
+            muse_state_set_page(MUSE_CAPTION_MAX * 2 / 3 / s_answers[layout].lines - 1,
+                                s_answers[layout].lines);
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
             view.stale = true;   /* a page wrapped for the old layout is wrapped again */
 #endif
@@ -2005,6 +2049,7 @@ static void update_status(muse_mode_t mode, float now)
     }
     if (fresh) {
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
+        if (answer >= 0) lv_obj_set_style_text_font(lbl, s_answers[answer].font, 0);
 #if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
         if (s_long) {
             lv_obj_set_style_text_font(s_caption_lbl, long_caption_font(shown), 0);
@@ -2015,7 +2060,22 @@ static void update_status(muse_mode_t mode, float now)
             lv_obj_set_style_text_font(lbl, caption_font_for(shown), 0);
         }
 #endif
+        if (answer == ANSWER_READ && muse_voice_in_call()) {
+            shown = live_caption_tail(shown, &s_answers[answer]);
+        }
         lv_label_set_text(lbl, shown);
+        if (answer == ANSWER_READ) {
+            const answer_layout_t *l = &s_answers[answer];
+            lv_point_t size;
+            const lv_font_t *font = lv_obj_get_style_text_font(lbl, 0);
+            lv_text_get_size(&size, shown, font, 0, CAPTION_LINE_SPACE,
+                             l->w / l->scale, LV_TEXT_FLAG_NONE);
+            int height = size.y < l->h / l->scale ? size.y : l->h / l->scale;
+            if (height < 1) height = 1;
+            lv_obj_set_height(lbl, height);
+            lv_obj_set_style_transform_pivot_y(lbl, height / 2, 0);
+            lv_obj_align(lbl, LV_ALIGN_CENTER, 0, l->top + l->h / 2);
+        }
 #if CONFIG_MUSE_SMALL_FULL_REPLY
         if (s_full_reply) {
             set_full_font();

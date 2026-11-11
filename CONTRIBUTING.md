@@ -12,6 +12,13 @@ We actively welcome your pull requests.
 5. Make sure your code lints.
 6. If you haven't already, complete the Contributor License Agreement ("CLA").
 
+## Device guides
+The device guides in this repository are text an AI reads, so every change to
+them gets a maintainer review against "Guides in this repository" in
+[`protocols/DEVICE.md`](protocols/DEVICE.md). Your own gadget's guide belongs in
+your fork or project, not in a pull request here, unless it's a generic guide
+for a board in `esp32/devices/`.
+
 ## Contributor License Agreement ("CLA")
 In order to accept your pull request, we need you to submit a CLA. You only need
 to do this once to work on any of Facebook's open source projects.
