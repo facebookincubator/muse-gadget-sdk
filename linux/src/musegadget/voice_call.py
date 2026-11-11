@@ -118,9 +118,12 @@ class ResponseStarted:
 
 @dataclass(frozen=True)
 class TranscriptDelta:
-    """More of the words the current response speaks. Words are fenced with
-    the reply's audio: dropped with it, or held with it until its caller's
-    turn confirms it."""
+    """More of the words Muse speaks.
+
+    ``response_id`` is that of the latest ``ResponseStarted`` when Muse sent
+    the words. Held words keep that ID. Words are dropped with the reply's
+    audio, or held with it until its caller's turn confirms it.
+    """
 
     response_id: Optional[str]
     text: str
@@ -128,7 +131,11 @@ class TranscriptDelta:
 
 @dataclass(frozen=True)
 class TranscriptDone:
-    """The whole transcript of the current response's speech."""
+    """The whole transcript of Muse's speech.
+
+    ``response_id`` is that of the latest ``ResponseStarted`` when Muse sent
+    the words. Held words keep that ID.
+    """
 
     response_id: Optional[str]
     text: str
@@ -137,7 +144,8 @@ class TranscriptDone:
 @dataclass(frozen=True)
 class ResponseDone:
     """Muse closed a response. ``status`` is as reported, such as ``"completed"``
-    or ``"cancelled"``, or None. Audio of the response may still follow."""
+    or ``"cancelled"``, or None. Audio and held words of the response can
+    still follow."""
 
     response_id: Optional[str]
     status: Optional[str]

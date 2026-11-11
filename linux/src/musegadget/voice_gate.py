@@ -21,8 +21,10 @@ Transcript text names no provider response. It belongs to the latest
 response.created and goes with the audio of the providers first heard since: it
 plays while any of them plays, waits while one waits, and is dropped once all of
 them are. Before that response has audio, words get the verdict a new provider
-ID would. After an interruption, words stay dropped until the next
-response.created.
+ID would. Each response.created starts a new group, even if its ID repeats or
+is missing. Held words keep that group when the next response.created arrives.
+A replacement drops them only once their group has providers and all are stale.
+After an interruption, words stay dropped until the next response.created.
 """
 
 MAX_IDS = 128
