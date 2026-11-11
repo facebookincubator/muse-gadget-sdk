@@ -34,6 +34,7 @@ if(CONFIG_MUSE_ENABLED)
         "muse_voice.c"
         "muse_adpcm.c"
         "muse_settings.c"
+        "muse_weather.c"
         "muse_text.c"
         "muse_lang.c"
         "muse_link.c"
@@ -49,6 +50,9 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
+        if(CONFIG_MUSE_TTS_GOOGLE)
+            list(APPEND srcs "muse_tts.c" "muse_tts_text.c")   # replies spoken
+        endif()
         if(CONFIG_MUSE_REALTIME_VOICE)
             list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
         endif()
@@ -67,7 +71,8 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_UI_LANG_VI)
         # Montserrat's Vietnamese letters, for the menu and the pairing card
         list(APPEND srcs "fonts/muse_font_vi_12.c" "fonts/muse_font_vi_14.c"
-                         "fonts/muse_font_vi_20.c" "fonts/muse_font_vi_28.c")
+                         "fonts/muse_font_vi_16.c" "fonts/muse_font_vi_20.c"
+                         "fonts/muse_font_vi_28.c")
     endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
@@ -166,6 +171,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_waveshare_s3_lcd19.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD_35)
         list(APPEND srcs "boards/board_waveshare_s3_lcd_35.c")
+    elseif(CONFIG_MUSE_BOARD_LCDWIKI_S3_28)
+        list(APPEND srcs "boards/board_lcdwiki_s3_28.c" "boards/muse_lcd_bands.c")
     endif()
     if(CONFIG_MUSE_VIDEO)
         # Phone camera: decode and draw (muse_video), and the transports that feed it.
@@ -199,7 +206,7 @@ endif()
 
 set(muse_priv_requires
     esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
-    bt esp-tls mbedtls esp_app_format esp_http_client
+    bt esp-tls mbedtls esp_app_format esp_http_client app_update
     noise_core minimp3 muse_vstream tinyh264 libvpx_vp8
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt efuse

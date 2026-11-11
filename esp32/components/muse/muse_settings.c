@@ -39,6 +39,9 @@ static struct {
     uint8_t mic_gain;
     uint8_t brightness;
     uint16_t sleep_s;
+    uint16_t call_idle_s;
+    bool greeting;
+    uint16_t weather_idle_s;
     uint8_t text_size;
     bool wifi_on;
     bool ble_on;
@@ -50,9 +53,12 @@ static struct {
 } s = {
     .volume = CONFIG_MUSE_DEFAULT_VOLUME,
     .speaker_on = true,
-    .mic_gain = 30,
+    .mic_gain = 42,
     .brightness = 100,
     .sleep_s = 120,
+    .call_idle_s = 120,
+    .greeting = true,
+    .weather_idle_s = 30,
     .text_size = MUSE_TEXT_MEDIUM,
     .wifi_on = true,
     .host = DEFAULT_HOST,
@@ -125,6 +131,9 @@ esp_err_t muse_settings_init(void)
         s.speaker_on = b;
     }
     load_u8("mic_gain", &s.mic_gain);
+    if (s.mic_gain < MUSE_MIC_GAIN_MAX) {
+        s.mic_gain = MUSE_MIC_GAIN_MAX;
+    }
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     if (nvs_get_u8(s_nvs, "voice_notes", &b) == ESP_OK) {
         atomic_store(&s_voice_notes, b != 0);
@@ -132,6 +141,11 @@ esp_err_t muse_settings_init(void)
 #endif
     load_u8("bright", &s.brightness);
     nvs_get_u16(s_nvs, "sleep_s", &s.sleep_s);
+    nvs_get_u16(s_nvs, "call_idle_s", &s.call_idle_s);
+    if (nvs_get_u8(s_nvs, "greeting", &b) == ESP_OK) {
+        s.greeting = b != 0;
+    }
+    nvs_get_u16(s_nvs, "weather_idle_s", &s.weather_idle_s);
     load_u8("text_size", &s.text_size);
     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
         s.wifi_on = b;
@@ -165,6 +179,9 @@ bool muse_settings_speaker_on(void) { return s.speaker_on; }
 int muse_settings_mic_gain(void) { return s.mic_gain; }
 int muse_settings_brightness(void) { return s.brightness; }
 int muse_settings_sleep_s(void) { return s.sleep_s; }
+int muse_settings_call_idle_s(void) { return s.call_idle_s; }
+bool muse_settings_greeting(void) { return s.greeting; }
+int muse_settings_weather_idle_s(void) { return s.weather_idle_s; }
 int muse_settings_text_size(void) { return s.text_size; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
@@ -247,6 +264,30 @@ void muse_settings_set_sleep_s(int secs)
     nvs_set_u16(s_nvs, "sleep_s", s.sleep_s);
     nvs_commit(s_nvs);
     notify(MUSE_SETTING_SLEEP);
+}
+
+void muse_settings_set_call_idle_s(int secs)
+{
+    s.call_idle_s = clampi(secs, 0, 3600);
+    nvs_set_u16(s_nvs, "call_idle_s", s.call_idle_s);
+    nvs_commit(s_nvs);
+    notify(MUSE_SETTING_CALL_IDLE);
+}
+
+void muse_settings_set_greeting(bool on)
+{
+    s.greeting = on;
+    nvs_set_u8(s_nvs, "greeting", on ? 1 : 0);
+    nvs_commit(s_nvs);
+    notify(MUSE_SETTING_GREETING);
+}
+
+void muse_settings_set_weather_idle_s(int secs)
+{
+    s.weather_idle_s = clampi(secs, 0, 300);
+    nvs_set_u16(s_nvs, "weather_idle_s", s.weather_idle_s);
+    nvs_commit(s_nvs);
+    notify(MUSE_SETTING_WEATHER);
 }
 
 void muse_settings_set_text_size(int size)

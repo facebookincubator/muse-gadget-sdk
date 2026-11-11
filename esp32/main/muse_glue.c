@@ -37,6 +37,7 @@
 #include "stack_monitor.h"
 #include "wifi_known.h"
 #include "wifi_mgr.h"
+#include "ota.h"
 
 #include "muse_ble.h"
 #include "muse_board.h"
@@ -398,6 +399,13 @@ static void op_reset_setup(void) {
     app_reset_setup_async();
 }
 
+static void op_ota(const char *url) {
+    if (url && *url) {
+        ESP_LOGI(TAG, "OTA requested from Muse: %s", url);
+        ota_start(url, true, NULL, NULL);
+    }
+}
+
 static const muse_link_ops_t s_ops = {
     .wifi_status = op_wifi_status,
     .wifi_apply = op_wifi_apply,
@@ -424,6 +432,7 @@ static const muse_link_ops_t s_ops = {
     .ble_quiet = ble_server_set_quiet,
     .wifi_saved = op_wifi_saved,
     .wifi_forget = op_wifi_forget,
+    .ota = op_ota,
 };
 
 // ---- Keeper: joins a saved network and applies BLE, on an internal stack ----

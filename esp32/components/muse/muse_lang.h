@@ -41,6 +41,9 @@ const char *muse_lang_message(const char *en);
 
 /* The button menu and the pairing card ("Volume", "Pairing code"). */
 const char *muse_lang_menu(const char *en);
+#ifndef __cplusplus
+#define T(en) muse_lang_menu(en)
+#endif
 
 #if !CONFIG_MUSE_UI_FREEINK   /* the LVGL UI's fonts; e-paper draws English only */
 /* A Montserrat font LVGL builds in, with the language's letters to fall back

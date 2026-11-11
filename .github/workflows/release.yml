@@ -1,0 +1,77 @@
+name: Build & Release LCDWIKI 2.8" Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag/version name (e.g. v1.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build LCDWIKI ESP32-S3 Firmware
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.3
+    defaults:
+      run:
+        shell: bash
+        working-directory: esp32
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build firmware
+        env:
+          TARGET: esp32s3
+          DEFAULTS: sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-lcdwiki-s3-28;devices/sdkconfig.muse-realtime-voice
+        run: |
+          . "$IDF_PATH/export.sh" > /dev/null
+          idf.py -B build -DIDF_TARGET="$TARGET" -DSDKCONFIG=build/sdkconfig \
+            -DSDKCONFIG_DEFAULTS="$DEFAULTS" build
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-bin
+          cp build/muse-gadget.bin release-bin/
+          cp build/bootloader/bootloader.bin release-bin/
+          cp build/partition_table/partition-table.bin release-bin/
+          cp build/ota_data_initial.bin release-bin/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: muse-lcdwiki-s3-28-firmware
+          path: esp32/release-bin/
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag_name != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || github.event.inputs.tag_name }}
+          name: Muse Gadget LCDWIKI 2.8" (${{ github.ref_name || github.event.inputs.tag_name }})
+          body: |
+            ## Firmware Muse Gadget LCDWIKI 2.8" ESP32-S3
+            - Màn hình hiển thị: 2.8" ILI9341 + Cảm ứng FT6336G.
+            - Hỗ trợ Live voice call thời gian thực và micro cảm ứng.
+            - Màn hình thời tiết Đồng Xoài (Open-Meteo & SNTP ICT-7).
+            - Hỗ trợ học ngoại ngữ & phát âm song ngữ: Tiếng Trung (`zh-CN`), Nhật (`ja`), Hàn (`ko`), Anh (`en`), Việt (`vi`).
+            - Tích hợp font chữ Hán CJK 16x16 và bộ lọc phiên âm Pinyin.
+            - Sẵn sàng OTA: Nạp không dây từ link direct download bên dưới.
+            
+            ### File nạp OTA:
+            Tải file `muse-gadget.bin` bên dưới hoặc copy link tải trực tiếp để cập nhật qua OTA.
+          files: |
+            esp32/release-bin/muse-gadget.bin
+            esp32/release-bin/bootloader.bin
+            esp32/release-bin/partition-table.bin
+            esp32/release-bin/ota_data_initial.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

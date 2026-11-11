@@ -74,6 +74,9 @@ extern "C" {
 #include "muse_account_api.h"
 #include "muse_link.h"
 #include "muse_settings.h"
+#if CONFIG_MUSE_TTS_GOOGLE
+#include "muse_tts.h"
+#endif
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
@@ -214,7 +217,7 @@ struct stream_t {
     bool overflow;
 };
 
-#define MAX_STREAMS 6
+#define MAX_STREAMS 12
 static stream_t s_streams[MAX_STREAMS];
 
 /* ---- The current turn ---- */
@@ -269,6 +272,7 @@ struct turn_t {
     /* TTS */
     int tts_msg;             /* message being fetched (or shown, speaker off), or -1 */
     bool silent;             /* speaker off: tts_msg is paced by silence, not fetched */
+    uint32_t tts_ticket;     /* muse_tts's ticket for tts_msg's speech, or 0 */
     uint8_t *mp3;            /* MP3_BUF */
     size_t mp3_len;
     bool mp3_ended;
@@ -1025,6 +1029,12 @@ static void turn_finish(void)
     turn_reset_streams();
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
+#if CONFIG_MUSE_TTS_GOOGLE
+    if (s_turn.tts_ticket) {
+        muse_tts_cancel();
+    }
+#endif
+    s_turn.tts_ticket = 0;
     s_turn.tts_msg = -1;
     s_turn.silent = false;
     s_turn.mp3_len = 0;
@@ -1777,6 +1787,23 @@ static void on_event(cJSON *line)
 /* A message event of the turn's reply, from the subscription or held (incoming_play). */
 static void on_message(const char *event, cJSON *payload, cJSON *line)
 {
+    if (!strcmp(event, "message.user")) {
+        const char *id = msg_id(payload, line);
+        const char *text = reply_text(payload);
+        if (!s_turn.text && !s_turn.nmsgs && text && (!s_turn.acked || is_user_id(id))) {
+            const char *att = strstr(text, "\n[file:");
+            size_t n = att ? (size_t)(att - text) : strlen(text);
+            if (n && (n != 12 || memcmp(text, "[Voice note]", 12) != 0)) {
+                char heard[256];
+                n = whole_chars(text, n < sizeof(heard) - 1 ? n : sizeof(heard) - 1);
+                memcpy(heard, text, n);
+                heard[n] = '\0';
+                ESP_LOGI(TAG, "heard: \"%s\"", heard);
+                emit(MUSE_HATCH_EV_HEARD, heard);
+            }
+        }
+        return;
+    }
     bool start = !strcmp(event, "delta.message_start");
     bool append = !strcmp(event, "delta.text_append");
     bool done = !strcmp(event, "delta.message_done");
@@ -1839,6 +1866,32 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+#if CONFIG_MUSE_TTS_GOOGLE
+/* Shows message i at reading pace: silence in place of speech paces the
+ * captions and ends the turn. */
+static void show_silently(int i)
+{
+    msg_t &m = s_turn.msgs[i];
+    m.pcm_start = s_turn.pcm_out;
+    size_t shown = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
+    m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
+    m.tts = TTS_ACTIVE;
+    s_turn.tts_msg = i;
+    s_turn.silent = true;
+    s_turn.tts_ticket = 0;
+    ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+    show_reply_start(m);
+}
+
+/* Default Latin language for a reply ("vi" when the reply contains Vietnamese
+ * letters, "en" otherwise); muse_tts_next_chunk_lang() overrides each CJK
+ * segment with "zh-CN", "ja", or "ko" automatically. */
+static const char *speech_lang(const char *text)
+{
+    return muse_tts_is_vietnamese(text) ? "vi" : "en";
+}
+#endif
+
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1849,6 +1902,26 @@ static void start_tts(void)
         if (m.tts != TTS_QUEUED) {
             continue;
         }
+#if CONFIG_MUSE_TTS_GOOGLE
+        const char *text = s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+        uint32_t ticket = (text && muse_settings_speaker_on()) ? muse_tts_speak(text, speech_lang(text)) : 0;
+        if (ticket) {
+            m.pcm_start = s_turn.pcm_out;
+            m.pcm_frames = 0;
+            m.tts = TTS_ACTIVE;
+            s_turn.tts_msg = i;
+            s_turn.silent = false;
+            s_turn.tts_ticket = ticket;
+            s_turn.mp3_len = 0;
+            s_turn.mp3_ended = false;
+            s_turn.kbps = 0;
+            s_turn.down_rate = 0;
+            mp3dec_init(&s_turn.dec);
+            ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
+            show_reply_start(m);
+            return;
+        }
+#endif
         /*
          * Replies are text, shown at reading pace: silence in place of speech
          * paces the captions and ends the turn. To speak them instead, send
@@ -1873,10 +1946,40 @@ static void start_tts(void)
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
         s_turn.silent = true;
+#if CONFIG_MUSE_TTS_GOOGLE
+        s_turn.tts_ticket = 0;
+#endif
         ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
         show_reply_start(m);
         return;
     }
+}
+
+/* Moves the speech that has arrived into the turn's MP3 buffer. */
+static void pump_tts(void)
+{
+#if CONFIG_MUSE_TTS_GOOGLE
+    if (s_turn.tts_msg < 0 || s_turn.silent || s_turn.mp3_ended) {
+        return;
+    }
+    size_t n = muse_tts_read(s_turn.tts_ticket, s_turn.mp3 + s_turn.mp3_len, MP3_BUF - s_turn.mp3_len);
+    if (n) {
+        mark(M_MP3);
+        s_turn.mp3_len += n;
+        return;
+    }
+    switch (muse_tts_state(s_turn.tts_ticket)) {
+    case MUSE_TTS_DONE:
+        s_turn.mp3_ended = true;   /* decode() drains the rest, then finishes */
+        break;
+    case MUSE_TTS_FAILED:
+        ESP_LOGW(TAG, "no speech for this message: showing it");
+        show_silently(s_turn.tts_msg);
+        break;
+    default:
+        break;
+    }
+#endif
 }
 
 static void tts_data(const uint8_t *data, size_t len)
@@ -2419,6 +2522,7 @@ static void hatch_task(void *arg)
         }
         if (s_turn.phase == P_WAIT_REPLY) {
             start_tts();
+            pump_tts();
             decode();
         }
         if (!s_connected) {
@@ -2497,6 +2601,9 @@ extern "C" void muse_hatch_start(void)
         s.cap = NDJSON_LINE_MAX;
     }
     s_turn.tts_msg = -1;
+#if CONFIG_MUSE_TTS_GOOGLE
+    muse_tts_start();   /* without it replies are shown, not spoken */
+#endif
 #if CONFIG_MUSE_REALTIME_VOICE
     muse_voice_call_init();   /* calls stay unavailable if it fails; notes still work */
 #endif

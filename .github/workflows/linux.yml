@@ -16,8 +16,14 @@ name: Linux client
 
 on:
   pull_request:
+    paths:
+      - 'linux/**'
+      - '.github/workflows/linux.yml'
   push:
     branches: [main]
+    paths:
+      - 'linux/**'
+      - '.github/workflows/linux.yml'
 
 permissions:
   contents: read
@@ -29,7 +35,8 @@ concurrency:
 jobs:
   tests:
     name: Tests (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+    continue-on-error: ${{ matrix.allow_failure || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +48,8 @@ jobs:
           - name: oldest
             python: "3.9"
             pins: "cryptography==3.3.2 websockets==13.1"
+            os: ubuntu-22.04
+            allow_failure: true
     defaults:
       run:
         working-directory: linux

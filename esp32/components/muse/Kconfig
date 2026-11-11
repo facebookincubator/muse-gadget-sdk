@@ -182,6 +182,10 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD_35
             bool "Waveshare ESP32-S3-Touch-LCD-3.5 (ESP32-S3, 480x320 touch LCD, ES8311 speaker and mic)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_LCDWIKI_S3_28
+            bool "LCDWIKI 2.8inch ESP32-S3 Display (ES3C28P with touch, ES3N28P without)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -234,6 +238,7 @@ menu "Muse"
         default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
         default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
         default "waveshare_s3_lcd_35" if MUSE_BOARD_WAVESHARE_S3_LCD_35
+        default "lcdwiki_s3_28" if MUSE_BOARD_LCDWIKI_S3_28
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -443,10 +448,21 @@ menu "Muse"
         help
             Push-to-talk turns go over a voice session of Muse's own, to the
             VM Home Link is paired with or one set up on the device with a
-            device token. Replies are text, shown as captions; start_tts in
-            muse_chat_session.cpp is where a TTS API of your own can speak
-            them. Needs PSRAM. Without it, voice notes go over Home Link's own
-            session to its paired VM and replies are shown as text.
+            device token. Replies are text, shown as captions, and spoken if
+            "Speak replies" below is on. Needs PSRAM. Without it, voice notes
+            go over Home Link's own session to its paired VM and replies are
+            shown as text.
+
+    config MUSE_TTS_GOOGLE
+        bool "Speak replies with Google Translate's voice"
+        depends on MUSE_HATCH
+        default y
+        help
+            Muse answers gadgets in text. With this on and the speaker on, each
+            reply is sent to the text-to-speech endpoint behind Google
+            Translate's "listen" button and the MP3 it returns is played, in
+            Vietnamese for a reply written in Vietnamese and otherwise in the
+            screen's language.
 
     config MUSE_REALTIME_VOICE
         bool "Live voice calls with Muse (experimental)"

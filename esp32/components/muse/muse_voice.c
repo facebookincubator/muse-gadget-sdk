@@ -669,9 +669,14 @@ static note_result_t note_held(bool wake, bool barge_in)
             if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP) {
                 if (eligible) return NOTE_ACCEPTED;
                 xQueueReceive(s_queue, &ev, 0);
+#if CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH
+                (void)until;
+                return NOTE_TAP;
+#else
                 int64_t held_us = until - s_press_us;
                 return held_us < CALL_TAP_US ? NOTE_TAP :
                     held_us < NOTE_MIN_HOLD_US ? NOTE_SHORT_HOLD : NOTE_INSUFFICIENT_CAPTURE;
+#endif
             }
             if (ev.type == MUSE_PTT_DOWN) return NOTE_CANCELLED;
             xQueueReceive(s_queue, &ev, 0);
@@ -1017,7 +1022,7 @@ static bool can_record(void)
  * shut after Muse's voice stops (these boards have no echo cancellation). */
 #define CALL_SPEAKER_LAG_US 120000
 #define CALL_TAIL_US 300000
-#define CALL_END_WAIT_US (20LL * 1000000)   /* hung up: wait this long for the call to wind down */
+#define CALL_END_WAIT_US 1500000LL         /* hung up: wait at most 1.5s for the call to wind down */
 #define CALL_RELEASE_US 120000            /* bounded capture lag, as for voice notes */
 
 typedef struct {
@@ -1126,7 +1131,10 @@ static void run_call(bool ptt, size_t waking_chunks)
             pre_get(i, s_chunk);
             c.awaiting |= muse_voice_call_audio(s_chunk, MUSE_AUDIO_CHUNK);
         }
-    } else muse_voice_call_start();
+    } else {
+        muse_audio_chirp(1);
+        muse_voice_call_start();
+    }
     while (!ended) {
         call_input(&c);
         unsigned press = c.press;
@@ -1244,8 +1252,13 @@ static void run_call(bool ptt, size_t waking_chunks)
         }
     }
     muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+    if (!ptt) muse_audio_chirp(-1);
     muse_state_set_level(0);
     s_monitor_db = -100.0f;
+    muse_input_event_t stale_ev;
+    while (xQueueReceive(s_queue, &stale_ev, 0) == pdTRUE) {
+        muse_input_clear_call_pending(stale_ev.mark);
+    }
     if (!atomic_load(&s_shutdown)) go_idle(ended && text[0] ? text : "CALL ENDED");
     atomic_store(&s_call_view, MUSE_VOICE_VIEW_NONE);
     atomic_store(&s_ptt_call, false);
