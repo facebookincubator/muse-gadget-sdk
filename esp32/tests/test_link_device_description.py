@@ -190,7 +190,8 @@ int main(void) {{
         # commands, OTA and the tunnel, at the largest values the build
         # accepts: a 64-character model id, a 128-character model name (no
         # character of it is escaped) and long node id and BLE names. The
-        # SSID is 32 quotation marks, each escaped to two bytes.
+        # SSID is 32 quotation marks, each escaped to two bytes: an SSID with a
+        # control character (six bytes each) isn't sent.
         profiles = {
             "e-paper status screen": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS", "CONFIG_HOMEHUB_RETERMINAL_SHT4X"],
             "SenseCAP Indicator": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS", "CONFIG_HOMEHUB_SENSECAP_SENSORS"],
@@ -223,6 +224,14 @@ int main(void) {{
                 print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
                 # cJSON_PrintPreallocated asks for 5 bytes beyond the output.
                 self.assertLessEqual(size + 5, REGISTER_LIMIT)
+
+    def test_register_leaves_out_an_ssid_with_control_characters(self) -> None:
+        defines = ['-DCONFIG_MUSE_DEVICE_MODEL_ID="acme-lamp"', '-DCONFIG_MUSE_DEVICE_MODEL_NAME="Acme Lamp"']
+        for ssid, sent in (("\\x01" * 32, None), ("Home\\tNet", None), ('\\"Caf\\xc3\\xa9\\x7f', '"Caf\u00e9\x7f')):
+            with self.subTest(ssid=ssid):
+                metadata = json.loads(self.registrations(defines, ssid=ssid)[0])["params"]["metadata"]
+                self.assertEqual(metadata.get("network_ssid"), sent)
+                self.assertEqual(metadata["model_name"], "Acme Lamp")
 
     def test_every_model_line_is_valid(self) -> None:
         ids = {"Kconfig": kconfig_default("MUSE_DEVICE_MODEL_ID"), **overlay_values("MUSE_DEVICE_MODEL_ID")}

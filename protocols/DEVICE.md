@@ -67,8 +67,8 @@ A command's description carries its contract (what it does, its arguments,
 what it returns, its timeout) and always matches the build. The guide carries
 what no single command can say: the device itself, rules across commands and,
 for your own gadget, what it's for. A rule about one command goes in its
-description, unless `link.register` (at most 8 KB, sent again on every
-reconnect) is short on space; then the guide, fetched only when needed, can
+description, unless `link.register` (at most 8 KB on ESP32, sent again on
+every reconnect) is short on space; then the guide, fetched only when needed, can
 carry it.
 
 Limits:

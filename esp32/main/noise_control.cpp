@@ -1376,6 +1376,12 @@ static void add_register_metadata_string(cJSON **metadata, cJSON *params,
                                          const char *key,
                                          const char *value) {
     if (!value || !value[0]) return;
+    // A control character escapes to six JSON bytes (\u00XX), which
+    // link.register has no room for. Only an SSID, which may hold any byte,
+    // can have one: leave it out rather than fail to register.
+    for (const unsigned char *c = (const unsigned char *)value; *c; c++) {
+        if (*c < 0x20) return;
+    }
     if (!*metadata) {
         *metadata = cJSON_CreateObject();
         if (!*metadata) return;
