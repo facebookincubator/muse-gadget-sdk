@@ -668,6 +668,27 @@ Keep within the session's bounds:
   slow work, and any request that depends on its result, in a task of your
   own, as `on_ws_command()`'s asynchronous commands do.
 
+## Slow replies
+
+On a board with the full UI and Muse's own voice session (PSRAM), a voice-note
+turn whose request Muse took and still says it's working on (`agent.status` /
+`task.status`) after 20 s adds a notice to the turn ("Muse is working on it.
+I'll tell you when it's done."), lets go of the turn so you can ask something
+else, and remembers the request. If Muse isn't working on it, the turn waits
+and fails with NO REPLY FROM MUSE as before. Turns on the Voice PE and
+reSpeaker builds, whose voice task doesn't play late replies, wait as before
+too. Streamed pieces name no request, so the late reply is known by its
+finished `message.assistant` row, whose `reply_to_message_id` names the
+request. With no turn running, that row is held until the voice task is idle
+(`muse_hatch_incoming()`), then played as a turn of its own that wakes the
+screen. Messages the turn already played aren't announced again, and rows that
+arrive together play in one turn. The request is forgotten once its reply
+plays, 10 s after Muse stops saying it's working, or 30 minutes after it was
+remembered. A battery board resting when the reply comes plays it when it
+wakes, if its connection survived. A late reply that arrives during another
+turn follows that turn's usual rules, and only one request is remembered at a
+time.
+
 ## Video from a phone
 
 `MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>` (overlay
@@ -796,13 +817,56 @@ the design, the Wi-Fi protocol and the numbers.
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
   output: app slots are 2 MB (4 MB on Muse).
 
+## Describe your device
+
+Muse learns what a gadget is from its `link.register`, and how to use it from
+its `device.guide` command; `../protocols/DEVICE.md` has the rules. Every
+device built with this SDK registers `device_family: "gadget"`; other families
+are reserved for Muse's own devices.
+
+- **Model.** Each board's overlay sets `CONFIG_MUSE_DEVICE_MODEL_ID` and
+  `CONFIG_MUSE_DEVICE_MODEL_NAME` after `CONFIG_IDF_TARGET`. The id names the
+  hardware, so every profile of a board uses the same one; boards in
+  `devices/` use `muse-gadget-<board>`. A build without them reports
+  `muse-gadget` ("Muse Gadget"). The build fails on a value outside the rules.
+- **Guide.** `device.guide` returns the Markdown file `CONFIG_MUSE_DEVICE_GUIDE`
+  names. `main/guide.md` covers boards with a status light or status screen,
+  `devices/guides/muse.md` (set in `devices/sdkconfig.muse`) the boards with
+  the full UI, and `devices/guides/voice.md` the Voice PE and the reSpeaker Lite and XVF3800.
+  Give a board its own guide in `devices/guides/` when these would be wrong
+  about it, and set it in its overlay. A relative path is looked up in the
+  project directory, then in `esp32/`. A leading HTML comment (the license
+  header) is left out, and a guide over 4096 bytes fails the build.
+- **Guides in this repository** are generic to the board: what it is and what
+  it can do, what it shows, its controls, recovery and limits, in at most 2048
+  bytes. They skip setup and pairing, since Muse only sees a device that's
+  already set up. They follow "Guides in this repository" in
+  `../protocols/DEVICE.md`, and CI checks them.
+- **Your own gadget's guide** is free-form: say what it's for and how you want
+  Muse to use it. Keep the file anywhere in your project and point
+  `CONFIG_MUSE_DEVICE_GUIDE` at it; only the 4096-byte limit is checked. For
+  a desk light whose firmware adds `light.set` and `timer.start`:
+
+  ```markdown
+  # Focus light
+
+  The lamp on my desk, used as a focus timer. "Focus" means 25 minutes of
+  work: call `light.set` with red, then `timer.start` with 1500 seconds.
+  The light turns green by itself when the timer ends. A press on the
+  button ends a focus session early.
+  ```
+
+`tests/test_link_device_description.py` checks the model lines, that every
+guide an overlay names embeds within the limit, this repository's guides
+against the policy, and `link.register`'s size.
+
 ## Adding a command
 
 Muse calls a gadget's commands by name: the firmware lists them in
 `link.register` and answers each `link.invoke`. A command you add lives in two
-places, which must use the same name. (`device.health` and `device.ota` are
-handled in `noise_control.cpp` itself; everything else goes through
-`on_ws_command()`.)
+places, which must use the same name. (`device.health`, `device.guide` and
+`device.ota` are handled in `noise_control.cpp` itself; everything else goes
+through `on_ws_command()`.)
 
 1. **Advertise it** in `build_register_json()` in `main/noise_control.cpp`:
    `add_command(commands, "relay.set", "<description>", required, optional)`.
@@ -841,6 +905,8 @@ handled in `noise_control.cpp` itself; everything else goes through
 6. **Add a host test** in `tests/`. `test_link_sensecap_sensors.py` checks
    that `sensors.read` is advertised and dispatched under the same option, and
    runs its parser against a harness.
+7. **Update the guides** (Describe your device, above) only if the command
+   needs a rule its description can't carry.
 
 Report environmental sensors (temperature, humidity, CO2, tVOC, light and so
 on) through `sensors.read`, on every board that has them, so Muse has one

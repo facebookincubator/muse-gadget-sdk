@@ -20,6 +20,8 @@
 # Pins are from Deotaland's RRL-01 schematic and production firmware; see
 # components/muse/boards/board_deotaland_rorolee.c.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-deotaland-rorolee"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Deotaland RoRoLee"
 CONFIG_MUSE_BOARD_DEOTALAND_ROROLEE=y
 # BOOT; the talk button confirms pairing, so Link doesn't read it itself.
 CONFIG_HOMEHUB_BUTTON_GPIO=0

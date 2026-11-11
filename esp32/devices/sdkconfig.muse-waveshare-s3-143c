@@ -17,6 +17,8 @@
 # speaker + ES7210 mics, single BOOT button. Native USB Serial/JTAG.
 # Load last, after sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-s3-143c"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-S3-Touch-AMOLED-1.43C"
 CONFIG_MUSE_BOARD_WAVESHARE_S3_143C=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y

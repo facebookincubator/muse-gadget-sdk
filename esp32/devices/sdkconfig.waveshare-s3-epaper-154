@@ -20,6 +20,8 @@
 # Sources: Waveshare wiki (waveshare.com/wiki/ESP32-S3-1.54inch-ePaper) for
 # the pins; esptool chip-id on the board for the chip, PSRAM and flash.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-s3-epaper-154"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-S3-1.54inch-ePaper V2"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # The e-paper shows a status screen.
