@@ -14,6 +14,7 @@
 
 import asyncio
 import base64
+import json
 import wave
 from types import SimpleNamespace
 
@@ -24,6 +25,7 @@ from musegadget.voice_audio import WavAudio
 from musegadget.voice_call import (AudioChunk, PlaybackFlushed, ResponseDone, ResponseStarted,
                                    TranscriptDelta, TranscriptDone, VoiceCall, Working)
 from test_streaming import chunk, connected
+from test_streaming import response as reply_to
 from test_voice_audio import open_audio, playback
 from test_voice_call import TONE, Output, admit, hangup, line, next_event
 from test_voice_gate import audio, silent_source, speech, turn
@@ -936,3 +938,187 @@ def test_a_barge_in_flush_failure_after_the_call_ended_is_raised_to_the_caller()
             await call.barge_in()  # nothing awaits the finished call's future
 
     asyncio.run(scenario())
+
+
+class FlushFailsOnce(Output):
+    def __init__(self, failure=None):
+        super().__init__()
+        self.failure = failure
+
+    def flush(self):
+        super().flush()
+        failure, self.failure = self.failure, None
+        if failure is not None:
+            raise failure
+
+
+@pytest.mark.parametrize("failing", ["callback", "output"])
+@pytest.mark.parametrize("failure_type", [asyncio.CancelledError, KeyboardInterrupt, SystemExit,
+                                          StopIteration])
+def test_barge_in_routes_every_flush_failure_through_run(failing, failure_type, caplog):
+    failure = failure_type("synthetic flush failure")
+
+    def observe(event):
+        if failing == "callback" and isinstance(event, PlaybackFlushed):
+            raise failure
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = FlushFailsOnce(failure if failing == "output" else None)
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=observe,
+                             cleanup_timeout=0.2)
+
+            async def run():
+                try:
+                    return await call.run(silent_source(), output)
+                except BaseException as exc:
+                    return exc
+
+            task = asyncio.create_task(run())
+            try:
+                media, start = await admit(vm)
+                await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE * 5)))
+                await output.written.wait()
+                raised = None
+                try:
+                    await call.barge_in()
+                except BaseException as exc:
+                    raised = exc
+                assert raised is None
+                assert await next_event(vm) == {"type": "response.cancel", "response_id": "r1"}
+                await hangup(vm, media, start)
+                result = await task
+                if failure_type is StopIteration:
+                    assert type(result) is RuntimeError
+                    assert result.__cause__ is failure
+                else:
+                    assert result is failure
+                assert call.end_call_acknowledged
+                assert call.cleanup_error is None
+                assert not session._requests
+                assert caplog.messages == []
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("observe", [False, True], ids=["audio_only", "observed"])
+def test_a_barge_in_flush_failure_at_any_moment_as_the_call_ends_is_raised_exactly_once(observe):
+    async def outcome(k):
+        failure = RuntimeError("synthetic flush failure")
+        async with connected(register_device=False) as (session, vm, unused):
+            output = FlushFailsOnce()
+            observer = {"on_event": [].append} if observe else {}
+            call = VoiceCall(session, device_id="homelink-synthetic", **observer)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            raised = []
+
+            async def barge_in_as_the_call_ends():
+                while call.reason != "remote_end":
+                    await asyncio.sleep(0)
+                for _ in range(k):
+                    await asyncio.sleep(0)
+                output.failure = failure
+                try:
+                    await call.barge_in()
+                except RuntimeError as exc:
+                    raised.append(exc)
+
+            barger = asyncio.create_task(barge_in_as_the_call_ends())
+            await chunk(vm, media, line(created("r1")) + line(done("r1")), end=True)
+            await hangup(vm, media, start, media_ended=True)
+            try:
+                await asyncio.wait_for(task, 2)
+            except RuntimeError as exc:
+                raised.append(exc)
+            await asyncio.wait_for(barger, 1)
+            assert output.failure is None  # the barge-in's flush did fail
+            return [exc for exc in raised if exc is failure] == [failure]
+
+    async def scenario():
+        return [k for k in range(8) if not await asyncio.wait_for(outcome(k), 5)]
+
+    assert asyncio.run(scenario()) == []
+
+
+@pytest.mark.parametrize("order", ["barge_in_then_hang_up", "hang_up_then_barge_in"])
+def test_a_barge_in_flush_failure_next_to_hangup_is_not_lost(order, caplog):
+    failure = OSError("synthetic flush failure")
+    seen = []
+
+    async def scenario(reply_open):
+        async with connected(register_device=False) as (session, vm, unused):
+            output = FlushFailsOnce()
+            call = VoiceCall(session, device_id="homelink-synthetic", cleanup_timeout=0.5)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await wait_until(call.ready.is_set)
+            if reply_open:
+                await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE * 5)))
+                await output.written.wait()
+            output.failure = failure
+
+            async def silence_speaker():
+                try:
+                    await call.barge_in()
+                except OSError as exc:
+                    seen.append(exc)
+
+            if order == "barge_in_then_hang_up":
+                await silence_speaker()
+                task.cancel()
+            else:
+                task.cancel()
+                await silence_speaker()
+            end = await vm.next_frame()
+            while end.kind == "body_chunk":  # quiet appends, and response.cancel if sent
+                assert json.loads(end.value.data)["type"] in (
+                    "input_audio_buffer.append", "response.cancel")
+                end = await vm.next_frame()
+            assert end.kind == "request" and end.value.path == "/voice/end-call"
+            await reply_to(vm, end.stream_id, b'{"ok":true,"result":{"ok":true}}', end=True)
+            final = await vm.next_frame()
+            assert final.stream_id == media and final.value.end_body
+            await chunk(vm, media, end=True)
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except OSError as exc:
+                seen.append(exc)
+            assert call.end_call_acknowledged
+
+    for reply_open in (False, True):
+        seen.clear()
+        caplog.clear()
+        asyncio.run(asyncio.wait_for(scenario(reply_open), 5))
+        logged = [record for record in caplog.records
+                  if record.exc_info and record.exc_info[1] is failure
+                  or "OSError" in record.getMessage()]
+        assert (len(seen), len(logged)) in [(1, 0), (0, 1)]
+        assert all(record.exc_info is None for record in logged)
+        assert "synthetic flush failure" not in caplog.text
+
+
+def test_barge_in_failure_is_logged_when_shutdown_raises_another_error(caplog):
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = FlushFailsOnce()
+            call = VoiceCall(session, device_id="homelink-synthetic", cleanup_timeout=0.5)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await call.ready.wait()
+            output.failure = OSError("synthetic flush failure")
+            await call.barge_in()
+            output.failure = asyncio.CancelledError()
+            await hangup(vm, media, start)
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert call.end_call_acknowledged
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert caplog.messages == ["voice barge-in flush failed (OSError)"]
+

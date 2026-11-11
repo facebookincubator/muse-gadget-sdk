@@ -273,6 +273,8 @@ class VoiceCall:
             raise
         finally:
             self._remote_ended = True  # Invalidate queued input before shutdown's first await.
+            # Nothing can hand a new failure to run() after it stops waiting.
+            self._barge_in_failure.cancel()
 
             async def shutdown():
                 # Shield the entire shutdown, including asynchronous source
@@ -305,26 +307,35 @@ class VoiceCall:
                 if pending:
                     raise asyncio.TimeoutError("voice worker shutdown timed out")
 
-            cleanup = asyncio.create_task(shutdown())
-            cancelled = False
-            # Cancellation must not strand the call. Repeated signals do not
-            # cancel shutdown; worker joins and remote cleanup have deadlines.
-            while not cleanup.done():
-                try:
-                    await asyncio.shield(cleanup)
-                except asyncio.CancelledError:
-                    cancelled = True
-                except Exception:
-                    break
             try:
-                cleanup.result()
-            except Exception as exc:
-                self.cleanup_error = exc
-                if error is None and not cancelled:
-                    raise
-                log.warning("voice cleanup failed (%s)", type(exc).__name__)
-            if cancelled and error is None:
-                raise asyncio.CancelledError
+                cleanup = asyncio.create_task(shutdown())
+                cancelled = False
+                # Cancellation must not strand the call. Repeated signals do not
+                # cancel shutdown; worker joins and remote cleanup have deadlines.
+                while not cleanup.done():
+                    try:
+                        await asyncio.shield(cleanup)
+                    except asyncio.CancelledError:
+                        cancelled = True
+                    except Exception:
+                        break
+                try:
+                    cleanup.result()
+                except Exception as exc:
+                    self.cleanup_error = exc
+                    if error is None and not cancelled:
+                        raise
+                    log.warning("voice cleanup failed (%s)", type(exc).__name__)
+                if cancelled and error is None:
+                    raise asyncio.CancelledError
+            except BaseException as exc:
+                error = exc
+                raise
+            finally:
+                if not self._barge_in_failure.cancelled():
+                    failure = self._barge_in_failure.exception()
+                    if failure is not error:
+                        log.warning("voice barge-in flush failed (%s)", type(failure).__name__)
 
     async def _start(self) -> None:
         query = {"call_id": self.call_id}
@@ -694,8 +705,12 @@ class VoiceCall:
         error = None
         try:
             self._apply_reply_flush()
-        except Exception as exc:
+        except BaseException as exc:
             error = exc
+            if isinstance(exc, StopIteration):
+                # Future.set_exception() rejects StopIteration before Python 3.12.
+                error = RuntimeError("coroutine raised StopIteration")
+                error.__cause__ = exc
         try:
             if response_id and not self._remote_ended:
                 try:
@@ -705,7 +720,7 @@ class VoiceCall:
                     log.warning("could not cancel interrupted response")
         finally:
             if error is not None:
-                # After run() ends, nothing awaits the failure: raise it here.
+                # Once run() stops waiting, the caller owns the failure.
                 if self._barge_in_failure is None or self._barge_in_failure.done():
                     raise error
                 self._barge_in_failure.set_exception(error)
