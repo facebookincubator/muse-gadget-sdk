@@ -35,6 +35,7 @@ import base64
 import enum
 import json
 import logging
+import re
 import struct
 import time
 import uuid
@@ -44,7 +45,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Callable, Sequence
 from urllib.parse import quote
 
-from musegadget import tls
+from musegadget import device_guide, tls
 from musegadget.muse_api import user_agent
 from musegadget.noise import Header, NoiseTransport, NoiseXXInitiator
 from musegadget.streaming import MAX_BUFFER_BYTES, MAX_BUFFER_CHUNKS, StreamingRequest
@@ -78,6 +79,23 @@ REQUEST_CHUNK_BYTES = 16 * 1024
 MAX_INLINE_REQUEST_BYTES = 64 * 1024
 # Matches JavaScript's encodeURIComponent, as the firmware does.
 _URI_COMPONENT_SAFE = "-_.!~*'()"
+DEFAULT_MODEL_ID = "muse-gadget-linux"
+DEFAULT_MODEL_NAME = "Linux gadget"
+MAX_MODEL_NAME_BYTES = 128
+_MODEL_ID = re.compile(r"[a-z0-9-]{1,64}")
+# Printable ASCII without " or \, so link.register never escapes it.
+_MODEL_NAME = re.compile(r"[ !#-\[\]-~]{1,%d}" % MAX_MODEL_NAME_BYTES)
+
+
+def check_model(model_id: str, model_name: str, guide: str | None) -> None:
+    """Raise ValueError for a model id, name or guide outside protocols/DEVICE.md's rules."""
+    if not isinstance(model_id, str) or not _MODEL_ID.fullmatch(model_id):
+        raise ValueError("model_id must be 1 to 64 lowercase letters, digits and hyphens")
+    if not isinstance(model_name, str) or not _MODEL_NAME.fullmatch(model_name):
+        raise ValueError(f"model_name must be 1 to {MAX_MODEL_NAME_BYTES} printable ASCII characters, "
+                         'without " or \\')
+    if guide is not None:
+        device_guide.check(guide)
 
 
 class Outcome(enum.Enum):
@@ -94,17 +112,27 @@ class DeviceDescription:
     display_name: str
     version: str
     commands: dict
+    model_id: str = DEFAULT_MODEL_ID
+    model_name: str = DEFAULT_MODEL_NAME
+    guide: str | None = None
+
+    def __post_init__(self) -> None:
+        check_model(self.model_id, self.model_name, self.guide)
 
     def register_params(self) -> dict:
+        commands = self.commands
+        if self.guide is not None:
+            commands = {**commands, device_guide.COMMAND: device_guide.SPEC}
         return {
             "node_id": self.node_id,
             "display_name": self.display_name,
             "platform": "linux",
             "version": self.version,
-            "device_family": "homehub",
-            "model_id": "linux",
+            "device_family": "gadget",
+            "model_id": self.model_id,
+            "metadata": {"model_name": self.model_name},
             "is_wakeup_supported": False,
-            "commands_v2": self.commands,
+            "commands_v2": commands,
         }
 
     def register_message(self, request_id: str) -> dict:
@@ -809,6 +837,11 @@ class LinkSession:
             return
         shown = printable(command)
         log.info("invoke %s", shown)
+        if command == device_guide.COMMAND and self._device.guide is not None:
+            result = {"ok": True, "payload": device_guide.payload(self._device.guide)}
+            log.info("%s %s in 0 ms", shown, describe_result(result))
+            await self.send({"method": "link.result", "id": invoke_id, **result})
+            return
         await self._invokes.acquire()
         started = time.monotonic()
         try:

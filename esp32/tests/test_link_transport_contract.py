@@ -132,9 +132,13 @@ class LinkTransportContractTest(unittest.TestCase):
         upgrade = _function_body(source, "static noise_upgrade_result_t ws_upgrade(")
 
         self.assertIn('"link.register"', register)
-        self.assertIn('"device_family", "link"', register)
-        self.assertIn('"model_id", "esp-link"', register)
+        self.assertIn('#define MUSE_DEVICE_FAMILY "gadget"', source)
+        self.assertIn('"device_family", MUSE_DEVICE_FAMILY', register)
+        self.assertIn('"model_id", CONFIG_MUSE_DEVICE_MODEL_ID', register)
+        self.assertIn('"model_name"', register)
+        self.assertIn("CONFIG_MUSE_DEVICE_MODEL_NAME", register)
         self.assertIn('"device.health"', register)
+        self.assertIn('"device.guide"', register)
         self.assertIn('"device.discover"', register)
         self.assertIn('"timeout_ms"', register)
         # Management commands remain handled by on_ws_command, but are not

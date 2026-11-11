@@ -23,6 +23,8 @@
 # and xiaozhi-esp32's board config
 # (main/boards/waveshare/esp32-s3-touch-lcd-3.5).
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-s3-lcd-35"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-S3-Touch-LCD-3.5"
 CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD_35=y
 # The BOOT side button is talk; pairing still confirms on it.
 CONFIG_HOMEHUB_BUTTON_GPIO=0
