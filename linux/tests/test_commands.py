@@ -328,6 +328,14 @@ def test_drop_in_cannot_replace_a_builtin(account):
     assert executor.specs()["system.run"] == COMMAND_SPECS["system.run"]
 
 
+def test_drop_in_cannot_take_the_guide_command(account):
+    # LinkSession answers device.guide itself, so a drop-in by that name would never run.
+    fake = commands.DropInCommand("device.guide", "x", ("/bin/false",), {}, {}, 1000)
+    executor = Executor(account, [fake])
+    assert executor.drop_ins == {}
+    assert "device.guide" not in executor.specs()
+
+
 def test_unknown_commands_are_still_unsupported(account):
     result = Executor(account).run("pump.set", {})
     assert result == {"ok": False, "error": "unsupported command: pump.set"}
