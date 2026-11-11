@@ -1259,3 +1259,74 @@ def test_held_surrogates_survive_provider_replacement(words, expected):
     assert events == [
         ResponseStarted("r1"), Working(True), *expected, AudioChunk("r1", 0, HALF),
     ]
+
+
+class DiscardedSamples:
+    def __bool__(self):
+        raise ValueError("synthetic ambiguous truth value")
+
+
+class DiscardedCount(int):
+    def __bool__(self):
+        raise ValueError("synthetic count truth test")
+
+
+def test_audio_only_call_ignores_output_flush_return_value():
+    class SamplesOutput(Output):
+        def flush(self):
+            super().flush()
+            return DiscardedSamples()
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = SamplesOutput()
+            call = VoiceCall(session, device_id="homelink-synthetic")
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, line(audio("p1", TONE)))
+            await output.written.wait()
+            await chunk(vm, media, b"".join(map(line, [
+                speech("item-2"), turn("item-2", "sub-2"), audio("p2", HALF),
+            ])), end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await task == "remote_end"
+            assert output.pcm == TONE + HALF
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("discarded, expected", [
+    (DiscardedSamples(), []),
+    (True, []),
+    (1.5, []),
+    (DiscardedCount(len(HALF)), [PlaybackFlushed(("r1",))]),
+], ids=["samples", "bool", "float", "integral"])
+def test_only_integral_output_flush_counts_report_discarded_audio(discarded, expected):
+    events = []
+
+    class BufferedOutput(Output):
+        def write(self, data):
+            super().write(data)
+            return len(data)
+
+        def flush(self):
+            super().flush()
+            return discarded
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = BufferedOutput()
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=events.append)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, line(created("r1")) + line(audio("p1", HALF)))
+            await output.written.wait()
+            await call.barge_in()
+            assert await next_event(vm) == {"type": "response.cancel", "response_id": "r1"}
+            await chunk(vm, media, end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await task == "remote_end"
+            assert output.pcm == HALF
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert events == [ResponseStarted("r1"), AudioChunk("r1", 0, HALF), *expected]

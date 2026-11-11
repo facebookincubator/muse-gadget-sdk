@@ -37,6 +37,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from numbers import Integral
 from typing import Callable, Optional, Tuple, Union
 from urllib.parse import urlencode
 
@@ -737,8 +738,10 @@ class VoiceCall:
         error = None
         try:
             discarded = self._output.flush()
-            self._trim_output(discarded or 0)
-            queued = [response_id for _, response_id in self._pending_output] + queued
+            if self._on_event is not None:
+                self._trim_output(discarded if isinstance(discarded, Integral)
+                                  and not isinstance(discarded, bool) else 0)
+                queued = [response_id for _, response_id in self._pending_output] + queued
             self._pending_output.clear()
         except BaseException as exc:
             error = exc
