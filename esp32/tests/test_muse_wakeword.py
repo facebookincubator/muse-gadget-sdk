@@ -357,7 +357,10 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('ww_runner_et.cpp', cmake)
         self.assertIn('models/hey_muse.pte', cmake)
         self.assertIn('executorch_add_model', cmake)
-        self.assertIn('executorch_add_kernels', cmake)
+        self.assertIn('make_kernel_bundle.py', cmake)
+        # The bundle is generated at build time; no committed bundle dir.
+        self.assertNotIn('"${CMAKE_CURRENT_SOURCE_DIR}/et_kernels"', cmake)
+        self.assertFalse((WW / 'et_kernels').exists())
         self.assertTrue((WW / 'models/hey_muse.pte').is_file())
 
     def test_runner_copies_unaligned_embedded_pte(self):
@@ -390,36 +393,27 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('model_cfg.temp_arena_size = kTempArenaBytes', runner)
         self.assertIn('model_cfg.temp_location = ET_MEM_DEFAULT', runner)
 
-    def test_model_ops_match_the_kernel_bundle(self):
-        # The embedded .pte only runs on firmware whose kernel bundle
-        # registers its ops; the bundle is generated from the .pte and
-        # pinned to the registry component version in main's manifest.
-        # Catches a model re-export without regenerating the bundle,
-        # which would otherwise fail only at build time or on device.
+    def test_model_is_declared_and_bundle_is_build_time(self):
+        # The embedded .pte only runs on firmware whose build-time kernel
+        # bundle registers its ops. The bundle is generated at configure
+        # time from the declared model, so the tree carries the model,
+        # its recorded ops, and the declaration — and no committed
+        # bundle that could go stale when the component is updated.
         sidecar = json.loads((WW / 'models/hey_muse.json').read_text())
         pte = WW / 'models/hey_muse.pte'
         self.assertEqual(sidecar['pte_size'], pte.stat().st_size)
         self.assertEqual(
             sidecar['pte_sha256'], hashlib.sha256(pte.read_bytes()).hexdigest()
         )
-        bundle = json.loads((WW / 'et_kernels/kernels.json').read_text())
-        self.assertEqual(bundle['schema'], 1)
-        self.assertEqual(len(bundle['models']), 1)
-        self.assertEqual(bundle['models'][0]['name'], 'hey_muse.pte')
-        self.assertEqual(bundle['models'][0]['sha256'], sidecar['pte_sha256'])
-        pinned = None
-        for line in (ROOT / 'main/idf_component.yml').read_text().splitlines():
-            if line.strip() == 'rascani/executorch:':
-                pinned = 'pending'
-            elif pinned == 'pending' and 'version:' in line:
-                pinned = line.split('version:', 1)[1].strip().strip('"').lstrip('=')
-                break
-        self.assertEqual(bundle['component_version'], pinned)
-        self.assertRegex(bundle['component_commit'], r'^[0-9a-f]{40}$')
-        registered = set()
-        for ops in bundle['libraries'].values():
-            registered.update(ops)
-        self.assertLessEqual(set(sidecar['model_ops']), registered)
+        self.assertTrue(sidecar['model_ops'])
+        cmake = (WW / 'CMakeLists.txt').read_text()
+        self.assertIn(
+            'executorch_add_model(PTE "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte")',
+            cmake,
+        )
+        self.assertFalse((WW / 'et_kernels').exists())
+        helper = (WW / 'tools/make_kernel_bundle.py').read_text()
+        self.assertIn('module._check_version = _unchecked_version', helper)
 
     def test_commands_advertised_and_dispatched_with_the_feature(self):
         noise = (ROOT / 'main/noise_control.cpp').read_text()
