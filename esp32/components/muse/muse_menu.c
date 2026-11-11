@@ -40,6 +40,9 @@
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
+#endif
 
 static const char *TAG = "muse_menu";
 
@@ -79,6 +82,9 @@ typedef enum {
 #if CONFIG_MUSE_VIDEO
     ITEM_CAMERA,
 #endif
+#if CONFIG_MUSE_APP_VIEW
+    ITEM_APPS,
+#endif
     ITEM_INFO,
     ITEM_BATTERY,
     ITEM_RESET,
@@ -102,6 +108,9 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
 #if CONFIG_MUSE_VIDEO
     [ITEM_CAMERA] = "Phone camera",
 #endif
+#if CONFIG_MUSE_APP_VIEW
+    [ITEM_APPS] = "Apps",
+#endif
     [ITEM_INFO] = "Status",
     [ITEM_BATTERY] = "Battery",
     [ITEM_RESET] = "Reset pairing",
@@ -124,6 +133,9 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_WIFI] = "Toggle",
 #if CONFIG_MUSE_VIDEO
     [ITEM_CAMERA] = "Open",
+#endif
+#if CONFIG_MUSE_APP_VIEW
+    [ITEM_APPS] = "Open",
 #endif
     [ITEM_INFO] = "Open",
     [ITEM_BATTERY] = "Open",
@@ -508,6 +520,12 @@ static void activate(int item, int direction)
     case ITEM_CAMERA:
         muse_menu_close();
         muse_video_open();
+        return;
+#endif
+#if CONFIG_MUSE_APP_VIEW
+    case ITEM_APPS:   /* the apps' launcher (muse_app_view.h) */
+        muse_menu_close();
+        muse_app_view_home();
         return;
 #endif
     case ITEM_INFO:

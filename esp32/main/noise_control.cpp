@@ -16,6 +16,9 @@
 
 #include "ble_commands.h"
 #include "noise_control.h"
+#if CONFIG_MUSE_WASM_APPS
+#include "muse_apps.h"
+#endif
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
 #include "noise_tunnel_internal.h"
@@ -1426,8 +1429,11 @@ static char *build_register_json(void) {
                 nullptr, nullptr);
     add_command(commands, "device.guide",
                 "This device's usage guide (Markdown): what it is, its "
-                "controls and limits.",
-                nullptr, nullptr);
+                "controls and limits."
+#if CONFIG_MUSE_WASM_APPS
+                " Also returns structured capabilities: board, devices and WASM API discovery."
+#endif
+                , nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
                 "Scan local network for devices (ARP, mDNS, SSDP, SNMP, NetBIOS)",
@@ -1547,6 +1553,10 @@ static char *build_register_json(void) {
                            "the agent's name.",
                     nullptr, nullptr);
     }
+#endif
+
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_advertise(commands);   // app.run and app.stop
 #endif
 
 #if CONFIG_HOMEHUB_VOICE
@@ -1785,7 +1795,12 @@ static void send_device_guide(
     cJSON *guide = cJSON_CreateStringReference(muse_device_guide_md);
     if (!cJSON_AddBoolToObject(result, "ok", true) || !payload
         || !cJSON_AddStringToObject(payload, "format", "markdown")
-        || !cJSON_AddItemToObject(payload, "guide", guide)) {
+        || !cJSON_AddItemToObject(payload, "guide", guide)
+#if CONFIG_MUSE_WASM_APPS
+        /* Once guide is attached, result owns it, including on a later failure. */
+        || !(guide = nullptr, muse_apps_add_capabilities(payload))
+#endif
+        ) {
         cJSON_Delete(guide);
         cJSON_Delete(result);
         result = cJSON_CreateObject();
@@ -2237,6 +2252,10 @@ static session_result_t run_session(stack_monitor_t *stack) {
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
             goto cleanup;
         }
+#if CONFIG_MUSE_WASM_APPS
+        // Apps add to it, and it must stay under 8 KB.
+        ESP_LOGI(TAG, "link.register: %u bytes", (unsigned)strlen(reg_json));
+#endif
         control_tx = {reg_json, strlen(reg_json), 0, false, session_generation};
         control_tx.is_registration = true;
     }

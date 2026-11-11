@@ -64,6 +64,9 @@
 #include "freertos/queue.h"
 #include "freertos/stream_buffer.h"
 #include "sdkconfig.h"
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
+#endif
 
 #include "muse_chat_priv.h"
 #include "muse_voice_call.h"
@@ -1401,6 +1404,9 @@ extern "C" bool muse_voice_call_ready(void)
 
 extern "C" void muse_voice_call_start(void)
 {
+#if CONFIG_MUSE_APP_VIEW
+    muse_app_view_preempt(MUSE_APP_STOP_CALL);
+#endif
     if (!s_inited) {
         return;
     }
@@ -1413,6 +1419,9 @@ extern "C" void muse_voice_call_start(void)
 
 extern "C" void muse_voice_call_start_ptt(void)
 {
+#if CONFIG_MUSE_APP_VIEW
+    muse_app_view_preempt(MUSE_APP_STOP_CALL);
+#endif
     if (!s_inited) {
         return;
     }

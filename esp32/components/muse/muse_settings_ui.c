@@ -42,6 +42,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
+#endif
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
@@ -1573,10 +1576,22 @@ static void on_camera(lv_event_t *e)
 }
 #endif
 
+#if CONFIG_MUSE_APP_VIEW
+/* Apps: the launcher of the apps installed on the gadget (muse_app_view.h). */
+static void on_apps(lv_event_t *e)
+{
+    (void)e;
+    muse_app_view_home();
+}
+#endif
+
 static void build_home(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_home = page(tile, "SETTINGS", false, &list);
+#if CONFIG_MUSE_APP_VIEW
+    row(list, LV_SYMBOL_LIST, "Apps", NULL, on_apps, NULL);
+#endif
     row(list, LV_SYMBOL_WIFI, "Wi-Fi", &s_home_wifi, on_nav, (void *)&WIFI);
     row(list, LV_SYMBOL_HOME, "Muse", &s_home_hatch, on_nav, (void *)&HATCH);
     row(list, LV_SYMBOL_BLUETOOTH, "Bluetooth", &s_home_ble, on_nav, (void *)&BLE);

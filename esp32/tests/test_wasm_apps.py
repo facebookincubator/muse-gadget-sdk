@@ -1,0 +1,581 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""WebAssembly apps (CONFIG_MUSE_WASM_APPS, components/muse_apps), API 1.0: the
+component stays optional and Link reaches it only under the option; the app.*
+commands are advertised and dispatched; the firmware's import table is the
+generated one, and nothing of API 0 is left; the apps build with components/muse_apps/sdk/build.py,
+which refuses what the gadget refuses; apps keep out of internal RAM; and
+MUSE.md, the guide for Muse, is current and fits in one message. The API's own
+files are tests/test_app_api.py's."""
+
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+APPS = ROOT / "components/muse_apps/sdk"
+COMPONENT = ROOT / "components/muse_apps"
+EXAMPLES = ["components/muse_apps/sdk/examples/hello.c", "components/muse_apps/sdk/examples/stopwatch.c", "components/muse_apps/sdk/examples/chat.c", "components/muse_apps/sdk/examples/dashboard.c",
+            "components/muse_apps/sdk/examples/canvas_effects.c"]
+COMMANDS = ["app.install", "app.list", "app.remove", "app.run", "app.stop", "app.status", "app.logs", "app.api",
+            "files.put", "files.list", "files.remove"]
+
+
+def read(path):
+    return (ROOT / path).read_text()
+
+
+def block(text, start, end="#endif"):
+    i = text.index(start)
+    return text[i:text.index(end, i)]
+
+
+def function(text, signature):
+    i = text.index(signature)
+    return text[i:text.index("\n}\n", i)]
+
+
+def capabilities():
+    return json.loads(read("components/muse_apps/sdk/api/api.capabilities.json"))
+
+
+def have_wasm_compiler():
+    """What components/muse_apps/sdk/build.py looks for: wasi-sdk, or the ziglang package of this Python."""
+    for d in (os.environ.get("WASI_SDK"), os.path.expanduser("~/wasi-sdk"), "/opt/wasi-sdk"):
+        if d and (Path(d) / "bin" / "clang").exists():
+            return True
+    return importlib.util.find_spec("ziglang") is not None
+
+
+def build(*args):
+    return subprocess.run([sys.executable, str(APPS / "build.py"), *map(str, args)],
+                          capture_output=True, text=True, cwd=ROOT)
+
+
+def enum_values(text, prefix):
+    """NAME -> value for the enum members starting with prefix, counting as C does."""
+    out = {}
+    for body in re.findall(r"enum\s*\{([^}]*)\}", re.sub(r"/\*.*?\*/", "", text, flags=re.S)):
+        value = -1
+        for item in filter(None, (i.strip() for i in body.split(","))):
+            name, _, given = (p.strip() for p in item.partition("="))
+            value = int(given, 0) if given else value + 1
+            if name.startswith(prefix):
+                out[name[len(prefix):]] = value
+    return out
+
+
+class WasmAppsTest(unittest.TestCase):
+    def test_component_instructions_are_local(self):
+        parent = read("AGENTS.md")
+        overview = block(parent, "## WebAssembly apps\n", "## Configuration gotchas\n")
+        self.assertLess(len(overview), 1000)
+        self.assertIn("components/muse_apps/AGENTS.md", overview)
+        instructions = read("components/muse_apps/AGENTS.md")
+        for topic in ("CONFIG_MUSE_WASM_APPS", "CONFIG_CAPABILITIES_REGISTRY",
+                      "muse_apps_alloc", "api.json", "cv_rect_style",
+                      "tests.test_wasm_apps", "muse_brief.py", "app.api"):
+            self.assertIn(topic, instructions)
+        self.assertIn("[the ESP32 instructions](../../AGENTS.md)", instructions)
+        self.assertIn("[the component instructions](../AGENTS.md)", read("components/muse_apps/sdk/README.md"))
+        self.assertIn("[component instructions](../../AGENTS.md)", read("components/muse_apps/sdk/api/README.md"))
+
+    def test_examples_are_grouped_and_guide_hello_is_standalone(self):
+        for name in ("hello.c", "stopwatch.c", "chat.c", "dashboard.c", "canvas_effects.c"):
+            self.assertTrue((APPS / "examples" / name).is_file(), name)
+            self.assertFalse((APPS / name).exists(), name)
+        self.assertFalse((APPS / "api" / "examples").exists())
+        if not have_wasm_compiler():
+            self.skipTest("no wasm32 compiler")
+        guide = read("components/muse_apps/sdk/MUSE.md")
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d)
+            for name, lang in (("gadget.h", "c"), ("hello.c", "c"), ("build.py", "python")):
+                pattern = r"<!-- BEGIN %s -->\n```%s\n(.*?)\n```\n<!-- END %s -->" % (
+                    re.escape(name), lang, re.escape(name))
+                body = re.search(pattern, guide, re.S).group(1)
+                (folder / name).write_text(body + "\n")
+            self.assertIn('#include "gadget.h"', (folder / "hello.c").read_text())
+            r = subprocess.run([sys.executable, str(folder / "build.py"), str(folder / "hello.c"),
+                                "-o", str(folder / "hello.wasm")], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_component_is_optional(self):
+        cmake = read("components/muse_apps/CMakeLists.txt")
+        self.assertIn('"muse_apps.c"', block(cmake, "if(CONFIG_MUSE_WASM_APPS)", "endif()"))
+        self.assertIn("WASM_ENABLE_INSTRUCTION_METERING=1",
+                      block(cmake, "if(CONFIG_MUSE_WASM_APPS)\n    # WAMR", "endif()\nendif()"))
+        # Whole, so the modules' imports win over the weak stubs.
+        self.assertIn("WHOLE_ARCHIVE", cmake)
+        self.assertIn("#define MUSE_APPS_DEFINE_STUBS", read("components/muse_apps/muse_apps_stubs.c"))
+        manifest = read("components/muse_apps/idf_component.yml")
+        # Keyed on an option every target defines, as MUSE_BOARD_ID rules are.
+        self.assertIn('if: "$CONFIG{MUSE_APPS_WAMR} == \\"y\\""', manifest)
+        kconfig = read("components/muse_apps/Kconfig")
+        self.assertIn('default "y" if MUSE_WASM_APPS', kconfig)
+        self.assertIn("default n", block(kconfig, "config MUSE_WASM_APPS", "help"))
+        self.assertIn("select MUSE_APP_VIEW", kconfig)
+        # The overlay that turns it on, and the interpreter it wants.
+        overlay = read("devices/sdkconfig.muse-apps")
+        for line in ["CONFIG_MUSE_WASM_APPS=y", "CONFIG_WAMR_ENABLE_AOT=n", "CONFIG_WAMR_ENABLE_LIBC_WASI=n"]:
+            self.assertIn(line, overlay)
+        self.assertIn("sdkconfig.muse-apps", block(read("tools/muse/board.sh"), "MUSE_APPS:-", "\nfi"))
+        # Link knows WAMR only through the component.
+        for path in ["main/CMakeLists.txt", "main/idf_component.yml", "CMakeLists.txt"]:
+            self.assertNotIn("wasm-micro-runtime", read(path), path)
+        self.assertIn("muse_apps", read("main/CMakeLists.txt"))
+        # Every call into it is under the option.
+        for path, call in [("main/app.c", "muse_apps_handles(command)"),
+                           ("main/app.c", "muse_apps_command("),
+                           ("main/noise_control.cpp", "muse_apps_advertise(commands)"),
+                           ("main/muse_glue.c", "muse_apps_start(noise_ctrl_send_command_result)"),
+                           ("main/muse_glue.c", "muse_apps_console(line)")]:
+            source = read(path)
+            self.assertIn(call, source)
+            before = source[:source.index(call)]
+            self.assertGreater(before.rfind("#if CONFIG_MUSE_WASM_APPS"), before.rfind("#endif"), path)
+
+    def test_app_view_belongs_to_the_ui(self):
+        muse = read("components/muse/CMakeLists.txt")
+        self.assertIn('"muse_app_view.c"', block(muse, "if(CONFIG_MUSE_APP_VIEW)", "endif()"))
+        ui = read("components/muse/muse_ui.c")
+        self.assertIn("muse_app_view_tick()", block(ui, "#if CONFIG_MUSE_APP_VIEW\n    if"))
+        for path in ["components/muse/muse_ui.c", "components/muse/muse_input.c",
+                     "components/muse/muse_app_view.c"]:
+            self.assertNotIn("WASM", read(path), path)
+
+    def test_commands_are_advertised_and_dispatched(self):
+        apps = read("components/muse_apps/muse_apps.c")
+        advertised = function(apps, "void muse_apps_advertise(")
+        handled = block(apps, "static const char *const s_commands[]", ";")
+        for name in COMMANDS:
+            self.assertIn('add_command(commands, "%s"' % name, advertised)
+            self.assertIn('"%s"' % name, handled)
+        app = read("main/app.c")
+        start = app.index("static cJSON *on_ws_command(")
+        dispatch = app[start:app.index("unsupported command", start)]
+        self.assertIn("muse_apps_command(", block(dispatch, "#if CONFIG_MUSE_WASM_APPS"))
+        # The console's lines for the bench tool, beside the loader's.
+        console = function(apps, "bool muse_apps_console(")
+        for line in ['"app.status"', '"app.logs"', '"app.api"', '"app.begin"', '"app.run="', '"app.event="',
+                     '"app.install="', '"app.install.upload="', '"app.remove="', '"app.list"', '"app.launcher"',
+                     '"app.key"', '"files.put="', '"files.upload="', '"files.remove="', '"files.list"']:
+            self.assertIn(line, console)
+        tool = read("tools/muse/app.py")
+        for line in ['"app.status"', '"app.logs"', '"app.api=0"', '"app.api=%d"', '"app.run="', '"app.event="',
+                     '"app.install="', '"app.install.upload="', '"app.remove="', '"app.list"', '"app.launcher"',
+                     '"app.key"', '"files.put="', '"files.upload="', '"files.remove="', '"files.list"']:
+            self.assertIn(line, tool)
+
+    def test_apps_are_installed_on_the_gadget(self):
+        # The partition comes last in the 16 MB table, so no offset moves.
+        rows = [line.split(",") for line in read("partitions_muse.csv").splitlines()
+                if line.strip() and not line.startswith("#")]
+        self.assertEqual([[c.strip() for c in r[:3]] for r in rows[-2:]],
+                         [["apps", "data", "littlefs"], ["files", "data", "littlefs"]])
+        self.assertEqual(rows[-3][0], "prod_bak")
+        offsets = [int(r[3], 16) for r in rows]
+        self.assertEqual(offsets, sorted(offsets))
+        cmake = read("components/muse_apps/CMakeLists.txt")
+        for module in ["store", "catalog", "launcher", "icons", "flash"]:
+            self.assertRegex(cmake, r"foreach\(module [^)]*\b%s\b" % module)
+        manifest = read("components/muse_apps/idf_component.yml")
+        self.assertIn('if: "$CONFIG{MUSE_APPS_WAMR} == \\"y\\""', manifest[manifest.index("joltwallet/littlefs"):])
+        # Only the store's task touches the catalog and the flash; the app task
+        # asks it. Its stack is in PSRAM only where flash writes leave the caches on.
+        self.assertNotIn("muse_apps_catalog_", read("components/muse_apps/muse_apps.c"))
+        self.assertNotIn("muse_apps_catalog_", read("components/muse_apps/muse_apps_launcher.c"))
+        store = read("components/muse_apps/muse_apps_store.c")
+        self.assertIn("xTaskCreateWithCaps(store_task", store)
+        # Internal RAM is audio's and TLS's: the lists live in PSRAM.
+        for path in ["muse_apps_store.c", "muse_apps_catalog.c", "muse_apps_launcher.c"]:
+            source = read("components/muse_apps/" + path)
+            for decl in re.findall(r"^static [^(=;]*\[MUSE_APPS_MAX\];", source, re.M):
+                self.assertIn("EXT_RAM_BSS_ATTR", decl, path)
+        self.assertIn("CONFIG_LITTLEFS_MALLOC_STRATEGY_SPIRAM=y", read("devices/sdkconfig.muse-apps"))
+        # The manifest names an install: id, launcher name, icon and colour.
+        install = function(store, "static void install(")
+        self.assertIn("muse_apps_manifest_info(", install)
+        fields = [f[0] for f in json.loads(read("components/muse_apps/sdk/api/api.json"))["manifest"]["fields"]]
+        for field in ["name", "title", "icon", "color"]:
+            self.assertIn(field, fields)
+        # Unpairing removes the apps, and an install still downloading doesn't land after it.
+        self.assertIn("muse_apps_forget_all();",
+                      function(read("main/app.c"), "static void finish_setup_reset_with_gate_held("))
+        self.assertIn("forget_if_asked()", install)
+        self.assertIn("muse_apps_flash_wipe(FILES_ROOT)", function(store, "static bool forget_if_asked("))
+
+    def test_gadget_files(self):
+        # Writes on the store's task, apps' reads on its reader task: neither is
+        # the app task or the VM's, whose stacks are in PSRAM.
+        store = read("components/muse_apps/muse_apps_store.c")
+        self.assertIn('mount(FILES_LABEL, FILES_ROOT,', store)
+        self.assertIn("xTaskCreateWithCaps(reader_task", function(store, "void muse_apps_store_start("))
+        self.assertIn("TASK_STACK_CAPABILITIES", function(store, "void muse_apps_store_start(")
+                      [function(store, "void muse_apps_store_start(").index("reader_task"):])
+        self.assertIn("muse_apps_vm_file_stream(", function(store, "static void file_put("))
+        for path in ["muse_apps.c", "muse_apps_files.c", "muse_apps_ui.c", "muse_apps_vm.c"]:
+            self.assertNotIn("muse_apps_flash_read(", read("components/muse_apps/" + path), path)
+            self.assertNotIn("fopen(", read("components/muse_apps/" + path), path)
+        # Apps reach them with a path from "/", and the files.gadget permission.
+        api = json.loads(read("components/muse_apps/sdk/api/api.json"))
+        self.assertIn("files.gadget", [p[0] for p in api["manifest"]["permissions"]])
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn('muse_apps_permitted("files.gadget")', function(apps, "int32_t muse_apps_gadget_path("))
+        self.assertIn("muse_apps_store_file_read(", read("components/muse_apps/muse_apps_files.c"))
+        self.assertIn("muse_apps_store_file_load(", read("components/muse_apps/muse_apps_ui.c"))
+
+    def test_launcher_opens_from_settings(self):
+        settings = read("components/muse/muse_settings_ui.c")
+        self.assertIn("muse_app_view_home()", function(settings, "static void on_apps("))
+        home = function(settings, "static void build_home(")
+        self.assertIn('row(list, LV_SYMBOL_LIST, "Apps", NULL, on_apps, NULL);', home)
+        before = home[:home.index('"Apps"')]
+        self.assertGreater(before.rfind("#if CONFIG_MUSE_APP_VIEW"), before.rfind("#endif"))
+        self.assertNotIn("WASM", settings)
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn("muse_app_view_set_home(open_launcher)", apps)
+        # The power key: an app goes back to the launcher if it came from there.
+        stop = function(apps, "static void handle_stop(")
+        self.assertIn("bool back = s_app.from_launcher;", stop)
+        self.assertIn("hide_launcher(false);", stop)
+        # The launcher is a list of LVGL objects, sized from the screen, and
+        # gone when it's hidden; button boards open it from the menu.
+        launcher = read("components/muse_apps/muse_apps_launcher.c")
+        self.assertIn("lv_obj_set_flex_flow(s_list, LV_FLEX_FLOW_COLUMN)", launcher)
+        self.assertIn("muse_app_view_size(&L.w, &L.h, &L.round)", function(launcher, "static void layout("))
+        self.assertIn("muse_apps_safe_inset()", function(launcher, "static void layout("))
+        self.assertNotIn("gadget_", launcher)
+        self.assertNotIn("466", launcher)
+        self.assertIn("muse_apps_launcher_hide();", function(apps, "static void hide_launcher("))
+        self.assertFalse((ROOT / "components/muse_apps/muse_apps_paint.c").exists())
+        menu = read("components/muse/muse_menu.c")
+        self.assertRegex(menu, r"#if CONFIG_MUSE_APP_VIEW\s+ITEM_APPS,")
+        self.assertRegex(menu, r"case ITEM_APPS:[^\n]*\n\s*muse_menu_close\(\);\s*muse_app_view_home\(\);")
+        # LVGL's callbacks only post: the rest runs on the app task under the lock.
+        for cb in ["static void on_row(", "static void on_answer("]:
+            self.assertIn("muse_apps_post(", function(launcher, cb))
+            self.assertNotIn("muse_apps_store_", function(launcher, cb))
+
+    def test_budget_follows_free_psram(self):
+        # Up to 2 MB, less where PSRAM is short, never under 1 MB, and the
+        # gadget always keeps 1 MB: set when the app starts, reported as is.
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn("#define BUDGET_MAX_BYTES (2 * 1024 * 1024)", apps)
+        self.assertIn("#define BUDGET_MIN_BYTES (1024 * 1024)", apps)
+        now = function(apps, "static size_t budget_now(")
+        self.assertIn("free_psram - RESERVE_BYTES", now)
+        self.assertIn("BUDGET_MAX_BYTES ? BUDGET_MAX_BYTES", now)
+        self.assertNotRegex(apps, r"\bBUDGET_BYTES\b")
+        self.assertIn("if (budget < BUDGET_MIN_BYTES)", apps)
+        self.assertIn(".max_memory_pages = budget / 65536", apps)
+        for alloc in ["static void *mem_alloc(", "bool muse_apps_charge(", "void *muse_apps_alloc("]:
+            self.assertIn("<= s_budget" if "mem_alloc" not in alloc else "> s_budget", function(apps, alloc))
+        self.assertEqual((apps + read("components/muse_apps/muse_apps_capabilities.c")).count('"budget_kb", (double)(muse_apps_mem_budget() / 1024)'), 2)
+        api = json.loads(read("components/muse_apps/sdk/api/api.json"))
+        self.assertEqual(dict((l[0], l[1]) for l in api["limits"])["budget_bytes"], 2 * 1024 * 1024)
+
+    def test_exit_hold_on_every_board(self):
+        # Most boards have no power key: holding the exit button 2 s closes the
+        # app or the launcher, and its release goes to nobody.
+        view = read("components/muse/muse_app_view.c")
+        self.assertIn("#define EXIT_HOLD_US (2000 * 1000)", view)
+        edge = function(view, "static void button_edge(")
+        self.assertIn("esp_timer_start_once(s_exit_timer, EXIT_HOLD_US)", edge)
+        self.assertIn("atomic_exchange(&s_exit_swallow, false)", edge)
+        self.assertIn("s_cbs.exit(MUSE_APP_STOP_USER)", function(view, "static void on_exit_hold("))
+        exit_button = function(view, "int muse_app_view_exit_button(")
+        self.assertIn("return MUSE_APP_BUTTON_PRIMARY;", exit_button)
+        self.assertNotIn("muse_board", exit_button)
+        self.assertIn('"exit_hold"', read("components/muse_apps/muse_apps_capabilities.c"))
+        self.assertNotIn("aux_taps_only", read("components/muse/muse_board.h"))
+        self.assertNotIn("aux_taps_only", view)
+        self.assertIn("exit_hold", read("components/muse_apps/sdk/MUSE.md"))
+
+    def test_import_table_comes_from_the_generated_header(self):
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn("MUSE_APPS_FUNCTIONS(GADGET_FN)", apps)
+        self.assertIn('wasm_runtime_register_natives("gadget"', apps)
+        self.assertIn('#include "muse_apps_api.h"', read("components/muse_apps/muse_apps_priv.h"))
+        self.assertFalse((COMPONENT / "muse_apps_host.c").exists(), "API 0's hand-written import table")
+        # The table, components/muse_apps/sdk/gadget.h and api.capabilities.json name the same functions.
+        table = dict(re.findall(r'GADGET_FN\((\w+), "([^"]*)"', read("components/muse_apps/muse_apps_api.h")))
+        self.assertEqual(table, capabilities()["functions"])
+        imports = re.findall(r"^GADGET_IMPORT\((\w+)\)", read("components/muse_apps/sdk/gadget.h"), re.M)
+        self.assertEqual(sorted(imports), sorted(table))
+        # The firmware checks a module's imports against what it registered.
+        self.assertIn("strcmp(imp.module_name, \"gadget\")", function(apps, "static bool imports_allowed("))
+
+    def test_nothing_of_api_0_is_left(self):
+        api0 = re.compile(r"\b(gfx_\w+|vm_(request|read|status|close)\s*\(|muse_send\s*\(|EV_VM\b|"
+                          r"EV_BUTTON_(DOWN|UP)\b|BUTTON_(TALK|SECOND)\b|MUSE_APPS_EV_\w+)")
+        self.assertFalse((APPS / "API.md").exists())
+        self.assertFalse((APPS / "api" / "gadget.h").exists())
+        places = [ROOT / p for p in ["components/muse_apps", "components/muse", "components/capabilities_registry",
+                                     "tools/muse", "devices"]]
+        # Link's own files that reach the apps (image_fetch.c's vm_read() is its own).
+        glue = [p for p in (ROOT / "main").glob("*.c*") if "muse_apps" in p.read_text(errors="replace")]
+        self.assertTrue(glue)
+        found = []
+        for place in places + glue:
+            for path in place.rglob("*") if place.is_dir() else [place]:
+                if path.suffix not in (".c", ".cpp", ".h", ".py", ".md", ".txt", ".yml") and \
+                        not path.name.startswith(("Kconfig", "sdkconfig")):
+                    continue
+                for n, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+                    if api0.search(line):
+                        found.append("%s:%d: %s" % (path.relative_to(ROOT), n, line.strip()))
+        for doc in ["AGENTS.md", "README.md", "../README.md"]:
+            for n, line in enumerate(read(doc).splitlines(), 1):
+                if api0.search(line) or "API.md" in line:
+                    found.append("%s:%d: %s" % (doc, n, line.strip()))
+        self.assertEqual(found, [])
+
+    def test_view_events_are_the_apis(self):
+        api = json.loads(read("components/muse_apps/sdk/api/api.json"))
+        enums = {e["name"]: {n: v for n, v, _ in e["values"]} for e in api["enums"]}
+        events = {name: v for name, v, _, _, _ in api["events"]}
+        view = read("components/muse/muse_app_view.h")
+        for name, value in enum_values(view, "MUSE_APP_EV_").items():
+            self.assertEqual(events[name], value, name)
+        prefixes = {"button": "MUSE_APP_BUTTON_", "button_action": "MUSE_APP_BTN_",
+                    "gesture": "MUSE_APP_GESTURE_", "stop_reason": "MUSE_APP_STOP_"}
+        for enum in api["enums"]:
+            prefix = prefixes.get(enum["name"])
+            if not prefix:
+                continue
+            ours = enum_values(view, prefix)
+            self.assertTrue(ours, prefix)
+            for name, value in ours.items():
+                self.assertEqual(enums[enum["name"]][name], value, prefix + name)
+        # The runtime checks the same when it builds.
+        self.assertEqual(read("components/muse_apps/muse_apps.c").count("_Static_assert(MUSE_APP_"), 3)
+
+    def test_build_refuses_what_the_gadget_refuses(self):
+        source = read("components/muse_apps/sdk/build.py")
+        self.assertIn('"-mexec-model=reactor"', source)
+        self.assertIn('"on_start" not in exports', source)
+        self.assertIn('customs.get("gadget.manifest")', source)
+        self.assertIn('wasm_runtime_lookup_function(s_app.inst, "_initialize")', read("components/muse_apps/muse_apps.c"))
+        if not have_wasm_compiler():
+            self.skipTest("no wasm compiler (set WASI_SDK, or run with a Python that has ziglang)")
+        cases = {
+            "wasi": ('__attribute__((import_module("wasi_snapshot_preview1"), import_name("fd_write"))) '
+                     "int fd_write(int, int, int, int);\n"
+                     'GADGET_MANIFEST("{\\"api\\":\\"1.0\\",\\"name\\":\\"t\\"}");\n'
+                     "GADGET_EXPORT(on_start) void on_start(void) { fd_write(1, 0, 0, 0); }\n",
+                     "gadgets don't offer"),
+            "not in the API": ('__attribute__((import_module("gadget"), import_name("gfx_clear"))) void gfx_clear(int);\n'
+                               "GADGET_EXPORT(on_start) void on_start(void) { gfx_clear(0); }\n", "doesn't have"),
+            "wrong signature": ('__attribute__((import_module("gadget"), import_name("sys_log"))) void my_log(int, int);\n'
+                                "GADGET_EXPORT(on_start) void on_start(void) { my_log(1, 2); }\n", "the API's is"),
+            "no on_start": ('GADGET_MANIFEST("{\\"api\\":\\"1.0\\",\\"name\\":\\"t\\"}");\n'
+                            "GADGET_EXPORT(on_frame) void on_frame(int32_t t) { (void)t; }\n", "exports no on_start"),
+            "another major API": ('GADGET_MANIFEST("{\\"api\\":\\"2.0\\",\\"name\\":\\"t\\"}");\n'
+                                  "GADGET_EXPORT(on_start) void on_start(void) {}\n", "asks for API 2.0"),
+            "bad name": ('GADGET_MANIFEST("{\\"api\\":\\"1.0\\",\\"name\\":\\"My App\\"}");\n'
+                         "GADGET_EXPORT(on_start) void on_start(void) {}\n", "name must be"),
+            "not JSON": ('GADGET_MANIFEST("{api: 1.0}");\nGADGET_EXPORT(on_start) void on_start(void) {}\n',
+                         "isn't JSON"),
+        }
+        with tempfile.TemporaryDirectory() as d:
+            for what, (body, message) in cases.items():
+                with self.subTest(what):
+                    src, out = Path(d) / "t.c", Path(d) / "t.wasm"
+                    src.write_text('#include "gadget.h"\n' + body)
+                    r = build(src, "-o", out)
+                    self.assertEqual(r.returncode, 1, r.stderr)
+                    self.assertIn(message, r.stderr)
+                    self.assertFalse(out.exists(), "the refused module is removed")
+            # Allowed, with warnings: no manifest; a call without its permission.
+            folder = Path(d) / "warn"
+            folder.mkdir()
+            (folder / "warn.c").write_text('#include "gadget.h"\n'
+                                           'GADGET_MANIFEST("{\\"api\\":\\"1.0\\",\\"name\\":\\"warn\\"}");\n'
+                                           "GADGET_EXPORT(on_start) void on_start(void) { chat_open(); }\n")
+            r = build(folder)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue((folder / "app.wasm").exists(), "a folder builds into its app.wasm")
+            self.assertIn('add "chat.read" to the manifest', r.stderr)
+            (folder / "warn.c").write_text('#include "gadget.h"\nGADGET_EXPORT(on_start) void on_start(void) {}\n')
+            r = build(folder)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("no manifest", r.stderr)
+
+    def test_example_apps_build(self):
+        if not have_wasm_compiler():
+            self.skipTest("no wasm compiler (set WASI_SDK, or run with a Python that has ziglang)")
+        sys.path.insert(0, str(APPS))
+        try:
+            from build import read_module
+        finally:
+            sys.path.remove(str(APPS))
+        with tempfile.TemporaryDirectory() as d:
+            for path in EXAMPLES:
+                with self.subTest(path):
+                    out = Path(d) / (Path(path).stem + ".wasm")
+                    r = build(path, "-o", out)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertNotIn("warning", r.stderr)
+                    imports, exports, customs = read_module(out.read_bytes())
+                    manifest = json.loads(customs["gadget.manifest"].rstrip(b"\0"))
+                    required_api = tuple(map(int, manifest["api"].split(".")))
+                    served_api = tuple(map(int, capabilities()["api"].split(".")))
+                    self.assertEqual(required_api[0], served_api[0])
+                    self.assertLessEqual(required_api[1], served_api[1])
+                    self.assertEqual(manifest["name"], Path(path).stem.replace("_", "-"))
+                    if path == "components/muse_apps/sdk/examples/hello.c":
+                        # MUSE.md's starting point: small, and drawn by widgets, not frames.
+                        self.assertLess(out.stat().st_size, 2048)
+                        self.assertNotIn("on_frame", exports)
+
+    def test_apps_keep_out_of_internal_ram(self):
+        """Internal RAM is what Wi-Fi, Noise and the panel's DMA run short of
+        (display.draw_file needs about 30 KB of it): apps take theirs from PSRAM.
+        Every file of the component is checked, the modules to come included."""
+        files = [ROOT / "components/muse/muse_app_view.c"] + sorted(COMPONENT.glob("*.c"))
+        self.assertGreater(len(files), 4)
+        for path in files:
+            source = path.read_text()
+            name = path.relative_to(ROOT)
+            defines = {k: int(v) for k, v in re.findall(r"#define\s+(\w+)\s+\(?(\d+)\)?\s", source)}
+            for kind, var, size in re.findall(
+                    r"^[ \t]*static\s+(?!const)([\w ]+?)\s+\**(\w+)\[(\w+)\]\s*[;=\[]", source, re.M):
+                count = int(size) if size.isdigit() else defines.get(size, 0)
+                width = 1 if "char" in kind or "int8" in kind else 4
+                self.assertLess(count * width, 512, "%s: static %s[%s] belongs in PSRAM" % (name, var, size))
+            if path.name == "muse_apps_store.c":
+                # The store writes flash, which turns the caches off: without
+                # XIP from PSRAM its stack has to be internal, and only then.
+                xip = ("#if CONFIG_SPIRAM_FETCH_INSTRUCTIONS && CONFIG_SPIRAM_RODATA\n"
+                       "#define TASK_STACK_CAPABILITIES (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)\n#else\n"
+                       "#define TASK_STACK_CAPABILITIES (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)\n#endif\n")
+                self.assertIn(xip, source, name)
+                source = source.replace(xip, "")
+            # Queues and task stacks from internal RAM: none.
+            for call in ["xQueueCreate(", "xQueueCreateStatic(", "xTaskCreate(", "xTaskCreatePinnedToCore(",
+                         "MALLOC_CAP_INTERNAL", "MALLOC_CAP_DMA"]:
+                self.assertNotIn(call, source, "%s: %s" % (name, call))
+            for args in re.findall(r"xQueueCreateWithCaps\(([^;]*)\);", source):
+                self.assertIn("MALLOC_CAP_SPIRAM", args, name)
+            for args in re.findall(r"heap_caps_(?:malloc|calloc|realloc|aligned_alloc)\(([^;]*)\);", source):
+                self.assertIn("MALLOC_CAP_SPIRAM", args, "%s: heap_caps_*(%s)" % (name, args))
+        apps = read("components/muse_apps/muse_apps.c")
+        # The app task's stack, WAMR's memory and the import table are in PSRAM.
+        self.assertIn("cfg.stack_alloc_caps = MALLOC_CAP_SPIRAM", apps)
+        self.assertIn("static const NativeSymbol natives[]", apps)
+        self.assertIn("init.mem_alloc_option.allocator.malloc_func = (void *)mem_alloc;", apps)
+
+    def test_stopping_an_app_frees_what_it_held(self):
+        stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
+        for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
+                     "muse_apps_files_stop();", "muse_apps_dev_stop();", "muse_apps_sys_stop();",
+                     "muse_apps_vm_close_all();", "muse_app_view_close();", "unload();"]:
+            self.assertIn(call, stop)
+
+    def test_talk_key_can_go_back_to_muse(self):
+        view = read("components/muse/muse_app_view.c")
+        self.assertIn("talk_to_muse && held[i].button == MUSE_APP_BUTTON_PRIMARY",
+                      function(view, "unsigned muse_app_view_buttons("))
+        # Each app starts without it.
+        self.assertIn("atomic_store(&s_talk_to_muse, false);", function(view, "bool muse_app_view_open("))
+        self.assertIn("muse_app_view_talk_to_muse(on != 0);",
+                      function(read("components/muse_apps/muse_apps_sys.c"), "void gadget_muse_talk_key("))
+
+    def test_app_downloads_are_ranged_and_bounded(self):
+        vm = read("components/muse_apps/muse_apps_vm.c")
+        self.assertIn('#define PATH_PREFIX "/fs/raw/"', vm)
+        self.assertIn("muse_link_req_max_body()", vm)
+        self.assertIn('"Range"', vm)
+        self.assertIn("max_bytes + 1 - have", vm)   # one byte past the limit tells a file that's too large
+        self.assertIn(".req_max_body = noise_ctrl_req_max_body", read("main/muse_glue.c"))
+        self.assertIn("#define APP_MAX_BYTES (256 * 1024)", read("components/muse_apps/muse_apps.c"))
+        self.assertEqual(capabilities()["limits"]["module_bytes"], 256 * 1024)
+
+    def test_muse_guide_is_current_and_fits_one_message(self):
+        check = subprocess.run([sys.executable, str(APPS / "muse_brief.py"), "--check"],
+                               capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stderr)
+        # chat.py --file sends it as one typed message, which the board collects up to CHAT_MAX.
+        chat_max = re.search(r"#define CHAT_MAX \((\d+) \* 1024\)", read("components/muse/muse_input.c"))
+        brief = read("components/muse_apps/sdk/muse_brief.py")
+        self.assertIn("MAX_BYTES = %s * 1024 - 1" % chat_max.group(1), brief)
+        guide = read("components/muse_apps/sdk/MUSE.md")
+        self.assertLess(len(guide.encode()), int(chat_max.group(1)) * 1024)
+        for word in COMMANDS + ["workspace/gadgets/apps/", "GADGET_MANIFEST", "api.capabilities.json", "ziglang"]:
+            self.assertIn(word, guide)
+        # The person's own style section stays.
+        # The person's own style section stays.
+        self.assertIn("### Style\nIf I don't ask for another style, use this one:", guide)
+        self.assertIn("#define STYLE_GOLD 0xC7A252", guide)
+        self.assertNotRegex(guide, r"(?i)cool ?tech|\bCOOL_")   # the style has no name
+        # The design: laid out from the screen's size and shape, with every glyph and colour the
+        # launcher knows, for the manifest's icon and color.
+        design = guide[guide.index("## Design\n"):guide.index("### Style\n")]
+        self.assertIn("`ui_span(y, margin)`", design)
+        # Laid out from the screen device.guide describes, not one board's.
+        self.assertIn("INFO_SAFE_INSET", design)
+        self.assertNotRegex(guide[guide.index("## Design\n"):guide.index("## gadget.h\n")], r"\b(466|233)\b")
+        self.assertIn("ui_fit_text(", design)
+        icons = read("components/muse_apps/muse_apps_icons.c")
+        glyphs = re.findall(r"GLYPH\((\w+)\)", icons[icons.index("muse_apps_glyphs[] = {"):])
+        colors = re.findall(r'\{"(\w+)", 0x[0-9A-F]{6},', icons)
+        self.assertEqual((len(glyphs), len(colors)), (35, 12))
+        for name in glyphs + colors:
+            self.assertRegex(design, r"\b%s\b" % name)
+
+
+    def test_not_on_e_paper_boards(self):
+        # FreeInk boards build no LVGL, which the app view and the API's widgets need.
+        kconfig = read("components/muse_apps/Kconfig")
+        self.assertRegex(kconfig, r"config MUSE_WASM_APPS\s+bool[^\n]*\n(\s*#[^\n]*\n)*\s*depends on [^\n]*!MUSE_UI_FREEINK")
+
+    def test_builds_without_apps_carry_none_of_it(self):
+        """Gadgets built without apps pay nothing: the registry, its drivers and the
+        apps' hooks are all behind CONFIG_CAPABILITIES_REGISTRY or CONFIG_MUSE_APP_VIEW, which
+        only CONFIG_MUSE_WASM_APPS selects."""
+        kconfig = (ROOT / "components/muse_apps/Kconfig").read_text()
+        self.assertIn("select CAPABILITIES_REGISTRY", kconfig)
+        self.assertIn("select MUSE_APP_VIEW", kconfig)
+        dev_cmake = (ROOT / "components/capabilities_registry/CMakeLists.txt").read_text()
+        self.assertRegex(dev_cmake, r'if\(CONFIG_CAPABILITIES_REGISTRY\)\s*list\(APPEND srcs "capabilities_registry.c"\)')
+        cmake = (ROOT / "components/muse/CMakeLists.txt").read_text()
+        for src in ("board_capabilities.c",):
+            i = cmake.index(src)
+            guard = cmake.rfind("if(", 0, i)
+            self.assertIn("CONFIG_CAPABILITIES_REGISTRY", cmake[guard:i], src + " is built without CONFIG_CAPABILITIES_REGISTRY")
+        # The battery registers from main/muse_glue.c: muse_app.c, whose
+        # ESP_ERROR_CHECK lines carry __LINE__, stays as it was without apps.
+        self.assertNotIn("board_capabilities", (ROOT / "components/muse/muse_app.c").read_text())
+        glue = function((ROOT / "main/muse_glue.c").read_text(), "static void boot_task(")
+        self.assertRegex(glue, r"#if CONFIG_CAPABILITIES_REGISTRY\s*(//[^\n]*\s*)*board_capabilities_init\(\);")
+        # Board files register their devices only with the registry (test_apps_dev.py checks each).
+        ui = (ROOT / "components/muse/muse_ui.c").read_text()
+        self.assertRegex(ui, r"#if CONFIG_MUSE_APP_VIEW\s*static atomic_int s_app_brightness")
+        # Declared always, cJSON would move in the link of builds without apps.
+        manifest = (ROOT / "components/muse_apps/idf_component.yml").read_text()
+        self.assertRegex(manifest, r'espressif/cjson:(?:\n    .*)*\n      - if: "\$CONFIG\{MUSE_APPS_WAMR\} == \\"y\\""')
+        link = (ROOT / "components/muse/muse_link.h").read_text()
+        self.assertRegex(link, r'#if CONFIG_MUSE_WASM_APPS\s*size_t \(\*req_max_body\)')
+        self.assertIn('__has_include("sdkconfig.h")', link)
+
+if __name__ == "__main__":
+    unittest.main()

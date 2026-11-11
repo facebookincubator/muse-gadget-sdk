@@ -18,6 +18,12 @@
 # UI, audio and Hatch client needs more than 2 MB per slot, and NVS also
 # holds Muse settings and BLE bonds, so both are larger. prod_data/prod_bak
 # follow the app slots; these boards have no factory product parameters.
+# apps holds installed WebAssembly apps and files the gadget's own files
+# (images and the like, for apps to read), both LittleFS and used only by
+# CONFIG_MUSE_WASM_APPS builds, past everything else so nothing moves. They're
+# in every build's table because an update over the air keeps the table a
+# board has: a board without them keeps installed apps until restart and has
+# no files.
 nvs,       data, nvs,     0x11000,  0xC000,
 otadata,   data, ota,     0x1D000,  0x2000,
 phy_init,  data, phy,     0x1F000,  0x1000,
@@ -25,3 +31,5 @@ ota_0,     app,  ota_0,   0x20000,  4M,
 ota_1,     app,  ota_1,   0x420000, 4M,
 prod_data, data, 0x40,    0x820000, 0x1000,
 prod_bak,  data, 0x41,    0x821000, 0x1000,
+apps,      data, littlefs, 0x830000, 2M,
+files,     data, littlefs, 0xA30000, 4M,

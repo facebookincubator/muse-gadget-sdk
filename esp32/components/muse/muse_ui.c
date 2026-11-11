@@ -16,6 +16,8 @@
 
 #include "muse_ui.h"
 
+#include <stdatomic.h>
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +54,9 @@
 #endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 #include "muse_review.h"
+#endif
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
 #endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
@@ -1590,6 +1595,10 @@ static void build_overlays(void)
     }
 }
 
+#if CONFIG_MUSE_APP_VIEW
+static atomic_int s_app_brightness;   /* an app's own, 0 for the person's setting */
+#endif
+
 static void apply_brightness(int pct)
 {
     if (pct != s_brightness) {
@@ -1628,6 +1637,12 @@ static bool update_sleep(void)
     }
     if (!s_dark) {
         int target = muse_settings_brightness();
+#if CONFIG_MUSE_APP_VIEW
+        int app = atomic_load(&s_app_brightness);
+        if (app > 0) {
+            target = app;
+        }
+#endif
         if (s_preview_brightness >= 0) {
             if (s_preview_brightness == target) {
                 s_preview_brightness = -1;
@@ -2135,6 +2150,13 @@ static void frame_tick(lv_timer_t *timer)
         return;   /* video covers everything */
     }
 #endif
+#if CONFIG_MUSE_APP_VIEW
+    if (muse_app_view_tick()) {
+        muse_menu_close();
+        update_chrome(now);   /* the pairing card stays above the app */
+        return;   /* an app covers everything else */
+    }
+#endif
     update_chrome(now);
     if (muse_menu_tick(now)) {
         image_hide_locked();
@@ -2250,6 +2272,13 @@ void muse_ui_set_swipe_enabled(bool enabled)
     s_shown_page = -1;
     s_next_settings_tick = 0;
 }
+
+#if CONFIG_MUSE_APP_VIEW
+void muse_ui_app_brightness(int pct)
+{
+    atomic_store(&s_app_brightness, pct > 100 ? 100 : pct);
+}
+#endif
 
 void muse_ui_preview_brightness(int pct)
 {
