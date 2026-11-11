@@ -1122,3 +1122,112 @@ def test_barge_in_failure_is_logged_when_shutdown_raises_another_error(caplog):
     asyncio.run(asyncio.wait_for(scenario(), 5))
     assert caplog.messages == ["voice barge-in flush failed (OSError)"]
 
+
+@pytest.mark.parametrize("callback_failure", [None, ValueError, asyncio.CancelledError])
+@pytest.mark.parametrize("path", ["barge_in", "caller_speech", "shutdown"])
+def test_audio_discarded_by_a_failing_output_flush_is_still_reported_flushed(path, callback_failure, caplog):
+    failure = RuntimeError("synthetic flush failure")
+    events = []
+
+    def observe(event):
+        events.append(event)
+        if callback_failure is not None and isinstance(event, PlaybackFlushed):
+            raise callback_failure("synthetic observer failure")
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = FlushFailsOnce(failure)
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=observe,
+                             cleanup_timeout=0.2)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            try:
+                media, start = await admit(vm)
+                await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE * 5)))
+                await output.written.wait()
+                if path == "barge_in":
+                    await call.barge_in()
+                    assert await next_event(vm) == {"type": "response.cancel", "response_id": "r1"}
+                elif path == "caller_speech":
+                    await chunk(vm, media, line(speech("item-2")))
+                else:
+                    task.cancel()  # shutdown's flush fails once; cleanup's flush succeeds
+                await hangup(vm, media, start)
+                with pytest.raises(asyncio.CancelledError if path == "shutdown" else RuntimeError) as caught:
+                    await task
+                if path != "shutdown":
+                    assert caught.value is failure
+                assert call.end_call_acknowledged
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert events == [
+        ResponseStarted("r1"), AudioChunk("r1", 0, TONE * 5), PlaybackFlushed(("r1",)),
+    ]
+    if callback_failure is not None:
+        assert caplog.messages.count(
+            "voice playback observer failed (%s)" % callback_failure.__name__) == 1
+    assert "synthetic observer failure" not in caplog.text
+
+
+class DeviceQueue(Output):
+    """A sound card's queue: write() says how much is queued, flush() discards
+    it and says how much. A failing flush raises before discarding anything."""
+
+    def __init__(self, failure):
+        super().__init__()
+        self.queued = bytearray()
+        self.failure = failure
+
+    def write(self, data):
+        super().write(data)
+        self.queued.extend(data)
+        return len(self.queued)
+
+    def flush(self):
+        super().flush()
+        failure, self.failure = self.failure, None
+        if failure is not None:
+            raise failure
+        discarded = len(self.queued)
+        self.queued.clear()
+        return discarded
+
+
+@pytest.mark.parametrize("path", ["barge_in", "caller_speech", "shutdown"])
+def test_queued_audio_kept_through_a_failing_flush_is_reported_when_discarded(path):
+    # The failed flush keeps r1 in the output queue until shutdown or cleanup.
+    failure = RuntimeError("synthetic flush failure")
+    events = []
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = DeviceQueue(failure)
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=events.append,
+                             cleanup_timeout=0.2)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            try:
+                media, start = await admit(vm)
+                await chunk(vm, media, line(created("r1")) + line(audio("p1", TONE)))
+                await output.written.wait()
+                if path == "barge_in":
+                    await call.barge_in()
+                    assert await next_event(vm) == {"type": "response.cancel", "response_id": "r1"}
+                elif path == "caller_speech":
+                    await chunk(vm, media, line(speech("item-2")))
+                else:
+                    task.cancel()  # shutdown's flush fails; cleanup's flush succeeds
+                await hangup(vm, media, start)
+                with pytest.raises(asyncio.CancelledError if path == "shutdown" else RuntimeError) as caught:
+                    await task
+                if path != "shutdown":
+                    assert caught.value is failure
+                assert call.end_call_acknowledged
+                assert output.queued == b""
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert events == [ResponseStarted("r1"), AudioChunk("r1", 0, TONE), PlaybackFlushed(("r1",))]

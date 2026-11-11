@@ -733,13 +733,23 @@ class VoiceCall:
         self._audible_frames = 0
         self._received_audio = False
         self._playing_until = 0
-        discarded = self._output.flush()
-        self._trim_output(discarded or 0)
-        cut = [response_id for _, response_id in self._pending_output]
-        self._pending_output.clear()
-        cut += queued
-        if self._on_event is not None and cut:
-            self._emit(PlaybackFlushed(tuple(dict.fromkeys(cut))))
+        error = None
+        try:
+            discarded = self._output.flush()
+            self._trim_output(discarded or 0)
+            queued = [response_id for _, response_id in self._pending_output] + queued
+            self._pending_output.clear()
+        except BaseException as exc:
+            error = exc
+        if self._on_event is not None and queued:
+            try:
+                self._emit(PlaybackFlushed(tuple(dict.fromkeys(queued))))
+            except BaseException as exc:
+                if error is None:
+                    raise
+                log.warning("voice playback observer failed (%s)", type(exc).__name__)
+        if error is not None:
+            raise error
 
     def _trim_output(self, pending: int) -> None:
         kept = deque()
