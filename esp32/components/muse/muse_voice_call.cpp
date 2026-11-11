@@ -66,6 +66,7 @@
 #include "sdkconfig.h"
 
 #include "muse_chat_priv.h"
+#include "muse_settings.h"
 #include "muse_voice_call.h"
 #include "muse_voice_call_core.h"
 #include "muse_voice_call_priv.h"
@@ -191,7 +192,6 @@ static cleanup_t s_cleanup;
 static int64_t s_cleanup_id, s_cleanup_at;   /* its end-call stream in flight, and when it went */
 static char s_cleanup_ans[END_BODY_MAX];
 static size_t s_cleanup_len;
-static uint32_t s_gate_started, s_gate_done;  /* the start that waited for a cleanup try */
 static uint32_t s_in_read;           /* bytes taken from s_in */
 static uint32_t s_in_from;           /* the call's audio starts at this byte */
 static uint32_t s_taken_gen;         /* the newest start the session took */
@@ -256,6 +256,7 @@ static void emit_caption(muse_voice_call_ev_t type, muse_vc_span_t raw)
     if (!muse_vc_json_unescape(raw, text, sizeof(text))) {
         return;
     }
+    ESP_LOGI(TAG, "%s: \"%s\"", type == MUSE_VOICE_CALL_EV_HEARD ? "heard" : "reply", text);
     muse_hatch_tail_words(text, line, sizeof(line));
     if (line[0]) {
         emit(type, line);
@@ -1067,12 +1068,15 @@ static bool begin_call(uint32_t gen)
     muse_vc_uuid(rnd, id);
     char admission[MUSE_VC_ADMISSION_MAX];
     const char *device = muse_voice_call_device_id();
-    if (!muse_vc_admission(id, device ? device : "", GREETING, admission, sizeof(admission)) ||
+    bool greeting = muse_settings_greeting();
+    if (!muse_vc_admission(id, device ? device : "", greeting, admission, sizeof(admission)) ||
         strlcat(admission, MUSE_VC_CAPABILITY_OFFER, sizeof(admission)) >= sizeof(admission)) {
         emit(MUSE_VOICE_CALL_EV_ENDED, "CALL FAILED");
         return true;
     }
     int64_t now = now_us();
+    int idle_s = muse_settings_call_idle_s();
+    s_call.limits.idle_us = (int64_t)idle_s * 1000000LL;
     muse_vc_call_begin(&s_call, id, now);
     muse_vc_lines_init(&s_lines, s_line_buf, MUSE_VC_LINE_MAX);
     muse_vc_resampler_init(&s_down, MUSE_VC_WIRE_RATE, MUSE_VC_MIC_RATE);
@@ -1207,23 +1211,31 @@ bool muse_voice_call_poll(void)
         return false;
     }
     cleanup_poll(now);
+    if (s_pending_gen && s_call.state != MUSE_VC_IDLE) {
+        /* A new call is requested while an old call is still ending or draining.
+         * Forcibly abort the old call's streams immediately so the new call
+         * can start without delay or blocking the session. */
+        if (s_media_id) {
+            muse_session_call_reset(s_media_id);
+            s_media_id = 0;
+        }
+        if (s_end_id) {
+            muse_session_call_reset(s_end_id);
+            s_end_id = 0;
+        }
+        s_call.state = MUSE_VC_IDLE;
+        s_call.media_open = false;
+        s_call.end_call_open = false;
+        s_call.end_call_pending = false;
+        emit(MUSE_VOICE_CALL_EV_ENDED, "REPLACED");
+    }
     if (s_pending_gen && s_call.state == MUSE_VC_IDLE) {
-        /* An earlier call still pending cleanup gets one try first: its
-         * end-call names its own id, so it can't end the new one. */
-        if (s_cleanup.active && s_gate_done != s_pending_gen) {
-            if (s_gate_started != s_pending_gen) {
-                /* This start's one try: the one already in flight, or a new one. */
-                s_gate_started = s_pending_gen;
-                if (!s_cleanup_id && muse_session_call_connect()) {
-                    cleanup_send(now);
-                }
-            }
-            if (!s_cleanup_id) {
-                s_gate_done = s_pending_gen;   /* tried (or couldn't): go on */
-            } else {
-                publish();
-                return pump_mic(now_us());
-            }
+        if (s_cleanup_id) {
+            muse_session_call_reset(s_cleanup_id);
+            s_cleanup_id = 0;
+        }
+        if (s_cleanup.active) {
+            cleanup_drop("replaced by new call");
         }
         if (!begin_call(s_pending_gen)) {
             return false;

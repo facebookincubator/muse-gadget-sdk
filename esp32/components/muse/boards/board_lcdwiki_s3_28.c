@@ -390,7 +390,20 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     esp_codec_dev_cfg_t in_cfg = { .dev_type = ESP_CODEC_DEV_TYPE_IN, .codec_if = codec, .data_if = data_if };
     *spk = esp_codec_dev_new(&out_cfg);
     *mic = esp_codec_dev_new(&in_cfg);
+    if (*mic) {
+        /* ES8311 supports up to 42 dB PGA scale (ES8311_MIC_GAIN_42DB) */
+        esp_codec_dev_set_in_gain(*mic, 42.0f);
+    }
     return *spk && *mic ? ESP_OK : ESP_FAIL;
+}
+
+static void set_mic_gain(esp_codec_dev_handle_t mic, int db)
+{
+    if (mic) {
+        /* Ensure maximum sensitivity for clear voice recognition on ES8311 */
+        float gain = db < 42 ? 42.0f : (float)db;
+        esp_codec_dev_set_in_gain(mic, gain);
+    }
 }
 
 static unsigned poll_buttons(void)
@@ -489,6 +502,7 @@ static muse_board_t s_board = {
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
     .audio_init = audio_init,
+    .set_mic_gain = set_mic_gain,
     .mic_slot = 0,              /* one mic, on the left slot */
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,

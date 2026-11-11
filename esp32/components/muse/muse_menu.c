@@ -71,6 +71,10 @@ typedef enum {
     ITEM_BRIGHTNESS,
     ITEM_MIC,
     ITEM_SLEEP,
+#if CONFIG_MUSE_REALTIME_VOICE
+    ITEM_CALL_IDLE,
+    ITEM_GREETING,
+#endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     ITEM_TEXT,
 #endif
@@ -94,6 +98,10 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_BRIGHTNESS] = "Brightness",
     [ITEM_MIC] = "Mic gain",
     [ITEM_SLEEP] = "Auto-sleep",
+#if CONFIG_MUSE_REALTIME_VOICE
+    [ITEM_CALL_IDLE] = "Call timeout",
+    [ITEM_GREETING] = "AI greeting",
+#endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     [ITEM_TEXT] = "Text size",
 #endif
@@ -117,6 +125,10 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_BRIGHTNESS] = "Change",
     [ITEM_MIC] = "Change",
     [ITEM_SLEEP] = "Change",
+#if CONFIG_MUSE_REALTIME_VOICE
+    [ITEM_CALL_IDLE] = "Change",
+    [ITEM_GREETING] = "Toggle",
+#endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     [ITEM_TEXT] = "Change",
 #endif
@@ -136,9 +148,13 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
 /* Ascending; Select moves to the next one and wraps. */
 static const int VOLUME_STEPS[] = { 10, 25, 40, 55, 70, 85, 100 };
 static const int BRIGHT_STEPS[] = { 10, 25, 50, 75, 100 };
-static const int GAIN_STEPS[] = { 0, 6, 12, 18, 24, 30, 36 };
+static const int GAIN_STEPS[] = { 0, 6, 12, 18, 24, 30, 36, 42 };
 static const int SLEEP_STEPS[] = { 0, 30, 60, 120, 300, 600 };
 static const char *const SLEEP_NAMES[] = { "Never", "30 s", "1 min", "2 min", "5 min", "10 min" };
+#if CONFIG_MUSE_REALTIME_VOICE
+static const int CALL_IDLE_STEPS[] = { 0, 30, 60, 120, 300, 600 };
+static const char *const CALL_IDLE_NAMES[] = { "Never", "30 s", "1 min", "2 min", "5 min", "10 min" };
+#endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
 static const char *const TEXT_NAMES[] = { "Small", "Medium", "Large" };
 #endif
@@ -262,6 +278,18 @@ static const char *sleep_name(int secs)
     return "Custom";
 }
 
+#if CONFIG_MUSE_REALTIME_VOICE
+static const char *call_idle_name(int secs)
+{
+    for (int i = 0; i < COUNT(CALL_IDLE_STEPS); i++) {
+        if (CALL_IDLE_STEPS[i] == secs) {
+            return CALL_IDLE_NAMES[i];
+        }
+    }
+    return "Custom";
+}
+#endif
+
 static void value_text(int item, char *buf, size_t n)
 {
     static const char *const WIFI_VALUES[] = { "Off", "Not set", "Joining", "On", "Failed", "Not found" };
@@ -284,6 +312,14 @@ static void value_text(int item, char *buf, size_t n)
     case ITEM_SLEEP:
         strlcpy(buf, sleep_name(muse_settings_sleep_s()), n);
         break;
+#if CONFIG_MUSE_REALTIME_VOICE
+    case ITEM_CALL_IDLE:
+        strlcpy(buf, call_idle_name(muse_settings_call_idle_s()), n);
+        break;
+    case ITEM_GREETING:
+        strlcpy(buf, muse_settings_greeting() ? "On" : "Off", n);
+        break;
+#endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     case ITEM_TEXT:
         strlcpy(buf, TEXT_NAMES[muse_settings_text_size()], n);
@@ -493,6 +529,14 @@ static void activate(int item, int direction)
     case ITEM_SLEEP:
         muse_settings_set_sleep_s(value_step(SLEEP_STEPS, COUNT(SLEEP_STEPS), muse_settings_sleep_s(), direction));
         break;
+#if CONFIG_MUSE_REALTIME_VOICE
+    case ITEM_CALL_IDLE:
+        muse_settings_set_call_idle_s(value_step(CALL_IDLE_STEPS, COUNT(CALL_IDLE_STEPS), muse_settings_call_idle_s(), direction));
+        break;
+    case ITEM_GREETING:
+        muse_settings_set_greeting(!muse_settings_greeting());
+        break;
+#endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     case ITEM_TEXT:
         muse_settings_set_text_size((muse_settings_text_size() + (direction < 0 ? COUNT(TEXT_NAMES) - 1 : 1)) % COUNT(TEXT_NAMES));

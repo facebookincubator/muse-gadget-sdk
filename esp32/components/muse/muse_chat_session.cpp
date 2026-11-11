@@ -217,7 +217,7 @@ struct stream_t {
     bool overflow;
 };
 
-#define MAX_STREAMS 6
+#define MAX_STREAMS 12
 static stream_t s_streams[MAX_STREAMS];
 
 /* ---- The current turn ---- */

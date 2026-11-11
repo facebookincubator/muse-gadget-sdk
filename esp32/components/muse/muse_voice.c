@@ -1022,7 +1022,7 @@ static bool can_record(void)
  * shut after Muse's voice stops (these boards have no echo cancellation). */
 #define CALL_SPEAKER_LAG_US 120000
 #define CALL_TAIL_US 300000
-#define CALL_END_WAIT_US (20LL * 1000000)   /* hung up: wait this long for the call to wind down */
+#define CALL_END_WAIT_US 1500000LL         /* hung up: wait at most 1.5s for the call to wind down */
 #define CALL_RELEASE_US 120000            /* bounded capture lag, as for voice notes */
 
 typedef struct {
@@ -1255,6 +1255,10 @@ static void run_call(bool ptt, size_t waking_chunks)
     if (!ptt) muse_audio_chirp(-1);
     muse_state_set_level(0);
     s_monitor_db = -100.0f;
+    muse_input_event_t stale_ev;
+    while (xQueueReceive(s_queue, &stale_ev, 0) == pdTRUE) {
+        muse_input_clear_call_pending(stale_ev.mark);
+    }
     if (!atomic_load(&s_shutdown)) go_idle(ended && text[0] ? text : "CALL ENDED");
     atomic_store(&s_call_view, MUSE_VOICE_VIEW_NONE);
     atomic_store(&s_ptt_call, false);

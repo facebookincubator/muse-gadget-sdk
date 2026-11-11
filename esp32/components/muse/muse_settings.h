@@ -22,6 +22,10 @@
 
 #include "esp_err.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * User settings, persisted in NVS. Setters save immediately and then notify the
  * change listener (from the caller's task), which applies the setting to the
@@ -35,7 +39,7 @@
 #define MUSE_VM_MAX 63
 #define MUSE_TOKEN_MAX 1023
 
-#define MUSE_MIC_GAIN_MAX 36      /* dB; ES7210 PGA, applied in 3 dB steps */
+#define MUSE_MIC_GAIN_MAX 42      /* dB; ES7210 / ES8311 PGA */
 
 typedef enum {
     MUSE_SETTING_VOLUME,
@@ -48,6 +52,8 @@ typedef enum {
     MUSE_SETTING_BLE,
     MUSE_SETTING_HATCH,
     MUSE_SETTING_VOICE_NOTES,
+    MUSE_SETTING_CALL_IDLE,
+    MUSE_SETTING_GREETING,
 } muse_setting_t;
 
 typedef void (*muse_setting_cb_t)(muse_setting_t what);
@@ -60,6 +66,8 @@ bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */
 int muse_settings_mic_gain(void);       /* dB, 0..MUSE_MIC_GAIN_MAX */
 int muse_settings_brightness(void);     /* 10..100 */
 int muse_settings_sleep_s(void);        /* 0 = never */
+int muse_settings_call_idle_s(void);    /* 0 = never, seconds */
+bool muse_settings_greeting(void);      /* AI says hello first when call starts */
 int muse_settings_weather_idle_s(void); /* 0 = off: không hiện màn hình thời tiết */
 /* Reply text size on small screens with full-screen replies. */
 enum { MUSE_TEXT_SMALL, MUSE_TEXT_MEDIUM, MUSE_TEXT_LARGE };
@@ -81,6 +89,8 @@ void muse_settings_set_speaker_on(bool on);
 void muse_settings_set_mic_gain(int db);
 void muse_settings_set_brightness(int pct);
 void muse_settings_set_sleep_s(int secs);
+void muse_settings_set_call_idle_s(int secs);
+void muse_settings_set_greeting(bool on);
 void muse_settings_set_weather_idle_s(int secs);
 void muse_settings_set_text_size(int size);
 void muse_settings_set_wifi_on(bool on);
@@ -92,3 +102,7 @@ void muse_settings_set_hatch_host(const char *host);
 void muse_settings_set_hatch_vm(const char *vm);
 /* append=true adds to the stored token (for chunked BLE writes). */
 esp_err_t muse_settings_set_hatch_token(const char *token, bool append);
+
+#ifdef __cplusplus
+}
+#endif

@@ -1726,7 +1726,7 @@ uint32_t muse_vc_call_poll(muse_vc_call_t *c, int64_t now_us)
         if (c->turns->n_active) {
             c->activity_us = now_us;   /* Muse is still working on a turn */
         }
-        if (now_us - c->activity_us > c->limits.idle_us) {
+        if (c->limits.idle_us > 0 && now_us - c->activity_us > c->limits.idle_us) {
             return muse_vc_call_hang_up(c, MUSE_VC_END_IDLE, now_us);
         }
         return 0;
