@@ -72,7 +72,6 @@ extern "C" {
 #include "cJSON.h"
 #include "minimp3.h"
 #include "muse_account_api.h"
-#include "muse_lang.h"
 #include "muse_link.h"
 #include "muse_settings.h"
 #if CONFIG_MUSE_TTS_GOOGLE
@@ -1705,7 +1704,7 @@ static void turn_detach(void)
     }
     ESP_LOGI(TAG, "no reply after %d s: telling the user, and waiting in the background", (int)(DETACH_US / 1000000));
     char notice[128];
-    strlcpy(notice, muse_lang_message("Muse is working on it. I'll tell you when it's done."), sizeof(notice));
+    strlcpy(notice, "Muse is working on it. I'll tell you when it's done.", sizeof(notice));
     int i = s_turn.nmsgs++;
     s_turn.msgs[i] = msg_t{};
     strlcpy(s_turn.msgs[i].id, "local-notice", sizeof(s_turn.msgs[i].id));
@@ -1867,6 +1866,7 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+#if CONFIG_MUSE_TTS_GOOGLE
 /* Shows message i at reading pace: silence in place of speech paces the
  * captions and ends the turn. */
 static void show_silently(int i)
@@ -1883,7 +1883,6 @@ static void show_silently(int i)
     show_reply_start(m);
 }
 
-#if CONFIG_MUSE_TTS_GOOGLE
 /* Default Latin language for a reply ("vi" when the reply contains Vietnamese
  * letters, "en" otherwise); muse_tts_next_chunk_lang() overrides each CJK
  * segment with "zh-CN", "ja", or "ko" automatically. */
@@ -1903,36 +1902,54 @@ static void start_tts(void)
         if (m.tts != TTS_QUEUED) {
             continue;
         }
-        /*
-         * Speaker on, the message's text goes to muse_tts and comes back as
-         * MP3, which pump_tts() moves into the turn's buffer and decode()
-         * plays, captions following. Speaker off, or if there's no speech to
-         * be had, the text is shown at reading pace.
-         */
-        uint32_t ticket = 0;
 #if CONFIG_MUSE_TTS_GOOGLE
         const char *text = s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
-        if (text && muse_settings_speaker_on()) {
-            ticket = muse_tts_speak(text, speech_lang(text));
-        }
-#endif
-        if (!ticket) {
-            show_silently(i);
+        uint32_t ticket = (text && muse_settings_speaker_on()) ? muse_tts_speak(text, speech_lang(text)) : 0;
+        if (ticket) {
+            m.pcm_start = s_turn.pcm_out;
+            m.pcm_frames = 0;
+            m.tts = TTS_ACTIVE;
+            s_turn.tts_msg = i;
+            s_turn.silent = false;
+            s_turn.tts_ticket = ticket;
+            s_turn.mp3_len = 0;
+            s_turn.mp3_ended = false;
+            s_turn.kbps = 0;
+            s_turn.down_rate = 0;
+            mp3dec_init(&s_turn.dec);
+            ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
+            show_reply_start(m);
             return;
         }
+#endif
+        /*
+         * Replies are text, shown at reading pace: silence in place of speech
+         * paces the captions and ends the turn. To speak them instead, send
+         * the message's text (s_turn.texts + i * TEXT_MAX, if texts was
+         * allocated; up to TEXT_MAX - 1 bytes) to a TTS API of your choice and
+         * play the MP3 it returns. In place of the silence below: keep
+         * m.tts = TTS_ACTIVE and s_turn.tts_msg = i, set s_turn.silent = false,
+         * m.pcm_start = s_turn.pcm_out, m.pcm_frames = 0, s_turn.mp3_len = 0,
+         * s_turn.mp3_ended = false, s_turn.kbps = 0, s_turn.down_rate = 0 and
+         * mp3dec_init(&s_turn.dec). Then, on this task, pass the MP3 to
+         * tts_data() as it arrives (it buffers up to MP3_BUF and drops the
+         * rest, so hold off while it's full) and set s_turn.mp3_ended at the
+         * end. decode() plays it at the speaker's volume, captions following,
+         * and finishes the message once it's drained.
+         */
         m.pcm_start = s_turn.pcm_out;
-        m.pcm_frames = 0;
+        /* Paced to the text kept: a reply longer than CAPTION_TEXT shows what
+         * was kept at reading pace, not stretched over the whole reply's time
+         * (the Watcher keeps the rest for review). */
+        size_t shown = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
+        m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
-        s_turn.silent = false;
-        s_turn.tts_ticket = ticket;
-        s_turn.mp3_len = 0;
-        s_turn.mp3_ended = false;
-        s_turn.kbps = 0;
-        s_turn.down_rate = 0;
-        mp3dec_init(&s_turn.dec);
-        mark(M_TTS);
-        ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
+        s_turn.silent = true;
+#if CONFIG_MUSE_TTS_GOOGLE
+        s_turn.tts_ticket = 0;
+#endif
+        ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
         show_reply_start(m);
         return;
     }

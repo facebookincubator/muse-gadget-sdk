@@ -17,6 +17,9 @@
 #pragma once
 
 #include "sdkconfig.h"
+#if !CONFIG_MUSE_UI_FREEINK
+#include "lvgl.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,12 +32,6 @@ extern "C" {
  * returns its translation of `en`, a format string's included, or `en` itself
  * when it has none.
  */
-
-#if CONFIG_MUSE_ENABLED
-
-#if !CONFIG_MUSE_UI_FREEINK
-#include "lvgl.h"
-#endif
 
 /* The state label's short, upper-case names ("READY") and the power label's. */
 const char *muse_lang_status(const char *en);
@@ -57,17 +54,6 @@ const lv_font_t *muse_lang_montserrat(const lv_font_t *font);
  * text has accented letters (CONFIG_MUSE_LATIN_FONT). */
 const lv_font_t *muse_lang_label_font(const char *text, const lv_font_t *plain);
 #endif
-
-#else /* !CONFIG_MUSE_ENABLED (Voice PE, link-only) */
-
-static inline const char *muse_lang_status(const char *en) { return en; }
-static inline const char *muse_lang_message(const char *en) { return en; }
-static inline const char *muse_lang_menu(const char *en) { return en; }
-#ifndef __cplusplus
-#define T(en) (en)
-#endif
-
-#endif /* CONFIG_MUSE_ENABLED */
 
 #ifdef __cplusplus
 }

@@ -1789,9 +1789,6 @@ static void muse_weather_build(lv_obj_t *scr)
 static void on_any_press(lv_event_t *e)
 {
     (void)e;
-    if (s_wx_shown) {
-        wx_hide_locked();   /* chạm: quay lại màn hình chat ngay */
-    }
     if (muse_board->touch_talk && muse_link_state() == MUSE_LINK_CONFIRM) {
         muse_input_touch_talk(true);
         muse_input_touch_talk(false);

@@ -33,6 +33,8 @@ static void send_snapshot(void) {}
 static void image_sync(void) {}
 static void image_hide_locked(void) {}
 static void muse_ui_show_face(void) {}
+static void muse_weather_hide(void) {}
+static bool muse_weather_tick(float now) { (void)now; return false; }
 #if CONFIG_MUSE_VOICE_NOTE_TOGGLE
 static bool s_note_listening;
 static void update_tileview_swipe(void) {}
