@@ -16,13 +16,15 @@ limitations under the License.
 # Muse Gadget with a screen
 
 An ESP32 board running the Muse Gadget SDK firmware with its own screen: it
-shows Muse's avatar, and people talk to Muse from it with voice notes whose
-replies show on the screen. Muse uses it through the commands it lists.
+shows Muse's avatar and, on boards with a microphone, people talk to Muse
+from it with voice notes whose replies show on the screen. Muse uses it
+through the commands it lists.
 
 ## What it can do
 
-- People talk to Muse from it: holding the talk button (or the on-screen
-  microphone on touch-only boards) records a voice note, sent on release. On
+- On boards with a microphone, people talk to Muse from it: holding the talk
+  button (or the on-screen microphone on touch-only boards) records a voice
+  note, sent on release. On
   boards set to toggle recording, one press starts the note and the next
   sends it. Replies show on the screen.
 - If it lists `display.*` commands, Muse can show images on its screen. An
@@ -41,7 +43,8 @@ replies show on the screen. Muse uses it through the commands it lists.
 
 ## Controls
 
-- The talk button, or the on-screen microphone on touch-only boards.
+- The talk button, or the on-screen microphone on touch-only boards, where
+  the board has a microphone.
 - The settings menu, with the device's options.
 
 ## Recovery

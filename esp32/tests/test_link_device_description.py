@@ -350,6 +350,21 @@ int main(void) {
                     self.assertNotIn("<!--", text)
                     self.assertNotIn("Hatch", text)
 
+    def test_boards_get_a_guide_that_fits_their_hardware(self) -> None:
+        # The XVF3800 has no status light, and the LCD-7 no microphone, so their
+        # guides must not promise one.
+        guides = overlay_values("MUSE_DEVICE_GUIDE")
+        self.assertEqual(guides["sdkconfig.seeed-respeaker-xvf3800"], "devices/guides/voice.md")
+        voice = " ".join((ROOT / "devices/guides/voice.md").read_text().split())
+        self.assertIn("Seeed reSpeaker XVF3800 running", voice)
+        self.assertIn("The reSpeaker XVF3800 shows no state", voice)
+        self.assertNotIn("sdkconfig.muse-waveshare-s3-lcd7", guides)
+        self.assertEqual(guides["sdkconfig.muse"], "devices/guides/muse.md")
+        muse = " ".join((ROOT / "devices/guides/muse.md").read_text().split())
+        self.assertIn("on boards with a microphone, people talk to Muse", muse)
+        self.assertIn("On boards with a microphone, people talk to Muse", muse)
+        self.assertIn("where the board has a microphone", muse)
+
     def test_this_repositorys_guides_follow_the_policy(self) -> None:
         if shutil.which("cmake") is None:
             self.skipTest("cmake unavailable")

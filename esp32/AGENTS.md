@@ -830,7 +830,7 @@ are reserved for Muse's own devices.
 - **Guide.** `device.guide` returns the Markdown file `CONFIG_MUSE_DEVICE_GUIDE`
   names. `main/guide.md` covers boards with a status light or status screen,
   `devices/guides/muse.md` (set in `devices/sdkconfig.muse`) the boards with
-  the full UI, and `devices/guides/voice.md` the Voice PE and reSpeaker Lite.
+  the full UI, and `devices/guides/voice.md` the Voice PE and the reSpeaker Lite and XVF3800.
   Give a board its own guide in `devices/guides/` when these would be wrong
   about it, and set it in its overlay. A relative path is looked up in the
   project directory, then in `esp32/`. A leading HTML comment (the license

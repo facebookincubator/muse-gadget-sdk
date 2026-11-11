@@ -16,13 +16,13 @@ limitations under the License.
 # Muse voice gadget
 
 A speaker-and-microphone device for talking to Muse, with no screen: a Home
-Assistant Voice Preview Edition or a Seeed reSpeaker Lite running the Muse
-Gadget SDK firmware. Muse uses it through the commands it lists.
+Assistant Voice Preview Edition, a Seeed reSpeaker Lite or a Seeed reSpeaker
+XVF3800 running the Muse Gadget SDK firmware. Muse uses it through the commands it lists.
 
 ## What it can do
 
 - People talk to Muse from it: holding the talk button (the centre button on
-  the Voice PE, the XIAO's BOOT button on the reSpeaker Lite) records a voice
+  the Voice PE, the XIAO's BOOT button on the reSpeakers) records a voice
   note, sent on release. Muse answers in the Muse app.
 - The dial sets the speaker volume on the Voice PE. If it lists
   `voice.configure`, the volume it sets is kept across restarts.
@@ -35,7 +35,8 @@ Gadget SDK firmware. Muse uses it through the commands it lists.
 
 ## Status light
 
-The LED ring (Voice PE) or RGB LED (reSpeaker Lite):
+The LED ring (Voice PE) or RGB LED (reSpeaker Lite). The reSpeaker XVF3800
+shows no state: its ring isn't a status light, so check the Muse app.
 
 | Colour | Meaning |
 |---|---|
@@ -46,11 +47,11 @@ The LED ring (Voice PE) or RGB LED (reSpeaker Lite):
 
 ## Recovery
 
-- With the mute switch on, holding the talk button for 5 seconds forgets its
+- With mute on, holding the talk button for 5 seconds forgets its
   pairing and Wi-Fi; set it up again in the Muse app.
 
 ## Limits
 
 - It has no screen, and no shell or files Muse can reach: it does only what
   its commands offer.
-- Commands work only while it's connected (green).
+- Commands work only while it's connected (green, on boards with a light).
