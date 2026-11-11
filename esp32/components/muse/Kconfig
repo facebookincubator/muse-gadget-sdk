@@ -71,6 +71,10 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-LCD-1.46"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_LILYGO_S3_AMOLED_175
+            bool "LilyGO T-Display-S3 AMOLED 1.75 (H741-01; no audio)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_ESP_MOSAICO
             bool "Espressif ESP-Mosaico (ESP32-S31)"
             depends on IDF_TARGET_ESP32S31
@@ -208,6 +212,7 @@ menu "Muse"
         default "waveshare_s3_143c" if MUSE_BOARD_WAVESHARE_S3_143C
         default "waveshare_s3_143" if MUSE_BOARD_WAVESHARE_S3_143
         default "waveshare_s3_146" if MUSE_BOARD_WAVESHARE_S3_146
+        default "lilygo_s3_amoled_175" if MUSE_BOARD_LILYGO_S3_AMOLED_175
         default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
         default "dfrobot_unihiker_k10" if MUSE_BOARD_DFROBOT_UNIHIKER_K10
         default "aipi" if MUSE_BOARD_AIPI
