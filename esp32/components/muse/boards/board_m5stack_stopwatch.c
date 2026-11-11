@@ -27,6 +27,8 @@
  * rail (codec and mic), IO4 touch reset, IO5 panel reset, IO8 the 3V3_L3B
  * rail (the OLED), IO9 the vibration motor, IO10 the amp. The BMI270 (0x68)
  * and RTC are on the always-on 3V3_L1; the IMU is put back in suspend at boot.
+ * For apps, the motor is the vibration device and the IMU the accel, gyro and
+ * steps devices (components/capabilities_registry), registered at the end of init().
  *
  * At rest on battery (display paused, codecs closed) both L3B rails are off,
  * with the lines into them parked low, and the chip light-sleeps until a rim
@@ -70,7 +72,13 @@
 #include "sdkconfig.h"
 
 #include "muse_audio.h"
+#if CONFIG_CAPABILITIES_REGISTRY
+#include "bmi270_device.h"
+#endif
 #include "muse_board.h"
+#if CONFIG_CAPABILITIES_REGISTRY
+#include "capabilities_registry.h"
+#endif
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "soc/spi_periph.h"
@@ -196,6 +204,7 @@ static const char *TAG = "board";
 #define IOE_OD 0x13                /* 1 = open drain */
 #define IOE_PWM1_DUTY 0x1B         /* the motor's PWM; bit 15 enables */
 #define IOE_I2C_CFG 0x23           /* 0: no I2C idle sleep */
+#define IOE_PWM_FREQ 0x25          /* 16 bits, Hz, shared by the PWM channels */
 #define IOE_PIN(n) ((uint16_t)BIT((n) - 1))
 #define IOE_AUDIO IOE_PIN(3)
 #define IOE_TP_RST IOE_PIN(4)
@@ -205,6 +214,10 @@ static const char *TAG = "board";
 #define IOE_SPK IOE_PIN(10)
 #define IOE_OUTPUTS (IOE_AUDIO | IOE_TP_RST | IOE_LCD_RST | IOE_L3B | IOE_MOTOR | IOE_SPK)
 #define SPK_PA_PIN 10              /* es8311's pa_pin, routed to the expander by s_ioe_gpio */
+#define MOTOR_PWM_HZ 5000          /* as M5's factory firmware sets it */
+#define MOTOR_DUTY (0x0FFF * 85 / 100)   /* 12 bits: the factory's strength 80 (25-100 %) */
+#define MOTOR_PWM_ON 0x8000
+#define MOTOR_RETRY_US 20000       /* a missed "off" goes again this soon */
 
 static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_pmic, s_ioe, s_tp;
@@ -451,6 +464,102 @@ static void imu_rest(void)
     i2c_master_bus_rm_device(imu);
 }
 
+#if CONFIG_CAPABILITIES_REGISTRY
+/*
+ * The vibration motor, on the expander's IO9 as its PWM1 output. M5's factory
+ * firmware (main/hal/hal_ioe.cpp, Vibrator) sets the expander's PWM to 5 kHz
+ * and a buzz's duty to 25-100 %, then 0; the registers are M5Unified's
+ * (M5IOE1_Class.inl: PWM_FREQ, PWM1_DUTY with bit 15 enabling it). IO9 is
+ * already an output, low, from init(). A buzz only records when it ends and
+ * fires the timer: the I2C writes run on the esp_timer task, so the caller
+ * (an app) never waits for the bus. A new buzz replaces one running.
+ */
+static esp_timer_handle_t s_motor_timer;
+static portMUX_TYPE s_motor_lock = portMUX_INITIALIZER_UNLOCKED;
+static int64_t s_motor_until;           /* under s_motor_lock: when the buzz ends */
+static bool s_motor_on, s_motor_pwm;    /* the esp_timer task's */
+
+static void motor_tick(void *arg)
+{
+    (void)arg;
+    taskENTER_CRITICAL(&s_motor_lock);
+    int64_t left = s_motor_until - esp_timer_get_time();
+    taskEXIT_CRITICAL(&s_motor_lock);
+    bool on = left > 0;
+    if (on && !s_motor_pwm) {
+        s_motor_pwm = reg_write(s_ioe, IOE_PWM_FREQ, (uint8_t[]){ MOTOR_PWM_HZ & 0xFF, MOTOR_PWM_HZ >> 8 }, 2) == ESP_OK;
+    }
+    if (on != s_motor_on) {
+        uint16_t duty = on ? MOTOR_PWM_ON | MOTOR_DUTY : 0;
+        if (reg_write(s_ioe, IOE_PWM1_DUTY, (uint8_t[]){ duty & 0xFF, duty >> 8 }, 2) == ESP_OK) {
+            s_motor_on = on;
+        } else {
+            ESP_LOGW(TAG, "vibration motor %s failed", on ? "on" : "off");
+        }
+    }
+    if (on) {
+        esp_timer_start_once(s_motor_timer, left);
+    } else if (s_motor_on) {
+        esp_timer_start_once(s_motor_timer, MOTOR_RETRY_US);   /* still running: try "off" again */
+    }
+}
+
+static int motor_call(const capability_t *dev, int action, const float *params, int n_params, const char *text)
+{
+    (void)dev;
+    (void)text;
+    if (action != 0 || n_params < 1 || !(params[0] >= 1.0f && params[0] <= 1000.0f)) {
+        return -1;
+    }
+    taskENTER_CRITICAL(&s_motor_lock);
+    s_motor_until = esp_timer_get_time() + (int64_t)(params[0] * 1000.0f);
+    taskEXIT_CRITICAL(&s_motor_lock);
+    /* Now, whatever it was waiting for: the tick reads the new end. If the
+     * tick armed itself again meanwhile, stop that and start over. */
+    for (int i = 0; i < 3 && esp_timer_start_once(s_motor_timer, 0) == ESP_ERR_INVALID_STATE; i++) {
+        esp_timer_stop(s_motor_timer);
+    }
+    return 0;
+}
+
+/* The well-known vibration device, exactly as components/muse_apps/sdk/api/api.json has it. */
+static const capability_field_t s_buzz_params[] = {
+    { "ms", "ms", 1, 1000 },
+};
+static const capability_action_t s_motor_actions[] = {
+    { "buzz", "Buzzes; a new buzz replaces one still running.", s_buzz_params, 1, false },
+};
+static const capability_t s_motor = {
+    .name = "vibration",
+    .desc = "Vibration motor inside the watch.",
+    .actions = s_motor_actions,
+    .n_actions = 1,
+    .call = motor_call,
+};
+
+/* The BMI270's axes in the screen's frame (x right, y up, z out of the
+ * screen). M5's factory firmware (main/hal/hal_imu.cpp, read into accelY,
+ * accelX, accelZ) swaps the chip's x and y into display axes with y pointing
+ * down, which its fluid demo (app_fluidbox) uses unchanged: so screen x is
+ * chip y, screen up is chip -x, and z (out of the screen) is chip z. */
+static void register_devices(void)
+{
+    const esp_timer_create_args_t args = { .callback = motor_tick, .name = "vibration" };
+    if (esp_timer_create(&args, &s_motor_timer) == ESP_OK) {
+        capabilities_registry_register(&s_motor);
+    } else {
+        ESP_LOGW(TAG, "no timer for the vibration motor: no vibration device");
+    }
+    const bmi270_device_cfg_t imu = {
+        .bus = s_i2c,
+        .addr = IMU_ADDR,
+        .axis = { 1, 0, 2 },
+        .sign = { 1, -1, 1 },
+    };
+    bmi270_device_register(&imu);   /* logs and carries on without one */
+}
+#endif /* CONFIG_CAPABILITIES_REGISTRY */
+
 static esp_err_t init(void)
 {
     s_ioe_lock = xSemaphoreCreateMutex();
@@ -518,6 +627,9 @@ static esp_err_t init(void)
     if (!s_pmic_irq) {
         ESP_LOGW(TAG, "power key interrupt not set up: polling the power key at rest");
     }
+#if CONFIG_CAPABILITIES_REGISTRY
+    register_devices();
+#endif
     return ESP_OK;
 }
 
