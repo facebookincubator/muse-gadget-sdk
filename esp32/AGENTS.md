@@ -82,6 +82,7 @@ before adding a feature to one.
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
 | Elecrow CrowPanel Advance 4.3 V1.3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-crowpanel-advance-43` | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
+| M5Stack TriviaPOD | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-triviapod` | `tools/muse/board.sh build triviapod` |
 | Seeed XIAO ESP32-S3 1.47 Touch Display | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147` | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
 | Freenove FNK0104B | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b` | `tools/muse/board.sh build fnk0104b` |
@@ -182,7 +183,7 @@ controls and unverified hardware behavior.
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|triviapod|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -310,7 +311,7 @@ flash size and status backend.
 
    | Hint | Board |
    |---|---|
-   | `top-right`, or `top-left` with live calls (`yellow` on older firmware) | M5Stack StopWatch |
+   | `top-right`, or `top-left` with live calls (`yellow` on older firmware) | M5Stack StopWatch or TriviaPOD — tell them apart by the `muse: board:` line a reset logs |
    | `USR1` | Seeed XIAO ESP32-S3 1.47 Touch Display |
    | `power` | M5Stack CoreS3 |
    | `front` | M5Stack StickS3, or StickC Plus2 — tell them apart by the port: the StickS3 is native USB, the Plus2 is a CH9102 `usbserial` |
@@ -521,7 +522,8 @@ The device still needs to be paired once for its token.
 `CONFIG_MUSE_REALTIME_VOICE` (off by default, "Live voice calls with Muse"
 under Muse in menuconfig) adds calls beside voice notes on boards with Muse's
 own voice session: the full-UI boards with PSRAM and the Voice PE (and
-reSpeaker Lite) builds. On StopWatch, hold yellow to talk or interrupt, release
+reSpeaker Lite) builds. On StopWatch (and the TriviaPOD, whose board file
+sets up the same keys), hold yellow to talk or interrupt, release
 to keep the call open, and tap blue to hang up; voice notes are an explicit
 Sound setting. With the option on, the StopWatch's yellow key is its talk
 button and blue its speaker button (`board_m5stack_stopwatch.c`), swapped from

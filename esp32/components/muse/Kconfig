@@ -127,6 +127,10 @@ menu "Muse"
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_M5STACK_TRIVIAPOD
+            bool "M5Stack TriviaPOD (ESP32-S3, round touch AMOLED)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_SEEED_XIAO_S3_147
             bool "Seeed XIAO ESP32-S3 1.47 Touch Display (PDM mic, no speaker)"
             depends on IDF_TARGET_ESP32S3
@@ -184,6 +188,13 @@ menu "Muse"
             depends on IDF_TARGET_ESP32S3
     endchoice
 
+    config MUSE_BOARD_M5STACK_STOPWATCH_FAMILY
+        bool
+        default y if MUSE_BOARD_M5STACK_STOPWATCH || MUSE_BOARD_M5STACK_TRIVIAPOD
+        help
+            The StopWatch and the TriviaPOD, whose board files set up the
+            same keys: the StopWatch's call controls apply to both.
+
     config MUSE_ENABLED
         bool
         default y if !MUSE_BOARD_NONE
@@ -218,6 +229,7 @@ menu "Muse"
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "m5stack_triviapod" if MUSE_BOARD_M5STACK_TRIVIAPOD
         default "seeed_xiao_s3_147" if MUSE_BOARD_SEEED_XIAO_S3_147
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
         default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
@@ -276,7 +288,7 @@ menu "Muse"
         bool "Isolated board BSP power-characterization firmware"
         # Boards implementing boards/muse_power_test_board.h; extend this list
         # only after the new board's diagnostic hooks and matrix pass tests.
-        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI || MUSE_BOARD_M5STACK_TRIVIAPOD) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
         default n
         help
             DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application

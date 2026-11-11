@@ -125,7 +125,7 @@ esp_err_t muse_settings_init(void)
         s.speaker_on = b;
     }
     load_u8("mic_gain", &s.mic_gain);
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
     if (nvs_get_u8(s_nvs, "voice_notes", &b) == ESP_OK) {
         atomic_store(&s_voice_notes, b != 0);
     }

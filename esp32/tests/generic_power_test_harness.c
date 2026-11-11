@@ -76,6 +76,7 @@ _Static_assert(sizeof(run_t) == 7648, "v3 run size");
 _Static_assert(sizeof(s_saved) == 7664, "v3 saved size");
 _Static_assert(offsetof(run_t, error) == 156, "v3 padding boundary");
 extern int64_t test_now;
+extern void test_motor_step(void);
 /* Exercise error cleanup directly; SDK fakes always succeed. */
 void test_error(void) { abort_run(ESP_FAIL, true); }
 bool test_running(void) { return s_run.status == RUN_RUNNING; }
@@ -89,14 +90,20 @@ void test_command(const char *line) { command(line); }
 void test_advance(unsigned ms)
 {
     for (unsigned i = 0; i < ms && (s_run.status == RUN_ARMED || s_run.status == RUN_RUNNING); i += 10) {
-        test_now += 10000; tick();
+        test_now += 10000; test_motor_step(); tick();
     }
 }
 #else
 #define MUSE_PTEST_HOST 1
 #define CONFIG_MUSE_POWER_TEST 1
 static int test_aipi, test_216;
+#ifdef TEST_TRIVIA
+#define CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD 1
+#define CONFIG_MUSE_BOARD_WAVESHARE_S3_175C 0
+#else
+#define CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD 0
 #define CONFIG_MUSE_BOARD_WAVESHARE_S3_175C (!test_aipi && !test_216)
+#endif
 #define CONFIG_MUSE_BOARD_WAVESHARE_S3_216 test_216
 #define CONFIG_MUSE_BOARD_AIPI test_aipi
 #define CONFIG_IDF_TARGET_ESP32S3 1
@@ -111,6 +118,7 @@ STUB(esp_err_t, bsp_i2c_init, (void), ESP_OK)
 #include "../components/muse/boards/board_power_test_generic.c"
 extern bool test_capture(void), test_running(void);
 extern void test_command(const char *), test_advance(unsigned), test_error(void);
+void test_motor_step(void);
 int64_t test_now = 1000000;
 static int pmu;
 static uint8_t pmu_reg; /* Charger disabled before boot recovery. */
@@ -119,13 +127,30 @@ esp_reset_reason_t esp_reset_reason(void) { return ESP_RST_POWERON; }
 static jmp_buf guard_wait;
 static void (*guard_entry)(void *);
 static unsigned notifications, guard_timeouts;
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+#include "../components/muse/boards/triviapod_power_test_motor.c"
+static unsigned motor_writes, motor_failures;
+static int64_t motor_latency_us;
+static bool test_dark;
+esp_err_t muse_triviapod_motor(bool enabled) {
+    motor_writes++;
+    if (motor_failures) { motor_failures--; return ESP_FAIL; }
+    test_now += motor_latency_us;
+    return ESP_OK;
+}
+void muse_triviapod_pause_static(bool pause) { (void)pause; assert(!test_dark); }
+esp_err_t muse_triviapod_charge(bool enabled) {
+    if (pmu_failures) { pmu_failures--; return ESP_FAIL; }
+    pmu_reg = enabled ? pmu_reg | 2 : pmu_reg & ~2; return ESP_OK;
+}
+#endif
 static int speaker, microphone, bus;
 int esp_codec_dev_open(esp_codec_dev_handle_t d, esp_codec_dev_sample_info_t *s) { assert(!test_capture()); return ESP_OK; }
 int esp_codec_dev_close(esp_codec_dev_handle_t d) { assert(!test_capture()); return ESP_OK; }
 int64_t esp_timer_get_time(void) { return test_now; }
 static const char *console_input;
 int usb_serial_jtag_read_bytes(void *p, size_t n, uint32_t ticks) { if (!console_input || !*console_input) { return 0; } *(uint8_t *)p = *console_input++; return 1; }
-int xTaskCreate(void (*fn)(void *), const char *name, unsigned stack, void *arg, unsigned priority, TaskHandle_t *out) { guard_entry = fn; *out = (void *)1; return pdPASS; }
+int xTaskCreate(void (*fn)(void *), const char *name, unsigned stack, void *arg, unsigned priority, TaskHandle_t *out) { if (!strcmp(name, "charge_guard")) { guard_entry = fn; } *out = (void *)1; return pdPASS; }
 void xTaskNotifyGive(TaskHandle_t task) { notifications++; }
 uint32_t ulTaskNotifyTake(int clear, TickType_t wait)
 {
@@ -138,10 +163,17 @@ static lv_display_t *display_start(lv_indev_t **touch) { static lv_display_t dis
 static bool display_lock(int timeout) { return true; }
 static void display_unlock(void) {}
 static void brightness(int value) {}
+static void display_pause(bool pause) {
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    test_dark = pause;
+#else
+    (void)pause;
+#endif
+}
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic) { *spk = &speaker; *mic = &microphone; return ESP_OK; }
 static esp_err_t power(muse_power_t *p) { p->usb = true; return ESP_OK; }
 static muse_board_t board = { .name = "Generic test board", .init = bsp_i2c_init, .display_start = display_start, .display_lock = display_lock,
-    .display_unlock = display_unlock, .set_brightness = brightness,
+    .display_unlock = display_unlock, .set_brightness = brightness, .display_pause = display_pause,
     .audio_init = audio_init, .read_power = power, .mic_slot = -1 };
 const muse_board_t *muse_board_get(void) { return &board; }
 esp_err_t i2c_master_get_bus_handle(int port, i2c_master_bus_handle_t *out) { *out = &bus; return ESP_OK; }
@@ -163,9 +195,16 @@ esp_err_t i2c_master_transmit(i2c_master_dev_handle_t d, const uint8_t *tx, size
 lv_obj_t *lv_display_get_screen_active(lv_display_t *d) { static lv_obj_t screen; return &screen; }
 lv_timer_t *lv_timer_create(void (*cb)(lv_timer_t *), uint32_t ms, void *arg) { static lv_timer_t timer; return &timer; }
 int usb_serial_jtag_write_bytes(const void *p, size_t n, uint32_t ticks) { return fwrite(p, 1, n, stdout); }
+void test_motor_step(void) {
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    if (s_load == MUSE_PTEST_LCD) { assert(!test_dark); }
+    if (s_mode || s_stop_pending) { motor_tick(); }
+#endif
+}
 int main(int argc, char **argv)
 {
     test_216 = !strcmp(argv[1], "216");
+    (void)test_216; (void)test_aipi;
     test_aipi = !strcmp(argv[1], "aipi");
     muse_power_test_run();
 }
@@ -183,6 +222,38 @@ void vTaskDelay(unsigned ticks)
         else if (!strncmp(line, "poll ", 5)) { strcat(line, "\n"); console_input = line + 5; return; }
         else if (!strcmp(line, "guard")) { guard_timeouts = 1; if (!setjmp(guard_wait)) { assert(guard_entry); guard_entry(NULL); } assert(pmu_reg & 2); test_advance(10); }
         else if (!strcmp(line, "error")) { test_error(); }
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+        else if (!strcmp(line, "motorcases")) {
+            muse_ptest_state_t st = {.id="motor_on_60pct"};
+            assert(muse_ptest_board_capture_ms(&st, 5000, 20000) == 20000);
+            assert(muse_ptest_board_capture_ms(&st, 5001, 20000) == 0);
+            assert(muse_triviapod_ptest_motor_apply(&st) == ESP_OK && s_on);
+            test_now += 30000000; motor_tick();
+            assert(!s_on && s_error == ESP_ERR_TIMEOUT);
+            assert(muse_triviapod_ptest_motor_apply(NULL) == ESP_ERR_TIMEOUT);
+            s_error = 0;
+            st.id = "motor_pulses_30_70ms";
+            assert(muse_ptest_board_capture_ms(&st, 5000, 20000) == 302000);
+            assert(!muse_triviapod_ptest_motor_apply(&st));
+            for (unsigned t = 0; t < 10000; t += 10) { motor_tick(); test_now += 10000; }
+            assert(s_pulses == 4 && s_max_on_ms == 70 && !s_error && !s_on);
+            assert(!muse_triviapod_ptest_motor_apply(NULL) && !s_on);
+            motor_latency_us = 5000;
+            assert(!muse_triviapod_ptest_motor_apply(&st)); motor_tick();
+            assert(s_on && s_off_us == test_now + 30000); /* hold starts after enable I/O */
+            test_now = s_off_us - 1; motor_tick(); assert(s_on);
+            test_now = s_off_us; motor_tick(); assert(!s_on && !s_error);
+            assert(!muse_triviapod_ptest_motor_apply(NULL));
+            motor_latency_us = 0;
+            assert(!muse_triviapod_ptest_motor_apply(&st)); motor_tick();
+            motor_failures = 1; test_now += 30000; motor_tick();
+            assert(s_error == ESP_FAIL && s_stop_pending);
+            test_now += 10000; motor_tick(); assert(!s_on && !s_stop_pending);
+            assert(muse_triviapod_ptest_motor_apply(NULL) == ESP_FAIL);
+            s_error = 0; assert(!muse_triviapod_ptest_motor_apply(&st));
+            test_now += 30000; motor_tick(); assert(s_error == ESP_ERR_TIMEOUT && !s_on);
+        }
+#endif
         else { test_command(line); }
     }
     exit(0);
