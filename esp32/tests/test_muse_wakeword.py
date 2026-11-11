@@ -17,6 +17,8 @@ timers, PTT/playback interleavings, audio rings, and the energy fallback,
 driven through scripted runner events and checked against a Python
 model written from the design rules, not from the C."""
 
+import hashlib
+import json
 import os
 import shlex
 import subprocess
@@ -125,7 +127,8 @@ class WakeWordCore(unittest.TestCase):
         cc = shlex.split(os.environ.get('CC', 'cc'))
         result = subprocess.run(
             [*cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', *SANITIZE,
-             '-include', str(ROOT / 'tests/host_compat.h'), '-I', str(WW / 'include'),
+             '-include', str(ROOT / 'tests/host_compat.h'),
+             '-I', str(WW / 'include'), '-I', str(ROOT / 'tests'),
              str(ROOT / 'tests/muse_wakeword_harness.c'),
              str(WW / 'muse_wakeword_core.c'),
              '-o', str(cls.binary)],
@@ -344,6 +347,80 @@ class WakeWordFirmwareContract(unittest.TestCase):
     same option, the tap inside both read loops, and the opt-in
     defaulting off. Behaviour is the other classes' job."""
 
+    def test_executorch_runner_is_the_default_production_runner(self):
+        kconfig = (WW / 'Kconfig').read_text()
+        cmake = (WW / 'CMakeLists.txt').read_text()
+        self.assertIn('default MUSE_WAKEWORD_RUNNER_EXECUTORCH', kconfig)
+        # No ET_ENABLE to select: the registry component links nothing
+        # until the model and kernel bundle are declared in CMake.
+        self.assertNotIn('ET_ENABLE', kconfig)
+        self.assertIn('ww_runner_et.cpp', cmake)
+        self.assertIn('models/hey_muse.pte', cmake)
+        self.assertIn('executorch_add_model', cmake)
+        self.assertIn('executorch_add_kernels', cmake)
+        self.assertTrue((WW / 'models/hey_muse.pte').is_file())
+
+    def test_runner_copies_unaligned_embedded_pte(self):
+        # et_model_create requires 16-byte-aligned program
+        # data, but EMBED_FILES alignment is layout luck: after the
+        # Oct 2026 rebase the embedded .pte landed at a 4-aligned
+        # address, load failed (0x12), wake init died, and the
+        # Settings toggle reverted instantly. The runner must copy a
+        # misaligned .pte into owned aligned storage instead.
+        src = (WW / 'ww_runner_et.cpp').read_text()
+        self.assertIn('heap_caps_aligned_alloc', src)
+        self.assertIn('pte_copy', src)
+        self.assertIn('free(runner->pte_copy)', src)
+        # Zero-copy normal path: the embed itself is 16-aligned in
+        # flash (custom asm), so the copy above is only a fallback.
+        cmake = (WW / 'CMakeLists.txt').read_text()
+        self.assertIn('hey_muse_pte.S.in', cmake)
+        self.assertNotIn('EMBED_FILES ${', cmake)
+        asm = (WW / 'hey_muse_pte.S.in').read_text()
+        self.assertIn('.balign 16', asm)
+        self.assertIn('_binary_hey_muse_pte_start', asm)
+
+    def test_runner_gives_kernels_a_temp_arena(self):
+        # et_model leaves temp_arena_size at 0 by default, which makes
+        # Method fall back to PAL malloc for kernel scratch during
+        # execute. The always-on runner opts into a bounded pool in the
+        # same default location class as its planned buffers instead.
+        runner = (WW / 'ww_runner_et.cpp').read_text()
+        self.assertRegex(runner, r'kTempArenaBytes\s*=\s*[1-9]')
+        self.assertIn('model_cfg.temp_arena_size = kTempArenaBytes', runner)
+        self.assertIn('model_cfg.temp_location = ET_MEM_DEFAULT', runner)
+
+    def test_model_ops_match_the_kernel_bundle(self):
+        # The embedded .pte only runs on firmware whose kernel bundle
+        # registers its ops; the bundle is generated from the .pte and
+        # pinned to the registry component version in main's manifest.
+        # Catches a model re-export without regenerating the bundle,
+        # which would otherwise fail only at build time or on device.
+        sidecar = json.loads((WW / 'models/hey_muse.json').read_text())
+        pte = WW / 'models/hey_muse.pte'
+        self.assertEqual(sidecar['pte_size'], pte.stat().st_size)
+        self.assertEqual(
+            sidecar['pte_sha256'], hashlib.sha256(pte.read_bytes()).hexdigest()
+        )
+        bundle = json.loads((WW / 'et_kernels/kernels.json').read_text())
+        self.assertEqual(bundle['schema'], 1)
+        self.assertEqual(len(bundle['models']), 1)
+        self.assertEqual(bundle['models'][0]['name'], 'hey_muse.pte')
+        self.assertEqual(bundle['models'][0]['sha256'], sidecar['pte_sha256'])
+        pinned = None
+        for line in (ROOT / 'main/idf_component.yml').read_text().splitlines():
+            if line.strip() == 'rascani/executorch:':
+                pinned = 'pending'
+            elif pinned == 'pending' and 'version:' in line:
+                pinned = line.split('version:', 1)[1].strip().strip('"').lstrip('=')
+                break
+        self.assertEqual(bundle['component_version'], pinned)
+        self.assertRegex(bundle['component_commit'], r'^[0-9a-f]{40}$')
+        registered = set()
+        for ops in bundle['libraries'].values():
+            registered.update(ops)
+        self.assertLessEqual(set(sidecar['model_ops']), registered)
+
     def test_commands_advertised_and_dispatched_with_the_feature(self):
         noise = (ROOT / 'main/noise_control.cpp').read_text()
         block = between(noise, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
@@ -358,7 +435,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
     def test_tap_is_inside_both_audio_read_loops(self):
         voice = (ROOT / 'components/muse/muse_voice.c').read_text()
         idle = between(voice, 'static void idle_capture(void)', 'static bool got_event')
-        record = between(voice, 'static bool record(bool barge_in', 'static void go_idle')
+        record = between(voice, 'static bool record(', 'static void go_idle')
         self.assertIn('muse_wakeword_on_audio(s_chunk', idle)
         self.assertIn('muse_wakeword_on_audio(s_chunk', record)
 
@@ -366,7 +443,11 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('bool synthetic;', (ROOT / 'components/muse/muse_input.h').read_text())
         voice = (ROOT / 'components/muse/muse_voice.c').read_text()
         self.assertIn('void muse_voice_seed_preroll(', voice)
-        self.assertIn('short_press(held) && !wake && !synthetic', voice)
+        # Short-press handling moved into note_held's qualification;
+        # synthetic turns stay exempt by carrying the flag into record(),
+        # which consumes the seed and pauses the runner only for real turns.
+        self.assertIn('record(synthetic, why', voice)
+        self.assertIn('if (seeded && s_seed_frames)', voice)
         self.assertIn('muse_wakeword_set_ptt_turn(!synthetic)', voice)
 
     def test_glue_starts_with_the_voice_pipeline(self):
@@ -384,12 +465,14 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertLess(caption, posted)
 
     def test_sound_page_has_wake_word_toggle(self):
-        # Same row name as the production UI; the small print is honest
-        # that only the clap bench trigger sits behind it for now.
+        # One row name for every runner; only the small print differs:
+        # the bench runner says the model is not implemented yet.
         ui = (ROOT / 'components/muse/muse_settings_ui.c').read_text()
         sound = between(ui, 'static void build_sound_page(', 'static void tick_sound(void)')
         self.assertIn('switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw)', sound)
+        self.assertIn('#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH', sound)
         self.assertIn('Model not implemented yet, clap to wake', sound)
+        self.assertIn('Listens for \\"Hey Muse\\"', sound)
         self.assertNotIn('Clap test', sound)
         callback = between(ui, 'static void on_wake_sw(', 'static void build_sound_page(')
         self.assertIn('muse_wakeword_set_enabled(', callback)
@@ -408,6 +491,132 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('default n', enable)
         settings = (ROOT / 'components/muse/muse_settings.c').read_text()
         self.assertIn('"ww_on"', settings)   # the persisted opt-in
+
+
+class WakeWordFrontendDetector(unittest.TestCase):
+    """The SDK-owned LFBE frontend and posterior detector used by the
+    ExecuTorch runner. Inference itself is covered on device; these pin
+    framing, the frozen 512/480/320 geometry, silence values, and the
+    detector warm-up/smoothing/cooldown state machine on the host."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        cls.binary = Path(cls.tmp.name) / 'ww_frontend_harness'
+        harness = Path(cls.tmp.name) / 'harness.c'
+        harness.write_text(r'''
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include "ww_detector.h"
+#include "ww_frontend.h"
+
+static float g_frames[16][WW_FRONTEND_N_MELS];
+static size_t g_count;
+static void on_frame(void *ctx, const float frame[WW_FRONTEND_N_MELS]) {
+    (void)ctx;
+    if (g_count < 16) memcpy(g_frames[g_count], frame, sizeof(g_frames[0]));
+    g_count++;
+}
+
+int main(int argc, char **argv) {
+    ww_frontend_t *fe = ww_frontend_create();
+    if (!fe) return 2;
+    const char *mode = argc > 1 ? argv[1] : "";
+    if (!strcmp(mode, "silence")) {
+        int16_t zeros[512] = {0};
+        size_t n = ww_frontend_push(fe, zeros, 512, on_frame, NULL);
+        float worst = 0;
+        for (int m = 0; m < WW_FRONTEND_N_MELS; m++) {
+            float want = (logf(WW_FRONTEND_LOG_EPS) - kWwFrontendNormMean[m]) /
+                kWwFrontendNormStd[m];
+            float d = fabsf(g_frames[0][m] - want);
+            if (d > worst) worst = d;
+        }
+        printf("frames %zu worst %.9g\n", n, worst);
+        return n == 1 && g_count == 1 && worst < 1e-5f ? 0 : 1;
+    }
+    if (!strcmp(mode, "sine") || !strcmp(mode, "split")) {
+        enum { N = 3219 };
+        static int16_t pcm[N];
+        for (int i = 0; i < N; i++)
+            pcm[i] = (int16_t)(12000.0f * sinf(2.0f * 3.1415926535f * 1000.0f * (float)i / 16000.0f));
+        g_count = 0;
+        ww_frontend_push(fe, pcm, N, on_frame, NULL);
+        if (!strcmp(mode, "sine")) {
+            int best = 0;
+            for (int m = 1; m < WW_FRONTEND_N_MELS; m++)
+                if (g_frames[0][m] > g_frames[0][best]) best = m;
+            printf("frames %zu argmax %d peak %.9g\n", g_count, best, g_frames[0][best]);
+            return g_count == 9 ? 0 : 1;
+        }
+        static float whole[16][WW_FRONTEND_N_MELS];
+        size_t whole_count = g_count;
+        memcpy(whole, g_frames, sizeof(whole));
+        ww_frontend_reset(fe);
+        g_count = 0;
+        const size_t chunks[] = {1, 319, 17, 511, 320, 999, 1052};
+        size_t off = 0;
+        for (size_t i = 0; i < sizeof(chunks) / sizeof(chunks[0]); i++) {
+            ww_frontend_push(fe, pcm + off, chunks[i], on_frame, NULL);
+            off += chunks[i];
+        }
+        printf("frames %zu equal %d\n", g_count,
+               g_count == whole_count && !memcmp(whole, g_frames, sizeof(whole)));
+        return off == N && g_count == whole_count &&
+            !memcmp(whole, g_frames, sizeof(whole)) ? 0 : 1;
+    }
+    if (!strcmp(mode, "detector")) {
+        ww_detector_t det;
+        ww_detector_init(&det, WW_SENSITIVITY_DEFAULT);
+        for (int i = 0; i < WW_DETECTOR_WARMUP_FRAMES; i++)
+            if (ww_detector_push(&det, 1.0f)) return 1;
+        if (!ww_detector_push(&det, 1.0f)) return 1; /* valid frame 30 */
+        for (int i = 0; i < WW_DETECTOR_COOLDOWN_FRAMES; i++)
+            if (ww_detector_push(&det, 1.0f)) return 1;
+        if (!ww_detector_push(&det, 1.0f)) return 1;
+        ww_detector_reset(&det);
+        for (int i = 0; i < WW_DETECTOR_WARMUP_FRAMES; i++)
+            if (ww_detector_push(&det, 1.0f)) return 1;
+        printf("detector ok\n");
+        return 0;
+    }
+    return 2;
+}
+''')
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        result = subprocess.run(
+            [*cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', *SANITIZE,
+             '-I', str(WW), '-I', str(WW / 'include'), str(harness),
+             str(WW / 'ww_frontend.c'), str(WW / 'ww_detector.c'), '-lm',
+             '-o', str(cls.binary)],
+            capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+
+    def run_mode(self, mode):
+        ran = subprocess.run([str(self.binary), mode], capture_output=True, env=ENV)
+        self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
+        self.assertEqual(ran.stderr, b'')
+        return ran.stdout.decode().strip()
+
+    def test_silence_frame_matches_log_eps_normalization(self):
+        out = self.run_mode('silence').split()
+        self.assertEqual(out[:2], ['frames', '1'])
+        self.assertLess(float(out[-1]), 1e-5)
+
+    def test_sine_peaks_at_the_1khz_mel(self):
+        out = self.run_mode('sine').split()
+        self.assertEqual(out[1], '9')
+        self.assertIn(int(out[3]), (12, 13))
+        self.assertGreater(float(out[5]), 2.0)
+
+    def test_arbitrary_chunking_is_bit_identical(self):
+        self.assertEqual(self.run_mode('split'), 'frames 9 equal 1')
+
+    def test_detector_warmup_fire_and_cooldown(self):
+        self.assertEqual(self.run_mode('detector'), 'detector ok')
 
 
 if __name__ == '__main__':

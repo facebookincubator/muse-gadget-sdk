@@ -71,7 +71,9 @@ void muse_wakeword_set_playback(bool on);
  * muse_voice's own pre_reset() after a turn. */
 void muse_wakeword_set_ptt_turn(bool active);
 
-/* "bench", or "off" (not compiled in). */
+/* "executorch", "bench", or "off" (not compiled in). This names the
+ * linked runner in logs/status so a bench build is never mistaken for
+ * real detection. */
 const char *muse_wakeword_runner_kind(void);
 
 /* Serial bench ("wake=1" / "wake.test=1"): with the bench runner,

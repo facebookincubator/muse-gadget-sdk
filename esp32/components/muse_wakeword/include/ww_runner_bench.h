@@ -23,12 +23,12 @@ extern "C" {
 #endif
 
 /*
- * Bench triggers for ww_runner_bench.c, the on-device stand-in for a
- * real model runner, used to bring up the audio tap, wake task, and
- * turn plumbing. It does
- * no speech detection: a wake comes from an explicit trigger below or
- * from a loud-then-quiet energy burst (a clap), shaped by these
- * constants, which tests/test_muse_wakeword.py pins.
+ * Bench triggers for ww_runner_bench.c, the on-device stand-in used
+ * to bring up and debug the audio tap, wake task, and turn plumbing
+ * without running the ExecuTorch runner. It does no speech
+ * detection: a wake comes from an explicit trigger below or from a
+ * loud-then-quiet energy burst (a clap), shaped by these constants,
+ * which tests/test_muse_wakeword.py pins.
  */
 #define WW_BENCH_LOUD_RMS 4000          /* sustained chunk: about -18 dBFS */
 #define WW_BENCH_PEAK_MIN 3000          /* transient peak: about -21 dBFS */

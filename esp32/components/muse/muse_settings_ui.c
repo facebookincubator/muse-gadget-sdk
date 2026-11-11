@@ -1346,7 +1346,11 @@ static void build_sound_page(lv_obj_t *tile)
 
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     s_wake_sw = switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw);
+#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
     note(list, "Model not implemented yet, clap to wake");
+#else
+    note(list, "Listens for \"Hey Muse\" so you can start a voice note without holding the talk button.");
+#endif
 #endif
 
     if (!muse_board->epaper) {

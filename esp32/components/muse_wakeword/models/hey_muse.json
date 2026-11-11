@@ -1,0 +1,70 @@
+{
+  "architecture_executorch_commit": "000859ea9f7d142bc638d9ba6ca8e79076711c74",
+  "architecture_executorch_version": "1.6.0",
+  "calibration": {
+    "clips": 95,
+    "file": "calibration_frames.pt",
+    "sha256": "a81f0febfe3ee1ce8dd0d6ae88ba34ec7603b86d7e123959be7dda8678f29dff"
+  },
+  "checkpoint_epoch": 11,
+  "checkpoint_sha256": "cafa78914c2280b653c2589b11985b5a6116c63a3bfdabd0d446c1a59febc5d3",
+  "class_names": [
+    "wakeword",
+    "silence",
+    "other"
+  ],
+  "component_op_set_sha256": "9d60f1f2407d4d0fb964b5af147b47e546291e59a7cc2a8c51e52efe7d97fa84",
+  "component_profile": "wakeword_int8",
+  "exporter_git_version": "a134f8f1caacdb1dc025e5c51cfcd6ae7ccc9fca",
+  "frontend": {
+    "clip_frames": 100,
+    "fmax": 8000.0,
+    "fmin": 0.0,
+    "hop_samples": 320,
+    "log_eps": 1e-06,
+    "mel_scale": "slaney",
+    "n_fft": 512,
+    "n_mels": 40,
+    "sample_rate": 16000,
+    "window_samples": 480
+  },
+  "model": "StreamingWakeWord",
+  "model_ops": [
+    "aten::_softmax.out",
+    "aten::cat.out",
+    "aten::copy_",
+    "aten::permute_copy.out",
+    "aten::slice_copy.Tensor_out",
+    "aten::squeeze_copy.dim_out",
+    "aten::transpose_copy.int_out",
+    "cadence::dequantize_per_tensor.out",
+    "cadence::quantize_per_tensor.out",
+    "cadence::quantized_conv2d_nhwc.per_tensor_out",
+    "cadence::quantized_fully_connected.per_tensor_out",
+    "cadence::quantized_relu.per_tensor_out"
+  ],
+  "notes": "Research/synthetic-data checkpoint; see the training bundle README for metrics and limitations. Runtime reading uses the sidecar only as provenance; the C frontend constants are regenerated alongside.",
+  "parity_vs_fp32": {
+    "clips": 24,
+    "fp32_frames_over_0.95": 29,
+    "frames": 2400,
+    "int8_frames_over_0.95": 31,
+    "wake_posterior_max_abs_diff": 0.09029132127761841,
+    "wake_posterior_mean_abs_diff": 0.004981738980859518
+  },
+  "pte_sha256": "5e76253736b347edd1dfe0653b8f279fb647e642fdcc50eabc61606b9692af84",
+  "pte_size": 75456,
+  "quantization": "cadence-int8-ptq",
+  "receptive_field_frames": 30,
+  "schema_version": 1,
+  "source": "clean-voice training bundle (epoch 11)",
+  "wake_phrases": [
+    "Hey Muse",
+    "Ok Muse",
+    "Okay Muse",
+    "Hey, Muse.",
+    "Hey Muse!",
+    "Ok, Muse.",
+    "Okay, Muse."
+  ]
+}
