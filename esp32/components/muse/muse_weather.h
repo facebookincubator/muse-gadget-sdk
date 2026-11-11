@@ -17,6 +17,8 @@
 #pragma once
 
 #include <stdbool.h>
+#include <string.h>
+#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,6 +58,11 @@ typedef struct {
     char updated_hhmm[16];  /* giờ cập nhật ("14:15" hoặc "--:--") */
 } muse_weather_t;
 
+#if CONFIG_MUSE_BOARD_SIMULATOR
+static inline void muse_weather_start(void) {}
+static inline void muse_weather_get(muse_weather_t *out) { if (out) memset(out, 0, sizeof(*out)); }
+static inline int muse_weather_idle_timeout(void) { return 0; }
+#else
 /* Khởi tạo múi giờ ICT-7, SNTP và tạo task nền lấy thời tiết Open-Meteo. */
 void muse_weather_start(void);
 
@@ -65,6 +72,7 @@ void muse_weather_get(muse_weather_t *out);
 /* Thời gian nghỉ hiệu dụng (giây) trước khi hiện màn hình thời tiết,
  * đã kẹp theo auto-sleep (slp - 5s); trả về 0 nếu tắt. */
 int muse_weather_idle_timeout(void);
+#endif
 
 /* Ẩn overlay thời tiết ngay lập tức (định nghĩa trong muse_ui.c). */
 void muse_weather_hide(void);

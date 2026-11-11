@@ -225,7 +225,6 @@ static const muse_lang_entry_t MENU[] = {
     { "2 minutes", "2 phút" },
     { "5 minutes", "5 phút" },
     { "10 minutes", "10 phút" },
-    { "Weather", "Thời tiết" },
     { "Loading weather...", "Đang tải thời tiết..." },
     { "Feels like", "Cảm giác như" },
     { "Humidity", "Độ ẩm" },

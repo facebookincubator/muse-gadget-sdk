@@ -16,8 +16,14 @@ name: Linux client
 
 on:
   pull_request:
+    paths:
+      - 'linux/**'
+      - '.github/workflows/linux.yml'
   push:
     branches: [main]
+    paths:
+      - 'linux/**'
+      - '.github/workflows/linux.yml'
 
 permissions:
   contents: read
