@@ -4,6 +4,7 @@ description: >-
   Read status and control mapped capabilities on compatible Tuya local-TCP devices through
   Muse Home Link. Use only with a known protocol version, device ID, local key, and exact
   datapoint schema; prefer a matching device-specific skill.
+  Switching heaters, valves, openers, irrigation or unknown loads needs the user's confirmation.
 ---
 
 # Tuya Wi-Fi Devices
@@ -30,6 +31,17 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 2. Read current status and map each returned datapoint through the known schema, including data type, units, range and enumeration values.
 3. For a requested change, write only the mapped datapoint and valid desired value using the compatible client. Do not assume datapoint 1 is always an on/off switch.
 4. Read fresh state afterward and compare the mapped value. Handle protocol errors, unavailable datapoints and optimistic devices explicitly.
+
+## Confirm Before Acting
+
+- Before switching a heater, valve, garage or door opener, irrigation controller, or a socket,
+  plug or switch whose load is unknown, read back the device, its room if known, the mapped
+  datapoint and the value, and wait for the user's yes. A yes covers that one command only.
+- Judge this by the device's Tuya `category` from its existing approved configuration, not only
+  by its name: for example `qn`, `rs`, `dr` and `dbl` (heaters), `sfkzq` and `ggq` (valves and
+  irrigation), `ckmkzq` and `mk` (garage doors and access control), and `cz`, `pc` and `kg`
+  (sockets, power strips and switches, unless the user has said what they power and it is none
+  of these). Confirm an unfamiliar or unknown category the same way.
 
 ## Verify the Result
 

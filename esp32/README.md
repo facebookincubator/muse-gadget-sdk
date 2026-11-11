@@ -259,6 +259,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Deotaland RoRoLee | UI, BOOT push-to-talk, VOL-/VOL+ menu, images | `tools/muse/board.sh build rorolee` |
 | Waveshare ESP32-S3-Touch-LCD-3.5 | Status on screen, images | `tools/board.sh waveshare-s3-lcd-35 build` |
 | Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build s3lcd35` |
+| DFRobot UNIHIKER K10 | UI, A push-to-talk, B menu, RGB status LEDs | [K10 setup](devices/dfrobot-unihiker-k10.md), `tools/muse/board.sh build k10` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.
@@ -319,6 +320,9 @@ To show your phone's camera on a board's screen, build it with
 same Wi-Fi, then open Phone camera on the board: the phone encodes H.264 or
 VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and
 [`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
+
+[`../protocols/DEVICE.md`](../protocols/DEVICE.md) says how a gadget describes
+itself to Muse: its family, its model and its usage guide.
 
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI

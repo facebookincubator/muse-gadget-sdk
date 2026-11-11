@@ -34,12 +34,12 @@ import socket
 import time
 from dataclasses import dataclass, field
 
-from musegadget import __version__, config, muse_api
+from musegadget import __version__, config, device_guide, muse_api
 from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import (
-    MAX_CONCURRENT_INVOKES, DeviceDescription, HttpStreamError, LinkSession, Outcome,
-    acknowledgement, check_image,
+    DEFAULT_MODEL_ID, DEFAULT_MODEL_NAME, MAX_CONCURRENT_INVOKES, DeviceDescription, HttpStreamError,
+    LinkSession, Outcome, acknowledgement, check_image, check_model,
 )
 from musegadget.muse_turn import MuseTurn, _acknowledged_message_ids
 
@@ -89,6 +89,11 @@ class Service:
     executor: Executor
     sdk_token: str | None = None
     display_name: str = field(default_factory=socket.gethostname)
+    # What the device is (protocols/DEVICE.md). describe() registers these and
+    # sizes the commands with them; guide None leaves out device.guide.
+    model_id: str = DEFAULT_MODEL_ID
+    model_name: str = DEFAULT_MODEL_NAME
+    guide: str | None = field(default_factory=device_guide.default_guide)
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _last_refresh_attempt: float = float("-inf")
     _sdk_token_change_warned: bool = False
@@ -100,10 +105,18 @@ class Service:
     # message they answer, so two waits on one chat would take each other's.
     _reply_waits: dict[str, tuple[asyncio.Lock, int]] = field(default_factory=dict, init=False, repr=False)
 
+    def __post_init__(self) -> None:
+        check_model(self.model_id, self.model_name, self.guide)
+
     def stop(self) -> None:
         self._stop.set()
 
     async def run(self) -> None:
+        try:
+            self.describe()
+        except ValueError as exc:
+            log.error("invalid device description: %s", exc)
+            raise
         backoff = Backoff()
         token_rejected = False
         while not self._stop.is_set():
@@ -163,12 +176,14 @@ class Service:
 
     def describe(self) -> DeviceDescription:
         """Describe the device to register with Muse for each session."""
+        model = {"model_id": self.model_id, "model_name": self.model_name, "guide": self.guide}
         return DeviceDescription(
             node_id=self.identity.node_id,
             display_name=self.display_name,
             version=__version__,
             commands=self.executor.specs(node_id=self.identity.node_id,
-                                         display_name=self.display_name, version=__version__),
+                                         display_name=self.display_name, version=__version__, **model),
+            **model,
         )
 
     def run_command(self, name: str, params: dict, timeout_ms: int | None = None) -> dict:

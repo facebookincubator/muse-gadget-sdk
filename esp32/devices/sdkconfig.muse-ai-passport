@@ -18,6 +18,8 @@
 # and replies show as text. The C3 has ~110 KB less SRAM than the C6, so
 # Link's TLS, Wi-Fi and BLE buffers are trimmed at least as hard.
 CONFIG_IDF_TARGET="esp32c3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-ai-passport"
+CONFIG_MUSE_DEVICE_MODEL_NAME="FoloToy AI Passport"
 CONFIG_MUSE_BOARD_AI_PASSPORT=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
 # UART0's TX is GPIO21, the backlight: keep the console off it. The ROM

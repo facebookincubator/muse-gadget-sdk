@@ -18,6 +18,8 @@
 # Source: https://github.com/Freenove/Freenove_ESP32_S3_Display
 # Load last, after sdkconfig.defaults and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-fnk0104b"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Freenove FNK0104B"
 CONFIG_MUSE_BOARD_FNK0104B=y
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

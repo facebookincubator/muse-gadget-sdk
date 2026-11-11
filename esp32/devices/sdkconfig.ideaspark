@@ -20,6 +20,8 @@
 # BLE 4.2, no PSRAM). It overrides the ESP32-C5 assumptions in
 # sdkconfig.defaults; C5-only options there are ignored for this target.
 CONFIG_IDF_TARGET="esp32"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-ideaspark"
+CONFIG_MUSE_DEVICE_MODEL_NAME="ideaspark ESP32 with 1.9-inch display"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # No status LED: the display shows the status colour in edge bars.

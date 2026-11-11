@@ -24,6 +24,8 @@
 # to fit internal SRAM. Modeled on devices/sdkconfig.muse-waveshare-c6-18,
 # minus the Waveshare board/display selection.
 CONFIG_IDF_TARGET="esp32c6"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-esp32c6-devkit"
+CONFIG_MUSE_DEVICE_MODEL_NAME="ESP32-C6 devkit"
 CONFIG_SPIRAM=n
 # TLS: keep allocations in internal SRAM and shrink outbound records; dynamic
 # input buffers are sized to each record instead of a fixed 16 KB.

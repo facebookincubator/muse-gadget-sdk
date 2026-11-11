@@ -1373,6 +1373,12 @@ static void identity_on_frame(identity_fetch &f, const DecodedServiceFrame &fram
 
 // ---- JSON message builders -------------------------------------------------
 
+#ifndef MUSE_DEVICE_FAMILY
+#define MUSE_DEVICE_FAMILY "gadget"
+#endif
+
+extern "C" const char muse_device_guide_md[];
+
 static cJSON *string_param(const char *description) {
     cJSON *param = cJSON_CreateObject();
     cJSON_AddStringToObject(param, "type", "string");
@@ -1416,6 +1422,12 @@ static void add_register_metadata_string(cJSON **metadata, cJSON *params,
                                          const char *key,
                                          const char *value) {
     if (!value || !value[0]) return;
+    // A control character escapes to six JSON bytes (\u00XX), which
+    // link.register has no room for. Only an SSID, which may hold any byte,
+    // can have one: leave it out rather than fail to register.
+    for (const unsigned char *c = (const unsigned char *)value; *c; c++) {
+        if (*c < 0x20) return;
+    }
     if (!*metadata) {
         *metadata = cJSON_CreateObject();
         if (!*metadata) return;
@@ -1444,10 +1456,12 @@ static char *build_register_json(void) {
     cJSON_AddStringToObject(params, "platform", "esp32");
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON_AddStringToObject(params, "version", desc ? desc->version : "unknown");
-    cJSON_AddStringToObject(params, "device_family", "link");
-    cJSON_AddStringToObject(params, "model_id", "esp-link");
+    cJSON_AddStringToObject(params, "device_family", MUSE_DEVICE_FAMILY);
+    cJSON_AddStringToObject(params, "model_id", CONFIG_MUSE_DEVICE_MODEL_ID);
     cJSON_AddBoolToObject(params, "is_wakeup_supported", false);
     cJSON *metadata = nullptr;
+    add_register_metadata_string(&metadata, params, "model_name",
+                                 CONFIG_MUSE_DEVICE_MODEL_NAME);
     add_register_metadata_string(&metadata, params, "network_ssid", wifi_ssid);
 
     cJSON *commands = cJSON_CreateObject();
@@ -1458,6 +1472,10 @@ static char *build_register_json(void) {
                 "connectivity_events: recent Wi-Fi, session and tunnel outages "
                 "with causes, as \"<N>s ago\" lines. For older history, file a "
                 "bug report",
+                nullptr, nullptr);
+    add_command(commands, "device.guide",
+                "This device's usage guide (Markdown): what it is, its "
+                "controls and limits.",
                 nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
@@ -1835,6 +1853,27 @@ static void send_device_health(
     queue_result(session_generation, request_id, result);
 }
 
+static void send_device_guide(
+    noise_ctrl_session_generation_t session_generation,
+    const char *request_id) {
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+    cJSON *guide = cJSON_CreateStringReference(muse_device_guide_md);
+    if (!cJSON_AddBoolToObject(result, "ok", true) || !payload
+        || !cJSON_AddStringToObject(payload, "format", "markdown")
+        || !cJSON_AddItemToObject(payload, "guide", guide)) {
+        cJSON_Delete(guide);
+        cJSON_Delete(result);
+        result = cJSON_CreateObject();
+        cJSON *error = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(error, "code", "out_of_memory");
+        cJSON_AddStringToObject(error, "message", "could not build the device guide");
+        if (!cJSON_AddItemToObject(result, "error", error)) cJSON_Delete(error);
+    }
+    queue_result(session_generation, request_id, result);
+}
+
 static void handle_invoke_request(
     const char *data, size_t len,
     noise_ctrl_session_generation_t session_generation) {
@@ -1910,6 +1949,8 @@ static void handle_invoke_request(
         }
     } else if (strcmp(command, "device.health") == 0) {
         send_device_health(session_generation, request_id);
+    } else if (strcmp(command, "device.guide") == 0) {
+        send_device_guide(session_generation, request_id);
     } else if (s_command_cb) {
         cJSON *result = s_command_cb(command, cmd_params, request_id,
                                      session_generation);
