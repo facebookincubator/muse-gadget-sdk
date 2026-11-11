@@ -17,11 +17,13 @@ PRODUCT_SOURCES = {
     "VOICE_PE": "voice_board.c",
     "RESPEAKER_LITE": "voice_board_respeaker_lite.c",
     "RESPEAKER_XVF3800": "voice_board_xvf3800.c",
+    "WAVESHARE_154G": "voice_board_waveshare_154g.c",
 }
 PRODUCT_STATUS = {
     "VOICE_PE": "VOICE_RING",
     "RESPEAKER_LITE": "RESPEAKER_LITE",
     "RESPEAKER_XVF3800": "NONE",
+    "WAVESHARE_154G": "WAVESHARE_EPD154G",
 }
 
 
@@ -85,6 +87,10 @@ class VoiceBoardSelectionTests(unittest.TestCase):
         cases += [
             ("RESPEAKER_XVF3800", status)
             for status in (None, "VOICE_RING", "RESPEAKER_LITE")
+        ]
+        cases += [
+            ("WAVESHARE_154G", status)
+            for status in (None, "NONE", "VOICE_RING", "RESPEAKER_LITE")
         ]
         for product, status in cases:
             with self.subTest(product=product, status=status):
@@ -162,6 +168,7 @@ class VoiceBoardSelectionTests(unittest.TestCase):
         for overlay, product in (
             ("home-assistant-voice", "VOICE_PE"),
             ("seeed-respeaker-lite", "RESPEAKER_LITE"),
+            ("waveshare-s3-epaper-154g", "WAVESHARE_154G"),
         ):
             text = (ROOT / "devices" / f"sdkconfig.{overlay}").read_text()
             self.assertIn(f"CONFIG_HOMEHUB_VOICE_BOARD_{product}=y\n", text)

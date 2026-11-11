@@ -560,12 +560,13 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_VOICE_RING
         default y if HOMEHUB_LED_BACKEND_RESPEAKER_LITE
         help
-            Hold the centre button (XIAO BOOT on Seeed reSpeaker boards),
-            speak, then release to send a voice note. The reply appears in
-            the Muse app as text unless a separate TTS integration is
-            configured. Voice PE and reSpeaker Lite retain their automatic
-            enablement for existing configurations. Other boards must enable
-            this option and select their exact audio board explicitly.
+            Hold the centre button (XIAO BOOT on Seeed reSpeaker boards, BOOT
+            on the Waveshare ESP32-S3-ePaper-1.54G), speak, then release to
+            send a voice note. The reply appears in the Muse app as text
+            unless a separate TTS integration is configured. Voice PE and
+            reSpeaker Lite retain their automatic enablement for existing
+            configurations. Other boards must enable this option and select
+            their exact audio board explicitly.
 
     choice HOMEHUB_VOICE_BOARD
         prompt "Voice audio board"
@@ -593,6 +594,10 @@ menu "ESP32 Device SDK"
 
         config HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800
             bool "Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental)"
+            depends on IDF_TARGET_ESP32S3
+
+        config HOMEHUB_VOICE_BOARD_WAVESHARE_154G
+            bool "Waveshare ESP32-S3-ePaper-1.54G"
             depends on IDF_TARGET_ESP32S3
 
     endchoice

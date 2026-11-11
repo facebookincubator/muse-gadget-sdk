@@ -53,7 +53,7 @@ session to Muse. The rest depends on the hardware.
 | **Waveshare ESP32-S3-Touch-AMOLED-1.75** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.75), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm) |
 | **Waveshare ESP32-S3-Touch-AMOLED-1.43C** | ESP32-S3 | 1.43" 466×466 round AMOLED, touch | 8 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.43C), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.43C) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-1.43c.htm) |
 | **Waveshare ESP32-S3-Touch-AMOLED-2.16** | ESP32-S3 | 2.16" 480×480 AMOLED, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16), [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) |
-| **Espressif ESP-Mosaico (experimental)** | ESP32-S31 | 2.16" 480×480 AMOLED, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/esp-mosaico/esp-mosaico-bsp), [esp-mosaico-vibe](https://github.com/espressif2022/esp-mosaico-vibe) | — |
+| **Espressif ESP-Mosaico (experimental)** | ESP32-S31 | 2.16" 480×480 AMOLED, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/esp-mosaico/esp-mosaico-bsp), [esp-mosaico-vibe](https://github.com/esp-mosaico/esp-mosaico-vibe) | — |
 | **Waveshare ESP32-S3-Touch-AMOLED-2.06** | ESP32-S3 | 2.06" 410×502 AMOLED, touch | 32 MB / 8 MB | [GitHub](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.06) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm) |
 | **OSTB EchoEar-2ST (experimental)** | ESP32-S3 rev 0.2 | 1.85" 360×360 round ST77916 LCD, touch | 16 MB / 8 MB octal (measured) | [Product](https://docs.yishierniao.cn/details/ai/echoear-2st/product.html), [setup](ostb-echoear-2st.md) | — |
 | **Espressif ESP32-S3-BOX-3** | ESP32-S3 | 2.4" 320×240 LCD, touch | 16 MB / 16 MB | [Espressif BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3), [ESP-BOX](https://github.com/espressif/esp-box) | — |
@@ -84,6 +84,7 @@ session to Muse. The rest depends on the hardware.
 | **VIEWE SmartRing-Plus** | ESP32-S3 | 1.85" 360×360 round LCD (ST77916), touch | 16 MB / 8 MB | [VIEWE GitHub](https://github.com/VIEWESMART/SmartRing-Plus), [BSP](https://components.espressif.com/components/viewesmart/smartring_plus); [setup](viewe-smartring-plus.md) | [VIEWE](https://viewedisplay.com/product/smart-ring-plus-esp32-ai-chatbot-1-8-inch-smart-touch-display/) |
 | **Waveshare ESP32-S3-Touch-LCD-1.9** | ESP32-S3 | 1.9" 170×320 LCD, touch | 16 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-LCD-1.9/Resources-And-Documents), [GitHub](https://github.com/waveshareteam/ESP32-S3-LCD-1.9) | [Waveshare](https://www.waveshare.com/esp32-s3-lcd-1.9.htm) |
 | **Waveshare ESP32-S3-Touch-LCD-3.5** | ESP32-S3 | 3.5" 320×480 LCD (ST7796), touch | 16 MB / 8 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-3.5), [xiaozhi-esp32 board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/waveshare/esp32-s3-touch-lcd-3.5) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-3.5.htm) |
+| **DFRobot UNIHIKER K10** | ESP32-S3 | 2.8" 240×320 LCD (ILI9341), no touch | 16 MB / 8 MB | [K10 setup](dfrobot-unihiker-k10.md) | [DFRobot](https://www.dfrobot.com/product-2904.html), [distributors](https://www.unihiker.com/distributors) |
 
 The experimental [OSTB EchoEar-2ST port](ostb-echoear-2st.md) targets the
 measured 16 MB flash / 8 MB PSRAM unit. Its hardware and validation limits
@@ -94,20 +95,20 @@ BQ27220 gauge; the similarly named 1.85C profile is not interchangeable.
 
 ## Features
 
-|  | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | CYD (experimental) | C3 OLED 0.42 | SenseCAP Indicator | Waveshare S3 ePaper 1.54 | Waveshare S3 ePaper 1.54G | reTerminal E1001 | reTerminal E1002 | reTerminal Sticky* | HA Voice PE | reSpeaker Lite (experimental) | reSpeaker XVF3800 (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | Waveshare S3 1.85C | Waveshare S3 1.46 | Waveshare S3 1.43 | Waveshare S3 1.43C | Waveshare S3 2.16 | Waveshare S3 2.06 | AIPI Lite | Waveshare C6 1.8 | Waveshare S3 1.8 | Waveshare C6 2.06 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | XIAO S3 1.47 | CoreS3 | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 | VN S3 1.83-inch | Waveshare LCD7 | Waveshare LCD 1.28 | Waveshare LCD 3.49 | AI Passport | EchoEar-2ST* | ATK BOX | Waveshare P4 3.5 | RoRoLee | Waveshare S3 1.9 | SpotPear v1.0 (experimental) | SmartRing-Plus | Waveshare S3 1.85B | Waveshare S3 LCD 3.5 |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Home-network tunnel | ✅ | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | ✅ | Enabled (unverified) | ✅ | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | Enabled (unverified) | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | Enabled | ✅ | Enabled | ✅ | ✅ | Enabled | Enabled (unverified) | Enabled | ✅ |
-| Shows status on | Light | Light | Screen | Screen | Screen | Text | Screen | E-paper | E-paper | E-paper | E-paper | E-paper | Light ring | RGB LED | App/log prompts | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
-| Images from Muse | — | — | ✅ | ✅ | ✅ | — | ✅ | Black and white | Four colours | Black and white | Six colours | Four grays (checked on one unit) | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | Enabled (unverified) | ✅ | — | Enabled (unverified) | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | Enabled | Unverified | ✅ | ✅ | Enabled (unverified) | Enabled | Enabled (unverified) | Enabled | ✅ |
-| UI and settings | — | — | — | — | — | — | — | — | — | — | — | Basic navigation checked | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | Experimental | ✅ | ✅ | ✅ | ✅ | No touch/menu key | ✅ | Enabled | ✅ |
-| Push-to-talk | — | — | — | — | — | — | — | — | — | — | — | AI voice note checked; screen mic unverified | ✅ | XIAO BOOT | XIAO BOOT (unverified) | ✅ | ✅ | ✅ | ✅ | — | Unverified | ✅ | ✅ | ✅ | Text replies | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | USR1 | ✅ | ✅ | ✅ | — | With an added PDM or I2S mic | ✅ | — | — | ✅ | Text replies (experimental) | Screen mic | ✅ | ✅ | ✅ | ✅ | BOOT voice note checked | Screen mic (unverified) | BOOT (unverified) | ✅ |
-| Speaker and mic | — | — | — | — | — | — | — | — | — | — | — | PDM voice note checked, no speaker | ✅ | 16 kHz I2S | 16 kHz I2S (unverified) | ✅ | ✅ | ✅ | ✅ | — | ES8311, ES7210 (mics unverified) | ✅ | ✅ | ✅ | ✅ | Mic ✅, speaker unverified | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | PDM mic, no speaker | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | ES8311, ES7210 | — | — | ✅ | ES8311 (experimental) | ES8311 / ES7210 | ES8311, one mic | ES8311 | ES8311, ES7210 | MAX98357 amp, INMP441 mic | MAX98357A / NP0557 | ES8311, one mic | ES8311 / ES7210 (unverified) | ES8311 |
-| Air sensors | — | — | — | — | — | — | D1S, D1Pro | — | Temperature, humidity | Temperature, humidity | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Video from a phone (`MUSE_VIDEO=1`) | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | ✅ | Built, not run | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | Built, not run | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Touch | — | — | — | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | Unverified | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | ✅ | — | ✅ | CST816S | ✅ |
-| Battery status | — | — | — | — | — | — | — | — | — | Voltage, estimated percent (unverified) | Voltage, estimated percent | BQ27220 %/mV and charging checked | — | — | — | ✅ | ✅ | ✅ | Voltage, estimated percent (unverified) | Voltage only (unverified) | Unverified | ✅ | Unverified | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | — | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | Voltage only | No charging state | Unverified | — | ✅ | ✅ | — | — | Unverified | BQ27220 percent, mV, charging | ✅ |
-| Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | Off | On | On | On | On | On | On | On | On | On | On | On | On | On | On | On | Off | On | On | Off | On | On | On | Off | On | On | On | On | On | Off | On | On | On | On | On | On (unverified) | On | On (unverified) | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | XIAO BOOT (talk/setup), hardware mute | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | Hold face (talk), BOOT, PWR | BOOT | BOOT (talk), hold face (talk) | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (hold to talk, click to sleep/wake, turn to review) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT or on-screen mic (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | BOOT (talk), PWR | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) | BOOT (talk) | BOOT (talk/pairing) | Screen mic (talk); BOOT inside the case | BOOT (talk), PWR (hardware) | BOOT (talk) |
+|  | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | CYD (experimental) | C3 OLED 0.42 | SenseCAP Indicator | Waveshare S3 ePaper 1.54 | Waveshare S3 ePaper 1.54G | reTerminal E1001 | reTerminal E1002 | reTerminal Sticky* | HA Voice PE | reSpeaker Lite (experimental) | reSpeaker XVF3800 (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | Waveshare S3 1.85C | Waveshare S3 1.46 | Waveshare S3 1.43 | Waveshare S3 1.43C | Waveshare S3 2.16 | Waveshare S3 2.06 | AIPI Lite | Waveshare C6 1.8 | Waveshare S3 1.8 | Waveshare C6 2.06 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | BOX-3 | StopWatch | XIAO S3 1.47 | CoreS3 | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 | VN S3 1.83-inch | Waveshare LCD7 | Waveshare LCD 1.28 | Waveshare LCD 3.49 | AI Passport | EchoEar-2ST* | ATK BOX | Waveshare P4 3.5 | RoRoLee | Waveshare S3 1.9 | SpotPear v1.0 (experimental) | SmartRing-Plus | Waveshare S3 1.85B | Waveshare S3 LCD 3.5 | UNIHIKER K10 |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Home-network tunnel | ✅ | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | ✅ | Enabled (unverified) | ✅ | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | Enabled (unverified) | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | Enabled | ✅ | Enabled | ✅ | ✅ | Enabled | Enabled (unverified) | Enabled | ✅ | Enabled (unverified) |
+| Shows status on | Light | Light | Screen | Screen | Screen | Text | Screen | E-paper | E-paper | E-paper | E-paper | E-paper | Light ring | RGB LED | App/log prompts | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Light | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar | Avatar |
+| Images from Muse | — | — | ✅ | ✅ | ✅ | — | ✅ | Black and white | Four colours | Black and white | Six colours | Four grays (checked on one unit) | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | Enabled (unverified) | ✅ | Enabled (unverified) | ✅ | — | Enabled (unverified) | — | ✅ | ✅ | ✅ | — | ✅ | ✅ | Enabled | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | Enabled | Unverified | ✅ | ✅ | Enabled (unverified) | Enabled | Enabled (unverified) | Enabled | ✅ | Enabled (unverified) |
+| UI and settings | — | — | — | — | — | — | — | — | — | — | — | Basic navigation checked | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | Experimental | ✅ | ✅ | ✅ | ✅ | No touch/menu key | ✅ | Enabled | ✅ | ✅ |
+| Push-to-talk | — | — | — | — | — | — | — | — | BOOT | — | — | AI voice note checked; screen mic unverified | ✅ | XIAO BOOT | XIAO BOOT (unverified) | ✅ | ✅ | ✅ | ✅ | — | Unverified | ✅ | ✅ | ✅ | Text replies | ✅ | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | USR1 | ✅ | ✅ | ✅ | — | With an added PDM or I2S mic | ✅ | — | — | ✅ | Text replies (experimental) | Screen mic | ✅ | ✅ | ✅ | ✅ | BOOT voice note checked | Screen mic (unverified) | BOOT (unverified) | ✅ | A (hold) |
+| Speaker and mic | — | — | — | — | — | — | — | — | ES8311 | — | — | PDM voice note checked, no speaker | ✅ | 16 kHz I2S | 16 kHz I2S (unverified) | ✅ | ✅ | ✅ | ✅ | — | ES8311, ES7210 (mics unverified) | ✅ | ✅ | ✅ | ✅ | Mic ✅, speaker unverified | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | PDM mic, no speaker | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | ES8311, ES7210 | — | — | ✅ | ES8311 (experimental) | ES8311 / ES7210 | ES8311, one mic | ES8311 | ES8311, ES7210 | MAX98357 amp, INMP441 mic | MAX98357A / NP0557 | ES8311, one mic | ES8311 / ES7210 (unverified) | ES8311 | NS4168 / ES7243E |
+| Air sensors | — | — | — | — | — | — | D1S, D1Pro | — | Temperature, humidity | Temperature, humidity | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Video from a phone (`MUSE_VIDEO=1`) | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | ✅ | Built, not run | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | Built, not run | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Touch | — | — | — | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | Unverified | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | ✅ | — | ✅ | CST816S | ✅ | — |
+| Battery status | — | — | — | — | — | — | — | — | — | Voltage, estimated percent (unverified) | Voltage, estimated percent | BQ27220 %/mV and charging checked | — | — | — | ✅ | ✅ | ✅ | Voltage, estimated percent (unverified) | Voltage only (unverified) | Unverified | ✅ | Unverified | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | — | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | Voltage only | No charging state | Unverified | — | ✅ | ✅ | — | — | Unverified | BQ27220 percent, mV, charging | ✅ | — |
+| Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | Off | On | On | On | On | On | On | On | On | On | On | On | On | On | On | On | Off | On | On | Off | On | On | On | Off | On | On | On | On | On | Off | On | On | On | On | On | On (unverified) | On | On (unverified) | On | On |
+| Buttons | BOOT | BOOT | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT (talk/setup) | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | XIAO BOOT (talk/setup), hardware mute | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | Hold face (talk), BOOT, PWR | BOOT | BOOT (talk), hold face (talk) | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (hold to talk, click to sleep/wake, turn to review) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT or on-screen mic (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | BOOT (talk), PWR | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) | BOOT (talk) | BOOT (talk/pairing) | Screen mic (talk); BOOT inside the case | BOOT (talk), PWR (hardware) | BOOT (talk) | A (talk), B (menu), BOOT (wake from power off) |
 
 *Sticky entries describe an experimental Muse port, not Seeed's factory
 firmware. On one unit the display, touch, voice notes/CJK replies, SHT40,
@@ -184,6 +185,15 @@ the same status screen, with the character in colour. Images from Muse are
 dithered to those six inks on the device (grays to black and white only),
 and each refresh takes about 30 seconds and flashes. `display.draw_url` tells
 Muse the six exact colours, the resolution and how slow it is.
+
+The Waveshare ESP32-S3-ePaper-1.54G has push-to-talk on BOOT once it is
+paired, through its ES8311 codec, microphone and speaker. Its green LED shows
+the turn, since the e-paper is too slow for it: steady while you talk,
+blinking while the agent works on the reply. Once the reply's text is in,
+its first page shows on the e-paper in ASCII, with "1/3" and so on at the
+bottom right when there are more, until the next turn; the Muse app has all of
+it. BOOT keeps its setup role while voice is not connected and while a pairing
+waits for confirmation.
 
 Both reTerminals have an SHT4x temperature and humidity sensor on board,
 which Muse reads with `sensors.read`. The board warms the sensor a little, so
@@ -619,16 +629,26 @@ edge (`no_ring`): the panel is square.
   pins for the board, `7b9cc1ac79f865983f59bb8ff3ff43eb74ff1dbe`, installed
   for `esp32s31`; `tools/muse/board.sh` looks for it in
   `~/.espressif/esp-idf-s31` (or set `IDF_EXPORT_S31` to its `export.sh`).
-- **Espressif's tools:** clone
-  [esp-mosaico-vibe](https://github.com/espressif2022/esp-mosaico-vibe) and
-  init its `submodule/esp-mosaico-utils` (default
-  `~/mosaico/esp-mosaico-vibe`, or set `MOSAICO_UTILS` to the utils checkout).
-  The build adds its ESP-Iris and app-side recovery components
-  (`components_mosaico/`, `devices/sdkconfig.muse-esp-mosaico-iris`).
+- **Espressif's tools:** they come in two generations, one per Vibe Mode
+  version, and each talks only to boards of its own (0.2's refuse 0.1 boards:
+  `esp-mosaico-vibe-mode/docs/migration-0.2.md` in their utils). Clone
+  [esp-mosaico-vibe](https://github.com/esp-mosaico/esp-mosaico-vibe) at tag
+  `v26.0.3` for Vibe Mode 0.2 or `v26.0.2` for 0.1, and init its
+  `submodule/esp-mosaico-utils` (default `~/mosaico/esp-mosaico-vibe`, or set
+  `MOSAICO_UTILS` to the utils checkout). In Vibe Mode, the matching tools'
+  `mosaico.py iris device-status` reports `product_contract`
+  (`esp-mosaico/v2` for 0.2). The build adds its ESP-Iris and app-side recovery
+  components (`components_mosaico/`, `devices/sdkconfig.muse-esp-mosaico-iris`).
+  A 0.2 checkout (it has `esp-mosaico-vibe-mode/`) adds
+  `devices/sdkconfig.muse-esp-mosaico-vibe2` on top and builds in
+  `build-muse-esp-mosaico-vibe2/`.
 - **Layout:** the first 2 MB is the board's retained layout, with Espressif's
   Vibe Mode firmware in `factory`; `partitions_mosaico.csv` keeps it and puts
-  the app in `ota_0` at 2 MB. Never flash with esptool or `idf.py flash`: they
-  write the app over Vibe Mode.
+  `nvs` at 2 MB and the app in `ota_0` after it. Vibe Mode 0.2 sits in
+  `vibe_mode` (app/test) and installs into `main_app`:
+  `partitions_mosaico_vibe2.csv`, whose header says which of its offsets Vibe
+  Mode depends on. Never flash with esptool or
+  `idf.py flash`: they write the app over Vibe Mode.
 - **Install:** `tools/muse/board.sh build mosaico` also makes an ESP-Iris
   System Update bundle, and `tools/muse/board.sh flash mosaico` installs it
   with Espressif's `mosaico.py iris system-update` (from the esp-mosaico-vibe
@@ -637,12 +657,18 @@ edge (`no_ring`): the panel is square.
   The USB-C port is the S31's high-speed USB: it shows up only while ESP-Iris
   runs, in Vibe Mode or in a Muse build. Espressif's demo firmware doesn't
   run it, so the first time, power the board on holding **AI** to start Vibe
-  Mode (a board without it: `mosaico.py recover`, powered on holding BOOT).
+  Mode. Boards whose demo (Claw) is 0.4.0 or older have no Vibe Mode:
+  install Espressif's current firmware over the cable first, with their web
+  flasher
+  ([mosaico.ai/en/firmware](https://mosaico.ai/en/firmware)) or
+  `mosaico.py recover`, both in ROM download mode (hold BOOT, briefly press
+  POWER). The board then has Vibe Mode 0.2 or later and needs the 0.2 tools.
   Muse builds then answer ESP-Iris and aren't signed (a signed app can't hand
   over to Vibe Mode, whose image it checks against our key), so later
   installs need no buttons.
 - **Video from a phone:** `MUSE_VIDEO=1 tools/muse/board.sh build|flash
-  mosaico` builds in `build-muse-esp-mosaico-video/` with
+  mosaico` builds in `build-muse-esp-mosaico-video/` (`-video-vibe2/` for
+  Vibe Mode 0.2) with
   `devices/sdkconfig.muse-video`: the phone camera or a clip over Wi-Fi
   (`../protocols/VIDEO.md`), up to 480 px shown one to one, as two bands
   decoded at once, one per core. Join Wi-Fi from the board's settings, or for
@@ -821,6 +847,7 @@ board's overlays, in order:
 | Deotaland RoRoLee | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-deotaland-rorolee`](sdkconfig.muse-deotaland-rorolee) | `tools/muse/board.sh build rorolee` |
 | VIEWE SmartRing-Plus | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-viewe-smartring-plus`](sdkconfig.muse-viewe-smartring-plus) | `tools/muse/board.sh build smartring-plus` |
 | Waveshare ESP32-S3-Touch-LCD-1.9 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-lcd19`](sdkconfig.muse-waveshare-s3-lcd19) | `tools/muse/board.sh build lcd19` |
+| DFRobot UNIHIKER K10 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-dfrobot-unihiker-k10`](sdkconfig.muse-dfrobot-unihiker-k10) | `tools/muse/board.sh build k10` |
 
 `tools/board.sh BOARD [build|flash|monitor|flash-monitor] [PORT]` builds each
 board in its own `build-<board>` directory. For the boards with the full UI, run `idf.py`
