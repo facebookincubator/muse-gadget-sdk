@@ -1466,12 +1466,10 @@ static char *build_register_json(void) {
 
     cJSON *commands = cJSON_CreateObject();
     add_command(commands, "device.health",
-                "Report Link health, including battery level (percent), "
-                "voltage, and whether it is charging or on USB power (each "
-                "null when the device has no battery or can't measure it), and "
-                "connectivity_events: recent Wi-Fi, session and tunnel outages "
-                "with causes, as \"<N>s ago\" lines. For older history, file a "
-                "bug report",
+                "Report Link health: battery level (percent), voltage, whether "
+                "it is charging or on USB power (each null if not measurable), "
+                "and connectivity_events, recent Wi-Fi, session and tunnel "
+                "outages with causes",
                 nullptr, nullptr);
     add_command(commands, "device.guide",
                 "This device's usage guide (Markdown): what it is, its "
