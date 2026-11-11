@@ -108,7 +108,7 @@ BQ27220 gauge; the similarly named 1.85C profile is not interchangeable.
 | Touch | — | — | — | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | Unverified | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | ✅ | — | ✅ | CST816S | ✅ | — |
 | Battery status | — | — | — | — | — | — | — | — | — | Voltage, estimated percent (unverified) | Voltage, estimated percent | BQ27220 %/mV and charging checked | — | — | — | ✅ | ✅ | ✅ | Voltage, estimated percent (unverified) | Voltage only (unverified) | Unverified | ✅ | Unverified | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | — | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | Voltage only | No charging state | Unverified | — | ✅ | ✅ | — | — | Unverified | BQ27220 percent, mV, charging | ✅ | — |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | Off | On | On | On | On | On | On | On | On | On | On | On | On | On | On | On | Off | On | On | Off | On | On | On | Off | On | On | On | On | On | Off | On | On | On | On | On | On (unverified) | On | On (unverified) | On | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT (talk/setup) | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | XIAO BOOT (talk/setup), hardware mute | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | Hold face (talk), BOOT, PWR | BOOT | BOOT (talk), hold face (talk) | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (hold to talk, click to sleep/wake, turn to review) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT or on-screen mic (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | BOOT (talk), PWR | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) | BOOT (talk) | BOOT (talk/pairing) | Screen mic (talk); BOOT inside the case | BOOT (talk), PWR (hardware) | BOOT (talk) | A (talk), B (menu), BOOT (wake from power off) |
+| Buttons | BOOT | BOOT | BOOT | BOOT | BOOT | BOOT | Top | BOOT | BOOT (talk/setup), PWR (tap: next page, hold: turn the screen) | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | XIAO BOOT (talk/setup), hardware mute | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | Hold face (talk), BOOT, PWR | BOOT | BOOT (talk), hold face (talk) | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (hold to talk, click to sleep/wake, turn to review) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT or on-screen mic (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | BOOT (talk), PWR | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) | BOOT (talk) | BOOT (talk/pairing) | Screen mic (talk); BOOT inside the case | BOOT (talk), PWR (hardware) | BOOT (talk) | A (talk), B (menu), BOOT (wake from power off) |
 
 *Sticky entries describe an experimental Muse port, not Seeed's factory
 firmware. On one unit the display, touch, voice notes/CJK replies, SHT40,
@@ -190,10 +190,20 @@ The Waveshare ESP32-S3-ePaper-1.54G has push-to-talk on BOOT once it is
 paired, through its ES8311 codec, microphone and speaker. Its green LED shows
 the turn, since the e-paper is too slow for it: steady while you talk,
 blinking while the agent works on the reply. Once the reply's text is in,
-its first page shows on the e-paper in ASCII, with "1/3" and so on at the
-bottom right when there are more, until the next turn; the Muse app has all of
-it. BOOT keeps its setup role while voice is not connected and while a pairing
-waits for confirmation.
+its first page shows on the e-paper in GNU Unifont's 8x16 letters (Latin
+with its accents, Greek, Cyrillic, Armenian and Georgian), with "1/3" and so
+on at the bottom right when there are more, until the next turn; the Muse app
+has all of it. BOOT keeps its setup role while voice is not connected and
+while a pairing waits for confirmation.
+
+On the Waveshare ESP32-S3-ePaper-1.54G, hold PWR for a second to turn the
+screen a quarter turn clockwise, status and images alike. The board keeps the
+turn across restarts. With voice on, a short press of PWR shows the last
+reply's next page, or the page an image from Muse covered, and both beep. The
+press that switches the board on from the battery doesn't count. A change that
+leaves most of the screen alone, such as the status line, refreshes only a
+window round it, so the rest doesn't flash; it takes as long as a full
+refresh.
 
 Both reTerminals have an SHT4x temperature and humidity sensor on board,
 which Muse reads with `sensors.read`. The board warms the sensor a little, so

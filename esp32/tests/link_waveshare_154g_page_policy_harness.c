@@ -17,9 +17,11 @@
 // Host harness for the 1.54G's reply page against display.draw_url: the
 // page task draws nothing while an image downloads but keeps the request for
 // when it ends, holds the download slot while it draws, and leaves an image
-// drawn this turn up until the next turn. The runner extracts the production rendering and page task code into
+// drawn this turn up until the next turn. A PWR tap during a download is
+// dropped, and the first tap after a kept image shows the page it covered.
+// The runner extracts the production rendering and page task code into
 // page_render.inc and page_task.inc; FreeRTOS, the display, the download
-// slot and Muse's captions are fakes here.
+// slot and Muse's captions are fakes here; muse_text.c is the real one.
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -27,6 +29,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "fonts/epaper_154g_caption_font.h"
 #include "image_fetch.h"
 #include "led_status.h"
 #include "muse_chat.h"
@@ -61,6 +64,7 @@ static bool s_claimed;         // the page task holds it
 static unsigned s_image_bands; // bands downloads have drawn
 static int s_page_bands, s_draw_done, s_animation;
 static const char *s_reply;    // Muse's reply text, NULL for none yet
+static const char *s_reply_more; // its second page, from a tenth of a second in
 
 bool image_fetch_claim(void) {
     if (s_fetching || s_claimed) return false;
@@ -91,13 +95,11 @@ void led_status_show_animation(void) {
 }
 
 bool muse_hatch_turn_caption(size_t played, char *out, size_t cap) {
-    (void)played;
     if (!s_reply) return false;
-    snprintf(out, cap, "%s", s_reply);
+    bool more = s_reply_more && played >= VOICE_MIC_RATE / 10;
+    snprintf(out, cap, "%s", more ? s_reply_more : s_reply);
     return true;
 }
-
-void muse_text_to_ascii(char *s, size_t cap) { (void)s, (void)cap; }
 
 #include "page_render.inc"
 #include "page_task.inc"
@@ -112,7 +114,7 @@ static void reset_counts(void) { s_page_bands = s_draw_done = s_animation = 0; }
 // voice.c's states for a voice note whose reply is `reply`, up to Muse
 // speaking it; the page task runs after each.
 static void turn_until_speaking(const char *reply) {
-    s_reply = NULL;
+    s_reply = s_reply_more = NULL;
     page_follow_voice(LED_VOICE_LISTENING);
     (void)page_serve();
     page_follow_voice(LED_VOICE_TRANSCRIBING);
@@ -137,6 +139,7 @@ static void image_drawn(void) {
 int main(void) {
     s_cache = s_cache_store;
     s_strip = s_strip_store;
+    muse_text_keep_latin();  // as voice_board_init() does
     static int page_task_handle;
     s_page_task = &page_task_handle;
     (void)page_task;
@@ -205,8 +208,59 @@ int main(void) {
     assert(!page_serve());
     assert(s_animation == 0 && s_page_bands == 0);
 
+    // A two-page reply, its first page up.
+    reset_counts();
+    turn_until_speaking("Here is the radar map");
+    s_reply_more = "and the forecast";
+    speak_and_end();
+    assert(s_cache_pages == 2 && s_cache_shown == 0 && s_draw_done == 1);
+
+    // A PWR tap while an image downloads draws nothing, and nothing waits
+    // for the download: the image would cover the page the tap asks for.
+    reset_counts();
+    s_fetching = true;
+    page_tap();
+    assert(!page_serve());
+    assert(s_page_bands == 0 && s_draw_done == 0 && s_cache_shown == 0);
+    s_image_bands += 13;
+    s_fetching = false;
+    assert(!page_serve());
+    assert(s_page_bands == 0 && s_draw_done == 0);
+
+    // The first tap after the image shows the page it covered, not the next.
+    page_tap();
+    assert(!page_serve());
+    assert(s_page_bands > 0 && s_draw_done == 1 && s_cache_shown == 0);
+    assert(!s_claimed);
+
+    // The next taps turn the page, round to the first after the last.
+    page_tap();
+    assert(!page_serve());
+    assert(s_draw_done == 2 && s_cache_shown == 1);
+    page_tap();
+    assert(!page_serve());
+    assert(s_draw_done == 3 && s_cache_shown == 0);
+
+    // Accented letters reach the page, which has them; curly quotes still
+    // get their stand-ins.
+    reset_counts();
+    turn_until_speaking("Caf\u00e9 \u201cma\u00f1ana\u201d");
+    speak_and_end();
+    assert(s_draw_done == 1);
+    assert(!strcmp(s_cache, "Caf\u00e9 \"ma\u00f1ana\""));
+
+    // A one-page reply has nothing to turn.
+    reset_counts();
+    turn_until_speaking("Done");
+    speak_and_end();
+    reset_counts();
+    page_tap();
+    assert(!page_serve());
+    assert(s_page_bands == 0 && s_draw_done == 0);
+
     puts("PASS waveshare 1.54G page vs display.draw_url: no drawing during a download, "
          "the request kept for when it ends, slot held while drawing, "
-         "a same-turn image kept until the next turn");
+         "a same-turn image kept until the next turn, a tap during a download "
+         "dropped, the first tap after an image shows the page it covered");
     return 0;
 }
