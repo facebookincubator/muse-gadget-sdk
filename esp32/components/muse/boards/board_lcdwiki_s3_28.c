@@ -182,7 +182,7 @@ static esp_err_t tp_read(esp_lcd_touch_handle_t tp, esp_lcd_touch_point_data_t *
     *count = 0;
     const uint8_t reg = TP_REG_POINTS;
     uint8_t d[5];
-    if (i2c_master_transmit_receive(s_tp_dev, &reg, 1, d, sizeof(d), 20) != ESP_OK) {
+    if (i2c_master_transmit_receive(s_tp_dev, &reg, 1, d, sizeof(d), 5) != ESP_OK) {
         return ESP_OK;
     }
     int fingers = d[0] & 0x0F;

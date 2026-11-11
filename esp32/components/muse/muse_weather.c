@@ -230,6 +230,8 @@ static bool fetch_weather(muse_weather_t *out)
         .url = MUSE_WEATHER_URL,
         .method = HTTP_METHOD_GET,
         .timeout_ms = 10000,
+        .buffer_size = 2048,
+        .buffer_size_tx = 1024,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = on_http_data,
         .user_data = &sink,
