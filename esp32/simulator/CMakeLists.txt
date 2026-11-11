@@ -209,6 +209,24 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py")
+    # Reuse the simulator adapters, but include the production UI directly so
+    # the regression can check the rendered label's font and geometry.
+    get_target_property(caption_sources muse_simulator SOURCES)
+    list(REMOVE_ITEM caption_sources src/main.c "${MUSE_COMPONENT_DIR}/muse_ui.c")
+    add_executable(muse_caption_layout_test tests/caption_layout_harness.c ${caption_sources})
+    get_target_property(caption_includes muse_simulator INCLUDE_DIRECTORIES)
+    get_target_property(caption_libraries muse_simulator LINK_LIBRARIES)
+    target_include_directories(muse_caption_layout_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_caption_layout_test PRIVATE ${caption_libraries})
+    get_target_property(caption_compile_options muse_simulator COMPILE_OPTIONS)
+    target_compile_options(muse_caption_layout_test PRIVATE ${caption_compile_options})
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_caption_layout_test PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_caption_layout COMMAND muse_caption_layout_test)
+    set_tests_properties(muse_caption_layout PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
     find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
     add_test(
         NAME muse_simulator_headless

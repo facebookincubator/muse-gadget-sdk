@@ -131,7 +131,9 @@ float muse_turn_progress(size_t played, int *message);
  * line wraps again on screen and a page holds exactly its lines. Every reply
  * is measured: one with CJK or accented letters also keeps to their font's
  * page (muse_state_page), but its pages without any show in this font. A
- * NULL glyph_px turns it off. Set before any reply is paged.
+ * NULL glyph_px turns it off. Set before any reply is paged; the full UI sets
+ * it again when the speaker switches its reply layout, and pages after that
+ * use the new width.
  */
 void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next));
 
