@@ -1330,3 +1330,61 @@ def test_only_integral_output_flush_counts_report_discarded_audio(discarded, exp
 
     asyncio.run(asyncio.wait_for(scenario(), 5))
     assert events == [ResponseStarted("r1"), AudioChunk("r1", 0, HALF), *expected]
+
+
+@pytest.mark.parametrize("response_id", [None, "r1"], ids=["unnamed", "same_id"])
+def test_held_words_of_a_reply_whose_only_audio_was_replaced_are_dropped(response_id):
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech(), created(response_id), audio("p1", TONE), said("old"),
+            created(response_id), audio("p2", HALF), turn(),
+        ])))
+        await wait_until(lambda: output.pcm == HALF)
+
+    assert run_call(script) == [
+        ResponseStarted(response_id), ResponseStarted(response_id), Working(True),
+        AudioChunk(response_id, 0, HALF),
+    ]
+
+
+def test_held_words_of_a_reply_without_audio_survive_another_replys_drop():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech(), created(None), said("kept"), created(None), audio("p1", TONE),
+            created("r2"), audio("p2", HALF), turn(),
+        ])))
+        await wait_until(lambda: output.pcm == HALF)
+
+    assert run_call(script) == [
+        ResponseStarted(None), ResponseStarted(None), ResponseStarted("r2"), Working(True),
+        TranscriptDelta(None, "kept"), AudioChunk("r2", 0, HALF),
+    ]
+
+
+def test_a_dropped_streams_trailing_silence_keeps_a_later_replys_held_words():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech("item-1"), turn("item-0", "sub-0"), created("r1"), audio("p1", TONE),
+            speech("item-2"), created("r2"), said("kept"), audio("p1", b"\0" * len(TONE)),
+            created("r3"), audio("p2", TONE), audio("p3", HALF), turn("item-2", "sub-2"),
+        ])))
+        await wait_until(lambda: output.pcm == HALF)
+
+    assert run_call(script) == [
+        Working(True), ResponseStarted("r1"), ResponseStarted("r2"), ResponseStarted("r3"),
+        TranscriptDelta("r2", "kept"), AudioChunk("r3", 0, HALF),
+    ]
+
+
+def test_held_words_of_an_unnamed_reply_are_dropped_with_its_replaced_audio():
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, b"".join(map(line, [
+            speech(), {"type": "response.created"}, audio("p1", TONE), said("old"),
+            {"type": "response.created"}, said("new"), audio("p2", HALF), turn(),
+        ])))
+        await wait_until(lambda: output.pcm == HALF)
+
+    assert run_call(script) == [
+        ResponseStarted(None), ResponseStarted(None), Working(True),
+        TranscriptDelta(None, "new"), AudioChunk(None, 0, HALF),
+    ]

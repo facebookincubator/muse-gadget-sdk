@@ -179,6 +179,12 @@ VoiceEvent = Union[ResponseStarted, TranscriptDelta, TranscriptDone, ResponseDon
                    AudioChunk, Working, PlaybackFlushed]
 
 
+@dataclass(frozen=True)
+class _HeldWords:
+    event: TranscriptDelta | TranscriptDone
+    providers: list[str]
+
+
 class VoiceCall:
     def __init__(self, session, *, device_id: str, thread_id: str | None = None,
                  half_duplex: bool = True,
@@ -228,7 +234,7 @@ class VoiceCall:
         self._reply_response: str | None = None
         self._open_response: str | None = None
         self._open_unmarked = False
-        self._waiting: list[tuple[bytearray, str | None] | TranscriptDelta | TranscriptDone] = []
+        self._waiting: list[tuple[bytearray, str | None] | _HeldWords] = []
         self._waiting_bytes = 0  # held PCM
         self._waiting_text_bytes = 0
         self._waiting_audio = False
@@ -509,7 +515,7 @@ class VoiceCall:
                         if isinstance(held, tuple):
                             self._queue_pcm(bytes(held[0]), held[1])
                         else:
-                            self._emit(held)
+                            self._emit(held.event)
                 self._clear_waiting()
             pcm = audio_from_event(event)
             if pcm:
@@ -517,15 +523,13 @@ class VoiceCall:
                 # them without activating audio or renewing either deadline.
                 if not any(pcm) and not self._received_audio and not self._waiting_audio:
                     if self.ready.is_set():
-                        self._reply_gate.audio(event)
-                        self._audio_response_id(event)
+                        if self._reply_gate.audio(event) != DROP:
+                            self._audio_response_id(event)
                         self._apply_reply_flush()
                     continue
                 if not self.ready.is_set():
                     raise ValueError("audio received before voice readiness")
                 verdict = self._reply_gate.audio(event)
-                # Bound before the flush, so the response's held words survive
-                # while this provider waits.
                 response_id = None if verdict == DROP else self._audio_response_id(event)
                 self._apply_reply_flush()
                 if verdict == DROP:
@@ -606,7 +610,9 @@ class VoiceCall:
     def _words(self, event: TranscriptDelta | TranscriptDone) -> None:
         verdict = self._reply_gate.words()
         if verdict == HOLD:
-            self._hold(event, len(event.text.encode("utf-8", "surrogatepass")))
+            # Each response.created replaces this list, even if its ID repeats.
+            held = _HeldWords(event, self._reply_gate.words_ids)
+            self._hold(held, len(event.text.encode("utf-8", "surrogatepass")))
         elif verdict == PLAY:
             self._emit(event)
 
@@ -675,18 +681,13 @@ class VoiceCall:
             self._flush()
         elif waiting:
             if self._reply_gate.holding:
-                # A new provider replaces held PCM. Words stay held while any
-                # provider of their response is not dropped, and later
-                # responses may already have words waiting for their own audio.
-                stale_responses = {response_id for source, response_id in self._audio_sources.items()
-                                   if self._reply_gate.ids[source] == STALE}
-                stale_responses -= {response_id for source, response_id in self._audio_sources.items()
-                                    if self._reply_gate.ids[source] != STALE}
                 self._waiting = [held for held in self._waiting
                                  if not isinstance(held, tuple)
-                                 and held.response_id not in stale_responses]
+                                 and (not held.providers or any(
+                                     self._reply_gate.ids[source] != STALE
+                                     for source in held.providers))]
                 self._waiting_bytes = 0
-                self._waiting_text_bytes = sum(len(held.text.encode("utf-8", "surrogatepass"))
+                self._waiting_text_bytes = sum(len(held.event.text.encode("utf-8", "surrogatepass"))
                                                for held in self._waiting)
                 self._waiting_audio = False
             else:
