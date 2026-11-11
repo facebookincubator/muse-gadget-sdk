@@ -39,10 +39,11 @@ class GenericPowerTest(unittest.TestCase):
         core = str(Path(cls.tmp.name) / "core.o")
         subprocess.run(cc + includes + ["-DTEST_CORE", "-c", harness, "-o", core], check=True)
         subprocess.run(cc + includes + [harness, core, "-o", str(Path(cls.tmp.name) / "generic")], check=True)
+        subprocess.run(cc + includes + ["-DTEST_TRIVIA", harness, core, "-o", str(Path(cls.tmp.name) / "trivia")], check=True)
         core_tests.PowerTest.setUpClass()
         cls.addClassCleanup(core_tests.PowerTest.tearDownClass)
     def run_commands(self, *commands, profile="175c", target="generic"):
-        proc = subprocess.run([str(core_tests.PowerTest.binary if target == "watcher" else Path(self.tmp.name) / "generic"), profile], input="\n".join(commands) + "\n",
+        proc = subprocess.run([str(core_tests.PowerTest.binary if target == "watcher" else Path(self.tmp.name) / ("trivia" if profile == "trivia" else "generic")), profile], input="\n".join(commands) + "\n",
                               text=True, capture_output=True, timeout=3, check=True)
         self.assertEqual(proc.stderr, "")
         return [row for line in proc.stdout.splitlines() if line.startswith("PTEST ")
@@ -52,8 +53,8 @@ class GenericPowerTest(unittest.TestCase):
         self.assertEqual(rows[0]["message"], "charging_off_not_supported")
         self.assertEqual(rows[1]["state"], "idle")
     def test_charging_lifecycle(self):
-        for board in ("175c", "216"):
-            for ending, state in (("advance 90000", "complete"), ("poll >ptest.abort", "aborted"),
+        for board in ("175c", "216", "trivia"):
+            for ending, state in (("advance 2000000", "complete"), ("poll >ptest.abort", "aborted"),
                                   ("error", "error"), ("guard", "error")):
                 with self.subTest(board=board, ending=ending):
                     rows = self.run_commands("charging 1", arm(usb_powered=1, charging_off=1),
@@ -64,7 +65,7 @@ class GenericPowerTest(unittest.TestCase):
                     if ending == "guard":
                         self.assertEqual(rows[-1]["error"], 263)  # ESP_ERR_TIMEOUT
     def test_charging_write_failures(self):
-        for board in ("175c", "216"):
+        for board in ("175c", "216", "trivia"):
             with self.subTest(board=board, failure="disable"):
                 # The disable write fails at run start: the run ends as error with charging on.
                 rows = self.run_commands(arm(usb_powered=1, charging_off=1), "pmufail 1", "advance 1500",
@@ -75,16 +76,16 @@ class GenericPowerTest(unittest.TestCase):
                 # retries until charging is back, and the next run is unaffected.
                 rows = self.run_commands(arm(usb_powered=1, charging_off=1), "advance 1500", "capture",
                                          "pmufail 3", "error", "charging 0", ">ptest.results", "guard",
-                                         "charging 1", arm(usb_powered=1), "advance 90000", ">ptest.results",
+                                         "charging 1", arm(usb_powered=1), "advance 2000000", ">ptest.results",
                                          profile=board)
                 self.assertEqual((rows[1]["state"], rows[1]["restore_error"]), ("error", -1))
                 self.assertEqual(rows[-1]["state"], "complete")
     def test_guard_expiry_does_not_poison_next_run(self):
-        for board in ("175c", "216"):
+        for board in ("175c", "216", "trivia"):
             with self.subTest(board=board):
                 rows = self.run_commands(arm(usb_powered=1, charging_off=1), "advance 1500",
                                          "guard", "charging 1", ">ptest.results", arm(usb_powered=1),
-                                         "advance 90000", ">ptest.results", profile=board)
+                                         "advance 2000000", ">ptest.results", profile=board)
                 self.assertEqual((rows[1]["state"], rows[1]["error"]), ("error", 263))
                 self.assertEqual(rows[-1]["state"], "complete")
     def test_usb_sleep_rejected_at_arm(self):
@@ -94,10 +95,23 @@ class GenericPowerTest(unittest.TestCase):
     def test_usb_run_and_capture(self):
         # I2C fakes assert at every access; status/results also run inside capture.
         for board in ("175c", "216", "aipi"):
-            for ending, state in (("advance 90000", "complete"), ("poll >ptest.abort", "aborted")):
+            for ending, state in (("advance 2000000", "complete"), ("poll >ptest.abort", "aborted")):
                 with self.subTest(board=board, ending=ending):
                     rows = self.run_commands(arm(usb_powered=1), "advance 1500", "capture",
                                              "poll >ptest.status", ">ptest.results", ending, ">ptest.results", profile=board)
                     self.assertEqual((rows[1]["type"], rows[1]["state"], rows[1]["usb"]), ("status", "running", True))
                     self.assertEqual(rows[-1]["state"], state)
                     self.assertTrue(any(r["measure_start_us"] for r in rows[-1]["records"]))
+
+    def test_triviapod_motor_guards_and_schedule(self):
+        self.run_commands("motorcases", profile="trivia")
+
+    def test_triviapod_plan_effective_durations(self):
+        rows = self.run_commands(arm(usb_powered=1, charging_off=1), profile="trivia")
+        plan = {s["id"]: s for s in rows[0]["plan"]}
+        self.assertEqual(plan["motor_pulses_30_70ms"]["capture_ms"], 302000)
+        self.assertEqual(plan["motor_idle_post"]["capture_ms"], 302000)
+        self.assertEqual(plan["cpu_fixed_80_idle"]["capture_ms"], 1000)
+        self.assertGreater(rows[0]["max_duration_ms"], 900000)
+        rows = self.run_commands(arm(usb_powered=1, settle_ms=6000, capture_ms=20000), profile="trivia")
+        self.assertEqual(rows[0]["message"], "board_state_duration_invalid")

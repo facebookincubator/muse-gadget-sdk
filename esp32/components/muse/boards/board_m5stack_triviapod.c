@@ -75,6 +75,7 @@
 
 #include "muse_audio.h"
 #include "muse_board.h"
+#include "muse_triviapod_power.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "soc/spi_periph.h"
@@ -212,7 +213,7 @@ static const char *TAG = "board";
 
 static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_pmic, s_ioe, s_tp;
-static SemaphoreHandle_t s_ioe_lock;
+static SemaphoreHandle_t s_ioe_lock, s_pmic_lock;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static const audio_codec_if_t *s_codec;
@@ -268,10 +269,15 @@ static esp_err_t reg_write(i2c_master_dev_handle_t dev, uint8_t reg, const uint8
 
 static esp_err_t pmic_update(uint8_t reg, uint8_t mask, uint8_t bits)
 {
-    uint8_t v;
-    ESP_RETURN_ON_ERROR(reg_read(s_pmic, reg, &v, 1), TAG, "pmic read %02x", reg);
+    xSemaphoreTake(s_pmic_lock, portMAX_DELAY);
+    uint8_t v = 0, actual;
+    esp_err_t err = reg_read(s_pmic, reg, &v, 1);
     uint8_t want = (v & ~mask) | (bits & mask);
-    return want == v ? ESP_OK : reg_write(s_pmic, reg, &want, 1);
+    if (!err && want != v) { err = reg_write(s_pmic, reg, &want, 1); }
+    if (!err) { err = reg_read(s_pmic, reg, &actual, 1); }
+    if (!err && actual != want) { err = ESP_FAIL; }
+    xSemaphoreGive(s_pmic_lock);
+    return err;
 }
 
 /* M5Unified's M5PM1_Class::setLedEnLevel controls PWR_CFG bit4.
@@ -421,6 +427,7 @@ static const audio_codec_gpio_if_t s_ioe_gpio = {
 
 static esp_err_t add_device(uint8_t addr, uint32_t hz, i2c_master_dev_handle_t *dev)
 {
+    if (*dev) { return ESP_OK; }
     const i2c_device_config_t cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = addr,
@@ -461,10 +468,11 @@ static void imu_rest(void)
     i2c_master_bus_rm_device(imu);
 }
 
-static esp_err_t init(void)
+/* Shared by early recovery and the full BSP initialization. No resets here. */
+static esp_err_t power_i2c_init(void)
 {
-    s_ioe_lock = xSemaphoreCreateMutex();
-    ESP_RETURN_ON_FALSE(s_ioe_lock, ESP_ERR_NO_MEM, TAG, "ioe lock");
+    if (!s_pmic_lock) { s_pmic_lock = xSemaphoreCreateMutex(); }
+    ESP_RETURN_ON_FALSE(s_pmic_lock, ESP_ERR_NO_MEM, TAG, "pmic lock");
     const i2c_master_bus_config_t i2c_cfg = {
         .i2c_port = I2C_NUM_0,
         .sda_io_num = I2C_SDA,
@@ -473,8 +481,78 @@ static esp_err_t init(void)
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = true,
     };
-    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_cfg, &s_i2c), TAG, "i2c");
+    if (!s_i2c) { ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_cfg, &s_i2c), TAG, "i2c"); }
     ESP_RETURN_ON_ERROR(add_device(PMIC_ADDR, 100000, &s_pmic), TAG, "pmic");
+    return ESP_OK;
+}
+
+esp_err_t muse_triviapod_charge(bool enabled)
+{
+    ESP_RETURN_ON_ERROR(power_i2c_init(), TAG, "charge bus");
+    /* M5PM1/M5Unified: PWR_CFG 0x06 bit0, not the AXP2101 register. */
+    return pmic_update(PMIC_PWR_CFG, BIT(0), enabled ? BIT(0) : 0);
+}
+
+#if CONFIG_MUSE_POWER_TEST
+/* Serialize PWM writes with the amp/touch/rail RMWs. Only IO9 is configured;
+ * PWM frequency is shared, but no other PWM channel is used by this image. */
+esp_err_t muse_triviapod_motor(bool enabled)
+{
+    ESP_RETURN_ON_ERROR(power_i2c_init(), TAG, "motor bus");
+    if (!s_ioe_lock) { s_ioe_lock = xSemaphoreCreateMutex(); }
+    ESP_RETURN_ON_FALSE(s_ioe_lock, ESP_ERR_NO_MEM, TAG, "motor lock");
+    ESP_RETURN_ON_ERROR(add_device(IOE_ADDR, 100000, &s_ioe), TAG, "motor ioe");
+    /* First attempt PWM off, even when a later configuration/frequency read
+     * fails. Repeat it at the end on error. Never let an unrelated failed
+     * configuration gate the stop write. Both matched/on schedules do this. */
+    xSemaphoreTake(s_ioe_lock, portMAX_DELAY);
+    uint8_t zero[2] = {0}, actual[2] = {0};
+    esp_err_t err = reg_write(s_ioe, IOE_PWM1_DUTY, zero, 2);
+    esp_err_t e = reg_read(s_ioe, IOE_PWM1_DUTY, actual, 2);
+    if (!err) { err = e ? e : memcmp(zero, actual, 2) ? ESP_FAIL : ESP_OK; }
+    xSemaphoreGive(s_ioe_lock);
+
+    const uint8_t regs[] = {IOE_OUT, IOE_OD, IOE_MODE};
+    for (size_t i = 0; i < sizeof(regs); i++) {
+        e = ioe_update(regs[i], IOE_MOTOR, regs[i] == IOE_MODE ? IOE_MOTOR : 0);
+        if (!err) { err = e; }
+    }
+    xSemaphoreTake(s_ioe_lock, portMAX_DELAY);
+    for (size_t i = 0; i < sizeof(regs); i++) {
+        e = reg_read(s_ioe, regs[i], actual, 2);
+        uint16_t value = actual[0] | actual[1] << 8;
+        if (!e && (value & IOE_MOTOR) != (regs[i] == IOE_MODE ? IOE_MOTOR : 0)) { e = ESP_FAIL; }
+        if (!err) { err = e; }
+    }
+    /* Also run this in matched idle: same scheduling and I2C work, no drive. */
+    uint8_t hz[] = {0xd0, 0x07}; /* 2000 Hz, M5IOE1 PWM_FREQ 0x25 */
+    e = reg_write(s_ioe, 0x25, hz, 2);
+    if (!err) { err = e; }
+    e = reg_read(s_ioe, 0x25, actual, 2);
+    if (!e && memcmp(hz, actual, 2)) { e = ESP_FAIL; }
+    if (!err) { err = e; }
+    uint8_t duty[] = {enabled && !err ? 0x99 : 0, enabled && !err ? 0x89 : 0};
+    e = reg_write(s_ioe, IOE_PWM1_DUTY, duty, 2);
+    if (!err) { err = e; }
+    e = reg_read(s_ioe, IOE_PWM1_DUTY, actual, 2);
+    if (!e && memcmp(duty, actual, 2)) { e = ESP_FAIL; }
+    if (!err) { err = e; }
+    xSemaphoreGive(s_ioe_lock);
+    return err;
+}
+void muse_triviapod_pause_static(bool pause)
+{
+    /* Freeze pixels without cutting the AMOLED/touch rails. */
+    if (pause) { esp_lv_adapter_pause(-1); }
+    else { esp_lv_adapter_resume(); }
+}
+#endif
+
+static esp_err_t init(void)
+{
+    ESP_RETURN_ON_ERROR(muse_triviapod_charge(true), TAG, "restore charging");
+    if (!s_ioe_lock) { s_ioe_lock = xSemaphoreCreateMutex(); }
+    ESP_RETURN_ON_FALSE(s_ioe_lock, ESP_ERR_NO_MEM, TAG, "ioe lock");
     ESP_RETURN_ON_ERROR(add_device(IOE_ADDR, 100000, &s_ioe), TAG, "ioe");
     ESP_RETURN_ON_ERROR(add_device(TP_ADDR, 400000, &s_tp), TAG, "touch");
 

@@ -68,9 +68,32 @@ class KM003CPtestTest(unittest.TestCase):
         with patch.object(tool.time, "monotonic", side_effect=lambda: clock[0]):
             recorder.run()
         self.assertEqual(len(waits), 4)
+        self.assertEqual(recorder.samples[0][1], -10000)
         self.assertTrue(all(w > 0.01 for w in waits), waits)  # no back-to-back catch-up reads
         times = [s[0] for s in recorder.samples]
         self.assertTrue(all(b - a >= 0.04 for a, b in zip(times, times[1:])), times)
+
+    def test_jitter_breaks_phase_lock_without_burst_reads(self):
+        clock, waits = [0.0], []
+        meter = Mock()
+        meter.read.side_effect = lambda: Mock(host_time_s=clock[0], ibus_a=-0.01, vbus_v=5.0)
+        recorder = tool.Recorder(meter, 20, 0.01)
+        recorder.stopped = Mock()
+        recorder.stopped.is_set.side_effect = lambda: meter.read.call_count >= 200
+        recorder.stopped.wait.side_effect = lambda t: (waits.append(t), clock.__setitem__(0, clock[0] + t))
+        with patch.object(tool.time, "monotonic", side_effect=lambda: clock[0]):
+            recorder.run()
+        self.assertTrue(all(0.0399 < w < 0.0601 for w in waits))
+        self.assertGreater(max(waits) - min(waits), 0.015)
+        phases = [round((t % .05) * 1000) for t, _, _ in recorder.samples]
+        self.assertGreater(len(set(phases)), 25)
+
+    def test_signed_raw_current_has_magnitude_summaries(self):
+        samples = [(i * .05, -10000, 5.2) for i in range(101)]
+        result = tool.summarise(samples, {"start": 0, "end": 5}, 1, 20)
+        self.assertEqual(result["mean_uA"], 10000)
+        self.assertAlmostEqual(result["mean_power_mW"], 52)
+        self.assertEqual(samples[0][1], -10000)
 
     def test_offset_and_drift(self):
         records = {("idle", 0): dict(id="idle", repeat=0, measure_start_us=2000000, end_us=4000000)}
