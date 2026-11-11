@@ -605,7 +605,7 @@ class VoiceCall:
     def _words(self, event: TranscriptDelta | TranscriptDone) -> None:
         verdict = self._reply_gate.words()
         if verdict == HOLD:
-            self._hold(event, len(event.text.encode()))
+            self._hold(event, len(event.text.encode("utf-8", "surrogatepass")))
         elif verdict == PLAY:
             self._emit(event)
 
@@ -685,7 +685,8 @@ class VoiceCall:
                                  if not isinstance(held, tuple)
                                  and held.response_id not in stale_responses]
                 self._waiting_bytes = 0
-                self._waiting_text_bytes = sum(len(held.text.encode()) for held in self._waiting)
+                self._waiting_text_bytes = sum(len(held.text.encode("utf-8", "surrogatepass"))
+                                               for held in self._waiting)
                 self._waiting_audio = False
             else:
                 self._clear_waiting()

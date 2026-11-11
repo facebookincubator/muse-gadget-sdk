@@ -1231,3 +1231,31 @@ def test_queued_audio_kept_through_a_failing_flush_is_reported_when_discarded(pa
 
     asyncio.run(asyncio.wait_for(scenario(), 5))
     assert events == [ResponseStarted("r1"), AudioChunk("r1", 0, TONE), PlaybackFlushed(("r1",))]
+
+
+@pytest.mark.parametrize("words, expected", [
+    ([said("Look \ud83d"), said("\ude00")],
+     [TranscriptDelta("r1", "Look \ud83d"), TranscriptDelta("r1", "\ude00")]),
+    ([transcript("Look \ud83d")], [TranscriptDone("r1", "Look \ud83d")]),
+], ids=["split_emoji", "transcript_done"])
+def test_held_surrogates_survive_provider_replacement(words, expected):
+    events = []
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = Output()
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=events.append)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, b"".join(map(line, [
+                speech(), created("r1"), audio("p1", TONE), *words,
+                audio("p2", HALF), turn(),
+            ])), end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await task == "remote_end"
+            assert output.pcm == HALF
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert events == [
+        ResponseStarted("r1"), Working(True), *expected, AudioChunk("r1", 0, HALF),
+    ]
