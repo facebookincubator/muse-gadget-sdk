@@ -284,8 +284,8 @@ listed here. Everything else is internal and can change.
 
 - `service.Service` keeps a paired device connected to its Muse. It fetches the
   device's VMs, connects, reconnects with backoff and rotates the device token.
-- `Service(identity, executor, sdk_token=None, display_name=...)` is a
-  dataclass. A dataclass subclass can add fields with defaults. `executor`
+- `Service(identity, executor, sdk_token=None, display_name=..., model_id=...,
+  model_name=..., guide=...)` is a dataclass. A dataclass subclass can add fields with defaults. `executor`
   is an `executor.Executor` instance.
 - `await Service.run()` runs until `Service.stop()` is called or `serve()`
   returns `Outcome.STOPPED`.
@@ -316,21 +316,22 @@ listed here. Everything else is internal and can change.
   the defaults are `muse-gadget-linux` and `Linux gadget`.
 - `guide` is the Markdown `device.guide` returns, at most 4096 bytes. When
   it's set, the session advertises `device.guide` and answers it itself.
-  `Service.describe()` sets the Linux client's own guide
+  `Service`'s default is the Linux client's own guide
   (`device_guide.default_guide()`, from `data/guide.md`); a gadget that
   changes what the device does should set its own.
   - `data/guide.md` is generic and follows "Guides in this repository" in
     `../protocols/DEVICE.md`, which the tests check.
   - Your own gadget's guide is free-form: say what it's for and how you want
     Muse to use its commands. Only the 4096-byte limit is checked.
-- `DeviceDescription` raises `ValueError` for values outside the rules, and
+- Set your device's `model_id`, `model_name` and `guide` on `Service`, not
+  by changing what `describe()` returns: `describe()` sizes the owner's
+  drop-in commands against the registration limit with them. `Service` and
+  `DeviceDescription` raise `ValueError` for values outside the rules, and
   `Service.run()` checks `describe()` before it connects. For example:
 
   ```python
-  def describe(self):
-      return dataclasses.replace(
-          super().describe(), model_id="acme-robot", model_name="Acme Robot",
-          guide=Path("guide.md").read_text())
+  service = Service(identity, executor, model_id="acme-robot", model_name="Acme Robot",
+                    guide=Path("guide.md").read_text())
   ```
 - `link_client.Outcome` says how a session ended: `CLOSED`, `AUTH_REJECTED`, `FORBIDDEN`,
   `UNPAIRED` or `STOPPED`.

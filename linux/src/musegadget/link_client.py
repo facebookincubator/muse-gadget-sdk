@@ -87,6 +87,17 @@ _MODEL_ID = re.compile(r"[a-z0-9-]{1,64}")
 _MODEL_NAME = re.compile(r"[ !#-\[\]-~]{1,%d}" % MAX_MODEL_NAME_BYTES)
 
 
+def check_model(model_id: str, model_name: str, guide: str | None) -> None:
+    """Raise ValueError for a model id, name or guide outside protocols/DEVICE.md's rules."""
+    if not isinstance(model_id, str) or not _MODEL_ID.fullmatch(model_id):
+        raise ValueError("model_id must be 1 to 64 lowercase letters, digits and hyphens")
+    if not isinstance(model_name, str) or not _MODEL_NAME.fullmatch(model_name):
+        raise ValueError(f"model_name must be 1 to {MAX_MODEL_NAME_BYTES} printable ASCII characters, "
+                         'without " or \\')
+    if guide is not None:
+        device_guide.check(guide)
+
+
 class Outcome(enum.Enum):
     CLOSED = "closed"               # connection ended; reconnect normally
     AUTH_REJECTED = "auth_rejected"  # edge refused the VM bearer; re-fetch VMs
@@ -106,13 +117,7 @@ class DeviceDescription:
     guide: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.model_id, str) or not _MODEL_ID.fullmatch(self.model_id):
-            raise ValueError("model_id must be 1 to 64 lowercase letters, digits and hyphens")
-        if not isinstance(self.model_name, str) or not _MODEL_NAME.fullmatch(self.model_name):
-            raise ValueError(f"model_name must be 1 to {MAX_MODEL_NAME_BYTES} printable ASCII characters, "
-                             'without " or \\')
-        if self.guide is not None:
-            device_guide.check(self.guide)
+        check_model(self.model_id, self.model_name, self.guide)
 
     def register_params(self) -> dict:
         commands = self.commands
