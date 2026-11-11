@@ -16,6 +16,8 @@
 # Sources: DFRobot official schematic V1.2 and framework-arduinounihiker.
 # Load after sdkconfig.muse. A/B are XL9535 pins 12/2, not ESP32 GPIOs.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-dfrobot-unihiker-k10"
+CONFIG_MUSE_DEVICE_MODEL_NAME="DFRobot UNIHIKER K10"
 CONFIG_MUSE_BOARD_DFROBOT_UNIHIKER_K10=y
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
