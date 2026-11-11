@@ -50,11 +50,55 @@ idf_component_register(
 
 # The registry component links nothing until a model and a kernel bundle
 # are declared. Declare them only for the real runner: the bench runner
-# and wakeword-off builds link no ExecuTorch code at all. The bundle
-# (et_kernels/, made by the component's tools/gen_kernels.py from the
-# exported model) must be regenerated after every model re-export or
-# component update; the build refuses a stale bundle.
+# and wakeword-off builds link no ExecuTorch code at all. The bundle is
+# generated at configure time into the build directory by
+# tools/make_kernel_bundle.py (which drops the component generator's
+# SHA gate; see that script) from the model declared below, so a
+# component update needs no SDK change beyond the version pin, and the
+# build refuses a bundle that does not match the model or component.
+# Wakeword builds need a Python with executorch installed; see
+# esp32/docs/executorch.md for EXECUTORCH_PYTHON.
 if(CONFIG_MUSE_WAKEWORD_ENABLE AND NOT CONFIG_MUSE_WAKEWORD_RUNNER_BENCH)
     executorch_add_model(PTE "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte")
-    executorch_add_kernels(DIR "${CMAKE_CURRENT_SOURCE_DIR}/et_kernels")
+    if(NOT EXECUTORCH_PYTHON)
+        set(EXECUTORCH_PYTHON "$ENV{EXECUTORCH_PYTHON}")
+    endif()
+    if(NOT EXECUTORCH_PYTHON)
+        idf_build_get_property(EXECUTORCH_PYTHON PYTHON)
+    endif()
+    execute_process(
+        COMMAND "${EXECUTORCH_PYTHON}" -c "import executorch.codegen.tools.selective_build"
+        RESULT_VARIABLE _et_no_executorch
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(_et_no_executorch)
+        message(FATAL_ERROR "ExecuTorch: wakeword builds need a Python with executorch installed to generate the kernel bundle; set EXECUTORCH_PYTHON to one (see esp32/docs/executorch.md). ${EXECUTORCH_PYTHON} cannot import executorch.codegen.tools.selective_build.")
+    endif()
+    get_property(_et_dir GLOBAL PROPERTY EXECUTORCH_COMPONENT_DIR)
+    if(NOT _et_dir)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/components/executorch/tools/gen_kernels.py")
+            set(_et_dir "${CMAKE_SOURCE_DIR}/components/executorch")
+        else()
+            file(GLOB _et_dirs "${CMAKE_SOURCE_DIR}/managed_components/*__executorch")
+            list(LENGTH _et_dirs _et_n)
+            if(NOT _et_n EQUAL 1)
+                message(FATAL_ERROR "ExecuTorch: cannot locate the executorch component (expected exactly one managed *__executorch directory).")
+            endif()
+            list(GET _et_dirs 0 _et_dir)
+        endif()
+    endif()
+    set(_et_bundle_dir "${CMAKE_BINARY_DIR}/executorch_kernels")
+    execute_process(
+        COMMAND "${EXECUTORCH_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_kernel_bundle.py"
+            --pte "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte"
+            --out "${_et_bundle_dir}"
+            --component-dir "${_et_dir}"
+        RESULT_VARIABLE _et_bundle_failed
+        OUTPUT_VARIABLE _et_bundle_output
+        ERROR_VARIABLE _et_bundle_output
+    )
+    if(_et_bundle_failed)
+        message(FATAL_ERROR "ExecuTorch: kernel bundle generation failed:\n${_et_bundle_output}")
+    endif()
+    executorch_add_kernels(DIR "${_et_bundle_dir}")
 endif()

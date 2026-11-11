@@ -17,16 +17,17 @@ limitations under the License.
 # Hey Muse wake word model
 
 `hey_muse.pte` is the int8 ExecuTorch export embedded by
-`ww_runner_et.cpp` (Cadence-backend PTQ; runs on the registry
-component's kernel bundle in `../et_kernels/` — Cadence
+`ww_runner_et.cpp` (Cadence-backend PTQ; runs on kernels registered
+from a bundle generated at build time from this file — Cadence
 generic/portable kernels).
 `hey_muse.json` is its generated provenance sidecar (checkpoint and
 PTE hashes, frontend config, class order, model ops, and the int8
 calibration/parity record). The
 runner does not read the JSON on device — the matching frontend
 constants are generated into `../ww_frontend_config.h` by the same
-export. Regenerate the kernel bundle after every re-export; the build
-refuses a bundle whose recorded model hash does not match this file.
+export. No bundle is committed: the build generates one from this
+file at configure time (see `../tools/make_kernel_bundle.py`) and
+refuses to proceed if it does not cover this model.
 
 - Architecture: ExecuTorch `StreamingWakeWord`
   (`examples/models/mlperf_tiny/streaming_wakeword.py`), one LFBE

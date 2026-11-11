@@ -38,7 +38,7 @@ component into `managed_components/` at build time
 (`managed_components/` and `dependencies.lock` are gitignored build
 artifacts; `tools/muse/board.sh` deletes them around every build).
 The component's own `README.md` covers using the runtime; this page
-covers the pin, the kernel bundle, and updating it.
+covers the pin, build-time bundle generation, and updating it.
 
 The component links nothing into firmware until a model and a kernel
 bundle are declared. The wake word component declares them in its
@@ -50,45 +50,41 @@ model load.
 ## Kernel bundle
 
 The component registers only the kernels in the project's kernel
-bundle. The bundle lives in
-[`components/muse_wakeword/et_kernels/`](../components/muse_wakeword/et_kernels/)
-and is generated from the exported model by the component's
-`tools/gen_kernels.py`, run with the Python environment the model was
-exported with:
+bundle. Nothing is committed: the wake word component generates the
+bundle at configure time, into the build directory, with the committed
+helper [`components/muse_wakeword/tools/make_kernel_bundle.py`](../components/muse_wakeword/tools/make_kernel_bundle.py),
+which loads the component's `tools/gen_kernels.py` with its SHA gate
+dropped (see that script for why, and what provenance it records).
+The build then declares the generated bundle, and refuses one whose
+component version, commit, or model hash does not match the declared
+model and component.
 
-```sh
-python <managed_components/rascani__executorch>/tools/gen_kernels.py \
-  --pte esp32/components/muse_wakeword/models/hey_muse.pte \
-  --out esp32/components/muse_wakeword/et_kernels
-```
-
-That environment needs the executorch the component was built from:
-for a dev version, `gen_kernels.py` requires the installed package's
-commit to match the component's `VERSION` exactly (a release version
-matches by version number instead), and the torch the `VERSION` names
-as `torch_requirement`. Regenerate the bundle after every model
-re-export or component update, and commit the bundle directory. The
-build refuses a stale bundle (wrong component version or commit, or a
-model hash that does not match a declared model) and prints the
-regeneration command. Do not hand-edit bundle files. If no bundle is
-declared, the build tries to make one with `EXECUTORCH_PYTHON` instead
-of failing; the wake word build always declares one, so never rely on
-that.
+Wakeword builds need a Python with executorch (any nightly whose
+codegen matches the component) and PyYAML installed. Point the build
+at it with `-DEXECUTORCH_PYTHON=<python>` or the `EXECUTORCH_PYTHON`
+environment variable; without one, configuration fails with a message
+saying so. Default builds need nothing: the bundle step only runs for
+the ExecuTorch runner. Do not commit a generated bundle directory: a
+component update needs no SDK change beyond the version pin, and the
+bundle regenerates from the declared model on the next configure.
 
 ## Updating the component
 
 Bump the `==` pin in [`main/idf_component.yml`](../main/idf_component.yml)
 (or, when the namespace moves, the namespace and `registry_url` with
-it), then regenerate the kernel bundle with the matching executorch
-environment and re-export the model only if the new component needs
-it (the exporter is `components/muse_wakeword/tools/export_hey_muse.py`;
-its sidecar records the export, and the build-time bundle check is
-the gate that the model's ops are covered).
+it), and re-export the model only if the new component needs it (the
+exporter is `components/muse_wakeword/tools/export_hey_muse.py`; its
+sidecar records the export, and the build-time bundle check is the
+gate that the model's ops are covered). Nothing else in the SDK
+changes: the bundle regenerates at configure time, so no bundle commit
+is needed, and no SDK update is needed at all until someone chooses
+to bump the pin.
 
-Review the update before opening a PR: read the `kernels.json` diff
-(component version and commit, kernel libraries, model hash) and
-file/size deltas. Do not line-review component sources (they are
-downloaded, not vendored). Then build the consumers: this SDK's
+Review the update before opening a PR: build the wake-word firmware
+with an executorch Python available (see above) and check the
+configure log says the bundle generated, plus the usual file/size
+deltas. Do not line-review component sources (they are downloaded,
+not vendored). Then build the consumers: this SDK's
 wake-word firmware for one Xtensa and one RISC-V board (the builds
 that actually link the component), plus a normal board build, which
 must still pass and link no ExecuTorch code:
@@ -101,8 +97,8 @@ With a board attached, flash the wake-word firmware and confirm the
 boot log's runner-ready line and `@wake` status over serial. Note
 the binary size change in the PR: when enabled, the registered kernels
 cost roughly 0.2 MB of flash text (plus the ~80 KB embedded model
-in the application component). Rollback is reverting the PR — pin,
-bundle, and any models version together.
+in the application component). Rollback is reverting the PR — pin
+and any models version together.
 
 Models (`.pte` files) are not part of the component and are never
 regenerated here; they ship with the application component (today:

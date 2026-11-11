@@ -23,7 +23,7 @@ same voice note as holding the talk button.
 
 `ww_runner_et.cpp` (default) drives the embedded int8
 `models/hey_muse.pte` through the ExecuTorch registry component
-(kernel bundle in `et_kernels/`); `ww_runner_bench.c` offers serial/clap
+(kernel bundle generated at build time); `ww_runner_bench.c` offers serial/clap
 triggers for bring-up only, with no speech detection.
 `MUSE_WAKEWORD_ENABLE` defaults to `n` and no board overlay sets it,
 so shipped builds are unchanged.
@@ -49,7 +49,7 @@ Measured on BOX-3 it saves ~91 KB with no latency cost (inference
 still ~15 ms/frame), and `et_model`/runner error logs still reach
 the console. Program verification is already off
 (`CONFIG_ET_PROGRAM_VERIFICATION` unset; the runtime falls back to
-minimal header checks), and the kernel bundle (`et_kernels/`) already
+minimal header checks), and the build-time kernel bundle already
 registers only the kernels the model uses, so there is nothing
 further to prune there. `CONFIG_ET_OPTIMIZE_SIZE` defaults to `y` in
 the registry component: explicitly unset it in the build fragment.

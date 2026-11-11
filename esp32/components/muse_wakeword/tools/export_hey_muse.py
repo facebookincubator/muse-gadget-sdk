@@ -27,9 +27,8 @@ The export is int8 only: Cadence-backend PTQ (int8 weights and
 activations, calibrated on the training bundle's
 calibration_frames.pt via --calibration), lowered through the Cadence
 passes to cadence:: ops. The registry component registers only the
-kernels in the project's kernel bundle (et_kernels/, made by the
-component's tools/gen_kernels.py from the exported .pte); regenerate
-the bundle after every export.
+kernels in a bundle generated at build time from the exported .pte
+(see tools/make_kernel_bundle.py); no bundle is committed.
 (A portable-fp32 export measured ~69 ms per 20 ms frame on ESP32-S3 —
 3.5x over the real-time budget — and was removed; the eager model in
 this script is the numerical reference for the parity check.) The
@@ -412,10 +411,10 @@ def main() -> None:
     with pte_path.open("wb") as f:
         program.write_to_file(f)
 
-    # The registry component registers only the kernels in the project's
-    # kernel bundle; the build refuses a bundle that does not cover this
-    # model's ops. Record the ops here so the bundle check has a sidecar
-    # to compare against.
+    # The registry component registers only the kernels in a bundle
+    # generated at build time from this .pte; the build refuses a bundle
+    # that does not cover this model's ops. Record the ops here so the
+    # bundle check has a sidecar to compare against.
     ops = model_ops(et_root, pte_path)
 
     checkpoint_sha = sha256_file(args.checkpoint)
