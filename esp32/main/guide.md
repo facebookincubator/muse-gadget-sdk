@@ -48,7 +48,9 @@ the colour or, on e-paper and small text screens, the words:
 
 - If it stops responding, unplug it and plug it back in.
 - Holding the button for 5 seconds forgets its pairing and Wi-Fi; set it up
-  again in the Muse app.
+  again in the Muse app. If the button also records voice notes, a hold
+  records instead while voice is connected: switch the board's mute on first,
+  or, on a board without one, hold it while voice isn't connected.
 
 ## Limits
 
