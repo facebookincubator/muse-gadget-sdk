@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
+#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -29,7 +29,7 @@
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
+cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -47,6 +47,7 @@ case $board in
     k10)     profile=dfrobot-unihiker-k10; target=esp32s3 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;
     atk-box) profile=atk-dnesp32s3-box;     target=esp32s3 ;;
+    atk-box2) profile=atk-dnesp32s3-box2;   target=esp32s3 ;;
     echoear) profile=ostb-echoear-2st; target=esp32s3 ;;
     box3)    profile=espressif-box-3;       target=esp32s3 ;;
     c6)      profile=waveshare-c6-18;      target=esp32c6 ;;
