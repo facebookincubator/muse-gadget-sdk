@@ -929,6 +929,13 @@ bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
     return muse_hatch_caption_at(s_turn.text, at < len ? at : len - 1, out, cap);
 }
 
+float muse_turn_progress(size_t played, int *message)
+{
+    (void)played;
+    if (message) *message = -1;
+    return 0;
+}
+
 size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms)
 {
     (void)pcm;
