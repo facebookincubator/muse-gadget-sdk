@@ -138,6 +138,15 @@ static const char *const WEATHER_NAMES[] = { "Off", "15 seconds", "30 seconds", 
 #define WEATHER_COUNT (int)(sizeof(WEATHER_CHOICES) / sizeof(WEATHER_CHOICES[0]))
 static lv_obj_t *s_weather_checks[WEATHER_COUNT];
 
+#if CONFIG_MUSE_REALTIME_VOICE
+static const int CALL_IDLE_CHOICES[] = { 0, 30, 60, 120, 300, 600 };
+static const char *const CALL_IDLE_NAMES[] = { "Never", "30 seconds", "1 minute", "2 minutes", "5 minutes", "10 minutes" };
+#define CALL_IDLE_COUNT (int)(sizeof(CALL_IDLE_CHOICES) / sizeof(CALL_IDLE_CHOICES[0]))
+static lv_obj_t *s_greeting_sw;
+static lv_obj_t *s_sound_call_idle_checks[CALL_IDLE_COUNT];
+static lv_obj_t *s_sleep_call_idle_checks[CALL_IDLE_COUNT];
+#endif
+
 /* Battery page. */
 static lv_obj_t *s_batt_status, *s_batt_level, *s_batt_drain, *s_batt_full, *s_batt_off, *s_batt_slept, *s_batt_wakes,
     *s_batt_busy, *s_batt_awake;
@@ -208,6 +217,8 @@ static int stacked_text_w(void)
 static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, const char *text)
 {
     char shown[SHOWN_MAX];
+    if (!text) text = "";
+    text = T(text);
     lv_obj_t *l = lv_label_create(parent);
     lv_obj_set_style_text_font(l, settings_font(font), 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
@@ -217,7 +228,10 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, 
 
 static void set_text(lv_obj_t *l, const char *text)
 {
+    if (!l) return;
     char shown[SHOWN_MAX];
+    if (!text) text = "";
+    text = T(text);
     text = muse_text_showable(text, shown, sizeof(shown));
     if (strcmp(lv_label_get_text(l), text) != 0) {
         lv_label_set_text(l, text);
@@ -519,6 +533,14 @@ static void drop(lv_obj_t *p)
             *pages[i] = NULL;
         }
     }
+#if CONFIG_MUSE_REALTIME_VOICE
+    if (p == s_sound) {
+        s_greeting_sw = NULL;
+        for (int i = 0; i < CALL_IDLE_COUNT; i++) s_sound_call_idle_checks[i] = NULL;
+    } else if (p == s_sleep) {
+        for (int i = 0; i < CALL_IDLE_COUNT; i++) s_sleep_call_idle_checks[i] = NULL;
+    }
+#endif
     lv_obj_delete_async(p);   /* we may be in one of its own events */
 }
 
@@ -1294,6 +1316,33 @@ static void on_bright(lv_event_t *e)
     }
 }
 
+#if CONFIG_MUSE_REALTIME_VOICE
+static void on_greeting_sw(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    muse_settings_set_greeting(lv_obj_has_state(sw, LV_STATE_CHECKED));
+}
+
+static void on_call_idle_choice(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    muse_settings_set_call_idle_s(CALL_IDLE_CHOICES[i]);
+    if (s_current == s_sound) {
+        for (int j = 0; j < CALL_IDLE_COUNT; j++) {
+            if (s_sound_call_idle_checks[j]) {
+                set_text(s_sound_call_idle_checks[j], j == i ? LV_SYMBOL_OK : "");
+            }
+        }
+    } else if (s_current == s_sleep) {
+        for (int j = 0; j < CALL_IDLE_COUNT; j++) {
+            if (s_sleep_call_idle_checks[j]) {
+                set_text(s_sleep_call_idle_checks[j], j == i ? LV_SYMBOL_OK : "");
+            }
+        }
+    }
+}
+#endif
+
 static void build_sound_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
@@ -1314,6 +1363,10 @@ static void build_sound_page(lv_obj_t *tile)
         s_spk_sw = switch_row(list, "Speaker", muse_settings_speaker_on(), on_speaker_sw);
         s_vol_sl = slider(list, "Volume", 0, 100, muse_settings_volume(), &s_vol_val, on_volume);
     }
+#if CONFIG_MUSE_REALTIME_VOICE
+    s_greeting_sw = switch_row(list, "AI greeting", muse_settings_greeting(), on_greeting_sw);
+    note(list, "When on, AI greets you first as soon as a call connects.");
+#endif
     s_gain_sl = slider(list, "Mic gain", 0, MUSE_MIC_GAIN_MAX / 3, muse_settings_mic_gain() / 3, &s_gain_val, on_gain);
 
     lv_obj_t *meter = lv_obj_create(list);
@@ -1341,6 +1394,18 @@ static void build_sound_page(lv_obj_t *tile)
         s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
         set_val(s_bright_val, "%d%%", muse_settings_brightness());
     }
+
+#if CONFIG_MUSE_REALTIME_VOICE
+    note(list, "End a call when idle for:");
+    for (int i = 0; i < CALL_IDLE_COUNT; i++) {
+        row(list, NULL, CALL_IDLE_NAMES[i], &s_sound_call_idle_checks[i], on_call_idle_choice,
+            (void *)(intptr_t)i);
+        lv_obj_set_style_text_color(s_sound_call_idle_checks[i], lv_color_hex(COLOR_ACCENT), 0);
+        set_text(s_sound_call_idle_checks[i],
+                 CALL_IDLE_CHOICES[i] == muse_settings_call_idle_s() ? LV_SYMBOL_OK : "");
+    }
+#endif
+
     if (s_vol_val) set_val(s_vol_val, "%d%%", muse_settings_volume());
     set_val(s_gain_val, "%d dB", muse_settings_mic_gain() / 3 * 3);
 }
@@ -1352,6 +1417,14 @@ static void tick_sound(void)
     }
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     lv_obj_set_state(s_notes_sw, LV_STATE_CHECKED, muse_settings_voice_notes());
+#endif
+#if CONFIG_MUSE_REALTIME_VOICE
+    if (s_greeting_sw) {
+        bool g = muse_settings_greeting();
+        if (g != lv_obj_has_state(s_greeting_sw, LV_STATE_CHECKED)) {
+            lv_obj_set_state(s_greeting_sw, LV_STATE_CHECKED, g);
+        }
+    }
 #endif
     bool on = muse_settings_speaker_on();   /* also toggled from the face */
     if (s_spk_sw && on != lv_obj_has_state(s_spk_sw, LV_STATE_CHECKED)) {
@@ -1412,6 +1485,16 @@ static void build_sleep_page(lv_obj_t *tile)
         set_text(s_weather_checks[i],
                  WEATHER_CHOICES[i] == muse_settings_weather_idle_s() ? LV_SYMBOL_OK : "");
     }
+#if CONFIG_MUSE_REALTIME_VOICE
+    note(list, "End a call when idle for:");
+    for (int i = 0; i < CALL_IDLE_COUNT; i++) {
+        row(list, NULL, CALL_IDLE_NAMES[i], &s_sleep_call_idle_checks[i], on_call_idle_choice,
+            (void *)(intptr_t)i);
+        lv_obj_set_style_text_color(s_sleep_call_idle_checks[i], lv_color_hex(COLOR_ACCENT), 0);
+        set_text(s_sleep_call_idle_checks[i],
+                 CALL_IDLE_CHOICES[i] == muse_settings_call_idle_s() ? LV_SYMBOL_OK : "");
+    }
+#endif
     note(list, "Tap the screen or press either button to wake.");
 }
 

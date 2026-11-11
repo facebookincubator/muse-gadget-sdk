@@ -235,10 +235,37 @@ static const muse_lang_entry_t MENU[] = {
     { "Updated", "Cập nhật" },
     { "Old data", "Dữ liệu cũ" },
     { "Tap to return to chat", "Chạm để quay lại trò chuyện" },
+    /* Touch Settings UI */
+    { "SETTINGS", "CÀI ĐẶT" },
+    { "SOUND", "ÂM THANH" },
+    { "SLEEP", "TỰ NGỦ" },
+    { "AUTO-SLEEP", "TỰ NGỦ" },
+    { "WIFI", "WI-FI" },
+    { "BLUETOOTH", "BLUETOOTH" },
+    { "SCREEN", "MÀN HÌNH" },
+    { "Sound", "Âm thanh" },
+    { "Sleep", "Tự ngủ" },
+    { "Bluetooth", "Bluetooth" },
+    { "Phone camera", "Camera ĐT" },
+    { "Mic level", "Mức mic" },
+    { "Mic only", "Chỉ có mic" },
+    { "No audio", "Không có âm thanh" },
+    { "Muted", "Đã tắt tiếng" },
+    { "Other network...", "Mạng khác..." },
+    { "MAC address", "Địa chỉ MAC" },
+    { "Forget paired phones", "Quên điện thoại đã ghép" },
+    { LV_SYMBOL_REFRESH "  Scan for networks", LV_SYMBOL_REFRESH "  Tìm mạng Wi-Fi" },
+    { LV_SYMBOL_EYE_CLOSE "  Sleep now", LV_SYMBOL_EYE_CLOSE "  Đi ngủ ngay" },
+    { "When on, AI greets you first as soon as a call connects.", "Khi bật, AI sẽ cất tiếng chào bạn trước ngay khi thông cuộc gọi." },
+    { "End a call when idle for:", "Tự ngắt cuộc gọi khi im lặng:" },
+    { "Turn the screen off after Muse has been idle for:", "Tắt màn hình sau khi Muse nghỉ được:" },
+    { "Tap the screen or press either button to wake.", "Chạm màn hình hoặc bấm nút để đánh thức." },
+    { "Talk at arm's length: the bar should reach green (-30 to -15 dBFS) without going orange.", "Nói cách tầm tay: thanh mic nên đạt mức xanh lá (-30 đến -15 dBFS) và không bị cam." },
 };
 
 static const char *lookup(const muse_lang_entry_t *t, size_t n, const char *en)
 {
+    if (!en) return "";
     for (size_t i = 0; i < n; i++) {
         if (!strcmp(t[i].en, en)) {
             return t[i].text;
