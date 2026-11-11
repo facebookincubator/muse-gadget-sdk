@@ -34,7 +34,7 @@ Beside the node id, display name, version and commands, `params` carry:
 |---|---|
 | `device_family` | `"gadget"`, always. Every device built with this SDK registers it; other families are reserved for Muse's own devices. |
 | `model_id` | The hardware model: 1 to 64 lowercase letters, digits and hyphens (`[a-z0-9-]{1,64}`). |
-| `metadata.model_name` | The hardware's name as people know it, such as `Seeed SenseCAP Watcher`: 1 to 128 bytes of UTF-8 with no control characters (U+0000 to U+001F, U+007F to U+009F). |
+| `metadata.model_name` | The hardware's name as people know it, such as `Seeed SenseCAP Watcher`: 1 to 128 printable ASCII characters (space to `~`), without `"` or `\`, so it never needs escaping. |
 
 `model_id`:
 

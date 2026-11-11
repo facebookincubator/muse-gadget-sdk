@@ -186,12 +186,20 @@ def test_register_describes_the_model():
 
 @pytest.mark.parametrize("field, value", [
     ("model_id", ""), ("model_id", "Acme"), ("model_id", "a" * 65), ("model_id", "acme_robot"),
-    ("model_name", ""), ("model_name", "é" * 65), ("model_name", "Acme\nRobot"), ("model_name", "Acme\x85"),
-    ("guide", ""), ("guide", "x" * (device_guide.MAX_BYTES + 1)),
+    ("model_name", ""), ("model_name", "x" * 129), ("model_name", "Caf\u00e9"), ("model_name", "Acme\nRobot"),
+    ("model_name", "Acme\x85"), ("model_name", 'Acme "Robot"'), ("model_name", "Acme\\Robot"), ("guide", ""), ("guide", "x" * (device_guide.MAX_BYTES + 1)),
 ])
 def test_description_rejects_what_muse_would_not_take(field, value):
     with pytest.raises(ValueError):
         dataclasses.replace(DEVICE, **{field: value})
+
+
+def test_model_name_takes_printable_ascii_that_json_leaves_as_is():
+    name = "".join(chr(c) for c in range(0x20, 0x7f) if chr(c) not in '"\\')
+    robot = dataclasses.replace(DEVICE, model_name=name)
+    assert json.dumps(name) == f'"{name}"'
+    assert dataclasses.replace(DEVICE, model_name="~" * 128).model_name == "~" * 128
+    assert robot.register_params()["metadata"] == {"model_name": name}
 
 
 

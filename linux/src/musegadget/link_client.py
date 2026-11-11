@@ -83,7 +83,8 @@ DEFAULT_MODEL_ID = "muse-gadget-linux"
 DEFAULT_MODEL_NAME = "Linux gadget"
 MAX_MODEL_NAME_BYTES = 128
 _MODEL_ID = re.compile(r"[a-z0-9-]{1,64}")
-_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# Printable ASCII without " or \, so link.register never escapes it.
+_MODEL_NAME = re.compile(r"[ !#-\[\]-~]{1,%d}" % MAX_MODEL_NAME_BYTES)
 
 
 class Outcome(enum.Enum):
@@ -107,9 +108,9 @@ class DeviceDescription:
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str) or not _MODEL_ID.fullmatch(self.model_id):
             raise ValueError("model_id must be 1 to 64 lowercase letters, digits and hyphens")
-        name_bytes = len(self.model_name.encode("utf-8")) if isinstance(self.model_name, str) else 0
-        if not 0 < name_bytes <= MAX_MODEL_NAME_BYTES or _CONTROL_CHARACTERS.search(self.model_name):
-            raise ValueError(f"model_name must be 1 to {MAX_MODEL_NAME_BYTES} bytes with no control characters")
+        if not isinstance(self.model_name, str) or not _MODEL_NAME.fullmatch(self.model_name):
+            raise ValueError(f"model_name must be 1 to {MAX_MODEL_NAME_BYTES} printable ASCII characters, "
+                             'without " or \\')
         if self.guide is not None:
             device_guide.check(self.guide)
 

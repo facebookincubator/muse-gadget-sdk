@@ -21,15 +21,15 @@ if(NOT CONFIG_MUSE_DEVICE_MODEL_ID MATCHES "^[a-z0-9-]+$" OR model_id_len GREATE
     message(FATAL_ERROR
         "CONFIG_MUSE_DEVICE_MODEL_ID \"${CONFIG_MUSE_DEVICE_MODEL_ID}\" must be 1 to 64 lowercase letters, digits and hyphens.")
 endif()
+# Printable ASCII without " or \, so link.register's JSON never escapes it
+# and its size test can count the name at its maximum.
 string(LENGTH "${CONFIG_MUSE_DEVICE_MODEL_NAME}" model_name_len)
-string(ASCII 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 127 c0_controls)
-string(ASCII 194 c1_lead)
-string(ASCII 128 c1_first)
-string(ASCII 159 c1_last)
-if(model_name_len EQUAL 0 OR model_name_len GREATER 128 OR
-   CONFIG_MUSE_DEVICE_MODEL_NAME MATCHES "[${c0_controls}]|${c1_lead}[${c1_first}-${c1_last}]")
+string(FIND "${CONFIG_MUSE_DEVICE_MODEL_NAME}" "\"" model_name_quote)
+string(FIND "${CONFIG_MUSE_DEVICE_MODEL_NAME}" "\\" model_name_backslash)
+if(model_name_len GREATER 128 OR NOT CONFIG_MUSE_DEVICE_MODEL_NAME MATCHES "^[ -~]+$" OR
+   NOT model_name_quote EQUAL -1 OR NOT model_name_backslash EQUAL -1)
     message(FATAL_ERROR
-        "CONFIG_MUSE_DEVICE_MODEL_NAME must be 1 to 128 bytes with no control characters.")
+        "CONFIG_MUSE_DEVICE_MODEL_NAME must be 1 to 128 printable ASCII characters, without \" or \\.")
 endif()
 
 if(NOT CONFIG_CJSON_NESTING_LIMIT EQUAL 16)

@@ -36,7 +36,7 @@ CJSON = Path(os.environ.get("CJSON_SOURCE_DIR", ROOT / "managed_components/espre
 REGISTER_LIMIT = 8192
 GUIDE_LIMIT = 4096
 GUIDE_DESCRIPTION = "This device's usage guide (Markdown): what it is, its controls and limits."
-CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+VALID_MODEL_NAME = re.compile(r"[ !#-\[\]-~]{1,128}")
 REPOSITORY_GUIDE_LIMIT = 2048
 BLE_CLIENT_STUBS = """
 #include "ble_client.h"
@@ -126,7 +126,8 @@ class DeviceDescriptionTest(unittest.TestCase):
         return ran.stdout
 
     def registrations(self, defines: list[str], node_id: str = "homelink-0a1b2c",
-                      display_name: str = "MuseGadget-0A1B2C", ble: bool = False) -> list[str]:
+                      display_name: str = "MuseGadget-0A1B2C", ble: bool = False,
+                      ssid: str = "0123456789abcdef0123456789abcdef") -> list[str]:
         family = NOISE[NOISE.index("#ifndef MUSE_DEVICE_FAMILY"):]
         family = family[: family.index("#endif") + len("#endif")]
         functions = "\n".join(function_source(NOISE, signature) for signature in (
@@ -147,7 +148,7 @@ class DeviceDescriptionTest(unittest.TestCase):
 typedef struct {{ char version[32]; }} esp_app_desc_t;
 static esp_app_desc_t app = {{ .version = "999.0.0-0123456789abcdefghij" }};
 const esp_app_desc_t *esp_app_get_description(void) {{ return &app; }}
-static char s_wifi_ssid[33] = "0123456789abcdef0123456789abcdef", s_register_req_id[40];
+static char s_wifi_ssid[33] = "{ssid}", s_register_req_id[40];
 static const char *s_node_id = "{node_id}", *s_display_name = "{display_name}";
 static void copy_wifi_ssid(char *out, size_t size) {{ snprintf(out, size, "%s", s_wifi_ssid); }}
 static void make_uuid(char *out, size_t size) {{ snprintf(out, size, "00000000-0000-4000-8000-000000000000"); }}
@@ -186,7 +187,10 @@ int main(void) {{
 
     def test_register_fits_its_buffer_in_the_largest_builds(self) -> None:
         # The richest option sets a board can build with, plus the opt-in BLE
-        # commands, OTA, the longest model id and name, node id and BLE name.
+        # commands, OTA and the tunnel, at the largest values the build
+        # accepts: a 64-character model id, a 128-character model name (no
+        # character of it is escaped) and long node id and BLE names. The
+        # SSID is 32 quotation marks, each escaped to two bytes.
         profiles = {
             "e-paper status screen": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS", "CONFIG_HOMEHUB_RETERMINAL_SHT4X"],
             "SenseCAP Indicator": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS", "CONFIG_HOMEHUB_SENSECAP_SENSORS"],
@@ -198,24 +202,27 @@ int main(void) {{
                                    "CONFIG_MUSE_P4_CSI_CAMERA"],
             "voice": ["CONFIG_HOMEHUB_VOICE"],
         }
-        ids = [kconfig_default("MUSE_DEVICE_MODEL_ID"), *overlay_values("MUSE_DEVICE_MODEL_ID").values()]
-        names = [kconfig_default("MUSE_DEVICE_MODEL_NAME"), *overlay_values("MUSE_DEVICE_MODEL_NAME").values()]
+        model_id, model_name = "z" * 64, "~" * 128
+        self.assertTrue(VALID_MODEL_NAME.fullmatch(model_name))
         common = [
             "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_BLE_COMMANDS=1",
-            f'-DCONFIG_MUSE_DEVICE_MODEL_ID="{max(ids, key=len)}"',
-            f'-DCONFIG_MUSE_DEVICE_MODEL_NAME="{max(names, key=lambda n: len(n.encode()))}"',
+            f'-DCONFIG_MUSE_DEVICE_MODEL_ID="{model_id}"', f'-DCONFIG_MUSE_DEVICE_MODEL_NAME="{model_name}"',
         ]
         for profile, options in profiles.items():
             with self.subTest(profile=profile):
                 lines = self.registrations(
-                    [*common, *(f"-D{option}=1" for option in options)], "n" * 31, "d" * 31, ble=True)
+                    [*common, *(f"-D{option}=1" for option in options)], "n" * 31, "d" * 31, ble=True,
+                    ssid='\\"' * 32)
                 for line in lines:
-                    commands = json.loads(line)["params"]["commands_v2"]
-                    self.assertIn("device.guide", commands)
-                    self.assertIn("ble.subscribe", commands)
+                    params = json.loads(line)["params"]
+                    self.assertEqual((params["model_id"], params["metadata"]["model_name"]), (model_id, model_name))
+                    self.assertEqual(params["metadata"]["network_ssid"], '"' * 32)
+                    self.assertIn("device.guide", params["commands_v2"])
+                    self.assertIn("ble.subscribe", params["commands_v2"])
                 size = max(len(line) for line in lines)
                 print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
-                self.assertLess(size, REGISTER_LIMIT)
+                # cJSON_PrintPreallocated asks for 5 bytes beyond the output.
+                self.assertLessEqual(size + 5, REGISTER_LIMIT)
 
     def test_every_model_line_is_valid(self) -> None:
         ids = {"Kconfig": kconfig_default("MUSE_DEVICE_MODEL_ID"), **overlay_values("MUSE_DEVICE_MODEL_ID")}
@@ -228,8 +235,7 @@ int main(void) {{
                 self.assertNotIn("hatch", model_id)
         for where, name in names.items():
             with self.subTest(where=where):
-                self.assertTrue(0 < len(name.encode()) <= 128, name)
-                self.assertIsNone(CONTROL.search(name), name)
+                self.assertTrue(VALID_MODEL_NAME.fullmatch(name), name)
                 self.assertNotIn("Hatch", name)
 
     def test_every_board_overlay_sets_its_model(self) -> None:
@@ -249,9 +255,11 @@ int main(void) {{
         base = ["-DCONFIG_CJSON_NESTING_LIMIT=16", "-DCONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384",
                 "-DCONFIG_LWIP_TCP_WND_DEFAULT=16384"]
         for model_id, name, accepted in (
-                ("acme-lamp", "Caf\u00e9 Lamp", True), ("Acme", "Lamp", False), ("a" * 65, "Lamp", False),
-                ("acme-lamp", "", False), ("acme-lamp", "x" * 129, False),
-                ("acme-lamp", "Lamp\tTwo", False), ("acme-lamp", "Lamp\x85", False)):
+                ("acme-lamp", "Acme Lamp (2nd gen) #1 ~ 100%", True), ("z" * 64, "~" * 128, True),
+                ("Acme", "Lamp", False), ("a" * 65, "Lamp", False),
+                ("acme-lamp", "", False), ("acme-lamp", "x" * 129, False), ("acme-lamp", "Caf\u00e9 Lamp", False),
+                ("acme-lamp", "Lamp\tTwo", False), ("acme-lamp", "Lamp\x85", False),
+                ("acme-lamp", 'The "Lamp"', False), ("acme-lamp", "Lamp\\Two", False)):
             with self.subTest(model_id=model_id, name=name):
                 ran = subprocess.run(
                     ["cmake", *base, f"-DCONFIG_MUSE_DEVICE_MODEL_ID={model_id}",

@@ -37,8 +37,9 @@ menu "ESP32 Device SDK"
         default "Muse Gadget"
         help
             The hardware's name as people know it, sent to Muse as
-            metadata.model_name in link.register: 1 to 128 bytes, no control
-            characters. Each board overlay in devices/ sets its own.
+            metadata.model_name in link.register: 1 to 128 printable ASCII
+            characters, without " or \. Each board overlay in devices/ sets
+            its own.
 
     config MUSE_DEVICE_GUIDE
         string "Device guide (Markdown file)"
