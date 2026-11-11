@@ -25,27 +25,30 @@ extern "C" {
 #endif
 
 /*
- * The interface contract with the wake word runner. This header
- * carries no ESP-IDF types so the host tests can link the same
- * code. The implementation linked here is ww_runner_bench.c
- * (serial/clap bench triggers; no speech detection);
- * muse_wakeword is written against this contract and nothing
- * else. Host tests script ww_event_t sequences directly in
- * tests/muse_wakeword_harness.c.
+ * The SDK-owned wake word runner contract.
+ * This header carries no ESP-IDF types so the host simulator can link
+ * the same code. Implementations: ww_runner_et.cpp (production:
+ * LFBE + detector + models/hey_muse.pte through the generated
+ * ExecuTorch runtime component) and ww_runner_bench.c (bring-up
+ * triggers). Host tests script ww_event_t sequences directly in
+ * tests/muse_wakeword_harness.c; there is no fake runner.
  *
  * Guarantees the integration relies on:
  * - All runner calls happen on the wake word task (create() runs at
  *   init, before that task starts), so implementations need no
  *   internal locking and must not call back into the integration.
  * - feed() accepts arbitrary frame counts (the firmware's 320-sample
- *   chunks included) and re-frames internally; it never allocates,
- *   blocks, or calls into ESP-IDF.
+ *   chunks included) and re-frames internally. It does not allocate
+ *   after create; the ExecuTorch runner's model reload happens only
+ *   in reset(), at session reset points.
  * - WW_EVENT_WAKE means "fire now": smoothing, thresholding, and
  *   cooldown have already been applied inside the runner.
  * - SPEECH_START/END are advisory; a runner that never emits them
- *   still integrates (captures end on the hard cap).
- * - reset() is cheap and idempotent, and warm-up after create/reset
- *   is the runner's business, not the caller's.
+ *   still integrates (captures end on energy silence or the hard cap).
+ *   The ExecuTorch runner never emits them: endpointing is the
+ *   SDK-side energy tier, and there is no VAD model.
+ * - reset() is idempotent, and warm-up after create/reset is the
+ *   runner's business, not the caller's.
  */
 
 typedef enum {
@@ -67,7 +70,7 @@ typedef enum {
 } ww_vad_mode_t;
 
 typedef struct {
-    const uint8_t *model;        /* .pte bytes (flash-resident), may be NULL (the bench runner ignores it) */
+    const uint8_t *model;        /* .pte bytes (flash-resident); NULL uses the embedded model */
     size_t model_len;
     uint32_t sample_rate_hz;     /* must be 16000 for the current front end */
     ww_sensitivity_t sensitivity;
