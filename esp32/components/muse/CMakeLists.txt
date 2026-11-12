@@ -51,6 +51,9 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
         if(CONFIG_MUSE_REALTIME_VOICE)
             list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
+            if(CONFIG_MUSE_VOICE_SOFTWARE_AEC)
+                list(APPEND srcs "muse_aec.c")
+            endif()
         endif()
     else()
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
