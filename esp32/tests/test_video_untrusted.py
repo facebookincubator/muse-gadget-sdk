@@ -63,13 +63,13 @@ def nal(kind, b):
     return b"\x00\x00\x00\x01" + bytes([kind]) + b.rbsp()
 
 
-def sps(width_mbs, height_mbs):
+def sps(width_mbs, height_mbs, sps_id=0):
     """A baseline-profile sequence parameter set for width x height macroblocks."""
     b = Bits()
     b.u(8, 66)   # profile_idc: baseline
     b.u(8, 0)    # constraint flags
     b.u(8, 30)   # level_idc
-    b.ue(0)      # seq_parameter_set_id
+    b.ue(sps_id)  # seq_parameter_set_id
     b.ue(0)      # log2_max_frame_num_minus4
     b.ue(2)      # pic_order_cnt_type
     b.ue(1)      # num_ref_frames
@@ -83,11 +83,11 @@ def sps(width_mbs, height_mbs):
     return nal(0x67, b)
 
 
-def pps(slice_groups=None):
+def pps(slice_groups=None, pps_id=0, sps_id=0):
     """slice_groups(b) writes num_slice_groups_minus1 and what follows it."""
     b = Bits()
-    b.ue(0)      # pic_parameter_set_id
-    b.ue(0)      # seq_parameter_set_id
+    b.ue(pps_id)  # pic_parameter_set_id
+    b.ue(sps_id)  # seq_parameter_set_id
     b.u(1, 0)    # entropy_coding_mode_flag: CAVLC
     b.u(1, 0)    # pic_order_present_flag
     if slice_groups:
@@ -107,25 +107,43 @@ def pps(slice_groups=None):
     return nal(0x68, b)
 
 
-def idr(mbs):
-    """An IDR slice of mbs grey I_PCM macroblocks (mbs=0: the header alone)."""
-    b = Bits()
-    b.ue(0)      # first_mb_in_slice
-    b.ue(7)      # slice_type: I (all slices)
-    b.ue(0)      # pic_parameter_set_id
-    b.u(4, 0)    # frame_num
-    b.ue(0)      # idr_pic_id
-    b.u(1, 0)    # no_output_of_prior_pics_flag
-    b.u(1, 0)    # long_term_reference_flag
-    b.ue(0)      # slice_qp_delta (se 0)
-    b.ue(1)      # disable_deblocking_filter_idc
+def pcm(b, mbs):
     for _ in range(mbs):
         b.ue(25)   # mb_type: I_PCM
         while len(b.bits) % 8:
             b.u(1, 0)
         for _ in range(384):
             b.u(8, 0x80)
+
+
+def idr(mbs, pps_id=0, idr_pic_id=0):
+    """An IDR slice of mbs grey I_PCM macroblocks (mbs=0: the header alone)."""
+    b = Bits()
+    b.ue(0)      # first_mb_in_slice
+    b.ue(7)      # slice_type: I (all slices)
+    b.ue(pps_id)  # pic_parameter_set_id
+    b.u(4, 0)    # frame_num
+    b.ue(idr_pic_id)
+    b.u(1, 0)    # no_output_of_prior_pics_flag
+    b.u(1, 0)    # long_term_reference_flag
+    b.ue(0)      # slice_qp_delta (se 0)
+    b.ue(1)      # disable_deblocking_filter_idc
+    pcm(b, mbs)
     return nal(0x65, b)
+
+
+def non_idr(mbs, pps_id=0, frame_num=1):
+    """A reference picture's I slice that isn't an IDR one, of mbs I_PCM macroblocks."""
+    b = Bits()
+    b.ue(0)      # first_mb_in_slice
+    b.ue(7)      # slice_type: I (all slices)
+    b.ue(pps_id)  # pic_parameter_set_id
+    b.u(4, frame_num)
+    b.u(1, 0)    # adaptive_ref_pic_marking_mode_flag
+    b.ue(0)      # slice_qp_delta (se 0)
+    b.ue(1)      # disable_deblocking_filter_idc
+    pcm(b, mbs)
+    return nal(0x61, b)
 
 
 def au(width_mbs, height_mbs, full=True, slice_groups=None):
@@ -278,6 +296,91 @@ class UntrustedVideoTest(unittest.TestCase):
         kc = (MUSE / "Kconfig").read_text()
         opt = kc[kc.index("config MUSE_VIDEO_WIFI_START_ANYTIME"):]
         self.assertIn("default n", opt[:opt.index("help")])
+
+
+
+# muse_vdec on access units in turn, as muse_video.c's decode task feeds it: the
+# caller holds the last picture (the show task may still be drawing it) and lets
+# go of it first only when muse_vdec_may_realloc() says the next access unit may
+# free it. Prints each unit's may_realloc and result; a held picture freed
+# under its reader shows as an AddressSanitizer use-after-free.
+REALLOC_HARNESS = r'''
+#include <stdio.h>
+#include <stdlib.h>
+#include "muse_vdec.h"
+#include "muse_vstream.h"
+int main(int argc, char **argv)
+{
+    muse_vdec_t *d = muse_vdec_open(MUSE_VIDEO_CODEC_H264, 240, 240);
+    if (!d) return 2;
+    const uint8_t *held = NULL;
+    size_t held_n = 0;
+    static uint8_t buf[1 << 20];
+    for (int i = 1; i < argc; i++) {
+        FILE *f = fopen(argv[i], "rb");
+        if (!f) return 2;
+        uint32_t n = (uint32_t)fread(buf, 1, sizeof(buf), f);
+        fclose(f);
+        int may = muse_vdec_may_realloc(d, buf, n);
+        if (may) held = NULL;
+        muse_pic_t pic;
+        int rc = muse_vdec_decode(d, buf, n, &pic);
+        volatile unsigned sum = 0;
+        for (size_t k = 0; held && k < held_n; k++) sum += held[k];
+        printf("%d %d\n", may, rc);
+        if (rc == MUSE_VDEC_PICTURE) {
+            held = pic.y;
+            held_n = (size_t)pic.y_stride * pic.h;
+        }
+    }
+    muse_vdec_close(d);
+    return 0;
+}
+'''
+
+
+class PicturesKeptTest(unittest.TestCase):
+    """A picture muse_vdec handed out stays allocated until an access unit
+    for which muse_vdec_may_realloc() said so: muse_video.c draws it while the
+    next one decodes."""
+
+    def run_units(self, *units):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "sdkconfig.h").write_text("#pragma once\n")
+            src, exe = Path(tmp, "harness.c"), Path(tmp, "vdec")
+            src.write_text(REALLOC_HARNESS)
+            cc = shlex.split(os.environ.get("CC", "cc"))
+            build = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", "-fsanitize=address", f"-I{tmp}",
+                                    f"-I{TINY}", f"-I{MUSE}", f"-I{ROOT / 'components/muse_vstream/include'}",
+                                    "-o", str(exe), str(src), str(MUSE / "muse_vdec.c"),
+                                    *[str(p) for p in sorted(TINY.glob("*.c"))]],
+                                   capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+            files = []
+            for i, unit in enumerate(units):
+                f = Path(tmp, f"au{i}.264")
+                f.write_bytes(unit)
+                files.append(str(f))
+            run = subprocess.run([str(exe), *files], capture_output=True, text=True, timeout=60,
+                                 env=dict(os.environ, ASAN_OPTIONS="detect_leaks=0"))
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            return [tuple(map(int, line.split())) for line in run.stdout.splitlines()]
+
+    def test_an_idr_slice_activating_another_sequence_parameter_set(self):
+        # Two sequence parameter sets up front; the second access unit is a
+        # lone IDR slice that activates the other one (no parameter set in it).
+        first = sps(15, 15, 0) + sps(2, 2, 1) + pps(pps_id=0, sps_id=0) + pps(pps_id=1, sps_id=1) + idr(225)
+        lines = self.run_units(first, idr(4, pps_id=1, idr_pic_id=1), non_idr(4, pps_id=1))
+        self.assertEqual([may for may, _ in lines], [1, 1, 0])
+        self.assertEqual([rc for _, rc in lines], [1, 1, 1])
+
+    def test_parameter_sets_from_an_earlier_access_unit(self):
+        # The second set comes in an access unit of its own, a picture of the
+        # first set follows, then an IDR slice switches to the second set.
+        lines = self.run_units(au(15, 15), sps(2, 2, 1) + pps(pps_id=1, sps_id=1), non_idr(225),
+                               idr(4, pps_id=1, idr_pic_id=1))
+        self.assertEqual([may for may, _ in lines], [1, 1, 0, 1])
+        self.assertEqual([rc for _, rc in lines][2:], [1, 1])
 
 
 if __name__ == "__main__":

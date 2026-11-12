@@ -179,9 +179,17 @@ bool muse_vdec_may_realloc(const muse_vdec_t *d, const uint8_t *buf, uint32_t le
     }
 #endif
     (void)d;
-    for (uint32_t i = 0; i + 3 < len; i++) {   /* any SPS NAL unit (type 7) */
-        if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1 && (buf[i + 3] & 0x1f) == 7) {
-            return true;
+    /* tinyh264 reallocates its pictures when an IDR slice activates a
+     * sequence parameter set other than the active one, and that set (or the
+     * picture parameter set naming it) may have come in an earlier access
+     * unit: any parameter set or IDR slice (NAL types 7, 8 and 5) counts, not
+     * only a sequence parameter set in this one. Keyframes carry all three. */
+    for (uint32_t i = 0; i + 3 < len; i++) {
+        if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1) {
+            uint8_t type = buf[i + 3] & 0x1f;
+            if (type == 5 || type == 7 || type == 8) {
+                return true;
+            }
         }
     }
     return false;
