@@ -56,6 +56,13 @@
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
+#if CONFIG_MUSE_APPS_DEMO
+/* From the optional muse_apps_demo component; declared here so muse does not
+ * depend on it (the component itself depends on muse). */
+lv_obj_t *muse_apps_demo_build(lv_obj_t *parent, lv_indev_t *indev);
+void muse_apps_demo_tick(void);
+static lv_obj_t *s_demo_canvas;   /* the multi-app demo face, or NULL to use the avatar */
+#endif
 
 static const char *TAG = "muse_ui";
 
@@ -2209,6 +2216,15 @@ static void frame_tick(lv_timer_t *timer)
         return;
     }
 
+#if CONFIG_MUSE_APPS_DEMO
+    if (s_demo_canvas) {
+        /* The demo renders the face; sleep, pairing and the menu were handled
+         * above, and the overlays draw over the canvas from the top layer. */
+        muse_apps_demo_tick();
+        return;
+    }
+#endif
+
     /* Fast attack, slow release keeps the mouth and meter lively but readable. */
     float level = muse_state_level();
     /* The voice task can switch sources after this frame read its mode. */
@@ -2282,6 +2298,13 @@ esp_err_t muse_ui_start(void)
         muse_menu_build(lv_screen_active(), s_w, s_h);
     }
     build_overlays();
+#if CONFIG_MUSE_APPS_DEMO
+    /* The multi-app demo draws its own full-screen face over the avatar's
+     * widgets, as the last child of the face so it sits on top; the pairing
+     * prompt and settings menu live on the top LVGL layer and still draw over
+     * it. NULL (no framebuffer) leaves the avatar in place. */
+    s_demo_canvas = muse_apps_demo_build(s_face ? s_face : lv_screen_active(), s_indev);
+#endif
     lv_timer_create(frame_tick, muse_board->frame_ms, NULL);
     s_ready = true;
     muse_board->display_unlock();

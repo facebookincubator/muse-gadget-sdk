@@ -1,0 +1,36 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+menu "Muse multi-app demo"
+
+    config MUSE_APPS_DEMO
+        bool "M5Stack multi-app demo UI (launcher + Pet World + diagnostics + hardware demo)"
+        # Its apps draw captions in a 5x7 ASCII font, a few short lines at a
+        # time: not CJK or accented letters, nor full-screen reply pages.
+        depends on MUSE_BOARD_M5STACK_CORE2 && SPIRAM && !MUSE_SMALL_FULL_REPLY
+        depends on !MUSE_CJK_FONT && !MUSE_LATIN_FONT
+        default n
+        help
+            Draw a touch-driven launcher and three sample apps as the face,
+            inside the normal muse_ui flow (so sleep, brightness and the pairing
+            prompt keep working): Pet World (an animated pet with day/night
+            rooms and speech bubbles tied to the voice session), a diagnostics
+            app (real Wi-Fi and Noise/session status, a signal-level meter, a
+            speaker beep and a connection test), and a hardware app (battery and
+            chip info, a touch physics canvas, an audio-level meter). A 320x240
+            RGB565 framebuffer in PSRAM is drawn full-screen each frame.
+            Intended as an example of building a custom UI on the board's
+            display; leave disabled for the standard avatar interface.
+
+endmenu

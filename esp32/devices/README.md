@@ -468,6 +468,11 @@ and [M5GFX](https://github.com/m5stack/M5GFX) are M5Stack's reference drivers
 for the pins and peripherals, and the display, touch and speaker setup follows
 Espressif's [BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_2).
 
+Loading the [`devices/sdkconfig.muse-m5stack-core2-demo`](sdkconfig.muse-m5stack-core2-demo)
+overlay after the board overlay swaps the avatar face for an optional
+multi-app demo UI — a touch launcher, Pet World, diagnostics and a hardware
+showcase ([`components/muse_apps_demo`](../components/muse_apps_demo/README.md)).
+
 The console is a CP2104 or CH9102F USB-UART bridge (early units the former,
 later ones the latter), so `tools/muse/board.sh flash core2` uses 230400
 baud, which both take. Back up the flash before you flash Muse for the first

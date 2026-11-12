@@ -78,6 +78,8 @@ set(GADGET_REQUIRES
     mbedtls
     efuse
     muse
+    # The Core2 multi-app demo; registers no sources unless CONFIG_MUSE_APPS_DEMO.
+    muse_apps_demo
     # The voice board's. Requirements are resolved before the configuration
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
