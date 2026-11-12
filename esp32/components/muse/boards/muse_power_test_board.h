@@ -36,6 +36,9 @@ esp_err_t muse_ptest_board_power(muse_ptest_readback_t *out);
 esp_err_t muse_ptest_board_apply(const muse_ptest_state_t *state);
 esp_err_t muse_ptest_board_readback(muse_ptest_readback_t *out);
 esp_err_t muse_ptest_board_service(muse_ptest_load_t load);
+/* Optional actuator cleanup at run finish, abort or error, even when fw_apply
+ * fails before reaching the BSP (e.g. a radio/PM error). Weak default is a no-op. */
+esp_err_t muse_ptest_board_stop(void);
 esp_err_t muse_ptest_board_uart_restore(void);
 esp_err_t muse_ptest_board_prepare_deep(bool held);
 esp_err_t muse_ptest_board_release_deep_holds(void);
