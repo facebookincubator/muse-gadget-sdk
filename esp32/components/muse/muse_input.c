@@ -47,6 +47,9 @@
 #endif
 #include "muse_state.h"
 #include "muse_ui.h"
+#if CONFIG_MUSE_LATEST_REPLY
+#include "muse_latest_reply.h"
+#endif
 #include "muse_voice.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO
@@ -934,6 +937,12 @@ static bool console_command(char *line, bool whole)
         return true;
     }
 #if LV_USE_SNAPSHOT
+#if CONFIG_MUSE_LATEST_REPLY
+    if (muse_latest_reply_bench(line)) {
+        set_asleep(false, "reply review");
+        return true;
+    }
+#endif
     if (!strcmp(line, "ui.demo=1") || !strcmp(line, "ui.demo=0")) {
         muse_ui_bench_demo(!strcmp(line, "ui.demo=1"));
         return true;
