@@ -45,6 +45,19 @@ bool muse_latest_reply_bench(const char *command)
 }
 #endif
 
+/* Mark truncation in the display copy without growing its fixed buffer. */
+static void prepare_display(char *text, bool shortened)
+{
+    muse_text_to_caption(text, MUSE_REVIEW_CAP);
+    if (!shortened) return;
+    size_t end = strlen(text);
+    if (end > MUSE_REVIEW_CAP - 4) {
+        end = MUSE_REVIEW_CAP - 4; // three dots and the terminating NUL
+        while (end && ((unsigned char)text[end] & 0xc0) == 0x80) end--;
+    }
+    memcpy(text + end, "...", 4);
+}
+
 /* Keep the main screen's caption font and let LVGL measure the full label. */
 static void layout_reply(void)
 {
@@ -68,7 +81,7 @@ static void load_reply(void)
     muse_review_snapshot(s_display, MUSE_REVIEW_CAP, &snapshot);
     s_revision = snapshot.revision;
     if (snapshot.available) {
-        muse_text_to_caption(s_display, MUSE_REVIEW_CAP);
+        prepare_display(s_display, snapshot.shortened);
         lv_obj_set_style_text_font(s_label, s_font_for(s_display), 0);
         lv_label_set_text_static(s_label, s_display);
     } else {
@@ -108,7 +121,7 @@ static void new_reply_cb(lv_event_t *event)
     muse_review_snapshot_t snapshot;
     muse_review_snapshot(incoming, MUSE_REVIEW_CAP, &snapshot);
     if (!snapshot.available) { heap_caps_free(incoming); return; }
-    muse_text_to_caption(incoming, MUSE_REVIEW_CAP);
+    prepare_display(incoming, snapshot.shortened);
 
     int old_y = lv_obj_get_scroll_y(s_scroll);
     s_previous_label = s_label;

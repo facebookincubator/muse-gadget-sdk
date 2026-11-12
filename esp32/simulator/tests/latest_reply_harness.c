@@ -201,6 +201,9 @@ int main(int argc, char **argv)
     lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
     advance_reply(420);
     assert(!strcmp(lv_label_get_text(s_notice), "REPLY SHORTENED"));
+    assert(!strcmp(lv_label_get_text(s_label), "A shortened reply..."));
+    muse_review_snapshot(original, sizeof(original), &original_info);
+    assert(!strcmp(original, "A shortened reply"));
     /* Navigating away during the animation safely completes the selection. */
     muse_review_store(muse_review_turn(), "Selected before leaving");
     lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
@@ -219,6 +222,7 @@ int main(int argc, char **argv)
     advance_reply(420);
     lv_obj_update_layout(s_scroll);
     assert(strlen(lv_label_get_text(s_label)) == MUSE_REVIEW_CAP - 1);
+    assert(!strcmp(lv_label_get_text(s_label) + MUSE_REVIEW_CAP - 4, "..."));
     lv_obj_scroll_to_y(s_scroll, LV_COORD_MAX, LV_ANIM_OFF);
     assert(lv_obj_get_scroll_bottom(s_scroll) == 0);
     free(full);
@@ -229,6 +233,7 @@ int main(int argc, char **argv)
     update_sleep();
     open_latest();
     assert(strlen(lv_label_get_text(s_label)) == MUSE_REVIEW_CAP - 1);
+    assert(!strcmp(lv_label_get_text(s_label) + MUSE_REVIEW_CAP - 4, "..."));
     muse_ui_show_face();
     s_next_settings_tick = 0;
     update_chrome(2.0f);
