@@ -745,7 +745,8 @@ the design, the Wi-Fi protocol and the numbers.
   start).
 - **Test** with `tests/test_muse_video.py` (the ring and the Wi-Fi messages,
   and the wiring under the options), `tests/test_video_untrusted.py`
-  (hostile sizes, the port's guards), `tests/test_tinyh264_pie.py` and
+  (hostile sizes, the port's guards, every drawn piece written exactly),
+  `tests/test_tinyh264_pie.py` and
   `tests/test_libvpx_vp8.py`; on a board, with Muse Gadgets Test (Android:
   `adb logcat -s MuseCam`; iPhone: Xcode's console).
 - **Untrusted input:** everything from the network is. Keep the checks in

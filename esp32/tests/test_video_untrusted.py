@@ -262,7 +262,7 @@ class UntrustedVideoTest(unittest.TestCase):
         self.assertEqual(video.count("muse_vdec_open(s_params.codec, s_params.width, s_params.height)"), 2)
         # Pictures handed to the show task are never freed under it.
         self.assertIn("bool reset = muse_vdec_may_realloc(", video)
-        self.assertIn("need > pp->h || a->vis_w > pp->w", video)
+        self.assertIn("need > p.h || a->vis_w > p.w", video)
 
     def test_wifi_port_guards(self):
         wifi = (MUSE / "muse_video_wifi.c").read_text()
@@ -278,6 +278,42 @@ class UntrustedVideoTest(unittest.TestCase):
         kc = (MUSE / "Kconfig").read_text()
         opt = kc[kc.index("config MUSE_VIDEO_WIFI_START_ANYTIME"):]
         self.assertIn("default n", opt[:opt.index("help")])
+
+
+class VideoDrawingTest(unittest.TestCase):
+    """fill() and the colour converters on any picture and band sizes: every
+    DMA piece written exactly, nothing before or after it, no read past a
+    picture (tests/video_fill_harness.c)."""
+
+    def test_pieces_written_exactly(self):
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp, "fill")
+            # AddressSanitizer catches a read past a picture, and with
+            # MUSE_FILL_EXACT a write past a piece's own allocation.
+            build = subprocess.run(
+                [*cc, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
+                 "-Wno-unused-parameter", "-Wno-unused-variable", "-fsanitize=address,undefined",
+                 "-fno-sanitize-recover=undefined", "-fno-omit-frame-pointer",
+                 f"-I{ROOT / 'tests/video_fill_fakes'}", f"-I{MUSE}", f"-I{ROOT / 'components/muse_vstream/include'}",
+                 "-o", str(exe), str(ROOT / "tests/video_fill_harness.c"), str(MUSE / "muse_yuv.c"),
+                 str(ROOT / "components/muse_vstream/muse_vstream.c")],
+                capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+            for exact in ("0", "1"):
+                env = dict(os.environ, MUSE_FILL_EXACT=exact, ASAN_OPTIONS="detect_leaks=0")
+                run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=600, env=env)
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                self.assertIn(": ok", run.stdout)
+
+    def test_two_bands_meet_on_whole_converter_rows(self):
+        video = (MUSE / "muse_video.c").read_text()
+        # The seam comes from the bands (the top band's rows), not the
+        # slot's provisional height, and the decode task checks the layout.
+        self.assertIn("band_seam(a, sl->h0, &vis0)", video)
+        self.assertIn("!bands_fit(h, s_band.h)", video)
+        yuv = (MUSE / "muse_yuv.h").read_text()
+        self.assertIn("int out_rows, uint8_t *out, int out_stride);", yuv)
 
 
 if __name__ == "__main__":
