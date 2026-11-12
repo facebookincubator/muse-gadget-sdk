@@ -27,7 +27,7 @@
 #include "muse_text.h"
 #include "muse_ui.h"
 
-static lv_obj_t *s_tile, *s_scroll, *s_label, *s_notice, *s_new, *s_previous_label;
+static lv_obj_t *s_tile, *s_scroll, *s_label, *s_new, *s_previous_label;
 static char *s_display, *s_previous_display;
 static bool s_transition;
 static bool s_visible;
@@ -89,7 +89,6 @@ static void load_reply(void)
     } else {
         lv_label_set_text(s_label, snapshot.failed ? "Latest reply unavailable" : "No reply yet");
     }
-    lv_label_set_text(s_notice, snapshot.shortened ? "REPLY SHORTENED" : "");
     lv_obj_add_flag(s_new, LV_OBJ_FLAG_HIDDEN);
     layout_reply();
 }
@@ -147,7 +146,6 @@ static void new_reply_cb(lv_event_t *event)
     lv_obj_set_y(s_previous_label, shift);
     lv_obj_update_layout(s_scroll);
     lv_obj_scroll_to_y(s_scroll, old_y + shift, LV_ANIM_OFF);
-    lv_label_set_text(s_notice, snapshot.shortened ? "REPLY SHORTENED" : "");
     lv_obj_add_flag(s_new, LV_OBJ_FLAG_HIDDEN);
     s_transition = true;
     lv_anim_t animation;
@@ -197,11 +195,6 @@ void muse_latest_reply_build(lv_obj_t *tileview, muse_latest_reply_font_t font_f
     lv_label_set_text(s_label, "No reply yet");
     lv_obj_remove_flag(s_label, LV_OBJ_FLAG_CLICKABLE);
 
-    s_notice = lv_label_create(s_tile);
-    lv_label_set_text(s_notice, "");
-    lv_obj_set_style_text_font(s_notice, &lv_font_unscii_8, 0);
-    lv_obj_set_style_text_color(s_notice, lv_color_hex(0x8b84a8), 0);
-    lv_obj_align(s_notice, LV_ALIGN_TOP_MID, 0, 399);
 
     s_new = lv_button_create(s_tile);
     lv_obj_set_size(s_new, 190, 42);

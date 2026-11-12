@@ -200,7 +200,6 @@ int main(int argc, char **argv)
     muse_review_store_complete(muse_review_turn(), "A shortened reply", true);
     lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
     advance_reply(420);
-    assert(!strcmp(lv_label_get_text(s_notice), "REPLY SHORTENED"));
     assert(!strcmp(lv_label_get_text(s_label), "A shortened reply..."));
     muse_review_snapshot(original, sizeof(original), &original_info);
     assert(!strcmp(original, "A shortened reply"));
@@ -255,6 +254,10 @@ int main(int argc, char **argv)
     assert(muse_latest_reply_bench("ui.reply=end"));
     muse_latest_reply_tick();
     assert(lv_obj_get_scroll_bottom(s_scroll) == 0);
+    int full_y = lv_obj_get_scroll_y(s_scroll);
+    muse_ui_show_face();
+    open_latest();
+    assert(lv_obj_get_scroll_y(s_scroll) == full_y);
     /* Snapshot copies must never mix two answers during a concurrent store. */
     memset(concurrent_text, 'a', sizeof(concurrent_text) - 1);
     muse_review_store(muse_review_turn(), concurrent_text);
