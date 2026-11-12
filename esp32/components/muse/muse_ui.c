@@ -56,6 +56,9 @@
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+#include "esp_attr.h"
+#endif
 
 static const char *TAG = "muse_ui";
 
@@ -147,6 +150,18 @@ static lv_obj_t *s_pair;
 static lv_obj_t *s_pair_code;
 static lv_obj_t *s_pair_title;
 static lv_obj_t *s_pair_hint;
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static lv_obj_t *s_notify_card;
+static lv_obj_t *s_notify_title;
+static lv_obj_t *s_notify_msg;
+static lv_obj_t *s_notify_footer;
+EXT_RAM_BSS_ATTR static char s_notify_title_buf[96];
+EXT_RAM_BSS_ATTR static char s_notify_msg_buf[768];
+static int64_t s_notify_expire_us;
+static bool s_notify_pending_show;
+static bool s_notify_pending_hide;
+static bool s_notify_active;
+#endif
 static lv_obj_t *s_canvas;
 static lv_obj_t *s_mic_icon;
 static lv_obj_t *s_ptt_hint, *s_spk_hint, *s_pwr_hint;
@@ -1470,12 +1485,70 @@ static void on_image_clicked(lv_event_t *e)
     image_hide_locked();
 }
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static void on_notify_clicked(lv_event_t *e)
+{
+    (void)e;
+    if (!s_image_mutex) return;
+    xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    s_notify_active = false;
+    s_notify_expire_us = 0;
+    s_notify_pending_show = false;
+    s_notify_pending_hide = false;
+    if (s_notify_card) {
+        lv_obj_add_flag(s_notify_card, LV_OBJ_FLAG_HIDDEN);
+    }
+    xSemaphoreGive(s_image_mutex);
+}
+
+static void notify_sync(void)
+{
+    if (!s_image_mutex || !s_notify_card) return;
+    xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    if (s_notify_pending_hide) {
+        s_notify_pending_hide = false;
+        s_notify_active = false;
+        s_notify_expire_us = 0;
+        lv_obj_add_flag(s_notify_card, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_notify_pending_show) {
+        s_notify_pending_show = false;
+        s_notify_active = true;
+        if (s_notify_title) lv_label_set_text(s_notify_title, s_notify_title_buf);
+        if (s_notify_msg) lv_label_set_text(s_notify_msg, s_notify_msg_buf);
+        lv_obj_remove_flag(s_notify_card, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_notify_card);
+        if (s_pair && !lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_move_foreground(s_pair);
+        }
+        if (s_cover) {
+            lv_obj_move_foreground(s_cover);
+        }
+        muse_state_set_asleep(false);
+        muse_state_poke();
+    }
+    if (s_notify_active && s_notify_expire_us > 0 && esp_timer_get_time() >= s_notify_expire_us) {
+        s_notify_active = false;
+        s_notify_expire_us = 0;
+        lv_obj_add_flag(s_notify_card, LV_OBJ_FLAG_HIDDEN);
+    }
+    xSemaphoreGive(s_image_mutex);
+}
+#endif
+
 #if CONFIG_MUSE_WATCHER_CAMERA
 static void on_camera_hint_clicked(lv_event_t *e)
 {
     (void)e;
     if (watcher_camera_preview_active()) watcher_camera_preview_toggle();
 }
+#endif
+
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static lv_point_t s_swipe_start_pt;
+static int64_t s_swipe_start_us;
+static int64_t s_last_swipe_trigger_us;
+static bool s_swipe_eligible;
 #endif
 
 static void on_any_press(lv_event_t *e)
@@ -1485,8 +1558,43 @@ static void on_any_press(lv_event_t *e)
         muse_input_touch_talk(true);
         muse_input_touch_talk(false);
     }
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    if (s_indev) {
+        lv_indev_get_point(s_indev, &s_swipe_start_pt);
+        s_swipe_start_us = esp_timer_get_time();
+        s_swipe_eligible = s_face_active && !s_dark &&
+                           (!s_cover || lv_obj_has_flag(s_cover, LV_OBJ_FLAG_HIDDEN)) &&
+                           (!s_pair || lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN)) &&
+                           (!s_notify_card || lv_obj_has_flag(s_notify_card, LV_OBJ_FLAG_HIDDEN));
+    }
+#endif
     muse_state_poke();
 }
+
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static void on_any_release(lv_event_t *e)
+{
+    (void)e;
+    if (!s_swipe_eligible || !s_indev) {
+        s_swipe_eligible = false;
+        return;
+    }
+    s_swipe_eligible = false;
+    lv_point_t end_pt = {0, 0};
+    lv_indev_get_point(s_indev, &end_pt);
+    int32_t dx = end_pt.x - s_swipe_start_pt.x;
+    int32_t dy = end_pt.y - s_swipe_start_pt.y;
+    int64_t now_us = esp_timer_get_time();
+    int64_t dt_ms = (now_us - s_swipe_start_us) / 1000;
+    if (dy >= 70 && LV_ABS(dy) > LV_ABS(dx) * 2 &&
+        dt_ms >= 50 && dt_ms <= 1500 &&
+        (now_us - s_last_swipe_trigger_us) > 4000000LL) {
+        s_last_swipe_trigger_us = now_us;
+        image_hide_locked();
+        muse_settings_ui_trigger_wg1200_weather_card();
+    }
+}
+#endif
 
 static lv_obj_t *make_control_icon(lv_obj_t *scr, const muse_button_hint_t *pos,
                                    const char *symbol, uint32_t color)
@@ -1588,6 +1696,45 @@ static void build_overlays(void)
         update_control_hints(MUSE_MODE_BOOT);
     }
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    /* Notification card overlay (wg1200.notify): shows title, wrapped message,
+     * and "Tap to dismiss" footer on the top layer. */
+    s_notify_card = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_notify_card);
+    lv_obj_set_size(s_notify_card, s_small ? s_w - 8 : 420, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(s_notify_card, s_h - 32, 0);
+    lv_obj_center(s_notify_card);
+    lv_obj_set_flex_flow(s_notify_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_notify_card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_ver(s_notify_card, s_small ? 10 : 22, 0);
+    lv_obj_set_style_pad_hor(s_notify_card, s_small ? 8 : 22, 0);
+    lv_obj_set_style_pad_row(s_notify_card, s_small ? 6 : 14, 0);
+    lv_obj_set_style_radius(s_notify_card, s_small ? 10 : 24, 0);
+    lv_obj_set_style_bg_opa(s_notify_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_notify_card, lv_color_hex(0x1a1530), 0);
+    lv_obj_set_style_border_color(s_notify_card, lv_color_hex(COLOR_ACCENT), 0);
+    lv_obj_set_style_border_width(s_notify_card, 2, 0);
+    lv_obj_add_flag(s_notify_card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_notify_card, on_notify_clicked, LV_EVENT_CLICKED, NULL);
+
+    s_notify_title = make_label(s_notify_card, font_pick(&lv_font_montserrat_20, FONT_COMPACT), COLOR_ACCENT);
+    lv_obj_set_width(s_notify_title, lv_pct(100));
+    lv_label_set_long_mode(s_notify_title, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_remove_flag(s_notify_title, LV_OBJ_FLAG_CLICKABLE);
+    lv_label_set_text(s_notify_title, "MUSE NOTIFICATION");
+
+    s_notify_msg = make_label(s_notify_card, font_pick(&lv_font_montserrat_20, FONT_COMPACT), COLOR_LIT);
+    lv_obj_set_width(s_notify_msg, lv_pct(100));
+    lv_obj_set_style_text_line_space(s_notify_msg, 4, 0);
+    lv_label_set_long_mode(s_notify_msg, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_remove_flag(s_notify_msg, LV_OBJ_FLAG_CLICKABLE);
+    lv_label_set_text(s_notify_msg, "");
+
+    s_notify_footer = make_label(s_notify_card, font_pick(&lv_font_montserrat_14, FONT_COMPACT), COLOR_DIM);
+    lv_obj_remove_flag(s_notify_footer, LV_OBJ_FLAG_CLICKABLE);
+    lv_label_set_text(s_notify_footer, "Tap to dismiss");
+#endif
+
     /* BLE pairing code, or the Muse app's ask for the talk button: a centred
      * column in one typeface, the code large. The small card grows with the hint. */
     s_pair = lv_obj_create(lv_layer_top());
@@ -1629,6 +1776,9 @@ static void build_overlays(void)
 
     if (s_indev) {
         lv_indev_add_event_cb(s_indev, on_any_press, LV_EVENT_PRESSED, NULL);
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+        lv_indev_add_event_cb(s_indev, on_any_release, LV_EVENT_RELEASED, NULL);
+#endif
     }
 }
 
@@ -2170,13 +2320,21 @@ static void frame_tick(lv_timer_t *timer)
     }
     (void)timer;
     image_sync();
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    notify_sync();
+#endif
     float mode_t;
     muse_mode_t mode = muse_state_mode(&mode_t);
     float now = (float)esp_timer_get_time() / 1e6f;
 
     if (mode != s_last_mode) {
         if (muse_voice_in_call()) s_level = 0;   /* do not smooth speaker energy into the mic meter */
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+        if (mode == MUSE_MODE_LISTENING ||
+            (mode == MUSE_MODE_THINKING && s_last_mode == MUSE_MODE_IDLE)) {
+#else
         if (mode == MUSE_MODE_LISTENING) {
+#endif
             image_hide_locked();
             muse_ui_show_face();
         }
@@ -2429,6 +2587,57 @@ void muse_ui_image_hide(void)
 #endif
     muse_board->display_unlock();
 }
+
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static void clean_notify_text(char *dst, size_t cap, const char *src, const char *fallback)
+{
+    if (!dst || cap == 0) return;
+    snprintf(dst, cap, "%s", (src && src[0]) ? src : (fallback ? fallback : ""));
+    muse_text_to_ascii(dst, cap);
+    char *p = dst;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (p != dst) {
+        memmove(dst, p, strlen(p) + 1);
+    }
+    if (!dst[0] && fallback && fallback[0]) {
+        snprintf(dst, cap, "%s", fallback);
+    }
+}
+
+bool muse_ui_notify_show(const char *title, const char *message, int duration_s)
+{
+    if (!s_ready || !s_image_mutex || !message || !message[0]) {
+        return false;
+    }
+    xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    clean_notify_text(s_notify_title_buf, sizeof(s_notify_title_buf), title, "MUSE NOTIFICATION");
+    clean_notify_text(s_notify_msg_buf, sizeof(s_notify_msg_buf), message, "");
+    if (!s_notify_msg_buf[0]) {
+        xSemaphoreGive(s_image_mutex);
+        return false;
+    }
+    s_notify_expire_us = duration_s > 0
+        ? esp_timer_get_time() + (int64_t)duration_s * 1000000LL
+        : 0;
+    s_notify_pending_show = true;
+    s_notify_pending_hide = false;
+    muse_state_set_asleep(false);
+    muse_state_poke();
+    xSemaphoreGive(s_image_mutex);
+    return true;
+}
+
+void muse_ui_notify_hide(void)
+{
+    if (!s_ready || !s_image_mutex) {
+        return;
+    }
+    xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    s_notify_pending_hide = true;
+    s_notify_pending_show = false;
+    xSemaphoreGive(s_image_mutex);
+}
+#endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA
 void muse_ui_camera_hint(bool visible)

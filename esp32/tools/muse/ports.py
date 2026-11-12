@@ -31,6 +31,7 @@ USJ = (0x303A, 0x1001)      # the chip's own USB Serial/JTAG
 CH342 = (0x1A86, 0x55D2)    # WCH dual UART bridge: two ports per device
 CH9102 = (0x1A86, 0x55D4)   # WCH single UART bridge
 CH340 = (0x1A86, 0x7522)    # WCH CH340K bridge on the CrowPanel (other CH340s are 0x7523)
+CH340_7523 = (0x1A86, 0x7523)  # WCH CH340 bridge on the WeatherXM WG1200
 CH343 = (0x1A86, 0x55D3)    # WCH single UART bridge on the Waveshare 7-inch, 1.28-inch and P4 3.5 LCDs
 CP210X = (0x10C4, 0xEA60)   # Silicon Labs CP2104 bridge
 
@@ -84,18 +85,22 @@ USB = {
     "smartring-plus": USJ,
     "lcd19": USJ,
     "s3lcd35": USJ,
+    "wg1200": (USJ, CH340_7523),   # onboard USB 2.0 hub exposes both USB Serial/JTAG and CH340
     "watcher": CH342,   # the ESP32-S3 on the second port; the Himax camera chip is on the first
     "plus2": CH9102,
     "core2": (CP210X, CH9102),
 }
 # Boards whose console takes Muse's serial commands (tools/muse/chat.py). The
 # Watcher reads them on its CH342 port with MUSE_CONSOLE_UART.
-COMMANDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "lilygo175", "aipi", "atk-box", "atk-box2", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "ai-passport", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35")
+COMMANDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "lilygo175", "aipi", "atk-box", "atk-box2", "box3", "c6", "c6-206", "sticks3", "watcher", "plus2", "cardputer-adv", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "ai-passport", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35", "wg1200")
 # Bridges that drop bytes when a whole packet arrives at once, so writes to them
 # go 64 bytes at a time at the line rate (paced_esptool.py, chat.Board.write).
 PACED = (CH342,)
+# Boards whose onboard USB hub exposes every bridge in USB[board] at once:
+# prefer the first attached kind (USB Serial/JTAG carries the chip's MAC).
+ONBOARD_HUB = ("wg1200",)
 KINDS = {USJ: "Espressif USB Serial/JTAG", CH342: "CH342 bridge", CH9102: "CH9102 bridge", CH343: "CH343 bridge",
-         CH340: "CH340 bridge", CP210X: "CP2104 bridge"}
+         CH340: "CH340 bridge", CH340_7523: "CH340 bridge", CP210X: "CP2104 bridge"}
 
 
 class NotFound(Exception):
@@ -123,7 +128,15 @@ def find(board, serial=None, ports=None):
     if serial and serial.startswith("/dev/"):
         return serial
     usb = USB[board]
-    cands = devices(usb, ports)
+    if board in ONBOARD_HUB and not serial:
+        cands = []
+        for kind_usb in _usbs(usb):
+            cands = devices(kind_usb, ports)
+            if cands:
+                usb = kind_usb
+                break
+    else:
+        cands = devices(usb, ports)
     if serial:
         cands = [p for p in cands if (p.serial_number or "").lower() == serial.lower()]
     if len(cands) == 1:
@@ -143,7 +156,7 @@ def paced(port, ports=None):
 
 def command_ports(ports=None):
     """Ports of boards that take serial commands, USB Serial/JTAG first."""
-    kinds = dict.fromkeys(USB[b] for b in COMMANDS)
+    kinds = dict.fromkeys(u for b in COMMANDS for u in _usbs(USB[b]))
     return [p.device for usb in kinds for p in devices(usb, ports)]
 
 

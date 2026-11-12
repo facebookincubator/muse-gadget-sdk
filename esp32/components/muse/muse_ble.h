@@ -30,7 +30,8 @@
  *                        wifi.forget (=ssid forgets that one, bare forgets all
  *                        saved networks), hatch.host, hatch.vm, hatch.token,
  *                        hatch.token+ (append chunk), hatch.test, volume,
- *                        mic_gain, brightness, sleep
+ *                        mic_gain, brightness, sleep; on the WG1200 also
+ *                        card.prompt, card.prompt+ (append) and card.prompt?
  *   STATUS (read/notify) JSON snapshot; notifies a short result after each CMD
  *
  * Both require an encrypted, MITM-protected link: the phone pairs with the

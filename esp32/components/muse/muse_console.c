@@ -63,6 +63,12 @@ bool muse_console_host(void)
 #else
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
+#if CONFIG_MUSE_BOARD_WXM_WG1200 && CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#define WG1200_DUAL_USB_CONSOLE 1
+#else
+#define WG1200_DUAL_USB_CONSOLE 0
+#endif
 #if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
 #include "esp_attr.h"
 #include "esp_pm.h"
@@ -137,6 +143,15 @@ esp_err_t muse_console_install(size_t rx_buf)
     esp_err_t err = uart_driver_install(PORT, rx_buf, 0, 0, NULL, 0);
     if (err == ESP_OK) {
         uart_vfs_dev_use_driver(PORT);
+#if WG1200_DUAL_USB_CONSOLE
+        /* WG1200 exposes both ESP32-S3 USB_SERIAL_JTAG (303a:1001) and CH340 UART0
+         * (1a86:7523) behind its internal USB 2.0 hub. Secondary console already
+         * mirrors stdout/logs to USB_SERIAL_JTAG; install its RX driver too so
+         * serial commands (>sdk_token=..., >boot.weatherxm) work on either port. */
+        usb_serial_jtag_driver_config_t usj_cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+        usj_cfg.rx_buffer_size = rx_buf;
+        (void)usb_serial_jtag_driver_install(&usj_cfg);
+#endif
 #if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
         wake_on_rx();
 #endif
@@ -146,6 +161,16 @@ esp_err_t muse_console_install(size_t rx_buf)
 
 bool muse_console_getc(uint8_t *c)
 {
+#if WG1200_DUAL_USB_CONSOLE
+    for (;;) {
+        if (usb_serial_jtag_read_bytes(c, 1, 0) == 1) {
+            return true;
+        }
+        if (uart_read_bytes(PORT, c, 1, pdMS_TO_TICKS(20)) == 1) {
+            return true;
+        }
+    }
+#else
     if (uart_read_bytes(PORT, c, 1, portMAX_DELAY) != 1) {
         return false;
     }
@@ -155,10 +180,16 @@ bool muse_console_getc(uint8_t *c)
     }
 #endif
     return true;
+#endif
 }
 
 bool muse_console_write(const void *buf, size_t n)
 {
+#if WG1200_DUAL_USB_CONSOLE
+    if (n && usb_serial_jtag_is_connected()) {
+        (void)usb_serial_jtag_write_bytes(buf, n, pdMS_TO_TICKS(50));
+    }
+#endif
     return uart_write_bytes(PORT, buf, n) == (int)n;
 }
 

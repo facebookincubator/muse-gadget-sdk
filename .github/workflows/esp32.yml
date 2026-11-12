@@ -313,6 +313,9 @@ jobs:
           - board: muse-dfrobot-unihiker-k10
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-dfrobot-unihiker-k10"
+          - board: muse-wxm-wg1200
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-wxm-wg1200"
     defaults:
       run:
         shell: bash

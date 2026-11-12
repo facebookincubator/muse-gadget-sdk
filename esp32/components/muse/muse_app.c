@@ -35,6 +35,9 @@
 #if CONFIG_MUSE_VIDEO_WIFI
 #include "muse_video_wifi.h"
 #endif
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+#include "wg1200_weather.h"
+#endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 #include "muse_review.h"
 #endif
@@ -89,6 +92,11 @@ void muse_app_run(const muse_board_t *board)
     muse_video_wifi_start();
 #endif
     ESP_ERROR_CHECK(muse_ui_start());
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    /* After muse_ui_start(): ST7701S 9-bit SPI init bit-bangs and releases
+     * GPIO41/48 during display_start(), so SX1262 SPI3_HOST claims them after. */
+    wg1200_weather_init();
+#endif
     ESP_LOGI(TAG, "UI built: free internal %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
     QueueHandle_t q = xQueueCreate(16, sizeof(muse_input_event_t));

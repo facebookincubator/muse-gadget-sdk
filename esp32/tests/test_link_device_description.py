@@ -131,8 +131,9 @@ class DeviceDescriptionTest(unittest.TestCase):
         family = NOISE[NOISE.index("#ifndef MUSE_DEVICE_FAMILY"):]
         family = family[: family.index("#endif") + len("#endif")]
         functions = "\n".join(function_source(NOISE, signature) for signature in (
-            "static cJSON *string_param(", "static cJSON *row_params(", "static void add_command(",
-            "static void add_register_metadata_string(", "static char *build_register_json(",
+            "static cJSON *string_param(", "static cJSON *int_param(", "static cJSON *row_params(",
+            "static void add_command(", "static void add_register_metadata_string(",
+            "static char *build_register_json(",
         ))
         # Print however large it gets, so the test reports the real size.
         cap = f"size <= {REGISTER_LIMIT} && !json"
@@ -201,25 +202,32 @@ int main(void) {{
                         "CONFIG_MUSE_WATCHER_CAMERA"],
             "full UI, P4 camera": ["CONFIG_HOMEHUB_LED_BACKEND_MUSE", "CONFIG_HOMEHUB_DISPLAY_COMMANDS",
                                    "CONFIG_MUSE_P4_CSI_CAMERA"],
+            "full UI, WG1200": ["CONFIG_HOMEHUB_LED_BACKEND_MUSE", "CONFIG_HOMEHUB_DISPLAY_COMMANDS",
+                                "CONFIG_MUSE_BOARD_WXM_WG1200"],
             "voice": ["CONFIG_HOMEHUB_VOICE"],
         }
         model_id, model_name = "z" * 64, "~" * 128
         self.assertTrue(VALID_MODEL_NAME.fullmatch(model_name))
+        # HOMEHUB_BLE_COMMANDS depends on HOMEHUB_BLE_PERSISTENT, which depends on !MUSE_ENABLED.
+        self.assertIn("depends on BT_NIMBLE_ENABLED && !MUSE_ENABLED", KCONFIG)
         common = [
-            "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_BLE_COMMANDS=1",
+            "-DCONFIG_HOMEHUB_TUNNEL=1",
             f'-DCONFIG_MUSE_DEVICE_MODEL_ID="{model_id}"', f'-DCONFIG_MUSE_DEVICE_MODEL_NAME="{model_name}"',
         ]
         for profile, options in profiles.items():
             with self.subTest(profile=profile):
+                has_ble = "CONFIG_MUSE_BOARD_WXM_WG1200" not in options
+                extra = ["-DCONFIG_HOMEHUB_BLE_COMMANDS=1"] if has_ble else []
                 lines = self.registrations(
-                    [*common, *(f"-D{option}=1" for option in options)], "n" * 31, "d" * 31, ble=True,
+                    [*common, *extra, *(f"-D{option}=1" for option in options)], "n" * 31, "d" * 31, ble=has_ble,
                     ssid='\\"' * 32)
                 for line in lines:
                     params = json.loads(line)["params"]
                     self.assertEqual((params["model_id"], params["metadata"]["model_name"]), (model_id, model_name))
                     self.assertEqual(params["metadata"]["network_ssid"], '"' * 32)
                     self.assertIn("device.guide", params["commands_v2"])
-                    self.assertIn("ble.subscribe", params["commands_v2"])
+                    if has_ble:
+                        self.assertIn("ble.subscribe", params["commands_v2"])
                 size = max(len(line) for line in lines)
                 print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
                 # cJSON_PrintPreallocated asks for 5 bytes beyond the output.

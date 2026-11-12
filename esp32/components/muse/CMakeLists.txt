@@ -158,6 +158,12 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_vn_s3_183.c")
     elseif(CONFIG_MUSE_BOARD_AI_PASSPORT)
         list(APPEND srcs "boards/board_ai_passport.c")
+    elseif(CONFIG_MUSE_BOARD_WXM_WG1200)
+        list(APPEND srcs
+            "boards/board_wxm_wg1200.c"
+            "wxm_boot_mgr.c"
+            "wg1200_card_prompt.c"
+            "wg1200_weather.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_P4_LCD35)
         list(APPEND srcs "boards/board_waveshare_p4_lcd35.c")
         if(CONFIG_MUSE_P4_CSI_CAMERA)
@@ -207,7 +213,7 @@ set(muse_priv_requires
     bt esp-tls mbedtls esp_app_format esp_http_client
     noise_core minimp3 muse_vstream tinyh264 libvpx_vp8
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
-    esp_driver_pcnt efuse
+    esp_driver_pcnt efuse app_update bootloader_support
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
     # before Kconfig values exist, so these can't depend on it; only the code does.
     fatfs esp_driver_sdspi sdmmc)
@@ -226,6 +232,17 @@ idf_component_register(
     REQUIRES esp_driver_gpio esp_driver_i2c
     PRIV_REQUIRES ${muse_priv_requires}
 )
+
+if(CONFIG_MUSE_BOARD_WXM_WG1200)
+    target_link_options(${COMPONENT_LIB} INTERFACE
+        "-Wl,--wrap=nvs_flash_init"
+        "-Wl,--wrap=nvs_flash_init_partition"
+        "-Wl,--wrap=nvs_flash_erase"
+        "-Wl,--wrap=nvs_open"
+        "-Wl,--wrap=nvs_open_from_partition"
+        "-Wl,--wrap=esp_panic_handler"
+    )
+endif()
 
 if(CONFIG_MUSE_UI_FREEINK)
     # FreeInk's board profile, for the panel and its pins. PUBLIC: FreeInk's
