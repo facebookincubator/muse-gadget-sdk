@@ -25,6 +25,7 @@
 #include "esp_random.h"
 #include "host/ble_hs.h"
 #include "host/ble_store.h"
+#include "nvs.h"
 
 #include "muse_chat.h"
 #include "muse_link.h"
@@ -49,6 +50,7 @@ static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_status_handle;
 static volatile uint32_t s_passkey;
 static volatile bool s_secure;
+static volatile bool s_forget_pending;   /* muse_ble_forget_all() ran with the stack down */
 static char s_name[32];   /* the whole "MuseGadget-XXXXXX", not a prefix of it */
 static char s_last[64] = "ready";
 
@@ -287,6 +289,13 @@ int muse_ble_gap_event(struct ble_gap_event *ev)
     switch (ev->type) {
     case BLE_GAP_EVENT_CONNECT:
         if (ev->connect.status == 0) {
+            if (s_forget_pending) {
+                /* A forget while the stack was starting may have missed the
+                 * bonds it had already loaded: drop them before this link can
+                 * encrypt with one. */
+                s_forget_pending = false;
+                ble_store_clear();
+            }
             s_conn = ev->connect.conn_handle;
             s_secure = false;
         }
@@ -360,10 +369,35 @@ void muse_ble_status(muse_ble_status_t *out)
     }
 }
 
+/* NimBLE's persisted store (CONFIG_BT_NIMBLE_NVS_PERSIST), which it loads
+ * again whenever the stack starts. */
+#define NIMBLE_BOND_NS "nimble_bond"
+
 void muse_ble_forget_all(void)
 {
     if (muse_link_ble_started()) {
         ble_store_clear();
         ESP_LOGI(TAG, "forgot all paired phones");
+        return;
+    }
+    /* Boards that start BLE on demand (the CrowPanel, the 1.75) may not have
+     * the stack up yet, and the bonds would come back with it: clear them
+     * where they're kept. That's everything ble_store_clear() deletes. A start
+     * running now may already have loaded them, so the first connection
+     * clears the store again (muse_ble_gap_event). */
+    s_forget_pending = true;
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NIMBLE_BOND_NS, NVS_READWRITE, &h);
+    if (err == ESP_OK) {
+        err = nvs_erase_all(h);
+        if (err == ESP_OK) {
+            err = nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "forgot all paired phones (BLE off)");
+    } else {
+        ESP_LOGE(TAG, "couldn't forget paired phones: %s", esp_err_to_name(err));
     }
 }
