@@ -26,13 +26,21 @@
  */
 
 /*
- * Two times upscaled: src_rows source rows (even) of src_w pixels become
- * 2 * src_rows rows of 2 * src_w pixels at out (out_stride bytes apart).
+ * Every converter writes exactly the rows it's asked for, out_rows (or rows)
+ * of them, and nothing past them, whatever their count: a destination that
+ * ends inside a row pair (or the 3/2 scale's pattern) gets only the rows it
+ * has room for, and source rows those rows don't come from aren't read.
+ */
+
+/*
+ * Two times upscaled: source rows of src_w pixels become out_rows rows of
+ * 2 * src_w pixels at out (out_stride bytes apart); output row i comes from
+ * source row i / 2, so (out_rows + 1) / 2 source rows are read.
  * y: 16-byte aligned, ystride a multiple of 16; u, v: 8-byte aligned,
  * cstride a multiple of 8; out and out_stride: multiples of 8.
  */
 void muse_yuv_up2(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride, int src_w,
-                  int src_rows, uint8_t *out, int out_stride);
+                  int out_rows, uint8_t *out, int out_stride);
 
 /*
  * Any other scale: output rows [row, row + rows) of an out_w x out_h picture
@@ -45,14 +53,15 @@ int muse_yuv_src_rows(int src_h, int out_h, int out_rows);
 
 /*
  * One and a half times upscaled (320 px to 480): output rows [row, row + rows)
- * (row and rows even) of a 3/2 src_w square. Each source pixel pair becomes
- * three (the middle one their average), rows likewise, in YUV, then
- * muse_yuv_1x() converts. Needs source rows up to muse_yuv_up32_src_rows().
+ * (row even) of a 3/2 src_w square. Each source pixel pair becomes three (the
+ * middle one their average), rows likewise, in YUV, then muse_yuv_1x()
+ * converts. Needs source rows up to muse_yuv_up32_src_rows(); never reads
+ * a source row at or past src_h.
  */
 void muse_yuv_up32(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride, int src_w,
                    int src_h, int row, int rows, uint8_t *out, int out_stride);
 int muse_yuv_up32_src_rows(int src_h, int out_rows);
 
-/* Not scaled: src_rows (even) rows of src_w (even) pixels, one to one. */
+/* Not scaled: src_rows rows of src_w (even) pixels, one to one. */
 void muse_yuv_1x(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride, int src_w,
                  int src_rows, uint8_t *out, int out_stride);

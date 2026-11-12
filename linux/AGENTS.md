@@ -41,6 +41,7 @@ pairing and control protocols, so the same app pairs either.
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
+| `video_call.py`, `voice_video.py`, `rtc/` | Video calls: JOIN over Noise, SRTP media (ICE-lite over UDP/TCP, Opus, H.264), H.264 outputs |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
@@ -221,6 +222,15 @@ never has a command's parameters, output or error message.
   real recordings, credentials, internal documents or captured events here.
   `test_streaming.py`, `test_voice_call.py` and `test_voice_cli.py` exercise real
   Noise against an in-process fake VM without hardware or external calls.
+- Video calls use `VideoCall`, not the realtime stream: media endpoint and
+  JOIN over Noise, then SRTP straight to the endpoint. The client mints the
+  JOIN's credentials and SRTP key and never logs them. Connectivity is an
+  ICE-lite check over UDP and RFC 4571 TCP at once (the first to answer
+  carries the call), repeated as consent. Accept media only from the endpoint's
+  SSRCs, inside the SRTP replay window, and bound every parse and reassembly.
+  Admit only `mcu-wearable` video. End the call explicitly on every path. Video
+  never blocks or ends the call; drops resume at a keyframe (ask with a PLI).
+  `rtc_fake_edge.py` is the loopback media endpoint for tests.
 
 ## Adding a command
 
