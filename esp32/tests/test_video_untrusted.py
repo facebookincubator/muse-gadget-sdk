@@ -15,7 +15,10 @@
 """The video decoders on input from the network: tinyh264 refuses parameter
 sets for pictures larger than the stream's (before allocating for them) and
 any whose sizes would overflow, muse_vdec refuses VP8 keyframes larger
-than the stream's, and pictures being drawn aren't freed under the reader."""
+than the stream's, and pictures being drawn aren't freed under the reader;
+and every decoder takes whole frames of any size from one reused buffer with
+nothing of an earlier one deciding what it reads."""
+import concurrent.futures
 import os
 from pathlib import Path
 import shlex
@@ -280,7 +283,7 @@ class UntrustedVideoTest(unittest.TestCase):
         self.assertEqual(video.count("muse_vdec_open(s_params.codec, s_params.width, s_params.height)"), 2)
         # Pictures handed to the show task are never freed under it.
         self.assertIn("bool reset = muse_vdec_may_realloc(", video)
-        self.assertIn("need > pp->h || a->vis_w > pp->w", video)
+        self.assertIn("need > p.h || a->vis_w > p.w", video)
 
     def test_wifi_port_guards(self):
         wifi = (MUSE / "muse_video_wifi.c").read_text()
@@ -296,6 +299,190 @@ class UntrustedVideoTest(unittest.TestCase):
         kc = (MUSE / "Kconfig").read_text()
         opt = kc[kc.index("config MUSE_VIDEO_WIFI_START_ANYTIME"):]
         self.assertIn("default n", opt[:opt.index("help")])
+
+
+def idr16(mbs, idr_pic_id):
+    """An IDR slice of mbs flat I_16x16 macroblocks (DC, no residual): a few
+    bits each, so a keyframe can be tiny and leave its picture unfinished."""
+    b = Bits()
+    b.ue(0)      # first_mb_in_slice
+    b.ue(7)      # slice_type: I (all slices)
+    b.ue(0)      # pic_parameter_set_id
+    b.u(4, 0)    # frame_num
+    b.ue(idr_pic_id)
+    b.u(1, 0)    # no_output_of_prior_pics_flag
+    b.u(1, 0)    # long_term_reference_flag
+    b.ue(0)      # slice_qp_delta (se 0)
+    b.ue(1)      # disable_deblocking_filter_idc
+    for _ in range(mbs):
+        b.ue(3)    # mb_type: I_16x16_2_0_0 (DC, no coded block pattern)
+        b.ue(0)    # intra_chroma_pred_mode: DC
+        b.ue(0)    # mb_qp_delta (se 0)
+        b.u(1, 1)  # Intra16x16DCLevel coeff_token: no coefficients
+    return nal(0x65, b)
+
+
+AU_MAX = 64 * 1024   # tests/vdec_stale_harness.c's buffer, as muse_video.c's s_au
+VSTREAM_INC = ROOT / "components/muse_vstream/include"
+VP8 = ROOT / "components/libvpx_vp8/src"
+
+
+def sanitizers(cc, tmp):
+    """ASan and UBSan where the compiler has them (the harness's guard bytes
+    catch a write without them)."""
+    flags = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
+    probe = Path(tmp, "probe.c")
+    probe.write_text("int main(void) { return 0; }\n")
+    r = subprocess.run([*cc, *flags, str(probe), "-o", str(Path(tmp, "probe"))], capture_output=True)
+    # Vendored decoders shift negative values as upstream ships them.
+    return flags + ["-fno-sanitize=shift-base"] if r.returncode == 0 else []
+
+
+class StaleStreamState(unittest.TestCase):
+    """Whole frames of very different sizes, one after another in one reused
+    buffer of AU_MAX bytes, through each decoder (tinyh264 alone and behind
+    muse_vdec.c, VP8 behind muse_vdec.c): a frame decodes exactly as it does
+    after reopening the decoder (result, picture size and pixels), nothing
+    past the frame is read (ASan: the earlier frames' bytes after it and the
+    guard past AU_MAX) or written (guard bytes), and a keyframe then
+    decodes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory(prefix="vdec-stale-")
+        tmp = Path(cls.tmp.name)
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        san = sanitizers(cc, tmp)
+        harness = str(ROOT / "tests/vdec_stale_harness.c")
+        tiny = [str(p) for p in sorted(TINY.glob("*.c"))]
+        glue = ["-I", str(MUSE), "-I", str(VSTREAM_INC), str(MUSE / "muse_vdec.c")]
+        builds = {
+            "src": ["-DSTALE_DIRECT=1", f"-I{TINY}", *tiny],
+            "src_vdec": [f"-I{TINY}", *glue, *tiny],
+            "vp8_vdec": ["-DCONFIG_MUSE_VIDEO_VP8=1", f"-I{TINY}", f"-I{VP8}", *glue,
+                         *tiny, *sorted(map(str, VP8.rglob("*.c")))],
+        }
+        cls.exe = {}
+
+        def build(item):
+            name, args = item
+            exe = tmp / name
+            # Vendored decoders as upstream ships them: their warnings aren't ours.
+            r = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", *san, *args,
+                                harness, "-lm", "-o", str(exe)], capture_output=True, text=True)
+            if r.returncode:
+                raise AssertionError(name + ":\n" + r.stdout + r.stderr)
+            return name, exe
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(builds)) as pool:
+            cls.exe = dict(pool.map(build, builds.items()))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def frames(self, named):
+        out = {}
+        for name, data in named.items():
+            self.assertLessEqual(len(data), AU_MAX, name)
+            p = Path(self.tmp.name, name)
+            p.write_bytes(data)
+            out[name] = str(p)
+        return out
+
+    def run_harness(self, build, codec, files):
+        r = subprocess.run([str(self.exe[build]), codec, *files], capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("runtime error", r.stderr)
+        self.assertNotIn("AddressSanitizer", r.stderr)
+        lines = r.stdout.splitlines()
+        self.assertEqual(lines[-1], "guard ok", r.stdout)
+        return [line.split() for line in lines[:-1] if line != "reset"]
+
+    def check(self, build, codec, f, picture, size):
+        """f: a, b, c, k. The run a, b, c, k against a, b, reopen, c, k: each
+        line is NAME LEN RC W H SUM (picture size and checksum)."""
+        seq = self.run_harness(build, codec, [f["a"], f["b"], f["c"], f["k"]])
+        ref = self.run_harness(build, codec, [f["a"], f["b"], "reset", f["c"], f["k"]])
+        self.assertEqual(seq, ref, (build, seq, ref))
+        # the keyframe after them decodes, to a whole picture
+        self.assertEqual(seq[3][2:5], [str(picture), *map(str, size)], (build, seq))
+        return seq
+
+    def h264(self):
+        return self.frames({
+            # 28 B: a keyframe whose picture (2 macroblocks) has 1
+            "h_a": sps(2, 1) + pps() + idr16(1, 0),
+            # one NAL unit as long as the whole buffer (zero padding after its slice)
+            "h_b": idr16(1, 1).ljust(AU_MAX, b"\0"),
+            "h_c": b"\0\0\0\1",
+            "h_k": sps(2, 1) + pps() + idr16(2, 2),
+        })
+
+    def test_tinyh264(self):
+        f = self.h264()
+        self.assertEqual(os.path.getsize(f["h_a"]), 28)
+        f = {k[2:]: v for k, v in f.items()}
+        seq = self.check("src", "direct", f, 1, (32, 16))   # H264BSD_PIC_RDY
+        self.assertEqual(seq[2][2], "3", seq)     # 4 bytes, no NAL unit: H264BSD_ERROR
+        seq = self.check("src_vdec", "h264", f, 1, (32, 16))   # MUSE_VDEC_PICTURE
+        self.assertEqual(seq[2][2], "-1", seq)
+
+    def test_vp8(self):
+        ivf = (ROOT / "tests/vectors/vp8/p0_keyframes.ivf").read_bytes()   # 240 x 240
+        frames, at = [], 32
+        while at + 12 <= len(ivf):
+            n = int.from_bytes(ivf[at:at + 4], "little")
+            frames.append(ivf[at + 12:at + 12 + n])
+            at += 12 + n
+        key = frames[0]
+        self.assertEqual(key[0] & 1, 0)   # a keyframe
+        f = self.frames({"v_a": key[:28], "v_b": frames[1].ljust(AU_MAX, b"\0"), "v_c": key[:4], "v_k": key})
+        self.check("vp8_vdec", "vp8", {k[2:]: v for k, v in f.items()}, 1, (240, 240))
+
+    def test_decoders_keep_no_stream_position_across_calls(self):
+        src = (TINY / "h264bsd_decoder.c").read_text()
+        body = src[src.index("u32 h264bsdDecode(storage_t *pStorage"):]
+        body = body[:body.index("\n}\n")]
+        self.assertIn("pStorage->prevBufPointer = NULL;", body)
+        self.assertIn("if (readBytes > len)", body)
+        self.assertIn("pStorage->prevBytesConsumed <= len)", src)
+
+
+class VideoDrawingTest(unittest.TestCase):
+    """fill() and the colour converters on any picture and band sizes: every
+    DMA piece written exactly, nothing before or after it, no read past a
+    picture (tests/video_fill_harness.c)."""
+
+    def test_pieces_written_exactly(self):
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp, "fill")
+            # AddressSanitizer catches a read past a picture, and with
+            # MUSE_FILL_EXACT a write past a piece's own allocation.
+            build = subprocess.run(
+                [*cc, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
+                 "-Wno-unused-parameter", "-Wno-unused-variable", "-fsanitize=address,undefined",
+                 "-fno-sanitize-recover=undefined", "-fno-omit-frame-pointer",
+                 f"-I{ROOT / 'tests/video_fill_fakes'}", f"-I{MUSE}", f"-I{ROOT / 'components/muse_vstream/include'}",
+                 "-o", str(exe), str(ROOT / "tests/video_fill_harness.c"), str(MUSE / "muse_yuv.c"),
+                 str(ROOT / "components/muse_vstream/muse_vstream.c")],
+                capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+            for exact in ("0", "1"):
+                env = dict(os.environ, MUSE_FILL_EXACT=exact, ASAN_OPTIONS="detect_leaks=0")
+                run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=600, env=env)
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                self.assertIn(": ok", run.stdout)
+
+    def test_two_bands_meet_on_whole_converter_rows(self):
+        video = (MUSE / "muse_video.c").read_text()
+        # The seam comes from the bands (the top band's rows), not the
+        # slot's provisional height, and the decode task checks the layout.
+        self.assertIn("band_seam(a, sl->h0, &vis0)", video)
+        self.assertIn("!bands_fit(h, s_band.h)", video)
+        yuv = (MUSE / "muse_yuv.h").read_text()
+        self.assertIn("int out_rows, uint8_t *out, int out_stride);", yuv)
 
 
 # muse_vdec on access units in turn, as muse_video.c's decode task feeds it: the
@@ -464,6 +651,7 @@ class PicturesKeptTest(unittest.TestCase):
         lines = self.run_units(two_bands(top_key, bottom_key), two_bands(top, bottom),
                                two_bands(non_idr(120, frame_num=2), non_idr(4, pps_id=1)[4:]), bands=True)
         self.assertEqual(lines, [(1, 1, 1), (1, 1, 1), (0, 1, 1)])
+
 
 if __name__ == "__main__":
     unittest.main()

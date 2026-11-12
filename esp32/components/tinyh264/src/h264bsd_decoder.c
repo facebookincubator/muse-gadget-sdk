@@ -156,7 +156,9 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
 
     /* if previous buffer was not finished and same pointer given -> skip NAL
      * unit extraction */
-    if (pStorage->prevBufNotFinished && byteStrm == pStorage->prevBufPointer)
+    /* OPT: and only while that NAL unit fits in this buffer */
+    if (pStorage->prevBufNotFinished && byteStrm == pStorage->prevBufPointer &&
+        pStorage->prevBytesConsumed <= len)
     {
         strm = pStorage->strm[0];
         strm.pStrmCurrPos = strm.pStrmBuffStart;
@@ -510,7 +512,16 @@ u32 h264bsdDecode(storage_t *pStorage, u8 *byteStrm, u32 len, u8 **picture, u32 
   u32 retCode = 3;
   u32 readBytes = 0;
 
+    /* OPT: each call is a whole access unit: a NAL unit an earlier call left
+     * unfinished is never resumed (the caller reuses one buffer, so the same
+     * address holds other bytes now) */
+    pStorage->prevBufNotFinished = HANTRO_FALSE;
+    pStorage->prevBufPointer = NULL;
+
     do {
+      /* OPT: never past the buffer */
+      if (readBytes > len)
+        return(H264BSD_ERROR);
       len -= readBytes;
       byteStrm += readBytes;
       retCode = h264bsdDecodeInternal(pStorage, byteStrm, len, &readBytes);
