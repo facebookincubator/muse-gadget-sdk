@@ -44,6 +44,14 @@ static void swipe(int x1, int y1, int x2, int y2)
     }
 }
 
+static void advance_reply(unsigned ms)
+{
+    for (unsigned elapsed = 0; elapsed < ms; elapsed += 20) {
+        sim_time_advance_us(20000);
+        lv_timer_handler();
+    }
+}
+
 static void open_latest(void)
 {
     lv_tileview_set_tile(s_tv, muse_latest_reply_tile(), LV_ANIM_OFF);
@@ -126,16 +134,18 @@ int main(int argc, char **argv)
     assert(lv_obj_get_scroll_y(s_scroll) > 0);
     assert(muse_latest_reply_bench("ui.reply=new"));
     muse_latest_reply_tick();
+    advance_reply(420);
     assert(lv_obj_get_scroll_y(s_scroll) == 0);
     lv_indev_set_read_cb(s_indev, read_pointer);
     swipe(230, 320, 230, 150);
     assert(lv_obj_get_scroll_y(s_scroll) > 0);
     assert(lv_tileview_get_tile_active(s_tv) == s_tile);
+    int reread_y = lv_obj_get_scroll_y(s_scroll);
     swipe(350, 220, 100, 220);
     assert(lv_tileview_get_tile_active(s_tv) == s_face);
     swipe(100, 220, 350, 220);
     assert(lv_tileview_get_tile_active(s_tv) == s_tile);
-    assert(lv_obj_get_scroll_y(s_scroll) == 0);
+    assert(lv_obj_get_scroll_y(s_scroll) == reread_y);
 
     lv_obj_scroll_to_y(s_scroll, 240, LV_ANIM_OFF);
     int scroll = lv_obj_get_scroll_y(s_scroll);
@@ -145,13 +155,33 @@ int main(int argc, char **argv)
     assert(!lv_obj_has_flag(s_new, LV_OBJ_FLAG_HIDDEN));
     assert(!strcmp(lv_label_get_text(s_label), answer));
     assert(lv_obj_get_scroll_y(s_scroll) == scroll);
+    lv_tileview_set_tile(s_tv, s_face, LV_ANIM_OFF);
+    open_latest();
+    muse_latest_reply_tick();
+    assert(!strcmp(lv_label_get_text(s_label), answer));
+    assert(lv_obj_get_scroll_y(s_scroll) == scroll);
+    assert(!lv_obj_has_flag(s_new, LV_OBJ_FLAG_HIDDEN));
     if (argc > 1) screenshot(argv[1]);
+    fail_display_alloc = true;
     lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
+    assert(!s_transition && !strcmp(lv_label_get_text(s_label), answer));
+    assert(lv_obj_get_scroll_y(s_scroll) == scroll);
+    fail_display_alloc = false;
+    lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
+    assert(s_transition && s_previous_label && s_previous_display);
+    assert(!strcmp(lv_label_get_text(s_previous_label), answer));
+    int start_y = lv_obj_get_scroll_y(s_scroll);
+    assert(start_y > scroll);
+    advance_reply(160);
+    assert(lv_obj_get_scroll_y(s_scroll) > 0 && lv_obj_get_scroll_y(s_scroll) < start_y);
+    advance_reply(260);
+    assert(!s_transition && !s_previous_label && !s_previous_display);
     assert(!strcmp(lv_label_get_text(s_label), "A new answer\n\nSecond paragraph."));
     assert(lv_obj_get_scroll_y(s_scroll) == 0);
     assert(lv_obj_has_flag(s_new, LV_OBJ_FLAG_HIDDEN));
     muse_review_store(muse_review_turn(), "“café” — a reply");
     lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
+    advance_reply(420);
     assert(!strcmp(lv_label_get_text(s_label), "\"cafe\" -- a reply"));
     char original[64];
     muse_review_snapshot_t original_info;
@@ -162,19 +192,31 @@ int main(int argc, char **argv)
     muse_review_store(turn, "Second part");
     muse_latest_reply_tick();
     lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
+    advance_reply(420);
     assert(!strcmp(lv_label_get_text(s_label), "First part\n\nSecond part"));
     muse_review_store(muse_review_turn(), "");
     muse_latest_reply_tick();
     assert(lv_obj_has_flag(s_new, LV_OBJ_FLAG_HIDDEN));
     muse_review_store_complete(muse_review_turn(), "A shortened reply", true);
     lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
+    advance_reply(420);
     assert(!strcmp(lv_label_get_text(s_notice), "REPLY SHORTENED"));
+    /* Navigating away during the animation safely completes the selection. */
+    muse_review_store(muse_review_turn(), "Selected before leaving");
+    lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
+    assert(s_transition);
+    lv_tileview_set_tile(s_tv, s_face, LV_ANIM_OFF);
+    assert(!s_transition && !s_previous_label && !s_previous_display);
+    open_latest();
+    assert(!strcmp(lv_label_get_text(s_label), "Selected before leaving"));
+    assert(lv_obj_get_scroll_y(s_scroll) == 0);
     /* A full buffer must remain scrollable through its final line. */
     char *full = malloc(40000);
     for (int i = 0; i < 39999; i++) full[i] = i % 32 == 31 ? '\n' : 'a';
     full[39999] = 0;
     muse_review_store(muse_review_turn(), full);
     lv_obj_send_event(s_new, LV_EVENT_CLICKED, NULL);
+    advance_reply(420);
     lv_obj_update_layout(s_scroll);
     assert(strlen(lv_label_get_text(s_label)) == MUSE_REVIEW_CAP - 1);
     lv_obj_scroll_to_y(s_scroll, LV_COORD_MAX, LV_ANIM_OFF);

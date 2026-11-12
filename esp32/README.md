@@ -437,15 +437,19 @@ e-paper boards with the FreeInk UI.
 With `CONFIG_MUSE_LATEST_REPLY` (on by default for the 1.75C), swipe right
 from Main to reread the latest answer received by the gadget. Scroll vertically;
 swipe left to return. The same three bottom dots indicate Latest reply, Main,
-and Settings on all three screens. The reader uses the main screen's pixel caption font. While reading, a floating
-**New reply ↓** button loads a newer answer at its top without moving the text
-under your finger. Completed messages from one gadget turn are joined together.
+and Settings on all three screens. The reader uses the main screen's pixel
+caption font. While reading, a floating
+**New reply ↓** button scrolls smoothly to the top of a newer answer. Returning
+from Main preserves the displayed answer and its scroll position. Completed
+messages from one gadget turn are joined together.
 
 The answer survives screen sleep and clears on reboot. Empty or failed requests
 keep the preceding answer. This is local reply retention, not server chat history.
 The combined answer is capped at 32 KiB, with **Reply shortened** shown if cut.
 It uses PSRAM: eight 32 KiB receiver slots, a 32 KiB saved answer, a 32 KiB display
-snapshot, plus LVGL layout memory. It does not write conversation text to flash.
+snapshot, plus LVGL layout memory. The new-reply animation temporarily needs
+one extra 32 KiB snapshot while both answers are on screen. It does not write
+conversation text to flash.
 Screenshot builds also accept `>ui=reply`, `>ui.reply=down`, and `>ui.reply=new`
 on the USB console for repeatable on-device checks.
 
