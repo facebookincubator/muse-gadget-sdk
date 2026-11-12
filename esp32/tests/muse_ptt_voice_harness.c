@@ -524,7 +524,7 @@ int main(int argc,char **argv) {
             s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
 #endif
             char why[96];
-            assert(record(why,sizeof(why)) && notes==1);
+            assert(record(false,why,sizeof(why)) && notes==1);
             /* Prefix and capture-lag tail remain in the sent audio. Neither
              * was used to make a short press eligible. */
             if(scenario==63) assert(note_frames==prefix+MUSE_AUDIO_CHUNK);
