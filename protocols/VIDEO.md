@@ -180,7 +180,8 @@ ends treat what they receive as untrusted and limit what a stranger gets:
   holds, and pictures being drawn are never freed under the show task
   (the decoder waits for both before any access unit with a parameter
   set or an IDR slice, which may switch to another parameter set sent
-  earlier, and before a VP8 keyframe).
+  earlier, and before a VP8 keyframe; a band that doesn't start with a
+  start code is one NAL unit to the decoder, so its first byte counts).
   `esp32/tests/test_video_untrusted.py` checks these.
 - **The apps** clamp what `hello` claims (sizes, rates, buffer) before
   sizing encoders and buffers from it, and take launch options (Android
