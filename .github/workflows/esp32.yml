@@ -147,6 +147,9 @@ jobs:
           - board: reterminal-sticky
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"
+          - board: reterminal-sticky-power-test
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky;devices/sdkconfig.reterminal-sticky-power-test"
           - board: reterminal-sticky-link
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-sticky-link"

@@ -25,6 +25,10 @@
 #include "muse_board.h"
 #include "muse_link.h"
 #include "eink/muse_eink.h"
+#if CONFIG_MUSE_POWER_TEST
+#include <stdio.h>
+#include "muse_power_test_board.h"
+#endif
 #if CONFIG_MUSE_STICKY_SD
 #include "driver/spi_master.h"
 #include "driver/sdspi_host.h"
@@ -325,6 +329,13 @@ static esp_err_t read_power(muse_power_t *out)
     out->battery_mv = mv;
     out->battery_pct = soc;
     out->charging = out->usb && (int16_t)current > 0;
+#if CONFIG_MUSE_POWER_TEST
+    /* The diagnostic suppresses ESP_LOG; keep gauge evidence outside its JSON. */
+    char line[96];
+    int n = snprintf(line, sizeof(line), "STICKY_GAUGE soc_pct=%u voltage_mv=%u current_ma=%d\n",
+                     (unsigned)soc, (unsigned)mv, (int)(int16_t)current);
+    if (n > 0 && n < (int)sizeof(line)) { muse_ptest_board_console_write(line, (size_t)n); }
+#endif
     return ESP_OK;
 }
 
