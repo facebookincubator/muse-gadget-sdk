@@ -449,6 +449,9 @@ class PicturesKeptTest(unittest.TestCase):
         self.assertEqual(bare[0], 0x65)
         lines = self.run_units(first, bare, non_idr(4, pps_id=1)[4:])
         self.assertEqual(lines, [(1, 1), (1, 1), (0, 1)])
+        # A unit that starts with another kind still counts the parameter
+        # sets behind start codes in it, as before.
+        self.assertEqual(self.run_units(b"\x61" + sps(2, 2, 1))[0][0], 1)
 
     def test_a_bottom_band_without_a_start_code(self):
         # Two bands from the network: the ring checks the top band's start
