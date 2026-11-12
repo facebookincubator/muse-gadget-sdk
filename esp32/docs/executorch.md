@@ -21,17 +21,13 @@ from the ESP Component Registry, pinned exact in
 [`main/idf_component.yml`](../main/idf_component.yml):
 
 ```yaml
-rascani/executorch:
-  version: "==1.6.0-dev.20261109"
-  registry_url: "https://components-staging.espressif.com"
+pytorch/executorch:
+  version: "==1.6.0-dev.20261112"
 ```
 
-The staging registry and `rascani` namespace are temporary: the
-`pytorch` namespace is being claimed, and when it is, the pin moves
-to `pytorch/executorch` on the production registry and the
-`registry_url` goes away. Until then, do not loosen the pin to a
-range: a kernel bundle is made for one component version, a respin
-included, and the build refuses a bundle made for another version.
+Do not loosen the pin to a range: a kernel bundle is made for one
+component version, a respin included, and the build refuses a bundle
+made for another version.
 
 There is no vendored tree. The component manager downloads the
 component into `managed_components/` at build time
@@ -70,9 +66,8 @@ bundle regenerates from the declared model on the next configure.
 
 ## Updating the component
 
-Bump the `==` pin in [`main/idf_component.yml`](../main/idf_component.yml)
-(or, when the namespace moves, the namespace and `registry_url` with
-it), and re-export the model only if the new component needs it (the
+Bump the `==` pin in [`main/idf_component.yml`](../main/idf_component.yml),
+and re-export the model only if the new component needs it (the
 exporter is `components/muse_wakeword/tools/export_hey_muse.py`; its
 sidecar records the export, and the build-time bundle check is the
 gate that the model's ops are covered). Nothing else in the SDK
