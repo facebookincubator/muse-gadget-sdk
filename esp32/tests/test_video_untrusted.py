@@ -315,15 +315,18 @@ def sanitizers(cc, tmp):
     probe = Path(tmp, "probe.c")
     probe.write_text("int main(void) { return 0; }\n")
     r = subprocess.run([*cc, *flags, str(probe), "-o", str(Path(tmp, "probe"))], capture_output=True)
-    return flags if r.returncode == 0 else []
+    # Vendored decoders shift negative values as upstream ships them.
+    return flags + ["-fno-sanitize=shift-base"] if r.returncode == 0 else []
 
 
 class StaleStreamState(unittest.TestCase):
     """Whole frames of very different sizes, one after another in one reused
     buffer of AU_MAX bytes, through each decoder (tinyh264 alone and behind
     muse_vdec.c, VP8 behind muse_vdec.c): a frame decodes exactly as it does
-    after reopening the decoder, nothing at or past AU_MAX is touched (ASan,
-    UBSan and guard bytes), and a keyframe then decodes."""
+    after reopening the decoder (result, picture size and pixels), nothing
+    past the frame is read (ASan: the earlier frames' bytes after it and the
+    guard past AU_MAX) or written (guard bytes), and a keyframe then
+    decodes."""
 
     @classmethod
     def setUpClass(cls):
@@ -346,7 +349,7 @@ class StaleStreamState(unittest.TestCase):
             name, args = item
             exe = tmp / name
             # Vendored decoders as upstream ships them: their warnings aren't ours.
-            r = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", *san, "-fno-sanitize=shift-base", *args,
+            r = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", *san, *args,
                                 harness, "-lm", "-o", str(exe)], capture_output=True, text=True)
             if r.returncode:
                 raise AssertionError(name + ":\n" + r.stdout + r.stderr)
@@ -377,12 +380,14 @@ class StaleStreamState(unittest.TestCase):
         self.assertEqual(lines[-1], "guard ok", r.stdout)
         return [line.split() for line in lines[:-1] if line != "reset"]
 
-    def check(self, build, codec, f, picture):
-        """f: a, b, c, k. The run a, b, c, k against a, b, reopen, c, k."""
+    def check(self, build, codec, f, picture, size):
+        """f: a, b, c, k. The run a, b, c, k against a, b, reopen, c, k: each
+        line is NAME LEN RC W H SUM (picture size and checksum)."""
         seq = self.run_harness(build, codec, [f["a"], f["b"], f["c"], f["k"]])
         ref = self.run_harness(build, codec, [f["a"], f["b"], "reset", f["c"], f["k"]])
         self.assertEqual(seq, ref, (build, seq, ref))
-        self.assertEqual(seq[3][2], str(picture), (build, seq))   # the keyframe after them decodes
+        # the keyframe after them decodes, to a whole picture
+        self.assertEqual(seq[3][2:5], [str(picture), *map(str, size)], (build, seq))
         return seq
 
     def h264(self):
@@ -399,9 +404,9 @@ class StaleStreamState(unittest.TestCase):
         f = self.h264()
         self.assertEqual(os.path.getsize(f["h_a"]), 28)
         f = {k[2:]: v for k, v in f.items()}
-        seq = self.check("src", "direct", f, 1)   # H264BSD_PIC_RDY
+        seq = self.check("src", "direct", f, 1, (32, 16))   # H264BSD_PIC_RDY
         self.assertEqual(seq[2][2], "3", seq)     # 4 bytes, no NAL unit: H264BSD_ERROR
-        seq = self.check("src_vdec", "h264", f, 1)   # MUSE_VDEC_PICTURE
+        seq = self.check("src_vdec", "h264", f, 1, (32, 16))   # MUSE_VDEC_PICTURE
         self.assertEqual(seq[2][2], "-1", seq)
 
     def test_vp8(self):
@@ -414,7 +419,7 @@ class StaleStreamState(unittest.TestCase):
         key = frames[0]
         self.assertEqual(key[0] & 1, 0)   # a keyframe
         f = self.frames({"v_a": key[:28], "v_b": frames[1].ljust(AU_MAX, b"\0"), "v_c": key[:4], "v_k": key})
-        self.check("vp8_vdec", "vp8", {k[2:]: v for k, v in f.items()}, 1)
+        self.check("vp8_vdec", "vp8", {k[2:]: v for k, v in f.items()}, 1, (240, 240))
 
     def test_decoders_keep_no_stream_position_across_calls(self):
         src = (TINY / "h264bsd_decoder.c").read_text()

@@ -23,9 +23,11 @@
  *   harness CODEC FILE|reset ...
  * CODEC: h264 or vp8 (muse_vdec_open / muse_vdec_decode), or, built
  * with -DSTALE_DIRECT, "direct" (tinyh264's h264bsdDecode alone, no glue).
- * "reset" closes and reopens the decoder. Prints one "NAME LEN RC" line per
- * frame and "guard ok" when the bytes past AU_MAX are untouched. The guard
- * is poisoned under AddressSanitizer, so a read there fails the run too.
+ * "reset" closes and reopens the decoder. Prints one "NAME LEN RC W H SUM"
+ * line per frame (SUM: FNV-1a of the picture's planes, "- - -" when there's
+ * no picture) and "guard ok" when the bytes past AU_MAX are untouched. Under
+ * AddressSanitizer the guard and, for each frame, the stale bytes between its
+ * end and AU_MAX are poisoned, so a read past the frame fails the run too.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -89,16 +91,52 @@ static void dec_close(dec_t *d)
 #endif
 }
 
-static int dec_decode(dec_t *d, uint8_t *au, uint32_t len)
+static uint32_t fnv(uint32_t x, const uint8_t *p, int n)
 {
+    while (n-- > 0) {
+        x = (x ^ *p++) * 16777619u;
+    }
+    return x;
+}
+
+static uint32_t plane(uint32_t x, const uint8_t *p, int stride, int w, int h)
+{
+    for (int r = 0; r < h; r++) {
+        x = fnv(x, p + (size_t)r * stride, w);
+    }
+    return x;
+}
+
+/* Decodes one frame and prints its result and picture, if any. */
+static void dec_decode(dec_t *d, uint8_t *au, uint32_t len)
+{
+    int rc, w = 0, h = 0;
+    uint32_t sum = 2166136261u;
 #if STALE_DIRECT
     u8 *pic = NULL;
-    u32 w = 0, h = 0;
-    return (int)h264bsdDecode(d->s, au, len, &pic, &w, &h);
+    u32 pw = 0, ph = 0;
+    rc = (int)h264bsdDecode(d->s, au, len, &pic, &pw, &ph);
+    if (rc == H264BSD_PIC_RDY && pic) {
+        w = (int)pw;
+        h = (int)ph;
+        sum = plane(sum, pic, w, w, h * 3 / 2);   /* Y, then U and V */
+    }
 #else
-    muse_pic_t pic;
-    return (int)muse_vdec_decode(d->v, au, len, &pic);
+    muse_pic_t pic = { 0 };
+    rc = (int)muse_vdec_decode(d->v, au, len, &pic);
+    if (rc == MUSE_VDEC_PICTURE) {
+        w = pic.w;
+        h = pic.h;
+        sum = plane(sum, pic.y, pic.y_stride, w, h);
+        sum = plane(sum, pic.u, pic.c_stride, w / 2, h / 2);
+        sum = plane(sum, pic.v, pic.c_stride, w / 2, h / 2);
+    }
 #endif
+    if (w) {
+        printf(" %d %d %d %08x\n", rc, w, h, (unsigned)sum);
+    } else {
+        printf(" %d - - -\n", rc);
+    }
 }
 
 int main(int argc, char **argv)
@@ -134,10 +172,17 @@ int main(int argc, char **argv)
             return 2;
         }
         /* the frame over what's left of the last one, as the ring's pop */
+#if STALE_ASAN
+        ASAN_UNPOISON_MEMORY_REGION(au, AU_MAX);
+#endif
         size_t n = fread(au, 1, AU_MAX, f);
         fclose(f);
+#if STALE_ASAN
+        ASAN_POISON_MEMORY_REGION(au + n, AU_MAX - n);   /* the last frames' bytes */
+#endif
         const char *name = strrchr(argv[i], '/') ? strrchr(argv[i], '/') + 1 : argv[i];
-        printf("%s %zu %d\n", name, n, dec_decode(&d, au, (uint32_t)n));
+        printf("%s %zu", name, n);
+        dec_decode(&d, au, (uint32_t)n);
         fflush(stdout);
     }
     dec_close(&d);
