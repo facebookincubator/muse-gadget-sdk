@@ -57,6 +57,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # libopus for the video call tests (they skip without it).
+      - name: Install libopus
+        run: sudo apt-get update && sudo apt-get install -y libopus0
+
       - name: Install
         env:
           PINS: ${{ matrix.pins }}
