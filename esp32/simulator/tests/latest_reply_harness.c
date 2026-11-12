@@ -246,6 +246,15 @@ int main(int argc, char **argv)
     muse_ui_show_face();
     lv_obj_update_layout(lv_screen_active());
     assert(lv_tileview_get_tile_active(s_tv) == s_face);
+    /* The hardware bench fixture must truncate and keep the end reachable. */
+    assert(muse_latest_reply_bench("ui.reply=test-long"));
+    muse_latest_reply_tick();
+    advance_reply(420);
+    assert(strlen(lv_label_get_text(s_label)) == MUSE_REVIEW_CAP - 1);
+    assert(!strcmp(lv_label_get_text(s_label) + MUSE_REVIEW_CAP - 4, "..."));
+    assert(muse_latest_reply_bench("ui.reply=end"));
+    muse_latest_reply_tick();
+    assert(lv_obj_get_scroll_bottom(s_scroll) == 0);
     /* Snapshot copies must never mix two answers during a concurrent store. */
     memset(concurrent_text, 'a', sizeof(concurrent_text) - 1);
     muse_review_store(muse_review_turn(), concurrent_text);

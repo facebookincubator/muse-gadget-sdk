@@ -20,7 +20,8 @@ sent 350 ms apart. A '>' starts a console command that runs to the end of the ke
 sent as one line: '>face=thinking' puts the avatar in a mode, '>face=happy' pets it.
 Bench touch boards use '>ui=settings' / '>ui=face' to select the tile.
 The 1.75C also accepts '>ui=reply', '>ui.reply=down', and '>ui.reply=new'
-for latest-reply review. Use
+for latest-reply review; `>ui.reply=test-long` stores an oversized synthetic
+answer and `>ui.reply=end` scrolls to its end. Use
 '>ui.settings=PAGE' to open a settings page (home, wifi, muse, ble, sound,
 sleep, battery, power);
 'a/s' are non-touch menu keys, not touch-settings navigation.

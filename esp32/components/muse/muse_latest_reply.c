@@ -39,7 +39,9 @@ bool muse_latest_reply_bench(const char *command)
 {
     int action = !strcmp(command, "ui=reply") ? 1
         : !strcmp(command, "ui.reply=down") ? 2
-        : !strcmp(command, "ui.reply=new") ? 3 : 0;
+        : !strcmp(command, "ui.reply=new") ? 3
+        : !strcmp(command, "ui.reply=test-long") ? 4
+        : !strcmp(command, "ui.reply=end") ? 5 : 0;
     if (action) atomic_store(&s_bench_action, action);
     return action != 0;
 }
@@ -240,7 +242,17 @@ void muse_latest_reply_tick(void)
     if (action && s_tile) {
         lv_tileview_set_tile(lv_obj_get_parent(s_tile), s_tile, LV_ANIM_OFF);
         if (action == 2) lv_obj_scroll_by(s_scroll, 0, -200, LV_ANIM_OFF);
-        if (action == 3) new_reply_cb(NULL);
+        if (action == 4) {
+            /* A synthetic oversized answer for repeatable hardware checks. */
+            uint32_t turn = muse_review_turn();
+            char part[512];
+            memset(part, 'a', sizeof(part) - 1);
+            for (size_t i = 31; i < sizeof(part) - 1; i += 32) part[i] = '\n';
+            part[sizeof(part) - 1] = '\0';
+            for (unsigned i = 0; i < 80; i++) muse_review_store(turn, part);
+        }
+        if (action == 3 || action == 4) new_reply_cb(NULL);
+        if (action == 5) lv_obj_scroll_to_y(s_scroll, LV_COORD_MAX, LV_ANIM_OFF);
     }
 #endif
     if (!s_visible || s_transition) return;
