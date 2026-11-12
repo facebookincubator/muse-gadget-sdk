@@ -280,7 +280,6 @@ class UntrustedVideoTest(unittest.TestCase):
         self.assertIn("default n", opt[:opt.index("help")])
 
 
-
 class VideoDrawingTest(unittest.TestCase):
     """fill() and the colour converters on any picture and band sizes: every
     DMA piece written exactly, nothing before or after it, no read past a

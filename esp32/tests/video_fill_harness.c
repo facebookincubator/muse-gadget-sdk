@@ -252,26 +252,40 @@ static int draw(int W, int H, const pic_t *top, const pic_t *bot, uint8_t *frame
 }
 
 /* The converters on their own: exactly rows rows written for every count,
- * from source planes holding only the rows those rows come from. */
+ * from source planes holding only the rows those rows come from, and each
+ * row the same as when the count is whole row pairs (whole patterns at 3/2)
+ * from a taller picture: a row left out or drawn wrong fails. */
 static void converters(void)
 {
-    enum { W = 64, OS = 2 * W * 2 };
-    static uint8_t out[PRE + 16 * OS + GUARD];
+    enum { W = 64, OS = 2 * W * 2, TALL = 32 };
+    static uint8_t out[PRE + 16 * OS + GUARD], ref[16 * OS];
+    pic_t tall = make_pic(W, TALL);
     for (int conv = 0; conv < 3; conv++) {
+        /* Bytes each output row gets: 2x doubles the width, 3/2 halves again. */
+        size_t row_bytes = conv == 0 ? 2 * W * 2 : conv == 1 ? W * 2 : W * 3 / 2 * 2;
         for (int rows = 1; rows <= 13; rows++) {
             int src_rows = conv == 0 ? (rows + 1) / 2 : conv == 1 ? rows : muse_yuv_up32_src_rows(1 << 20, rows);
-            pic_t pc = make_pic(W, (src_rows + 1) & ~1);
+            int h = (src_rows + 1) & ~1;
+            pic_t pc = make_pic(W, h);
+            /* The same pixels as the tall picture's first rows. */
+            memcpy((uint8_t *)pc.p.y, tall.p.y, (size_t)W * h);
+            memcpy((uint8_t *)pc.p.u, tall.p.u, (size_t)(W / 2) * (h / 2));
+            memcpy((uint8_t *)pc.p.v, tall.p.v, (size_t)(W / 2) * (h / 2));
             pc.p.h = src_rows;
             memset(out, FENCE, sizeof(out));
             uint8_t *dst = out + PRE;
             memset(dst, UNSET, (size_t)rows * OS);
+            memset(ref, UNSET, sizeof(ref));
             what = conv == 0 ? "muse_yuv_up2" : conv == 1 ? "muse_yuv_1x" : "muse_yuv_up32";
             if (conv == 0) {
                 muse_yuv_up2(pc.p.y, pc.p.u, pc.p.v, W, W / 2, W, rows, dst, OS);
+                muse_yuv_up2(tall.p.y, tall.p.u, tall.p.v, W, W / 2, W, (rows + 3) & ~3, ref, OS);
             } else if (conv == 1) {
                 muse_yuv_1x(pc.p.y, pc.p.u, pc.p.v, W, W / 2, W, rows, dst, OS);
+                muse_yuv_1x(tall.p.y, tall.p.u, tall.p.v, W, W / 2, W, (rows + 1) & ~1, ref, OS);
             } else {
                 muse_yuv_up32(pc.p.y, pc.p.u, pc.p.v, W, W / 2, W, src_rows, 0, rows, dst, OS);
+                muse_yuv_up32(tall.p.y, tall.p.u, tall.p.v, W, W / 2, W, TALL, 0, (rows + 1) & ~1, ref, OS);
             }
             for (int i = 0; i < PRE; i++) {
                 if (out[i] != FENCE) {
@@ -285,9 +299,16 @@ static void converters(void)
                     break;
                 }
             }
+            for (int r = 0; r < rows; r++) {
+                if (memcmp(dst + (size_t)r * OS, ref + (size_t)r * OS, row_bytes) != 0) {
+                    fail("%d rows: row %d not the picture's%.0d", rows, r, 0);
+                    break;
+                }
+            }
             free(pc.buf);
         }
     }
+    free(tall.buf);
 }
 
 /* The protocol's layouts look the same in two bands as in one. */
@@ -362,7 +383,7 @@ int main(void)
     /* The decode task's check: only the protocol's layouts. */
     what = "bands_fit";
     s_params.height = 68;
-    if (bands_fit(32, 48) == false || bands_fit(32, 36) == false || bands_fit(48, 32) == false) {
+    if (bands_fit(32, 48) == false || bands_fit(48, 32) == false) {
         fail("68 rows: a coded layout refused%.0d%.0d%.0d", 0, 0, 0);
     }
     if (bands_fit(18, 62) || bands_fit(80, 16) || bands_fit(64, 32) || bands_fit(0, 80) || bands_fit(32, 40)) {

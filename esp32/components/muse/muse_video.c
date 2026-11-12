@@ -660,18 +660,18 @@ static void on_progress1(void *ctx, const muse_pic_t *pic, int rows)
 }
 
 /*
- * Two bands as the protocol codes them: the top band whole macroblock rows
- * with at least one of the picture's rows below it, the two making the
- * stream's height, exactly or (the bottom band whole macroblocks too)
- * rounded up to a macroblock.
+ * Two bands as the protocol codes them: each whole macroblock rows (as the
+ * decoders report them), the top band with at least one of the picture's
+ * rows below it, the two making the stream's height rounded up to a
+ * macroblock.
  */
 static bool bands_fit(int h0, int h1)
 {
     int H = (int)s_params.height, H16 = (H + 15) & ~15;
-    if (h0 <= 0 || h1 <= 0 || h0 % 16 || h0 >= H) {
+    if (h0 <= 0 || h1 <= 0 || h0 % 16 || h1 % 16 || h0 >= H) {
         return false;
     }
-    return h0 + h1 == H || (h0 + h1 == H16 && h1 % 16 == 0);
+    return h0 + h1 == H16;
 }
 
 /*
