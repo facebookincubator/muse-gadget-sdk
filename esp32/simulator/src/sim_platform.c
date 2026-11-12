@@ -261,6 +261,14 @@ size_t muse_sim_strlcpy(char *destination, const char *source, size_t size)
     }
     return source_length;
 }
+
+size_t muse_sim_strlcat(char *destination, const char *source, size_t size)
+{
+    size_t used = 0;
+    while (used < size && destination[used]) used++;
+    if (used == size) return size + strlen(source);
+    return used + muse_sim_strlcpy(destination + used, source, size - used);
+}
 #endif
 
 static int cond_wait_ticks(pthread_cond_t *condition, pthread_mutex_t *lock, TickType_t ticks)

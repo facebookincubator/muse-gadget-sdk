@@ -19,7 +19,7 @@
 #pragma GCC system_header
 #endif
 
-/* ESP-IDF's libc and macOS supply strlcpy; glibc versions commonly used by
+/* ESP-IDF's libc and macOS supply strlcpy/strlcat; glibc versions commonly used by
  * devservers do not. Map production calls to the simulator implementation on
  * hosts that need it. macOS keeps its fortified libc macro and native symbol. */
 #include_next <string.h>
@@ -32,10 +32,12 @@ extern "C" {
 #endif
 
 size_t muse_sim_strlcpy(char *destination, const char *source, size_t size);
+size_t muse_sim_strlcat(char *destination, const char *source, size_t size);
 
 #ifdef __cplusplus
 }
 #endif
 
 #define strlcpy muse_sim_strlcpy
+#define strlcat muse_sim_strlcat
 #endif
