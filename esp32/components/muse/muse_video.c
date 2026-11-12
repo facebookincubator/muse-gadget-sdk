@@ -888,8 +888,9 @@ static void decode_task(void *arg)
             }
         }
         /* An access unit that may make a decoder reallocate its pictures
-         * (new parameter sets, a keyframe) frees the one the show task may
-         * still be drawing: wait for that one first (both slots ours). */
+         * (muse_vdec_may_realloc: a parameter set or IDR slice, a VP8
+         * keyframe) frees the one the show task may still be drawing: wait
+         * for that one first (both slots ours). */
         bool reset = muse_vdec_may_realloc(dec, bands == 2 ? s_au + 4 : s_au, len0) ||
                        (bands == 2 && muse_vdec_may_realloc(dec, s_au + 4 + len0, (uint32_t)n - 4 - len0));
         if (reset) {

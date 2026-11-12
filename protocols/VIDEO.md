@@ -178,7 +178,10 @@ ends treat what they receive as untrusted and limit what a stranger gets:
   picture (nothing is allocated for it), and tinyh264 refuses sizes whose
   arithmetic would overflow. Drawing reads only what the decoded picture
   holds, and pictures being drawn are never freed under the show task
-  (the decoder waits for both before new parameter sets or a keyframe).
+  (the decoder waits for both before any access unit with a parameter
+  set or an IDR slice, which may switch to another parameter set sent
+  earlier, and before a VP8 keyframe; a band that doesn't start with a
+  start code is one NAL unit to the decoder, so its first byte counts).
   Drawing writes exactly the piece of the panel it's filling, whatever
   the sizes: each colour converter writes only the rows it's asked for,
   and two bands meet where the top band's rows end, on whole rows of the
