@@ -2194,6 +2194,18 @@ static void idle_wait(esp_tls_t *tls, uint64_t last_busy_us) {
     lwip_select(fd + 1, &rd, nullptr, nullptr, &tv);
 }
 
+// Link's control stream ends (end_body on its Response or a BodyChunk) only
+// when the VM closes this device's control channel. The device is then no
+// longer registered, and nothing else would notice: WebSocket pongs keep the
+// connection looking alive. End the session so it reconnects and registers
+// again.
+static bool control_stream_ended(const DecodedServiceFrame &frame) {
+    if (frame.stream_id != CTRL_STREAM_ID) return false;
+    if (frame.kind == ServiceFrameKind::BodyChunk) return frame.body_chunk.end_body;
+    if (frame.kind == ServiceFrameKind::Response) return frame.response.end_body;
+    return false;
+}
+
 // Connectivity history: failed attempts between sessions are summarized in
 // the next session_up rather than recorded one by one. noise_ctrl_task-owned.
 static uint32_t s_failed_attempts = 0;
@@ -2599,7 +2611,17 @@ static session_result_t run_session(stack_monitor_t *stack) {
                                 error = true;
                                 break;
                             }
+                        } else if (frame.stream_id == CTRL_STREAM_ID) {
+                            // A Response's inline body carries messages too.
+                            process_inbound_body_chunk(frame.response.body,
+                                                       session_generation);
                         }
+                    }
+                    if (control_stream_ended(frame)) {
+                        ESP_LOGW(TAG, "server ended /link-control");
+                        end_reason = "server ended control stream";
+                        error = true;
+                        break;
                     }
                 }
             } else if (n == 0) {

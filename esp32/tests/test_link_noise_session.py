@@ -153,6 +153,47 @@ class LinkNoiseSessionTest(unittest.TestCase):
         self.assertIn('strcmp(status, "ws_auth_failed") == 0', ws_status)
         self.assertIn("schedule_vm_auth_refresh();", ws_status)
 
+    def test_the_end_of_the_control_stream_ends_the_session(self) -> None:
+        """When the VM closes the device's control stream (end_body on it),
+        the device is no longer registered, and WebSocket pongs alone would
+        keep the session up, unreachable. Runs control_stream_ended() from
+        noise_control.cpp and checks the session loop acts on it, after
+        reading the messages that frame carried (a Response's inline body
+        included)."""
+        noise = NOISE_C.read_text()
+        define = next(line for line in noise.splitlines()
+                      if line.startswith("#define CTRL_STREAM_ID "))
+        signature = "static bool control_stream_ended(const DecodedServiceFrame &frame) {"
+        start = noise.index(signature)
+        function = noise[start:noise.index("\n}\n", start) + 3]
+
+        session = _function_body(noise, "static session_result_t run_session(")
+        complete = session[session.index(
+            "if (inbound.frame_status == InboundFrameStatus::Complete) {"):]
+        self.assertIn("process_inbound_body_chunk(frame.response.body,", complete)
+        ended = complete.index("if (control_stream_ended(frame)) {")
+        self.assertLess(complete.index("process_inbound_body_chunk(frame.body_chunk.data,"), ended)
+        self.assertLess(complete.index("process_inbound_body_chunk(frame.response.body,"), ended)
+        self.assertIn("error = true;", complete[ended:ended + 300])
+
+        compiler = shlex.split(os.environ.get("CXX", "c++"))
+        if not compiler or shutil.which(compiler[0]) is None:
+            self.skipTest("c++ compiler not available")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "control_stream_end.inc").write_text(define + "\n" + function)
+            binary = Path(tmpdir) / "control_stream_end"
+            compiled = subprocess.run(
+                [*compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                 "-I", tmpdir, "-I", str(ROOT / "components" / "noise_core" / "include"),
+                 str(ROOT / "tests" / "link_control_stream_end_harness.cpp"),
+                 "-o", str(binary)],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(compiled.returncode, 0, msg=compiled.stdout + compiled.stderr)
+            ran = subprocess.run([str(binary)], text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(ran.returncode, 0, msg=ran.stdout + ran.stderr)
+            self.assertEqual(ran.stdout.strip(), "ok")
+
 
 if __name__ == "__main__":
     unittest.main()
