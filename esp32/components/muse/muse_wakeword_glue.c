@@ -143,14 +143,22 @@ void muse_wakeword_set_playback(bool on)
 
 void muse_wakeword_set_enabled(bool on)
 {
-    muse_settings_set_wakeword_on(on);
     if (!s_started) {
+        /* Init failed, so nothing listens. Saving "on" would start
+         * listening at a later boot nobody asked for; "off" still saves. */
+        if (!on) {
+            muse_settings_set_wakeword_on(false);
+        }
         return;
     }
+    muse_settings_set_wakeword_on(on);
     /* Publish only. The wake task applies the transition, so a
      * redundant enable cannot reset a live session out from under
      * muse_voice (which would orphan the synthetic hold). */
     s_enabled = on;
+    /* A voice task resting asleep on battery re-checks now rather than at
+     * its 60 s backstop: listening keeps the codecs on. */
+    muse_state_nudge();
 }
 
 void muse_wakeword_bench_trigger(bool with_speech)
@@ -408,6 +416,14 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
                                         WAKE_TASK_PRIO, NULL, MUSE_AUDIO_CORE,
                                         MUSE_BIG_CAPS) != pdPASS) {
         ESP_LOGE(TAG, "no memory for the wake task");
+        ww_runner_destroy(s_runner);
+        s_runner = NULL;
+        vStreamBufferDeleteWithCaps(s_tap);
+        s_tap = NULL;
+        free(pre_storage);
+        muse_ww_ring_init(&s_pre, NULL, 0);
+        free(s_snap);
+        s_snap = NULL;
         return ESP_ERR_NO_MEM;   /* s_started stays false: every hook no-ops */
     }
     s_started = true;

@@ -441,6 +441,23 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('muse_wakeword_core_abort(&s_core);', down)
         self.assertIn('muse_voice_seed_preroll(NULL, 0);', down)
 
+    def test_enable_wakes_a_resting_voice_task_and_needs_a_running_glue(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        setter = between(glue, 'void muse_wakeword_set_enabled(bool on)', 'void muse_wakeword_bench_trigger(')
+        not_started = between(setter, 'if (!s_started) {', 'return;')
+        # After a failed init only "off" is saved.
+        self.assertIn('if (!on) {', not_started)
+        self.assertLess(setter.index('if (!s_started) {'),
+                        setter.index('muse_settings_set_wakeword_on(on);'))
+        self.assertIn('muse_state_nudge();', setter)
+
+    def test_failed_wake_task_start_frees_everything(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        failed = between(glue, '"no memory for the wake task"', 's_started = true;')
+        for freed in ('ww_runner_destroy(s_runner)', 'vStreamBufferDeleteWithCaps(s_tap)',
+                      'free(pre_storage)', 'free(s_snap)'):
+            self.assertIn(freed, failed)
+
     def test_glue_starts_with_the_voice_pipeline(self):
         app = (ROOT / 'components/muse/muse_app.c').read_text()
         started = app.index('muse_voice_start(q)')
