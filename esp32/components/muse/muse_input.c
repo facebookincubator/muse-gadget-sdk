@@ -37,6 +37,7 @@
 #include "muse_ble.h"
 #include "muse_board.h"
 #include "muse_chat.h"
+#include "muse_options.h"
 #include "muse_console.h"
 #include "muse_link.h"
 #include "muse_mem.h"
@@ -861,6 +862,14 @@ static void set_face(const char *name)
  */
 static bool console_command(char *line, bool whole)
 {
+#if CONFIG_MUSE_HATCH
+    if (whole && muse_options_console(line)) {
+        muse_state_poke();
+        muse_state_set_asleep(false);
+        muse_state_nudge();
+        return true;
+    }
+#endif
     if (whole && s_console_hook && s_console_hook(line)) {
         return true;
     }

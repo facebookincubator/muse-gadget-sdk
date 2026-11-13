@@ -42,6 +42,8 @@ bool muse_options_request(uint32_t generation, int index);
 bool muse_options_pending(void);
 bool muse_options_waiting(void);
 bool muse_options_take(muse_options_t *out);
+/* USB console: options, or options.select=GENERATION,INDEX (zero based). */
+bool muse_options_console(const char *line);
 void muse_options_result(uint32_t generation, muse_options_status_t status,
                          bool saved, const char *detail);
 
