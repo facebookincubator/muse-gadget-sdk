@@ -26,6 +26,21 @@ static void close_options(lv_event_t *e)
     muse_state_poke();
 }
 
+static void outside_clicked(lv_event_t *e)
+{
+    if (lv_event_get_target(e) != s_overlay) return;
+    s_expanded = false;
+    muse_state_poke();
+}
+
+static void select_option(lv_event_t *e)
+{
+    int index = (int)(intptr_t)lv_event_get_user_data(e);
+    if (muse_options_request(s_view->generation, index)) s_expanded = false;
+    muse_state_poke();
+    muse_state_nudge();
+}
+
 static lv_obj_t *label(lv_obj_t *parent, const char *text)
 {
     lv_obj_t *obj = lv_label_create(parent);
@@ -63,6 +78,7 @@ void muse_options_ui_start(int width, int height, bool round, const lv_font_t *f
     lv_obj_set_style_bg_color(s_overlay, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_overlay, LV_OPA_70, 0);
     lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_overlay, outside_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_remove_flag(s_overlay, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
     s_panel = lv_obj_create(s_overlay);
     int panel_w = width * 78 / 100, panel_h = height * 72 / 100;
