@@ -84,6 +84,8 @@ int main(int argc, char **argv)
     muse_board=&test_board; assert(muse_ui_start()==ESP_OK);
     muse_state_set_mode(MUSE_MODE_IDLE); muse_state_set_asleep(false);
     lv_indev_set_read_cb(s_indev,read_touch); frame();
+    lv_obj_t *reopen=lv_obj_get_parent(find(lv_layer_top(),"Options"));
+    assert(lv_obj_has_flag(reopen,LV_OBJ_FLAG_HIDDEN));
     muse_options_t q={.count=3,.selected=-1};
     strcpy(q.widget_id,"widget-test"); strcpy(q.message_id,"message-test");
     strcpy(q.question,"Which lunch would you like?");
@@ -102,7 +104,8 @@ int main(int argc, char **argv)
     assert(!muse_options_request(q.generation,1));
     assert(muse_options_take(&q));
     muse_options_result(q.generation,MUSE_OPTIONS_SELECTED,true,""); frame();
-    tap(find(lv_layer_top(),"Options"));
+    assert(lv_obj_has_flag(reopen,LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(lv_obj_get_parent(panel),LV_OBJ_FLAG_HIDDEN));
     answer=find(lv_layer_top(),"Salad"); assert(answer);
     assert(lv_obj_has_state(lv_obj_get_parent(answer),LV_STATE_DISABLED));
     /* A new question can replace the prior one; a wake touch cannot answer it. */
@@ -113,5 +116,6 @@ int main(int argc, char **argv)
     assert(!muse_options_pending());
     muse_options_clear(); frame();
     assert(!muse_options_snapshot(&q));
+    assert(lv_obj_has_flag(reopen,LV_OBJ_FLAG_HIDDEN));
     return 0;
 }

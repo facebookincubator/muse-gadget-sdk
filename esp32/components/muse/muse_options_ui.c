@@ -12,19 +12,18 @@ static muse_options_t *s_view;
 static uint32_t s_seen_generation, s_seen_revision;
 static bool s_expanded;
 
-static void toggle(lv_event_t *e)
+static void open_options(lv_event_t *e)
 {
     (void)e;
-    s_expanded = !s_expanded;
+    s_expanded = true;
     muse_state_poke();
 }
 
-static void select_option(lv_event_t *e)
+static void close_options(lv_event_t *e)
 {
-    int index = (int)(intptr_t)lv_event_get_user_data(e);
-    if (muse_options_request(s_view->generation, index)) s_expanded = false;
+    (void)e;
+    s_expanded = false;
     muse_state_poke();
-    muse_state_nudge();
 }
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text)
@@ -46,9 +45,14 @@ void muse_options_ui_start(int width, int height, bool round, const lv_font_t *f
     s_open = lv_button_create(lv_layer_top());
     lv_obj_set_size(s_open, LV_SIZE_CONTENT, 36);
     lv_obj_align(s_open, LV_ALIGN_TOP_MID, 0, height > 300 ? 54 : 22);
-    lv_obj_add_event_cb(s_open, toggle, LV_EVENT_CLICKED, NULL);
-    lv_obj_set_style_bg_color(s_open, lv_color_hex(0x49386c), 0);
-    label(s_open, "Options");
+    lv_obj_add_event_cb(s_open, open_options, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_style_bg_opa(s_open, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_shadow_width(s_open, 0, 0);
+    lv_obj_set_style_border_width(s_open, 0, 0);
+    /* A percent-width child in a content-width button creates a sizing cycle
+     * and collapses the control to a small blank square on the device. */
+    lv_obj_t *open_label = label(s_open, "Options");
+    lv_obj_set_width(open_label, LV_SIZE_CONTENT);
     lv_obj_add_flag(s_open, LV_OBJ_FLAG_HIDDEN);
 
     /* A separate top-layer object owns touches; its gestures never bubble to
@@ -104,7 +108,7 @@ void muse_options_ui_tick(bool available)
         if (have) {
             lv_obj_t *close = lv_button_create(s_panel);
             lv_obj_set_width(close, lv_pct(100));
-            lv_obj_add_event_cb(close, toggle, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(close, close_options, LV_EVENT_CLICKED, NULL);
             label(close, "Close options");
             label(s_panel, s_view->question[0] ? s_view->question : "Choose an option");
             for (int i = 0; i < s_view->count; ++i) {
@@ -127,6 +131,8 @@ void muse_options_ui_tick(bool available)
             lv_obj_scroll_to_y(s_panel, 0, LV_ANIM_OFF);
         }
     }
-    lv_obj_set_flag(s_open, LV_OBJ_FLAG_HIDDEN, !have || !available || s_expanded);
+    bool unanswered = have && s_view->status == MUSE_OPTIONS_READY;
+    if (!unanswered) s_expanded = false;
+    lv_obj_set_flag(s_open, LV_OBJ_FLAG_HIDDEN, !unanswered || !available || s_expanded);
     lv_obj_set_flag(s_overlay, LV_OBJ_FLAG_HIDDEN, !have || !available || !s_expanded);
 }
