@@ -2465,6 +2465,49 @@ static void on_button_long_press(void) {
     reset_setup_from_control("button long-press", SETUP_RESET_FORGET_WIFI);
 }
 
+#if !CONFIG_MUSE_ENABLED
+#define LINK_WIFI_RETRY_MIN_US (30LL * 1000 * 1000)
+#define LINK_WIFI_RETRY_MAX_US (5LL * 60 * 1000 * 1000)
+#define LINK_WIFI_JOIN_TIMEOUT_MS 20000
+
+// A paired Link whose boot join found no saved network (the router still
+// starting after a power cut, say) has nothing else to rejoin it: wifi_mgr only
+// reconnects after a first association. The heartbeat looks again, backing
+// off, until one works; from then on wifi_mgr keeps it. (Muse's keeper does
+// this on boards with the full UI.)
+static void link_keep_wifi(void) {
+    static bool joined_once;
+    static int64_t next_try;
+    static int64_t backoff = LINK_WIFI_RETRY_MIN_US;
+    if (wifi_mgr_is_connected()) {
+        joined_once = true;
+        backoff = LINK_WIFI_RETRY_MIN_US;
+        return;
+    }
+    if (joined_once || CONFIG_HOMEHUB_WIFI_SSID[0] || !config_setup_complete()) return;
+    int64_t now = esp_timer_get_time();
+    if (now < next_try || !operation_gate_take(0, "Wi-Fi rejoin")) return;
+    char joined[WIFI_KNOWN_SSID_MAX + 1];
+    app_wifi_join_t result = join_saved_networks(LINK_WIFI_JOIN_TIMEOUT_MS, JOIN_ANY,
+                                                 true, joined);
+    operation_gate_give();
+    if (result == APP_WIFI_JOINED) {
+        joined_once = true;
+        ui_set_wifi(joined);
+        ui_set_status("wifi_connected");
+        led_status_set_state(LED_STATE_WIFI_CONNECTED);
+        persist_connected_wifi_channel();
+        return;
+    }
+    if (result != APP_WIFI_BUSY) {
+        ui_set_status("wifi_failed");
+        led_status_set_state(LED_STATE_ERROR);
+    }
+    next_try = now + backoff;
+    backoff = backoff * 2 > LINK_WIFI_RETRY_MAX_US ? LINK_WIFI_RETRY_MAX_US : backoff * 2;
+}
+#endif
+
 
 #if CONFIG_MUSE_ENABLED
 // ---- Muse hooks (app.h) -----------------------------------------------------
@@ -3170,6 +3213,7 @@ void app_run(void) {
 #if CONFIG_MUSE_ENABLED
         muse_keep_vm_session();
 #else
+        link_keep_wifi();
         // Paired, but with no VM session: the boot attempt failed (a refusal
         // that keeps the credentials, or the network). Nothing else retries
         // it. It keeps its own floor: a fetch that succeeds without starting a
