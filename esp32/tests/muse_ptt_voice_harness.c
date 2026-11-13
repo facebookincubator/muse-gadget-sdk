@@ -411,6 +411,16 @@ esp_err_t muse_audio_write(const int16_t *p,size_t n) {
 int main(int argc,char **argv) {
     assert(argc==2); scenario=atoi(argv[1]); s_queue=input_queue=&queue; ready=true;
     s_pre=calloc(PRE_CAP_CHUNKS,sizeof(*s_pre));
+    if(scenario==90) {
+        /* A wake word press that interrupts a reply stays synthetic, and a
+         * real press after it does not inherit that. */
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch()};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        push(MUSE_PTT_DOWN);
+        assert(got_event(MUSE_PTT_DOWN) && !s_press_synthetic);
+        free(s_pre); return 0;
+    }
     if(scenario>=70) {
         notes_mode=true; clock_us=1000000;
         if(scenario==78 || scenario==84) {

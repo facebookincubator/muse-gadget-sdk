@@ -88,6 +88,7 @@ static QueueHandle_t s_queue;
 static uint32_t s_press_input_epoch;
 static uint32_t s_press_mark;   /* the press's pending-call mark (muse_input_clear_call_pending) */
 static int64_t s_press_us;
+static bool s_press_synthetic;   /* the press came from the wake word glue */
 static volatile bool s_monitor;
 static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
@@ -277,6 +278,7 @@ static bool got_event(muse_ptt_t type)
                 s_press_input_epoch = ev.epoch;
                 s_press_mark = ev.mark;
                 s_press_us = ev.at_us;
+                s_press_synthetic = ev.synthetic;
             }
             return true;
         }
@@ -1344,7 +1346,9 @@ static void voice_task(void *arg)
     muse_audio_selftest();
     for (;;) {
         bool wake = false;
-        bool synthetic = false;   /* this press came from the wake word glue */
+        /* This press came from the wake word glue. One that interrupted a
+         * reply (pending_down) keeps that: it is a voice note, not a call. */
+        bool synthetic = pending_down && s_press_synthetic;
         if (!pending_down) {
             muse_input_event_t ev;
             bool asleep = muse_state_asleep();
@@ -1438,6 +1442,7 @@ static void voice_task(void *arg)
             s_press_input_epoch = ev.epoch;
             s_press_mark = ev.mark;
             s_press_us = ev.at_us;
+            s_press_synthetic = ev.synthetic;
             wake = ev.wake;
             synthetic = ev.synthetic;
         }

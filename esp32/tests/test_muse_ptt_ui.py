@@ -124,6 +124,15 @@ class StopWatchPTT(unittest.TestCase):
         for scenario in (44, 45, 46):
             self.run_case('voice', scenario)
 
+    def test_wake_word_press_that_interrupts_a_reply_stays_synthetic(self):
+        # Otherwise the next turn treats it as a finger: on live-call PTT
+        # boards a held call with the mic open and no release coming.
+        for board, realtime in ((1, 1), (0, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 90, board=board, realtime=realtime)
+        voice = (MUSE / 'muse_voice.c').read_text()
+        self.assertIn('bool synthetic = pending_down && s_press_synthetic;', voice)
+
     def test_reply_completion_is_visible_but_ptt_still_interrupts(self):
         self.run_case('voice', 43)
         self.run_case('voice', 47)
