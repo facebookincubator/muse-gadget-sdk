@@ -69,6 +69,14 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+      # The wake word's shared C frontend/detector shim, then its wrapper
+      # tests against that library (a scripted model; no torch or wheel).
+      - name: Wake-word signal library
+        run: sh wakeword/test_native.sh "$RUNNER_TEMP/wakeword"
+
+      - name: Wake-word tests
+        run: MUSE_WAKEWORD_LIBRARY="$RUNNER_TEMP/wakeword/libmuse_wakeword_signal.so" python -m pytest -q wakeword/tests
+
   shellcheck:
     name: ShellCheck install.sh
     runs-on: ubuntu-latest
