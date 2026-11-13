@@ -2319,17 +2319,25 @@ void muse_ui_preview_brightness(int pct)
 
 bool muse_ui_image_size(int *w, int *h)
 {
-    if (!s_ready || !heap_caps_get_total_size(MALLOC_CAP_SPIRAM)) {
+    if (!heap_caps_get_total_size(MALLOC_CAP_SPIRAM)) {
         return false;
     }
-    *w = s_w;
-    *h = s_h;
-    return true;
+    if (s_ready) {
+        *w = s_w;
+        *h = s_h;
+        return true;
+    }
+    if (muse_board && muse_board->width > 0 && muse_board->height > 0) {
+        *w = muse_board->width;
+        *h = muse_board->height;
+        return true;
+    }
+    return false;
 }
 
 int muse_ui_image_bits(void)
 {
-    return muse_board->epaper ? 2 : 16;
+    return (muse_board && muse_board->epaper) ? 2 : 16;
 }
 
 /* Floyd-Steinberg to four grays, in place: each pixel becomes black, 85, 170
@@ -2363,7 +2371,11 @@ static void dither_gray4_565(uint16_t *px, int w, int h, int16_t *err)
 
 void muse_ui_image_done(void)
 {
-    if (!s_ready || muse_ui_image_bits() != 2) {
+    if (!s_ready) {
+        return;
+    }
+    muse_state_poke();
+    if (muse_ui_image_bits() != 2) {
         return;   /* a colour panel shows each rectangle as it comes */
     }
     int16_t *err = malloc(2 * (size_t)(s_w + 2) * sizeof(int16_t));
@@ -2386,6 +2398,7 @@ bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels)
         return false;
     }
     xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    bool wake = false;
     if (!s_image_buf) {
         /* The first rectangle of an image: a black screen to draw onto. */
         s_image_buf = heap_caps_calloc((size_t)s_w * s_h, sizeof(uint16_t), MALLOC_CAP_SPIRAM);
@@ -2393,6 +2406,18 @@ bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels)
             xSemaphoreGive(s_image_mutex);
             return false;
         }
+        wake = true;
+    }
+#if CONFIG_MUSE_WATCHER_CAMERA
+    else if (!watcher_camera_preview_active()) {
+        wake = true;
+    }
+#else
+    else {
+        wake = true;
+    }
+#endif
+    if (wake) {
         /* Now, not when it's shown: asleep, the display may be paused (muse_input.c). */
         muse_state_set_asleep(false);
     }

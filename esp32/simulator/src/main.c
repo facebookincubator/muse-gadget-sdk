@@ -67,7 +67,8 @@ static void usage(FILE *out, const char *argv0)
             "  wifi=off|no_network|connecting|connected|failed|not_nearby\n"
             "  ble=off|advertising|connected         passkey=0..999999\n"
             "  paired=true|false  link=boot|unpaired|pairing|confirm|connecting|online|offline|error\n"
-            "  speaker=true|false call=true|false brightness=10..100 advance=MILLISECONDS\n"
+            "  speaker=true|false call=true|false brightness=10..100\n"
+            "  image=RRGGBB|hide  advance=MILLISECONDS\n"
             "\n"
             "Interactive keys: F1..F7 select face states, H is happy, Space is\n"
             "push-to-talk, +/- change level, [/] change progress, S sleeps,\n"
@@ -289,6 +290,54 @@ static bool set_link(const char *value)
     return false;
 }
 
+static bool draw_test_image(const char *value)
+{
+    if (!strcmp(value, "hide")) {
+        muse_ui_image_hide();
+        return true;
+    }
+    if (strlen(value) != 6) {
+        return false;
+    }
+    char *end = NULL;
+    errno = 0;
+    unsigned long rgb = strtoul(value, &end, 16);
+    if (errno || end != value + 6) {
+        return false;
+    }
+    int w = 0, h = 0;
+    if (!muse_ui_image_size(&w, &h) || w <= 0 || h <= 0) {
+        return false;
+    }
+    unsigned r = (rgb >> 16) & 0xff;
+    unsigned g = (rgb >> 8) & 0xff;
+    unsigned b = rgb & 0xff;
+    uint8_t *row = malloc((size_t)w * 2);
+    if (!row) {
+        return false;
+    }
+    bool ok = true;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            unsigned shade = (unsigned)((x + y) & 0x1f);
+            unsigned rx = r + shade > 255 ? 255 : r + shade;
+            unsigned gx = g + shade > 255 ? 255 : g + shade;
+            uint16_t px565 = (uint16_t)(((rx >> 3) << 11) | ((gx >> 2) << 5) | (b >> 3));
+            row[2 * x] = (uint8_t)(px565 >> 8);
+            row[2 * x + 1] = (uint8_t)(px565 & 0xff);
+        }
+        if (!muse_ui_image_draw(0, y, w, 1, (const uint16_t *)row)) {
+            ok = false;
+            break;
+        }
+    }
+    free(row);
+    if (ok) {
+        muse_ui_image_done();
+    }
+    return ok;
+}
+
 static bool apply_setting(const char *key, const char *value, bool real_time)
 {
     bool flag;
@@ -364,6 +413,9 @@ static bool apply_setting(const char *key, const char *value, bool real_time)
     if (!strcmp(key, "brightness") && parse_long(value, 10, 100, &number)) {
         sim_services_set_brightness((int)number);
         return true;
+    }
+    if (!strcmp(key, "image")) {
+        return draw_test_image(value);
     }
     if (!strcmp(key, "advance") && parse_long(value, 0, 3600000, &number)) {
         render_for((uint32_t)number, real_time);
@@ -514,6 +566,12 @@ int main(int argc, char **argv)
     muse_state_init();
     muse_state_set_power(&s_power);
     muse_board = sim_board_get();
+    int pre_w = 0, pre_h = 0;
+    if (!muse_ui_image_size(&pre_w, &pre_h)
+        || pre_w != muse_board->width || pre_h != muse_board->height) {
+        fprintf(stderr, "muse_ui_image_size failed before muse_ui_start\n");
+        return 1;
+    }
     if (muse_board->init && muse_board->init() != ESP_OK) {
         fprintf(stderr, "simulator board initialization failed\n");
         return 1;
