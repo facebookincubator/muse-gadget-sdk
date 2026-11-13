@@ -30,6 +30,30 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 3. For a requested operation, send the documented local cleaning, pause or return-to-dock command supported by this model.
 4. Correlate the response and poll/subscribe to fresh state as supported. If local communication fails, report it rather than quietly switching to a cloud channel.
 
+## Wi-Fi RSSI via GET_NETWORK_INFO
+
+The local channel also answers the `get_network_info` RPC with the
+robot's live Wi-Fi state: SSID, BSSID, frequency and **RSSI** of its
+current AP link (verified on a QX Revo Ultra 2: docked robot reading
+−26 dBm on its 2.4 GHz IoT network). Send it through the same local
+client session as any other command — in python-roborock's device
+API this is the v1 `command` trait with `RoborockCommand.GET_NETWORK_INFO`,
+NOT the `network_info` trait, whose refresh only echoes the seeded
+discovery data (IP) and never returns RSSI.
+
+Uses, in order of value:
+
+- A **docked robot is a fixed RSSI point** in whatever room its dock
+  occupies; sampled on a poll cadence it joins an RSSI time series
+  for coarse presence corroboration (variance is the signal; a flat
+  series abstains).
+- While **cleaning**, the same reading is a mobile survey: log RSSI
+  with robot state (and pose, where the map lane provides it) to
+  build a per-room radio map that calibrates fixed points.
+
+Keep it read-only and corroboration-grade: RSSI from a vacuum is
+occupancy-trend evidence, never a person locator.
+
 ## Verify the Result
 
 - Check that status reflects the requested mission; acknowledgment alone does not prove movement or completion.
