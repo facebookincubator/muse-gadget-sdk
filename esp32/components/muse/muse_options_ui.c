@@ -135,7 +135,8 @@ void muse_options_ui_tick(bool available)
         s_seen_revision = s_view->revision;
         lv_obj_clean(s_panel);
         if (have) {
-            label(s_panel, s_view->question[0] ? s_view->question : "Choose an option");
+            lv_obj_t *question = label(s_panel, s_view->question[0] ? s_view->question : "Choose an option");
+            lv_obj_set_style_text_line_space(question, 4, 0);
             for (int i = 0; i < s_view->count; ++i) {
                 lv_obj_t *button = lv_button_create(s_panel);
                 lv_obj_set_width(button, lv_pct(100));
