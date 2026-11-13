@@ -33,6 +33,8 @@ bool muse_ui_dark(void);
 
 /* From any task: the face tile is the currently visible tile. */
 bool muse_ui_face_active(void);
+/* From any task: a vertical volume drag owns the current touch (no hold PTT). */
+bool muse_ui_volume_swiping(void);
 
 /* The functions below run in the LVGL task (or with the display lock held). */
 

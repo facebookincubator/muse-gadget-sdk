@@ -196,6 +196,15 @@ It works on boards with the full UI, using their existing console commands.
 
 ## Boards
 
+On LVGL touch-screen boards with speaker audio, drag up or down on the main
+avatar or its background to raise or lower volume. A temporary percentage
+appears while dragging; lifting your finger saves the setting. Dragging through
+three quarters of the screen height covers the full 0–100 range. Horizontal
+swipes still open Settings. Buttons, reply paging, Settings, wake touches and
+image/video views retain their existing controls. This gesture does not unmute
+the speaker, and is unavailable on boards without touch or speaker audio and
+on the separate FreeInk UI.
+
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
 settings. Audio and image support vary by board, so check the feature table in
 [`devices/`](devices). The others show status on a light, a ring or a simple

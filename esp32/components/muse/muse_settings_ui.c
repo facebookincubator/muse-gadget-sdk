@@ -1344,6 +1344,15 @@ static void tick_sound(void)
     if (screen_only()) {
         return;
     }
+    /* The avatar's volume gesture (or phone) may have changed the setting
+     * since this slider was built. Never overwrite an in-progress preview. */
+    if (s_vol_sl && !lv_slider_is_dragged(s_vol_sl)) {
+        int volume = muse_settings_volume();
+        if (lv_slider_get_value(s_vol_sl) != volume) {
+            lv_slider_set_value(s_vol_sl, volume, LV_ANIM_OFF);
+            set_val(s_vol_val, "%d%%", volume);
+        }
+    }
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     lv_obj_set_state(s_notes_sw, LV_STATE_CHECKED, muse_settings_voice_notes());
 #endif

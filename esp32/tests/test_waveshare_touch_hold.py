@@ -56,12 +56,13 @@ static unsigned pwr_edges;
 static lv_indev_t indev, *s_touch_indev = &indev;
 static lv_obj_t tileview;
 static TickType_t now;
-static bool pressed, scrolling, face = true;
+static bool pressed, scrolling, volume_swiping, face = true;
 static TickType_t xTaskGetTickCount(void) { return now; }
 static unsigned muse_gpio_button_poll(muse_gpio_button_t *b) { return b == &s_pwr ? pwr_edges : 0; }
 static int lv_indev_get_state(lv_indev_t *i) { (void)i; return pressed; }
 __attribute__((unused)) static lv_obj_t *lv_indev_get_scroll_obj(lv_indev_t *i) { (void)i; return scrolling ? &tileview : NULL; }
 static bool muse_ui_face_active(void) { return face; }
+static bool muse_ui_volume_swiping(void) { return volume_swiping; }
 %(poll)s
 static unsigned step(TickType_t ms) { now += ms; return poll_buttons(); }
 static void hold_talks(void) {
@@ -91,6 +92,18 @@ static void slow_swipe_never_talks(void) {
     pressed = false;
     assert(step(10) == MUSE_BTN_TALK_RELEASE);
 }
+static void volume_drag_never_talks(void) {
+    pressed = true;
+    assert(step(10) == 0);
+    volume_swiping = true;
+    assert(step(100) == 0);
+    assert(step(600) == 0);
+    volume_swiping = false;  /* Remains cancelled for the rest of this touch. */
+    assert(step(600) == 0);
+    pressed = false;
+    assert(step(10) == 0);
+    hold_talks();
+}
 static void off_face_press_never_talks(void) {
     face = false;
     pressed = true;
@@ -115,6 +128,7 @@ int main(int argc, char **argv) {
     case 1: slow_swipe_never_talks(); break;
     case 2: off_face_press_never_talks(); break;
     case 3: pwr_is_power_never_talk(); break;
+    case 4: volume_drag_never_talks(); break;
     default: return 2;
     }
     return 0;
@@ -159,6 +173,9 @@ class WaveshareTouchHold(unittest.TestCase):
 
     def test_slow_swipe_off_face_never_talks(self):
         self.run_case("1")
+
+    def test_volume_drag_cancels_hold_until_next_touch(self):
+        self.run_case("4")
 
     def test_press_starting_off_face_never_talks(self):
         self.run_case("2")
