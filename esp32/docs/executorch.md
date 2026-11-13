@@ -55,8 +55,15 @@ The build then declares the generated bundle, and refuses one whose
 component version, commit, or model hash does not match the declared
 model and component.
 
-Wakeword builds need a Python with executorch (any nightly whose
-codegen matches the component) and PyYAML installed. Point the build
+Wakeword builds need a Python with executorch and PyYAML installed.
+Use the nightly the component was built from, which the component's
+`VERSION` names: for `1.6.0-dev.20261112` that is
+`executorch==1.6.0.dev20261112` (commit `2a00808`) from
+`https://download.pytorch.org/whl/nightly/cpu`, with
+`torch==2.14.0` from `https://download.pytorch.org/whl/test/cpu`.
+Other versions are not checked and may generate a mismatched bundle or
+fail; the stable `executorch==1.6.0` from PyPI fails, because its codegen
+lacks a function the component's generator calls. Point the build
 at it with `-DEXECUTORCH_PYTHON=<python>` or the `EXECUTORCH_PYTHON`
 environment variable; without one, configuration fails with a message
 saying so. Default builds need nothing: the bundle step only runs for
