@@ -1,12 +1,15 @@
 # Reply option selection
 
 On PSRAM boards with the LVGL touchscreen UI, Muse's text option questions open
-a scrollable picker. Tap an answer to send it. **Close options** returns to the
-conversation, as does tapping outside the panel. A text-only **Options** control
+a scrollable picker showing the question and its answers. Tap an answer to send
+it, or tap outside the panel to return to the conversation. A text-only **Options** control
 appears only when an unanswered question is dismissed; it disappears as soon as
 an answer is submitted. A selected answer is retained internally to prevent
 repeat submission. Voice recording and calls
 temporarily hide the picker.
+
+The question comes from the widget title when supplied, otherwise from Muse's
+reply text. “Choose an option” is used only when no question text is available.
 
 On round displays, the panel is scaled so its entire rectangular diagonal fits
 within the display diameter minus 20 pixels. This keeps its corners and
