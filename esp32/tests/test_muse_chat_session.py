@@ -722,6 +722,34 @@ int main(int argc, char **argv) {
         assert(muse_options_snapshot(&q) && q.selected == 1 && q.saved);
         break;
     }
+    case 32: {
+        s_turn.texts=static_cast<char *>(calloc(MAX_MSGS,TEXT_MAX));
+        assert(s_turn.texts);
+        for (bool typed : {false, true}) {
+            muse_options_clear(); begin(typed);
+            event("delta.message_start","lunch","note");
+            event("delta.text_append","lunch","","What do you want for lunch?");
+            event("delta.text_append","lunch","","\n\n[[hatch_widget:meal]]");
+            cJSON *line=cJSON_Parse(R"({"type":"event","event":"delta.message_done","payload":{"message_id":"lunch","widgets":[{"kind":"option","widget_id":"meal","data":{"options":["Pasta","Salad"]}}]}})");
+            on_event(line); cJSON_Delete(line);
+            muse_options_t q;
+            assert(muse_options_snapshot(&q) && !strcmp(q.question,"What do you want for lunch?"));
+            /* Another message must not borrow the lunch question's streamed text. */
+            line=cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{"message_id":"other-question","widgets":[{"kind":"option","widget_id":"other-choices","data":{"options":["Yes","No"]}}]}})");
+            on_event(line); cJSON_Delete(line);
+            assert(muse_options_snapshot(&q) && !q.question[0]);
+        }
+        free(s_turn.texts); s_turn.texts=nullptr;
+        break;
+    }
+    case 33: {
+        muse_options_clear(); s_turn.phase=P_IDLE;
+        cJSON *line=cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{"message_id":"lunch","transcript":{"messages":[{"role":"assistant","content":[{"type":"text","text":"What do you want for lunch?\n[[hatch_widget:meal]]"}]}]},"widgets":[{"kind":"option","widget_id":"meal","data":{"options":["Pasta","Salad"]}}]}})");
+        on_event(line); cJSON_Delete(line);
+        muse_options_t q;
+        assert(muse_options_snapshot(&q) && !strcmp(q.question,"What do you want for lunch?"));
+        break;
+    }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -778,6 +806,12 @@ int main(int argc, char **argv) {
 
     def test_idle_widget_and_phone_selection_use_the_real_adapter(self):
         self.run_case(31)
+
+    def test_widget_done_uses_only_its_own_streamed_question(self):
+        self.run_case(32)
+
+    def test_idle_canonical_transcript_supplies_the_picker_question(self):
+        self.run_case(33)
 
     def test_rejected_deltas_do_not_emit_or_complete_voice_or_typed_replies(self):
         self.run_case(0)

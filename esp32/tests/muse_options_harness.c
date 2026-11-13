@@ -132,6 +132,68 @@ static void state_events(void)
     assert(view().selected==2 && view().state_version==4);
     cJSON_Delete(event); cJSON_Delete(root);
 }
+static void question_text(void)
+{
+    cJSON *root=fixture();
+    cJSON_DeleteItemFromObject(root,"display_text");
+    receive(root); muse_options_t initial=view();
+    assert(!initial.question[0]);
+    /* A canonical row can arrive after the widget, with content nested in payload. */
+    cJSON_AddStringToObject(root,"display_text","");
+    cJSON_AddItemToObject(root,"payload",cJSON_Parse("{\"content\":\"What do you want for lunch?\\n\\n[[hatch_widget:meal-1]]\"}"));
+    receive(root); muse_options_t updated=view();
+    assert(!strcmp(updated.question,"What do you want for lunch?"));
+    assert(updated.generation==initial.generation && updated.revision>initial.revision);
+    assert(muse_options_request(updated.generation,1));
+    cJSON *data=cJSON_GetObjectItem(widget(root),"data");
+    cJSON_AddStringToObject(data,"title","");
+    receive(root); assert(!strcmp(view().question,updated.question));
+    cJSON_AddStringToObject(widget(root),"title","Which lunch?");
+    receive(root); updated=view();
+    assert(!strcmp(updated.question,"Which lunch?") && updated.status==MUSE_OPTIONS_QUEUED && updated.selected==1);
+    cJSON_DeleteItemFromObject(widget(root),"title");
+    cJSON_DeleteItemFromObject(root,"payload");
+    receive(root); assert(!strcmp(view().question,"Which lunch?"));
+    cJSON_Delete(root);
+}
+static void question_sources(void)
+{
+    for (int mode=0; mode<4; ++mode) {
+        muse_options_clear();
+        cJSON *root=fixture(), *data=cJSON_GetObjectItem(widget(root),"data");
+        cJSON_ReplaceItemInObject(root,"display_text",cJSON_CreateString(" \n[[hatch_widget:meal-1]]\t"));
+        cJSON_AddStringToObject(data,"title"," \t");
+        if (mode==0) cJSON_AddStringToObject(root,"content","What do you want for lunch?");
+        if (mode==1) cJSON_AddItemToObject(root,"payload",cJSON_Parse("{\"content\":\"What do you want for lunch?\"}"));
+        if (mode==2) cJSON_ReplaceItemInObject(data,"title",cJSON_CreateString("What do you want for lunch?"));
+        if (mode==3) cJSON_AddStringToObject(widget(root),"title","What do you want for lunch?");
+        receive(root);
+        assert(!strcmp(view().question,"What do you want for lunch?"));
+        cJSON_Delete(root);
+    }
+    cJSON *root=fixture();
+    char long_question[MUSE_OPTION_QUESTION_BYTES*2];
+    for (size_t i=0; i<sizeof(long_question)-3; i+=3) memcpy(long_question+i,"寿",3);
+    long_question[sizeof(long_question)-3]='\0';
+    cJSON_ReplaceItemInObject(root,"display_text",cJSON_CreateString(long_question));
+    receive(root); muse_options_t q=view();
+    assert(strlen(q.question)==(MUSE_OPTION_QUESTION_BYTES-1)/3*3);
+    assert(!strncmp(q.question,long_question,strlen(q.question)));
+    cJSON_Delete(root);
+}
+static void transcript_question(void)
+{
+    cJSON *root=fixture();
+    cJSON_DeleteItemFromObject(root,"display_text");
+    /* Current Muse canonical rows carry assistant text in transcript blocks. */
+    cJSON_AddItemToObject(root,"transcript",cJSON_Parse("{\"messages\":["
+        "{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Do not show user text\"}]},"
+        "{\"role\":\"assistant\",\"content\":[{\"type\":\"image\",\"text\":\"Not text\"},"
+        "{\"type\":\"text\",\"text\":\"What do you want for lunch?\"},"
+        "{\"type\":\"text\",\"text\":\"[[hatch_widget:meal-1]]\"}]}]}"));
+    receive(root); assert(!strcmp(view().question,"What do you want for lunch?"));
+    cJSON_Delete(root);
+}
 int main(int argc,char **argv)
 {
     assert(argc==2); int mode=atoi(argv[1]);
@@ -142,6 +204,9 @@ int main(int argc,char **argv)
     else if (mode==11) phone();
     else if (mode==12) encoded();
     else if (mode==13) state_events();
+    else if (mode==14) question_text();
+    else if (mode==15) question_sources();
+    else if (mode==16) transcript_question();
     else return 2;
     return 0;
 }

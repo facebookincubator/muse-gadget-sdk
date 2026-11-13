@@ -88,10 +88,15 @@ int main(int argc, char **argv)
     assert(lv_obj_has_flag(reopen,LV_OBJ_FLAG_HIDDEN));
     muse_options_t q={.count=3,.selected=-1};
     strcpy(q.widget_id,"widget-test"); strcpy(q.message_id,"message-test");
-    strcpy(q.question,"Which lunch would you like?");
     strcpy(q.labels[0],"Pasta"); strcpy(q.labels[1],"Salad");
     strcpy(q.labels[2],"A longer answer that wraps over several lines and remains reachable by scrolling");
     assert(muse_options_publish(&q)); frame();
+    assert(find(lv_layer_top(),"Choose an option"));
+    /* Late question text refreshes the already-open picker without a new widget. */
+    strcpy(q.question,"What do you want for lunch?");
+    assert(muse_options_publish(&q)); frame();
+    assert(find(lv_layer_top(),q.question));
+    assert(!find(lv_layer_top(),"Choose an option"));
     lv_obj_t *answer=find(lv_layer_top(),"Pasta"); assert(answer);
     lv_obj_t *panel=lv_obj_get_parent(lv_obj_get_parent(answer));
     assert_panel_inside(panel);

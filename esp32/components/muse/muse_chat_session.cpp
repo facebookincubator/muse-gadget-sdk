@@ -1778,7 +1778,11 @@ static void on_event(cJSON *line)
         return;
     }
     if (!strcmp(event, "message.assistant") || !strcmp(event, "delta.message_done")) {
-        if (muse_options_receive(payload) && s_turn.text) {
+        const char *id = msg_id(payload, line);
+        int i = s_turn.phase == P_WAIT_REPLY && id ? find_msg(id) : -1;
+        /* Done events can carry widgets without repeating the streamed text. */
+        const char *text = i >= 0 && s_turn.msgs[i].len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+        if (muse_options_receive_message(payload, text) && s_turn.text) {
             /* Serial diagnostics expose only widget data, never credentials. */
             char *widgets = cJSON_PrintUnformatted(cJSON_GetObjectItem(payload, "widgets"));
             if (widgets) {
@@ -1832,11 +1836,8 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
         const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "text"));
         if (text && text[0] && s_turn.text) {
             mark(M_TEXT);
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+            /* Retain typed text too: a later widget may need its question. */
             append_text(m, text);
-#else
-            m.len += strlen(text);
-#endif
             muse_hatch_console("text", text, "\"msg\":%d", i);
         } else if (text && text[0]) {
             add_reply_text(i, text);
