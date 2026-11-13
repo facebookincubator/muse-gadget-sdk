@@ -85,9 +85,10 @@ def distrusted_name(der: bytes) -> str | None:
     return None
 
 
-# OpenSSL looks certificates up in a CA directory by subject hash ("1a2b3c4d.0").
-_HASH_NAME = re.compile(r"[0-9a-f]{8}\.[0-9]+")
-_URI = re.compile(r"(?:^|:)[A-Za-z][A-Za-z0-9+.-]*:")    # a scheme, as in file:///…
+# OpenSSL looks certificates up in a CA directory by subject hash ("1a2b3c4d.0");
+# its store loader matches the hash in either case.
+_HASH_NAME = re.compile(r"[0-9a-f]{8}\.[0-9]+", re.I)
+_URI = re.compile(r"(?:^|:)[A-Za-z][A-Za-z0-9+.-]*:/")    # a scheme, as in file:///…
 
 
 FIX = "update your ca-certificates package, then restart musegadget"
@@ -100,11 +101,12 @@ class TrustStoreError(Exception):
 def check_trust_store() -> list[str] | None:
     """Names of the distrusted roots in the system trust store, or None if it can't be read.
 
-    Reads what OpenSSL uses by default: the CA file and the hash-named files
-    of the CA directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override
-    them; ``SSL_CERT_DIR`` may list several, separated as in ``PATH``). A
-    root counts if it's there at all, whatever trust settings it carries.
-    A CA file, CA directory or hashed file that exists but can't be read
+    Reads what OpenSSL uses by default: the CA file and the files of the CA
+    directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them;
+    ``SSL_CERT_DIR`` may list several, separated as in ``PATH``). Every file
+    in the directory is read, not only the hash-named ones OpenSSL looks up.
+    A root counts if it's there at all, whatever trust settings it carries.
+    A CA file, CA directory or hash-named file that exists but can't be read
     makes the whole store unreadable, since OpenSSL might still read what
     this can't, and so does a store URI in ``SSL_CERT_DIR`` or
     ``SSL_CERT_URI``.
@@ -130,17 +132,18 @@ def check_trust_store() -> list[str] | None:
             continue        # OpenSSL skips a listed directory that isn't there
         try:
             with os.scandir(directory) as entries:
-                files = sorted(entry.path for entry in entries
-                               if _HASH_NAME.fullmatch(entry.name) and entry.is_file())
+                files = sorted((entry.name, entry.path) for entry in entries if entry.is_file())
         except OSError:
             return None
-        for path in files:
+        for name, path in files:
             try:
                 store.load_verify_locations(cafile=path)
             except (OSError, ssl.SSLError):
-                # OpenSSL's directory lookup reads files differently, and may
-                # still take a certificate from one that fails here.
-                return None
+                if _HASH_NAME.fullmatch(name):
+                    # OpenSSL's lookup reads files differently, and may still
+                    # take a certificate from one that fails here.
+                    return None
+                continue    # other files are read only in case they hold one
             readable = True
     if not readable:
         return None

@@ -166,19 +166,19 @@ def use_store(monkeypatch, cafile, capath) -> None:
                         lambda: SimpleNamespace(cafile=cafile and str(cafile), capath=capath and str(capath)))
 
 
-def test_check_trust_store_reads_the_ca_file_and_the_hashed_files(tmp_path, monkeypatch):
-    (g3, g3_der), (comodo, comodo_der), (_, c1_der), _ = published_roots()
+def test_check_trust_store_reads_the_ca_file_and_every_file_in_the_ca_directory(tmp_path, monkeypatch):
+    (g3, g3_der), (comodo, comodo_der), (c1, c1_der), _ = published_roots()
     (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der)
                                          + ssl.DER_cert_to_PEM_cert(g3_der))
     directory = tmp_path / "certs"
     (directory / "nested").mkdir(parents=True)
     (directory / "0a1b2c3d.0").write_text(ssl.DER_cert_to_PEM_cert(g3_der))
     (directory / "4e5f6a7b.0").write_text(trusted_pem(comodo_der, reject=SERVER_AUTH))
-    # OpenSSL finds certificates in the directory by hash name only.
+    # OpenSSL looks up only hash-named files, but every file is checked.
     (directory / "ca-bundle.crt").write_text(ssl.DER_cert_to_PEM_cert(c1_der))
     (directory / "README").write_text("not a certificate\n")
     use_store(monkeypatch, tmp_path / "bundle.pem", directory)
-    assert tls.check_trust_store() == sorted([g3, comodo])
+    assert tls.check_trust_store() == sorted([g3, comodo, c1])
 
 
 def test_check_trust_store_reads_every_directory_ssl_cert_dir_lists(tmp_path, monkeypatch):
@@ -231,8 +231,9 @@ def test_a_directory_that_cant_be_listed_makes_the_store_unreadable(tmp_path, mo
 def test_an_openssl_store_the_check_cant_read_makes_the_store_unreadable(tmp_path, monkeypatch,
                                                                          variable, value):
     (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    (tmp_path / "certs").mkdir()
     monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "bundle.pem"))
-    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "certs"))
     monkeypatch.delenv("SSL_CERT_URI", raising=False)
     assert tls.check_trust_store() == []
     monkeypatch.setenv(variable, value.format(tmp=tmp_path))
@@ -245,10 +246,15 @@ def test_a_hashed_file_that_doesnt_load_makes_the_store_unreadable(tmp_path, mon
     (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
     directory = tmp_path / "certs"
     directory.mkdir()
-    (directory / "14bc7599.0").write_text(ssl.DER_cert_to_PEM_cert(published_roots()[0][1])
-                                          + "-----BEGIN X509 CRL-----\nMAA=\n-----END X509 CRL-----\n")
+    damaged = (ssl.DER_cert_to_PEM_cert(published_roots()[0][1])
+               + "-----BEGIN X509 CRL-----\nMAA=\n-----END X509 CRL-----\n")
     use_store(monkeypatch, tmp_path / "bundle.pem", directory)
-    assert tls.check_trust_store() is None
+    for name in ("14bc7599.0", "14BC7599.1"):     # OpenSSL's store loader ignores case
+        (directory / name).write_text(damaged)
+        assert tls.check_trust_store() is None
+        (directory / name).unlink()
+    (directory / "README").write_text(damaged)    # not looked up, so not a reason to stop
+    assert tls.check_trust_store() == []
 
 
 def test_the_client_context_refuses_an_unsafe_trust_store(tmp_path, monkeypatch):
