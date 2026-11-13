@@ -59,6 +59,15 @@ class MuseOptions(unittest.TestCase):
     def test_phone_state_event_and_old_versions(self):
         self.run_case(13)
 
+    def test_late_nested_question_and_empty_title_preserve_the_choice(self):
+        self.run_case(14)
+
+    def test_question_sources_skip_empty_placeholders_and_clip_whole_utf8(self):
+        self.run_case(15)
+
+    def test_canonical_transcript_question_excludes_user_and_nontext_blocks(self):
+        self.run_case(16)
+
     def run_case(self, mode):
         result = subprocess.run([str(self.binary), str(mode)], capture_output=True, text=True,
                                 env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0:halt_on_error=1',

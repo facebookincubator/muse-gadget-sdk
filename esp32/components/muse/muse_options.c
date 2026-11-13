@@ -101,6 +101,10 @@ bool muse_options_publish(const muse_options_t *q)
     bool same = !strcmp(s_question->widget_id, q->widget_id) && !strcmp(s_question->message_id, q->message_id);
     /* A duplicate must not undo a queued/in-flight/accepted/uncertain choice. */
     if (same && s_question->count == q->count && !memcmp(s_question->labels, q->labels, sizeof(q->labels))) {
+        /* Widgets can precede their question text. Refresh the displayed text
+         * without creating a new question or reopening an answered picker. */
+        bool changed = q->question[0] && strcmp(s_question->question, q->question);
+        if (changed) memcpy(s_question->question, q->question, sizeof(q->question));
         if (q->state_version > s_question->state_version) s_question->state_version = q->state_version;
         if (q->selected >= 0 && q->state_version >= s_question->state_version) {
             s_question->selected = q->selected;
@@ -108,8 +112,9 @@ bool muse_options_publish(const muse_options_t *q)
             s_question->status = MUSE_OPTIONS_SELECTED;
             s_question->saved = true;
             s_question->detail[0] = '\0';
-            s_question->revision = ++s_revision;
+            changed = true;
         }
+        if (changed) s_question->revision = ++s_revision;
         portEXIT_CRITICAL(&s_lock);
         return true;
     }

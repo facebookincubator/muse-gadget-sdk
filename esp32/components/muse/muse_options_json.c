@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "muse_options.h"
 #include "cJSON.h"
+#include <ctype.h>
 #include <math.h>
 #include <string.h>
 
@@ -22,7 +23,65 @@ static const cJSON *object(const cJSON *j, cJSON **owned)
     return cJSON_IsObject(j) ? j : NULL;
 }
 
-static bool receive_widget(const cJSON *widget, const char *message, const char *question)
+static void append_question(char *out, size_t cap, const char *text)
+{
+    if (!text) return;
+    size_t used = strlen(out);
+    size_t n = strlen(text);
+    if (n >= cap - used) {
+        n = cap - used - 1;
+        while (n && ((unsigned char)text[n] & 0xc0) == 0x80) --n;
+    }
+    memcpy(out + used, text, n);
+    out[used + n] = '\0';
+}
+
+/* Display text may contain widget placeholders or only whitespace. Treat those
+ * as missing so an empty title/display_text cannot hide the actual question. */
+static bool clean_question(char *out)
+{
+    char *marker;
+    while ((marker = strstr(out, "[[hatch_widget:"))) {
+        char *end = strstr(marker, "]]");
+        if (!end) { *marker = '\0'; break; }
+        memmove(marker, end + 2, strlen(end + 2) + 1);
+    }
+    char *start = out;
+    while (isspace((unsigned char)*start)) ++start;
+    size_t n = strlen(start);
+    while (n && isspace((unsigned char)start[n - 1])) --n;
+    memmove(out, start, n);
+    out[n] = '\0';
+    return n > 0;
+}
+
+static bool question_text(char *out, size_t cap, const char *text)
+{
+    out[0] = '\0';
+    append_question(out, cap, text);
+    return clean_question(out);
+}
+
+static bool transcript_question(char *out, size_t cap, const cJSON *payload)
+{
+    const cJSON *rows = member(member(payload, "transcript"), "messages"), *row;
+    out[0] = '\0';
+    cJSON_ArrayForEach(row, rows) {
+        const char *role = string(row, "role");
+        if (!role || strcmp(role, "assistant")) continue;
+        const cJSON *blocks = member(row, "content"), *block;
+        cJSON_ArrayForEach(block, blocks) {
+            const char *type = string(block, "type"), *text = string(block, "text");
+            if (!type || strcmp(type, "text") || !text || !text[0]) continue;
+            if (out[0]) append_question(out, cap, "\n");
+            append_question(out, cap, text);
+        }
+    }
+    return clean_question(out);
+}
+
+static bool receive_widget(const cJSON *widget, const char *message, const cJSON *payload,
+                           const char *streamed_text)
 {
     const char *kind = string(widget, "kind");
     if (!kind || strcmp(kind, "option")) return false;
@@ -51,22 +110,15 @@ static bool receive_widget(const cJSON *widget, const char *message, const char 
         for (int k = 0; ok && k < i; ++k) if (!strcmp(q.labels[k], q.labels[i])) ok = false;
         if (selected && !strcmp(selected, q.labels[i])) q.selected = i;
     }
-    const char *title = string(data, "title");
-    if (!title) title = question;
     /* A question is display-only and can be clipped; IDs and choices cannot. */
-    if (title) {
-        size_t n = strlen(title);
-        if (n >= sizeof(q.question)) {
-            n = sizeof(q.question) - 1;
-            while (n && ((unsigned char)title[n] & 0xc0) == 0x80) --n;
-        }
-        memcpy(q.question, title, n);
-        char *marker;
-        while ((marker = strstr(q.question, "[[hatch_widget:"))) {
-            char *end = strstr(marker, "]]");
-            if (!end) { *marker = '\0'; break; }
-            memmove(marker, end + 2, strlen(end + 2) + 1);
-        }
+    const char *candidates[] = {string(widget, "title"), string(data, "title"),
+        string(payload, "display_text"), string(member(payload, "payload"), "content"),
+        string(payload, "content")};
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        if (question_text(q.question, sizeof(q.question), candidates[i])) break;
+    }
+    if (!q.question[0] && !transcript_question(q.question, sizeof(q.question), payload)) {
+        question_text(q.question, sizeof(q.question), streamed_text);
     }
     if (ok) ok = muse_options_publish(&q);
     cJSON_Delete(data_owned);
@@ -75,6 +127,11 @@ static bool receive_widget(const cJSON *widget, const char *message, const char 
 }
 
 bool muse_options_receive(const cJSON *payload)
+{
+    return muse_options_receive_message(payload, NULL);
+}
+
+bool muse_options_receive_message(const cJSON *payload, const char *streamed_text)
 {
     const char *host = string(payload, "host_message_id"), *widget_id = string(payload, "widget_id");
     if (host && widget_id) {
@@ -100,12 +157,10 @@ bool muse_options_receive(const cJSON *payload)
     }
     const char *id = string(payload, "message_id");
     if (!id) id = string(payload, "id");
-    const char *question = string(payload, "display_text");
-    if (!question) question = string(payload, "content");
     const cJSON *widgets = member(payload, "widgets"), *widget;
     bool found = false;
     cJSON_ArrayForEach(widget, widgets) {
-        if (receive_widget(widget, id, question)) found = true;
+        if (receive_widget(widget, id, payload, streamed_text)) found = true;
     }
     return found;
 }
