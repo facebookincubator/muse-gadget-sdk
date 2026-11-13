@@ -550,6 +550,16 @@ class WakeWordFirmwareContract(unittest.TestCase):
         heard = between(glue, 'before == MUSE_WW_IDLE && now == MUSE_WW_ARMED', 'MUSE_WW_ACTION_POST_PTT_DOWN')
         self.assertIn('muse_state_set_asleep(false)', heard)
 
+    def test_wakeword_overlay_is_committed_and_wired(self):
+        # Wake word builds come from a committed overlay, not local
+        # sdkconfig fragments, and board.sh builds it in its own dir.
+        overlay = (ROOT / 'devices/sdkconfig.muse-wakeword').read_text()
+        self.assertIn('CONFIG_MUSE_WAKEWORD_ENABLE=y', overlay)
+        self.assertIn('# CONFIG_ET_OPTIMIZE_SIZE is not set', overlay)
+        self.assertIn('# CONFIG_ET_ENABLE_LOGGING is not set', overlay)
+        board = (ROOT / 'tools/muse/board.sh').read_text()
+        self.assertIn('B=$B-wakeword; defaults="$defaults;devices/sdkconfig.muse-wakeword"', board)
+
     def test_listening_needs_a_working_runner(self):
         # A runner that failed to load or run hears nothing, so the
         # status and the indicator must not say listening.

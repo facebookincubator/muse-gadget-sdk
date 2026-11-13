@@ -36,15 +36,20 @@ python3 -m unittest tests.test_muse_wakeword -v
 
 ## Trying it on a BOX-3
 
-For the real runner, build with `CONFIG_MUSE_WAKEWORD_ENABLE=y`
-(the ExecuTorch runner is the default choice and selects the runtime)
-in the build's `sdkconfig` (token setup as usual), flash, run
-`>wake.on`, and say "Hey Muse". Expect research-checkpoint behavior,
-including false triggers; `@wake` and the `muse_wake`/`ww_et` logs
-show the flow.
+For the real runner, build with the committed overlay
+`devices/sdkconfig.muse-wakeword` (token setup as usual):
 
-Trim for size: build with ExecuTorch runtime logging compiled out
-(`CONFIG_ET_ENABLE_LOGGING` unset in the build's sdkconfig fragment).
+```sh
+EXECUTORCH_PYTHON=<python with executorch> MUSE_WAKEWORD=1 tools/muse/board.sh build box3
+MUSE_WAKEWORD=1 tools/muse/board.sh flash box3
+```
+
+Then run `>wake.on` and say "Hey Muse". Expect research-checkpoint
+behavior, including false triggers; `@wake` and the `muse_wake`/`ww_et`
+logs show the flow.
+
+The overlay already trims for size and speed as follows. ExecuTorch
+runtime logging is compiled out (`CONFIG_ET_ENABLE_LOGGING` unset).
 Measured on BOX-3 it saves ~91 KB with no latency cost (inference
 still ~15 ms/frame), and `et_model`/runner error logs still reach
 the console. Program verification is already off
@@ -52,7 +57,7 @@ the console. Program verification is already off
 minimal header checks), and the build-time kernel bundle already
 registers only the kernels the model uses, so there is nothing
 further to prune there. `CONFIG_ET_OPTIMIZE_SIZE` defaults to `y` in
-the registry component: explicitly unset it in the build fragment.
+the registry component; the overlay unsets it.
 A build with it (plus an Error log floor) measured 67 KB smaller but
 slowed inference to ~23 ms/frame, over the 20 ms budget with tap-frame
 drops, so it was rejected.
