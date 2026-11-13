@@ -104,6 +104,9 @@ void muse_wakeword_core_init(muse_wakeword_core_t *core, const muse_wakeword_con
 void muse_wakeword_core_reset(muse_wakeword_core_t *core);
 /* One chunk through the state machine; returns MUSE_WW_ACTION_* flags. */
 uint32_t muse_wakeword_core_tick(muse_wakeword_core_t *core, const muse_wakeword_input_t *in);
+/* The turn a POST_PTT_DOWN asked for could not be opened (the input queue
+ * was full): back to idle, counted as a cancel, with nothing left to post. */
+void muse_wakeword_core_abort(muse_wakeword_core_t *core);
 muse_ww_state_t muse_wakeword_core_state(const muse_wakeword_core_t *core);
 muse_wakeword_stats_t muse_wakeword_core_stats(const muse_wakeword_core_t *core);
 
@@ -116,12 +119,11 @@ muse_wakeword_stats_t muse_wakeword_core_stats(const muse_wakeword_core_t *core)
 bool muse_wakeword_energy_voiced(const int16_t *pcm, size_t frames, int32_t rms_threshold);
 
 /*
- * Caller-owned frame ring for the handoff queue and the upload
- * pre-roll (same store, two readers' views). Storage is the
+ * Caller-owned frame ring for the upload pre-roll. Storage is the
  * caller's (allocated once at init from MUSE_BIG_CAPS in firmware);
  * nothing here allocates. Push never blocks: on overflow the oldest
- * frames are dropped and counted, because voice_task must never wait
- * on the runner. Single producer / single consumer, like its use.
+ * frames are dropped and counted. Not thread safe: one task owns a
+ * ring (the cross-task tap is a FreeRTOS stream buffer in the glue).
  */
 typedef struct {
     int16_t *storage;

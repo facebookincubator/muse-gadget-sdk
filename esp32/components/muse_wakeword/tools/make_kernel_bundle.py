@@ -11,9 +11,9 @@
 Loads the registry component's tools/gen_kernels.py and runs it with
 only its _check_version replaced. That check requires the installed
 executorch commit to equal the component's commit exactly (for dev
-versions), which no published nightly wheel satisfies for this
-component; the SDK deliberately does not require an exact-commit
-Python environment to build firmware. The replacement keeps everything
+versions), which only the component's own nightly satisfies; the SDK
+deliberately does not require that exact Python environment to build
+firmware, though it is the tested one (esp32/docs/executorch.md). The replacement keeps everything
 else in _check_version: the component version and commit still come
 from the component's own VERSION and manifest, and the bundle still
 records the *true* installed executorch version and commit — nothing

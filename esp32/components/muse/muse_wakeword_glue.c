@@ -20,12 +20,15 @@
 
 #if CONFIG_MUSE_WAKEWORD_ENABLE
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/idf_additions.h"
+#include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 
 #include "muse_audio.h"
@@ -43,6 +46,7 @@
 static const char *TAG = "muse_wake";
 
 #define TAP_CHUNKS 25                                  /* 500 ms of scheduling slack */
+#define CHUNK_BYTES (MUSE_AUDIO_CHUNK * sizeof(int16_t))
 #define PRE_FRAMES (MUSE_AUDIO_RATE)                   /* 1 s of upload pre-roll */
 #define WAKE_TASK_STACK 8192
 #define WAKE_TASK_PRIO 5                               /* below muse_voice (6) */
@@ -50,20 +54,24 @@ static const char *TAG = "muse_wake";
 static QueueHandle_t s_queue;
 static ww_runner_t *s_runner;
 static muse_wakeword_core_t s_core;
-static muse_ww_ring_t s_tap;    /* voice_task -> wake task */
+/* voice_task -> wake task. A stream buffer is FreeRTOS's single-writer,
+ * single-reader primitive: the writer owns the head and the reader the
+ * tail, so neither needs a lock. Only whole chunks are ever written. */
+static StreamBufferHandle_t s_tap;
+static volatile uint32_t s_tap_drops;   /* frames; voice_task only writes */
 static muse_ww_ring_t s_pre;    /* wake task only: upload pre-roll */
 static int16_t *s_snap;         /* PRE_FRAMES, for muse_voice_seed_preroll */
 static bool s_started;
 /* Cross-task control surface: other tasks only publish the desired
  * flags below (and the PTT edge flags). The wake task is the single
- * writer of the rings, the session core, and the runner, applying
- * flag transitions at its loop boundary in apply_requests(). That
- * keeps the tap ring single-producer/single-consumer and the runner
- * single-threaded (see ww_runner.h). */
+ * reader of the tap and the single writer of the pre-roll ring, the
+ * session core, and the runner, applying flag transitions at its loop
+ * boundary in apply_requests(). That keeps the runner single-threaded
+ * (see ww_runner.h). */
 static volatile bool s_enabled;      /* desired listening opt-in */
 static volatile bool s_playback;     /* desired: own-voice playback active */
 static volatile bool s_ptt_turn;     /* desired: physical PTT turn recording */
-static volatile bool s_pending_down, s_pending_up;   /* physical, from muse_voice */
+static atomic_bool s_pending_down, s_pending_up;   /* physical, from muse_voice */
 #if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
 static volatile bool s_bench_wake_req, s_bench_test_req;
 #endif
@@ -72,9 +80,10 @@ static bool s_applied_playback;           /* wake task only */
 static bool s_applied_ptt_turn;           /* wake task only */
 static muse_wakeword_stats_t s_stats_snap;   /* wake task writes, status reads */
 static int s_state_snap;
-static uint32_t s_drops_snap;
+static volatile bool s_runner_ok = true;   /* wake task writes: the runner can detect */
 static uint32_t s_capture_chunks;                    /* wake task only, for the log */
 static size_t s_seeded_frames;
+static bool s_up_owed;   /* wake task only: a synthetic release the full queue refused */
 
 const char *muse_wakeword_runner_kind(void)
 {
@@ -92,8 +101,10 @@ bool muse_wakeword_enabled(void)
 
 bool muse_wakeword_listening(void)
 {
-    return s_started && s_applied_enabled && !s_applied_playback && !s_applied_ptt_turn &&
-           !muse_voice_resting();
+    /* A runner whose model failed to load or run hears nothing:
+     * not listening until a reset reloads it. */
+    return s_started && s_applied_enabled && s_runner_ok && !s_applied_playback &&
+           !s_applied_ptt_turn && !muse_voice_resting();
 }
 
 void muse_wakeword_set_ptt_turn(bool active)
@@ -109,15 +120,23 @@ void muse_wakeword_on_audio(const int16_t *pcm, size_t frames)
     if (!s_started || !s_applied_enabled) {
         return;   /* one branch while off: keep the tap cheap */
     }
-    muse_ww_ring_push(&s_tap, pcm, frames);
+    /* Whole chunks or nothing: a send into too little space would be
+     * partial, so check first. Space only grows between the check and the
+     * send (this is the only writer). On overload the newest chunk drops. */
+    size_t bytes = frames * sizeof(int16_t);
+    if (xStreamBufferSpacesAvailable(s_tap) >= bytes) {
+        xStreamBufferSend(s_tap, pcm, bytes, 0);
+    } else {
+        s_tap_drops += frames;
+    }
 }
 
 void muse_wakeword_note_ptt(bool down)
 {
     if (down) {
-        s_pending_down = true;
+        atomic_store(&s_pending_down, true);
     } else {
-        s_pending_up = true;
+        atomic_store(&s_pending_up, true);
     }
 }
 
@@ -131,14 +150,22 @@ void muse_wakeword_set_playback(bool on)
 
 void muse_wakeword_set_enabled(bool on)
 {
-    muse_settings_set_wakeword_on(on);
     if (!s_started) {
+        /* Init failed, so nothing listens. Saving "on" would start
+         * listening at a later boot nobody asked for; "off" still saves. */
+        if (!on) {
+            muse_settings_set_wakeword_on(false);
+        }
         return;
     }
+    muse_settings_set_wakeword_on(on);
     /* Publish only. The wake task applies the transition, so a
      * redundant enable cannot reset a live session out from under
      * muse_voice (which would orphan the synthetic hold). */
     s_enabled = on;
+    /* A voice task resting asleep on battery re-checks now rather than at
+     * its 60 s backstop: listening keeps the codecs on. */
+    muse_state_nudge();
 }
 
 void muse_wakeword_bench_trigger(bool with_speech)
@@ -159,18 +186,29 @@ void muse_wakeword_bench_trigger(bool with_speech)
 #endif
 }
 
-static void post_ptt(muse_ptt_t type)
+static bool post_ptt(muse_ptt_t type)
 {
-    muse_input_event_t ev = { .type = type, .synthetic = true };
+    /* The current input epoch, like a real edge: muse_voice cancels a press
+     * whose epoch is stale, so a zero here would end every hands-free turn
+     * once any real edge had been dropped. */
+    muse_input_event_t ev = { .type = type, .synthetic = true, .epoch = muse_input_call_epoch(),
+                              .at_us = esp_timer_get_time() };
     if (xQueueSend(s_queue, &ev, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "input queue full, synthetic %s dropped",
-                 type == MUSE_PTT_DOWN ? "down" : "up");
+        ESP_LOGW(TAG, "input queue full, synthetic %s %s", type == MUSE_PTT_DOWN ? "down" : "up",
+                 type == MUSE_PTT_DOWN ? "dropped" : "retried next chunk");
+        return false;
     }
+    return true;
 }
 
 /* One core tick and everything its actions mean for the device. */
 static void tick(const muse_wakeword_input_t *in)
 {
+    /* A release the full queue refused goes first: without it the turn
+     * it ends would record to its 15 s cap. */
+    if (s_up_owed && post_ptt(MUSE_PTT_UP)) {
+        s_up_owed = false;
+    }
     muse_ww_state_t before = muse_wakeword_core_state(&s_core);
     uint32_t act = muse_wakeword_core_tick(&s_core, in);
     muse_ww_state_t now = muse_wakeword_core_state(&s_core);
@@ -179,12 +217,12 @@ static void tick(const muse_wakeword_input_t *in)
     }
     if (before == MUSE_WW_IDLE && now == MUSE_WW_ARMED) {
         ESP_LOGI(TAG, "wake heard (runner=%s), listening for speech", muse_wakeword_runner_kind());
-        muse_state_poke();
+        muse_state_set_asleep(false);   /* like a talk press: the prompt must be seen */
         muse_state_set_caption("HEY MUSE HEARD - SPEAK NOW");
     }
     if (act & MUSE_WW_ACTION_POST_PTT_DOWN) {
         /* Snapshot point: audio muse_voice reads between here and
-         * record()'s first live read stays in the wake rings and is
+         * record()'s first live read stays in the tap and is
          * not in the note (input-queue + can_record latency, normally
          * a few ms). Endpointing likewise trails live audio by the
          * current tap backlog (up to TAP_CHUNKS under sustained load).
@@ -198,11 +236,18 @@ static void tick(const muse_wakeword_input_t *in)
          * reason when it cannot (for example, Muse is not set up yet). */
         muse_state_set_mode(MUSE_MODE_LISTENING);
         muse_state_set_caption("LISTENING...");
-        post_ptt(MUSE_PTT_DOWN);
-        ESP_LOGI(TAG, "speech started, pre-roll %.2fs", (double)s_seeded_frames / MUSE_AUDIO_RATE);
+        /* Never a press ahead of an owed release. A press the queue
+         * refused opens no turn: drop the session and its seed, so no
+         * stray release or stale pre-roll follows it. */
+        if (!s_up_owed && post_ptt(MUSE_PTT_DOWN)) {
+            ESP_LOGI(TAG, "speech started, pre-roll %.2fs", (double)s_seeded_frames / MUSE_AUDIO_RATE);
+        } else {
+            muse_wakeword_core_abort(&s_core);
+            muse_voice_seed_preroll(NULL, 0);
+        }
     }
-    if (act & MUSE_WW_ACTION_POST_PTT_UP) {
-        post_ptt(MUSE_PTT_UP);
+    if ((act & MUSE_WW_ACTION_POST_PTT_UP) && !post_ptt(MUSE_PTT_UP)) {
+        s_up_owed = true;
     }
     if (act & MUSE_WW_ACTION_CONVERTED_TO_PTT) {
         ESP_LOGI(TAG, "the talk button took over");
@@ -221,7 +266,7 @@ static void tick(const muse_wakeword_input_t *in)
 }
 
 /* Wake task only: turn the published desire flags into transitions
- * on the rings, core, and runner. Outside init this is the one place
+ * on the pre-roll ring, core, and runner. Outside init this is the one place
  * those objects are mutated, so no other task can race them. */
 static void apply_requests(void)
 {
@@ -234,10 +279,11 @@ static void apply_requests(void)
                 muse_wakeword_input_t in = { 0 };
                 tick(&in);
             }
-            muse_ww_ring_clear(&s_tap);
+            xStreamBufferReset(s_tap);   /* no task blocks on it here: we are its reader */
             muse_ww_ring_clear(&s_pre);
-            muse_wakeword_core_reset(&s_core);
-            s_pending_down = s_pending_up = false;
+            muse_wakeword_core_reset(&s_core);   /* an owed release still goes */
+            atomic_store(&s_pending_down, false);
+            atomic_store(&s_pending_up, false);
             ww_runner_reset(s_runner);
         } else {
             muse_ww_ring_clear(&s_pre);
@@ -280,7 +326,15 @@ static void snapshot_status(void)
 {
     s_stats_snap = muse_wakeword_core_stats(&s_core);
     s_state_snap = (int)muse_wakeword_core_state(&s_core);
-    s_drops_snap = muse_ww_ring_drops(&s_tap);
+    bool ok = ww_runner_ok(s_runner);
+    if (ok != s_runner_ok) {
+        if (ok) {
+            ESP_LOGI(TAG, "runner recovered");
+        } else {
+            ESP_LOGW(TAG, "runner stopped: not listening until it reloads");
+        }
+        s_runner_ok = ok;
+    }
 }
 
 static muse_wakeword_input_t next_input(const int16_t *pcm)
@@ -290,12 +344,12 @@ static muse_wakeword_input_t next_input(const int16_t *pcm)
      * suppression were applied with the transitions above. */
     muse_wakeword_input_t in = {
         .voiced = muse_wakeword_energy_voiced(pcm, MUSE_AUDIO_CHUNK, MUSE_WAKEWORD_ENERGY_RMS_DEFAULT),
-        .ptt_down = s_pending_down,
-        .ptt_up = s_pending_up,
+        /* Read and clear at once: a press noted in between must not be lost. */
+        .ptt_down = atomic_exchange(&s_pending_down, false),
+        .ptt_up = atomic_exchange(&s_pending_up, false),
         .playback = s_applied_playback || s_applied_ptt_turn,
         .enabled = s_applied_enabled,
     };
-    s_pending_down = s_pending_up = false;
     in.event = ww_runner_feed(s_runner, pcm, MUSE_AUDIO_CHUNK);
     return in;
 }
@@ -306,18 +360,16 @@ static void wake_task(void *arg)
     static int16_t chunk[MUSE_AUDIO_CHUNK];
     for (;;) {
         apply_requests();
-        if (muse_ww_ring_fill(&s_tap) < MUSE_AUDIO_CHUNK) {
+        /* The timeout keeps requests applied while the tap is dry. */
+        if (xStreamBufferReceive(s_tap, chunk, CHUNK_BYTES, pdMS_TO_TICKS(10)) != CHUNK_BYTES) {
             /* Disabled mid-capture with the tap now dry: one silent
              * tick is what closes the synthetic hold. */
             if (!s_applied_enabled && muse_wakeword_core_state(&s_core) != MUSE_WW_IDLE) {
                 muse_wakeword_input_t in = { 0 };
                 tick(&in);
+            } else if (s_up_owed && post_ptt(MUSE_PTT_UP)) {
+                s_up_owed = false;   /* the tap is dry, but the release still goes */
             }
-            snapshot_status();
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-        if (muse_ww_ring_pop(&s_tap, chunk, MUSE_AUDIO_CHUNK) != MUSE_AUDIO_CHUNK) {
             snapshot_status();
             continue;
         }
@@ -340,7 +392,7 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
         return ESP_ERR_NOT_SUPPORTED;
     }
     s_queue = queue;
-    int16_t *tap_storage = heap_caps_malloc(TAP_CHUNKS * MUSE_AUDIO_CHUNK * sizeof(int16_t), MUSE_BIG_CAPS);
+    s_tap = xStreamBufferCreateWithCaps(TAP_CHUNKS * CHUNK_BYTES, CHUNK_BYTES, MUSE_BIG_CAPS);
     int16_t *pre_storage = heap_caps_malloc(PRE_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);
     s_snap = heap_caps_malloc(PRE_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);
     ww_config_t cfg = {
@@ -354,16 +406,18 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
 #endif
         .vad = WW_VAD_ENERGY,
     };
-    s_runner = (tap_storage && pre_storage && s_snap) ? ww_runner_create(&cfg) : NULL;
+    s_runner = (s_tap && pre_storage && s_snap) ? ww_runner_create(&cfg) : NULL;
     if (!s_runner) {
-        free(tap_storage);
+        if (s_tap) {
+            vStreamBufferDeleteWithCaps(s_tap);
+            s_tap = NULL;
+        }
         free(pre_storage);
         free(s_snap);
         s_snap = NULL;
         ESP_LOGE(TAG, "no memory for wake word");
         return ESP_ERR_NO_MEM;
     }
-    muse_ww_ring_init(&s_tap, tap_storage, TAP_CHUNKS * MUSE_AUDIO_CHUNK);
     muse_ww_ring_init(&s_pre, pre_storage, PRE_FRAMES);
     muse_wakeword_config_t core_cfg = {
         .start_timeout_chunks = muse_wakeword_ms_to_chunks(CONFIG_MUSE_WAKEWORD_START_TIMEOUT_MS),
@@ -378,6 +432,14 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
                                         WAKE_TASK_PRIO, NULL, MUSE_AUDIO_CORE,
                                         MUSE_BIG_CAPS) != pdPASS) {
         ESP_LOGE(TAG, "no memory for the wake task");
+        ww_runner_destroy(s_runner);
+        s_runner = NULL;
+        vStreamBufferDeleteWithCaps(s_tap);
+        s_tap = NULL;
+        free(pre_storage);
+        muse_ww_ring_init(&s_pre, NULL, 0);
+        free(s_snap);
+        s_snap = NULL;
         return ESP_ERR_NO_MEM;   /* s_started stays false: every hook no-ops */
     }
     s_started = true;
@@ -403,7 +465,7 @@ void muse_wakeword_status(muse_wakeword_status_t *out)
         .submits = s_stats_snap.submits,
         .conversions = s_stats_snap.conversions,
         .suppressed_wakes = s_stats_snap.suppressed_wakes,
-        .dropped_frames = s_drops_snap,
+        .dropped_frames = s_tap_drops,
     };
 }
 

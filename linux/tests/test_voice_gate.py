@@ -187,7 +187,7 @@ def test_real_call_drops_trailing_provider_audio_and_keeps_next_reply_prefix(int
             assert bytes(output.pcm) == before and not call._playback
             fresh = b"\x10\x04" * 960
             await chunk(vm, media, line(speech()) + line(audio("new-provider", fresh)))
-            await wait_until(lambda: bool(call._waiting_pcm))
+            await wait_until(lambda: bool(call._waiting))
             assert bytes(output.pcm) == before
             await chunk(vm, media, line(turn()))
             await wait_until(lambda: len(output.pcm) > len(before))

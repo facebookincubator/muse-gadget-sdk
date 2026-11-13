@@ -1638,8 +1638,8 @@ static char *build_register_json(void) {
                 "Turn hands-free wake word listening on: saying the wake word "
                 "then starts a voice note like holding the talk button. Kept "
                 "across restarts. Returns enabled and listening state and the "
-                "runner in use; runner \"bench\" or \"fake\" means a test double "
-                "that detects no speech.",
+                "runner in use; runner \"bench\" means a test double that "
+                "detects no speech.",
                 nullptr, nullptr);
     add_command(commands, "disable_wakeword",
                 "Turn hands-free wake word listening off at once, ending any "

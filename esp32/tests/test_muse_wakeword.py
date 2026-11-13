@@ -50,6 +50,13 @@ def model(ticks, start, end, cap, energy):
     stats = [0, 0, 0, 0, 0]   # wakes, cancels, submits, conversions, suppressed
     trace = []
     for ev_ch, voiced, down, up, playback, enabled in ticks:
+        if ev_ch == 'A':
+            # The glue could not post the press: back to idle, a cancel.
+            if state != IDLE:
+                stats[1] += 1
+            state, armed, capture, silence = IDLE, 0, 0, 0
+            trace.append((state, 0))
+            continue
         ev = EV[ev_ch] if enabled else NONE   # harness: listening == enabled
         act = 0
         if not enabled:
@@ -67,13 +74,21 @@ def model(ticks, start, end, cap, energy):
             continue
         if down:
             # A real press wins over playback suppression: it cancels
-            # arming or converts a capture even on a suppressed tick.
+            # arming or converts a capture even on a suppressed tick. A
+            # release noted in the same tick ends the button's capture.
             if state == ARMED:
                 state, act = IDLE, CANCELLED
                 stats[1] += 1
             elif state == CAPTURING:
-                state, act = CAPTURING_PTT, CONVERTED
                 stats[3] += 1
+                if up:
+                    state, act = IDLE, CONVERTED | SUBMITTED
+                    stats[2] += 1
+                else:
+                    state, act = CAPTURING_PTT, CONVERTED
+            elif state == CAPTURING_PTT and up:
+                state, act = IDLE, SUBMITTED
+                stats[2] += 1
             trace.append((state, act))
             continue
         if state == CAPTURING_PTT:
@@ -194,6 +209,24 @@ class WakeWordCore(unittest.TestCase):
         trace = self.run_core(ticks, energy=0)
         # The physical release ends it: SUBMITTED alone, no synthetic POST_UP.
         self.assertEqual(trace[-1][1], SUBMITTED)
+        self.assertFalse(any(a & POST_UP for _, a in trace))
+
+    def test_press_and_release_in_one_tick_end_the_capture(self):
+        # Regression: the release used to be lost with the press, leaving
+        # CAPTURING_PTT (and every wake ignored) until the hard cap.
+        ticks = [tick('W'), tick('s'), tick(down=1, up=1), tick('W'), tick('s')]
+        trace = self.run_core(ticks, energy=0)
+        self.assertEqual(trace[2], (IDLE, CONVERTED | SUBMITTED))
+        self.assertEqual(trace[4], (CAPTURING, POST_DOWN))   # wakes work again
+        converted = [tick('W'), tick('s'), tick(down=1), tick(down=1, up=1)]
+        trace = self.run_core(converted, energy=0)
+        self.assertEqual(trace[3], (IDLE, SUBMITTED))
+
+    def test_abort_drops_a_capture_whose_press_never_went(self):
+        ticks = [tick('W'), tick('s'), tick('A'), tick(), tick(), tick(), tick()]
+        trace = self.run_core(ticks, energy=0)
+        self.assertEqual(trace[2], (IDLE, 0))
+        # Nothing posts afterwards: no stray release for a turn that never opened.
         self.assertFalse(any(a & POST_UP for _, a in trace))
 
     def test_press_during_playback_cancels_arming(self):
@@ -444,6 +477,58 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('if (seeded && s_seed_frames)', voice)
         self.assertIn('muse_wakeword_set_ptt_turn(!synthetic)', voice)
 
+    def test_feature_off_builds_allocate_no_seed(self):
+        # The one-second seed is only used by wake word turns: a build
+        # without the feature (no-PSRAM boards included) must not pay
+        # 32 KB of internal RAM for it.
+        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
+        start = between(voice, 'esp_err_t muse_voice_start(', 's_pre = heap_caps_malloc')
+        gated = between(start, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
+        self.assertIn('s_seed = heap_caps_malloc(', gated)
+        self.assertEqual(voice.count('s_seed = heap_caps_malloc('), 1)
+        kconfig = (WW / 'Kconfig').read_text()
+        enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_RUNNER')
+        self.assertIn('depends on SPIRAM', enable)
+
+    def test_synthetic_edges_carry_the_input_epoch_and_time(self):
+        # note_held cancels a press whose epoch is not the current one, and
+        # the epoch moves whenever a real edge is dropped: an untagged
+        # (zero) synthetic press would then never record again.
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        post = between(glue, 'static bool post_ptt(', 'xQueueSend(')
+        self.assertIn('.epoch = muse_input_call_epoch()', post)
+        self.assertIn('.at_us = esp_timer_get_time()', post)
+
+    def test_glue_retries_a_refused_release_and_drops_a_refused_press(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        tick_fn = between(glue, 'static void tick(', 'static void apply_requests(')
+        # The owed release goes before the core ticks again ...
+        self.assertLess(tick_fn.index('if (s_up_owed && post_ptt(MUSE_PTT_UP))'),
+                        tick_fn.index('muse_wakeword_core_tick('))
+        self.assertIn('!post_ptt(MUSE_PTT_UP)) {\n        s_up_owed = true;', tick_fn)
+        # ... and a refused press ends the session and clears its seed.
+        down = between(tick_fn, 'MUSE_WW_ACTION_POST_PTT_DOWN', 'MUSE_WW_ACTION_POST_PTT_UP')
+        self.assertIn('if (!s_up_owed && post_ptt(MUSE_PTT_DOWN))', down)
+        self.assertIn('muse_wakeword_core_abort(&s_core);', down)
+        self.assertIn('muse_voice_seed_preroll(NULL, 0);', down)
+
+    def test_enable_wakes_a_resting_voice_task_and_needs_a_running_glue(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        setter = between(glue, 'void muse_wakeword_set_enabled(bool on)', 'void muse_wakeword_bench_trigger(')
+        not_started = between(setter, 'if (!s_started) {', 'return;')
+        # After a failed init only "off" is saved.
+        self.assertIn('if (!on) {', not_started)
+        self.assertLess(setter.index('if (!s_started) {'),
+                        setter.index('muse_settings_set_wakeword_on(on);'))
+        self.assertIn('muse_state_nudge();', setter)
+
+    def test_failed_wake_task_start_frees_everything(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        failed = between(glue, '"no memory for the wake task"', 's_started = true;')
+        for freed in ('ww_runner_destroy(s_runner)', 'vStreamBufferDeleteWithCaps(s_tap)',
+                      'free(pre_storage)', 'free(s_snap)'):
+            self.assertIn(freed, failed)
+
     def test_glue_starts_with_the_voice_pipeline(self):
         app = (ROOT / 'components/muse/muse_app.c').read_text()
         started = app.index('muse_voice_start(q)')
@@ -458,15 +543,42 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertLess(listening, posted)
         self.assertLess(caption, posted)
 
+    def test_wake_heard_wakes_the_screen(self):
+        # A talk press wakes the screen; a wake must too, or its prompt and
+        # the whole hands-free turn happen on a dark display.
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        heard = between(glue, 'before == MUSE_WW_IDLE && now == MUSE_WW_ARMED', 'MUSE_WW_ACTION_POST_PTT_DOWN')
+        self.assertIn('muse_state_set_asleep(false)', heard)
+
+    def test_wakeword_overlay_is_committed_and_wired(self):
+        # Wake word builds come from a committed overlay, not local
+        # sdkconfig fragments, and board.sh builds it in its own dir.
+        overlay = (ROOT / 'devices/sdkconfig.muse-wakeword').read_text()
+        self.assertIn('CONFIG_MUSE_WAKEWORD_ENABLE=y', overlay)
+        self.assertIn('# CONFIG_ET_OPTIMIZE_SIZE is not set', overlay)
+        self.assertIn('# CONFIG_ET_ENABLE_LOGGING is not set', overlay)
+        board = (ROOT / 'tools/muse/board.sh').read_text()
+        self.assertIn('B=$B-wakeword; defaults="$defaults;devices/sdkconfig.muse-wakeword"', board)
+
+    def test_listening_needs_a_working_runner(self):
+        # A runner that failed to load or run hears nothing, so the
+        # status and the indicator must not say listening.
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        listening = between(glue, 'bool muse_wakeword_listening(void)\n{', '\n}')
+        self.assertIn('s_runner_ok', listening)
+        snapshot = between(glue, 'static void snapshot_status(void)', '\n}')
+        self.assertIn('ww_runner_ok(s_runner)', snapshot)
+
     def test_sound_page_has_wake_word_toggle(self):
         # One row name for every runner; only the small print differs:
-        # the bench runner says the model is not implemented yet.
+        # the bench runner says only a clap triggers it.
         ui = (ROOT / 'components/muse/muse_settings_ui.c').read_text()
         sound = between(ui, 'static void build_sound_page(', 'static void tick_sound(void)')
         self.assertIn('switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw)', sound)
         self.assertIn('#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH', sound)
-        self.assertIn('Model not implemented yet, clap to wake', sound)
+        self.assertIn('note(list, "A clap starts a voice note. There\'s no spoken wake word yet.");', sound)
         self.assertIn('Listens for \\"Hey Muse\\"', sound)
+        self.assertNotIn('not implemented', sound)   # user copy, not a placeholder
         self.assertNotIn('Clap test', sound)
         callback = between(ui, 'static void on_wake_sw(', 'static void build_sound_page(')
         self.assertIn('muse_wakeword_set_enabled(', callback)
@@ -611,6 +723,256 @@ int main(int argc, char **argv) {
 
     def test_detector_warmup_fire_and_cooldown(self):
         self.assertEqual(self.run_mode('detector'), 'detector ok')
+
+
+ET_FAKES = {
+    'esp_heap_caps.h': r"""
+#pragma once
+#include <stddef.h>
+#include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+#define MALLOC_CAP_DEFAULT (1u << 0)
+#define MALLOC_CAP_INTERNAL (1u << 1)
+#define MALLOC_CAP_SPIRAM (1u << 2)
+#define MALLOC_CAP_8BIT (1u << 3)
+void *heap_caps_aligned_alloc(size_t alignment, size_t size, uint32_t caps);
+void heap_caps_free(void *ptr);
+size_t heap_caps_get_minimum_free_size(uint32_t caps);
+size_t heap_caps_get_free_size(uint32_t caps);
+size_t heap_caps_get_total_size(uint32_t caps);
+#ifdef __cplusplus
+}
+#endif
+""",
+    'esp_log.h': r"""
+#pragma once
+static inline void fake_log(const char *tag, const char *fmt, ...) { (void)tag; (void)fmt; }
+#define ESP_LOGI(tag, ...) fake_log(tag, __VA_ARGS__)
+#define ESP_LOGW(tag, ...) fake_log(tag, __VA_ARGS__)
+#define ESP_LOGE(tag, ...) fake_log(tag, __VA_ARGS__)
+""",
+    'esp_timer.h': r"""
+#pragma once
+#include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+int64_t esp_timer_get_time(void);
+#ifdef __cplusplus
+}
+#endif
+""",
+    'freertos/FreeRTOS.h': '#pragma once\n',
+    'freertos/task.h': r"""
+#pragma once
+static inline unsigned uxTaskGetStackHighWaterMark(void *task) { (void)task; return 0; }
+""",
+    'et_model.h': r"""
+#pragma once
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+typedef enum { ET_MEM_DEFAULT = 0, ET_MEM_INTERNAL, ET_MEM_PSRAM } et_mem_location_t;
+typedef struct {
+    const uint8_t *pte; size_t pte_size;
+    size_t arena_size; et_mem_location_t arena_location; void *arena_buffer;
+    size_t temp_arena_size; et_mem_location_t temp_location; void *temp_buffer;
+    et_mem_location_t planned_location; void *planned_buffer; size_t planned_buffer_size;
+    bool verify;
+} et_model_config_t;
+#define ET_MODEL_CONFIG_DEFAULT(p, n) {(p), (n), 0, ET_MEM_DEFAULT, NULL, 0, ET_MEM_DEFAULT, NULL, ET_MEM_DEFAULT, NULL, 0, false}
+typedef struct { int32_t scalar_type; size_t ndim; int32_t dims[8]; size_t nbytes; } et_tensor_info_t;
+typedef struct et_model et_model_t;
+et_model_t *et_model_create(const et_model_config_t *cfg);
+void et_model_destroy(et_model_t *model);
+bool et_model_load_method(et_model_t *model, const char *name);
+bool et_model_planned_info(et_model_t *model, const char *name, size_t *n, size_t *bytes);
+size_t et_model_num_inputs(et_model_t *model);
+size_t et_model_num_outputs(et_model_t *model);
+bool et_model_input_info(et_model_t *model, size_t index, et_tensor_info_t *out);
+bool et_model_output_info(et_model_t *model, size_t index, et_tensor_info_t *out);
+bool et_model_set_input(et_model_t *model, size_t index, const void *data, size_t nbytes);
+bool et_model_execute(et_model_t *model);
+const void *et_model_output_data(et_model_t *model, size_t index, size_t *out_nbytes);
+const char *et_model_last_error(et_model_t *model);
+#ifdef __cplusplus
+}
+#endif
+""",
+}
+
+ET_HARNESS = r"""
+/* Drives ww_runner_et.cpp against a fake et_model that behaves like the
+ * registry component's: a method load without caller buffers allocates
+ * its arenas and planned memory, and every load zeroes planned memory. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "esp_heap_caps.h"
+#include "et_model.h"
+#include "ww_runner.h"
+
+/* The embedded-model symbols must link; the harness passes its own model. */
+const uint8_t _binary_hey_muse_pte_start[16];
+const uint8_t _binary_hey_muse_pte_end[16];
+__attribute__((aligned(16))) static const uint8_t g_pte[64] = {1};
+
+static int g_allocs, g_frees, g_loads, g_fail_load, g_fail_exec;
+#define PLANNED 36864
+
+void *heap_caps_aligned_alloc(size_t alignment, size_t size, uint32_t caps) {
+    (void)caps;
+    void *p = NULL;
+    if (posix_memalign(&p, alignment, size)) return NULL;
+    g_allocs++;
+    return p;
+}
+void heap_caps_free(void *p) { if (p) { g_frees++; free(p); } }
+size_t heap_caps_get_minimum_free_size(uint32_t c) { (void)c; return 0; }
+size_t heap_caps_get_free_size(uint32_t c) { (void)c; return 0; }
+size_t heap_caps_get_total_size(uint32_t c) { (void)c; return 0; }
+int64_t esp_timer_get_time(void) { return 0; }
+
+struct et_model { et_model_config_t cfg; bool loaded; void *owned[3]; };
+static void drop(et_model_t *m) {
+    for (int i = 0; i < 3; i++) { heap_caps_free(m->owned[i]); m->owned[i] = NULL; }
+    m->loaded = false;
+}
+et_model_t *et_model_create(const et_model_config_t *cfg) {
+    et_model_t *m = calloc(1, sizeof(*m));
+    if (m) m->cfg = *cfg;
+    return m;
+}
+void et_model_destroy(et_model_t *m) { if (m) { drop(m); free(m); } }
+bool et_model_load_method(et_model_t *m, const char *name) {
+    drop(m);
+    g_loads++;
+    if (strcmp(name, "forward") || g_fail_load) return false;
+    if (!m->cfg.arena_buffer) m->owned[0] = heap_caps_aligned_alloc(16, m->cfg.arena_size, 0);
+    if (!m->cfg.temp_buffer) m->owned[1] = heap_caps_aligned_alloc(16, m->cfg.temp_arena_size, 0);
+    void *planned = m->cfg.planned_buffer;
+    if (!planned) planned = m->owned[2] = heap_caps_aligned_alloc(16, PLANNED, 0);
+    else if (m->cfg.planned_buffer_size < PLANNED) return false;
+    memset(planned, 0, PLANNED);
+    m->loaded = true;
+    return true;
+}
+bool et_model_planned_info(et_model_t *m, const char *name, size_t *n, size_t *bytes) {
+    if (!name && !m->loaded) return false;
+    if (n) *n = 1;
+    if (bytes) *bytes = PLANNED;
+    return true;
+}
+size_t et_model_num_inputs(et_model_t *m) { (void)m; return 1; }
+size_t et_model_num_outputs(et_model_t *m) { (void)m; return 1; }
+bool et_model_input_info(et_model_t *m, size_t i, et_tensor_info_t *o) {
+    (void)m; (void)i; memset(o, 0, sizeof(*o)); o->nbytes = 40 * sizeof(float); return true;
+}
+bool et_model_output_info(et_model_t *m, size_t i, et_tensor_info_t *o) {
+    (void)m; (void)i; memset(o, 0, sizeof(*o)); o->nbytes = 3 * sizeof(float); return true;
+}
+bool et_model_set_input(et_model_t *m, size_t i, const void *d, size_t n) {
+    (void)i; (void)d; return m->loaded && n == 40 * sizeof(float);
+}
+bool et_model_execute(et_model_t *m) { return m->loaded && !g_fail_exec; }
+const void *et_model_output_data(et_model_t *m, size_t i, size_t *n) {
+    static const float out[3] = {0.0f, 1.0f, 0.0f};
+    (void)m; (void)i; *n = sizeof(out); return out;
+}
+const char *et_model_last_error(et_model_t *m) { (void)m; return "fake"; }
+
+static int16_t g_pcm[640];
+
+int main(int argc, char **argv) {
+    const char *mode = argc > 1 ? argv[1] : "";
+    ww_config_t cfg = { .model = g_pte, .model_len = sizeof(g_pte), .sample_rate_hz = 16000,
+                        .sensitivity = WW_SENSITIVITY_DEFAULT, .vad = WW_VAD_ENERGY };
+    ww_runner_t *r = ww_runner_create(&cfg);
+    if (!r || !ww_runner_ok(r)) return 2;
+    if (!strcmp(mode, "reset")) {
+        int allocs = g_allocs, loads = g_loads;
+        for (int i = 0; i < 5; i++) ww_runner_reset(r);
+        printf("allocs %d reloads %d ok %d\n", g_allocs - allocs, g_loads - loads, ww_runner_ok(r));
+    } else if (!strcmp(mode, "recover")) {
+        g_fail_exec = 1;
+        ww_runner_feed(r, g_pcm, 640);   /* first frame: inference fails */
+        int after_fail = ww_runner_ok(r);
+        g_fail_exec = 0;
+        g_fail_load = 1;
+        ww_runner_reset(r);              /* reload fails too */
+        int after_bad_reload = ww_runner_ok(r);
+        g_fail_load = 0;
+        ww_runner_reset(r);              /* and recovers */
+        printf("failed %d bad_reload %d recovered %d\n", after_fail, after_bad_reload, ww_runner_ok(r));
+    } else {
+        return 2;
+    }
+    ww_runner_destroy(r);
+    printf("balanced %d\n", g_allocs == g_frees);
+    return 0;
+}
+"""
+
+
+class WakeWordExecuTorchRunner(unittest.TestCase):
+    """ww_runner_et.cpp's memory and failure handling against a fake
+    et_model with the component's allocation behaviour: reset reloads
+    the model into memory allocated once at create, and a runner that
+    cannot detect says so."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        tmp = Path(cls.tmp.name)
+        for name, text in ET_FAKES.items():
+            (tmp / 'inc' / name).parent.mkdir(parents=True, exist_ok=True)
+            (tmp / 'inc' / name).write_text(text)
+        harness = tmp / 'harness.c'
+        harness.write_text(ET_HARNESS)
+        cls.binary = tmp / 'ww_et_harness'
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        cxx = shlex.split(os.environ.get('CXX', 'c++'))
+        inc = ['-I', str(tmp / 'inc'), '-I', str(WW), '-I', str(WW / 'include')]
+        objs = []
+        for src, tool, std in ((harness, cc, '-std=gnu11'),
+                               (WW / 'ww_frontend.c', cc, '-std=gnu11'),
+                               (WW / 'ww_detector.c', cc, '-std=gnu11'),
+                               (WW / 'ww_runner_et.cpp', cxx, '-std=gnu++17')):
+            obj = tmp / (src.name + '.o')
+            result = subprocess.run(
+                [*tool, std, '-Wall', '-Wextra', '-Werror', *SANITIZE, *inc,
+                 '-c', str(src), '-o', str(obj)], capture_output=True, text=True)
+            if result.returncode:
+                raise AssertionError(result.stdout + result.stderr)
+            objs.append(str(obj))
+        result = subprocess.run([*cxx, *SANITIZE, *objs, '-lm', '-o', str(cls.binary)],
+                                capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+
+    def run_mode(self, mode):
+        ran = subprocess.run([str(self.binary), mode], capture_output=True, env=ENV)
+        self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
+        return ran.stdout.decode().split('\n')
+
+    def test_reset_reloads_without_allocating(self):
+        # Every reset reloads (zeroing the streaming state) into the
+        # memory allocated at create: nothing is freed and reallocated,
+        # so a reset after a reply cannot fail on a fragmented heap.
+        out = self.run_mode('reset')
+        self.assertEqual(out[0], 'allocs 0 reloads 5 ok 1')
+        self.assertEqual(out[1], 'balanced 1')
+
+    def test_failed_runner_reports_not_ok_until_a_reload_works(self):
+        out = self.run_mode('recover')
+        self.assertEqual(out[0], 'failed 0 bad_reload 0 recovered 1')
+        self.assertEqual(out[1], 'balanced 1')
 
 
 if __name__ == '__main__':

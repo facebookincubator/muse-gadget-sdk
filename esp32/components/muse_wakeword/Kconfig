@@ -17,6 +17,7 @@ menu "Muse wake word"
 
     config MUSE_WAKEWORD_ENABLE
         bool "Compile in hands-free wake word support"
+        depends on SPIRAM
         default n
         help
             Saying "Hey Muse" (or "Ok Muse") starts the same voice note
@@ -30,7 +31,9 @@ menu "Muse wake word"
             No board overlay enables this yet; enablement
             is per-board and opt-in. The current model is a
             synthetic-data research checkpoint, not a
-            production-tuned detector.
+            production-tuned detector. Needs PSRAM: the audio
+            buffers take about 115 KB, and the ExecuTorch runner
+            about 215 KB more (model arenas and the frontend).
 
     choice MUSE_WAKEWORD_RUNNER
         prompt "Wake word runner"

@@ -88,6 +88,7 @@ static QueueHandle_t s_queue;
 static uint32_t s_press_input_epoch;
 static uint32_t s_press_mark;   /* the press's pending-call mark (muse_input_clear_call_pending) */
 static int64_t s_press_us;
+static bool s_press_synthetic;   /* the press came from the wake word glue */
 static volatile bool s_monitor;
 static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
@@ -277,6 +278,7 @@ static bool got_event(muse_ptt_t type)
                 s_press_input_epoch = ev.epoch;
                 s_press_mark = ev.mark;
                 s_press_us = ev.at_us;
+                s_press_synthetic = ev.synthetic;
             }
             return true;
         }
@@ -449,7 +451,9 @@ static bool record(bool seeded, char *why, size_t cap)
          * Capture runs 60-80 ms behind real time and people let go on their
          * last syllable, so keep going briefly after release.
          */
-        if (!released && got_event(NOTE_TOGGLE ? MUSE_PTT_DOWN : MUSE_PTT_UP)) {
+        /* A wake word note ends at its synthetic release (endpointing or
+         * disable) in toggle builds too: no second press is coming. */
+        if (!released && got_event(NOTE_TOGGLE && !seeded ? MUSE_PTT_DOWN : MUSE_PTT_UP)) {
             released = true;
             stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
         }
@@ -712,7 +716,9 @@ typedef enum {
  */
 static note_result_t note_held(bool wake, bool barge_in)
 {
-    if (wake || barge_in) s_pre_fill = 0;
+    /* A wake word press brings its own pre-roll (the seed, which ends where
+     * speech started), so the idle ring would repeat that audio. */
+    if (wake || barge_in || s_press_synthetic) s_pre_fill = 0;
     int settle = barge_in ? SETTLE_CHUNKS : 0;
     size_t captured = 0;
     if (!wake) {
@@ -727,7 +733,7 @@ static note_result_t note_held(bool wake, bool barge_in)
         bool eligible = !settle && (NOTE_TOGGLE ? captured >= NOTE_MIN_RECORD_FRAMES :
             !note_requires_hold() ||
             (until - s_press_us >= NOTE_MIN_HOLD_US && captured >= NOTE_MIN_RECORD_FRAMES));
-        if (edge && NOTE_TOGGLE && ev.type != MUSE_PTT_END_CALL) {
+        if (edge && NOTE_TOGGLE && !s_press_synthetic && ev.type != MUSE_PTT_END_CALL) {
             if (ev.type == MUSE_PTT_UP) {
                 xQueueReceive(s_queue, &ev, 0);   /* letting go doesn't stop a toggled note */
                 continue;
@@ -1188,6 +1194,7 @@ static void run_call(bool ptt, size_t waking_chunks)
         if (!atomic_load(&s_shutdown)) go_idle("INPUT LOST - PRESS AGAIN");
         return;
     }
+    muse_wakeword_set_ptt_turn(true);   /* a call pauses the runner like a recorded turn */
     muse_state_set_level(0);
     muse_state_set_progress(0);
     muse_state_set_caption("CONNECTING TO MUSE...");
@@ -1318,6 +1325,7 @@ static void run_call(bool ptt, size_t waking_chunks)
         }
     }
     muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+    muse_wakeword_set_ptt_turn(false);
     muse_state_set_level(0);
     s_monitor_db = -100.0f;
     if (!atomic_load(&s_shutdown)) go_idle(ended && text[0] ? text : "CALL ENDED");
@@ -1342,13 +1350,17 @@ static void voice_task(void *arg)
     muse_audio_selftest();
     for (;;) {
         bool wake = false;
-        bool synthetic = false;   /* this press came from the wake word glue */
+        /* This press came from the wake word glue. One that interrupted a
+         * reply (pending_down) keeps that: it is a voice note, not a call. */
+        bool synthetic = pending_down && s_press_synthetic;
         if (!pending_down) {
             muse_input_event_t ev;
             bool asleep = muse_state_asleep();
             bool battery = muse_state_on_battery();
-            /* Listening for a wake word keeps the codecs powered. */
-            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && !muse_wakeword_listening();
+            /* The wake word opt-in keeps the codecs powered. Not
+             * muse_wakeword_listening(): it reads false while resting, and
+             * briefly after a reply until the wake task applies playback off. */
+            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && !muse_wakeword_enabled();
 #if HOLD_NOTES
             /* A press goes first: send_held() leaves it queued and returns
              * without backing off, so retrying before it's read would spin. */
@@ -1434,6 +1446,7 @@ static void voice_task(void *arg)
             s_press_input_epoch = ev.epoch;
             s_press_mark = ev.mark;
             s_press_us = ev.at_us;
+            s_press_synthetic = ev.synthetic;
             wake = ev.wake;
             synthetic = ev.synthetic;
         }
@@ -1535,6 +1548,7 @@ static void voice_task(void *arg)
 void muse_voice_seed_preroll(const int16_t *pcm, size_t frames)
 {
     if (!s_seed || !pcm) {
+        s_seed_frames = 0;   /* NULL clears a seed whose press never went */
         return;
     }
     size_t n = frames < SEED_FRAMES ? frames : SEED_FRAMES;
@@ -1546,7 +1560,9 @@ void muse_voice_seed_preroll(const int16_t *pcm, size_t frames)
 esp_err_t muse_voice_start(QueueHandle_t queue)
 {
     s_queue = queue;
-    s_seed = heap_caps_malloc(SEED_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    s_seed = heap_caps_malloc(SEED_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);   /* NULL: no seeded turns */
+#endif
     s_pre = heap_caps_malloc(PRE_CAP_CHUNKS * sizeof(pre_chunk_t), MUSE_BIG_CAPS);
     if (!s_pre || muse_audio_init(muse_settings_volume(), muse_settings_mic_gain()) != ESP_OK) {
         muse_state_set_mode(MUSE_MODE_ERROR);

@@ -141,7 +141,11 @@ else()
     # Both LVGL's SDL display driver and its SDL2 OS abstraction include SDL
     # headers while LVGL itself is compiled.
     target_link_libraries(lvgl PRIVATE ${MUSE_SIM_SDL_TARGET})
-    target_compile_definitions(lvgl PRIVATE _POSIX_C_SOURCE=200809L)
+    # usleep() was removed from POSIX.1-2008, so _POSIX_C_SOURCE=200809L
+    # alone hides its declaration on glibc; _DEFAULT_SOURCE re-exposes it.
+    # LVGL's pthread OS layer calls usleep(), and GCC 14+ turns the
+    # resulting implicit declaration into an error.
+    target_compile_definitions(lvgl PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
 endif()
 
 set(MUSE_COMPONENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../components/muse")

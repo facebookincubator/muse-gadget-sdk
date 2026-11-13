@@ -58,7 +58,7 @@ void muse_wakeword_note_ptt(bool down);
 void muse_wakeword_set_enabled(bool on);
 bool muse_wakeword_enabled(void);
 /* Enabled, not suppressed by playback, and not resting: what the
- * listening indicator and the rest decision use. */
+ * listening indicator shows. Resting follows muse_wakeword_enabled(). */
 bool muse_wakeword_listening(void);
 
 /* Reply audio (or a chirp/test) is playing: wakes are discarded and

@@ -40,7 +40,8 @@ extern "C" {
  * - feed() accepts arbitrary frame counts (the firmware's 320-sample
  *   chunks included) and re-frames internally. It does not allocate
  *   after create; the ExecuTorch runner's model reload happens only
- *   in reset(), at session reset points.
+ *   in reset(), at session reset points, into memory allocated at
+ *   create, so reset() does not allocate either.
  * - WW_EVENT_WAKE means "fire now": smoothing, thresholding, and
  *   cooldown have already been applied inside the runner.
  * - SPEECH_START/END are advisory; a runner that never emits them
@@ -85,6 +86,9 @@ void ww_runner_reset(ww_runner_t *r);
 ww_event_t ww_runner_feed(ww_runner_t *r, const int16_t *pcm, size_t frames);
 void ww_runner_set_listening(ww_runner_t *r, bool on);
 void ww_runner_set_suppressed(ww_runner_t *r, bool on);
+/* False while the runner cannot detect anything (its model failed to
+ * load or run); reset() retries. Lets "listening" mean listening. */
+bool ww_runner_ok(ww_runner_t *r);
 
 #ifdef __cplusplus
 }

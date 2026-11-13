@@ -57,6 +57,12 @@ struct ww_runner {
     ww_detector_t detector;
     et_model_t *model = nullptr;
     uint8_t *pte_copy = nullptr;   /* owned aligned .pte copy, if the embed was misaligned */
+    /* Method memory, allocated once at create and handed to et_model as
+     * caller buffers: a reload (reset) reuses it, so reset never frees
+     * and reallocates ~164 KB, and cannot fail for lack of memory. */
+    uint8_t *arena = nullptr;
+    uint8_t *temp_arena = nullptr;
+    uint8_t *planned = nullptr;
     std::mutex mutex;
     bool listening = true;
     bool suppressed = false;
@@ -103,12 +109,35 @@ static void ww_runner_et_reset_locked(ww_runner_t *runner, bool reload_model)
     ww_detector_reset(&runner->detector);
     runner->fired = false;
     if (reload_model && runner->model != nullptr) {
+        /* Reloading into the caller buffers zeroes the model's streaming
+         * state (et_model clears planned memory on every load) and
+         * recovers a runner an inference failure stopped. */
         runner->ready = et_model_load_method(runner->model, "forward");
-        if (!runner->ready && !runner->error_logged) {
+        if (runner->ready) {
+            runner->error_logged = false;   /* a later failure logs again */
+        } else if (!runner->error_logged) {
             ESP_LOGE(kTag, "model reload failed: %s", et_model_last_error(runner->model));
             runner->error_logged = true;
         }
     }
+}
+
+/* Method memory is the runner's, not et_model's: freed after the model. */
+static void ww_runner_et_free_buffers(ww_runner_t *runner)
+{
+    heap_caps_free(runner->planned);
+    heap_caps_free(runner->temp_arena);
+    heap_caps_free(runner->arena);
+    runner->planned = runner->temp_arena = runner->arena = nullptr;
+}
+
+static uint8_t *ww_runner_et_alloc(size_t bytes)
+{
+    /* What ET_MEM_DEFAULT asks of et_model: PSRAM for large blocks
+     * where present, internal RAM otherwise. 16-aligned, as required
+     * for caller buffers. */
+    return static_cast<uint8_t *>(
+        heap_caps_aligned_alloc(kPteAlignment, bytes == 0 ? 1 : bytes, MALLOC_CAP_DEFAULT));
 }
 
 extern "C" void ww_runner_et_frame_cb(void *ctx, const float frame[WW_FRONTEND_N_MELS])
@@ -264,18 +293,45 @@ ww_runner_t *ww_runner_create(const ww_config_t *cfg)
     model_cfg.arena_location = ET_MEM_DEFAULT;
     model_cfg.temp_arena_size = kTempArenaBytes;
     model_cfg.temp_location = ET_MEM_DEFAULT;
-    /* Planned buffers (36 KiB for Hey Muse) cannot be ET_MEM_INTERNAL:
-     * in the full firmware internal RAM is nearly exhausted once Wi-Fi/BLE
-     * are up (~12 KiB free, 4 KiB largest block on BOX-3), so the reload in
-     * ww_runner_reset() fails with "allocating planned buffer failed" at
-     * wake.on time even though create succeeded at boot. ET_MEM_DEFAULT
-     * routes large blocks to PSRAM where present and falls back to internal
-     * RAM on boards without it. Revisit per board if timing data says the
-     * activations belong in internal RAM. */
-    model_cfg.planned_location = ET_MEM_DEFAULT;
+    /* Size the planned buffers without loading the method: creating a
+     * model only checks the program header (the .pte stays in flash). */
+    size_t planned_total = 0;
+    et_model_t *probe = et_model_create(&model_cfg);
+    const bool sized = probe != nullptr &&
+                       et_model_planned_info(probe, "forward", nullptr, &planned_total);
+    et_model_destroy(probe);
+    if (sized) {
+        runner->arena = ww_runner_et_alloc(kMethodArenaBytes);
+        runner->temp_arena = ww_runner_et_alloc(kTempArenaBytes);
+        runner->planned = ww_runner_et_alloc(planned_total);
+    }
+    if (!sized || runner->arena == nullptr || runner->temp_arena == nullptr ||
+        runner->planned == nullptr) {
+        if (sized) {
+            ESP_LOGE(kTag, "no memory for the model (%zu B planned)", planned_total);
+        } else {
+            ESP_LOGE(kTag, "cannot size the model");
+        }
+        ww_runner_et_free_buffers(runner);
+        ww_frontend_destroy(runner->frontend);
+        free(runner->pte_copy);
+        delete runner;
+        return nullptr;
+    }
+    model_cfg.arena_buffer = runner->arena;
+    model_cfg.temp_buffer = runner->temp_arena;
+    model_cfg.planned_buffer = runner->planned;
+    model_cfg.planned_buffer_size = planned_total;
+    /* Planned buffers (36 KiB for Hey Muse) are not internal-only: in the
+     * full firmware internal RAM is nearly exhausted once Wi-Fi/BLE are
+     * up (~12 KiB free, 4 KiB largest block on BOX-3). Like the arenas
+     * they come from ww_runner_et_alloc() (PSRAM where present) once, at
+     * create, so a later reload never allocates. Revisit per board if
+     * timing data says the activations belong in internal RAM. */
     runner->model = et_model_create(&model_cfg);
     if (runner->model == nullptr) {
         ESP_LOGE(kTag, "et_model_create failed");
+        ww_runner_et_free_buffers(runner);
         ww_frontend_destroy(runner->frontend);
         free(runner->pte_copy);
         delete runner;
@@ -292,6 +348,7 @@ ww_runner_t *ww_runner_create(const ww_config_t *cfg)
         output_info.nbytes != kOutputBytes) {
         ESP_LOGE(kTag, "model contract mismatch: %s", et_model_last_error(runner->model));
         et_model_destroy(runner->model);
+        ww_runner_et_free_buffers(runner);
         ww_frontend_destroy(runner->frontend);
         free(runner->pte_copy);
         delete runner;
@@ -315,6 +372,7 @@ void ww_runner_destroy(ww_runner_t *runner)
         return;
     }
     et_model_destroy(runner->model);
+    ww_runner_et_free_buffers(runner);
     ww_frontend_destroy(runner->frontend);
     free(runner->pte_copy);
     delete runner;
@@ -347,6 +405,15 @@ ww_event_t ww_runner_feed(ww_runner_t *runner, const int16_t *pcm, size_t frames
      * also splits out the frontend cost of the push's first frame. */
     runner->push_us += (uint64_t)(esp_timer_get_time() - push_t0);
     return runner->fired ? WW_EVENT_WAKE : WW_EVENT_NONE;
+}
+
+bool ww_runner_ok(ww_runner_t *runner)
+{
+    if (runner == nullptr) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(runner->mutex);
+    return runner->ready;
 }
 
 void ww_runner_set_listening(ww_runner_t *runner, bool on)
