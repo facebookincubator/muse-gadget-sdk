@@ -265,22 +265,23 @@ def test_the_first_copy_of_a_root_decides_its_trust(tmp_path, monkeypatch):
     assert tls.system_roots() == [plain_first.der]
 
 
-def test_an_entry_that_does_not_parse_ends_the_file_as_in_openssl(tmp_path, monkeypatch):
-    # OpenSSL loads none of a CA file with an entry it can't read, and reads
-    # a hashed file only up to such an entry.
-    good, after = CA("Before the bad entry"), CA("After the bad entry")
-    bad = trusted_pem(CA("Bad").der, reject=[b"\x06\x00"])    # an empty OID
+def test_a_file_that_does_not_parse_is_not_used(tmp_path, monkeypatch):
+    # OpenSSL loads none of a CA file with an entry it can't read, and a
+    # hashed file that fails ends the lookup of its subject hash.
+    good, other = CA("Good"), CA("Other")
     pem = ssl.DER_cert_to_PEM_cert
-    (tmp_path / "bundle.pem").write_text(pem(good.der) + bad)
+    bad_settings = trusted_pem(CA("Bad").der, reject=[b"\x06\x00"])    # an empty OID
+    bad_framing = trusted_pem(CA("Bad").der).replace("END TRUSTED CERTIFICATE", "END CERTIFICATE")
     directory = tmp_path / "certs"
     directory.mkdir()
-    (directory / "0a1b2c3d.0").write_text(pem(good.der) + bad + pem(after.der))
-    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
-                        lambda: SimpleNamespace(cafile=str(tmp_path / "bundle.pem"), capath=None))
-    assert tls.system_roots() == []
-    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
-                        lambda: SimpleNamespace(cafile=None, capath=str(directory)))
-    assert tls.system_roots() == [good.der]
+    (directory / "0a1b2c3d.0").write_text(pem(good.der) + bad_settings)
+    (directory / "0a1b2c3d.1").write_text(pem(good.der))
+    (directory / "4e5f6a7b.0").write_text(pem(other.der))
+    for bad in (bad_settings, bad_framing):
+        (tmp_path / "bundle.pem").write_text(pem(good.der) + bad + pem(good.der))
+        monkeypatch.setattr(tls.ssl, "get_default_verify_paths", lambda: SimpleNamespace(
+            cafile=str(tmp_path / "bundle.pem"), capath=str(directory)))
+        assert tls.system_roots() == [other.der]
 
 
 def test_hashed_files_are_read_in_suffix_order(tmp_path, monkeypatch):
