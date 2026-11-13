@@ -255,7 +255,13 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
             stop.set()
             try:
                 await asyncio.wait_for(connection, 3)
-            except (Exception, asyncio.CancelledError):
+            except asyncio.CancelledError:
+                # Ctrl-C during teardown still stops the command; live
+                # wake-word mode must not go back to listening.
+                connection.cancel()
+                await asyncio.gather(connection, return_exceptions=True)
+                raise
+            except Exception:
                 connection.cancel()
                 await asyncio.gather(connection, return_exceptions=True)
 

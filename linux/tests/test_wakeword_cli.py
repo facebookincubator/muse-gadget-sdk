@@ -15,6 +15,8 @@
 import asyncio
 import base64
 import json
+import os
+import signal
 import sys
 import wave
 from types import SimpleNamespace
@@ -256,3 +258,59 @@ def test_live_rearms_after_call_cleanup_and_reads_rotated_pairing(
     assert tokens == ["synthetic", "synthetic-rotated"]
     assert Detector.instance.closed and Live.instance.closed
     assert "returning to wake-word listening" in capsys.readouterr().out
+
+
+def test_interrupt_during_call_teardown_stops_live_listening(
+    tmp_path, monkeypatch, capsys
+):
+    prepare_audio(tmp_path, monkeypatch, TONE)
+    monkeypatch.setattr(Detector, "fire_at", 1)
+    from musegadget import voice_audio, voice_call
+
+    calls = []
+
+    class Live:
+        def __init__(self):
+            pass
+
+        async def frames(self):
+            yield TONE
+            await asyncio.Event().wait()
+
+        def close(self):
+            pass
+
+    class Session:
+        def __init__(self, **options):
+            pass
+
+        async def run(self, stop):
+            await stop.wait()
+            # Ctrl-C arrives while the transport is still closing.
+            os.kill(os.getpid(), signal.SIGINT)
+            await asyncio.sleep(0.5)
+
+        async def wait_transport_ready(self, timeout):
+            pass
+
+    class Call:
+        def __init__(self, session, **options):
+            pass
+
+        async def run(self, source, output, **options):
+            calls.append(True)
+            if len(calls) > 1:
+                raise asyncio.CancelledError
+            return "remote_stop"
+
+    monkeypatch.setattr(voice_audio, "LiveAudio", Live)
+    monkeypatch.setattr(voice_call, "VoiceCall", Call)
+    monkeypatch.setattr(
+        muse_api,
+        "fetch_vms_with_status",
+        lambda *unused: ([{"vm_id": "target", "vm_auth_token": "synthetic"}], 200),
+    )
+    monkeypatch.setattr("musegadget.link_client.LinkSession", Session)
+    assert cli.main(["voice-call", "--vm-id", "target", "--live", "--wake-word"]) == 130
+    assert len(calls) == 1
+    assert "returning to wake-word listening" not in capsys.readouterr().out
