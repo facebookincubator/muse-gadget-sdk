@@ -421,6 +421,27 @@ int main(int argc,char **argv) {
         assert(got_event(MUSE_PTT_DOWN) && !s_press_synthetic);
         free(s_pre); return 0;
     }
+    if(scenario==91) {
+        /* A wake word press: its seed already holds the pre-roll and the
+         * speech start, so the ring keeps only audio read after the press. */
+        clock_us=1000000;
+        for(int i=0;i<PRE_CHUNKS;i++) {
+            for(int j=0;j<MUSE_AUDIO_CHUNK;j++) s_chunk[j]=-30000;
+            pre_put_preroll();
+        }
+        assert(s_pre_fill==PRE_CHUNKS);
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        note_release_frame=40;
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+        assert(s_pre_fill>0 && s_pre_fill<=PRE_CAP_CHUNKS);
+        for(size_t i=0;i<s_pre_fill;i++) {
+            pre_get(i,s_chunk);
+            assert(s_chunk[MUSE_AUDIO_CHUNK-1]>-1000);   /* no idle pre-roll */
+        }
+        free(s_pre); return 0;
+    }
     if(scenario>=70) {
         notes_mode=true; clock_us=1000000;
         if(scenario==78 || scenario==84) {

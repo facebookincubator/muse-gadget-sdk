@@ -714,7 +714,9 @@ typedef enum {
  */
 static note_result_t note_held(bool wake, bool barge_in)
 {
-    if (wake || barge_in) s_pre_fill = 0;
+    /* A wake word press brings its own pre-roll (the seed, which ends where
+     * speech started), so the idle ring would repeat that audio. */
+    if (wake || barge_in || s_press_synthetic) s_pre_fill = 0;
     int settle = barge_in ? SETTLE_CHUNKS : 0;
     size_t captured = 0;
     if (!wake) {
