@@ -77,6 +77,8 @@ static const char *TAG = "muse_ui";
 #define SPEAKER_PX 64
 #define SPEAKER_GROW_PX 8       /* how much the speaker button swells while held */
 #define SPEAKER_HOLD_MS 400     /* LVGL's long press */
+#define VOLUME_HINT_HOLD_MS 450
+#define VOLUME_HINT_FADE_MS 250
 
 #define COLOR_DIM 0x8b84a8
 #define COLOR_CAPTION 0xd8d2ff
@@ -112,6 +114,7 @@ static bool s_touch_talk_down;
 static volatile bool s_volume_swiping;   /* input task: suppress screen-hold PTT */
 static muse_volume_swipe_t s_volume_swipe;
 static lv_obj_t *s_volume_hint;
+static lv_obj_t *s_volume_percent, *s_volume_bar;
 #if CONFIG_MUSE_VOICE_NOTE_TOGGLE
 static bool s_note_listening;   /* a toggled note is recording: keep its face up */
 #endif
@@ -1200,6 +1203,27 @@ static bool volume_swipe_allowed(void)
     return true;
 }
 
+static void volume_hint_opacity(void *obj, int32_t opacity)
+{
+    lv_obj_set_style_opa(obj, opacity, 0);
+}
+
+static void volume_hint_faded(lv_anim_t *animation)
+{
+    lv_obj_add_flag(animation->var, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_volume_hint(int volume)
+{
+    /* A fresh drag immediately restores the indicator, even midway through
+     * the previous drag's fade. Children inherit the panel's opacity. */
+    lv_anim_delete(s_volume_hint, volume_hint_opacity);
+    lv_obj_set_style_opa(s_volume_hint, LV_OPA_COVER, 0);
+    lv_label_set_text_fmt(s_volume_percent, "%d%%", volume);
+    lv_bar_set_value(s_volume_bar, volume, LV_ANIM_OFF);
+    lv_obj_remove_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void finish_volume_swipe(void)
 {
     if (s_volume_swiping) {
@@ -1208,7 +1232,15 @@ static void finish_volume_swipe(void)
         if (s_volume_swipe.value != muse_settings_volume()) {
             muse_settings_set_volume(s_volume_swipe.value);
         }
-        lv_obj_add_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN);
+        lv_anim_t fade;
+        lv_anim_init(&fade);
+        lv_anim_set_var(&fade, s_volume_hint);
+        lv_anim_set_exec_cb(&fade, volume_hint_opacity);
+        lv_anim_set_values(&fade, LV_OPA_COVER, LV_OPA_TRANSP);
+        lv_anim_set_delay(&fade, VOLUME_HINT_HOLD_MS);
+        lv_anim_set_duration(&fade, VOLUME_HINT_FADE_MS);
+        lv_anim_set_completed_cb(&fade, volume_hint_faded);
+        lv_anim_start(&fade);
     }
     s_volume_swipe.tracking = false;
     s_volume_swiping = false;
@@ -1241,8 +1273,7 @@ static void on_volume_swipe(lv_event_t *e)
             s_volume_swiping = true;
             update_tileview_swipe();
             if (old_value != s_volume_swipe.value) muse_audio_set_volume(s_volume_swipe.value);
-            lv_label_set_text_fmt(s_volume_hint, "Volume %d%%", s_volume_swipe.value);
-            lv_obj_remove_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN);
+            show_volume_hint(s_volume_swipe.value);
         }
         break;
     case LV_EVENT_LONG_PRESSED:
@@ -1628,13 +1659,34 @@ static void build_overlays(void)
     lv_obj_t *scr = lv_screen_active();
 
     if (muse_board->touch && muse_board->audio_init) {
-        s_volume_hint = make_label(lv_layer_top(), font_pick(&lv_font_montserrat_20, FONT_COMPACT), COLOR_LIT);
+        int bar_height = s_h / 3;
+        if (bar_height > 160) bar_height = 160;
+        int pad = s_small ? 6 : 10;
+        const lv_font_t *font = font_pick(&lv_font_montserrat_20, FONT_COMPACT);
+        s_volume_hint = lv_obj_create(lv_layer_top());
+        lv_obj_remove_style_all(s_volume_hint);
+        lv_obj_set_size(s_volume_hint, s_small ? 48 : 64,
+                        bar_height + lv_font_get_line_height(font) + pad * 3);
         lv_obj_set_style_bg_color(s_volume_hint, lv_color_hex(0x201a35), 0);
         lv_obj_set_style_bg_opa(s_volume_hint, LV_OPA_COVER, 0);
-        lv_obj_set_style_pad_all(s_volume_hint, s_small ? 6 : 12, 0);
-        lv_obj_set_style_radius(s_volume_hint, 12, 0);
-        lv_obj_align(s_volume_hint, LV_ALIGN_CENTER, 0, -s_h / 4);
-        lv_obj_remove_flag(s_volume_hint, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_pad_all(s_volume_hint, pad, 0);
+        lv_obj_set_style_radius(s_volume_hint, 16, 0);
+        lv_obj_align(s_volume_hint, LV_ALIGN_CENTER, s_w / 4, 0);
+        lv_obj_remove_flag(s_volume_hint, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+        s_volume_percent = make_label(s_volume_hint, font, COLOR_LIT);
+        lv_obj_align(s_volume_percent, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_remove_flag(s_volume_percent, LV_OBJ_FLAG_CLICKABLE);
+        s_volume_bar = lv_bar_create(s_volume_hint);
+        lv_obj_set_size(s_volume_bar, s_small ? 12 : 20, bar_height);
+        lv_obj_align(s_volume_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_bar_set_orientation(s_volume_bar, LV_BAR_ORIENTATION_VERTICAL);
+        lv_bar_set_range(s_volume_bar, 0, 100);
+        lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x3a3052), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
+        lv_obj_set_style_radius(s_volume_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_radius(s_volume_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+        lv_obj_remove_flag(s_volume_bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN);
     }
 

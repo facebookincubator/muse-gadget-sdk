@@ -198,7 +198,8 @@ It works on boards with the full UI, using their existing console commands.
 
 On LVGL touch-screen boards with speaker audio, drag up or down on the main
 avatar or its background to raise or lower volume. A temporary percentage
-appears while dragging; lifting your finger saves the setting. Dragging through
+appears above a vertical filled bar while dragging; lifting your finger saves
+the setting, then the indicator briefly holds and fades away. Dragging through
 three quarters of the screen height covers the full 0–100 range. Horizontal
 swipes still open Settings. Buttons, reply paging, Settings, wake touches and
 image/video views retain their existing controls. This gesture does not unmute

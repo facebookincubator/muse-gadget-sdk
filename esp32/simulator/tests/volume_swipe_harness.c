@@ -34,6 +34,7 @@ static void touch(int x, int y, bool pressed)
     sim_time_advance_us(20000);
     lv_indev_read(s_indev);
     lv_obj_update_layout(lv_screen_active());
+    lv_obj_update_layout(lv_layer_top());
 }
 
 int main(void)
@@ -54,18 +55,34 @@ int main(void)
     assert(muse_ui_volume_swiping());
     assert(preview_volume > 50 && saved_volume == 50 && saves == 0);
     assert(!lv_obj_has_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_bar_get_value(s_volume_bar) == preview_volume);
+    assert(lv_bar_get_orientation(s_volume_bar) == LV_BAR_ORIENTATION_VERTICAL);
+    char percent[8];
+    snprintf(percent, sizeof(percent), "%d%%", preview_volume);
+    assert(!strcmp(lv_label_get_text(s_volume_percent), percent));
+    assert(!lv_obj_has_flag(s_volume_hint, LV_OBJ_FLAG_CLICKABLE));
+    assert(lv_obj_get_y(s_volume_percent) < lv_obj_get_y(s_volume_bar));
     assert(lv_obj_get_scroll_x(s_tv) == 0);
     touch(x, y - 80, false);
     assert(!muse_ui_volume_swiping());
     assert(saved_volume == preview_volume && saves == 1);
-    assert(lv_obj_has_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN));
+    assert(!lv_obj_has_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN));
+    sim_time_advance_us((VOLUME_HINT_HOLD_MS + VOLUME_HINT_FADE_MS / 2) * 1000);
+    lv_anim_refr_now();
+    assert(lv_obj_get_style_opa(s_volume_hint, 0) > LV_OPA_TRANSP);
+    assert(lv_obj_get_style_opa(s_volume_hint, 0) < LV_OPA_COVER);
     assert(lv_obj_has_flag(s_tv, LV_OBJ_FLAG_SCROLLABLE));
 
     touch(x, y, true);
     touch(x, y + 80, true);
     assert(preview_volume == 50);
+    assert(lv_bar_get_value(s_volume_bar) == 50);
+    assert(lv_obj_get_style_opa(s_volume_hint, 0) == LV_OPA_COVER);
     touch(x, y + 80, false);
     assert(saved_volume == 50 && saves == 2);
+    sim_time_advance_us((VOLUME_HINT_HOLD_MS + VOLUME_HINT_FADE_MS + 1) * 1000);
+    lv_anim_refr_now();
+    assert(lv_obj_has_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN));
 
     /* A tap and small finger jitter never save or preview a new volume. */
     touch(x, y, true);
