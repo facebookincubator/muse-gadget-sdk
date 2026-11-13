@@ -166,7 +166,7 @@ def use_store(monkeypatch, cafile, capath) -> None:
                         lambda: SimpleNamespace(cafile=cafile and str(cafile), capath=capath and str(capath)))
 
 
-def test_distrusted_system_roots_reads_the_ca_file_and_the_hashed_files(tmp_path, monkeypatch):
+def test_check_trust_store_reads_the_ca_file_and_the_hashed_files(tmp_path, monkeypatch):
     (g3, g3_der), (comodo, comodo_der), (_, c1_der), _ = published_roots()
     (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der)
                                          + ssl.DER_cert_to_PEM_cert(g3_der))
@@ -178,10 +178,10 @@ def test_distrusted_system_roots_reads_the_ca_file_and_the_hashed_files(tmp_path
     (directory / "ca-bundle.crt").write_text(ssl.DER_cert_to_PEM_cert(c1_der))
     (directory / "README").write_text("not a certificate\n")
     use_store(monkeypatch, tmp_path / "bundle.pem", directory)
-    assert tls.distrusted_system_roots() == sorted([g3, comodo])
+    assert tls.check_trust_store() == sorted([g3, comodo])
 
 
-def test_distrusted_system_roots_reads_every_directory_ssl_cert_dir_lists(tmp_path, monkeypatch):
+def test_check_trust_store_reads_every_directory_ssl_cert_dir_lists(tmp_path, monkeypatch):
     (g3, g3_der), (comodo, comodo_der), _, _ = published_roots()
     one, two = tmp_path / "one", tmp_path / "two"
     one.mkdir()
@@ -190,12 +190,28 @@ def test_distrusted_system_roots_reads_every_directory_ssl_cert_dir_lists(tmp_pa
     (two / "4e5f6a7b.0").write_text(ssl.DER_cert_to_PEM_cert(comodo_der))
     monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "absent.pem"))
     monkeypatch.setenv("SSL_CERT_DIR", f"{one}{os.pathsep}{two}")
-    assert tls.distrusted_system_roots() == sorted([g3, comodo])
+    assert tls.check_trust_store() == sorted([g3, comodo])
 
 
-def test_distrusted_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
-    use_store(monkeypatch, None, None)
-    assert tls.distrusted_system_roots() == []
+def test_check_trust_store_tells_a_clean_store_from_an_unreadable_one(tmp_path, monkeypatch):
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    use_store(monkeypatch, tmp_path / "bundle.pem", None)
+    assert tls.check_trust_store() == []
+    assert tls.trust_store_problem() is None
+    for cafile, capath in ((None, None), (tmp_path / "absent.pem", tmp_path / "absent")):
+        use_store(monkeypatch, cafile, capath)
+        assert tls.check_trust_store() is None
+        assert tls.trust_store_problem() == "can't read the system trust store"
+
+
+def test_the_client_context_refuses_an_unsafe_trust_store(tmp_path, monkeypatch):
+    monkeypatch.setattr(tls, "_context", None)
+    for problem in ("can't read the system trust store",
+                    "the system trust store still trusts emSign ECC Root CA - G3"):
+        monkeypatch.setattr(tls, "trust_store_problem", lambda: problem)
+        with pytest.raises(tls.TrustStoreError, match=f"{problem}; {tls.FIX}"):
+            tls.client_context()
+        assert tls._context is None
 
 
 def test_the_client_context_is_the_system_trust_store(tmp_path, monkeypatch):
@@ -211,6 +227,7 @@ def test_the_client_context_is_the_system_trust_store(tmp_path, monkeypatch):
     monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
     monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "certs"))
     monkeypatch.setattr(tls, "_context", None)
+    assert tls.trust_store_problem() is None
     context = tls.client_context()
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
     for ca in (plain, tls_root):
@@ -223,6 +240,52 @@ def test_the_client_context_is_the_system_trust_store(tmp_path, monkeypatch):
 def test_the_client_context_is_built_once(monkeypatch):
     built = []
     monkeypatch.setattr(tls, "_context", None)
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: None)
     monkeypatch.setattr(tls.ssl, "create_default_context", lambda: built.append(object()) or built[-1])
     assert tls.client_context() is tls.client_context()
     assert len(built) == 1
+
+
+UNSAFE = ("can't read the system trust store",
+          "the system trust store still trusts emSign ECC Root CA - G3")
+
+
+@pytest.mark.parametrize("problem", UNSAFE)
+@pytest.mark.parametrize("argv", [["run"], ["pair"], ["voice-call", "--vm-id", "vm-1"]])
+def test_commands_that_connect_refuse_to_start_on_an_unsafe_trust_store(monkeypatch, capsys, argv, problem):
+    from unittest.mock import Mock
+
+    from musegadget import cli, muse_api, service
+
+    connect = Mock(side_effect=AssertionError("must not start"))
+    for module, name in ((muse_api, "fetch_vms_with_status"), (service, "run_service"), (cli, "pair")):
+        monkeypatch.setattr(module, name, connect)
+    monkeypatch.setattr(tls, "_context", None)
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: problem)
+    assert cli.main(argv) == cli.EXIT_TRUST_STORE == 78
+    error = capsys.readouterr().err
+    assert problem in error and tls.FIX in error
+    connect.assert_not_called()
+
+
+def test_the_service_checks_the_trust_store_before_connecting(monkeypatch):
+    import asyncio
+    from unittest.mock import Mock
+
+    from musegadget import config, muse_api
+    from musegadget.executor import Account, Executor
+    from musegadget.identity import Identity
+    from musegadget.service import Service
+
+    connect = Mock(side_effect=AssertionError("must not connect"))
+    monkeypatch.setattr(muse_api, "fetch_vms_with_status", connect)
+    monkeypatch.setattr(config, "load_json", connect)    # the first step of each connection
+    monkeypatch.setattr(tls, "_context", None)
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: UNSAFE[1])
+
+    async def run() -> None:
+        await Service(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current())).run()
+
+    with pytest.raises(tls.TrustStoreError):
+        asyncio.run(run())
+    connect.assert_not_called()

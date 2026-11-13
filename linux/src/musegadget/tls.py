@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""TLS client context: the system trust store.
+"""TLS client context: the system trust store, checked before use.
 
 Every HTTPS and WSS connection uses this one context. It is OpenSSL's
-default trust, so the distro's own trust and reject settings for each root
-apply, and so do its ca-certificates updates, which remove distrusted roots.
-``musegadget doctor`` warns when the store still holds one of
-``DISTRUSTED_ROOTS``, meaning that package needs updating.
+default trust, so the distro's own trust and reject settings apply, and so
+do its ca-certificates updates, which remove distrusted roots. Until the
+store no longer holds any of ``DISTRUSTED_ROOTS``, musegadget refuses to
+connect at all.
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 # CA - G3 became public (Mozilla Bug 2083449). Comodo AAA Services root
 # cross-signed those intermediates; Mozilla removed emSign C1 and C3 at
 # eMudhra's request. Distros have shipped the removal in ca-certificates;
-# doctor uses this table to spot a store that hasn't been updated. The key
-# hash also catches any reissue of the same root.
+# this table spots a store that hasn't been updated. The key hash also
+# catches any reissue of the same root.
 DISTRUSTED_ROOTS = (
     ("emSign ECC Root CA - G3",
      "86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b",
@@ -89,13 +89,20 @@ def distrusted_name(der: bytes) -> str | None:
 _HASH_NAME = re.compile(r"[0-9a-f]{8}\.[0-9]+")
 
 
-def distrusted_system_roots() -> list[str]:
-    """Names of the distrusted roots in the system's default CA file or CA directory.
+FIX = "update your ca-certificates package, then restart musegadget"
 
-    Reads the default CA file and the hash-named files of the default CA
-    directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them;
-    ``SSL_CERT_DIR`` may list several, separated as in ``PATH``). A root
-    counts if it's there at all, whatever trust settings it carries.
+
+class TrustStoreError(Exception):
+    """The system trust store can't be read or still holds a distrusted root."""
+
+
+def check_trust_store() -> list[str] | None:
+    """Names of the distrusted roots in the system trust store, or None if it can't be read.
+
+    Reads what OpenSSL uses by default: the CA file and the hash-named files
+    of the CA directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override
+    them; ``SSL_CERT_DIR`` may list several, separated as in ``PATH``). A
+    root counts if it's there at all, whatever trust settings it carries.
     """
     paths = ssl.get_default_verify_paths()
     files = [paths.cafile] if paths.cafile else []
@@ -109,20 +116,39 @@ def distrusted_system_roots() -> list[str]:
                                 if _HASH_NAME.fullmatch(entry.name) and entry.is_file())
         except OSError:
             pass
-    store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    store, readable = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT), False
     for path in files:
         try:
             store.load_verify_locations(cafile=path)
+            readable = True
         except (OSError, ssl.SSLError):
             continue
+    if not readable:
+        return None
     return sorted({name for der in store.get_ca_certs(binary_form=True)
                    if (name := distrusted_name(der))})
 
 
+def trust_store_problem() -> str | None:
+    """Why the system trust store isn't safe to use, or None if it is."""
+    found = check_trust_store()
+    if found is None:
+        return "can't read the system trust store"
+    if found:
+        return f"the system trust store still trusts {', '.join(found)}"
+    return None
+
+
 def client_context() -> ssl.SSLContext:
-    """The shared client context for every HTTPS and WSS connection: the system trust store."""
+    """The shared client context for every HTTPS and WSS connection: the system trust store.
+
+    Raises ``TrustStoreError`` instead while ``trust_store_problem()`` finds one.
+    """
     global _context
     with _context_lock:
         if _context is None:
+            problem = trust_store_problem()
+            if problem is not None:
+                raise TrustStoreError(f"musegadget won't connect: {problem}; {FIX}.")
             _context = ssl.create_default_context()
         return _context

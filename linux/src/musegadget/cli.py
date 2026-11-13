@@ -21,10 +21,13 @@ import logging
 import os
 import sys
 
-from musegadget import __version__, config, doctor, identity
+from musegadget import __version__, config, doctor, identity, tls
 from musegadget.pair import SETUP_WINDOW_S, PairOutcome, SetupWindow, pair
 
 log = logging.getLogger("musegadget")
+
+# EX_CONFIG: the trust store needs fixing first, so the systemd unit doesn't restart on it.
+EXIT_TRUST_STORE = 78
 
 
 def _setup_open(window: SetupWindow) -> None:
@@ -37,6 +40,7 @@ def _setup_open(window: SetupWindow) -> None:
 
 
 def cmd_pair(args: argparse.Namespace) -> int:
+    tls.client_context()    # pairing checks the device token with the Muse API
     result = pair(on_open=_setup_open, force=args.force, timeout_s=args.timeout)
     if result.outcome is PairOutcome.PAIRED:
         print("Paired.")
@@ -54,6 +58,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from musegadget.executor import Account, Executor
     from musegadget.service import run_service
 
+    tls.client_context()
     if os.geteuid() == 0:
         if not args.run_as:
             print("Pass --run-as ACCOUNT (the account whose permissions commands get).",
@@ -194,6 +199,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
     from musegadget.voice_audio import LiveAudio, WavAudio
     from musegadget.voice_call import VoiceCall
 
+    tls.client_context()
     # With video on standard output, everything this command prints goes to stderr.
     report = sys.stderr if args.video_out == "-" else sys.stdout
     if args.live and (args.in_wav or args.out_wav):
@@ -452,6 +458,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         return args.func(args)
+    except tls.TrustStoreError as exc:
+        print(exc, file=sys.stderr)
+        return EXIT_TRUST_STORE
     except PermissionError as exc:
         # The state directory is root-only on an installed device.
         print(f"Can't access {exc.filename or config.state_dir()}; run this with sudo.",

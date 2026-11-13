@@ -238,6 +238,16 @@ install_musegadget() {
     DATA_DIR="$data"
 }
 
+# musegadget won't connect while the trust store can't be read or still has a
+# distrusted root CA, so stop before installing a service that can't start.
+check_trust_store() {
+    local problem
+    problem="$("$VENV/bin/python" -c 'from musegadget import tls; print(tls.trust_store_problem() or "")')" ||
+        die "couldn't check the system trust store."
+    [ -z "$problem" ] && return
+    die "musegadget won't connect: $problem. Update your ca-certificates package, then run this installer again."
+}
+
 configure_bluez() {
     # The Muse Android app writes (MTU - 3)-byte packets and fails above 512,
     # so keep the negotiated MTU at 256, as the ESP32 firmware does.
@@ -453,6 +463,7 @@ main() {
     enable_bluez
     install_uv
     install_musegadget
+    check_trust_store
     configure_bluez
     save_sdk_token
     install_service

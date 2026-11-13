@@ -31,6 +31,8 @@ StateDirectory=musegadget
 StateDirectoryMode=0700
 Restart=always
 RestartSec=5
+# musegadget exits with 78 while the trust store needs fixing; restart it after.
+RestartPreventExitStatus=78
 
 [Install]
 WantedBy=multi-user.target
