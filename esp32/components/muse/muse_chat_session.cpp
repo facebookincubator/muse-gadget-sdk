@@ -77,6 +77,7 @@ extern "C" {
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
+#include "muse_options.h"
 #include "sdkconfig.h"
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call_priv.h"
@@ -158,7 +159,7 @@ static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP
 
 /* ---- Voice task <-> session task ---- */
 
-enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_INCOMING };
+enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_INCOMING, CMD_OPTION };
 
 struct cmd_t {
     cmd_type_t type;
@@ -201,7 +202,7 @@ static int64_t s_auto_backoff_us = AUTO_RETRY_MIN_US;
 
 /* ---- Streams on the connection ---- */
 
-enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS, K_CALL, K_END_CALL };
+enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS, K_CALL, K_END_CALL, K_OPTION_STATE };
 
 struct stream_t {
     int64_t id;
@@ -303,6 +304,9 @@ struct pending_t {
  * there (the AIPI), so Wi-Fi setup and TLS have the internal RAM. */
 EXT_RAM_BSS_ATTR static turn_t s_turn;
 EXT_RAM_BSS_ATTR static pending_t s_pending;
+static muse_options_t *s_option_send, *s_option_save;
+static bool s_option_sending;
+static int64_t s_option_state_us;
 static std::atomic<bool> s_incoming{false};   /* a reply is held: muse_hatch_incoming() */
 static std::atomic<bool> s_incoming_used{false};   /* a voice task plays them (the Voice PE's doesn't) */
 
@@ -792,6 +796,8 @@ static bool send_body(int64_t id, const uint8_t *data, size_t len, bool end_body
 
 static void disconnect(const char *why)
 {
+    muse_options_disconnected();
+    s_option_sending = false;
     if (s_conn.tls) {
         ESP_LOGI(TAG, "disconnect: %s", why);
         esp_tls_conn_destroy(s_conn.tls);
@@ -1023,6 +1029,11 @@ static void turn_reset_streams(void)
 
 static void turn_finish(void)
 {
+    if (s_option_sending) {
+        muse_options_result(s_option_send->generation, MUSE_OPTIONS_UNCERTAIN, false,
+                            "Check the Muse app before answering again.");
+        s_option_sending = false;
+    }
     turn_reset_streams();
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
@@ -1033,6 +1044,11 @@ static void turn_finish(void)
 
 static void turn_fail(const char *why)
 {
+    if (s_option_sending) {
+        muse_options_result(s_option_send->generation, MUSE_OPTIONS_UNCERTAIN, false,
+                            "Check the Muse app before answering again.");
+        s_option_sending = false;
+    }
     ESP_LOGW(TAG, "turn failed: %s", why);
     if (s_turn.text) {
         muse_hatch_console("error", why, nullptr);
@@ -1243,12 +1259,14 @@ static bool record_note(void)
  * parts, since each frame has to fit SCRATCH. A spoken turn names the device
  * (MUSE_CHAT_SPOKEN_DEVICE); a typed one doesn't.
  */
-static void send_chat(const char *text, const char *modality, bool spoken)
+static void send_chat(const char *text, const char *modality, bool spoken, cJSON *provided = nullptr)
 {
     s_turn.chat_posted = true;
-    cJSON *body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "message", text);
-    cJSON_AddStringToObject(body, "output_modality", modality);
+    cJSON *body = provided ? provided : cJSON_CreateObject();
+    if (!provided) {
+        cJSON_AddStringToObject(body, "message", text);
+        cJSON_AddStringToObject(body, "output_modality", modality);
+    }
     if (spoken) {
         cJSON_AddStringToObject(body, "device", MUSE_CHAT_SPOKEN_DEVICE);
     }
@@ -1755,6 +1773,20 @@ static void on_event(cJSON *line)
         last = v > last ? v : last;
     }
     cJSON *payload = cJSON_GetObjectItem(line, "payload");
+    if (!strcmp(event, "widget.state_updated")) {
+        muse_options_receive(payload);
+        return;
+    }
+    if (!strcmp(event, "message.assistant") || !strcmp(event, "delta.message_done")) {
+        if (muse_options_receive(payload) && s_turn.text) {
+            /* Serial diagnostics expose only widget data, never credentials. */
+            char *widgets = cJSON_PrintUnformatted(cJSON_GetObjectItem(payload, "widgets"));
+            if (widgets) {
+                muse_hatch_console("options", widgets, nullptr);
+                cJSON_free(widgets);
+            }
+        }
+    }
     if (s_turn.phase == P_IDLE) {
         pending_event(event, payload, line);
         return;
@@ -1835,6 +1867,31 @@ static void on_chat_ack(stream_t *s)
     mark(M_ACK);
     ESP_LOGI(TAG, "chat/stream ack: user message %s", s_turn.user_ids[0]);
     cJSON_Delete(root);
+    if (s_option_sending) {
+        if (!s_turn.user_ids[0][0]) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_UNCERTAIN, false,
+                                "No acknowledgement. Check the Muse app.");
+            s_option_sending = false;
+            return;
+        }
+        s_option_sending = false;
+        *s_option_save = *s_option_send;
+        muse_options_result(s_option_save->generation, MUSE_OPTIONS_SELECTED, false, "Answer sent. Saving selection...");
+        char mutation[40];
+        uint32_t a = esp_random(), b = esp_random(), c = esp_random(), d = esp_random();
+        snprintf(mutation, sizeof(mutation), "%08lx-%04lx-4%03lx-8%03lx-%04lx%08lx",
+                 (unsigned long)a, (unsigned long)(b >> 16), (unsigned long)(b & 0xfff),
+                 (unsigned long)(c & 0xfff), (unsigned long)(c >> 16), (unsigned long)d);
+        cJSON *body = muse_options_state_body(s_option_save, mutation);
+        char *json = body ? cJSON_PrintUnformatted(body) : nullptr;
+        cJSON_Delete(body);
+        bool sent = json && open_stream(K_OPTION_STATE, "POST", "/widgets/state", "application/json",
+                                         "application/json", json, true);
+        cJSON_free(json);
+        s_option_state_us = now_us();
+        if (!sent) muse_options_result(s_option_save->generation, MUSE_OPTIONS_SELECTED, false,
+                                       "Answer sent. Selection could not be saved.");
+    }
     emit(MUSE_HATCH_EV_SENT, nullptr);
 }
 
@@ -2106,8 +2163,10 @@ static void stream_data(stream_t *s, ConstByteSpan data)
     case K_DICT:
         feed_lines(s, data.data(), data.size(), on_dictation_line);
         break;
-    case K_CHAT: {
+    case K_CHAT:
+    case K_OPTION_STATE: {
         size_t take = data.size() < s->cap - 1 - s->len ? data.size() : s->cap - 1 - s->len;
+        if (take < data.size()) s->overflow = true;
         memcpy(s->line + s->len, data.data(), take);
         s->len += take;
         break;
@@ -2152,6 +2211,16 @@ static bool stream_end(stream_t *s, bool ok)
     case K_TTS:
         tts_end(s, ok);
         break;
+    case K_OPTION_STATE: {
+        s->line[s->len] = '\0';
+        cJSON *response = cJSON_Parse(s->line);
+        bool saved = ok && !s->overflow && muse_options_state_response(s_option_save, response);
+        muse_options_result(s_option_save->generation, MUSE_OPTIONS_SELECTED, saved,
+                            saved ? "" : "Answer sent. Check selection in the Muse app.");
+        cJSON_Delete(response);
+        close_stream(s);
+        break;
+    }
 #if CONFIG_MUSE_REALTIME_VOICE
     case K_CALL:
     case K_END_CALL: {
@@ -2302,6 +2371,7 @@ static void handle(const cmd_t &cmd)
         }
         break;
     case CMD_FORGET:
+        muse_options_clear();
         if (s_turn.phase != P_IDLE) {
             turn_fail("SETTINGS CHANGED");
         }
@@ -2356,6 +2426,60 @@ static void handle(const cmd_t &cmd)
         }
         incoming_play(cmd.gen);
         break;
+    case CMD_OPTION: {
+        if (!s_option_send) s_option_send = static_cast<muse_options_t *>(psram_alloc(sizeof(*s_option_send)));
+        if (!s_option_save) s_option_save = static_cast<muse_options_t *>(psram_alloc(sizeof(*s_option_save)));
+        if (!s_option_send || !s_option_save) {
+            muse_options_t q;
+            if (muse_options_snapshot(&q)) muse_options_result(q.generation, MUSE_OPTIONS_READY, false, "Out of memory. Try again.");
+            ev_t ev = {}; ev.type = MUSE_HATCH_EV_ERROR; ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, 0);
+            break;
+        }
+        if (!muse_options_take(s_option_send)) {
+            ev_t ev = {};
+            ev.type = MUSE_HATCH_EV_ERROR;
+            ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, 0);
+            break;
+        }
+        bool saving = false;
+        for (const auto &stream : s_streams) if (stream.kind == K_OPTION_STATE) saving = true;
+        if (cmd.gen != s_gen.load() || s_turn.phase != P_IDLE || call_busy() || saving) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_READY, false, "Muse is busy. Try again.");
+            ev_t ev = {};
+            ev.type = MUSE_HATCH_EV_ERROR;
+            ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, 0);
+            break;
+        }
+        if (!s_connected) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_STALE, false, "Reconnect and continue in the Muse app.");
+            ev_t ev = {};
+            ev.type = MUSE_HATCH_EV_ERROR;
+            ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, 0);
+            break;
+        }
+        if (!turn_start(cmd.gen, false)) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_STALE, false, "Reconnect and continue in the Muse app.");
+            break;
+        }
+        char interaction[40];
+        uint32_t a = esp_random(), b = esp_random(), c = esp_random(), d = esp_random();
+        snprintf(interaction, sizeof(interaction), "%08lx-%04lx-4%03lx-8%03lx-%04lx%08lx",
+                 (unsigned long)a, (unsigned long)(b >> 16), (unsigned long)(b & 0xfff),
+                 (unsigned long)(c & 0xfff), (unsigned long)(c >> 16), (unsigned long)d);
+        cJSON *body = muse_options_chat_body(s_option_send, interaction);
+        if (!body) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_READY, false, "Out of memory. Try again.");
+            turn_fail("OUT OF MEMORY");
+            break;
+        }
+        s_option_sending = true;
+        send_chat(s_option_send->labels[s_option_send->selected], "text", false, body);
+        break;
+    }
     }
 }
 
@@ -2428,6 +2552,13 @@ static void hatch_task(void *arg)
             continue;
         }
         check_turn();
+        for (auto &stream : s_streams) {
+            if (stream.kind == K_OPTION_STATE && now_us() - s_option_state_us > 15000000) {
+                muse_options_result(s_option_save->generation, MUSE_OPTIONS_SELECTED, false,
+                                    "Answer sent. Saving selection timed out.");
+                send_reset(stream.id);
+            }
+        }
         if (s_turn.phase == P_IDLE && s_pending.replies) {
             s_incoming = true;   /* held rows not played yet (a press or a typed turn came first) */
         }
@@ -2435,7 +2566,7 @@ static void hatch_task(void *arg)
         int64_t t = now_us();
         if (t - s_conn.last_rx_us > DEAD_US) {
             drop_connection("server went quiet");
-        } else if (s_turn.phase == P_IDLE && !call_busy() && !s_pending.active && t - s_conn.last_use_us > IDLE_CLOSE_US) {
+        } else if (s_turn.phase == P_IDLE && !call_busy() && !s_pending.active && !muse_options_waiting() && t - s_conn.last_use_us > IDLE_CLOSE_US) {
             disconnect("idle");
             muse_hatch_report(MUSE_HATCH_UNTESTED, "");
             s_auto_next_us = INT64_MAX;   /* the next turn connects */
@@ -2632,6 +2763,12 @@ extern "C" void muse_hatch_text_cancel(void)
 extern "C" bool muse_hatch_incoming(void)
 {
     s_incoming_used = true;
+    if (muse_options_pending()) {
+        uint32_t gen = ++s_gen;
+        drain_out();
+        post(CMD_OPTION, gen);
+        return true;
+    }
     if (!s_incoming.exchange(false)) {
         return false;
     }

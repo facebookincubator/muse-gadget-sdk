@@ -43,6 +43,7 @@ class ChatSession(unittest.TestCase):
 #include <initializer_list>
 #include "host_compat.h"
 #include "cJSON.h"
+#include "muse_options.h"
 #include "minimp3.h"
 #include "muse_chat_priv.h"
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
@@ -708,6 +709,19 @@ int main(int argc, char **argv) {
     case 28: others_status_and_late_play(); break;
     case 29: chained_and_mid_stream_replies(); break;
     case 30: late_rows_by_their_own_order_and_content(); break;
+    case 31: {
+        muse_options_clear();
+        s_turn.phase = P_IDLE;
+        cJSON *line = cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{"message_id":"question","widgets":[{"kind":"option","widget_id":"choices","data":{"options":["Red","Green"]}}]}})");
+        on_event(line); cJSON_Delete(line);
+        muse_options_t q;
+        assert(muse_options_snapshot(&q) && q.count == 2 && q.status == MUSE_OPTIONS_READY);
+        assert(muse_options_request(q.generation,1));
+        line = cJSON_Parse(R"({"type":"event","event":"widget.state_updated","payload":{"host_message_id":"question","widget_id":"choices","state":{"version":1,"data":{"selectedText":"Green"}}}})");
+        on_event(line); cJSON_Delete(line);
+        assert(muse_options_snapshot(&q) && q.selected == 1 && q.saved);
+        break;
+    }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -722,10 +736,14 @@ int main(int argc, char **argv) {
                  '-I', str(ROOT / 'tests'), '-I', str(ROOT / 'components/muse'),
                  '-I', str(ROOT / 'components/minimp3/include')]
         commands = [
+            [*shlex.split(os.environ.get('CC', 'cc')), '-std=c11', *flags, '-pthread',
+             '-I', str(ROOT / 'simulator/compat'), '-c', str(ROOT / 'components/muse/muse_options.c'), '-o', str(out / 'options.o')],
+            [*shlex.split(os.environ.get('CC', 'cc')), '-std=c11', *flags,
+             '-c', str(ROOT / 'components/muse/muse_options_json.c'), '-o', str(out / 'options-json.o')],
             [*shlex.split(os.environ.get('CC', 'cc')), '-std=c11', *flags,
              '-c', str(JSON / 'cJSON.c'), '-o', str(out / 'cjson.o')],
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags,
-             str(out / 'session.cpp'), str(out / 'cjson.o'), '-o', str(out / 'session')],
+             str(out / 'session.cpp'), str(out / 'options.o'), str(out / 'options-json.o'), str(out / 'cjson.o'), '-o', str(out / 'session')],
         ]
         # The Watcher keeps whole replies for review: the same handlers, with the
         # real review store and fake FreeRTOS/heap headers.
@@ -744,7 +762,7 @@ int main(int argc, char **argv) {
             [*shlex.split(os.environ.get('CC', 'cc')), '-std=gnu11', *flags, *watcher,
              '-c', str(ROOT / 'components/muse/muse_review.c'), '-o', str(out / 'review.o')],
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags, *watcher,
-             str(out / 'session.cpp'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-watcher')],
+             str(out / 'session.cpp'), str(out / 'options.o'), str(out / 'options-json.o'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-watcher')],
         ]
         for command in commands:
             result = subprocess.run(command, capture_output=True, text=True)
@@ -757,6 +775,9 @@ int main(int argc, char **argv) {
         binary = self.watcher_binary if watcher else self.binary
         result = subprocess.run([str(binary), str(case)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_idle_widget_and_phone_selection_use_the_real_adapter(self):
+        self.run_case(31)
 
     def test_rejected_deltas_do_not_emit_or_complete_voice_or_typed_replies(self):
         self.run_case(0)
