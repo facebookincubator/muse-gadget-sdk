@@ -92,16 +92,22 @@ def distrusted_name(der: bytes) -> str | None:
 # OpenSSL finds certificates in a CA directory by subject hash: "1a2b3c4d.0",
 # then ".1" and so on, stopping at the first missing suffix.
 _HASH_NAME = re.compile(r"([0-9a-f]{8})\.(0|[1-9][0-9]*)")
-# PEM markers start a line, as OpenSSL reads them (a BEGIN line may start with
-# a UTF-8 byte order mark); other text is ignored.
+# PEM markers start a line, as OpenSSL reads them: a BEGIN line may start with
+# a UTF-8 byte order mark, and spaces and control characters may end a line.
+# Other text is ignored.
 _PEM_CERT = re.compile(
-    rb"^(?:\xef\xbb\xbf)?-----BEGIN (TRUSTED CERTIFICATE|X509 CERTIFICATE|CERTIFICATE)-----[ \t\r]*$"
-    rb"(.*?)^-----END \1-----[ \t\r]*$",
+    rb"^(?:\xef\xbb\xbf)?-----BEGIN (TRUSTED CERTIFICATE|X509 CERTIFICATE|CERTIFICATE)-----"
+    rb"[\x00-\x09\x0b-\x20]*$(.*?)^-----END \1-----[\x00-\x09\x0b-\x20]*$",
     re.S | re.M)
 _SERVER_AUTH = bytes.fromhex("06082b06010505070301")   # DER OID 1.3.6.1.5.5.7.3.1
 _ANY_EKU = bytes.fromhex("0604551d2500")              # DER OID 2.5.29.37.0
 # The fields of OpenSSL's X509_CERT_AUX, in order: trust, reject, alias, key id, other.
 _AUX_FIELDS = (0x30, 0xA0, 0x0C, 0x04, 0xA1)
+# Name strings that OpenSSL canonicalises for its subject hash, and their encodings.
+_CANON_STRINGS = {0x0C: "utf-8", 0x13: "latin-1", 0x14: "latin-1", 0x16: "latin-1",
+                  0x1A: "latin-1", 0x1C: "utf-32-be", 0x1E: "utf-16-be"}
+_ASCII_SPACE = re.compile("[ \t\n\v\f\r]+")
+_ASCII_LOWER = {c: c + 32 for c in range(ord("A"), ord("Z") + 1)}
 
 
 def _der_element(data: bytes, offset: int, limit: int) -> tuple[int, int, int]:
@@ -161,6 +167,59 @@ def _algorithms(data: bytes, start: int, end: int) -> None:
         start = element_end
 
 
+def _der(tag: int, content: bytes) -> bytes:
+    if len(content) < 0x80:
+        return bytes([tag, len(content)]) + content
+    size = (len(content).bit_length() + 7) // 8
+    return bytes([tag, 0x80 | size]) + len(content).to_bytes(size, "big") + content
+
+
+def _subject(cert: bytes) -> bytes:
+    """OpenSSL's canonical form of a certificate's subject (``x509_name_canon``).
+
+    Strings become lower-case UTF-8 with runs of ASCII white space collapsed
+    and trimmed. OpenSSL compares and hashes subjects in this form.
+    """
+    _, start, end = _der_element(cert, 0, len(cert))
+    _, start, end = _der_element(cert, start, end)               # tbsCertificate
+    if start < end and cert[start] == 0xA0:
+        start = _der_element(cert, start, end)[2]                # version
+    for _ in range(4):                                           # serial to validity
+        start = _der_element(cert, start, end)[2]
+    tag, start, end = _der_element(cert, start, end)
+    if tag != 0x30:
+        raise ValueError("expected a subject")
+    canon = b""
+    while start < end:
+        tag, entry, rdn_end = _der_element(cert, start, end)
+        if tag != 0x31:
+            raise ValueError("expected a relative distinguished name")
+        entries = []
+        while entry < rdn_end:
+            tag, content, entry_end = _der_element(cert, entry, rdn_end)
+            if tag != 0x30:
+                raise ValueError("expected an attribute")
+            oid, value = _oid(cert, content, entry_end)
+            tag, content, value_end = _der_element(cert, value, entry_end)
+            if value_end != entry_end:
+                raise ValueError("bad attribute")
+            encoded = cert[value:value_end]
+            if tag in _CANON_STRINGS:
+                text = cert[content:value_end].decode(_CANON_STRINGS[tag])
+                text = _ASCII_SPACE.sub(" ", text).strip(" ").translate(_ASCII_LOWER)
+                encoded = _der(0x0C, text.encode())
+            entries.append(_der(0x30, oid + encoded))
+            entry = entry_end
+        canon += _der(0x31, b"".join(sorted(entries)))           # DER sorts a SET OF
+        start = rdn_end
+    return canon
+
+
+def _subject_hash(subject: bytes) -> str:
+    """OpenSSL's subject hash (``X509_NAME_hash``) of a canonical subject."""
+    return hashlib.sha1(subject).digest()[3::-1].hex()
+
+
 def _trusted_certificate(trusted: bytes) -> tuple[bytes, bool]:
     """An OpenSSL ``TRUSTED CERTIFICATE``'s certificate, and whether it may anchor TLS.
 
@@ -215,12 +274,12 @@ def _pem_certificates(data: bytes) -> tuple[list[tuple[bytes, bool]], bool]:
     return certs, True
 
 
-def _file_certificates(path: str) -> tuple[list[tuple[bytes, bool]], bool] | None:
-    """The CA certificates OpenSSL loads from a file, and whether each may anchor TLS.
+def _file_certificates(path: str) -> tuple[list[tuple[bytes, bool]], set[bytes], bool] | None:
+    """Each certificate of a file OpenSSL loads, and whether it may anchor TLS.
 
-    ``None`` if OpenSSL refuses the file. The second value says whether the
-    trust settings of every entry were read, including every certificate
-    OpenSSL loaded.
+    ``None`` if OpenSSL refuses the file. Also returns the CA certificates
+    OpenSSL loaded, and whether the trust settings of every entry were read,
+    including every certificate OpenSSL loaded.
     """
     scratch = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     try:
@@ -229,19 +288,19 @@ def _file_certificates(path: str) -> tuple[list[tuple[bytes, bool]], bool] | Non
             data = f.read()
     except OSError:     # ssl.SSLError included
         return None
-    loaded = set(scratch.get_ca_certs(binary_form=True))
     certs, complete = _pem_certificates(data)
+    loaded = set(scratch.get_ca_certs(binary_form=True))
     complete = complete and loaded <= {der for der, _ in certs}
     if not complete:
         log.warning("couldn't read the TLS trust settings in %s; not using it", path)
-    return [(der, tls_root) for der, tls_root in certs if der in loaded], complete
+    return certs, loaded, complete
 
 
-def _hashed_files(capath: str) -> list[list[str]]:
+def _hashed_files(capath: str) -> list[tuple[str, list[str]]]:
     """The files of a CA directory that OpenSSL's subject-hash lookup reads.
 
-    One list per subject hash, in the order OpenSSL reads them: ".0", ".1"
-    and so on, up to the first missing suffix.
+    Each subject hash with its files, in the order OpenSSL reads them: ".0",
+    ".1" and so on, up to the first missing suffix.
     """
     names = {}
     with os.scandir(capath) as entries:
@@ -253,7 +312,8 @@ def _hashed_files(capath: str) -> list[list[str]]:
         chain = []
         while f"{stem}.{len(chain)}" in names:
             chain.append(names[f"{stem}.{len(chain)}"])
-        chains.append(chain)
+        if chain:
+            chains.append((stem, chain))
     return chains
 
 
@@ -270,31 +330,61 @@ def _system_roots() -> tuple[list[bytes], bool]:
 
     Reads the default CA file and the hash-named files in the default CA
     directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them), and
-    keeps the trust settings of ``TRUSTED CERTIFICATE`` entries. A file is
-    used only when OpenSSL loads it and every entry's trust settings parse;
-    as in OpenSSL, a hashed file that fails ends its subject hash's lookup,
-    and the first copy of a certificate decides its trust.
+    keeps the trust settings of ``TRUSTED CERTIFICATE`` entries. It follows
+    OpenSSL's store (``X509_STORE``, ``by_dir``):
+
+    - a file is used only when OpenSSL loads it and every entry's trust
+      settings parse; if that fails for the CA file, nothing is trusted;
+    - a hashed file that fails ends its subject hash's lookup;
+    - the directory is searched only for subjects the CA file lacks, and a
+      certificate counts only under its own subject hash;
+    - the first copy of a certificate decides its trust.
     """
     store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     paths = ssl.get_default_verify_paths()
-    chains = [[paths.cafile]] if paths.cafile else []
+    seen, readable, file_subjects = set(), False, set()
+
+    def add(certs: list[tuple[bytes, bool]], loaded: set[bytes]) -> None:
+        for der, tls_root in certs:
+            if der not in seen:
+                seen.add(der)
+                if tls_root and der in loaded:
+                    store.load_verify_locations(cadata=der)
+
+    if paths.cafile:
+        result = _file_certificates(paths.cafile)
+        if result is not None:
+            readable = True
+            certs, loaded, complete = result
+            if not complete:
+                return [], True
+            try:
+                file_subjects = {_subject(der) for der, _ in certs}
+            except (ValueError, UnicodeError):
+                return [], True
+            add(certs, loaded)
+    chains = []
     if paths.capath:
         try:
-            chains += _hashed_files(paths.capath)
+            chains = _hashed_files(paths.capath)
         except OSError:
             pass
-    seen, readable = set(), False
-    for chain in chains:
+    for stem, chain in chains:
         for path in chain:
             result = _file_certificates(path)
             readable = readable or result is not None
-            if result is None or not result[1]:
+            if result is None or not result[2]:
                 break
-            for der, tls_root in result[0]:
-                if der not in seen:
-                    seen.add(der)
-                    if tls_root:
-                        store.load_verify_locations(cadata=der)
+            certs, loaded, _ = result
+            usable = []
+            for der, tls_root in certs:
+                try:
+                    subject = _subject(der)
+                except (ValueError, UnicodeError):
+                    continue
+                if _subject_hash(subject) == stem and subject not in file_subjects:
+                    usable.append((der, tls_root))
+            add(usable, loaded)
     return store.get_ca_certs(binary_form=True), readable
 
 
