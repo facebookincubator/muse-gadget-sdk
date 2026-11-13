@@ -242,11 +242,16 @@ install_musegadget() {
 # distrusted root CA, so stop before installing a service that can't start.
 check_trust_store() {
     local problem
-    # As the service runs it: as root, without this shell's SSL_CERT_* settings.
-    problem="$(as_root env -u SSL_CERT_FILE -u SSL_CERT_DIR -u SSL_CERT_URI "$VENV/bin/python" \
+    # As the service runs it: as root, without this shell's SSL_CERT_* settings
+    # (and, with -I, without importing from the current directory).
+    problem="$(as_root env -u SSL_CERT_FILE -u SSL_CERT_DIR -u SSL_CERT_URI "$VENV/bin/python" -I \
         -c 'from musegadget import tls; print(tls.trust_store_problem() or "")')" ||
         die "couldn't check the system trust store."
     [ -z "$problem" ] && return
+    # An earlier install's service would keep restarting the new code, which refuses to run.
+    if systemd_running && [ -e "$UNIT" ]; then
+        as_root systemctl stop musegadget.service >/dev/null 2>&1 || true
+    fi
     die "musegadget won't connect: $problem. Update your ca-certificates package, then run this installer again."
 }
 
