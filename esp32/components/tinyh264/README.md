@@ -61,6 +61,9 @@ it got the same buffer address again; `muse_vdec.c` reuses one buffer, so by
 then that address holds another frame. Such a NAL unit is now dropped, a
 resumed one must fit the buffer it's resumed in, and no step reads past the
 input. Resuming within one call, after new parameter sets, works as before.
+A picture that concealment finishes without a single valid slice has
+nothing to output: the call goes on with the rest of the access unit
+instead of returning a picture that isn't there.
 
 On the S3 at 240 MHz a 232 px picture decodes in about 21 ms at 600 kb/s and
 25 ms at 1000 (x264, no deblocking), with the code running from cache.

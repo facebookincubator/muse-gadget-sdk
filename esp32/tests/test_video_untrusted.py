@@ -826,6 +826,23 @@ class PicturesKeptTest(unittest.TestCase):
                                two_bands(non_idr(120, frame_num=2), non_idr(4, pps_id=1)[4:]), bands=True)
         self.assertEqual(lines, [(1, 1, 1), (1, 1, 1), (0, 1, 1)])
 
+    def test_a_slice_whose_header_fails_then_a_keyframe(self):
+        # A slice header that fails after the picture started (an unknown
+        # slice type) leaves a picture with no valid slice; the next access
+        # unit conceals it, and tinyh264 had no picture to output for it
+        # (h264bsdDecode dereferenced NULL). The keyframe after it decodes.
+        b = Bits()
+        b.ue(0)       # first_mb_in_slice
+        b.ue(30)      # slice_type: none
+        b.ue(0)       # pic_parameter_set_id
+        b.u(4, 1)     # frame_num
+        broken = nal(0x61, b)
+        lines = self.run_units(au(2, 2), broken, au(2, 2), non_idr(4, frame_num=1))
+        self.assertEqual([rc for _, rc in lines], [1, -1, 1, 1])
+        # A picture after it decodes too.
+        lines = self.run_units(au(2, 2), broken, non_idr(4, frame_num=2))
+        self.assertEqual([rc for _, rc in lines], [1, -1, 1])
+
 
 if __name__ == "__main__":
     unittest.main()
