@@ -9,7 +9,11 @@ repeat submission. Voice recording and calls
 temporarily hide the picker.
 
 The question comes from the widget title when supplied, otherwise from Muse's
-reply text. “Choose an option” is used only when no question text is available.
+reply text, including canonical transcript text and text streamed for that same
+message. Empty titles and widget placeholders do not suppress the question.
+If question text arrives after the options, the open picker refreshes without
+resetting a selection. “Choose an option” is used only when no question text is available.
+Wrapped question lines have four pixels of extra line spacing for readability.
 
 On round displays, the panel is scaled so its entire rectangular diagonal fits
 within the display diameter minus 20 pixels. This keeps its corners and
@@ -29,6 +33,12 @@ The gadget receives a `kind: "option"` widget in an assistant message's
 arrive as JSON-encoded strings. The model retains the host message identifier,
 widget identifier, labels, selected index, and state version after a turn ends.
 `widget.state_updated` events update a matching retained question.
+
+Current canonical messages can omit top-level `display_text` and `content`;
+their text is in `transcript.messages[].content[]` blocks with `type: "text"`.
+The picker reads assistant text from those blocks, as well as older reply-text
+fields. A done event carrying only widgets can use the already-streamed text
+of its own message; it never borrows another message's question.
 
 Selecting sends the original option label to `POST /chat/stream`. The request's
 `metadata.message_origin` contains `kind: "options_widget"`, `widget_id`,
@@ -53,20 +63,23 @@ assume a choice made on the gadget locks the corresponding buttons on the phone.
 
 | Check | Result |
 | --- | --- |
-| Option model and JSON adapter under ASan/UBSan | 7 tests passed, including malformed/oversized widgets, Unicode, duplicate taps, stale generations, disconnects, and phone state versions |
-| Chat session harness with the real option adapter | 27 tests passed, including idle widget delivery and phone selection events |
+| Option model and JSON adapter under ASan/UBSan | 10 tests passed, including malformed/oversized widgets, Unicode, duplicate taps, late question updates, canonical transcript text, and phone state versions |
+| Chat session harness with the real option adapter | 29 tests passed, including idle transcript delivery, same-message streamed questions in voice/typed turns, and phone selection events |
 | Existing Link chat tests | 13 tests passed |
 | Voice/input regression harness | 54 tests passed with a macOS compiler wrapper for Linux-specific flags |
-| Simulator under ASan/UBSan | 38 checks passed on the standalone upstream branch, including real LVGL pointer dispatch, scrolling, selection, duplicate rejection, waking touches, circular corner containment at 412/466 px, and unchanged rectangular panel sizing |
+| Simulator under ASan/UBSan | 38 checks passed on the standalone upstream branch, including late question-label refresh, real LVGL pointer dispatch, scrolling, selection, duplicate rejection, waking touches, and circular/rectangular containment |
 | Simulator avatar-selection regression | 3 tests passed; fixture includes the new units and uses Ninja |
 | 1.75C application build, ESP-IDF 6.0.3 | Passed; signed binary `0x221000` bytes in a `0x400000`-byte app slot |
 | Connected physical 1.75C | Received Red/Green/Blue widget; selected Green through the USB selection API; rejected a second selection; played/displayed the following reply; a verification chat returned `Green` |
+| Lunch-question regression on the 1.75C | Temporary serial instrumentation confirmed `What do you want for lunch?` decoded from a live transcript-only canonical row; selected Salad through USB and a verification chat returned `Salad`. Simulator checks verify the label refresh |
+| Physical finger selection | Pulkit tested selecting an option by finger on the 1.75C and confirmed it works |
 | Server selected-state persistence | HTTP 403; local selection remains locked, with no automatic chat retry |
 
-Touch dispatch was exercised in the simulator. The physical-device selection
-test used a local build including the separately proposed swipe-volume feature
-and the same model request through USB, not a human finger or an automated
-physical touchscreen press. Simulator captures are not device screenshots.
+Touch dispatch was exercised in the simulator, and Pulkit separately confirmed
+physical finger selection on the 1.75C. Automated physical-device selection
+testing used a local build including the separately proposed swipe-volume
+feature and the same model request through USB. Simulator captures are not
+device screenshots.
 
 The full host suite was exercised (1,104 tests in the first run), but that run
 was not clean: sandbox socket restrictions, missing FreeInk configuration,
