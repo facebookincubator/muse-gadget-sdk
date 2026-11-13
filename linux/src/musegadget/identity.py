@@ -32,7 +32,7 @@ from typing import Callable
 from musegadget import config
 
 NODE_ID_PREFIX = "homelink-"
-BLE_NAME_PREFIX = "MuseGadget-"
+BLE_NAME_PREFIX = "MuseGadget"
 _MAC_RE = re.compile(r"[0-9a-f]{2}(:[0-9a-f]{2}){5}")
 
 
@@ -54,11 +54,8 @@ class Identity:
 
     @property
     def ble_name(self) -> str:
-        # Hyphenated, matching the ESP32 firmware as shipped
-        # ("MuseGadget-XXXXXX" — esp32/main/identity.c). FINAL fleet ruling
-        # (owner, 2026-11-08): the firmware form is the standard everywhere;
-        # the apps match the trailing six hex digits against the node id
-        # suffix either way.
+        # No separator: the apps compare the text after the prefix with the
+        # text after "homelink-" in the node id.
         return BLE_NAME_PREFIX + self.suffix.upper()
 
 

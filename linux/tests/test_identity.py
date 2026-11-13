@@ -24,7 +24,7 @@ def test_names_share_the_suffix():
     ident = identity.Identity("02:00:00:ab:cd:ef")
     assert ident.node_id == "homelink-abcdef"
     assert ident.device_id == "hatch-link:02:00:00:ab:cd:ef"
-    assert ident.ble_name == "MuseGadget-ABCDEF"
+    assert ident.ble_name == "MuseGadgetABCDEF"
 
 
 def test_generated_mac_is_locally_administered_unicast():

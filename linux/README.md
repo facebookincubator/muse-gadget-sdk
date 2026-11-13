@@ -63,7 +63,7 @@ When the installer says pairing is open, go to the Muse app:
 
 1. Turn on **Settings > Devices > Developer mode**.
 2. Add a device (**Settings > Devices > Add Device**, the **+** icon in the
-   top right). It shows up as `MuseGadget-XXXXXX`, with the name the
+   top right). It shows up as `MuseGadgetXXXXXX`, with the name the
    installer printed.
 3. Muse warns that this is a community device. Continue if it's yours.
 4. When asked for Wi-Fi, pick the network shown. The machine is already
