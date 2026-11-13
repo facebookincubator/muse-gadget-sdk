@@ -23,6 +23,33 @@ menu "ESP32 Device SDK"
             backend strings. Internal builds override this to match
             the shipping product name.
 
+    config MUSE_DEVICE_MODEL_ID
+        string "Device model id"
+        default "muse-gadget"
+        help
+            The hardware model this device registers with Muse (model_id in
+            link.register): 1 to 64 lowercase letters, digits and hyphens.
+            Profiles of the same hardware share one id. Each board overlay in
+            devices/ sets its own. See protocols/DEVICE.md.
+
+    config MUSE_DEVICE_MODEL_NAME
+        string "Device model name"
+        default "Muse Gadget"
+        help
+            The hardware's name as people know it, sent to Muse as
+            metadata.model_name in link.register: 1 to 128 printable ASCII
+            characters, without " or \. Each board overlay in devices/ sets
+            its own.
+
+    config MUSE_DEVICE_GUIDE
+        string "Device guide (Markdown file)"
+        default "main/guide.md"
+        help
+            The Markdown file device.guide returns to Muse: what the device
+            is, its controls and its limits. A relative path is looked up in
+            the project directory, then in esp32/. The build fails if the
+            guide is over 4096 bytes. See protocols/DEVICE.md.
+
     config GADGET_SDK_TOKEN
         string "Muse Gadgets SDK token"
         default ""

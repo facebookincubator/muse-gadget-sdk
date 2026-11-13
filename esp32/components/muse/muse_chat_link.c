@@ -902,6 +902,11 @@ void muse_hatch_turn_cancel(void)
     xQueueReset(s_events);
 }
 
+bool muse_hatch_incoming(void)
+{
+    return false;   /* replies come on the turn's own session */
+}
+
 muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
 {
     pump();
@@ -922,6 +927,13 @@ bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
     }
     size_t at = read_at(esp_timer_get_time());
     return muse_hatch_caption_at(s_turn.text, at < len ? at : len - 1, out, cap);
+}
+
+float muse_turn_progress(size_t played, int *message)
+{
+    (void)played;
+    if (message) *message = -1;
+    return 0;
 }
 
 size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms)

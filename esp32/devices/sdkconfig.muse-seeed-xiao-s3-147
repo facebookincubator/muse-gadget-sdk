@@ -4,6 +4,8 @@
 # Sources: Seeed wiki /getting_started_1.47_inch_touch_display_esp32s3/
 # and Seeed-Studio/Seeed_GFX2 (panel, touch and PDM examples).
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-seeed-xiao-s3-147"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Seeed XIAO ESP32-S3 1.47 Touch Display"
 CONFIG_MUSE_BOARD_SEEED_XIAO_S3_147=y
 CONFIG_HOMEHUB_BUTTON_GPIO=11
 # UART0 defaults overlap SD CS (GPIO43) and touch IRQ (GPIO44). Route the

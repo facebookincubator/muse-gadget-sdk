@@ -61,10 +61,12 @@ class LinkOtaTest(unittest.TestCase):
 
     def test_ota_disabled_and_enabled(self) -> None:
         # mosaico: "" (another board), "board" (the ESP-Mosaico without its
-        # Vibe Mode overlay) or "vibe" (its Vibe Mode build).
+        # Vibe Mode overlay), "vibe" (its Vibe Mode build) or "vibe2" (for
+        # Vibe Mode 0.2, Recovery ABI 2).
         for enabled, dev, mosaico in (
             (False, True, ""), (True, True, ""), (True, False, ""),
             (True, True, "board"), (False, True, "vibe"), (True, True, "vibe"),
+            (True, True, "vibe2"),
         ):
             with self.subTest(enabled=enabled, dev=dev, mosaico=mosaico), \
                     tempfile.TemporaryDirectory() as name:
@@ -74,7 +76,10 @@ class LinkOtaTest(unittest.TestCase):
                     + f"#define CONFIG_HOMEHUB_DEV_BUILD {int(dev)}\n"
                     + ("#define CONFIG_MUSE_BOARD_ESP_MOSAICO 1\n" if mosaico else "")
                     + ("#define CONFIG_ESP_IRIS_OTA_DEFAULT_VIA_RECOVERY 1\n"
-                       if mosaico == "vibe" else "")
+                       if mosaico.startswith("vibe") else "")
+                    + ("#define CONFIG_ESP_IRIS_RECOVERY_ABI 2\n"
+                       "#define VIBE_SUBTYPE 0x20\n"  # app/test
+                       if mosaico == "vibe2" else "")
                 )
                 # Type-check log arguments without printing or making them unused.
                 (tmp / "esp_log.h").write_text(
@@ -222,6 +227,9 @@ int main(void) {
 #include "esp_app_desc.h"
 #define nullptr NULL
 #define CONFIG_HOMEHUB_TUNNEL 1
+#define MUSE_DEVICE_FAMILY "gadget"
+#define CONFIG_MUSE_DEVICE_MODEL_ID "muse-gadget-test"
+#define CONFIG_MUSE_DEVICE_MODEL_NAME "Test board"
 static bool enabled;
 bool ota_is_enabled(void) { return enabled; }
 static esp_app_desc_t app = { .version = "999.0.0" };

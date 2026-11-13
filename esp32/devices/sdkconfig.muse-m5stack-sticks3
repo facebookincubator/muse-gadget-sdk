@@ -15,6 +15,8 @@
 # M5Stack StickS3: ESP32-S3-PICO-1-N8R8 (8 MB flash, 8 MB octal PSRAM), two
 # buttons, no touch. Load last, after sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-m5stack-sticks3"
+CONFIG_MUSE_DEVICE_MODEL_NAME="M5Stack StickS3"
 CONFIG_MUSE_BOARD_M5STACK_STICKS3=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse_8mb.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
