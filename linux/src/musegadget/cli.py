@@ -40,7 +40,6 @@ def _setup_open(window: SetupWindow) -> None:
 
 
 def cmd_pair(args: argparse.Namespace) -> int:
-    tls.client_context()    # pairing checks the device token with the Muse API
     result = pair(on_open=_setup_open, force=args.force, timeout_s=args.timeout)
     if result.outcome is PairOutcome.PAIRED:
         print("Paired.")

@@ -242,7 +242,9 @@ install_musegadget() {
 # distrusted root CA, so stop before installing a service that can't start.
 check_trust_store() {
     local problem
-    problem="$("$VENV/bin/python" -c 'from musegadget import tls; print(tls.trust_store_problem() or "")')" ||
+    # As the service runs it: as root, without this shell's SSL_CERT_* settings.
+    problem="$(as_root env -u SSL_CERT_FILE -u SSL_CERT_DIR -u SSL_CERT_URI "$VENV/bin/python" \
+        -c 'from musegadget import tls; print(tls.trust_store_problem() or "")')" ||
         die "couldn't check the system trust store."
     [ -z "$problem" ] && return
     die "musegadget won't connect: $problem. Update your ca-certificates package, then run this installer again."

@@ -87,6 +87,7 @@ def distrusted_name(der: bytes) -> str | None:
 
 # OpenSSL looks certificates up in a CA directory by subject hash ("1a2b3c4d.0").
 _HASH_NAME = re.compile(r"[0-9a-f]{8}\.[0-9]+")
+_URI = re.compile(r"(?:^|:)[A-Za-z][A-Za-z0-9+.-]*:")    # a scheme, as in file:///…
 
 
 FIX = "update your ca-certificates package, then restart musegadget"
@@ -105,7 +106,8 @@ def check_trust_store() -> list[str] | None:
     root counts if it's there at all, whatever trust settings it carries.
     A CA file, CA directory or hashed file that exists but can't be read
     makes the whole store unreadable, since OpenSSL might still read what
-    this can't.
+    this can't, and so does a store URI in ``SSL_CERT_DIR`` or
+    ``SSL_CERT_URI``.
     """
     paths = ssl.get_default_verify_paths()
     store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -118,9 +120,13 @@ def check_trust_store() -> list[str] | None:
         readable = True
     variable = getattr(paths, "openssl_capath_env", None)
     listed = os.environ.get(variable) if variable else None
+    if os.environ.get("SSL_CERT_URI") or (listed and _URI.search(listed)):
+        return None         # an OpenSSL store URI, which this doesn't read
     directories = listed.split(os.pathsep) if listed else ([paths.capath] if paths.capath else [])
     for directory in directories:
         if not os.path.isdir(directory):
+            if directory and os.path.exists(directory):
+                return None     # OpenSSL may read it as a store
             continue        # OpenSSL skips a listed directory that isn't there
         try:
             with os.scandir(directory) as entries:

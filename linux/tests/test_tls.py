@@ -223,6 +223,22 @@ def test_a_directory_that_cant_be_listed_makes_the_store_unreadable(tmp_path, mo
     assert tls.check_trust_store() is None
 
 
+@pytest.mark.parametrize("variable,value", [
+    ("SSL_CERT_DIR", "file:///etc/ssl/legacy.pem"),
+    ("SSL_CERT_DIR", "{tmp}/bundle.pem"),
+    ("SSL_CERT_URI", "file:///etc/ssl/certs"),
+])
+def test_an_openssl_store_the_check_cant_read_makes_the_store_unreadable(tmp_path, monkeypatch,
+                                                                         variable, value):
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "bundle.pem"))
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    monkeypatch.delenv("SSL_CERT_URI", raising=False)
+    assert tls.check_trust_store() == []
+    monkeypatch.setenv(variable, value.format(tmp=tmp_path))
+    assert tls.check_trust_store() is None
+
+
 def test_a_hashed_file_that_doesnt_load_makes_the_store_unreadable(tmp_path, monkeypatch):
     # OpenSSL's directory lookup reads certificates one at a time and skips
     # other entries, so it may take a root from a file that fails to load here.
@@ -289,13 +305,14 @@ def test_commands_that_connect_refuse_to_start_on_an_unsafe_trust_store(monkeypa
     from musegadget import cli, muse_api, service
 
     connect = Mock(side_effect=AssertionError("must not start"))
-    for module, name in ((muse_api, "fetch_vms_with_status"), (service, "run_service"), (cli, "pair")):
+    for module, name in ((muse_api, "fetch_vms_with_status"), (service, "run_service")):
         monkeypatch.setattr(module, name, connect)
     monkeypatch.setattr(tls, "_context", None)
     monkeypatch.setattr(tls, "trust_store_problem", lambda: problem)
     assert cli.main(argv) == cli.EXIT_TRUST_STORE == 78
-    error = capsys.readouterr().err
-    assert problem in error and tls.FIX in error
+    output = capsys.readouterr()
+    assert problem in output.err and tls.FIX in output.err
+    assert "Setup open" not in output.out
     connect.assert_not_called()
 
 
