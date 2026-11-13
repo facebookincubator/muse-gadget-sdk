@@ -13,9 +13,12 @@ static int saved_volume = 50, preview_volume = 50, saves;
 static int test_volume(void) { return saved_volume; }
 static void test_save(int volume) { saved_volume = volume; saves++; }
 static void test_preview(int volume) { preview_volume = volume; }
+static int speaker_saves;
+static void test_speaker(bool on) { speaker_saves++; muse_settings_set_speaker_on(on); }
 #define muse_settings_volume test_volume
 #define muse_settings_set_volume test_save
 #define muse_audio_set_volume test_preview
+#define muse_settings_set_speaker_on test_speaker
 #include "../../components/muse/muse_ui.c"
 
 static lv_point_t finger;
@@ -150,5 +153,43 @@ int main(void)
     assert(saves == 4 && saved_volume == preview_volume);
     touch(x, y + 80, false);
     assert(saves == 4 && !muse_settings_speaker_on());
+
+    /* Zero volume mutes immediately, once, even while the finger stays down. */
+    sim_services_set_speaker(true);
+    saved_volume = preview_volume = 5;
+    touch(x, y, true);
+    touch(x, y + 80, true);
+    assert(muse_ui_volume_swiping() && preview_volume == 0);
+    assert(!muse_settings_speaker_on() && speaker_saves == 1);
+    assert(!strcmp(lv_label_get_text(s_speaker_icon), LV_SYMBOL_MUTE));
+    touch(x, y + 100, true);
+    assert(!muse_settings_speaker_on() && speaker_saves == 1);
+    touch(x, y + 100, false);
+    assert(saved_volume == 0 && saves == 5 && speaker_saves == 1);
+
+    /* Raising volume after zero restores audio and the icon immediately. */
+    touch(x, y, true);
+    touch(x, y - 80, true);
+    assert(preview_volume > 0 && muse_settings_speaker_on());
+    assert(!strcmp(lv_label_get_text(s_speaker_icon), LV_SYMBOL_VOLUME_MAX));
+    assert(speaker_saves == 2);
+    touch(x, y - 100, true);
+    assert(speaker_saves == 2);
+    touch(x, y - 80, false);
+    assert(saved_volume > 0 && saves == 6 && speaker_saves == 2);
+
+    /* Returning to zero mutes again; staying there does not repeat the save. */
+    touch(x, y, true);
+    touch(x, y + 100, true);
+    touch(x, y + 100, false);
+    assert(saved_volume == 0 && !muse_settings_speaker_on() && speaker_saves == 3);
+    touch(x, y, true);
+    touch(x, y + 80, true);
+    assert(speaker_saves == 3);
+    /* Reversing away from zero in this same touch also restores the icon. */
+    touch(x, y - 80, true);
+    assert(preview_volume > 0 && muse_settings_speaker_on() && speaker_saves == 4);
+    assert(!strcmp(lv_label_get_text(s_speaker_icon), LV_SYMBOL_VOLUME_MAX));
+    touch(x, y - 80, false);
     return 0;
 }

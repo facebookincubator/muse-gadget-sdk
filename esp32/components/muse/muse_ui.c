@@ -1228,7 +1228,7 @@ static void finish_volume_swipe(void)
 {
     if (s_volume_swiping) {
         /* Preview uses the codec only; persist once, rather than writing flash
-         * on every touch sample. Muting remains a separate setting. */
+         * on every touch sample. Reaching zero mutes separately below. */
         if (s_volume_swipe.value != muse_settings_volume()) {
             muse_settings_set_volume(s_volume_swipe.value);
         }
@@ -1273,6 +1273,13 @@ static void on_volume_swipe(lv_event_t *e)
             s_volume_swiping = true;
             update_tileview_swipe();
             if (old_value != s_volume_swipe.value) muse_audio_set_volume(s_volume_swipe.value);
+            bool speaker_on = muse_settings_speaker_on();
+            if ((s_volume_swipe.value == 0 && speaker_on) ||
+                (s_volume_swipe.value > old_value && !speaker_on)) {
+                speaker_on = s_volume_swipe.value > 0;
+                muse_settings_set_speaker_on(speaker_on);
+                if (s_speaker) show_speaker(speaker_on);
+            }
             show_volume_hint(s_volume_swipe.value);
         }
         break;

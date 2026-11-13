@@ -202,9 +202,10 @@ appears above a vertical filled bar while dragging; lifting your finger saves
 the setting, then the indicator briefly holds and fades away. Dragging through
 three quarters of the screen height covers the full 0–100 range. Horizontal
 swipes still open Settings. Buttons, reply paging, Settings, wake touches and
-image/video views retain their existing controls. This gesture does not unmute
-the speaker, and is unavailable on boards without touch or speaker audio and
-on the separate FreeInk UI.
+image/video views retain their existing controls. Reaching 0% mutes the speaker
+immediately; increasing volume unmutes it and restores the speaker icon.
+The gesture is unavailable on boards without touch or speaker audio and on
+the separate FreeInk UI.
 
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
 settings. Audio and image support vary by board, so check the feature table in
