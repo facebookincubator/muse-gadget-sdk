@@ -164,7 +164,7 @@ never has a command's parameters, output or error message.
   `model_id` and `metadata.model_name` from the `DeviceDescription`
   (`../protocols/DEVICE.md`). Every device built with this SDK registers
   `device_family: "gadget"`; other families are reserved for Muse's own
-  devices. Don't advertise `device.ota`: it installs ESP32 firmware.
+  devices.
 - Messages from the device to the Muse (`musegadget send-user-msg`) go as separate
   `POST /chat/stream` requests on the same session, with `device_id` set to the
   node id and `"output_modality": "text"`. `session_id` picks the chat;
