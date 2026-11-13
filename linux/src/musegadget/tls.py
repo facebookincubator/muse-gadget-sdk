@@ -164,14 +164,14 @@ def _trusted_certificate(trusted: bytes) -> tuple[bytes, bool]:
     Its trust settings follow the certificate. As OpenSSL does for a TLS
     server, a root rejected for server authentication (or any purpose), or
     with a trust list that includes neither, is not a TLS root. Settings
-    that don't parse raise ``ValueError``.
+    that don't parse raise ``ValueError``; OpenSSL ignores bytes after them.
     """
     _, _, cert_end = _der_element(trusted, 0, len(trusted))
     cert, aux = trusted[:cert_end], trusted[cert_end:]
     if not aux:
         return cert, True
     tag, start, end = _der_element(aux, 0, len(aux))
-    if tag != 0x30 or end != len(aux):
+    if tag != 0x30:
         raise ValueError("bad trust settings")
     trust = reject = None
     position = 0
@@ -192,23 +192,26 @@ def _trusted_certificate(trusted: bytes) -> tuple[bytes, bool]:
     return cert, trust is None or bool(trust & {_SERVER_AUTH, _ANY_EKU})
 
 
-def _pem_certificates(data: bytes) -> list[tuple[bytes, bool]]:
-    """Each certificate of a PEM file, as DER, and whether it may anchor TLS.
+def _pem_certificates(data: bytes) -> tuple[list[tuple[bytes, bool]], bool]:
+    """The certificates of a PEM file, up to the first that doesn't parse.
 
-    Like OpenSSL, this skips entries that don't parse and ignores anything
-    after the certificate in a plain ``CERTIFICATE`` entry.
+    Returns each one's DER and whether it may anchor TLS, and whether every
+    entry parsed. Like OpenSSL, a plain ``CERTIFICATE`` entry ignores
+    anything after its certificate.
     """
     certs = []
     for label, body in _PEM_CERT.findall(data):
         try:
             der = base64.b64decode(b"".join(body.split()), validate=True)
             if label == b"TRUSTED CERTIFICATE":
-                certs.append(_trusted_certificate(der))
+                cert, tls_root = _trusted_certificate(der)
             else:
-                certs.append((der[:_der_element(der, 0, len(der))[2]], True))
-        except (ValueError, binascii.Error):
-            continue
-    return certs
+                cert, tls_root = der[:_der_element(der, 0, len(der))[2]], True
+            ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=cert)
+        except (ValueError, binascii.Error, ssl.SSLError):
+            return certs, False
+        certs.append((cert, tls_root))
+    return certs, True
 
 
 def _hashed_files(capath: str) -> list[str]:
@@ -223,8 +226,8 @@ def _hashed_files(capath: str) -> list[str]:
         stem, suffix = _HASH_NAME.fullmatch(name).groups()
         if int(suffix) < len(names) and all(
                 f"{stem}.{i}" in names for i in range(int(suffix))):
-            files.append(path)
-    return sorted(files)
+            files.append(((stem, int(suffix)), path))
+    return [path for _, path in sorted(files)]    # ".2" before ".10", as OpenSSL reads them
 
 
 def system_roots() -> list[bytes]:
@@ -232,33 +235,34 @@ def system_roots() -> list[bytes]:
 
     Reads the default CA file and the hash-named files in the default CA
     directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them), and
-    keeps the trust settings of ``TRUSTED CERTIFICATE`` entries. As in
-    OpenSSL's store, the first copy of a certificate decides its trust.
+    keeps the trust settings of ``TRUSTED CERTIFICATE`` entries. As OpenSSL
+    does, it reads none of a CA file with an entry that doesn't parse, and a
+    hashed file up to such an entry; the first copy of a certificate decides
+    its trust.
     """
     store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     paths = ssl.get_default_verify_paths()
-    files = [paths.cafile] if paths.cafile else []
+    files = [(paths.cafile, True)] if paths.cafile else []
     if paths.capath:
         try:
-            files += _hashed_files(paths.capath)
+            files += [(path, False) for path in _hashed_files(paths.capath)]
         except OSError:
             pass
     seen = set()
-    for path in files:
+    for path, whole_file in files:
         try:
             with open(path, "rb") as f:
                 data = f.read()
         except OSError:
             continue
-        for der, tls_root in _pem_certificates(data):    # CA directories also hold CRLs
-            if der in seen:
-                continue
-            seen.add(der)
-            if tls_root:
-                try:
+        certs, complete = _pem_certificates(data)
+        if whole_file and not complete:
+            continue
+        for der, tls_root in certs:
+            if der not in seen:
+                seen.add(der)
+                if tls_root:
                     store.load_verify_locations(cadata=der)
-                except ssl.SSLError:
-                    continue
     return store.get_ca_certs(binary_form=True)
 
 

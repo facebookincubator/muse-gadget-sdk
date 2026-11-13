@@ -227,7 +227,7 @@ NONMINIMAL_SERVER_AUTH = bytes.fromhex("0681082b06010505070301")   # long-form l
     (der(0x30, der(0x30, EMAIL_PROTECTION) + der(0x30, SERVER_AUTH)), False),  # repeated
     (der(0x30, der(0x05, b"")), False),                             # unknown field
     (der(0x30, der(0xA0, NONMINIMAL_SERVER_AUTH)), False),          # not DER
-    (der(0x30, der(0x30, SERVER_AUTH)) + b"\x00", False),           # trailing bytes
+    (der(0x30, der(0x30, SERVER_AUTH)) + b"\x00", True),            # OpenSSL ignores what follows
     (der(0x30, der(0x30, SERVER_AUTH))[:-1], False),                # truncated
     (der(0x30, bytes([0x30, 0x0B]) + SERVER_AUTH), False),          # list overruns settings
     (der(0x30, der(0x30, b"\x04\x00")), False),                     # not an OID
@@ -263,6 +263,39 @@ def test_the_first_copy_of_a_root_decides_its_trust(tmp_path, monkeypatch):
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
                         lambda: SimpleNamespace(cafile=str(bundle), capath=None))
     assert tls.system_roots() == [plain_first.der]
+
+
+def test_an_entry_that_does_not_parse_ends_the_file_as_in_openssl(tmp_path, monkeypatch):
+    # OpenSSL loads none of a CA file with an entry it can't read, and reads
+    # a hashed file only up to such an entry.
+    good, after = CA("Before the bad entry"), CA("After the bad entry")
+    bad = trusted_pem(CA("Bad").der, reject=[b"\x06\x00"])    # an empty OID
+    pem = ssl.DER_cert_to_PEM_cert
+    (tmp_path / "bundle.pem").write_text(pem(good.der) + bad)
+    directory = tmp_path / "certs"
+    directory.mkdir()
+    (directory / "0a1b2c3d.0").write_text(pem(good.der) + bad + pem(after.der))
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=str(tmp_path / "bundle.pem"), capath=None))
+    assert tls.system_roots() == []
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=None, capath=str(directory)))
+    assert tls.system_roots() == [good.der]
+
+
+def test_hashed_files_are_read_in_suffix_order(tmp_path, monkeypatch):
+    # ".2" comes before ".10", so its copy of a root decides the root's trust.
+    root = CA("Root")
+    directory = tmp_path / "certs"
+    directory.mkdir()
+    fillers = [CA(f"Filler {i}") for i in range(11)]
+    for i, filler in enumerate(fillers):
+        (directory / f"0a1b2c3d.{i}").write_text(ssl.DER_cert_to_PEM_cert(filler.der))
+    (directory / "0a1b2c3d.2").write_text(ssl.DER_cert_to_PEM_cert(root.der))
+    (directory / "0a1b2c3d.10").write_text(trusted_pem(root.der, reject=[SERVER_AUTH]))
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=None, capath=str(directory)))
+    assert root.der in tls.system_roots()
 
 
 def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
