@@ -14,6 +14,39 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static muse_options_t *s_question;
 static uint32_t s_generation, s_revision;
 
+bool muse_options_console(const char *line)
+{
+    bool select = !strncmp(line, "options.select=", 15);
+    if (strcmp(line, "options") && !select) return false;
+    bool accepted = false;
+    if (select) {
+        char *end;
+        const char *p = line + 15;
+        unsigned long generation = strtoul(p, &end, 10);
+        if (*p >= '0' && *p <= '9' && end != p && *end == ',' && generation <= UINT32_MAX) {
+            p = end + 1;
+            unsigned long index = strtoul(p, &end, 10);
+            if (*p >= '0' && *p <= '9' && end != p && !*end && index < MUSE_OPTIONS_MAX)
+                accepted = muse_options_request((uint32_t)generation, (int)index);
+        }
+    }
+    /* The USB task has a small stack; copy only status, not the label buffers. */
+    uint32_t generation = 0;
+    int count = 0, selected = -1, status = MUSE_OPTIONS_EMPTY;
+    bool saved = false;
+    portENTER_CRITICAL(&s_lock);
+    if (s_question) {
+        generation = s_question->generation; count = s_question->count;
+        selected = s_question->selected; status = s_question->status; saved = s_question->saved;
+    }
+    portEXIT_CRITICAL(&s_lock);
+    printf("@options {\"generation\":%lu,\"count\":%d,\"selected\":%d,\"status\":%d,\"saved\":%s,\"accepted\":%s}\n",
+           (unsigned long)generation, count, selected, status,
+           saved ? "true" : "false", accepted ? "true" : "false");
+    fflush(stdout);
+    return true;
+}
+
 bool muse_options_snapshot(muse_options_t *out)
 {
     portENTER_CRITICAL(&s_lock);
