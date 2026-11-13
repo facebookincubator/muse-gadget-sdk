@@ -231,6 +231,13 @@ NONMINIMAL_SERVER_AUTH = bytes.fromhex("0681082b06010505070301")   # long-form l
     (der(0x30, der(0x30, SERVER_AUTH))[:-1], False),                # truncated
     (der(0x30, bytes([0x30, 0x0B]) + SERVER_AUTH), False),          # list overruns settings
     (der(0x30, der(0x30, b"\x04\x00")), False),                     # not an OID
+    (der(0x30, der(0xA0, b"\x06\x00")), False),                     # empty OID
+    (der(0x30, der(0x30, SERVER_AUTH + bytes.fromhex("0603802a03"))), False),  # padded OID
+    (der(0x30, der(0x30, SERVER_AUTH + bytes.fromhex("06022a83"))), False),    # unfinished OID
+    (der(0x30, der(0x30, SERVER_AUTH) + der(0x04, b"\x01")
+               + der(0xA1, der(0x30, bytes.fromhex("06032a0304") + b"\x05\x00"))), True),
+    (der(0x30, der(0x30, SERVER_AUTH) + der(0xA1, der(0x30, b"\x05\x00"))), False),
+    (der(0x30, der(0x30, SERVER_AUTH) + der(0xA1, b"\x04\x00")), False),
 ])
 def test_trust_settings_that_do_not_parse_are_not_trusted(tmp_path, monkeypatch, aux, kept):
     body = ROOT.der if aux is None else ROOT.der + aux
@@ -241,6 +248,21 @@ def test_trust_settings_that_do_not_parse_are_not_trusted(tmp_path, monkeypatch,
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
                         lambda: SimpleNamespace(cafile=str(bundle), capath=None))
     assert tls.system_roots() == ([ROOT.der] if kept else [])
+    if kept:    # never more trust than OpenSSL gives the same file
+        handshake(ssl.create_default_context(cafile=str(bundle)), server_context(ROOT, tmp_path))
+
+
+def test_the_first_copy_of_a_root_decides_its_trust(tmp_path, monkeypatch):
+    # OpenSSL keeps the first copy of a certificate it loads and ignores the rest.
+    rejected_first, plain_first = CA("Rejected first"), CA("Plain first")
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_text(trusted_pem(rejected_first.der, reject=[SERVER_AUTH])
+                      + ssl.DER_cert_to_PEM_cert(rejected_first.der)
+                      + ssl.DER_cert_to_PEM_cert(plain_first.der)
+                      + trusted_pem(plain_first.der, reject=[SERVER_AUTH]))
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=str(bundle), capath=None))
+    assert tls.system_roots() == [plain_first.der]
 
 
 def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):

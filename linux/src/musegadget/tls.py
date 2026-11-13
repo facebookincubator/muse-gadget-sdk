@@ -124,19 +124,42 @@ def _der_element(data: bytes, offset: int, limit: int) -> tuple[int, int, int]:
     return tag, offset, offset + length
 
 
+def _oid(data: bytes, start: int, end: int) -> tuple[bytes, int]:
+    """The DER OID at ``start`` and its end, checked as OpenSSL checks it."""
+    tag, content, element_end = _der_element(data, start, end)
+    value = data[content:element_end]
+    # Each sub-identifier ends with a byte below 0x80 and has no leading 0x80.
+    if tag != 0x06 or not value or value[-1] & 0x80 or any(
+            byte == 0x80 and (i == 0 or not value[i - 1] & 0x80)
+            for i, byte in enumerate(value)):
+        raise ValueError("bad OID")
+    return data[start:element_end], element_end
+
+
 def _oids(data: bytes, start: int, end: int) -> set[bytes]:
     oids = set()
     while start < end:
-        tag, _, element_end = _der_element(data, start, end)
-        if tag != 0x06:
-            raise ValueError("expected an OID")
-        oids.add(data[start:element_end])
-        start = element_end
+        oid, start = _oid(data, start, end)
+        oids.add(oid)
     return oids
 
 
-def _tls_certificate(trusted: bytes) -> bytes | None:
-    """The certificate of an OpenSSL ``TRUSTED CERTIFICATE``, if it may anchor TLS.
+def _algorithms(data: bytes, start: int, end: int) -> None:
+    """Check a DER ``SEQUENCE OF AlgorithmIdentifier``."""
+    while start < end:
+        tag, content, element_end = _der_element(data, start, end)
+        if tag != 0x30:
+            raise ValueError("expected an AlgorithmIdentifier")
+        _, content = _oid(data, content, element_end)
+        if content < element_end:
+            _, _, content = _der_element(data, content, element_end)    # parameters
+        if content != element_end:
+            raise ValueError("bad AlgorithmIdentifier")
+        start = element_end
+
+
+def _trusted_certificate(trusted: bytes) -> tuple[bytes, bool]:
+    """An OpenSSL ``TRUSTED CERTIFICATE``'s certificate, and whether it may anchor TLS.
 
     Its trust settings follow the certificate. As OpenSSL does for a TLS
     server, a root rejected for server authentication (or any purpose), or
@@ -146,7 +169,7 @@ def _tls_certificate(trusted: bytes) -> bytes | None:
     _, _, cert_end = _der_element(trusted, 0, len(trusted))
     cert, aux = trusted[:cert_end], trusted[cert_end:]
     if not aux:
-        return cert
+        return cert, True
     tag, start, end = _der_element(aux, 0, len(aux))
     if tag != 0x30 or end != len(aux):
         raise ValueError("bad trust settings")
@@ -161,26 +184,30 @@ def _tls_certificate(trusted: bytes) -> bytes | None:
             trust = _oids(aux, content, element_end)
         elif tag == 0xA0:
             reject = _oids(aux, content, element_end)
+        elif tag == 0xA1:
+            _algorithms(aux, content, element_end)
         start = element_end
     if reject and reject & {_SERVER_AUTH, _ANY_EKU}:
-        return None
-    if trust is not None and not trust & {_SERVER_AUTH, _ANY_EKU}:
-        return None
-    return cert
+        return cert, False
+    return cert, trust is None or bool(trust & {_SERVER_AUTH, _ANY_EKU})
 
 
-def _pem_certificates(data: bytes) -> list[bytes]:
-    """DER of the certificates in a PEM file that may anchor TLS."""
+def _pem_certificates(data: bytes) -> list[tuple[bytes, bool]]:
+    """Each certificate of a PEM file, as DER, and whether it may anchor TLS.
+
+    Like OpenSSL, this skips entries that don't parse and ignores anything
+    after the certificate in a plain ``CERTIFICATE`` entry.
+    """
     certs = []
     for label, body in _PEM_CERT.findall(data):
         try:
             der = base64.b64decode(b"".join(body.split()), validate=True)
             if label == b"TRUSTED CERTIFICATE":
-                der = _tls_certificate(der)
-        except (ValueError, IndexError, binascii.Error):
+                certs.append(_trusted_certificate(der))
+            else:
+                certs.append((der[:_der_element(der, 0, len(der))[2]], True))
+        except (ValueError, binascii.Error):
             continue
-        if der:
-            certs.append(der)
     return certs
 
 
@@ -205,7 +232,8 @@ def system_roots() -> list[bytes]:
 
     Reads the default CA file and the hash-named files in the default CA
     directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them), and
-    keeps the trust settings of ``TRUSTED CERTIFICATE`` entries.
+    keeps the trust settings of ``TRUSTED CERTIFICATE`` entries. As in
+    OpenSSL's store, the first copy of a certificate decides its trust.
     """
     store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     paths = ssl.get_default_verify_paths()
@@ -215,17 +243,22 @@ def system_roots() -> list[bytes]:
             files += _hashed_files(paths.capath)
         except OSError:
             pass
+    seen = set()
     for path in files:
         try:
             with open(path, "rb") as f:
                 data = f.read()
         except OSError:
             continue
-        for der in _pem_certificates(data):    # CA directories also hold CRLs
-            try:
-                store.load_verify_locations(cadata=der)
-            except ssl.SSLError:
+        for der, tls_root in _pem_certificates(data):    # CA directories also hold CRLs
+            if der in seen:
                 continue
+            seen.add(der)
+            if tls_root:
+                try:
+                    store.load_verify_locations(cadata=der)
+                except ssl.SSLError:
+                    continue
     return store.get_ca_certs(binary_form=True)
 
 
