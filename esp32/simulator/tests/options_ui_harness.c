@@ -95,7 +95,7 @@ int main(int argc, char **argv)
     lv_obj_t *answer=find(lv_layer_top(),"Pasta"); assert(answer);
     lv_obj_t *panel=lv_obj_get_parent(lv_obj_get_parent(answer));
     assert_panel_inside(panel);
-    /* Only the scrim dismisses; the close control and list remain inside it. */
+    /* Only the scrim dismisses; touches inside the question/list stay inside. */
     touch(s_w/2,32,true); touch(s_w/2,32,false); frame();
     assert(lv_obj_has_flag(lv_obj_get_parent(panel),LV_OBJ_FLAG_HIDDEN));
     assert(!lv_obj_has_flag(reopen,LV_OBJ_FLAG_HIDDEN));

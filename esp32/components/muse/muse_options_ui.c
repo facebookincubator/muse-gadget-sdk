@@ -21,13 +21,6 @@ static void open_options(lv_event_t *e)
     muse_state_poke();
 }
 
-static void close_options(lv_event_t *e)
-{
-    (void)e;
-    s_expanded = false;
-    muse_state_poke();
-}
-
 static void outside_clicked(lv_event_t *e)
 {
     if (lv_event_get_target(e) != s_overlay) return;
@@ -142,10 +135,6 @@ void muse_options_ui_tick(bool available)
         s_seen_revision = s_view->revision;
         lv_obj_clean(s_panel);
         if (have) {
-            lv_obj_t *close = lv_button_create(s_panel);
-            lv_obj_set_width(close, lv_pct(100));
-            lv_obj_add_event_cb(close, close_options, LV_EVENT_CLICKED, NULL);
-            label(close, "Close options");
             label(s_panel, s_view->question[0] ? s_view->question : "Choose an option");
             for (int i = 0; i < s_view->count; ++i) {
                 lv_obj_t *button = lv_button_create(s_panel);
@@ -161,9 +150,9 @@ void muse_options_ui_tick(bool available)
             if (!status[0]) {
                 status = s_view->status == MUSE_OPTIONS_SELECTED ? "Answer selected"
                          : s_view->status == MUSE_OPTIONS_QUEUED || s_view->status == MUSE_OPTIONS_SENDING ? "Sending answer..."
-                         : s_view->status == MUSE_OPTIONS_READY ? "Tap one answer" : "Continue in the Muse app";
+                         : s_view->status == MUSE_OPTIONS_READY ? "" : "Continue in the Muse app";
             }
-            label(s_panel, status);
+            if (status[0]) label(s_panel, status);
             lv_obj_scroll_to_y(s_panel, 0, LV_ANIM_OFF);
         }
     }
