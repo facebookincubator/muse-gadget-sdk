@@ -65,13 +65,21 @@ def model(ticks, start, end, cap, energy):
             continue
         if down:
             # A real press wins over playback suppression: it cancels
-            # arming or converts a capture even on a suppressed tick.
+            # arming or converts a capture even on a suppressed tick. A
+            # release noted in the same tick ends the button's capture.
             if state == ARMED:
                 state, act = IDLE, CANCELLED
                 stats[1] += 1
             elif state == CAPTURING:
-                state, act = CAPTURING_PTT, CONVERTED
                 stats[3] += 1
+                if up:
+                    state, act = IDLE, CONVERTED | SUBMITTED
+                    stats[2] += 1
+                else:
+                    state, act = CAPTURING_PTT, CONVERTED
+            elif state == CAPTURING_PTT and up:
+                state, act = IDLE, SUBMITTED
+                stats[2] += 1
             trace.append((state, act))
             continue
         if state == CAPTURING_PTT:
@@ -192,6 +200,17 @@ class WakeWordCore(unittest.TestCase):
         # The physical release ends it: SUBMITTED alone, no synthetic POST_UP.
         self.assertEqual(trace[-1][1], SUBMITTED)
         self.assertFalse(any(a & POST_UP for _, a in trace))
+
+    def test_press_and_release_in_one_tick_end_the_capture(self):
+        # Regression: the release used to be lost with the press, leaving
+        # CAPTURING_PTT (and every wake ignored) until the hard cap.
+        ticks = [tick('W'), tick('s'), tick(down=1, up=1), tick('W'), tick('s')]
+        trace = self.run_core(ticks, energy=0)
+        self.assertEqual(trace[2], (IDLE, CONVERTED | SUBMITTED))
+        self.assertEqual(trace[4], (CAPTURING, POST_DOWN))   # wakes work again
+        converted = [tick('W'), tick('s'), tick(down=1), tick(down=1, up=1)]
+        trace = self.run_core(converted, energy=0)
+        self.assertEqual(trace[3], (IDLE, SUBMITTED))
 
     def test_press_during_playback_cancels_arming(self):
         # Regression: the glue reports a physical PTT turn through the
