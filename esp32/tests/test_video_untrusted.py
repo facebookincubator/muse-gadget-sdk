@@ -440,6 +440,28 @@ class StaleStreamState(unittest.TestCase):
         f = self.frames({"v_a": key[:28], "v_b": frames[1].ljust(AU_MAX, b"\0"), "v_c": key[:4], "v_k": key})
         self.check("vp8_vdec", "vp8", {k[2:]: v for k, v in f.items()}, 1, (240, 240))
 
+    def test_vp8_inter_frame_after_a_failed_size_change(self):
+        # A key frame of another size (smaller than the stream's) frees every
+        # picture; this one then fails (its first partition runs past the
+        # frame), leaving the references without memory. The inter frame
+        # after it predicted from them through NULL; it is refused now, and
+        # the next key frame decodes.
+        ivf = (ROOT / "tests/vectors/vp8/p0_keyframes.ivf").read_bytes()   # 240 x 240
+        frames, at = [], 32
+        while at + 12 <= len(ivf):
+            n = int.from_bytes(ivf[at:at + 4], "little")
+            frames.append(ivf[at + 12:at + 12 + n])
+            at += 12 + n
+        key, inter = frames[0], frames[1]
+        self.assertEqual((key[0] & 1, inter[0] & 1), (0, 1))
+        first = int.from_bytes(key[:3], "little") >> 5
+        small = bytearray(key[:10 + first - 5])   # 3-byte tag, 7-byte key frame header
+        small[6:8] = (224).to_bytes(2, "little")
+        self.assertLessEqual(first, len(small))   # as the ring takes it (muse_vstream.c)
+        f = self.frames({"v_key": key, "v_small": bytes(small), "v_inter": inter, "v_key2": key})
+        seq = self.run_harness("vp8_vdec", "vp8", [f["v_key"], f["v_small"], f["v_inter"], f["v_key2"]])
+        self.assertEqual([line[2] for line in seq], ["1", "-1", "-1", "1"], seq)
+
     def test_decoders_keep_no_stream_position_across_calls(self):
         src = (TINY / "h264bsd_decoder.c").read_text()
         body = src[src.index("u32 h264bsdDecode(storage_t *pStorage"):]

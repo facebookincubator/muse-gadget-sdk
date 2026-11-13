@@ -64,7 +64,9 @@ segmentation, 240 to 480 px).
 - Memory (`vp8/common/alloccommon.c`, `vp8/common/reconinter.c`,
   `vpx_scale/`): pictures are allocated when a frame first needs one, so a
   stream holds only as many as its references use (libvpx allocates four up
-  front, plus a scratch picture the decoder never uses). Their border is 8
+  front, plus a scratch picture the decoder never uses). An inter frame
+  whose references have no memory (a key frame of a new size failed after
+  freeing them) is refused, as before a first key frame. Their border is 8
   pixels (16 on the S3 and the S31, whose SIMD code wants 16-byte aligned
   rows) instead of 32: a reference block that reaches past it is copied
   through an edge-emulation buffer with its coordinates clamped into the
