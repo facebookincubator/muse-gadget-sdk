@@ -329,6 +329,10 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         /* Toggle mode (64-66): letting go of the first press, then a press that stops. */
         if(frame==note_release_frame) push(scenario>=64 && scenario<=66 ? MUSE_PTT_DOWN : MUSE_PTT_UP);
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
+        if(scenario==67 && frame==40) {   /* the wake word's endpointing */
+            muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+            xQueueSend(&queue,&u,0);
+        }
         if(scenario==58 && frame==10) atomic_store(&s_shutdown,true);
         if(scenario==59 && frame==10) atomic_fetch_add(&s_call_epoch,1);
         for(size_t i=0;i<n;i++) p[i]=scenario>=60 ?
@@ -487,6 +491,23 @@ int main(int argc,char **argv) {
             }
             if(scenario==70) assert(clock_us==1880000 && !queue.n); /* no release: 880 ms hold */
         }
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==67) {
+        /* Toggle builds: a wake word note still ends at its synthetic
+         * release, not at the 15 s cap waiting for a second press. */
+        assert(NOTE_TOGGLE);
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        char why[96];
+        assert(record(true,why,sizeof(why)) && notes==1);
+        assert(frame>40 && frame<=40+7 && note_frames<MAX_FRAMES);
         drop_rec(); free(s_pre); return 0;
     }
     if(scenario>=50) {

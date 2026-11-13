@@ -133,6 +133,9 @@ class StopWatchPTT(unittest.TestCase):
         voice = (MUSE / 'muse_voice.c').read_text()
         self.assertIn('bool synthetic = pending_down && s_press_synthetic;', voice)
 
+    def test_wake_word_note_ends_at_its_release_in_toggle_builds(self):
+        self.run_case('voice', 67, board=3, realtime=0)
+
     def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
         # The seed already ends at the speech start; the idle ring covers
         # the same audio and would play it twice.

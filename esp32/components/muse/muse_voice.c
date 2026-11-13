@@ -451,7 +451,9 @@ static bool record(bool seeded, char *why, size_t cap)
          * Capture runs 60-80 ms behind real time and people let go on their
          * last syllable, so keep going briefly after release.
          */
-        if (!released && got_event(NOTE_TOGGLE ? MUSE_PTT_DOWN : MUSE_PTT_UP)) {
+        /* A wake word note ends at its synthetic release (endpointing or
+         * disable) in toggle builds too: no second press is coming. */
+        if (!released && got_event(NOTE_TOGGLE && !seeded ? MUSE_PTT_DOWN : MUSE_PTT_UP)) {
             released = true;
             stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
         }
@@ -731,7 +733,7 @@ static note_result_t note_held(bool wake, bool barge_in)
         bool eligible = !settle && (NOTE_TOGGLE ? captured >= NOTE_MIN_RECORD_FRAMES :
             !note_requires_hold() ||
             (until - s_press_us >= NOTE_MIN_HOLD_US && captured >= NOTE_MIN_RECORD_FRAMES));
-        if (edge && NOTE_TOGGLE && ev.type != MUSE_PTT_END_CALL) {
+        if (edge && NOTE_TOGGLE && !s_press_synthetic && ev.type != MUSE_PTT_END_CALL) {
             if (ev.type == MUSE_PTT_UP) {
                 xQueueReceive(s_queue, &ev, 0);   /* letting go doesn't stop a toggled note */
                 continue;
