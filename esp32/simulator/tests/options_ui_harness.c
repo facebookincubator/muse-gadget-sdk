@@ -95,6 +95,15 @@ int main(int argc, char **argv)
     lv_obj_t *answer=find(lv_layer_top(),"Pasta"); assert(answer);
     lv_obj_t *panel=lv_obj_get_parent(lv_obj_get_parent(answer));
     assert_panel_inside(panel);
+    /* Only the scrim dismisses; the close control and list remain inside it. */
+    touch(s_w/2,32,true); touch(s_w/2,32,false); frame();
+    assert(lv_obj_has_flag(lv_obj_get_parent(panel),LV_OBJ_FLAG_HIDDEN));
+    assert(!lv_obj_has_flag(reopen,LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_get_width(reopen)>60);
+    assert(lv_obj_get_style_bg_opa(reopen,0)==LV_OPA_TRANSP);
+    assert(!muse_options_pending());
+    tap(reopen);
+    assert(!lv_obj_has_flag(lv_obj_get_parent(panel),LV_OBJ_FLAG_HIDDEN));
     /* The whole picker owns vertical scrolling, never the face's tile navigation. */
     touch(s_w/2,s_h/2,true); touch(s_w/2,s_h/2-60,true); touch(s_w/2,s_h/2-60,false);
     assert(!muse_options_pending() && lv_obj_get_scroll_x(s_tv) == 0);
