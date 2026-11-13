@@ -11,6 +11,8 @@ static const lv_font_t *s_font;
 static muse_options_t *s_view;
 static uint32_t s_seen_generation, s_seen_revision;
 static bool s_expanded;
+static lv_point_t s_press_point;
+static bool s_dragged;
 
 static void open_options(lv_event_t *e)
 {
@@ -35,6 +37,24 @@ static void outside_clicked(lv_event_t *e)
 
 static void select_option(lv_event_t *e)
 {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESSING && code != LV_EVENT_CLICKED) return;
+    lv_indev_t *input = lv_event_get_indev(e);
+    if (code == LV_EVENT_PRESSED) {
+        s_dragged = false;
+        if (input) lv_indev_get_point(input, &s_press_point);
+        return;
+    }
+    if (code == LV_EVENT_PRESSING && input) {
+        lv_point_t point;
+        lv_indev_get_point(input, &point);
+        int dx = point.x - s_press_point.x, dy = point.y - s_press_point.y;
+        if (dx * dx + dy * dy > 100) s_dragged = true;
+        return;
+    }
+    /* A list that fits has no scroll object to consume a drag. Still require
+     * a stationary tap, rather than selecting its row on release. */
+    if (code != LV_EVENT_CLICKED || s_dragged) return;
     int index = (int)(intptr_t)lv_event_get_user_data(e);
     if (muse_options_request(s_view->generation, index)) s_expanded = false;
     muse_state_poke();
@@ -134,7 +154,7 @@ void muse_options_ui_tick(bool available)
                 lv_obj_set_style_min_height(button, 44, 0);
                 lv_obj_set_style_bg_color(button, lv_color_hex(i == s_view->selected ? 0x67508e : 0x302642), 0);
                 label(button, s_view->labels[i]);
-                lv_obj_add_event_cb(button, select_option, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+                lv_obj_add_event_cb(button, select_option, LV_EVENT_ALL, (void *)(intptr_t)i);
                 if (s_view->status != MUSE_OPTIONS_READY) lv_obj_add_state(button, LV_STATE_DISABLED);
             }
             const char *status = s_view->detail;
