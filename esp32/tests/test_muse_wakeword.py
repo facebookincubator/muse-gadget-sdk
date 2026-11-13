@@ -50,6 +50,13 @@ def model(ticks, start, end, cap, energy):
     stats = [0, 0, 0, 0, 0]   # wakes, cancels, submits, conversions, suppressed
     trace = []
     for ev_ch, voiced, down, up, playback, enabled in ticks:
+        if ev_ch == 'A':
+            # The glue could not post the press: back to idle, a cancel.
+            if state != IDLE:
+                stats[1] += 1
+            state, armed, capture, silence = IDLE, 0, 0, 0
+            trace.append((state, 0))
+            continue
         ev = EV[ev_ch] if enabled else NONE   # harness: listening == enabled
         act = 0
         if not enabled:
@@ -67,13 +74,21 @@ def model(ticks, start, end, cap, energy):
             continue
         if down:
             # A real press wins over playback suppression: it cancels
-            # arming or converts a capture even on a suppressed tick.
+            # arming or converts a capture even on a suppressed tick. A
+            # release noted in the same tick ends the button's capture.
             if state == ARMED:
                 state, act = IDLE, CANCELLED
                 stats[1] += 1
             elif state == CAPTURING:
-                state, act = CAPTURING_PTT, CONVERTED
                 stats[3] += 1
+                if up:
+                    state, act = IDLE, CONVERTED | SUBMITTED
+                    stats[2] += 1
+                else:
+                    state, act = CAPTURING_PTT, CONVERTED
+            elif state == CAPTURING_PTT and up:
+                state, act = IDLE, SUBMITTED
+                stats[2] += 1
             trace.append((state, act))
             continue
         if state == CAPTURING_PTT:
@@ -194,6 +209,24 @@ class WakeWordCore(unittest.TestCase):
         trace = self.run_core(ticks, energy=0)
         # The physical release ends it: SUBMITTED alone, no synthetic POST_UP.
         self.assertEqual(trace[-1][1], SUBMITTED)
+        self.assertFalse(any(a & POST_UP for _, a in trace))
+
+    def test_press_and_release_in_one_tick_end_the_capture(self):
+        # Regression: the release used to be lost with the press, leaving
+        # CAPTURING_PTT (and every wake ignored) until the hard cap.
+        ticks = [tick('W'), tick('s'), tick(down=1, up=1), tick('W'), tick('s')]
+        trace = self.run_core(ticks, energy=0)
+        self.assertEqual(trace[2], (IDLE, CONVERTED | SUBMITTED))
+        self.assertEqual(trace[4], (CAPTURING, POST_DOWN))   # wakes work again
+        converted = [tick('W'), tick('s'), tick(down=1), tick(down=1, up=1)]
+        trace = self.run_core(converted, energy=0)
+        self.assertEqual(trace[3], (IDLE, SUBMITTED))
+
+    def test_abort_drops_a_capture_whose_press_never_went(self):
+        ticks = [tick('W'), tick('s'), tick('A'), tick(), tick(), tick(), tick()]
+        trace = self.run_core(ticks, energy=0)
+        self.assertEqual(trace[2], (IDLE, 0))
+        # Nothing posts afterwards: no stray release for a turn that never opened.
         self.assertFalse(any(a & POST_UP for _, a in trace))
 
     def test_press_during_playback_cancels_arming(self):
@@ -444,6 +477,58 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('if (seeded && s_seed_frames)', voice)
         self.assertIn('muse_wakeword_set_ptt_turn(!synthetic)', voice)
 
+    def test_feature_off_builds_allocate_no_seed(self):
+        # The one-second seed is only used by wake word turns: a build
+        # without the feature (no-PSRAM boards included) must not pay
+        # 32 KB of internal RAM for it.
+        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
+        start = between(voice, 'esp_err_t muse_voice_start(', 's_pre = heap_caps_malloc')
+        gated = between(start, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
+        self.assertIn('s_seed = heap_caps_malloc(', gated)
+        self.assertEqual(voice.count('s_seed = heap_caps_malloc('), 1)
+        kconfig = (WW / 'Kconfig').read_text()
+        enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_RUNNER')
+        self.assertIn('depends on SPIRAM', enable)
+
+    def test_synthetic_edges_carry_the_input_epoch_and_time(self):
+        # note_held cancels a press whose epoch is not the current one, and
+        # the epoch moves whenever a real edge is dropped: an untagged
+        # (zero) synthetic press would then never record again.
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        post = between(glue, 'static bool post_ptt(', 'xQueueSend(')
+        self.assertIn('.epoch = muse_input_call_epoch()', post)
+        self.assertIn('.at_us = esp_timer_get_time()', post)
+
+    def test_glue_retries_a_refused_release_and_drops_a_refused_press(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        tick_fn = between(glue, 'static void tick(', 'static void apply_requests(')
+        # The owed release goes before the core ticks again ...
+        self.assertLess(tick_fn.index('if (s_up_owed && post_ptt(MUSE_PTT_UP))'),
+                        tick_fn.index('muse_wakeword_core_tick('))
+        self.assertIn('!post_ptt(MUSE_PTT_UP)) {\n        s_up_owed = true;', tick_fn)
+        # ... and a refused press ends the session and clears its seed.
+        down = between(tick_fn, 'MUSE_WW_ACTION_POST_PTT_DOWN', 'MUSE_WW_ACTION_POST_PTT_UP')
+        self.assertIn('if (!s_up_owed && post_ptt(MUSE_PTT_DOWN))', down)
+        self.assertIn('muse_wakeword_core_abort(&s_core);', down)
+        self.assertIn('muse_voice_seed_preroll(NULL, 0);', down)
+
+    def test_enable_wakes_a_resting_voice_task_and_needs_a_running_glue(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        setter = between(glue, 'void muse_wakeword_set_enabled(bool on)', 'void muse_wakeword_bench_trigger(')
+        not_started = between(setter, 'if (!s_started) {', 'return;')
+        # After a failed init only "off" is saved.
+        self.assertIn('if (!on) {', not_started)
+        self.assertLess(setter.index('if (!s_started) {'),
+                        setter.index('muse_settings_set_wakeword_on(on);'))
+        self.assertIn('muse_state_nudge();', setter)
+
+    def test_failed_wake_task_start_frees_everything(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        failed = between(glue, '"no memory for the wake task"', 's_started = true;')
+        for freed in ('ww_runner_destroy(s_runner)', 'vStreamBufferDeleteWithCaps(s_tap)',
+                      'free(pre_storage)', 'free(s_snap)'):
+            self.assertIn(freed, failed)
+
     def test_glue_starts_with_the_voice_pipeline(self):
         app = (ROOT / 'components/muse/muse_app.c').read_text()
         started = app.index('muse_voice_start(q)')
@@ -458,15 +543,23 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertLess(listening, posted)
         self.assertLess(caption, posted)
 
+    def test_wake_heard_wakes_the_screen(self):
+        # A talk press wakes the screen; a wake must too, or its prompt and
+        # the whole hands-free turn happen on a dark display.
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        heard = between(glue, 'before == MUSE_WW_IDLE && now == MUSE_WW_ARMED', 'MUSE_WW_ACTION_POST_PTT_DOWN')
+        self.assertIn('muse_state_set_asleep(false)', heard)
+
     def test_sound_page_has_wake_word_toggle(self):
         # One row name for every runner; only the small print differs:
-        # the bench runner says the model is not implemented yet.
+        # the bench runner says only a clap triggers it.
         ui = (ROOT / 'components/muse/muse_settings_ui.c').read_text()
         sound = between(ui, 'static void build_sound_page(', 'static void tick_sound(void)')
         self.assertIn('switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw)', sound)
         self.assertIn('#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH', sound)
-        self.assertIn('Model not implemented yet, clap to wake', sound)
+        self.assertIn('note(list, "A clap starts a voice note. There\'s no spoken wake word yet.");', sound)
         self.assertIn('Listens for \\"Hey Muse\\"', sound)
+        self.assertNotIn('not implemented', sound)   # user copy, not a placeholder
         self.assertNotIn('Clap test', sound)
         callback = between(ui, 'static void on_wake_sw(', 'static void build_sound_page(')
         self.assertIn('muse_wakeword_set_enabled(', callback)

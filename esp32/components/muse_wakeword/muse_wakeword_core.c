@@ -84,6 +84,15 @@ static void go_idle(muse_wakeword_core_t *core)
     core->silence_chunks = 0;
 }
 
+void muse_wakeword_core_abort(muse_wakeword_core_t *core)
+{
+    if (!core || core->state == MUSE_WW_IDLE) {
+        return;
+    }
+    core->stats.cancels++;
+    go_idle(core);
+}
+
 static bool speech_now(const muse_wakeword_core_t *core, const muse_wakeword_input_t *in)
 {
     return in->event == WW_EVENT_SPEECH_START || (core->cfg.energy_endpointing && in->voiced);
@@ -125,10 +134,23 @@ uint32_t muse_wakeword_core_tick(muse_wakeword_core_t *core, const muse_wakeword
             core->stats.cancels++;
             return MUSE_WW_ACTION_CANCELLED;
         }
+        /* A release noted in the same tick (a quick tap between two
+         * chunks) ends the button's capture now: waiting for another
+         * release would hold the session, and every wake, until the cap. */
         if (core->state == MUSE_WW_CAPTURING) {
-            core->state = MUSE_WW_CAPTURING_PTT;
             core->stats.conversions++;
+            if (in->ptt_up) {
+                go_idle(core);
+                core->stats.submits++;
+                return MUSE_WW_ACTION_CONVERTED_TO_PTT | MUSE_WW_ACTION_SUBMITTED;
+            }
+            core->state = MUSE_WW_CAPTURING_PTT;
             return MUSE_WW_ACTION_CONVERTED_TO_PTT;
+        }
+        if (core->state == MUSE_WW_CAPTURING_PTT && in->ptt_up) {
+            go_idle(core);   /* the converting press was let go */
+            core->stats.submits++;
+            return MUSE_WW_ACTION_SUBMITTED;
         }
         return MUSE_WW_ACTION_NONE;   /* IDLE or already the button's turn */
     }

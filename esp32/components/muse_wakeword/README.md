@@ -71,8 +71,8 @@ For plumbing-only bring-up, build instead with
 Or clap loudly near the microphones while listening. On-device, the
 same persisted opt-in is the **Sound > Wake word** settings switch
 (on button boards, the quick menu's **Wake word** row); in bench
-builds the switch's small print says the model is not implemented
-yet, since clapping is all the bench runner detects. A submit only
+builds the switch's small print says a clap starts a voice note,
+since clapping is all the bench runner detects. A submit only
 reaches Muse once the gadget is paired; unpaired, the turn stops
 at the setup caption, and the `muse_wake` log lines plus `@wake`
 counters show the flow. In the Muse app once paired,
