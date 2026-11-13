@@ -103,26 +103,36 @@ def check_trust_store() -> list[str] | None:
     of the CA directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override
     them; ``SSL_CERT_DIR`` may list several, separated as in ``PATH``). A
     root counts if it's there at all, whatever trust settings it carries.
+    A CA file or directory that exists but can't be read makes the whole
+    store unreadable, since OpenSSL might still read what this can't.
     """
     paths = ssl.get_default_verify_paths()
-    files = [paths.cafile] if paths.cafile else []
+    store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    readable = False
+    if paths.cafile:
+        try:
+            store.load_verify_locations(cafile=paths.cafile)
+        except (OSError, ssl.SSLError):
+            return None
+        readable = True
     variable = getattr(paths, "openssl_capath_env", None)
     listed = os.environ.get(variable) if variable else None
     directories = listed.split(os.pathsep) if listed else ([paths.capath] if paths.capath else [])
     for directory in directories:
+        if not os.path.isdir(directory):
+            continue        # OpenSSL skips a listed directory that isn't there
         try:
             with os.scandir(directory) as entries:
-                files += sorted(entry.path for entry in entries
-                                if _HASH_NAME.fullmatch(entry.name) and entry.is_file())
+                files = sorted(entry.path for entry in entries
+                               if _HASH_NAME.fullmatch(entry.name) and entry.is_file())
         except OSError:
-            pass
-    store, readable = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT), False
-    for path in files:
-        try:
-            store.load_verify_locations(cafile=path)
+            return None
+        for path in files:
+            try:
+                store.load_verify_locations(cafile=path)
+            except (OSError, ssl.SSLError):
+                continue    # OpenSSL can't load it either
             readable = True
-        except (OSError, ssl.SSLError):
-            continue
     if not readable:
         return None
     return sorted({name for der in store.get_ca_certs(binary_form=True)

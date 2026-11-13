@@ -198,10 +198,29 @@ def test_check_trust_store_tells_a_clean_store_from_an_unreadable_one(tmp_path, 
     use_store(monkeypatch, tmp_path / "bundle.pem", None)
     assert tls.check_trust_store() == []
     assert tls.trust_store_problem() is None
-    for cafile, capath in ((None, None), (tmp_path / "absent.pem", tmp_path / "absent")):
+    (tmp_path / "empty").mkdir()
+    for cafile, capath in ((None, None), (None, tmp_path / "empty"),
+                           (tmp_path / "absent.pem", tmp_path / "absent")):
         use_store(monkeypatch, cafile, capath)
         assert tls.check_trust_store() is None
         assert tls.trust_store_problem() == "can't read the system trust store"
+
+
+def test_a_directory_that_cant_be_listed_makes_the_store_unreadable(tmp_path, monkeypatch):
+    # OpenSSL opens hashed files by name, so it might read a root from a
+    # directory this check can't list.
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    (tmp_path / "certs").mkdir()
+    real_scandir = tls.os.scandir
+
+    def scandir(path):
+        if str(path) == str(tmp_path / "certs"):
+            raise PermissionError(path)
+        return real_scandir(path)
+
+    monkeypatch.setattr(tls.os, "scandir", scandir)
+    use_store(monkeypatch, tmp_path / "bundle.pem", tmp_path / "certs")
+    assert tls.check_trust_store() is None
 
 
 def test_the_client_context_refuses_an_unsafe_trust_store(tmp_path, monkeypatch):
