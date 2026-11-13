@@ -26,6 +26,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/idf_additions.h"
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
@@ -171,7 +172,11 @@ void muse_wakeword_bench_trigger(bool with_speech)
 
 static void post_ptt(muse_ptt_t type)
 {
-    muse_input_event_t ev = { .type = type, .synthetic = true };
+    /* The current input epoch, like a real edge: muse_voice cancels a press
+     * whose epoch is stale, so a zero here would end every hands-free turn
+     * once any real edge had been dropped. */
+    muse_input_event_t ev = { .type = type, .synthetic = true, .epoch = muse_input_call_epoch(),
+                              .at_us = esp_timer_get_time() };
     if (xQueueSend(s_queue, &ev, 0) != pdTRUE) {
         ESP_LOGW(TAG, "input queue full, synthetic %s dropped",
                  type == MUSE_PTT_DOWN ? "down" : "up");

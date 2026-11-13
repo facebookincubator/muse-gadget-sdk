@@ -386,6 +386,15 @@ class WakeWordFirmwareContract(unittest.TestCase):
         enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_RUNNER')
         self.assertIn('depends on SPIRAM', enable)
 
+    def test_synthetic_edges_carry_the_input_epoch_and_time(self):
+        # note_held cancels a press whose epoch is not the current one, and
+        # the epoch moves whenever a real edge is dropped: an untagged
+        # (zero) synthetic press would then never record again.
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        post = between(glue, 'static void post_ptt(', 'xQueueSend(')
+        self.assertIn('.epoch = muse_input_call_epoch()', post)
+        self.assertIn('.at_us = esp_timer_get_time()', post)
+
     def test_glue_starts_with_the_voice_pipeline(self):
         app = (ROOT / 'components/muse/muse_app.c').read_text()
         started = app.index('muse_voice_start(q)')
