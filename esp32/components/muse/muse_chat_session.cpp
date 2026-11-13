@@ -74,6 +74,9 @@ extern "C" {
 #include "muse_account_api.h"
 #include "muse_link.h"
 #include "muse_settings.h"
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+#include "muse_state.h"
+#endif
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
@@ -158,7 +161,11 @@ static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP
 
 /* ---- Voice task <-> session task ---- */
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_UI_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_INCOMING };
+#else
 enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_INCOMING };
+#endif
 
 struct cmd_t {
     cmd_type_t type;
@@ -247,6 +254,10 @@ struct turn_t {
     uint32_t review;         /* this turn's identity for reply review (typed turns all have gen 0) */
 #endif
     bool text;               /* typed at the console: the reply goes there, unspoken */
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    bool ui_text;            /* also drive on-screen THINKING/SPEAKING captions */
+    int64_t pace_us;
+#endif
     bool end_requested, end_sent, chat_posted, acked;
     int64_t dict_id, chat_id;
     int64_t start_us, end_sent_us, chat_us, last_event_us, last_content_us;
@@ -1037,6 +1048,13 @@ static void turn_fail(const char *why)
     if (s_turn.text) {
         muse_hatch_console("error", why, nullptr);
     }
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    if (s_turn.ui_text) {
+        muse_state_set_progress(0);
+        muse_state_set_mode(MUSE_MODE_IDLE);
+        muse_state_set_caption("%s", why);
+    }
+#endif
     emit(MUSE_HATCH_EV_ERROR, why);
     turn_finish();
 }
@@ -1048,12 +1066,23 @@ static void turn_done(bool complete)
         muse_hatch_console("done", nullptr, "\"messages\":%d,\"complete\":%s", s_turn.nmsgs,
                            complete ? "true" : "false");
     }
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    if (s_turn.ui_text) {
+        muse_state_set_progress(0);
+        muse_state_set_mode(MUSE_MODE_IDLE);
+        muse_state_set_caption("%s", "");
+    }
+#endif
     emit(MUSE_HATCH_EV_DONE, complete ? nullptr : "REPLY INCOMPLETE");
     turn_finish();
 }
 
 /* Ends any turn in progress and starts a fresh one. False if Hatch can't be reached. */
-static bool turn_start(uint32_t gen, bool text)
+static bool turn_start(uint32_t gen, bool text
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+                       , bool ui_text = false, const char *prompt_text = nullptr
+#endif
+)
 {
     if (s_turn.phase != P_IDLE) {
         if (s_turn.text) {
@@ -1074,11 +1103,32 @@ static bool turn_start(uint32_t gen, bool text)
     s_turn.review = muse_review_turn();
 #endif
     s_turn.text = text;
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    s_turn.ui_text = ui_text;
+#endif
     s_turn.tts_msg = -1;
     memset(s_marks, 0, sizeof(s_marks));
     s_reply_shown[0] = '\0';
     s_turn.start_us = now_us();
     resampler_init(&s_turn.up, MIC_RATE, DICT_RATE);
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    if (ui_text) {
+        if (prompt_text && prompt_text[0]) {
+            snprintf(s_turn.committed, sizeof(s_turn.committed), "SENT: %s", prompt_text);
+        }
+        muse_state_set_asleep(false);
+        muse_state_poke();
+        muse_state_set_progress(0);
+        muse_state_set_mode(MUSE_MODE_THINKING);
+        char page[MUSE_CAPTION_MAX];
+        if (s_turn.committed[0] && muse_hatch_caption_at(s_turn.committed, 0, page, sizeof(page)) && page[0]) {
+            strlcpy(s_reply_shown, page, sizeof(s_reply_shown));
+            muse_state_set_caption("%s", page);
+        } else {
+            muse_state_set_caption(s_connected ? "ASKING MUSE..." : "CONNECTING TO MUSE...");
+        }
+    }
+#endif
     if (!ensure_connected()) {
         turn_fail(muse_hatch_configured() ? "CAN'T REACH MUSE" : "MUSE NOT SET UP");
         return false;
@@ -1295,6 +1345,30 @@ static void post_chat(const char *text)
 }
 
 /* A typed turn: the text goes straight to the chat. */
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static void text_begin(const char *text, bool ui_text = false)
+{
+    if (!turn_start(0, true, ui_text, text)) {
+        return;
+    }
+    ESP_LOGI(TAG, "typed turn: %u bytes (ui=%d)", (unsigned)strlen(text), (int)ui_text);
+    send_chat(text, "text", false);
+    if (s_turn.phase == P_WAIT_REPLY) {
+        mark(M_SENT);
+        muse_hatch_console("sent", nullptr, "\"bytes\":%u", (unsigned)strlen(text));
+        if (s_turn.ui_text) {
+            muse_state_set_mode(MUSE_MODE_THINKING);
+            char page[MUSE_CAPTION_MAX];
+            if (s_turn.committed[0] && muse_hatch_caption_at(s_turn.committed, 0, page, sizeof(page)) && page[0]) {
+                strlcpy(s_reply_shown, page, sizeof(s_reply_shown));
+                muse_state_set_caption("%s", page);
+            } else {
+                muse_state_set_caption("WAITING FOR MUSE...");
+            }
+        }
+    }
+}
+#else
 static void text_begin(const char *text)
 {
     if (!turn_start(0, true)) {
@@ -1307,6 +1381,7 @@ static void text_begin(const char *text)
         muse_hatch_console("sent", nullptr, "\"bytes\":%u", (unsigned)strlen(text));
     }
 }
+#endif
 
 static void on_dictation_line(cJSON *line)
 {
@@ -1486,6 +1561,26 @@ static void show_reply_start(const msg_t &m)
     }
 }
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+/* Updates the on-screen reply page for a WG1200 touchscreen text turn. */
+static void show_ui_reply_page(void)
+{
+    if (!s_turn.ui_text) {
+        return;
+    }
+    char page[MUSE_CAPTION_MAX];
+    if (muse_hatch_turn_caption(s_turn.pcm_out, page, sizeof(page)) && page[0]) {
+        if (muse_state_mode(nullptr) != MUSE_MODE_SPEAKING) {
+            muse_state_set_mode(MUSE_MODE_SPEAKING);
+        }
+        if (strcmp(page, s_reply_shown) != 0) {
+            strlcpy(s_reply_shown, page, sizeof(s_reply_shown));
+            muse_state_set_caption("%s", page);
+        }
+    }
+}
+#endif
+
 static void message_done(int i, const char *final_text)
 {
     msg_t &m = s_turn.msgs[i];
@@ -1503,10 +1598,23 @@ static void message_done(int i, const char *final_text)
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */
         size_t n = m.len;
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+        if (s_turn.ui_text && !m.len && final_text && final_text[0]) {
+            append_text(m, final_text);
+            n = m.len;
+            muse_hatch_console("final", final_text, "\"msg\":%d", i);
+        } else
+#endif
         if (final_text && final_text[0] && strlen(final_text) != m.len) {
             n = strlen(final_text);
             muse_hatch_console("final", final_text, "\"msg\":%d", i);
         }
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+        if (s_turn.ui_text && m.len && m.tts == TTS_NONE) {
+            m.tts = TTS_QUEUED;
+            show_ui_reply_page();
+        }
+#endif
         muse_hatch_console("message_done", nullptr, "\"msg\":%d,\"bytes\":%u", i, (unsigned)n);
         ESP_LOGI(TAG, "message %s done (%u chars)", m.id, (unsigned)n);
         return;
@@ -1802,10 +1910,21 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
             mark(M_TEXT);
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
             append_text(m, text);
+#elif CONFIG_MUSE_BOARD_WXM_WG1200
+            if (s_turn.ui_text) {
+                append_text(m, text);
+            } else {
+                m.len += strlen(text);
+            }
 #else
             m.len += strlen(text);
 #endif
             muse_hatch_console("text", text, "\"msg\":%d", i);
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+            if (s_turn.ui_text) {
+                show_ui_reply_page();
+            }
+#endif
         } else if (text && text[0]) {
             add_reply_text(i, text);
         }
@@ -1840,11 +1959,42 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static bool has_reply_text(void)
+{
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        if (s_turn.msgs[i].len > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
         return;
     }
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    if (s_turn.ui_text && !has_reply_text() && s_turn.committed[0] && s_turn.chat_us > 0) {
+        size_t len = strlen(s_turn.committed);
+        size_t cycle = len + TEXT_HOLD_S * TEXT_CHARS_PER_S;
+        int64_t elapsed_us = now_us() - s_turn.chat_us;
+        size_t elapsed_chars = elapsed_us > 0 ? (size_t)(elapsed_us * TEXT_CHARS_PER_S / 1000000LL) : 0;
+        size_t at = cycle ? (elapsed_chars % cycle) : 0;
+        if (at >= len) {
+            at = len ? len - 1 : 0;
+        }
+        char page[MUSE_CAPTION_MAX];
+        if (muse_hatch_caption_at(s_turn.committed, at, page, sizeof(page)) && page[0] &&
+            strcmp(page, s_reply_shown) != 0) {
+            strlcpy(s_reply_shown, page, sizeof(s_reply_shown));
+            muse_state_set_caption("%s", page);
+        }
+        return;
+    }
+#endif
     for (int i = 0; i < s_turn.nmsgs; i++) {
         msg_t &m = s_turn.msgs[i];
         if (m.tts != TTS_QUEUED) {
@@ -1874,8 +2024,19 @@ static void start_tts(void)
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
         s_turn.silent = true;
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+        s_turn.pace_us = now_us();
+#endif
         ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+        if (s_turn.ui_text) {
+            show_ui_reply_page();
+        } else {
+            show_reply_start(m);
+        }
+#else
         show_reply_start(m);
+#endif
         return;
     }
 }
@@ -1912,6 +2073,27 @@ static void pace_silently(void)
     static const int16_t zeros[256] = {};
     msg_t &m = s_turn.msgs[s_turn.tts_msg];
     uint32_t end = m.pcm_start + m.pcm_frames + TEXT_HOLD_S * MIC_RATE;
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    if (s_turn.ui_text) {
+        int64_t now = now_us();
+        int64_t dt_us = now - s_turn.pace_us;
+        if (dt_us > 0) {
+            uint32_t adv = (uint32_t)(dt_us * MIC_RATE / 1000000LL);
+            if (adv > 0) {
+                s_turn.pcm_out += adv;
+                s_turn.pace_us = now;
+            }
+        }
+        show_ui_reply_page();
+        if (s_turn.pcm_out >= end) {
+            m.pcm_end = s_turn.pcm_out;
+            m.tts = TTS_FINISHED;
+            s_turn.tts_msg = -1;
+            s_turn.silent = false;
+        }
+        return;
+    }
+#endif
     while (s_turn.pcm_out < end && xStreamBufferSpacesAvailable(s_out) >= sizeof(zeros)) {
         uint32_t n = end - s_turn.pcm_out < 256 ? end - s_turn.pcm_out : 256;
         xStreamBufferSend(s_out, zeros, n * sizeof(int16_t), 0);
@@ -2328,10 +2510,17 @@ static void handle(const cmd_t &cmd)
         }
         break;
     case CMD_TEXT:
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    case CMD_UI_TEXT:
+#endif
         if (s_turn.phase != P_IDLE && !s_turn.text) {
             muse_hatch_console("error", "BUSY WITH A VOICE TURN", nullptr);
         } else {
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+            text_begin(cmd.text, cmd.type == CMD_UI_TEXT);
+#else
             text_begin(cmd.text);
+#endif
         }
         free(cmd.text);
         break;
@@ -2623,6 +2812,23 @@ extern "C" void muse_hatch_text_turn(char *text)
         free(text);
     }
 }
+
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+extern "C" void muse_chat_ui_text_turn(char *text)
+{
+    cmd_t cmd{ CMD_UI_TEXT, 0, text };
+    if (!s_cmds || !muse_hatch_configured()) {
+        muse_hatch_console("error", "MUSE NOT SET UP", nullptr);
+        muse_state_set_asleep(false);
+        muse_state_set_mode(MUSE_MODE_ERROR);
+        muse_state_set_caption("MUSE NOT SET UP");
+        free(text);
+    } else if (xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        muse_hatch_console("error", "BUSY", nullptr);
+        free(text);
+    }
+}
+#endif
 
 extern "C" void muse_hatch_text_cancel(void)
 {

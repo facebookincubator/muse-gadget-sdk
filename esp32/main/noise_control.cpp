@@ -1388,6 +1388,17 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static cJSON *int_param(const char *description) {
+    cJSON *param = cJSON_CreateObject();
+    cJSON_AddStringToObject(param, "type", "integer");
+    if (description) {
+        cJSON_AddStringToObject(param, "description", description);
+    }
+    return param;
+}
+#endif
+
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
 // The optional `row` of display.draw_url and display.draw_file.
 static cJSON *row_params(void) {
@@ -1631,6 +1642,39 @@ static char *build_register_json(void) {
                 "and relative humidity in percent. Each reading has its age "
                 "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
+#endif
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    add_command(commands, "sensors.read",
+                "Read BMP390 and WS1001/WS1300 LoRa sensors: "
+                "gateway_temperature, barometric_pressure, outdoor_temperature, "
+                "outdoor_humidity, wind_speed, wind_gust, wind_direction, "
+                "rain_rate, rain_daily, uv_index, illuminance, "
+                "solar_irradiance, station_battery, lora_rssi, lora_snr "
+                "(each with age_s) and lora_radio.",
+                nullptr, nullptr);
+    {
+        cJSON *boot_wxm_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(boot_wxm_optional, "slot",
+                              string_param("Partition: 'ota_0' or 'factory'."));
+        add_command(commands, "device.boot_weatherxm",
+                    "Reboot into stock WeatherXM OS ('ota_0' or 'factory').",
+                    nullptr, boot_wxm_optional);
+    }
+    {
+        cJSON *notify_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(notify_required, "message",
+                              string_param("Card body text."));
+        cJSON *notify_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(notify_optional, "title",
+                              string_param("Card heading."));
+        cJSON_AddItemToObject(notify_optional, "beep_ms",
+                              int_param("Buzzer ms (0-1000, default 120)."));
+        cJSON_AddItemToObject(notify_optional, "duration_s",
+                              int_param("Seconds shown (0 = until tapped, default 30)."));
+        add_command(commands, "wg1200.notify",
+                    "Show a notification card on the 480x480 screen and optional beep.",
+                    notify_required, notify_optional);
+    }
 #endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA

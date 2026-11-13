@@ -171,6 +171,9 @@ menu "Muse"
         config MUSE_BOARD_AI_PASSPORT
             bool "FoloToy AI Passport (ESP32-C3, three buttons, no touch)"
             depends on IDF_TARGET_ESP32C3
+        config MUSE_BOARD_WXM_WG1200
+            bool "WeatherXM WG1200 (ESP32-S3, 480x480 touch LCD, BMP390 + SX1262 LoRa)"
+            depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_WAVESHARE_P4_LCD35
             bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 (ESP32-P4 + C6)"
             depends on IDF_TARGET_ESP32P4
@@ -238,6 +241,7 @@ menu "Muse"
         default "waveshare_s3_lcd349" if MUSE_BOARD_WAVESHARE_S3_LCD349
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
+        default "wxm_wg1200" if MUSE_BOARD_WXM_WG1200
         default "waveshare_p4_lcd35" if MUSE_BOARD_WAVESHARE_P4_LCD35
         default "deotaland_rorolee" if MUSE_BOARD_DEOTALAND_ROROLEE
         default "viewe_smartring_plus" if MUSE_BOARD_VIEWE_SMARTRING_PLUS
@@ -274,7 +278,7 @@ menu "Muse"
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_CROWPANEL_ADVANCE_43 || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_WAVESHARE_P4_LCD35 || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_CROWPANEL_ADVANCE_43 || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_WXM_WG1200 || MUSE_BOARD_WAVESHARE_P4_LCD35 || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
     # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME
@@ -317,6 +321,18 @@ menu "Muse"
             through the ISP and the P4's JPEG encoder compresses one frame
             per capture. devices/sdkconfig.muse-waveshare-p4-lcd35-camera
             turns it on with the sensor's settings.
+
+    config MUSE_WG1200_FORECAST_LOCATION
+        string "Swipe-down forecast place when the station has no GPS fix"
+        depends on MUSE_BOARD_WXM_WG1200
+        default ""
+        help
+            The swipe-down card asks Muse for today's hourly forecast at the
+            outdoor station's last GPS fix, scored against its live readings.
+            The station reports GPS only when WeatherXM's firmware asks for
+            it, so until a fix has arrived (and kept in muse_nvs) the request
+            names this fallback place when set. Anything you've told Muse about
+            where the station is, or how you like the card, takes precedence.
 
     config MUSE_CJK_FONT
         bool "Show Chinese, Japanese and Korean in captions"

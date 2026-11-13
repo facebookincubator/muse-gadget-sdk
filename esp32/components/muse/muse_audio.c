@@ -32,6 +32,9 @@
 #include "muse_board.h"
 #include "muse_mem.h"
 #include "muse_settings.h"
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+#include "boards/board_wxm_wg1200.h"
+#endif
 
 static const char *TAG = "muse_audio";
 
@@ -465,6 +468,11 @@ float muse_audio_level(const int16_t *mono, size_t frames)
 
 void muse_audio_chirp(int rising)
 {
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    (void)rising;
+    wg1200_buzzer_beep(60);
+    return;
+#endif
     enum { MS = 90, N = MUSE_AUDIO_RATE * MS / 1000 };
     static int16_t buf[N];
     float f0 = rising ? 620.0f : 980.0f;

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
+#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|wg1200> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -29,7 +29,7 @@
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
+cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|wg1200|s3lcd35}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -74,6 +74,7 @@ case $board in
     smartring-plus) profile=viewe-smartring-plus; target=esp32s3 ;;
     lcd19)   profile=waveshare-s3-lcd19;   target=esp32s3 ;;
     s3lcd35) profile=waveshare-s3-lcd-35;  target=esp32s3 ;;
+    wg1200)  profile=wxm-wg1200;           target=esp32s3; wg1200_dualboot=1 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.
@@ -163,6 +164,11 @@ if [ -n "${iris:-}" ]; then
     ws=${MOSAICO_WORKSPACE:-$(cd "$MOSAICO_UTILS/../.." && pwd)}
     [ -e "$ws/projects/muse_gadget" ] || { mkdir -p "$ws/projects" && ln -s "$root" "$ws/projects/muse_gadget"; }
     cd "$ws" && exec python3 mosaico.py iris system-update --bundle "$root/$B/muse-gadget-system-update.irisfw" ${3:+--device-id $3}
+fi
+if [ -n "${wg1200_dualboot:-}" ]; then
+    # Never write @flash_args on WG1200: 0x0..0x81FFFF and 0xC20000..0xF20FFF
+    # hold the WeatherXM bootloader, X.509 cert, NVS and factory/ota_0 slots.
+    exec "$root/tools/wg1200_dualboot.sh" install ${3:-}
 fi
 port=$(python "$root/tools/muse/ports.py" $board ${3:-}) || exit 1
 esptool="-m esptool"

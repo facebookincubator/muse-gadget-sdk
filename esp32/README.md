@@ -262,6 +262,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Waveshare ESP32-S3-Touch-LCD-3.5 | Status on screen, images | `tools/board.sh waveshare-s3-lcd-35 build` |
 | Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build s3lcd35` |
 | DFRobot UNIHIKER K10 | UI, A push-to-talk, B menu, RGB status LEDs | [K10 setup](devices/dfrobot-unihiker-k10.md), `tools/muse/board.sh build k10` |
+| WeatherXM WG1200 | 4" 480×480 touch UI, text replies, buzzer, BMP390 + SX1262 LoRa weather sensors, images, dual-boot | [WG1200 setup](devices/wxm-wg1200.md), `tools/muse/board.sh build wg1200` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.

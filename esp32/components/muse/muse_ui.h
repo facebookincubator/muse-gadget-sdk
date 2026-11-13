@@ -58,6 +58,14 @@ void muse_ui_image_hide(void);
 /* Watcher camera mode: shows an on-screen shutter hint over the live image. */
 void muse_ui_camera_hint(bool visible);
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+/* Notification overlay card (wg1200.notify), callable from any task.
+ * Wakes the screen, shows title + wrapped message + "Tap to dismiss" footer,
+ * and auto-dismisses after duration_s seconds (0 = stay until tapped). */
+bool muse_ui_notify_show(const char *title, const char *message, int duration_s);
+void muse_ui_notify_hide(void);
+#endif
+
 /* Bench testing, from any task: streams the screen over USB serial. */
 void muse_ui_request_snapshot(void);
 #if CONFIG_LV_USE_SNAPSHOT

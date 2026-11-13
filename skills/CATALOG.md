@@ -1,6 +1,6 @@
 # Skill Catalog
 
-54 active skills: 53 device/family skills and one shared Google Cast skill.
+56 active skills: 55 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -66,6 +66,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [ESPHome devices](gadget-esphome-devices/SKILL.md) — entities exposed by installed firmware.
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
+- [WeatherXM WG1200](gadget-weatherxm-wg1200/SKILL.md) — outdoor LoRa weather telemetry, indoor pressure, sky-camera checks and 480x480 display cards.
 - [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — cloud only; needs internet and a Tuya end-user API key: status, confirmed control, weather, stats and snapshots.
 - [SinricPro cloud devices](gadget-sinricpro-cloud-devices/SKILL.md) — cloud only; needs internet and a SinricPro API key: state, actions, scenes and schedules.
 
@@ -74,6 +75,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
 - [Wyze RTSP cameras](gadget-wyze-rtsp-cameras/SKILL.md) — viewing/capture with compatible legacy firmware already installed.
 - [yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
+- [Thingino cameras](gadget-thingino-cameras/SKILL.md) — HTTP snapshots or TCP RTSP frames from cameras already running Thingino firmware.
 
 ## Vehicles and climate
 
