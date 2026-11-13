@@ -89,26 +89,37 @@ def distrusted_name(der: bytes) -> str | None:
     return None
 
 
-# OpenSSL finds certificates in a CA directory by subject hash ("1a2b3c4d.0").
-_HASH_NAME = re.compile(r"[0-9a-f]{8}\.[0-9]+")
+# OpenSSL finds certificates in a CA directory by subject hash: "1a2b3c4d.0",
+# then ".1" and so on, stopping at the first missing suffix.
+_HASH_NAME = re.compile(r"([0-9a-f]{8})\.(0|[1-9][0-9]*)")
 _PEM_CERT = re.compile(
     rb"-----BEGIN (TRUSTED CERTIFICATE|X509 CERTIFICATE|CERTIFICATE)-----(.+?)-----END \1-----",
     re.S)
 _SERVER_AUTH = bytes.fromhex("06082b06010505070301")   # DER OID 1.3.6.1.5.5.7.3.1
 _ANY_EKU = bytes.fromhex("0604551d2500")              # DER OID 2.5.29.37.0
+# The fields of OpenSSL's X509_CERT_AUX, in order: trust, reject, alias, key id, other.
+_AUX_FIELDS = (0x30, 0xA0, 0x0C, 0x04, 0xA1)
 
 
-def _der_element(data: bytes, offset: int) -> tuple[int, int, int]:
-    """``(tag, content start, end)`` of the DER element at ``offset``."""
+def _der_element(data: bytes, offset: int, limit: int) -> tuple[int, int, int]:
+    """``(tag, content start, end)`` of the DER element at ``offset``, within ``limit``.
+
+    Only DER's minimal length encoding is accepted, so equal values have
+    equal bytes.
+    """
+    if offset + 2 > limit:
+        raise ValueError("truncated DER element")
     tag, length = data[offset], data[offset + 1]
     offset += 2
     if length & 0x80:
         size = length & 0x7F
-        if not 0 < size <= 4 or offset + size > len(data):
+        if not 0 < size <= 4 or offset + size > limit or data[offset] == 0:
             raise ValueError("bad DER length")
         length = int.from_bytes(data[offset:offset + size], "big")
+        if length < 0x80:
+            raise ValueError("bad DER length")
         offset += size
-    if offset + length > len(data):
+    if offset + length > limit:
         raise ValueError("truncated DER element")
     return tag, offset, offset + length
 
@@ -116,7 +127,7 @@ def _der_element(data: bytes, offset: int) -> tuple[int, int, int]:
 def _oids(data: bytes, start: int, end: int) -> set[bytes]:
     oids = set()
     while start < end:
-        tag, _, element_end = _der_element(data, start)
+        tag, _, element_end = _der_element(data, start, end)
         if tag != 0x06:
             raise ValueError("expected an OID")
         oids.add(data[start:element_end])
@@ -129,16 +140,23 @@ def _tls_certificate(trusted: bytes) -> bytes | None:
 
     Its trust settings follow the certificate. As OpenSSL does for a TLS
     server, a root rejected for server authentication (or any purpose), or
-    with a trust list that includes neither, is not a TLS root.
+    with a trust list that includes neither, is not a TLS root. Settings
+    that don't parse raise ``ValueError``.
     """
-    _, _, cert_end = _der_element(trusted, 0)
+    _, _, cert_end = _der_element(trusted, 0, len(trusted))
     cert, aux = trusted[:cert_end], trusted[cert_end:]
     if not aux:
         return cert
-    _, start, end = _der_element(aux, 0)
+    tag, start, end = _der_element(aux, 0, len(aux))
+    if tag != 0x30 or end != len(aux):
+        raise ValueError("bad trust settings")
     trust = reject = None
+    position = 0
     while start < end:
-        tag, content, element_end = _der_element(aux, start)
+        tag, content, element_end = _der_element(aux, start, end)
+        if tag not in _AUX_FIELDS[position:]:
+            raise ValueError("bad trust settings")
+        position = _AUX_FIELDS.index(tag) + 1
         if tag == 0x30:
             trust = _oids(aux, content, element_end)
         elif tag == 0xA0:
@@ -166,6 +184,22 @@ def _pem_certificates(data: bytes) -> list[bytes]:
     return certs
 
 
+def _hashed_files(capath: str) -> list[str]:
+    """The files of a CA directory that OpenSSL's subject-hash lookup reads."""
+    names = {}
+    with os.scandir(capath) as entries:
+        for entry in entries:
+            if _HASH_NAME.fullmatch(entry.name) and entry.is_file():
+                names[entry.name] = entry.path
+    files = []
+    for name, path in names.items():
+        stem, suffix = _HASH_NAME.fullmatch(name).groups()
+        if int(suffix) < len(names) and all(
+                f"{stem}.{i}" in names for i in range(int(suffix))):
+            files.append(path)
+    return sorted(files)
+
+
 def system_roots() -> list[bytes]:
     """DER of every TLS root in the OS trust store, as OpenSSL finds it.
 
@@ -178,9 +212,7 @@ def system_roots() -> list[bytes]:
     files = [paths.cafile] if paths.cafile else []
     if paths.capath:
         try:
-            with os.scandir(paths.capath) as entries:
-                files += sorted(entry.path for entry in entries
-                                if _HASH_NAME.fullmatch(entry.name) and entry.is_file())
+            files += _hashed_files(paths.capath)
         except OSError:
             pass
     for path in files:

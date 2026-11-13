@@ -146,18 +146,21 @@ def test_a_reissued_certificate_for_a_distrusted_key_is_refused(monkeypatch):
 
 
 def test_system_roots_reads_the_ca_file_and_the_hashed_files_in_the_ca_directory(tmp_path, monkeypatch):
-    # OpenSSL looks certificates up in the CA directory by subject hash, so a
-    # file without a hash name is not part of the system's trust store.
-    in_file, in_directory, unhashed = CA("In file"), CA("In directory"), CA("Unhashed")
+    # OpenSSL looks certificates up in the CA directory by subject hash, from
+    # ".0" up to the first missing suffix. Other files are not part of the
+    # system's trust store.
+    in_file, first, second = CA("In file"), CA("First"), CA("Second")
+    unhashed, after_gap, padded = CA("Unhashed"), CA("After a gap"), CA("Padded suffix")
     (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(in_file.der))
     directory = tmp_path / "certs"
     (directory / "nested").mkdir(parents=True)
-    (directory / "0a1b2c3d.0").write_text(ssl.DER_cert_to_PEM_cert(in_directory.der))
-    (directory / "root.pem").write_text(ssl.DER_cert_to_PEM_cert(unhashed.der))
+    for name, ca in (("0a1b2c3d.0", first), ("0a1b2c3d.1", second), ("root.pem", unhashed),
+                     ("4e5f6a7b.1", after_gap), ("0a1b2c3d.02", padded)):
+        (directory / name).write_text(ssl.DER_cert_to_PEM_cert(ca.der))
     (directory / "README").write_text("not a certificate\n")
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths", lambda: SimpleNamespace(
         cafile=str(tmp_path / "bundle.pem"), capath=str(directory)))
-    assert sorted(tls.system_roots()) == sorted([in_file.der, in_directory.der])
+    assert sorted(tls.system_roots()) == sorted([in_file.der, first.der, second.der])
 
 
 SERVER_AUTH = bytes.fromhex("06082b06010505070301")      # 1.3.6.1.5.5.7.3.1
@@ -208,6 +211,36 @@ def test_system_roots_keeps_the_trust_settings_of_trusted_certificates(tmp_path,
     for root in (email_only, rejected, rejected_any):
         with pytest.raises(ssl.SSLCertVerificationError):
             handshake(context, server_context(root, tmp_path))
+
+
+ROOT = CA("Root")
+NONMINIMAL_SERVER_AUTH = bytes.fromhex("0681082b06010505070301")   # long-form length
+
+
+@pytest.mark.parametrize("aux, kept", [
+    (None, True),                                                  # no settings at all
+    (der(0x30, b""), True),                                         # empty settings
+    (der(0x30, der(0x30, b"")), False),                             # empty trust list
+    (der(0x30, der(0xA0, EMAIL_PROTECTION)), True),                 # rejected for email only
+    (der(0x30, der(0x30, SERVER_AUTH) + der(0x0C, b"alias")), True),
+    (der(0x30, der(0x0C, b"alias") + der(0x30, SERVER_AUTH)), False),   # out of order
+    (der(0x30, der(0x30, EMAIL_PROTECTION) + der(0x30, SERVER_AUTH)), False),  # repeated
+    (der(0x30, der(0x05, b"")), False),                             # unknown field
+    (der(0x30, der(0xA0, NONMINIMAL_SERVER_AUTH)), False),          # not DER
+    (der(0x30, der(0x30, SERVER_AUTH)) + b"\x00", False),           # trailing bytes
+    (der(0x30, der(0x30, SERVER_AUTH))[:-1], False),                # truncated
+    (der(0x30, bytes([0x30, 0x0B]) + SERVER_AUTH), False),          # list overruns settings
+    (der(0x30, der(0x30, b"\x04\x00")), False),                     # not an OID
+])
+def test_trust_settings_that_do_not_parse_are_not_trusted(tmp_path, monkeypatch, aux, kept):
+    body = ROOT.der if aux is None else ROOT.der + aux
+    bundle = tmp_path / "bundle.trust.crt"
+    bundle.write_text("-----BEGIN TRUSTED CERTIFICATE-----\n"
+                      + base64.encodebytes(body).decode()
+                      + "-----END TRUSTED CERTIFICATE-----\n")
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=str(bundle), capath=None))
+    assert tls.system_roots() == ([ROOT.der] if kept else [])
 
 
 def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
