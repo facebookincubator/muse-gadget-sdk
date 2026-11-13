@@ -274,12 +274,12 @@ def _pem_certificates(data: bytes) -> tuple[list[tuple[bytes, bool]], bool]:
     return certs, True
 
 
-def _file_certificates(path: str) -> tuple[list[tuple[bytes, bool]], set[bytes], bool] | None:
+def _file_certificates(path: str) -> tuple[list[tuple[bytes, bool]], bool] | None:
     """Each certificate of a file OpenSSL loads, and whether it may anchor TLS.
 
-    ``None`` if OpenSSL refuses the file. Also returns the CA certificates
-    OpenSSL loaded, and whether the trust settings of every entry were read,
-    including every certificate OpenSSL loaded.
+    ``None`` if OpenSSL refuses the file. The second value says whether the
+    trust settings of every entry were read, including every certificate
+    OpenSSL loaded.
     """
     scratch = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     try:
@@ -289,11 +289,10 @@ def _file_certificates(path: str) -> tuple[list[tuple[bytes, bool]], set[bytes],
     except OSError:     # ssl.SSLError included
         return None
     certs, complete = _pem_certificates(data)
-    loaded = set(scratch.get_ca_certs(binary_form=True))
-    complete = complete and loaded <= {der for der, _ in certs}
+    complete = complete and set(scratch.get_ca_certs(binary_form=True)) <= {der for der, _ in certs}
     if not complete:
         log.warning("couldn't read the TLS trust settings in %s; not using it", path)
-    return certs, loaded, complete
+    return certs, complete
 
 
 def _hashed_files(capath: str) -> list[tuple[str, list[str]]]:
@@ -318,15 +317,7 @@ def _hashed_files(capath: str) -> list[tuple[str, list[str]]]:
 
 
 def system_roots() -> list[bytes]:
-    """DER of every root in the OS trust store that OpenSSL trusts for TLS.
-
-    See ``_system_roots()``.
-    """
-    return _system_roots()[0]
-
-
-def _system_roots() -> tuple[list[bytes], bool]:
-    """DER of every TLS root in the OS trust store, and whether default trust is safe.
+    """DER of every certificate in the OS trust store that OpenSSL trusts for TLS.
 
     Reads the default CA file and the hash-named files in the default CA
     directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them), and
@@ -334,37 +325,33 @@ def _system_roots() -> tuple[list[bytes], bool]:
     OpenSSL's store (``X509_STORE``, ``by_dir``):
 
     - a file is used only when OpenSSL loads it and every entry's trust
-      settings parse; if that fails for the CA file, no roots are returned;
+      settings parse; if that fails for the CA file, nothing is returned;
     - a hashed file that fails ends its subject hash's lookup;
     - the directory is searched only for subjects the CA file lacks, and a
       certificate counts only under its own subject hash;
     - the first copy of a certificate decides its trust.
-
-    The second value is true when none of the certificates OpenSSL loads
-    from these files is distrusted, so Python's default trust may stand in.
     """
-    store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     paths = ssl.get_default_verify_paths()
-    seen, loaded_anywhere, file_subjects, usable_file = set(), set(), set(), True
+    roots, seen, file_subjects = [], set(), set()
 
-    def add(certs: list[tuple[bytes, bool]], loaded: set[bytes]) -> None:
+    def add(certs: list[tuple[bytes, bool]]) -> None:
         for der, tls_root in certs:
             if der not in seen:
                 seen.add(der)
-                if tls_root and der in loaded:
-                    store.load_verify_locations(cadata=der)
+                if tls_root:
+                    roots.append(der)
 
     if paths.cafile:
         result = _file_certificates(paths.cafile)
         if result is not None:
-            certs, loaded, usable_file = result
-            loaded_anywhere |= loaded
+            certs, complete = result
             try:
                 file_subjects = {_subject(der) for der, _ in certs}
             except (ValueError, UnicodeError):
-                usable_file = False
-            if usable_file:
-                add(certs, loaded)
+                complete = False
+            if not complete:
+                return []
+            add(certs)
     chains = []
     if paths.capath:
         try:
@@ -372,28 +359,20 @@ def _system_roots() -> tuple[list[bytes], bool]:
         except OSError:
             pass
     for stem, chain in chains:
-        usable = True
         for path in chain:
             result = _file_certificates(path)
-            if result is None:
+            if result is None or not result[1]:
                 break
-            certs, loaded, complete = result
-            loaded_anywhere |= loaded
-            usable = usable and complete
-            if usable:
-                own = []
-                for der, tls_root in certs:
-                    try:
-                        subject = _subject(der)
-                    except (ValueError, UnicodeError):
-                        continue
-                    if _subject_hash(subject) == stem and subject not in file_subjects:
-                        own.append((der, tls_root))
-                add(own, loaded)
-    default_is_safe = not any(distrusted_name(der) for der in loaded_anywhere)
-    if not usable_file:
-        return [], default_is_safe
-    return store.get_ca_certs(binary_form=True), default_is_safe
+            own = []
+            for der, tls_root in result[0]:
+                try:
+                    subject = _subject(der)
+                except (ValueError, UnicodeError):
+                    continue
+                if _subject_hash(subject) == stem and subject not in file_subjects:
+                    own.append((der, tls_root))
+            add(own)
+    return roots
 
 
 def distrusted_system_roots() -> list[str]:
@@ -402,19 +381,14 @@ def distrusted_system_roots() -> list[str]:
 
 
 def _build_context() -> ssl.SSLContext:
-    roots, default_is_safe = _system_roots()
-    if not roots and default_is_safe:
-        log.warning("found no system root CAs to filter; using Python's default TLS trust")
-        return ssl.create_default_context()
-    if not roots:
-        # Python's default trust would load a distrusted root from these files.
-        log.error("couldn't read the system's TLS roots; not trusting any")
-        return ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)    # trusts nothing, so connects nowhere
+    roots = system_roots()
     kept = [der for der in roots if distrusted_name(der) is None]
     if len(kept) < len(roots):
         log.info("not trusting %d distrusted root CAs from the system store",
                  len(roots) - len(kept))
     if not kept:
+        # Python's default trust would skip the distrusted-root filter.
+        log.error("found no usable TLS root CAs in the system store; not trusting any")
         return ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)    # trusts nothing, so connects nowhere
     return ssl.create_default_context(cadata=b"".join(kept))
 

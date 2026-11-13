@@ -408,7 +408,7 @@ def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
 def test_the_client_context_refuses_a_distrusted_root_and_trusts_the_rest(tmp_path, monkeypatch):
     good, bad = CA("Good root"), CA("Bad root")
     monkeypatch.setattr(tls, "DISTRUSTED_ROOTS", (("Bad root", "0" * 64, spki_sha256(bad.key.public_key())),))
-    monkeypatch.setattr(tls, "_system_roots", lambda: ([good.der, bad.der], True))
+    monkeypatch.setattr(tls, "system_roots", lambda: [good.der, bad.der])
     context = tls._build_context()
     assert context.get_ca_certs(binary_form=True) == [good.der]
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
@@ -418,32 +418,26 @@ def test_the_client_context_refuses_a_distrusted_root_and_trusts_the_rest(tmp_pa
         handshake(context, server_context(bad, tmp_path))
 
 
-def test_no_system_roots_falls_back_to_default_trust_with_a_warning(monkeypatch, caplog):
-    monkeypatch.setattr(tls, "_system_roots", lambda: ([], True))
+def test_no_usable_system_roots_trusts_nothing(tmp_path, monkeypatch, caplog):
+    # Python's default trust would skip the distrusted-root filter, so the
+    # client never falls back to it: with no usable root it trusts nothing.
+    monkeypatch.setattr(tls, "system_roots", lambda: [])
     context = tls._build_context()
+    assert context.get_ca_certs() == []
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
-    assert "found no system root CAs" in caplog.text
+    assert "no usable TLS root CAs" in caplog.text
 
-
-def test_default_trust_stands_in_only_without_distrusted_roots(tmp_path, monkeypatch, caplog):
-    # When no roots can be read exactly, Python's default trust loads the same
-    # files without the distrusted-root filter, so it stands in only when
-    # those files hold no distrusted root.
+    # OpenSSL loads this file, but its settings' length isn't minimally encoded.
     nonminimal = CA("Root").der + bytes.fromhex("30810c300a06082b06010505070301")
     bundle = tmp_path / "bundle.pem"
+    bundle.write_text("-----BEGIN TRUSTED CERTIFICATE-----\n" + base64.encodebytes(nonminimal).decode()
+                      + "-----END TRUSTED CERTIFICATE-----\n"
+                      + ssl.DER_cert_to_PEM_cert(published_roots()[0][1]))
+    monkeypatch.undo()
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
                         lambda: SimpleNamespace(cafile=str(bundle), capath=None))
-    unreadable = ("-----BEGIN TRUSTED CERTIFICATE-----\n" + base64.encodebytes(nonminimal).decode()
-                  + "-----END TRUSTED CERTIFICATE-----\n")
-    bundle.write_text(unreadable)
-    assert tls._system_roots() == ([], True)
-    assert tls._build_context().verify_mode == ssl.CERT_REQUIRED
-    assert "using Python's default TLS trust" in caplog.text
-
-    bundle.write_text(unreadable + ssl.DER_cert_to_PEM_cert(published_roots()[0][1]))
-    assert tls._system_roots() == ([], False)
+    assert tls.system_roots() == []
     assert tls._build_context().get_ca_certs() == []
-    assert "not trusting any" in caplog.text
 
 
 def test_a_ca_file_with_only_a_server_certificate_is_trusted_as_openssl_trusts_it(tmp_path, monkeypatch):
@@ -455,21 +449,16 @@ def test_a_ca_file_with_only_a_server_certificate_is_trusted_as_openssl_trusts_i
     server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server.load_cert_chain(certfile, keyfile)
     (tmp_path / "certs").mkdir()
-    monkeypatch.setenv("SSL_CERT_FILE", str(certfile))    # so default trust reads it too
+    monkeypatch.setenv("SSL_CERT_FILE", str(certfile))
     monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "certs"))
-    outcomes = []
+    assert tls.system_roots() == [leaf.public_bytes(Encoding.DER)]
     for context in (ssl.create_default_context(cafile=str(certfile)), tls._build_context()):
-        try:
-            handshake(context, server)
-            outcomes.append(True)
-        except ssl.SSLCertVerificationError:    # newer Pythons verify strictly
-            outcomes.append(False)
-    assert outcomes[0] == outcomes[1]
+        handshake(context, server)
 
 
 def test_a_store_of_only_distrusted_roots_trusts_nothing(monkeypatch):
     der = published_roots()[0][1]
-    monkeypatch.setattr(tls, "_system_roots", lambda: ([der], True))
+    monkeypatch.setattr(tls, "system_roots", lambda: [der])
     context = tls._build_context()
     assert context.get_ca_certs() == []
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
