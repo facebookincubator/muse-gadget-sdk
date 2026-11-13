@@ -103,8 +103,9 @@ def check_trust_store() -> list[str] | None:
     of the CA directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override
     them; ``SSL_CERT_DIR`` may list several, separated as in ``PATH``). A
     root counts if it's there at all, whatever trust settings it carries.
-    A CA file or directory that exists but can't be read makes the whole
-    store unreadable, since OpenSSL might still read what this can't.
+    A CA file, CA directory or hashed file that exists but can't be read
+    makes the whole store unreadable, since OpenSSL might still read what
+    this can't.
     """
     paths = ssl.get_default_verify_paths()
     store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -131,7 +132,9 @@ def check_trust_store() -> list[str] | None:
             try:
                 store.load_verify_locations(cafile=path)
             except (OSError, ssl.SSLError):
-                continue    # OpenSSL can't load it either
+                # OpenSSL's directory lookup reads files differently, and may
+                # still take a certificate from one that fails here.
+                return None
             readable = True
     if not readable:
         return None

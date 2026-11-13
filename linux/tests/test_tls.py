@@ -223,6 +223,18 @@ def test_a_directory_that_cant_be_listed_makes_the_store_unreadable(tmp_path, mo
     assert tls.check_trust_store() is None
 
 
+def test_a_hashed_file_that_doesnt_load_makes_the_store_unreadable(tmp_path, monkeypatch):
+    # OpenSSL's directory lookup reads certificates one at a time and skips
+    # other entries, so it may take a root from a file that fails to load here.
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    directory = tmp_path / "certs"
+    directory.mkdir()
+    (directory / "14bc7599.0").write_text(ssl.DER_cert_to_PEM_cert(published_roots()[0][1])
+                                          + "-----BEGIN X509 CRL-----\nMAA=\n-----END X509 CRL-----\n")
+    use_store(monkeypatch, tmp_path / "bundle.pem", directory)
+    assert tls.check_trust_store() is None
+
+
 def test_the_client_context_refuses_an_unsafe_trust_store(tmp_path, monkeypatch):
     monkeypatch.setattr(tls, "_context", None)
     for problem in ("can't read the system trust store",
@@ -308,3 +320,16 @@ def test_the_service_checks_the_trust_store_before_connecting(monkeypatch):
     with pytest.raises(tls.TrustStoreError):
         asyncio.run(run())
     connect.assert_not_called()
+
+
+def test_pairing_checks_the_trust_store_before_opening_setup(monkeypatch):
+    from unittest.mock import Mock
+
+    from musegadget import pair
+
+    on_open = Mock()
+    monkeypatch.setattr(tls, "_context", None)
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: UNSAFE[0])
+    with pytest.raises(tls.TrustStoreError):
+        pair.pair(on_open=on_open)
+    on_open.assert_not_called()
