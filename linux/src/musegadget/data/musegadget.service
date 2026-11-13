@@ -31,7 +31,7 @@ StateDirectory=musegadget
 StateDirectoryMode=0700
 Restart=always
 RestartSec=5
-# musegadget exits with 78 while the trust store needs fixing; restart it after.
+# Exit 78: the trust store needs fixing first. Restart musegadget once it is.
 RestartPreventExitStatus=78
 
 [Install]
