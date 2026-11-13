@@ -193,6 +193,7 @@ static conn_t s_conn;
 static bool s_connected;
 static muse_hatch_vm_t s_vm;       /* cached per-VM credentials */
 static bool s_vm_direct;           /* s_vm.vm_token is the device token itself */
+static bool s_ignore_local_token;  /* standalone token rejected while Link is paired */
 static char s_host[MUSE_HOST_MAX + 1];
 /* When to connect without a turn asking: once Wi-Fi is up, again with backoff
  * if that fails or the connection drops, not after an idle close. */
@@ -833,8 +834,8 @@ static bool resolve_vm(char *err, size_t err_cap)
     }
     char want[MUSE_VM_MAX + 1];
     muse_settings_hatch_vm(want);
-    if (!muse_settings_hatch_token_len()) {
-        /* No token of our own: use Link's Hatch account. */
+    if (!muse_settings_hatch_token_len() || (s_ignore_local_token && muse_link_hatch_linked())) {
+        /* No token of our own (or a standalone token was rejected): use Link's account. */
         if (muse_link_hatch_vm(want, s_vm.vm_id, sizeof(s_vm.vm_id), s_vm.vm_name, sizeof(s_vm.vm_name),
                                &s_vm.vm_token)) {
             ESP_LOGI(TAG, "VM %s (%s) via Link", s_vm.vm_id, s_vm.vm_name);
@@ -854,6 +855,18 @@ static bool resolve_vm(char *err, size_t err_cap)
         ESP_LOGI(TAG, "VM %s (%s)", s_vm.vm_id, s_vm.vm_name);
         free(token);
         return true;
+    }
+    if (rc == MUSE_HATCH_API_AUTH && !want[0] && muse_link_hatch_linked()) {
+        ESP_LOGW(TAG, "standalone token rejected by account API; falling back to Link");
+        free(token);
+        s_ignore_local_token = true;
+        if (muse_link_hatch_vm(want, s_vm.vm_id, sizeof(s_vm.vm_id), s_vm.vm_name, sizeof(s_vm.vm_name),
+                               &s_vm.vm_token)) {
+            ESP_LOGI(TAG, "VM %s (%s) via Link", s_vm.vm_id, s_vm.vm_name);
+            return true;
+        }
+        strlcpy(err, "Can't reach Muse's server", err_cap);
+        return false;
     }
     if (want[0]) {
         /* Not a device token (or the API is down): try it as the VM's own token. */
@@ -966,8 +979,12 @@ static bool ensure_connected(void)
             return true;
         }
         disconnect(err);
-        /* A refused VM token may just be stale: fetch a fresh one once. */
-        if ((status == 401 || status == 403) && !s_vm_direct) {
+        /* A refused VM token may just be stale: fetch a fresh one once (or fall back to Link). */
+        if ((status == 401 || status == 403) && (!s_vm_direct || muse_link_hatch_linked())) {
+            if (s_vm_direct) {
+                ESP_LOGW(TAG, "standalone token refused by VM; falling back to Link");
+                s_ignore_local_token = true;
+            }
             forget_vm();
             continue;
         }
@@ -2308,6 +2325,7 @@ static void handle(const cmd_t &cmd)
         disconnect("settings changed");
         pending_clear();
         forget_vm();
+        s_ignore_local_token = false;
         s_auto_next_us = 0;
         s_auto_backoff_us = AUTO_RETRY_MIN_US;
         break;
