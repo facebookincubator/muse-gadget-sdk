@@ -83,6 +83,11 @@ static int core_main(int argc, char **argv)
         for (size_t j = 0; j < CHUNK; j++) {
             pcm[j] = amp;
         }
+        if (ticks[i][0] == 'A') {   /* the glue could not post the press */
+            muse_wakeword_core_abort(&core);
+            printf("%d 0\n", (int)muse_wakeword_core_state(&core));
+            continue;
+        }
         muse_wakeword_input_t in = {
             /* Scripted events are gated by the listening opt-in, as a
              * runner's feed() results are; playback suppression stays

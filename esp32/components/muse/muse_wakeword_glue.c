@@ -82,6 +82,7 @@ static muse_wakeword_stats_t s_stats_snap;   /* wake task writes, status reads *
 static int s_state_snap;
 static uint32_t s_capture_chunks;                    /* wake task only, for the log */
 static size_t s_seeded_frames;
+static bool s_up_owed;   /* wake task only: a synthetic release the full queue refused */
 
 const char *muse_wakeword_runner_kind(void)
 {
@@ -170,7 +171,7 @@ void muse_wakeword_bench_trigger(bool with_speech)
 #endif
 }
 
-static void post_ptt(muse_ptt_t type)
+static bool post_ptt(muse_ptt_t type)
 {
     /* The current input epoch, like a real edge: muse_voice cancels a press
      * whose epoch is stale, so a zero here would end every hands-free turn
@@ -178,14 +179,21 @@ static void post_ptt(muse_ptt_t type)
     muse_input_event_t ev = { .type = type, .synthetic = true, .epoch = muse_input_call_epoch(),
                               .at_us = esp_timer_get_time() };
     if (xQueueSend(s_queue, &ev, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "input queue full, synthetic %s dropped",
-                 type == MUSE_PTT_DOWN ? "down" : "up");
+        ESP_LOGW(TAG, "input queue full, synthetic %s %s", type == MUSE_PTT_DOWN ? "down" : "up",
+                 type == MUSE_PTT_DOWN ? "dropped" : "retried next chunk");
+        return false;
     }
+    return true;
 }
 
 /* One core tick and everything its actions mean for the device. */
 static void tick(const muse_wakeword_input_t *in)
 {
+    /* A release the full queue refused goes first: without it the turn
+     * it ends would record to its 15 s cap. */
+    if (s_up_owed && post_ptt(MUSE_PTT_UP)) {
+        s_up_owed = false;
+    }
     muse_ww_state_t before = muse_wakeword_core_state(&s_core);
     uint32_t act = muse_wakeword_core_tick(&s_core, in);
     muse_ww_state_t now = muse_wakeword_core_state(&s_core);
@@ -213,11 +221,18 @@ static void tick(const muse_wakeword_input_t *in)
          * reason when it cannot (for example, Muse is not set up yet). */
         muse_state_set_mode(MUSE_MODE_LISTENING);
         muse_state_set_caption("LISTENING...");
-        post_ptt(MUSE_PTT_DOWN);
-        ESP_LOGI(TAG, "speech started, pre-roll %.2fs", (double)s_seeded_frames / MUSE_AUDIO_RATE);
+        /* Never a press ahead of an owed release. A press the queue
+         * refused opens no turn: drop the session and its seed, so no
+         * stray release or stale pre-roll follows it. */
+        if (!s_up_owed && post_ptt(MUSE_PTT_DOWN)) {
+            ESP_LOGI(TAG, "speech started, pre-roll %.2fs", (double)s_seeded_frames / MUSE_AUDIO_RATE);
+        } else {
+            muse_wakeword_core_abort(&s_core);
+            muse_voice_seed_preroll(NULL, 0);
+        }
     }
-    if (act & MUSE_WW_ACTION_POST_PTT_UP) {
-        post_ptt(MUSE_PTT_UP);
+    if ((act & MUSE_WW_ACTION_POST_PTT_UP) && !post_ptt(MUSE_PTT_UP)) {
+        s_up_owed = true;
     }
     if (act & MUSE_WW_ACTION_CONVERTED_TO_PTT) {
         ESP_LOGI(TAG, "the talk button took over");
@@ -251,7 +266,7 @@ static void apply_requests(void)
             }
             xStreamBufferReset(s_tap);   /* no task blocks on it here: we are its reader */
             muse_ww_ring_clear(&s_pre);
-            muse_wakeword_core_reset(&s_core);
+            muse_wakeword_core_reset(&s_core);   /* an owed release still goes */
             atomic_store(&s_pending_down, false);
             atomic_store(&s_pending_up, false);
             ww_runner_reset(s_runner);
@@ -328,6 +343,8 @@ static void wake_task(void *arg)
             if (!s_applied_enabled && muse_wakeword_core_state(&s_core) != MUSE_WW_IDLE) {
                 muse_wakeword_input_t in = { 0 };
                 tick(&in);
+            } else if (s_up_owed && post_ptt(MUSE_PTT_UP)) {
+                s_up_owed = false;   /* the tap is dry, but the release still goes */
             }
             snapshot_status();
             continue;

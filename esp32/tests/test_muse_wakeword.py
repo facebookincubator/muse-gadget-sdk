@@ -48,6 +48,13 @@ def model(ticks, start, end, cap, energy):
     stats = [0, 0, 0, 0, 0]   # wakes, cancels, submits, conversions, suppressed
     trace = []
     for ev_ch, voiced, down, up, playback, enabled in ticks:
+        if ev_ch == 'A':
+            # The glue could not post the press: back to idle, a cancel.
+            if state != IDLE:
+                stats[1] += 1
+            state, armed, capture, silence = IDLE, 0, 0, 0
+            trace.append((state, 0))
+            continue
         ev = EV[ev_ch] if enabled else NONE   # harness: listening == enabled
         act = 0
         if not enabled:
@@ -211,6 +218,13 @@ class WakeWordCore(unittest.TestCase):
         converted = [tick('W'), tick('s'), tick(down=1), tick(down=1, up=1)]
         trace = self.run_core(converted, energy=0)
         self.assertEqual(trace[3], (IDLE, SUBMITTED))
+
+    def test_abort_drops_a_capture_whose_press_never_went(self):
+        ticks = [tick('W'), tick('s'), tick('A'), tick(), tick(), tick(), tick()]
+        trace = self.run_core(ticks, energy=0)
+        self.assertEqual(trace[2], (IDLE, 0))
+        # Nothing posts afterwards: no stray release for a turn that never opened.
+        self.assertFalse(any(a & POST_UP for _, a in trace))
 
     def test_press_during_playback_cancels_arming(self):
         # Regression: the glue reports a physical PTT turn through the
@@ -410,9 +424,22 @@ class WakeWordFirmwareContract(unittest.TestCase):
         # the epoch moves whenever a real edge is dropped: an untagged
         # (zero) synthetic press would then never record again.
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        post = between(glue, 'static void post_ptt(', 'xQueueSend(')
+        post = between(glue, 'static bool post_ptt(', 'xQueueSend(')
         self.assertIn('.epoch = muse_input_call_epoch()', post)
         self.assertIn('.at_us = esp_timer_get_time()', post)
+
+    def test_glue_retries_a_refused_release_and_drops_a_refused_press(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        tick_fn = between(glue, 'static void tick(', 'static void apply_requests(')
+        # The owed release goes before the core ticks again ...
+        self.assertLess(tick_fn.index('if (s_up_owed && post_ptt(MUSE_PTT_UP))'),
+                        tick_fn.index('muse_wakeword_core_tick('))
+        self.assertIn('!post_ptt(MUSE_PTT_UP)) {\n        s_up_owed = true;', tick_fn)
+        # ... and a refused press ends the session and clears its seed.
+        down = between(tick_fn, 'MUSE_WW_ACTION_POST_PTT_DOWN', 'MUSE_WW_ACTION_POST_PTT_UP')
+        self.assertIn('if (!s_up_owed && post_ptt(MUSE_PTT_DOWN))', down)
+        self.assertIn('muse_wakeword_core_abort(&s_core);', down)
+        self.assertIn('muse_voice_seed_preroll(NULL, 0);', down)
 
     def test_glue_starts_with_the_voice_pipeline(self):
         app = (ROOT / 'components/muse/muse_app.c').read_text()

@@ -84,6 +84,15 @@ static void go_idle(muse_wakeword_core_t *core)
     core->silence_chunks = 0;
 }
 
+void muse_wakeword_core_abort(muse_wakeword_core_t *core)
+{
+    if (!core || core->state == MUSE_WW_IDLE) {
+        return;
+    }
+    core->stats.cancels++;
+    go_idle(core);
+}
+
 static bool speech_now(const muse_wakeword_core_t *core, const muse_wakeword_input_t *in)
 {
     return in->event == WW_EVENT_SPEECH_START || (core->cfg.energy_endpointing && in->voiced);

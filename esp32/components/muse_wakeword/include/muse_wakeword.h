@@ -104,6 +104,9 @@ void muse_wakeword_core_init(muse_wakeword_core_t *core, const muse_wakeword_con
 void muse_wakeword_core_reset(muse_wakeword_core_t *core);
 /* One chunk through the state machine; returns MUSE_WW_ACTION_* flags. */
 uint32_t muse_wakeword_core_tick(muse_wakeword_core_t *core, const muse_wakeword_input_t *in);
+/* The turn a POST_PTT_DOWN asked for could not be opened (the input queue
+ * was full): back to idle, counted as a cancel, with nothing left to post. */
+void muse_wakeword_core_abort(muse_wakeword_core_t *core);
 muse_ww_state_t muse_wakeword_core_state(const muse_wakeword_core_t *core);
 muse_wakeword_stats_t muse_wakeword_core_stats(const muse_wakeword_core_t *core);
 

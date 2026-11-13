@@ -1546,6 +1546,7 @@ static void voice_task(void *arg)
 void muse_voice_seed_preroll(const int16_t *pcm, size_t frames)
 {
     if (!s_seed || !pcm) {
+        s_seed_frames = 0;   /* NULL clears a seed whose press never went */
         return;
     }
     size_t n = frames < SEED_FRAMES ? frames : SEED_FRAMES;
