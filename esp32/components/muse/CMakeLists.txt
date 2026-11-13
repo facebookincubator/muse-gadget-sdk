@@ -27,6 +27,7 @@ if(CONFIG_MUSE_ENABLED)
         "muse_board.c"
         "muse_console.c"
         "muse_state.c"
+        "muse_options.c"
         "muse_battery.c"
         "muse_audio.c"
         "muse_pmu.c"
@@ -44,10 +45,10 @@ if(CONFIG_MUSE_ENABLED)
         # The LVGL UI's fonts, as the TTFs LVGL builds them from (eink/fonts/).
         list(APPEND embed "eink/fonts/montserrat.ttf" "eink/fonts/symbols.ttf" "eink/fonts/unscii.ttf")
     else()
-        list(APPEND srcs "muse_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c" "muse_lv_mem.c")
+        list(APPEND srcs "muse_ui.c" "muse_options_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c" "muse_lv_mem.c")
     endif()
     if(CONFIG_MUSE_HATCH)
-        list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp")
+        list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_options_json.c")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
         if(CONFIG_MUSE_REALTIME_VOICE)
             list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
@@ -196,6 +197,8 @@ elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
     # voice_muse_chat.c stands in for the Muse settings, Wi-Fi and Link hooks.
     list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_chat_text.c" "muse_text.c")
+    # The shared session handles option events even without a touchscreen.
+    list(APPEND srcs "muse_options.c" "muse_options_json.c")
     list(APPEND embed "test_reply.mp3")
     if(CONFIG_MUSE_REALTIME_VOICE)
         list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")

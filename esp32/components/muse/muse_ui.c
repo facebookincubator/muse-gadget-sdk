@@ -15,6 +15,7 @@
  */
 
 #include "muse_ui.h"
+#include "muse_options_ui.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -1588,6 +1589,10 @@ static void build_overlays(void)
         update_control_hints(MUSE_MODE_BOOT);
     }
 
+#if CONFIG_MUSE_HATCH
+    if (muse_board->touch) muse_options_ui_start(s_w, s_h, muse_board->round, caption_font());
+#endif
+
     /* BLE pairing code, or the Muse app's ask for the talk button: a centred
      * column in one typeface, the code large. The small card grows with the hint. */
     s_pair = lv_obj_create(lv_layer_top());
@@ -1703,6 +1708,9 @@ static const char *idle_name(muse_wifi_state_t wifi)
 
 static void update_chrome(float now)
 {
+    muse_options_ui_tick(muse_ui_face_active() && !muse_voice_in_call() && !s_image_dsc.data &&
+                         muse_state_mode(NULL) != MUSE_MODE_LISTENING &&
+                         lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
     if (now < s_next_settings_tick) {
         return;
     }

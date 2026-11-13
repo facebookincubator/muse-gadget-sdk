@@ -33,6 +33,7 @@
 
 #include "muse_state.h"
 #include "muse_ui.h"
+#include "muse_options.h"
 #include "sim_board.h"
 #include "sim_platform.h"
 #include "sim_services.h"
@@ -300,6 +301,22 @@ static bool apply_setting(const char *key, const char *value, bool real_time)
     if (!strcmp(key, "caption")) {
         muse_state_set_caption("%s", value);
         return true;
+    }
+    if (!strcmp(key, "options")) {
+        muse_options_t q = { .selected = -1 };
+        snprintf(q.widget_id, sizeof(q.widget_id), "sim-options");
+        snprintf(q.message_id, sizeof(q.message_id), "sim-message");
+        snprintf(q.question, sizeof(q.question), "Which lunch would you like?");
+        const char *p = value;
+        while (*p && q.count < MUSE_OPTIONS_MAX) {
+            const char *end = strchr(p, '|');
+            size_t len = end ? (size_t)(end - p) : strlen(p);
+            if (!len || len >= MUSE_OPTION_BYTES) return false;
+            memcpy(q.labels[q.count++], p, len);
+            if (!end) return muse_options_publish(&q);
+            p = end + 1;
+        }
+        return false;
     }
     if (!strcmp(key, "level") && parse_float(value, 0.0f, 1.0f, &scalar)) {
         s_level = scalar;

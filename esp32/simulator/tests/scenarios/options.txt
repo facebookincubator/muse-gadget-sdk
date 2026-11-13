@@ -1,0 +1,4 @@
+face=idle
+speaker=false
+options=Pasta|Salad|A longer answer that wraps onto several lines
+advance=400
