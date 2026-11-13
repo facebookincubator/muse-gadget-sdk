@@ -200,6 +200,26 @@ def test_audio_keeps_the_response_it_started_in_when_the_next_response_opens():
     ]
 
 
+def test_a_response_that_can_still_play_keeps_its_offset_past_the_id_bound():
+    tiny = b"\x10\x00" * 2
+    legacy = {"type": "response.output_audio.delta", "delta": base64.b64encode(tiny).decode()}
+    others = ["r%d" % n for n in range(2, voice.MAX_IDS + 3)]
+
+    async def script(vm, media, call, output, events):
+        await chunk(vm, media, line(created("r1")) + line(audio("p1", HALF)))
+        await chunk(vm, media, b"".join(line(event) for response_id in others
+                                        for event in (created(response_id), legacy)))
+        await wait_until(lambda: len(output.pcm) == len(HALF) + len(others) * len(tiny))
+        await chunk(vm, media, line(audio("p1", HALF)))
+        await wait_until(lambda: len(output.pcm) == 2 * len(HALF) + len(others) * len(tiny))
+        assert len(call._audio_offsets) <= voice.MAX_IDS
+
+    chunks = [event for event in run_call(script) if isinstance(event, AudioChunk)]
+    assert chunks == [AudioChunk("r1", 0, HALF), *(AudioChunk(response_id, 0, tiny)
+                                                   for response_id in others),
+                      AudioChunk("r1", 480, HALF)]
+
+
 def test_zero_keepalive_binds_provider_to_the_response_open_at_first_audio():
     async def script(vm, media, call, output, events):
         await chunk(vm, media, b"".join(map(line, [
@@ -1312,6 +1332,43 @@ def test_only_integral_output_flush_counts_report_discarded_audio(discarded, exp
         def flush(self):
             super().flush()
             return discarded
+
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            output = BufferedOutput()
+            call = VoiceCall(session, device_id="homelink-synthetic", on_event=events.append)
+            task = asyncio.create_task(call.run(silent_source(), output))
+            media, start = await admit(vm)
+            await chunk(vm, media, line(created("r1")) + line(audio("p1", HALF)))
+            await output.written.wait()
+            await call.barge_in()
+            assert await next_event(vm) == {"type": "response.cancel", "response_id": "r1"}
+            await chunk(vm, media, end=True)
+            await hangup(vm, media, start, media_ended=True)
+            assert await task == "remote_end"
+            assert output.pcm == HALF
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+    assert events == [ResponseStarted("r1"), AudioChunk("r1", 0, HALF), *expected]
+
+
+@pytest.mark.parametrize("queued, expected", [
+    (DiscardedSamples(), []),
+    (True, []),
+    (1.5, []),
+    (DiscardedCount(len(HALF)), [PlaybackFlushed(("r1",))]),
+], ids=["samples", "bool", "float", "integral"])
+def test_only_integral_output_write_counts_track_queued_audio(queued, expected):
+    events = []
+
+    class BufferedOutput(Output):
+        def write(self, data):
+            super().write(data)
+            return queued
+
+        def flush(self):
+            super().flush()
+            return len(HALF)
 
     async def scenario():
         async with connected(register_device=False) as (session, vm, unused):

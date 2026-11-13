@@ -680,8 +680,22 @@ class VoiceCall:
             offset = self._audio_offsets.pop(response_id, 0)
             self._audio_offsets[response_id] = offset + len(pcm) // 2
             if len(self._audio_offsets) > MAX_IDS:
-                del self._audio_offsets[next(iter(self._audio_offsets))]
+                self._trim_offsets()
             self._emit(AudioChunk(response_id, offset, pcm))
+
+    def _trim_offsets(self) -> None:
+        # Forget the oldest responses that can get no more audio: none of it
+        # queued, playing or held, no provider stream that can still play,
+        # and not the latest. Until enough qualify, keep more than MAX_IDS.
+        live = {self._response_id}
+        live.update(response_id for _, _, response_id in self._playback)
+        live.update(response_id for _, response_id in self._pending_output)
+        live.update(held[1] for held in self._waiting if isinstance(held, tuple))
+        live.update(response_id for source, response_id in self._audio_sources.items()
+                    if self._reply_gate.ids.get(source, STALE) != STALE)
+        excess = len(self._audio_offsets) - MAX_IDS
+        for response_id in [key for key in self._audio_offsets if key not in live][:excess]:
+            del self._audio_offsets[response_id]
 
     def _apply_reply_flush(self) -> None:
         playing, waiting = self._reply_gate.take_flush()
@@ -841,7 +855,8 @@ class VoiceCall:
             self._playback.popleft()
             self._playback_bytes -= len(pcm)
             self._audible_frames -= int(audible)
-            if self._on_event is not None and pending is not None:
+            if (self._on_event is not None and isinstance(pending, Integral)
+                    and not isinstance(pending, bool)):
                 self._pending_output.append((len(pcm), response_id))
                 self._trim_output(pending)
             duration = len(pcm) / (SAMPLE_RATE * 2)

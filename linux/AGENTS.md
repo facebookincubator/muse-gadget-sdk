@@ -480,8 +480,9 @@ run_command=...)` is one encrypted session with a Muse VM.
   responses that audio belonged to, in playback order. An output that queues
   audio says how much: `write(pcm)` returns the bytes still queued and
   `flush()` the bytes it discarded, as a non-boolean `numbers.Integral`
-  count. One that plays at once returns None. Any other `flush()` return
-  value counts as nothing discarded by the output, and without `on_event`
+  count. One that plays at once returns None. Any other `write()` return
+  value counts as None, any other `flush()` return value as nothing
+  discarded by the output, and without `on_event`
   the return value is ignored. If `flush()` raises, the event still reports
   the audio discarded from the call's own queue. If the callback also
   raises, the output's error wins and the callback's error type is logged.
