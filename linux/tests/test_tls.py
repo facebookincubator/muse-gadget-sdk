@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import datetime
 import hashlib
+import os
 import re
 import socket
 import ssl
@@ -399,6 +400,31 @@ def test_the_directory_is_searched_as_openssl_searches_it(tmp_path, monkeypatch)
                 handshake(context, server_context(ca, tmp_path))
 
 
+def test_ssl_cert_dir_may_list_several_directories(tmp_path, monkeypatch):
+    # OpenSSL searches each directory of a PATH-style SSL_CERT_DIR in order,
+    # and stops at the first that has the subject. Python reports no capath.
+    first, second, shadowed_rejected, shadowed_plain = (
+        CA("first dir root"), CA("second dir root"), CA("shadowed"), CA("shadowed"))
+    one, two = tmp_path / "one", tmp_path / "two"
+    one.mkdir()
+    two.mkdir()
+    (one / f"{subject_hash(first.name)}.0").write_text(ssl.DER_cert_to_PEM_cert(first.der))
+    (one / f"{subject_hash('shadowed')}.0").write_text(trusted_pem(shadowed_rejected.der, reject=[SERVER_AUTH]))
+    (two / f"{subject_hash(second.name)}.0").write_text(ssl.DER_cert_to_PEM_cert(second.der))
+    (two / f"{subject_hash('shadowed')}.0").write_text(ssl.DER_cert_to_PEM_cert(shadowed_plain.der))
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "absent.pem"))
+    monkeypatch.setenv("SSL_CERT_DIR", f"{one}{os.pathsep}{two}")
+    monkeypatch.setattr(tls, "DISTRUSTED_ROOTS", ())
+    assert ssl.get_default_verify_paths().capath is None
+    assert sorted(tls.system_roots()) == sorted([first.der, second.der])
+    for context in (ssl.create_default_context(), tls._build_context()):
+        for ca in (first, second):
+            handshake(context, server_context(ca, tmp_path))
+        for ca in (shadowed_rejected, shadowed_plain):
+            with pytest.raises(ssl.SSLCertVerificationError):
+                handshake(context, server_context(ca, tmp_path))
+
+
 def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
                         lambda: SimpleNamespace(cafile=None, capath=None))
@@ -454,6 +480,12 @@ def test_a_ca_file_with_only_a_server_certificate_is_trusted_as_openssl_trusts_i
     assert tls.system_roots() == [leaf.public_bytes(Encoding.DER)]
     for context in (ssl.create_default_context(cafile=str(certfile)), tls._build_context()):
         handshake(context, server)
+
+
+def test_trusts_nothing_says_whether_any_root_is_usable(monkeypatch):
+    for roots, expected in (([], True), ([published_roots()[0][1]], True), ([CA("Fine").der], False)):
+        monkeypatch.setattr(tls, "system_roots", lambda: roots)
+        assert tls.trusts_nothing() is expected
 
 
 def test_a_store_of_only_distrusted_roots_trusts_nothing(monkeypatch):

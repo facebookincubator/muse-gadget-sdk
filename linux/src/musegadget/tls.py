@@ -348,31 +348,53 @@ def system_roots() -> list[bytes]:
             try:
                 file_subjects = {_subject(der) for der, _ in certs}
             except (ValueError, UnicodeError):
+                log.warning("couldn't read a certificate's subject in %s; not using it",
+                            paths.cafile)
                 complete = False
             if not complete:
                 return []
             add(certs)
-    chains = []
-    if paths.capath:
+    for directory in _ca_directories(paths):
         try:
-            chains = _hashed_files(paths.capath)
+            chains = _hashed_files(directory)
         except OSError:
-            pass
-    for stem, chain in chains:
-        for path in chain:
-            result = _file_certificates(path)
-            if result is None or not result[1]:
-                break
-            own = []
-            for der, tls_root in result[0]:
-                try:
-                    subject = _subject(der)
-                except (ValueError, UnicodeError):
-                    continue
-                if _subject_hash(subject) == stem and subject not in file_subjects:
-                    own.append((der, tls_root))
-            add(own)
+            continue
+        found = set()
+        for stem, chain in chains:
+            for path in chain:
+                result = _file_certificates(path)
+                if result is None or not result[1]:
+                    break
+                own = []
+                for der, tls_root in result[0]:
+                    try:
+                        subject = _subject(der)
+                    except (ValueError, UnicodeError):
+                        continue
+                    if _subject_hash(subject) == stem and subject not in file_subjects:
+                        own.append((der, tls_root))
+                        found.add(subject)
+                add(own)
+        file_subjects |= found    # later directories are searched only for other subjects
     return roots
+
+
+def _ca_directories(paths) -> list[str]:
+    """The CA directories OpenSSL searches, in order.
+
+    ``SSL_CERT_DIR`` may list several, separated as in ``PATH``; Python
+    reports no directory for such a list, but OpenSSL searches each one.
+    """
+    variable = getattr(paths, "openssl_capath_env", None)
+    listed = os.environ.get(variable) if variable else None
+    if listed:
+        return [directory for directory in listed.split(os.pathsep) if directory]
+    return [paths.capath] if paths.capath else []
+
+
+def trusts_nothing() -> bool:
+    """Whether the client finds no root it may trust, and so connects nowhere."""
+    return all(distrusted_name(der) for der in system_roots())
 
 
 def distrusted_system_roots() -> list[str]:

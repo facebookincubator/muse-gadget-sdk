@@ -215,11 +215,17 @@ def test_network_reuses_setup_probe_with_timeout(
 def test_trust_store_warns_about_distrusted_roots_without_failing(
     monkeypatch: pytest.MonkeyPatch, present: list[str], status: str,
 ) -> None:
+    monkeypatch.setattr(doctor.tls, "trusts_nothing", Mock(return_value=False))
     monkeypatch.setattr(doctor.tls, "distrusted_system_roots", Mock(return_value=present))
     result: doctor.CheckResult = doctor.check_trust_store()
     assert result["status"] == status
     for name in present:
         assert name in result["detail"]
+
+
+def test_trust_store_fails_when_musegadget_trusts_no_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor.tls, "trusts_nothing", Mock(return_value=True))
+    assert doctor.check_trust_store()["status"] == "FAIL"
 
 
 @pytest.mark.parametrize("status,exit_code", [("OK", 0), ("FAIL", 1), ("WARN", 0)])
@@ -259,6 +265,7 @@ def test_doctor_continues_after_failures_without_changing_saved_files(
     before: dict[str, bytes] = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     monkeypatch.setattr(doctor.shutil, "which", Mock(return_value=None))
     monkeypatch.setattr(doctor.network, "is_online", Mock(return_value=True))
+    monkeypatch.setattr(doctor.tls, "trusts_nothing", Mock(return_value=False))
     monkeypatch.setattr(doctor.tls, "distrusted_system_roots", Mock(return_value=[]))
     results: tuple[doctor.CheckResult, ...] = doctor.run_checks()
     assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK", "OK"]
