@@ -1550,7 +1550,9 @@ void muse_voice_seed_preroll(const int16_t *pcm, size_t frames)
 esp_err_t muse_voice_start(QueueHandle_t queue)
 {
     s_queue = queue;
-    s_seed = heap_caps_malloc(SEED_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    s_seed = heap_caps_malloc(SEED_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);   /* NULL: no seeded turns */
+#endif
     s_pre = heap_caps_malloc(PRE_CAP_CHUNKS * sizeof(pre_chunk_t), MUSE_BIG_CAPS);
     if (!s_pre || muse_audio_init(muse_settings_volume(), muse_settings_mic_gain()) != ESP_OK) {
         muse_state_set_mode(MUSE_MODE_ERROR);

@@ -373,6 +373,19 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('if (seeded && s_seed_frames)', voice)
         self.assertIn('muse_wakeword_set_ptt_turn(!synthetic)', voice)
 
+    def test_feature_off_builds_allocate_no_seed(self):
+        # The one-second seed is only used by wake word turns: a build
+        # without the feature (no-PSRAM boards included) must not pay
+        # 32 KB of internal RAM for it.
+        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
+        start = between(voice, 'esp_err_t muse_voice_start(', 's_pre = heap_caps_malloc')
+        gated = between(start, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
+        self.assertIn('s_seed = heap_caps_malloc(', gated)
+        self.assertEqual(voice.count('s_seed = heap_caps_malloc('), 1)
+        kconfig = (WW / 'Kconfig').read_text()
+        enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_RUNNER')
+        self.assertIn('depends on SPIRAM', enable)
+
     def test_glue_starts_with_the_voice_pipeline(self):
         app = (ROOT / 'components/muse/muse_app.c').read_text()
         started = app.index('muse_voice_start(q)')

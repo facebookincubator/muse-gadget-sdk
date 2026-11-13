@@ -17,6 +17,7 @@ menu "Muse wake word"
 
     config MUSE_WAKEWORD_ENABLE
         bool "Compile in hands-free wake word support"
+        depends on SPIRAM
         default n
         help
             A clap (or a serial bench trigger) starts the same voice
@@ -27,7 +28,8 @@ menu "Muse wake word"
             The bench runner detects no speech at all: it fires on a
             loud-then-quiet energy burst (a clap) or on serial bench
             keys. No board overlay enables this yet; enablement is
-            per-board and opt-in.
+            per-board and opt-in. Needs PSRAM: its buffers take about
+            115 KB.
 
     choice MUSE_WAKEWORD_RUNNER
         prompt "Wake word runner"
