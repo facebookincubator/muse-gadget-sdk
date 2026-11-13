@@ -123,7 +123,7 @@ bash linux/wakeword/test_native.sh
 ```
 
 An optional pure-C CMake recipe is also provided; it has no ExecuTorch or Python
-build dependencies. Configure/build/CTest passed in laptop scratch. The direct
+build dependencies; its CTest target runs the same `signal_test`. The direct
 Linux compiler build is the tested primary path.
 
 Base wrapper tests use the real C shim with a scripted model, so they can run

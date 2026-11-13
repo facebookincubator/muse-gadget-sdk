@@ -23,7 +23,6 @@
     "warmup_frames": 29
   },
   "experimental": true,
-  "exporter_exir": "/Users/jrstevens/executorch/exir/__init__.py",
   "exporter_git_version": "a134f8f1caacdb1dc025e5c51cfcd6ae7ccc9fca",
   "frontend": {
     "clip_frames": 100,

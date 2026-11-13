@@ -46,6 +46,26 @@ def test_signal_sources_are_the_esp32_sources():
     assert header_sha == sidecar["frontend_header_sha256"]
 
 
+def test_shipped_wakeword_metadata_has_no_local_paths():
+    # Provenance sidecars ship in the public package: no machine paths.
+    data = REPO_ROOT / "linux" / "src" / "musegadget" / "data" / "wakeword"
+
+    def strings(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                yield key
+                yield from strings(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from strings(item)
+
+    for name in ("hey_muse_xnnpack.json", "validation.json"):
+        for text in strings(json.loads((data / name).read_text())):
+            assert not text.startswith(("/", "~")), (name, text)
+            assert "/Users/" not in text and "/home/" not in text, (name, text)
+
 def test_wheel_loader_keeps_model_file_ownership_in_runtime(tmp_path, monkeypatch):
     # ESP embeds aligned flash bytes; Linux must continue to use the file API.
     path = tmp_path / "model with spaces.pte"

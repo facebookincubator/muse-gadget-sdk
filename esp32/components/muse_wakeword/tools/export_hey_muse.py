@@ -697,7 +697,6 @@ def export_xnnpack(args, checkpoint, model, streaming_cls, et_root: Path) -> Non
     (args.parity_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n"
     )
-    import executorch.exir as exir
     import executorch.version as et_version
 
     architecture = (
@@ -724,7 +723,6 @@ def export_xnnpack(args, checkpoint, model, streaming_cls, et_root: Path) -> Non
         "architecture_sha256": sha256_file(architecture),
         "architecture_commit": commit,
         "exporter_git_version": et_version.git_version,
-        "exporter_exir": str(Path(exir.__file__).resolve()),
         "torch_version": torch.__version__,
         "class_names": EXPECTED_CLASSES,
         "wake_phrases": config.get("data", {}).get("wake_phrases", []),
