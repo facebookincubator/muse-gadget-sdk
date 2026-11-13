@@ -23,9 +23,12 @@ the Muse. Every HTTPS and WSS connection uses this context instead.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import logging
 import os
+import re
 import ssl
 import threading
 import warnings
@@ -86,11 +89,89 @@ def distrusted_name(der: bytes) -> str | None:
     return None
 
 
-def system_roots() -> list[bytes]:
-    """DER of every root in the OS trust store, as OpenSSL finds it.
+# OpenSSL finds certificates in a CA directory by subject hash ("1a2b3c4d.0").
+_HASH_NAME = re.compile(r"[0-9a-f]{8}\.[0-9]+")
+_PEM_CERT = re.compile(
+    rb"-----BEGIN (TRUSTED CERTIFICATE|X509 CERTIFICATE|CERTIFICATE)-----(.+?)-----END \1-----",
+    re.S)
+_SERVER_AUTH = bytes.fromhex("06082b06010505070301")   # DER OID 1.3.6.1.5.5.7.3.1
+_ANY_EKU = bytes.fromhex("0604551d2500")              # DER OID 2.5.29.37.0
 
-    Reads the default CA file and every file in the default CA directory
-    (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them), parsed by OpenSSL.
+
+def _der_element(data: bytes, offset: int) -> tuple[int, int, int]:
+    """``(tag, content start, end)`` of the DER element at ``offset``."""
+    tag, length = data[offset], data[offset + 1]
+    offset += 2
+    if length & 0x80:
+        size = length & 0x7F
+        if not 0 < size <= 4 or offset + size > len(data):
+            raise ValueError("bad DER length")
+        length = int.from_bytes(data[offset:offset + size], "big")
+        offset += size
+    if offset + length > len(data):
+        raise ValueError("truncated DER element")
+    return tag, offset, offset + length
+
+
+def _oids(data: bytes, start: int, end: int) -> set[bytes]:
+    oids = set()
+    while start < end:
+        tag, _, element_end = _der_element(data, start)
+        if tag != 0x06:
+            raise ValueError("expected an OID")
+        oids.add(data[start:element_end])
+        start = element_end
+    return oids
+
+
+def _tls_certificate(trusted: bytes) -> bytes | None:
+    """The certificate of an OpenSSL ``TRUSTED CERTIFICATE``, if it may anchor TLS.
+
+    Its trust settings follow the certificate. As OpenSSL does for a TLS
+    server, a root rejected for server authentication (or any purpose), or
+    with a trust list that includes neither, is not a TLS root.
+    """
+    _, _, cert_end = _der_element(trusted, 0)
+    cert, aux = trusted[:cert_end], trusted[cert_end:]
+    if not aux:
+        return cert
+    _, start, end = _der_element(aux, 0)
+    trust = reject = None
+    while start < end:
+        tag, content, element_end = _der_element(aux, start)
+        if tag == 0x30:
+            trust = _oids(aux, content, element_end)
+        elif tag == 0xA0:
+            reject = _oids(aux, content, element_end)
+        start = element_end
+    if reject and reject & {_SERVER_AUTH, _ANY_EKU}:
+        return None
+    if trust is not None and not trust & {_SERVER_AUTH, _ANY_EKU}:
+        return None
+    return cert
+
+
+def _pem_certificates(data: bytes) -> list[bytes]:
+    """DER of the certificates in a PEM file that may anchor TLS."""
+    certs = []
+    for label, body in _PEM_CERT.findall(data):
+        try:
+            der = base64.b64decode(b"".join(body.split()), validate=True)
+            if label == b"TRUSTED CERTIFICATE":
+                der = _tls_certificate(der)
+        except (ValueError, IndexError, binascii.Error):
+            continue
+        if der:
+            certs.append(der)
+    return certs
+
+
+def system_roots() -> list[bytes]:
+    """DER of every TLS root in the OS trust store, as OpenSSL finds it.
+
+    Reads the default CA file and the hash-named files in the default CA
+    directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them), and
+    keeps the trust settings of ``TRUSTED CERTIFICATE`` entries.
     """
     store = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     paths = ssl.get_default_verify_paths()
@@ -98,14 +179,21 @@ def system_roots() -> list[bytes]:
     if paths.capath:
         try:
             with os.scandir(paths.capath) as entries:
-                files += sorted(entry.path for entry in entries if entry.is_file())
+                files += sorted(entry.path for entry in entries
+                                if _HASH_NAME.fullmatch(entry.name) and entry.is_file())
         except OSError:
             pass
     for path in files:
         try:
-            store.load_verify_locations(cafile=path)
-        except (OSError, ssl.SSLError):
-            continue    # CA directories also hold CRLs and other files
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            continue
+        for der in _pem_certificates(data):    # CA directories also hold CRLs
+            try:
+                store.load_verify_locations(cadata=der)
+            except ssl.SSLError:
+                continue
     return store.get_ca_certs(binary_form=True)
 
 

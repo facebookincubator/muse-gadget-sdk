@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
 import re
@@ -144,16 +145,69 @@ def test_a_reissued_certificate_for_a_distrusted_key_is_refused(monkeypatch):
     assert tls.distrusted_name(CA("Unrelated").der) is None
 
 
-def test_system_roots_reads_the_ca_file_and_every_file_in_the_ca_directory(tmp_path, monkeypatch):
-    in_file, in_directory = CA("In file"), CA("In directory")
+def test_system_roots_reads_the_ca_file_and_the_hashed_files_in_the_ca_directory(tmp_path, monkeypatch):
+    # OpenSSL looks certificates up in the CA directory by subject hash, so a
+    # file without a hash name is not part of the system's trust store.
+    in_file, in_directory, unhashed = CA("In file"), CA("In directory"), CA("Unhashed")
     (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(in_file.der))
     directory = tmp_path / "certs"
     (directory / "nested").mkdir(parents=True)
-    (directory / "root.pem").write_text(ssl.DER_cert_to_PEM_cert(in_directory.der))
+    (directory / "0a1b2c3d.0").write_text(ssl.DER_cert_to_PEM_cert(in_directory.der))
+    (directory / "root.pem").write_text(ssl.DER_cert_to_PEM_cert(unhashed.der))
     (directory / "README").write_text("not a certificate\n")
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths", lambda: SimpleNamespace(
         cafile=str(tmp_path / "bundle.pem"), capath=str(directory)))
     assert sorted(tls.system_roots()) == sorted([in_file.der, in_directory.der])
+
+
+SERVER_AUTH = bytes.fromhex("06082b06010505070301")      # 1.3.6.1.5.5.7.3.1
+EMAIL_PROTECTION = bytes.fromhex("06082b06010505070304")  # 1.3.6.1.5.5.7.3.4
+ANY_PURPOSE = bytes.fromhex("0604551d2500")             # 2.5.29.37.0
+
+
+def der(tag: int, body: bytes) -> bytes:
+    assert len(body) < 128
+    return bytes([tag, len(body)]) + body
+
+
+def trusted_pem(cert_der: bytes, trust=None, reject=None) -> str:
+    """An OpenSSL ``TRUSTED CERTIFICATE``: the certificate and its trust settings."""
+    aux = b""
+    if trust is not None:
+        aux += der(0x30, b"".join(trust))
+    if reject is not None:
+        aux += der(0xA0, b"".join(reject))
+    body = base64.encodebytes(cert_der + der(0x30, aux)).decode()
+    return f"-----BEGIN TRUSTED CERTIFICATE-----\n{body}-----END TRUSTED CERTIFICATE-----\n"
+
+
+def test_system_roots_keeps_the_trust_settings_of_trusted_certificates(tmp_path, monkeypatch):
+    # Some distributions ship an OpenSSL bundle with per-root trust settings
+    # (e.g. ca-bundle.trust.crt): roots trusted only for email, and roots
+    # rejected for TLS. They must not become TLS trust anchors here. As in
+    # OpenSSL, "any purpose" counts for TLS in both lists.
+    tls_root, any_purpose, email_only, rejected, rejected_any, plain = (
+        CA("TLS root"), CA("Any-purpose root"), CA("Email-only root"),
+        CA("Rejected root"), CA("Rejected for any purpose"), CA("No settings"))
+    bundle = tmp_path / "bundle.trust.crt"
+    bundle.write_text(
+        trusted_pem(tls_root.der, trust=[EMAIL_PROTECTION, SERVER_AUTH])
+        + trusted_pem(any_purpose.der, trust=[ANY_PURPOSE])
+        + trusted_pem(email_only.der, trust=[EMAIL_PROTECTION])
+        + trusted_pem(rejected.der, reject=[SERVER_AUTH])
+        + trusted_pem(rejected_any.der, trust=[SERVER_AUTH], reject=[ANY_PURPOSE])
+        + trusted_pem(plain.der))
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=str(bundle), capath=None))
+    assert sorted(tls.system_roots()) == sorted([tls_root.der, any_purpose.der, plain.der])
+
+    monkeypatch.setattr(tls, "DISTRUSTED_ROOTS", ())
+    context = tls._build_context()
+    for root in (tls_root, any_purpose, plain):
+        handshake(context, server_context(root, tmp_path))
+    for root in (email_only, rejected, rejected_any):
+        with pytest.raises(ssl.SSLCertVerificationError):
+            handshake(context, server_context(root, tmp_path))
 
 
 def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
