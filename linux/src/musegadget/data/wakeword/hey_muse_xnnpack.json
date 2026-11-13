@@ -123,7 +123,7 @@
     "window_ms": 30,
     "window_samples": 480
   },
-  "frontend_header_sha256": "37611f28dd4596ff9bc5656c8c51879aec389de096eb0000bcbf4ee616c9c5aa",
+  "frontend_header_sha256": "8b18004b49e0ed2b5d8f41bbff4e45c31aa71e4591a47100d2367d1e2f83fdf1",
   "histories_initialized": "zeros",
   "input_shape": [
     1,

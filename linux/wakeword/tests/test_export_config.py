@@ -73,6 +73,24 @@ class ExportConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             exporter.validate_frontend(self.config, self.header)
 
+    def test_generated_header_matches_committed_header(self):
+        # The committed header is the exporter's output, byte for byte.
+        import json
+        import tempfile
+
+        sidecar = json.loads(
+            (
+                ROOT
+                / "linux/src/musegadget/data/wakeword/hey_muse_xnnpack.json"
+            ).read_text()
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "ww_frontend_config.h"
+            exporter.write_frontend_header(
+                out, sidecar["frontend"], sidecar["checkpoint_sha256"]
+            )
+            self.assertEqual(out.read_bytes(), self.header.read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()
