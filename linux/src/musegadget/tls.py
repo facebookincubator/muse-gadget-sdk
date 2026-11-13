@@ -93,14 +93,18 @@ def distrusted_system_roots() -> list[str]:
     """Names of the distrusted roots in the system's default CA file or CA directory.
 
     Reads the default CA file and the hash-named files of the default CA
-    directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them). A root
+    directory (``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` override them;
+    ``SSL_CERT_DIR`` may list several, separated as in ``PATH``). A root
     counts if it's there at all, whatever trust settings it carries.
     """
     paths = ssl.get_default_verify_paths()
     files = [paths.cafile] if paths.cafile else []
-    if paths.capath:
+    variable = getattr(paths, "openssl_capath_env", None)
+    listed = os.environ.get(variable) if variable else None
+    directories = listed.split(os.pathsep) if listed else ([paths.capath] if paths.capath else [])
+    for directory in directories:
         try:
-            with os.scandir(paths.capath) as entries:
+            with os.scandir(directory) as entries:
                 files += sorted(entry.path for entry in entries
                                 if _HASH_NAME.fullmatch(entry.name) and entry.is_file())
         except OSError:

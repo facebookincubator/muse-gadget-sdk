@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import datetime
 import hashlib
+import os
 import re
 import socket
 import ssl
@@ -134,7 +135,7 @@ def test_the_table_matches_the_published_roots():
         assert tls.distrusted_name(der) == name
 
 
-def test_a_reissued_certificate_for_a_distrusted_key_is_refused(monkeypatch):
+def test_a_reissued_certificate_for_a_distrusted_key_is_recognised(monkeypatch):
     key = ec.generate_private_key(ec.SECP256R1())
     original = make_cert("Original", key, ca=True).public_bytes(Encoding.DER)
     reissue = make_cert("Reissue", key, ca=True).public_bytes(Encoding.DER)
@@ -177,6 +178,18 @@ def test_distrusted_system_roots_reads_the_ca_file_and_the_hashed_files(tmp_path
     (directory / "ca-bundle.crt").write_text(ssl.DER_cert_to_PEM_cert(c1_der))
     (directory / "README").write_text("not a certificate\n")
     use_store(monkeypatch, tmp_path / "bundle.pem", directory)
+    assert tls.distrusted_system_roots() == sorted([g3, comodo])
+
+
+def test_distrusted_system_roots_reads_every_directory_ssl_cert_dir_lists(tmp_path, monkeypatch):
+    (g3, g3_der), (comodo, comodo_der), _, _ = published_roots()
+    one, two = tmp_path / "one", tmp_path / "two"
+    one.mkdir()
+    two.mkdir()
+    (one / "0a1b2c3d.0").write_text(ssl.DER_cert_to_PEM_cert(g3_der))
+    (two / "4e5f6a7b.0").write_text(ssl.DER_cert_to_PEM_cert(comodo_der))
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "absent.pem"))
+    monkeypatch.setenv("SSL_CERT_DIR", f"{one}{os.pathsep}{two}")
     assert tls.distrusted_system_roots() == sorted([g3, comodo])
 
 

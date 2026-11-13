@@ -161,8 +161,8 @@ def check_trust_store() -> CheckResult:
                 "hint": "Keep the ca-certificates package up to date."}
     return {"name": "Root CAs", "status": "WARN",
             "detail": f"The system trust store still has {', '.join(present)}.",
-            "hint": "musegadget uses the system trust store. "
-                    "Update the ca-certificates package."}
+            "hint": "musegadget uses the system trust store. Update the ca-certificates "
+                    "package, then restart musegadget (sudo systemctl restart musegadget)."}
 
 
 def run_checks() -> tuple[CheckResult, ...]:

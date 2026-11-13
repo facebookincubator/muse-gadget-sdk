@@ -19,7 +19,8 @@
 #   bash install.sh [--from SOURCE] [--run-as USER] [--sdk-token TOKEN] [--yes] [--no-pair]
 #   bash install.sh --uninstall [--purge]
 #
-# Installs system packages, a pinned uv, and musegadget into /opt/musegadget;
+# Installs system packages (bringing ca-certificates up to date), a pinned uv,
+# and musegadget into /opt/musegadget;
 # sets BlueZ's GATT MTU for the Android app; installs and starts the
 # musegadget service; then opens Bluetooth pairing for the Muse app.
 
