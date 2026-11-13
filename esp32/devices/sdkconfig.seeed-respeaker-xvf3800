@@ -1,0 +1,42 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Seeed reSpeaker XVF3800 with pre-soldered XIAO ESP32-S3, 8 MB flash and
+# 8 MB octal PSRAM. Load after sdkconfig.defaults. Experimental Link-only voice.
+# Requires respeaker_xvf3800_i2s_slave_v1.0.9_16k.bin or a compatible newer
+# same-major 16 kHz I2S-slave image with stock output routing.
+# Sources: https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY
+# and https://wiki.seeedstudio.com/respeaker_xvf3800_xiao_i2s/
+# XIAO BOOT=GPIO0, SDA=GPIO5, SCL=GPIO6, WS=GPIO7, BCLK=GPIO8,
+# ESP32 DOUT=GPIO44, DIN=GPIO43. USB serial: Espressif 303a:1001.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-seeed-respeaker-xvf3800"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Seeed reSpeaker XVF3800 with XIAO ESP32-S3"
+CONFIG_MUSE_DEVICE_GUIDE="devices/guides/voice.md"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_HOMEHUB_LED_BACKEND_NONE=y
+CONFIG_HOMEHUB_VOICE=y
+CONFIG_HOMEHUB_VOICE_BOARD_RESPEAKER_XVF3800=y
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-xvf3800"
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_MODE_QUAD=n
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y

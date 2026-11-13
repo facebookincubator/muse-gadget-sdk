@@ -36,6 +36,18 @@ extern "C" {
 // Tunnel stream id on the shared Noise session (control uses stream 1).
 #define TUNNEL_STREAM_ID 2
 
+// No inbound tunnel frame (pong or data) for this long marks the tunnel dead:
+// about three missed 20s keepalive pings.
+#define TUN_KEEPALIVE_TIMEOUT_US (65 * 1000 * 1000)
+
+// A tunnel ping unanswered this long (pongs normally take well under a second)
+// makes the session send a WebSocket ping, whose pong shows the connection is
+// still alive even if the tunnel backend is gone.
+#define TUN_PING_PROBE_US (5 * 1000 * 1000)
+// Only a ping unanswered at least this long can prove the connection dead,
+// leaving the WebSocket ping sent at TUN_PING_PROBE_US 10s for its pong.
+#define TUN_PING_ANSWER_US (15 * 1000 * 1000)
+
 // Emit-side callbacks the session owner provides to the tunnel. All run on
 // the session task, so they may touch the ClientSession directly.
 typedef struct {
@@ -55,6 +67,11 @@ typedef struct {
     // scratch for the frame headers and the tag. NULL: send_body is used.
     bool (*send_body_inplace)(void *ctx, uint8_t *buf, size_t headroom,
                               size_t len, size_t tailroom);
+
+    // Send a Reset on the tunnel stream (StartOutboundReset + flush), so the
+    // server forgets TUNNEL_STREAM_ID before we reuse it. Returns true on
+    // success.
+    bool (*reset_stream)(void *ctx);
 } noise_tunnel_emit_t;
 
 // Room around each outbound batch for in-place encoding: the WebSocket header
@@ -92,19 +109,33 @@ bool noise_tx_has_contiguous_dma_headroom(void);
 bool noise_tunnel_on_session_up(const noise_tunnel_emit_t *emit);
 
 // Retry opening the tunnel stream if it is currently down while the control
-// session is still up (e.g. after a transient backend 503). Rate-limited
-// internally; safe to call every loop iteration. No-op if already up.
-void noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit);
+// session is still up (e.g. after a transient backend 503). If we marked the
+// stream down locally, Resets it first so the server accepts the reused stream
+// id. Rate-limited and DMA-gated internally; safe to call every loop
+// iteration. No-op if already up. Returns false if the session must be torn
+// down: the Reset failed, or DMA headroom has held the reopen back for the
+// TX stall timeout (30s).
+bool noise_tunnel_maybe_reopen(const noise_tunnel_emit_t *emit);
 
 // Session torn down: mark the tunnel down and forget the emit context.
 void noise_tunnel_on_session_down(void);
+
+// Longest failure description noise_tunnel_on_server_drop() keeps, NUL
+// included; a longer `why` is cut.
+#define TUNNEL_FAILURE_MAX 72
+
+// The server reset the tunnel stream or refused POST /link-tunnel: mark the
+// tunnel down (control stays up) and record `why` in the connectivity history.
+void noise_tunnel_on_server_drop(const char *why);
 
 // Deliver an inbound BodyChunk received on TUNNEL_STREAM_ID to the packet cb.
 void noise_tunnel_on_inbound(const uint8_t *data, size_t len);
 
 // Send batches queued at entry while DMA headroom permits. Queued batches stay
 // pending under pressure; return promptly so control/RX/keepalives can run.
-// Returns the number sent (0 if empty or gated), or -1 on send error.
+// Returns the number sent (0 if empty or gated), or -1 on send error or when
+// queued batches have been gated with no progress for TUN_TX_STALL_TIMEOUT_US;
+// either way the caller must tear the session down.
 int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit);
 
 // Tunnel-stream keepalive. Call periodically from the session loop while the
@@ -115,6 +146,21 @@ int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit);
 // the half-open case where the WS/Noise transport is alive but the VM-side
 // backend behind raw.sock has gone away. No-op if the tunnel is down.
 void noise_tunnel_tick(const noise_tunnel_emit_t *emit);
+
+// Send time of the oldest keepalive ping with no inbound tunnel frame since, or
+// 0 if none is outstanding. Session task.
+uint64_t noise_tunnel_unanswered_ping_us(void);
+
+// Once after noise_tunnel_tick() marked the tunnel down: the send time of the
+// oldest unanswered ping, if it had TUN_PING_ANSWER_US to be answered, else 0
+// (pings DMA-gated, or one sent just before the timeout). If nothing at all
+// has arrived on the connection since then, the connection is dead (reconnect)
+// rather than only the tunnel backend (reopen the tunnel). Session task.
+uint64_t noise_tunnel_take_unanswered_timeout(void);
+
+// Seconds since the last inbound tunnel frame (pong or data), counting a
+// stream open as one. UINT32_MAX if the tunnel has never opened. Any task.
+uint32_t noise_tunnel_rx_idle_s(void);
 
 #ifdef __cplusplus
 }

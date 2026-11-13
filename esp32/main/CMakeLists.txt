@@ -31,6 +31,8 @@ set(GADGET_SRCS
     "config_store.c"
     "vm_api.c"
     "diagnostic_log.c"
+    "link_events.c"
+    "link_probe.c"
     "stack_monitor.c"
     "bug_report.c"
     "ota.c"
@@ -116,6 +118,10 @@ if(CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341)
     list(APPEND GADGET_REQUIRES esp_lcd_ili9341)
 endif()
 
+if(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796)
+    list(APPEND GADGET_REQUIRES esp_lcd_st7796)
+endif()
+
 if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
     list(APPEND GADGET_SRCS "sensecap_sensors.c")
 endif()
@@ -132,11 +138,7 @@ if(CONFIG_HOMEHUB_VOICE)
         "voice_muse_chat.c"
         "voice_player.c"
     )
-    if(CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
-        list(APPEND GADGET_SRCS "voice_board_respeaker_lite.c")
-    else()
-        list(APPEND GADGET_SRCS "voice_board.c")
-    endif()
+    include("voice_board_select.cmake")
 endif()
 
 idf_component_register(
@@ -145,6 +147,12 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}
 )
+
+# device.guide's Markdown, embedded as muse_device_guide_md (NUL-terminated).
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/device_guide.cmake")
+idf_build_get_property(gadget_project_dir PROJECT_DIR)
+muse_device_guide_assemble("${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" "${gadget_project_dir}")
+target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" TEXT)
 
 # fast_gcm.c takes over ESP-IDF's one-shot AES-GCM entry points (PSA's AES-GCM
 # driver calls them across archives, so the linker can redirect them).

@@ -20,6 +20,8 @@
 # talks, blue mutes or hangs up); red bottom-left = M5PM1 BTN (0x48 bit0),
 # not an ESP GPIO. See factory hal_button.cpp/view.cpp and M5PM1 1.0.6.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-m5stack-stopwatch"
+CONFIG_MUSE_DEVICE_MODEL_NAME="M5Stack StopWatch"
 CONFIG_MUSE_BOARD_M5STACK_STOPWATCH=y
 
 CONFIG_SPIRAM=y
@@ -69,3 +71,12 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # actually slept, and how long each power lock kept the chip awake.
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
+# Internal RAM is tight once Wi-Fi, BLE and both VM sessions are up (more so
+# with live calls), and code and rodata run from PSRAM, so:
+# - setup task stacks (pairing, provisioning, the Muse VM lookup) go to PSRAM:
+#   the 8 KB provisioning and lookup stacks otherwise find no free block, and
+#   pairing ends with error_operation_in_progress or Muse can't reach its VM;
+# - allocations of 1 KB and up try PSRAM first (sdkconfig.muse: 4 KB), leaving
+#   the 16 KB of DMA-capable RAM Link waits for before it sends link.register.
+CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024

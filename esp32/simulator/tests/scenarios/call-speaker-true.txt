@@ -1,0 +1,5 @@
+face=speaking
+call=true
+speaker=true
+caption=The museum opens at ten tomorrow. You can take the riverside path and stop for coffee along the way.
+advance=2000

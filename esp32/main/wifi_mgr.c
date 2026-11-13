@@ -24,11 +24,14 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "soc/soc_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
+
+#include "link_events.h"
 
 static const char *TAG = "link.wifi";
 
@@ -57,6 +60,9 @@ static atomic_bool s_connect_pending = ATOMIC_VAR_INIT(false);
 static atomic_bool s_sta_idle = ATOMIC_VAR_INIT(true);
 static int s_retry = 0;
 static int s_reconnect_backoff_ms = 1000;  // grows on consecutive failures
+// Connectivity history: record only IP-up/down transitions, not every retry.
+static bool s_has_ip = false;
+static int64_t s_ip_lost_us = 0;
 #define MAX_INITIAL_RETRY        3
 #define RECONNECT_BACKOFF_MIN_MS 1000
 #define RECONNECT_BACKOFF_MAX_MS 60000
@@ -158,6 +164,13 @@ static void event_handler(void *arg, esp_event_base_t base,
         ESP_LOGW(TAG, "station disconnected reason=%u rssi=%d",
                  ev ? ev->reason : 0, ev ? ev->rssi : 0);
 
+        if (s_has_ip) {
+            s_has_ip = false;
+            s_ip_lost_us = esp_timer_get_time();
+            link_events_record(LINK_EVENT_WIFI_DOWN, "esp-idf reason=%u rssi=%d",
+                               ev ? ev->reason : 0u, ev ? ev->rssi : 0);
+        }
+
         xEventGroupClearBits(s_events, BIT_CONNECTED | BIT_GOT_IP);
         atomic_store(&s_sta_idle, true);
         const wifi_event_sta_disconnected_t *event =
@@ -187,6 +200,15 @@ static void event_handler(void *arg, esp_event_base_t base,
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "got IP " IPSTR, IP2STR(&ev->ip_info.ip));
+        if (!s_has_ip) {
+            s_has_ip = true;
+            if (s_ip_lost_us) {
+                link_events_record(LINK_EVENT_WIFI_UP, "got IP after %llus without Wi-Fi",
+                                   (unsigned long long)((esp_timer_get_time() - s_ip_lost_us) / 1000000));
+            } else {
+                link_events_record(LINK_EVENT_WIFI_UP, "got IP");
+            }
+        }
         s_retry = 0;
         s_keep_connected = true;
         s_reconnect_backoff_ms = RECONNECT_BACKOFF_MIN_MS;  // reset on success

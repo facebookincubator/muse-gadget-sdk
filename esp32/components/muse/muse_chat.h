@@ -102,11 +102,27 @@ typedef enum {
 muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap);
 
 /*
+ * For the voice task, while idle. True once a reply has come for a request
+ * whose turn ended before it (Muse said it was still working, and the turn
+ * said so and let go); it then starts that reply's turn, to be played like any
+ * reply (muse_hatch_turn_event and the rest), though nobody pressed anything.
+ */
+bool muse_hatch_incoming(void);
+
+/*
  * The page of reply text holding what's being said after `played` frames of
  * reply speech (sized by muse_state_page), or before the speech its opening
  * page. False until there's reply text to page.
  */
 bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
+
+/* Approximate progress at the same playback cursor as captions, 0..1.
+ * message receives the current message index, or -1 before playback. Values
+ * may be revised as duration becomes known; the voice task stabilizes them.
+ * 1 means this message has drained; the ring caps at 99% until the whole
+ * turn succeeds. Voice task only.
+ * Link-only builds return 0 and -1 (their paging is unchanged). */
+float muse_turn_progress(size_t played, int *message);
 
 /*
  * For a caption font whose letters differ in width: pages also wrap each line
@@ -115,7 +131,9 @@ bool muse_hatch_turn_caption(size_t played, char *out, size_t cap);
  * line wraps again on screen and a page holds exactly its lines. Every reply
  * is measured: one with CJK or accented letters also keeps to their font's
  * page (muse_state_page), but its pages without any show in this font. A
- * NULL glyph_px turns it off. Set before any reply is paged.
+ * NULL glyph_px turns it off. Set before any reply is paged; the full UI sets
+ * it again when the speaker switches its reply layout, and pages after that
+ * use the new width.
  */
 void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next));
 

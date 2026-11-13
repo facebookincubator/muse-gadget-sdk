@@ -2446,8 +2446,10 @@ static const vm_info_t *find_vm_by_id(const vm_info_t *vms, int count, const cha
     return NULL;
 }
 
-// Runs on an internal-RAM stack: the caller's may be in PSRAM, and this reads
-// and (on token refresh) writes NVS.
+// Reads and (on token refresh) writes NVS, so its stack is in internal RAM
+// (the caller's may be in PSRAM) unless code and rodata run from PSRAM and the
+// board puts setup task stacks there (helper_task.h): with live calls on, the
+// StopWatch has no 8 KB internal block left once Wi-Fi and Link are up.
 static void hatch_vm_task(void *arg) {
     hatch_vm_request_t *req = arg;
     if (config_is_provisioned() && operation_gate_take(pdMS_TO_TICKS(15000), "Muse VM lookup")) {
@@ -2476,7 +2478,7 @@ static void hatch_vm_task(void *arg) {
     }
     xTaskNotifyGive(req->waiter);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 bool app_hatch_vm_credentials(const char *want_vm, char *vm_id, size_t id_cap,
@@ -2486,7 +2488,8 @@ bool app_hatch_vm_credentials(const char *want_vm, char *vm_id, size_t id_cap,
         .vm_name = vm_name, .name_cap = name_cap,
         .waiter = xTaskGetCurrentTaskHandle(),
     };
-    if (xTaskCreate(hatch_vm_task, "muse_vm", 8192, &req, 4, NULL) != pdPASS) {
+    if (helper_task_create(hatch_vm_task, "muse_vm", 8192, &req, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "Muse VM lookup: no memory for its task");
         return false;
     }
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);

@@ -1,6 +1,6 @@
 # Skill Catalog
 
-47 active skills: 46 device/family skills and one shared Google Cast skill.
+54 active skills: 53 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -19,6 +19,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 ## Speakers, displays and TVs
 
+- [Amazon Echo](gadget-amazon-echo/SKILL.md) — cloud only; needs internet, a Linux Home Link and an Amazon login: TTS, volume, media and confirmed switching.
 - [Apple HomePod mini](gadget-apple-homepod-mini/SKILL.md) — supported volume, transport and grouping controls.
 - [Apple TV 4K](gadget-apple-tv-4k/SKILL.md) — paired remote, apps and keyboard.
 - [Freebox Player Pop](gadget-freebox-player-pop/SKILL.md) — Cast and Android TV Remote v2.
@@ -45,6 +46,9 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Dyson HP04](gadget-dyson-pure-hot-cool-hp04/SKILL.md) — local status and supported fan/heating controls.
 - [Miele G 7566](gadget-miele-g7566-dishwasher/SKILL.md) — local status; commands only if supported and permitted.
 - [Moonraker 3D printers](gadget-moonraker-3d-printers/SKILL.md) — existing-service status and print/job controls.
+- [Bambu Lab printers](gadget-bambu-lab-printers/SKILL.md) — local status, filament and owner-approved prints in Developer Mode.
+- [Bambu Lab P2S](gadget-bambu-lab-p2s/SKILL.md) — status, chamber-camera snapshots, monitoring and agreed failure pauses.
+- [HomeWhiz laundry](gadget-homewhiz-laundry/SKILL.md) — cloud only; needs internet and a HomeWhiz account: washer and dryer cycle state, read-only.
 
 ## Vacuums
 
@@ -62,6 +66,8 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [ESPHome devices](gadget-esphome-devices/SKILL.md) — entities exposed by installed firmware.
 - [Tuya Wi-Fi devices](gadget-tuya-wifi-devices/SKILL.md) — confirmed local protocol, keys and datapoint map.
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
+- [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — cloud only; needs internet and a Tuya end-user API key: status, confirmed control, weather, stats and snapshots.
+- [SinricPro cloud devices](gadget-sinricpro-cloud-devices/SKILL.md) — cloud only; needs internet and a SinricPro API key: state, actions, scenes and schedules.
 
 ## Read-only network and camera access
 
@@ -73,3 +79,4 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 - [Tesla](gadget-tesla/SKILL.md) — self-hosted status, drive/charge history and efficiency analytics via Fleet API, TeslaMate and Fleet Telemetry; read-only by default.
 - [Google Nest Thermostats](gadget-google-nest-thermostats/SKILL.md) — temperature and setpoints via a Smart Device Management bridge.
+- [VeSync humidifier](gadget-vesync-humidifier/SKILL.md) — cloud only; needs internet and a VeSync account: Levoit humidifier state and control.

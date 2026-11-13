@@ -8,6 +8,8 @@
 # and the attached board's ROM flash-ID and startup log.
 # Load after sdkconfig.defaults and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-s3-lcd7"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-S3-Touch-LCD-7"
 CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD7=y
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

@@ -54,6 +54,14 @@ deblocking off and 2 Mb/s VGA):
   slower there than the C (480 px in two bands: 40 ms a frame against 28),
   hence off.
 
+One `OPT:` change is a behaviour change, for input from the network:
+`h264bsdDecode` takes one whole access unit per call and starts each call
+fresh. Upstream resumed a NAL unit an earlier call left unfinished whenever
+it got the same buffer address again; `muse_vdec.c` reuses one buffer, so by
+then that address holds another frame. Such a NAL unit is now dropped, a
+resumed one must fit the buffer it's resumed in, and no step reads past the
+input. Resuming within one call, after new parameter sets, works as before.
+
 On the S3 at 240 MHz a 232 px picture decodes in about 21 ms at 600 kb/s and
 25 ms at 1000 (x264, no deblocking), with the code running from cache.
 `CONFIG_MUSE_VIDEO_DECODER_IRAM` puts the per-macroblock code and its tables

@@ -96,6 +96,12 @@ void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result);
 
+// Builds the device.health payload object; the caller owns it. Also embedded in
+// bug.report so a filed bug carries the connectivity history. The bug.report
+// copy holds the full history but leaves out the SSID, like the rest of the
+// report's explicit fields; device.health holds only the recent events.
+cJSON *noise_ctrl_device_health_json(bool for_bug_report);
+
 // ---- Extra daemon requests on this session (CONFIG_HOMEHUB_DAEMON_REQUESTS) ----
 //
 // Any task can open an HTTP request to the VM daemon on its own stream of this

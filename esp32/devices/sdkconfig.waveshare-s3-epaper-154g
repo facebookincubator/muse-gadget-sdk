@@ -25,6 +25,8 @@
 # It overrides the ESP32-C5 assumptions in sdkconfig.defaults; C5-only options
 # there are ignored for this target.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-s3-epaper-154g"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-S3-ePaper-1.54G"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # E-paper shows status.
@@ -34,6 +36,10 @@ CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
 # BOOT button on GPIO0 confirms pairing and opens setup.
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_HOMEHUB_BUTTON_LABEL="BOOT"
+# Push-to-talk voice notes on BOOT through the board's ES8311
+# (main/voice_board_waveshare_154g.c).
+CONFIG_HOMEHUB_VOICE=y
+CONFIG_HOMEHUB_VOICE_BOARD_WAVESHARE_154G=y
 
 # 8 MB of embedded flash; use the 8 MB partition table.
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y

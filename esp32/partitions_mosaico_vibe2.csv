@@ -1,0 +1,34 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Name,    Type, SubType, Offset,   Size,     Flags
+# Espressif ESP-Mosaico (16 MB) with Vibe Mode 0.2 (tools/muse/board.sh picks
+# this for an esp-mosaico-utils checkout that has esp-mosaico-vibe-mode). Its
+# product_contract.json fixes the same first 2 MB as partitions_mosaico.csv,
+# except that Vibe Mode is `vibe_mode` (app/test) instead of `factory`; its
+# System Update installs the app into app/ota_0 named `main_app`.
+# main_app starts at 0x210000, as on a board from the factory
+# (esp-mosaico-vibe-mode/docs/migration-0.2.md): an install that moves it
+# fails at commit (0x105) after writing the table, because Vibe Mode looks
+# the app up in the table it booted with. Vibe Mode also opens `nvs` at boot
+# and aborts if it cannot: keep it at 0x200000, and do not shrink it under an
+# installed app.
+otadata,   data, ota,     0x9000,   0x2000,
+phy_init,  data, phy,     0xb000,   0x1000,
+sysmeta,   data, nvs,     0xc000,   0x14000,
+vibe_mode, app,  test,    0x20000,  0x1c0000,
+coredump,  data, coredump,0x1e0000, 0x20000,
+nvs,       data, nvs,     0x200000, 0x10000,
+main_app,  app,  ota_0,   0x210000, 0x600000,
+mg_queue,  data, 0x4D,    0x810000, 0x200000,

@@ -44,7 +44,7 @@ def test_settled_submission_cannot_be_relabelled_to_unlock_waiting_pcm():
             media, start = await admit(vm)
             await chunk(vm, media, b"".join(map(line, [speech("A"), turn("A", "S"), settled("S"),
                                                        speech("B"), audio("B-provider")])))
-            await wait_until(lambda: bool(call._waiting_pcm))
+            await wait_until(lambda: bool(call._waiting))
             assert call._settled_turns == {"S": "A"} and not call._reply_gate.confirmed
             await chunk(vm, media, line(turn("B", "S")))
             await hangup(vm, media, start)

@@ -51,6 +51,10 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.06"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_WAVESHARE_S3_185B
+            bool "Waveshare ESP32-S3-Touch-LCD-1.85B"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_S3_185C
             bool "Waveshare ESP32-S3-Touch-LCD-1.85C"
             depends on IDF_TARGET_ESP32S3
@@ -67,9 +71,17 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-LCD-1.46"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_LILYGO_S3_AMOLED_175
+            bool "LilyGO T-Display-S3 AMOLED 1.75 (H741-01; no audio)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_ESP_MOSAICO
             bool "Espressif ESP-Mosaico (ESP32-S31)"
             depends on IDF_TARGET_ESP32S31
+
+        config MUSE_BOARD_DFROBOT_UNIHIKER_K10
+            bool "DFRobot UNIHIKER K10 (240x320 LCD, two buttons, ES7243E)"
+            depends on IDF_TARGET_ESP32S3
 
         config MUSE_BOARD_AIPI
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
@@ -77,6 +89,10 @@ menu "Muse"
 
         config MUSE_BOARD_ATK_DNESP32S3_BOX
             bool "ALIENTEK ATK-DNESP32S3-BOX V1.1 (320x240 LCD, ES8311, three keys, no touch)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_ATK_DNESP32S3_BOX2
+            bool "ALIENTEK ATK-DNESP32S3-BOX2 (320x240 LCD, ES8389, four keys, battery, no touch)"
             depends on IDF_TARGET_ESP32S3
 
         config MUSE_BOARD_ESPRESSIF_BOX_3
@@ -170,6 +186,10 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD19
             bool "Waveshare ESP32-S3-Touch-LCD-1.9 (170x320 SH8601, one button)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_LCD_35
+            bool "Waveshare ESP32-S3-Touch-LCD-3.5 (ESP32-S3, 480x320 touch LCD, ES8311 speaker and mic)"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -187,13 +207,17 @@ menu "Muse"
         default "reterminal_sticky" if MUSE_BOARD_RETERMINAL_STICKY
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
         default "waveshare_s3_206" if MUSE_BOARD_WAVESHARE_S3_206
+        default "waveshare_s3_185b" if MUSE_BOARD_WAVESHARE_S3_185B
         default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
         default "waveshare_s3_143c" if MUSE_BOARD_WAVESHARE_S3_143C
         default "waveshare_s3_143" if MUSE_BOARD_WAVESHARE_S3_143
         default "waveshare_s3_146" if MUSE_BOARD_WAVESHARE_S3_146
+        default "lilygo_s3_amoled_175" if MUSE_BOARD_LILYGO_S3_AMOLED_175
         default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
+        default "dfrobot_unihiker_k10" if MUSE_BOARD_DFROBOT_UNIHIKER_K10
         default "aipi" if MUSE_BOARD_AIPI
         default "atk_dnesp32s3_box" if MUSE_BOARD_ATK_DNESP32S3_BOX
+        default "atk_dnesp32s3_box2" if MUSE_BOARD_ATK_DNESP32S3_BOX2
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
         default "waveshare_s3_18" if MUSE_BOARD_WAVESHARE_S3_18
@@ -219,6 +243,7 @@ menu "Muse"
         default "viewe_smartring_plus" if MUSE_BOARD_VIEWE_SMARTRING_PLUS
         default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
         default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
+        default "waveshare_s3_lcd_35" if MUSE_BOARD_WAVESHARE_S3_LCD_35
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -448,6 +473,22 @@ menu "Muse"
             also ends when Muse ends it, when nothing has been said or
             played for the idle limit, or at the length limit. Muse's VM
             has to accept voice calls from this gadget's credentials.
+
+    config MUSE_VOICE_NOTE_TOGGLE
+        bool "Press once to record a voice note, press again to send"
+        depends on MUSE_ENABLED && !MUSE_REALTIME_VOICE
+        depends on !MUSE_BOARD_SENSECAP_WATCHER && !MUSE_UI_FREEINK
+        default n
+        help
+            A talk-button press starts recording and the next press sends
+            the note. Releasing the button does not stop recording. A press
+            that wakes the display only wakes it. A note needs at least
+            500 ms of audio before the press that sends it, and recording
+            still ends at the normal 15-second limit. While a note records,
+            the other buttons don't open the menu or sleep the screen.
+            Replies remain text unless a separate TTS integration is
+            provided. Not available on the SenseCAP Watcher, whose wheel
+            click sleeps, or on e-paper (FreeInk) boards.
 
 if MUSE_REALTIME_VOICE
 
