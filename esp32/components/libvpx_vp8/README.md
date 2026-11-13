@@ -74,7 +74,8 @@ segmentation, 240 to 480 px).
   buffer is in each decoder's state, as two decoders run at once (a
   picture's two bands, one per core). A stride that would be a multiple of
   256 bytes gets 32 more, so a block's rows don't share cache sets (480 px:
-  544, as upstream).
+  544, as upstream). A picture that fails to allocate releases only its
+  own slot.
 - Low-memory decoding (`vp8dx_mgx_set_lowmem()`, `vpx/vp8dx.h`;
   `vp8/decoder/decodeframe.c`), opt-in: an inter frame that replaces the
   last frame, and leaves no reference on its old content, is decoded over it
