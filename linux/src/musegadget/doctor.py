@@ -153,21 +153,15 @@ def check_network() -> CheckResult:
 
 
 def check_trust_store() -> CheckResult:
-    """Report distrusted root CAs left in the OS trust store; musegadget skips them anyway."""
-    if tls.trusts_nothing():
-        return {"name": "Root CAs", "status": "FAIL",
-                "detail": "musegadget found no root CA it can use in the system trust store, "
-                          "so it can't make HTTPS connections.",
-                "hint": "Check the ca-certificates package, and SSL_CERT_FILE and SSL_CERT_DIR "
-                        "if they are set. The service log names any file it couldn't read."}
+    """Warn about distrusted root CAs left in the system trust store, which musegadget uses."""
     present: list[str] = tls.distrusted_system_roots()
     if not present:
         return {"name": "Root CAs", "status": "OK",
-                "detail": "The system trust store has none of the root CAs that musegadget refuses.",
-                "hint": "musegadget refuses them itself if a later update brings one back."}
+                "detail": "The system trust store has none of the known distrusted root CAs.",
+                "hint": "Keep the ca-certificates package up to date."}
     return {"name": "Root CAs", "status": "WARN",
-            "detail": f"The system trust store still trusts {', '.join(present)}.",
-            "hint": "musegadget refuses them, but other software here doesn't. "
+            "detail": f"The system trust store still has {', '.join(present)}.",
+            "hint": "musegadget uses the system trust store. "
                     "Update the ca-certificates package."}
 
 

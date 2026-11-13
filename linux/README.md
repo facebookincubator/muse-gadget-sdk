@@ -464,12 +464,12 @@ bash install.sh --uninstall              # remove it (add --purge to forget the 
 
 `doctor` checks saved pairing credentials, SDK token format, the systemd
 service, Bluetooth controller power, TCP connectivity to the default
-Muse API on port 443, and whether the system still trusts root CAs that
-musegadget refuses. Each check prints `OK`, `FAIL`, or `WARN` and a next
+Muse API on port 443, and whether the system trust store still has known
+distrusted root CAs. Each check prints `OK`, `FAIL`, or `WARN` and a next
 step. It exits with code 1 if any check fails, or 0 otherwise. Bluetooth
-problems are warnings because Bluetooth is only needed for pairing. Refused
-root CAs are warnings because musegadget skips them itself; update the
-`ca-certificates` package so the rest of the system does too.
+problems are warnings because Bluetooth is only needed for pairing.
+musegadget uses the system trust store, so a distrusted root CA there is a
+warning to update the `ca-certificates` package; the installer updates it too.
 
 Run it on the gadget with sudo so it can read the root-owned state files.
 It never changes settings, starts services, opens pairing, or prints tokens.

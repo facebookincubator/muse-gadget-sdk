@@ -180,6 +180,28 @@ install_packages() {
     fi
 }
 
+# musegadget uses the system trust store, and distros remove distrusted root
+# CAs in ca-certificates updates, so bring that one package up to date.
+update_ca_certificates() {
+    local updated=0
+    if [ "$DISTRO_FAMILY" = fedora ]; then
+        as_root dnf upgrade -y -q ca-certificates >/dev/null 2>&1 && updated=1
+    elif [ "$DISTRO_FAMILY" = debian ]; then
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 &&
+            as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --only-upgrade \
+                ca-certificates >/dev/null 2>&1 && updated=1
+    else
+        # Upgrading one package without the rest is a partial upgrade on Arch.
+        say "ca-certificates: left to pacman -Syu, which keeps it current on Arch."
+        return
+    fi
+    if [ "$updated" = 1 ]; then
+        say "ca-certificates is up to date."
+    else
+        warn "couldn't update ca-certificates; continuing with the installed version."
+    fi
+}
+
 install_uv() {
     if [ -x "$PREFIX/bin/uv" ] && [ "$("$PREFIX/bin/uv" --version | awk '{print $2}')" = "$UV_VERSION" ]; then
         return
@@ -426,6 +448,7 @@ main() {
     fi
     choose_account
     install_packages
+    update_ca_certificates
     enable_bluez
     install_uv
     install_musegadget
