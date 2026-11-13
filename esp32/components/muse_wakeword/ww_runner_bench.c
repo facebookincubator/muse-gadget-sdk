@@ -63,6 +63,11 @@ void ww_runner_destroy(ww_runner_t *r)
     free(r);
 }
 
+bool ww_runner_ok(ww_runner_t *r)
+{
+    return r != NULL;   /* nothing to fail: no model */
+}
+
 static void forget(ww_runner_t *r)
 {
     r->pending_n = 0;

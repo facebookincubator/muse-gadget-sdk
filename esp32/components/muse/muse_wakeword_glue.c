@@ -80,6 +80,7 @@ static bool s_applied_playback;           /* wake task only */
 static bool s_applied_ptt_turn;           /* wake task only */
 static muse_wakeword_stats_t s_stats_snap;   /* wake task writes, status reads */
 static int s_state_snap;
+static volatile bool s_runner_ok = true;   /* wake task writes: the runner can detect */
 static uint32_t s_capture_chunks;                    /* wake task only, for the log */
 static size_t s_seeded_frames;
 static bool s_up_owed;   /* wake task only: a synthetic release the full queue refused */
@@ -100,8 +101,10 @@ bool muse_wakeword_enabled(void)
 
 bool muse_wakeword_listening(void)
 {
-    return s_started && s_applied_enabled && !s_applied_playback && !s_applied_ptt_turn &&
-           !muse_voice_resting();
+    /* A runner whose model failed to load or run hears nothing:
+     * not listening until a reset reloads it. */
+    return s_started && s_applied_enabled && s_runner_ok && !s_applied_playback &&
+           !s_applied_ptt_turn && !muse_voice_resting();
 }
 
 void muse_wakeword_set_ptt_turn(bool active)
@@ -323,6 +326,15 @@ static void snapshot_status(void)
 {
     s_stats_snap = muse_wakeword_core_stats(&s_core);
     s_state_snap = (int)muse_wakeword_core_state(&s_core);
+    bool ok = ww_runner_ok(s_runner);
+    if (ok != s_runner_ok) {
+        if (ok) {
+            ESP_LOGI(TAG, "runner recovered");
+        } else {
+            ESP_LOGW(TAG, "runner stopped: not listening until it reloads");
+        }
+        s_runner_ok = ok;
+    }
 }
 
 static muse_wakeword_input_t next_input(const int16_t *pcm)
