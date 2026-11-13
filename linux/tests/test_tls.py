@@ -419,26 +419,52 @@ def test_the_client_context_refuses_a_distrusted_root_and_trusts_the_rest(tmp_pa
 
 
 def test_no_system_roots_falls_back_to_default_trust_with_a_warning(monkeypatch, caplog):
-    monkeypatch.setattr(tls, "_system_roots", lambda: ([], False))
+    monkeypatch.setattr(tls, "_system_roots", lambda: ([], True))
     context = tls._build_context()
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
     assert "found no system root CAs" in caplog.text
 
 
-def test_unusable_trust_files_do_not_fall_back_to_default_trust(tmp_path, monkeypatch, caplog):
-    # Default trust would load these files without the distrusted-root filter.
-    # OpenSSL loads this entry, but its settings' length isn't minimally encoded.
+def test_default_trust_stands_in_only_without_distrusted_roots(tmp_path, monkeypatch, caplog):
+    # When no roots can be read exactly, Python's default trust loads the same
+    # files without the distrusted-root filter, so it stands in only when
+    # those files hold no distrusted root.
     nonminimal = CA("Root").der + bytes.fromhex("30810c300a06082b06010505070301")
     bundle = tmp_path / "bundle.pem"
-    bundle.write_text("-----BEGIN TRUSTED CERTIFICATE-----\n"
-                      + base64.encodebytes(nonminimal).decode()
-                      + "-----END TRUSTED CERTIFICATE-----\n")
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
                         lambda: SimpleNamespace(cafile=str(bundle), capath=None))
+    unreadable = ("-----BEGIN TRUSTED CERTIFICATE-----\n" + base64.encodebytes(nonminimal).decode()
+                  + "-----END TRUSTED CERTIFICATE-----\n")
+    bundle.write_text(unreadable)
     assert tls._system_roots() == ([], True)
-    context = tls._build_context()
-    assert context.get_ca_certs() == []
-    assert "no usable TLS root CAs" in caplog.text
+    assert tls._build_context().verify_mode == ssl.CERT_REQUIRED
+    assert "using Python's default TLS trust" in caplog.text
+
+    bundle.write_text(unreadable + ssl.DER_cert_to_PEM_cert(published_roots()[0][1]))
+    assert tls._system_roots() == ([], False)
+    assert tls._build_context().get_ca_certs() == []
+    assert "not trusting any" in caplog.text
+
+
+def test_a_ca_file_with_only_a_server_certificate_is_trusted_as_openssl_trusts_it(tmp_path, monkeypatch):
+    key = ec.generate_private_key(ec.SECP256R1())
+    leaf = make_cert("localhost", key, ca=False)    # self-signed, not a CA
+    certfile, keyfile = tmp_path / "server.crt", tmp_path / "server.key"
+    certfile.write_bytes(leaf.public_bytes(Encoding.PEM))
+    keyfile.write_bytes(key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
+    server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server.load_cert_chain(certfile, keyfile)
+    (tmp_path / "certs").mkdir()
+    monkeypatch.setenv("SSL_CERT_FILE", str(certfile))    # so default trust reads it too
+    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "certs"))
+    outcomes = []
+    for context in (ssl.create_default_context(cafile=str(certfile)), tls._build_context()):
+        try:
+            handshake(context, server)
+            outcomes.append(True)
+        except ssl.SSLCertVerificationError:    # newer Pythons verify strictly
+            outcomes.append(False)
+    assert outcomes[0] == outcomes[1]
 
 
 def test_a_store_of_only_distrusted_roots_trusts_nothing(monkeypatch):
