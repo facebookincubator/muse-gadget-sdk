@@ -306,7 +306,8 @@ class LiveAudio:
             except queue.Empty:
                 await asyncio.sleep(0.01)
 
-    def write(self, pcm: bytes) -> None:
+    def write(self, pcm: bytes) -> int:
+        """Queue PCM and return the number of bytes awaiting the device callback."""
         if not pcm or len(pcm) > FRAME_BYTES or len(pcm) % 2:
             raise ValueError("playback needs 1–960 PCM16 samples")
         if not self._output_stream.active:
@@ -316,6 +317,7 @@ class LiveAudio:
                 raise OSError("audio device playback queue full")
             self._playback.append(pcm)
             self._playback_bytes += len(pcm)
+            return self._playback_bytes
 
     @staticmethod
     def _clear(q) -> None:
@@ -325,11 +327,14 @@ class LiveAudio:
             except queue.Empty:
                 return
 
-    def flush(self) -> None:
+    def flush(self) -> int:
+        """Discard queued PCM and return the number of bytes removed."""
         with self._playback_lock:
+            discarded = self._playback_bytes
             self._playback.clear()
             self._playback_bytes = 0
             self._upsample_previous = 0
+            return discarded
 
     def close(self) -> None:
         try:

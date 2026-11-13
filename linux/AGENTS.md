@@ -423,6 +423,70 @@ run_command=...)` is one encrypted session with a Muse VM.
   follows. `ReplayScope.observe_idle(event, session_id)` retires an event
   seen while no turn is open.
 
+### Voice call events
+
+- `VoiceCall(..., on_event=callback)` calls `callback(event)` for each
+  `voice_call.VoiceEvent`, on the event loop. It must not block. An
+  exception it raises ends the call. Without `on_event` no events are built.
+  Raised outside `barge_in()`, `KeyboardInterrupt` and `SystemExit` can stop
+  the event loop, as asyncio lets them, before the explicit end-call.
+- If `barge_in()`'s flush fails, it still sends `response.cancel` for the open
+  response, and `run()` raises the failure after cleanup. Once `run()` has
+  started shutting down, `barge_in()` raises the failure itself. If `run()` is
+  cancelled or raises another error, it logs the failure's type once.
+  `StopIteration` is raised as `RuntimeError`.
+- `ResponseStarted(response_id)` and `ResponseDone(response_id, status)` come
+  from `response.created` and `response.done` (or `response.completed`).
+  `status` is as Muse reports it, such as `"completed"` or `"cancelled"`, or
+  None. Audio of a response can still arrive after its `ResponseDone`.
+  A held reply's words and audio can follow its `ResponseDone` and even the
+  next `ResponseStarted`.
+- `TranscriptDelta(response_id, text)` and `TranscriptDone(response_id, text)`
+  carry the words Muse speaks. The wire events name no response, so
+  `response_id` is that of the latest `ResponseStarted` when Muse sent the
+  words, and held words keep it. Words go with that response's audio, the
+  provider audio streams first heard since its `response.created`. Each
+  `response.created` starts a new set of streams, even if its ID repeats or is
+  missing. Words are delivered while one of those streams plays, held while
+  one waits for its caller's turn and then delivered in order with it, and
+  dropped once all of them are dropped. Words that come before the response's
+  first audio are delivered, held or dropped as new audio would be. Words of
+  the response open at a barge-in or the caller's speech never arrive. The
+  text is as Muse sent it, control characters included: strip them before
+  printing it to a terminal.
+- `AudioChunk(response_id, offset, pcm)` is reply PCM accepted for playback,
+  delivered before the output writes it. Held audio is delivered when its
+  turn confirms it, joined into one chunk per run between held words.
+  Dropped audio never is. `offset` counts the samples
+  delivered for `response_id` before this chunk, so `offset / SAMPLE_RATE`
+  is where it starts in that response's speech. `response_id` is the latest
+  `ResponseStarted`'s when the chunk's provider audio stream was first heard,
+  so a reply still playing when the next response opens keeps its own.
+  Audio without a provider response id takes the latest at arrival.
+- `Working(working)` changes when Muse starts or stops working on a caller
+  turn, by the ESP32 client's rule (`muse_vc_call_working()`): a turn is
+  open from its `turn_started` until a settlement names it. A settlement with
+  `async_handoffs_pending` of 1 or more (such as a spoken approval prompt) is
+  a boundary where Muse waits on the caller: not working until the next caller
+  turn starts. One reporting 0 retires every open turn, except, once, the
+  latest caller turn whose reply hasn't finished (a reply without a response
+  ID never counts as finished). Only a non-negative integer count does
+  either. This doesn't change the call's idle tracking. No `Working(False)`
+  comes when the call ends: once `run()` returns, Muse is no longer working
+  on the call.
+- `PlaybackFlushed(response_ids)` says audio already delivered, still queued
+  or playing, was discarded: a barge-in, the caller talking over the reply,
+  a continuation replacing it, or the call ending. `response_ids` names the
+  responses that audio belonged to, in playback order. An output that queues
+  audio says how much: `write(pcm)` returns the bytes still queued and
+  `flush()` the bytes it discarded, as a non-boolean `numbers.Integral`
+  count. One that plays at once returns None. Any other `write()` return
+  value counts as None, any other `flush()` return value as nothing
+  discarded by the output, and without `on_event`
+  the return value is ignored. If `flush()` raises, the event still reports
+  the audio discarded from the call's own queue. If the callback also
+  raises, the output's error wins and the callback's error type is logged.
+
 ## Say Muse, never Hatch
 
 Users never see the name Hatch.
