@@ -299,6 +299,54 @@ def test_hashed_files_are_read_in_suffix_order(tmp_path, monkeypatch):
     assert root.der in tls.system_roots()
 
 
+def test_pem_markers_must_start_a_line(tmp_path, monkeypatch):
+    # OpenSSL ignores a commented-out entry; so must the trust filter.
+    commented, root = CA("Commented"), CA("Root")
+    text = "".join("# " + line + "\n" for line in ssl.DER_cert_to_PEM_cert(commented.der).splitlines())
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_text(text + ssl.DER_cert_to_PEM_cert(root.der))
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=str(bundle), capath=None))
+    assert tls.system_roots() == [root.der]
+    handshake(ssl.create_default_context(cafile=str(bundle)), server_context(root, tmp_path))
+    with pytest.raises(ssl.SSLCertVerificationError):
+        handshake(ssl.create_default_context(cafile=str(bundle)), server_context(commented, tmp_path))
+
+
+def subject_hash(name: str) -> str:
+    """OpenSSL's subject hash (``X509_NAME_hash``) of a ``CN=name`` name, for simple names."""
+    value = name.lower().encode()
+    canonical = der(0x31, der(0x30, bytes.fromhex("0603550403") + der(0x0C, value)))
+    return hashlib.sha1(canonical).digest()[3::-1].hex()
+
+
+def test_the_ca_directory_trusts_what_openssl_trusts(tmp_path, monkeypatch):
+    # Real subject-hash names, so OpenSSL's own directory lookup finds them.
+    plain, tls_only, email_only, rejected, unhashed = (
+        CA("plain root"), CA("tls root"), CA("email root"), CA("rejected root"), CA("unhashed root"))
+    directory = tmp_path / "certs"
+    directory.mkdir()
+    for ca, text in ((plain, ssl.DER_cert_to_PEM_cert(plain.der)),
+                     (tls_only, trusted_pem(tls_only.der, trust=[SERVER_AUTH])),
+                     (email_only, trusted_pem(email_only.der, trust=[EMAIL_PROTECTION])),
+                     (rejected, trusted_pem(rejected.der, reject=[SERVER_AUTH]))):
+        (directory / f"{subject_hash(ca.name)}.0").write_text(text)
+    (directory / "bundle.trust.crt").write_text(ssl.DER_cert_to_PEM_cert(unhashed.der))
+    native = ssl.create_default_context(cafile=None, capath=str(directory))
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=None, capath=str(directory)))
+    monkeypatch.setattr(tls, "DISTRUSTED_ROOTS", ())
+    ours = tls._build_context()
+    for ca, trusted in ((plain, True), (tls_only, True), (email_only, False),
+                        (rejected, False), (unhashed, False)):
+        for context in (native, ours):
+            if trusted:
+                handshake(context, server_context(ca, tmp_path))
+            else:
+                with pytest.raises(ssl.SSLCertVerificationError):
+                    handshake(context, server_context(ca, tmp_path))
+
+
 def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
                         lambda: SimpleNamespace(cafile=None, capath=None))
@@ -308,7 +356,7 @@ def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
 def test_the_client_context_refuses_a_distrusted_root_and_trusts_the_rest(tmp_path, monkeypatch):
     good, bad = CA("Good root"), CA("Bad root")
     monkeypatch.setattr(tls, "DISTRUSTED_ROOTS", (("Bad root", "0" * 64, spki_sha256(bad.key.public_key())),))
-    monkeypatch.setattr(tls, "system_roots", lambda: [good.der, bad.der])
+    monkeypatch.setattr(tls, "_system_roots", lambda: ([good.der, bad.der], True))
     context = tls._build_context()
     assert context.get_ca_certs(binary_form=True) == [good.der]
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
@@ -319,8 +367,7 @@ def test_the_client_context_refuses_a_distrusted_root_and_trusts_the_rest(tmp_pa
 
 
 def test_no_system_roots_falls_back_to_default_trust_with_a_warning(monkeypatch, caplog):
-    monkeypatch.setattr(tls, "system_roots", lambda: [])
-    monkeypatch.setattr(tls, "_openssl_reads_a_trust_file", lambda: False)
+    monkeypatch.setattr(tls, "_system_roots", lambda: ([], False))
     context = tls._build_context()
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
     assert "found no system root CAs" in caplog.text
@@ -336,7 +383,7 @@ def test_unusable_trust_files_do_not_fall_back_to_default_trust(tmp_path, monkey
                       + "-----END TRUSTED CERTIFICATE-----\n")
     monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
                         lambda: SimpleNamespace(cafile=str(bundle), capath=None))
-    assert tls.system_roots() == [] and tls._openssl_reads_a_trust_file()
+    assert tls._system_roots() == ([], True)
     context = tls._build_context()
     assert context.get_ca_certs() == []
     assert "no usable TLS root CAs" in caplog.text
@@ -344,7 +391,7 @@ def test_unusable_trust_files_do_not_fall_back_to_default_trust(tmp_path, monkey
 
 def test_a_store_of_only_distrusted_roots_trusts_nothing(monkeypatch):
     der = published_roots()[0][1]
-    monkeypatch.setattr(tls, "system_roots", lambda: [der])
+    monkeypatch.setattr(tls, "_system_roots", lambda: ([der], True))
     context = tls._build_context()
     assert context.get_ca_certs() == []
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
