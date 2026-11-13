@@ -92,9 +92,10 @@ def distrusted_name(der: bytes) -> str | None:
 # OpenSSL finds certificates in a CA directory by subject hash: "1a2b3c4d.0",
 # then ".1" and so on, stopping at the first missing suffix.
 _HASH_NAME = re.compile(r"([0-9a-f]{8})\.(0|[1-9][0-9]*)")
-# PEM markers start a line, as OpenSSL reads them; other text is ignored.
+# PEM markers start a line, as OpenSSL reads them (a BEGIN line may start with
+# a UTF-8 byte order mark); other text is ignored.
 _PEM_CERT = re.compile(
-    rb"^-----BEGIN (TRUSTED CERTIFICATE|X509 CERTIFICATE|CERTIFICATE)-----[ \t\r]*$"
+    rb"^(?:\xef\xbb\xbf)?-----BEGIN (TRUSTED CERTIFICATE|X509 CERTIFICATE|CERTIFICATE)-----[ \t\r]*$"
     rb"(.*?)^-----END \1-----[ \t\r]*$",
     re.S | re.M)
 _SERVER_AUTH = bytes.fromhex("06082b06010505070301")   # DER OID 1.3.6.1.5.5.7.3.1
@@ -218,7 +219,8 @@ def _file_certificates(path: str) -> tuple[list[tuple[bytes, bool]], bool] | Non
     """The CA certificates OpenSSL loads from a file, and whether each may anchor TLS.
 
     ``None`` if OpenSSL refuses the file. The second value says whether the
-    trust settings of every entry were read.
+    trust settings of every entry were read, including every certificate
+    OpenSSL loaded.
     """
     scratch = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     try:
@@ -229,6 +231,9 @@ def _file_certificates(path: str) -> tuple[list[tuple[bytes, bool]], bool] | Non
         return None
     loaded = set(scratch.get_ca_certs(binary_form=True))
     certs, complete = _pem_certificates(data)
+    complete = complete and loaded <= {der for der, _ in certs}
+    if not complete:
+        log.warning("couldn't read the TLS trust settings in %s; not using it", path)
     return [(der, tls_root) for der, tls_root in certs if der in loaded], complete
 
 

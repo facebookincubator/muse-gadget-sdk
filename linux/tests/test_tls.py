@@ -313,6 +313,22 @@ def test_pem_markers_must_start_a_line(tmp_path, monkeypatch):
         handshake(ssl.create_default_context(cafile=str(bundle)), server_context(commented, tmp_path))
 
 
+def test_a_byte_order_mark_before_an_entry_is_read_as_openssl_reads_it(tmp_path, monkeypatch):
+    # OpenSSL reads an entry whose BEGIN line starts with a UTF-8 byte order
+    # mark, so its trust settings must count: here the first copy rejects TLS.
+    root = CA("Root")
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_bytes(b"\xef\xbb\xbf" + trusted_pem(root.der, reject=[SERVER_AUTH]).encode()
+                       + ssl.DER_cert_to_PEM_cert(root.der).encode())
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=str(bundle), capath=None))
+    assert tls.system_roots() == []
+    with pytest.raises(ssl.SSLCertVerificationError):
+        handshake(ssl.create_default_context(cafile=str(bundle)), server_context(root, tmp_path))
+    bundle.write_bytes(b"\xef\xbb\xbf" + ssl.DER_cert_to_PEM_cert(root.der).encode())
+    assert tls.system_roots() == [root.der]
+
+
 def subject_hash(name: str) -> str:
     """OpenSSL's subject hash (``X509_NAME_hash``) of a ``CN=name`` name, for simple names."""
     value = name.lower().encode()
