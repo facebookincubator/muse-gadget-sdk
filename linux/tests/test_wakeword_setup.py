@@ -5,6 +5,7 @@
 
 import hashlib
 import os
+import platform
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP = ROOT / "wakeword" / "setup.sh"
+
+# The helper refuses to run anywhere but the Linux gadget host, before it
+# parses anything else; these tests exercise what it does there.
+pytestmark = pytest.mark.skipif(
+    platform.system() != "Linux", reason="setup.sh runs only on Linux"
+)
 
 
 def run(*args, env=None):
