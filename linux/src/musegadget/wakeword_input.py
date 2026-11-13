@@ -32,6 +32,10 @@ PREROLL_BYTES = SAMPLE_RATE * 2
 MAX_BUFFER_BYTES = SAMPLE_RATE * 2 * 4
 
 
+class WakeWordBacklogError(BufferError):
+    """Live capture outran the call; its queued audio would have been truncated."""
+
+
 class Pcm24To16:
     """Streaming 2:3 FIR resampler; independent of input chunk boundaries."""
 
@@ -112,7 +116,7 @@ class WakeWordInput:
 
     def _enqueue(self, pcm):
         if self._buffer_bytes + len(pcm) > MAX_BUFFER_BYTES:
-            raise BufferError(
+            raise WakeWordBacklogError(
                 "wake-word capture exceeded the four-second admission buffer"
             )
         self._queue.append(pcm)

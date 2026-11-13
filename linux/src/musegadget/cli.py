@@ -273,7 +273,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
         try:
             if detector is None:
                 return await invoke(audio, audio.frames())
-            from musegadget.wakeword_input import WakeWordInput
+            from musegadget.wakeword_input import WakeWordBacklogError, WakeWordInput
 
             while True:
                 listener = WakeWordInput(audio.frames(), detector, realtime=args.live)
@@ -285,7 +285,14 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
                     if not detected:
                         return "no_wake_word"
                     print("Hey Muse detected; starting voice call.", file=report)
-                    reason = await invoke(audio, listener.frames())
+                    try:
+                        reason = await invoke(audio, listener.frames())
+                    except WakeWordBacklogError:
+                        # The call failed closed (its audio is never truncated);
+                        # a backlog must not end live listening as well.
+                        if not args.live:
+                            raise
+                        reason = "capture_backlog"
                 finally:
                     await listener.aclose()
                 if not args.live:

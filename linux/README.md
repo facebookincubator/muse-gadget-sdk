@@ -292,8 +292,9 @@ opens the microphone or enables this feature.
 bounds each local wait; call idle/overall timers start only after activation.
 WAV mode also accepts `--wake-word`, runs at most one call, and exits without
 admitting a call if the file ends before a detection. A live capture backlog
-exceeding four seconds during admission fails closed rather than silently
-truncating the user's question. Startup needs the configured VM to be reachable.
+exceeding four seconds during admission fails that call closed rather than
+silently truncating the user's question; live mode then returns to listening.
+Startup needs the configured VM to be reachable.
 
 ### Lifecycle diagnostics
 
