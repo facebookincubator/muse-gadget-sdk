@@ -320,9 +320,26 @@ def test_the_client_context_refuses_a_distrusted_root_and_trusts_the_rest(tmp_pa
 
 def test_no_system_roots_falls_back_to_default_trust_with_a_warning(monkeypatch, caplog):
     monkeypatch.setattr(tls, "system_roots", lambda: [])
+    monkeypatch.setattr(tls, "_openssl_reads_a_trust_file", lambda: False)
     context = tls._build_context()
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
     assert "found no system root CAs" in caplog.text
+
+
+def test_unusable_trust_files_do_not_fall_back_to_default_trust(tmp_path, monkeypatch, caplog):
+    # Default trust would load these files without the distrusted-root filter.
+    # OpenSSL loads this entry, but its settings' length isn't minimally encoded.
+    nonminimal = CA("Root").der + bytes.fromhex("30810c300a06082b06010505070301")
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_text("-----BEGIN TRUSTED CERTIFICATE-----\n"
+                      + base64.encodebytes(nonminimal).decode()
+                      + "-----END TRUSTED CERTIFICATE-----\n")
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=str(bundle), capath=None))
+    assert tls.system_roots() == [] and tls._openssl_reads_a_trust_file()
+    context = tls._build_context()
+    assert context.get_ca_certs() == []
+    assert "no usable TLS root CAs" in caplog.text
 
 
 def test_a_store_of_only_distrusted_roots_trusts_nothing(monkeypatch):

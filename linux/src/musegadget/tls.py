@@ -287,8 +287,30 @@ def distrusted_system_roots() -> list[str]:
     return sorted({name for der in system_roots() if (name := distrusted_name(der))})
 
 
+def _openssl_reads_a_trust_file() -> bool:
+    """Whether OpenSSL loads any of the files ``system_roots()`` reads."""
+    paths = ssl.get_default_verify_paths()
+    files = [paths.cafile] if paths.cafile else []
+    if paths.capath:
+        try:
+            files += [path for chain in _hashed_files(paths.capath) for path in chain]
+        except OSError:
+            pass
+    for path in files:
+        try:
+            ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cafile=path)
+            return True
+        except OSError:     # ssl.SSLError included
+            continue
+    return False
+
+
 def _build_context() -> ssl.SSLContext:
     roots = system_roots()
+    if not roots and _openssl_reads_a_trust_file():
+        # Python's default trust would load those files without the filter.
+        log.error("found no usable TLS root CAs in the system store; not trusting any")
+        return ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)    # trusts nothing, so connects nowhere
     if not roots:
         log.warning("found no system root CAs to filter; using Python's default TLS trust")
         return ssl.create_default_context()
