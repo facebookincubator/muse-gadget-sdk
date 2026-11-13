@@ -231,6 +231,18 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
             -fsanitize=address,undefined -fno-omit-frame-pointer)
     endif()
     add_test(NAME muse_caption_layout COMMAND muse_caption_layout_test)
+    add_executable(muse_options_ui_test tests/options_ui_harness.c ${caption_sources})
+    target_include_directories(muse_options_ui_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_options_ui_test PRIVATE ${caption_libraries})
+    target_compile_options(muse_options_ui_test PRIVATE ${caption_compile_options})
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_options_ui_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_options_ui COMMAND muse_options_ui_test)
+    add_test(NAME muse_options_round_466 COMMAND muse_options_ui_test 466 466 1)
+    add_test(NAME muse_options_rectangle COMMAND muse_options_ui_test 320 480 0)
+    set_tests_properties(muse_options_ui muse_options_round_466 muse_options_rectangle PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;ASAN_OPTIONS=detect_leaks=0:halt_on_error=1" TIMEOUT 30)
     set_tests_properties(muse_caption_layout PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
     find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
