@@ -485,7 +485,8 @@ class WakeWordFirmwareContract(unittest.TestCase):
         ui = (ROOT / 'components/muse/muse_settings_ui.c').read_text()
         sound = between(ui, 'static void build_sound_page(', 'static void tick_sound(void)')
         self.assertIn('switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw)', sound)
-        self.assertIn('Model not implemented yet, clap to wake', sound)
+        self.assertIn('note(list, "A clap starts a voice note. There\'s no spoken wake word yet.");', sound)
+        self.assertNotIn('not implemented', sound)   # user copy, not a placeholder
         self.assertNotIn('Clap test', sound)
         callback = between(ui, 'static void on_wake_sw(', 'static void build_sound_page(')
         self.assertIn('muse_wakeword_set_enabled(', callback)
