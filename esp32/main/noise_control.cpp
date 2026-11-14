@@ -1633,17 +1633,11 @@ static char *build_register_json(void) {
 #endif
 
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-    add_command(commands, "enable_wakeword",
-                "Turn hands-free wake word listening on: saying the wake word "
-                "then starts a voice note like holding the talk button. Kept "
-                "across restarts. Returns enabled and listening state and the "
-                "runner in use; runner \"bench\" means a test double that "
-                "detects no speech.",
-                nullptr, nullptr);
-    add_command(commands, "disable_wakeword",
-                "Turn hands-free wake word listening off at once, ending any "
-                "hands-free capture in progress. Kept across restarts. "
-                "Returns the same state as enable_wakeword.",
+    add_command(commands, "wakeword.disable",
+                "Turn off hands-free \"Hey Muse\" listening at once, ending any "
+                "hands-free voice note in progress. Only someone at the device "
+                "can turn it back on. Kept across restarts. Returns enabled and "
+                "listening (both false).",
                 nullptr, nullptr);
 #endif
 

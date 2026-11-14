@@ -1943,8 +1943,11 @@ static cJSON *bug_report_command(
 #endif  // CONFIG_HOMEHUB_BLE_COMMANDS
 
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-static cJSON *wakeword_command(bool on) {
-    muse_wakeword_set_enabled(on);
+/* Muse may only turn listening off. Turning it on is the device's own
+ * choice (Settings, the quick menu, serial), so no remote command can make
+ * the gadget start sending audio. */
+static cJSON *wakeword_disable_command(void) {
+    muse_wakeword_set_enabled(false);
     muse_wakeword_status_t st;
     muse_wakeword_status(&st);
     cJSON *result = cJSON_CreateObject();
@@ -1956,11 +1959,6 @@ static cJSON *wakeword_command(bool on) {
     }
     cJSON_AddBoolToObject(payload, "enabled", st.enabled);
     cJSON_AddBoolToObject(payload, "listening", st.listening);
-    cJSON_AddStringToObject(payload, "runner", st.runner);
-    cJSON_AddNumberToObject(payload, "wakes", st.wakes);
-    cJSON_AddNumberToObject(payload, "cancels", st.cancels);
-    cJSON_AddNumberToObject(payload, "submits", st.submits);
-    cJSON_AddNumberToObject(payload, "dropped_frames", st.dropped_frames);
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddItemToObject(result, "payload", payload);
     return result;
@@ -2054,11 +2052,8 @@ static cJSON *on_ws_command(
     }
 #endif
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-    if (strcmp(command, "enable_wakeword") == 0) {
-        return wakeword_command(true);
-    }
-    if (strcmp(command, "disable_wakeword") == 0) {
-        return wakeword_command(false);
+    if (strcmp(command, "wakeword.disable") == 0) {
+        return wakeword_disable_command();
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {

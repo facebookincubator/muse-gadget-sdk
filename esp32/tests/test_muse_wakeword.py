@@ -384,16 +384,26 @@ class WakeWordFirmwareContract(unittest.TestCase):
         helper = (WW / 'tools/make_kernel_bundle.py').read_text()
         self.assertIn('module._check_version = _unchecked_version', helper)
 
-    def test_commands_advertised_and_dispatched_with_the_feature(self):
+    def test_muse_can_only_turn_listening_off(self):
+        # Only audio after a detection on the device may leave it, so no
+        # remote command turns listening on; Muse gets wakeword.disable.
         noise = (ROOT / 'main/noise_control.cpp').read_text()
         block = between(noise, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
-        self.assertIn('add_command(commands, "enable_wakeword"', block)
-        self.assertIn('add_command(commands, "disable_wakeword"', block)
+        self.assertIn('add_command(commands, "wakeword.disable"', block)
+        self.assertEqual(block.count('add_command('), 1)
         app = (ROOT / 'main/app.c').read_text()
         dispatch = between(app, 'static cJSON *on_ws_command(', 'unsupported command')
         block = between(dispatch, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
-        self.assertIn('"enable_wakeword"', block)
-        self.assertIn('"disable_wakeword"', block)
+        self.assertIn('"wakeword.disable"', block)
+        self.assertEqual(block.count('strcmp(command,'), 1)
+        for name in ('enable_wakeword', 'disable_wakeword', 'wakeword.enable'):
+            self.assertNotIn(name, noise)
+            self.assertNotIn(name, app)
+        # The only call from the Link side sets it off.
+        main_calls = [line.strip() for path in (ROOT / 'main').glob('*.c*')
+                      for line in path.read_text().splitlines()
+                      if 'muse_wakeword_set_enabled(' in line]
+        self.assertEqual(main_calls, ['muse_wakeword_set_enabled(false);'])
 
     def test_tap_is_inside_both_audio_read_loops(self):
         voice = (ROOT / 'components/muse/muse_voice.c').read_text()

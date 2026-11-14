@@ -430,7 +430,7 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
     }
     s_started = true;
     ESP_LOGI(TAG, "wake word ready: runner=%s, listening %s", muse_wakeword_runner_kind(),
-             s_enabled ? "on (saved opt-in)" : "off (enable_wakeword turns it on)");
+             s_enabled ? "on (saved opt-in)" : "off (Settings > Sound or wake.on turns it on)");
     return ESP_OK;
 }
 

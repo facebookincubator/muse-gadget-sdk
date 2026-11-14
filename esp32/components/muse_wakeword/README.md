@@ -71,6 +71,8 @@ On the device, the same persisted opt-in is the **Sound > Wake word** settings s
 (on button boards, the quick menu's **Wake word** row). A submit only
 reaches Muse once the gadget is paired; unpaired, the turn stops
 at the setup caption, and the `muse_wake` log lines plus `@wake`
-counters show the flow. In the Muse app once paired,
-`enable_wakeword` and `disable_wakeword` do the same as `wake.on`
-and `wake.off`.
+counters show the flow.
+
+Muse can only turn listening off (`wakeword.disable`, the same as
+`wake.off`); there is no remote command to turn it on, so only someone
+at the device can start the gadget listening.
