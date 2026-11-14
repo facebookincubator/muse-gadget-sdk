@@ -45,7 +45,7 @@ The same on every gadget that runs apps.
 | `frame_rate` | 30 | on_frame calls per second, at most. |
 | `object_pixels` | 4,096 | An object's position, width and height in pixels, either way; larger values are clamped. |
 | `shadow_pixels` | 64 | Shadow width, spread and offsets, line dashes, and radii other than RADIUS_CIRCLE; larger values are clamped. |
-| `styles_per_object` | 32 | ui_style_add calls on one object; past that ERR_LIMIT. |
+| `styles_per_object` | 32 | The app's styles on one object: shared ones from ui_style_add plus each selector ui_style sets; past that ERR_LIMIT. |
 
 ## What an app exports
 
@@ -554,11 +554,11 @@ Style properties for other parts and states, and shared styles.
 int32_t ui_style(int32_t obj, int32_t selector, int32_t prop, int32_t value);
 ```
 
-Sets a style property for one part and state: ui_style(slider, PART_INDICATOR, P_BG_COLOR, 0x00C8FF).
+Sets a style property for one part and state: ui_style(slider, PART_INDICATOR, P_BG_COLOR, 0x00C8FF). Each selector counts once toward limits.styles_per_object.
 
 - `selector`: A PART_ plus STATE_ bits.
 - `prop`: A style property.
-- Errors: `ERR_HANDLE`, `ERR_ARG`
+- Errors: `ERR_HANDLE`, `ERR_ARG`, `ERR_LIMIT`
 - WAMR signature: `(iiii)i`
 
 #### `ui_style_create`
@@ -590,7 +590,7 @@ Sets a property in a shared style. Objects using it update.
 int32_t ui_style_add(int32_t obj, int32_t style, int32_t selector);
 ```
 
-Gives an object a shared style, up to 32 times per object. Properties set on the object itself still win.
+Gives an object a shared style. With the selectors ui_style has set on it, 32 per object (limits.styles_per_object). Properties set on the object itself still win.
 
 - `selector`: A PART_ plus STATE_ bits.
 - Errors: `ERR_HANDLE`, `ERR_ARG`, `ERR_LIMIT`

@@ -1551,8 +1551,9 @@ GADGET_IMPORT(ui_scale_needle) int32_t ui_scale_needle(int32_t scale, int32_t li
 
 /*
  * Sets a style property for one part and state: ui_style(slider,
- * PART_INDICATOR, P_BG_COLOR, 0x00C8FF). selector: A PART_ plus STATE_ bits.
- * prop: A style property.
+ * PART_INDICATOR, P_BG_COLOR, 0x00C8FF). Each selector counts once toward
+ * limits.styles_per_object. selector: A PART_ plus STATE_ bits. prop: A style
+ * property.
  */
 GADGET_IMPORT(ui_style) int32_t ui_style(int32_t obj, int32_t selector, int32_t prop, int32_t value);
 
@@ -1569,8 +1570,9 @@ GADGET_IMPORT(ui_style_create) int32_t ui_style_create(void);
 GADGET_IMPORT(ui_style_set) int32_t ui_style_set(int32_t style, int32_t prop, int32_t value);
 
 /*
- * Gives an object a shared style, up to 32 times per object. Properties set on
- * the object itself still win. selector: A PART_ plus STATE_ bits.
+ * Gives an object a shared style. With the selectors ui_style has set on it,
+ * 32 per object (limits.styles_per_object). Properties set on the object
+ * itself still win. selector: A PART_ plus STATE_ bits.
  */
 GADGET_IMPORT(ui_style_add) int32_t ui_style_add(int32_t obj, int32_t style, int32_t selector);
 

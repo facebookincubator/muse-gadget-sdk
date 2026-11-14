@@ -949,9 +949,17 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("if (s_q) vQueueDeleteWithCaps(s_q);", start)
 
     def test_style_attachments_per_object_are_capped(self):
-        """LVGL asserts (and so aborts) past 63 styles on one object."""
-        add = function(read("components/muse_apps/muse_apps_ui.c"), "int32_t gadget_ui_style_add(")
-        self.assertLess(add.index("if (s->styles >= STYLES_PER_OBJECT) {"), add.index("lv_obj_add_style("))
+        """LVGL asserts (and so aborts) past 63 styles on one object: shared
+        styles and local selectors count together, the theme's don't."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        room = function(ui, "static bool style_room(")
+        self.assertIn("if (local && st->is_local && st->selector == sel) {", room)
+        self.assertIn("n += !st->is_theme && !st->is_trans;", room)
+        self.assertIn("return n < STYLES_PER_OBJECT;", room)
+        add = function(ui, "int32_t gadget_ui_style_add(")
+        self.assertLess(add.index("if (!style_room(s->obj, false, sel)) {"), add.index("lv_obj_add_style("))
+        local = function(ui, "int32_t gadget_ui_style(")
+        self.assertLess(local.index("if (!style_room(s->obj, true, sel)) {"), local.index("style_set("))
 
     def test_the_unpair_mark_waits_for_the_apps_to_go(self):
         catalog = read("components/muse_apps/muse_apps_catalog.c")

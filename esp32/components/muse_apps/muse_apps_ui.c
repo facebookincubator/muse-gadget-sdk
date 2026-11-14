@@ -39,6 +39,8 @@
 #include "muse_apps_priv.h"
 #include "muse_apps_ui_priv.h"
 #include "muse_link.h"
+#include "src/core/lv_obj_private.h"         /* an object's style list, for STYLES_PER_OBJECT */
+#include "src/core/lv_obj_style_private.h"
 #if LV_USE_LODEPNG
 #include "src/libs/lodepng/lodepng.h"
 #endif
@@ -120,7 +122,6 @@ typedef struct {
     int32_t *grid;      /* ui_grid's column and row tracks */
     int32_t needle_of;  /* a line: the scale it's the needle of (its handle), or 0 */
     uint8_t type;       /* GADGET_W_ */
-    uint8_t styles;     /* ui_style_add calls: LVGL aborts past 63 styles on one object */
 } slot_t;
 
 typedef struct {
@@ -404,7 +405,7 @@ enum { K_INT = 1, K_COORD, K_RGB, K_OPA, K_BOOL, K_FONT, K_ANGLE, K_SCALE, K_TEX
 /* Shadows, radii and dashes within 64 px, as cv_rect_style's: LVGL sizes a
  * shadow's corner buffer from them, and steps a dash in 16 bits. */
 #define SHADOW_MAX 64
-#define STYLES_PER_OBJECT 32   /* limits.styles_per_object */
+#define STYLES_PER_OBJECT 32   /* limits.styles_per_object: LVGL aborts past 63 on one object */
 
 typedef struct {
     lv_style_prop_t prop;
@@ -2442,6 +2443,21 @@ int32_t gadget_ui_scale_needle(wasm_exec_env_t env, int32_t scale, int32_t line,
 
 /* ---- Styles --------------------------------------------------------------------------------------- */
 
+/* Room on the object for another of the app's styles: a shared one, or a
+ * local selector it doesn't have yet (ui_style). The theme's don't count. */
+static bool style_room(lv_obj_t *o, bool local, lv_style_selector_t sel)
+{
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < o->style_cnt; i++) {
+        const lv_obj_style_t *st = &o->styles[i];
+        if (local && st->is_local && st->selector == sel) {
+            return true;
+        }
+        n += !st->is_theme && !st->is_trans;
+    }
+    return n < STYLES_PER_OBJECT;
+}
+
 int32_t gadget_ui_style(wasm_exec_env_t env, int32_t obj, int32_t selector, int32_t prop, int32_t value)
 {
     (void)env;
@@ -2452,6 +2468,9 @@ int32_t gadget_ui_style(wasm_exec_env_t env, int32_t obj, int32_t selector, int3
     }
     if (!selector_in(selector, &sel)) {
         return GADGET_ERR_ARG;
+    }
+    if (!style_room(s->obj, true, sel)) {
+        return GADGET_ERR_LIMIT;
     }
     return style_set(s->obj, NULL, sel, prop, value);
 }
@@ -2513,10 +2532,9 @@ int32_t gadget_ui_style_add(wasm_exec_env_t env, int32_t obj, int32_t style, int
     if (!selector_in(selector, &sel)) {
         return GADGET_ERR_ARG;
     }
-    if (s->styles >= STYLES_PER_OBJECT) {
+    if (!style_room(s->obj, false, sel)) {
         return GADGET_ERR_LIMIT;
     }
-    s->styles++;
     lv_obj_add_style(s->obj, st, sel);
     return 0;
 }
