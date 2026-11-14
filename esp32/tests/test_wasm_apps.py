@@ -720,6 +720,16 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("lv_event_stop_processing(e);", guard)
         self.assertIn("lv_obj_add_event_cb(o, chart_guard, LV_EVENT_DRAW_MAIN | LV_EVENT_PREPROCESS, NULL);", ui)
 
+    def test_a_vertical_slider_with_no_track_takes_no_drag(self):
+        """LVGL 9.5 divides by a vertical slider's height less its top and bottom padding."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        guard = function(ui, "static void slider_guard(")
+        for code in ("LV_EVENT_PRESSING", "LV_EVENT_RELEASED", "LV_EVENT_PRESS_LOST"):
+            self.assertIn(code, guard)
+        self.assertIn("lv_obj_get_style_pad_top(o, LV_PART_MAIN) + lv_obj_get_style_pad_bottom(o, LV_PART_MAIN)", guard)
+        self.assertIn("lv_event_stop_processing(e);", guard)
+        self.assertIn("lv_obj_add_event_cb(o, slider_guard, LV_EVENT_ALL | LV_EVENT_PREPROCESS, NULL);", ui)
+
     def test_unpair_records_the_apps_wipe_before_its_worker_starts(self):
         """A worker that can't start reboots: the wipe must already be recorded."""
         app = read("main/app.c")
