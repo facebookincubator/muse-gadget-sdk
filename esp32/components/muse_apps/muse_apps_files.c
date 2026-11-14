@@ -358,6 +358,7 @@ static void save_drop(void *arg)
 
 int32_t gadget_state_save(wasm_exec_env_t env, const char *name, const void *data, uint32_t data_len)
 {
+    muse_apps_check_deadline();   /* it encodes up to 64 KB each call */
     if (!valid_name(name) || (!data && data_len)) {
         return GADGET_ERR_ARG;
     }

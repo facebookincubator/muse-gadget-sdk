@@ -884,6 +884,10 @@ class WasmAppsTest(unittest.TestCase):
         for prop in ["TEXT_LETTER_SPACE", "TEXT_LINE_SPACE"]:
             self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_WIDTH}," % (prop, prop), ui)
 
+    def test_state_save_checks_the_clock(self):
+        save = function(read("components/muse_apps/muse_apps_files.c"), "int32_t gadget_state_save(")
+        self.assertIn("muse_apps_check_deadline();", save[:200])
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
