@@ -189,12 +189,14 @@ void muse_hatch_status(muse_hatch_status_t *out)
     }
 }
 
-/* The simulator pages no replies (muse_chat_text.c isn't built). */
+/* The latest-reply harness links the production text helpers. */
+#if !CONFIG_MUSE_LATEST_REPLY
 void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next))
 {
     (void)width_px;
     (void)glyph_px;
 }
+#endif
 
 muse_link_state_t muse_link_state(void)
 {

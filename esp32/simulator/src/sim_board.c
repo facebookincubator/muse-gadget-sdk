@@ -20,7 +20,11 @@
 #include "src/drivers/sdl/lv_sdl_mouse.h"
 #include "src/drivers/sdl/lv_sdl_window.h"
 
+#if CONFIG_MUSE_LATEST_REPLY
+#define WATCHER_RESOLUTION 466
+#else
 #define WATCHER_RESOLUTION 412
+#endif
 
 static lv_display_t *s_display;
 

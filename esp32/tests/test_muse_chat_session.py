@@ -45,7 +45,7 @@ class ChatSession(unittest.TestCase):
 #include "cJSON.h"
 #include "minimp3.h"
 #include "muse_chat_priv.h"
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 #include "muse_review.h"
 #include "muse_text.h"
 #endif
@@ -100,7 +100,7 @@ bool muse_hatch_configured() { return true; }
 static void resampler_init(resampler_t *, int, int) {}
 static void on_dictation_end(bool) {}
 static void log_marks() {}
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 /* The real review store, read back whole: one page holds all of it here. */
 int muse_chat_caption_page(const char *text, int, char *out, size_t cap) {
     strlcpy(out, text, cap); return 1;
@@ -349,7 +349,7 @@ static void chat_request(bool spoken) {
     assert(!strcmp(chat_body, spoken ? "{\"message\":\"Hi\",\"output_modality\":\"text\",\"device\":\"mcu-wearable\"}"
                                      : "{\"message\":\"Hi\",\"output_modality\":\"text\"}"));
 }
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 static char review[40000];
 static const char *reviewed() {
     int page = 0, pages = 0;
@@ -708,7 +708,7 @@ int main(int argc, char **argv) {
     case 28: others_status_and_late_play(); break;
     case 29: chained_and_mid_stream_replies(); break;
     case 30: late_rows_by_their_own_order_and_content(); break;
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
     case 20: review_keeps_caption_pace(); break;
@@ -745,6 +745,11 @@ int main(int argc, char **argv) {
              '-c', str(ROOT / 'components/muse/muse_review.c'), '-o', str(out / 'review.o')],
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags, *watcher,
              str(out / 'session.cpp'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-watcher')],
+        ]
+        latest = [flag.replace('CONFIG_MUSE_BOARD_SENSECAP_WATCHER', 'CONFIG_MUSE_LATEST_REPLY') for flag in watcher]
+        commands += [
+            [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags, *latest,
+             str(out / 'session.cpp'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-latest')],
         ]
         for command in commands:
             result = subprocess.run(command, capture_output=True, text=True)
@@ -846,3 +851,9 @@ int main(int argc, char **argv) {
 
     def test_late_turn_takes_chained_rows_and_never_half_a_message(self):
         self.run_case(29)
+
+    def test_latest_reply_capture_and_caption_pace(self):
+        for case in (0, 1, 2, 18, 19, 20):
+            with self.subTest(case=case):
+                result = subprocess.run([str(self.binary.parent / 'session-latest'), str(case)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
