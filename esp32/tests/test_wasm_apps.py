@@ -919,7 +919,11 @@ class WasmAppsTest(unittest.TestCase):
         chat = read("components/muse_apps/sdk/examples/chat.c")
         self.assertIn("a == close_button && b == UI_CLICKED", chat)
         self.assertIn("a == BUTTON_SECONDARY && b == BTN_LONG", chat)
+        self.assertIn("a == BUTTON_BACK && b == BTN_DOWN", chat)   # Cardputer's Esc
         self.assertGreaterEqual(chat.count("sys_exit();"), 2)
+        # With neither touch nor a second button, the talk button's exit hold stays the app's.
+        self.assertIn("int32_t talk = second || sys_info(INFO_TOUCH) == 1;", chat)
+        self.assertIn("if (talk) {\n        muse_talk_key(1);", chat)
 
     def test_files_put_words_too_long_are_refused(self):
         console = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_console(")

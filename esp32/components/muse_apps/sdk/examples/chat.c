@@ -25,8 +25,10 @@
  * shown at the bottom; the second button, or the button on screen, asks Muse
  * for a joke (chat_send), and the app shows that message like the others. A
  * drag scrolls back; new text scrolls into view again after a few seconds.
- * The talk button doesn't close it, so the close mark at the top (touch) or a
- * long press of the second button does.
+ * The talk button doesn't close it, so the close mark at the top (touch), a
+ * long press of the second button or a Back key does. A board with neither
+ * touch nor a second button keeps the talk button for the app instead, so
+ * its 2 s hold closes the chat.
  * Build from the SDK folder: python3 build.py examples/chat.c
  */
 #include <string.h>
@@ -308,15 +310,20 @@ GADGET_EXPORT(on_start) void on_start(void)
         ui_set_text(l, P_TEXT, SYM_ENVELOPE "  A joke");
         ui_set(l, P_TEXT_COLOR, PALE);
     }
+    /* With no other way out, the talk button stays the app's: its hold closes it. */
+    int32_t talk = second || sys_info(INFO_TOUCH) == 1;
     hint = second ? "Talk button: talk to Muse. Second button: a joke, hold to close."
-                  : "Hold the talk button to talk to Muse.";
+           : talk ? "Hold the talk button to talk to Muse."
+                  : "Hold the talk button to close.";
     footer = ui_create(W_LABEL, screen);
     ui_set(footer, P_WIDTH, PCT(100));
     ui_set(footer, P_LONG_MODE, LONG_WRAP);
     ui_set(footer, P_TEXT_ALIGN, TEXT_ALIGN_CENTER);
     ui_set(footer, P_TEXT_FONT, FONT_14);
 
-    muse_talk_key(1);   /* the talk button stays Muse's push-to-talk */
+    if (talk) {
+        muse_talk_key(1);   /* the talk button stays Muse's push-to-talk */
+    }
     mode = muse_mode();
     show_mode();
     if (chat_open() < 0) {
@@ -375,7 +382,7 @@ GADGET_EXPORT(on_event) void on_event(int32_t type, int32_t a, int32_t b)
     case EV_BUTTON:
         if (a == BUTTON_SECONDARY && b == BTN_UP) {
             ask_for_a_joke();
-        } else if (a == BUTTON_SECONDARY && b == BTN_LONG) {
+        } else if ((a == BUTTON_SECONDARY && b == BTN_LONG) || (a == BUTTON_BACK && b == BTN_DOWN)) {
             sys_exit();   /* the app stops: no UP follows */
         }
         break;
