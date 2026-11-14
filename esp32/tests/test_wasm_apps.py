@@ -833,11 +833,14 @@ class WasmAppsTest(unittest.TestCase):
         changed = function(read("components/muse_apps/muse_apps.c"), "void muse_apps_vm_changed(")
         self.assertLess(changed.index("muse_apps_vm_close_all();"), changed.index("on_view_exit(GADGET_STOP_USER);"))
 
-    def test_the_view_rechecks_for_a_call_once_open(self):
-        """A call checks for an open view after it starts; the view checks for
-        a call after it opens: one of them sees the other."""
+    def test_the_view_rechecks_for_a_call_or_video_once_open(self):
+        """A call or the video view checks for an open view after it starts; the
+        view checks for them after it opens: one of them sees the other."""
         opened = function(read("components/muse/muse_app_view.c"), "bool muse_app_view_open(")
-        self.assertLess(opened.index("atomic_store(&s_open, true);"), opened.index("if (muse_voice_in_call()) {"))
+        self.assertLess(opened.index("atomic_store(&s_open, true);"),
+                        opened.index("if (muse_voice_in_call() || video_open()) {"))
+        video = function(read("components/muse/muse_video.c"), "void muse_video_open(")
+        self.assertLess(video.index("s_open = true;"), video.index("muse_app_view_preempt(MUSE_APP_STOP_VIDEO);"))
 
     def test_apps_only_where_their_exit_is_in_reach(self):
         kconfig = read("components/muse_apps/Kconfig")

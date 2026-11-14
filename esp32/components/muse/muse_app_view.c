@@ -26,6 +26,9 @@
 #include "muse_link.h"
 #include "muse_state.h"
 #include "muse_voice.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 
 static const char *TAG = "muse_app_view";
 
@@ -127,6 +130,15 @@ int muse_app_view_exit_button(void)
     return MUSE_APP_BUTTON_PRIMARY;
 }
 
+static bool video_open(void)
+{
+#if CONFIG_MUSE_VIDEO
+    return muse_video_is_open();
+#else
+    return false;
+#endif
+}
+
 bool muse_app_view_open(const muse_app_view_cbs_t *cbs)
 {
     if (!muse_board || !muse_board->display_lock) {
@@ -175,16 +187,17 @@ bool muse_app_view_open(const muse_app_view_cbs_t *cbs)
         esp_timer_stop(s_long_timer);
         esp_timer_stop(s_exit_timer);
         atomic_store(&s_open, true);
-        /* A call that started meanwhile found no view to stop (it checks after
-         * it's on, we after we are): its hang-up buttons stay its own. */
-        if (muse_voice_in_call()) {
+        /* A call or the video view that started meanwhile found no view to
+         * stop (each checks after it's on, we after we are): a call's hang-up
+         * buttons stay its own, and the video keeps the screen. */
+        if (muse_voice_in_call() || video_open()) {
             atomic_store(&s_open, false);
             lv_obj_delete(s_root);
             s_root = NULL;
         }
     }
     muse_app_view_unlock();
-    if (!s_root && !muse_voice_in_call()) {
+    if (!s_root && !muse_voice_in_call() && !video_open()) {
         ESP_LOGW(TAG, "no memory for the app's screen");
     }
     return s_root != NULL;
