@@ -51,6 +51,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "sdkconfig.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 #include "wasm_export.h"
 
 static const char *TAG = "muse_apps";
@@ -1334,6 +1337,13 @@ static void run(req_t *r)
         run_failed(r, covered, "busy", "a call is on");
         return;
     }
+#if CONFIG_MUSE_VIDEO
+    if (muse_video_is_open()) {   /* the video view has the screen */
+        unload();
+        run_failed(r, covered, "busy", "the video view is open");
+        return;
+    }
+#endif
     const muse_app_view_cbs_t cbs = {.input = on_view_input, .exit = on_view_exit};
     xQueueReset(s_inputs);
     if (!muse_app_view_open(&cbs)) {
