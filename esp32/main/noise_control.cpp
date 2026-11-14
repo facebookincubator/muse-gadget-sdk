@@ -1632,6 +1632,15 @@ static char *build_register_json(void) {
                 nullptr, nullptr);
 #endif
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    add_command(commands, "wakeword.disable",
+                "Turn off hands-free \"Hey Muse\" listening at once, ending any "
+                "hands-free voice note in progress. Only someone at the device "
+                "can turn it back on. Kept across restarts. Returns enabled and "
+                "listening (both false).",
+                nullptr, nullptr);
+#endif
+
 #if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
     add_command(commands, "camera.capture",
 #if CONFIG_MUSE_WATCHER_CAMERA

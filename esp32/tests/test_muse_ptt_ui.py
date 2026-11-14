@@ -24,6 +24,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
+# Builds with the wake word compiled in (boards with PSRAM, as the option needs).
+WAKEWORD_BUILDS = {(1, 1), (0, 1), (1, 0), (3, 0)}
 FAKE_HEADERS = [
     'esp_attr.h', 'esp_err.h', 'esp_heap_caps.h', 'esp_log.h', 'esp_timer.h',
     'esp_codec_dev.h', 'lvgl.h', 'driver/gpio.h', 'nvs.h', 'nvs_flash.h',
@@ -86,6 +88,11 @@ class StopWatchPTT(unittest.TestCase):
                            '-g', '-O1', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                            '-no-pie', '-include', str(ROOT / 'tests/host_compat.h'),
                            '-I', str(stage), str(source)]
+                if kind == 'voice' and (board, realtime) in WAKEWORD_BUILDS:
+                    # The wake word paths, with the harness's no-op glue hooks.
+                    # The other builds compile them out, as firmware without
+                    # the feature does (muse_wakeword_glue.h's inline stubs).
+                    command.append('-DCONFIG_MUSE_WAKEWORD_ENABLE=1')
                 if kind == 'voice' and realtime:
                     command.append(str(MUSE / 'muse_voice_call_core.c'))
                 if kind == 'voice':
@@ -117,6 +124,105 @@ class StopWatchPTT(unittest.TestCase):
     def test_reply_ring_clears_on_incomplete_error_and_interruption(self):
         for scenario in (44, 45, 46):
             self.run_case('voice', scenario)
+
+    def test_wake_word_press_that_interrupts_a_reply_stays_synthetic(self):
+        # Otherwise the next turn treats it as a finger: on live-call PTT
+        # boards a held call with the mic open and no release coming.
+        for board, realtime in ((1, 1), (0, 1)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 90, board=board, realtime=realtime)
+        voice = (MUSE / 'muse_voice.c').read_text()
+        self.assertIn('bool synthetic = pending_down && s_press_synthetic;', voice)
+
+    def test_stray_wake_word_edges_never_shape_a_button_note(self):
+        for board, realtime in ((1, 1), (0, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 69, board=board, realtime=realtime)
+        voice = (MUSE / 'muse_voice.c').read_text()
+        # Nor drive a call.
+        self.assertIn('/* A call is never driven by the wake word: drop its edges. */', voice)
+
+    def test_recorder_cap_tells_the_wake_word_glue(self):
+        # The recorder's cap counts the seed and admission audio, so it can
+        # end a hands-free turn before the core's own cap: the glue must hear.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 68, board=board, realtime=realtime)
+        voice = (MUSE / 'muse_voice.c').read_text()
+        task = voice[voice.index('static void voice_task('):]
+        # Every voice-side end of a turn that never reached record(): shutdown,
+        # can't record, and a turn that didn't qualify.
+        self.assertGreaterEqual(task.count('muse_wakeword_turn_ended()'), 3)
+
+    def test_short_wake_word_turn_never_starts_a_call(self):
+        # Disabling listening right after a hands-free start posts a
+        # synthetic release: that's a short note, never tap-to-call. A turn
+        # that can't qualify (e.g. a capture error) just ends.
+        for board, realtime in ((0, 1), (1, 1), (1, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 87, board=board, realtime=realtime)
+        voice = (MUSE / 'muse_voice.c').read_text()
+        task = voice[voice.index('static void voice_task('):]
+        guard = task.index('if (synthetic) {\n                /* A hands-free turn that didn')
+        self.assertLess(guard, task.index('result == NOTE_TAP'))
+
+    def test_wake_word_turn_is_admitted_at_once_and_a_press_takes_it_over(self):
+        for board, realtime in ((1, 1), (0, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 92, board=board, realtime=realtime)
+                self.run_case('voice', 93, board=board, realtime=realtime)
+
+    def test_wake_word_note_ends_at_its_release_in_toggle_builds(self):
+        self.run_case('voice', 67, board=3, realtime=0)
+
+    def test_wake_word_seed_is_at_most_one_second(self):
+        # The pre-roll seed is the only audio from before a detection that
+        # can leave the device.
+        for board, realtime in ((1, 1), (1, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 94, board=board, realtime=realtime)
+
+    def test_wake_word_note_continues_past_the_seed_without_a_gap(self):
+        # The wake task trails the voice task: the chunks already tapped past
+        # the seed's end follow the seed, then live reads, each once.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 95, board=board, realtime=realtime)
+
+    def test_finger_owns_a_hands_free_note_against_a_racing_release(self):
+        # Endpointing read its input before the press and posts a release
+        # after it: the note must run on until the finger lets go.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 96, board=board, realtime=realtime)
+
+    def test_wake_word_note_with_lost_audio_ends_unsent(self):
+        # Sustained overload overwrote part of the audio after the seed: the
+        # turn ends before anything goes, rather than sending a note with a hole.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 97, board=board, realtime=realtime)
+
+    def test_stale_press_takes_nothing_over_from_a_hands_free_note(self):
+        # A press the input queue's overflow invalidated must not take the
+        # note over (its release would be ignored too, leaving a 15 s note).
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 98, board=board, realtime=realtime)
+
+    def test_rejected_hands_free_turns_free_their_buffer(self):
+        # Each overload rejection frees the recording buffer, across
+        # consecutive attempts through the voice loop.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 88, board=board, realtime=realtime)
+
+    def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
+        # The seed already ends at the speech start; the idle ring covers
+        # the same audio and would play it twice.
+        for board, realtime in ((1, 1), (0, 1)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 91, board=board, realtime=realtime)
 
     def test_reply_completion_is_visible_but_ptt_still_interrupts(self):
         self.run_case('voice', 43)

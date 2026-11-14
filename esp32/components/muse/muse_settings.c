@@ -323,3 +323,29 @@ esp_err_t muse_settings_set_hatch_token(const char *token, bool append)
     }
     return err;
 }
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* The wake word opt-in, kept apart (and last) so builds without the feature
+ * compile this file exactly as before. Read from NVS on first use, which is
+ * muse_wakeword_init() after muse_settings_init(). Default off: listening is
+ * an explicit opt-in. */
+static bool s_wakeword_on, s_wakeword_loaded;
+
+bool muse_settings_wakeword_on(void)
+{
+    if (!s_wakeword_loaded) {
+        uint8_t b = 0;
+        s_wakeword_on = nvs_get_u8(s_nvs, "ww_on", &b) == ESP_OK && b;
+        s_wakeword_loaded = true;
+    }
+    return s_wakeword_on;
+}
+
+void muse_settings_set_wakeword_on(bool on)
+{
+    s_wakeword_on = on;
+    s_wakeword_loaded = true;
+    save_u8("ww_on", on);
+    notify(MUSE_SETTING_WAKEWORD);
+}
+#endif

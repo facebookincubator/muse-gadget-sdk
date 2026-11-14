@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 /*
  * User settings, persisted in NVS. Setters save immediately and then notify the
@@ -47,6 +48,9 @@ typedef enum {
     MUSE_SETTING_BLE,
     MUSE_SETTING_HATCH,
     MUSE_SETTING_VOICE_NOTES,
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    MUSE_SETTING_WAKEWORD,      /* the wake word opt-in changed */
+#endif
 } muse_setting_t;
 
 typedef void (*muse_setting_cb_t)(muse_setting_t what);
@@ -67,6 +71,9 @@ bool muse_settings_ble_on(void);
 /* StopWatch: false selects realtime PTT; true selects voice notes only. */
 bool muse_settings_voice_notes(void);
 void muse_settings_set_voice_notes(bool on);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+bool muse_settings_wakeword_on(void);   /* hands-free listening opt-in; default off */
+#endif
 
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1]);
 void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]);
@@ -82,6 +89,9 @@ void muse_settings_set_sleep_s(int secs);
 void muse_settings_set_text_size(int size);
 void muse_settings_set_wifi_on(bool on);
 void muse_settings_set_ble_on(bool on);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+void muse_settings_set_wakeword_on(bool on);
+#endif
 /* A network name is remembered first among the saved ones and joined now;
  * an empty ssid forgets every saved network. */
 void muse_settings_set_wifi(const char *ssid, const char *pass);

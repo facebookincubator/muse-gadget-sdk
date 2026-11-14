@@ -338,6 +338,12 @@ such as the StopWatch). The text is centred beneath the smaller avatar;
 turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
 visible when the larger text fills the reading area.
 
+The ExecuTorch runtime for the on-device "Hey Muse" wake word (off by
+default; not enabled on any board yet) comes from the ESP Component
+Registry, and only into builds with `MUSE_WAKEWORD_ENABLE`;
+[`docs/executorch.md`](docs/executorch.md) says how the pin and its
+kernel bundle are updated.
+
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
 answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app).
