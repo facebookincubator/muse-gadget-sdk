@@ -577,11 +577,27 @@ class WasmAppsTest(unittest.TestCase):
         must still reach the firmware, or the mic stays open."""
         view = read("components/muse/muse_app_view.c")
         buttons = function(view, "unsigned muse_app_view_buttons(unsigned ev)")
-        guard = "if (!(bits & held[i].press) && !(atomic_load(&s_app_down) & row)) {"
+        self.assertIn("bool was_down = atomic_load(&s_app_down) & row;", buttons)
+        guard = "if (!(bits & held[i].press) && !was_down) {"
         self.assertIn(guard, buttons)
         self.assertLess(buttons.index(guard), buttons.index("ev &= ~bits;"))
         self.assertIn("atomic_fetch_or(&s_app_down, row);", buttons)
         self.assertIn("atomic_store(&s_app_down, 0);", function(view, "bool muse_app_view_open("))
+
+    def test_both_edges_at_once_follow_the_button_s_last_state(self):
+        """A board can report a release and the next press in one poll (CoreS3's
+        PMU key): after the app's press that's a release, then a press still held."""
+        buttons = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons(unsigned ev)")
+        both = buttons[buttons.index("if (release && !was_down) {"):buttons.index("if (muse_state_asleep()) {")]
+        # Up for the app: a tap, whose release also ends a press the firmware holds.
+        self.assertIn("ev |= held[i].release;", both)
+        # Down for the app: its release first, then the new press, held (timers on).
+        again = both[both.index("} else if (release) {"):]
+        self.assertLess(again.index("button_edge(held[i].button, false, true);"), again.index("release = false;"))
+        rest = buttons[buttons.index("if (muse_state_asleep()) {"):]
+        self.assertIn("if (!release) {\n            atomic_fetch_or(&s_app_down, row);", rest)
+        self.assertIn("button_edge(held[i].button, true, release);", rest)
+        self.assertNotIn("m5stack", buttons.lower())
 
     def test_console_install_line_is_parsed_by_its_blanks(self):
         """A word too long for its buffer, or words split by a tab, once made
@@ -720,6 +736,29 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("lv_event_stop_processing(e);", guard)
         self.assertIn("lv_obj_add_event_cb(o, chart_guard, LV_EVENT_DRAW_MAIN | LV_EVENT_PREPROCESS, NULL);", ui)
 
+    def test_unpairing_stops_any_running_app(self):
+        """An app run from the VM (app.run {path}) has no installed id, and
+        unpairing over BLE doesn't restart the gadget: it must stop too."""
+        apps = read("components/muse_apps/muse_apps.c")
+        stop = function(apps, "static void handle_stop(")
+        removed = stop[stop.index("if (r->removed) {"):stop.index("if (r->o.from == MUSE_APPS_FROM_VIEW) {")]
+        self.assertIn("if (!s_app.running || (r->id[0] && strcmp(r->id, s_app.id))) {", removed)
+        self.assertNotIn("!s_app.id[0]", removed)
+        self.assertIn("muse_apps_stop_installed(NULL);", function(read("components/muse_apps/muse_apps_store.c"),
+                                                                 "static bool forget_if_asked("))
+
+    def test_a_vertical_slider_with_no_track_takes_no_drag(self):
+        """LVGL 9.5 divides by a vertical slider's height less its top and bottom padding."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        guard = function(ui, "static void slider_guard(")
+        for code in ("LV_EVENT_PRESSING", "LV_EVENT_RELEASED", "LV_EVENT_PRESS_LOST"):
+            self.assertIn(code, guard)
+        self.assertIn("lv_obj_get_style_pad_top(o, LV_PART_MAIN) + lv_obj_get_style_pad_bottom(o, LV_PART_MAIN)", guard)
+        self.assertIn("lv_event_stop_processing(e);", guard)
+        # Measured in the state LVGL measures it in: not pressed, on release.
+        self.assertLess(guard.index("lv_obj_remove_state(o, LV_STATE_PRESSED);"), guard.index("lv_obj_get_height(o)"))
+        self.assertIn("lv_obj_add_event_cb(o, slider_guard, LV_EVENT_ALL | LV_EVENT_PREPROCESS, NULL);", ui)
+
     def test_unpair_records_the_apps_wipe_before_its_worker_starts(self):
         """A worker that can't start reboots: the wipe must already be recorded."""
         app = read("main/app.c")
@@ -796,11 +835,14 @@ class WasmAppsTest(unittest.TestCase):
         changed = function(read("components/muse_apps/muse_apps.c"), "void muse_apps_vm_changed(")
         self.assertLess(changed.index("muse_apps_vm_close_all();"), changed.index("on_view_exit(GADGET_STOP_USER);"))
 
-    def test_the_view_rechecks_for_a_call_once_open(self):
-        """A call checks for an open view after it starts; the view checks for
-        a call after it opens: one of them sees the other."""
+    def test_the_view_rechecks_for_a_call_or_video_once_open(self):
+        """A call or the video view checks for an open view after it starts; the
+        view checks for them after it opens: one of them sees the other."""
         opened = function(read("components/muse/muse_app_view.c"), "bool muse_app_view_open(")
-        self.assertLess(opened.index("atomic_store(&s_open, true);"), opened.index("if (muse_voice_in_call()) {"))
+        self.assertLess(opened.index("atomic_store(&s_open, true);"),
+                        opened.index("if (muse_voice_in_call() || video_open()) {"))
+        video = function(read("components/muse/muse_video.c"), "void muse_video_open(")
+        self.assertLess(video.index("s_open = true;"), video.index("muse_app_view_preempt(MUSE_APP_STOP_VIDEO);"))
 
     def test_apps_only_where_their_exit_is_in_reach(self):
         kconfig = read("components/muse_apps/Kconfig")
@@ -867,12 +909,25 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("xSemaphoreTake(s_one, pdMS_TO_TICKS(timeout_ms)) != pdTRUE", read_vm)
 
     def test_a_failed_state_save_gives_its_quota_back(self):
+        """Saves of one name run in order; once none is in flight the count is
+        what the VM has, even when a failed save had another queued behind it."""
         files = read("components/muse_apps/muse_apps_files.c")
-        self.assertIn("sizes_undo(j->name, j->prev);", function(files, "static void save_run("))
-        self.assertIn("sizes_undo(j->name, j->prev);", function(files, "static void save_drop("))
+        self.assertIn("sizes_saved(j->gen, j->name, ok, j->data_len);", function(files, "static void save_run("))
+        self.assertIn("sizes_saved(j->gen, j->name, false, 0);", function(files, "static void save_drop("))
+        self.assertIn("e->saved = ok ? (uint32_t)len : e->saved;", function(files, "static void sizes_saved("))
+        self.assertIn("e->size = e->saved;", function(files, "static void sizes_settle("))
+        # A save refused before it goes out (no op slot, no queue room) puts
+        # back the count it replaced, which may be another save's in flight.
+        self.assertIn("e->size = prev;", function(files, "static void sizes_unsave("))
         save = function(files, "int32_t gadget_state_save(")
-        self.assertIn("sizes_take(name, data_len, &j->prev);", save)
-        self.assertIn("sizes_undo(name, j->prev);", save)
+        self.assertEqual(save.count("sizes_take("), 1)
+        self.assertIn("sizes_take(name, data_len, &prev);", save)
+        self.assertEqual(save.count("sizes_unsave(name, prev);"), 2)
+        self.assertNotIn("sizes_saved(", save)
+        # A stopped app's saves and loads still out don't count for the next one.
+        self.assertIn("s_sizes_gen++;", function(files, "void muse_apps_files_stop("))
+        for f in ("static void sizes_saved(", "static void sizes_note("):
+            self.assertIn("gen == s_sizes_gen ?", function(files, f))
 
     def test_one_button_doing_both_is_one_button(self):
         present = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons_present(")
@@ -882,7 +937,11 @@ class WasmAppsTest(unittest.TestCase):
         chat = read("components/muse_apps/sdk/examples/chat.c")
         self.assertIn("a == close_button && b == UI_CLICKED", chat)
         self.assertIn("a == BUTTON_SECONDARY && b == BTN_LONG", chat)
+        self.assertIn("a == BUTTON_BACK && b == BTN_DOWN", chat)   # Cardputer's Esc
         self.assertGreaterEqual(chat.count("sys_exit();"), 2)
+        # With neither touch nor a second button, the talk button's exit hold stays the app's.
+        self.assertIn("int32_t talk = second || sys_info(INFO_TOUCH) == 1;", chat)
+        self.assertIn("if (talk) {\n        muse_talk_key(1);", chat)
 
     def test_files_put_words_too_long_are_refused(self):
         console = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_console(")

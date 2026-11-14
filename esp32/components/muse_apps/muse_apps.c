@@ -1498,8 +1498,8 @@ static void put(req_t *r)
 
 static void handle_stop(const req_t *r)
 {
-    if (r->removed) {   /* app.remove, or unpairing: only if it's that installed app */
-        if (!s_app.running || !s_app.id[0] || (r->id[0] && strcmp(r->id, s_app.id))) {
+    if (r->removed) {   /* app.remove: only if it's that installed app; unpairing (no id): any app */
+        if (!s_app.running || (r->id[0] && strcmp(r->id, s_app.id))) {
             return;
         }
         bool back = s_app.from_launcher;
