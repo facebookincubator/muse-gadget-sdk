@@ -274,6 +274,9 @@ jobs:
           - board: muse-m5stack-stopwatch-video
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
+          - board: muse-m5stack-stopwatch-apps
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-apps"
           - board: muse-seeed-xiao-s3-147
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147"

@@ -618,6 +618,14 @@ class WasmAppsTest(unittest.TestCase):
             self.assertRegex(design, r"\b%s\b" % name)
 
 
+    def test_ci_builds_apps(self):
+        """Apps are off by default, so no other build compiles them: CI builds
+        one board with the overlay."""
+        workflow = (ROOT.parent / ".github/workflows/esp32.yml").read_text()
+        self.assertIn('- board: muse-m5stack-stopwatch-apps\n            target: esp32s3\n'
+                      '            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;'
+                      'devices/sdkconfig.muse-apps"', workflow)
+
     def test_not_on_e_paper_boards(self):
         # FreeInk boards build no LVGL, which the app view and the API's widgets need.
         kconfig = read("components/muse_apps/Kconfig")
