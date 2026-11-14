@@ -291,9 +291,23 @@ class Executor:
 
     def file_op(self, op: str, params: dict) -> dict:
         request = json.dumps({**params, "op": op})
+        options = self._child_options()
+        # The child runs with a scrubbed env and cwd="/", so it can only
+        # import musegadget.fileops when the package happens to be
+        # installed into sys.executable's environment. When the service
+        # runs from a source tree (a checkout, an embedded port) it is
+        # not, and every file operation dies with ModuleNotFoundError
+        # before reading the request. Put the package's parent directory
+        # on the child's PYTHONPATH so the child can always import the
+        # same package this process is running.
+        package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(options.get("env") or {})
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = package_root + (os.pathsep + existing if existing else "")
+        options["env"] = env
         proc = subprocess.run(
             [sys.executable, "-m", "musegadget.fileops"], input=request.encode(),
-            capture_output=True, timeout=60, cwd="/", **self._child_options(),
+            capture_output=True, timeout=60, cwd="/", **options,
         )
         try:
             return json.loads(proc.stdout)
