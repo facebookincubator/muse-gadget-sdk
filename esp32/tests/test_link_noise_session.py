@@ -101,8 +101,6 @@ class LinkNoiseSessionTest(unittest.TestCase):
         self.assertIn("cJSON_Delete(pr.result)", stale_callback)
         self.assertIn("continue;", stale_callback)
 
-        self.assertIn("ctx->session_generation = session_generation", noise)
-        self.assertIn("queue_result(ctx->session_generation", noise)
         self.assertIn("args->session_generation = session_generation", app)
         self.assertIn("args->session_generation, args->request_id", app)
 

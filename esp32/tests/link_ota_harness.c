@@ -256,7 +256,7 @@ static void check_vibe_mode(void) {
     assert(!ota_installed_by_vibe_mode());
     running_state = ESP_OTA_IMG_PENDING_VERIFY;
 #if CONFIG_HOMEHUB_OTA_ENABLED
-    /* device.ota's own update keeps its health check. */
+    /* ota_start's own update keeps its health check. */
     assert(config_set_str("ota_verify", "00020000:"
                           "0000000000000000000000000000000000000000000000000000000000000000"));
     assert(ota_verify_recorded_for_running());

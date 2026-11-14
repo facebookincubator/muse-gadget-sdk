@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from musegadget import __version__, config, identity, muse_api, network
+from musegadget import __version__, config, identity, muse_api, network, tls
 from musegadget.ble_setup import Credentials, ProvisionFailed, SetupController
 from musegadget.pairing import PairingSession
 
@@ -99,7 +99,10 @@ def pair(*, on_open: Callable[[SetupWindow], None], force: bool = False,
     Reads the SDK token and the device identity from the state directory and
     saves the pairing on success. It prints nothing. ``on_open`` runs once
     setup is about to open, so the caller can tell the user what to do.
+    Raises ``tls.TrustStoreError`` first if the system trust store isn't
+    safe to use, since pairing checks the device token with the Muse API.
     """
+    tls.client_context()
     # BleServer needs D-Bus, which only a device that pairs has to install.
     from musegadget.ble_server import BleServer
 
