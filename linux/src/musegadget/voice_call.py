@@ -217,6 +217,9 @@ class VoiceCall:
         self._mic_epoch = 0
         self.reason = ""
         self.cleanup_error: Exception | None = None
+        # A cancellation that arrived while an earlier error was already
+        # propagating: the error still wins, but the caller can see both.
+        self.cleanup_cancelled = False
         self.end_call_acknowledged = False
         self.media_drain_incomplete = False
         self.advisory_error_count = 0
@@ -334,6 +337,7 @@ class VoiceCall:
                         cancelled = True
                     except Exception:
                         break
+                self.cleanup_cancelled = cancelled
                 try:
                     cleanup.result()
                 except Exception as exc:

@@ -197,6 +197,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
     from musegadget.service import DEFAULT_NOISE_HOST
     from musegadget.voice_audio import LiveAudio, WavAudio
     from musegadget.voice_call import VoiceCall
+    from musegadget.wakeword_input import WakeWordBacklogError
 
     tls.client_context()
     # With video on standard output, everything this command prints goes to stderr.
@@ -255,7 +256,18 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
 
                 call = VideoCall(session, video_output=video, **options)
             calls.append(call)
-            return await call.run(source, audio, realtime_input=args.live)
+            try:
+                return await call.run(source, audio, realtime_input=args.live)
+            except WakeWordBacklogError:
+                # The call failed closed (its audio is never truncated). Live
+                # mode listens again only if the call really ended: a failed
+                # end-call stops the command, and so does a Ctrl-C that came
+                # in while the call was cleaning up.
+                if call.cleanup_cancelled:
+                    raise asyncio.CancelledError from None
+                if not args.live or call.cleanup_error is not None:
+                    raise
+                return "capture_backlog"
         finally:
             stop.set()
             try:
@@ -278,7 +290,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
         try:
             if detector is None:
                 return await invoke(audio, audio.frames())
-            from musegadget.wakeword_input import WakeWordBacklogError, WakeWordInput
+            from musegadget.wakeword_input import WakeWordInput
 
             while True:
                 listener = WakeWordInput(audio.frames(), detector, realtime=args.live)
@@ -290,14 +302,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
                     if not detected:
                         return "no_wake_word"
                     print("Hey Muse detected; starting voice call.", file=report)
-                    try:
-                        reason = await invoke(audio, listener.frames())
-                    except WakeWordBacklogError:
-                        # The call failed closed (its audio is never truncated);
-                        # a backlog must not end live listening as well.
-                        if not args.live:
-                            raise
-                        reason = "capture_backlog"
+                    reason = await invoke(audio, listener.frames())
                 finally:
                     await listener.aclose()
                 if not args.live:

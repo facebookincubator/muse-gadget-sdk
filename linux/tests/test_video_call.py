@@ -427,6 +427,61 @@ def test_unacknowledged_end_call_is_an_error():
     assert not asyncio.run(scenario()).end_call_acknowledged
 
 
+
+@pytest.mark.parametrize("cleanup", ["end_call_failed", "interrupted"])
+def test_cleanup_outcome_is_recorded_under_an_earlier_failure(cleanup):
+    # The first failure still propagates; the caller can see a failed
+    # end-call or a Ctrl-C that came in while the call was cleaning up.
+    opus_or_skip()
+
+    async def scenario():
+        edge = FakeEdge(udp=True, tcp=False)
+        await edge.start()
+        session = FakeSession(edge)
+        original = session.request
+        ending = asyncio.Event()
+
+        async def request(method, path, body=b"", **kwargs):
+            if path == "/voice/end-call":
+                ending.set()
+                if cleanup == "end_call_failed":
+                    return {"ok": False, "status": 503, "response": None}
+                await asyncio.sleep(0.2)
+            reply = await original(method, path, body, **kwargs)
+            if path == "/voice/calls/join":
+                edge.server_pwd = None  # media never connects
+            return reply
+
+        session.request = request
+        call = VideoCall(session, device_id="d", video_output=Units(), ready_timeout=0.5)
+
+        async def frames():
+            yield bytes(1920)
+
+        class Out:
+            def write(self, pcm):
+                pass
+
+            def flush(self):
+                pass
+
+        task = asyncio.create_task(call.run(frames(), Out()))
+        try:
+            if cleanup == "interrupted":
+                await asyncio.wait_for(ending.wait(), 5)
+                task.cancel()
+            with pytest.raises((ConnectionError, asyncio.TimeoutError)):
+                await asyncio.wait_for(task, 5)
+        finally:
+            edge.close()
+        return call
+
+    call = asyncio.run(scenario())
+    if cleanup == "end_call_failed":
+        assert call.cleanup_error is not None and not call.cleanup_cancelled
+    else:
+        assert call.cleanup_cancelled and call.cleanup_error is None
+
 def test_quiet_live_microphone_lets_the_idle_timer_fire():
     opus_or_skip()
     hiss = struct.pack("<h", 120) * 960  # steady low noise, below speech level

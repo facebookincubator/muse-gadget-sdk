@@ -351,6 +351,9 @@ def test_capture_backlog_fails_that_call_and_keeps_live_listening(
             pass
 
     class Call:
+        cleanup_error = None
+        cleanup_cancelled = False
+
         def __init__(self, session, **options):
             pass
 
@@ -391,3 +394,74 @@ def test_run_service_never_loads_capture_or_the_wake_word():
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == ""
+
+
+def live_wake_fakes(monkeypatch, run_call):
+    """Live wake-word mode with fake audio, session and call objects."""
+    from musegadget import voice_audio, voice_call
+
+    class Live:
+        def __init__(self):
+            pass
+
+        async def frames(self):
+            yield TONE
+            await asyncio.Event().wait()
+
+        def close(self):
+            pass
+
+    class Session:
+        def __init__(self, **options):
+            pass
+
+        async def run(self, stop):
+            await stop.wait()
+
+        async def wait_transport_ready(self, timeout):
+            pass
+
+    class Call:
+        cleanup_error = None
+        cleanup_cancelled = False
+
+        def __init__(self, session, **options):
+            self.session = session
+
+        async def run(self, source, output, **options):
+            return await run_call(self)
+
+    monkeypatch.setattr(voice_audio, "LiveAudio", Live)
+    monkeypatch.setattr(voice_call, "VoiceCall", Call)
+    monkeypatch.setattr(
+        muse_api,
+        "fetch_vms_with_status",
+        lambda *unused: ([{"vm_id": "target", "vm_auth_token": "synthetic"}], 200),
+    )
+    monkeypatch.setattr("musegadget.link_client.LinkSession", Session)
+
+
+@pytest.mark.parametrize("cleanup", ["end_call_failed", "interrupted"])
+def test_backlog_recovery_needs_a_clean_hang_up(tmp_path, monkeypatch, capsys, cleanup):
+    prepare_audio(tmp_path, monkeypatch, TONE)
+    monkeypatch.setattr(Detector, "fire_at", 1)
+    from musegadget.wakeword_input import WakeWordBacklogError
+
+    calls = []
+
+    async def run_call(call):
+        calls.append(call)
+        if len(calls) > 1:  # listening resumed: stop the loop for the assertion
+            raise asyncio.CancelledError
+        if cleanup == "end_call_failed":
+            call.cleanup_error = ConnectionError("synthetic 503 from end-call")
+        else:
+            call.cleanup_cancelled = True
+        raise WakeWordBacklogError("synthetic capture backlog")
+
+    live_wake_fakes(monkeypatch, run_call)
+    expected = 1 if cleanup == "end_call_failed" else 130
+    assert cli.main(["voice-call", "--vm-id", "target", "--live", "--wake-word"]) == expected
+    assert len(calls) == 1
+    assert "returning to wake-word listening" not in capsys.readouterr().out
+
