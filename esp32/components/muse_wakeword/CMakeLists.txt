@@ -51,12 +51,13 @@ endif()
 
 # The registry component links nothing until a model and a kernel bundle
 # are declared. The bundle is generated at configure time into the build
-# directory by tools/make_kernel_bundle.py (which drops the component generator's
-# SHA gate; see that script) from the model declared below, so a
-# component update needs no SDK change beyond the version pin, and the
-# build refuses a bundle that does not match the model or component.
-# Wakeword builds need a Python with executorch installed; see
-# esp32/docs/executorch.md for EXECUTORCH_PYTHON.
+# directory by the component's own tools/gen_kernels.py, unmodified, from
+# the model declared below. That generator refuses an executorch whose
+# version and commit don't match the component's, so the bundle comes only
+# from the generator the component was built with, and the build refuses a
+# bundle that does not match the model or component. Wakeword builds need
+# that executorch installed; see esp32/docs/executorch.md for
+# EXECUTORCH_PYTHON.
 executorch_add_model(PTE "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte")
 if(NOT EXECUTORCH_PYTHON)
     set(EXECUTORCH_PYTHON "$ENV{EXECUTORCH_PYTHON}")
@@ -87,10 +88,10 @@ if(NOT _et_dir)
 endif()
 set(_et_bundle_dir "${CMAKE_BINARY_DIR}/executorch_kernels")
 execute_process(
-    COMMAND "${EXECUTORCH_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_kernel_bundle.py"
+    COMMAND "${EXECUTORCH_PYTHON}" "${_et_dir}/tools/gen_kernels.py"
+        --component-dir "${_et_dir}"
         --pte "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte"
         --out "${_et_bundle_dir}"
-        --component-dir "${_et_dir}"
     RESULT_VARIABLE _et_bundle_failed
     OUTPUT_VARIABLE _et_bundle_output
     ERROR_VARIABLE _et_bundle_output

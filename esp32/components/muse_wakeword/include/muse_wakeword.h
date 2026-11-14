@@ -143,6 +143,36 @@ size_t muse_ww_ring_snapshot(const muse_ww_ring_t *ring, int16_t *out, size_t ou
 size_t muse_ww_ring_fill(const muse_ww_ring_t *ring);
 uint32_t muse_ww_ring_drops(const muse_ww_ring_t *ring);
 
+/*
+ * Numbered audio chunks for the hand-off from the wake task to the
+ * recorder. The glue numbers every chunk it taps and keeps the latest
+ * ones here (the voice task's own copy); the wake task learns each
+ * chunk's number with it. When the wake task seeds a hands-free turn
+ * with the pre-roll ending at chunk M, the recorder appends the chunks
+ * numbered M+1 onward that it had already tapped, so the note has no gap
+ * however far the wake task trails. Caller-owned storage, one task.
+ */
+#define MUSE_WW_CHUNK_FRAMES 320   /* muse_audio's 20 ms chunk at 16 kHz */
+
+typedef struct {
+    uint32_t seq;
+    int16_t pcm[MUSE_WW_CHUNK_FRAMES];
+} muse_ww_chunk_t;
+
+typedef struct {
+    muse_ww_chunk_t *slots;
+    size_t capacity;
+    uint32_t next_seq;   /* the number the next pushed chunk gets */
+} muse_ww_history_t;
+
+void muse_ww_history_init(muse_ww_history_t *h, muse_ww_chunk_t *slots, size_t capacity);
+/* Copies one chunk in, numbers it, and returns its slot (overwriting the oldest). */
+const muse_ww_chunk_t *muse_ww_history_push(muse_ww_history_t *h, const int16_t *pcm);
+/* The held chunks numbered `from` or later, oldest first, at most max:
+ * pointers into the slots, valid until the next push. Chunks no longer
+ * held are skipped; a `from` past the newest gives none. */
+size_t muse_ww_history_since(const muse_ww_history_t *h, uint32_t from, const int16_t *out[], size_t max);
+
 #ifdef __cplusplus
 }
 #endif

@@ -427,6 +427,15 @@ static bool record(bool seeded, char *why, size_t cap)
             take(&st, s_seed + off);
             n += MUSE_AUDIO_CHUNK;
         }
+        /* Then what this task had already read past the seed's end when the
+         * wake task (which trails it) seeded the turn, so the command has no
+         * gap. Live reads follow from the next chunk on. */
+        const int16_t *later[MUSE_WAKEWORD_BACKLOG_CHUNKS];
+        size_t backlog = muse_wakeword_take_backlog(later, MUSE_WAKEWORD_BACKLOG_CHUNKS);
+        for (size_t i = 0; i < backlog; i++) {
+            take(&st, later[i]);
+            n += MUSE_AUDIO_CHUNK;
+        }
     } else {
         s_seed_frames = 0;   /* never leak a seed into a button turn */
     }

@@ -41,6 +41,18 @@ bool muse_wakeword_listening(void) { return false; }
 void muse_wakeword_set_playback(bool on) { (void)on; }
 void muse_wakeword_set_ptt_turn(bool active) { (void)active; }
 const char *muse_wakeword_runner_kind(void) { return "fake"; }
+/* The recorder's backlog: scenario 95 hands over the chunks the voice task
+ * "had already tapped" past the seed, with sample values that continue it. */
+static int16_t backlog_pcm[3][MUSE_AUDIO_CHUNK];
+static size_t backlog_n, backlog_takes;
+size_t muse_wakeword_take_backlog(const int16_t *chunks[], size_t max)
+{
+    backlog_takes++;
+    size_t n = backlog_n < max ? backlog_n : max;
+    for (size_t i = 0; i < n; i++) chunks[i] = backlog_pcm[i];
+    backlog_n = 0;   /* once per turn */
+    return n;
+}
 void muse_wakeword_status(muse_wakeword_status_t *out) { *out = (muse_wakeword_status_t){ .runner = "fake" }; }
 #endif
 
@@ -358,15 +370,15 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(frame==note_release_frame) push((scenario>=64 && scenario<=66) || (scenario==69 && NOTE_TOGGLE) ? MUSE_PTT_DOWN : MUSE_PTT_UP);
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-        if(scenario==67 && frame==40) {   /* the wake word's endpointing */
+        if((scenario==67 && frame==40) || (scenario==95 && frame==4)) {   /* the wake word's endpointing */
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
             xQueueSend(&queue,&u,0);
         }
 #endif
         if(scenario==58 && frame==10) atomic_store(&s_shutdown,true);
         if(scenario==59 && frame==10) atomic_fetch_add(&s_call_epoch,1);
-        for(size_t i=0;i<n;i++) p[i]=scenario>=60 ?
-            (int16_t)((int)((i*113+frame*97)%50000)-25000) : (int16_t)(100+frame);
+        for(size_t i=0;i<n;i++) p[i]=scenario==95 ? (int16_t)(1000+(4+frame)*MUSE_AUDIO_CHUNK%20000+i) :
+            scenario>=60 ? (int16_t)((int)((i*113+frame*97)%50000)-25000) : (int16_t)(100+frame);
         if(verify_pcm && frame!=note_read_fail_frame) {
             assert(expected_frames+n<=MAX_FRAMES);
 #if MUSE_LOW_MEM
@@ -516,6 +528,33 @@ int main(int argc,char **argv) {
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>=60 && frame<=60+7 && !turn_ended_calls);
         drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==95) {
+        /* The wake task trailed the voice task when it seeded the turn: the
+         * seed (chunks 0-1) is followed by the backlog the voice task had
+         * already tapped (chunks 2-4), then live reads (chunk 5 on). The
+         * note is one unbroken sequence, every chunk once. Chunk k holds
+         * 1000 + k*320 + i (mod 20000 per chunk start). */
+        clock_us=1000000;
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        int16_t seed[2*MUSE_AUDIO_CHUNK];
+        for(int k=0;k<2;k++) for(int i=0;i<MUSE_AUDIO_CHUNK;i++) seed[k*MUSE_AUDIO_CHUNK+i]=(int16_t)(1000+k*MUSE_AUDIO_CHUNK%20000+i);
+        muse_voice_seed_preroll(seed,2*MUSE_AUDIO_CHUNK);
+        for(int k=0;k<3;k++) for(int i=0;i<MUSE_AUDIO_CHUNK;i++) backlog_pcm[k][i]=(int16_t)(1000+(2+k)*MUSE_AUDIO_CHUNK%20000+i);
+        backlog_n=3;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+        char why[96];
+        assert(record(true,why,sizeof(why)) && backlog_takes==1);
+        size_t chunks=s_rec_n/MUSE_AUDIO_CHUNK;
+        assert(chunks>=6);
+        for(size_t k=0;k<chunks;k++)
+            for(int i=0;i<MUSE_AUDIO_CHUNK;i++)
+                assert(s_rec[k*MUSE_AUDIO_CHUNK+i]==(int16_t)(1000+k*MUSE_AUDIO_CHUNK%20000+i));
+        free(s_seed); s_seed=NULL; drop_rec(); free(s_pre); return 0;
     }
 #endif
     if(scenario>=70) {

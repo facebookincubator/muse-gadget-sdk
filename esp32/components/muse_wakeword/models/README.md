@@ -26,7 +26,7 @@ calibration/parity record). The
 runner does not read the JSON on device — the matching frontend
 constants are generated into `../ww_frontend_config.h` by the same
 export. No bundle is committed: the build generates one from this
-file at configure time (see `../tools/make_kernel_bundle.py`) and
+file at configure time (see `../../../docs/executorch.md`) and
 refuses to proceed if it does not cover this model.
 
 - Architecture: ExecuTorch `StreamingWakeWord`

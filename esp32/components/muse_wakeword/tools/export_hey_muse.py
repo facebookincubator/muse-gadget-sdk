@@ -15,7 +15,7 @@ One exporter, two backends, selected with --backend (default: cadence):
   --calibration), lowered through the Cadence passes to cadence:: ops.
   The registry component registers only the kernels in a bundle
   generated at build time from the exported .pte (see
-  tools/make_kernel_bundle.py); no bundle is committed.
+  esp32/docs/executorch.md); no bundle is committed.
   Writes, by default, ../models/hey_muse.pte, ../models/hey_muse.json,
   and the generated ../ww_frontend_config.h.
   (A portable-fp32 export measured ~69 ms per 20 ms
