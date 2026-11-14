@@ -45,13 +45,15 @@ const char *muse_wakeword_runner_kind(void) { return "fake"; }
  * "had already tapped" past the seed, with sample values that continue it. */
 static int16_t backlog_pcm[3][MUSE_AUDIO_CHUNK];
 static size_t backlog_n, backlog_takes;
-size_t muse_wakeword_take_backlog(const int16_t *chunks[], size_t max)
+static bool backlog_lost;   /* scenario 97: overload overwrote part of it */
+bool muse_wakeword_take_backlog(const int16_t *chunks[], size_t max, size_t *count)
 {
     backlog_takes++;
     size_t n = backlog_n < max ? backlog_n : max;
     for (size_t i = 0; i < n; i++) chunks[i] = backlog_pcm[i];
     backlog_n = 0;   /* once per turn */
-    return n;
+    *count = n;
+    return !backlog_lost;
 }
 void muse_wakeword_status(muse_wakeword_status_t *out) { *out = (muse_wakeword_status_t){ .runner = "fake" }; }
 #endif
@@ -529,6 +531,26 @@ int main(int argc,char **argv) {
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>=60 && frame<=60+7 && !turn_ended_calls);
         drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==97) {
+        /* Overload overwrote part of the audio after the seed: the note
+         * can't be continuous, so the turn ends before anything goes. */
+        clock_us=1000000;
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        int16_t seed[2*MUSE_AUDIO_CHUNK]={0};
+        muse_voice_seed_preroll(seed,2*MUSE_AUDIO_CHUNK);
+        backlog_n=3; backlog_lost=true;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        char why[96]="x";
+        assert(!record(true,why,sizeof(why)) && !why[0]);
+        assert(backlog_takes==1 && !notes && !note_frames && !s_rec_n && !s_seed_frames && turn_ended_calls==1 && !frame);
+        free(s_seed); s_seed=NULL; drop_rec(); free(s_pre); return 0;
     }
     if(scenario==96) {
         /* Endpointing that raced a finger: the wake task read its input

@@ -406,6 +406,20 @@ static void take_pre(rec_stats_t *st, size_t chunks)
  */
 static bool record(bool seeded, char *why, size_t cap)
 {
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* A hands-free turn takes the chunks this task already read past its
+     * seed (the wake task trails it) before anything goes. If overload
+     * overwrote some, the note can't be continuous: it ends here, unsent. */
+    const int16_t *later[MUSE_WAKEWORD_BACKLOG_CHUNKS];
+    size_t backlog = 0;
+    if (seeded && s_seed_frames &&
+        !muse_wakeword_take_backlog(later, MUSE_WAKEWORD_BACKLOG_CHUNKS, &backlog)) {
+        s_seed_frames = 0;
+        muse_wakeword_turn_ended();
+        if (cap) why[0] = '\0';
+        return false;
+    }
+#endif
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
@@ -433,11 +447,9 @@ static bool record(bool seeded, char *why, size_t cap)
             take(&st, s_seed + off);
             n += MUSE_AUDIO_CHUNK;
         }
-        /* Then what this task had already read past the seed's end when the
-         * wake task (which trails it) seeded the turn, so the command has no
-         * gap. Live reads follow from the next chunk on. */
-        const int16_t *later[MUSE_WAKEWORD_BACKLOG_CHUNKS];
-        size_t backlog = muse_wakeword_take_backlog(later, MUSE_WAKEWORD_BACKLOG_CHUNKS);
+        /* Then what this task had already read past the seed's end (taken
+         * above), so the command has no gap. Live reads follow from the
+         * next chunk on. */
         for (size_t i = 0; i < backlog; i++) {
             take(&st, later[i]);
             n += MUSE_AUDIO_CHUNK;

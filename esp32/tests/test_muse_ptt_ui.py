@@ -196,6 +196,13 @@ class StopWatchPTT(unittest.TestCase):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 96, board=board, realtime=realtime)
 
+    def test_wake_word_note_with_lost_audio_ends_unsent(self):
+        # Sustained overload overwrote part of the audio after the seed: the
+        # turn ends before anything goes, rather than sending a note with a hole.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 97, board=board, realtime=realtime)
+
     def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
         # The seed already ends at the speech start; the idle ring covers
         # the same audio and would play it twice.

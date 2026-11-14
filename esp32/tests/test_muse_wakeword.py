@@ -1065,7 +1065,9 @@ static int run(long start_seq, int lag)
     size_t n = 0;
     memcpy(note, seed, seed_frames * sizeof(int16_t)); n += seed_frames;
     const int16_t *later[HIST];
-    size_t k = muse_ww_history_since(&hist, seed_end, later, HIST);
+    bool complete;
+    size_t k = muse_ww_history_since(&hist, seed_end, later, HIST, &complete);
+    if (!complete) return 14;
     for (size_t i = 0; i < k; i++) { memcpy(note + n, later[i], CHUNK * sizeof(int16_t)); n += CHUNK; }
     for (int j = 0; j < 5; j++) { fill(note + n, produced++); n += CHUNK; }   /* live */
     if (seed_frames > PRE) return 11;   /* at most 1 s before the speech start */
@@ -1078,21 +1080,115 @@ static int run(long start_seq, int lag)
     return 0;
 }
 
+/* Sustained overload: the wake task stalls while the voice task keeps
+ * reading. The tap holds the first TAP chunks and drops the rest, but the
+ * history numbers and keeps every chunk, so it moves past what the tap
+ * still holds. A seed from those old items can't be followed without a
+ * hole: since() must say so. After the gap, the pre-roll restarts, and a
+ * seed there has no audio from before the gap and a complete backlog. */
+static int overload(void)
+{
+    static muse_ww_chunk_t slots[HIST];
+    static int16_t pre_store[PRE], seed[PRE];
+    muse_ww_history_t hist;
+    muse_ww_history_init(&hist, slots, HIST);
+    muse_ww_ring_t pre;
+    muse_ww_ring_init(&pre, pre_store, PRE);
+    muse_wakeword_config_t cfg = { 0 };
+    muse_wakeword_core_t core;
+    muse_wakeword_core_init(&core, &cfg);
+    muse_ww_chunk_t tap[TAP];
+    int tap_n = 0;
+    long produced = 0;
+    for (; produced < 65; produced++) {   /* the stall: 65 chunks read, 25 queued */
+        int16_t pcm[CHUNK];
+        fill(pcm, produced);
+        const muse_ww_chunk_t *item = muse_ww_history_push(&hist, pcm);
+        if (tap_n < TAP) tap[tap_n++] = *item;
+    }
+    /* The wake task wakes and works through the queue; a seed at the last
+     * queued item (chunk 24) can't be followed: 25-32 are gone. */
+    uint32_t last = 0;
+    int have = 0;
+    for (int i = 0; i < tap_n; i++) {
+        if (have && tap[i].seq != last + 1) return 30;   /* the queued items run on */
+        muse_ww_ring_push(&pre, tap[i].pcm, CHUNK);
+        last = tap[i].seq; have = 1;
+    }
+    const int16_t *later[HIST];
+    bool complete = true;
+    muse_ww_history_since(&hist, last + 1, later, HIST, &complete);
+    if (complete) return 31;
+    /* The next chunk the tap takes is 65: a gap. The pre-roll restarts. */
+    int16_t pcm[CHUNK];
+    fill(pcm, produced);
+    muse_ww_chunk_t next = *muse_ww_history_push(&hist, pcm);
+    produced++;
+    if (next.seq == last + 1) return 32;
+    muse_wakeword_core_gap(&core, &pre);
+    if (muse_ww_ring_fill(&pre) != 0) return 33;
+    muse_ww_ring_push(&pre, next.pcm, CHUNK);
+    for (int j = 0; j < 9; j++) {   /* the wake task keeps up again */
+        fill(pcm, produced++);
+        const muse_ww_chunk_t *it = muse_ww_history_push(&hist, pcm);
+        muse_ww_ring_push(&pre, it->pcm, CHUNK);
+        last = it->seq;
+    }
+    size_t seed_frames = muse_ww_ring_snapshot(&pre, seed, PRE);
+    if (seed[0] != 65 || seed_frames != 10 * CHUNK) return 34;   /* nothing from before the gap */
+    size_t k = muse_ww_history_since(&hist, last + 1, later, HIST, &complete);
+    if (!complete || k != 0) return 35;
+    printf("overload ok\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 1 && !strcmp(argv[1], "overload")) {
+        return overload();
+    }
+    if (argc > 1 && !strcmp(argv[1], "gap")) {
+        /* A gap ends a wake still waiting for speech and empties the
+         * pre-roll; a running capture is left alone. */
+        static int16_t store[PRE];
+        muse_ww_ring_t pre;
+        muse_ww_ring_init(&pre, store, PRE);
+        muse_wakeword_config_t cfg = { .start_timeout_chunks = 100, .end_silence_chunks = 100,
+                                       .max_capture_chunks = 1000, .energy_endpointing = true };
+        muse_wakeword_core_t core;
+        muse_wakeword_core_init(&core, &cfg);
+        int16_t pcm[CHUNK] = {0};
+        muse_wakeword_input_t wake = { .enabled = true, .event = WW_EVENT_WAKE };
+        muse_wakeword_core_tick(&core, &wake);
+        if (muse_wakeword_core_state(&core) != MUSE_WW_ARMED) return 40;
+        muse_ww_ring_push(&pre, pcm, CHUNK);
+        if (!muse_wakeword_core_gap(&core, &pre)) return 41;
+        if (muse_wakeword_core_state(&core) != MUSE_WW_IDLE || muse_ww_ring_fill(&pre)) return 42;
+        muse_wakeword_core_tick(&core, &wake);
+        muse_wakeword_input_t talk = { .enabled = true, .voiced = true };
+        muse_wakeword_core_tick(&core, &talk);
+        if (muse_wakeword_core_state(&core) != MUSE_WW_CAPTURING) return 43;
+        muse_ww_ring_push(&pre, pcm, CHUNK);
+        if (muse_wakeword_core_gap(&core, &pre)) return 44;
+        if (muse_wakeword_core_state(&core) != MUSE_WW_CAPTURING || muse_ww_ring_fill(&pre)) return 45;
+        printf("gap ok\n");
+        return 0;
+    }
     if (argc > 1 && !strcmp(argv[1], "since")) {
         static muse_ww_chunk_t slots[4];
         muse_ww_history_t h;
         const int16_t *out[8];
         muse_ww_history_init(&h, slots, 4);
-        if (muse_ww_history_since(&h, 0, out, 8) != 0) return 20;      /* empty */
+        bool c;
+        if (muse_ww_history_since(&h, 0, out, 8, &c) != 0 || !c) return 20;     /* empty, nothing owed */
         int16_t pcm[CHUNK] = {0};
-        for (int i = 0; i < 6; i++) muse_ww_history_push(&h, pcm);  /* holds 2..5 */
-        if (muse_ww_history_since(&h, 6, out, 8) != 0) return 21;      /* nothing newer */
-        if (muse_ww_history_since(&h, 100, out, 8) != 0) return 22;    /* the future */
-        if (muse_ww_history_since(&h, 0, out, 8) != 4) return 23;      /* only what's held */
-        if (muse_ww_history_since(&h, 4, out, 8) != 2) return 24;
-        if (muse_ww_history_since(&h, 2, out, 3) != 3) return 25;      /* at most max */
+        for (int i = 0; i < 6; i++) muse_ww_history_push(&h, pcm);         /* holds 2..5 */
+        if (muse_ww_history_since(&h, 6, out, 8, &c) != 0 || !c) return 21;     /* nothing newer */
+        if (muse_ww_history_since(&h, 100, out, 8, &c) != 0 || c) return 22;    /* the future */
+        if (muse_ww_history_since(&h, 0, out, 8, &c) != 4 || c) return 23;      /* 0 and 1 are gone */
+        if (muse_ww_history_since(&h, 2, out, 8, &c) != 4 || !c) return 26;     /* exactly what's held */
+        if (muse_ww_history_since(&h, 4, out, 8, NULL) != 2) return 24;
+        if (muse_ww_history_since(&h, 2, out, 3, &c) != 3 || c) return 25;      /* more than max */
         printf("since ok\n");
         return 0;
     }
@@ -1139,6 +1235,28 @@ class WakeWordHandoff(unittest.TestCase):
     def test_history_since(self):
         self.assertEqual(self.run_mode('since').strip(), 'since ok')
 
+    def test_overload_never_yields_a_note_with_a_hole(self):
+        # The tap drops what doesn't fit while the history keeps numbering:
+        # a seed from the old queued items is reported incomplete, and after
+        # the gap the pre-roll restarts with nothing from before it.
+        self.assertEqual(self.run_mode('overload').strip(), 'overload ok')
+
+    def test_gap_ends_a_waiting_wake_and_empties_the_pre_roll(self):
+        self.assertEqual(self.run_mode('gap').strip(), 'gap ok')
+
+    def test_glue_handles_gaps_and_lost_backlogs(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        task = between(glue, 'static void wake_task(void *arg)', '\n}\n')
+        self.assertIn('if (s_have_seq && item.seq != s_last_seq + 1) {', task)
+        self.assertLess(task.index('muse_wakeword_core_gap(&s_core, &s_pre)'), task.index('muse_ww_ring_push(&s_pre, item.pcm'))
+        take = between(glue, 'bool muse_wakeword_take_backlog(', '\n}\n')
+        self.assertIn('&complete);', take)
+        self.assertIn('return complete;', take)
+        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
+        record = between(voice, 'static bool record(', 'static void go_idle')
+        # Checked before go_live() opens the turn: nothing goes.
+        self.assertLess(record.index('!muse_wakeword_take_backlog('), record.index('go_live();'))
+
     def test_note_is_continuous_at_every_lag(self):
         out = self.run_mode()
         self.assertIn('lag 24 backlog 26 seed 50', out)   # a full tap behind: nothing lost
@@ -1160,7 +1278,8 @@ class WakeWordHandoff(unittest.TestCase):
         self.assertIn('s_last_seq = item.seq;', task)
         voice = (ROOT / 'components/muse/muse_voice.c').read_text()
         record = between(voice, 'static bool record(', 'static void go_idle')
-        self.assertLess(record.index('take(&st, s_seed + off)'), record.index('muse_wakeword_take_backlog('))
+        # Seed first, then the backlog (taken up front), then live reads.
+        self.assertLess(record.index('take(&st, s_seed + off)'), record.index('take(&st, later[i])'))
 
 
 if __name__ == '__main__':
