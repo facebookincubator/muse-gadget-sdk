@@ -632,7 +632,8 @@ class WasmAppsTest(unittest.TestCase):
         app = read("tools/muse/app.py")
         self.assertIn('line = "app.install=" + " ".join([word((args.id or "-") + look), word(args.install)]', app)
         # files.put's words, too, are split at blanks: a blank in one is refused, not misread.
-        self.assertIn('"files.put=" + word(args.file_put) + (" " + word(args.as_name)', app)
+        self.assertIn('"files.put=" + word(args.file_put) + (" " + word(args.as_name, 96)', app)
+        self.assertIn('if len(s.encode()) > limit:', app)
 
     def test_png_with_16_bit_channels_is_refused(self):
         """LVGL's lodepng unfilters into its 4-byte-a-pixel buffer before
@@ -901,6 +902,11 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("a == close_button && b == UI_CLICKED", chat)
         self.assertIn("a == BUTTON_SECONDARY && b == BTN_LONG", chat)
         self.assertGreaterEqual(chat.count("sys_exit();"), 2)
+
+    def test_files_put_words_too_long_are_refused(self):
+        console = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_console(")
+        put = console[console.index('if (!strncmp(line, "files.put=", 10)) {'):]
+        self.assertLess(put.index("if (n1 > 179 || n2 > 96) {"), put.index("sscanf(line + 10"))
 
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")

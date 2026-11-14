@@ -2295,6 +2295,14 @@ bool muse_apps_console(const char *line)
         char path[PATH_MAX_LEN] = "", name[MUSE_APPS_FLASH_NAME_MAX + 1] = "";
         const char *what = line + 6;
         if (!strncmp(line, "files.put=", 10)) {
+            /* A word too long for its buffer is refused, not cut into another path or name. */
+            const char *w = line + 10 + strspn(line + 10, " ");
+            size_t n1 = strcspn(w, " "), n2 = strcspn(w + n1 + strspn(w + n1, " "), " ");
+            if (n1 > 179 || n2 > 96) {
+                cJSON_Delete(params);
+                console_say("{\"ok\":false,\"error\":{\"code\":\"bad_line\",\"message\":\"the path or name is too long\"}}");
+                return true;
+            }
             sscanf(line + 10, "%179s %96s", path, name);
             what = "put";
         } else if (!strncmp(line, "files.remove=", 13)) {

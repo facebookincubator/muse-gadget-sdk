@@ -159,10 +159,12 @@ def install_line(args):
     return word((args.id or "-") + look) + (" " + args.name if args.name else "")
 
 
-def word(s):
-    """One word of a console line: a blank would split it into two."""
+def word(s, limit=179):
+    """One word of a console line: a blank would split it into two, and the console takes 179 bytes of one."""
     if any(c.isspace() for c in s):
         sys.exit("%r has a blank, which the console would take as two words" % s)
+    if len(s.encode()) > limit:
+        sys.exit("%r is longer than the console takes (%d bytes)" % (s, limit))
     return s
 
 
@@ -258,7 +260,7 @@ def main():
             elif args.files:
                 f = command(board, "files.list", 10)
             elif args.file_put:
-                f = command(board, "files.put=" + word(args.file_put) + (" " + word(args.as_name) if args.as_name else ""), 240)
+                f = command(board, "files.put=" + word(args.file_put) + (" " + word(args.as_name, 96) if args.as_name else ""), 240)
             elif args.file_upload:
                 with open(args.file_upload, "rb") as fh:
                     f = send(board, fh.read(), file=args.as_name or os.path.basename(args.file_upload))
