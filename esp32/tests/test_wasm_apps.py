@@ -678,6 +678,12 @@ class WasmAppsTest(unittest.TestCase):
         self.assertLess(task.index("if (forget_marked()) {"), task.index("for (st_req_t r;;)"))
         self.assertIn("nvs_flash", read("components/muse_apps/CMakeLists.txt"))
 
+    def test_vm_locks_are_made_once(self):
+        setup = function(read("components/muse_apps/muse_apps_vm.c"), "static bool setup(")
+        self.assertIn("taskENTER_CRITICAL(&s_setup_mux);", setup)
+        self.assertIn("if (!s_one && one && lock) {", setup)
+        self.assertIn("vSemaphoreDelete(one);", setup)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

@@ -226,13 +226,31 @@ static int get_range(const char *url, size_t offset, size_t want, uint8_t *dst,
     return status;
 }
 
-// The locks, made by the first caller (the app task); later ones wait on them.
+// The locks, made by the first caller; later ones wait on them. Callers can
+// race here (the app task, the store, two image loaders), so the pair is
+// published once, under a lock, and a loser's are deleted.
+static portMUX_TYPE s_setup_mux = portMUX_INITIALIZER_UNLOCKED;
+
 static bool setup(char *err, size_t err_len) {
-    if (!s_one) {
-        s_one = xSemaphoreCreateMutex();
-        s_r.lock = xSemaphoreCreateMutex();
+    taskENTER_CRITICAL(&s_setup_mux);
+    bool ready = s_one && s_r.lock;
+    taskEXIT_CRITICAL(&s_setup_mux);
+    if (!ready) {
+        SemaphoreHandle_t one = xSemaphoreCreateMutex(), lock = xSemaphoreCreateMutex();
+        taskENTER_CRITICAL(&s_setup_mux);
+        if (!s_one && one && lock) {
+            s_r.lock = lock;
+            s_one = one;
+            one = lock = NULL;
+        }
+        taskEXIT_CRITICAL(&s_setup_mux);
+        if (one) vSemaphoreDelete(one);
+        if (lock) vSemaphoreDelete(lock);
     }
-    if (!s_one || !s_r.lock) {
+    taskENTER_CRITICAL(&s_setup_mux);
+    ready = s_one && s_r.lock;
+    taskEXIT_CRITICAL(&s_setup_mux);
+    if (!ready) {
         snprintf(err, err_len, "out of memory");
         return false;
     }
