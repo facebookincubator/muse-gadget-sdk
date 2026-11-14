@@ -255,7 +255,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
                 from musegadget.video_call import VideoCall
 
                 call = VideoCall(session, video_output=video, **options)
-            calls.append(call)
+            calls[:] = [call]  # only the current call; earlier ones are released
             try:
                 return await call.run(source, audio, realtime_input=args.live)
             except WakeWordBacklogError:
@@ -364,7 +364,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
             except Exception:
                 log.warning("could not close call video output")
             if calls:  # after closing, so the outputs' last drops are counted
-                print(_video_report(calls[0].summary(), video), file=report)
+                print(_video_report(calls[-1].summary(), video), file=report)
 
 
 def _video_report(stats: dict, video) -> str:

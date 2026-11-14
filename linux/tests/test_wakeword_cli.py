@@ -465,3 +465,24 @@ def test_backlog_recovery_needs_a_clean_hang_up(tmp_path, monkeypatch, capsys, c
     assert len(calls) == 1
     assert "returning to wake-word listening" not in capsys.readouterr().out
 
+
+def test_live_wake_loop_keeps_only_the_current_call(tmp_path, monkeypatch):
+    import gc
+    import weakref
+
+    prepare_audio(tmp_path, monkeypatch, TONE)
+    monkeypatch.setattr(Detector, "fire_at", 1)
+    seen = []
+
+    async def run_call(call):
+        seen.append(weakref.ref(call))
+        if len(seen) < 4:
+            return "remote_stop"
+        gc.collect()
+        # Earlier calls (and the sessions they hold) are released.
+        assert [ref() is None for ref in seen[:-1]] == [True] * 3
+        raise asyncio.CancelledError
+
+    live_wake_fakes(monkeypatch, run_call)
+    assert cli.main(["voice-call", "--vm-id", "target", "--live", "--wake-word"]) == 130
+    assert len(seen) == 4
