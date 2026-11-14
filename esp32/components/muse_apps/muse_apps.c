@@ -1194,12 +1194,11 @@ static bool read_names(cJSON *arr, char names[][NAME_LEN], int *n, const char *w
     return true;
 }
 
-static void copy_string(cJSON *j, const char *key, char *out, size_t cap)
+/* False if it didn't fit whole. */
+static bool copy_string(cJSON *j, const char *key, char *out, size_t cap)
 {
     const char *v = cJSON_GetStringValue(cJSON_GetObjectItem(j, key));
-    if (cap) {
-        snprintf(out, cap, "%s", v ? v : "");
-    }
+    return cap && snprintf(out, cap, "%s", v ? v : "") < (int)cap;
 }
 
 bool muse_apps_manifest_info(const uint8_t *bytes, size_t len, char *name, size_t name_cap, char *title,
@@ -1211,7 +1210,9 @@ bool muse_apps_manifest_info(const uint8_t *bytes, size_t len, char *name, size_
         mlen--;
     }
     cJSON *j = m ? cJSON_ParseWithLength((const char *)m, mlen) : NULL;
-    copy_string(j, "name", name, name_cap);
+    if (!copy_string(j, "name", name, name_cap) && name_cap) {
+        name[0] = '\0';   /* cut short, it could be another app's: no name, then */
+    }
     copy_string(j, "title", title, title_cap);
     copy_string(j, "icon", icon, icon_cap);
     copy_string(j, "color", color, color_cap);
@@ -2245,6 +2246,10 @@ bool muse_apps_console(const char *line)
             return true;
         }
         req_t r = {.kind = REQ_PUT, .o = {.from = MUSE_APPS_FROM_CONSOLE}, .bytes = s_stage, .len = s_stage_len};
+        if (strlen(line + 8) >= sizeof(r.path)) {   /* cut short, it would write another file */
+            console_say("{\"ok\":false,\"error\":{\"code\":\"bad_path\",\"message\":\"the path is too long\"}}");
+            return true;
+        }
         snprintf(r.path, sizeof(r.path), "%s", line + 8);
         s_stage = NULL;
         s_stage_len = 0;

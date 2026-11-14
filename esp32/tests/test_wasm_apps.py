@@ -905,6 +905,15 @@ class WasmAppsTest(unittest.TestCase):
             body = function(ui, name)
             self.assertLess(body.index("if (!takes_children(p)) {"), body.index("lv_obj_") if "lv_obj_" in body else len(body), name)
 
+    def test_a_manifest_name_too_long_is_not_cut_into_an_id(self):
+        info = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_manifest_info(")
+        self.assertIn('if (!copy_string(j, "name", name, name_cap) && name_cap) {', info)
+
+    def test_a_put_path_too_long_is_refused_not_cut(self):
+        console = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_console(")
+        put = console[console.index('if (!strncmp(line, "app.put=", 8)) {'):]
+        self.assertLess(put.index("strlen(line + 8) >= sizeof(r.path)"), put.index("snprintf(r.path"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
