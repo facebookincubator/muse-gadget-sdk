@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
+#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -31,7 +31,7 @@
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
+cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -59,6 +59,7 @@ case $board in
     # so pace the writes (paced_esptool.py) at the baud they were tested at.
     watcher) profile=sensecap-watcher;     target=esp32s3; baud=115200; paced=1 ;;
     cardputer-adv) profile=m5stack-cardputer-adv; target=esp32s3 ;;
+    atoms3) profile=m5stack-atoms3; target=esp32s3 ;;
     sticks3) profile=m5stack-sticks3;      target=esp32s3 ;;
     crowpanel-43) profile=crowpanel-advance-43; target=esp32s3 ;;
     stopwatch) profile=m5stack-stopwatch;  target=esp32s3 ;;

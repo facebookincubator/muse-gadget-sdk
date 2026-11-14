@@ -65,6 +65,7 @@ session to Muse. The rest depends on the hardware.
 | **Waveshare ESP32-C6-Touch-AMOLED-2.06** | ESP32-C6 | 2.06" 410×502 AMOLED, touch | 16 MB / none | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-C6-Touch-AMOLED-2.06) | [Waveshare](https://www.waveshare.com/esp32-c6-touch-amoled-2.06.htm) |
 | **Seeed SenseCAP Watcher** | ESP32-S3 | 1.45" 412×412 round LCD, touch | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/watcher/), [GitHub](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware) | [Seeed Studio](https://www.seeedstudio.com/SenseCAP-Watcher-W1-A-p-5979.html) |
 | **M5Stack Cardputer ADV (experimental)** | ESP32-S3 | 1.14" 240×135 LCD | 8 MB / none | [M5Stack docs](https://docs.m5stack.com/en/core/Cardputer-Adv) | — |
+| **M5Stack AtomS3 + Atomic Voice Base (experimental)** | ESP32-S3 | 0.85" 128×128 LCD, ES8311 mic/speaker | 8 MB / none | [AtomS3](https://docs.m5stack.com/en/core/AtomS3), [Atomic Voice Base](https://docs.m5stack.com/en/atom/Atomic_Voice_Base), [M5Unified](https://github.com/m5stack/M5Unified) | — |
 | **M5Stack StickS3** | ESP32-S3 | 1.14" 135×240 LCD | 8 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/StickS3), [M5Unified](https://github.com/m5stack/M5Unified) | [M5Stack](https://shop.m5stack.com/products/m5sticks3-esp32s3-mini-iot-dev-kit) |
 | **M5Stack StopWatch** | ESP32-S3 | 1.75" 466×466 round AMOLED, touch | 16 MB / 8 MB | [M5Stack docs](https://docs.m5stack.com/en/core/StopWatch), [M5Unified](https://github.com/m5stack/M5Unified), [factory firmware](https://github.com/m5stack/M5StopWatch-UserDemo) | — |
 | **Seeed XIAO ESP32-S3 1.47 Touch Display** | ESP32-S3 (XIAO ESP32-S3 Plus) | 1.47" 172×320 IPS LCD (JD9853A), touch | 16 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/getting_started_1.47_inch_touch_display_esp32s3/), [setup](seeed-xiao-s3-147.md) | [Seeed Studio](https://www.seeedstudio.com/1-47-Inch-Touch-Display-Powered-by-XIAO-ESP32-S3-Plus-p-6996.html) |
@@ -134,9 +135,9 @@ slot, so it has no OTA. Its contributor reports a band of noise along the
 bottom of the screen that isn't diagnosed yet, so the bottom status bar and the
 bottom of large images may not show.
 
-Boards without PSRAM (the ideaspark, the C3 OLED, the CYD, the C6 boards, the Cardputer ADV and the AI Passport) don't have room for
+Boards without PSRAM (the ideaspark, the C3 OLED, the CYD, the C6 boards, the Cardputer ADV, AtomS3 and the AI Passport) don't have room for
 the home-network tunnel. Muse can still reach and control them once the
-control session is up. The Waveshare C6, Cardputer ADV and AI Passport also can't hold their own voice
+control session is up. The Waveshare C6, Cardputer ADV, AtomS3 and AI Passport also can't hold their own voice
 session, so push-to-talk sends your voice note over its control session to the
 Muse it's paired with, and the reply scrolls past as text. It can't show images either: the UI holds a whole image in
 PSRAM, where the ideaspark draws one straight to its screen.
@@ -843,6 +844,7 @@ board's overlays, in order:
 | Waveshare C6 2.06 | `esp32c6` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-c6-206`](sdkconfig.muse-waveshare-c6-206) | `tools/muse/board.sh build c6-206` |
 | SenseCAP Watcher | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-sensecap-watcher`](sdkconfig.muse-sensecap-watcher) | by hand |
 | M5Stack Cardputer ADV | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
+| M5Stack AtomS3 + Atomic Voice Base (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-atoms3` | `tools/muse/board.sh build atoms3` |
 | M5Stack StickS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-sticks3`](sdkconfig.muse-m5stack-sticks3) | by hand |
 | Elecrow CrowPanel Advance 4.3 V1.3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-crowpanel-advance-43`](sdkconfig.muse-crowpanel-advance-43) | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack StopWatch | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stopwatch`](sdkconfig.muse-m5stack-stopwatch) | by hand |

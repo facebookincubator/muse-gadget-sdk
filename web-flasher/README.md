@@ -6,6 +6,11 @@ The ESP32 CI (`.github/workflows/esp32.yml`) packages the boards listed in
 `boards.json` from its own builds, assembles the site on every run, and deploys
 it on pushes to `main`.
 
+The M5Stack AtomS3 + Atomic Voice Base profile is experimental. It uses the
+AtomS3's 8 MB flash and has no PSRAM; replies are shown as text on its display.
+Choose **M5Stack AtomS3 + Atomic Voice Base (experimental)** in the board list
+to flash it from Chrome or Edge.
+
 ## The SDK token
 
 The site's builds have no SDK token, and a gadget needs one to pair. After

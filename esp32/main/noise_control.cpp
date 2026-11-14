@@ -131,9 +131,9 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // but the tunnel stream (multiplexed on this session) carries ~8 KB IP-packet
 // batches, so scratch must fit a full batch plus ServiceFrame/envelope overhead.
 // Chat subscriptions deliver 16 KB body chunks plus framing, even on boards
-// without PSRAM. Reserve enough inbound space for those frames. Not on the
-// ESP32-C3 AI Passport: three 17 KB buffers beside its UI leave too little to
-// upload a voice note. It takes 12 KB, as Link boards without PSRAM do.
+// without PSRAM. Reserve enough inbound space for those frames. The ESP32-C3
+// AI Passport and AtomS3 take 12 KB: larger buffers leave too little RAM for
+// the session to stay up beside Wi-Fi and the UI.
 // With PSRAM it is the protocol's largest frame, as Muse's chat session uses,
 // so extra requests (display.draw_file) can take large replies in few frames;
 // the two buffers cost 104 KB of PSRAM more than 12 KB ones.
@@ -141,7 +141,8 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // can't be skipped: Noise's nonces and the ordered framer would desync), the
 // request in flight ends with NOISE_CTRL_REQ_TOO_LARGE, and the session
 // reconnects.
-#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                             CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define SVC_FRAME_SCRATCH (12 * 1024)
 #elif CONFIG_SPIRAM
 #define SVC_FRAME_SCRATCH (64 * 1024)
@@ -149,10 +150,12 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define SVC_FRAME_SCRATCH (SMALL_CONTROL_SESSION ? 17 * 1024 : 12288)
 #endif
 
-// The ADV and the ESP32-C3 AI Passport cannot allocate the session with the
-// larger inbound buffers and the usual outbound buffers together. Keep this
-// reduction local to those boards.
-#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT)
+// These small boards cannot allocate the session with the larger inbound
+// buffers and the usual outbound buffers together. Keep this reduction local
+// to the profiles that need it.
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || \
+                              CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                              CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define CARDPUTER_CONTROL_SESSION 1
 #else
 #define CARDPUTER_CONTROL_SESSION 0
@@ -186,7 +189,8 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define WS_BUF_SIZE (SMALL_CONTROL_SESSION ? 7 * 1024 : 16 * 1024)
 #endif
 // Inbound WebSocket frames: SVC_FRAME_SCRATCH plus framing and the AEAD tag.
-#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                             CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define WS_RX_BUF_SIZE (SVC_FRAME_SCRATCH + 1024)
 #else
 #define WS_RX_BUF_SIZE (SMALL_CONTROL_SESSION ? 17 * 1024 : WS_BUF_SIZE)
