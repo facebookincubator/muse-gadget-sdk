@@ -325,7 +325,7 @@ static void talk_button(unsigned ev)
         released = false;
     }
     if (!talk_down && !swallow && (ev & MUSE_BTN_TALK_PRESS)) {
-        if (muse_link_talk_press()) {
+        if (!(ev & (1u << 17)) && muse_link_talk_press()) {
             /* Confirmed a Muse app pairing (Link's setup button). */
             muse_state_poke();
             swallow = true;

@@ -69,6 +69,9 @@ extern "C" {
 #define MUSE_BTN_REVIEW_PREV  (1u << 15)
 #define MUSE_BTN_REVIEW_NEXT  (1u << 16)
 #endif
+/* With MUSE_BTN_TALK_PRESS: the press is a hand on a touch pad, not a key.
+ * It talks, but doesn't confirm a pairing: a pad can go off unmeant. */
+#define MUSE_BTN_TALK_TOUCH   (1u << 17)
 
 /* Where a button's icon goes on screen: beside the button, inside the panel. */
 typedef struct {

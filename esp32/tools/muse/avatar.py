@@ -93,6 +93,8 @@ BOARDS = {
     "AIPI Lite": "aipi",
     "ALIENTEK ATK-DNESP32S3-BOX": "atk-box",
     "OSTB EchoEar-2ST": "echoear",
+    "Espressif EchoEar": "vocat",
+    "OSTB-3ST": "ostb",
     "Waveshare ESP32-C6-Touch-AMOLED-1.8": "c6",
     "Waveshare ESP32-S3-Touch-AMOLED-1.8": "s3-18",
     "Waveshare ESP32-C6-Touch-AMOLED-2.06": "c6-206",
@@ -120,7 +122,7 @@ BOARDS = {
     "Waveshare ESP32-S3-Touch-LCD-3.5": "s3lcd35",
     "LCDWIKI 2.8inch ESP32-S3 Display": "lcd28",
 }
-CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "aipi", "atk-box", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35", "lcd28")
+CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "s3lcd", "ostb", "143c", "143", "146", "aipi", "atk-box", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "vocat", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35", "lcd28")
 
 
 class Stop(Exception):

@@ -39,6 +39,8 @@ case $board in
     s3-206)  profile=waveshare-s3-206;     target=esp32s3 ;;
     185b)    profile=waveshare-s3-185b;    target=esp32s3 ;;
     185c)    profile=waveshare-s3-185c;    target=esp32s3 ;;
+    s3lcd)   profile=waveshare-s3-185c;    target=esp32s3 ;;
+    ostb)    profile=ostb-3st;             target=esp32s3 ;;
     143c)    profile=waveshare-s3-143c;    target=esp32s3 ;;
     143)     profile=waveshare-s3-143;     target=esp32s3 ;;
     146)     profile=waveshare-s3-146;     target=esp32s3 ;;
@@ -48,6 +50,7 @@ case $board in
     aipi)    profile=aipi;                 target=esp32s3 ;;
     atk-box) profile=atk-dnesp32s3-box;     target=esp32s3 ;;
     echoear) profile=ostb-echoear-2st; target=esp32s3 ;;
+    vocat)   profile=echoear;              target=esp32s3 ;;
     box3)    profile=espressif-box-3;       target=esp32s3 ;;
     c6)      profile=waveshare-c6-18;      target=esp32c6 ;;
     c6-206)  profile=waveshare-c6-206;     target=esp32c6 ;;

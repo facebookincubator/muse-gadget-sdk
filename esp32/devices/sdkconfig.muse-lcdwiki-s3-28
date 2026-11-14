@@ -83,11 +83,7 @@ CONFIG_LV_USE_TJPGD=y
 CONFIG_LV_USE_FS_STDIO=y
 CONFIG_LV_FS_STDIO_LETTER=83
 
-# Wake word: "Hi Muse" (MultiNet, the engine choice's default) starts a call
-# hands-free. The model partition is in partitions_muse.csv; esp-sr packs the
-# English MultiNet7 model selected here into it at build time. The wake word
-# starts a live call, so it needs the realtime-voice overlay loaded after
-# this one (build_board.bat does; a plain board.sh lcd28 build has no calls
-# and drops this, as it drops the rest of the call settings).
-CONFIG_MUSE_WAKE_WORD=y
-CONFIG_SR_MN_EN_MULTINET7_QUANT=y
+# Wake word: disabled on LCDWIKI 2.8" because ESP-SR AFE/MultiNet7 + LVGL + Wi-Fi + BLE
+# exhausts internal DMA RAM (causing AUDIO INIT FAILED / cache freeze crash).
+# CONFIG_MUSE_WAKE_WORD is not set
+# CONFIG_SR_MN_EN_MULTINET7_QUANT is not set

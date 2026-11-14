@@ -1,4 +1,4 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Copyright (c) 2026 ledienbien-ai
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Waveshare ESP32-S3-Touch-LCD-1.85C: 16 MB flash, 8 MB octal PSRAM.
-# Load last, after sdkconfig.muse.
+# Waveshare ESP32-S3-Touch-LCD-1.85C (V1 and V2): ESP32-S3R8, 16 MB flash,
+# 8 MB octal PSRAM, native USB Serial/JTAG. Load last, after sdkconfig.muse,
+# which sets the 16 MB flash size and partition table.
+# Facts from docs.waveshare.com/ESP32-S3-Touch-LCD-1.85C.
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_MUSE_BOARD_WAVESHARE_S3_185C=y
-CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
-CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
@@ -59,12 +59,13 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # internal RAM, more than Wi-Fi can spare here.
 # CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set
 # Pins keep their state in light sleep. This workaround would float them all,
-# panel and touch reset and the amp enable included.
+# the backlight and the V2 amp enable included.
 # CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND is not set
 # For the battery meter (muse_battery.h, ">power" on the console): time
 # actually slept, and how long each power lock kept the chip awake.
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
-
-# Set your SDK token in build-muse-waveshare-s3-185c/sdkconfig (ignored by
-# Git), not here.
+# The screen starts in Vietnamese; Settings > Language (or ">lang=en" on the
+# console) changes it, and the choice is kept.
+CONFIG_MUSE_UI_LANG_VI=y
+CONFIG_MUSE_LANG_DEFAULT_VI=y

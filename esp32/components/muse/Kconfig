@@ -186,6 +186,14 @@ menu "Muse"
         config MUSE_BOARD_LCDWIKI_S3_28
             bool "LCDWIKI 2.8inch ESP32-S3 Display (ES3C28P with touch, ES3N28P without)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_OSTB_3ST
+            bool "OSTB-3ST (ESP32-S3, 1.83 inch touch LCD, two keys)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_ECHOEAR
+            bool "Espressif EchoEar (ESP-VoCat), v1.0 and v1.2"
+            depends on IDF_TARGET_ESP32S3
     endchoice
 
     config MUSE_ENABLED
@@ -239,6 +247,8 @@ menu "Muse"
         default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
         default "waveshare_s3_lcd_35" if MUSE_BOARD_WAVESHARE_S3_LCD_35
         default "lcdwiki_s3_28" if MUSE_BOARD_LCDWIKI_S3_28
+        default "ostb_3st" if MUSE_BOARD_OSTB_3ST
+        default "echoear" if MUSE_BOARD_ECHOEAR
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead

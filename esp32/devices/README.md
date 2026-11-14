@@ -86,6 +86,8 @@ session to Muse. The rest depends on the hardware.
 | **Waveshare ESP32-S3-Touch-LCD-3.5** | ESP32-S3 | 3.5" 320×480 LCD (ST7796), touch | 16 MB / 8 MB | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-3.5), [xiaozhi-esp32 board](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/waveshare/esp32-s3-touch-lcd-3.5) | [Waveshare](https://www.waveshare.com/esp32-s3-touch-lcd-3.5.htm) |
 | **DFRobot UNIHIKER K10** | ESP32-S3 | 2.8" 240×320 LCD (ILI9341), no touch | 16 MB / 8 MB | [K10 setup](dfrobot-unihiker-k10.md) | [DFRobot](https://www.dfrobot.com/product-2904.html), [distributors](https://www.unihiker.com/distributors) |
 | **LCDWIKI 2.8inch ESP32-S3 Display** (ES3C28P, ES3N28P) | ESP32-S3 | 2.8" 320×240 LCD, touch on the ES3C28P | 16 MB / 8 MB | [LCDWIKI](https://www.lcdwiki.com/2.8inch_ESP32-S3_Display) | — |
+| **OSTB-3ST** | ESP32-S3 | 1.83" 296×240 LCD, touch | 16 MB / 8 MB | its xiaozhi-esp32 board files (`ostb-xiaozhi-3st`) | — |
+| **Espressif EchoEar** (ESP-VoCat), v1.0 and v1.2 | ESP32-S3 | 1.85" round 360×360 LCD, touch | 16 MB / 16 MB (v1.0: 32 MB / 16 MB) | [Espressif](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/echoear/user_guide_v1.2.html) | — |
 
 The experimental [OSTB EchoEar-2ST port](ostb-echoear-2st.md) targets the
 measured 16 MB flash / 8 MB PSRAM unit. Its hardware and validation limits
