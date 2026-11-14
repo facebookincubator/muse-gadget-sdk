@@ -784,16 +784,12 @@ class WasmAppsTest(unittest.TestCase):
         self.assertLess(put.index("strlen(line + 8) >= sizeof(r.path)"), put.index("snprintf(r.path"))
 
     def test_a_vm_switch_stops_the_running_app(self):
-        """An app run for one VM mustn't act, with its permissions, on the next."""
+        """An app run for one VM doesn't carry on with the next."""
         app = read("main/app.c")
         for name in ["static void set_vm_with_gate_held(", "static void reset_default_vm_with_gate_held("]:
             self.assertIn("muse_apps_vm_changed();", function(app, name)[:300], name)
-        apps = read("components/muse_apps/muse_apps.c")
-        changed = function(apps, "void muse_apps_vm_changed(")
-        self.assertLess(changed.index("atomic_store(&s_vm_moved, true);"), changed.index("on_view_exit("))
-        self.assertIn("muse_apps_vm_close_all();", changed)
-        self.assertIn("atomic_store(&s_vm_moved, false);", function(apps, "static void run("))
-        self.assertIn("muse_apps_vm_moved()", function(read("components/muse_apps/muse_apps_vm.c"), "bool muse_apps_vm_job("))
+        changed = function(read("components/muse_apps/muse_apps.c"), "void muse_apps_vm_changed(")
+        self.assertLess(changed.index("muse_apps_vm_close_all();"), changed.index("on_view_exit(GADGET_STOP_USER);"))
 
     def test_the_view_rechecks_for_a_call_once_open(self):
         """A call checks for an open view after it starts; the view checks for

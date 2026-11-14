@@ -89,9 +89,8 @@ bool muse_apps_console(const char *line);
  * owner's gadget doesn't carry the last one's. */
 void muse_apps_forget_all(void);
 
-/* The gadget is moving to another VM: the running app stops, and its
- * requests go no further, so what one VM's app was let do doesn't carry
- * over to the next VM. */
+/* The gadget is moving to another VM: the running app stops, so one VM's
+ * app doesn't carry on with the next VM. */
 void muse_apps_vm_changed(void);
 
 #ifdef __cplusplus

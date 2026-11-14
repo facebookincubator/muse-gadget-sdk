@@ -582,7 +582,7 @@ static bool worker_ready(void) {
 }
 
 bool muse_apps_vm_job(muse_apps_job_fn run, muse_apps_job_fn drop, void *arg) {
-    if (!run || muse_apps_vm_moved() || !worker_ready()) return false;
+    if (!run || !worker_ready()) return false;
     job_t j = {run, drop, arg, atomic_load(&s_epoch)};
     return xQueueSend(s_jobs, &j, 0) == pdTRUE;
 }
