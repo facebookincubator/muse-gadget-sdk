@@ -378,7 +378,9 @@ and builds without it don't change. With it on:
   background work, whose results may arrive later.
 - **Other boards:** tap the talk button to start a call, press again to hang up;
   holding still sends a voice note. The mic is off while Muse talks, except on
-  the Voice PE when its audio chip reports echo cancellation.
+  the Voice PE when its audio chip reports echo cancellation. ESP32-S3 boards
+  with enough PSRAM can opt into [software echo cancellation](docs/software-aec.md)
+  to allow hands-free interruption during playback.
 - A call also ends when Muse ends it, after 45 seconds of quiet (not counting
   time Muse is still working on something), or after 15 minutes. Muse may not
   hang up by itself when it says goodbye: press to end the call. If the

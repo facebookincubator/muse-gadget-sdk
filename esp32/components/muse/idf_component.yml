@@ -16,6 +16,12 @@ dependencies:
   idf:
     version: ">=5.5"
   espressif/cjson: "~1.7"
+  # Optional software echo cancellation on ESP32-S3 voice boards.
+  espressif/esp-sr:
+    version: "==2.5.2"
+    rules:
+      - if: "target == esp32s3"
+      - if: "$CONFIG{MUSE_VOICE_SOFTWARE_AEC} == True"
   # Video over Wi-Fi announces itself with it (muse_video_wifi.c).
   espressif/mdns:
     version: "^1.8"

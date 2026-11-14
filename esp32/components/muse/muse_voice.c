@@ -38,6 +38,9 @@
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+#include "muse_aec.h"
+#endif
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call.h"
 #include "muse_voice_call_core.h"
@@ -1160,6 +1163,9 @@ static void run_call(bool ptt, size_t waking_chunks)
     muse_state_set_level(0);
     muse_state_set_progress(0);
     muse_state_set_caption("CONNECTING TO MUSE...");
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+    muse_aec_t *aec = ptt ? NULL : muse_aec_start();
+#endif
     if (ptt) {
         muse_voice_call_start_ptt();
         /* These were captured while this waking press was held. Enqueue
@@ -1216,7 +1222,11 @@ static void run_call(bool ptt, size_t waking_chunks)
         }
         bool mic = captured && !c.hung_up && !c.server_hold && c.input_epoch == muse_input_call_epoch();
         if (ptt) mic = mic && capture_window && (c.held || c.release_until) && press == c.press && status.capture;
-        else mic = mic && c.live && muse_vc_gate_mic_open(&c.gate, now);
+        else mic = mic && c.live &&
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+                   !aec &&
+#endif
+                   muse_vc_gate_mic_open(&c.gate, now);
         if (mic) mic = muse_voice_call_audio(s_chunk, MUSE_AUDIO_CHUNK);
         if (ptt && mic) {
             c.awaiting = true;
@@ -1226,6 +1236,12 @@ static void run_call(bool ptt, size_t waking_chunks)
             }
         }
         bool show_mic = mic && c.live && (!ptt || c.held);
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+        /* AEC sends its cleaned frames below, so `mic` is false in this
+         * mode. Keep the listening meter responsive when playback is idle. */
+        if (aec && captured && c.live && !c.hung_up && !c.server_hold &&
+            c.input_epoch == muse_input_call_epoch()) show_mic = true;
+#endif
         float mic_level = show_mic ? muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK) : 0;
         if (s_monitor) s_monitor_db = show_mic ? muse_audio_dbfs(s_chunk, MUSE_AUDIO_CHUNK) : -100.0f;
         bool flushed = false;
@@ -1238,6 +1254,26 @@ static void run_call(bool ptt, size_t waking_chunks)
         } else {
             muse_audio_write(silence, MUSE_AUDIO_CHUNK);
         }
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+        if (aec) {
+            /* Advance the reference even when a mic read fails; otherwise
+             * each missed chunk shifts speaker echo out of alignment. */
+            size_t clean_n = muse_aec_feed(aec, captured ? s_chunk : silence,
+                          n && muse_settings_speaker_on() ? out : silence,
+                          muse_settings_speaker_on() ? n : 0);
+            if (clean_n && captured && c.live && !c.hung_up && !c.server_hold &&
+                c.input_epoch == muse_input_call_epoch()) {
+                int16_t *clean = muse_aec_output(aec);
+                /* Below the near-end speech floor, a residual during
+                 * playback should be silence to the server's voice detector. */
+                if (!muse_vc_gate_mic_open(&c.gate, now) &&
+                    muse_audio_dbfs(clean, clean_n) < -55.0f) {
+                    memset(clean, 0, clean_n * sizeof(int16_t));
+                }
+                muse_voice_call_audio(clean, clean_n);
+            }
+        }
+#endif
         bool speaking = !muse_vc_gate_mic_open(&c.gate, now) && !(ptt && (c.held || c.release_until));
         if (ptt && !c.held && !status.sending &&
             ((!status.heard && !status.reply_open) || (status.reply_done && !speaking))) c.awaiting = false;
@@ -1287,6 +1323,9 @@ static void run_call(bool ptt, size_t waking_chunks)
         }
     }
     muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+    muse_aec_stop(aec);
+#endif
     muse_state_set_level(0);
     s_monitor_db = -100.0f;
     if (!atomic_load(&s_shutdown)) go_idle(ended && text[0] ? text : "CALL ENDED");
