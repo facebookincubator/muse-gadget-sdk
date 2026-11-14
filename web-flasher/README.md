@@ -1,5 +1,9 @@
 # Web flasher
 
+The flasher has moved to [gadgets.muse.ai/flash](https://gadgets.muse.ai/flash), which fills in
+the maker's SDK token from their Muse account. This page sends visitors there, carrying
+`?board=<id>`; open it with `?classic` to stay here.
+
 A page on GitHub Pages that flashes Muse Gadget firmware from Chrome or Edge
 over Web Serial, using [ESP Web Tools](https://esphome.github.io/esp-web-tools/).
 The ESP32 CI (`.github/workflows/esp32.yml`) packages the boards listed in
