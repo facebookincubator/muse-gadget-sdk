@@ -25,6 +25,7 @@
 
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -838,12 +839,17 @@ void muse_apps_launcher_close(void)
     on_view_exit(GADGET_STOP_USER);   /* as the power key */
 }
 
+/* A view exit (a call or video taking the screen, power, the exit hold) the
+ * request queue had no room for, as its reason + 1: it mustn't be lost. */
+static atomic_int s_view_stop;
+
 static void on_view_exit(int reason)
 {
     req_t r = {.kind = REQ_STOP, .o = {.from = MUSE_APPS_FROM_VIEW}, .reason = reason};
-    if (s_reqs && xQueueSend(s_reqs, &r, 0) == pdTRUE) {
-        wake();
+    if (!s_reqs || xQueueSend(s_reqs, &r, 0) != pdTRUE) {
+        atomic_store(&s_view_stop, reason + 1);
     }
+    wake();
 }
 
 static void unload(void)
@@ -1757,6 +1763,11 @@ static void *app_task(void *arg)
 
     for (;;) {
         req_t r;
+        int pending = atomic_exchange(&s_view_stop, 0);
+        if (pending) {
+            req_t stop = {.kind = REQ_STOP, .o = {.from = MUSE_APPS_FROM_VIEW}, .reason = pending - 1};
+            handle(&stop);
+        }
         if (!s_app.running && !s_launcher) {
             if (xQueueReceive(s_reqs, &r, portMAX_DELAY)) {
                 handle(&r);

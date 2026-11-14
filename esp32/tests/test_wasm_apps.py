@@ -791,6 +791,14 @@ class WasmAppsTest(unittest.TestCase):
         listing = function(catalog, "cJSON *muse_apps_catalog_json(")
         self.assertIn("if (!ok || !cJSON_AddItemToArray(apps, app)) {", listing)
 
+    def test_a_view_exit_is_never_lost(self):
+        """A call or video taking the screen stops the app even with the request queue full."""
+        apps = read("components/muse_apps/muse_apps.c")
+        exit_ = function(apps, "static void on_view_exit(int reason)\n{")
+        self.assertIn("atomic_store(&s_view_stop, reason + 1);", exit_)
+        task = function(apps, "static void *app_task(")
+        self.assertIn("int pending = atomic_exchange(&s_view_stop, 0);", task)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
