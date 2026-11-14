@@ -22,6 +22,7 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "sdkconfig.h"
 
 /*
  * Buttons, as the board reports them. The talk button is push-to-talk. On touch
@@ -49,6 +50,11 @@ typedef struct {
     uint32_t epoch;   /* a dropped call edge invalidates this and all older gestures */
     uint32_t mark;    /* DOWN: its pending-call mark (muse_input_clear_call_pending), or 0 */
     int64_t at_us;    /* input edge time, before queueing or voice-task delays */
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    bool synthetic;   /* posted by the wake word glue, not a finger: an
+                       * intentional hold, ended by endpointing, and a real
+                       * press during it takes over instead of retriggering */
+#endif
 } muse_input_event_t;
 
 /*

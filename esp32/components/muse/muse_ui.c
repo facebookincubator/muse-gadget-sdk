@@ -1169,6 +1169,15 @@ static void apply_text_size(void)
 }
 #endif
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* Here rather than at the top, after the last assert: builds without the
+ * wake word then compile this file exactly as before (assert() records its
+ * line number). */
+#include "muse_wakeword_glue.h"
+static lv_obj_t *s_listen_icon;   /* status line: "Hey Muse" listening is on */
+static int s_shown_listen = -1;   /* 0 hidden, 1 on but paused, 2 listening */
+#endif
+
 static void build_screen(void)
 {
 #if CONFIG_MUSE_LATIN_FONT
@@ -1271,6 +1280,11 @@ static void build_screen(void)
     lv_obj_align(status, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 40 : s_small ? 1 : 20 + s_dy);
     s_wifi_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_ble_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* Whenever the wake word is on, so it's never listening unseen. */
+    s_listen_icon = make_mic(status, s_small ? 10 : 14);
+    lv_obj_add_flag(s_listen_icon, LV_OBJ_FLAG_HIDDEN);
+#endif
     s_power_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
 
     /* The compact layout leaves the state to the avatar and the caption,
@@ -1741,6 +1755,17 @@ static void update_chrome(float now)
         lv_label_set_text(s_ble_icon, ble);
         lv_obj_set_style_text_color(s_ble_icon, lv_color_hex(b.state == MUSE_BLE_CONNECTED ? COLOR_ACCENT : COLOR_DIM), 0);
     }
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* Lit while the wake word is listening, dim while it's on but paused
+     * (Muse talking, a button turn, the runner stopped). */
+    int listen = !muse_wakeword_enabled() ? 0 : muse_wakeword_listening() ? 2 : 1;
+    if (listen != s_shown_listen) {
+        lv_obj_set_flag(s_listen_icon, LV_OBJ_FLAG_HIDDEN, listen == 0);
+        color_mic(s_listen_icon, listen == 2 ? COLOR_ACCENT : COLOR_DIM);
+        s_shown_listen = listen;
+    }
+#endif
 
     /* Paired, the name has done its job (picking this one out in the Muse
      * app) and the speaker button has replies to mute. */

@@ -50,6 +50,10 @@ SAMPLE_RATE = 24000
 FRAME_SAMPLES = 960
 FRAME_BYTES = FRAME_SAMPLES * 2
 FRAME_SECONDS = FRAME_SAMPLES / SAMPLE_RATE
+# A source that queues capture before the call can take it (wake-word
+# admission) reports `backlog_bytes`; queued audio is sent this much faster
+# than real time until the queue is down to one frame.
+CATCH_UP_RATE = 3.0
 MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 4
 MAX_PLAYBACK_BYTES = SAMPLE_RATE * 2 * 5
 # Words held with an unconfirmed reply have their own budget, so observing a
@@ -217,6 +221,9 @@ class VoiceCall:
         self._mic_epoch = 0
         self.reason = ""
         self.cleanup_error: Exception | None = None
+        # A cancellation that arrived while an earlier error was already
+        # propagating: the error still wins, but the caller can see both.
+        self.cleanup_cancelled = False
         self.end_call_acknowledged = False
         self.media_drain_incomplete = False
         self.advisory_error_count = 0
@@ -334,6 +341,7 @@ class VoiceCall:
                         cancelled = True
                     except Exception:
                         break
+                self.cleanup_cancelled = cancelled
                 try:
                     cleanup.result()
                 except Exception as exc:
@@ -843,7 +851,18 @@ class VoiceCall:
                                    "send_timestamp_ms": int(time.time() * 1000)})
             except _InputGated:
                 continue  # Never replay a frame invalidated while it waited for the wire.
-            next_send = time.monotonic() + len(pcm) / (SAMPLE_RATE * 2)
+            duration = len(pcm) / (SAMPLE_RATE * 2)
+            queued = getattr(source, "backlog_bytes", None)
+            if queued is None:
+                next_send = time.monotonic() + duration
+            else:
+                # Queued capture (pre-roll and audio from before the call was
+                # ready) catches up instead of arriving later and later: pace
+                # against a wall-clock schedule, so send latency never adds up,
+                # and step faster than real time while frames are queued. The
+                # schedule keeps at most one frame of credit.
+                step = duration / CATCH_UP_RATE if queued > FRAME_BYTES else duration
+                next_send = max(next_send + step, time.monotonic() - duration)
 
     async def _play(self) -> None:
         while True:

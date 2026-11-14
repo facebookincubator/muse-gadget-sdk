@@ -89,6 +89,8 @@ class VideoCall:
         self.call_id = str(uuid.uuid4())
         self.started_at = datetime.now(timezone.utc)
         self.reason = ""
+        self.cleanup_error: Exception | None = None
+        self.cleanup_cancelled = False
         self.end_call_acknowledged = False
         self.media: MediaSession | None = None
         self.video_frames = 0
@@ -147,9 +149,11 @@ class VideoCall:
                     cancelled = True
                 except Exception:
                     break
+            self.cleanup_cancelled = cancelled
             try:
                 cleanup.result()
             except Exception as exc:
+                self.cleanup_error = exc
                 if error is None and not cancelled:
                     raise
                 log.warning("video call cleanup failed (%s)", type(exc).__name__)

@@ -179,6 +179,31 @@ def test_actual_noise_duplex_wav_audio_and_cancelled_response_is_not_call_end(tm
         assert wav.readframes(wav.getnframes()) == TONE * 2
 
 
+def test_cancellation_during_cleanup_after_a_failure_is_recorded():
+    # The original failure still propagates, but the caller can tell a
+    # Ctrl-C arrived while the call was cleaning up.
+    async def scenario():
+        failed = asyncio.Event()
+
+        async def failing_source():
+            failed.set()
+            raise RuntimeError("synthetic source failure")
+            yield TONE
+
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", cleanup_timeout=1)
+            task = asyncio.create_task(call.run(failing_source(), Output()))
+            media, start = await admit(vm)
+            await asyncio.wait_for(failed.wait(), 1)
+            await asyncio.sleep(0.05)  # shutdown is now waiting on the end-call
+            task.cancel()
+            await hangup(vm, media, start)
+            with pytest.raises(RuntimeError):
+                await asyncio.wait_for(task, 2)
+            assert call.cleanup_cancelled and call.cleanup_error is None
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("failure", ["source", "cancel", "server", "identity", "truncated", "oversize"])
 def test_hangup_on_errors_and_cancellation_preserves_original_failure(failure):
     async def broken_source():
