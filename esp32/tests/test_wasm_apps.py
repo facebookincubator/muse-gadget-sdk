@@ -842,6 +842,11 @@ class WasmAppsTest(unittest.TestCase):
         send = function(read("components/muse_apps/muse_apps_chat.c"), "int32_t gadget_chat_send(")
         self.assertLess(send.index("muse_apps_check_deadline();"), send.index("muse_apps_vm_json_escape("))
 
+    def test_no_app_opens_during_a_call(self):
+        """The call's hang-up buttons would go to the app."""
+        run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
+        self.assertLess(run.index("if (muse_voice_in_call()) {"), run.index("muse_app_view_open(&cbs)"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

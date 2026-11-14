@@ -48,6 +48,7 @@
 #include "muse_link.h"
 #include "muse_state.h"
 #include "muse_ui.h"
+#include "muse_voice.h"
 #include "sdkconfig.h"
 #include "wasm_export.h"
 
@@ -1419,6 +1420,11 @@ static void run(req_t *r)
         run_failed(r, covered, "invalid_app",
                    "a callback has the wrong signature: on_start(), on_frame(int), on_event(int, int, int) and "
                    "on_stop(int), returning nothing");
+        return;
+    }
+    if (muse_voice_in_call()) {   /* its buttons hang up: an app mustn't take them */
+        unload();
+        run_failed(r, false, "busy", "a call is on");
         return;
     }
     const muse_app_view_cbs_t cbs = {.input = on_view_input, .exit = on_view_exit};
