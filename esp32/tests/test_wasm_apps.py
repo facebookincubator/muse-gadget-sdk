@@ -513,6 +513,34 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("memset((uint8_t *)(n + 1) + keep, 0, new_size - keep)", grow)
         self.assertIn("mem_free(p)", function(apps, "void muse_apps_linear_unmap("))
 
+    def test_callbacks_have_a_clock_deadline(self):
+        """Natives aren't metered: a callback calling costly ones in a loop
+        (image decodes, drawing) would hold LVGL's lock and the app task for
+        as long as it liked. Every UI/canvas native takes the lock through
+        muse_apps_ui_lock(), which ends a callback past its time."""
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn("#define CALL_MAX_US (2 * 1000000LL)", apps)
+        self.assertIn("#define START_MAX_US (5 * 1000000LL)", apps)
+        check = function(apps, "static void check_deadline(")
+        self.assertIn("esp_timer_get_time() > s_app.deadline_us", check)
+        self.assertIn("wasm_runtime_set_exception(s_app.inst,", check)
+        self.assertIn("check_deadline();", function(apps, "void muse_apps_ui_lock("))
+        call = function(apps, "static bool call_app(")
+        self.assertLess(call.index("s_app.deadline_us = esp_timer_get_time() + CALL_MAX_US;"),
+                        call.index("wasm_runtime_call_wasm("))
+        self.assertGreater(call.index("s_app.deadline_us = 0;"), call.index("wasm_runtime_call_wasm("))
+        run = function(apps, "static void run(")
+        self.assertLess(run.index("s_app.deadline_us = esp_timer_get_time() + START_MAX_US;"),
+                        run.index("wasm_runtime_call_wasm(s_app.env, init"))
+        self.assertEqual(apps.count("wasm_runtime_call_wasm("), 3)
+        for path in ["components/muse_apps/muse_apps_ui.c", "components/muse_apps/muse_apps_canvas.c"]:
+            for name, body in re.findall(r"\nint32_t (gadget_\w+)\(wasm_exec_env_t[^)]*\)\n\{(.*?)\n\}\n",
+                                         read(path), re.S):
+                if name in ("gadget_ui_span",):   # arithmetic on the screen's size only
+                    continue
+                self.assertRegex(body, r"muse_apps_ui_lock\(\)|obj_arg\(|canvas_arg\(|chart_arg\(|style_arg\(|return rect\(",
+                                 "%s: %s doesn't take LVGL's lock" % (path, name))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

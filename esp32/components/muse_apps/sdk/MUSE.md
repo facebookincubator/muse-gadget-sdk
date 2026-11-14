@@ -394,7 +394,8 @@ The same on every gadget that runs apps:
   `sys_info(INFO_MEM_BUDGET)`. `sys_info(INFO_MEM_USED)` says how much is in
   use, and `app.status` the peak. Past it, calls answer `ERR_NO_MEMORY`.
 - **Time:** each call into the app gets 4 million WebAssembly instructions
-  (`on_start` 16 million), well under a second. Past that the app traps and stops.
+  (`on_start` 16 million), well under a second, and 2 s on the clock including the
+  gadget's own work (`on_start` 5 s). Past either the app traps and stops.
   Keep a call to a few milliseconds: no busy loops, no waiting.
 - **Counts:** 256 objects, 32 shared styles, 8 timers, 4 operations in
   flight, 4 open devices, text of up to 4 KB per string, 200 bytes per log
