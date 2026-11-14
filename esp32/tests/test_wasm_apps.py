@@ -872,6 +872,12 @@ class WasmAppsTest(unittest.TestCase):
         turn = function(read("components/muse_apps/muse_apps.c"), "static void turn(")
         self.assertIn("for (int k = 0; k < MAX_OPS && s_app.running && take_done(&op); k++) {", turn)
 
+    def test_an_infinite_roller_is_charged_for_its_pages(self):
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        self.assertIn("return r && r->infinite ? 2 * 15 * (strlen(r->options) + 1) : 0;", function(ui, "static size_t roller_extra("))
+        roller = function(ui, "static int32_t roller_set(")
+        self.assertLess(roller.index("charge_delta(s, roller_extra(s->ext)"), roller.index("lv_roller_set_options("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

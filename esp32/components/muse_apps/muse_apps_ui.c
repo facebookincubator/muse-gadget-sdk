@@ -884,11 +884,22 @@ static chart_t *chart_ext(slot_t *s)
 }
 
 /* A roller's options and mode, together as LVGL takes them. */
+/* An infinite roller has LVGL copy its options once a page (up to 15),
+ * twice over, unchecked: charged as such before. */
+static size_t roller_extra(const roller_t *r)
+{
+    return r && r->infinite ? 2 * 15 * (strlen(r->options) + 1) : 0;
+}
+
 static int32_t roller_set(slot_t *s, const char *options, bool infinite)
 {
     size_t n = strlen(options);
     roller_t *r = muse_apps_alloc(sizeof(roller_t) + n + 1);
     if (!r) {
+        return GADGET_ERR_NO_MEMORY;
+    }
+    if (!charge_delta(s, roller_extra(s->ext), infinite ? 2 * 15 * (n + 1) : 0)) {
+        muse_apps_free(r);
         return GADGET_ERR_NO_MEMORY;
     }
     r->infinite = infinite;
