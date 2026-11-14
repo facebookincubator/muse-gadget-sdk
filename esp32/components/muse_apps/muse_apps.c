@@ -961,6 +961,10 @@ static void stop(int reason, const char *message, bool keep_view)
 static void show_launcher(const char *note)
 {
     const muse_app_view_cbs_t cbs = {.input = on_view_input, .exit = on_view_exit};
+    if (muse_voice_in_call()) {   /* the call keeps its buttons */
+        muse_app_view_close();
+        return;
+    }
     if (!muse_app_view_open(&cbs)) {
         return;
     }
@@ -1425,14 +1429,14 @@ static void run(req_t *r)
     }
     if (muse_voice_in_call()) {   /* its buttons hang up: an app mustn't take them */
         unload();
-        run_failed(r, false, "busy", "a call is on");
+        run_failed(r, covered, "busy", "a call is on");
         return;
     }
     const muse_app_view_cbs_t cbs = {.input = on_view_input, .exit = on_view_exit};
     xQueueReset(s_inputs);
     if (!muse_app_view_open(&cbs)) {
         unload();
-        run_failed(r, false, "no_display", "the screen isn't available");
+        run_failed(r, covered, "no_display", "the screen isn't available");
         return;
     }
     s_app.running = true;

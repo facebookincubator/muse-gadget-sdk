@@ -858,6 +858,16 @@ class WasmAppsTest(unittest.TestCase):
     def test_muse_caption_returns_the_whole_caption(self):
         self.assertIn("char caption[MUSE_CAPTION_MAX]", function(read("components/muse_apps/muse_apps_sys.c"), "int32_t gadget_muse_caption("))
 
+    def test_a_refused_app_gives_the_screen_back(self):
+        """With the view already covered (a replaced app, the launcher), a
+        refusal must close it, or the face and the call's buttons stay hidden."""
+        apps = read("components/muse_apps/muse_apps.c")
+        run = function(apps, "static void run(")
+        self.assertIn('run_failed(r, covered, "busy", "a call is on");', run)
+        self.assertIn('run_failed(r, covered, "no_display", "the screen isn\'t available");', run)
+        launcher = function(apps, "static void show_launcher(")
+        self.assertLess(launcher.index("if (muse_voice_in_call()) {"), launcher.index("muse_app_view_open(&cbs)"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
