@@ -25,7 +25,8 @@
  *
  * A name is a path in the partition: segments of A-Z, a-z, 0-9, '.', '-'
  * and '_' joined by '/', none empty, none starting with '.', each under 64
- * characters and all of it under MUSE_APPS_FLASH_NAME_MAX. Apps write it
+ * characters, at most 8 folders deep and all of it under
+ * MUSE_APPS_FLASH_NAME_MAX. Apps write it
  * with a leading '/': "/photos/cat.jpg".
  */
 

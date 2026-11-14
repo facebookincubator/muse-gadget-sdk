@@ -35,6 +35,7 @@
 static const char *TAG = "muse_apps_flash";
 
 #define SEGMENT_MAX 63   /* LittleFS's default name length, less one */
+#define FOLDERS_MAX 8    /* folders a name may have: as deep as listing and wiping go */
 #define PART ".part"
 #define PATH_CAP (MUSE_APPS_FLASH_NAME_MAX + 64)
 
@@ -46,11 +47,13 @@ static const char *fail(char *err, size_t err_len, const char *code, const char 
 bool muse_apps_flash_name_ok(const char *name) {
     if (!name || !*name || strlen(name) >= MUSE_APPS_FLASH_NAME_MAX) return false;
     size_t seg = 0;
+    int folders = 0;
     for (const char *p = name;; p++) {
         char c = *p;
         if (c == '/' || c == '\0') {
             if (seg == 0 || seg > SEGMENT_MAX) return false;   // empty, or too long
             if (c == '\0') break;
+            if (++folders > FOLDERS_MAX) return false;   // deeper than walk() and sweep() reach
             seg = 0;
             continue;
         }
@@ -214,7 +217,7 @@ static void walk(const char *root, const char *rel, walk_t *w, int depth) {
         struct stat st;
         if (stat(path, &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
-            if (depth < 8) walk(root, name, w, depth + 1);
+            if (depth < FOLDERS_MAX) walk(root, name, w, depth + 1);
             continue;
         }
         size_t len = strlen(name);
@@ -268,7 +271,7 @@ static void sweep(const char *path, bool all, int depth) {
         struct stat st;
         if (stat(child, &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
-            if (depth < 8) sweep(child, all, depth + 1);
+            if (depth < FOLDERS_MAX) sweep(child, all, depth + 1);
             rmdir(child);   // fails, harmlessly, unless it's now empty
             continue;
         }

@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
     dir = argv[1];
 
     /* Names: folders and a file, nothing that climbs out or hides. */
-    const char *good[] = {"cat.jpg", "photos/cat.jpg", "A-b_c.1", "a/b/c/d.png", "x.part1"};
+    const char *good[] = {"cat.jpg", "photos/cat.jpg", "A-b_c.1", "a/b/c/d.png", "x.part1", "1/2/3/4/5/6/7/8/f"};
     for (size_t i = 0; i < sizeof(good) / sizeof(good[0]); i++) CHECK(muse_apps_flash_name_ok(good[i]));
     char long_seg[80], long_name[120];
     memset(long_seg, 'a', 64);
@@ -71,7 +71,8 @@ int main(int argc, char **argv) {
     long_name[96] = '\0';
     for (int k = 30; k < 96; k += 31) long_name[k] = '/';
     const char *bad[] = {"", "/a", "a/", "a//b", ".a", "a/../b", "..", ".", "a/.b", "x.part", "a b", "a\\b",
-                         "caf\xc3\xa9", long_seg, long_name};
+                         "caf\xc3\xa9", long_seg, long_name,
+                         "1/2/3/4/5/6/7/8/9/f"};   /* deeper than listing and wiping reach */
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         if (muse_apps_flash_name_ok(bad[i])) fprintf(stderr, "took bad name %zu\n", i);
         CHECK(!muse_apps_flash_name_ok(bad[i]));
@@ -141,10 +142,14 @@ int main(int argc, char **argv) {
     CHECK(muse_apps_flash_commit(dir, "d.txt", tmp, &replaced, err, sizeof(err)) == NULL && !replaced);
     CHECK(exists("d.txt") && !exists("d.txt.part"));
 
-    /* Unpairing: everything goes, the partition's root stays. */
+    /* The deepest name is listed. */
+    CHECK(put("1/2/3/4/5/6/7/8/f", "f", &replaced) == NULL);
+    CHECK(!strcmp(listed(0, &bytes, &total, &count), "1/2/3/4/5/6/7/8/f") && count == 3);
+
+    /* Unpairing: everything goes, the deepest too, the partition's root stays. */
     CHECK(put("deep/er/e.txt", "e", &replaced) == NULL);
     muse_apps_flash_wipe(dir);
-    CHECK(!exists("cat.jpg") && !exists("d.txt") && !exists("deep") && exists(""));
+    CHECK(!exists("cat.jpg") && !exists("d.txt") && !exists("deep") && !exists("1") && exists(""));
     CHECK(listed(0, &bytes, &total, &count)[0] == '\0' && count == 0 && total == 0);
 
     if (failures) return 1;
