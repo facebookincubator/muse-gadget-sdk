@@ -1097,11 +1097,11 @@ As C defines, for an app:
 #define P_BG_GRAD_COLOR 102  /* rgb, style. The gradient's end colour. */
 #define P_BG_GRAD_DIR 103  /* grad_dir, style */
 #define P_BORDER_COLOR 104  /* rgb, style */
-#define P_BORDER_WIDTH 105  /* int, style */
+#define P_BORDER_WIDTH 105  /* int, style. 0..1024 px. */
 #define P_BORDER_OPA 106  /* opa, style */
 #define P_BORDER_SIDE 107  /* border_side, style */
 #define P_OUTLINE_COLOR 108  /* rgb, style */
-#define P_OUTLINE_WIDTH 109  /* int, style */
+#define P_OUTLINE_WIDTH 109  /* int, style. 0..1024 px. */
 #define P_OUTLINE_PAD 110  /* int, style. Gap between the object and its outline. */
 #define P_SHADOW_COLOR 111  /* rgb, style */
 #define P_SHADOW_WIDTH 112  /* int, style. Blur width, 0..64 px. Shadows cost drawing time; use them on a few objects. */
@@ -1125,13 +1125,13 @@ As C defines, for an app:
 #define P_TEXT_LINE_SPACE 130  /* int, style */
 #define P_TEXT_DECOR 131  /* text_decor, style */
 #define P_LINE_COLOR 132  /* rgb, style */
-#define P_LINE_WIDTH 133  /* int, style */
+#define P_LINE_WIDTH 133  /* int, style. 0..1024 px. */
 #define P_LINE_OPA 134  /* opa, style */
 #define P_LINE_ROUNDED 135  /* bool, style */
 #define P_LINE_DASH_WIDTH 136  /* int, style. 0..1024 px. */
 #define P_LINE_DASH_GAP 137  /* int, style. 0..1024 px. */
 #define P_ARC_COLOR 138  /* rgb, style */
-#define P_ARC_WIDTH 139  /* int, style */
+#define P_ARC_WIDTH 139  /* int, style. 0..1024 px. */
 #define P_ARC_OPA 140  /* opa, style */
 #define P_ARC_ROUNDED 141  /* bool, style */
 #define P_IMAGE_OPA 142  /* opa, style */

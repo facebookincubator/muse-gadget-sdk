@@ -1101,11 +1101,11 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_BG_GRAD_COLOR` | rgb | style | rw | The gradient's end colour. |
 | `P_BG_GRAD_DIR` | grad_dir | style | rw |  |
 | `P_BORDER_COLOR` | rgb | style | rw |  |
-| `P_BORDER_WIDTH` | int | style | rw |  |
+| `P_BORDER_WIDTH` | int | style | rw | 0..1024 px. |
 | `P_BORDER_OPA` | opa | style | rw |  |
 | `P_BORDER_SIDE` | border_side | style | rw |  |
 | `P_OUTLINE_COLOR` | rgb | style | rw |  |
-| `P_OUTLINE_WIDTH` | int | style | rw |  |
+| `P_OUTLINE_WIDTH` | int | style | rw | 0..1024 px. |
 | `P_OUTLINE_PAD` | int | style | rw | Gap between the object and its outline. |
 | `P_SHADOW_COLOR` | rgb | style | rw |  |
 | `P_SHADOW_WIDTH` | int | style | rw | Blur width, 0..64 px. Shadows cost drawing time; use them on a few objects. |
@@ -1129,13 +1129,13 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_TEXT_LINE_SPACE` | int | style | rw |  |
 | `P_TEXT_DECOR` | text_decor | style | rw |  |
 | `P_LINE_COLOR` | rgb | style | rw |  |
-| `P_LINE_WIDTH` | int | style | rw |  |
+| `P_LINE_WIDTH` | int | style | rw | 0..1024 px. |
 | `P_LINE_OPA` | opa | style | rw |  |
 | `P_LINE_ROUNDED` | bool | style | rw |  |
 | `P_LINE_DASH_WIDTH` | int | style | rw | 0..1024 px. |
 | `P_LINE_DASH_GAP` | int | style | rw | 0..1024 px. |
 | `P_ARC_COLOR` | rgb | style | rw |  |
-| `P_ARC_WIDTH` | int | style | rw |  |
+| `P_ARC_WIDTH` | int | style | rw | 0..1024 px. |
 | `P_ARC_OPA` | opa | style | rw |  |
 | `P_ARC_ROUNDED` | bool | style | rw |  |
 | `P_IMAGE_OPA` | opa | style | rw |  |

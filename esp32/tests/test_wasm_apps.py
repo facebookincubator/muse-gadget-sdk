@@ -756,6 +756,13 @@ class WasmAppsTest(unittest.TestCase):
         apps = function(read("components/muse_apps/muse_apps.c"), "void muse_apps_start(")
         self.assertIn("vQueueDeleteWithCaps(s_reqs);", apps[apps.index('"couldn\'t start the app task"'):])
 
+    def test_widths_are_never_negative(self):
+        """A negative line width made LVGL allocate a chart's points short."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        for prop in ["BORDER_WIDTH", "OUTLINE_WIDTH", "LINE_WIDTH", "ARC_WIDTH"]:
+            self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_WIDTH}," % (prop, prop), ui)
+        self.assertIn("case K_WIDTH: out->num = clamp(v, 0, 1024);", function(ui, "static int32_t style_value("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
