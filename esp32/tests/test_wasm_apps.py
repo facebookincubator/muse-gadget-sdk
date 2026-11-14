@@ -847,6 +847,14 @@ class WasmAppsTest(unittest.TestCase):
         run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
         self.assertLess(run.index("if (muse_voice_in_call()) {"), run.index("muse_app_view_open(&cbs)"))
 
+    def test_a_turn_takes_at_most_a_queue_of_input(self):
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn("for (int k = 0; k < INPUT_QUEUE_LEN && s_app.running && xQueueReceive(s_inputs, &in, 0); k++) {",
+                      function(apps, "static void turn("))
+        start = function(apps, "void muse_apps_start(")
+        failed = start[start.index('"no memory for the app queues"'):]
+        self.assertLess(failed.index("s_state = NULL;"), failed.index("return;"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

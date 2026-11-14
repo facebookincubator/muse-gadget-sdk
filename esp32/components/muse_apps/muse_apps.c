@@ -125,6 +125,7 @@ typedef struct {
 } app_timer_t;
 
 static QueueHandle_t s_reqs, s_inputs;
+#define INPUT_QUEUE_LEN 32
 static muse_apps_result_fn s_send_result;
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;   /* ops, memory, the log */
 
@@ -1656,7 +1657,9 @@ static void turn(void)
         }
     }
     input_t in;
-    while (s_app.running && xQueueReceive(s_inputs, &in, 0)) {
+    /* At most a queue's worth a turn: input that keeps coming (a held touch)
+     * mustn't keep stops, timers and frames waiting. */
+    for (int k = 0; k < INPUT_QUEUE_LEN && s_app.running && xQueueReceive(s_inputs, &in, 0); k++) {
         if (in.type != EV_WAKE && !deliver(in.type, in.a, in.b)) {
             return;
         }
@@ -1821,11 +1824,19 @@ void muse_apps_start(muse_apps_result_fn send_result)
     /* In PSRAM: internal RAM is what Wi-Fi, Noise and the panel's DMA run short
      * of. No interrupt handler uses these queues, so they needn't be internal. */
     s_reqs = xQueueCreateWithCaps(4, sizeof(req_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_inputs = xQueueCreateWithCaps(32, sizeof(input_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_inputs = xQueueCreateWithCaps(INPUT_QUEUE_LEN, sizeof(input_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_log = heap_caps_malloc(LOG_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_state = heap_caps_calloc(1, sizeof(*s_state), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_reqs || !s_inputs || !s_log || !s_state) {
         ESP_LOGE(TAG, "no memory for the app queues");
+        /* None of it, then: commands answer that apps didn't start. */
+        if (s_reqs) vQueueDeleteWithCaps(s_reqs);
+        if (s_inputs) vQueueDeleteWithCaps(s_inputs);
+        heap_caps_free(s_log);
+        heap_caps_free(s_state);
+        s_reqs = s_inputs = NULL;
+        s_log = NULL;
+        s_state = NULL;
         return;
     }
     muse_apps_store_start();
