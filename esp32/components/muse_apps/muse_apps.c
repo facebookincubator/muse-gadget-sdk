@@ -65,8 +65,6 @@ static const char *TAG = "muse_apps";
 #define TASK_PRIORITY 2                     /* below the UI, input and the network */
 #define STEP_LIMIT 4000000                  /* limits.instructions: well under a second */
 #define START_STEP_LIMIT 16000000           /* limits.instructions_start */
-#define CALL_MAX_US (2 * 1000000LL)         /* imports aren't metered: a callback's time, on the clock */
-#define START_MAX_US (5 * 1000000LL)        /* _initialize and on_start together */
 #define POLL_MS 50                          /* requests and state changes, while running */
 #define PATH_MAX_LEN 192
 #define REQUEST_ID_LEN 64
@@ -148,7 +146,6 @@ typedef struct {
     char requires[MAX_NAMES][NAME_LEN];
     int n_requires;
     int64_t started_us;
-    int64_t deadline_us;       /* while a callback runs: when it's out of time; 0 otherwise */
     uint32_t frames, events;
     int frame_rate;
     int64_t next_frame_us;
@@ -630,21 +627,8 @@ size_t muse_apps_mem_budget(void)
 
 /* ---- LVGL's lock ------------------------------------------------------------------------- */
 
-/* Natives' work isn't metered: a callback that keeps calling costly ones
- * (drawing, images, text) is stopped on the first one past its time. Each
- * UI and canvas native takes LVGL's lock first, so it's checked here: the
- * native still finishes, and the app traps once it returns. */
-void muse_apps_check_deadline(void)
-{
-    if (s_app.deadline_us && s_app.inst && esp_timer_get_time() > s_app.deadline_us) {
-        s_app.deadline_us = 0;
-        wasm_runtime_set_exception(s_app.inst, "callback ran too long");
-    }
-}
-
 void muse_apps_ui_lock(void)
 {
-    muse_apps_check_deadline();
     if (!s_app.ui_locked) {
         muse_app_view_lock();
         s_app.ui_locked = true;
@@ -886,9 +870,7 @@ static void unload(void)
 static bool call_app(wasm_function_inst_t fn, uint32_t argc, uint32_t *argv, int limit)
 {
     wasm_runtime_set_instruction_count_limit(s_app.env, limit);
-    s_app.deadline_us = esp_timer_get_time() + CALL_MAX_US;
     bool ok = wasm_runtime_call_wasm(s_app.env, fn, argc, argv);
-    s_app.deadline_us = 0;
     ui_release();
     return ok;
 }
@@ -1465,10 +1447,8 @@ static void run(req_t *r)
     /* A WASI reactor's _initialize (static constructors) first, then on_start:
      * one budget between them. */
     wasm_runtime_set_instruction_count_limit(s_app.env, START_STEP_LIMIT);
-    s_app.deadline_us = esp_timer_get_time() + START_MAX_US;
     bool inited = !init || wasm_runtime_call_wasm(s_app.env, init, 0, NULL);
     bool started = inited && wasm_runtime_call_wasm(s_app.env, on_start, 0, NULL);
-    s_app.deadline_us = 0;
     ui_release();
     if (!started) {
         const char *what = wasm_runtime_get_exception(s_app.inst);

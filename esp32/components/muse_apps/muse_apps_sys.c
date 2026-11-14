@@ -70,7 +70,6 @@ int64_t gadget_sys_time(wasm_exec_env_t env)
 void gadget_sys_log(wasm_exec_env_t env, const char *text)
 {
     (void)env;
-    muse_apps_check_deadline();   /* logging is slow on a UART console: it mustn't outlast the callback */
     muse_apps_log("%.200s", text ? text : "");
 }
 

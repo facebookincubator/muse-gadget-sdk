@@ -519,38 +519,6 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("memset((uint8_t *)(n + 1) + keep, 0, new_size - keep)", grow)
         self.assertIn("mem_free(p)", function(apps, "void muse_apps_linear_unmap("))
 
-    def test_callbacks_have_a_clock_deadline(self):
-        """Natives aren't metered: a callback calling costly ones in a loop
-        (image decodes, drawing) would hold LVGL's lock and the app task for
-        as long as it liked. Every UI/canvas native takes the lock through
-        muse_apps_ui_lock(), which ends a callback past its time."""
-        apps = read("components/muse_apps/muse_apps.c")
-        self.assertIn("#define CALL_MAX_US (2 * 1000000LL)", apps)
-        self.assertIn("#define START_MAX_US (5 * 1000000LL)", apps)
-        check = function(apps, "void muse_apps_check_deadline(")
-        self.assertIn("esp_timer_get_time() > s_app.deadline_us", check)
-        self.assertIn("wasm_runtime_set_exception(s_app.inst,", check)
-        self.assertIn("check_deadline();", function(apps, "void muse_apps_ui_lock("))
-        # The lock is held for the rest of the callback: sys_log, which needs
-        # no lock and is slow on a UART console, checks the clock itself.
-        sys_log = function(read("components/muse_apps/muse_apps_sys.c"), "void gadget_sys_log(")
-        self.assertLess(sys_log.index("muse_apps_check_deadline();"), sys_log.index("muse_apps_log("))
-        call = function(apps, "static bool call_app(")
-        self.assertLess(call.index("s_app.deadline_us = esp_timer_get_time() + CALL_MAX_US;"),
-                        call.index("wasm_runtime_call_wasm("))
-        self.assertGreater(call.index("s_app.deadline_us = 0;"), call.index("wasm_runtime_call_wasm("))
-        run = function(apps, "static void run(")
-        self.assertLess(run.index("s_app.deadline_us = esp_timer_get_time() + START_MAX_US;"),
-                        run.index("wasm_runtime_call_wasm(s_app.env, init"))
-        self.assertEqual(apps.count("wasm_runtime_call_wasm("), 3)
-        for path in ["components/muse_apps/muse_apps_ui.c", "components/muse_apps/muse_apps_canvas.c"]:
-            for name, body in re.findall(r"\nint32_t (gadget_\w+)\(wasm_exec_env_t[^)]*\)\n\{(.*?)\n\}\n",
-                                         read(path), re.S):
-                if name in ("gadget_ui_span",):   # arithmetic on the screen's size only
-                    continue
-                self.assertRegex(body, r"muse_apps_ui_lock\(\)|obj_arg\(|canvas_arg\(|chart_arg\(|style_arg\(|return rect\(",
-                                 "%s: %s doesn't take LVGL's lock" % (path, name))
-
     def test_a_control_message_held_for_dma_says_so(self):
         """Apps take internal RAM, and Link holds its registration and command
         results back while DMA-capable RAM is under its reserve: in apps
@@ -838,10 +806,6 @@ class WasmAppsTest(unittest.TestCase):
         sweep = function(read("components/muse_apps/muse_apps_flash.c"), "static bool sweep(")
         self.assertIn("if (!dir) return !all || (depth == 0 && errno == ENOENT);", sweep)
 
-    def test_chat_send_checks_the_clock(self):
-        send = function(read("components/muse_apps/muse_apps_chat.c"), "int32_t gadget_chat_send(")
-        self.assertLess(send.index("muse_apps_check_deadline();"), send.index("muse_apps_vm_json_escape("))
-
     def test_no_app_opens_during_a_call(self):
         """The call's hang-up buttons would go to the app."""
         run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
@@ -883,10 +847,6 @@ class WasmAppsTest(unittest.TestCase):
         ui = read("components/muse_apps/muse_apps_ui.c")
         for prop in ["TEXT_LETTER_SPACE", "TEXT_LINE_SPACE"]:
             self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_WIDTH}," % (prop, prop), ui)
-
-    def test_state_save_checks_the_clock(self):
-        save = function(read("components/muse_apps/muse_apps_files.c"), "int32_t gadget_state_save(")
-        self.assertIn("muse_apps_check_deadline();", save[:200])
 
     def test_an_id_too_long_is_refused_not_cut(self):
         """Cut to 31 bytes, it could name another installed app."""
