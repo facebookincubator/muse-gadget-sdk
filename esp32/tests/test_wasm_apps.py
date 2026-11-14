@@ -853,6 +853,11 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn('vm = args.vm if "/" in args.vm or args.vm.endswith(".wasm") else args.vm + "/"',
                       read("tools/muse/app.py"))
 
+    def test_frame_and_stop_callbacks_have_room_for_a_64_bit_result(self):
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn("uint32_t argv[2] = {(uint32_t)reason};", apps)
+        self.assertIn("uint32_t argv[2] = {(uint32_t)(now / 1000)};", apps)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

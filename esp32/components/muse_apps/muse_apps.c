@@ -900,7 +900,7 @@ static void stop(int reason, const char *message, bool keep_view)
     bool was_running = s_app.running;
     s_app.running = false;
     if (was_running && reason != STOP_TRAP && s_app.on_stop) {
-        uint32_t argv[1] = {(uint32_t)reason};
+        uint32_t argv[2] = {(uint32_t)reason};   /* room for a 64-bit result declared by mistake */
         if (!call_app(s_app.on_stop, 1, argv, STEP_LIMIT)) {
             const char *what = wasm_runtime_get_exception(s_app.inst);
             muse_apps_log("on_stop trapped: %s", what ? what : "?");
@@ -1603,7 +1603,7 @@ static void turn(void)
         }
     }
     if (s_app.running && s_app.on_frame && s_app.frame_rate > 0 && !s_app.dark && s_app.next_frame_us <= now) {
-        uint32_t argv[1] = {(uint32_t)(now / 1000)};
+        uint32_t argv[2] = {(uint32_t)(now / 1000)};   /* as on_stop's */
         if (!call_app(s_app.on_frame, 1, argv, STEP_LIMIT)) {
             crashed("on_frame");
             return;
