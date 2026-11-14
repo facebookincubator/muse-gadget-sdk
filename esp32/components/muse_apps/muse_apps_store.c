@@ -91,6 +91,7 @@ typedef struct {
     char file[MUSE_APPS_FLASH_NAME_MAX];  // ST_FILE_*: the file's name in the partition
     uint8_t *bytes;  // ST_INSTALL, ST_FILE_PUT from the console's upload: no download; owned by the request
     size_t len;
+    uint32_t epoch;  // s_epoch when it was asked
 } st_req_t;
 
 static QueueHandle_t s_q;
@@ -100,6 +101,7 @@ static int s_list_n;
 static bool s_persistent;
 static bool s_files;  // the "files" partition is mounted
 static atomic_bool s_forget;  // unpaired: remove everything before anything else
+static atomic_uint s_epoch;   // moves at each unpairing: what was asked before it isn't done
 
 // Copies the catalog for other tasks, after each change.
 static void publish(void) {
@@ -484,6 +486,16 @@ static void store_task(void *arg) {
     for (st_req_t r;;) {
         if (!xQueueReceive(s_q, &r, portMAX_DELAY)) continue;
         forget_if_asked();
+        if (r.kind != ST_FORGET && r.epoch != atomic_load(&s_epoch)) {
+            // Asked before the gadget was unpaired: not for its next owner.
+            if (r.kind == ST_OPEN) {
+                muse_apps_open_failed(&r.o, "unpaired", "the gadget was unpaired");
+            } else {
+                muse_apps_reply(&r.o, muse_apps_error("unpaired", "the gadget was unpaired"));
+            }
+            free(r.bytes);
+            continue;
+        }
         switch (r.kind) {
         case ST_INSTALL: install(&r); break;
         case ST_REMOVE: remove_app(&r); break;
@@ -543,7 +555,8 @@ void muse_apps_store_start(void) {
     }
 }
 
-static bool post(const st_req_t *r) {
+static bool post(st_req_t *r) {
+    r->epoch = atomic_load(&s_epoch);
     return s_q && xQueueSend(s_q, r, 0) == pdTRUE;
 }
 
@@ -608,6 +621,7 @@ bool muse_apps_store_file_list(const muse_apps_origin_t *o) {
 }
 
 void muse_apps_store_forget_all(void) {
+    atomic_fetch_add(&s_epoch, 1);
     atomic_store(&s_forget, true);
     st_req_t r = {.kind = ST_FORGET};
     if (s_q) xQueueSend(s_q, &r, 0);  // full: the flag is seen after the request in hand

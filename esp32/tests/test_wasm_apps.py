@@ -608,6 +608,15 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("!range_ok(lo, hi) && has_needle(s)", widget)
         self.assertIn("if (range_ok(c->min, c->max)) {", widget)
 
+    def test_store_requests_from_before_an_unpairing_are_dropped(self):
+        store = read("components/muse_apps/muse_apps_store.c")
+        self.assertIn("r->epoch = atomic_load(&s_epoch);", function(store, "static bool post("))
+        task = function(store, "static void store_task(")
+        self.assertIn("r.epoch != atomic_load(&s_epoch)", task)
+        self.assertLess(task.index("r.epoch != atomic_load(&s_epoch)"), task.index("case ST_INSTALL"))
+        forget = function(store, "void muse_apps_store_forget_all(")
+        self.assertLess(forget.index("atomic_fetch_add(&s_epoch, 1);"), forget.index("xQueueSend("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
