@@ -585,6 +585,29 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("int rate = s_app.frame_rate;", turn)
         self.assertIn("if (rate > 0) {", turn)
 
+    def test_lvgl_layouts_and_ranges_stay_in_bounds(self):
+        """LVGL's grid indexes its tracks with each child's cell unchecked,
+        drops every scale's needle hook when one scale goes, and divides by a
+        scale's or chart's range: the wrapper keeps them in bounds."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        fits = function(ui, "static bool track_fits(")
+        self.assertIn("(uint32_t)span <= tracks - (uint32_t)pos", fits)
+        cell = function(ui, "int32_t gadget_ui_grid_cell(")
+        self.assertIn("grid_tracks(p->grid, false)", cell)
+        self.assertIn("!track_fits(col, col_span, cols) || !track_fits(row, row_span, rws)", cell)
+        self.assertNotIn("col + col_span", cell)
+        grid = function(ui, "int32_t gadget_ui_grid(")
+        self.assertLess(grid.index("first_cell(child)"), grid.index("lv_obj_set_grid_dsc_array("))
+        self.assertIn("first_cell(s->obj)", function(ui, "int32_t gadget_ui_set_parent("))
+        self.assertIn("m == LV_LAYOUT_GRID && !s->grid", function(ui, "static int32_t obj_set("))
+        needle = function(ui, "int32_t gadget_ui_scale_needle(")
+        self.assertIn("l->needle_of && l->needle_of != h && find(l->needle_of)", needle)
+        self.assertLess(needle.index("range_ok("), needle.index("lv_scale_set_line_needle_value("))
+        self.assertIn("return lo < hi && (int64_t)hi - lo <= INT32_MAX;", function(ui, "static bool range_ok("))
+        widget = function(ui, "static int32_t widget_set(")
+        self.assertIn("!range_ok(lo, hi) && has_needle(s)", widget)
+        self.assertIn("if (range_ok(c->min, c->max)) {", widget)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

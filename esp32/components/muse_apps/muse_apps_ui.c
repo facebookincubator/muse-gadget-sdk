@@ -118,6 +118,7 @@ typedef struct {
     uint32_t charged;   /* bytes charged to the budget for it */
     void *ext;          /* by type: image_t, a canvas, line points, chart_t, roller_t */
     int32_t *grid;      /* ui_grid's column and row tracks */
+    int32_t needle_of;  /* a line: the scale it's the needle of (its handle), or 0 */
     uint8_t type;       /* GADGET_W_ */
 } slot_t;
 
@@ -707,6 +708,9 @@ static int32_t obj_set(slot_t *s, int32_t prop, int32_t v)
         if (!MAP_IN(s_layouts, v, m)) {
             return GADGET_ERR_ARG;
         }
+        if (m == LV_LAYOUT_GRID && !s->grid) {
+            return GADGET_ERR_ARG;   /* ui_grid sets it, with the tracks: LVGL's subgrid indexes the parent's unchecked */
+        }
         lv_obj_set_layout(o, m);
         return 0;
     case GADGET_P_FLEX_FLOW:
@@ -821,6 +825,25 @@ static int32_t roller_set(slot_t *s, const char *options, bool infinite)
     return 0;
 }
 
+/* A scale's or chart's range: LVGL divides by max - min, so it must be
+ * positive and fit an int32_t. */
+static bool range_ok(int32_t lo, int32_t hi)
+{
+    return lo < hi && (int64_t)hi - lo <= INT32_MAX;
+}
+
+/* Whether a scale has a line as its needle. */
+static bool has_needle(const slot_t *scale)
+{
+    int32_t h = handle_of(index_of(scale));
+    for (int i = 1; i < MAX_OBJECTS; i++) {
+        if (s_ui->slots[i].obj && s_ui->slots[i].needle_of == h) {
+            return true;
+        }
+    }
+    return false;
+}
+
 #define ONLY(t)                             \
     do {                                    \
         if (s->type != (t)) {               \
@@ -866,6 +889,11 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
         } else if (t == GADGET_W_SLIDER) {
             min ? lv_slider_set_min_value(o, v) : lv_slider_set_max_value(o, v);
         } else if (t == GADGET_W_SCALE) {
+            /* LVGL places a needle (on each style change too) dividing by the range */
+            int32_t lo = min ? v : lv_scale_get_range_min_value(o), hi = min ? lv_scale_get_range_max_value(o) : v;
+            if (!range_ok(lo, hi) && has_needle(s)) {
+                return GADGET_ERR_ARG;
+            }
             min ? lv_scale_set_min_value(o, v) : lv_scale_set_max_value(o, v);
         } else if (t == GADGET_W_CHART) {
             chart_t *c = chart_ext(s);
@@ -873,7 +901,9 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
                 return GADGET_ERR_NO_MEMORY;
             }
             *(min ? &c->min : &c->max) = v;
-            lv_chart_set_axis_range(o, LV_CHART_AXIS_PRIMARY_Y, c->min, c->max);
+            if (range_ok(c->min, c->max)) {   /* LVGL divides by it drawing bars: until then, the last good one */
+                lv_chart_set_axis_range(o, LV_CHART_AXIS_PRIMARY_Y, c->min, c->max);
+            }
         } else {
             return GADGET_ERR_UNSUPPORTED;
         }
@@ -1667,6 +1697,37 @@ static void on_delete(lv_event_t *e)
 
 /* ---- Objects ------------------------------------------------------------------------------------ */
 
+/* Tracks in one half of a ui_grid's array: its columns, or its rows. */
+static uint32_t grid_tracks(const int32_t *grid, bool rows)
+{
+    const int32_t *t = grid + (rows ? MAX_GRID + 1 : 0);
+    uint32_t n = 0;
+    while (n < MAX_GRID && t[n] != LV_GRID_TEMPLATE_LAST) {
+        n++;
+    }
+    return n;
+}
+
+static bool track_fits(int32_t pos, int32_t span, uint32_t tracks)
+{
+    return pos >= 0 && span >= 1 && (uint32_t)pos < tracks && (uint32_t)span <= tracks - (uint32_t)pos;
+}
+
+/* Whether an object's cell lies within its parent's tracks: LVGL's grid
+ * indexes the tracks with the cell's position and span unchecked. */
+static bool cell_fits(lv_obj_t *o, const int32_t *grid)
+{
+    return track_fits(lv_obj_get_style_grid_cell_column_pos(o, LV_PART_MAIN),
+                      lv_obj_get_style_grid_cell_column_span(o, LV_PART_MAIN), grid_tracks(grid, false)) &&
+           track_fits(lv_obj_get_style_grid_cell_row_pos(o, LV_PART_MAIN),
+                      lv_obj_get_style_grid_cell_row_span(o, LV_PART_MAIN), grid_tracks(grid, true));
+}
+
+static void first_cell(lv_obj_t *o)
+{
+    lv_obj_set_grid_cell(o, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
+}
+
 static lv_obj_t *create(int type, lv_obj_t *parent)
 {
     switch (type) {
@@ -1791,6 +1852,9 @@ int32_t gadget_ui_set_parent(wasm_exec_env_t env, int32_t obj, int32_t parent)
         }
     }
     lv_obj_set_parent(s->obj, p->obj);
+    if (p->grid && !cell_fits(s->obj, p->grid)) {
+        first_cell(s->obj);   /* placed for another grid */
+    }
     return 0;
 }
 
@@ -1959,6 +2023,13 @@ int32_t gadget_ui_grid(wasm_exec_env_t env, int32_t obj, const char *columns, co
     }
     memcpy(grid, cols, sizeof(cols));
     memcpy(grid + MAX_GRID + 1, rws, sizeof(rws));
+    /* Children placed for more tracks than these go to the first cell. */
+    for (uint32_t i = 0; i < lv_obj_get_child_count(s->obj); i++) {
+        lv_obj_t *child = lv_obj_get_child(s->obj, (int32_t)i);
+        if (!cell_fits(child, grid)) {
+            first_cell(child);
+        }
+    }
     lv_obj_set_grid_dsc_array(s->obj, grid, grid + MAX_GRID + 1);
     lv_obj_set_layout(s->obj, LV_LAYOUT_GRID);
     muse_apps_free(s->grid);
@@ -1974,8 +2045,15 @@ int32_t gadget_ui_grid_cell(wasm_exec_env_t env, int32_t obj, int32_t col, int32
     if (!s) {
         return GADGET_ERR_HANDLE;
     }
-    if (col < 0 || row < 0 || col_span < 1 || row_span < 1 || col + col_span > MAX_GRID ||
-        row + row_span > MAX_GRID || is_root(s)) {
+    if (is_root(s)) {
+        return GADGET_ERR_ARG;
+    }
+    /* Within the parent's tracks if it has a grid; within any grid's
+     * otherwise, and fitted to the parent's when it gets one (ui_grid). */
+    const slot_t *p = slot_of(lv_obj_get_parent(s->obj));
+    uint32_t cols = p && p->grid ? grid_tracks(p->grid, false) : MAX_GRID;
+    uint32_t rws = p && p->grid ? grid_tracks(p->grid, true) : MAX_GRID;
+    if (!track_fits(col, col_span, cols) || !track_fits(row, row_span, rws)) {
         return GADGET_ERR_ARG;
     }
     lv_obj_set_grid_cell(s->obj, LV_GRID_ALIGN_STRETCH, col, col_span, LV_GRID_ALIGN_STRETCH, row, row_span);
@@ -2249,6 +2327,17 @@ int32_t gadget_ui_scale_needle(wasm_exec_env_t env, int32_t scale, int32_t line,
     if (!s || s->type != GADGET_W_SCALE || !l || l->type != GADGET_W_LINE) {
         return GADGET_ERR_HANDLE;
     }
+    /* One scale's needle at a time: deleting a scale makes LVGL drop every
+     * scale's deletion hook from the line, so another scale would keep it
+     * after it's freed. And LVGL divides by the range to place it. */
+    int32_t h = handle_of(index_of(s));
+    if (l->needle_of && l->needle_of != h && find(l->needle_of)) {
+        return GADGET_ERR_BUSY;
+    }
+    if (!range_ok(lv_scale_get_range_min_value(s->obj), lv_scale_get_range_max_value(s->obj))) {
+        return GADGET_ERR_ARG;
+    }
+    l->needle_of = h;
     lv_scale_set_line_needle_value(s->obj, l->obj, clamp(length, -32767, 32767), value);
     return 0;
 }
