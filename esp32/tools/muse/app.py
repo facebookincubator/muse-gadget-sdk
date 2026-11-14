@@ -156,7 +156,7 @@ def install_line(args):
     look = ":%s:%s" % (args.icon or "", args.color or "") if args.icon or args.color else ""
     if not (args.id or look or args.name):
         return ""
-    return (args.id or "-") + look + (" " + args.name if args.name else "")
+    return word((args.id or "-") + look) + (" " + args.name if args.name else "")
 
 
 def word(s):
