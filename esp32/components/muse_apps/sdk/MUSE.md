@@ -1372,7 +1372,7 @@ GADGET_IMPORT(sys_brightness) int32_t sys_brightness(int32_t percent);
 
 /*
  * Creates a widget with the theme's look. type: A W_ constant. parent:
- * UI_ROOT, or another object. Returns the new object.
+ * UI_ROOT, or another object other than a roller. Returns the new object.
  */
 GADGET_IMPORT(ui_create) int32_t ui_create(int32_t type, int32_t parent);
 
@@ -1426,7 +1426,8 @@ GADGET_IMPORT(ui_align) int32_t ui_align(int32_t obj, int32_t align, int32_t dx,
 GADGET_IMPORT(ui_align_to) int32_t ui_align_to(int32_t obj, int32_t base, int32_t align, int32_t dx, int32_t dy);
 
 /*
- * Moves an object to another parent.
+ * Moves an object to another parent. parent: Not a roller, nor the object or
+ * one inside it.
  */
 GADGET_IMPORT(ui_set_parent) int32_t ui_set_parent(int32_t obj, int32_t parent);
 

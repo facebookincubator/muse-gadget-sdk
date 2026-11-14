@@ -896,6 +896,15 @@ class WasmAppsTest(unittest.TestCase):
         for name in ["bool muse_apps_store_install(", "bool muse_apps_store_install_bytes("]:
             self.assertIn("if (id && strlen(id) >= sizeof(r.id)) return false;", function(store, name), name)
 
+    def test_no_app_object_goes_inside_a_roller(self):
+        """LVGL takes a roller's first child as its label: an app object
+        moved ahead of it was read as a label (type confusion)."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        self.assertIn("return p->type != GADGET_W_ROLLER;", function(ui, "static bool takes_children("))
+        for name in ["int32_t gadget_ui_create(", "int32_t gadget_ui_set_parent("]:
+            body = function(ui, name)
+            self.assertLess(body.index("if (!takes_children(p)) {"), body.index("lv_obj_") if "lv_obj_" in body else len(body), name)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

@@ -213,7 +213,7 @@ int32_t ui_create(int32_t type, int32_t parent);
 Creates a widget with the theme's look.
 
 - `type`: A W_ constant.
-- `parent`: UI_ROOT, or another object.
+- `parent`: UI_ROOT, or another object other than a roller.
 - Returns: The new object.
 - Errors: `ERR_ARG`, `ERR_HANDLE`, `ERR_LIMIT`, `ERR_NO_MEMORY`
 - WAMR signature: `(ii)i`
@@ -327,7 +327,9 @@ int32_t ui_set_parent(int32_t obj, int32_t parent);
 ```
 
 Moves an object to another parent.
-- Errors: `ERR_HANDLE`
+
+- `parent`: Not a roller, nor the object or one inside it.
+- Errors: `ERR_ARG`, `ERR_HANDLE`
 - WAMR signature: `(ii)i`
 
 #### `ui_grid`

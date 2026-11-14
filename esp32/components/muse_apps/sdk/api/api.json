@@ -397,7 +397,10 @@
     {
       "name": "ui_create",
       "group": "ui",
-      "args": [["type", "widget", "A W_ constant."], ["parent", "handle", "UI_ROOT, or another object."]],
+      "args": [
+        ["type", "widget", "A W_ constant."],
+        ["parent", "handle", "UI_ROOT, or another object other than a roller."]
+      ],
       "ret": ["handle", "The new object."],
       "errors": ["ARG", "HANDLE", "LIMIT", "NO_MEMORY"],
       "doc": "Creates a widget with the theme's look."
@@ -490,9 +493,12 @@
     {
       "name": "ui_set_parent",
       "group": "ui",
-      "args": [["obj", "handle", ""], ["parent", "handle", ""]],
+      "args": [
+        ["obj", "handle", ""],
+        ["parent", "handle", "Not a roller, nor the object or one inside it."]
+      ],
       "ret": ["result", ""],
-      "errors": ["HANDLE"],
+      "errors": ["ARG", "HANDLE"],
       "doc": "Moves an object to another parent."
     },
     {

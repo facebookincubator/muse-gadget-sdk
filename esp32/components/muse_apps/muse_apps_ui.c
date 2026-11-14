@@ -1908,6 +1908,13 @@ static bool focusable(int type)
     }
 }
 
+/* LVGL takes a roller's first child as its label: an app's object there
+ * (created there, or moved ahead of the label) would be read as one. */
+static bool takes_children(const slot_t *p)
+{
+    return p->type != GADGET_W_ROLLER;
+}
+
 int32_t gadget_ui_create(wasm_exec_env_t env, int32_t type, int32_t parent)
 {
     (void)env;
@@ -1917,6 +1924,9 @@ int32_t gadget_ui_create(wasm_exec_env_t env, int32_t type, int32_t parent)
     }
     if (!p) {
         return GADGET_ERR_HANDLE;
+    }
+    if (!takes_children(p)) {
+        return GADGET_ERR_ARG;
     }
     if (s_ui->n_objects >= MAX_OBJECTS - 1) {
         return GADGET_ERR_LIMIT;
@@ -1984,6 +1994,9 @@ int32_t gadget_ui_set_parent(wasm_exec_env_t env, int32_t obj, int32_t parent)
     slot_t *s = obj_arg(obj), *p = find(parent);
     if (!s || !p || is_root(s)) {
         return GADGET_ERR_HANDLE;
+    }
+    if (!takes_children(p)) {
+        return GADGET_ERR_ARG;
     }
     for (lv_obj_t *up = p->obj; up; up = lv_obj_get_parent(up)) {
         if (up == s->obj) {
