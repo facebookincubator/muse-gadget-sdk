@@ -2368,6 +2368,11 @@ bool muse_apps_console(const char *line)
             sscanf(line + 10, "%179s %96s", path, name);
             what = "put";
         } else if (!strncmp(line, "files.remove=", 13)) {
+            if (strlen(line + 13) >= sizeof(name)) {   /* refused, not cut into another file's name */
+                cJSON_Delete(params);
+                console_say("{\"ok\":false,\"error\":{\"code\":\"bad_line\",\"message\":\"the name is too long\"}}");
+                return true;
+            }
             snprintf(name, sizeof(name), "%s", line + 13);
             what = "remove";
         }

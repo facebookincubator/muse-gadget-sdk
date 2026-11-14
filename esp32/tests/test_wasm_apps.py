@@ -963,7 +963,10 @@ class WasmAppsTest(unittest.TestCase):
 
     def test_app_py_checks_lengths_and_acknowledged_bytes(self):
         app = read("tools/muse/app.py")
-        self.assertIn('"files.remove=" + word(args.file_remove, 97)', app)
+        self.assertIn('"files.remove=" + word(args.file_remove, 96)', app)
+        console = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_console(")
+        remove = console[console.index('} else if (!strncmp(line, "files.remove=", 13)) {'):]
+        self.assertLess(remove.index("if (strlen(line + 13) >= sizeof(name)) {"), remove.index("snprintf(name"))
         self.assertIn('got = f.get("bytes")', app)
         self.assertIn("if got != sent:", app)
 

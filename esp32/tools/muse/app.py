@@ -271,7 +271,7 @@ def main():
                 with open(args.file_upload, "rb") as fh:
                     f = send(board, fh.read(), file=args.as_name or os.path.basename(args.file_upload))
             elif args.file_remove:
-                f = command(board, "files.remove=" + word(args.file_remove, 97), 10)
+                f = command(board, "files.remove=" + word(args.file_remove, 96), 10)
             else:
                 put = args.put
                 if put and not put.endswith(".wasm"):
