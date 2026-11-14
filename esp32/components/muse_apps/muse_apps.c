@@ -1363,8 +1363,9 @@ static void run(req_t *r)
      * one budget between them. */
     wasm_function_inst_t init = wasm_runtime_lookup_function(s_app.inst, "_initialize");
     wasm_runtime_set_instruction_count_limit(s_app.env, START_STEP_LIMIT);
-    bool inited = !init || wasm_runtime_call_wasm(s_app.env, init, 0, NULL);
-    bool started = inited && wasm_runtime_call_wasm(s_app.env, on_start, 0, NULL);
+    uint32_t ret[2] = {0};   /* room for a result an app declared by mistake: WAMR writes it here */
+    bool inited = !init || wasm_runtime_call_wasm(s_app.env, init, 0, ret);
+    bool started = inited && wasm_runtime_call_wasm(s_app.env, on_start, 0, ret);
     ui_release();
     if (!started) {
         const char *what = wasm_runtime_get_exception(s_app.inst);

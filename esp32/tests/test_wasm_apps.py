@@ -830,6 +830,14 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn('cJSON_AddBoolToObject(wasm, "enabled", muse_settings_apps_on())',
                       read("components/muse_apps/muse_apps_capabilities.c"))
 
+    def test_start_callbacks_have_room_for_a_result(self):
+        """An app that declares on_start returning int by mistake: WAMR writes
+        the result where the arguments go, so that can't be NULL."""
+        run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
+        self.assertIn("wasm_runtime_call_wasm(s_app.env, init, 0, ret)", run)
+        self.assertIn("wasm_runtime_call_wasm(s_app.env, on_start, 0, ret)", run)
+        self.assertNotIn("on_start, 0, NULL)", run)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
