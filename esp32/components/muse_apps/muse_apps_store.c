@@ -583,14 +583,19 @@ void muse_apps_store_start(void) {
     s_persistent = mount(LABEL, ROOT, "installed apps last until restart");
     s_files = mount(FILES_LABEL, FILES_ROOT, "no files on the gadget");
     if (s_files) muse_apps_flash_tidy(FILES_ROOT);
+    // Without its task a queue would take requests nobody answers: drop it, and they're refused.
     if (xTaskCreateWithCaps(store_task, "muse_apps_store", TASK_STACK_BYTES, NULL, TASK_PRIORITY, NULL,
                             TASK_STACK_CAPABILITIES) != pdPASS) {
         ESP_LOGE(TAG, "couldn't start the store task");
+        vQueueDeleteWithCaps(s_q);
+        s_q = NULL;
     }
     s_rq = xQueueCreateWithCaps(READER_QUEUE_LEN, sizeof(rd_req_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_rq || xTaskCreateWithCaps(reader_task, "muse_apps_files", READER_STACK_BYTES, NULL, TASK_PRIORITY, NULL,
                                      TASK_STACK_CAPABILITIES) != pdPASS) {
         ESP_LOGE(TAG, "couldn't start the files' reader task");
+        if (s_rq) vQueueDeleteWithCaps(s_rq);
+        s_rq = NULL;
     }
 }
 

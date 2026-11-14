@@ -1825,6 +1825,8 @@ void muse_apps_start(muse_apps_result_fn send_result)
         muse_app_view_set_home(open_launcher);
     } else {
         ESP_LOGE(TAG, "couldn't start the app task");
+        vQueueDeleteWithCaps(s_reqs);   /* nobody would answer: requests are refused instead */
+        s_reqs = NULL;
     }
     cfg = esp_pthread_get_default_config();
     esp_pthread_set_cfg(&cfg);

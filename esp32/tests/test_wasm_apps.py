@@ -744,6 +744,14 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("esp_timer_stop(s_exit_timer);", reset)
         self.assertIn("atomic_store(&s_long_button, 0);", reset)
 
+    def test_a_queue_without_its_task_is_dropped(self):
+        """Requests to a queue nobody serves would wait for ever."""
+        start = function(read("components/muse_apps/muse_apps_store.c"), "void muse_apps_store_start(")
+        self.assertIn("vQueueDeleteWithCaps(s_q);\n        s_q = NULL;", start)
+        self.assertIn("if (s_rq) vQueueDeleteWithCaps(s_rq);\n        s_rq = NULL;", start)
+        apps = function(read("components/muse_apps/muse_apps.c"), "void muse_apps_start(")
+        self.assertIn("vQueueDeleteWithCaps(s_reqs);", apps[apps.index('"couldn\'t start the app task"'):])
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
