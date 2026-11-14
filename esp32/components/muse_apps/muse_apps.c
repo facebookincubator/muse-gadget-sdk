@@ -1670,9 +1670,12 @@ static void turn(void)
             return;
         }
         s_app.frames++;
-        s_app.next_frame_us += 1000000 / s_app.frame_rate;
-        if (s_app.next_frame_us < now) {
-            s_app.next_frame_us = now + 1000000 / s_app.frame_rate;
+        int rate = s_app.frame_rate;   /* the callback may have changed it, to 0 too */
+        if (rate > 0) {
+            s_app.next_frame_us += 1000000 / rate;
+            if (s_app.next_frame_us < now) {
+                s_app.next_frame_us = now + 1000000 / rate;
+            }
         }
     }
     if (s_app.running && s_app.keep_awake && now - s_app.last_poke_us > 1000000) {

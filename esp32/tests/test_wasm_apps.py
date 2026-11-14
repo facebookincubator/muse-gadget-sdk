@@ -579,6 +579,12 @@ class WasmAppsTest(unittest.TestCase):
             self.assertLess(run.index(call), run.index("muse_app_view_open(&cbs)"), call)
         self.assertLess(run.index("callback_is(init, 0)"), run.index("wasm_runtime_call_wasm(s_app.env, init"))
 
+    def test_a_frame_rate_set_to_zero_in_on_frame_divides_nothing(self):
+        turn = function(read("components/muse_apps/muse_apps.c"), "static void turn(")
+        self.assertNotIn("/ s_app.frame_rate", turn)
+        self.assertIn("int rate = s_app.frame_rate;", turn)
+        self.assertIn("if (rate > 0) {", turn)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
