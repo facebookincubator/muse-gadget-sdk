@@ -37,7 +37,7 @@ pairing and control protocols, so the same app pairs either.
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
-| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store minus distrusted root CAs |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a distrusted root CA |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
@@ -280,7 +280,8 @@ listed here. Everything else is internal and can change.
 ### Pairing
 
 - `pair.pair(on_open=..., force=False, timeout_s=600)` opens Bluetooth setup
-  so that the Muse app can pair the device. It prints nothing.
+  so that the Muse app can pair the device. It prints nothing. Like
+  `Service.run()`, it first raises `tls.TrustStoreError` for an unsafe trust store.
 - Just before setup opens, it calls `on_open` with a `SetupWindow`. Use it to
   tell the user what to do. `ble_name` is the device to choose in the Muse
   app, `timeout_s` is how long setup stays open, and `has_sdk_token` is false
@@ -298,7 +299,8 @@ listed here. Everything else is internal and can change.
   model_name=..., guide=...)` is a dataclass. A dataclass subclass can add fields with defaults. `executor`
   is an `executor.Executor` instance.
 - `await Service.run()` runs until `Service.stop()` is called or `serve()`
-  returns `Outcome.STOPPED`.
+  returns `Outcome.STOPPED`. It first raises `tls.TrustStoreError` if the
+  system trust store can't be read or still has a distrusted root CA.
 - To describe your own device, or to run your own work while it is connected,
   subclass `Service` and override any of these three methods.
 - `describe()` returns the `DeviceDescription` to register with Muse.

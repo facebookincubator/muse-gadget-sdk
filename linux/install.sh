@@ -19,7 +19,8 @@
 #   bash install.sh [--from SOURCE] [--run-as USER] [--sdk-token TOKEN] [--yes] [--no-pair]
 #   bash install.sh --uninstall [--purge]
 #
-# Installs system packages, a pinned uv, and musegadget into /opt/musegadget;
+# Installs system packages (bringing ca-certificates up to date), a pinned uv,
+# and musegadget into /opt/musegadget;
 # sets BlueZ's GATT MTU for the Android app; installs and starts the
 # musegadget service; then opens Bluetooth pairing for the Muse app.
 
@@ -180,6 +181,28 @@ install_packages() {
     fi
 }
 
+# musegadget uses the system trust store, and distros remove distrusted root
+# CAs in ca-certificates updates, so bring that one package up to date.
+update_ca_certificates() {
+    local updated=0
+    if [ "$DISTRO_FAMILY" = fedora ]; then
+        as_root dnf upgrade -y -q ca-certificates >/dev/null 2>&1 && updated=1
+    elif [ "$DISTRO_FAMILY" = debian ]; then
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 &&
+            as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --only-upgrade \
+                ca-certificates >/dev/null 2>&1 && updated=1
+    else
+        # Upgrading one package without the rest is a partial upgrade on Arch.
+        say "ca-certificates: left to pacman -Syu, which keeps it current on Arch."
+        return
+    fi
+    if [ "$updated" = 1 ]; then
+        say "ca-certificates is up to date."
+    else
+        warn "couldn't update ca-certificates; continuing with the installed version."
+    fi
+}
+
 install_uv() {
     if [ -x "$PREFIX/bin/uv" ] && [ "$("$PREFIX/bin/uv" --version | awk '{print $2}')" = "$UV_VERSION" ]; then
         return
@@ -213,6 +236,23 @@ install_musegadget() {
         -r "$data/requirements.lock"
     as_root ln -sf "$VENV/bin/musegadget" /usr/local/bin/musegadget
     DATA_DIR="$data"
+}
+
+# musegadget won't connect while the trust store can't be read or still has a
+# distrusted root CA, so stop before installing a service that can't start.
+check_trust_store() {
+    local problem
+    # As the service runs it: as root, without this shell's SSL_CERT_* settings
+    # (and, with -I, without importing from the current directory).
+    problem="$(as_root env -u SSL_CERT_FILE -u SSL_CERT_DIR -u SSL_CERT_URI "$VENV/bin/python" -I \
+        -c 'from musegadget import tls; print(tls.trust_store_problem() or "")')" ||
+        die "couldn't check the system trust store."
+    [ -z "$problem" ] && return
+    # An earlier install's service would keep restarting the new code, which refuses to run.
+    if systemd_running && [ -e "$UNIT" ]; then
+        as_root systemctl stop musegadget.service >/dev/null 2>&1 || true
+    fi
+    die "musegadget won't connect: $problem. Update your ca-certificates package, then run this installer again."
 }
 
 configure_bluez() {
@@ -426,9 +466,11 @@ main() {
     fi
     choose_account
     install_packages
+    update_ca_certificates
     enable_bluez
     install_uv
     install_musegadget
+    check_trust_store
     configure_bluez
     save_sdk_token
     install_service
