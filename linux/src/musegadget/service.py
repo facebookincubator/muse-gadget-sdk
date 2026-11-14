@@ -641,7 +641,8 @@ def _text_bytes(event: dict) -> int:
     payload = event.get("payload")
     if not isinstance(payload, dict):
         return 0
-    return sum(len(payload[key].encode("utf-8")) for key in ("text", "display_text", "content", "transcript")
+    return sum(len(payload[key].encode("utf-8", errors="surrogatepass")) for key in
+               ("text", "display_text", "content", "transcript")
                if isinstance(payload.get(key), str))
 
 
