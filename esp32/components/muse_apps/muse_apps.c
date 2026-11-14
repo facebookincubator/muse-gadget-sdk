@@ -2451,8 +2451,7 @@ void muse_apps_advertise(cJSON *commands)
     snprintf(description, sizeof(description), "Its colour, else its manifest's: one of %s.", names);
     add_param(look, "color", "string", description);
     add_command(commands, "app.install",
-                "Install a WebAssembly app (apps API 1.0, gadget SDK apps/) on this gadget from this VM, or update "
-                "it (same id, new file). It stays in the launcher (Settings > Apps) until app.remove or the user "
+                "Install a WebAssembly app on this gadget from this VM, or update it (same id, new file). It stays in the launcher (Settings > Apps) until app.remove or the user "
                 "removes it there. Doesn't run it.",
                 install, look, 60000);
     add_command(commands, "app.list",

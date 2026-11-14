@@ -1277,7 +1277,7 @@ A device with one of these names has exactly these fields, actions and events, s
 
 ## Manifest
 
-A JSON object in the custom section gadget.manifest of the .wasm, which GADGET_MANIFEST() in gadget.h writes from one string literal. The gadget reads it before running the app. The VM signs the whole file, manifest included.
+A JSON object in the custom section gadget.manifest of the .wasm, which GADGET_MANIFEST() in gadget.h writes from one string literal. The gadget reads it before running the app. It's the app's own claim: nothing signs the file, and app.install's optional SHA-256 only checks it arrived intact.
 
 | Field | Type | Required | |
 |---|---|---|---|
