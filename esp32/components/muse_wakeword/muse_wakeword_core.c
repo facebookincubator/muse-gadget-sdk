@@ -329,3 +329,47 @@ uint32_t muse_ww_ring_drops(const muse_ww_ring_t *ring)
 {
     return ring ? ring->dropped_frames : 0;
 }
+
+void muse_ww_history_init(muse_ww_history_t *h, muse_ww_chunk_t *slots, size_t capacity)
+{
+    if (!h) {
+        return;
+    }
+    *h = (muse_ww_history_t){
+        .slots = slots,
+        .capacity = slots ? capacity : 0,
+    };
+}
+
+const muse_ww_chunk_t *muse_ww_history_push(muse_ww_history_t *h, const int16_t *pcm)
+{
+    if (!h || !pcm || !h->capacity) {
+        return NULL;
+    }
+    muse_ww_chunk_t *slot = &h->slots[h->next_seq % h->capacity];
+    slot->seq = h->next_seq++;
+    memcpy(slot->pcm, pcm, sizeof(slot->pcm));
+    return slot;
+}
+
+size_t muse_ww_history_since(const muse_ww_history_t *h, uint32_t from, const int16_t *out[], size_t max)
+{
+    if (!h || !out || !h->capacity) {
+        return 0;
+    }
+    /* Numbers wrap, so compare distances back from the next one. */
+    uint32_t held = h->next_seq < h->capacity ? h->next_seq : (uint32_t)h->capacity;
+    uint32_t back = h->next_seq - from;   /* chunks from `from` to the newest */
+    if (back == 0 || back > UINT32_MAX / 2) {
+        return 0;   /* nothing newer, or `from` is in the future */
+    }
+    if (back > held) {
+        back = held;   /* older ones are gone */
+    }
+    size_t n = back < max ? back : max;
+    uint32_t first = h->next_seq - back;
+    for (size_t i = 0; i < n; i++) {
+        out[i] = h->slots[(first + i) % h->capacity].pcm;
+    }
+    return n;
+}

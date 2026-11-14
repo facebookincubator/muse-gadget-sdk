@@ -45,7 +45,10 @@
 static const char *TAG = "muse_wake";
 
 #define TAP_CHUNKS 25                                  /* 500 ms of scheduling slack */
-#define CHUNK_BYTES (MUSE_AUDIO_CHUNK * sizeof(int16_t))
+#define ITEM_BYTES (sizeof(muse_ww_chunk_t))           /* a numbered chunk */
+_Static_assert(MUSE_AUDIO_CHUNK == MUSE_WW_CHUNK_FRAMES, "the tap carries whole muse_audio chunks");
+_Static_assert(MUSE_WAKEWORD_BACKLOG_CHUNKS >= TAP_CHUNKS + 2,
+               "the recorder's backlog must cover a full tap plus the chunks read before it starts");
 #define PRE_FRAMES (MUSE_AUDIO_RATE)                   /* 1 s of upload pre-roll */
 #define WAKE_TASK_STACK 8192
 #define WAKE_TASK_PRIO 5                               /* below muse_voice (6) */
@@ -58,6 +61,15 @@ static muse_wakeword_core_t s_core;
  * tail, so neither needs a lock. Only whole chunks are ever written. */
 static StreamBufferHandle_t s_tap;
 static volatile uint32_t s_tap_drops;   /* frames; voice_task only writes */
+/* voice_task only: its numbered copy of the chunks it tapped, for the
+ * recorder's backlog (muse_wakeword_take_backlog). */
+static muse_ww_history_t s_hist;
+static muse_ww_chunk_t *s_hist_slots;
+/* Set by the wake task before it posts a hands-free press: the number of
+ * the first chunk after the seed, which the recorder appends from. */
+static atomic_uint s_seed_end;
+static atomic_bool s_backlog_owed;
+static uint32_t s_last_seq;    /* wake task only: the chunk being ticked */
 static muse_ww_ring_t s_pre;    /* wake task only: upload pre-roll */
 static int16_t *s_snap;         /* PRE_FRAMES, for muse_voice_seed_preroll */
 static bool s_started;
@@ -113,12 +125,18 @@ void muse_wakeword_on_audio(const int16_t *pcm, size_t frames)
     if (!s_started || !s_applied_enabled) {
         return;   /* one branch while off: keep the tap cheap */
     }
-    /* Whole chunks or nothing: a send into too little space would be
+    if (frames != MUSE_AUDIO_CHUNK) {
+        s_tap_drops += frames;   /* the voice loops only ever pass whole chunks */
+        return;
+    }
+    /* Numbered and kept for the recorder first, so a chunk the full tap
+     * drops still reaches a hands-free note. */
+    const muse_ww_chunk_t *item = muse_ww_history_push(&s_hist, pcm);
+    /* Whole items or nothing: a send into too little space would be
      * partial, so check first. Space only grows between the check and the
      * send (this is the only writer). On overload the newest chunk drops. */
-    size_t bytes = frames * sizeof(int16_t);
-    if (xStreamBufferSpacesAvailable(s_tap) >= bytes) {
-        xStreamBufferSend(s_tap, pcm, bytes, 0);
+    if (xStreamBufferSpacesAvailable(s_tap) >= ITEM_BYTES) {
+        xStreamBufferSend(s_tap, item, ITEM_BYTES, 0);
     } else {
         s_tap_drops += frames;
     }
@@ -131,6 +149,14 @@ void muse_wakeword_note_ptt(bool down)
     } else {
         atomic_store(&s_pending_up, true);
     }
+}
+
+size_t muse_wakeword_take_backlog(const int16_t *chunks[], size_t max)
+{
+    if (!s_started || !atomic_exchange(&s_backlog_owed, false)) {
+        return 0;
+    }
+    return muse_ww_history_since(&s_hist, atomic_load(&s_seed_end), chunks, max);
 }
 
 void muse_wakeword_turn_ended(void)
@@ -204,15 +230,16 @@ static void tick(const muse_wakeword_input_t *in)
         muse_state_set_caption("HEY MUSE HEARD - SPEAK NOW");
     }
     if (act & MUSE_WW_ACTION_POST_PTT_DOWN) {
-        /* Snapshot point: audio muse_voice reads between here and
-         * record()'s first live read stays in the tap and is
-         * not in the note (input-queue + can_record latency, normally
-         * a few ms). Endpointing likewise trails live audio by the
-         * current tap backlog (up to TAP_CHUNKS under sustained load).
-         * Accepted budget for now; closing it means seeding when
-         * record() accepts the turn instead of here. */
+        /* The seed is the pre-roll through this chunk (at most 1 s). The
+         * voice task may already have tapped later chunks that this task
+         * hasn't reached (up to TAP_CHUNKS under load): the recorder takes
+         * those from its own numbered copy, from s_seed_end on, so the note
+         * runs on without a gap or a repeat. Endpointing still trails live
+         * audio by that backlog. */
         s_seeded_frames = muse_ww_ring_snapshot(&s_pre, s_snap, PRE_FRAMES);
         muse_voice_seed_preroll(s_snap, s_seeded_frames);
+        atomic_store(&s_seed_end, s_last_seq + 1);
+        atomic_store(&s_backlog_owed, true);
         s_capture_chunks = 0;
         /* Show the capture state here, before posting: record() sets the
          * same state when it accepts the turn, and replaces it with the
@@ -227,6 +254,7 @@ static void tick(const muse_wakeword_input_t *in)
         } else {
             muse_wakeword_core_abort(&s_core);
             muse_voice_seed_preroll(NULL, 0);
+            atomic_store(&s_backlog_owed, false);
         }
     }
     if ((act & MUSE_WW_ACTION_POST_PTT_UP) && !post_ptt(MUSE_PTT_UP)) {
@@ -343,11 +371,11 @@ static muse_wakeword_input_t next_input(const int16_t *pcm)
 static void wake_task(void *arg)
 {
     (void)arg;
-    static int16_t chunk[MUSE_AUDIO_CHUNK];
+    static muse_ww_chunk_t item;
     for (;;) {
         apply_requests();
         /* The timeout keeps requests applied while the tap is dry. */
-        if (xStreamBufferReceive(s_tap, chunk, CHUNK_BYTES, pdMS_TO_TICKS(10)) != CHUNK_BYTES) {
+        if (xStreamBufferReceive(s_tap, &item, ITEM_BYTES, pdMS_TO_TICKS(10)) != ITEM_BYTES) {
             /* Disabled mid-capture with the tap now dry: one silent
              * tick is what closes the synthetic hold. */
             if (!s_applied_enabled && muse_wakeword_core_state(&s_core) != MUSE_WW_IDLE) {
@@ -360,9 +388,10 @@ static void wake_task(void *arg)
             continue;
         }
         if (!s_applied_playback && !s_applied_ptt_turn) {
-            muse_ww_ring_push(&s_pre, chunk, MUSE_AUDIO_CHUNK);
+            muse_ww_ring_push(&s_pre, item.pcm, MUSE_AUDIO_CHUNK);
         }
-        muse_wakeword_input_t in = next_input(chunk);
+        s_last_seq = item.seq;
+        muse_wakeword_input_t in = next_input(item.pcm);
         tick(&in);
         snapshot_status();
     }
@@ -378,7 +407,8 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
         return ESP_ERR_NOT_SUPPORTED;
     }
     s_queue = queue;
-    s_tap = xStreamBufferCreateWithCaps(TAP_CHUNKS * CHUNK_BYTES, CHUNK_BYTES, MUSE_BIG_CAPS);
+    s_tap = xStreamBufferCreateWithCaps(TAP_CHUNKS * ITEM_BYTES, ITEM_BYTES, MUSE_BIG_CAPS);
+    s_hist_slots = heap_caps_malloc(MUSE_WAKEWORD_BACKLOG_CHUNKS * sizeof(*s_hist_slots), MUSE_BIG_CAPS);
     int16_t *pre_storage = heap_caps_malloc(PRE_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);
     s_snap = heap_caps_malloc(PRE_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);
     ww_config_t cfg = {
@@ -392,12 +422,14 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
 #endif
         .vad = WW_VAD_ENERGY,
     };
-    s_runner = (s_tap && pre_storage && s_snap) ? ww_runner_create(&cfg) : NULL;
+    s_runner = (s_tap && s_hist_slots && pre_storage && s_snap) ? ww_runner_create(&cfg) : NULL;
     if (!s_runner) {
         if (s_tap) {
             vStreamBufferDeleteWithCaps(s_tap);
             s_tap = NULL;
         }
+        free(s_hist_slots);
+        s_hist_slots = NULL;
         free(pre_storage);
         free(s_snap);
         s_snap = NULL;
@@ -405,6 +437,7 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
         return ESP_ERR_NO_MEM;
     }
     muse_ww_ring_init(&s_pre, pre_storage, PRE_FRAMES);
+    muse_ww_history_init(&s_hist, s_hist_slots, MUSE_WAKEWORD_BACKLOG_CHUNKS);
     muse_wakeword_config_t core_cfg = {
         .start_timeout_chunks = muse_wakeword_ms_to_chunks(CONFIG_MUSE_WAKEWORD_START_TIMEOUT_MS),
         .end_silence_chunks = muse_wakeword_ms_to_chunks(CONFIG_MUSE_WAKEWORD_END_SILENCE_MS),
@@ -422,6 +455,9 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
         s_runner = NULL;
         vStreamBufferDeleteWithCaps(s_tap);
         s_tap = NULL;
+        muse_ww_history_init(&s_hist, NULL, 0);
+        free(s_hist_slots);
+        s_hist_slots = NULL;
         free(pre_storage);
         muse_ww_ring_init(&s_pre, NULL, 0);
         free(s_snap);

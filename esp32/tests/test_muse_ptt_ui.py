@@ -182,6 +182,13 @@ class StopWatchPTT(unittest.TestCase):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 94, board=board, realtime=realtime)
 
+    def test_wake_word_note_continues_past_the_seed_without_a_gap(self):
+        # The wake task trails the voice task: the chunks already tapped past
+        # the seed's end follow the seed, then live reads, each once.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 95, board=board, realtime=realtime)
+
     def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
         # The seed already ends at the speech start; the idle ring covers
         # the same audio and would play it twice.

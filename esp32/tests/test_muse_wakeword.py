@@ -472,7 +472,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
         failed = between(glue, '"no memory for the wake task"', 's_started = true;')
         for freed in ('ww_runner_destroy(s_runner)', 'vStreamBufferDeleteWithCaps(s_tap)',
-                      'free(pre_storage)', 'free(s_snap)'):
+                      'free(s_hist_slots)', 'free(pre_storage)', 'free(s_snap)'):
             self.assertIn(freed, failed)
 
     def test_turn_ended_closes_the_capture_but_not_a_new_arming(self):
@@ -569,7 +569,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('muse_wakeword_enabled()', tick)   # switch tracks serial/Muse toggles
 
     def test_option_needs_psram_and_the_lvgl_ui(self):
-        # The buffers and runner (~325 KB) only fit in PSRAM, and only the
+        # The buffers and runner (~344 KB) only fit in PSRAM, and only the
         # LVGL UI has the controls and the listening indicator.
         kconfig = (WW / 'Kconfig').read_text()
         enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_SENSITIVITY')
@@ -992,6 +992,160 @@ class WakeWordExecuTorchRunner(unittest.TestCase):
         out = self.run_mode('recover')
         self.assertEqual(out[0], 'failed 0 bad_reload 0 recovered 1')
         self.assertEqual(out[1], 'balanced 1')
+
+
+HANDOFF_HARNESS = r"""
+/* The wake task -> recorder hand-off with the wake task trailing: the
+ * voice task numbers and keeps every chunk it taps (muse_ww_history) and
+ * queues it for the wake task; the wake task pre-rolls what it consumes
+ * and, at the speech start, seeds the turn and notes the next number; the
+ * recorder sends the seed, the history from that number, then live chunks.
+ * Each chunk's samples are its absolute index, so the note must count up
+ * by one with nothing missing or repeated. */
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "muse_wakeword.h"
+
+#define CHUNK MUSE_WW_CHUNK_FRAMES
+#define TAP 25
+#define HIST 29
+#define PRE (16000)
+
+static void fill(int16_t *pcm, long k) { for (int i = 0; i < CHUNK; i++) pcm[i] = (int16_t)(k % 30000); }
+
+static int run(long start_seq, int lag)
+{
+    static muse_ww_chunk_t slots[HIST];
+    static int16_t pre_store[PRE], seed[PRE], note[PRE * 4];
+    muse_ww_history_t hist;
+    muse_ww_history_init(&hist, slots, HIST);
+    hist.next_seq = (uint32_t)start_seq;   /* numbers may wrap */
+    muse_ww_ring_t pre;
+    muse_ww_ring_init(&pre, pre_store, PRE);
+    muse_ww_chunk_t tap[TAP];   /* the stream buffer, as a FIFO */
+    int tap_n = 0;
+    long produced = 0, speech_at = 120;   /* the wake task seeds at chunk 120 */
+    uint32_t seed_end = 0;
+    size_t seed_frames = 0;
+    int seeded = 0;
+    /* Voice task runs ahead; the wake task consumes only once `lag` chunks are queued. */
+    while (!seeded) {
+        int16_t pcm[CHUNK];
+        fill(pcm, produced++);
+        const muse_ww_chunk_t *item = muse_ww_history_push(&hist, pcm);
+        if (tap_n < TAP) tap[tap_n++] = *item; else return 10;   /* never drops here */
+        while (tap_n > lag) {
+            muse_ww_chunk_t got = tap[0];
+            memmove(tap, tap + 1, (size_t)--tap_n * sizeof(tap[0]));
+            muse_ww_ring_push(&pre, got.pcm, CHUNK);
+            if ((long)(got.seq - (uint32_t)start_seq) == speech_at) {
+                seed_frames = muse_ww_ring_snapshot(&pre, seed, PRE);
+                seed_end = got.seq + 1;
+                seeded = 1;
+                break;
+            }
+        }
+    }
+    /* Two more chunks are read before the press reaches the recorder. */
+    for (int j = 0; j < 2; j++) {
+        int16_t pcm[CHUNK];
+        fill(pcm, produced++);
+        muse_ww_history_push(&hist, pcm);
+    }
+    size_t n = 0;
+    memcpy(note, seed, seed_frames * sizeof(int16_t)); n += seed_frames;
+    const int16_t *later[HIST];
+    size_t k = muse_ww_history_since(&hist, seed_end, later, HIST);
+    for (size_t i = 0; i < k; i++) { memcpy(note + n, later[i], CHUNK * sizeof(int16_t)); n += CHUNK; }
+    for (int j = 0; j < 5; j++) { fill(note + n, produced++); n += CHUNK; }   /* live */
+    if (seed_frames > PRE) return 11;   /* at most 1 s before the speech start */
+    long first = note[0];
+    for (size_t c = 0; c < n / CHUNK; c++)
+        for (int i = 0; i < CHUNK; i++)
+            if (note[c * CHUNK + i] != (int16_t)((first + (long)c) % 30000)) return 12;
+    if ((long)(n / CHUNK) != produced - first) return 13;
+    printf("lag %d backlog %zu seed %zu\n", lag, k, seed_frames / CHUNK);
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc > 1 && !strcmp(argv[1], "since")) {
+        static muse_ww_chunk_t slots[4];
+        muse_ww_history_t h;
+        const int16_t *out[8];
+        muse_ww_history_init(&h, slots, 4);
+        if (muse_ww_history_since(&h, 0, out, 8) != 0) return 20;      /* empty */
+        int16_t pcm[CHUNK] = {0};
+        for (int i = 0; i < 6; i++) muse_ww_history_push(&h, pcm);  /* holds 2..5 */
+        if (muse_ww_history_since(&h, 6, out, 8) != 0) return 21;      /* nothing newer */
+        if (muse_ww_history_since(&h, 100, out, 8) != 0) return 22;    /* the future */
+        if (muse_ww_history_since(&h, 0, out, 8) != 4) return 23;      /* only what's held */
+        if (muse_ww_history_since(&h, 4, out, 8) != 2) return 24;
+        if (muse_ww_history_since(&h, 2, out, 3) != 3) return 25;      /* at most max */
+        printf("since ok\n");
+        return 0;
+    }
+    /* The queue holds at most TAP: the chunk being seeded plus TAP - 1 behind it. */
+    const int lags[] = { 0, 1, 5, 12, 20, TAP - 1 };
+    for (size_t li = 0; li < sizeof(lags) / sizeof(lags[0]); li++) {
+        int lag = lags[li];
+        int r = run(0, lag);
+        if (r) return r;
+        r = run(4294967200L, lag);   /* numbers wrap mid-turn */
+        if (r) return 100 + r;
+    }
+    return 0;
+}
+"""
+
+
+class WakeWordHandoff(unittest.TestCase):
+    """The seed-plus-backlog hand-off keeps a hands-free note continuous
+    however far the wake task trails the voice task (up to a full tap),
+    and the pre-roll before the speech start stays within 1 s."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        harness = Path(cls.tmp.name) / 'handoff.c'
+        harness.write_text(HANDOFF_HARNESS)
+        cls.binary = Path(cls.tmp.name) / 'handoff'
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        result = subprocess.run(
+            [*cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', *SANITIZE,
+             '-I', str(WW / 'include'), str(harness), str(WW / 'muse_wakeword_core.c'),
+             '-o', str(cls.binary)], capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+
+    def run_mode(self, *args):
+        ran = subprocess.run([str(self.binary), *args], capture_output=True, env=ENV)
+        self.assertEqual(ran.returncode, 0, ran.stdout.decode() + ran.stderr.decode())
+        return ran.stdout.decode()
+
+    def test_history_since(self):
+        self.assertEqual(self.run_mode('since').strip(), 'since ok')
+
+    def test_note_is_continuous_at_every_lag(self):
+        out = self.run_mode()
+        self.assertIn('lag 24 backlog 26 seed 50', out)   # a full tap behind: nothing lost
+        self.assertIn('lag 0 backlog 2 seed 50', out)
+
+    def test_glue_numbers_the_tap_and_seeds_from_the_next_chunk(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        tap = between(glue, 'void muse_wakeword_on_audio(', '\n}\n')
+        self.assertLess(tap.index('muse_ww_history_push(&s_hist, pcm)'), tap.index('xStreamBufferSend(s_tap, item, ITEM_BYTES, 0)'))
+        seed = between(glue, 'if (act & MUSE_WW_ACTION_POST_PTT_DOWN) {', 'post_ptt(MUSE_PTT_DOWN)')
+        self.assertIn('atomic_store(&s_seed_end, s_last_seq + 1);', seed)
+        task = between(glue, 'static void wake_task(void *arg)', '\n}\n')
+        self.assertIn('s_last_seq = item.seq;', task)
+        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
+        record = between(voice, 'static bool record(', 'static void go_idle')
+        self.assertLess(record.index('take(&st, s_seed + off)'), record.index('muse_wakeword_take_backlog('))
 
 
 if __name__ == '__main__':
