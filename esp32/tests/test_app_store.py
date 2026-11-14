@@ -54,6 +54,7 @@ class AppStoreTest(unittest.TestCase):
             build = subprocess.run(
                 [*cc, "-std=c11", "-D_DEFAULT_SOURCE", "-D_DARWIN_C_SOURCE", "-Wall", "-Wextra", "-Werror",
                  "-Wno-unused-function", "-I", str(ROOT / "tests/app_store_fakes"),
+                 "-include", str(ROOT / "tests/app_store_fakes/stat_fault.h"),
                  "-I", str(JSON), "-I", str(ROOT / "components/muse_apps"),
                  str(ROOT / "tests/app_store_harness.c"), str(ROOT / "components/muse_apps/muse_apps_catalog.c"),
                  str(ROOT / "components/muse_apps/muse_apps_icons.c"), str(cjson),                 "-o", str(binary)],
