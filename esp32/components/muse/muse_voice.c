@@ -424,6 +424,8 @@ static bool record(bool seeded, char *why, size_t cap)
     if (seeded && s_seed_frames &&
         !muse_wakeword_take_backlog(later, MUSE_WAKEWORD_BACKLOG_CHUNKS, &backlog)) {
         s_seed_frames = 0;
+        free(s_rec);   /* can_record() allocated it for this note */
+        s_rec = NULL;
         muse_wakeword_turn_ended();
         if (cap) why[0] = '\0';
         return false;

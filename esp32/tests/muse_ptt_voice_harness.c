@@ -142,7 +142,12 @@ void vTaskDelay(int ms) {
         push(MUSE_PTT_DOWN);
     }
 }
-void *heap_caps_malloc(size_t n, unsigned caps) { (void)caps; ++allocations; return malloc(n); }
+static int rec_allocs;
+void *heap_caps_malloc(size_t n, unsigned caps) {
+    (void)caps; ++allocations;
+    if(scenario==88 && n==MAX_FRAMES*sizeof(int16_t)) { assert(!s_rec); ++rec_allocs; }   /* the last one was freed */
+    return malloc(n);
+}
 void *heap_caps_realloc(void *p, size_t n, unsigned caps) { (void)caps; return realloc(p,n); }
 static int pokes;
 static int64_t poked_us, idle_clock_at_idle = -1;
@@ -328,11 +333,20 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         /* Stop after the actual outer voice loop has handled the attempt,
          * before it can consume a newer DOWN or overwrite its result. */
         /* A waking tap leaves the screen as it was (IDLE): stop once it's handled. */
-        int quiet_until=scenario==78?6:scenario==84?21:1;
+        int quiet_until=scenario==78?6:scenario==84?21:scenario==88?12:1;
         if(frame>quiet_until && (mode==MUSE_MODE_IDLE || atomic_load(&s_shutdown))) longjmp(finish,1);
         ++frame;
         clock_us+=(scenario==70 || scenario==72 || scenario==73)?40000:20000;
         assert(frame<100);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+        if(scenario==88 && (frame==2 || frame==5 || frame==8)) {   /* a hands-free turn whose backlog overload lost */
+            int16_t seed[MUSE_AUDIO_CHUNK]={0};
+            muse_voice_seed_preroll(seed,MUSE_AUDIO_CHUNK);
+            backlog_n=3; backlog_lost=true;
+            muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+            xQueueSend(&queue,&e,0);
+        }
+#endif
         if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
         if(scenario==87 && frame==5) {
@@ -553,6 +567,21 @@ int main(int argc,char **argv) {
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>10 && frame<=10+7 && s_press_synthetic && !note_ptt_calls);
         drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==88) {
+        /* Overload rejects three hands-free turns in a row, through the
+         * voice loop itself: each rejection frees the recording buffer
+         * can_record() allocated (heap_caps_malloc asserts the last one is
+         * gone before the next), and nothing is sent. */
+        notes_mode=true; clock_us=1000000;
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        int outcome=setjmp(finish);
+        if(!outcome) voice_task(NULL);
+        assert(outcome==1 && backlog_takes==3 && turn_ended_calls==3 && !notes && !note_frames && !s_rec);
+#if HOLD_NOTES
+        assert(rec_allocs==3);
+#endif
+        free(s_seed); s_seed=NULL; free(s_pre); return 0;
     }
     if(scenario==97) {
         /* Overload overwrote part of the audio after the seed: the note
