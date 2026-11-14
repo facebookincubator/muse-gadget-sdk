@@ -577,11 +577,27 @@ class WasmAppsTest(unittest.TestCase):
         must still reach the firmware, or the mic stays open."""
         view = read("components/muse/muse_app_view.c")
         buttons = function(view, "unsigned muse_app_view_buttons(unsigned ev)")
-        guard = "if (!(bits & held[i].press) && !(atomic_load(&s_app_down) & row)) {"
+        self.assertIn("bool was_down = atomic_load(&s_app_down) & row;", buttons)
+        guard = "if (!(bits & held[i].press) && !was_down) {"
         self.assertIn(guard, buttons)
         self.assertLess(buttons.index(guard), buttons.index("ev &= ~bits;"))
         self.assertIn("atomic_fetch_or(&s_app_down, row);", buttons)
         self.assertIn("atomic_store(&s_app_down, 0);", function(view, "bool muse_app_view_open("))
+
+    def test_both_edges_at_once_follow_the_button_s_last_state(self):
+        """A board can report a release and the next press in one poll (CoreS3's
+        PMU key): after the app's press that's a release, then a press still held."""
+        buttons = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons(unsigned ev)")
+        both = buttons[buttons.index("if (release && !was_down) {"):buttons.index("if (muse_state_asleep()) {")]
+        # Up for the app: a tap, whose release also ends a press the firmware holds.
+        self.assertIn("ev |= held[i].release;", both)
+        # Down for the app: its release first, then the new press, held (timers on).
+        again = both[both.index("} else if (release) {"):]
+        self.assertLess(again.index("button_edge(held[i].button, false, true);"), again.index("release = false;"))
+        rest = buttons[buttons.index("if (muse_state_asleep()) {"):]
+        self.assertIn("if (!release) {\n            atomic_fetch_or(&s_app_down, row);", rest)
+        self.assertIn("button_edge(held[i].button, true, release);", rest)
+        self.assertNotIn("m5stack", buttons.lower())
 
     def test_console_install_line_is_parsed_by_its_blanks(self):
         """A word too long for its buffer, or words split by a tab, once made
