@@ -628,6 +628,22 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("atomic_fetch_or(&s_app_down, row);", buttons)
         self.assertIn("atomic_store(&s_app_down, 0);", function(view, "bool muse_app_view_open("))
 
+    def test_object_shadows_and_radii_are_bounded(self):
+        """LVGL sizes a shadow's corner buffer as 2 * (width + radius)^2 in an
+        int: unbounded, it wrapped to a small buffer that was written past."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        self.assertIn("#define SHADOW_MAX 64", ui)
+        self.assertIn("#define RADIUS_MAX 1024", ui)
+        for prop, kind in [("SHADOW_WIDTH", "K_SHADOW"), ("SHADOW_SPREAD", "K_SPREAD"), ("RADIUS", "K_RADIUS")]:
+            self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, %s}," % (prop, prop, kind), ui)
+        value = function(ui, "static int32_t style_value(")
+        self.assertIn("case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX);", value)
+        self.assertIn("case K_SPREAD: out->num = clamp(v, -SHADOW_MAX, SHADOW_MAX);", value)
+        self.assertIn("v == GADGET_RADIUS_CIRCLE ? RADIUS_MAX : clamp(v, 0, RADIUS_MAX)", value)
+        self.assertIn("v.num >= RADIUS_MAX ? GADGET_RADIUS_CIRCLE : v.num", function(ui, "static int32_t style_api("))
+        # 2 * (64 + 1024)^2 fits an int with room.
+        self.assertLess(2 * (64 + 1024) ** 2, 2 ** 31)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

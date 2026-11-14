@@ -395,7 +395,16 @@ static int prop_info(int32_t prop)
 
 /* ---- Style properties (100 to 154) ------------------------------------------------------- */
 
-enum { K_INT = 1, K_COORD, K_RGB, K_OPA, K_BOOL, K_FONT, K_ANGLE, K_SCALE, K_TEXT_ALIGN, K_GRAD, K_SIDE, K_DECOR, K_PADS };
+enum { K_INT = 1, K_COORD, K_RGB, K_OPA, K_BOOL, K_FONT, K_ANGLE, K_SCALE, K_TEXT_ALIGN, K_GRAD, K_SIDE, K_DECOR, K_PADS,
+       K_SHADOW, K_SPREAD, K_RADIUS };
+
+/* LVGL draws a shadow's corner in a buffer of 2 * (width + radius)^2 bytes,
+ * computed in an int: a wide shadow on a large rounded object wrapped it to a
+ * small allocation it then wrote past. Shadows are bounded as the canvas's
+ * are, and radii here (a circle's included, the object's half side up to it),
+ * which keeps that buffer under 2.4 MB. */
+#define SHADOW_MAX 64
+#define RADIUS_MAX 1024
 
 typedef struct {
     lv_style_prop_t prop;
@@ -415,12 +424,12 @@ static const style_map_t s_style_map[] = {
     [GADGET_P_OUTLINE_WIDTH - 100] = {LV_STYLE_OUTLINE_WIDTH, K_INT},
     [GADGET_P_OUTLINE_PAD - 100] = {LV_STYLE_OUTLINE_PAD, K_INT},
     [GADGET_P_SHADOW_COLOR - 100] = {LV_STYLE_SHADOW_COLOR, K_RGB},
-    [GADGET_P_SHADOW_WIDTH - 100] = {LV_STYLE_SHADOW_WIDTH, K_INT},
+    [GADGET_P_SHADOW_WIDTH - 100] = {LV_STYLE_SHADOW_WIDTH, K_SHADOW},
     [GADGET_P_SHADOW_OPA - 100] = {LV_STYLE_SHADOW_OPA, K_OPA},
     [GADGET_P_SHADOW_OFFSET_X - 100] = {LV_STYLE_SHADOW_OFFSET_X, K_INT},
     [GADGET_P_SHADOW_OFFSET_Y - 100] = {LV_STYLE_SHADOW_OFFSET_Y, K_INT},
-    [GADGET_P_SHADOW_SPREAD - 100] = {LV_STYLE_SHADOW_SPREAD, K_INT},
-    [GADGET_P_RADIUS - 100] = {LV_STYLE_RADIUS, K_INT},
+    [GADGET_P_SHADOW_SPREAD - 100] = {LV_STYLE_SHADOW_SPREAD, K_SPREAD},
+    [GADGET_P_RADIUS - 100] = {LV_STYLE_RADIUS, K_RADIUS},
     [GADGET_P_PAD_ALL - 100] = {LV_STYLE_PAD_TOP, K_PADS},
     [GADGET_P_PAD_LEFT - 100] = {LV_STYLE_PAD_LEFT, K_INT},
     [GADGET_P_PAD_RIGHT - 100] = {LV_STYLE_PAD_RIGHT, K_INT},
@@ -475,6 +484,9 @@ static int32_t style_value(int kind, int32_t v, lv_style_value_t *out)
     int32_t c;
     switch (kind) {
     case K_INT: out->num = clamp(v, -32767, 32767); return 0;
+    case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX); return 0;
+    case K_SPREAD: out->num = clamp(v, -SHADOW_MAX, SHADOW_MAX); return 0;
+    case K_RADIUS: out->num = v == GADGET_RADIUS_CIRCLE ? RADIUS_MAX : clamp(v, 0, RADIUS_MAX); return 0;
     case K_COORD:
         if (!coord_in(v, false, &c)) {
             return GADGET_ERR_ARG;
@@ -520,6 +532,7 @@ static int32_t style_api(int kind, lv_style_value_t v)
     case K_ANGLE: return v.num / 10;
     case K_SCALE: return (v.num * 100 + 128) / 256;
     case K_GRAD: return MAP_OUT(s_grads, v.num);
+    case K_RADIUS: return v.num >= RADIUS_MAX ? GADGET_RADIUS_CIRCLE : v.num;
     default: return v.num;
     }
 }
