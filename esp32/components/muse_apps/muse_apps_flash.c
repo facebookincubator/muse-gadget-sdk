@@ -118,8 +118,9 @@ const char *muse_apps_flash_commit(const char *root, const char *name, const cha
     struct stat st;
     *replaced = stat(dest, &st) == 0;
     // POSIX rename replaces dest in one step (LittleFS's does too); some
-    // hosts' doesn't, so try again without it.
-    if (rename(tmp, dest) != 0 && !(remove(dest) == 0 && rename(tmp, dest) == 0)) {
+    // hosts' refuses an existing one (EEXIST), so try again without it. Any
+    // other failure (an open file: EBUSY) keeps dest as it was.
+    if (rename(tmp, dest) != 0 && !(errno == EEXIST && remove(dest) == 0 && rename(tmp, dest) == 0)) {
         muse_apps_flash_abort(tmp);
         return fail(err, err_len, "storage_failed", "couldn't move the file into place");
     }
@@ -170,13 +171,19 @@ const char *muse_apps_flash_read(const char *root, const char *name, size_t offs
     if (!muse_apps_flash_name_ok(name)) return fail(err, err_len, "bad_name", "not a file name");
     char path[PATH_CAP];
     if (!join(path, sizeof(path), root, name, NULL)) return fail(err, err_len, "bad_name", "the name is too long");
-    struct stat st;
-    if (stat(path, &st) != 0 || S_ISDIR(st.st_mode)) return fail(err, err_len, "not_found", "no such file");
-    size_t size = (size_t)st.st_size;
-    if (offset >= size || !max) return NULL;
-    size_t want = size - offset < max ? size - offset : max;
+    // The size of the file opened, which the store task may replace meanwhile.
     FILE *f = fopen(path, "rb");
-    if (!f) return fail(err, err_len, "not_found", "no such file");
+    struct stat st;
+    if (!f || fstat(fileno(f), &st) != 0 || S_ISDIR(st.st_mode)) {
+        if (f) fclose(f);
+        return fail(err, err_len, "not_found", "no such file");
+    }
+    size_t size = (size_t)st.st_size;
+    size_t want = offset < size ? (size - offset < max ? size - offset : max) : 0;
+    if (!want) {
+        fclose(f);
+        return NULL;
+    }
     uint8_t *buf = heap_caps_malloc(want, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) {
         fclose(f);

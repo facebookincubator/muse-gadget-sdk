@@ -842,6 +842,13 @@ class WasmAppsTest(unittest.TestCase):
         run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
         self.assertLess(run.index("if (muse_video_is_open()) {"), run.index("muse_app_view_open(&cbs)"))
 
+    def test_gadget_files_read_and_replace_safely(self):
+        flash = read("components/muse_apps/muse_apps_flash.c")
+        reading = function(flash, "const char *muse_apps_flash_read(")
+        self.assertLess(reading.index("fopen(path, \"rb\")"), reading.index("fstat(fileno(f), &st)"))
+        self.assertNotIn("stat(path, &st)", reading)
+        self.assertIn("errno == EEXIST && remove(dest) == 0", function(flash, "const char *muse_apps_flash_commit("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
