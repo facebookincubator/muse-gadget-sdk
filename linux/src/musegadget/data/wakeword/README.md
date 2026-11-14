@@ -1,8 +1,8 @@
 # Hey Muse wake word model — attribution
 
-This directory holds the Linux wake-word model
-(`hey_muse_xnnpack.pte`, fp32 XNNPACK export of checkpoint epoch 11
-(checkpoint SHA-256 `cafa78914c2280b653c2589b11985b5a6116c63a3bfdabd0d446c1a59febc5d3`),
+This directory holds the Linux wake-word model,
+`hey_muse_xnnpack.pte`: an fp32 XNNPACK export of checkpoint epoch 11
+(checkpoint SHA-256 `cafa78914c2280b653c2589b11985b5a6116c63a3bfdabd0d446c1a59febc5d3`).
 
 The model was trained on synthetic speech generated with Piper, plus
 Google Speech Commands recordings as negatives and backgrounds. No
