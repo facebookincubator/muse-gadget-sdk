@@ -36,7 +36,8 @@ extern "C" {
  * Guarantees the integration relies on:
  * - All runner calls happen on the wake word task (create() runs at
  *   init, before that task starts), so implementations need no
- *   internal locking and must not call back into the integration.
+ *   internal locking (the ExecuTorch runner still takes its own mutex,
+ *   as a guard) and must not call back into the integration.
  * - feed() accepts arbitrary frame counts (the firmware's 320-sample
  *   chunks included) and re-frames internally. It does not allocate
  *   after create; the ExecuTorch runner's model reload happens only
