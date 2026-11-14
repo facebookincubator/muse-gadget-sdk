@@ -726,6 +726,11 @@ class WasmAppsTest(unittest.TestCase):
             self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_DASH}," % (prop, prop), ui)
         self.assertIn("case K_DASH: out->num = clamp(v, 0, 1024);", function(ui, "static int32_t style_value("))
 
+    def test_a_textarea_is_charged_for_the_text_it_keeps(self):
+        text = function(read("components/muse_apps/muse_apps_ui.c"), "static int32_t text_set(")
+        after = text[text.index("lv_textarea_set_text(o, text);"):]
+        self.assertIn("charge_delta(s, len, kept ? strlen(kept) : 0);", after[:400])
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

@@ -1386,6 +1386,10 @@ static int32_t text_set(slot_t *s, int32_t prop, const char *text)
             lv_checkbox_set_text(o, text);
         } else if (t == GADGET_W_TEXTAREA) {
             lv_textarea_set_text(o, text);
+            /* It keeps what its max length and accepted characters allow:
+             * charge that, not what was offered. */
+            const char *kept = lv_textarea_get_text(o);
+            charge_delta(s, len, kept ? strlen(kept) : 0);
         } else {
             lv_dropdown_set_text(o, *text ? text : NULL);   /* "": the selected option again */
         }
