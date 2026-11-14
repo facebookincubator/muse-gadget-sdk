@@ -868,6 +868,10 @@ class WasmAppsTest(unittest.TestCase):
         launcher = function(apps, "static void show_launcher(")
         self.assertLess(launcher.index("if (muse_voice_in_call()) {"), launcher.index("muse_app_view_open(&cbs)"))
 
+    def test_a_turn_delivers_at_most_max_ops_completions(self):
+        turn = function(read("components/muse_apps/muse_apps.c"), "static void turn(")
+        self.assertIn("for (int k = 0; k < MAX_OPS && s_app.running && take_done(&op); k++) {", turn)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

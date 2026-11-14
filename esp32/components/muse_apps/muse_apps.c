@@ -1655,7 +1655,9 @@ static void turn(void)
 {
     /* Finished operations, then queued input, then what changed. */
     op_t op;
-    while (s_app.running && take_done(&op)) {
+    /* At most as many as can be outstanding: an app that starts another
+     * operation from each EV_DONE mustn't hold the turn. */
+    for (int k = 0; k < MAX_OPS && s_app.running && take_done(&op); k++) {
         if (!deliver_op(&op)) {
             return;
         }
