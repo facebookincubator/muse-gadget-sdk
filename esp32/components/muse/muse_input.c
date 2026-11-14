@@ -695,8 +695,10 @@ static void input_task(void *arg)
         }
 #endif
 #if CONFIG_MUSE_APP_VIEW
-        /* An open app takes the talk, speaker and aux buttons; the power key still closes it. */
-        ev = muse_app_view_buttons(ev);
+        /* An open app takes the talk, speaker and aux buttons; the power key still closes it.
+         * A toggled voice note that's recording keeps the talk key: its next press stops it. */
+        unsigned keep = NOTE_TOGGLED() ? ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE) : 0;
+        ev = muse_app_view_buttons(ev & ~keep) | keep;
 #endif
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",

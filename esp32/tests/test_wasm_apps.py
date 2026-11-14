@@ -775,6 +775,12 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("!atomic_load(&s_ready) || atomic_load(&s_unwiped)", reader)
         self.assertIn("atomic_store(&s_unwiped, true);", function(store, "void muse_apps_store_forget_all("))
 
+    def test_a_toggled_voice_note_keeps_the_talk_key(self):
+        """Its next press stops the recording: an app opening meanwhile mustn't take it."""
+        task = function(read("components/muse/muse_input.c"), "static void input_task(")
+        self.assertIn("unsigned keep = NOTE_TOGGLED() ? ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE) : 0;", task)
+        self.assertIn("ev = muse_app_view_buttons(ev & ~keep) | keep;", task)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
