@@ -119,6 +119,8 @@ typedef struct {
     void *ext;          /* by type: image_t, a canvas, line points, chart_t, roller_t */
     int32_t *grid;      /* ui_grid's column and row tracks */
     int32_t needle_of;  /* a line: the scale it's the needle of (its handle), or 0 */
+    uint32_t local_sels[7]; /* per part: the state sets it has a local style for (bit per set) */
+    uint8_t shared;     /* shared styles added */
     uint8_t type;       /* GADGET_W_ */
 } slot_t;
 
@@ -583,6 +585,35 @@ static int32_t style_get(lv_obj_t *o, int32_t prop, int32_t *out)
     }
     *out = style_api(m->kind, lv_obj_get_style_prop(o, LV_PART_MAIN, m->prop));
     return 0;
+}
+
+/* LVGL counts an object's styles (local, shared, its theme's and those of
+ * running transitions) in six bits and asserts when they wrap, which aborts
+ * the firmware. Each local selector and each added style is one: an app gets
+ * at most STYLES_PER_OBJECT, leaving the rest to the theme and transitions. */
+#define STYLES_PER_OBJECT 32
+
+static int styles_of(const slot_t *s)
+{
+    int n = s->shared;
+    for (size_t p = 0; p < sizeof(s->local_sels) / sizeof(s->local_sels[0]); p++) {
+        n += __builtin_popcount(s->local_sels[p]);
+    }
+    return n;
+}
+
+/* Room for a local style at the API selector (already checked by selector_in). */
+static bool local_style_room(slot_t *s, int32_t selector)
+{
+    uint32_t part = ((uint32_t)selector >> 8) & 0xFF, bit = 1u << ((uint32_t)selector & 0x1F);
+    if (s->local_sels[part] & bit) {
+        return true;
+    }
+    if (styles_of(s) >= STYLES_PER_OBJECT) {
+        return false;
+    }
+    s->local_sels[part] |= bit;
+    return true;
 }
 
 /* A PART_ plus STATE_ bits as LVGL's selector. */
@@ -2385,6 +2416,9 @@ int32_t gadget_ui_style(wasm_exec_env_t env, int32_t obj, int32_t selector, int3
     if (!selector_in(selector, &sel)) {
         return GADGET_ERR_ARG;
     }
+    if (!local_style_room(s, selector)) {
+        return GADGET_ERR_LIMIT;
+    }
     return style_set(s->obj, NULL, sel, prop, value);
 }
 
@@ -2445,6 +2479,10 @@ int32_t gadget_ui_style_add(wasm_exec_env_t env, int32_t obj, int32_t style, int
     if (!selector_in(selector, &sel)) {
         return GADGET_ERR_ARG;
     }
+    if (styles_of(s) >= STYLES_PER_OBJECT) {
+        return GADGET_ERR_LIMIT;
+    }
+    s->shared++;
     lv_obj_add_style(s->obj, st, sel);
     return 0;
 }

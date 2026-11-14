@@ -697,6 +697,16 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("lv_draw_buf_destroy(decoded);", png)
         self.assertNotIn("lv_free(rgba)", png)
 
+    def test_styles_per_object_stay_under_lvgl_s_count(self):
+        """LVGL keeps an object's style count in six bits and aborts on wrap."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        self.assertIn("#define STYLES_PER_OBJECT 32", ui)
+        local = function(ui, "int32_t gadget_ui_style(wasm_exec_env_t env")
+        self.assertLess(local.index("local_style_room(s, selector)"), local.index("style_set(s->obj, NULL, sel"))
+        shared = function(ui, "int32_t gadget_ui_style_add(")
+        self.assertLess(shared.index("styles_of(s) >= STYLES_PER_OBJECT"), shared.index("lv_obj_add_style("))
+        self.assertIn("s->shared++;", shared)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
