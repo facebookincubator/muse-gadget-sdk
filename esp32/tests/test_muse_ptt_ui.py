@@ -155,11 +155,22 @@ class StopWatchPTT(unittest.TestCase):
         self.assertGreaterEqual(task.count('muse_wakeword_turn_ended()'), 3)
 
     def test_short_wake_word_turn_never_starts_a_call(self):
-        # Disabling listening during admission posts a synthetic release:
-        # on tap-to-call boards that short gesture must not become a call.
+        # Disabling listening right after a hands-free start posts a
+        # synthetic release: that's a short note, never tap-to-call. A turn
+        # that can't qualify (e.g. a capture error) just ends.
         for board, realtime in ((0, 1), (1, 1), (1, 0)):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 87, board=board, realtime=realtime)
+        voice = (MUSE / 'muse_voice.c').read_text()
+        task = voice[voice.index('static void voice_task('):]
+        guard = task.index('if (synthetic) {\n                /* A hands-free turn that didn')
+        self.assertLess(guard, task.index('result == NOTE_TAP'))
+
+    def test_wake_word_turn_is_admitted_at_once_and_a_press_takes_it_over(self):
+        for board, realtime in ((1, 1), (0, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 92, board=board, realtime=realtime)
+                self.run_case('voice', 93, board=board, realtime=realtime)
 
     def test_wake_word_note_ends_at_its_release_in_toggle_builds(self):
         self.run_case('voice', 67, board=3, realtime=0)
@@ -169,7 +180,7 @@ class StopWatchPTT(unittest.TestCase):
         # can leave the device.
         for board, realtime in ((1, 1), (1, 0)):
             with self.subTest(board=board, realtime=realtime):
-                self.run_case('voice', 92, board=board, realtime=realtime)
+                self.run_case('voice', 94, board=board, realtime=realtime)
 
     def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
         # The seed already ends at the speech start; the idle ring covers

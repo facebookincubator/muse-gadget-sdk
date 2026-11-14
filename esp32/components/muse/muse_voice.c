@@ -764,6 +764,19 @@ static note_result_t note_held(bool wake, bool barge_in)
      * speech started), so the idle ring would repeat that audio. */
     if (wake || barge_in || s_press_synthetic) s_pre_fill = 0;
     int settle = barge_in ? SETTLE_CHUNKS : 0;
+    if (s_press_synthetic) {
+        /* A wake detection already qualified a hands-free turn and its seed
+         * holds the start, so there's no hold to measure: record() takes it
+         * now, and the wake core hears every chunk from here (endpointing,
+         * caps, a press taking it over). After a barge-in, Muse's own tail
+         * is still skipped. */
+        for (int i = 0; i < settle; i++) {
+            if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
+                return atomic_load(&s_shutdown) ? NOTE_CANCELLED : NOTE_CAPTURE_ERROR;
+            }
+        }
+        return NOTE_ACCEPTED;
+    }
     size_t captured = 0;
     if (!wake) {
         muse_state_set_mode(MUSE_MODE_LISTENING);
