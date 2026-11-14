@@ -241,8 +241,10 @@ unsigned muse_app_view_buttons_present(void)
         return 0;
     }
     unsigned b = 1u << MUSE_APP_BUTTON_PRIMARY;
-    /* Both arrive as SECONDARY. */
-    if (muse_board->aux_button || muse_board->speaker_button) {
+    /* Both arrive as SECONDARY. An aux label naming the talk button (one
+     * button doing both, as on the JC3248W535) isn't a second button. */
+    const char *aux = muse_board->aux_button, *talk = muse_board->talk_button;
+    if ((aux && !(talk && !strcmp(aux, talk))) || muse_board->speaker_button) {
         b |= 1u << MUSE_APP_BUTTON_SECONDARY;
     }
     if (muse_board->keyboard) {

@@ -892,6 +892,10 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("sizes_take(name, data_len, &j->prev);", save)
         self.assertIn("sizes_undo(name, j->prev);", save)
 
+    def test_one_button_doing_both_is_one_button(self):
+        present = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons_present(")
+        self.assertIn("(aux && !(talk && !strcmp(aux, talk)))", present)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
