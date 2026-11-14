@@ -913,6 +913,20 @@ class WasmAppsTest(unittest.TestCase):
         self.assertLess(run.index("runs_itself(bytes, len)"), run.index("free(bytes);\n    if (!s_app.module)"))
         self.assertLess(run.index("if (itself) {"), run.index("wasm_runtime_instantiate_ex("))
 
+    def test_ui_geometry_and_shadows_are_bounded(self):
+        """Common-sense limits: pixels within 4096, shadows and radii within
+        64 px as cv_rect_style's (RADIUS_CIRCLE still rounds)."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        self.assertIn("*out = clamp(v, size ? 0 : -PX_MAX, PX_MAX);", function(ui, "static bool coord_in("))
+        value = function(ui, "static int32_t style_value(")
+        self.assertIn("case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX);", value)
+        self.assertIn("case K_OFFSET: out->num = clamp(v, -SHADOW_MAX, SHADOW_MAX);", value)
+        self.assertIn("v == GADGET_RADIUS_CIRCLE ? v : clamp(v, 0, SHADOW_MAX)", value)
+        for prop, kind in [("SHADOW_WIDTH", "K_SHADOW"), ("SHADOW_SPREAD", "K_SHADOW"), ("SHADOW_OFFSET_X", "K_OFFSET"),
+                           ("SHADOW_OFFSET_Y", "K_OFFSET"), ("RADIUS", "K_RADIUS")]:
+            self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, %s}," % (prop, prop, kind), ui)
+        self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64);", read("components/muse_apps/muse_apps_canvas.c"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

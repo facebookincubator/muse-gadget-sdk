@@ -290,7 +290,14 @@ lv_obj_t *muse_apps_ui_canvas(int32_t handle, void **ext)
 
 /* ---- Values ------------------------------------------------------------------------------ */
 
-/* An API coordinate (pixels, PCT(p) or SIZE_CONTENT) as LVGL's. */
+static int32_t clamp(int32_t v, int32_t lo, int32_t hi)
+{
+    return v < lo ? lo : v > hi ? hi : v;
+}
+
+/* An API coordinate (pixels, PCT(p) or SIZE_CONTENT) as LVGL's. Pixels are
+ * kept within PX_MAX either way, as a canvas's sides are. */
+#define PX_MAX 4096
 static bool coord_in(int32_t v, bool size, int32_t *out)
 {
     if (v == GADGET_SIZE_CONTENT) {
@@ -301,7 +308,7 @@ static bool coord_in(int32_t v, bool size, int32_t *out)
         *out = lv_pct(v - PCT_BASE);
         return true;
     }
-    *out = v;
+    *out = clamp(v, size ? 0 : -PX_MAX, PX_MAX);
     return v > -COORD_LIMIT && v < COORD_LIMIT;
 }
 
@@ -324,11 +331,6 @@ static bool coord_special(int32_t api)
 static int32_t rgb_out(lv_color_t c)
 {
     return (int32_t)(lv_color_to_u32(c) & 0xFFFFFF);
-}
-
-static int32_t clamp(int32_t v, int32_t lo, int32_t hi)
-{
-    return v < lo ? lo : v > hi ? hi : v;
 }
 
 /* An API enum's LVGL value through a table; false if out of range. */
@@ -396,7 +398,11 @@ static int prop_info(int32_t prop)
 /* ---- Style properties (100 to 154) ------------------------------------------------------- */
 
 enum { K_INT = 1, K_COORD, K_RGB, K_OPA, K_BOOL, K_FONT, K_ANGLE, K_SCALE, K_TEXT_ALIGN, K_GRAD, K_SIDE, K_DECOR, K_PADS,
-       K_SPREAD };
+       K_SHADOW, K_OFFSET, K_RADIUS };
+
+/* Shadows and radii within 64 px, as cv_rect_style's: LVGL sizes a shadow's
+ * corner buffer from them. */
+#define SHADOW_MAX 64
 
 typedef struct {
     lv_style_prop_t prop;
@@ -416,12 +422,12 @@ static const style_map_t s_style_map[] = {
     [GADGET_P_OUTLINE_WIDTH - 100] = {LV_STYLE_OUTLINE_WIDTH, K_INT},
     [GADGET_P_OUTLINE_PAD - 100] = {LV_STYLE_OUTLINE_PAD, K_INT},
     [GADGET_P_SHADOW_COLOR - 100] = {LV_STYLE_SHADOW_COLOR, K_RGB},
-    [GADGET_P_SHADOW_WIDTH - 100] = {LV_STYLE_SHADOW_WIDTH, K_INT},
+    [GADGET_P_SHADOW_WIDTH - 100] = {LV_STYLE_SHADOW_WIDTH, K_SHADOW},
     [GADGET_P_SHADOW_OPA - 100] = {LV_STYLE_SHADOW_OPA, K_OPA},
-    [GADGET_P_SHADOW_OFFSET_X - 100] = {LV_STYLE_SHADOW_OFFSET_X, K_INT},
-    [GADGET_P_SHADOW_OFFSET_Y - 100] = {LV_STYLE_SHADOW_OFFSET_Y, K_INT},
-    [GADGET_P_SHADOW_SPREAD - 100] = {LV_STYLE_SHADOW_SPREAD, K_SPREAD},
-    [GADGET_P_RADIUS - 100] = {LV_STYLE_RADIUS, K_INT},
+    [GADGET_P_SHADOW_OFFSET_X - 100] = {LV_STYLE_SHADOW_OFFSET_X, K_OFFSET},
+    [GADGET_P_SHADOW_OFFSET_Y - 100] = {LV_STYLE_SHADOW_OFFSET_Y, K_OFFSET},
+    [GADGET_P_SHADOW_SPREAD - 100] = {LV_STYLE_SHADOW_SPREAD, K_SHADOW},
+    [GADGET_P_RADIUS - 100] = {LV_STYLE_RADIUS, K_RADIUS},
     [GADGET_P_PAD_ALL - 100] = {LV_STYLE_PAD_TOP, K_PADS},
     [GADGET_P_PAD_LEFT - 100] = {LV_STYLE_PAD_LEFT, K_INT},
     [GADGET_P_PAD_RIGHT - 100] = {LV_STYLE_PAD_RIGHT, K_INT},
@@ -476,7 +482,9 @@ static int32_t style_value(int kind, int32_t v, lv_style_value_t *out)
     int32_t c;
     switch (kind) {
     case K_INT: out->num = clamp(v, -32767, 32767); return 0;
-    case K_SPREAD: out->num = clamp(v, 0, 32767); return 0;   /* LVGL overruns a shadow whose spread is negative */
+    case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX); return 0;   /* a negative spread overruns LVGL's buffer */
+    case K_OFFSET: out->num = clamp(v, -SHADOW_MAX, SHADOW_MAX); return 0;
+    case K_RADIUS: out->num = v == GADGET_RADIUS_CIRCLE ? v : clamp(v, 0, SHADOW_MAX); return 0;
     case K_COORD:
         if (!coord_in(v, false, &c)) {
             return GADGET_ERR_ARG;

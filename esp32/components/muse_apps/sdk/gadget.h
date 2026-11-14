@@ -515,12 +515,12 @@
 #define P_OUTLINE_WIDTH 109  /* int, style */
 #define P_OUTLINE_PAD 110  /* int, style. Gap between the object and its outline. */
 #define P_SHADOW_COLOR 111  /* rgb, style */
-#define P_SHADOW_WIDTH 112  /* int, style. Blur width. Shadows cost drawing time; use them on a few objects. */
+#define P_SHADOW_WIDTH 112  /* int, style. Blur width, 0 to 64. Shadows cost drawing time; use them on a few objects. */
 #define P_SHADOW_OPA 113  /* opa, style */
-#define P_SHADOW_OFFSET_X 114  /* int, style */
-#define P_SHADOW_OFFSET_Y 115  /* int, style */
-#define P_SHADOW_SPREAD 116  /* int, style. Not negative. */
-#define P_RADIUS 117  /* int, style. Corner radius; RADIUS_CIRCLE for round. */
+#define P_SHADOW_OFFSET_X 114  /* int, style. -64 to 64. */
+#define P_SHADOW_OFFSET_Y 115  /* int, style. -64 to 64. */
+#define P_SHADOW_SPREAD 116  /* int, style. 0 to 64. */
+#define P_RADIUS 117  /* int, style. Corner radius, 0 to 64; RADIUS_CIRCLE for round. */
 #define P_PAD_ALL 118  /* int, style, write-only. Sets the four paddings. */
 #define P_PAD_LEFT 119  /* int, style */
 #define P_PAD_RIGHT 120  /* int, style */

@@ -43,6 +43,8 @@ The same on every gadget that runs apps.
 | `chart_series` | 4 | Series per chart. |
 | `line_points` | 64 | Points per line object. |
 | `frame_rate` | 30 | on_frame calls per second, at most. |
+| `object_pixels` | 4,096 | An object's position, width and height in pixels, either way; larger values are clamped. |
+| `shadow_pixels` | 64 | Shadow width, spread and offsets, and radii other than RADIUS_CIRCLE; larger values are clamped. |
 
 ## What an app exports
 
@@ -1110,12 +1112,12 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_OUTLINE_WIDTH` | int | style | rw |  |
 | `P_OUTLINE_PAD` | int | style | rw | Gap between the object and its outline. |
 | `P_SHADOW_COLOR` | rgb | style | rw |  |
-| `P_SHADOW_WIDTH` | int | style | rw | Blur width. Shadows cost drawing time; use them on a few objects. |
+| `P_SHADOW_WIDTH` | int | style | rw | Blur width, 0 to 64. Shadows cost drawing time; use them on a few objects. |
 | `P_SHADOW_OPA` | opa | style | rw |  |
-| `P_SHADOW_OFFSET_X` | int | style | rw |  |
-| `P_SHADOW_OFFSET_Y` | int | style | rw |  |
-| `P_SHADOW_SPREAD` | int | style | rw | Not negative. |
-| `P_RADIUS` | int | style | rw | Corner radius; RADIUS_CIRCLE for round. |
+| `P_SHADOW_OFFSET_X` | int | style | rw | -64 to 64. |
+| `P_SHADOW_OFFSET_Y` | int | style | rw | -64 to 64. |
+| `P_SHADOW_SPREAD` | int | style | rw | 0 to 64. |
+| `P_RADIUS` | int | style | rw | Corner radius, 0 to 64; RADIUS_CIRCLE for round. |
 | `P_PAD_ALL` | int | style | w | Sets the four paddings. |
 | `P_PAD_LEFT` | int | style | rw |  |
 | `P_PAD_RIGHT` | int | style | rw |  |
