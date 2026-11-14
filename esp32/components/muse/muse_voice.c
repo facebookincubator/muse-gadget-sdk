@@ -89,6 +89,7 @@ static uint32_t s_press_input_epoch;
 static uint32_t s_press_mark;   /* the press's pending-call mark (muse_input_clear_call_pending) */
 static int64_t s_press_us;
 static bool s_press_synthetic;   /* the press came from the wake word glue */
+static bool s_button_recording;  /* record() is taking a button (not hands-free) note */
 static volatile bool s_monitor;
 static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
@@ -260,6 +261,17 @@ static void idle_capture(void)
     pre_put_preroll();
 }
 
+/* Whether a queued edge counts for a phase looking for `type`. Real edges
+ * count in their own input epoch. Wake word edges never shape a button
+ * note: a synthetic release only ends a hands-free turn, and a synthetic
+ * press doesn't count while a button note records. */
+static bool edge_counts(const muse_input_event_t *ev, muse_ptt_t type)
+{
+    if (!ev->synthetic) return ev->epoch == muse_input_call_epoch();
+    if (type == MUSE_PTT_UP) return s_press_synthetic;
+    return !s_button_recording;
+}
+
 /* Consume through the requested edge, leaving later edges for the next
  * phase (notably a quick release after interrupting a saved note's reply). */
 static bool got_event(muse_ptt_t type)
@@ -272,8 +284,7 @@ static bool got_event(muse_ptt_t type)
              * this drain is only looking for the other edge. */
             muse_wakeword_note_ptt(ev.type == MUSE_PTT_DOWN);
         }
-        /* Synthetic (wake word) edges carry no call epoch/mark. */
-        if ((ev.synthetic || ev.epoch == muse_input_call_epoch()) && ev.type == type) {
+        if (ev.type == type && edge_counts(&ev, type)) {
             if (type == MUSE_PTT_DOWN) {
                 s_press_input_epoch = ev.epoch;
                 s_press_mark = ev.mark;
@@ -281,6 +292,9 @@ static bool got_event(muse_ptt_t type)
                 s_press_synthetic = ev.synthetic;
             }
             return true;
+        }
+        if (ev.synthetic && ev.type == MUSE_PTT_DOWN) {
+            muse_wakeword_turn_ended();   /* a hands-free press dropped: its capture closes */
         }
         muse_input_clear_call_pending(ev.mark);   /* a press dropped here starts nothing */
     }
@@ -371,6 +385,7 @@ static bool record(bool seeded, char *why, size_t cap)
 {
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
+    s_button_recording = !seeded;
     s_rec_n = s_sent = 0;
     s_live = s_tried = false;
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
@@ -460,6 +475,7 @@ static bool record(bool seeded, char *why, size_t cap)
     }
     take_pre(&st, s_pre_fill);
     muse_state_set_level(0);
+    s_button_recording = false;
     if (seeded && !released) {
         muse_wakeword_turn_ended();   /* the cap or a failure ended it, not the glue */
     }
@@ -732,6 +748,11 @@ static note_result_t note_held(bool wake, bool barge_in)
         if (atomic_load(&s_shutdown) || s_press_input_epoch != muse_input_call_epoch()) return NOTE_CANCELLED;
         muse_input_event_t ev;
         bool edge = xQueuePeek(s_queue, &ev, 0) == pdTRUE;
+        if (edge && ev.synthetic && !s_press_synthetic) {
+            xQueueReceive(s_queue, &ev, 0);   /* wake word edges never shape a button note */
+            if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
+            continue;
+        }
         int64_t until = edge ? ev.at_us : esp_timer_get_time();
         bool eligible = !settle && (NOTE_TOGGLE ? captured >= NOTE_MIN_RECORD_FRAMES :
             !note_requires_hold() ||
@@ -749,7 +770,7 @@ static note_result_t note_held(bool wake, bool barge_in)
         if (edge) {
             /* Leave an admitted release for record()'s capture-lag tail, and
              * a later DOWN for the next gesture. Never borrow its hold time. */
-            if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP) {
+            if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP && ev.synthetic == s_press_synthetic) {
                 if (eligible) return NOTE_ACCEPTED;
                 xQueueReceive(s_queue, &ev, 0);
                 int64_t held_us = until - s_press_us;
@@ -792,6 +813,11 @@ static bool ptt_held_on_waking(void)
             return false;
         }
         if (xQueuePeek(s_queue, &ev, 0) == pdTRUE) {
+            if (ev.synthetic) {
+                xQueueReceive(s_queue, &ev, 0);   /* not this finger's release */
+                if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
+                continue;
+            }
             s_pre_fill = 0;
             if (ev.type != MUSE_PTT_DOWN) xQueueReceive(s_queue, &ev, 0);
             return false;
@@ -1131,6 +1157,11 @@ static void call_input(call_ui_t *c)
     while (xQueueReceive(s_queue, &ev, 0) == pdTRUE) {
         muse_state_poke();
         muse_input_clear_call_pending(ev.mark);   /* in the call now, or dropped */
+        if (ev.synthetic) {
+            /* A call is never driven by the wake word: drop its edges. */
+            if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
+            continue;
+        }
         if (ev.epoch != c->input_epoch) continue;
         if (c->hung_up) continue;
         if (ev.type == MUSE_PTT_END_CALL || (!c->ptt && ev.type == MUSE_PTT_DOWN)) {

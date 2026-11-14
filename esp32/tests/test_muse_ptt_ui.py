@@ -133,6 +133,14 @@ class StopWatchPTT(unittest.TestCase):
         voice = (MUSE / 'muse_voice.c').read_text()
         self.assertIn('bool synthetic = pending_down && s_press_synthetic;', voice)
 
+    def test_stray_wake_word_edges_never_shape_a_button_note(self):
+        for board, realtime in ((1, 1), (0, 1), (0, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 69, board=board, realtime=realtime)
+        voice = (MUSE / 'muse_voice.c').read_text()
+        # Nor drive a call.
+        self.assertIn('/* A call is never driven by the wake word: drop its edges. */', voice)
+
     def test_recorder_cap_tells_the_wake_word_glue(self):
         # The recorder's cap counts the seed and admission audio, so it can
         # end a hands-free turn before the core's own cap: the glue must hear.

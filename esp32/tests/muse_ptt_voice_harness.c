@@ -336,7 +336,7 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
     if(scenario>=50) {
         note_burst=0;
         /* Toggle mode (64-66): letting go of the first press, then a press that stops. */
-        if(frame==note_release_frame) push(scenario>=64 && scenario<=66 ? MUSE_PTT_DOWN : MUSE_PTT_UP);
+        if(frame==note_release_frame) push((scenario>=64 && scenario<=66) || (scenario==69 && NOTE_TOGGLE) ? MUSE_PTT_DOWN : MUSE_PTT_UP);
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
         if(scenario==67 && frame==40) {   /* the wake word's endpointing */
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
@@ -524,6 +524,29 @@ int main(int argc,char **argv) {
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>40 && frame<=40+7 && note_frames<MAX_FRAMES);
         assert(!turn_ended_calls);   /* the glue's own release ended it */
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==69) {
+        /* Stray wake word edges during a button note change nothing: a
+         * synthetic release doesn't end it or make it a tap, and a synthetic
+         * press doesn't cancel it (the glue is told its capture is over). */
+        clock_us=1000000;
+        post(MUSE_PTT_DOWN,false);
+        assert(got_event(MUSE_PTT_DOWN) && !s_press_synthetic);
+        muse_input_event_t up={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        muse_input_event_t dn={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&up,0);
+        xQueueSend(&queue,&dn,0);
+        note_release_frame=60;
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+        assert(turn_ended_calls==1 && !queue.n);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        xQueueSend(&queue,&up,0);
+        char why[96];
+        assert(record(false,why,sizeof(why)) && notes==1);
+        assert(frame>=60 && frame<=60+7);   /* the real release (toggle: press) ended it */
         drop_rec(); free(s_pre); return 0;
     }
     if(scenario==68) {
