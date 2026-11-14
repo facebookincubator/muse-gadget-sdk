@@ -1815,6 +1815,25 @@ static void first_cell(lv_obj_t *o)
     lv_obj_set_grid_cell(o, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
 }
 
+/* A crowded line chart (as many points as pixels) has LVGL allocate
+ * (w + 2 * extra) * 3 points for up to w + 1 columns: with no content width,
+ * or no extra (no bullet and no line width), it writes past them. Such a
+ * chart isn't drawn. */
+static void chart_guard(lv_event_t *e)
+{
+    lv_obj_t *o = lv_event_get_current_target(e);
+    uint32_t n = lv_chart_get_point_count(o);
+    int32_t w = lv_obj_get_content_width(o);
+    if (lv_chart_get_type(o) != LV_CHART_TYPE_LINE || n < 2 || (int64_t)n < w) {
+        return;
+    }
+    int32_t extra = w / (int32_t)(n - 1) + lv_obj_get_style_width(o, LV_PART_INDICATOR) / 2 +
+                    lv_obj_get_style_line_width(o, LV_PART_ITEMS);
+    if (w < 1 || extra < 1) {
+        lv_event_stop_processing(e);
+    }
+}
+
 static lv_obj_t *create(int type, lv_obj_t *parent)
 {
     switch (type) {
@@ -1884,6 +1903,9 @@ int32_t gadget_ui_create(wasm_exec_env_t env, int32_t type, int32_t parent)
     if (!o) {
         muse_apps_uncharge(s_cost[type]);
         return GADGET_ERR_NO_MEMORY;
+    }
+    if (type == GADGET_W_CHART) {
+        lv_obj_add_event_cb(o, chart_guard, LV_EVENT_DRAW_MAIN | LV_EVENT_PREPROCESS, NULL);
     }
     slot_t *s = &s_ui->slots[idx];
     uint32_t gen = s->gen ? s->gen : 1;

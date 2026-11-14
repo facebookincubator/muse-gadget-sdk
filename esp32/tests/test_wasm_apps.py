@@ -807,6 +807,14 @@ class WasmAppsTest(unittest.TestCase):
         cols = ui[ui.index("case GADGET_P_COLUMN_COUNT:"):]
         self.assertLess(cols.index("table_refund(s, lv_table_get_row_count(o), (uint32_t)v);"), cols.index("lv_table_set_column_count("))
 
+    def test_a_degenerate_crowded_line_chart_is_not_drawn(self):
+        """LVGL allocates (w + 2 * extra) * 3 points for up to w + 1 columns."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        guard = function(ui, "static void chart_guard(")
+        self.assertIn("if (w < 1 || extra < 1) {", guard)
+        self.assertIn("lv_event_stop_processing(e);", guard)
+        self.assertIn("lv_obj_add_event_cb(o, chart_guard, LV_EVENT_DRAW_MAIN | LV_EVENT_PREPROCESS, NULL);", ui)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
