@@ -940,6 +940,14 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("return !size || (v >= PCT_BASE && v <= PCT_BASE + 100);", coord)
         self.assertIn("#define SIZE_LIMIT 4096", ui)
 
+    def test_apps_only_where_their_exit_is_in_reach(self):
+        kconfig = read("components/muse_apps/Kconfig")
+        for board in ["MUSE_BOARD_OSTB_ECHOEAR_2ST", "MUSE_BOARD_WAVESHARE_S3_LCD7", "MUSE_BOARD_VIEWE_SMARTRING_PLUS"]:
+            self.assertIn("!" + board, kconfig)
+        # Boards that turn a held touch on the face into push-to-talk don't, under an app.
+        face = function(read("components/muse/muse_ui.c"), "bool muse_ui_face_active(")
+        self.assertLess(face.index("if (muse_app_view_tick()) {"), face.index("return s_face_active;"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

@@ -141,6 +141,11 @@ static void tile_changed_cb(lv_event_t *e)
 /* From any task: the face tile is the currently visible tile. */
 bool muse_ui_face_active(void)
 {
+#if CONFIG_MUSE_APP_VIEW
+    if (muse_app_view_tick()) {
+        return false;   /* an app covers it: a held touch is the app's, not push-to-talk */
+    }
+#endif
     return s_face_active;
 }
 static lv_obj_t *s_settings;

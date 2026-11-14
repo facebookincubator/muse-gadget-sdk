@@ -28,6 +28,9 @@ are relative to `esp32/` unless stated otherwise. This file lives in
 with the full LVGL UI and PSRAM, replacing the face. They can be installed
 for the launcher (Apps in Settings or the menu), get buttons and touch,
 follow the chat, read files, keep state and use registered hardware.
+Kconfig keeps them from builds with the BLE commands (together they make
+`link.register` larger than 8 KB) and from boards where an app's exit is out
+of reach (EchoEar-2ST, Waveshare LCD-7, SmartRing-Plus).
 [SDK README](sdk/README.md) covers app authors; [MUSE.md](sdk/MUSE.md) is the
 self-contained guide to send Muse.
 

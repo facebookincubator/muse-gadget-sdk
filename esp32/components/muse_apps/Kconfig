@@ -19,8 +19,11 @@ menu "Muse apps"
         # Not on e-paper boards (MUSE_UI_FREEINK): apps draw with LVGL, which they don't build.
         # Not with the BLE commands: both together make link.register larger than its 8 KB,
         # and the gadget never registers.
+        # Not on boards where an app's exit is out of reach: no button the app view can use
+        # (EchoEar-2ST, Waveshare LCD-7) or the only one inside the case (SmartRing-Plus).
         depends on MUSE_ENABLED && SPIRAM && HOMEHUB_DAEMON_REQUESTS && !MUSE_UI_FREEINK
         depends on !HOMEHUB_BLE_COMMANDS
+        depends on !MUSE_BOARD_OSTB_ECHOEAR_2ST && !MUSE_BOARD_WAVESHARE_S3_LCD7 && !MUSE_BOARD_VIEWE_SMARTRING_PLUS
         select MUSE_APP_VIEW
         select CAPABILITIES_REGISTRY
         default n
