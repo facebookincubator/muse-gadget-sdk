@@ -834,6 +834,10 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("muse_apps_forget_all();", unpair)
         self.assertLess(unpair.index("clear_setup_credentials("), unpair.index("muse_apps_forget_all();"))
 
+    def test_a_wipe_root_that_cant_be_opened_isnt_wiped(self):
+        sweep = function(read("components/muse_apps/muse_apps_flash.c"), "static bool sweep(")
+        self.assertIn("if (!dir) return !all || (depth == 0 && errno == ENOENT);", sweep)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

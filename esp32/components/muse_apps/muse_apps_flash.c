@@ -263,7 +263,7 @@ cJSON *muse_apps_flash_list(const char *root, size_t *total, bool *more) {
 // meant to delete is still there (all: anything at all).
 static bool sweep(const char *path, bool all, int depth) {
     DIR *dir = opendir(path);
-    if (!dir) return !all || depth == 0;
+    if (!dir) return !all || (depth == 0 && errno == ENOENT);   // no partition root: nothing to wipe
     bool ok = true;
     for (struct dirent *d; (d = readdir(dir));) {
         if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, "..")) continue;
