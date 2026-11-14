@@ -70,7 +70,8 @@ const char *muse_apps_catalog_read(const char *id, uint8_t **out, size_t *len, c
 /* Removes every app (the gadget was unpaired). */
 void muse_apps_catalog_wipe(void);
 
-/* [{"id", "name", "sha256", "bytes", "icon", "color"}, ...] (icon and color if set), in the order they were installed. */
+/* [{"id", "name", "sha256", "bytes", "icon", "color"}, ...] (icon and color if set), in the order they were installed;
+ * NULL when memory runs out. */
 cJSON *muse_apps_catalog_json(void);
 /* The SHA-256 of data as 64 lowercase hex digits. */
 void muse_apps_sha256_hex(const uint8_t *data, size_t len, char out[MUSE_APPS_SHA_HEX + 1]);

@@ -163,9 +163,15 @@ static bool write_all(const char *path, const void *data, size_t len) {
 
 static bool save(void) {
     if (!s_persistent) return true;
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "version", 1);
-    cJSON_AddItemToObject(root, "apps", muse_apps_catalog_json());
+    // Every piece or nothing: a catalog missing one would drop its modules at the next start.
+    cJSON *root = cJSON_CreateObject(), *apps = muse_apps_catalog_json();
+    bool built = root && apps && cJSON_AddNumberToObject(root, "version", 1) && cJSON_AddItemToObject(root, "apps", apps);
+    if (!built) {
+        cJSON_Delete(apps);   // not in root unless built
+        cJSON_Delete(root);
+        ESP_LOGE(TAG, "no memory to save %s", CATALOG);
+        return false;
+    }
     char *text = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     char path[160];
@@ -444,17 +450,21 @@ void muse_apps_catalog_wipe(void) {
     delete_unnamed();
 }
 
+// NULL, not part of a list, when memory runs out.
 cJSON *muse_apps_catalog_json(void) {
     cJSON *apps = cJSON_CreateArray();
-    for (int i = 0; i < s_count; i++) {
+    for (int i = 0; apps && i < s_count; i++) {
+        const muse_apps_entry_t *e = &s_apps[i].e;
         cJSON *app = cJSON_CreateObject();
-        cJSON_AddStringToObject(app, "id", s_apps[i].e.id);
-        cJSON_AddStringToObject(app, "name", s_apps[i].e.name);
-        cJSON_AddStringToObject(app, "sha256", s_apps[i].e.sha256);
-        cJSON_AddNumberToObject(app, "bytes", s_apps[i].e.bytes);
-        if (s_apps[i].e.icon[0]) cJSON_AddStringToObject(app, "icon", s_apps[i].e.icon);
-        if (s_apps[i].e.color[0]) cJSON_AddStringToObject(app, "color", s_apps[i].e.color);
-        cJSON_AddItemToArray(apps, app);
+        bool ok = app && cJSON_AddStringToObject(app, "id", e->id) && cJSON_AddStringToObject(app, "name", e->name) &&
+                  cJSON_AddStringToObject(app, "sha256", e->sha256) && cJSON_AddNumberToObject(app, "bytes", e->bytes) &&
+                  (!e->icon[0] || cJSON_AddStringToObject(app, "icon", e->icon)) &&
+                  (!e->color[0] || cJSON_AddStringToObject(app, "color", e->color));
+        if (!ok || !cJSON_AddItemToArray(apps, app)) {
+            cJSON_Delete(app);
+            cJSON_Delete(apps);
+            return NULL;
+        }
     }
     return apps;
 }

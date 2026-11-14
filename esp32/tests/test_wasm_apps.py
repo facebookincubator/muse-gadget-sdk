@@ -781,6 +781,14 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("unsigned keep = NOTE_TOGGLED() ? ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE) : 0;", task)
         self.assertIn("ev = muse_app_view_buttons(ev & ~keep) | keep;", task)
 
+    def test_the_catalog_is_saved_whole_or_not_at_all(self):
+        catalog = read("components/muse_apps/muse_apps_catalog.c")
+        save = function(catalog, "static bool save(")
+        self.assertIn("bool built = root && apps &&", save)
+        self.assertLess(save.index("if (!built) {"), save.index("write_all("))
+        listing = function(catalog, "cJSON *muse_apps_catalog_json(")
+        self.assertIn("if (!ok || !cJSON_AddItemToArray(apps, app)) {", listing)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
