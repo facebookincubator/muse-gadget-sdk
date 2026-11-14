@@ -287,7 +287,12 @@ listening. Ctrl-C stops it; omit `--wake-word` or use `--no-wake-word` for the
 original immediate-call behavior. The normal `musegadget run` service never
 opens the microphone or enables this feature.
 
-`--wake-sensitivity low|default|high` selects the ESP32 detector's presets;
+`--wake-sensitivity low|default|high` selects the ESP32 detector's presets. The
+model's own streaming test (fp32, on its training bundle's test set) reports
+about 4 false wakes an hour at low (51.3% of wake words caught) and about 34 at
+default (78.7%); high wasn't measured, and none of this was measured with a
+Linux microphone. Each false wake starts a call that sends audio until the call
+ends (by default after 45 quiet seconds).
 `--wake-model PATH` selects a compatible XNNPACK PTE. `--wake-timeout SECONDS`
 bounds each local wait; call idle/overall timers start only after activation.
 WAV mode also accepts `--wake-word`, runs at most one call, and exits without

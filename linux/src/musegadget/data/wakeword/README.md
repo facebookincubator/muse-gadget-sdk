@@ -51,3 +51,20 @@ Google Speech Commands v0.02, used for negative speech and
 backgrounds, is licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); dataset:
 [http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz](http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz).
+
+## Measured accuracy
+
+The same checkpoint as the ESP32 model. Its own streaming test (fp32,
+the precision of this export, on the clean-voice training bundle's
+test set), at the detector thresholds the Linux client shares with the
+ESP32:
+
+| Sensitivity | Threshold | Wake words caught | False wakes per hour |
+| --- | --- | --- | --- |
+| Low | 0.99 | 51.3% | 3.98 |
+| Default | 0.95 | 78.7% | 33.8 |
+| High | 0.90 | not measured | not measured |
+
+No threshold reaches one false wake an hour or fewer. None of this was
+measured with a Linux microphone. On Linux each false wake starts a
+voice call that sends audio to Muse.

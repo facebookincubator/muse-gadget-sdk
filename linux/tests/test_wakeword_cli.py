@@ -90,7 +90,10 @@ def test_no_wake_means_no_vm_lookup_or_voice_admission(tmp_path, monkeypatch, ca
     monkeypatch.setattr(LinkSession, "_open", forbidden)
     assert cli.main(args) == 0
     assert Detector.instance.closed
-    assert "no_wake_word" in capsys.readouterr().out
+    output = capsys.readouterr()
+    assert "no_wake_word" in output.out
+    # The notice states the measured false-wake rate and what a wake does.
+    assert "34 false wakes an hour" in output.err and "sends audio to Muse" in output.err
 
 
 def test_wake_admits_existing_noise_voice_call_with_original_rate_preroll(

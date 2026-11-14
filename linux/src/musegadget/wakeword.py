@@ -220,8 +220,8 @@ class WakeWordDetector:
             self._callback = _FRAME_CALLBACK(self._on_frame)
             try:
                 warnings.warn(
-                    "Hey Muse is an experimental research checkpoint, not "
-                    "validated on real microphone recordings. Keep opt-in.",
+                    "Hey Muse is an experimental model trained on synthetic "
+                    "voices, not validated on real microphone recordings. Keep opt-in.",
                     ResearchWakeWordWarning,
                     stacklevel=2,
                 )

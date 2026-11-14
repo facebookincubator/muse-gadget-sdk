@@ -327,7 +327,9 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
                       "see skills/gadget-linux-wakeword/SKILL.md.",
                       file=sys.stderr)
                 return 1
-            print("Wake word enabled: research checkpoint; false triggers are expected.", file=sys.stderr)
+            print("Wake word on. The model's own test reports about 34 false wakes an hour at "
+                  "default sensitivity and about 4 at low (high wasn't measured); each wake "
+                  "starts a call that sends audio to Muse.", file=sys.stderr)
         audio = LiveAudio() if args.live else WavAudio(args.in_wav, args.out_wav)
         reason = asyncio.run(run(audio))
         print(f"{'Video' if video else 'Voice'} call ended: {reason}.", file=report)
@@ -504,7 +506,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="listen locally for Hey Muse before a call; off by default")
     voice.add_argument("--wake-model", help="alternative compatible XNNPACK wake-word PTE")
     voice.add_argument("--wake-sensitivity", choices=("low", "default", "high"), default="default",
-                       help="wake-word sensitivity preset (default: %(default)s)")
+                       help="wake-word sensitivity: low (about 4 false wakes an hour), default "
+                            "(about 34) or high (not measured); default: %(default)s")
     voice.add_argument("--wake-timeout", type=positive_seconds,
                        help="optional maximum seconds waiting for a wake word")
     voice.add_argument("--thread-id", help="target thread, otherwise the primary thread")
