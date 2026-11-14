@@ -460,6 +460,9 @@ static bool record(bool seeded, char *why, size_t cap)
     }
     take_pre(&st, s_pre_fill);
     muse_state_set_level(0);
+    if (seeded && !released) {
+        muse_wakeword_turn_ended();   /* the cap or a failure ended it, not the glue */
+    }
 
     char tail[160];
     int tl = 0;
@@ -1478,6 +1481,7 @@ static void voice_task(void *arg)
         if (atomic_load(&s_shutdown)) {
             pending_down = false;
             muse_input_clear_call_pending(s_press_mark);
+            if (synthetic) muse_wakeword_turn_ended();
             continue;
         }
         muse_wifi_power(MUSE_WIFI_FULL);
@@ -1499,6 +1503,7 @@ static void voice_task(void *arg)
             pending_down = false;
             if (synthetic) {
                 s_seed_frames = 0;   /* never leak a seed into a turn that will not happen */
+                muse_wakeword_turn_ended();
             }
             pre_reset();
             continue;
@@ -1511,6 +1516,7 @@ static void voice_task(void *arg)
             drop_rec();
             pre_reset();
             muse_state_set_level(0);
+            if (synthetic) muse_wakeword_turn_ended();
             if (atomic_load(&s_shutdown) || muse_state_mode(NULL) == MUSE_MODE_OFF) continue;
             if (synthetic) {
                 /* A hands-free turn that didn't qualify (disabled or ended

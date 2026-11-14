@@ -17,6 +17,11 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdarg.h>
+/* Count muse_voice's turn-ended notices: the header is included first, so
+ * its declaration is untouched, then calls in muse_voice.c land here. */
+#include "muse_wakeword_glue.h"
+static int turn_ended_calls;
+#define muse_wakeword_turn_ended() (void)(++turn_ended_calls)
 #include "muse_voice.c"
 #define TAG INPUT_TAG
 #define s_queue input_queue
@@ -466,7 +471,7 @@ int main(int argc,char **argv) {
         if(!outcome) voice_task(NULL);
         bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
         /* A short hands-free gesture is never tap-to-call, and shows no hint. */
-        if(scenario==87) assert(!starts && outcome==1 && !caption[0] && mode==MUSE_MODE_IDLE);
+        if(scenario==87) assert(!starts && outcome==1 && !caption[0] && mode==MUSE_MODE_IDLE && turn_ended_calls==1);
         if(scenario==79 || scenario==83) {
             assert(outcome==3 && notes==1 && !starts && clock_us>=1600000);
             /* A waking press shows nothing until it qualifies as a note. */
@@ -518,6 +523,23 @@ int main(int argc,char **argv) {
         char why[96];
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>40 && frame<=40+7 && note_frames<MAX_FRAMES);
+        assert(!turn_ended_calls);   /* the glue's own release ended it */
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==68) {
+        /* A hands-free note that runs to the recorder's cap: the glue is told,
+         * so its capture closes and the next wake is heard. */
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        char why[96];
+        assert(record(true,why,sizeof(why)) && notes==1);
+        assert(turn_ended_calls==1);
         drop_rec(); free(s_pre); return 0;
     }
     if(scenario>=50) {

@@ -133,6 +133,18 @@ class StopWatchPTT(unittest.TestCase):
         voice = (MUSE / 'muse_voice.c').read_text()
         self.assertIn('bool synthetic = pending_down && s_press_synthetic;', voice)
 
+    def test_recorder_cap_tells_the_wake_word_glue(self):
+        # The recorder's cap counts the seed and admission audio, so it can
+        # end a hands-free turn before the core's own cap: the glue must hear.
+        for board, realtime in ((1, 1), (0, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 68, board=board, realtime=realtime)
+        voice = (MUSE / 'muse_voice.c').read_text()
+        task = voice[voice.index('static void voice_task('):]
+        # Every voice-side end of a turn that never reached record(): shutdown,
+        # can't record, and a turn that didn't qualify.
+        self.assertGreaterEqual(task.count('muse_wakeword_turn_ended()'), 3)
+
     def test_short_wake_word_turn_never_starts_a_call(self):
         # Disabling listening during admission posts a synthetic release:
         # on tap-to-call boards that short gesture must not become a call.
