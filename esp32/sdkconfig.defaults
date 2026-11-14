@@ -70,7 +70,7 @@ CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y
 CONFIG_ESP_INT_WDT=n
 CONFIG_ESP_TASK_WDT_EN=n
 
-# Custom partition table (dual-OTA: ota_0/ota_1 + otadata for device.ota)
+# Custom partition table (dual-OTA: ota_0/ota_1 + otadata for OTA updates)
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Move the partition table from the IDF default 0x8000 to 0x10000. A Secure Boot

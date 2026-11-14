@@ -37,7 +37,7 @@ pairing and control protocols, so the same app pairs either.
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
-| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store minus distrusted root CAs |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a distrusted root CA |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
@@ -96,18 +96,28 @@ Reinstalling keeps the pairing. It restarts the service, which kills any
 command Muse is running at that moment, so check the log for recent `invoke`
 lines first.
 
-For a quicker loop, build a wheel and install it into the existing venv:
+To install a wheel you built, give it to the installer:
 
 ```sh
 uv build --wheel
 # on the device:
-sudo /opt/musegadget/bin/uv pip install --python /opt/musegadget/venv/bin/python --no-deps --reinstall musegadget-*.whl
-sudo systemctl restart musegadget
+bash install.sh --from musegadget-*.whl --run-as USER --yes   # copy just one wheel
 ```
+
+Pass the same `--run-as` as before: without it, commands run as the account
+running the installer.
+
+Upgrade through the installer only. It checks `/opt/musegadget/bin/uv`
+against a pinned checksum, and builds a new venv, before running anything there
+as root. Don't run that uv with `sudo` yourself.
 
 Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
 `--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
-keep it that way.
+keep it that way. Root runs everything under `/opt/musegadget`, so the
+installer never runs a file there that another account could have changed.
+To move to a new uv, update `UV_VERSION` and both checksums for each target
+in `uv_release`, from the release's `.sha256` files and the binaries in the
+archives. `tests/test_install_sh.py` checks that each target has both.
 
 ## Run and debug
 
@@ -164,7 +174,7 @@ never has a command's parameters, output or error message.
   `model_id` and `metadata.model_name` from the `DeviceDescription`
   (`../protocols/DEVICE.md`). Every device built with this SDK registers
   `device_family: "gadget"`; other families are reserved for Muse's own
-  devices. Don't advertise `device.ota`: it installs ESP32 firmware.
+  devices.
 - Messages from the device to the Muse (`musegadget send-user-msg`) go as separate
   `POST /chat/stream` requests on the same session, with `device_id` set to the
   node id and `"output_modality": "text"`. `session_id` picks the chat;
@@ -280,7 +290,8 @@ listed here. Everything else is internal and can change.
 ### Pairing
 
 - `pair.pair(on_open=..., force=False, timeout_s=600)` opens Bluetooth setup
-  so that the Muse app can pair the device. It prints nothing.
+  so that the Muse app can pair the device. It prints nothing. Like
+  `Service.run()`, it first raises `tls.TrustStoreError` for an unsafe trust store.
 - Just before setup opens, it calls `on_open` with a `SetupWindow`. Use it to
   tell the user what to do. `ble_name` is the device to choose in the Muse
   app, `timeout_s` is how long setup stays open, and `has_sdk_token` is false
@@ -298,7 +309,8 @@ listed here. Everything else is internal and can change.
   model_name=..., guide=...)` is a dataclass. A dataclass subclass can add fields with defaults. `executor`
   is an `executor.Executor` instance.
 - `await Service.run()` runs until `Service.stop()` is called or `serve()`
-  returns `Outcome.STOPPED`.
+  returns `Outcome.STOPPED`. It first raises `tls.TrustStoreError` if the
+  system trust store can't be read or still has a distrusted root CA.
 - To describe your own device, or to run your own work while it is connected,
   subclass `Service` and override any of these three methods.
 - `describe()` returns the `DeviceDescription` to register with Muse.
