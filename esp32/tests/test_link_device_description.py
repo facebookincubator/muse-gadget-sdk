@@ -155,7 +155,6 @@ static void make_uuid(char *out, size_t size) {{ snprintf(out, size, "00000000-0
 static int bits = 16;
 bool led_status_display_info(int *w, int *h) {{ *w = 800; *h = 480; return true; }}
 int led_status_display_bits(void) {{ return bits; }}
-bool ota_is_enabled(void) {{ return true; }}
 void ble_commands_register(cJSON *commands);
 {family}
 {functions.replace(cap, "size <= 65536 && !json")}
@@ -187,7 +186,7 @@ int main(void) {{
 
     def test_register_fits_its_buffer_in_the_largest_builds(self) -> None:
         # The richest option sets a board can build with, plus the opt-in BLE
-        # commands, OTA and the tunnel, at the largest values the build
+        # commands and the tunnel, at the largest values the build
         # accepts: a 64-character model id, a 128-character model name (no
         # character of it is escaped) and long node id and BLE names. The
         # SSID is 32 quotation marks, each escaped to two bytes: an SSID with a
