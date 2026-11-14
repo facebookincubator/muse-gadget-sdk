@@ -167,7 +167,12 @@ bool muse_app_view_open(const muse_app_view_cbs_t *cbs)
         s_touch_down = false;
         s_cbs = *cbs;
         atomic_store(&s_talk_to_muse, false);
+        /* A press held from before (another app's) is no longer this view's:
+         * neither its release nor its hold timers. */
         atomic_store(&s_app_down, 0);
+        atomic_store(&s_long_button, 0);
+        esp_timer_stop(s_long_timer);
+        esp_timer_stop(s_exit_timer);
         atomic_store(&s_open, true);
     }
     muse_app_view_unlock();

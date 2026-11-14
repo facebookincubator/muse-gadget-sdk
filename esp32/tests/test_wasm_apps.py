@@ -737,6 +737,13 @@ class WasmAppsTest(unittest.TestCase):
         self.assertLess(forget.index("!muse_apps_flash_wipe(FILES_ROOT)"), forget.index("forget_mark(false);"))
         self.assertIn("bool muse_apps_flash_wipe(const char *root);", read("components/muse_apps/muse_apps_flash.h"))
 
+    def test_reopening_the_view_drops_held_buttons_and_their_timers(self):
+        opened = function(read("components/muse/muse_app_view.c"), "bool muse_app_view_open(")
+        reset = opened[opened.index("atomic_store(&s_app_down, 0);"):opened.index("atomic_store(&s_open, true);")]
+        self.assertIn("esp_timer_stop(s_long_timer);", reset)
+        self.assertIn("esp_timer_stop(s_exit_timer);", reset)
+        self.assertIn("atomic_store(&s_long_button, 0);", reset)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
