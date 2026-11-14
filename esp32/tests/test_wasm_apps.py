@@ -687,6 +687,16 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("if (!s_one && one && lock) {", setup)
         self.assertIn("vSemaphoreDelete(one);", setup)
 
+    def test_png_pixels_come_from_lvgl_s_draw_buffer(self):
+        """LVGL's lodepng returns an lv_draw_buf_t, not bare RGBA: reading
+        width*height*4 bytes from it read past the descriptor."""
+        png = function(read("components/muse_apps/muse_apps_ui.c"), "static int32_t decode_png(")
+        self.assertIn("lv_draw_buf_t *decoded = NULL;", png)
+        self.assertIn("decoded->data + (size_t)y * stride", png)
+        self.assertIn("(uint64_t)stride * h > decoded->data_size", png)
+        self.assertIn("lv_draw_buf_destroy(decoded);", png)
+        self.assertNotIn("lv_free(rgba)", png)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

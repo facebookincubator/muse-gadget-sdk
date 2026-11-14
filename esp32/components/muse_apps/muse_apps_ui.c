@@ -1424,30 +1424,47 @@ static int32_t decode_png(const uint8_t *data, size_t len, uint32_t max_pixels, 
     if ((uint64_t)w * h > max_pixels) {
         return GADGET_ERR_NO_MEMORY;
     }
-    unsigned char *rgba = NULL;
-    err = lodepng_decode32(&rgba, &w, &h, data, len);
-    if (err) {
-        lv_free(rgba);
+    /* LVGL's lodepng hands back a draw buffer (RGBA bytes, rows of its
+     * stride), not the bare pixels upstream's does. */
+    lv_draw_buf_t *decoded = NULL;
+    err = lodepng_decode32((unsigned char **)&decoded, &w, &h, data, len);
+    if (err || !decoded) {
+        if (decoded) {
+            lv_draw_buf_destroy(decoded);
+        }
         return err == 83 ? GADGET_ERR_NO_MEMORY : GADGET_ERR_ARG;   /* 83: lodepng's out of memory */
+    }
+    uint32_t stride = decoded->header.stride;
+    if (!w || !h || (uint64_t)w * h > max_pixels || decoded->header.w != w || decoded->header.h != h ||
+        stride < 4 * w || (uint64_t)stride * h > decoded->data_size) {
+        lv_draw_buf_destroy(decoded);
+        return GADGET_ERR_ARG;
     }
     size_t n = (size_t)w * h;
     bool alpha = false;
-    for (size_t i = 0; i < n && !alpha; i++) {
-        alpha = rgba[i * 4 + 3] != 0xFF;
+    for (unsigned y = 0; y < h && !alpha; y++) {
+        const uint8_t *row = decoded->data + (size_t)y * stride;
+        for (unsigned x = 0; x < w && !alpha; x++) {
+            alpha = row[x * 4 + 3] != 0xFF;
+        }
     }
     image_t *img = image_new(w, h, alpha);
     if (img) {
         uint16_t *px = (uint16_t *)img->dsc.data;
         uint8_t *a = (uint8_t *)(px + n);
-        for (size_t i = 0; i < n; i++) {
-            const uint8_t *p = rgba + i * 4;
-            px[i] = rgb565(p[0], p[1], p[2]);
-            if (alpha) {
-                a[i] = p[3];
+        for (unsigned y = 0; y < h; y++) {
+            const uint8_t *row = decoded->data + (size_t)y * stride;
+            for (unsigned x = 0; x < w; x++) {
+                const uint8_t *p = row + x * 4;
+                size_t i = (size_t)y * w + x;
+                px[i] = rgb565(p[0], p[1], p[2]);
+                if (alpha) {
+                    a[i] = p[3];
+                }
             }
         }
     }
-    lv_free(rgba);
+    lv_draw_buf_destroy(decoded);
     *out = img;
     return img ? 0 : GADGET_ERR_NO_MEMORY;
 }
