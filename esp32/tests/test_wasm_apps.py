@@ -731,6 +731,12 @@ class WasmAppsTest(unittest.TestCase):
         after = text[text.index("lv_textarea_set_text(o, text);"):]
         self.assertIn("charge_delta(s, len, kept ? strlen(kept) : 0);", after[:400])
 
+    def test_an_unpairing_wipe_that_left_a_file_is_tried_again(self):
+        forget = function(read("components/muse_apps/muse_apps_store.c"), "static bool forget_if_asked(")
+        self.assertIn("if (s_files && !muse_apps_flash_wipe(FILES_ROOT)) {", forget)
+        self.assertLess(forget.index("!muse_apps_flash_wipe(FILES_ROOT)"), forget.index("forget_mark(false);"))
+        self.assertIn("bool muse_apps_flash_wipe(const char *root);", read("components/muse_apps/muse_apps_flash.h"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

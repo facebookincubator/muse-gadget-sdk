@@ -68,5 +68,6 @@ const char *muse_apps_flash_read(const char *root, const char *name, size_t offs
 cJSON *muse_apps_flash_list(const char *root, size_t *total, bool *more);
 /* Deletes what a write cut short (temporary files), at mount. */
 void muse_apps_flash_tidy(const char *root);
-/* Deletes everything (the gadget was unpaired). */
-void muse_apps_flash_wipe(const char *root);
+/* Deletes everything (the gadget was unpaired); false if anything is left
+ * (a file a reader held open), for a later try. */
+bool muse_apps_flash_wipe(const char *root);

@@ -259,36 +259,43 @@ cJSON *muse_apps_flash_list(const char *root, size_t *total, bool *more) {
 }
 
 // Deletes everything under path (all) or what writes cut short, and the
-// folders that leaves empty, but never path itself.
-static void sweep(const char *path, bool all, int depth) {
+// folders that leaves empty, but never path itself. False if something it
+// meant to delete is still there (all: anything at all).
+static bool sweep(const char *path, bool all, int depth) {
     DIR *dir = opendir(path);
-    if (!dir) return;
+    if (!dir) return !all || depth == 0;
+    bool ok = true;
     for (struct dirent *d; (d = readdir(dir));) {
         if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, "..")) continue;
         char child[PATH_CAP + 64];
         int n = snprintf(child, sizeof(child), "%s/%s", path, d->d_name);
         if (n <= 0 || (size_t)n >= sizeof(child)) continue;
         struct stat st;
-        if (stat(child, &st) != 0) continue;
+        if (stat(child, &st) != 0) {
+            ok = ok && !all;
+            continue;
+        }
         if (S_ISDIR(st.st_mode)) {
-            if (depth < FOLDERS_MAX) sweep(child, all, depth + 1);
-            rmdir(child);   // fails, harmlessly, unless it's now empty
+            if (depth < FOLDERS_MAX) ok = sweep(child, all, depth + 1) && ok;
+            // fails, harmlessly when tidying, unless it's now empty
+            if (rmdir(child) != 0 && all) ok = false;
             continue;
         }
         size_t len = strlen(d->d_name);
         bool partial = len >= sizeof(PART) - 1 && !strcmp(d->d_name + len - (sizeof(PART) - 1), PART);
         if (all || partial) {
-            remove(child);
-            if (partial) ESP_LOGI(TAG, "deleted %s, a write cut short", child);
+            if (remove(child) != 0) ok = false;   // a reader may hold it open
+            else if (partial) ESP_LOGI(TAG, "deleted %s, a write cut short", child);
         }
     }
     closedir(dir);
+    return ok;
 }
 
 void muse_apps_flash_tidy(const char *root) {
-    sweep(root, false, 0);
+    (void)sweep(root, false, 0);
 }
 
-void muse_apps_flash_wipe(const char *root) {
-    sweep(root, true, 0);
+bool muse_apps_flash_wipe(const char *root) {
+    return sweep(root, true, 0);
 }

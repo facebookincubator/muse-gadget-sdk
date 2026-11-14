@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "muse_apps_flash.h"
 
@@ -146,9 +147,21 @@ int main(int argc, char **argv) {
     CHECK(put("1/2/3/4/5/6/7/8/f", "f", &replaced) == NULL);
     CHECK(!strcmp(listed(0, &bytes, &total, &count), "1/2/3/4/5/6/7/8/f") && count == 3);
 
+    /* A file that can't be removed yet (on the gadget, one a reader holds
+     * open) makes the wipe say so, so that it's tried again. */
+    if (geteuid() != 0) {
+        char keep[300];
+        CHECK(put("keep/k.txt", "k", &replaced) == NULL);
+        snprintf(keep, sizeof(keep), "%s/keep", dir);
+        chmod(keep, 0500);
+        CHECK(!muse_apps_flash_wipe(dir) && exists("keep/k.txt"));
+        chmod(keep, 0700);
+        CHECK(put("1/2/3/4/5/6/7/8/f", "f", &replaced) == NULL);
+    }
+
     /* Unpairing: everything goes, the deepest too, the partition's root stays. */
     CHECK(put("deep/er/e.txt", "e", &replaced) == NULL);
-    muse_apps_flash_wipe(dir);
+    CHECK(muse_apps_flash_wipe(dir));
     CHECK(!exists("cat.jpg") && !exists("d.txt") && !exists("deep") && !exists("1") && exists(""));
     CHECK(listed(0, &bytes, &total, &count)[0] == '\0' && count == 0 && total == 0);
 

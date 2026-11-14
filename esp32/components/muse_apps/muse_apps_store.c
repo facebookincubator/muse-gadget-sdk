@@ -189,7 +189,11 @@ static bool forget_if_asked(void) {
     muse_apps_stop_installed(NULL);
     muse_apps_catalog_wipe();
     publish();
-    if (s_files) muse_apps_flash_wipe(FILES_ROOT);
+    if (s_files && !muse_apps_flash_wipe(FILES_ROOT)) {
+        // Something was still open: the mark stays, and the next start wipes again.
+        ESP_LOGW(TAG, "unpaired: a file couldn't be removed yet; trying again at the next start");
+        return true;
+    }
     forget_mark(false);
     ESP_LOGI(TAG, "unpaired: every app and file removed");
     return true;
