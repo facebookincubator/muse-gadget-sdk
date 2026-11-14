@@ -348,6 +348,9 @@ const muse_ww_chunk_t *muse_ww_history_push(muse_ww_history_t *h, const int16_t 
     }
     muse_ww_chunk_t *slot = &h->slots[h->next_seq % h->capacity];
     slot->seq = h->next_seq++;
+    if (h->held < h->capacity) {
+        h->held++;
+    }
     memcpy(slot->pcm, pcm, sizeof(slot->pcm));
     return slot;
 }
@@ -358,7 +361,7 @@ size_t muse_ww_history_since(const muse_ww_history_t *h, uint32_t from, const in
         return 0;
     }
     /* Numbers wrap, so compare distances back from the next one. */
-    uint32_t held = h->next_seq < h->capacity ? h->next_seq : (uint32_t)h->capacity;
+    uint32_t held = (uint32_t)h->held;
     uint32_t back = h->next_seq - from;   /* chunks from `from` to the newest */
     if (back == 0 || back > UINT32_MAX / 2) {
         return 0;   /* nothing newer, or `from` is in the future */

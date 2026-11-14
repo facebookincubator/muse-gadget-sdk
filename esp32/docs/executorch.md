@@ -90,10 +90,13 @@ is needed, and no SDK update is needed at all until someone chooses
 to bump the pin.
 
 Review the update before opening a PR: build the wake-word firmware
-with an executorch Python available (see above) and check the
+with the matching executorch Python (see above) and check the
 configure log says the bundle generated, plus the usual file/size
-deltas. Do not line-review component sources (they are downloaded,
-not vendored). Then build the consumers: this SDK's
+deltas. The component isn't vendored, so a PR shows only the pin; what
+the build itself verifies is the exact version, the publisher's
+checksums (the component manager checks every file it downloads) and
+the generator's executorch version check. Review the component's
+release as you would any dependency update. Then build the consumers: this SDK's
 wake-word firmware for one Xtensa and one RISC-V board (the builds
 that actually link the component), plus a normal board build, which
 must still pass without downloading ExecuTorch:

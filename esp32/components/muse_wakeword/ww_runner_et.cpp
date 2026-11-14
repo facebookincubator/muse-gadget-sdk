@@ -444,9 +444,4 @@ void ww_runner_set_suppressed(ww_runner_t *runner, bool on)
     }
 }
 
-const char *ww_runner_kind(void)
-{
-    return "executorch";
-}
-
 } // extern "C"
