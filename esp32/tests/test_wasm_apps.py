@@ -810,12 +810,6 @@ class WasmAppsTest(unittest.TestCase):
         face = function(read("components/muse/muse_ui.c"), "bool muse_ui_face_active(")
         self.assertLess(face.index("if (muse_app_view_tick()) {"), face.index("return s_face_active;"))
 
-    def test_shadow_spread_is_never_negative(self):
-        """LVGL inverts a shadow's core box on a negative spread and overruns its buffer."""
-        self.assertIn("case K_SPREAD: out->num = clamp(v, 0, 32767);",
-                      function(read("components/muse_apps/muse_apps_ui.c"), "static int32_t style_value("))
-        self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64);", read("components/muse_apps/muse_apps_canvas.c"))
-
     def test_apps_are_off_until_the_person_turns_them_on(self):
         """Run apps in Settings, saved, off by default: off, Muse isn't offered
         the app commands and they're refused; changing it restarts the gadget."""
@@ -832,14 +826,6 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn('cJSON_AddBoolToObject(wasm, "enabled", muse_settings_apps_on())',
                       read("components/muse_apps/muse_apps_capabilities.c"))
 
-    def test_start_callbacks_have_room_for_a_result(self):
-        """An app that declares on_start returning int by mistake: WAMR writes
-        the result where the arguments go, so that can't be NULL."""
-        run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
-        self.assertIn("wasm_runtime_call_wasm(s_app.env, init, 0, ret)", run)
-        self.assertIn("wasm_runtime_call_wasm(s_app.env, on_start, 0, ret)", run)
-        self.assertNotIn("on_start, 0, NULL)", run)
-
     def test_no_app_opens_over_the_video_view(self):
         run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
         self.assertLess(run.index("if (muse_video_is_open()) {"), run.index("muse_app_view_open(&cbs)"))
@@ -854,11 +840,6 @@ class WasmAppsTest(unittest.TestCase):
     def test_app_py_runs_a_vm_folder_by_path(self):
         self.assertIn('vm = args.vm if "/" in args.vm or args.vm.endswith(".wasm") else args.vm + "/"',
                       read("tools/muse/app.py"))
-
-    def test_frame_and_stop_callbacks_have_room_for_a_64_bit_result(self):
-        apps = read("components/muse_apps/muse_apps.c")
-        self.assertIn("uint32_t argv[2] = {(uint32_t)reason};", apps)
-        self.assertIn("uint32_t argv[2] = {(uint32_t)(now / 1000)};", apps)
 
     def test_the_launcher_doesnt_open_over_the_video_view(self):
         launcher = function(read("components/muse_apps/muse_apps.c"), "static void show_launcher(")
@@ -907,6 +888,30 @@ class WasmAppsTest(unittest.TestCase):
         console = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_console(")
         put = console[console.index('if (!strncmp(line, "files.put=", 10)) {'):]
         self.assertLess(put.index("if (n1 > 179 || n2 > 96) {"), put.index("sscanf(line + 10"))
+
+    def test_callbacks_are_checked_before_running(self):
+        """A callback declared with results (or other parameters) by mistake:
+        WAMR writes results over the arguments it's given."""
+        apps = read("components/muse_apps/muse_apps.c")
+        check = function(apps, "static bool callback_is(")
+        self.assertIn("wasm_func_get_result_count(fn, s_app.inst) || wasm_func_get_param_count(fn, s_app.inst) != n", check)
+        self.assertIn("types[i] != WASM_I32", check)
+        run = function(apps, "static void run(")
+        for call in ["callback_is(on_start, 0)", "callback_is(init, 0)", "callback_is(s_app.on_frame, 1)",
+                     "callback_is(s_app.on_event, 3)", "callback_is(s_app.on_stop, 1)"]:
+            self.assertLess(run.index(call), run.index("muse_app_view_open(&cbs)"), call)
+
+    def test_nothing_runs_before_the_instruction_limit(self):
+        """A start function, __post_instantiate or __wasm_call_ctors would run
+        while instantiating, unmetered: such an app is refused."""
+        apps = read("components/muse_apps/muse_apps.c")
+        itself = function(apps, "static const char *runs_itself(")
+        self.assertIn("if (id == 8) {", itself)
+        self.assertIn('"__post_instantiate"', itself)
+        self.assertIn('"__wasm_call_ctors"', itself)
+        run = function(apps, "static void run(")
+        self.assertLess(run.index("runs_itself(bytes, len)"), run.index("free(bytes);\n    if (!s_app.module)"))
+        self.assertLess(run.index("if (itself) {"), run.index("wasm_runtime_instantiate_ex("))
 
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")

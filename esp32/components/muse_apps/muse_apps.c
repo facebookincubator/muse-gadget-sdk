@@ -900,7 +900,7 @@ static void stop(int reason, const char *message, bool keep_view)
     bool was_running = s_app.running;
     s_app.running = false;
     if (was_running && reason != STOP_TRAP && s_app.on_stop) {
-        uint32_t argv[2] = {(uint32_t)reason};   /* room for a 64-bit result declared by mistake */
+        uint32_t argv[1] = {(uint32_t)reason};
         if (!call_app(s_app.on_stop, 1, argv, STEP_LIMIT)) {
             const char *what = wasm_runtime_get_exception(s_app.inst);
             muse_apps_log("on_stop trapped: %s", what ? what : "?");
@@ -1042,6 +1042,54 @@ static bool leb(const uint8_t *p, size_t len, size_t *at, uint32_t *out)
         }
     }
     return false;
+}
+
+/* What WAMR would run itself while instantiating, before the instruction
+ * limit applies, so that a loop there would hold the app task: a start
+ * function, __post_instantiate or __wasm_call_ctors. NULL for none, as in the
+ * reactors build.py makes (their _initialize runs here, metered). */
+static const char *runs_itself(const uint8_t *p, size_t len)
+{
+    for (size_t at = 8; at < len;) {
+        uint8_t id = p[at++];
+        uint32_t size;
+        if (!leb(p, len, &at, &size) || size > len - at) {
+            break;
+        }
+        if (id == 8) {
+            return "a start function";
+        }
+        at += size;
+    }
+    for (int32_t i = 0; i < wasm_runtime_get_export_count(s_app.module); i++) {
+        wasm_export_t e;
+        wasm_runtime_get_export_type(s_app.module, i, &e);
+        if (e.name && (!strcmp(e.name, "__post_instantiate") || !strcmp(e.name, "__wasm_call_ctors"))) {
+            return e.name;
+        }
+    }
+    return NULL;
+}
+
+/* A callback export with the API's signature: n i32 parameters, no results.
+ * WAMR writes results over the arguments it's given, so one more would
+ * land past them. */
+static bool callback_is(wasm_function_inst_t fn, uint32_t n)
+{
+    wasm_valkind_t types[3];
+    if (!fn) {
+        return true;
+    }
+    if (wasm_func_get_result_count(fn, s_app.inst) || wasm_func_get_param_count(fn, s_app.inst) != n || n > 3) {
+        return false;
+    }
+    wasm_func_get_param_types(fn, s_app.inst, types);
+    for (uint32_t i = 0; i < n; i++) {
+        if (types[i] != WASM_I32) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /* The gadget.manifest custom section, or NULL. */
@@ -1309,9 +1357,16 @@ static void run(req_t *r)
     args.name = s_app.name;
     args.wasm_binary_freeable = true;  /* the loader keeps copies: the download can go */
     s_app.module = wasm_runtime_load_ex(bytes, (uint32_t)len, &args, err, sizeof(err));
+    const char *itself = s_app.module ? runs_itself(bytes, len) : NULL;
     free(bytes);
     if (!s_app.module) {
         unload();
+        run_failed(r, covered, "invalid_app", err);
+        return;
+    }
+    if (itself) {
+        unload();
+        snprintf(err, sizeof(err), "the app has %s, which would run before its limits: build it as a reactor", itself);
         run_failed(r, covered, "invalid_app", err);
         return;
     }
@@ -1339,9 +1394,18 @@ static void run(req_t *r)
     s_app.on_frame = wasm_runtime_lookup_function(s_app.inst, "on_frame");
     s_app.on_event = wasm_runtime_lookup_function(s_app.inst, "on_event");
     s_app.on_stop = wasm_runtime_lookup_function(s_app.inst, "on_stop");
+    wasm_function_inst_t init = wasm_runtime_lookup_function(s_app.inst, "_initialize");
     if (!on_start) {
         unload();
         run_failed(r, covered, "invalid_app", "the app exports no on_start()");
+        return;
+    }
+    if (!callback_is(on_start, 0) || !callback_is(init, 0) || !callback_is(s_app.on_frame, 1) ||
+        !callback_is(s_app.on_event, 3) || !callback_is(s_app.on_stop, 1)) {
+        unload();
+        run_failed(r, covered, "invalid_app",
+                   "a callback isn't as gadget.h declares it: void on_start(void), on_frame(int32_t), "
+                   "on_event(int32_t, int32_t, int32_t), on_stop(int32_t)");
         return;
     }
     if (muse_voice_in_call()) {   /* its buttons hang up: an app mustn't take them */
@@ -1383,11 +1447,9 @@ static void run(req_t *r)
     muse_apps_dev_start();
     /* A WASI reactor's _initialize (static constructors) first, then on_start:
      * one budget between them. */
-    wasm_function_inst_t init = wasm_runtime_lookup_function(s_app.inst, "_initialize");
     wasm_runtime_set_instruction_count_limit(s_app.env, START_STEP_LIMIT);
-    uint32_t ret[2] = {0};   /* room for a result an app declared by mistake: WAMR writes it here */
-    bool inited = !init || wasm_runtime_call_wasm(s_app.env, init, 0, ret);
-    bool started = inited && wasm_runtime_call_wasm(s_app.env, on_start, 0, ret);
+    bool inited = !init || wasm_runtime_call_wasm(s_app.env, init, 0, NULL);
+    bool started = inited && wasm_runtime_call_wasm(s_app.env, on_start, 0, NULL);
     ui_release();
     if (!started) {
         const char *what = wasm_runtime_get_exception(s_app.inst);
@@ -1615,7 +1677,7 @@ static void turn(void)
         }
     }
     if (s_app.running && s_app.on_frame && s_app.frame_rate > 0 && !s_app.dark && s_app.next_frame_us <= now) {
-        uint32_t argv[2] = {(uint32_t)(now / 1000)};   /* as on_stop's */
+        uint32_t argv[1] = {(uint32_t)(now / 1000)};
         if (!call_app(s_app.on_frame, 1, argv, STEP_LIMIT)) {
             crashed("on_frame");
             return;
