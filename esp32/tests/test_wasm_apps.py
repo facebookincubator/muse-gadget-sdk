@@ -932,6 +932,14 @@ class WasmAppsTest(unittest.TestCase):
         refusal = run[run.index("if (itself) {"):]
         self.assertLess(refusal.index("snprintf(err"), refusal.index("unload();"))
 
+    def test_buggy_values_dont_divide_by_zero(self):
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        self.assertIn("[GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_DASH},", ui)
+        self.assertIn("case K_DASH: out->num = v < 0 ? 0 : v;", function(ui, "static int32_t style_value("))
+        roller = function(ui, "static int32_t roller_set(")
+        self.assertLess(roller.index("lv_obj_get_style_text_letter_space(s->obj, LV_PART_MAIN) <= 0"),
+                        roller.index("lv_roller_set_options("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

@@ -1136,8 +1136,8 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_LINE_WIDTH` | int | style | rw |  |
 | `P_LINE_OPA` | opa | style | rw |  |
 | `P_LINE_ROUNDED` | bool | style | rw |  |
-| `P_LINE_DASH_WIDTH` | int | style | rw |  |
-| `P_LINE_DASH_GAP` | int | style | rw |  |
+| `P_LINE_DASH_WIDTH` | int | style | rw | Not negative. |
+| `P_LINE_DASH_GAP` | int | style | rw | Not negative. |
 | `P_ARC_COLOR` | rgb | style | rw |  |
 | `P_ARC_WIDTH` | int | style | rw |  |
 | `P_ARC_OPA` | opa | style | rw |  |
@@ -1172,7 +1172,7 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_OPTIONS` | text | roller, dropdown | rw | The options, one per line. |
 | `P_SELECTED` | int | roller, dropdown | rw | The selected option, from 0. |
 | `P_VISIBLE_ROWS` | int | roller | rw |  |
-| `P_INFINITE` | bool | roller | rw | Spins round instead of stopping at the ends. |
+| `P_INFINITE` | bool | roller | rw | Spins round instead of stopping at the ends. ERR_ARG if letter spacing leaves its options no height. |
 | `P_LIST_DIR` | dir | dropdown | rw | Which way the list opens. |
 | `P_PLACEHOLDER` | text | textarea | rw | Text shown while it's empty. |
 | `P_ONE_LINE` | bool | textarea | rw |  |

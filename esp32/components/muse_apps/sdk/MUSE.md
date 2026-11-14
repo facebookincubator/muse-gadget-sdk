@@ -1131,8 +1131,8 @@ As C defines, for an app:
 #define P_LINE_WIDTH 133  /* int, style */
 #define P_LINE_OPA 134  /* opa, style */
 #define P_LINE_ROUNDED 135  /* bool, style */
-#define P_LINE_DASH_WIDTH 136  /* int, style */
-#define P_LINE_DASH_GAP 137  /* int, style */
+#define P_LINE_DASH_WIDTH 136  /* int, style. Not negative. */
+#define P_LINE_DASH_GAP 137  /* int, style. Not negative. */
 #define P_ARC_COLOR 138  /* rgb, style */
 #define P_ARC_WIDTH 139  /* int, style */
 #define P_ARC_OPA 140  /* opa, style */
@@ -1167,7 +1167,7 @@ As C defines, for an app:
 #define P_OPTIONS 214  /* text, roller, dropdown. The options, one per line. */
 #define P_SELECTED 215  /* int, roller, dropdown. The selected option, from 0. */
 #define P_VISIBLE_ROWS 216  /* int, roller */
-#define P_INFINITE 217  /* bool, roller. Spins round instead of stopping at the ends. */
+#define P_INFINITE 217  /* bool, roller. Spins round instead of stopping at the ends. ERR_ARG if letter spacing leaves its options no height. */
 #define P_LIST_DIR 218  /* dir, dropdown. Which way the list opens. */
 #define P_PLACEHOLDER 219  /* text, textarea. Text shown while it's empty. */
 #define P_ONE_LINE 220  /* bool, textarea */

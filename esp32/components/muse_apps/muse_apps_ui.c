@@ -398,7 +398,7 @@ static int prop_info(int32_t prop)
 /* ---- Style properties (100 to 154) ------------------------------------------------------- */
 
 enum { K_INT = 1, K_COORD, K_RGB, K_OPA, K_BOOL, K_FONT, K_ANGLE, K_SCALE, K_TEXT_ALIGN, K_GRAD, K_SIDE, K_DECOR, K_PADS,
-       K_SHADOW, K_OFFSET, K_RADIUS };
+       K_SHADOW, K_OFFSET, K_RADIUS, K_DASH };
 
 /* Shadows and radii within 64 px, as cv_rect_style's: LVGL sizes a shadow's
  * corner buffer from them. */
@@ -446,8 +446,8 @@ static const style_map_t s_style_map[] = {
     [GADGET_P_LINE_WIDTH - 100] = {LV_STYLE_LINE_WIDTH, K_INT},
     [GADGET_P_LINE_OPA - 100] = {LV_STYLE_LINE_OPA, K_OPA},
     [GADGET_P_LINE_ROUNDED - 100] = {LV_STYLE_LINE_ROUNDED, K_BOOL},
-    [GADGET_P_LINE_DASH_WIDTH - 100] = {LV_STYLE_LINE_DASH_WIDTH, K_INT},
-    [GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_INT},
+    [GADGET_P_LINE_DASH_WIDTH - 100] = {LV_STYLE_LINE_DASH_WIDTH, K_DASH},
+    [GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_DASH},
     [GADGET_P_ARC_COLOR - 100] = {LV_STYLE_ARC_COLOR, K_RGB},
     [GADGET_P_ARC_WIDTH - 100] = {LV_STYLE_ARC_WIDTH, K_INT},
     [GADGET_P_ARC_OPA - 100] = {LV_STYLE_ARC_OPA, K_OPA},
@@ -484,6 +484,7 @@ static int32_t style_value(int kind, int32_t v, lv_style_value_t *out)
     case K_INT: out->num = clamp(v, -32767, 32767); return 0;
     case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX); return 0;   /* a negative spread overruns LVGL's buffer */
     case K_OFFSET: out->num = clamp(v, -SHADOW_MAX, SHADOW_MAX); return 0;
+    case K_DASH: out->num = v < 0 ? 0 : v; return 0;   /* LVGL takes a remainder by dash + gap */
     case K_RADIUS: out->num = v == GADGET_RADIUS_CIRCLE ? v : clamp(v, 0, SHADOW_MAX); return 0;
     case K_COORD:
         if (!coord_in(v, false, &c)) {
@@ -837,6 +838,11 @@ static chart_t *chart_ext(slot_t *s)
 /* A roller's options and mode, together as LVGL takes them. */
 static int32_t roller_set(slot_t *s, const char *options, bool infinite)
 {
+    /* LVGL divides by an option's height (the font's line plus the letter space) to lay out infinite pages */
+    if (infinite && lv_font_get_line_height(lv_obj_get_style_text_font(s->obj, LV_PART_MAIN)) +
+                            lv_obj_get_style_text_letter_space(s->obj, LV_PART_MAIN) <= 0) {
+        return GADGET_ERR_ARG;
+    }
     size_t n = strlen(options);
     roller_t *r = muse_apps_alloc(sizeof(roller_t) + n + 1);
     if (!r) {
