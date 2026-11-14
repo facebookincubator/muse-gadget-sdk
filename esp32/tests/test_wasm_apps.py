@@ -862,6 +862,11 @@ class WasmAppsTest(unittest.TestCase):
         launcher = function(read("components/muse_apps/muse_apps.c"), "static void show_launcher(")
         self.assertLess(launcher.index("if (muse_video_is_open()) {"), launcher.index("muse_app_view_open(&cbs)"))
 
+    def test_a_run_path_too_long_is_refused_not_cut(self):
+        console = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_console(")
+        run = console[console.index('if (!strncmp(line, "app.run=", 8)) {'):]
+        self.assertLess(run.index("strlen(line + 8) >= sizeof(r.path) - 12"), run.index("snprintf(r.path"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

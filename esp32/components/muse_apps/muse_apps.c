@@ -2245,6 +2245,10 @@ bool muse_apps_console(const char *line)
         bool posted;
         if (is_path(line + 8)) {
             req_t r = {.kind = REQ_RUN_VM, .o = console};
+            if (strlen(line + 8) >= sizeof(r.path) - 12) {   /* cut short, it would run another app */
+                console_say("{\"ok\":false,\"error\":{\"code\":\"bad_path\",\"message\":\"the path is too long\"}}");
+                return true;
+            }
             snprintf(r.path, sizeof(r.path) - 12, "%s", line + 8);
             posted = post_req(&r);
         } else {
