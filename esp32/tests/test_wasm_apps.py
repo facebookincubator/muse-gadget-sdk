@@ -763,6 +763,18 @@ class WasmAppsTest(unittest.TestCase):
             self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_WIDTH}," % (prop, prop), ui)
         self.assertIn("case K_WIDTH: out->num = clamp(v, 0, 1024);", function(ui, "static int32_t style_value("))
 
+    def test_the_store_waits_for_nvs_and_its_wipe_before_files_are_read(self):
+        """The store starts before the firmware initializes NVS: an unpairing's
+        mark mustn't be missed, and no file is read until it's wiped."""
+        store = read("components/muse_apps/muse_apps_store.c")
+        marked = function(store, "static bool forget_marked(")
+        self.assertIn("== ESP_ERR_NVS_NOT_INITIALIZED) {", marked)
+        task = function(store, "static void store_task(")
+        self.assertLess(task.index("forget_marked()"), task.index("atomic_store(&s_ready, true);"))
+        reader = function(store, "static void reader_task(")
+        self.assertIn("!atomic_load(&s_ready) || atomic_load(&s_unwiped)", reader)
+        self.assertIn("atomic_store(&s_unwiped, true);", function(store, "void muse_apps_store_forget_all("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

@@ -103,6 +103,8 @@ static bool s_persistent;
 static bool s_files;  // the "files" partition is mounted
 static atomic_bool s_forget;  // unpaired: remove everything before anything else
 static atomic_uint s_epoch;   // moves at each unpairing: what was asked before it isn't done
+static atomic_bool s_ready;   // the last run's unpairing, if any, is wiped: files may be read
+static atomic_bool s_unwiped; // an unpairing's files aren't all gone yet: none are read
 
 // Copies the catalog for other tasks, after each change.
 static void publish(void) {
@@ -176,7 +178,12 @@ static void forget_mark(bool on) {
 static bool forget_marked(void) {
     nvs_handle_t h;
     uint8_t v = 0;
-    if (nvs_open(NVS_SPACE, NVS_READONLY, &h) != ESP_OK) return false;
+    esp_err_t err;
+    // The store starts before the firmware initializes NVS: wait for it rather than miss a mark.
+    while ((err = nvs_open(NVS_SPACE, NVS_READONLY, &h)) == ESP_ERR_NVS_NOT_INITIALIZED) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (err != ESP_OK) return false;   // never marked
     bool marked = nvs_get_u8(h, NVS_FORGET, &v) == ESP_OK && v;
     nvs_close(h);
     return marked;
@@ -189,12 +196,14 @@ static bool forget_if_asked(void) {
     muse_apps_stop_installed(NULL);
     muse_apps_catalog_wipe();
     publish();
+    atomic_store(&s_unwiped, true);
     if (s_files && !muse_apps_flash_wipe(FILES_ROOT)) {
         // Something was still open: the mark stays, and the next start wipes again.
         ESP_LOGW(TAG, "unpaired: a file couldn't be removed yet; trying again at the next start");
         return true;
     }
     forget_mark(false);
+    atomic_store(&s_unwiped, false);
     ESP_LOGI(TAG, "unpaired: every app and file removed");
     return true;
 }
@@ -468,7 +477,9 @@ static void reader_task(void *arg) {
         uint8_t *data = NULL;
         size_t len = 0;
         int32_t result = GADGET_ERR_UNSUPPORTED;
-        if (s_files) {
+        if (s_files && (!atomic_load(&s_ready) || atomic_load(&s_unwiped))) {
+            result = GADGET_ERR_FAILED;   // possibly the last owner's: not until they're wiped
+        } else if (s_files) {
             char err[96];
             const char *code = muse_apps_flash_read(FILES_ROOT, r.name, r.offset, r.max, &data, &len, err, sizeof(err));
             result = code ? gadget_error(code) : (int32_t)len;
@@ -521,6 +532,7 @@ static void store_task(void *arg) {
         atomic_store(&s_forget, true);
         forget_if_asked();
     }
+    atomic_store(&s_ready, true);
     publish();
     for (st_req_t r;;) {
         if (!xQueueReceive(s_q, &r, portMAX_DELAY)) continue;
@@ -666,6 +678,7 @@ bool muse_apps_store_file_list(const muse_apps_origin_t *o) {
 
 void muse_apps_store_forget_all(void) {
     atomic_fetch_add(&s_epoch, 1);
+    atomic_store(&s_unwiped, true);
     forget_mark(true);   // before anything: kept across a restart until the wipe is done
     atomic_store(&s_forget, true);
     st_req_t r = {.kind = ST_FORGET};
