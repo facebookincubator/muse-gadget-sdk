@@ -267,5 +267,20 @@ class PacingTest(unittest.TestCase):
         self.assertEqual(b.ser.writes, [b">status\n"])
 
 
+
+class ConsoleLineTest(unittest.TestCase):
+    def test_a_line_break_cant_start_another_command(self) -> None:
+        # app.py builds commands from file names: "x.png\n>sdk_token=..." mustn't reach the console.
+        board = chat.Board.__new__(chat.Board)
+        sent = []
+        board.write = sent.append
+        board.write_line("files.upload=cat.png")
+        self.assertEqual(sent, [b">files.upload=cat.png\n"])
+        for bad in ("files.upload=x.png\n>sdk_token=mgst_x", "app.put=a\rb"):
+            with self.assertRaises(ValueError):
+                board.write_line(bad)
+        self.assertEqual(len(sent), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

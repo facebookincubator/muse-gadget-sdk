@@ -178,6 +178,10 @@ class Board:
             time.sleep(0.1)
 
     def write_line(self, cmd):
+        # One console line: a CR or LF inside cmd (from a file name, say)
+        # would start another command, such as >sdk_token=.
+        if "\r" in cmd or "\n" in cmd:
+            raise ValueError("a console command can't contain a line break")
         self.write(b">" + cmd.encode() + b"\n")
 
     def read_line(self, deadline):
