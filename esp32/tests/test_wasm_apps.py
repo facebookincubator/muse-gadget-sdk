@@ -815,6 +815,17 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("lv_event_stop_processing(e);", guard)
         self.assertIn("lv_obj_add_event_cb(o, chart_guard, LV_EVENT_DRAW_MAIN | LV_EVENT_PREPROCESS, NULL);", ui)
 
+    def test_table_dimensions_are_charged(self):
+        """LVGL allocates a pointer per cell: 256 x 16 tables are 16 KB each."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        self.assertIn("(size_t)rows * cols * sizeof(char *)", function(ui, "static size_t table_bytes("))
+        cell = function(ui, "int32_t gadget_ui_table_cell(")
+        self.assertLess(cell.index("table_resize_charge(s, to_rows, to_cols)"), cell.index("lv_table_set_cell_value("))
+        rows = ui[ui.index("case GADGET_P_ROW_COUNT:"):]
+        self.assertLess(rows.index("table_resize_charge("), rows.index("lv_table_set_row_count("))
+        width = function(ui, "int32_t gadget_ui_table_column_width(")
+        self.assertLess(width.index("table_resize_charge("), width.index("lv_table_set_column_count("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

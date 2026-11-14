@@ -659,6 +659,19 @@ static int32_t set_state(lv_obj_t *o, lv_state_t st, int32_t v)
     return 0;
 }
 
+/* LVGL keeps a pointer for every cell and a size for every row and column:
+ * charged for the table's dimensions before it allocates them. */
+static size_t table_bytes(uint32_t rows, uint32_t cols)
+{
+    return (size_t)rows * cols * sizeof(char *) + ((size_t)rows + cols) * sizeof(int32_t);
+}
+
+static bool table_resize_charge(slot_t *s, uint32_t rows, uint32_t cols)
+{
+    return charge_delta(s, table_bytes(lv_table_get_row_count(s->obj), lv_table_get_column_count(s->obj)),
+                        table_bytes(rows, cols));
+}
+
 /* Gives back what ui_table_cell charged for the cells outside rows x cols,
  * which LVGL frees when the table shrinks. */
 static void table_refund(slot_t *s, uint32_t rows, uint32_t cols)
@@ -1149,6 +1162,9 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
         if (v < 0 || v > MAX_TABLE_ROWS) {
             return GADGET_ERR_ARG;
         }
+        if (!table_resize_charge(s, (uint32_t)v, lv_table_get_column_count(o))) {
+            return GADGET_ERR_NO_MEMORY;
+        }
         table_refund(s, (uint32_t)v, lv_table_get_column_count(o));
         lv_table_set_row_count(o, (uint32_t)v);
         return 0;
@@ -1156,6 +1172,9 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
         ONLY(GADGET_W_TABLE);
         if (v < 1 || v > MAX_TABLE_COLS) {
             return GADGET_ERR_ARG;
+        }
+        if (!table_resize_charge(s, lv_table_get_row_count(o), (uint32_t)v)) {
+            return GADGET_ERR_NO_MEMORY;
         }
         table_refund(s, lv_table_get_row_count(o), (uint32_t)v);
         lv_table_set_column_count(o, (uint32_t)v);
@@ -2405,7 +2424,15 @@ int32_t gadget_ui_table_cell(wasm_exec_env_t env, int32_t table, int32_t row, in
     const char *old = (uint32_t)row < lv_table_get_row_count(s->obj) && (uint32_t)col < lv_table_get_column_count(s->obj)
                           ? lv_table_get_cell_value(s->obj, (uint32_t)row, (uint32_t)col)
                           : NULL;
+    uint32_t rows = lv_table_get_row_count(s->obj), cols = lv_table_get_column_count(s->obj);
+    /* LVGL grows the table to reach the cell. */
+    uint32_t to_rows = (uint32_t)row >= rows ? (uint32_t)row + 1 : rows;
+    uint32_t to_cols = (uint32_t)col >= cols ? (uint32_t)col + 1 : cols;
+    if (!table_resize_charge(s, to_rows, to_cols)) {
+        return GADGET_ERR_NO_MEMORY;
+    }
     if (!charge_delta(s, old ? strlen(old) + 8 : 0, len + 8)) {
+        charge_delta(s, table_bytes(to_rows, to_cols), table_bytes(rows, cols));   /* the table stays as it was */
         return GADGET_ERR_NO_MEMORY;
     }
     lv_table_set_cell_value(s->obj, (uint32_t)row, (uint32_t)col, text);
@@ -2423,6 +2450,9 @@ int32_t gadget_ui_table_column_width(wasm_exec_env_t env, int32_t table, int32_t
         return GADGET_ERR_ARG;
     }
     if ((uint32_t)col >= lv_table_get_column_count(s->obj)) {
+        if (!table_resize_charge(s, lv_table_get_row_count(s->obj), (uint32_t)col + 1)) {
+            return GADGET_ERR_NO_MEMORY;
+        }
         lv_table_set_column_count(s->obj, (uint32_t)col + 1);
     }
     lv_table_set_column_width(s->obj, (uint32_t)col, clamp(width, 0, 32767));
