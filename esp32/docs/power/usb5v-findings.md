@@ -2,7 +2,8 @@
 
 ## Scope and fixture
 
-The power-test image (`CONFIG_MUSE_POWER_TEST`) on four boards, swept with
+The initial measurements used the power-test image (`CONFIG_MUSE_POWER_TEST`)
+on four boards, swept with
 `"usb_powered":1` and measured with a POWER-Z KM003C on each board's 5 V USB
 input. These are **USB-input currents, not battery currents**: read
 [km003c.md](km003c.md) for what USB adds and how steps compare with
@@ -94,3 +95,77 @@ Steps, from run 1 at the 5 V input:
 - Windows are cut from each record's own start and end times, mapped to
   host time through the board's console replies, with 1 s guards.
 - Two runs per board give no confidence interval.
+
+## reTerminal Sticky (2026-11-12)
+
+Two accepted sweeps on one unit with the
+[Sticky diagnostic image](km003c.md#reterminal-sticky-diagnostic).
+All 32 measured rows are in [usb5v-profile.csv](usb5v-profile.csv).
+
+- POWER-Z KM003C on the USB input, computer attached, battery fitted.
+  Cables stayed unchanged. These are USB-input currents, including the bridge.
+- The battery met the USB-plus-voltage plateau criterion before each run:
+  three fresh polls at least one minute apart, charging=false, USB input at
+  least 50% below the original 543.133 mA reference and stable within
+  max(2 mA, 5%), battery voltage at least 4100 mV with at most 10 mV spread.
+  Run 1 qualified at 26.43 to 26.85 mA and 4187 to 4188 mV;
+  run 2 at 26.57 to 26.65 mA and 4186 mV.
+  SOC was logged, not used as the gate.
+- Charging stayed enabled but off in every window. All 48 application/start/end
+  gauge receipts per run, plus the restoration receipt, reported zero signed
+  current. Any positive receipt rejected a run regardless of its final flag.
+- Five seconds settling, 20 s capture, 1 s guards, 20 Hz meter reads.
+  Windows retained 358 to 380 samples over 18.0 to 19.0 s.
+  Qualification and both captures used one open CH343 UART connection.
+  Each capture kept one boot ID across all windows. Both passed on the first attempt.
+- Firmware SHA-256: `9611e21036731ef2f349d739fe08f9c775b8dd3d60b98d09241094c96a9b9dca`,
+  verified by independent flash readback.
+- FULL and FAST alternated black and white frames at 80 MHz, with a 500 ms
+  rest after each completed refresh. Each started from a completed FULL white
+  seed before settling. Three panel-resting references used the same 80 MHz
+  CPU setting and 20 ms polling interval. Touch and SD rails stayed at init levels.
+
+For e-paper rows, `actual.io_frames` counts BUSY-confirmed refreshes completed
+in the untrimmed 20 s capture: FULL 9 / 9, FAST 17 / 17
+in runs 1 / 2. CSV `samples` counts POWER-Z readings, not panel refreshes.
+Window means include the 500 ms rests; they are not energy per refresh.
+
+Mean mA / mW at the USB input:
+
+| State | Run 1 | Run 2 |
+|---|---:|---:|
+| `baseline_pre` | 13.12 / 68.0 | 12.97 / 67.3 |
+| `cpu_fixed_40_idle` | 23.78 / 123.3 | 23.62 / 122.5 |
+| `cpu_fixed_80_idle` | 30.97 / 160.5 | 30.99 / 160.6 |
+| `cpu_fixed_160_idle` | 34.78 / 180.3 | 34.72 / 179.9 |
+| `cpu_fixed_240_idle` | 39.26 / 202.8 | 38.74 / 200.0 |
+| `baseline_cpu_post` | 13.19 / 68.5 | 13.15 / 68.2 |
+| `epaper_off_pre` | 31.25 / 162.0 | 30.69 / 159.1 |
+| `epaper_full` | 34.13 / 176.8 | 34.39 / 178.1 |
+| `epaper_off_between` | 31.11 / 161.2 | 30.91 / 160.3 |
+| `epaper_fast` | 34.69 / 179.5 | 34.84 / 180.4 |
+| `epaper_off_post` | 31.00 / 160.6 | 30.90 / 160.1 |
+| `mic_off_pre` | 30.89 / 160.2 | 30.79 / 159.6 |
+| `mic_capture_16k` | 30.82 / 159.8 | 30.88 / 160.1 |
+| `mic_off_post` | 30.79 / 159.5 | 30.74 / 159.4 |
+| `wifi_scanning` | 69.21 / 355.9 | 69.01 / 355.2 |
+| `baseline_post` | 13.17 / 68.3 | 12.97 / 67.3 |
+
+The two runs differ by at most 0.56 mA per row. Endpoint baselines
+differ by 0.058 and 0.001 mA,
+within max(2 mA, 5% of their mean).
+
+### Console-open observation
+
+Opening the CH343 port rebooted this board, followed by a brief charge
+top-up. The accepted captures kept the console open from battery
+qualification through both sweeps.
+
+### Sticky limits
+
+- One unit, two accepted runs; no confidence interval or battery runtime.
+- USB input includes the bridge and powered board rails. The 20 Hz samples
+  do not resolve peaks shorter than the gap between reads.
+- Gauge receipts are boundary observations, not continuous charge monitoring.
+- The panel deep-sleep request had no controller readback. LCD brightness,
+  external codecs and speaker output are unsupported.

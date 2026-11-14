@@ -79,6 +79,7 @@ typedef enum {
     MUSE_PTEST_WIFI_SCAN,
     MUSE_PTEST_UNSUPPORTED,
     MUSE_PTEST_DEEP_SLEEP,
+    MUSE_PTEST_EPAPER, /* io_frames counts BUSY-confirmed panel refreshes. */
 } muse_ptest_load_t;
 
 typedef struct {
@@ -103,7 +104,7 @@ typedef struct {
     uint16_t knobs_applied;  /* successful API/config readback, not measured savings */
     int configured_volume;  /* API programmed, not an analog measurement */
     int battery_mv;         /* 0 if unavailable or divider rail off */
-    uint32_t io_frames;      /* successful I2S frames during this state */
+    uint32_t io_frames;      /* I2S frames, or completed panel refreshes for EPAPER */
     uint32_t adc_samples;
     uint32_t wifi_scans;
     bool wifi_started;
