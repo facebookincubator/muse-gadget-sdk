@@ -199,10 +199,10 @@ static bool unmounted(const char *label, bool mounted) {
 static bool forget_if_asked(void) {
     if (!atomic_exchange(&s_forget, false)) return false;
     muse_apps_stop_installed(NULL);
-    muse_apps_catalog_wipe();
+    bool apps_gone = muse_apps_catalog_wipe();
     publish();
     atomic_store(&s_unwiped, true);
-    if ((s_files && !muse_apps_flash_wipe(FILES_ROOT)) || unmounted(LABEL, s_persistent) ||
+    if (!apps_gone || (s_files && !muse_apps_flash_wipe(FILES_ROOT)) || unmounted(LABEL, s_persistent) ||
         unmounted(FILES_LABEL, s_files)) {
         // Something was still open, or a partition didn't mount: the mark stays, and the next start wipes again.
         ESP_LOGW(TAG, "unpaired: not everything could be removed yet; trying again at the next start");

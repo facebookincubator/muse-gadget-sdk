@@ -27,6 +27,7 @@
 #include "muse_apps_catalog.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -183,10 +184,11 @@ static bool save(void) {
 }
 
 // Deletes what catalog.json doesn't name: modules of removed apps, installs
-// cut short, leftover .tmp files.
-static void delete_unnamed(void) {
+// cut short, leftover .tmp files. False if one couldn't be.
+static bool delete_unnamed(void) {
     DIR *dir = opendir(s_dir);
-    if (!dir) return;
+    if (!dir) return errno == ENOENT;
+    bool all = true;
     for (struct dirent *d; (d = readdir(dir));) {
         const char *name = d->d_name;
         if (!strcmp(name, ".") || !strcmp(name, "..") || !strcmp(name, CATALOG)) continue;
@@ -200,10 +202,14 @@ static void delete_unnamed(void) {
         char path[sizeof(s_dir) + sizeof(d->d_name) + 1];
         int len = snprintf(path, sizeof(path), "%s/%s", s_dir, name);
         if (len < 0 || (size_t)len >= sizeof(path)) continue;
-        remove(path);
+        if (remove(path) != 0) {
+            all = false;
+            continue;
+        }
         ESP_LOGI(TAG, "deleted %s, which no installed app uses", name);
     }
     closedir(dir);
+    return all;
 }
 
 static void forget_all(void) {
@@ -442,12 +448,12 @@ const char *muse_apps_catalog_read(const char *id, uint8_t **out, size_t *len, c
     return NULL;
 }
 
-void muse_apps_catalog_wipe(void) {
+bool muse_apps_catalog_wipe(void) {
     forget_all();
     s_unread = false;   // unpairing removes every app, read or not
-    if (!s_persistent) return;
-    save();
-    delete_unnamed();
+    if (!s_persistent) return true;
+    bool saved = save();
+    return delete_unnamed() && saved;
 }
 
 // NULL, not part of a list, when memory runs out.

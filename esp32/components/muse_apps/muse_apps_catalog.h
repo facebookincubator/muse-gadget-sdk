@@ -67,8 +67,8 @@ const char *muse_apps_catalog_remove(const char *id, bool *removed, char *err, s
 /* The app's bytes, checked against its hash; the caller frees *out. A damaged
  * app is removed. */
 const char *muse_apps_catalog_read(const char *id, uint8_t **out, size_t *len, char *err, size_t err_len);
-/* Removes every app (the gadget was unpaired). */
-void muse_apps_catalog_wipe(void);
+/* Removes every app (the gadget was unpaired); false if one stayed on flash. */
+bool muse_apps_catalog_wipe(void);
 
 /* [{"id", "name", "sha256", "bytes", "icon", "color"}, ...] (icon and color if set), in the order they were installed;
  * NULL when memory runs out. */

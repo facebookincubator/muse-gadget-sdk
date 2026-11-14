@@ -953,6 +953,14 @@ class WasmAppsTest(unittest.TestCase):
         add = function(read("components/muse_apps/muse_apps_ui.c"), "int32_t gadget_ui_style_add(")
         self.assertLess(add.index("if (s->styles >= STYLES_PER_OBJECT) {"), add.index("lv_obj_add_style("))
 
+    def test_the_unpair_mark_waits_for_the_apps_to_go(self):
+        catalog = read("components/muse_apps/muse_apps_catalog.c")
+        self.assertIn("return delete_unnamed() && saved;", function(catalog, "bool muse_apps_catalog_wipe("))
+        self.assertIn("if (remove(path) != 0) {", function(catalog, "static bool delete_unnamed("))
+        forget = function(read("components/muse_apps/muse_apps_store.c"), "static bool forget_if_asked(")
+        self.assertIn("bool apps_gone = muse_apps_catalog_wipe();", forget)
+        self.assertIn("if (!apps_gone ||", forget)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
