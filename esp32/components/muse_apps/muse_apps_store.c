@@ -626,6 +626,7 @@ static void set_app(st_req_t *r, const char *id, const char *name, const char *i
 bool muse_apps_store_install(const muse_apps_origin_t *o, const char *id, const char *name, const char *icon,
                              const char *color, const char *path, const char *sha256) {
     st_req_t r = {.kind = ST_INSTALL, .o = *o};
+    if (id && strlen(id) >= sizeof(r.id)) return false;   // cut short, it could replace another app
     set_app(&r, id, name, icon, color);
     snprintf(r.path, sizeof(r.path), "%s", path);
     snprintf(r.sha256, sizeof(r.sha256), "%s", sha256 ? sha256 : "");
@@ -635,18 +636,21 @@ bool muse_apps_store_install(const muse_apps_origin_t *o, const char *id, const 
 bool muse_apps_store_install_bytes(const muse_apps_origin_t *o, const char *id, const char *name, const char *icon,
                                    const char *color, uint8_t *bytes, size_t len) {
     st_req_t r = {.kind = ST_INSTALL, .o = *o, .bytes = bytes, .len = len};
+    if (id && strlen(id) >= sizeof(r.id)) return false;
     set_app(&r, id, name, icon, color);
     return post(&r);
 }
 
 bool muse_apps_store_remove(const muse_apps_origin_t *o, const char *id) {
     st_req_t r = {.kind = ST_REMOVE, .o = *o};
+    if (strlen(id) >= sizeof(r.id)) return false;   // cut short, it could name another app
     snprintf(r.id, sizeof(r.id), "%s", id);
     return post(&r);
 }
 
 bool muse_apps_store_open(const muse_apps_origin_t *o, const char *id) {
     st_req_t r = {.kind = ST_OPEN, .o = *o};
+    if (strlen(id) >= sizeof(r.id)) return false;
     snprintf(r.id, sizeof(r.id), "%s", id);
     return post(&r);
 }

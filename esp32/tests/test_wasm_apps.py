@@ -888,6 +888,14 @@ class WasmAppsTest(unittest.TestCase):
         save = function(read("components/muse_apps/muse_apps_files.c"), "int32_t gadget_state_save(")
         self.assertIn("muse_apps_check_deadline();", save[:200])
 
+    def test_an_id_too_long_is_refused_not_cut(self):
+        """Cut to 31 bytes, it could name another installed app."""
+        store = read("components/muse_apps/muse_apps_store.c")
+        for name in ["bool muse_apps_store_remove(", "bool muse_apps_store_open("]:
+            self.assertIn("if (strlen(id) >= sizeof(r.id)) return false;", function(store, name), name)
+        for name in ["bool muse_apps_store_install(", "bool muse_apps_store_install_bytes("]:
+            self.assertIn("if (id && strlen(id) >= sizeof(r.id)) return false;", function(store, name), name)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
