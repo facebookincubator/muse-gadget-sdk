@@ -720,6 +720,17 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("lv_event_stop_processing(e);", guard)
         self.assertIn("lv_obj_add_event_cb(o, chart_guard, LV_EVENT_DRAW_MAIN | LV_EVENT_PREPROCESS, NULL);", ui)
 
+    def test_unpairing_stops_any_running_app(self):
+        """An app run from the VM (app.run {path}) has no installed id, and
+        unpairing over BLE doesn't restart the gadget: it must stop too."""
+        apps = read("components/muse_apps/muse_apps.c")
+        stop = function(apps, "static void handle_stop(")
+        removed = stop[stop.index("if (r->removed) {"):stop.index("if (r->o.from == MUSE_APPS_FROM_VIEW) {")]
+        self.assertIn("if (!s_app.running || (r->id[0] && strcmp(r->id, s_app.id))) {", removed)
+        self.assertNotIn("!s_app.id[0]", removed)
+        self.assertIn("muse_apps_stop_installed(NULL);", function(read("components/muse_apps/muse_apps_store.c"),
+                                                                 "static bool forget_if_asked("))
+
     def test_a_vertical_slider_with_no_track_takes_no_drag(self):
         """LVGL 9.5 divides by a vertical slider's height less its top and bottom padding."""
         ui = read("components/muse_apps/muse_apps_ui.c")
