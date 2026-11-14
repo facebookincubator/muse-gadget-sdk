@@ -454,6 +454,20 @@ int main(int argc,char **argv) {
         assert(got_event(MUSE_PTT_DOWN) && !s_press_synthetic);
         free(s_pre); return 0;
     }
+    if(scenario==92) {
+        /* The only audio from before a detection that can leave the device:
+         * the seed, at most 1 s, in whole chunks. */
+        static int16_t two_s[2*MUSE_AUDIO_RATE+123];
+        for(size_t i=0;i<sizeof(two_s)/sizeof(two_s[0]);i++) two_s[i]=(int16_t)(i%1000+1);
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        muse_voice_seed_preroll(two_s,sizeof(two_s)/sizeof(two_s[0]));
+        assert(SEED_FRAMES==MUSE_AUDIO_RATE && s_seed_frames==SEED_FRAMES);
+        muse_voice_seed_preroll(two_s,1000);
+        assert(s_seed_frames==1000/MUSE_AUDIO_CHUNK*MUSE_AUDIO_CHUNK);
+        muse_voice_seed_preroll(NULL,0);
+        assert(s_seed_frames==0);
+        free(s_seed); s_seed=NULL; free(s_pre); return 0;
+    }
     if(scenario==91) {
         /* A wake word press: its seed already holds the pre-roll and the
          * speech start, so the ring keeps only audio read after the press. */

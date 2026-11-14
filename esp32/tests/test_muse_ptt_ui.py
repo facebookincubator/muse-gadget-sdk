@@ -164,6 +164,13 @@ class StopWatchPTT(unittest.TestCase):
     def test_wake_word_note_ends_at_its_release_in_toggle_builds(self):
         self.run_case('voice', 67, board=3, realtime=0)
 
+    def test_wake_word_seed_is_at_most_one_second(self):
+        # The pre-roll seed is the only audio from before a detection that
+        # can leave the device.
+        for board, realtime in ((1, 1), (1, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 92, board=board, realtime=realtime)
+
     def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
         # The seed already ends at the speech start; the idle ring covers
         # the same audio and would play it twice.
