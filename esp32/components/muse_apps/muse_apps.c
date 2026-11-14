@@ -2242,14 +2242,21 @@ bool muse_apps_console(const char *line)
     if (!strncmp(line, "app.install=", 12)) {   /* "app.install=PATH" or "app.install=ID[:ICON:COLOR] PATH [NAME]", ID "-" for the manifest's */
         char a[64] = "", path[PATH_MAX_LEN] = "";
         const char *name = NULL, *icon = NULL, *color = NULL;
-        int n = sscanf(line + 12, "%63s %179s", a, path);
+        /* Words split at blanks, a tab too; one too long for its buffer is a bad line, not two words. */
+        const char *w1 = line + 12 + strspn(line + 12, " \t");
+        const char *w2 = w1 + strcspn(w1, " \t");
+        size_t n1 = (size_t)(w2 - w1);
+        w2 += strspn(w2, " \t");
+        size_t n2 = strcspn(w2, " \t");
+        int n = !n1 || n1 >= sizeof(a) || n2 > 179 ? 0 : sscanf(line + 12, "%63s %179s", a, path);
         if (n == 1 && is_path(a)) {   /* just a path: the manifest says the rest */
             snprintf(path, sizeof(path), "%s", a);
             a[0] = '\0';
         } else if (n == 2) {
-            name = strchr(strchr(line + 12, ' ') + 1, ' ');
-            if (name) {
-                name++;
+            name = w2 + n2;
+            name += strspn(name, " \t");
+            if (!*name) {
+                name = NULL;
             }
             split_look(a, &icon, &color);
             if (!strcmp(a, "-")) {   /* the manifest's name */

@@ -649,6 +649,16 @@ class WasmAppsTest(unittest.TestCase):
         allowed = function(read("components/muse_apps/muse_apps.c"), "static bool imports_allowed(")
         self.assertIn("wasm_func_type_get_result_count(imp.u.func_type) > 1", allowed)
 
+    def test_console_install_line_is_parsed_by_its_blanks(self):
+        """A word too long for its buffer, or words split by a tab, once made
+        the name lookup step through a NULL pointer."""
+        console = function(read("components/muse_apps/muse_apps.c"), "bool muse_apps_console(")
+        install = console[console.index('if (!strncmp(line, "app.install=", 12))'):]
+        install = install[:install.index("return true;")]
+        self.assertNotIn("strchr(strchr(", install)
+        self.assertIn("n1 >= sizeof(a) || n2 > 179 ? 0 :", install)
+        self.assertIn('name = w2 + n2;', install)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
