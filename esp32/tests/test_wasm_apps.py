@@ -884,6 +884,14 @@ class WasmAppsTest(unittest.TestCase):
         read_vm = function(read("components/muse_apps/muse_apps_vm.c"), "bool muse_apps_vm_file_read(")
         self.assertIn("xSemaphoreTake(s_one, pdMS_TO_TICKS(timeout_ms)) != pdTRUE", read_vm)
 
+    def test_a_failed_state_save_gives_its_quota_back(self):
+        files = read("components/muse_apps/muse_apps_files.c")
+        self.assertIn("sizes_undo(j->name, j->prev);", function(files, "static void save_run("))
+        self.assertIn("sizes_undo(j->name, j->prev);", function(files, "static void save_drop("))
+        save = function(files, "int32_t gadget_state_save(")
+        self.assertIn("sizes_take(name, data_len, &j->prev);", save)
+        self.assertIn("sizes_undo(name, j->prev);", save)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

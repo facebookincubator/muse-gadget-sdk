@@ -76,9 +76,11 @@ static state_size_t *size_entry(const char *name, bool make)
     return NULL;
 }
 
+#define NO_SIZE UINT32_MAX   /* no entry */
+
 /* Room for name at len bytes: 0, or GADGET_ERR_TOO_LARGE, ERR_LIMIT or
- * ERR_NO_MEMORY. With count, it's counted. */
-static int32_t sizes_take(const char *name, size_t len, bool count)
+ * ERR_NO_MEMORY. With prev, it's counted, and *prev is what it replaced. */
+static int32_t sizes_take(const char *name, size_t len, uint32_t *prev)
 {
     if (!s_sizes) {
         state_size_t *t = muse_apps_calloc(STATE_NAMES, sizeof(state_size_t));
@@ -106,11 +108,26 @@ static int32_t sizes_take(const char *name, size_t len, bool count)
         r = GADGET_ERR_TOO_LARGE;
     } else if (!room) {
         r = GADGET_ERR_LIMIT;
-    } else if (count) {
+    } else if (prev) {
+        state_size_t *e = size_entry(name, false);
+        *prev = e ? e->size : NO_SIZE;
         size_entry(name, true)->size = (uint32_t)len;
     }
     taskEXIT_CRITICAL(&s_sizes_mux);
     return r;
+}
+
+/* A failed save: back to what it was before. */
+static void sizes_undo(const char *name, uint32_t prev)
+{
+    taskENTER_CRITICAL(&s_sizes_mux);
+    state_size_t *e = size_entry(name, false);
+    if (e && prev == NO_SIZE) {
+        e->name[0] = '\0';
+    } else if (e) {
+        e->size = prev;
+    }
+    taskEXIT_CRITICAL(&s_sizes_mux);
 }
 
 /* A loaded file's size: any task. */
@@ -327,6 +344,7 @@ int32_t gadget_state_load(wasm_exec_env_t env, const char *name, void *buf, uint
 typedef struct {
     int32_t op;
     char name[NAME_CHARS + 1];
+    uint32_t prev;              /* the size counted before, for a failed save */
     size_t data_len, len;
     char body[];                /* the request's JSON: the data is copied in, base64 */
 } save_job_t;
@@ -345,6 +363,9 @@ static void save_run(void *arg)
         muse_apps_log("state_save %s: %s %d%s%s", j->name, status > 0 ? "HTTP" : "status", status,
                       f.error[0] ? ": " : "", f.error);
     }
+    if (!ok) {
+        sizes_undo(j->name, j->prev);
+    }
     muse_apps_op_finish(j->op, ok ? 0 : muse_apps_vm_error(status), NULL, 0);
     heap_caps_free(j);
 }
@@ -352,6 +373,7 @@ static void save_run(void *arg)
 static void save_drop(void *arg)
 {
     save_job_t *j = arg;
+    sizes_undo(j->name, j->prev);
     muse_apps_op_finish(j->op, GADGET_ERR_FAILED, NULL, 0);
     heap_caps_free(j);
 }
@@ -391,15 +413,16 @@ int32_t gadget_state_save(wasm_exec_env_t env, const char *name, const void *dat
     j->len = (size_t)(o - j->body);
     j->data_len = data_len;
     snprintf(j->name, sizeof(j->name), "%s", name);
-    int32_t r = sizes_take(name, data_len, false);
+    int32_t r = sizes_take(name, data_len, NULL);
     int32_t op = r ? r : muse_apps_op_begin(env, NULL, 0);
     if (op < 0) {
         heap_caps_free(j);
         return op;
     }
-    sizes_take(name, data_len, true);
+    sizes_take(name, data_len, &j->prev);
     j->op = op;
     if (!muse_apps_vm_job(save_run, save_drop, j)) {
+        sizes_undo(name, j->prev);
         heap_caps_free(j);
         muse_apps_op_finish(op, GADGET_ERR_NO_MEMORY, NULL, 0);
     }
