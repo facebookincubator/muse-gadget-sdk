@@ -326,7 +326,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('ww_runner_et.cpp', cmake)
         self.assertIn('models/hey_muse.pte', cmake)
         self.assertIn('executorch_add_model', cmake)
-        self.assertIn('make_kernel_bundle.py', cmake)
+        self.assertIn('"${EXECUTORCH_PYTHON}" "${_et_dir}/tools/gen_kernels.py"', cmake)
         # The bundle is generated at build time; no committed bundle dir.
         self.assertNotIn('"${CMAKE_CURRENT_SOURCE_DIR}/et_kernels"', cmake)
         self.assertFalse((WW / 'et_kernels').exists())
@@ -381,8 +381,10 @@ class WakeWordFirmwareContract(unittest.TestCase):
             cmake,
         )
         self.assertFalse((WW / 'et_kernels').exists())
-        helper = (WW / 'tools/make_kernel_bundle.py').read_text()
-        self.assertIn('module._check_version = _unchecked_version', helper)
+        # The component's generator runs unmodified, with its check that the
+        # installed executorch is the one the component was built from.
+        self.assertFalse((WW / 'tools/make_kernel_bundle.py').exists())
+        self.assertNotIn('_check_version', cmake)
 
     def test_muse_can_only_turn_listening_off(self):
         # Only audio after a detection on the device may leave it, so no

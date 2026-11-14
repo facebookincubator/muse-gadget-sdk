@@ -28,7 +28,7 @@ activations, calibrated on the training bundle's
 calibration_frames.pt via --calibration), lowered through the Cadence
 passes to cadence:: ops. The registry component registers only the
 kernels in a bundle generated at build time from the exported .pte
-(see tools/make_kernel_bundle.py); no bundle is committed.
+(see esp32/docs/executorch.md); no bundle is committed.
 (A portable-fp32 export measured ~69 ms per 20 ms frame on ESP32-S3 —
 3.5x over the real-time budget — and was removed; the eager model in
 this script is the numerical reference for the parity check.) The

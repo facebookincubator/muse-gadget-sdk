@@ -55,13 +55,13 @@ model load.
 
 The component registers only the kernels in the project's kernel
 bundle. Nothing is committed: the wake word component generates the
-bundle at configure time, into the build directory, with the committed
-helper [`components/muse_wakeword/tools/make_kernel_bundle.py`](../components/muse_wakeword/tools/make_kernel_bundle.py),
-which loads the component's `tools/gen_kernels.py` with its SHA gate
-dropped (see that script for why, and what provenance it records).
-The build then declares the generated bundle, and refuses one whose
-component version, commit, or model hash does not match the declared
-model and component.
+bundle at configure time, into the build directory, by running the
+component's own `tools/gen_kernels.py` unmodified. The generator checks
+that the installed executorch is the one the component was built from
+(its version and commit) before it generates anything, so a mismatched
+code generator can't produce the bundle. The build then declares the
+generated bundle, and refuses one whose component version, commit, or
+model hash does not match the declared model and component.
 
 Wakeword builds need a Python with executorch and PyYAML installed.
 Use the nightly the component was built from, which the component's
@@ -69,9 +69,8 @@ Use the nightly the component was built from, which the component's
 `executorch==1.6.0.dev20261112` (commit `2a00808`) from
 `https://download.pytorch.org/whl/nightly/cpu`, with
 `torch==2.14.0` from `https://download.pytorch.org/whl/test/cpu`.
-Other versions are not checked and may generate a mismatched bundle or
-fail; the stable `executorch==1.6.0` from PyPI fails, because its codegen
-lacks a function the component's generator calls. Point the build
+The generator refuses any other version, the stable
+`executorch==1.6.0` from PyPI included. Point the build
 at it with `-DEXECUTORCH_PYTHON=<python>` or the `EXECUTORCH_PYTHON`
 environment variable; without one, configuration fails with a message
 saying so. Default builds need nothing: the bundle step only runs for
