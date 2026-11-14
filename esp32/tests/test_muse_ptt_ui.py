@@ -210,6 +210,13 @@ class StopWatchPTT(unittest.TestCase):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 98, board=board, realtime=realtime)
 
+    def test_rejected_hands_free_turns_free_their_buffer(self):
+        # Each overload rejection frees the recording buffer, across
+        # consecutive attempts through the voice loop.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 88, board=board, realtime=realtime)
+
     def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
         # The seed already ends at the speech start; the idle ring covers
         # the same audio and would play it twice.
