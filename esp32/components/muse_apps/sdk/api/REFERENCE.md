@@ -1069,12 +1069,12 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 |---|---|---|---|---|
 | `P_X` | coord | object | rw | Left edge, from the parent's content area, or the offset from P_ALIGN. |
 | `P_Y` | coord | object | rw | Top edge, or the offset from P_ALIGN. |
-| `P_WIDTH` | coord | object | rw |  |
-| `P_HEIGHT` | coord | object | rw |  |
-| `P_MIN_WIDTH` | coord | object | rw |  |
-| `P_MAX_WIDTH` | coord | object | rw |  |
-| `P_MIN_HEIGHT` | coord | object | rw |  |
-| `P_MAX_HEIGHT` | coord | object | rw |  |
+| `P_WIDTH` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
+| `P_HEIGHT` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
+| `P_MIN_WIDTH` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
+| `P_MAX_WIDTH` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
+| `P_MIN_HEIGHT` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
+| `P_MAX_HEIGHT` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
 | `P_ALIGN` | align | object | rw | Where in the parent; P_X and P_Y offset it. |
 | `P_HIDDEN` | bool | object | rw | Not drawn, and takes no input or space in a layout. |
 | `P_CLICKABLE` | bool | object | rw | Takes touch. On for buttons and inputs, off for labels and images. |

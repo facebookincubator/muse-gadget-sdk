@@ -292,7 +292,10 @@ lv_obj_t *muse_apps_ui_canvas(int32_t handle, void **ext)
 
 /* ---- Values ------------------------------------------------------------------------------ */
 
-/* An API coordinate (pixels, PCT(p) or SIZE_CONTENT) as LVGL's. */
+/* An API coordinate (pixels, PCT(p) or SIZE_CONTENT) as LVGL's. A size is
+ * 0..SIZE_LIMIT pixels or 0..100 % of its parent: LVGL allocates whole rows
+ * of a large object's shadow unchecked. */
+#define SIZE_LIMIT 4096
 static bool coord_in(int32_t v, bool size, int32_t *out)
 {
     if (v == GADGET_SIZE_CONTENT) {
@@ -301,9 +304,12 @@ static bool coord_in(int32_t v, bool size, int32_t *out)
     }
     if (v >= PCT_BASE - PCT_SPAN && v <= PCT_BASE + PCT_SPAN) {
         *out = lv_pct(v - PCT_BASE);
-        return true;
+        return !size || (v >= PCT_BASE && v <= PCT_BASE + 100);
     }
     *out = v;
+    if (size) {
+        return v >= 0 && v <= SIZE_LIMIT;
+    }
     return v > -COORD_LIMIT && v < COORD_LIMIT;
 }
 

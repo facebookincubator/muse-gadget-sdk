@@ -932,6 +932,14 @@ class WasmAppsTest(unittest.TestCase):
         opened = function(read("components/muse/muse_app_view.c"), "bool muse_app_view_open(")
         self.assertLess(opened.index("atomic_store(&s_open, true);"), opened.index("if (muse_voice_in_call()) {"))
 
+    def test_object_sizes_are_bounded(self):
+        """LVGL allocates whole rows of a large object's shadow unchecked."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        coord = function(ui, "static bool coord_in(")
+        self.assertIn("return v >= 0 && v <= SIZE_LIMIT;", coord)
+        self.assertIn("return !size || (v >= PCT_BASE && v <= PCT_BASE + 100);", coord)
+        self.assertIn("#define SIZE_LIMIT 4096", ui)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

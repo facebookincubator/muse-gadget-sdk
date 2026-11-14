@@ -474,12 +474,12 @@
 /* Properties, for ui_set, ui_get, ui_set_text, ui_style and ui_animate. */
 #define P_X 1  /* coord, any object. Left edge, from the parent's content area, or the offset from P_ALIGN. */
 #define P_Y 2  /* coord, any object. Top edge, or the offset from P_ALIGN. */
-#define P_WIDTH 3  /* coord, any object */
-#define P_HEIGHT 4  /* coord, any object */
-#define P_MIN_WIDTH 5  /* coord, any object */
-#define P_MAX_WIDTH 6  /* coord, any object */
-#define P_MIN_HEIGHT 7  /* coord, any object */
-#define P_MAX_HEIGHT 8  /* coord, any object */
+#define P_WIDTH 3  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
+#define P_HEIGHT 4  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
+#define P_MIN_WIDTH 5  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
+#define P_MAX_WIDTH 6  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
+#define P_MIN_HEIGHT 7  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
+#define P_MAX_HEIGHT 8  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
 #define P_ALIGN 9  /* align, any object. Where in the parent; P_X and P_Y offset it. */
 #define P_HIDDEN 10  /* bool, any object. Not drawn, and takes no input or space in a layout. */
 #define P_CLICKABLE 11  /* bool, any object. Takes touch. On for buttons and inputs, off for labels and images. */
