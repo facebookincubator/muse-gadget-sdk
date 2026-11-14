@@ -121,9 +121,9 @@ menu "ESP32 Device SDK"
         bool "Enable OTA firmware updates"
         default n
         help
-            Allow firmware updates over authenticated control and BLE setup.
-            When disabled, OTA commands are not advertised and update requests
-            are skipped without downloading, even when force is requested.
+            Allow firmware updates during BLE setup. When disabled, update
+            requests are skipped without downloading, even when force is
+            requested.
             Optional OTA parameters in Wi-Fi setup are ignored so provisioning
             can finish normally. Internal builds enable this explicitly.
 

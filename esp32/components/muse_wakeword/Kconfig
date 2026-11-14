@@ -12,72 +12,70 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Always defined, unlike MUSE_WAKEWORD_ENABLE (a bool whose dependencies are
+# unmet isn't written to sdkconfig), so this component's idf_component.yml can
+# pull the ExecuTorch registry component only into builds with the feature.
+config MUSE_WAKEWORD_EXECUTORCH
+    string
+    default "y" if MUSE_WAKEWORD_ENABLE
+    default "n"
+
 menu "Muse wake word"
     depends on MUSE_ENABLED
 
     config MUSE_WAKEWORD_ENABLE
         bool "Compile in hands-free wake word support"
-        depends on SPIRAM
+        depends on SPIRAM && !MUSE_UI_FREEINK
         default n
         help
             Saying "Hey Muse" (or "Ok Muse") starts the same voice note
             as holding the talk button. This only compiles the feature
-            in: listening also needs a runtime opt-in, so flashing this
-            firmware never starts listening on its own.
+            in: listening also needs the opt-in on the device itself
+            (Settings > Sound, the quick menu, or "wake.on" over
+            serial), so flashing this firmware never starts listening
+            on its own. No board overlay enables it.
 
-            The session core, audio rings, energy endpointing, LFBE
-            frontend, detector, and ExecuTorch runner are built here;
-            the runtime comes from the ExecuTorch registry component.
-            No board overlay enables this yet; enablement
-            is per-board and opt-in. The current model is a
-            synthetic-data research checkpoint, not a
-            production-tuned detector. Needs PSRAM: the audio
-            buffers take about 115 KB, and the ExecuTorch runner
-            about 215 KB more (model arenas and the frontend).
+            Detection runs on the device: the ExecuTorch model in
+            models/hey_muse.pte, an int8 export of a streaming
+            keyword-spotting network trained on synthetic speech from
+            eight Piper voices (see models/README.md). Audio leaves the
+            device only after a detection, as a voice note that starts
+            at most 1 s before the speech following it (so it includes
+            the wake word) and ends with that speech, the talk button,
+            or 15 s. A detection with no speech after it sends nothing;
+            one followed by speech sends a voice note, so a false
+            trigger near conversation uploads one. This checkpoint's own
+            streaming test (fp32, on its training bundle's test set)
+            reports about 34 false wakes an hour at Default sensitivity
+            (78.7% of wake words caught) and about 4 an hour at Low
+            (51.3%); High wasn't measured. The int8 model on the device
+            has not been measured on a device yet.
 
-    choice MUSE_WAKEWORD_RUNNER
-        prompt "Wake word runner"
-        default MUSE_WAKEWORD_RUNNER_EXECUTORCH
-        depends on MUSE_WAKEWORD_ENABLE
-        help
-            What sits behind the runner interface. Exactly one
-            implementation is linked, and the boot log names it so a
-            test double is never mistaken for real detection.
-
-        config MUSE_WAKEWORD_RUNNER_EXECUTORCH
-            bool "ExecuTorch Hey Muse model"
-            help
-                SDK-owned LFBE frontend and posterior detector driving
-                the embedded models/hey_muse.pte through the ExecuTorch
-                registry component. The bench choice below links no
-                runtime.
-
-        config MUSE_WAKEWORD_RUNNER_BENCH
-            bool "Bench triggers (serial key or loud burst, no detection)"
-            help
-                Fires a wake on the serial bench keys "wake=1" and
-                "wake.test=1", or on a loud-then-quiet energy burst (a
-                clap). For bring-up of the audio tap, wake task, and
-                turn plumbing only: it detects no speech at all. No
-                board overlay selects this.
-    endchoice
+            Needs PSRAM: the audio buffers take about 112 KB and the
+            ExecuTorch runner about 213 KB more (a 64 KB method arena,
+            a 64 KB scratch arena, the model's 29.5 KB planned buffer
+            and the 52 KB frontend), far beyond the internal RAM left
+            with Wi-Fi up. Not available with the e-paper (FreeInk) UI,
+            which has no wake word controls.
 
     choice MUSE_WAKEWORD_SENSITIVITY
         prompt "Wake word sensitivity"
         default MUSE_WAKEWORD_SENSITIVITY_DEFAULT
         depends on MUSE_WAKEWORD_ENABLE
         help
-            Passed to the runner as a preset. Raw detection thresholds are
-            the runner's, never Kconfig values.
+            The detector's threshold on the smoothed wake posterior
+            (ww_detector.c): Low 0.99, Default 0.95, High 0.90. False wakes
+            per hour on the checkpoint's own fp32 streaming test: about 4
+            at Low and 34 at Default; High wasn't measured.
 
         config MUSE_WAKEWORD_SENSITIVITY_LOW
-            bool "Low (fewest false triggers)"
+            bool "Low (about 4 false wakes an hour)"
 
         config MUSE_WAKEWORD_SENSITIVITY_DEFAULT
-            bool "Default"
+            bool "Default (about 34 false wakes an hour)"
 
         config MUSE_WAKEWORD_SENSITIVITY_HIGH
-            bool "High (easiest to trigger)"
+            bool "High (easiest to trigger; not measured)"
     endchoice
 
     choice MUSE_WAKEWORD_VAD

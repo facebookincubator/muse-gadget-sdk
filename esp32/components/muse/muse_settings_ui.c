@@ -1259,7 +1259,7 @@ static void on_notes_sw(lv_event_t *e)
 #endif
 
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-/* The listening opt-in, shared with wake.on / enable_wakeword and persisted
+/* The listening opt-in, shared with wake.on and the quick menu, and persisted
  * by muse_wakeword_set_enabled. */
 static void on_wake_sw(lv_event_t *e)
 {
@@ -1346,11 +1346,7 @@ static void build_sound_page(lv_obj_t *tile)
 
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     s_wake_sw = switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw);
-#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
-    note(list, "A clap starts a voice note. There's no spoken wake word yet.");
-#else
     note(list, "Listens for \"Hey Muse\" so you can start a voice note without holding the talk button.");
-#endif
 #endif
 
     if (!muse_board->epaper) {
@@ -1374,7 +1370,7 @@ static void tick_sound(void)
         lv_obj_set_state(s_spk_sw, LV_STATE_CHECKED, on);
     }
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-    bool wake_on = muse_wakeword_enabled();   /* also toggled over serial / by Muse */
+    bool wake_on = muse_wakeword_enabled();   /* also toggled by the menu, serial, wakeword.disable */
     if (s_wake_sw && wake_on != lv_obj_has_state(s_wake_sw, LV_STATE_CHECKED)) {
         lv_obj_set_state(s_wake_sw, LV_STATE_CHECKED, wake_on);
     }

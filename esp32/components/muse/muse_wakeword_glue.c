@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+/* Built only with CONFIG_MUSE_WAKEWORD_ENABLE (components/muse/CMakeLists.txt);
+ * the header has the no-op stubs for builds without it. */
 #include "muse_wakeword_glue.h"
 
 #include "sdkconfig.h"
@@ -39,9 +41,6 @@
 #include "muse_voice.h"
 #include "muse_wakeword.h"
 #include "ww_runner.h"
-#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
-#include "ww_runner_bench.h"
-#endif
 
 static const char *TAG = "muse_wake";
 
@@ -72,9 +71,6 @@ static volatile bool s_enabled;      /* desired listening opt-in */
 static volatile bool s_playback;     /* desired: own-voice playback active */
 static volatile bool s_ptt_turn;     /* desired: physical PTT turn recording */
 static atomic_bool s_pending_down, s_pending_up;   /* physical, from muse_voice */
-#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
-static volatile bool s_bench_wake_req, s_bench_test_req;
-#endif
 static volatile bool s_applied_enabled;   /* wake task applies; taps/status read */
 static bool s_applied_playback;           /* wake task only */
 static bool s_applied_ptt_turn;           /* wake task only */
@@ -84,14 +80,11 @@ static volatile bool s_runner_ok = true;   /* wake task writes: the runner can d
 static uint32_t s_capture_chunks;                    /* wake task only, for the log */
 static size_t s_seeded_frames;
 static bool s_up_owed;   /* wake task only: a synthetic release the full queue refused */
+static volatile bool s_turn_end_req;   /* muse_voice ended the hands-free turn itself */
 
 const char *muse_wakeword_runner_kind(void)
 {
-#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
-    return "bench";
-#else
     return "executorch";
-#endif
 }
 
 bool muse_wakeword_enabled(void)
@@ -140,6 +133,14 @@ void muse_wakeword_note_ptt(bool down)
     }
 }
 
+void muse_wakeword_turn_ended(void)
+{
+    if (!s_started) {
+        return;
+    }
+    s_turn_end_req = true;   /* applied by the wake task */
+}
+
 void muse_wakeword_set_playback(bool on)
 {
     if (!s_started) {
@@ -166,24 +167,6 @@ void muse_wakeword_set_enabled(bool on)
     /* A voice task resting asleep on battery re-checks now rather than at
      * its 60 s backstop: listening keeps the codecs on. */
     muse_state_nudge();
-}
-
-void muse_wakeword_bench_trigger(bool with_speech)
-{
-#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
-    if (!s_started) {
-        return;
-    }
-    if (with_speech) {
-        s_bench_test_req = true;
-    } else {
-        s_bench_wake_req = true;
-    }
-    ESP_LOGI(TAG, "bench trigger%s queued", with_speech ? " (with speech)" : "");
-#else
-    (void)with_speech;
-    ESP_LOGW(TAG, "bench trigger ignored: runner=%s has no triggers", muse_wakeword_runner_kind());
-#endif
 }
 
 static bool post_ptt(muse_ptt_t type)
@@ -294,6 +277,18 @@ static void apply_requests(void)
         ww_runner_set_listening(s_runner, on);
         ESP_LOGI(TAG, "listening %s (runner=%s)", on ? "on" : "off", muse_wakeword_runner_kind());
     }
+    if (s_turn_end_req) {
+        s_turn_end_req = false;
+        /* The turn is over on the voice side: close a capture still open
+         * here (its release would be stray now) and forget an owed one.
+         * An arming is a new session, not this turn's. */
+        s_up_owed = false;
+        muse_ww_state_t st = muse_wakeword_core_state(&s_core);
+        if (st == MUSE_WW_CAPTURING || st == MUSE_WW_CAPTURING_PTT) {
+            muse_wakeword_core_abort(&s_core);
+            ESP_LOGI(TAG, "hands-free turn ended by the recorder");
+        }
+    }
     if (s_playback != s_applied_playback) {
         s_applied_playback = s_playback;
         ww_runner_set_suppressed(s_runner, s_applied_playback || s_applied_ptt_turn);
@@ -311,15 +306,6 @@ static void apply_requests(void)
             ww_runner_reset(s_runner);
         }
     }
-#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH
-    if (s_bench_test_req) {
-        s_bench_test_req = s_bench_wake_req = false;
-        ww_runner_bench_trigger_test(s_runner);
-    } else if (s_bench_wake_req) {
-        s_bench_wake_req = false;
-        ww_runner_bench_trigger(s_runner);
-    }
-#endif
 }
 
 static void snapshot_status(void)
@@ -444,7 +430,7 @@ esp_err_t muse_wakeword_init(QueueHandle_t queue)
     }
     s_started = true;
     ESP_LOGI(TAG, "wake word ready: runner=%s, listening %s", muse_wakeword_runner_kind(),
-             s_enabled ? "on (saved opt-in)" : "off (enable_wakeword turns it on)");
+             s_enabled ? "on (saved opt-in)" : "off (Settings > Sound or wake.on turns it on)");
     return ESP_OK;
 }
 
@@ -467,33 +453,6 @@ void muse_wakeword_status(muse_wakeword_status_t *out)
         .suppressed_wakes = s_stats_snap.suppressed_wakes,
         .dropped_frames = s_tap_drops,
     };
-}
-
-#else   /* !CONFIG_MUSE_WAKEWORD_ENABLE: stubs, see the header */
-
-esp_err_t muse_wakeword_init(QueueHandle_t queue)
-{
-    (void)queue;
-    return ESP_OK;
-}
-void muse_wakeword_on_audio(const int16_t *pcm, size_t frames)
-{
-    (void)pcm;
-    (void)frames;
-}
-void muse_wakeword_note_ptt(bool down) { (void)down; }
-void muse_wakeword_set_enabled(bool on) { (void)on; }
-bool muse_wakeword_enabled(void) { return false; }
-bool muse_wakeword_listening(void) { return false; }
-void muse_wakeword_set_playback(bool on) { (void)on; }
-void muse_wakeword_set_ptt_turn(bool active) { (void)active; }
-const char *muse_wakeword_runner_kind(void) { return "off"; }
-void muse_wakeword_bench_trigger(bool with_speech) { (void)with_speech; }
-void muse_wakeword_status(muse_wakeword_status_t *out)
-{
-    if (out) {
-        *out = (muse_wakeword_status_t){ .runner = "off" };
-    }
 }
 
 #endif

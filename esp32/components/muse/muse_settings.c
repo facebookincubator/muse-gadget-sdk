@@ -42,7 +42,6 @@ static struct {
     uint8_t text_size;
     bool wifi_on;
     bool ble_on;
-    bool wakeword_on;   /* default off: listening is an explicit opt-in */
     char ssid[MUSE_SSID_MAX + 1];
     char pass[MUSE_PASS_MAX + 1];
     char host[MUSE_HOST_MAX + 1];
@@ -140,9 +139,6 @@ esp_err_t muse_settings_init(void)
     if (nvs_get_u8(s_nvs, "ble_on", &b) == ESP_OK) {
         s.ble_on = b;
     }
-    if (nvs_get_u8(s_nvs, "ww_on", &b) == ESP_OK) {
-        s.wakeword_on = b;
-    }
     load_str("ssid", s.ssid, sizeof(s.ssid));
     load_str("pass", s.pass, sizeof(s.pass));
     load_str("host", s.host, sizeof(s.host));
@@ -173,7 +169,6 @@ int muse_settings_text_size(void) { return s.text_size; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
 bool muse_settings_voice_notes(void) { return atomic_load(&s_voice_notes); }
-bool muse_settings_wakeword_on(void) { return s.wakeword_on; }
 
 void muse_settings_set_voice_notes(bool on)
 {
@@ -274,13 +269,6 @@ void muse_settings_set_ble_on(bool on)
     notify(MUSE_SETTING_BLE);
 }
 
-void muse_settings_set_wakeword_on(bool on)
-{
-    s.wakeword_on = on;
-    save_u8("ww_on", on);
-    notify(MUSE_SETTING_WAKEWORD);
-}
-
 void muse_settings_set_wifi(const char *ssid, const char *pass)
 {
     if (muse_link_wifi_set(ssid ? ssid : "", ssid && ssid[0] && pass ? pass : "")) {
@@ -335,3 +323,29 @@ esp_err_t muse_settings_set_hatch_token(const char *token, bool append)
     }
     return err;
 }
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* The wake word opt-in, kept apart (and last) so builds without the feature
+ * compile this file exactly as before. Read from NVS on first use, which is
+ * muse_wakeword_init() after muse_settings_init(). Default off: listening is
+ * an explicit opt-in. */
+static bool s_wakeword_on, s_wakeword_loaded;
+
+bool muse_settings_wakeword_on(void)
+{
+    if (!s_wakeword_loaded) {
+        uint8_t b = 0;
+        s_wakeword_on = nvs_get_u8(s_nvs, "ww_on", &b) == ESP_OK && b;
+        s_wakeword_loaded = true;
+    }
+    return s_wakeword_on;
+}
+
+void muse_settings_set_wakeword_on(bool on)
+{
+    s_wakeword_on = on;
+    s_wakeword_loaded = true;
+    save_u8("ww_on", on);
+    notify(MUSE_SETTING_WAKEWORD);
+}
+#endif

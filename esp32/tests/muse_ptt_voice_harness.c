@@ -17,6 +17,11 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdarg.h>
+/* Count muse_voice's turn-ended notices: the header is included first, so
+ * its declaration is untouched, then calls in muse_voice.c land here. */
+#include "muse_wakeword_glue.h"
+static int turn_ended_calls;
+#define muse_wakeword_turn_ended() (void)(++turn_ended_calls)
 #include "muse_voice.c"
 #define TAG INPUT_TAG
 #define s_queue input_queue
@@ -24,7 +29,24 @@
 #undef s_queue
 #undef TAG
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* The glue's hooks as no-ops: the wake word scenarios post synthetic
+ * edges and seeds themselves. */
+esp_err_t muse_wakeword_init(QueueHandle_t q) { (void)q; return ESP_OK; }
+void muse_wakeword_on_audio(const int16_t *pcm, size_t frames) { (void)pcm; (void)frames; }
+void muse_wakeword_note_ptt(bool down) { (void)down; }
+void muse_wakeword_set_enabled(bool on) { (void)on; }
+bool muse_wakeword_enabled(void) { return false; }
+bool muse_wakeword_listening(void) { return false; }
+void muse_wakeword_set_playback(bool on) { (void)on; }
+void muse_wakeword_set_ptt_turn(bool active) { (void)active; }
+const char *muse_wakeword_runner_kind(void) { return "fake"; }
+void muse_wakeword_status(muse_wakeword_status_t *out) { *out = (muse_wakeword_status_t){ .runner = "fake" }; }
+#endif
+
 struct test_queue { muse_input_event_t items[64]; int n; } queue;
+/* 70-89 run the whole voice loop; 90 and up are unit scenarios again. */
+#define VOICE_LOOP (scenario>=70 && scenario<90)
 static int scenario, frame, starts, ends, allocations, notes, writes, delivered, tail_reads;
 static int64_t clock_us;
 static float ring_values[32];
@@ -156,7 +178,7 @@ float muse_audio_dbfs(const int16_t *p,size_t n) { (void)n; return (float)p[0]/1
 float muse_audio_level(const int16_t *p,size_t n) { assert(n); return (float)p[0]/1000; }
 
 /* Legacy path is a tripwire, not another implementation of the note engine. */
-void muse_hatch_turn_begin(void) { ++notes; if(scenario>=70) longjmp(finish,3); if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
+void muse_hatch_turn_begin(void) { ++notes; if(VOICE_LOOP) longjmp(finish,3); if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
 void muse_hatch_turn_audio(const int16_t *p,size_t n) {
     if(verify_pcm) {
         assert(note_frames+n<=MAX_FRAMES);
@@ -206,7 +228,7 @@ size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) {
 #if CONFIG_MUSE_REALTIME_VOICE
 static int pending_at_ready = -1;
 bool muse_voice_call_ready(void) { pending_at_ready = (atomic_load(&s_call_pending)!=0); return ready; }
-void muse_voice_call_start(void) { ++starts; held=false; if(scenario>=70) longjmp(finish,2); }
+void muse_voice_call_start(void) { ++starts; held=false; if(VOICE_LOOP) longjmp(finish,2); }
 void muse_voice_call_start_ptt(void) {
     ++starts; held=true;
     if(scenario==33) overflow_input(MUSE_PTT_UP);
@@ -287,7 +309,7 @@ muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
 #endif
 
 esp_err_t muse_audio_read(int16_t *p,size_t n) {
-    if(scenario>=70) {
+    if(VOICE_LOOP) {
         /* Stop after the actual outer voice loop has handled the attempt,
          * before it can consume a newer DOWN or overwrite its result. */
         /* A waking tap leaves the screen as it was (IDLE): stop once it's handled. */
@@ -297,6 +319,12 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         clock_us+=(scenario==70 || scenario==72 || scenario==73)?40000:20000;
         assert(frame<100);
         if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+        if(scenario==87 && frame==5) {
+            muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+            xQueueSend(&queue,&u,0);
+        }
+#endif
         if((scenario==82 || scenario==84) && frame==20) post(MUSE_PTT_UP,false);   /* 400 ms */
         if(scenario==85 || scenario==86) {
             /* Toggle: a waking tap, then a press that starts a note and is let go. */
@@ -327,12 +355,14 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
     if(scenario>=50) {
         note_burst=0;
         /* Toggle mode (64-66): letting go of the first press, then a press that stops. */
-        if(frame==note_release_frame) push(scenario>=64 && scenario<=66 ? MUSE_PTT_DOWN : MUSE_PTT_UP);
+        if(frame==note_release_frame) push((scenario>=64 && scenario<=66) || (scenario==69 && NOTE_TOGGLE) ? MUSE_PTT_DOWN : MUSE_PTT_UP);
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
         if(scenario==67 && frame==40) {   /* the wake word's endpointing */
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
             xQueueSend(&queue,&u,0);
         }
+#endif
         if(scenario==58 && frame==10) atomic_store(&s_shutdown,true);
         if(scenario==59 && frame==10) atomic_fetch_add(&s_call_epoch,1);
         for(size_t i=0;i<n;i++) p[i]=scenario>=60 ?
@@ -415,6 +445,7 @@ esp_err_t muse_audio_write(const int16_t *p,size_t n) {
 int main(int argc,char **argv) {
     assert(argc==2); scenario=atoi(argv[1]); s_queue=input_queue=&queue; ready=true;
     s_pre=calloc(PRE_CAP_CHUNKS,sizeof(*s_pre));
+#if CONFIG_MUSE_WAKEWORD_ENABLE
     if(scenario==90) {
         /* A wake word press that interrupts a reply stays synthetic, and a
          * real press after it does not inherit that. */
@@ -424,6 +455,20 @@ int main(int argc,char **argv) {
         push(MUSE_PTT_DOWN);
         assert(got_event(MUSE_PTT_DOWN) && !s_press_synthetic);
         free(s_pre); return 0;
+    }
+    if(scenario==94) {
+        /* The only audio from before a detection that can leave the device:
+         * the seed, at most 1 s, in whole chunks. */
+        static int16_t two_s[2*MUSE_AUDIO_RATE+123];
+        for(size_t i=0;i<sizeof(two_s)/sizeof(two_s[0]);i++) two_s[i]=(int16_t)(i%1000+1);
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        muse_voice_seed_preroll(two_s,sizeof(two_s)/sizeof(two_s[0]));
+        assert(SEED_FRAMES==MUSE_AUDIO_RATE && s_seed_frames==SEED_FRAMES);
+        muse_voice_seed_preroll(two_s,1000);
+        assert(s_seed_frames==1000/MUSE_AUDIO_CHUNK*MUSE_AUDIO_CHUNK);
+        muse_voice_seed_preroll(NULL,0);
+        assert(s_seed_frames==0);
+        free(s_seed); s_seed=NULL; free(s_pre); return 0;
     }
     if(scenario==91) {
         /* A wake word press: its seed already holds the pre-roll and the
@@ -439,13 +484,40 @@ int main(int argc,char **argv) {
         assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
         note_release_frame=40;
         assert(note_held(false,false)==NOTE_ACCEPTED);
-        assert(s_pre_fill>0 && s_pre_fill<=PRE_CAP_CHUNKS);
-        for(size_t i=0;i<s_pre_fill;i++) {
-            pre_get(i,s_chunk);
-            assert(s_chunk[MUSE_AUDIO_CHUNK-1]>-1000);   /* no idle pre-roll */
-        }
+        assert(!s_pre_fill);   /* no idle pre-roll after the seed */
         free(s_pre); return 0;
     }
+    if(scenario==92) {
+        /* A hands-free turn is admitted at once: no hold to measure, so no
+         * audio is read outside record() (where the wake core hears it).
+         * After a barge-in only Muse's own tail is skipped. */
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED && frame==0);
+        assert(note_held(false,true)==NOTE_ACCEPTED && frame==SETTLE_CHUNKS);
+        free(s_pre); return 0;
+    }
+    if(scenario==93) {
+        /* A real press while a hands-free note starts takes it over: one
+         * note, ended by the finger's release, nothing dropped. */
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        push(MUSE_PTT_DOWN);   /* the finger lands right away */
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        note_release_frame=60;
+        char why[96];
+        assert(record(true,why,sizeof(why)) && notes==1);
+        assert(frame>=60 && frame<=60+7 && !turn_ended_calls);
+        drop_rec(); free(s_pre); return 0;
+    }
+#endif
     if(scenario>=70) {
         notes_mode=true; clock_us=1000000;
         if(scenario==78 || scenario==84) {
@@ -453,11 +525,22 @@ int main(int argc,char **argv) {
             mode=MUSE_MODE_IDLE; snprintf(caption,sizeof(caption),"PREVIOUS REPLY"); ready=false;
         }
         if(scenario==85 || scenario==86) assert(NOTE_TOGGLE);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+        if(scenario==87) {
+            /* A wake word press, released (listening disabled) 100 ms later. */
+            muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+            xQueueSend(&queue,&e,0);
+        } else
+#endif
         post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
         int outcome=setjmp(finish);
         if(!outcome) voice_task(NULL);
         bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
-        if(scenario==79 || scenario==83) {
+        /* A short hands-free gesture is never tap-to-call, and shows no hint. */
+        if(scenario==87) {
+            /* Admitted at once: its synthetic release ends a short note. */
+            assert(outcome==3 && notes==1 && !starts);
+        } else if(scenario==79 || scenario==83) {
             assert(outcome==3 && notes==1 && !starts && clock_us>=1600000);
             /* A waking press shows nothing until it qualifies as a note. */
             if(scenario==83) assert(first_mode_us>=1600000);
@@ -493,6 +576,7 @@ int main(int argc,char **argv) {
         }
         drop_rec(); free(s_pre); return 0;
     }
+#if CONFIG_MUSE_WAKEWORD_ENABLE
     if(scenario==67) {
         /* Toggle builds: a wake word note still ends at its synthetic
          * release, not at the 15 s cap waiting for a second press. */
@@ -508,8 +592,49 @@ int main(int argc,char **argv) {
         char why[96];
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>40 && frame<=40+7 && note_frames<MAX_FRAMES);
+        assert(!turn_ended_calls);   /* the glue's own release ended it */
         drop_rec(); free(s_pre); return 0;
     }
+    if(scenario==69) {
+        /* Stray wake word edges during a button note change nothing: a
+         * synthetic release doesn't end it or make it a tap, and a synthetic
+         * press doesn't cancel it (the glue is told its capture is over). */
+        clock_us=1000000;
+        post(MUSE_PTT_DOWN,false);
+        assert(got_event(MUSE_PTT_DOWN) && !s_press_synthetic);
+        muse_input_event_t up={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        muse_input_event_t dn={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&up,0);
+        xQueueSend(&queue,&dn,0);
+        note_release_frame=60;
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+        assert(turn_ended_calls==1 && !queue.n);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        xQueueSend(&queue,&up,0);
+        char why[96];
+        assert(record(false,why,sizeof(why)) && notes==1);
+        assert(frame>=60 && frame<=60+7);   /* the real release (toggle: press) ended it */
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==68) {
+        /* A hands-free note that runs to the recorder's cap: the glue is told,
+         * so its capture closes and the next wake is heard. */
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        char why[96];
+        assert(record(true,why,sizeof(why)) && notes==1);
+        assert(turn_ended_calls==1);
+        drop_rec(); free(s_pre); return 0;
+    }
+#endif
     if(scenario>=50) {
         /* Run the actual note admission/recording path: no transport call is
          * allowed before both thresholds, even without a whole-note buffer. */

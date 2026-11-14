@@ -41,6 +41,22 @@ refuses to proceed if it does not cover this model.
   the checkpoint's per-mel mean/std normalization.
 - No VAD. Endpointing after a wake is the SDK-side energy tier.
 
+## Measured accuracy
+
+From the checkpoint's own streaming test (fp32, the clean-voice training
+bundle's test set), at the detector thresholds `ww_detector.c` uses:
+
+| Sensitivity | Threshold | Wake words caught | False wakes per hour |
+| --- | --- | --- | --- |
+| Low | 0.99 | 51.3% | 3.98 |
+| Default | 0.95 | 78.7% | 33.8 |
+| High | 0.90 | not measured | not measured |
+
+No threshold reaches one false wake an hour or fewer. These are not
+measurements of the int8 model on a device, which haven't been made; the
+int8 export's parity check against fp32 is in `hey_muse.json`. A false
+wake followed by speech within 2.5 s sends a voice note.
+
 
 
 ## Attribution

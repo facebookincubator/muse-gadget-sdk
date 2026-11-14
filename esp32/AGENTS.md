@@ -874,9 +874,9 @@ against the policy, and `link.register`'s size.
 
 Muse calls a gadget's commands by name: the firmware lists them in
 `link.register` and answers each `link.invoke`. A command you add lives in two
-places, which must use the same name. (`device.health`, `device.guide` and
-`device.ota` are handled in `noise_control.cpp` itself; everything else goes
-through `on_ws_command()`.)
+places, which must use the same name. (`device.health` and `device.guide` are
+handled in `noise_control.cpp` itself; everything else goes through
+`on_ws_command()`.)
 
 1. **Advertise it** in `build_register_json()` in `main/noise_control.cpp`:
    `add_command(commands, "relay.set", "<description>", required, optional)`.

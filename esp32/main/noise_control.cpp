@@ -53,7 +53,6 @@ extern "C" {
     CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
 #include "reterminal_battery.h"
 #endif
-#include "ota.h"
 #include "tunnel_netif.h"
 #if CONFIG_MUSE_ENABLED
 extern "C" {
@@ -1634,17 +1633,11 @@ static char *build_register_json(void) {
 #endif
 
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-    add_command(commands, "enable_wakeword",
-                "Turn hands-free wake word listening on: saying the wake word "
-                "then starts a voice note like holding the talk button. Kept "
-                "across restarts. Returns enabled and listening state and the "
-                "runner in use; runner \"bench\" means a test double that "
-                "detects no speech.",
-                nullptr, nullptr);
-    add_command(commands, "disable_wakeword",
-                "Turn hands-free wake word listening off at once, ending any "
-                "hands-free capture in progress. Kept across restarts. "
-                "Returns the same state as enable_wakeword.",
+    add_command(commands, "wakeword.disable",
+                "Turn off hands-free \"Hey Muse\" listening at once, ending any "
+                "hands-free voice note in progress. Only someone at the device "
+                "can turn it back on. Kept across restarts. Returns enabled and "
+                "listening (both false).",
                 nullptr, nullptr);
 #endif
 
@@ -1660,22 +1653,6 @@ static char *build_register_json(void) {
     cJSON_AddNumberToObject(
         cJSON_GetObjectItem(commands, "camera.capture"), "timeout_ms", 30000);
 #endif
-
-    if (ota_is_enabled()) {
-        cJSON *ota_required = cJSON_CreateObject();
-        cJSON_AddItemToObject(ota_required, "url",
-                              string_param("HTTPS URL of the .bin firmware image to flash."));
-        cJSON *ota_optional = cJSON_CreateObject();
-        cJSON *force_param = cJSON_CreateObject();
-        cJSON_AddStringToObject(force_param, "type", "boolean");
-        cJSON_AddStringToObject(force_param, "description",
-                                "Install even if the image version is not newer.");
-        cJSON_AddItemToObject(ota_optional, "force", force_param);
-        add_command(commands, "device.ota",
-                    "Download a firmware image from `url` and apply it "
-                    "(esp_https_ota), then reboot.",
-                    ota_required, ota_optional);
-    }
 
 #if CONFIG_HOMEHUB_BLE_COMMANDS
     ble_commands_register(commands);
@@ -1701,14 +1678,9 @@ static char *build_register_json(void) {
     return json;
 }
 
-// ---- OTA callback ----------------------------------------------------------
+// ---- Async results ---------------------------------------------------------
 
-struct ota_ctx {
-    noise_ctrl_session_generation_t session_generation;
-    char request_id[64];
-};
-
-// Queued result from OTA or other async operations.
+// Queued result from an asynchronous command.
 static void queue_result(noise_ctrl_session_generation_t session_generation,
                          const char *request_id, cJSON *result) {
     if (!session_generation || !s_result_q || !request_id) {
@@ -1728,45 +1700,6 @@ static void queue_result(noise_ctrl_session_generation_t session_generation,
         cJSON_Delete(result);
         ESP_LOGW(TAG, "result queue full, dropping result for %s", request_id);
     }
-}
-
-static void noise_ota_status(const ota_event_t *ev, void *user) {
-    auto *ctx = static_cast<ota_ctx *>(user);
-    cJSON *result = cJSON_CreateObject();
-
-    switch (ev->result) {
-        case OTA_RESULT_APPLIED: {
-            cJSON_AddBoolToObject(result, "ok", true);
-            char payload[192];
-            snprintf(payload, sizeof(payload),
-                     "{\"status\":\"applied\",\"version\":\"%s\",\"rebooting\":true}",
-                     ev->new_version ? ev->new_version : "");
-            cJSON_AddStringToObject(result, "payload_json", payload);
-            break;
-        }
-        case OTA_RESULT_SKIPPED: {
-            cJSON_AddBoolToObject(result, "ok", true);
-            char payload[192];
-            snprintf(payload, sizeof(payload),
-                     "{\"status\":\"skipped\",\"version\":\"%s\",\"running\":\"%s\"}",
-                     ev->new_version ? ev->new_version : "",
-                     ev->running_version ? ev->running_version : "");
-            cJSON_AddStringToObject(result, "payload_json", payload);
-            break;
-        }
-        default: {
-            cJSON_AddBoolToObject(result, "ok", false);
-            cJSON *error = cJSON_CreateObject();
-            cJSON_AddStringToObject(error, "code", "ota_failed");
-            cJSON_AddStringToObject(error, "message",
-                                    ev->detail ? ev->detail : "ota failed");
-            cJSON_AddItemToObject(result, "error", error);
-            break;
-        }
-    }
-
-    queue_result(ctx->session_generation, ctx->request_id, result);
-    free(ctx);
 }
 
 // ---- Inbound message dispatch -----------------------------------------------
@@ -1929,38 +1862,7 @@ static void handle_invoke_request(
 
     ESP_LOGI(TAG, "invoke request: command=%s", command);
 
-    if (strcmp(command, "device.ota") == 0) {
-        cJSON *url = cmd_params ? cJSON_GetObjectItem(cmd_params, "url") : nullptr;
-        cJSON *force = cmd_params ? cJSON_GetObjectItem(cmd_params, "force") : nullptr;
-        if (cJSON_IsString(url) && url->valuestring && url->valuestring[0]) {
-            auto *ctx = static_cast<ota_ctx *>(malloc(sizeof(ota_ctx)));
-            if (ctx) {
-                ctx->session_generation = session_generation;
-                strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
-                ctx->request_id[sizeof(ctx->request_id) - 1] = '\0';
-                ota_start(url->valuestring, cJSON_IsTrue(force),
-                          noise_ota_status, ctx);
-            } else {
-                cJSON *result = cJSON_CreateObject();
-                cJSON_AddBoolToObject(result, "ok", false);
-                cJSON *error = cJSON_CreateObject();
-                cJSON_AddStringToObject(error, "code", "out_of_memory");
-                cJSON_AddStringToObject(error, "message",
-                                        "failed to allocate OTA context");
-                cJSON_AddItemToObject(result, "error", error);
-                queue_result(session_generation, request_id, result);
-            }
-        } else {
-            cJSON *result = cJSON_CreateObject();
-            cJSON_AddBoolToObject(result, "ok", false);
-            cJSON *error = cJSON_CreateObject();
-            cJSON_AddStringToObject(error, "code", "invalid_params");
-            cJSON_AddStringToObject(error, "message",
-                                    "device.ota requires a non-empty url");
-            cJSON_AddItemToObject(result, "error", error);
-            queue_result(session_generation, request_id, result);
-        }
-    } else if (strcmp(command, "device.health") == 0) {
+    if (strcmp(command, "device.health") == 0) {
         send_device_health(session_generation, request_id);
     } else if (strcmp(command, "device.guide") == 0) {
         send_device_guide(session_generation, request_id);
