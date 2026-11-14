@@ -940,6 +940,12 @@ class WasmAppsTest(unittest.TestCase):
         self.assertLess(roller.index("lv_obj_get_style_text_letter_space(s->obj, LV_PART_MAIN) <= 0"),
                         roller.index("lv_roller_set_options("))
 
+    def test_storage_out_of_memory_paths(self):
+        flash = function(read("components/muse_apps/muse_apps_flash.c"), "static void walk(")
+        self.assertIn('if (!cJSON_AddStringToObject(entry, "name", name)', flash)
+        start = function(read("components/muse_apps/muse_apps_store.c"), "void muse_apps_store_start(")
+        self.assertIn("if (s_q) vQueueDeleteWithCaps(s_q);", start)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

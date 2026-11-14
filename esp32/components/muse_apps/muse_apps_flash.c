@@ -235,8 +235,11 @@ static void walk(const char *root, const char *rel, walk_t *w, int depth) {
             continue;
         }
         cJSON *entry = cJSON_CreateObject();
-        cJSON_AddStringToObject(entry, "name", name);
-        cJSON_AddNumberToObject(entry, "bytes", (double)st.st_size);
+        if (!cJSON_AddStringToObject(entry, "name", name) || !cJSON_AddNumberToObject(entry, "bytes", (double)st.st_size)) {
+            cJSON_Delete(entry);   /* out of memory: the list is short, not broken */
+            w->more = true;
+            continue;
+        }
         cJSON_AddItemToArray(w->list, entry);
         w->count++;
     }

@@ -596,6 +596,8 @@ void muse_apps_store_start(void) {
     s_q = xQueueCreateWithCaps(QUEUE_LEN, sizeof(st_req_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_lock || !s_q) {
         ESP_LOGE(TAG, "no memory for the store");
+        if (s_q) vQueueDeleteWithCaps(s_q);   // without it, requests are refused rather than left unanswered
+        s_q = NULL;
         return;
     }
     s_persistent = mount(LABEL, ROOT, "installed apps last until restart");
