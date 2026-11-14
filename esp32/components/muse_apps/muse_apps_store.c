@@ -189,6 +189,11 @@ static bool forget_marked(void) {
     return marked;
 }
 
+// A partition that's there but didn't mount: whatever it holds is still there.
+static bool unmounted(const char *label, bool mounted) {
+    return !mounted && esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, label);
+}
+
 // Unpairing removes every app, before the next change: an install that was
 // downloading meanwhile doesn't land for the next owner.
 static bool forget_if_asked(void) {
@@ -197,9 +202,10 @@ static bool forget_if_asked(void) {
     muse_apps_catalog_wipe();
     publish();
     atomic_store(&s_unwiped, true);
-    if (s_files && !muse_apps_flash_wipe(FILES_ROOT)) {
-        // Something was still open: the mark stays, and the next start wipes again.
-        ESP_LOGW(TAG, "unpaired: a file couldn't be removed yet; trying again at the next start");
+    if ((s_files && !muse_apps_flash_wipe(FILES_ROOT)) || unmounted(LABEL, s_persistent) ||
+        unmounted(FILES_LABEL, s_files)) {
+        // Something was still open, or a partition didn't mount: the mark stays, and the next start wipes again.
+        ESP_LOGW(TAG, "unpaired: not everything could be removed yet; trying again at the next start");
         return true;
     }
     forget_mark(false);

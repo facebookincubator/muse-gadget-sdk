@@ -649,7 +649,8 @@ class WasmAppsTest(unittest.TestCase):
 
     def test_an_unpairing_wipe_that_left_a_file_is_tried_again(self):
         forget = function(read("components/muse_apps/muse_apps_store.c"), "static bool forget_if_asked(")
-        self.assertIn("if (s_files && !muse_apps_flash_wipe(FILES_ROOT)) {", forget)
+        self.assertIn("(s_files && !muse_apps_flash_wipe(FILES_ROOT)) || unmounted(LABEL, s_persistent) ||", forget)
+        self.assertIn("unmounted(FILES_LABEL, s_files)", forget)
         self.assertLess(forget.index("!muse_apps_flash_wipe(FILES_ROOT)"), forget.index("forget_mark(false);"))
         self.assertIn("bool muse_apps_flash_wipe(const char *root);", read("components/muse_apps/muse_apps_flash.h"))
 
