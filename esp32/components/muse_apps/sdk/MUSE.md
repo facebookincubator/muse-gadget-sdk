@@ -1121,8 +1121,8 @@ As C defines, for an app:
 #define P_TEXT_OPA 126  /* opa, style */
 #define P_TEXT_FONT 127  /* font, style */
 #define P_TEXT_ALIGN 128  /* text_align, style */
-#define P_TEXT_LETTER_SPACE 129  /* int, style */
-#define P_TEXT_LINE_SPACE 130  /* int, style */
+#define P_TEXT_LETTER_SPACE 129  /* int, style. 0..1024 px. */
+#define P_TEXT_LINE_SPACE 130  /* int, style. 0..1024 px. */
 #define P_TEXT_DECOR 131  /* text_decor, style */
 #define P_LINE_COLOR 132  /* rgb, style */
 #define P_LINE_WIDTH 133  /* int, style. 0..1024 px. */

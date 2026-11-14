@@ -1125,8 +1125,8 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_TEXT_OPA` | opa | style | rw |  |
 | `P_TEXT_FONT` | font | style | rw |  |
 | `P_TEXT_ALIGN` | text_align | style | rw |  |
-| `P_TEXT_LETTER_SPACE` | int | style | rw |  |
-| `P_TEXT_LINE_SPACE` | int | style | rw |  |
+| `P_TEXT_LETTER_SPACE` | int | style | rw | 0..1024 px. |
+| `P_TEXT_LINE_SPACE` | int | style | rw | 0..1024 px. |
 | `P_TEXT_DECOR` | text_decor | style | rw |  |
 | `P_LINE_COLOR` | rgb | style | rw |  |
 | `P_LINE_WIDTH` | int | style | rw | 0..1024 px. |
