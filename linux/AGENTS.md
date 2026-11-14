@@ -96,18 +96,28 @@ Reinstalling keeps the pairing. It restarts the service, which kills any
 command Muse is running at that moment, so check the log for recent `invoke`
 lines first.
 
-For a quicker loop, build a wheel and install it into the existing venv:
+To install a wheel you built, give it to the installer:
 
 ```sh
 uv build --wheel
 # on the device:
-sudo /opt/musegadget/bin/uv pip install --python /opt/musegadget/venv/bin/python --no-deps --reinstall musegadget-*.whl
-sudo systemctl restart musegadget
+bash install.sh --from musegadget-*.whl --run-as USER --yes   # copy just one wheel
 ```
+
+Pass the same `--run-as` as before: without it, commands run as the account
+running the installer.
+
+Upgrade through the installer only. It checks `/opt/musegadget/bin/uv`
+against a pinned checksum, and builds a new venv, before running anything there
+as root. Don't run that uv with `sudo` yourself.
 
 Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
 `--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
-keep it that way.
+keep it that way. Root runs everything under `/opt/musegadget`, so the
+installer never runs a file there that another account could have changed.
+To move to a new uv, update `UV_VERSION` and both checksums for each target
+in `uv_release`, from the release's `.sha256` files and the binaries in the
+archives. `tests/test_install_sh.py` checks that each target has both.
 
 ## Run and debug
 
