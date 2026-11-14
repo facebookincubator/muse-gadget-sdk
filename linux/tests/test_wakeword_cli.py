@@ -368,3 +368,23 @@ def test_capture_backlog_fails_that_call_and_keeps_live_listening(
     assert cli.main(["voice-call", "--vm-id", "target", "--live", "--wake-word"]) == 130
     assert len(calls) == 2
     assert "capture_backlog; returning to wake-word listening" in capsys.readouterr().out
+
+
+def test_run_service_never_loads_capture_or_the_wake_word():
+    # Only a local `voice-call` opens the microphone. The paired service, its
+    # commands and its local socket never load audio capture or the detector,
+    # so nothing Muse invokes through them reaches this code.
+    import subprocess
+
+    probe = (
+        "import sys\n"
+        "import musegadget.cli, musegadget.service, musegadget.executor\n"
+        "loaded = sorted(m for m in sys.modules if m in ('sounddevice',"
+        " 'musegadget.voice_audio', 'musegadget.wakeword',"
+        " 'musegadget.wakeword_input', 'musegadget.voice_call'))\n"
+        "print(','.join(loaded))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == ""
