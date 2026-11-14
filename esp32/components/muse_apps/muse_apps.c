@@ -845,6 +845,9 @@ void muse_apps_launcher_close(void)
  * request queue had no room for, as its reason + 1: it mustn't be lost. */
 static atomic_int s_view_stop;
 
+/* Set when the gadget moves to another VM; a new app starts clear. */
+static atomic_bool s_vm_moved;
+
 static void on_view_exit(int reason)
 {
     req_t r = {.kind = REQ_STOP, .o = {.from = MUSE_APPS_FROM_VIEW}, .reason = reason};
@@ -1319,6 +1322,7 @@ static void run(req_t *r)
     bool covered = s_app.running || s_launcher;   /* the view has the screen already */
     stop(GADGET_STOP_REPLACED, NULL, true);
     hide_launcher(true);
+    atomic_store(&s_vm_moved, false);   /* this app's requests go to the VM the gadget is on now */
     s_app.id[0] = s_app.title[0] = '\0';
     uint8_t *bytes = r->bytes;
     size_t len = r->len;
@@ -2102,6 +2106,21 @@ cJSON *muse_apps_command(const char *command, cJSON *params, const char *request
 void muse_apps_forget_all(void)
 {
     muse_apps_store_forget_all();
+}
+
+bool muse_apps_vm_moved(void)
+{
+    return atomic_load(&s_vm_moved);
+}
+
+void muse_apps_vm_changed(void)
+{
+    if (!s_state) {
+        return;
+    }
+    atomic_store(&s_vm_moved, true);   /* no new request from the running app ... */
+    muse_apps_vm_close_all();          /* ... and its queued ones are dropped */
+    on_view_exit(GADGET_STOP_USER);
 }
 
 void muse_apps_run_installed(const muse_apps_origin_t *o, const char *id, const char *name, uint8_t *bytes,

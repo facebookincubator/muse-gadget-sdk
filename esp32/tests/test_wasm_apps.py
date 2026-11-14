@@ -914,6 +914,18 @@ class WasmAppsTest(unittest.TestCase):
         put = console[console.index('if (!strncmp(line, "app.put=", 8)) {'):]
         self.assertLess(put.index("strlen(line + 8) >= sizeof(r.path)"), put.index("snprintf(r.path"))
 
+    def test_a_vm_switch_stops_the_running_app(self):
+        """An app run for one VM mustn't act, with its permissions, on the next."""
+        app = read("main/app.c")
+        for name in ["static void set_vm_with_gate_held(", "static void reset_default_vm_with_gate_held("]:
+            self.assertIn("muse_apps_vm_changed();", function(app, name)[:300], name)
+        apps = read("components/muse_apps/muse_apps.c")
+        changed = function(apps, "void muse_apps_vm_changed(")
+        self.assertLess(changed.index("atomic_store(&s_vm_moved, true);"), changed.index("on_view_exit("))
+        self.assertIn("muse_apps_vm_close_all();", changed)
+        self.assertIn("atomic_store(&s_vm_moved, false);", function(apps, "static void run("))
+        self.assertIn("muse_apps_vm_moved()", function(read("components/muse_apps/muse_apps_vm.c"), "bool muse_apps_vm_job("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

@@ -232,6 +232,8 @@ bool muse_apps_vm_file_stream(const char *path, size_t max_bytes, int timeout_ms
                               char *err, size_t err_len);
 /* Cancels whatever requests the app left open. */
 void muse_apps_vm_close_all(void);
+/* The gadget moved to another VM since the running app started: its requests are refused. */
+bool muse_apps_vm_moved(void);
 /* An app's path, as file_read and ui_image_load take it, as a path on the VM
  * relative to home: relative to the app's folder, or from "~/" with the
  * files.home permission. 0, or GADGET_ERR_ARG (absolute, "..", too long),

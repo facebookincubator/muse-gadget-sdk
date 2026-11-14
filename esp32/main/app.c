@@ -1431,6 +1431,9 @@ static void on_wifi_scan(void) {
 }
 
 static void set_vm_with_gate_held(const char *url) {
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_vm_changed();  // an app the last VM ran doesn't act on the next one
+#endif
     ble_server_send_status("vm_switching");
     ui_set_status("vm_switching");
     led_status_set_state(LED_STATE_VM_SWITCHING);
@@ -1776,6 +1779,9 @@ static bool reset_setup_from_control(const char *source,
 }
 
 static void reset_default_vm_with_gate_held(void) {
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_vm_changed();
+#endif
     config_erase_key("vm_url");
     ble_server_send_status("vm_switching");
     ui_set_status("vm_switching");
