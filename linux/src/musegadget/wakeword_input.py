@@ -169,6 +169,15 @@ class WakeWordInput:
             self._changed.set()
             self._wake.set()
 
+    @property
+    def backlog_bytes(self) -> int:
+        """Admitted capture not yet taken by the call."""
+        return self._buffer_bytes
+
+    def __aiter__(self):
+        # The call reads the listener itself, so it can see the backlog.
+        return self.frames()
+
     async def frames(self):
         while True:
             if self._error is not None:

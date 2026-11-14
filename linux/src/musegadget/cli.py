@@ -302,7 +302,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
                     if not detected:
                         return "no_wake_word"
                     print("Hey Muse detected; starting voice call.", file=report)
-                    reason = await invoke(audio, listener.frames())
+                    reason = await invoke(audio, listener)
                 finally:
                     await listener.aclose()
                 if not args.live:

@@ -239,7 +239,7 @@ def test_live_rearms_after_call_cleanup_and_reads_rotated_pairing(
 
         async def run(self, source, output, **options):
             calls.append(True)
-            assert await source.__anext__() == TONE
+            assert await source.__aiter__().__anext__() == TONE
             assert Detector.instance.calls == 1
             if len(calls) == 1:
                 config.save_json(

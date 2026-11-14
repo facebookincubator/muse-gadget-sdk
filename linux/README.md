@@ -296,9 +296,12 @@ ends (by default after 45 quiet seconds).
 `--wake-model PATH` selects a compatible XNNPACK PTE. `--wake-timeout SECONDS`
 bounds each local wait; call idle/overall timers start only after activation.
 WAV mode also accepts `--wake-word`, runs at most one call, and exits without
-admitting a call if the file ends before a detection. A live capture backlog
-exceeding four seconds during admission fails that call closed rather than
-silently truncating the user's question; live mode then returns to listening.
+admitting a call if the file ends before a detection. Audio queued after a
+detection (the pre-roll and capture from before the call was ready) is sent up
+to three times faster than real time until it has caught up, so speech doesn't
+arrive later and later. A live capture backlog that still exceeds four seconds
+fails that call closed rather than silently truncating the user's question;
+live mode then returns to listening.
 Startup needs the configured VM to be reachable.
 
 ### Lifecycle diagnostics

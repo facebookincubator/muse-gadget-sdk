@@ -232,6 +232,8 @@ never has a command's parameters, output or error message.
 - `voice-call --wake-word` waits for local detection before admitting a call;
   the default is unchanged. `WakeWordInput` owns the capture iterator and a
   bounded one-second pre-roll/four-second startup queue; always await `aclose()`.
+  The call reads the listener itself and sends its queued backlog at up to
+  three times real time (wall-clock paced) until it is down to one frame.
   Its detector tap alone uses a streaming 24-to-16 kHz FIR. Active calls never
   run detection, and live mode resets/re-arms only after successful cleanup.
   Inference uses the supplied wheel's public ExecuTorch runtime; native code is
