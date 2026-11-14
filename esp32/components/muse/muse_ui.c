@@ -21,6 +21,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <strings.h>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -206,6 +208,31 @@ static lv_obj_t *s_wx_hint;
 static bool s_wx_shown;
 static int s_wx_shown_code = -1;
 static int s_wx_shown_clock = -1;
+/* --- Màn hình chờ luân phiên (idle rotation): đồng hồ -> thời tiết -> khung ảnh ---
+ * Cả ba mặt dùng chung điều kiện hiện/ẩn của màn thời tiết cũ; mỗi mặt hiện
+ * trong muse_settings_idle_dwell_s() giây rồi chuyển mặt kế. Mặt ảnh chỉ
+ * tham gia khi MUSE_IDLE_PHOTOS_OK và quét được ảnh trong /sdcard/photos. */
+#if CONFIG_MUSE_IDLE_PHOTOS && CONFIG_LV_USE_TJPGD && CONFIG_LV_USE_FS_STDIO
+#define MUSE_IDLE_PHOTOS_OK 1
+#else
+#define MUSE_IDLE_PHOTOS_OK 0
+#endif
+typedef enum {
+    IDLE_FACE_NONE = 0,
+    IDLE_FACE_CLOCK,
+    IDLE_FACE_WEATHER,
+    IDLE_FACE_PHOTO,
+} idle_face_t;
+static lv_obj_t *s_clk_panel;   /* mặt đồng hồ để bàn */
+static lv_obj_t *s_clk_time;
+static lv_obj_t *s_clk_date;
+static int s_clk_shown_clock = -1;
+#if MUSE_IDLE_PHOTOS_OK
+static lv_obj_t *s_pic_panel;   /* mặt khung ảnh */
+static lv_obj_t *s_pic_img;
+#endif
+static idle_face_t s_idle_face = IDLE_FACE_NONE;
+static float s_idle_since;   /* thời điểm (giây, esp_timer) mặt hiện tại bắt đầu */
 static lv_image_dsc_t s_image_dsc;  /* its data is set once the image is shown */
 /* The download writes the pixels without the display lock, so a big JPEG isn't
  * held up by each frame; this guards the buffer and what changed in it. */
@@ -1658,9 +1685,166 @@ static void wx_hide_locked(void)
     }
 }
 
-void muse_weather_hide(void)
+/* Cập nhật chữ trên mặt đồng hồ (gọi khi hiện + mỗi phút). */
+static void clk_update_labels(void)
+{
+    time_t now = time(NULL);
+    if (now > 1700000000) {
+        struct tm tmv;
+        localtime_r(&now, &tmv);
+        char buf[40];
+        strftime(buf, sizeof(buf), "%H:%M", &tmv);
+        lv_label_set_text(s_clk_time, buf);
+        snprintf(buf, sizeof(buf), "%s, %02d/%02d/%04d", WX_WEEKDAYS[tmv.tm_wday],
+                 tmv.tm_mday, tmv.tm_mon + 1, tmv.tm_year + 1900);
+        lv_label_set_text(s_clk_date, buf);
+        s_clk_shown_clock = tmv.tm_hour * 60 + tmv.tm_min;
+    } else {
+        lv_label_set_text(s_clk_time, "--:--");
+        lv_label_set_text(s_clk_date, "");
+        s_clk_shown_clock = -1;
+    }
+}
+
+#if MUSE_IDLE_PHOTOS_OK
+#define IDLE_PHOTO_DIR "/sdcard/photos"
+#define IDLE_PHOTO_MAX 32
+static char s_pic_names[IDLE_PHOTO_MAX][64];
+static int s_pic_count;
+static int s_pic_index;   /* ảnh đang hiện trong s_pic_names */
+
+/* Quét thư mục ảnh trên thẻ; trả về true nếu có ít nhất một JPEG. Thứ tự là
+ * thứ tự FAT trả về, không sắp xếp. Thẻ bị rút thì opendir trượt và mặt ảnh
+ * bị bỏ qua, không lỗi. */
+static bool idle_photo_scan(void)
+{
+    s_pic_count = 0;
+    if (!muse_settings_idle_photos()) {
+        return false;
+    }
+    DIR *d = opendir(IDLE_PHOTO_DIR);
+    if (!d) {
+        return false;
+    }
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL && s_pic_count < IDLE_PHOTO_MAX) {
+        const char *dot = strrchr(de->d_name, '.');
+        if (!dot || (strcasecmp(dot, ".jpg") != 0 && strcasecmp(dot, ".jpeg") != 0)) {
+            continue;
+        }
+        strlcpy(s_pic_names[s_pic_count], de->d_name, sizeof(s_pic_names[0]));
+        s_pic_count++;
+    }
+    closedir(d);
+    return s_pic_count > 0;
+}
+
+/* Nạp ảnh idx vào mặt khung ảnh, thu/phóng vừa 320x240 (giữ tỉ lệ, nền đen).
+ * Trả về false nếu file không giải mã được (JPEG progressive, file hỏng,
+ * thẻ vừa bị rút) để nơi gọi thử ảnh kế tiếp. */
+static bool idle_photo_load(int idx)
+{
+    char src[112];
+    snprintf(src, sizeof(src), "%c:%s/%s", (char)LV_FS_STDIO_LETTER,
+             IDLE_PHOTO_DIR, s_pic_names[idx]);
+    lv_image_header_t header;
+    if (lv_image_decoder_get_info(src, &header) != LV_RESULT_OK ||
+        header.w < 1 || header.h < 1) {
+        return false;
+    }
+    lv_image_set_src(s_pic_img, src);
+    uint32_t zw = (uint32_t)(muse_board->width * 256 / header.w);
+    uint32_t zh = (uint32_t)(muse_board->height * 256 / header.h);
+    uint32_t zoom = zw < zh ? zw : zh;
+    if (zoom > 512) {
+        zoom = 512;   /* không phóng quá 2x: mờ và tốn CPU giải mã lại */
+    }
+    if (zoom < 1) {
+        zoom = 1;
+    }
+    lv_image_set_pivot(s_pic_img, header.w / 2, header.h / 2);
+    lv_image_set_scale(s_pic_img, zoom);
+    lv_obj_center(s_pic_img);
+    return true;
+}
+
+/* Hiện ảnh đầu tiên đọc được từ vị trí from; chạy tới cuối danh sách. */
+static bool idle_photo_show_from(int from)
+{
+    if (!s_pic_panel) {
+        return false;
+    }
+    for (int i = from; i < s_pic_count; i++) {
+        if (idle_photo_load(i)) {
+            s_pic_index = i;
+            lv_obj_clear_flag(s_pic_panel, LV_OBJ_FLAG_HIDDEN);
+            s_idle_face = IDLE_FACE_PHOTO;
+            return true;
+        }
+    }
+    return false;
+}
+#endif   /* MUSE_IDLE_PHOTOS_OK */
+
+/* Ẩn mọi mặt của màn chờ và đặt lại vòng luân phiên. */
+static void idle_hide_locked(void)
 {
     wx_hide_locked();
+    if (s_clk_panel) {
+        lv_obj_add_flag(s_clk_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+#if MUSE_IDLE_PHOTOS_OK
+    if (s_pic_panel) {
+        lv_obj_add_flag(s_pic_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+#endif
+    s_idle_face = IDLE_FACE_NONE;
+}
+
+static void idle_show_clock(void)
+{
+    clk_update_labels();
+    lv_obj_clear_flag(s_clk_panel, LV_OBJ_FLAG_HIDDEN);
+    s_idle_face = IDLE_FACE_CLOCK;
+}
+
+static void idle_show_weather(void)
+{
+    wx_update_labels();
+    lv_obj_clear_flag(s_wx_panel, LV_OBJ_FLAG_HIDDEN);
+    s_wx_shown = true;
+    s_idle_face = IDLE_FACE_WEATHER;
+}
+
+/* Chuyển sang mặt kế: đồng hồ -> thời tiết -> từng ảnh -> đồng hồ. */
+static void idle_advance(float now)
+{
+    idle_face_t cur = s_idle_face;
+    idle_hide_locked();
+    bool shown = false;
+    if (cur == IDLE_FACE_WEATHER) {
+#if MUSE_IDLE_PHOTOS_OK
+        if (idle_photo_scan()) {
+            shown = idle_photo_show_from(0);
+        }
+#endif
+    } else if (cur == IDLE_FACE_PHOTO) {
+#if MUSE_IDLE_PHOTOS_OK
+        shown = idle_photo_show_from(s_pic_index + 1);
+#endif
+    } else if (cur == IDLE_FACE_CLOCK) {
+        idle_show_weather();
+        shown = true;
+    }
+    if (!shown) {
+        idle_show_clock();
+    }
+    s_idle_since = now;
+}
+
+void muse_weather_hide(void)
+{
+    idle_hide_locked();
 }
 
 static bool muse_weather_visible(void)
@@ -1668,12 +1852,13 @@ static bool muse_weather_visible(void)
     return s_wx_shown;
 }
 
-/* Gọi từ frame_tick(): trả về true khi màn thời tiết đang hiện (để khỏi vẽ
- * avatar phía sau). Hiện khi: IDLE, màn hình sáng, không chạm đủ lâu. */
+/* Gọi từ frame_tick(): trả về true khi một mặt của màn chờ đang hiện (để
+ * khỏi vẽ avatar phía sau). Hiện khi: IDLE, màn hình sáng, không chạm đủ
+ * lâu (điều kiện của màn thời tiết cũ, muse_weather_idle_timeout()). Vào
+ * màn chờ luôn bắt đầu ở mặt đồng hồ, rồi luân phiên theo dwell. */
 static bool muse_weather_tick(float now)
 {
-    (void)now;
-    if (!s_wx_panel) {
+    if (!s_wx_panel || !s_clk_panel) {
         return false;
     }
     float mode_t;
@@ -1682,32 +1867,39 @@ static bool muse_weather_tick(float now)
     bool want = after > 0 && s_face_active && !muse_voice_in_call() &&
                 mode == MUSE_MODE_IDLE && !muse_state_asleep() &&
                 muse_state_idle_secs() >= after;
-    if (want && !s_wx_shown) {
-        wx_update_labels();
-        lv_obj_clear_flag(s_wx_panel, LV_OBJ_FLAG_HIDDEN);
-        s_wx_shown = true;
-    } else if (!want && s_wx_shown) {
-        wx_hide_locked();
-    }
-    if (s_wx_shown) {
-        /* Đồng hồ lên theo từng phút, dữ liệu mới thì cập nhật chữ. */
-        time_t t = time(NULL);
-        if (t > 1700000000) {
-            struct tm tmv;
-            localtime_r(&t, &tmv);
-            if (tmv.tm_hour * 60 + tmv.tm_min != s_wx_shown_clock) {
-                wx_update_labels();
-            }
+    if (!want) {
+        if (s_idle_face != IDLE_FACE_NONE) {
+            idle_hide_locked();
         }
+        return false;
+    }
+    if (s_idle_face == IDLE_FACE_NONE) {
+        idle_show_clock();
+        s_idle_since = now;
         return true;
     }
-    return false;
+    if (now - s_idle_since >= (float)muse_settings_idle_dwell_s()) {
+        idle_advance(now);
+    }
+    /* Đồng hồ lên theo từng phút, dữ liệu mới thì cập nhật chữ. */
+    time_t t = time(NULL);
+    if (t > 1700000000) {
+        struct tm tmv;
+        localtime_r(&t, &tmv);
+        int minute = tmv.tm_hour * 60 + tmv.tm_min;
+        if (s_idle_face == IDLE_FACE_CLOCK && minute != s_clk_shown_clock) {
+            clk_update_labels();
+        } else if (s_idle_face == IDLE_FACE_WEATHER && minute != s_wx_shown_clock) {
+            wx_update_labels();
+        }
+    }
+    return true;
 }
 
-static void on_weather_clicked(lv_event_t *e)
+static void on_idle_clicked(lv_event_t *e)
 {
     (void)e;
-    wx_hide_locked();
+    idle_hide_locked();
     muse_state_poke();
 }
 
@@ -1722,7 +1914,7 @@ static void muse_weather_build(lv_obj_t *scr)
     lv_obj_set_style_bg_opa(s_wx_panel, LV_OPA_COVER, 0);
     lv_obj_remove_flag(s_wx_panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_wx_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_event_cb(s_wx_panel, on_weather_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_wx_panel, on_idle_clicked, LV_EVENT_CLICKED, NULL);
 
     s_wx_place = make_label(s_wx_panel, muse_font(14), COLOR_DIM);
     lv_label_set_text(s_wx_place, "ĐỒNG XOÀI, BÌNH PHƯỚC");
@@ -1785,6 +1977,50 @@ static void muse_weather_build(lv_obj_t *scr)
     lv_obj_align(s_wx_hint, LV_ALIGN_BOTTOM_MID, 0, -10);
     (void)muse_weather_visible;
 }
+
+/* Mặt đồng hồ để bàn: giờ thật to ở giữa, ngày tháng ở dưới. */
+static void muse_clock_build(lv_obj_t *scr)
+{
+    s_clk_panel = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_clk_panel);
+    lv_obj_set_size(s_clk_panel, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(s_clk_panel, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_clk_panel, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(s_clk_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_clk_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_clk_panel, on_idle_clicked, LV_EVENT_CLICKED, NULL);
+
+    s_clk_time = make_label(s_clk_panel, WX_TEMP_FONT, COLOR_LIT);
+    lv_label_set_text(s_clk_time, "--:--");
+    lv_obj_align(s_clk_time, LV_ALIGN_CENTER, 0, -30);
+
+    s_clk_date = make_label(s_clk_panel, muse_font(20), COLOR_DIM);
+    lv_label_set_text(s_clk_date, "");
+    lv_obj_align(s_clk_date, LV_ALIGN_CENTER, 0, 28);
+
+    lv_obj_t *hint = make_label(s_clk_panel, muse_font(14), COLOR_DIM);
+    lv_label_set_text(hint, T("Tap to return to chat"));
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -10);
+}
+
+#if MUSE_IDLE_PHOTOS_OK
+/* Mặt khung ảnh: một lv_image giữa màn hình đen; src/scale đặt lúc nạp ảnh. */
+static void muse_photos_build(lv_obj_t *scr)
+{
+    s_pic_panel = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_pic_panel);
+    lv_obj_set_size(s_pic_panel, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(s_pic_panel, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_pic_panel, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(s_pic_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_pic_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_pic_panel, on_idle_clicked, LV_EVENT_CLICKED, NULL);
+
+    s_pic_img = lv_image_create(s_pic_panel);
+    lv_obj_remove_flag(s_pic_img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(s_pic_img);
+}
+#endif   /* MUSE_IDLE_PHOTOS_OK */
 
 static void on_any_press(lv_event_t *e)
 {
@@ -1936,6 +2172,10 @@ static void build_overlays(void)
     lv_obj_add_event_cb(s_cover, on_cover_event, LV_EVENT_PRESS_LOST, NULL);
 
     muse_weather_build(scr);
+    muse_clock_build(scr);
+#if MUSE_IDLE_PHOTOS_OK
+    muse_photos_build(scr);
+#endif
 
     if (s_indev) {
         lv_indev_add_event_cb(s_indev, on_any_press, LV_EVENT_PRESSED, NULL);

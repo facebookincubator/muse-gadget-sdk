@@ -157,6 +157,18 @@ const char *muse_voice_call_device_id(void)
     return "homelink-00a1b2";
 }
 
+/* The fork reads these two from its runtime settings; the harness world's
+ * settings hold the fake sdkconfig's values. */
+bool muse_settings_greeting(void)
+{
+    return false;
+}
+
+int muse_settings_call_idle_s(void)
+{
+    return CONFIG_MUSE_REALTIME_VOICE_IDLE_S;
+}
+
 /* ---- The session ---- */
 
 struct op_t {
@@ -1196,6 +1208,18 @@ static std::string cavd_id(double amplitude, const char *rid)
         return ev;
     }
     return ev.substr(0, ev.size() - 1) + ",\"response_id\":\"" + rid + "\"}";
+}
+
+/* One 40 ms audio event in the older downlink shape: no response_id anywhere. */
+static std::string legacy_audio(double amplitude)
+{
+    static double phase;
+    std::vector<int16_t> pcm(960);
+    for (int16_t &v : pcm) {
+        v = (int16_t)lround(amplitude * sin(phase));
+        phase += 2 * M_PI * 440.0 / 24000.0;
+    }
+    return "{\"type\":\"response.output_audio.delta\",\"event_id\":\"e\",\"delta\":\"" + b64(pcm) + "\"}";
 }
 
 static std::string ev_speech(const char *item)
@@ -2936,6 +2960,145 @@ static void hands_free_early_media_and_keep_cap(void)
     expect_event(MUSE_VOICE_CALL_EV_ENDED);
 }
 
+/* A hands-free barge-in (muse_voice_call_interrupt, the voice task's tap):
+ * playback stops at once, response.cancel goes up ahead of the caller's
+ * next mic audio, the cut reply never resumes, and the next reply plays. */
+static void hands_free_interrupt(void)
+{
+    int64_t id = live_call();
+    line(id, ev_speech("i1"));
+    line(id, ev_turn("s1", "i1"));
+    line(id, ev_created("resp_one"));
+    read_all();   /* the speech's flush fence, acked as the voice task acks it at once */
+    for (int i = 0; i < 6; i++) {
+        line(id, cavd_id(8000, "p1"));
+    }
+    std::vector<int16_t> got;
+    bool flushed = false;
+    read_all(&got, &flushed);
+    assert(!flushed && muse_vc_peak(got.data(), got.size()) > 7000);   /* p1 is playing */
+    for (int i = 0; i < 6; i++) {
+        line(id, cavd_id(8000, "p1"));   /* more of it, queued and unread */
+    }
+    /* The tap, and the caller talking over Muse at once. */
+    muse_voice_call_interrupt();
+    size_t before = s_ops.size();
+    mic(3200);
+    poll(5, 10000);
+    std::vector<std::string> sent;
+    for (size_t k = before; k < s_ops.size(); k++) {
+        if (s_ops[k].op == "send" && s_ops[k].id == id) {
+            sent.push_back(s_ops[k].body);
+        }
+    }
+    assert(!sent.empty() && sent[0] == "{\"type\":\"response.cancel\",\"response_id\":\"resp_one\"}\n");
+    size_t cancels = 0, appends = 0;
+    for (const std::string &b : sent) {
+        cancels += b.find("response.cancel") != std::string::npos;
+        appends += b.find("input_audio_buffer.append") != std::string::npos;
+    }
+    assert(cancels == 1 && appends > 0);   /* the cancel, then the caller's audio */
+    got.clear();
+    flushed = false;
+    read_all(&got, &flushed);
+    assert(flushed && got.empty());   /* nothing of the queued reply plays */
+    /* The cut reply's late frames are dropped, before and after its done. */
+    line(id, cavd_id(8000, "p1"));
+    poll();
+    assert(heard_peak() == 0);
+    line(id, ev_done("resp_one"));
+    line(id, cavd_id(8000, "p1"));
+    poll();
+    assert(heard_peak() == 0);
+    /* The caller's new turn: its reply plays. */
+    line(id, ev_speech("i2"));
+    line(id, ev_turn("s2", "i2"));
+    line(id, ev_created("resp_two"));
+    read_all();   /* the speech's flush fence again */
+    line(id, cavd_id(4000, "p2"));
+    poll();
+    int peak = heard_peak();
+    assert(peak > 3000 && peak < 5000);
+    /* An interrupt with nothing open sends no cancel. */
+    line(id, ev_done("resp_two"));
+    poll();
+    before = s_ops.size();
+    muse_voice_call_interrupt();
+    poll(3, 10000);
+    for (size_t k = before; k < s_ops.size(); k++) {
+        assert(s_ops[k].body.find("response.cancel") == std::string::npos);
+    }
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+    print_ops("hands_free_interrupt");
+}
+
+/* A barge-in ends the cut reply's captions too: its trailing words never
+ * reach the screen, and the next reply's start from empty. */
+static void hands_free_interrupt_captions(void)
+{
+    int64_t id = live_call();
+    char text[96];
+    line(id, ev_speech("i1"));
+    line(id, ev_turn("s1", "i1"));
+    line(id, ev_created("resp_one"));
+    line(id, "{\"type\":\"response.output_audio_transcript.delta\",\"event_id\":\"e\",\"delta\":\"First words\"}");
+    expect_event(MUSE_VOICE_CALL_EV_REPLY, text);
+    assert(!strcmp(text, "First words"));
+    muse_voice_call_interrupt();
+    poll();
+    line(id, "{\"type\":\"response.output_audio_transcript.delta\",\"event_id\":\"e\",\"delta\":\" cut off\"}");
+    poll();
+    assert(next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_NONE);
+    line(id, ev_done("resp_one"));
+    line(id, ev_speech("i2"));
+    line(id, ev_turn("s2", "i2"));
+    line(id, ev_created("resp_two"));
+    line(id, "{\"type\":\"response.output_audio_transcript.delta\",\"event_id\":\"e\",\"delta\":\"Second reply\"}");
+    expect_event(MUSE_VOICE_CALL_EV_REPLY, text);
+    assert(!strcmp(text, "Second reply"));   /* not "First words cut off Second reply" */
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
+/* The older downlink carries no provider id: a barge-in still cancels the
+ * open response by its created id, and its audio is dropped while that
+ * response stays open; the next response's audio plays again. */
+static void hands_free_interrupt_legacy(void)
+{
+    int64_t id = live_call();
+    line(id, ev_speech("i1"));
+    line(id, ev_turn("s1", "i1"));
+    line(id, ev_created("resp_one"));
+    read_all();   /* the speech's flush fence, acked as the voice task acks it at once */
+    line(id, legacy_audio(8000));
+    poll();
+    assert(heard_peak() > 7000);   /* legacy audio plays, as it always did */
+    muse_voice_call_interrupt();
+    poll();
+    bool cancelled = false;
+    for (const op_t &o : s_ops) {
+        cancelled |= o.op == "send" && o.id == id &&
+                     o.body == "{\"type\":\"response.cancel\",\"response_id\":\"resp_one\"}\n";
+    }
+    assert(cancelled);
+    bool flushed = false;
+    read_all(nullptr, &flushed);
+    assert(flushed);
+    line(id, legacy_audio(8000));   /* still resp_one's: dropped */
+    poll();
+    assert(heard_peak() == 0);
+    line(id, ev_done("resp_one"));
+    line(id, legacy_audio(8000));   /* the next response's: plays again */
+    poll();
+    assert(heard_peak() > 7000);
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -2957,7 +3120,9 @@ int main(int argc, char **argv)
                                     ptt_stop_discards_ineligible, ptt_stop_paced_ack_only, ptt_stop_paced_ack_eof,
                                     ptt_stop_paced_eof_ack, ptt_stop_paced_output_only, ptt_stop_no_progress_deadline,
                                     ptt_stop_paced_interrupts, hands_free_working,
-                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap };
+                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap,
+                                    hands_free_interrupt, hands_free_interrupt_captions,
+                                    hands_free_interrupt_legacy };
     int which = atoi(argv[1]);
     if (which < 0 || which >= (int)(sizeof(cases) / sizeof(cases[0]))) {
         return 2;

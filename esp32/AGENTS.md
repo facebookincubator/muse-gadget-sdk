@@ -610,6 +610,14 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
 - Hands-free calls shut the mic while Muse is audibly talking, plus 300 ms.
   The Voice PE keeps it open (full duplex) when its XMOS reports echo-cancelled
   outputs at start-up.
+- Hands-free barge-in: in a call, a talk-button tap (BOOT, or the on-screen
+  mic) interrupts — `muse_voice_call_interrupt()` drains playback at once,
+  the session sends `response.cancel` for the in-flight response ahead of
+  the caller's next mic audio, and the reply gate (fed from call start,
+  armed by the first cut) drops the cut reply's late audio and ends its
+  captions; the mic reopens after only the already-sounding tail. Holding
+  the button for a second hangs up instead. Push-to-talk calls keep their
+  press semantics; the speaker key still hangs up there.
 - The VM must accept calls from the gadget's credentials. A `session_control`
   stop on this call's realtime stream ends the call: the client drains queued
   playback and explicitly ends it. The admission body's second line,

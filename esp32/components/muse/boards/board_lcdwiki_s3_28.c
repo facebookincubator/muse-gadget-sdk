@@ -58,6 +58,13 @@
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 
+#if CONFIG_MUSE_LCDWIKI_SD
+#include "driver/sdspi_host.h"
+#include "esp_timer.h"
+#include "esp_vfs_fat.h"
+#include "freertos/semphr.h"
+#endif
+
 static const char *TAG = "board";
 
 /* Landscape, the USB-C port on the right: the panel's 320-row axis runs across. */
@@ -112,6 +119,10 @@ static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static muse_gpio_button_t s_boot;
 static adc_oneshot_unit_handle_t s_adc;
+#if CONFIG_MUSE_LCDWIKI_SD
+static sdmmc_card_t *s_sd_card;
+static SemaphoreHandle_t s_sd_lock;
+#endif
 
 static muse_board_t s_board;
 
@@ -309,6 +320,9 @@ static lv_display_t *display_start(lv_indev_t **touch)
     if (esp_lv_adapter_start() != ESP_OK) {
         return NULL;
     }
+#if CONFIG_MUSE_LCDWIKI_SD
+    sd_start();   /* the SPI2 bus it shares with the panel exists by now */
+#endif
     return disp;
 }
 
@@ -445,6 +459,86 @@ static esp_err_t read_power(muse_power_t *out)
     return ESP_OK;
 }
 
+#if CONFIG_MUSE_LCDWIKI_SD
+/*
+ * TODO(SD pins): the microSD slot's wiring is NOT recorded anywhere in this
+ * tree. The board file's other pins come from LCDWIKI's page for the board
+ * and its xiaozhi-esp32 files (see the header comment), but neither those
+ * sources as quoted here nor devices/AGENTS.md's vendor table give the
+ * slot's lines, and display_start() brings the panel's SPI2 bus up with
+ * MISO unconnected (GPIO_NUM_NC). Fill these three in from LCDWIKI's
+ * published pin table for the ES3C28P/ES3N28P before enabling
+ * CONFIG_MUSE_LCDWIKI_SD; MOSI/SCK are the panel's (LCD_MOSI/LCD_SCLK on
+ * SPI2), which the slot shares on boards of this family. If the slot has
+ * no card-detect line, poll by mount attempt instead of by SD_CD.
+ * Until then the task below refuses to run, and the idle photo frame
+ * (CONFIG_MUSE_IDLE_PHOTOS) simply never finds /sdcard/photos.
+ */
+#define SD_MISO (-1)   /* TODO: the slot's data-out line, as a GPIO number */
+#define SD_CS   (-1)   /* TODO: the slot's chip select */
+#define SD_CD   (-1)   /* TODO: card detect, active low */
+
+#if SD_MISO < 0 || SD_CS < 0 || SD_CD < 0
+/* Pins not filled in yet: no task, one log line, nothing touches the bus. */
+static void sd_start(void)
+{
+    ESP_LOGW(TAG, "SD mount off: slot pins not recorded (TODO in board_lcdwiki_s3_28.c)");
+}
+#else
+static void sd_task(void *arg)
+{
+    (void)arg;
+    const gpio_config_t cd_cfg = { .pin_bit_mask = 1ULL << SD_CD, .mode = GPIO_MODE_INPUT,
+                                   .pull_up_en = GPIO_PULLUP_ENABLE };
+    gpio_config(&cd_cfg);
+    int64_t retry_at = 0;
+    for (;;) {
+        xSemaphoreTake(s_sd_lock, portMAX_DELAY);
+        bool inserted = !gpio_get_level(SD_CD);
+        if (!inserted && s_sd_card) {
+            esp_vfs_fat_sdcard_unmount("/sdcard", s_sd_card);
+            s_sd_card = NULL;
+            ESP_LOGI(TAG, "SD card removed");
+        }
+        if (inserted && !s_sd_card && esp_timer_get_time() >= retry_at) {
+            sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+            host.slot = LCD_HOST;
+            host.max_freq_khz = 20000;
+            sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
+            slot.host_id = LCD_HOST;
+            slot.gpio_cs = SD_CS;
+            slot.gpio_miso = SD_MISO;
+            slot.gpio_mosi = LCD_MOSI;
+            slot.gpio_sck = LCD_SCLK;
+            const esp_vfs_fat_sdmmc_mount_config_t config = {
+                .format_if_mount_failed = false,
+                .max_files = 4,
+            };
+            esp_err_t err = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot, &config, &s_sd_card);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "SD card mounted at /sdcard");
+            } else {
+                s_sd_card = NULL;
+                ESP_LOGW(TAG, "SD mount: %s", esp_err_to_name(err));
+                retry_at = esp_timer_get_time() + 5000000;
+            }
+        }
+        xSemaphoreGive(s_sd_lock);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+/* The panel's SPI bus must exist first, so this runs from display_start(). */
+static void sd_start(void)
+{
+    s_sd_lock = xSemaphoreCreateMutex();
+    if (!s_sd_lock || xTaskCreate(sd_task, "lcdwiki_sd", 4096, NULL, 2, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "SD task not started");
+    }
+}
+#endif   /* SD pins filled in */
+#endif   /* CONFIG_MUSE_LCDWIKI_SD */
+
 static void panel_off(void *arg)
 {
     (void)arg;
@@ -459,6 +553,16 @@ static void panel_off(void *arg)
  */
 static esp_err_t power_off(void)
 {
+#if CONFIG_MUSE_LCDWIKI_SD
+    if (s_sd_lock) {
+        xSemaphoreTake(s_sd_lock, portMAX_DELAY);
+        if (s_sd_card) {
+            esp_vfs_fat_sdcard_unmount("/sdcard", s_sd_card);
+            s_sd_card = NULL;
+        }
+        xSemaphoreGive(s_sd_lock);
+    }
+#endif
     set_brightness(0);
     muse_lcd_bands_run(panel_off, NULL);
     if (s_board.touch) {

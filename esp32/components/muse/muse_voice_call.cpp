@@ -145,6 +145,9 @@ static std::atomic<uint32_t> s_end_gen{0};         /* the call the voice task la
 static std::atomic<uint32_t> s_talk_word{0};
 static std::atomic<uint32_t> s_flush_req{0}, s_flush_ack{0};
 static std::atomic<uint32_t> s_press_req{0}, s_press_ack{0}, s_press_clean{0};
+/* A hands-free barge-in, packed like the talk word: generation (16 bits),
+ * cut number (15). The session acks the word it took into s_cut_ack. */
+static std::atomic<uint32_t> s_cut_word{0}, s_cut_ack{0};
 static std::atomic<uint32_t> s_status{0};
 static std::atomic<uint32_t> s_in_written{0};      /* bytes the voice task put in s_in */
 
@@ -152,6 +155,8 @@ static std::atomic<uint32_t> s_in_written{0};      /* bytes the voice task put i
 static bool v_call, v_ptt, v_talking, v_overflow;   /* v_call: a call, until its ENDED is read */
 static uint32_t v_press;             /* the last press number */
 static uint32_t v_press_told;        /* the press read() last reported as a flush */
+static uint32_t v_cut;               /* the last barge-in number (hands-free) */
+static uint32_t v_cut_told;          /* the cut word read() last reported as a flush */
 
 /* Session task only. */
 static muse_vc_call_t s_call;
@@ -215,6 +220,14 @@ static ring_t s_defer, s_wait;
  * work bound to that response, if any; the server's barge-in on the new
  * speech is what stops the provider's own speech. */
 static char s_cancel[MUSE_VC_TURN_ID_MAX];
+static uint32_t s_cut_seen;          /* the barge-in word the session last took */
+/* A hands-free call's reply gate is fed from the start but only watched;
+ * the first barge-in arms it (s_hf_armed), and from then on its verdicts
+ * rule the downlink as a push-to-talk call's do. s_hf_cut_open is the cut
+ * response's created id: audio that carries no provider id (the older
+ * downlink) is that reply's while it stays the open response. */
+static bool s_hf_armed;
+static char s_hf_cut_open[MUSE_VC_TURN_ID_MAX];
 static uint32_t s_st;                /* status bits (session's copy) */
 static int64_t s_wall_offset_ms;
 static bool s_wall_known;
@@ -623,6 +636,14 @@ static bool ptt_playable(void)
     return (taking_audio() || draining) && ptt_fenced();
 }
 
+/* An armed hands-free call: no button fences its downlink, only the
+ * barge-in's flush does (the session stops writing, the reader empties). */
+static bool hf_playable(void)
+{
+    return taking_audio() && !end_requested() && s_gen.load() == s_call_gen &&
+           s_flush_req.load() == s_flush_ack.load();
+}
+
 static void out_write(const int16_t *pcm, size_t n)
 {
     xStreamBufferSend(s_out, pcm, n * sizeof(int16_t), 0);
@@ -634,7 +655,7 @@ static void out_write(const int16_t *pcm, size_t n)
 /* Moves playable reply audio to s_out as far as it fits. */
 static void defer_flush(void)
 {
-    while (s_defer.len && ptt_playable()) {
+    while (s_defer.len && (s_ptt ? ptt_playable() : hf_playable())) {
         const int16_t *p;
         size_t n = ring_peek(&s_defer, &p);
         size_t room = xStreamBufferSpacesAvailable(s_out) / sizeof(int16_t);
@@ -704,6 +725,33 @@ static void ptt_pressed(uint32_t press)
     s_tail_left = 0;
     s_press = press;
     s_press_ack.store(press);
+}
+
+/* A hands-free barge-in, as a push-to-talk press does it (ptt_pressed): the
+ * cancel target is read before the gate is pressed, queued playback is
+ * dropped behind the flush fence, and the cut reply's caption is done. The
+ * gate has watched the call from the start, so every id it has seen goes
+ * stale; from here on its verdicts rule the downlink (play()). The cancel
+ * goes up with the next pump, ahead of the caller's mic audio. */
+static void hf_cut(void)
+{
+    s_cancel[0] = '\0';
+    s_hf_cut_open[0] = '\0';
+    const char *open = muse_vc_reply_gate_open_response(s_gate);
+    if (!open && s_call.open_response[0]) {
+        open = s_call.open_response;   /* a reply no caller turn opened (the greeting, say) */
+    }
+    if (open) {
+        strlcpy(s_cancel, open, sizeof(s_cancel));
+        strlcpy(s_hf_cut_open, open, sizeof(s_hf_cut_open));
+    }
+    muse_vc_reply_gate_press(s_gate);
+    defer_clear();
+    s_flush_req.fetch_add(1);   /* the reader empties s_out; nothing new is written until it has */
+    s_reply[0] = '\0';          /* the old reply's caption is done too */
+    muse_vc_resampler_init(&s_down, MUSE_VC_WIRE_RATE, MUSE_VC_MIC_RATE);   /* no edge carried from the old reply */
+    s_hf_armed = true;
+    ESP_LOGI(TAG, "barge-in: reply cut");
 }
 
 static void publish(void)
@@ -785,20 +833,31 @@ static void play(const muse_vc_event_t &ev, int64_t now)
         return;   /* barged in: the reader hasn't emptied the buffer yet (PTT: it waits in s_defer) */
     }
     muse_vc_gate_verdict_t verdict = MUSE_VC_GATE_PLAY;
-    if (s_ptt) {
+    if (s_ptt || ev.audio_cavd) {
         verdict = muse_vc_reply_gate_audio(s_gate, &ev);
-        gate_flush();
-        if (muse_vc_reply_gate_full(s_gate) && s_call.state == MUSE_VC_LIVE) {
-            /* Too many replies to tell old from new: end the call, visibly,
-             * rather than risk playing an old one or go quiet for good. */
-            ESP_LOGW(TAG, "too many replies in one call: ending it");
-            strlcpy(s_error, "CALL FULL, CALL AGAIN", sizeof(s_error));
-            take(muse_vc_call_hang_up(&s_call, MUSE_VC_END_FAILED, now));
-            return;
+        if (!s_ptt && !s_hf_armed) {
+            /* Hands-free and not barged into yet: the gate only watches, so
+             * a cut knows every id it has seen; its verdicts and flushes
+             * change nothing until one arms it. */
+            muse_vc_reply_gate_take_flush(s_gate);
+            verdict = MUSE_VC_GATE_PLAY;
+        } else {
+            gate_flush();
+            if (muse_vc_reply_gate_full(s_gate) && s_call.state == MUSE_VC_LIVE) {
+                /* Too many replies to tell old from new: end the call, visibly,
+                 * rather than risk playing an old one or go quiet for good. */
+                ESP_LOGW(TAG, "too many replies in one call: ending it");
+                strlcpy(s_error, "CALL FULL, CALL AGAIN", sizeof(s_error));
+                take(muse_vc_call_hang_up(&s_call, MUSE_VC_END_FAILED, now));
+                return;
+            }
+            if (verdict == MUSE_VC_GATE_DROP) {
+                return;   /* stale, unattributed, or no new turn to answer */
+            }
         }
-        if (verdict == MUSE_VC_GATE_DROP) {
-            return;   /* stale, unattributed, or no new turn to answer */
-        }
+    } else if (s_hf_armed && s_hf_cut_open[0] && !strcmp(s_call.open_response, s_hf_cut_open)) {
+        return;   /* no provider id to judge by (the older downlink): the cut
+                   * reply's, while it is still the open response */
     }
     bool audible;
     long n = muse_vc_decode_audio(&s_down, ev.audio, s_dec, DEC_BYTES, s_pcm, &audible);
@@ -833,6 +892,23 @@ static void play(const muse_vc_event_t &ev, int64_t now)
         }
         return;
     }
+    if (s_hf_armed) {
+        if (verdict == MUSE_VC_GATE_HOLD) {
+            /* The next reply, waiting for its turn like a push-to-talk one. */
+            if (!ring_push(&s_wait, s_pcm, (size_t)n)) {
+                muse_vc_reply_gate_overflow(s_gate);   /* dropped whole, stale */
+            }
+            return;
+        }
+        defer_flush();
+        if (hf_playable() && !s_defer.len && xStreamBufferSpacesAvailable(s_out) >= bytes) {
+            out_write(s_pcm, (size_t)n);
+            s_frames_out++;
+        } else if (!ring_push(&s_defer, s_pcm, (size_t)n)) {
+            s_dropped_audio++;
+        }
+        return;
+    }
     if (xStreamBufferSpacesAvailable(s_out) < bytes) {
         s_dropped_audio++;
         return;
@@ -855,8 +931,10 @@ static void on_line(void *ctx, const char *line, size_t len)
         return;
     }
     bool before = s_call.state == MUSE_VC_LIVE;
-    /* In a push-to-talk call, reply captions only while Muse answers the last hold. */
-    bool captions = !s_ptt || muse_vc_reply_gate_captions(s_gate);
+    /* In a push-to-talk call, reply captions only while Muse answers the
+     * last hold; in a hands-free call, only once a barge-in has armed the
+     * gate (before that, every reply captions as it comes). */
+    bool captions = (!s_ptt && !s_hf_armed) || muse_vc_reply_gate_captions(s_gate);
     switch (ev.kind) {
     case MUSE_VC_EV_RESPONSE_CREATED:
         s_reply[0] = '\0';
@@ -908,7 +986,7 @@ static void on_line(void *ctx, const char *line, size_t len)
     take(muse_vc_call_event(&s_call, &ev, now));
     /* The lifecycle validates first (a turn with a bad or conflicting
      * identity fails the call): the gate only hears what it accepted. */
-    if (s_ptt && before && s_call.state == MUSE_VC_LIVE) {
+    if (before && s_call.state == MUSE_VC_LIVE && (s_ptt || s_hf_armed)) {
         bool was_waiting = muse_vc_reply_gate_waiting(s_gate);
         muse_vc_reply_gate_event(s_gate, &ev);
         gate_flush();
@@ -922,12 +1000,17 @@ static void on_line(void *ctx, const char *line, size_t len)
                 ring_clear(&s_wait);
             }
         }
-        if (ev.kind == MUSE_VC_EV_SPEECH_STARTED) {
+        if (s_ptt && ev.kind == MUSE_VC_EV_SPEECH_STARTED) {
             s_st |= ST_HEARD;
         }
-        if (muse_vc_reply_gate_done(s_gate, &ev)) {
+        if (s_ptt && muse_vc_reply_gate_done(s_gate, &ev)) {
             s_st |= ST_REPLY_DONE;   /* this reply's own turn or response, never an older one's */
         }
+    } else if (before && s_call.state == MUSE_VC_LIVE) {
+        /* Hands-free and not barged into yet: the gate only watches, so feed
+         * it and drop the flushes it raises (they aren't the caller's yet). */
+        muse_vc_reply_gate_event(s_gate, &ev);
+        muse_vc_reply_gate_take_flush(s_gate);
     } else if (s_ptt && s_call.state != MUSE_VC_LIVE) {
         if (ptt_playable()) {
             ring_clear(&s_wait);   /* Muse's goodbye drains only confirmed, playable audio. */
@@ -941,19 +1024,31 @@ static void on_line(void *ctx, const char *line, size_t len)
 
 static const int16_t s_quiet[MIC_PIECE] = {};
 
+/* The pending response.cancel (a push-to-talk press, or a hands-free
+ * barge-in) goes up before the caller's next mic audio. False if the send
+ * failed; the cancel is dropped either way once its send was tried. */
+static bool send_cancel(void)
+{
+    if (!s_cancel[0]) {
+        return true;
+    }
+    char esc[MUSE_VC_TURN_ID_MAX * 6 + 1], cancel[sizeof(esc) + 64];
+    if (muse_vc_json_escape(s_cancel, esc, sizeof(esc))) {
+        int n = snprintf(cancel, sizeof(cancel), "{\"type\":\"response.cancel\",\"response_id\":\"%s\"}\n", esc);
+        if (n > 0 && (size_t)n < sizeof(cancel) &&
+            !muse_session_call_send(s_media_id, reinterpret_cast<const uint8_t *>(cancel), (size_t)n, false)) {
+            return false;
+        }
+    }
+    s_cancel[0] = '\0';
+    return true;
+}
+
 /* A push-to-talk call's uplink: held audio, then quiet. */
 static bool pump_ptt(int64_t now)
 {
-    if (s_cancel[0]) {
-        char esc[MUSE_VC_TURN_ID_MAX * 6 + 1], cancel[sizeof(esc) + 64];
-        if (muse_vc_json_escape(s_cancel, esc, sizeof(esc))) {
-            int n = snprintf(cancel, sizeof(cancel), "{\"type\":\"response.cancel\",\"response_id\":\"%s\"}\n", esc);
-            if (n > 0 && (size_t)n < sizeof(cancel) &&
-                !muse_session_call_send(s_media_id, reinterpret_cast<const uint8_t *>(cancel), (size_t)n, false)) {
-                return false;
-            }
-        }
-        s_cancel[0] = '\0';
+    if (!send_cancel()) {
+        return false;
     }
     if (s_talk) {
         muse_vc_call_activity(&s_call, now);   /* holding the button isn't idle */
@@ -1012,6 +1107,9 @@ static bool pump_mic(int64_t now)
     }
     if (s_ptt && s_call.state == MUSE_VC_LIVE && !s_call.held && s_media_id) {
         return pump_ptt(now);
+    }
+    if (s_call.state == MUSE_VC_LIVE && s_media_id && !send_cancel()) {
+        return false;   /* a barge-in's cancel, ahead of the caller's next audio */
     }
     if (s_call.state != MUSE_VC_LIVE || s_call.held || !s_media_id) {
         /* Not live, held, or hung up (a mute, say): the mic goes nowhere, and
@@ -1082,10 +1180,14 @@ static bool begin_call(uint32_t gen)
     muse_vc_resampler_init(&s_down, MUSE_VC_WIRE_RATE, MUSE_VC_MIC_RATE);
     muse_vc_uplink_init(&s_up);
     s_mic_len = s_mic_off = 0;
+    /* The reply gate serves both call kinds now: a push-to-talk call from
+     * its first press, a hands-free one as a watched (then armed) gate. */
+    muse_vc_reply_gate_init(s_gate);
+    defer_clear();
+    s_cancel[0] = '\0';
+    s_hf_armed = false;
+    s_hf_cut_open[0] = '\0';
     if (s_ptt) {
-        muse_vc_reply_gate_init(s_gate);
-        defer_clear();
-        s_cancel[0] = '\0';
         s_st = 0;
         s_quiet_next_us = 0;
     }
@@ -1190,6 +1292,15 @@ static void take_commands(int64_t now)
             s_tail_left = PTT_TAIL_MS * (MUSE_VC_MIC_RATE / 1000);
         }
     }
+    uint32_t cw = s_cut_word.load();
+    if (!s_ptt && cw != s_cut_seen) {
+        s_cut_seen = cw;
+        if ((cw >> 16) == (s_call_gen & 0xffff) && s_call.state == MUSE_VC_LIVE) {
+            hf_cut();
+        }
+        s_cut_ack.store(cw);   /* acked either way: the reader must not wait
+                                * on a cut of a call that isn't live (yet) */
+    }
 }
 
 bool muse_voice_call_poll(void)
@@ -1248,6 +1359,9 @@ bool muse_voice_call_poll(void)
             defer_clear();
             run(MUSE_VC_ACT_ENDED, false);
         }
+    }
+    if (!s_ptt && s_hf_armed) {
+        defer_flush();   /* a waiting reply whose turn came, or room in s_out */
     }
     bool ok = pump_mic(now_us());
     publish();
@@ -1451,6 +1565,18 @@ extern "C" void muse_voice_call_set_talking(bool held)
     muse_session_call_wake();
 }
 
+extern "C" void muse_voice_call_interrupt(void)
+{
+    if (!s_inited || !v_call || v_ptt) {
+        return;
+    }
+    drain_out();   /* what's queued stops now; read() holds the rest of the
+                    * reply back until the session has taken the cut */
+    v_cut++;
+    s_cut_word.store(((s_gen.load() & 0xffff) << 16) | ((v_cut & 0x7fff) << 1));
+    muse_session_call_wake();
+}
+
 extern "C" void muse_voice_call_end(void)
 {
     if (s_inited) {
@@ -1509,6 +1635,15 @@ extern "C" size_t muse_voice_call_read(int16_t *pcm, size_t frames, bool *flushe
         drain_out();
         s_flush_ack.store(req);
         *flushed = true;
+        return 0;
+    }
+    uint32_t cut = s_cut_word.load();
+    if (v_call && !v_ptt && cut && (cut >> 16) == (s_gen.load() & 0xffff) && s_cut_ack.load() != cut) {
+        /* A barge-in the session hasn't taken yet: nothing of the old reply
+         * plays in between, and the flush is reported once per cut. */
+        drain_out();
+        *flushed = v_cut_told != cut;
+        v_cut_told = cut;
         return 0;
     }
     uint32_t press = s_press_req.load();

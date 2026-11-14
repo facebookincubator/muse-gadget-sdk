@@ -21,7 +21,16 @@
 nvs,       data, nvs,     0x11000,  0xC000,
 otadata,   data, ota,     0x1D000,  0x2000,
 phy_init,  data, phy,     0x1F000,  0x1000,
-ota_0,     app,  ota_0,   0x20000,  4M,
-ota_1,     app,  ota_1,   0x420000, 4M,
-prod_data, data, 0x40,    0x820000, 0x1000,
-prod_bak,  data, 0x41,    0x821000, 0x1000,
+ota_0,     app,  ota_0,   0x20000,  5M,
+ota_1,     app,  ota_1,   0x520000, 5M,
+prod_data, data, 0x40,    0xA20000, 0x1000,
+prod_bak,  data, 0x41,    0xA21000, 0x1000,
+# The wake word's speech models (CONFIG_MUSE_WAKE_WORD): esp-sr's build packs
+# the selected models into srmodels.bin and flashes it here; empty on boards
+# without the feature.
+model,     data, spiffs,  0xA22000, 4M,
+# Layout history: the app slots grew 4M -> 5M in Nov 2026 because the ESP-SR
+# wake word (Flite + MultiNet + AFE) pushed the app past 4M; prod_data,
+# prod_bak and model shifted up into the free flash tail to make room.
+# Devices on the previous layout need one full USB flash before OTA updates
+# work again (the wake word's new model partition already required that).

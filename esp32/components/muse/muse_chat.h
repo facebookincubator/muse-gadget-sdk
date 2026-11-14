@@ -106,8 +106,20 @@ muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap);
  * whose turn ended before it (Muse said it was still working, and the turn
  * said so and let go); it then starts that reply's turn, to be played like any
  * reply (muse_hatch_turn_event and the rest), though nobody pressed anything.
+ * An announcement held by muse_hatch_announce() is offered the same way,
+ * after any such reply.
  */
 bool muse_hatch_incoming(void);
+
+/*
+ * Holds `text` for the voice task to announce once it is idle, as a turn of
+ * its own: shown on the screen and spoken like a reply, in `lang` (a tag
+ * like "vi" or "en") or with the language picked from the text when NULL.
+ * This is what a device.speak command from the VM asks for. False when this
+ * build has no voice session of its own to say it with, the session isn't
+ * running, or an announcement is already waiting.
+ */
+bool muse_hatch_announce(const char *text, const char *lang);
 
 /*
  * The page of reply text holding what's being said after `played` frames of

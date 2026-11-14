@@ -161,6 +161,18 @@ void muse_settings_set_speaker_on(bool on)
     sim_services_set_speaker(on);
 }
 
+/* The idle rotation's dwell, polled by muse_ui.c's tick; the simulator has
+ * no settings store, so it keeps the firmware's default. */
+int muse_settings_idle_dwell_s(void)
+{
+    return 15;
+}
+
+bool muse_settings_idle_photos(void)
+{
+    return false;   /* no /sdcard in the simulator: the face never joins */
+}
+
 void muse_wifi_status(muse_wifi_status_t *out)
 {
     if (out) {

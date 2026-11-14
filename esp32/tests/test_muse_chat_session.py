@@ -56,6 +56,9 @@ static turn_t s_turn;
 static pending_t s_pending;
 static std::atomic<bool> s_incoming{false};
 static std::atomic<bool> s_incoming_used{true};
+static char *s_announce_text;
+static char s_announce_lang[8];
+static std::atomic<bool> s_announce{false};
 static char s_reply_shown[EV_TEXT];
 static int64_t s_last_seq, s_last_row_seq, s_marks[4];
 static void *psram_alloc(size_t n) { return malloc(n); }
@@ -677,6 +680,21 @@ static void late_rows_by_their_own_order_and_content() {
     assert(s_turn.nmsgs == 3 && !strcmp(s_turn.msgs[0].id, "late") && s_turn.msgs[0].done);
     assert(s_turn.msgs[0].len == 6 && s_turn.msgs[1].done && !strcmp(s_turn.msgs[2].id, "outer"));
 }
+static void announcement_plays_as_its_own_turn() {
+    /* Offered with nothing held: nothing changes. */
+    announce_play(s_turn.gen + 1);
+    assert(s_turn.phase == P_IDLE && !s_turn.nmsgs);
+    /* Held words become a turn of their own: one finished message, shown,
+     * with the announcement's language kept for its speech. */
+    s_announce_text = strdup("Chào buổi sáng");
+    strlcpy(s_announce_lang, "vi", sizeof(s_announce_lang));
+    announce_play(s_turn.gen + 1);
+    assert(!s_announce_text);
+    assert(s_turn.phase == P_WAIT_REPLY && s_turn.nmsgs == 1);
+    assert(!strcmp(s_turn.msgs[0].id, "local-announce") && s_turn.msgs[0].done);
+    assert(!strcmp(s_turn.tts_lang, "vi"));
+    assert(captions > 0);
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
@@ -708,6 +726,7 @@ int main(int argc, char **argv) {
     case 28: others_status_and_late_play(); break;
     case 29: chained_and_mid_stream_replies(); break;
     case 30: late_rows_by_their_own_order_and_content(); break;
+    case 31: announcement_plays_as_its_own_turn(); break;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -843,6 +862,9 @@ int main(int argc, char **argv) {
 
     def test_late_reply_row_numbered_below_live_events_content_only_or_envelope_id_is_held(self):
         self.run_case(30)
+
+    def test_announcement_plays_as_its_own_turn(self):
+        self.run_case(31)
 
     def test_late_turn_takes_chained_rows_and_never_half_a_message(self):
         self.run_case(29)

@@ -42,6 +42,8 @@ static struct {
     uint16_t call_idle_s;
     bool greeting;
     uint16_t weather_idle_s;
+    uint16_t idle_dwell_s;
+    bool idle_photos;
     uint8_t text_size;
     bool wifi_on;
     bool ble_on;
@@ -59,6 +61,8 @@ static struct {
     .call_idle_s = 120,
     .greeting = true,
     .weather_idle_s = 30,
+    .idle_dwell_s = 15,
+    .idle_photos = true,
     .text_size = MUSE_TEXT_MEDIUM,
     .wifi_on = true,
     .host = DEFAULT_HOST,
@@ -67,6 +71,8 @@ static struct {
 static SemaphoreHandle_t s_lock;
 /* StopWatch samples this at the next press, never during an active call. */
 static atomic_bool s_voice_notes;
+/* The wake-word detector polls this from its own task. */
+static atomic_bool s_wake_word;
 static nvs_handle_t s_nvs;
 static muse_setting_cb_t s_listener;
 
@@ -139,6 +145,12 @@ esp_err_t muse_settings_init(void)
         atomic_store(&s_voice_notes, b != 0);
     }
 #endif
+#if CONFIG_MUSE_WAKE_WORD
+    atomic_store(&s_wake_word, true);   /* listening unless turned off in Sound settings */
+    if (nvs_get_u8(s_nvs, "wake_word", &b) == ESP_OK) {
+        atomic_store(&s_wake_word, b != 0);
+    }
+#endif
     load_u8("bright", &s.brightness);
     nvs_get_u16(s_nvs, "sleep_s", &s.sleep_s);
     nvs_get_u16(s_nvs, "call_idle_s", &s.call_idle_s);
@@ -146,6 +158,10 @@ esp_err_t muse_settings_init(void)
         s.greeting = b != 0;
     }
     nvs_get_u16(s_nvs, "weather_idle_s", &s.weather_idle_s);
+    nvs_get_u16(s_nvs, "idle_dwell_s", &s.idle_dwell_s);
+    if (nvs_get_u8(s_nvs, "idle_photos", &b) == ESP_OK) {
+        s.idle_photos = b != 0;
+    }
     load_u8("text_size", &s.text_size);
     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
         s.wifi_on = b;
@@ -182,6 +198,8 @@ int muse_settings_sleep_s(void) { return s.sleep_s; }
 int muse_settings_call_idle_s(void) { return s.call_idle_s; }
 bool muse_settings_greeting(void) { return s.greeting; }
 int muse_settings_weather_idle_s(void) { return s.weather_idle_s; }
+int muse_settings_idle_dwell_s(void) { return s.idle_dwell_s; }
+bool muse_settings_idle_photos(void) { return s.idle_photos; }
 int muse_settings_text_size(void) { return s.text_size; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
@@ -192,6 +210,15 @@ void muse_settings_set_voice_notes(bool on)
     atomic_store(&s_voice_notes, on);
     save_u8("voice_notes", on);
     notify(MUSE_SETTING_VOICE_NOTES);
+}
+
+bool muse_settings_wake_word(void) { return atomic_load(&s_wake_word); }
+
+void muse_settings_set_wake_word(bool on)
+{
+    atomic_store(&s_wake_word, on);
+    save_u8("wake_word", on);
+    notify(MUSE_SETTING_WAKE_WORD);
 }
 
 /* Home Link owns the saved networks (this is the first); the local copy is only a fallback. */
@@ -288,6 +315,20 @@ void muse_settings_set_weather_idle_s(int secs)
     nvs_set_u16(s_nvs, "weather_idle_s", s.weather_idle_s);
     nvs_commit(s_nvs);
     notify(MUSE_SETTING_WEATHER);
+}
+
+/* The idle rotation polls these each tick, like the reply text size. */
+void muse_settings_set_idle_dwell_s(int secs)
+{
+    s.idle_dwell_s = clampi(secs, 5, 120);
+    nvs_set_u16(s_nvs, "idle_dwell_s", s.idle_dwell_s);
+    nvs_commit(s_nvs);
+}
+
+void muse_settings_set_idle_photos(bool on)
+{
+    s.idle_photos = on;
+    save_u8("idle_photos", on);
 }
 
 void muse_settings_set_text_size(int size)

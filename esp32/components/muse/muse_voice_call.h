@@ -26,7 +26,9 @@ extern "C" {
 
 /*
  * Realtime voice calls with Muse (CONFIG_MUSE_REALTIME_VOICE), beside the
- * push-to-talk voice notes: a tap starts a call, the next press ends it. The
+ * push-to-talk voice notes: a tap starts a call. In a hands-free call a tap
+ * barges in (muse_voice_call_interrupt) and holding the button hangs up;
+ * the voice task owns that gesture split (muse_voice.c). The
  * call runs over the same Muse session as the notes (muse_chat_session.cpp);
  * muse_voice_call.cpp runs it on the session task, and these are for the
  * voice task.
@@ -77,6 +79,18 @@ void muse_voice_call_start_ptt(void);
  * no more audio is taken.
  */
 void muse_voice_call_set_talking(bool held);
+/*
+ * A hands-free call's barge-in, from the voice task: Muse's reply stops
+ * now and never resumes. What's queued stops before this returns, and
+ * muse_voice_call_read reports the flush (and returns nothing of the reply)
+ * until the session has cut it: the session sends response.cancel for the
+ * open response ahead of the caller's next mic audio, and the reply gate
+ * (fed on every hands-free call, armed by the first barge-in) drops the cut
+ * reply's late audio for the rest of the call, as a push-to-talk press does.
+ * No-op with no call, or in a push-to-talk call (a press there already is
+ * the barge-in).
+ */
+void muse_voice_call_interrupt(void);
 /* Hangs up the current call. */
 void muse_voice_call_end(void);
 /*

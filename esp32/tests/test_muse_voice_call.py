@@ -344,7 +344,8 @@ class VoiceCallSession(unittest.TestCase):
              'ptt_end_mid_pump', 'ptt_stop_drains_deferred', 'ptt_stop_discards_ineligible',
              'ptt_stop_paced_ack_only', 'ptt_stop_paced_ack_eof', 'ptt_stop_paced_eof_ack', 'ptt_stop_paced_output_only',
              'ptt_stop_no_progress_deadline', 'ptt_stop_paced_interrupts', 'hands_free_working',
-             'hands_free_interrupted_settle', 'hands_free_early_media_and_keep_cap']
+             'hands_free_interrupted_settle', 'hands_free_early_media_and_keep_cap',
+             'hands_free_interrupt', 'hands_free_interrupt_captions', 'hands_free_interrupt_legacy']
 
     @classmethod
     def setUpClass(cls):
@@ -434,6 +435,24 @@ class VoiceCallSession(unittest.TestCase):
 
     def test_early_media_answers_its_turn_and_a_lost_reply_keeps_it_once(self):
         self.run_case('hands_free_early_media_and_keep_cap')
+
+    def test_hands_free_barge_in_cancels_and_the_reply_never_resumes(self):
+        ops = self.run_case('hands_free_interrupt')
+        media = ops[0]
+        self.assertEqual(media['op'], 'media')
+        call_id = media['path'].split('=', 1)[1]
+        cancels = [o for o in ops if o['op'] == 'send' and o['id'] == media['id']
+                   and 'response.cancel' in o['body']]
+        self.assertEqual(len(cancels), 1)
+        self.assertEqual(json.loads(cancels[0]['body']),
+                         {'type': 'response.cancel', 'response_id': 'resp_one'})
+        self.check_end_call(ops, call_id)   # every way out still sends the end-call, once
+
+    def test_hands_free_barge_in_ends_the_cut_replys_captions(self):
+        self.run_case('hands_free_interrupt_captions')
+
+    def test_hands_free_barge_in_with_legacy_audio_drops_it_while_open(self):
+        self.run_case('hands_free_interrupt_legacy')
 
     def test_ptt_reply_done_is_the_current_replys_own(self):
         self.run_case('ptt_stale_completion')

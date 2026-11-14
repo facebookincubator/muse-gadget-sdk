@@ -88,5 +88,12 @@ void muse_input_set_console_hook(bool (*hook)(const char *line));
 /* LVGL microphone press/release edges; handled by the existing input task. */
 void muse_input_touch_talk(bool pressed);
 
+/* The wake word was heard (muse_wake.c): wakes the screen if it's asleep
+ * and posts a tap on the talk button, so a hands-free call starts as with
+ * a physical tap. Unlike a waking physical press, the gesture is not
+ * swallowed by the waking: starting the call is its whole point. Does
+ * nothing while a call is up or the talk button is physically held. */
+void muse_input_wake_word(void);
+
 /* Plays the goodbye animation and powers off (from the input task). */
 void muse_input_request_power_off(void);

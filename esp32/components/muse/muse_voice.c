@@ -37,6 +37,9 @@
 #include "muse_mem.h"
 #include "muse_settings.h"
 #include "muse_state.h"
+#if CONFIG_MUSE_WAKE_WORD
+#include "muse_wake.h"
+#endif
 #include "muse_wifi.h"
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call.h"
@@ -248,6 +251,12 @@ static void idle_capture(void)
         return;
     }
     pre_put_preroll();
+#if CONFIG_MUSE_WAKE_WORD
+    /* The wake word listens on the same idle capture (muse_wake.c): it
+     * hears nothing once a press takes the mic, and the settle window
+     * above keeps Muse's own just-played sound out of its ears too. */
+    muse_wake_feed(s_chunk, MUSE_AUDIO_CHUNK);
+#endif
 }
 
 /* Consume through the requested edge, leaving later edges for the next
@@ -1024,12 +1033,20 @@ static bool can_record(void)
 #define CALL_TAIL_US 300000
 #define CALL_END_WAIT_US 1500000LL         /* hung up: wait at most 1.5s for the call to wind down */
 #define CALL_RELEASE_US 120000            /* bounded capture lag, as for voice notes */
+/* Hands-free call gestures (the talk button, BOOT here, and the on-screen
+ * mic, which post the same edges): a press barges in at once — Muse's
+ * reply is cut and the mic reopens (muse_voice_call_interrupt) — and a
+ * press still down after this long hangs up instead. A tap is therefore
+ * "interrupt", a hold is "hang up"; push-to-talk calls keep their own
+ * mapping (a press talks or interrupts, the speaker button hangs up). */
+#define CALL_HANGUP_HOLD_US 1000000LL
 
 typedef struct {
     bool ptt, held, live, hung_up, server_hold, awaiting;
     unsigned press;
     uint32_t input_epoch;
     int64_t give_up, release_until;
+    int64_t down_us;   /* hands-free: the current press's edge time (0: not down) */
     size_t release_frames;
     muse_vc_gate_t gate;
 } call_ui_t;
@@ -1055,8 +1072,16 @@ static void call_input(call_ui_t *c)
         muse_input_clear_call_pending(ev.mark);   /* in the call now, or dropped */
         if (ev.epoch != c->input_epoch) continue;
         if (c->hung_up) continue;
-        if (ev.type == MUSE_PTT_END_CALL || (!c->ptt && ev.type == MUSE_PTT_DOWN)) {
+        if (ev.type == MUSE_PTT_END_CALL) {
             c->hung_up = true;
+        } else if (!c->ptt && ev.type == MUSE_PTT_DOWN) {
+            /* Barge in on the press; the hold check below hangs up if the
+             * press is still down after CALL_HANGUP_HOLD_US. A press with
+             * nothing playing is a harmless no-op cut. */
+            c->down_us = ev.at_us;
+            muse_voice_call_interrupt();
+        } else if (!c->ptt && ev.type == MUSE_PTT_UP) {
+            c->down_us = 0;
         } else if (c->ptt && ev.type == MUSE_PTT_DOWN) {
             finish_release(c);   /* old press closes before the new one opens */
             ++c->press;
@@ -1075,6 +1100,10 @@ static void call_input(call_ui_t *c)
                 c->release_frames = TAIL_FRAMES;
             }
         }
+    }
+    if (!c->ptt && c->down_us && esp_timer_get_time() - c->down_us >= CALL_HANGUP_HOLD_US) {
+        c->hung_up = true;   /* the barge-in press turned into a hold: hang up */
+        c->down_us = 0;
     }
     if (atomic_load(&s_shutdown) || c->input_epoch != muse_input_call_epoch()) c->hung_up = true;
     if (c->release_until && (c->hung_up || c->server_hold ||
@@ -1147,7 +1176,7 @@ static void run_call(bool ptt, size_t waking_chunks)
             switch (ev) {
             case MUSE_VOICE_CALL_EV_READY:
                 c.live = true;
-                muse_state_set_caption(ptt ? "HOLD YELLOW TO TALK" : "IN A CALL - PRESS TO HANG UP");
+                muse_state_set_caption(ptt ? "HOLD YELLOW TO TALK" : "IN A CALL - TAP TO INTERRUPT, HOLD TO HANG UP");
                 break;
             case MUSE_VOICE_CALL_EV_HEARD:
                 muse_state_set_caption("\"%s\"", text);

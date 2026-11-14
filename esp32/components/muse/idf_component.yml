@@ -42,6 +42,12 @@ dependencies:
     public: true
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} != \"none\""
+  # Wake word (muse_wake.c): on-device speech recognition and its models.
+  espressif/esp-sr:
+    version: "~2.4"
+    public: true
+    rules:
+      - if: "$CONFIG{MUSE_WAKE_WORD_SR} == \"y\""
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:

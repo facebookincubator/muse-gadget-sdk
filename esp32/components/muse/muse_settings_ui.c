@@ -137,6 +137,13 @@ static const int WEATHER_CHOICES[] = { 0, 15, 30, 60, 120 };
 static const char *const WEATHER_NAMES[] = { "Off", "15 seconds", "30 seconds", "1 minute", "2 minutes" };
 #define WEATHER_COUNT (int)(sizeof(WEATHER_CHOICES) / sizeof(WEATHER_CHOICES[0]))
 static lv_obj_t *s_weather_checks[WEATHER_COUNT];
+static const int DWELL_CHOICES[] = { 10, 15, 30, 60 };
+static const char *const DWELL_NAMES[] = { "10 seconds", "15 seconds", "30 seconds", "1 minute" };
+#define DWELL_COUNT (int)(sizeof(DWELL_CHOICES) / sizeof(DWELL_CHOICES[0]))
+static lv_obj_t *s_dwell_checks[DWELL_COUNT];
+#if CONFIG_MUSE_IDLE_PHOTOS
+static lv_obj_t *s_idle_photos_sw;
+#endif
 
 #if CONFIG_MUSE_REALTIME_VOICE
 static const int CALL_IDLE_CHOICES[] = { 0, 30, 60, 120, 300, 600 };
@@ -145,6 +152,9 @@ static const char *const CALL_IDLE_NAMES[] = { "Never", "30 seconds", "1 minute"
 static lv_obj_t *s_greeting_sw;
 static lv_obj_t *s_sound_call_idle_checks[CALL_IDLE_COUNT];
 static lv_obj_t *s_sleep_call_idle_checks[CALL_IDLE_COUNT];
+#endif
+#if CONFIG_MUSE_WAKE_WORD
+static lv_obj_t *s_wake_sw;
 #endif
 
 /* Battery page. */
@@ -536,6 +546,9 @@ static void drop(lv_obj_t *p)
 #if CONFIG_MUSE_REALTIME_VOICE
     if (p == s_sound) {
         s_greeting_sw = NULL;
+#if CONFIG_MUSE_WAKE_WORD
+        s_wake_sw = NULL;
+#endif
         for (int i = 0; i < CALL_IDLE_COUNT; i++) s_sound_call_idle_checks[i] = NULL;
     } else if (p == s_sleep) {
         for (int i = 0; i < CALL_IDLE_COUNT; i++) s_sleep_call_idle_checks[i] = NULL;
@@ -1343,6 +1356,14 @@ static void on_call_idle_choice(lv_event_t *e)
 }
 #endif
 
+#if CONFIG_MUSE_WAKE_WORD
+static void on_wake_sw(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    muse_settings_set_wake_word(lv_obj_has_state(sw, LV_STATE_CHECKED));
+}
+#endif
+
 static void build_sound_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
@@ -1366,6 +1387,16 @@ static void build_sound_page(lv_obj_t *tile)
 #if CONFIG_MUSE_REALTIME_VOICE
     s_greeting_sw = switch_row(list, "AI greeting", muse_settings_greeting(), on_greeting_sw);
     note(list, "When on, AI greets you first as soon as a call connects.");
+#endif
+#if CONFIG_MUSE_WAKE_WORD
+    s_wake_sw = switch_row(list, "Wake word", muse_settings_wake_word(), on_wake_sw);
+#if CONFIG_MUSE_WAKE_WORD_WAKENET
+    note(list, "When on, Muse listens while idle and starts a call when it hears \"Jarvis\". "
+               "Listening stays on this device; nothing is sent until a call starts.");
+#else
+    note(list, "When on, Muse listens while idle and starts a call when it hears \"Hi Muse\". "
+               "Listening stays on this device; nothing is sent until a call starts.");
+#endif
 #endif
     s_gain_sl = slider(list, "Mic gain", 0, MUSE_MIC_GAIN_MAX / 3, muse_settings_mic_gain() / 3, &s_gain_val, on_gain);
 
@@ -1426,6 +1457,14 @@ static void tick_sound(void)
         }
     }
 #endif
+#if CONFIG_MUSE_WAKE_WORD
+    if (s_wake_sw) {
+        bool w = muse_settings_wake_word();
+        if (w != lv_obj_has_state(s_wake_sw, LV_STATE_CHECKED)) {
+            lv_obj_set_state(s_wake_sw, LV_STATE_CHECKED, w);
+        }
+    }
+#endif
     bool on = muse_settings_speaker_on();   /* also toggled from the face */
     if (s_spk_sw && on != lv_obj_has_state(s_spk_sw, LV_STATE_CHECKED)) {
         lv_obj_set_state(s_spk_sw, LV_STATE_CHECKED, on);
@@ -1460,6 +1499,22 @@ static void on_weather_choice(lv_event_t *e)
     }
 }
 
+static void on_dwell_choice(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    muse_settings_set_idle_dwell_s(DWELL_CHOICES[i]);
+    for (int j = 0; j < DWELL_COUNT; j++) {
+        set_text(s_dwell_checks[j], j == i ? LV_SYMBOL_OK : "");
+    }
+}
+
+#if CONFIG_MUSE_IDLE_PHOTOS
+static void on_idle_photos_sw(lv_event_t *e)
+{
+    muse_settings_set_idle_photos(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+#endif
+
 static void on_sleep_now(lv_event_t *e)
 {
     (void)e;
@@ -1484,6 +1539,17 @@ static void build_sleep_page(lv_obj_t *tile)
         lv_obj_set_style_text_color(s_weather_checks[i], lv_color_hex(COLOR_ACCENT), 0);
         set_text(s_weather_checks[i],
                  WEATHER_CHOICES[i] == muse_settings_weather_idle_s() ? LV_SYMBOL_OK : "");
+    }
+#if CONFIG_MUSE_IDLE_PHOTOS
+    s_idle_photos_sw = switch_row(list, "Photo frame from SD card", muse_settings_idle_photos(),
+                                  on_idle_photos_sw);
+#endif
+    note(list, "Rotate the idle screen every:");
+    for (int i = 0; i < DWELL_COUNT; i++) {
+        row(list, NULL, T(DWELL_NAMES[i]), &s_dwell_checks[i], on_dwell_choice, (void *)(intptr_t)i);
+        lv_obj_set_style_text_color(s_dwell_checks[i], lv_color_hex(COLOR_ACCENT), 0);
+        set_text(s_dwell_checks[i],
+                 DWELL_CHOICES[i] == muse_settings_idle_dwell_s() ? LV_SYMBOL_OK : "");
     }
 #if CONFIG_MUSE_REALTIME_VOICE
     note(list, "End a call when idle for:");

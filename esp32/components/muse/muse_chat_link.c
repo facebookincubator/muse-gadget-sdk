@@ -907,6 +907,13 @@ bool muse_hatch_incoming(void)
     return false;   /* replies come on the turn's own session */
 }
 
+bool muse_hatch_announce(const char *text, const char *lang)
+{
+    (void)text;
+    (void)lang;
+    return false;   /* no voice session of its own to speak through */
+}
+
 muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
 {
     pump();

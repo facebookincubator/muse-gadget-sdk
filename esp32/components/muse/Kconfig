@@ -264,6 +264,35 @@ menu "Muse"
             mount costs a task, time on the bus the e-paper shares, and parsing
             whatever card is inserted. Turn it on for a feature that uses it.
 
+    config MUSE_IDLE_PHOTOS
+        bool "Idle photo frame from a card mounted at /sdcard"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            The idle screen rotates clock -> weather -> photos: JPEG files in
+            /sdcard/photos on a FAT card a board mounts at /sdcard (see
+            MUSE_STICKY_SD, MUSE_LCDWIKI_SD), each shown for the idle dwell
+            time. Needs LVGL's TJPGD decoder and stdio filesystem
+            (CONFIG_LV_USE_TJPGD, CONFIG_LV_USE_FS_STDIO with a driver
+            letter); without them, or with no card or folder, the rotation
+            simply skips the photo face. The dwell and the on/off switch are
+            user settings (Sleep page).
+
+    config MUSE_LCDWIKI_SD
+        bool "Mount the LCDWIKI S3 2.8 microSD card at /sdcard"
+        depends on MUSE_BOARD_LCDWIKI_S3_28
+        default n
+        help
+            NOT YET FUNCTIONAL: the SD slot's pins are not recorded anywhere
+            in this tree (the board file takes its other pins from LCDWIKI's
+            page and the board's xiaozhi-esp32 files; the slot's are not
+            among them, and the panel's SPI setup leaves MISO unconnected).
+            The mount task in board_lcdwiki_s3_28.c is written after the
+            Sticky's (CONFIG_MUSE_STICKY_SD) but refuses to run until the
+            SD_MISO / SD_CS / SD_CD pins at its TODO are filled in from
+            LCDWIKI's published pin table for this board. Leave it off
+            until then; the idle photo frame skips itself without a card.
+
     # The Muse tools' serial port: the console UART behind the board's USB
     # bridge, where the chip's own USB Serial/JTAG isn't wired to a connector
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
@@ -537,6 +566,49 @@ if MUSE_REALTIME_VOICE
             while Muse is audibly talking and for a moment after.
 
 endif
+
+    config MUSE_WAKE_WORD
+        bool "Wake word: start a call by speaking (experimental)"
+        depends on MUSE_ENABLED && MUSE_REALTIME_VOICE && IDF_TARGET_ESP32S3
+        default n
+        help
+            While the gadget is idle, the mic audio it already captures is
+            also fed to Espressif's on-device speech recognition (esp-sr):
+            nothing is recorded and nothing leaves the chip. When the wake
+            word is heard, a live call starts, exactly as a tap on the talk
+            button starts one. Listening is a Sound setting, on by default,
+            and stops while a call is up.
+            The models live in the "model" partition (partitions_muse.csv),
+            which esp-sr's build packs and flashes from the model selected
+            in the "ESP Speech Recognition" menu; that selection has to
+            match the engine chosen below, as the LCDWIKI overlay does:
+            MultiNet is SR_MN_EN_MULTINET7_QUANT, WakeNet's "Jarvis" is
+            SR_WN_WN9_JARVIS_TTS. A build with no model packed still boots;
+            the wake word just stays off, with the reason in the log.
+
+    choice MUSE_WAKE_WORD_ENGINE
+        prompt "Wake word"
+        depends on MUSE_WAKE_WORD
+        default MUSE_WAKE_WORD_MULTINET
+        help
+            MultiNet hears a phrase of your own as a speech command;
+            WakeNet hears one stock word, with a dedicated model trained
+            for nothing else, which is the surer ear in a noisy room.
+
+        config MUSE_WAKE_WORD_MULTINET
+            bool "\"Hi Muse\" (MultiNet speech commands)"
+
+        config MUSE_WAKE_WORD_WAKENET
+            bool "\"Jarvis\" (WakeNet9)"
+
+    endchoice
+
+    # Always defined, so idf_component.yml can key esp-sr on it in every
+    # build (a bool whose dependencies are unmet isn't written to sdkconfig).
+    config MUSE_WAKE_WORD_SR
+        string
+        default "y" if MUSE_WAKE_WORD
+        default "n"
 
     config MUSE_HATCH_COMPACT_BUFFERS
         bool "Smaller voice session buffers, for 2 MB of PSRAM"

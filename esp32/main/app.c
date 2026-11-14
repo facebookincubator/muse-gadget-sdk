@@ -94,6 +94,11 @@
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
 #include "muse_input.h"
+#include "muse_chat.h"
+#include "muse_settings.h"
+#include "muse_state.h"
+#include "muse_tts.h"
+#include "muse_voice.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
 #else
@@ -1941,6 +1946,113 @@ static cJSON *bug_report_command(
 
 #endif  // CONFIG_HOMEHUB_BLE_COMMANDS
 
+#if CONFIG_MUSE_ENABLED
+// ---- Spoken announcements (device.speak) -------------------------------------
+//
+// The VM asks the gadget to say something: a morning briefing, an alert.
+// The words are handed to Muse's own voice session (muse_hatch_announce),
+// which shows and speaks them as a turn of their own once the voice task is
+// idle, so an announcement never talks over a call or a voice note. The
+// checks and the hand-off run on this short-lived task, not on the session
+// task the command arrived on; the result says whether the words were taken.
+
+#if CONFIG_MUSE_TTS_GOOGLE
+typedef struct {
+    noise_ctrl_session_generation_t session_generation;
+    char request_id[64];
+    char *text;
+    char lang[8];
+} speak_task_args_t;
+
+static void speak_task(void *arg) {
+    speak_task_args_t *args = (speak_task_args_t *)arg;
+    cJSON *result;
+    muse_mode_t mode = muse_state_mode(NULL);
+    if (muse_voice_in_call() || mode == MUSE_MODE_LISTENING
+        || mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING) {
+        /* In a call, recording a note, or mid-reply: never talk over it. */
+        result = command_error("busy", "a call or a voice turn is in progress");
+    } else {
+        char *scratch = malloc(MUSE_TTS_ANNOUNCE_MAX + 8);
+        if (!scratch) {
+            result = command_error("out_of_memory", "failed to allocate");
+        } else {
+            muse_tts_announce_t check = muse_tts_announce_check(
+                args->text, scratch, MUSE_TTS_ANNOUNCE_MAX + 8);
+            free(scratch);
+            if (check == MUSE_TTS_ANNOUNCE_EMPTY) {
+                result = command_error(
+                    "nothing_to_say", "the text has nothing to say once cleaned for speech");
+            } else if (check == MUSE_TTS_ANNOUNCE_TOO_LONG) {
+                result = command_error(
+                    "text_too_long", "the text is longer than an announcement may be");
+            } else if (!muse_hatch_announce(args->text, args->lang[0] ? args->lang : NULL)) {
+                result = command_error(
+                    "unavailable",
+                    "no voice session to speak through, or an announcement is already waiting");
+            } else {
+                result = cJSON_CreateObject();
+                cJSON_AddBoolToObject(result, "ok", true);
+                cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+                cJSON_AddBoolToObject(payload, "queued", true);
+                /* The speaker setting rules at the moment of the answer:
+                 * off, the words are shown on the screen, not spoken. */
+                cJSON_AddBoolToObject(payload, "spoken", muse_settings_speaker_on());
+                if (args->lang[0]) {
+                    cJSON_AddStringToObject(payload, "lang", args->lang);
+                }
+            }
+        }
+    }
+    noise_ctrl_send_command_result(
+        args->session_generation, args->request_id, result);
+    free(args->text);
+    free(args);
+    stack_monitor_record(NULL);
+    vTaskDelete(NULL);
+}
+#endif  // CONFIG_MUSE_TTS_GOOGLE
+
+static cJSON *speak_command(cJSON *params, const char *request_id,
+                            noise_ctrl_session_generation_t session_generation) {
+#if !CONFIG_MUSE_TTS_GOOGLE
+    (void)params;
+    (void)request_id;
+    (void)session_generation;
+    return command_error("unavailable", "this build cannot speak: spoken replies are off");
+#else
+    char *text = json_strdup_string(params, "text");
+    if (!text) return command_error("missing_param", "text is required");
+    speak_task_args_t *args = calloc(1, sizeof(*args));
+    if (!args) {
+        free(text);
+        return command_error("out_of_memory", "failed to allocate");
+    }
+    args->session_generation = session_generation;
+    strncpy(args->request_id, request_id, sizeof(args->request_id) - 1);
+    args->text = text;
+    cJSON *lang = params ? cJSON_GetObjectItem(params, "lang") : NULL;
+    if (cJSON_IsString(lang) && lang->valuestring && lang->valuestring[0]) {
+        if (strlen(lang->valuestring) >= sizeof(args->lang)) {
+            free(text);
+            free(args);
+            return command_error("invalid_params",
+                                 "lang must be a short tag like \"vi\" or \"en\"");
+        }
+        strncpy(args->lang, lang->valuestring, sizeof(args->lang) - 1);
+    }
+    if (xTaskCreate(speak_task, "device_speak", 8192, args, 4, NULL) != pdPASS) {
+        free(text);
+        free(args);
+        return command_error("out_of_memory", "failed to start task");
+    }
+    cJSON *async = cJSON_CreateObject();
+    cJSON_AddBoolToObject(async, "_async", true);
+    return async;
+#endif
+}
+#endif  // CONFIG_MUSE_ENABLED
+
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
@@ -1957,6 +2069,11 @@ static cJSON *on_ws_command(
         if (!url) return command_error("missing_param", "url is required");
         return queue_ws_control(WS_CONTROL_SET_VM, url);
     }
+#if CONFIG_MUSE_ENABLED
+    if (strcmp(command, "device.speak") == 0) {
+        return speak_command(params, request_id, session_generation);
+    }
+#endif
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
     bool draw_file = strcmp(command, "display.draw_file") == 0;
     if (draw_file || strcmp(command, "display.draw_url") == 0) {

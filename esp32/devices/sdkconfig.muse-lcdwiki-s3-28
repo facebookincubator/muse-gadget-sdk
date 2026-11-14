@@ -74,3 +74,20 @@ CONFIG_MUSE_TTS_GOOGLE=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
 CONFIG_MUSE_LANG_DEFAULT_VI=y
 CONFIG_MUSE_CJK_FONT=y
+# Idle rotation's photo face: JPEGs from /sdcard/photos via LVGL's TJPGD
+# decoder and its stdio filesystem (driver letter 'S'). The face shows only
+# once a board mount provides /sdcard; the LCDWIKI slot's mount is still
+# waiting on its pins (CONFIG_MUSE_LCDWIKI_SD, off, in the board file).
+CONFIG_MUSE_IDLE_PHOTOS=y
+CONFIG_LV_USE_TJPGD=y
+CONFIG_LV_USE_FS_STDIO=y
+CONFIG_LV_FS_STDIO_LETTER=83
+
+# Wake word: "Hi Muse" (MultiNet, the engine choice's default) starts a call
+# hands-free. The model partition is in partitions_muse.csv; esp-sr packs the
+# English MultiNet7 model selected here into it at build time. The wake word
+# starts a live call, so it needs the realtime-voice overlay loaded after
+# this one (build_board.bat does; a plain board.sh lcd28 build has no calls
+# and drops this, as it drops the rest of the call settings).
+CONFIG_MUSE_WAKE_WORD=y
+CONFIG_SR_MN_EN_MULTINET7_QUANT=y

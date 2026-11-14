@@ -32,6 +32,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_weather.h"
+#if CONFIG_MUSE_WAKE_WORD
+#include "muse_wake.h"
+#endif
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO_WIFI
 #include "muse_video_wifi.h"
@@ -107,6 +110,9 @@ void muse_app_run(const muse_board_t *board)
     } else {
         muse_state_set_mode(MUSE_MODE_IDLE);
         muse_state_set_caption("%s", "");   /* the button icons say how to talk */
+#if CONFIG_MUSE_WAKE_WORD
+        muse_wake_start();   /* hears the wake word on the voice task's idle capture */
+#endif
     }
 
     muse_hatch_start();

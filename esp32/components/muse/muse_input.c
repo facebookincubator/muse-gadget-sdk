@@ -78,6 +78,7 @@ static const char *TAG = "muse_input";
 #define WIFI_NAP_MS (2 * 60 * 1000)   /* low power this long: Wi-Fi off until it ends */
 #define DOUBLE_TICKS 35        /* 350 ms: a second aux press within this toggles phone setup */
 
+#define WAKE_TAP_MS 150        /* the wake word's tap: released well within a tap's 300 ms */
 #define GOODBYE_MS 1500        /* let the goodbye animation play */
 #define HINT_TICKS 60          /* 0.6 s: warn that holding powers off */
 #define LONG_TICKS 150         /* 1.5 s: power off */
@@ -1055,4 +1056,25 @@ esp_err_t muse_input_start(QueueHandle_t queue)
 void muse_input_request_power_off(void)
 {
     s_power_off_requested = true;
+}
+
+/*
+ * The wake word's tap: the same DOWN/UP pair a quick physical tap posts,
+ * through post() so the epoch and pending-call mark behave identically.
+ * The DOWN is not a waking press (wake=false): a physical tap that wakes
+ * the screen is swallowed by the waking, but this gesture exists to start
+ * the call, so the screen is woken first and the tap then counts in full.
+ */
+void muse_input_wake_word(void)
+{
+    if (!s_queue || s_talk_down || muse_voice_in_call()) {
+        return;
+    }
+    if (muse_state_asleep()) {
+        set_asleep(false, "wake word");
+    }
+    muse_state_poke();
+    post(MUSE_PTT_DOWN, false);
+    vTaskDelay(pdMS_TO_TICKS(WAKE_TAP_MS));
+    post(MUSE_PTT_UP, false);
 }

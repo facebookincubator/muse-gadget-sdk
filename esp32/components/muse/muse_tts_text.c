@@ -220,6 +220,18 @@ size_t muse_tts_clean(const char *text, char *out, size_t cap)
     return o;
 }
 
+muse_tts_announce_t muse_tts_announce_check(const char *text, char *scratch, size_t cap)
+{
+    if (!text || !scratch || cap < 2) {
+        return MUSE_TTS_ANNOUNCE_EMPTY;
+    }
+    size_t n = muse_tts_clean(text, scratch, cap);
+    if (!n) {
+        return MUSE_TTS_ANNOUNCE_EMPTY;
+    }
+    return n > MUSE_TTS_ANNOUNCE_MAX ? MUSE_TTS_ANNOUNCE_TOO_LONG : MUSE_TTS_ANNOUNCE_OK;
+}
+
 /* Bytes of `c` (one character, `len` bytes) once percent-encoded. */
 static size_t encoded_len(const unsigned char *c, size_t len)
 {

@@ -1597,6 +1597,34 @@ static char *build_register_json(void) {
                     ota_required, ota_optional);
     }
 
+#if CONFIG_MUSE_ENABLED && CONFIG_MUSE_TTS_GOOGLE
+    {
+        cJSON *speak_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(speak_required, "text",
+                              string_param("What to say, as plain text. It is cleaned "
+                                           "as a chat reply is before being read out, and "
+                                           "may come to at most 1000 bytes once cleaned."));
+        cJSON *speak_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(speak_optional, "lang",
+                              string_param("Language tag to read it in, like \"vi\" or "
+                                           "\"en\". Without it, Vietnamese text is read "
+                                           "as Vietnamese and the rest as English."));
+        add_command(commands, "device.speak",
+                    "Say `text` out loud on the device and show it on the screen: "
+                    "a morning briefing, an alert, anything the user should hear "
+                    "without asking. It is said once the device is idle, so it "
+                    "never talks over a call or a voice note; if one is going on "
+                    "the command answers with a busy error instead. With the "
+                    "speaker off in the device's Settings the words are only "
+                    "shown, and the result's `spoken` says which happened. "
+                    "Replies when the words have been taken, not when they "
+                    "have been said.",
+                    speak_required, speak_optional);
+        cJSON_AddNumberToObject(
+            cJSON_GetObjectItem(commands, "device.speak"), "timeout_ms", 30000);
+    }
+#endif
+
 #if CONFIG_HOMEHUB_BLE_COMMANDS
     ble_commands_register(commands);
 #endif

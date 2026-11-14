@@ -53,6 +53,28 @@ extern "C" {
 size_t muse_tts_clean(const char *text, char *out, size_t cap);
 
 /*
+ * The most bytes of cleaned text an announcement (a device.speak command)
+ * may hold. muse_tts_speak() cleans into a buffer barely bigger than this,
+ * and a briefing read out at speaking pace is already a long one at it.
+ */
+#define MUSE_TTS_ANNOUNCE_MAX 1000
+
+typedef enum {
+    MUSE_TTS_ANNOUNCE_OK,
+    MUSE_TTS_ANNOUNCE_EMPTY,     /* nothing to say once cleaned */
+    MUSE_TTS_ANNOUNCE_TOO_LONG, /* cleaned text passes MUSE_TTS_ANNOUNCE_MAX bytes */
+} muse_tts_announce_t;
+
+/*
+ * Whether `text` can be announced whole: cleaned as it would be read out
+ * (into scratch, at least MUSE_TTS_ANNOUNCE_MAX + 8 bytes — cleaning stops
+ * short of the buffer's end rather than cut a character, so the headroom
+ * keeps an over-long text measuring over the cap, not clipped into
+ * compliance), it says something and it fits.
+ */
+muse_tts_announce_t muse_tts_announce_check(const char *text, char *scratch, size_t cap);
+
+/*
  * The next piece of *text, at most MUSE_TTS_CHUNK_CHARS characters, ending at
  * a sentence or, failing that, a word. Moves *text past it. False at the end.
  */

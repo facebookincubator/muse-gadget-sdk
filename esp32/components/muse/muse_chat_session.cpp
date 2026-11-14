@@ -161,12 +161,13 @@ static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP
 
 /* ---- Voice task <-> session task ---- */
 
-enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_INCOMING };
+enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_INCOMING, CMD_ANNOUNCE, CMD_ANNOUNCE_PLAY };
 
 struct cmd_t {
     cmd_type_t type;
     uint32_t gen;
-    char *text;              /* CMD_TEXT: malloc'd, freed by the session task */
+    char *text;              /* CMD_TEXT and CMD_ANNOUNCE: malloc'd, freed by the session task */
+    char lang[8] = {};       /* CMD_ANNOUNCE: the text's language tag, or "" */
 };
 
 struct ev_t {
@@ -273,6 +274,7 @@ struct turn_t {
     int tts_msg;             /* message being fetched (or shown, speaker off), or -1 */
     bool silent;             /* speaker off: tts_msg is paced by silence, not fetched */
     uint32_t tts_ticket;     /* muse_tts's ticket for tts_msg's speech, or 0 */
+    char tts_lang[8];        /* an announcement's language tag, or "" to pick from the text */
     uint8_t *mp3;            /* MP3_BUF */
     size_t mp3_len;
     bool mp3_ended;
@@ -308,6 +310,9 @@ EXT_RAM_BSS_ATTR static turn_t s_turn;
 EXT_RAM_BSS_ATTR static pending_t s_pending;
 static std::atomic<bool> s_incoming{false};   /* a reply is held: muse_hatch_incoming() */
 static std::atomic<bool> s_incoming_used{false};   /* a voice task plays them (the Voice PE's doesn't) */
+static char *s_announce_text;                 /* a device.speak announcement held for the voice task */
+static char s_announce_lang[8];               /* its language tag, or "" to pick from the text */
+static std::atomic<bool> s_announce{false};   /* one is held: muse_hatch_incoming() */
 
 /* Turn milestones, logged together when the turn ends. */
 enum mark_t : uint8_t { M_RELEASE, M_SENT, M_ACK, M_TEXT, M_DONE, M_TTS, M_MP3, M_AUDIO, M_COUNT };
@@ -1748,6 +1753,31 @@ static void incoming_play(uint32_t gen)
     }
 }
 
+/* The voice task is idle and ready for the held announcement (device.speak): a turn of its own, that nobody pressed for. */
+static void announce_play(uint32_t gen)
+{
+    char *text = s_announce_text;
+    s_announce_text = nullptr;
+    if (!text) {
+        ESP_LOGW(TAG, "announcement offered with nothing held");
+        return;
+    }
+    if (!turn_start(gen, false)) {
+        free(text);   /* not set up, or Muse unreachable: the words are dropped */
+        return;
+    }
+    s_turn.phase = P_WAIT_REPLY;
+    s_turn.chat_posted = s_turn.acked = true;
+    s_turn.chat_us = s_turn.last_event_us = now_us();
+    strlcpy(s_turn.tts_lang, s_announce_lang, sizeof(s_turn.tts_lang));
+    int i = s_turn.nmsgs++;
+    s_turn.msgs[i] = msg_t{};
+    strlcpy(s_turn.msgs[i].id, "local-announce", sizeof(s_turn.msgs[i].id));
+    add_reply_text(i, text);
+    message_done(i, nullptr);
+    free(text);
+}
+
 static void on_event(cJSON *line)
 {
     if (strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(line, "type")) ?: "", "event") != 0) {
@@ -1904,7 +1934,9 @@ static void start_tts(void)
         }
 #if CONFIG_MUSE_TTS_GOOGLE
         const char *text = s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
-        uint32_t ticket = (text && muse_settings_speaker_on()) ? muse_tts_speak(text, speech_lang(text)) : 0;
+        uint32_t ticket = (text && muse_settings_speaker_on())
+                              ? muse_tts_speak(text, s_turn.tts_lang[0] ? s_turn.tts_lang : speech_lang(text))
+                              : 0;
         if (ticket) {
             m.pcm_start = s_turn.pcm_out;
             m.pcm_frames = 0;
@@ -2456,6 +2488,27 @@ static void handle(const cmd_t &cmd)
         }
         incoming_play(cmd.gen);
         break;
+    case CMD_ANNOUNCE:
+        if (s_announce_text) {
+            free(cmd.text);   /* one already waits (muse_hatch_announce says so first) */
+            break;
+        }
+        s_announce_text = cmd.text;   /* takes ownership */
+        strlcpy(s_announce_lang, cmd.lang, sizeof(s_announce_lang));
+        break;
+    case CMD_ANNOUNCE_PLAY:
+        if (cmd.gen != s_gen.load() || s_turn.phase != P_IDLE) {
+            /* A press or a typed turn came first: end the voice task's wait
+             * for this turn, and offer the announcement again once idle. */
+            ev_t ev = {};
+            ev.type = MUSE_HATCH_EV_ERROR;
+            ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, pdMS_TO_TICKS(200));
+            s_announce = true;   /* still held */
+            break;
+        }
+        announce_play(cmd.gen);
+        break;
     }
 }
 
@@ -2531,6 +2584,9 @@ static void hatch_task(void *arg)
         check_turn();
         if (s_turn.phase == P_IDLE && s_pending.replies) {
             s_incoming = true;   /* held rows not played yet (a press or a typed turn came first) */
+        }
+        if (s_turn.phase == P_IDLE && s_announce_text) {
+            s_announce = true;   /* an announcement not played yet (its offer was dropped) */
         }
 
         int64_t t = now_us();
@@ -2736,13 +2792,40 @@ extern "C" void muse_hatch_text_cancel(void)
 extern "C" bool muse_hatch_incoming(void)
 {
     s_incoming_used = true;
-    if (!s_incoming.exchange(false)) {
+    bool held = s_incoming.exchange(false);
+    bool announced = !held && s_announce.exchange(false);
+    if (!held && !announced) {
         return false;
     }
     /* A turn of its own, numbered here like a press's, so a press that follows replaces it. */
     uint32_t gen = ++s_gen;
     drain_out();
-    post(CMD_INCOMING, gen);
+    post(held ? CMD_INCOMING : CMD_ANNOUNCE_PLAY, gen);
+    return true;
+}
+
+extern "C" bool muse_hatch_announce(const char *text, const char *lang)
+{
+    if (!s_cmds || !text || !text[0]) {
+        return false;
+    }
+    if (s_announce.exchange(true)) {
+        return false;   /* an announcement is already waiting */
+    }
+    char *copy = strdup(text);
+    if (!copy) {
+        s_announce = false;
+        return false;
+    }
+    cmd_t cmd{ CMD_ANNOUNCE, 0, copy };
+    if (lang) {
+        strlcpy(cmd.lang, lang, sizeof(cmd.lang));
+    }
+    if (xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
+        free(copy);
+        s_announce = false;
+        return false;
+    }
     return true;
 }
 
