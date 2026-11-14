@@ -45,16 +45,18 @@ idf_component_register(
 if(CONFIG_MUSE_WASM_APPS)
     # WAMR 2.4's ESP-IDF port on IDF v6, interpreter only. Its file layer is
     # for WASI (off) and wants newlib's *at() calls, which picolibc lacks; its
-    # platform file wants <sys/stat.h>; its mmap names MALLOC_CAP_EXEC, which
-    # there is none of with memory protection on (AOT, which needs it, is off).
-    # Instruction metering gives each call into an app its budget.
+    # platform file wants <sys/stat.h>. Instruction metering gives each call
+    # into an app its budget.
     idf_component_get_property(wamr_lib espressif__wasm-micro-runtime COMPONENT_LIB)
     idf_component_get_property(wamr_dir espressif__wasm-micro-runtime COMPONENT_DIR)
     set_source_files_properties("${wamr_dir}/core/shared/platform/esp-idf/espidf_file.c"
         TARGET_DIRECTORY ${wamr_lib} PROPERTIES HEADER_FILE_ONLY TRUE)
+    # Its memory-map layer takes linear memory outside the app's budget (and
+    # off the S3 with heap_caps_malloc(MALLOC_CAP_8BIT), internal RAM first):
+    # ours keeps it in PSRAM and counts it (muse_apps_wamr_mem.c, muse_apps.c).
+    set_source_files_properties("${wamr_dir}/core/shared/platform/esp-idf/espidf_memmap.c"
+        TARGET_DIRECTORY ${wamr_lib} PROPERTIES HEADER_FILE_ONLY TRUE)
+    target_sources(${wamr_lib} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/muse_apps_wamr_mem.c")
     target_compile_options(${wamr_lib} PRIVATE -include sys/stat.h)
     target_compile_definitions(${wamr_lib} PRIVATE WASM_ENABLE_INSTRUCTION_METERING=1)
-    if(NOT CONFIG_HEAP_HAS_EXEC_HEAP)
-        target_compile_definitions(${wamr_lib} PRIVATE MALLOC_CAP_EXEC=MALLOC_CAP_INVALID)
-    endif()
 endif()

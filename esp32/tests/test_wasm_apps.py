@@ -122,7 +122,7 @@ class WasmAppsTest(unittest.TestCase):
         cmake = read("components/muse_apps/CMakeLists.txt")
         self.assertIn('"muse_apps.c"', block(cmake, "if(CONFIG_MUSE_WASM_APPS)", "endif()"))
         self.assertIn("WASM_ENABLE_INSTRUCTION_METERING=1",
-                      block(cmake, "if(CONFIG_MUSE_WASM_APPS)\n    # WAMR", "endif()\nendif()"))
+                      block(cmake, "if(CONFIG_MUSE_WASM_APPS)\n    # WAMR", "endif()"))
         # Whole, so the modules' imports win over the weak stubs.
         self.assertIn("WHOLE_ARCHIVE", cmake)
         self.assertIn("#define MUSE_APPS_DEFINE_STUBS", read("components/muse_apps/muse_apps_stubs.c"))
@@ -489,6 +489,29 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("cfg.stack_alloc_caps = MALLOC_CAP_SPIRAM", apps)
         self.assertIn("static const NativeSymbol natives[]", apps)
         self.assertIn("init.mem_alloc_option.allocator.malloc_func = (void *)mem_alloc;", apps)
+
+    def test_linear_memory_is_psram_and_budgeted(self):
+        """WAMR maps linear memory through its platform layer, not the runtime
+        allocator. ESP-IDF's layer would take it from internal RAM first and
+        outside the budget; the component's replaces it."""
+        cmake = read("components/muse_apps/CMakeLists.txt")
+        self.assertIn('esp-idf/espidf_memmap.c"\n        TARGET_DIRECTORY ${wamr_lib} PROPERTIES HEADER_FILE_ONLY TRUE', cmake)
+        self.assertIn('target_sources(${wamr_lib} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/muse_apps_wamr_mem.c")', cmake)
+        self.assertNotIn('"muse_apps_wamr_mem.c"', block(cmake, "set(srcs)", "idf_component_register"))
+        shim = read("components/muse_apps/muse_apps_wamr_mem.c")
+        for fn in ["void *os_mmap(", "void *os_mremap(", "void os_munmap(", "int os_mprotect(",
+                   "void os_dcache_flush(", "void os_icache_flush("]:
+            self.assertIn(fn, shim)
+        self.assertIn("prot & MMAP_PROT_EXEC ? NULL : muse_apps_linear_map(size)", shim)
+        self.assertNotRegex(re.sub(r"/\*.*?\*/", "", shim, flags=re.S), r"heap_caps_\w+\(")
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn("mem_alloc((unsigned)size)", function(apps, "void *muse_apps_linear_map("))
+        self.assertIn("memset(p, 0, size)", function(apps, "void *muse_apps_linear_map("))
+        grow = function(apps, "void *muse_apps_linear_remap(")
+        self.assertIn("fits_locked(more)", grow)
+        self.assertIn("MALLOC_CAP_SPIRAM", grow)
+        self.assertIn("memset((uint8_t *)(n + 1) + keep, 0, new_size - keep)", grow)
+        self.assertIn("mem_free(p)", function(apps, "void muse_apps_linear_unmap("))
 
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")

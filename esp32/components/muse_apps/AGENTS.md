@@ -84,6 +84,8 @@ The component's files:
   in `muse_apps_icons.c`.
 - `muse_apps_priv.h`: operations, budgeted memory, LVGL's lock and module
   start/stop hooks.
+- `muse_apps_wamr_mem.c`: built into WAMR's library in place of its ESP-IDF
+  memory-map layer, so linear memory is PSRAM in the app's budget.
 
 CMake builds each module that exists, linking the component whole so imports
 replace their weak `ERR_UNSUPPORTED` stubs in `muse_apps_stubs.c`. CMake checks

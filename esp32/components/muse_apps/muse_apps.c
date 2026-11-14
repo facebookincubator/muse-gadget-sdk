@@ -41,6 +41,7 @@
 #include "muse_app_view.h"
 #include "muse_apps_flash.h"
 #include "muse_apps_priv.h"
+#include "muse_apps_wamr_mem.h"
 #include "muse_board.h"
 #include "capabilities_registry.h"
 #include "muse_link.h"
@@ -444,6 +445,72 @@ static void *mem_realloc(void *p, unsigned size)
     memcpy(n, p, b->size);
     mem_free(p);
     return n;
+}
+
+/* ---- WAMR's linear memory (muse_apps_wamr_mem.c) ------------------------------------------ */
+/* WAMR maps it through its platform layer, not the allocator above: these
+ * keep it in PSRAM and in the budget like the rest of WAMR's memory, and zero
+ * it, as WAMR expects of a new page. */
+
+void *muse_apps_linear_map(size_t size)
+{
+    void *p = size <= UINT32_MAX ? mem_alloc((unsigned)size) : NULL;
+    if (p) {
+        memset(p, 0, size);
+    }
+    return p;
+}
+
+void *muse_apps_linear_remap(void *old, size_t old_size, size_t new_size)
+{
+    if (!old) {
+        return muse_apps_linear_map(new_size);
+    }
+    block_t *b = (block_t *)old - 1;
+    if (new_size <= b->size) {
+        return old;   /* linear memory only grows */
+    }
+    if (new_size > UINT32_MAX - sizeof(block_t)) {
+        return NULL;
+    }
+    /* Only the growth is new to the budget: the old block goes once copied. */
+    size_t more = new_size - b->size;
+    if (b->counted) {
+        taskENTER_CRITICAL(&s_mux);
+        bool ok = fits_locked(more);
+        if (ok) {
+            s_mem.wamr += more;
+            size_t u = used_locked();
+            if (u > s_mem.peak) {
+                s_mem.peak = u;
+            }
+        }
+        taskEXIT_CRITICAL(&s_mux);
+        if (!ok) {
+            return NULL;
+        }
+    }
+    block_t *n = heap_caps_aligned_alloc(8, new_size + sizeof(block_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!n) {
+        if (b->counted) {
+            taskENTER_CRITICAL(&s_mux);
+            s_mem.wamr -= more;
+            taskEXIT_CRITICAL(&s_mux);
+        }
+        return NULL;
+    }
+    n->size = (uint32_t)new_size;
+    n->counted = b->counted;
+    size_t keep = old_size < b->size ? old_size : b->size;
+    memcpy(n + 1, old, keep);
+    memset((uint8_t *)(n + 1) + keep, 0, new_size - keep);
+    heap_caps_free(b);
+    return n + 1;
+}
+
+void muse_apps_linear_unmap(void *p)
+{
+    mem_free(p);
 }
 
 /* ---- The modules' memory ----------------------------------------------------------------- */
