@@ -713,7 +713,9 @@ class WasmAppsTest(unittest.TestCase):
 
     def test_app_py_installs_with_an_id_word(self):
         app = read("tools/muse/app.py")
-        self.assertIn('line = "app.install=" + " ".join([(args.id or "-") + look, args.install]', app)
+        self.assertIn('line = "app.install=" + " ".join([word((args.id or "-") + look), word(args.install)]', app)
+        # files.put's words, too, are split at blanks: a blank in one is refused, not misread.
+        self.assertIn('"files.put=" + word(args.file_put) + (" " + word(args.as_name)', app)
 
     def test_png_with_16_bit_channels_is_refused(self):
         """LVGL's lodepng unfilters into its 4-byte-a-pixel buffer before

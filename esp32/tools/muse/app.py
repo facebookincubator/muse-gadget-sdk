@@ -159,6 +159,13 @@ def install_line(args):
     return (args.id or "-") + look + (" " + args.name if args.name else "")
 
 
+def word(s):
+    """One word of a console line: a blank would split it into two."""
+    if any(c.isspace() for c in s):
+        sys.exit("%r has a blank, which the console would take as two words" % s)
+    return s
+
+
 def app_file(path):
     """A .wasm file, or an app's folder's app.wasm."""
     return os.path.join(path, "app.wasm") if os.path.isdir(path) else path
@@ -230,7 +237,7 @@ def main():
                 # The console's "app.install=ID[:ICON:COLOR] PATH [NAME]", ID "-" for the manifest's:
                 # always with an ID, since a bare path's word is limited to an ID's 63 bytes.
                 look = ":%s:%s" % (args.icon or "", args.color or "") if args.icon or args.color else ""
-                line = "app.install=" + " ".join([(args.id or "-") + look, args.install]
+                line = "app.install=" + " ".join([word((args.id or "-") + look), word(args.install)]
                                                  + ([args.name] if args.name else []))
                 f = command(board, line, 60)
             elif args.install_file:
@@ -249,7 +256,7 @@ def main():
             elif args.files:
                 f = command(board, "files.list", 10)
             elif args.file_put:
-                f = command(board, "files.put=" + args.file_put + (" " + args.as_name if args.as_name else ""), 240)
+                f = command(board, "files.put=" + word(args.file_put) + (" " + word(args.as_name) if args.as_name else ""), 240)
             elif args.file_upload:
                 with open(args.file_upload, "rb") as fh:
                     f = send(board, fh.read(), file=args.as_name or os.path.basename(args.file_upload))
