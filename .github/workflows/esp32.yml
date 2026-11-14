@@ -54,10 +54,13 @@ jobs:
 
       - name: Run host tests in ESP-IDF
         uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
+        env:
+          FREEINK_SOURCE_DIR: ../freeink-host-source
         with:
           esp_idf_version: v6.0.3
           target: esp32c5
           path: esp32
+          extra_docker_args: -e FREEINK_SOURCE_DIR
           command: |
             set -e
             # test_noise_core links against the host PSA Crypto library.
@@ -66,8 +69,7 @@ jobs:
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
-            FREEINK_SOURCE_DIR="$PWD/../freeink-host-source" \
-              python -m unittest discover -s tests -p "test_*.py" -v
+            python -m unittest discover -s tests -p "test_*.py" -v
 
   simulator:
     name: UI simulator (${{ matrix.name }})
