@@ -1849,6 +1849,10 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
                                  "failed to clear setup credentials");
         }
         args->setup_credentials_cleared = true;
+#if CONFIG_MUSE_WASM_APPS
+        // Now, not after the worker's disconnect: a failed start below reboots first.
+        muse_apps_forget_all();
+#endif
     }
 
     if (xTaskCreate(ws_control_task, "ws_control", 8192, args, 4, NULL)

@@ -826,6 +826,14 @@ class WasmAppsTest(unittest.TestCase):
         width = function(ui, "int32_t gadget_ui_table_column_width(")
         self.assertLess(width.index("table_resize_charge("), width.index("lv_table_set_column_count("))
 
+    def test_unpair_records_the_apps_wipe_before_its_worker_starts(self):
+        """A worker that can't start reboots: the wipe must already be recorded."""
+        app = read("main/app.c")
+        unpair = app[app.index("if (action == WS_CONTROL_UNPAIR) {"):]
+        unpair = unpair[:unpair.index('xTaskCreate(ws_control_task')]
+        self.assertIn("muse_apps_forget_all();", unpair)
+        self.assertLess(unpair.index("clear_setup_credentials("), unpair.index("muse_apps_forget_all();"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
