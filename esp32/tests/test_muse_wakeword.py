@@ -529,6 +529,15 @@ class WakeWordFirmwareContract(unittest.TestCase):
                       'free(pre_storage)', 'free(s_snap)'):
             self.assertIn(freed, failed)
 
+    def test_turn_ended_closes_the_capture_but_not_a_new_arming(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        apply = between(glue, 'static void apply_requests(void)', 'static void snapshot_status(void)')
+        block = between(apply, 'if (s_turn_end_req) {', 'if (s_playback != s_applied_playback)')
+        self.assertIn('s_up_owed = false;', block)
+        self.assertIn('st == MUSE_WW_CAPTURING || st == MUSE_WW_CAPTURING_PTT', block)
+        self.assertIn('muse_wakeword_core_abort(&s_core);', block)
+        self.assertNotIn('MUSE_WW_ARMED', block)
+
     def test_glue_starts_with_the_voice_pipeline(self):
         app = (ROOT / 'components/muse/muse_app.c').read_text()
         started = app.index('muse_voice_start(q)')

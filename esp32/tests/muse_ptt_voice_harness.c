@@ -17,6 +17,11 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdarg.h>
+/* Count muse_voice's turn-ended notices: the header is included first, so
+ * its declaration is untouched, then calls in muse_voice.c land here. */
+#include "muse_wakeword_glue.h"
+static int turn_ended_calls;
+#define muse_wakeword_turn_ended() (void)(++turn_ended_calls)
 #include "muse_voice.c"
 #define TAG INPUT_TAG
 #define s_queue input_queue
@@ -297,6 +302,10 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         clock_us+=(scenario==70 || scenario==72 || scenario==73)?40000:20000;
         assert(frame<100);
         if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
+        if(scenario==87 && frame==5) {
+            muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+            xQueueSend(&queue,&u,0);
+        }
         if((scenario==82 || scenario==84) && frame==20) post(MUSE_PTT_UP,false);   /* 400 ms */
         if(scenario==85 || scenario==86) {
             /* Toggle: a waking tap, then a press that starts a note and is let go. */
@@ -327,7 +336,7 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
     if(scenario>=50) {
         note_burst=0;
         /* Toggle mode (64-66): letting go of the first press, then a press that stops. */
-        if(frame==note_release_frame) push(scenario>=64 && scenario<=66 ? MUSE_PTT_DOWN : MUSE_PTT_UP);
+        if(frame==note_release_frame) push((scenario>=64 && scenario<=66) || (scenario==69 && NOTE_TOGGLE) ? MUSE_PTT_DOWN : MUSE_PTT_UP);
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
         if(scenario==67 && frame==40) {   /* the wake word's endpointing */
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
@@ -453,10 +462,16 @@ int main(int argc,char **argv) {
             mode=MUSE_MODE_IDLE; snprintf(caption,sizeof(caption),"PREVIOUS REPLY"); ready=false;
         }
         if(scenario==85 || scenario==86) assert(NOTE_TOGGLE);
-        post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
+        if(scenario==87) {
+            /* A wake word press, released (listening disabled) 100 ms later. */
+            muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+            xQueueSend(&queue,&e,0);
+        } else post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
         int outcome=setjmp(finish);
         if(!outcome) voice_task(NULL);
         bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
+        /* A short hands-free gesture is never tap-to-call, and shows no hint. */
+        if(scenario==87) assert(!starts && outcome==1 && !caption[0] && mode==MUSE_MODE_IDLE && turn_ended_calls==1);
         if(scenario==79 || scenario==83) {
             assert(outcome==3 && notes==1 && !starts && clock_us>=1600000);
             /* A waking press shows nothing until it qualifies as a note. */
@@ -508,6 +523,46 @@ int main(int argc,char **argv) {
         char why[96];
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>40 && frame<=40+7 && note_frames<MAX_FRAMES);
+        assert(!turn_ended_calls);   /* the glue's own release ended it */
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==69) {
+        /* Stray wake word edges during a button note change nothing: a
+         * synthetic release doesn't end it or make it a tap, and a synthetic
+         * press doesn't cancel it (the glue is told its capture is over). */
+        clock_us=1000000;
+        post(MUSE_PTT_DOWN,false);
+        assert(got_event(MUSE_PTT_DOWN) && !s_press_synthetic);
+        muse_input_event_t up={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        muse_input_event_t dn={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&up,0);
+        xQueueSend(&queue,&dn,0);
+        note_release_frame=60;
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+        assert(turn_ended_calls==1 && !queue.n);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        xQueueSend(&queue,&up,0);
+        char why[96];
+        assert(record(false,why,sizeof(why)) && notes==1);
+        assert(frame>=60 && frame<=60+7);   /* the real release (toggle: press) ended it */
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==68) {
+        /* A hands-free note that runs to the recorder's cap: the glue is told,
+         * so its capture closes and the next wake is heard. */
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        char why[96];
+        assert(record(true,why,sizeof(why)) && notes==1);
+        assert(turn_ended_calls==1);
         drop_rec(); free(s_pre); return 0;
     }
     if(scenario>=50) {

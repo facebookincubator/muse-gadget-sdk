@@ -84,6 +84,7 @@ static volatile bool s_runner_ok = true;   /* wake task writes: the runner can d
 static uint32_t s_capture_chunks;                    /* wake task only, for the log */
 static size_t s_seeded_frames;
 static bool s_up_owed;   /* wake task only: a synthetic release the full queue refused */
+static volatile bool s_turn_end_req;   /* muse_voice ended the hands-free turn itself */
 
 const char *muse_wakeword_runner_kind(void)
 {
@@ -138,6 +139,14 @@ void muse_wakeword_note_ptt(bool down)
     } else {
         atomic_store(&s_pending_up, true);
     }
+}
+
+void muse_wakeword_turn_ended(void)
+{
+    if (!s_started) {
+        return;
+    }
+    s_turn_end_req = true;   /* applied by the wake task */
 }
 
 void muse_wakeword_set_playback(bool on)
@@ -293,6 +302,18 @@ static void apply_requests(void)
         s_applied_enabled = on;
         ww_runner_set_listening(s_runner, on);
         ESP_LOGI(TAG, "listening %s (runner=%s)", on ? "on" : "off", muse_wakeword_runner_kind());
+    }
+    if (s_turn_end_req) {
+        s_turn_end_req = false;
+        /* The turn is over on the voice side: close a capture still open
+         * here (its release would be stray now) and forget an owed one.
+         * An arming is a new session, not this turn's. */
+        s_up_owed = false;
+        muse_ww_state_t st = muse_wakeword_core_state(&s_core);
+        if (st == MUSE_WW_CAPTURING || st == MUSE_WW_CAPTURING_PTT) {
+            muse_wakeword_core_abort(&s_core);
+            ESP_LOGI(TAG, "hands-free turn ended by the recorder");
+        }
     }
     if (s_playback != s_applied_playback) {
         s_applied_playback = s_playback;
@@ -487,6 +508,7 @@ bool muse_wakeword_enabled(void) { return false; }
 bool muse_wakeword_listening(void) { return false; }
 void muse_wakeword_set_playback(bool on) { (void)on; }
 void muse_wakeword_set_ptt_turn(bool active) { (void)active; }
+void muse_wakeword_turn_ended(void) {}
 const char *muse_wakeword_runner_kind(void) { return "off"; }
 void muse_wakeword_bench_trigger(bool with_speech) { (void)with_speech; }
 void muse_wakeword_status(muse_wakeword_status_t *out)

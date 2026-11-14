@@ -71,6 +71,11 @@ void muse_wakeword_set_playback(bool on);
  * muse_voice's own pre_reset() after a turn. */
 void muse_wakeword_set_ptt_turn(bool active);
 
+/* muse_voice ended a hands-free turn by itself (its 15 s cap, a failure,
+ * or a turn that never started or didn't qualify), not at the glue's own
+ * release: the glue closes its capture so the next wake is heard. */
+void muse_wakeword_turn_ended(void);
+
 /* "executorch", "bench", or "off" (not compiled in). This names the
  * linked runner in logs/status so a bench build is never mistaken for
  * real detection. */
