@@ -368,12 +368,23 @@ typedef struct {
     uint32_t size, counted;
 } block_t;
 
+/* Whether bytes more fit the budget beside what's used, without wrapping
+ * around for a size near SIZE_MAX. Under s_mux. */
+static bool fits_locked(size_t bytes)
+{
+    size_t used = used_locked();
+    return used <= s_budget && bytes <= s_budget - used;
+}
+
 static void *mem_alloc(unsigned size)
 {
+    if (size > UINT32_MAX - sizeof(block_t)) {
+        return NULL;
+    }
     bool counted = false;
     taskENTER_CRITICAL(&s_mux);
     if (s_mem.counting) {
-        if (used_locked() + size > s_budget) {
+        if (!fits_locked(size)) {
             taskEXIT_CRITICAL(&s_mux);
             if (!s_mem.over_logged) {
                 s_mem.over_logged = true;
@@ -441,7 +452,7 @@ bool muse_apps_charge(size_t bytes)
 {
     bool ok;
     taskENTER_CRITICAL(&s_mux);
-    ok = !s_mem.counting || used_locked() + bytes <= s_budget;
+    ok = !s_mem.counting || fits_locked(bytes);
     if (ok && s_mem.counting) {
         s_mem.charged += bytes;
         size_t u = used_locked();
@@ -462,8 +473,11 @@ void muse_apps_uncharge(size_t bytes)
 
 void *muse_apps_alloc(size_t bytes)
 {
+    if (bytes > SIZE_MAX - sizeof(block_t)) {
+        return NULL;
+    }
     taskENTER_CRITICAL(&s_mux);
-    bool ok = used_locked() + bytes <= s_budget;
+    bool ok = fits_locked(bytes);
     if (ok) {
         s_mem.fw += bytes;
         size_t u = used_locked();

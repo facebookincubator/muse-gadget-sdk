@@ -288,7 +288,13 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("if (budget < BUDGET_MIN_BYTES)", apps)
         self.assertIn(".max_memory_pages = budget / 65536", apps)
         for alloc in ["static void *mem_alloc(", "bool muse_apps_charge(", "void *muse_apps_alloc("]:
-            self.assertIn("<= s_budget" if "mem_alloc" not in alloc else "> s_budget", function(apps, alloc))
+            self.assertIn("fits_locked(", function(apps, alloc))
+        # Checked without wrapping around: a size near SIZE_MAX never passes.
+        fits = function(apps, "static bool fits_locked(")
+        self.assertIn("used <= s_budget && bytes <= s_budget - used", fits)
+        self.assertNotRegex(apps, r"used_locked\(\) \+ \w+ (<=|>) s_budget")
+        self.assertIn("size > UINT32_MAX - sizeof(block_t)", function(apps, "static void *mem_alloc("))
+        self.assertIn("bytes > SIZE_MAX - sizeof(block_t)", function(apps, "void *muse_apps_alloc("))
         self.assertEqual((apps + read("components/muse_apps/muse_apps_capabilities.c")).count('"budget_kb", (double)(muse_apps_mem_budget() / 1024)'), 2)
         api = json.loads(read("components/muse_apps/sdk/api/api.json"))
         self.assertEqual(dict((l[0], l[1]) for l in api["limits"])["budget_bytes"], 2 * 1024 * 1024)
