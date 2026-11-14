@@ -2302,6 +2302,9 @@ static session_result_t run_session(stack_monitor_t *stack) {
     uint64_t last_ws_ping_us = 0;
     bool heartbeat_sent = false;
     uint64_t last_heartbeat_us = 0;
+#if CONFIG_MUSE_WASM_APPS
+    int64_t dma_held_since_us = 0, dma_held_warned_us = 0;
+#endif
 
     // Tunnel data-plane stream, multiplexed on this session. Deferred: it is
     // opened from inside the loop only after the link.register reply arrives
@@ -2518,6 +2521,32 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 clear_pending_json_body(control_tx);
             }
         }
+#if CONFIG_MUSE_WASM_APPS
+        // Apps builds run closest to the DMA reserve, and a control message it
+        // holds back (the registration, a command's result) waits silently:
+        // say so every 5 s while it does.
+        {
+            size_t dma_free = 0;
+            bool waiting = control_tx.json || uxQueueMessagesWaiting(s_result_q);
+            bool short_of_dma = !noise_tx_has_dma_headroom(&dma_free)
+                                || !noise_tx_has_contiguous_dma_headroom();
+            int64_t now = esp_timer_get_time();
+            if (!waiting || !short_of_dma) {
+                dma_held_since_us = 0;
+            } else if (!dma_held_since_us) {
+                dma_held_since_us = now;
+                dma_held_warned_us = now;
+            } else if (now - dma_held_warned_us >= 5000000) {
+                dma_held_warned_us = now;
+                ESP_LOGW(TAG, "%s held for %d s: DMA-capable RAM is short (%u bytes free; sending needs %u)",
+                         !control_tx.json ? "a command result"
+                         : control_tx.is_registration ? "link.register"
+                         : control_tx.is_heartbeat ? "link.heartbeat" : "a control message",
+                         (int)((now - dma_held_since_us) / 1000000), (unsigned)dma_free,
+                         (unsigned)NOISE_TX_DMA_RESERVE_BYTES);
+            }
+        }
+#endif
 
 #if CONFIG_HOMEHUB_DAEMON_REQUESTS
         {
