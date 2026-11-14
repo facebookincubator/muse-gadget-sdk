@@ -707,6 +707,10 @@ class WasmAppsTest(unittest.TestCase):
         self.assertLess(shared.index("styles_of(s) >= STYLES_PER_OBJECT"), shared.index("lv_obj_add_style("))
         self.assertIn("s->shared++;", shared)
 
+    def test_app_py_installs_with_an_id_word(self):
+        app = read("tools/muse/app.py")
+        self.assertIn('line = "app.install=" + " ".join([(args.id or "-") + look, args.install]', app)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

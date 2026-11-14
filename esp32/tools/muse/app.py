@@ -227,12 +227,11 @@ def main():
             elif args.vm:
                 f = command(board, "app.run=" + args.vm, 60)
             elif args.install:
-                # The console's "app.install=ID[:ICON:COLOR] PATH [NAME]", or just the path.
-                head = (args.id or "") + (":%s:%s" % (args.icon or "", args.color or "")
-                                          if args.icon or args.color else "")
-                line = "app.install=" + (" ".join([(args.id or "-") + head[len(args.id or ""):], args.install]
-                                                  + ([args.name] if args.name else []))
-                                         if head or args.name else args.install)
+                # The console's "app.install=ID[:ICON:COLOR] PATH [NAME]", ID "-" for the manifest's:
+                # always with an ID, since a bare path's word is limited to an ID's 63 bytes.
+                look = ":%s:%s" % (args.icon or "", args.color or "") if args.icon or args.color else ""
+                line = "app.install=" + " ".join([(args.id or "-") + look, args.install]
+                                                 + ([args.name] if args.name else []))
                 f = command(board, line, 60)
             elif args.install_file:
                 with open(app_file(args.install_file), "rb") as fh:
