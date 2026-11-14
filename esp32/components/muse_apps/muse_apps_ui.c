@@ -119,8 +119,6 @@ typedef struct {
     void *ext;          /* by type: image_t, a canvas, line points, chart_t, roller_t */
     int32_t *grid;      /* ui_grid's column and row tracks */
     int32_t needle_of;  /* a line: the scale it's the needle of (its handle), or 0 */
-    uint32_t local_sels[7]; /* per part: the state sets it has a local style for (bit per set) */
-    uint8_t shared;     /* shared styles added */
     uint8_t type;       /* GADGET_W_ */
 } slot_t;
 
@@ -292,10 +290,7 @@ lv_obj_t *muse_apps_ui_canvas(int32_t handle, void **ext)
 
 /* ---- Values ------------------------------------------------------------------------------ */
 
-/* An API coordinate (pixels, PCT(p) or SIZE_CONTENT) as LVGL's. A size is
- * 0..SIZE_LIMIT pixels or 0..100 % of its parent: LVGL allocates whole rows
- * of a large object's shadow unchecked. */
-#define SIZE_LIMIT 4096
+/* An API coordinate (pixels, PCT(p) or SIZE_CONTENT) as LVGL's. */
 static bool coord_in(int32_t v, bool size, int32_t *out)
 {
     if (v == GADGET_SIZE_CONTENT) {
@@ -304,12 +299,9 @@ static bool coord_in(int32_t v, bool size, int32_t *out)
     }
     if (v >= PCT_BASE - PCT_SPAN && v <= PCT_BASE + PCT_SPAN) {
         *out = lv_pct(v - PCT_BASE);
-        return !size || (v >= PCT_BASE && v <= PCT_BASE + 100);
+        return true;
     }
     *out = v;
-    if (size) {
-        return v >= 0 && v <= SIZE_LIMIT;
-    }
     return v > -COORD_LIMIT && v < COORD_LIMIT;
 }
 
@@ -404,15 +396,7 @@ static int prop_info(int32_t prop)
 /* ---- Style properties (100 to 154) ------------------------------------------------------- */
 
 enum { K_INT = 1, K_COORD, K_RGB, K_OPA, K_BOOL, K_FONT, K_ANGLE, K_SCALE, K_TEXT_ALIGN, K_GRAD, K_SIDE, K_DECOR, K_PADS,
-       K_SHADOW, K_SPREAD, K_RADIUS, K_DASH, K_WIDTH };
-
-/* LVGL draws a shadow's corner in a buffer of 2 * (width + radius)^2 bytes,
- * computed in an int: a wide shadow on a large rounded object wrapped it to a
- * small allocation it then wrote past. Shadows are bounded as the canvas's
- * are, and radii here (a circle's included, the object's half side up to it),
- * which keeps that buffer under 2.4 MB. */
-#define SHADOW_MAX 64
-#define RADIUS_MAX 1024
+       K_SPREAD };
 
 typedef struct {
     lv_style_prop_t prop;
@@ -425,19 +409,19 @@ static const style_map_t s_style_map[] = {
     [GADGET_P_BG_GRAD_COLOR - 100] = {LV_STYLE_BG_GRAD_COLOR, K_RGB},
     [GADGET_P_BG_GRAD_DIR - 100] = {LV_STYLE_BG_GRAD_DIR, K_GRAD},
     [GADGET_P_BORDER_COLOR - 100] = {LV_STYLE_BORDER_COLOR, K_RGB},
-    [GADGET_P_BORDER_WIDTH - 100] = {LV_STYLE_BORDER_WIDTH, K_WIDTH},
+    [GADGET_P_BORDER_WIDTH - 100] = {LV_STYLE_BORDER_WIDTH, K_INT},
     [GADGET_P_BORDER_OPA - 100] = {LV_STYLE_BORDER_OPA, K_OPA},
     [GADGET_P_BORDER_SIDE - 100] = {LV_STYLE_BORDER_SIDE, K_SIDE},
     [GADGET_P_OUTLINE_COLOR - 100] = {LV_STYLE_OUTLINE_COLOR, K_RGB},
-    [GADGET_P_OUTLINE_WIDTH - 100] = {LV_STYLE_OUTLINE_WIDTH, K_WIDTH},
+    [GADGET_P_OUTLINE_WIDTH - 100] = {LV_STYLE_OUTLINE_WIDTH, K_INT},
     [GADGET_P_OUTLINE_PAD - 100] = {LV_STYLE_OUTLINE_PAD, K_INT},
     [GADGET_P_SHADOW_COLOR - 100] = {LV_STYLE_SHADOW_COLOR, K_RGB},
-    [GADGET_P_SHADOW_WIDTH - 100] = {LV_STYLE_SHADOW_WIDTH, K_SHADOW},
+    [GADGET_P_SHADOW_WIDTH - 100] = {LV_STYLE_SHADOW_WIDTH, K_INT},
     [GADGET_P_SHADOW_OPA - 100] = {LV_STYLE_SHADOW_OPA, K_OPA},
     [GADGET_P_SHADOW_OFFSET_X - 100] = {LV_STYLE_SHADOW_OFFSET_X, K_INT},
     [GADGET_P_SHADOW_OFFSET_Y - 100] = {LV_STYLE_SHADOW_OFFSET_Y, K_INT},
     [GADGET_P_SHADOW_SPREAD - 100] = {LV_STYLE_SHADOW_SPREAD, K_SPREAD},
-    [GADGET_P_RADIUS - 100] = {LV_STYLE_RADIUS, K_RADIUS},
+    [GADGET_P_RADIUS - 100] = {LV_STYLE_RADIUS, K_INT},
     [GADGET_P_PAD_ALL - 100] = {LV_STYLE_PAD_TOP, K_PADS},
     [GADGET_P_PAD_LEFT - 100] = {LV_STYLE_PAD_LEFT, K_INT},
     [GADGET_P_PAD_RIGHT - 100] = {LV_STYLE_PAD_RIGHT, K_INT},
@@ -449,17 +433,17 @@ static const style_map_t s_style_map[] = {
     [GADGET_P_TEXT_OPA - 100] = {LV_STYLE_TEXT_OPA, K_OPA},
     [GADGET_P_TEXT_FONT - 100] = {LV_STYLE_TEXT_FONT, K_FONT},
     [GADGET_P_TEXT_ALIGN - 100] = {LV_STYLE_TEXT_ALIGN, K_TEXT_ALIGN},
-    [GADGET_P_TEXT_LETTER_SPACE - 100] = {LV_STYLE_TEXT_LETTER_SPACE, K_WIDTH},
-    [GADGET_P_TEXT_LINE_SPACE - 100] = {LV_STYLE_TEXT_LINE_SPACE, K_WIDTH},
+    [GADGET_P_TEXT_LETTER_SPACE - 100] = {LV_STYLE_TEXT_LETTER_SPACE, K_INT},
+    [GADGET_P_TEXT_LINE_SPACE - 100] = {LV_STYLE_TEXT_LINE_SPACE, K_INT},
     [GADGET_P_TEXT_DECOR - 100] = {LV_STYLE_TEXT_DECOR, K_DECOR},
     [GADGET_P_LINE_COLOR - 100] = {LV_STYLE_LINE_COLOR, K_RGB},
-    [GADGET_P_LINE_WIDTH - 100] = {LV_STYLE_LINE_WIDTH, K_WIDTH},
+    [GADGET_P_LINE_WIDTH - 100] = {LV_STYLE_LINE_WIDTH, K_INT},
     [GADGET_P_LINE_OPA - 100] = {LV_STYLE_LINE_OPA, K_OPA},
     [GADGET_P_LINE_ROUNDED - 100] = {LV_STYLE_LINE_ROUNDED, K_BOOL},
-    [GADGET_P_LINE_DASH_WIDTH - 100] = {LV_STYLE_LINE_DASH_WIDTH, K_DASH},
-    [GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_DASH},
+    [GADGET_P_LINE_DASH_WIDTH - 100] = {LV_STYLE_LINE_DASH_WIDTH, K_INT},
+    [GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_INT},
     [GADGET_P_ARC_COLOR - 100] = {LV_STYLE_ARC_COLOR, K_RGB},
-    [GADGET_P_ARC_WIDTH - 100] = {LV_STYLE_ARC_WIDTH, K_WIDTH},
+    [GADGET_P_ARC_WIDTH - 100] = {LV_STYLE_ARC_WIDTH, K_INT},
     [GADGET_P_ARC_OPA - 100] = {LV_STYLE_ARC_OPA, K_OPA},
     [GADGET_P_ARC_ROUNDED - 100] = {LV_STYLE_ARC_ROUNDED, K_BOOL},
     [GADGET_P_IMAGE_OPA - 100] = {LV_STYLE_IMAGE_OPA, K_OPA},
@@ -492,11 +476,7 @@ static int32_t style_value(int kind, int32_t v, lv_style_value_t *out)
     int32_t c;
     switch (kind) {
     case K_INT: out->num = clamp(v, -32767, 32767); return 0;
-    case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX); return 0;
-    case K_SPREAD: out->num = clamp(v, 0, SHADOW_MAX); return 0;   /* LVGL inverts its core box on a negative one */
-    case K_RADIUS: out->num = v == GADGET_RADIUS_CIRCLE ? RADIUS_MAX : clamp(v, 0, RADIUS_MAX); return 0;
-    case K_DASH: out->num = clamp(v, 0, 1024); return 0;   /* LVGL divides by width + gap */
-    case K_WIDTH: out->num = clamp(v, 0, 1024); return 0;  /* negative: LVGL sizes buffers short (a chart's points) */
+    case K_SPREAD: out->num = clamp(v, 0, 32767); return 0;   /* LVGL overruns a shadow whose spread is negative */
     case K_COORD:
         if (!coord_in(v, false, &c)) {
             return GADGET_ERR_ARG;
@@ -542,7 +522,6 @@ static int32_t style_api(int kind, lv_style_value_t v)
     case K_ANGLE: return v.num / 10;
     case K_SCALE: return (v.num * 100 + 128) / 256;
     case K_GRAD: return MAP_OUT(s_grads, v.num);
-    case K_RADIUS: return v.num >= RADIUS_MAX ? GADGET_RADIUS_CIRCLE : v.num;
     default: return v.num;
     }
 }
@@ -595,35 +574,6 @@ static int32_t style_get(lv_obj_t *o, int32_t prop, int32_t *out)
     return 0;
 }
 
-/* LVGL counts an object's styles (local, shared, its theme's and those of
- * running transitions) in six bits and asserts when they wrap, which aborts
- * the firmware. Each local selector and each added style is one: an app gets
- * at most STYLES_PER_OBJECT, leaving the rest to the theme and transitions. */
-#define STYLES_PER_OBJECT 32
-
-static int styles_of(const slot_t *s)
-{
-    int n = s->shared;
-    for (size_t p = 0; p < sizeof(s->local_sels) / sizeof(s->local_sels[0]); p++) {
-        n += __builtin_popcount(s->local_sels[p]);
-    }
-    return n;
-}
-
-/* Room for a local style at the API selector (already checked by selector_in). */
-static bool local_style_room(slot_t *s, int32_t selector)
-{
-    uint32_t part = ((uint32_t)selector >> 8) & 0xFF, bit = 1u << ((uint32_t)selector & 0x1F);
-    if (s->local_sels[part] & bit) {
-        return true;
-    }
-    if (styles_of(s) >= STYLES_PER_OBJECT) {
-        return false;
-    }
-    s->local_sels[part] |= bit;
-    return true;
-}
-
 /* A PART_ plus STATE_ bits as LVGL's selector. */
 static bool selector_in(int32_t sel, lv_style_selector_t *out)
 {
@@ -663,19 +613,6 @@ static int32_t set_state(lv_obj_t *o, lv_state_t st, int32_t v)
         lv_obj_remove_state(o, st);
     }
     return 0;
-}
-
-/* LVGL keeps a pointer for every cell and a size for every row and column:
- * charged for the table's dimensions before it allocates them. */
-static size_t table_bytes(uint32_t rows, uint32_t cols)
-{
-    return (size_t)rows * cols * sizeof(char *) + ((size_t)rows + cols) * sizeof(int32_t);
-}
-
-static bool table_resize_charge(slot_t *s, uint32_t rows, uint32_t cols)
-{
-    return charge_delta(s, table_bytes(lv_table_get_row_count(s->obj), lv_table_get_column_count(s->obj)),
-                        table_bytes(rows, cols));
 }
 
 /* Gives back what ui_table_cell charged for the cells outside rows x cols,
@@ -890,22 +827,11 @@ static chart_t *chart_ext(slot_t *s)
 }
 
 /* A roller's options and mode, together as LVGL takes them. */
-/* An infinite roller has LVGL copy its options once a page (up to 15),
- * twice over, unchecked: charged as such before. */
-static size_t roller_extra(const roller_t *r)
-{
-    return r && r->infinite ? 2 * 15 * (strlen(r->options) + 1) : 0;
-}
-
 static int32_t roller_set(slot_t *s, const char *options, bool infinite)
 {
     size_t n = strlen(options);
     roller_t *r = muse_apps_alloc(sizeof(roller_t) + n + 1);
     if (!r) {
-        return GADGET_ERR_NO_MEMORY;
-    }
-    if (!charge_delta(s, roller_extra(s->ext), infinite ? 2 * 15 * (n + 1) : 0)) {
-        muse_apps_free(r);
         return GADGET_ERR_NO_MEMORY;
     }
     r->infinite = infinite;
@@ -1179,9 +1105,6 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
         if (v < 0 || v > MAX_TABLE_ROWS) {
             return GADGET_ERR_ARG;
         }
-        if (!table_resize_charge(s, (uint32_t)v, lv_table_get_column_count(o))) {
-            return GADGET_ERR_NO_MEMORY;
-        }
         table_refund(s, (uint32_t)v, lv_table_get_column_count(o));
         lv_table_set_row_count(o, (uint32_t)v);
         return 0;
@@ -1189,9 +1112,6 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
         ONLY(GADGET_W_TABLE);
         if (v < 1 || v > MAX_TABLE_COLS) {
             return GADGET_ERR_ARG;
-        }
-        if (!table_resize_charge(s, lv_table_get_row_count(o), (uint32_t)v)) {
-            return GADGET_ERR_NO_MEMORY;
         }
         table_refund(s, lv_table_get_row_count(o), (uint32_t)v);
         lv_table_set_column_count(o, (uint32_t)v);
@@ -2454,15 +2374,7 @@ int32_t gadget_ui_table_cell(wasm_exec_env_t env, int32_t table, int32_t row, in
     const char *old = (uint32_t)row < lv_table_get_row_count(s->obj) && (uint32_t)col < lv_table_get_column_count(s->obj)
                           ? lv_table_get_cell_value(s->obj, (uint32_t)row, (uint32_t)col)
                           : NULL;
-    uint32_t rows = lv_table_get_row_count(s->obj), cols = lv_table_get_column_count(s->obj);
-    /* LVGL grows the table to reach the cell. */
-    uint32_t to_rows = (uint32_t)row >= rows ? (uint32_t)row + 1 : rows;
-    uint32_t to_cols = (uint32_t)col >= cols ? (uint32_t)col + 1 : cols;
-    if (!table_resize_charge(s, to_rows, to_cols)) {
-        return GADGET_ERR_NO_MEMORY;
-    }
     if (!charge_delta(s, old ? strlen(old) + 8 : 0, len + 8)) {
-        charge_delta(s, table_bytes(to_rows, to_cols), table_bytes(rows, cols));   /* the table stays as it was */
         return GADGET_ERR_NO_MEMORY;
     }
     lv_table_set_cell_value(s->obj, (uint32_t)row, (uint32_t)col, text);
@@ -2480,9 +2392,6 @@ int32_t gadget_ui_table_column_width(wasm_exec_env_t env, int32_t table, int32_t
         return GADGET_ERR_ARG;
     }
     if ((uint32_t)col >= lv_table_get_column_count(s->obj)) {
-        if (!table_resize_charge(s, lv_table_get_row_count(s->obj), (uint32_t)col + 1)) {
-            return GADGET_ERR_NO_MEMORY;
-        }
         lv_table_set_column_count(s->obj, (uint32_t)col + 1);
     }
     lv_table_set_column_width(s->obj, (uint32_t)col, clamp(width, 0, 32767));
@@ -2523,9 +2432,6 @@ int32_t gadget_ui_style(wasm_exec_env_t env, int32_t obj, int32_t selector, int3
     }
     if (!selector_in(selector, &sel)) {
         return GADGET_ERR_ARG;
-    }
-    if (!local_style_room(s, selector)) {
-        return GADGET_ERR_LIMIT;
     }
     return style_set(s->obj, NULL, sel, prop, value);
 }
@@ -2587,10 +2493,6 @@ int32_t gadget_ui_style_add(wasm_exec_env_t env, int32_t obj, int32_t style, int
     if (!selector_in(selector, &sel)) {
         return GADGET_ERR_ARG;
     }
-    if (styles_of(s) >= STYLES_PER_OBJECT) {
-        return GADGET_ERR_LIMIT;
-    }
-    s->shared++;
     lv_obj_add_style(s->obj, st, sel);
     return 0;
 }

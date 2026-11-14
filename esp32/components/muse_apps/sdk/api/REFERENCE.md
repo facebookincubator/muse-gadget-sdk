@@ -1069,12 +1069,12 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 |---|---|---|---|---|
 | `P_X` | coord | object | rw | Left edge, from the parent's content area, or the offset from P_ALIGN. |
 | `P_Y` | coord | object | rw | Top edge, or the offset from P_ALIGN. |
-| `P_WIDTH` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
-| `P_HEIGHT` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
-| `P_MIN_WIDTH` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
-| `P_MAX_WIDTH` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
-| `P_MIN_HEIGHT` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
-| `P_MAX_HEIGHT` | coord | object | rw | 0..4096 px, PCT(0..100) or SIZE_CONTENT. |
+| `P_WIDTH` | coord | object | rw |  |
+| `P_HEIGHT` | coord | object | rw |  |
+| `P_MIN_WIDTH` | coord | object | rw |  |
+| `P_MAX_WIDTH` | coord | object | rw |  |
+| `P_MIN_HEIGHT` | coord | object | rw |  |
+| `P_MAX_HEIGHT` | coord | object | rw |  |
 | `P_ALIGN` | align | object | rw | Where in the parent; P_X and P_Y offset it. |
 | `P_HIDDEN` | bool | object | rw | Not drawn, and takes no input or space in a layout. |
 | `P_CLICKABLE` | bool | object | rw | Takes touch. On for buttons and inputs, off for labels and images. |
@@ -1103,19 +1103,19 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_BG_GRAD_COLOR` | rgb | style | rw | The gradient's end colour. |
 | `P_BG_GRAD_DIR` | grad_dir | style | rw |  |
 | `P_BORDER_COLOR` | rgb | style | rw |  |
-| `P_BORDER_WIDTH` | int | style | rw | 0..1024 px. |
+| `P_BORDER_WIDTH` | int | style | rw |  |
 | `P_BORDER_OPA` | opa | style | rw |  |
 | `P_BORDER_SIDE` | border_side | style | rw |  |
 | `P_OUTLINE_COLOR` | rgb | style | rw |  |
-| `P_OUTLINE_WIDTH` | int | style | rw | 0..1024 px. |
+| `P_OUTLINE_WIDTH` | int | style | rw |  |
 | `P_OUTLINE_PAD` | int | style | rw | Gap between the object and its outline. |
 | `P_SHADOW_COLOR` | rgb | style | rw |  |
-| `P_SHADOW_WIDTH` | int | style | rw | Blur width, 0..64 px. Shadows cost drawing time; use them on a few objects. |
+| `P_SHADOW_WIDTH` | int | style | rw | Blur width. Shadows cost drawing time; use them on a few objects. |
 | `P_SHADOW_OPA` | opa | style | rw |  |
 | `P_SHADOW_OFFSET_X` | int | style | rw |  |
 | `P_SHADOW_OFFSET_Y` | int | style | rw |  |
-| `P_SHADOW_SPREAD` | int | style | rw | 0..64 px. |
-| `P_RADIUS` | int | style | rw | Corner radius, up to 1024 px; RADIUS_CIRCLE for round. |
+| `P_SHADOW_SPREAD` | int | style | rw | Not negative. |
+| `P_RADIUS` | int | style | rw | Corner radius; RADIUS_CIRCLE for round. |
 | `P_PAD_ALL` | int | style | w | Sets the four paddings. |
 | `P_PAD_LEFT` | int | style | rw |  |
 | `P_PAD_RIGHT` | int | style | rw |  |
@@ -1127,17 +1127,17 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_TEXT_OPA` | opa | style | rw |  |
 | `P_TEXT_FONT` | font | style | rw |  |
 | `P_TEXT_ALIGN` | text_align | style | rw |  |
-| `P_TEXT_LETTER_SPACE` | int | style | rw | 0..1024 px. |
-| `P_TEXT_LINE_SPACE` | int | style | rw | 0..1024 px. |
+| `P_TEXT_LETTER_SPACE` | int | style | rw |  |
+| `P_TEXT_LINE_SPACE` | int | style | rw |  |
 | `P_TEXT_DECOR` | text_decor | style | rw |  |
 | `P_LINE_COLOR` | rgb | style | rw |  |
-| `P_LINE_WIDTH` | int | style | rw | 0..1024 px. |
+| `P_LINE_WIDTH` | int | style | rw |  |
 | `P_LINE_OPA` | opa | style | rw |  |
 | `P_LINE_ROUNDED` | bool | style | rw |  |
-| `P_LINE_DASH_WIDTH` | int | style | rw | 0..1024 px. |
-| `P_LINE_DASH_GAP` | int | style | rw | 0..1024 px. |
+| `P_LINE_DASH_WIDTH` | int | style | rw |  |
+| `P_LINE_DASH_GAP` | int | style | rw |  |
 | `P_ARC_COLOR` | rgb | style | rw |  |
-| `P_ARC_WIDTH` | int | style | rw | 0..1024 px. |
+| `P_ARC_WIDTH` | int | style | rw |  |
 | `P_ARC_OPA` | opa | style | rw |  |
 | `P_ARC_ROUNDED` | bool | style | rw |  |
 | `P_IMAGE_OPA` | opa | style | rw |  |
@@ -1279,7 +1279,7 @@ A device with one of these names has exactly these fields, actions and events, s
 
 ## Manifest
 
-A JSON object in the custom section gadget.manifest of the .wasm, which GADGET_MANIFEST() in gadget.h writes from one string literal. The gadget reads it before running the app. It's the app's own claim: nothing signs the file, and app.install's optional SHA-256 only checks it arrived intact.
+A JSON object in the custom section gadget.manifest of the .wasm, which GADGET_MANIFEST() in gadget.h writes from one string literal. The gadget reads it before running the app.
 
 | Field | Type | Required | |
 |---|---|---|---|

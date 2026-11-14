@@ -1062,12 +1062,12 @@ As C defines, for an app:
 /* Properties, for ui_set, ui_get, ui_set_text, ui_style and ui_animate. */
 #define P_X 1  /* coord, any object. Left edge, from the parent's content area, or the offset from P_ALIGN. */
 #define P_Y 2  /* coord, any object. Top edge, or the offset from P_ALIGN. */
-#define P_WIDTH 3  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
-#define P_HEIGHT 4  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
-#define P_MIN_WIDTH 5  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
-#define P_MAX_WIDTH 6  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
-#define P_MIN_HEIGHT 7  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
-#define P_MAX_HEIGHT 8  /* coord, any object. 0..4096 px, PCT(0..100) or SIZE_CONTENT. */
+#define P_WIDTH 3  /* coord, any object */
+#define P_HEIGHT 4  /* coord, any object */
+#define P_MIN_WIDTH 5  /* coord, any object */
+#define P_MAX_WIDTH 6  /* coord, any object */
+#define P_MIN_HEIGHT 7  /* coord, any object */
+#define P_MAX_HEIGHT 8  /* coord, any object */
 #define P_ALIGN 9  /* align, any object. Where in the parent; P_X and P_Y offset it. */
 #define P_HIDDEN 10  /* bool, any object. Not drawn, and takes no input or space in a layout. */
 #define P_CLICKABLE 11  /* bool, any object. Takes touch. On for buttons and inputs, off for labels and images. */
@@ -1096,19 +1096,19 @@ As C defines, for an app:
 #define P_BG_GRAD_COLOR 102  /* rgb, style. The gradient's end colour. */
 #define P_BG_GRAD_DIR 103  /* grad_dir, style */
 #define P_BORDER_COLOR 104  /* rgb, style */
-#define P_BORDER_WIDTH 105  /* int, style. 0..1024 px. */
+#define P_BORDER_WIDTH 105  /* int, style */
 #define P_BORDER_OPA 106  /* opa, style */
 #define P_BORDER_SIDE 107  /* border_side, style */
 #define P_OUTLINE_COLOR 108  /* rgb, style */
-#define P_OUTLINE_WIDTH 109  /* int, style. 0..1024 px. */
+#define P_OUTLINE_WIDTH 109  /* int, style */
 #define P_OUTLINE_PAD 110  /* int, style. Gap between the object and its outline. */
 #define P_SHADOW_COLOR 111  /* rgb, style */
-#define P_SHADOW_WIDTH 112  /* int, style. Blur width, 0..64 px. Shadows cost drawing time; use them on a few objects. */
+#define P_SHADOW_WIDTH 112  /* int, style. Blur width. Shadows cost drawing time; use them on a few objects. */
 #define P_SHADOW_OPA 113  /* opa, style */
 #define P_SHADOW_OFFSET_X 114  /* int, style */
 #define P_SHADOW_OFFSET_Y 115  /* int, style */
-#define P_SHADOW_SPREAD 116  /* int, style. 0..64 px. */
-#define P_RADIUS 117  /* int, style. Corner radius, up to 1024 px; RADIUS_CIRCLE for round. */
+#define P_SHADOW_SPREAD 116  /* int, style. Not negative. */
+#define P_RADIUS 117  /* int, style. Corner radius; RADIUS_CIRCLE for round. */
 #define P_PAD_ALL 118  /* int, style, write-only. Sets the four paddings. */
 #define P_PAD_LEFT 119  /* int, style */
 #define P_PAD_RIGHT 120  /* int, style */
@@ -1120,17 +1120,17 @@ As C defines, for an app:
 #define P_TEXT_OPA 126  /* opa, style */
 #define P_TEXT_FONT 127  /* font, style */
 #define P_TEXT_ALIGN 128  /* text_align, style */
-#define P_TEXT_LETTER_SPACE 129  /* int, style. 0..1024 px. */
-#define P_TEXT_LINE_SPACE 130  /* int, style. 0..1024 px. */
+#define P_TEXT_LETTER_SPACE 129  /* int, style */
+#define P_TEXT_LINE_SPACE 130  /* int, style */
 #define P_TEXT_DECOR 131  /* text_decor, style */
 #define P_LINE_COLOR 132  /* rgb, style */
-#define P_LINE_WIDTH 133  /* int, style. 0..1024 px. */
+#define P_LINE_WIDTH 133  /* int, style */
 #define P_LINE_OPA 134  /* opa, style */
 #define P_LINE_ROUNDED 135  /* bool, style */
-#define P_LINE_DASH_WIDTH 136  /* int, style. 0..1024 px. */
-#define P_LINE_DASH_GAP 137  /* int, style. 0..1024 px. */
+#define P_LINE_DASH_WIDTH 136  /* int, style */
+#define P_LINE_DASH_GAP 137  /* int, style */
 #define P_ARC_COLOR 138  /* rgb, style */
-#define P_ARC_WIDTH 139  /* int, style. 0..1024 px. */
+#define P_ARC_WIDTH 139  /* int, style */
 #define P_ARC_OPA 140  /* opa, style */
 #define P_ARC_ROUNDED 141  /* bool, style */
 #define P_IMAGE_OPA 142  /* opa, style */

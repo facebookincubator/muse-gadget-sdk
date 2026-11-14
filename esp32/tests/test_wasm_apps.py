@@ -580,25 +580,6 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("atomic_fetch_or(&s_app_down, row);", buttons)
         self.assertIn("atomic_store(&s_app_down, 0);", function(view, "bool muse_app_view_open("))
 
-    def test_object_shadows_and_radii_are_bounded(self):
-        """LVGL sizes a shadow's corner buffer as 2 * (width + radius)^2 in an
-        int: unbounded, it wrapped to a small buffer that was written past."""
-        ui = read("components/muse_apps/muse_apps_ui.c")
-        self.assertIn("#define SHADOW_MAX 64", ui)
-        self.assertIn("#define RADIUS_MAX 1024", ui)
-        for prop, kind in [("SHADOW_WIDTH", "K_SHADOW"), ("SHADOW_SPREAD", "K_SPREAD"), ("RADIUS", "K_RADIUS")]:
-            self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, %s}," % (prop, prop, kind), ui)
-        value = function(ui, "static int32_t style_value(")
-        self.assertIn("case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX);", value)
-        # Not negative: LVGL then inverts the shadow's core box and overruns its buffer.
-        self.assertIn("case K_SPREAD: out->num = clamp(v, 0, SHADOW_MAX);", value)
-        canvas = read("components/muse_apps/muse_apps_canvas.c")
-        self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64);", canvas)
-        self.assertIn("v == GADGET_RADIUS_CIRCLE ? RADIUS_MAX : clamp(v, 0, RADIUS_MAX)", value)
-        self.assertIn("v.num >= RADIUS_MAX ? GADGET_RADIUS_CIRCLE : v.num", function(ui, "static int32_t style_api("))
-        # 2 * (64 + 1024)^2 fits an int with room.
-        self.assertLess(2 * (64 + 1024) ** 2, 2 ** 31)
-
     def test_console_install_line_is_parsed_by_its_blanks(self):
         """A word too long for its buffer, or words split by a tab, once made
         the name lookup step through a NULL pointer."""
@@ -644,16 +625,6 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("lv_draw_buf_destroy(decoded);", png)
         self.assertNotIn("lv_free(rgba)", png)
 
-    def test_styles_per_object_stay_under_lvgl_s_count(self):
-        """LVGL keeps an object's style count in six bits and aborts on wrap."""
-        ui = read("components/muse_apps/muse_apps_ui.c")
-        self.assertIn("#define STYLES_PER_OBJECT 32", ui)
-        local = function(ui, "int32_t gadget_ui_style(wasm_exec_env_t env")
-        self.assertLess(local.index("local_style_room(s, selector)"), local.index("style_set(s->obj, NULL, sel"))
-        shared = function(ui, "int32_t gadget_ui_style_add(")
-        self.assertLess(shared.index("styles_of(s) >= STYLES_PER_OBJECT"), shared.index("lv_obj_add_style("))
-        self.assertIn("s->shared++;", shared)
-
     def test_app_py_installs_with_an_id_word(self):
         app = read("tools/muse/app.py")
         self.assertIn('line = "app.install=" + " ".join([word((args.id or "-") + look), word(args.install)]', app)
@@ -667,13 +638,6 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("unsigned depth = st.info_png.color.bitdepth;", png)
         self.assertIn("depth > 8", png)
         self.assertLess(png.index("depth > 8"), png.index("lodepng_decode32("))
-
-    def test_line_dashes_are_never_negative(self):
-        """LVGL takes each dash's position modulo width + gap."""
-        ui = read("components/muse_apps/muse_apps_ui.c")
-        for prop in ["LINE_DASH_WIDTH", "LINE_DASH_GAP"]:
-            self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_DASH}," % (prop, prop), ui)
-        self.assertIn("case K_DASH: out->num = clamp(v, 0, 1024);", function(ui, "static int32_t style_value("))
 
     def test_a_textarea_is_charged_for_the_text_it_keeps(self):
         text = function(read("components/muse_apps/muse_apps_ui.c"), "static int32_t text_set(")
@@ -700,13 +664,6 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("if (s_rq) vQueueDeleteWithCaps(s_rq);\n        s_rq = NULL;", start)
         apps = function(read("components/muse_apps/muse_apps.c"), "void muse_apps_start(")
         self.assertIn("vQueueDeleteWithCaps(s_reqs);", apps[apps.index('"couldn\'t start the app task"'):])
-
-    def test_widths_are_never_negative(self):
-        """A negative line width made LVGL allocate a chart's points short."""
-        ui = read("components/muse_apps/muse_apps_ui.c")
-        for prop in ["BORDER_WIDTH", "OUTLINE_WIDTH", "LINE_WIDTH", "ARC_WIDTH"]:
-            self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_WIDTH}," % (prop, prop), ui)
-        self.assertIn("case K_WIDTH: out->num = clamp(v, 0, 1024);", function(ui, "static int32_t style_value("))
 
     def test_the_store_waits_for_nvs_and_its_wipe_before_files_are_read(self):
         """The store starts before the firmware initializes NVS: an unpairing's
@@ -758,17 +715,6 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("lv_event_stop_processing(e);", guard)
         self.assertIn("lv_obj_add_event_cb(o, chart_guard, LV_EVENT_DRAW_MAIN | LV_EVENT_PREPROCESS, NULL);", ui)
 
-    def test_table_dimensions_are_charged(self):
-        """LVGL allocates a pointer per cell: 256 x 16 tables are 16 KB each."""
-        ui = read("components/muse_apps/muse_apps_ui.c")
-        self.assertIn("(size_t)rows * cols * sizeof(char *)", function(ui, "static size_t table_bytes("))
-        cell = function(ui, "int32_t gadget_ui_table_cell(")
-        self.assertLess(cell.index("table_resize_charge(s, to_rows, to_cols)"), cell.index("lv_table_set_cell_value("))
-        rows = ui[ui.index("case GADGET_P_ROW_COUNT:"):]
-        self.assertLess(rows.index("table_resize_charge("), rows.index("lv_table_set_row_count("))
-        width = function(ui, "int32_t gadget_ui_table_column_width(")
-        self.assertLess(width.index("table_resize_charge("), width.index("lv_table_set_column_count("))
-
     def test_unpair_records_the_apps_wipe_before_its_worker_starts(self):
         """A worker that can't start reboots: the wipe must already be recorded."""
         app = read("main/app.c")
@@ -810,18 +756,6 @@ class WasmAppsTest(unittest.TestCase):
     def test_a_turn_delivers_at_most_max_ops_completions(self):
         turn = function(read("components/muse_apps/muse_apps.c"), "static void turn(")
         self.assertIn("for (int k = 0; k < MAX_OPS && s_app.running && take_done(&op); k++) {", turn)
-
-    def test_an_infinite_roller_is_charged_for_its_pages(self):
-        ui = read("components/muse_apps/muse_apps_ui.c")
-        self.assertIn("return r && r->infinite ? 2 * 15 * (strlen(r->options) + 1) : 0;", function(ui, "static size_t roller_extra("))
-        roller = function(ui, "static int32_t roller_set(")
-        self.assertLess(roller.index("charge_delta(s, roller_extra(s->ext)"), roller.index("lv_roller_set_options("))
-
-    def test_text_spacing_is_never_negative(self):
-        """An infinite roller divides by line height + letter spacing."""
-        ui = read("components/muse_apps/muse_apps_ui.c")
-        for prop in ["TEXT_LETTER_SPACE", "TEXT_LINE_SPACE"]:
-            self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_WIDTH}," % (prop, prop), ui)
 
     def test_an_id_too_long_is_refused_not_cut(self):
         """Cut to 31 bytes, it could name another installed app."""
@@ -867,14 +801,6 @@ class WasmAppsTest(unittest.TestCase):
         opened = function(read("components/muse/muse_app_view.c"), "bool muse_app_view_open(")
         self.assertLess(opened.index("atomic_store(&s_open, true);"), opened.index("if (muse_voice_in_call()) {"))
 
-    def test_object_sizes_are_bounded(self):
-        """LVGL allocates whole rows of a large object's shadow unchecked."""
-        ui = read("components/muse_apps/muse_apps_ui.c")
-        coord = function(ui, "static bool coord_in(")
-        self.assertIn("return v >= 0 && v <= SIZE_LIMIT;", coord)
-        self.assertIn("return !size || (v >= PCT_BASE && v <= PCT_BASE + 100);", coord)
-        self.assertIn("#define SIZE_LIMIT 4096", ui)
-
     def test_apps_only_where_their_exit_is_in_reach(self):
         kconfig = read("components/muse_apps/Kconfig")
         for board in ["MUSE_BOARD_OSTB_ECHOEAR_2ST", "MUSE_BOARD_WAVESHARE_S3_LCD7", "MUSE_BOARD_VIEWE_SMARTRING_PLUS"]:
@@ -882,6 +808,12 @@ class WasmAppsTest(unittest.TestCase):
         # Boards that turn a held touch on the face into push-to-talk don't, under an app.
         face = function(read("components/muse/muse_ui.c"), "bool muse_ui_face_active(")
         self.assertLess(face.index("if (muse_app_view_tick()) {"), face.index("return s_face_active;"))
+
+    def test_shadow_spread_is_never_negative(self):
+        """LVGL inverts a shadow's core box on a negative spread and overruns its buffer."""
+        self.assertIn("case K_SPREAD: out->num = clamp(v, 0, 32767);",
+                      function(read("components/muse_apps/muse_apps_ui.c"), "static int32_t style_value("))
+        self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64);", read("components/muse_apps/muse_apps_canvas.c"))
 
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
