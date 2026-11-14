@@ -953,6 +953,7 @@ static bool console_command(char *line, bool whole)
         return true;
     }
 #endif
+#if CONFIG_MUSE_WAKEWORD_ENABLE
     if (!strcmp(line, "wake") || !strcmp(line, "wake.on") || !strcmp(line, "wake.off")) {
         if (line[4] == '.') {
             muse_wakeword_set_enabled(!strcmp(line, "wake.on"));
@@ -967,6 +968,7 @@ static bool console_command(char *line, bool whole)
         fflush(stdout);
         return true;
     }
+#endif
     if (!strncmp(line, "face=", 5)) {
         set_face(line + 5);
         return true;

@@ -17,13 +17,22 @@ limitations under the License.
 # ExecuTorch runtime (registry component)
 
 The [ExecuTorch](https://github.com/pytorch/executorch) runtime comes
-from the ESP Component Registry, pinned exact in
-[`main/idf_component.yml`](../main/idf_component.yml):
+from the ESP Component Registry, pinned exact in the wake word
+component's
+[`idf_component.yml`](../components/muse_wakeword/idf_component.yml):
 
 ```yaml
 pytorch/executorch:
   version: "==1.6.0-dev.20261112"
+  rules:
+    - if: "$CONFIG{MUSE_WAKEWORD_EXECUTORCH} == \"y\""
 ```
+
+The rule keeps it out of every build without `MUSE_WAKEWORD_ENABLE`:
+those builds don't download it, list it in `dependencies.lock`, or
+compile any of it. `MUSE_WAKEWORD_EXECUTORCH` is a string that is
+always defined (`"y"` with the feature, `"n"` without), because the
+component manager can't evaluate a bool whose dependencies are unmet.
 
 Do not loosen the pin to a range: a kernel bundle is made for one
 component version, a respin included, and the build refuses a bundle
@@ -38,8 +47,7 @@ covers the pin, build-time bundle generation, and updating it.
 
 The component links nothing into firmware until a model and a kernel
 bundle are declared. The wake word component declares them in its
-`CMakeLists.txt`, gated on the feature and the ExecuTorch runner
-choice, so default firmware is unchanged. A project that declares
+`CMakeLists.txt`, only with the feature on. A project that declares
 nothing and calls `et_model` fails to link instead of failing every
 model load.
 
@@ -73,7 +81,7 @@ bundle regenerates from the declared model on the next configure.
 
 ## Updating the component
 
-Bump the `==` pin in [`main/idf_component.yml`](../main/idf_component.yml),
+Bump the `==` pin in [`components/muse_wakeword/idf_component.yml`](../components/muse_wakeword/idf_component.yml),
 and re-export the model only if the new component needs it (the
 exporter is `components/muse_wakeword/tools/export_hey_muse.py`; its
 sidecar records the export, and the build-time bundle check is the
@@ -89,7 +97,7 @@ deltas. Do not line-review component sources (they are downloaded,
 not vendored). Then build the consumers: this SDK's
 wake-word firmware for one Xtensa and one RISC-V board (the builds
 that actually link the component), plus a normal board build, which
-must still pass and link no ExecuTorch code:
+must still pass without downloading ExecuTorch:
 
 ```sh
 tools/muse/board.sh build box3

@@ -475,9 +475,30 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertNotIn('MUSE_WW_ARMED', block)
 
     def test_glue_starts_with_the_voice_pipeline(self):
-        app = (ROOT / 'components/muse/muse_app.c').read_text()
-        started = app.index('muse_voice_start(q)')
-        self.assertIn('muse_wakeword_init(q)', app[started:])
+        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
+        start = between(voice, 'esp_err_t muse_voice_start(QueueHandle_t queue)', '\n}\n')
+        task = start.index('xTaskCreatePinnedToCoreWithCaps(voice_task')
+        self.assertIn('muse_wakeword_init(queue)', start[task:])
+
+    def test_feature_off_builds_compile_no_wake_word_code(self):
+        # Builds without the feature must not change: the glue isn't
+        # compiled, its hooks are inline no-ops, and every wake word line in
+        # shared files is behind the option.
+        cmake = (ROOT / 'components/muse/CMakeLists.txt').read_text()
+        self.assertIn('if(CONFIG_MUSE_WAKEWORD_ENABLE)\n        # Wake word tap and task', cmake)
+        header = (ROOT / 'components/muse/muse_wakeword_glue.h').read_text()
+        stubs = header[header.index('#else   /* !CONFIG_MUSE_WAKEWORD_ENABLE */'):]
+        self.assertIn('static inline void muse_wakeword_on_audio(', stubs)
+        self.assertNotIn('!CONFIG_MUSE_WAKEWORD_ENABLE', (ROOT / 'components/muse/muse_wakeword_glue.c').read_text())
+        self.assertNotIn('muse_wakeword', (ROOT / 'components/muse/muse_app.c').read_text())
+        main_yml = (ROOT / 'main/idf_component.yml').read_text()
+        self.assertNotIn('executorch', main_yml)
+        manifest = (WW / 'idf_component.yml').read_text()
+        self.assertIn('if: "$CONFIG{MUSE_WAKEWORD_EXECUTORCH} == \\"y\\""', manifest)
+        kconfig = (WW / 'Kconfig').read_text()
+        helper = between(kconfig, 'config MUSE_WAKEWORD_EXECUTORCH', 'menu "Muse wake word"')
+        self.assertIn('default "y" if MUSE_WAKEWORD_ENABLE', helper)
+        self.assertIn('default "n"', helper)
 
     def test_speech_start_shows_listening_before_posting(self):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()

@@ -23,6 +23,7 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "sdkconfig.h"
 
 /*
  * Firmware glue for hands-free wake word ("Hey Muse"): the audio
@@ -35,9 +36,21 @@
  * muse_state's captions, and components cannot require each other.
  *
  * Every entry point is safe to call with the feature compiled out
- * (CONFIG_MUSE_WAKEWORD_ENABLE=n): the stubs do nothing and report
- * the runner as "off", so call sites need no conditionals.
+ * (CONFIG_MUSE_WAKEWORD_ENABLE=n): the inline stubs at the end do
+ * nothing and report the runner as "off", so call sites need no
+ * conditionals and builds without the feature compile no code for it.
  */
+
+typedef struct {
+    bool enabled;
+    bool listening;
+    const char *runner;
+    int state;   /* muse_ww_state_t, kept as int to stay dependency-free */
+    uint32_t wakes, cancels, submits, conversions, suppressed_wakes;
+    uint32_t dropped_frames;   /* ring overload evidence */
+} muse_wakeword_status_t;
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
 
 /* Once, after muse_voice_start. Synthetic events go to `queue` (the
  * muse_input queue). Failure only loses wake word; voice still runs. */
@@ -79,13 +92,33 @@ void muse_wakeword_turn_ended(void);
 /* "executorch", or "off" (not compiled in): the runner in logs/status. */
 const char *muse_wakeword_runner_kind(void);
 
-typedef struct {
-    bool enabled;
-    bool listening;
-    const char *runner;
-    int state;   /* muse_ww_state_t, kept as int to stay dependency-free */
-    uint32_t wakes, cancels, submits, conversions, suppressed_wakes;
-    uint32_t dropped_frames;   /* ring overload evidence */
-} muse_wakeword_status_t;
-
 void muse_wakeword_status(muse_wakeword_status_t *out);
+
+#else   /* !CONFIG_MUSE_WAKEWORD_ENABLE */
+
+static inline esp_err_t muse_wakeword_init(QueueHandle_t queue)
+{
+    (void)queue;
+    return ESP_OK;
+}
+static inline void muse_wakeword_on_audio(const int16_t *pcm, size_t frames)
+{
+    (void)pcm;
+    (void)frames;
+}
+static inline void muse_wakeword_note_ptt(bool down) { (void)down; }
+static inline void muse_wakeword_set_enabled(bool on) { (void)on; }
+static inline bool muse_wakeword_enabled(void) { return false; }
+static inline bool muse_wakeword_listening(void) { return false; }
+static inline void muse_wakeword_set_playback(bool on) { (void)on; }
+static inline void muse_wakeword_set_ptt_turn(bool active) { (void)active; }
+static inline void muse_wakeword_turn_ended(void) {}
+static inline const char *muse_wakeword_runner_kind(void) { return "off"; }
+static inline void muse_wakeword_status(muse_wakeword_status_t *out)
+{
+    if (out) {
+        *out = (muse_wakeword_status_t){ .runner = "off" };
+    }
+}
+
+#endif

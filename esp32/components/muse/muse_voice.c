@@ -88,8 +88,17 @@ static QueueHandle_t s_queue;
 static uint32_t s_press_input_epoch;
 static uint32_t s_press_mark;   /* the press's pending-call mark (muse_input_clear_call_pending) */
 static int64_t s_press_us;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
 static bool s_press_synthetic;   /* the press came from the wake word glue */
 static bool s_button_recording;  /* record() is taking a button (not hands-free) note */
+#define EV_SYNTHETIC(ev) ((ev).synthetic)
+#define NOTE_PRESS_SYNTHETIC(ev) (s_press_synthetic = (ev).synthetic)
+#else
+/* Builds without the wake word compile none of its paths. */
+#define s_press_synthetic false
+#define EV_SYNTHETIC(ev) false
+#define NOTE_PRESS_SYNTHETIC(ev) ((void)0)
+#endif
 static volatile bool s_monitor;
 static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
@@ -173,10 +182,12 @@ static muse_adpcm_t s_pre_enc;
 static int16_t s_chunk[MUSE_AUDIO_CHUNK];
 static int s_settle;
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
 /* Wake word pre-roll seeded for the next record(), whole chunks. */
 #define SEED_FRAMES (MUSE_AUDIO_RATE)   /* one second, matching the glue */
 static int16_t *s_seed;
 static volatile size_t s_seed_frames;
+#endif
 
 /*
  * The note being recorded (HOLD_NOTES), kept whole in case it can't go now.
@@ -261,6 +272,7 @@ static void idle_capture(void)
     pre_put_preroll();
 }
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
 /* Whether a queued edge counts for a phase looking for `type`. Real edges
  * count in their own input epoch. Wake word edges never shape a button
  * note: a synthetic release only ends a hands-free turn, and a synthetic
@@ -271,6 +283,7 @@ static bool edge_counts(const muse_input_event_t *ev, muse_ptt_t type)
     if (type == MUSE_PTT_UP) return s_press_synthetic;
     return !s_button_recording;
 }
+#endif
 
 /* Consume through the requested edge, leaving later edges for the next
  * phase (notably a quick release after interrupting a saved note's reply). */
@@ -279,21 +292,25 @@ static bool got_event(muse_ptt_t type)
     muse_input_event_t ev;
     while (xQueueReceive(s_queue, &ev, 0) == pdTRUE) {
         muse_state_poke();
-        if (!ev.synthetic) {
+        if (!EV_SYNTHETIC(ev)) {
             /* Wake word preemption needs real presses even when
              * this drain is only looking for the other edge. */
             muse_wakeword_note_ptt(ev.type == MUSE_PTT_DOWN);
         }
+#if CONFIG_MUSE_WAKEWORD_ENABLE
         if (ev.type == type && edge_counts(&ev, type)) {
+#else
+        if (ev.epoch == muse_input_call_epoch() && ev.type == type) {
+#endif
             if (type == MUSE_PTT_DOWN) {
                 s_press_input_epoch = ev.epoch;
                 s_press_mark = ev.mark;
                 s_press_us = ev.at_us;
-                s_press_synthetic = ev.synthetic;
+                NOTE_PRESS_SYNTHETIC(ev);
             }
             return true;
         }
-        if (ev.synthetic && ev.type == MUSE_PTT_DOWN) {
+        if (EV_SYNTHETIC(ev) && ev.type == MUSE_PTT_DOWN) {
             muse_wakeword_turn_ended();   /* a hands-free press dropped: its capture closes */
         }
         muse_input_clear_call_pending(ev.mark);   /* a press dropped here starts nothing */
@@ -385,7 +402,9 @@ static bool record(bool seeded, char *why, size_t cap)
 {
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
     s_button_recording = !seeded;
+#endif
     s_rec_n = s_sent = 0;
     s_live = s_tried = false;
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
@@ -397,6 +416,7 @@ static bool record(bool seeded, char *why, size_t cap)
     char text[96];
     rec_stats_t st = { 0 };
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
     size_t n = 0;
     if (seeded && s_seed_frames) {
         /* A hands-free turn: the seeded audio already includes the wake
@@ -410,10 +430,13 @@ static bool record(bool seeded, char *why, size_t cap)
     } else {
         s_seed_frames = 0;   /* never leak a seed into a button turn */
     }
+    n += s_pre_fill * MUSE_AUDIO_CHUNK;
+#else
+    size_t n = s_pre_fill * MUSE_AUDIO_CHUNK;
+#endif
     /* Link-only boards upload synchronously. Replay the longer buffered hold
      * in short bursts between mic reads, rather than stalling capture while
      * sending the whole prefix. The voice-session backend has a larger FIFO. */
-    n += s_pre_fill * MUSE_AUDIO_CHUNK;
     take_pre(&st, MUSE_LOW_MEM ? PRE_CHUNKS : s_pre_fill);
     bool released = false;
     size_t stop_at = MAX_FRAMES;
@@ -475,7 +498,9 @@ static bool record(bool seeded, char *why, size_t cap)
     }
     take_pre(&st, s_pre_fill);
     muse_state_set_level(0);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
     s_button_recording = false;
+#endif
     if (seeded && !released) {
         muse_wakeword_turn_ended();   /* the cap or a failure ended it, not the glue */
     }
@@ -748,7 +773,7 @@ static note_result_t note_held(bool wake, bool barge_in)
         if (atomic_load(&s_shutdown) || s_press_input_epoch != muse_input_call_epoch()) return NOTE_CANCELLED;
         muse_input_event_t ev;
         bool edge = xQueuePeek(s_queue, &ev, 0) == pdTRUE;
-        if (edge && ev.synthetic && !s_press_synthetic) {
+        if (edge && EV_SYNTHETIC(ev) && !s_press_synthetic) {
             xQueueReceive(s_queue, &ev, 0);   /* wake word edges never shape a button note */
             if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
             continue;
@@ -770,7 +795,7 @@ static note_result_t note_held(bool wake, bool barge_in)
         if (edge) {
             /* Leave an admitted release for record()'s capture-lag tail, and
              * a later DOWN for the next gesture. Never borrow its hold time. */
-            if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP && ev.synthetic == s_press_synthetic) {
+            if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP && EV_SYNTHETIC(ev) == s_press_synthetic) {
                 if (eligible) return NOTE_ACCEPTED;
                 xQueueReceive(s_queue, &ev, 0);
                 int64_t held_us = until - s_press_us;
@@ -813,7 +838,7 @@ static bool ptt_held_on_waking(void)
             return false;
         }
         if (xQueuePeek(s_queue, &ev, 0) == pdTRUE) {
-            if (ev.synthetic) {
+            if (EV_SYNTHETIC(ev)) {
                 xQueueReceive(s_queue, &ev, 0);   /* not this finger's release */
                 if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
                 continue;
@@ -1157,7 +1182,7 @@ static void call_input(call_ui_t *c)
     while (xQueueReceive(s_queue, &ev, 0) == pdTRUE) {
         muse_state_poke();
         muse_input_clear_call_pending(ev.mark);   /* in the call now, or dropped */
-        if (ev.synthetic) {
+        if (EV_SYNTHETIC(ev)) {
             /* A call is never driven by the wake word: drop its edges. */
             if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
             continue;
@@ -1468,21 +1493,21 @@ static void voice_task(void *arg)
                 continue;
             }
             muse_state_poke();
-            if (!ev.synthetic) {
+            if (!EV_SYNTHETIC(ev)) {
                 muse_wakeword_note_ptt(ev.type == MUSE_PTT_DOWN);
             }
             /* Synthetic (wake word) edges carry no call epoch/mark. */
             if (ev.type != MUSE_PTT_DOWN ||
-                (!ev.synthetic && ev.epoch != muse_input_call_epoch())) {
+                (!EV_SYNTHETIC(ev) && ev.epoch != muse_input_call_epoch())) {
                 muse_input_clear_call_pending(ev.mark);
                 continue;
             }
             s_press_input_epoch = ev.epoch;
             s_press_mark = ev.mark;
             s_press_us = ev.at_us;
-            s_press_synthetic = ev.synthetic;
+            NOTE_PRESS_SYNTHETIC(ev);
             wake = ev.wake;
-            synthetic = ev.synthetic;
+            synthetic = EV_SYNTHETIC(ev);
         }
         bool ptt = muse_voice_ptt_enabled();
         if (wake && ptt && !ptt_held_on_waking()) {
@@ -1532,10 +1557,12 @@ static void voice_task(void *arg)
         muse_input_clear_call_pending(s_press_mark);
         if (!can_record()) {
             pending_down = false;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
             if (synthetic) {
                 s_seed_frames = 0;   /* never leak a seed into a turn that will not happen */
                 muse_wakeword_turn_ended();
             }
+#endif
             pre_reset();
             continue;
         }
@@ -1549,6 +1576,7 @@ static void voice_task(void *arg)
             muse_state_set_level(0);
             if (synthetic) muse_wakeword_turn_ended();
             if (atomic_load(&s_shutdown) || muse_state_mode(NULL) == MUSE_MODE_OFF) continue;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
             if (synthetic) {
                 /* A hands-free turn that didn't qualify (disabled or ended
                  * during admission) just ends: never a call, and no hint
@@ -1557,6 +1585,7 @@ static void voice_task(void *arg)
                 go_idle(result == NOTE_CAPTURE_ERROR ? "MICROPHONE ERROR - TRY AGAIN" : "");
                 continue;
             }
+#endif
 #if CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH
             /* Other boards retain tap-to-call beside holding for a note. */
             if (result == NOTE_TAP && s_press_input_epoch == muse_input_call_epoch()
@@ -1590,6 +1619,7 @@ static void voice_task(void *arg)
     }
 }
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
 void muse_voice_seed_preroll(const int16_t *pcm, size_t frames)
 {
     if (!s_seed || !pcm) {
@@ -1601,6 +1631,7 @@ void muse_voice_seed_preroll(const int16_t *pcm, size_t frames)
     memcpy(s_seed, pcm, n * sizeof(int16_t));
     s_seed_frames = n;   /* publish after the copy */
 }
+#endif
 
 esp_err_t muse_voice_start(QueueHandle_t queue)
 {
@@ -1624,6 +1655,13 @@ esp_err_t muse_voice_start(QueueHandle_t queue)
         muse_state_set_caption("AUDIO INIT FAILED");
         return ESP_ERR_NO_MEM;
     }
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* The wake word rides the voice pipeline: its tap is this task's reads,
+     * and its presses go to the same queue. */
+    if (muse_wakeword_init(queue) != ESP_OK) {
+        ESP_LOGW(TAG, "wake word unavailable; push-to-talk unaffected");
+    }
+#endif
     return ESP_OK;
 }
 

@@ -31,7 +31,6 @@
 #include "muse_text.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
-#include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO_WIFI
 #include "muse_video_wifi.h"
@@ -104,9 +103,6 @@ void muse_app_run(const muse_board_t *board)
     } else if (muse_voice_start(q) != ESP_OK) {
         ESP_LOGE(TAG, "voice pipeline unavailable");
     } else {
-        if (muse_wakeword_init(q) != ESP_OK) {
-            ESP_LOGW(TAG, "wake word unavailable; push-to-talk unaffected");
-        }
         muse_state_set_mode(MUSE_MODE_IDLE);
         muse_state_set_caption("%s", "");   /* the button icons say how to talk */
     }

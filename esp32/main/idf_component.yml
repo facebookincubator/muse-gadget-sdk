@@ -16,11 +16,6 @@ dependencies:
   espressif/esp_websocket_client: "~1.2"
   espressif/cjson: "~1.7"
   espressif/led_strip: "~3.0"
-  # ExecuTorch runtime (wake word). Pinned exact: a kernel bundle
-  # refuses any other component version, including a respin of the
-  # same version.
-  pytorch/executorch:
-    version: "==1.6.0-dev.20261112"
   # The ESP32-2432S028 (CYD) status screen.
   espressif/esp_lcd_ili9341:
     version: "~2.1"

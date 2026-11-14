@@ -338,9 +338,9 @@ such as the StopWatch). The text is centred beneath the smaller avatar;
 turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
 visible when the larger text fills the reading area.
 
-The ExecuTorch runtime for on-device ML (wake word, in progress; not
-enabled on any board yet) comes from the ESP Component Registry, pinned
-in [`main/idf_component.yml`](main/idf_component.yml) —
+The ExecuTorch runtime for the on-device "Hey Muse" wake word (off by
+default; not enabled on any board yet) comes from the ESP Component
+Registry, and only into builds with `MUSE_WAKEWORD_ENABLE`;
 [`docs/executorch.md`](docs/executorch.md) says how the pin and its
 kernel bundle are updated.
 

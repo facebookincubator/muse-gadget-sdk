@@ -29,6 +29,21 @@ static int turn_ended_calls;
 #undef s_queue
 #undef TAG
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* The glue's hooks as no-ops: the wake word scenarios post synthetic
+ * edges and seeds themselves. */
+esp_err_t muse_wakeword_init(QueueHandle_t q) { (void)q; return ESP_OK; }
+void muse_wakeword_on_audio(const int16_t *pcm, size_t frames) { (void)pcm; (void)frames; }
+void muse_wakeword_note_ptt(bool down) { (void)down; }
+void muse_wakeword_set_enabled(bool on) { (void)on; }
+bool muse_wakeword_enabled(void) { return false; }
+bool muse_wakeword_listening(void) { return false; }
+void muse_wakeword_set_playback(bool on) { (void)on; }
+void muse_wakeword_set_ptt_turn(bool active) { (void)active; }
+const char *muse_wakeword_runner_kind(void) { return "fake"; }
+void muse_wakeword_status(muse_wakeword_status_t *out) { *out = (muse_wakeword_status_t){ .runner = "fake" }; }
+#endif
+
 struct test_queue { muse_input_event_t items[64]; int n; } queue;
 static int scenario, frame, starts, ends, allocations, notes, writes, delivered, tail_reads;
 static int64_t clock_us;
@@ -302,10 +317,12 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         clock_us+=(scenario==70 || scenario==72 || scenario==73)?40000:20000;
         assert(frame<100);
         if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
         if(scenario==87 && frame==5) {
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
             xQueueSend(&queue,&u,0);
         }
+#endif
         if((scenario==82 || scenario==84) && frame==20) post(MUSE_PTT_UP,false);   /* 400 ms */
         if(scenario==85 || scenario==86) {
             /* Toggle: a waking tap, then a press that starts a note and is let go. */
@@ -338,10 +355,12 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         /* Toggle mode (64-66): letting go of the first press, then a press that stops. */
         if(frame==note_release_frame) push((scenario>=64 && scenario<=66) || (scenario==69 && NOTE_TOGGLE) ? MUSE_PTT_DOWN : MUSE_PTT_UP);
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
         if(scenario==67 && frame==40) {   /* the wake word's endpointing */
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
             xQueueSend(&queue,&u,0);
         }
+#endif
         if(scenario==58 && frame==10) atomic_store(&s_shutdown,true);
         if(scenario==59 && frame==10) atomic_fetch_add(&s_call_epoch,1);
         for(size_t i=0;i<n;i++) p[i]=scenario>=60 ?
@@ -424,6 +443,7 @@ esp_err_t muse_audio_write(const int16_t *p,size_t n) {
 int main(int argc,char **argv) {
     assert(argc==2); scenario=atoi(argv[1]); s_queue=input_queue=&queue; ready=true;
     s_pre=calloc(PRE_CAP_CHUNKS,sizeof(*s_pre));
+#if CONFIG_MUSE_WAKEWORD_ENABLE
     if(scenario==90) {
         /* A wake word press that interrupts a reply stays synthetic, and a
          * real press after it does not inherit that. */
@@ -455,6 +475,7 @@ int main(int argc,char **argv) {
         }
         free(s_pre); return 0;
     }
+#endif
     if(scenario>=70) {
         notes_mode=true; clock_us=1000000;
         if(scenario==78 || scenario==84) {
@@ -462,11 +483,14 @@ int main(int argc,char **argv) {
             mode=MUSE_MODE_IDLE; snprintf(caption,sizeof(caption),"PREVIOUS REPLY"); ready=false;
         }
         if(scenario==85 || scenario==86) assert(NOTE_TOGGLE);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
         if(scenario==87) {
             /* A wake word press, released (listening disabled) 100 ms later. */
             muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
             xQueueSend(&queue,&e,0);
-        } else post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
+        } else
+#endif
+        post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
         int outcome=setjmp(finish);
         if(!outcome) voice_task(NULL);
         bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
@@ -508,6 +532,7 @@ int main(int argc,char **argv) {
         }
         drop_rec(); free(s_pre); return 0;
     }
+#if CONFIG_MUSE_WAKEWORD_ENABLE
     if(scenario==67) {
         /* Toggle builds: a wake word note still ends at its synthetic
          * release, not at the 15 s cap waiting for a second press. */
@@ -565,6 +590,7 @@ int main(int argc,char **argv) {
         assert(turn_ended_calls==1);
         drop_rec(); free(s_pre); return 0;
     }
+#endif
     if(scenario>=50) {
         /* Run the actual note admission/recording path: no transport call is
          * allowed before both thresholds, even without a whole-note buffer. */

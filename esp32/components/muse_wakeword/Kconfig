@@ -12,6 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Always defined, unlike MUSE_WAKEWORD_ENABLE (a bool whose dependencies are
+# unmet isn't written to sdkconfig), so this component's idf_component.yml can
+# pull the ExecuTorch registry component only into builds with the feature.
+config MUSE_WAKEWORD_EXECUTORCH
+    string
+    default "y" if MUSE_WAKEWORD_ENABLE
+    default "n"
+
 menu "Muse wake word"
     depends on MUSE_ENABLED
 

@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+/* Built only with CONFIG_MUSE_WAKEWORD_ENABLE (components/muse/CMakeLists.txt);
+ * the header has the no-op stubs for builds without it. */
 #include "muse_wakeword_glue.h"
 
 #include "sdkconfig.h"
@@ -451,33 +453,6 @@ void muse_wakeword_status(muse_wakeword_status_t *out)
         .suppressed_wakes = s_stats_snap.suppressed_wakes,
         .dropped_frames = s_tap_drops,
     };
-}
-
-#else   /* !CONFIG_MUSE_WAKEWORD_ENABLE: stubs, see the header */
-
-esp_err_t muse_wakeword_init(QueueHandle_t queue)
-{
-    (void)queue;
-    return ESP_OK;
-}
-void muse_wakeword_on_audio(const int16_t *pcm, size_t frames)
-{
-    (void)pcm;
-    (void)frames;
-}
-void muse_wakeword_note_ptt(bool down) { (void)down; }
-void muse_wakeword_set_enabled(bool on) { (void)on; }
-bool muse_wakeword_enabled(void) { return false; }
-bool muse_wakeword_listening(void) { return false; }
-void muse_wakeword_set_playback(bool on) { (void)on; }
-void muse_wakeword_set_ptt_turn(bool active) { (void)active; }
-void muse_wakeword_turn_ended(void) {}
-const char *muse_wakeword_runner_kind(void) { return "off"; }
-void muse_wakeword_status(muse_wakeword_status_t *out)
-{
-    if (out) {
-        *out = (muse_wakeword_status_t){ .runner = "off" };
-    }
 }
 
 #endif
