@@ -904,12 +904,18 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("xSemaphoreTake(s_one, pdMS_TO_TICKS(timeout_ms)) != pdTRUE", read_vm)
 
     def test_a_failed_state_save_gives_its_quota_back(self):
+        """Saves of one name run in order; once none is in flight the count is
+        what the VM has, even when a failed save had another queued behind it."""
         files = read("components/muse_apps/muse_apps_files.c")
-        self.assertIn("sizes_undo(j->name, j->prev);", function(files, "static void save_run("))
-        self.assertIn("sizes_undo(j->name, j->prev);", function(files, "static void save_drop("))
+        self.assertIn("sizes_saved(j->name, ok, j->data_len);", function(files, "static void save_run("))
+        self.assertIn("sizes_saved(j->name, false, 0);", function(files, "static void save_drop("))
+        saved = function(files, "static void sizes_saved(")
+        self.assertIn("e->saved = ok ? (uint32_t)len : e->saved;", saved)
+        self.assertIn("e->size = e->saved;", saved)
         save = function(files, "int32_t gadget_state_save(")
-        self.assertIn("sizes_take(name, data_len, &j->prev);", save)
-        self.assertIn("sizes_undo(name, j->prev);", save)
+        self.assertEqual(save.count("sizes_take("), 1)
+        self.assertIn("sizes_take(name, data_len, true);", save)
+        self.assertEqual(save.count("sizes_saved(name, false, 0);"), 2)
 
     def test_one_button_doing_both_is_one_button(self):
         present = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons_present(")
