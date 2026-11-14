@@ -203,6 +203,13 @@ class StopWatchPTT(unittest.TestCase):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 97, board=board, realtime=realtime)
 
+    def test_stale_press_takes_nothing_over_from_a_hands_free_note(self):
+        # A press the input queue's overflow invalidated must not take the
+        # note over (its release would be ignored too, leaving a 15 s note).
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 98, board=board, realtime=realtime)
+
     def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
         # The seed already ends at the speech start; the idle ring covers
         # the same audio and would play it twice.

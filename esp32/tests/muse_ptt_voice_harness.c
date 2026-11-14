@@ -34,7 +34,8 @@ static int turn_ended_calls;
  * edges and seeds themselves. */
 esp_err_t muse_wakeword_init(QueueHandle_t q) { (void)q; return ESP_OK; }
 void muse_wakeword_on_audio(const int16_t *pcm, size_t frames) { (void)pcm; (void)frames; }
-void muse_wakeword_note_ptt(bool down) { (void)down; }
+static int note_ptt_calls;
+void muse_wakeword_note_ptt(bool down) { (void)down; note_ptt_calls++; }
 void muse_wakeword_set_enabled(bool on) { (void)on; }
 bool muse_wakeword_enabled(void) { return false; }
 bool muse_wakeword_listening(void) { return false; }
@@ -373,7 +374,11 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
         if(scenario==96 && frame==3) push(MUSE_PTT_DOWN);   /* a finger lands on the hands-free note */
-        if((scenario==67 && frame==40) || (scenario==95 && frame==4) || (scenario==96 && frame==4)) {   /* the wake word's endpointing */
+        if(scenario==98 && frame==3) {   /* a press the queue's overflow made stale */
+            muse_input_event_t d={.type=MUSE_PTT_DOWN,.epoch=muse_input_call_epoch()-1,.at_us=clock_us};
+            xQueueSend(&queue,&d,0);
+        }
+        if((scenario==67 && frame==40) || (scenario==95 && frame==4) || (scenario==96 && frame==4) || (scenario==98 && frame==10)) {   /* the wake word's endpointing */
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
             xQueueSend(&queue,&u,0);
         }
@@ -530,6 +535,23 @@ int main(int argc,char **argv) {
         char why[96];
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>=60 && frame<=60+7 && !turn_ended_calls);
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==98) {
+        /* A press the input queue's overflow made stale lands on a
+         * hands-free note: it takes nothing over and the wake word doesn't
+         * hear it, so the wake word's release still ends the note. */
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        char why[96];
+        assert(record(true,why,sizeof(why)) && notes==1);
+        assert(frame>10 && frame<=10+7 && s_press_synthetic && !note_ptt_calls);
         drop_rec(); free(s_pre); return 0;
     }
     if(scenario==97) {
