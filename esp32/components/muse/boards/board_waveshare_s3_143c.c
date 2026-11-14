@@ -468,7 +468,7 @@ static unsigned poll_buttons(void)
         tp_down = false;
         tp_talking = false;
     } else if (pressed && tp_down && tp_on_face && !tp_talking) {
-        if (lv_indev_get_scroll_obj(s_touch_indev) || !muse_ui_face_active()) {
+        if (lv_indev_get_scroll_obj(s_touch_indev) || muse_ui_volume_swiping() || !muse_ui_face_active()) {
             tp_on_face = false;
         } else if ((xTaskGetTickCount() - tp_press_tick) >= pdMS_TO_TICKS(TOUCH_HOLD_MS)) {
             tp_talking = true;

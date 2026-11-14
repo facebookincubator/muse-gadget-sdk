@@ -34,6 +34,7 @@
 #include "src/misc/lv_area_private.h"            /* lv_area_intersect, for the ring */
 
 #include "muse_ble.h"
+#include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_input.h"
 #include "muse_chat.h"
@@ -49,6 +50,7 @@
 #include "muse_text.h"
 #include "muse_wifi.h"
 #include "muse_voice.h"
+#include "muse_volume_swipe.h"
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
@@ -80,6 +82,8 @@ static const char *TAG = "muse_ui";
 #define SPEAKER_PX 64
 #define SPEAKER_GROW_PX 8       /* how much the speaker button swells while held */
 #define SPEAKER_HOLD_MS 400     /* LVGL's long press */
+#define VOLUME_HINT_HOLD_MS 450
+#define VOLUME_HINT_FADE_MS 250
 
 #define COLOR_DIM 0x8b84a8
 #define COLOR_CAPTION 0xd8d2ff
@@ -112,6 +116,10 @@ static lv_indev_t *s_indev;
 static lv_obj_t *s_tv;
 static bool s_swipe_enabled = true;
 static bool s_touch_talk_down;
+static volatile bool s_volume_swiping;   /* input task: suppress screen-hold PTT */
+static muse_volume_swipe_t s_volume_swipe;
+static lv_obj_t *s_volume_hint;
+static lv_obj_t *s_volume_percent, *s_volume_bar;
 #if CONFIG_MUSE_VOICE_NOTE_TOGGLE
 static bool s_note_listening;   /* a toggled note is recording: keep its face up */
 #endif
@@ -123,7 +131,7 @@ static lv_obj_t *s_face;
 static void update_tileview_swipe(void)
 {
     if (!s_tv) return;
-    bool enabled = s_swipe_enabled && !s_touch_talk_down;
+    bool enabled = s_swipe_enabled && !s_touch_talk_down && !s_volume_swiping;
 #if CONFIG_MUSE_VOICE_NOTE_TOGGLE
     enabled = enabled && !s_note_listening;
 #endif
@@ -147,6 +155,11 @@ bool muse_ui_face_active(void)
     }
 #endif
     return s_face_active;
+}
+
+bool muse_ui_volume_swiping(void)
+{
+    return s_volume_swiping;
 }
 static lv_obj_t *s_settings;
 static lv_obj_t *s_dots[2];
@@ -558,7 +571,7 @@ static void build_button_icons(lv_obj_t *face)
 static void on_canvas_clicked(lv_event_t *e)
 {
     (void)e;
-    muse_state_make_happy();
+    if (!s_volume_swipe.claimed) muse_state_make_happy();
 }
 
 static const lv_font_t *font_pick(const lv_font_t *full, const lv_font_t *compact)
@@ -1179,6 +1192,120 @@ static void apply_text_size(void)
 }
 #endif
 
+/* Only the face background and avatar register this callback. Buttons, reply
+ * paging, Settings, images and the wake cover keep their own touch handling. */
+static bool volume_swipe_allowed(void)
+{
+    if (!muse_board->audio_init || !s_face_active || !s_swipe_enabled ||
+        s_touch_talk_down || muse_state_asleep() || muse_menu_is_open() ||
+        s_image_dsc.data || !lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(s_cover, LV_OBJ_FLAG_HIDDEN) ||
+        (s_tv && lv_obj_get_scroll_x(s_tv) != 0)) return false;
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    if (s_full_reply) return false;
+#endif
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+    if (s_note_listening) return false;
+#endif
+#if CONFIG_MUSE_VIDEO
+    if (muse_video_is_open()) return false;
+#endif
+    return true;
+}
+
+static void volume_hint_opacity(void *obj, int32_t opacity)
+{
+    lv_obj_set_style_opa(obj, opacity, 0);
+}
+
+static void volume_hint_faded(lv_anim_t *animation)
+{
+    lv_obj_add_flag(animation->var, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_volume_hint(int volume)
+{
+    /* A fresh drag immediately restores the indicator, even midway through
+     * the previous drag's fade. Children inherit the panel's opacity. */
+    lv_anim_delete(s_volume_hint, volume_hint_opacity);
+    lv_obj_set_style_opa(s_volume_hint, LV_OPA_COVER, 0);
+    lv_label_set_text_fmt(s_volume_percent, "%d%%", volume);
+    lv_bar_set_value(s_volume_bar, volume, LV_ANIM_OFF);
+    lv_obj_remove_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void finish_volume_swipe(void)
+{
+    if (s_volume_swiping) {
+        /* Preview uses the codec only; persist once, rather than writing flash
+         * on every touch sample. Reaching zero mutes separately below. */
+        if (s_volume_swipe.value != muse_settings_volume()) {
+            muse_settings_set_volume(s_volume_swipe.value);
+        }
+        lv_anim_t fade;
+        lv_anim_init(&fade);
+        lv_anim_set_var(&fade, s_volume_hint);
+        lv_anim_set_exec_cb(&fade, volume_hint_opacity);
+        lv_anim_set_values(&fade, LV_OPA_COVER, LV_OPA_TRANSP);
+        lv_anim_set_delay(&fade, VOLUME_HINT_HOLD_MS);
+        lv_anim_set_duration(&fade, VOLUME_HINT_FADE_MS);
+        lv_anim_set_completed_cb(&fade, volume_hint_faded);
+        lv_anim_start(&fade);
+    }
+    s_volume_swipe.tracking = false;
+    s_volume_swiping = false;
+    update_tileview_swipe();
+}
+
+static void on_volume_swipe(lv_event_t *e)
+{
+    /* Do not treat bubbled events from a child control as background drags. */
+    if (lv_event_get_target(e) != lv_event_get_current_target(e)) return;
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_point_t point;
+    switch (code) {
+    case LV_EVENT_PRESSED:
+        s_volume_swipe = (muse_volume_swipe_t){0};
+        if (volume_swipe_allowed()) {
+            lv_indev_get_point(s_indev, &point);
+            muse_volume_swipe_begin(&s_volume_swipe, point.x, point.y, s_h, muse_settings_volume());
+        }
+        break;
+    case LV_EVENT_PRESSING:
+        if (!s_volume_swipe.tracking) break;
+        if (!volume_swipe_allowed()) {
+            finish_volume_swipe();
+            break;
+        }
+        lv_indev_get_point(s_indev, &point);
+        int old_value = s_volume_swipe.value;
+        if (muse_volume_swipe_move(&s_volume_swipe, point.x, point.y)) {
+            s_volume_swiping = true;
+            update_tileview_swipe();
+            if (old_value != s_volume_swipe.value) muse_audio_set_volume(s_volume_swipe.value);
+            bool speaker_on = muse_settings_speaker_on();
+            if ((s_volume_swipe.value == 0 && speaker_on) ||
+                (s_volume_swipe.value > old_value && !speaker_on)) {
+                speaker_on = s_volume_swipe.value > 0;
+                muse_settings_set_speaker_on(speaker_on);
+                if (s_speaker) show_speaker(speaker_on);
+            }
+            show_volume_hint(s_volume_swipe.value);
+        }
+        break;
+    case LV_EVENT_LONG_PRESSED:
+        /* A stationary hold belongs to push-to-talk on some round boards. */
+        if (!s_volume_swipe.claimed) s_volume_swipe.tracking = false;
+        break;
+    case LV_EVENT_RELEASED:
+    case LV_EVENT_PRESS_LOST:
+        finish_volume_swipe();
+        break;
+    default:
+        break;
+    }
+}
+
 static void build_screen(void)
 {
 #if CONFIG_MUSE_LATIN_FONT
@@ -1207,6 +1334,12 @@ static void build_screen(void)
         s_settings = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_LEFT);
         lv_obj_add_event_cb(s_tv, tile_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
         face = s_face;
+        if (muse_board->audio_init) {
+            /* Horizontal drags chain to the tileview; vertical drags belong
+             * to volume rather than scrolling the avatar's children. */
+            lv_obj_remove_flag(face, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_event_cb(face, on_volume_swipe, LV_EVENT_ALL, NULL);
+        }
     }
 
     if (!s_small && muse_board->no_ring) {
@@ -1264,6 +1397,9 @@ static void build_screen(void)
     s_muse_y = s_big_y;
     lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_canvas, on_canvas_clicked, LV_EVENT_CLICKED, NULL);
+    if (muse_board->touch && muse_board->audio_init) {
+        lv_obj_add_event_cb(s_canvas, on_volume_swipe, LV_EVENT_ALL, NULL);
+    }
     if (s_ring) {
         /* The canvas's black corners reach the bezel; keep the ring on top. */
         lv_obj_move_foreground(s_ring);
@@ -1538,6 +1674,38 @@ static void update_control_hints(muse_mode_t mode)
 static void build_overlays(void)
 {
     lv_obj_t *scr = lv_screen_active();
+
+    if (muse_board->touch && muse_board->audio_init) {
+        int bar_height = s_h / 3;
+        if (bar_height > 160) bar_height = 160;
+        int pad = s_small ? 6 : 10;
+        const lv_font_t *font = font_pick(&lv_font_montserrat_20, FONT_COMPACT);
+        s_volume_hint = lv_obj_create(lv_layer_top());
+        lv_obj_remove_style_all(s_volume_hint);
+        lv_obj_set_size(s_volume_hint, s_small ? 48 : 64,
+                        bar_height + lv_font_get_line_height(font) + pad * 3);
+        lv_obj_set_style_bg_color(s_volume_hint, lv_color_hex(0x201a35), 0);
+        lv_obj_set_style_bg_opa(s_volume_hint, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_all(s_volume_hint, pad, 0);
+        lv_obj_set_style_radius(s_volume_hint, 16, 0);
+        lv_obj_align(s_volume_hint, LV_ALIGN_CENTER, s_w / 4, 0);
+        lv_obj_remove_flag(s_volume_hint, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+        s_volume_percent = make_label(s_volume_hint, font, COLOR_LIT);
+        lv_obj_align(s_volume_percent, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_remove_flag(s_volume_percent, LV_OBJ_FLAG_CLICKABLE);
+        s_volume_bar = lv_bar_create(s_volume_hint);
+        lv_obj_set_size(s_volume_bar, s_small ? 12 : 20, bar_height);
+        lv_obj_align(s_volume_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_bar_set_orientation(s_volume_bar, LV_BAR_ORIENTATION_VERTICAL);
+        lv_bar_set_range(s_volume_bar, 0, 100);
+        lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x3a3052), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
+        lv_obj_set_style_radius(s_volume_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_radius(s_volume_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+        lv_obj_remove_flag(s_volume_bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(s_volume_hint, LV_OBJ_FLAG_HIDDEN);
+    }
 
     /* Page dots. */
     for (int i = 0; i < 2 && s_tv; i++) {
