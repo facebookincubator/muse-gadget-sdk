@@ -855,6 +855,9 @@ class WasmAppsTest(unittest.TestCase):
         failed = start[start.index('"no memory for the app queues"'):]
         self.assertLess(failed.index("s_state = NULL;"), failed.index("return;"))
 
+    def test_muse_caption_returns_the_whole_caption(self):
+        self.assertIn("char caption[MUSE_CAPTION_MAX]", function(read("components/muse_apps/muse_apps_sys.c"), "int32_t gadget_muse_caption("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

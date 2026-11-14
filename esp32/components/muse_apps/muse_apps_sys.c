@@ -158,7 +158,7 @@ int32_t gadget_muse_mode(wasm_exec_env_t env)
 int32_t gadget_muse_caption(wasm_exec_env_t env, void *buf, uint32_t buf_size)
 {
     (void)env;
-    char caption[256] = "";
+    char caption[MUSE_CAPTION_MAX] = "";
     uint32_t version = 0;
     muse_state_caption(caption, sizeof(caption), &version);
     size_t n = strlen(caption);
