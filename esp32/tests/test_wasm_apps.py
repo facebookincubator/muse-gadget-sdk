@@ -858,6 +858,10 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("uint32_t argv[2] = {(uint32_t)reason};", apps)
         self.assertIn("uint32_t argv[2] = {(uint32_t)(now / 1000)};", apps)
 
+    def test_the_launcher_doesnt_open_over_the_video_view(self):
+        launcher = function(read("components/muse_apps/muse_apps.c"), "static void show_launcher(")
+        self.assertLess(launcher.index("if (muse_video_is_open()) {"), launcher.index("muse_app_view_open(&cbs)"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

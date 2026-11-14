@@ -951,6 +951,12 @@ static void show_launcher(const char *note)
         muse_app_view_close();
         return;
     }
+#if CONFIG_MUSE_VIDEO
+    if (muse_video_is_open()) {
+        muse_app_view_close();
+        return;
+    }
+#endif
     if (!muse_app_view_open(&cbs)) {
         return;
     }
