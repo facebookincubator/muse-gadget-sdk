@@ -559,6 +559,26 @@ class WasmAppsTest(unittest.TestCase):
                      "!noise_tx_has_contiguous_dma_headroom()", "ESP_LOGW(", '"link.register"', "5000000"]:
             self.assertIn(part, warn)
 
+    def test_callbacks_and_initializers_are_checked_before_running(self):
+        """WAMR writes a callback's results over its arguments, and runs a
+        start function, __post_instantiate and __wasm_call_ctors itself while
+        instantiating, before any instruction limit is set."""
+        apps = read("components/muse_apps/muse_apps.c")
+        run = function(apps, "static void run(")
+        self.assertLess(run.index("has_start_section(bytes, len)"), run.index("wasm_runtime_load_ex("))
+        self.assertIn("if (id == 8) {", function(apps, "static bool has_start_section("))
+        self.assertLess(run.index("exports_allowed(err, sizeof(err))"), run.index("wasm_runtime_instantiate_ex("))
+        exports = function(apps, "static bool exports_allowed(")
+        for name in ['"__post_instantiate"', '"__wasm_call_ctors"']:
+            self.assertIn(name, exports)
+        check = function(apps, "static bool callback_is(")
+        self.assertIn("wasm_func_get_result_count(fn, s_app.inst) != 0", check)
+        self.assertIn("types[i] != WASM_I32", check)
+        for call in ["callback_is(on_start, 0)", "callback_is(init, 0)", "callback_is(s_app.on_frame, 1)",
+                     "callback_is(s_app.on_event, 3)", "callback_is(s_app.on_stop, 1)"]:
+            self.assertLess(run.index(call), run.index("muse_app_view_open(&cbs)"), call)
+        self.assertLess(run.index("callback_is(init, 0)"), run.index("wasm_runtime_call_wasm(s_app.env, init"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

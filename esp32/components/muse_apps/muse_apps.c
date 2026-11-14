@@ -1021,6 +1021,44 @@ static bool imports_allowed(char *err, size_t err_len)
     return true;
 }
 
+/* WAMR runs these itself while instantiating, before an instruction limit
+ * can be set, so a loop in one would hold the app task for good: apps with
+ * them aren't run. (_initialize is called here, metered, with on_start.) */
+static bool exports_allowed(char *err, size_t err_len)
+{
+    int32_t count = wasm_runtime_get_export_count(s_app.module);
+    for (int32_t i = 0; i < count; i++) {
+        wasm_export_t exp;
+        wasm_runtime_get_export_type(s_app.module, i, &exp);
+        if (exp.name && (!strcmp(exp.name, "__post_instantiate") || !strcmp(exp.name, "__wasm_call_ctors"))) {
+            snprintf(err, err_len, "exports %s, which would run unmetered: build it as a reactor", exp.name);
+            return false;
+        }
+    }
+    return true;
+}
+
+/* A callback's export must have exactly its signature: WAMR writes a
+ * function's results over the arguments it's called with, so an extra
+ * result would land past them on the app task's stack. */
+static bool callback_is(wasm_function_inst_t fn, uint32_t i32_params)
+{
+    if (wasm_func_get_result_count(fn, s_app.inst) != 0 || wasm_func_get_param_count(fn, s_app.inst) != i32_params) {
+        return false;
+    }
+    wasm_valkind_t types[3];
+    if (i32_params > sizeof(types) / sizeof(types[0])) {
+        return false;
+    }
+    wasm_func_get_param_types(fn, s_app.inst, types);
+    for (uint32_t i = 0; i < i32_params; i++) {
+        if (types[i] != WASM_I32) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* ---- The manifest ---------------------------------------------------------------------------------- */
 
 static bool leb(const uint8_t *p, size_t len, size_t *at, uint32_t *out)
@@ -1036,6 +1074,28 @@ static bool leb(const uint8_t *p, size_t len, size_t *at, uint32_t *out)
             *out = v;
             return true;
         }
+    }
+    return false;
+}
+
+/* Whether the module has a start section (id 8): WAMR runs its function
+ * while instantiating, unmetered (exports_allowed()). */
+static bool has_start_section(const uint8_t *p, size_t len)
+{
+    size_t at = 8;
+    if (len < 8 || memcmp(p, "\0asm", 4)) {
+        return false;
+    }
+    while (at < len) {
+        uint8_t id = p[at++];
+        uint32_t size;
+        if (!leb(p, len, &at, &size) || size > len - at) {
+            return false;   /* malformed: the loader refuses it */
+        }
+        if (id == 8) {
+            return true;
+        }
+        at += size;
     }
     return false;
 }
@@ -1289,6 +1349,12 @@ static void run(req_t *r)
         return;
     }
 
+    if (has_start_section(bytes, len)) {
+        free(bytes);
+        run_failed(r, covered, "invalid_app", "the app has a start function, which would run unmetered");
+        return;
+    }
+
     memset(s_app.timers, 0, sizeof(s_app.timers));
     taskENTER_CRITICAL(&s_mux);
     s_mem = (typeof(s_mem)){.counting = true};
@@ -1305,7 +1371,7 @@ static void run(req_t *r)
         return;
     }
     int32_t imports = wasm_runtime_get_import_count(s_app.module);
-    if (!imports_allowed(err, sizeof(err))) {
+    if (!imports_allowed(err, sizeof(err)) || !exports_allowed(err, sizeof(err))) {
         unload();
         run_failed(r, covered, "invalid_app", err);
         return;
@@ -1331,6 +1397,16 @@ static void run(req_t *r)
     if (!on_start) {
         unload();
         run_failed(r, covered, "invalid_app", "the app exports no on_start()");
+        return;
+    }
+    wasm_function_inst_t init = wasm_runtime_lookup_function(s_app.inst, "_initialize");
+    if (!callback_is(on_start, 0) || (init && !callback_is(init, 0)) ||
+        (s_app.on_frame && !callback_is(s_app.on_frame, 1)) || (s_app.on_event && !callback_is(s_app.on_event, 3)) ||
+        (s_app.on_stop && !callback_is(s_app.on_stop, 1))) {
+        unload();
+        run_failed(r, covered, "invalid_app",
+                   "a callback has the wrong signature: on_start(), on_frame(int), on_event(int, int, int) and "
+                   "on_stop(int), returning nothing");
         return;
     }
     const muse_app_view_cbs_t cbs = {.input = on_view_input, .exit = on_view_exit};
@@ -1360,7 +1436,6 @@ static void run(req_t *r)
     muse_apps_dev_start();
     /* A WASI reactor's _initialize (static constructors) first, then on_start:
      * one budget between them. */
-    wasm_function_inst_t init = wasm_runtime_lookup_function(s_app.inst, "_initialize");
     wasm_runtime_set_instruction_count_limit(s_app.env, START_STEP_LIMIT);
     s_app.deadline_us = esp_timer_get_time() + START_MAX_US;
     bool inited = !init || wasm_runtime_call_wasm(s_app.env, init, 0, NULL);
