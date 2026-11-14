@@ -25,6 +25,7 @@
 #include "muse_board.h"
 #include "muse_link.h"
 #include "muse_state.h"
+#include "muse_voice.h"
 
 static const char *TAG = "muse_app_view";
 
@@ -174,9 +175,16 @@ bool muse_app_view_open(const muse_app_view_cbs_t *cbs)
         esp_timer_stop(s_long_timer);
         esp_timer_stop(s_exit_timer);
         atomic_store(&s_open, true);
+        /* A call that started meanwhile found no view to stop (it checks after
+         * it's on, we after we are): its hang-up buttons stay its own. */
+        if (muse_voice_in_call()) {
+            atomic_store(&s_open, false);
+            lv_obj_delete(s_root);
+            s_root = NULL;
+        }
     }
     muse_app_view_unlock();
-    if (!s_root) {
+    if (!s_root && !muse_voice_in_call()) {
         ESP_LOGW(TAG, "no memory for the app's screen");
     }
     return s_root != NULL;

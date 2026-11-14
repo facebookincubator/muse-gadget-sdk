@@ -926,6 +926,12 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("atomic_store(&s_vm_moved, false);", function(apps, "static void run("))
         self.assertIn("muse_apps_vm_moved()", function(read("components/muse_apps/muse_apps_vm.c"), "bool muse_apps_vm_job("))
 
+    def test_the_view_rechecks_for_a_call_once_open(self):
+        """A call checks for an open view after it starts; the view checks for
+        a call after it opens: one of them sees the other."""
+        opened = function(read("components/muse/muse_app_view.c"), "bool muse_app_view_open(")
+        self.assertLess(opened.index("atomic_store(&s_open, true);"), opened.index("if (muse_voice_in_call()) {"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
