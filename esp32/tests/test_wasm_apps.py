@@ -719,6 +719,13 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("depth > 8", png)
         self.assertLess(png.index("depth > 8"), png.index("lodepng_decode32("))
 
+    def test_line_dashes_are_never_negative(self):
+        """LVGL takes each dash's position modulo width + gap."""
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        for prop in ["LINE_DASH_WIDTH", "LINE_DASH_GAP"]:
+            self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, K_DASH}," % (prop, prop), ui)
+        self.assertIn("case K_DASH: out->num = clamp(v, 0, 1024);", function(ui, "static int32_t style_value("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
