@@ -213,9 +213,14 @@ void muse_apps_catalog_open(const char *dir) {
     char path[160];
     snprintf(path, sizeof(path), "%s/" CATALOG, s_dir);
     size_t len = 0;
+    struct stat cat;
+    bool exists = stat(path, &cat) == 0;
     char *text = (char *)read_all(path, CATALOG_MAX, &len);
     cJSON *root = text ? cJSON_Parse(text) : NULL;
     free(text);
+    /* A catalog that's there but couldn't be read (no memory, a flash error)
+     * names nothing: its modules aren't unused, so they stay. */
+    bool trusted = !exists || root;
     bool dropped = false;
     cJSON *item;
     cJSON_ArrayForEach(item, cJSON_GetObjectItem(root, "apps")) {
@@ -244,7 +249,11 @@ void muse_apps_catalog_open(const char *dir) {
     }
     cJSON_Delete(root);
     if (dropped) save();
-    delete_unnamed();
+    if (trusted) {
+        delete_unnamed();
+    } else {
+        ESP_LOGW(TAG, "couldn't read %s: its apps' modules kept", CATALOG);
+    }
     ESP_LOGI(TAG, "%d apps installed", s_count);
 }
 
@@ -396,6 +405,17 @@ const char *muse_apps_catalog_read(const char *id, uint8_t **out, size_t *len, c
     } else if (s->ram && (data = alloc(s->e.bytes))) {
         memcpy(data, s->ram, s->e.bytes);
         n = s->e.bytes;
+    }
+    if (!data && s_persistent) {
+        char path[224];
+        struct stat st;
+        app_path(path, sizeof(path), s->e.sha256);
+        if (stat(path, &st) == 0 && st.st_size == (off_t)s->e.bytes) {
+            /* there, but not read: no memory or a flash error, not damage */
+            return fail(err, err_len, "no_memory", "couldn't read the app: try again");
+        }
+    } else if (!data) {
+        return fail(err, err_len, "no_memory", "couldn't copy the app: try again");
     }
     char sha[MUSE_APPS_SHA_HEX + 1] = "";
     if (data && n == s->e.bytes) muse_apps_sha256_hex(data, n, sha);

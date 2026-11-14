@@ -188,6 +188,26 @@ int main(int argc, char **argv) {
         CHECK(muse_apps_catalog_count() == MUSE_APPS_MAX);
     }
 
+    /* A catalog or module that's there but can't be read (here unreadable,
+     * on the gadget no memory or a flash error) isn't damage: nothing goes. */
+    if (geteuid() != 0) {
+        char cat[300];
+        snprintf(cat, sizeof(cat), "%s/catalog.json", dir);
+        int before = files();
+        chmod(cat, 0000);
+        muse_apps_catalog_open(dir);
+        CHECK(muse_apps_catalog_count() == 0 && files() == before);
+        chmod(cat, 0600);
+        muse_apps_catalog_open(dir);
+        CHECK(muse_apps_catalog_count() == MUSE_APPS_MAX);
+        sha_of("t0", sha);
+        snprintf(name, sizeof(name), "%s/%s.wasm", dir, sha);
+        chmod(name, 0000);
+        CHECK(!strcmp(muse_apps_catalog_read("app0", &data, &len, err, sizeof(err)), "no_memory") && data == NULL);
+        chmod(name, 0600);
+        CHECK(muse_apps_catalog_count() == MUSE_APPS_MAX && has_module("t0"));
+    }
+
     /* Unpairing removes every app. */
     muse_apps_catalog_wipe();
     CHECK(muse_apps_catalog_count() == 0 && files() == 1);
