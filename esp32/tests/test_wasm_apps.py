@@ -755,6 +755,8 @@ class WasmAppsTest(unittest.TestCase):
             self.assertIn(code, guard)
         self.assertIn("lv_obj_get_style_pad_top(o, LV_PART_MAIN) + lv_obj_get_style_pad_bottom(o, LV_PART_MAIN)", guard)
         self.assertIn("lv_event_stop_processing(e);", guard)
+        # Measured in the state LVGL measures it in: not pressed, on release.
+        self.assertLess(guard.index("lv_obj_remove_state(o, LV_STATE_PRESSED);"), guard.index("lv_obj_get_height(o)"))
         self.assertIn("lv_obj_add_event_cb(o, slider_guard, LV_EVENT_ALL | LV_EVENT_PREPROCESS, NULL);", ui)
 
     def test_unpair_records_the_apps_wipe_before_its_worker_starts(self):
@@ -910,8 +912,8 @@ class WasmAppsTest(unittest.TestCase):
         """Saves of one name run in order; once none is in flight the count is
         what the VM has, even when a failed save had another queued behind it."""
         files = read("components/muse_apps/muse_apps_files.c")
-        self.assertIn("sizes_saved(j->name, ok, j->data_len);", function(files, "static void save_run("))
-        self.assertIn("sizes_saved(j->name, false, 0);", function(files, "static void save_drop("))
+        self.assertIn("sizes_saved(j->gen, j->name, ok, j->data_len);", function(files, "static void save_run("))
+        self.assertIn("sizes_saved(j->gen, j->name, false, 0);", function(files, "static void save_drop("))
         self.assertIn("e->saved = ok ? (uint32_t)len : e->saved;", function(files, "static void sizes_saved("))
         self.assertIn("e->size = e->saved;", function(files, "static void sizes_settle("))
         # A save refused before it goes out (no op slot, no queue room) puts
@@ -922,6 +924,10 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("sizes_take(name, data_len, &prev);", save)
         self.assertEqual(save.count("sizes_unsave(name, prev);"), 2)
         self.assertNotIn("sizes_saved(", save)
+        # A stopped app's saves and loads still out don't count for the next one.
+        self.assertIn("s_sizes_gen++;", function(files, "void muse_apps_files_stop("))
+        for f in ("static void sizes_saved(", "static void sizes_note("):
+            self.assertIn("gen == s_sizes_gen ?", function(files, f))
 
     def test_one_button_doing_both_is_one_button(self):
         present = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons_present(")

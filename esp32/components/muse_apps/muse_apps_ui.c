@@ -1821,6 +1821,11 @@ static void slider_guard(lv_event_t *e)
         return;
     }
     lv_obj_t *o = lv_event_get_current_target(e);
+    if (code != LV_EVENT_PRESSING) {
+        /* LVGL leaves the pressed state before it works out the value: so
+         * does the check, in case the padding is the pressed state's. */
+        lv_obj_remove_state(o, LV_STATE_PRESSED);
+    }
     int32_t h = lv_obj_get_height(o);
     lv_slider_orientation_t m = lv_slider_get_orientation(o);
     bool vertical = m == LV_SLIDER_ORIENTATION_VERTICAL || (m == LV_SLIDER_ORIENTATION_AUTO && lv_obj_get_width(o) < h);

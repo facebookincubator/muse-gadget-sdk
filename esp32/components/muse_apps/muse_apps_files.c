@@ -58,6 +58,7 @@ typedef struct {
 #define NO_SIZE UINT32_MAX
 
 static state_size_t *s_sizes;
+static uint32_t s_sizes_gen;   /* moves when the app stops: its saves and loads still out don't count after */
 static portMUX_TYPE s_sizes_mux = portMUX_INITIALIZER_UNLOCKED;
 
 /* Under s_sizes_mux: name's entry, or a free one if make; NULL if none. */
@@ -136,10 +137,10 @@ static void sizes_settle(state_size_t *e)
 
 /* A save that ran (or was dropped) is done: ok, the VM has len bytes. A
  * failed one gives its quota back once no other of the name is in flight. */
-static void sizes_saved(const char *name, bool ok, size_t len)
+static void sizes_saved(uint32_t gen, const char *name, bool ok, size_t len)
 {
     taskENTER_CRITICAL(&s_sizes_mux);
-    state_size_t *e = size_entry(name, false);
+    state_size_t *e = gen == s_sizes_gen ? size_entry(name, false) : NULL;
     if (e && e->saving) {
         e->saved = ok ? (uint32_t)len : e->saved;
         sizes_settle(e);
@@ -161,10 +162,10 @@ static void sizes_unsave(const char *name, uint32_t prev)
 }
 
 /* A loaded file's size: any task. */
-static void sizes_note(const char *name, size_t len)
+static void sizes_note(uint32_t gen, const char *name, size_t len)
 {
     taskENTER_CRITICAL(&s_sizes_mux);
-    state_size_t *e = size_entry(name, true);
+    state_size_t *e = gen == s_sizes_gen ? size_entry(name, true) : NULL;
     if (e) {
         e->saved = (uint32_t)len;
         e->size = e->saving ? e->size : (uint32_t)len;
@@ -177,6 +178,7 @@ void muse_apps_files_stop(void)
     taskENTER_CRITICAL(&s_sizes_mux);
     state_size_t *t = s_sizes;
     s_sizes = NULL;
+    s_sizes_gen++;
     taskEXIT_CRITICAL(&s_sizes_mux);
     muse_apps_free(t);
 }
@@ -222,6 +224,7 @@ static bool state_path(const char *name, char *out, size_t cap)
 typedef struct {
     int32_t op;
     bool state;                 /* state_load: a file larger than the buffer is ERR_TOO_LARGE */
+    uint32_t gen;               /* state_load: the app's, for its size */
     char name[NAME_CHARS + 1];
     size_t offset, want;
     char path[PATH_CAP];
@@ -268,7 +271,7 @@ static void read_run(void *arg)
     if (!result) {
         result = (int32_t)have;
         if (j->state) {
-            sizes_note(j->name, have);
+            sizes_note(j->gen, j->name, have);
         }
     } else if (status != MUSE_APPS_VM_CANCELLED && !(j->state && result == GADGET_ERR_NOT_FOUND)) {
         muse_apps_log("%s %s: %s %d", j->state ? "state_load" : "file_read", j->state ? j->name : j->path,
@@ -365,6 +368,7 @@ int32_t gadget_state_load(wasm_exec_env_t env, const char *name, void *buf, uint
         return GADGET_ERR_OFFLINE;
     }
     j->state = true;
+    j->gen = s_sizes_gen;   /* moves only on this task */
     snprintf(j->name, sizeof(j->name), "%s", name);
     j->want = buf_size < STATE_MAX ? buf_size : STATE_MAX;
     return start_read(env, j, buf);
@@ -375,6 +379,7 @@ int32_t gadget_state_load(wasm_exec_env_t env, const char *name, void *buf, uint
 typedef struct {
     int32_t op;
     char name[NAME_CHARS + 1];
+    uint32_t gen;               /* the app's, for its quota */
     size_t data_len, len;
     char body[];                /* the request's JSON: the data is copied in, base64 */
 } save_job_t;
@@ -393,7 +398,7 @@ static void save_run(void *arg)
         muse_apps_log("state_save %s: %s %d%s%s", j->name, status > 0 ? "HTTP" : "status", status,
                       f.error[0] ? ": " : "", f.error);
     }
-    sizes_saved(j->name, ok, j->data_len);
+    sizes_saved(j->gen, j->name, ok, j->data_len);
     muse_apps_op_finish(j->op, ok ? 0 : muse_apps_vm_error(status), NULL, 0);
     heap_caps_free(j);
 }
@@ -401,7 +406,7 @@ static void save_run(void *arg)
 static void save_drop(void *arg)
 {
     save_job_t *j = arg;
-    sizes_saved(j->name, false, 0);
+    sizes_saved(j->gen, j->name, false, 0);
     muse_apps_op_finish(j->op, GADGET_ERR_FAILED, NULL, 0);
     heap_caps_free(j);
 }
@@ -441,6 +446,7 @@ int32_t gadget_state_save(wasm_exec_env_t env, const char *name, const void *dat
     j->len = (size_t)(o - j->body);
     j->data_len = data_len;
     snprintf(j->name, sizeof(j->name), "%s", name);
+    j->gen = s_sizes_gen;   /* moves only on this task */
     uint32_t prev = 0;
     int32_t r = sizes_take(name, data_len, &prev);
     int32_t op = r ? r : muse_apps_op_begin(env, NULL, 0);
