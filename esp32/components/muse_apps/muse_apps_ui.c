@@ -120,6 +120,7 @@ typedef struct {
     int32_t *grid;      /* ui_grid's column and row tracks */
     int32_t needle_of;  /* a line: the scale it's the needle of (its handle), or 0 */
     uint8_t type;       /* GADGET_W_ */
+    uint8_t styles;     /* ui_style_add calls: LVGL aborts past 63 styles on one object */
 } slot_t;
 
 typedef struct {
@@ -398,11 +399,12 @@ static int prop_info(int32_t prop)
 /* ---- Style properties (100 to 154) ------------------------------------------------------- */
 
 enum { K_INT = 1, K_COORD, K_RGB, K_OPA, K_BOOL, K_FONT, K_ANGLE, K_SCALE, K_TEXT_ALIGN, K_GRAD, K_SIDE, K_DECOR, K_PADS,
-       K_SHADOW, K_OFFSET, K_RADIUS, K_DASH };
+       K_SHADOW, K_OFFSET, K_RADIUS, K_SPACE };
 
-/* Shadows and radii within 64 px, as cv_rect_style's: LVGL sizes a shadow's
- * corner buffer from them. */
+/* Shadows, radii and dashes within 64 px, as cv_rect_style's: LVGL sizes a
+ * shadow's corner buffer from them, and steps a dash in 16 bits. */
 #define SHADOW_MAX 64
+#define STYLES_PER_OBJECT 32   /* limits.styles_per_object */
 
 typedef struct {
     lv_style_prop_t prop;
@@ -440,14 +442,14 @@ static const style_map_t s_style_map[] = {
     [GADGET_P_TEXT_FONT - 100] = {LV_STYLE_TEXT_FONT, K_FONT},
     [GADGET_P_TEXT_ALIGN - 100] = {LV_STYLE_TEXT_ALIGN, K_TEXT_ALIGN},
     [GADGET_P_TEXT_LETTER_SPACE - 100] = {LV_STYLE_TEXT_LETTER_SPACE, K_INT},
-    [GADGET_P_TEXT_LINE_SPACE - 100] = {LV_STYLE_TEXT_LINE_SPACE, K_INT},
+    [GADGET_P_TEXT_LINE_SPACE - 100] = {LV_STYLE_TEXT_LINE_SPACE, K_SPACE},
     [GADGET_P_TEXT_DECOR - 100] = {LV_STYLE_TEXT_DECOR, K_DECOR},
     [GADGET_P_LINE_COLOR - 100] = {LV_STYLE_LINE_COLOR, K_RGB},
     [GADGET_P_LINE_WIDTH - 100] = {LV_STYLE_LINE_WIDTH, K_INT},
     [GADGET_P_LINE_OPA - 100] = {LV_STYLE_LINE_OPA, K_OPA},
     [GADGET_P_LINE_ROUNDED - 100] = {LV_STYLE_LINE_ROUNDED, K_BOOL},
-    [GADGET_P_LINE_DASH_WIDTH - 100] = {LV_STYLE_LINE_DASH_WIDTH, K_DASH},
-    [GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_DASH},
+    [GADGET_P_LINE_DASH_WIDTH - 100] = {LV_STYLE_LINE_DASH_WIDTH, K_SHADOW},
+    [GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_SHADOW},
     [GADGET_P_ARC_COLOR - 100] = {LV_STYLE_ARC_COLOR, K_RGB},
     [GADGET_P_ARC_WIDTH - 100] = {LV_STYLE_ARC_WIDTH, K_INT},
     [GADGET_P_ARC_OPA - 100] = {LV_STYLE_ARC_OPA, K_OPA},
@@ -484,7 +486,7 @@ static int32_t style_value(int kind, int32_t v, lv_style_value_t *out)
     case K_INT: out->num = clamp(v, -32767, 32767); return 0;
     case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX); return 0;   /* a negative spread overruns LVGL's buffer */
     case K_OFFSET: out->num = clamp(v, -SHADOW_MAX, SHADOW_MAX); return 0;
-    case K_DASH: out->num = v < 0 ? 0 : v; return 0;   /* LVGL takes a remainder by dash + gap */
+    case K_SPACE: out->num = v < 0 ? 0 : v; return 0;   /* a roller divides by the line plus this */
     case K_RADIUS: out->num = v == GADGET_RADIUS_CIRCLE ? v : clamp(v, 0, SHADOW_MAX); return 0;
     case K_COORD:
         if (!coord_in(v, false, &c)) {
@@ -2511,6 +2513,10 @@ int32_t gadget_ui_style_add(wasm_exec_env_t env, int32_t obj, int32_t style, int
     if (!selector_in(selector, &sel)) {
         return GADGET_ERR_ARG;
     }
+    if (s->styles >= STYLES_PER_OBJECT) {
+        return GADGET_ERR_LIMIT;
+    }
+    s->styles++;
     lv_obj_add_style(s->obj, st, sel);
     return 0;
 }

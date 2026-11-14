@@ -101,7 +101,8 @@
     ["line_points", 64, "Points per line object."],
     ["frame_rate", 30, "on_frame calls per second, at most."],
     ["object_pixels", 4096, "An object's position, width and height in pixels, either way; larger values are clamped."],
-    ["shadow_pixels", 64, "Shadow width, spread and offsets, and radii other than RADIUS_CIRCLE; larger values are clamped."]
+    ["shadow_pixels", 64, "Shadow width, spread and offsets, line dashes, and radii other than RADIUS_CIRCLE; larger values are clamped."],
+    ["styles_per_object", 32, "ui_style_add calls on one object; past that ERR_LIMIT."]
   ],
   "exports": [
     {
@@ -707,8 +708,8 @@
         ["selector", "int", "A PART_ plus STATE_ bits."]
       ],
       "ret": ["result", ""],
-      "errors": ["HANDLE"],
-      "doc": "Gives an object a shared style. Properties set on the object itself still win."
+      "errors": ["HANDLE", "ARG", "LIMIT"],
+      "doc": "Gives an object a shared style, up to 32 times per object. Properties set on the object itself still win."
     },
     {
       "name": "ui_animate",
@@ -1542,14 +1543,14 @@
     [127, "text_font", "font", "style", "rw", ""],
     [128, "text_align", "text_align", "style", "rw", ""],
     [129, "text_letter_space", "int", "style", "rw", ""],
-    [130, "text_line_space", "int", "style", "rw", ""],
+    [130, "text_line_space", "int", "style", "rw", "Not negative."],
     [131, "text_decor", "text_decor", "style", "rw", ""],
     [132, "line_color", "rgb", "style", "rw", ""],
     [133, "line_width", "int", "style", "rw", ""],
     [134, "line_opa", "opa", "style", "rw", ""],
     [135, "line_rounded", "bool", "style", "rw", ""],
-    [136, "line_dash_width", "int", "style", "rw", "Not negative."],
-    [137, "line_dash_gap", "int", "style", "rw", "Not negative."],
+    [136, "line_dash_width", "int", "style", "rw", "0 to 64."],
+    [137, "line_dash_gap", "int", "style", "rw", "0 to 64."],
     [138, "arc_color", "rgb", "style", "rw", ""],
     [139, "arc_width", "int", "style", "rw", ""],
     [140, "arc_opa", "opa", "style", "rw", ""],

@@ -934,8 +934,10 @@ class WasmAppsTest(unittest.TestCase):
 
     def test_buggy_values_dont_divide_by_zero(self):
         ui = read("components/muse_apps/muse_apps_ui.c")
-        self.assertIn("[GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_DASH},", ui)
-        self.assertIn("case K_DASH: out->num = v < 0 ? 0 : v;", function(ui, "static int32_t style_value("))
+        self.assertIn("[GADGET_P_LINE_DASH_GAP - 100] = {LV_STYLE_LINE_DASH_GAP, K_SHADOW},", ui)
+        self.assertIn("[GADGET_P_LINE_DASH_WIDTH - 100] = {LV_STYLE_LINE_DASH_WIDTH, K_SHADOW},", ui)
+        self.assertIn("[GADGET_P_TEXT_LINE_SPACE - 100] = {LV_STYLE_TEXT_LINE_SPACE, K_SPACE},", ui)
+        self.assertIn("case K_SPACE: out->num = v < 0 ? 0 : v;", function(ui, "static int32_t style_value("))
         roller = function(ui, "static int32_t roller_set(")
         self.assertLess(roller.index("lv_obj_get_style_text_letter_space(s->obj, LV_PART_MAIN) <= 0"),
                         roller.index("lv_roller_set_options("))
@@ -945,6 +947,11 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn('if (!cJSON_AddStringToObject(entry, "name", name)', flash)
         start = function(read("components/muse_apps/muse_apps_store.c"), "void muse_apps_store_start(")
         self.assertIn("if (s_q) vQueueDeleteWithCaps(s_q);", start)
+
+    def test_style_attachments_per_object_are_capped(self):
+        """LVGL asserts (and so aborts) past 63 styles on one object."""
+        add = function(read("components/muse_apps/muse_apps_ui.c"), "int32_t gadget_ui_style_add(")
+        self.assertLess(add.index("if (s->styles >= STYLES_PER_OBJECT) {"), add.index("lv_obj_add_style("))
 
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")

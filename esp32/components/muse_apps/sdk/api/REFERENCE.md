@@ -44,7 +44,8 @@ The same on every gadget that runs apps.
 | `line_points` | 64 | Points per line object. |
 | `frame_rate` | 30 | on_frame calls per second, at most. |
 | `object_pixels` | 4,096 | An object's position, width and height in pixels, either way; larger values are clamped. |
-| `shadow_pixels` | 64 | Shadow width, spread and offsets, and radii other than RADIUS_CIRCLE; larger values are clamped. |
+| `shadow_pixels` | 64 | Shadow width, spread and offsets, line dashes, and radii other than RADIUS_CIRCLE; larger values are clamped. |
+| `styles_per_object` | 32 | ui_style_add calls on one object; past that ERR_LIMIT. |
 
 ## What an app exports
 
@@ -589,10 +590,10 @@ Sets a property in a shared style. Objects using it update.
 int32_t ui_style_add(int32_t obj, int32_t style, int32_t selector);
 ```
 
-Gives an object a shared style. Properties set on the object itself still win.
+Gives an object a shared style, up to 32 times per object. Properties set on the object itself still win.
 
 - `selector`: A PART_ plus STATE_ bits.
-- Errors: `ERR_HANDLE`
+- Errors: `ERR_HANDLE`, `ERR_ARG`, `ERR_LIMIT`
 - WAMR signature: `(iii)i`
 
 ### Animation
@@ -1130,14 +1131,14 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_TEXT_FONT` | font | style | rw |  |
 | `P_TEXT_ALIGN` | text_align | style | rw |  |
 | `P_TEXT_LETTER_SPACE` | int | style | rw |  |
-| `P_TEXT_LINE_SPACE` | int | style | rw |  |
+| `P_TEXT_LINE_SPACE` | int | style | rw | Not negative. |
 | `P_TEXT_DECOR` | text_decor | style | rw |  |
 | `P_LINE_COLOR` | rgb | style | rw |  |
 | `P_LINE_WIDTH` | int | style | rw |  |
 | `P_LINE_OPA` | opa | style | rw |  |
 | `P_LINE_ROUNDED` | bool | style | rw |  |
-| `P_LINE_DASH_WIDTH` | int | style | rw | Not negative. |
-| `P_LINE_DASH_GAP` | int | style | rw | Not negative. |
+| `P_LINE_DASH_WIDTH` | int | style | rw | 0 to 64. |
+| `P_LINE_DASH_GAP` | int | style | rw | 0 to 64. |
 | `P_ARC_COLOR` | rgb | style | rw |  |
 | `P_ARC_WIDTH` | int | style | rw |  |
 | `P_ARC_OPA` | opa | style | rw |  |

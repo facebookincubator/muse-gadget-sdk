@@ -533,14 +533,14 @@
 #define P_TEXT_FONT 127  /* font, style */
 #define P_TEXT_ALIGN 128  /* text_align, style */
 #define P_TEXT_LETTER_SPACE 129  /* int, style */
-#define P_TEXT_LINE_SPACE 130  /* int, style */
+#define P_TEXT_LINE_SPACE 130  /* int, style. Not negative. */
 #define P_TEXT_DECOR 131  /* text_decor, style */
 #define P_LINE_COLOR 132  /* rgb, style */
 #define P_LINE_WIDTH 133  /* int, style */
 #define P_LINE_OPA 134  /* opa, style */
 #define P_LINE_ROUNDED 135  /* bool, style */
-#define P_LINE_DASH_WIDTH 136  /* int, style. Not negative. */
-#define P_LINE_DASH_GAP 137  /* int, style. Not negative. */
+#define P_LINE_DASH_WIDTH 136  /* int, style. 0 to 64. */
+#define P_LINE_DASH_GAP 137  /* int, style. 0 to 64. */
 #define P_ARC_COLOR 138  /* rgb, style */
 #define P_ARC_WIDTH 139  /* int, style */
 #define P_ARC_OPA 140  /* opa, style */
@@ -977,8 +977,8 @@ GADGET_IMPORT(ui_style_create) int32_t ui_style_create(void);
 GADGET_IMPORT(ui_style_set) int32_t ui_style_set(int32_t style, int32_t prop, int32_t value);
 
 /*
- * Gives an object a shared style. Properties set on the object itself still
- * win. selector: A PART_ plus STATE_ bits.
+ * Gives an object a shared style, up to 32 times per object. Properties set on
+ * the object itself still win. selector: A PART_ plus STATE_ bits.
  */
 GADGET_IMPORT(ui_style_add) int32_t ui_style_add(int32_t obj, int32_t style, int32_t selector);
 
