@@ -967,10 +967,6 @@ static bool console_command(char *line, bool whole)
         fflush(stdout);
         return true;
     }
-    if (!strcmp(line, "wake=1") || !strcmp(line, "wake.test=1")) {
-        muse_wakeword_bench_trigger(line[4] == '.');   /* "wake.test=1" adds speech */
-        return true;
-    }
     if (!strncmp(line, "face=", 5)) {
         set_face(line + 5);
         return true;
@@ -1007,8 +1003,7 @@ static bool console_command(char *line, bool whole)
  * "power.reset" starts it over, "nap" sleeps and leaves Wi-Fi at once (as
  * two minutes asleep on battery would; 'w' rejoins), "face=" shows a face
  * (see set_face), "wake" prints the wake word state, "wake.on" and "wake.off"
- * toggle listening, "wake=1" and "wake.test=1" fire the bench runner (with
- * and without following speech), and "chat=" sends a typed message to Hatch (see chat_line
+ * toggle listening, and "chat=" sends a typed message to Hatch (see chat_line
  * and tools/muse/chat.py).
  */
 static void serial_task(void *arg)

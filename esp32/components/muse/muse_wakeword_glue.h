@@ -76,15 +76,8 @@ void muse_wakeword_set_ptt_turn(bool active);
  * release: the glue closes its capture so the next wake is heard. */
 void muse_wakeword_turn_ended(void);
 
-/* "executorch", "bench", or "off" (not compiled in). This names the
- * linked runner in logs/status so a bench build is never mistaken for
- * real detection. */
+/* "executorch", or "off" (not compiled in): the runner in logs/status. */
 const char *muse_wakeword_runner_kind(void);
-
-/* Serial bench ("wake=1" / "wake.test=1"): with the bench runner,
- * fires a wake on the next chunk, optionally followed by speech so a
- * whole turn runs with nobody talking. A no-op otherwise. */
-void muse_wakeword_bench_trigger(bool with_speech);
 
 typedef struct {
     bool enabled;

@@ -27,11 +27,11 @@ extern "C" {
 /*
  * The SDK-owned wake word runner contract.
  * This header carries no ESP-IDF types so the host simulator can link
- * the same code. Implementations: ww_runner_et.cpp (production:
- * LFBE + detector + models/hey_muse.pte through the generated
- * ExecuTorch runtime component) and ww_runner_bench.c (bring-up
- * triggers). Host tests script ww_event_t sequences directly in
- * tests/muse_wakeword_harness.c; there is no fake runner.
+ * the same code. The implementation is ww_runner_et.cpp: LFBE +
+ * detector + models/hey_muse.pte through the ExecuTorch registry
+ * component. Host tests script ww_event_t sequences directly in
+ * tests/muse_wakeword_harness.c, and drive ww_runner_et.cpp against a
+ * fake et_model in tests/test_muse_wakeword.py.
  *
  * Guarantees the integration relies on:
  * - All runner calls happen on the wake word task (create() runs at

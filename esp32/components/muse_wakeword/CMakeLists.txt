@@ -24,22 +24,16 @@ set(srcs)
 # are declared below, so default firmware is unchanged.
 set(priv_requires executorch esp_timer)
 if(CONFIG_MUSE_WAKEWORD_ENABLE)
-    list(APPEND srcs "muse_wakeword_core.c")
-    # Exactly one runner implementation: each defines the ww_runner_* API.
-    if(CONFIG_MUSE_WAKEWORD_RUNNER_BENCH)
-        list(APPEND srcs "ww_runner_bench.c")
-    else()
-        list(APPEND srcs "ww_detector.c" "ww_frontend.c" "ww_runner_et.cpp")
-        # Not EMBED_FILES: its generated asm has no alignment directive,
-        # and ExecuTorch Program::load requires 8-aligned program data.
-        # hey_muse_pte.S.in embeds the model 16-aligned in flash instead.
-        set(HEY_MUSE_PTE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte")
-        file(SIZE "${HEY_MUSE_PTE_PATH}" HEY_MUSE_PTE_LEN)
-        configure_file(hey_muse_pte.S.in "${CMAKE_CURRENT_BINARY_DIR}/hey_muse_pte.S" @ONLY)
-        set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/hey_muse_pte.S"
-                                    PROPERTIES OBJECT_DEPENDS "${HEY_MUSE_PTE_PATH}")
-        list(APPEND srcs "${CMAKE_CURRENT_BINARY_DIR}/hey_muse_pte.S")
-    endif()
+    list(APPEND srcs "muse_wakeword_core.c" "ww_detector.c" "ww_frontend.c" "ww_runner_et.cpp")
+    # Not EMBED_FILES: its generated asm has no alignment directive,
+    # and ExecuTorch Program::load requires 8-aligned program data.
+    # hey_muse_pte.S.in embeds the model 16-aligned in flash instead.
+    set(HEY_MUSE_PTE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte")
+    file(SIZE "${HEY_MUSE_PTE_PATH}" HEY_MUSE_PTE_LEN)
+    configure_file(hey_muse_pte.S.in "${CMAKE_CURRENT_BINARY_DIR}/hey_muse_pte.S" @ONLY)
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/hey_muse_pte.S"
+                                PROPERTIES OBJECT_DEPENDS "${HEY_MUSE_PTE_PATH}")
+    list(APPEND srcs "${CMAKE_CURRENT_BINARY_DIR}/hey_muse_pte.S")
 endif()
 
 idf_component_register(
@@ -49,8 +43,7 @@ idf_component_register(
 )
 
 # The registry component links nothing until a model and a kernel bundle
-# are declared. Declare them only for the real runner: the bench runner
-# and wakeword-off builds link no ExecuTorch code at all. The bundle is
+# are declared. The bundle is
 # generated at configure time into the build directory by
 # tools/make_kernel_bundle.py (which drops the component generator's
 # SHA gate; see that script) from the model declared below, so a
@@ -58,7 +51,7 @@ idf_component_register(
 # build refuses a bundle that does not match the model or component.
 # Wakeword builds need a Python with executorch installed; see
 # esp32/docs/executorch.md for EXECUTORCH_PYTHON.
-if(CONFIG_MUSE_WAKEWORD_ENABLE AND NOT CONFIG_MUSE_WAKEWORD_RUNNER_BENCH)
+if(CONFIG_MUSE_WAKEWORD_ENABLE)
     executorch_add_model(PTE "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte")
     if(NOT EXECUTORCH_PYTHON)
         set(EXECUTORCH_PYTHON "$ENV{EXECUTORCH_PYTHON}")

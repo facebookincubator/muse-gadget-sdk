@@ -35,33 +35,6 @@ menu "Muse wake word"
             buffers take about 115 KB, and the ExecuTorch runner
             about 215 KB more (model arenas and the frontend).
 
-    choice MUSE_WAKEWORD_RUNNER
-        prompt "Wake word runner"
-        default MUSE_WAKEWORD_RUNNER_EXECUTORCH
-        depends on MUSE_WAKEWORD_ENABLE
-        help
-            What sits behind the runner interface. Exactly one
-            implementation is linked, and the boot log names it so a
-            test double is never mistaken for real detection.
-
-        config MUSE_WAKEWORD_RUNNER_EXECUTORCH
-            bool "ExecuTorch Hey Muse model"
-            help
-                SDK-owned LFBE frontend and posterior detector driving
-                the embedded models/hey_muse.pte through the ExecuTorch
-                registry component. The bench choice below links no
-                runtime.
-
-        config MUSE_WAKEWORD_RUNNER_BENCH
-            bool "Bench triggers (serial key or loud burst, no detection)"
-            help
-                Fires a wake on the serial bench keys "wake=1" and
-                "wake.test=1", or on a loud-then-quiet energy burst (a
-                clap). For bring-up of the audio tap, wake task, and
-                turn plumbing only: it detects no speech at all. No
-                board overlay selects this.
-    endchoice
-
     choice MUSE_WAKEWORD_SENSITIVITY
         prompt "Wake word sensitivity"
         default MUSE_WAKEWORD_SENSITIVITY_DEFAULT

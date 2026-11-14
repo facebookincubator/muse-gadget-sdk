@@ -303,72 +303,6 @@ class WakeWordCore(unittest.TestCase):
         self.run_energy([100] * 319 + [9000], 512)   # one loud sample is not speech energy
 
 
-class WakeWordBenchRunner(unittest.TestCase):
-    """The bench stand-in for the ET runner: a serial trigger and a
-    clap trigger. A burst is a short transient (or sustained loud
-    sound) spanning at most 8 chunks, then 2 quiet chunks to fire and
-    50 feeds of cooldown; constants pinned from ww_runner_bench.h."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.tmp.cleanup)
-        cls.binary = Path(cls.tmp.name) / 'muse_wakeword_bench_harness'
-        cc = shlex.split(os.environ.get('CC', 'cc'))
-        result = subprocess.run(
-            [*cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', *SANITIZE,
-             '-include', str(ROOT / 'tests/host_compat.h'), '-I', str(WW / 'include'),
-             str(ROOT / 'tests/muse_wakeword_bench_harness.c'),
-             str(WW / 'muse_wakeword_core.c'), str(WW / 'ww_runner_bench.c'),
-             '-o', str(cls.binary)],
-            capture_output=True, text=True)
-        if result.returncode:
-            raise AssertionError(result.stdout + result.stderr)
-
-    def run_bench(self, pattern):
-        ran = subprocess.run([str(self.binary), pattern], capture_output=True, env=ENV)
-        self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
-        self.assertEqual(ran.stderr, b'')
-        return [int(x) for x in ran.stdout.decode().split()]
-
-    def test_quiet_room_never_wakes(self):
-        self.assertEqual(self.run_bench('Q' * 20), [NONE] * 20)
-
-    def test_serial_trigger_fires_once_on_the_next_feed(self):
-        self.assertEqual(self.run_bench('TQ'), [WAKE, NONE])
-        self.assertEqual(self.run_bench('WQ'), [WAKE, SPEECH_START])
-
-    def test_energy_burst_needs_loud_then_quiet(self):
-        self.assertEqual(self.run_bench('LLLQQ'), [NONE] * 4 + [WAKE])
-        self.assertEqual(self.run_bench('LQQ'), [NONE, NONE, WAKE])
-        self.assertEqual(self.run_bench('LLLLLQ'), [NONE] * 6)     # still loud
-
-    def test_short_clap_transient_wakes_after_quiet(self):
-        # Whole-chunk RMS is only 3000: sustained-chunk thresholds missed
-        # real claps on the BOX-3, whose energy is in the first few ms.
-        self.assertEqual(self.run_bench('CQQ'), [NONE, NONE, WAKE])
-        self.assertEqual(self.run_bench('CCCQQ')[-1], WAKE)        # decay across chunks
-        self.assertEqual(self.run_bench('cQQ'), [NONE] * 3)        # peak too soft
-
-    def test_sustained_loud_sound_is_not_a_clap(self):
-        self.assertEqual(self.run_bench('L' * 8 + 'QQ')[-1], WAKE)
-        self.assertEqual(self.run_bench('L' * 9 + 'QQ')[-1], NONE)
-
-    def test_cooldown_blocks_an_immediate_second_burst(self):
-        self.assertEqual(self.run_bench('LLLQQ' + 'LLLQQ')[-1], NONE)
-        again = self.run_bench('LLLQQ' + 'Q' * 50 + 'LLLQQ')
-        self.assertEqual(again[-1], WAKE)
-
-    def test_gates_discard_bursts_and_triggers(self):
-        self.assertEqual(self.run_bench('0LLLQQ1Q'), [NONE] * 6)   # not listening
-        self.assertEqual(self.run_bench('sLLLQQuQ'), [NONE] * 6)   # suppressed
-        self.assertEqual(self.run_bench('sTuQ'), [NONE, NONE])     # trigger dropped
-
-    def test_reset_forgets_a_half_finished_burst(self):
-        self.assertEqual(self.run_bench('LLLRQQ'), [NONE] * 5)
-        self.assertEqual(self.run_bench('CRQQ'), [NONE] * 3)
-
-
 def between(source, start, end):
     at = source.index(start)
     return source[at:source.index(end, at)]
@@ -383,7 +317,9 @@ class WakeWordFirmwareContract(unittest.TestCase):
     def test_executorch_runner_is_the_default_production_runner(self):
         kconfig = (WW / 'Kconfig').read_text()
         cmake = (WW / 'CMakeLists.txt').read_text()
-        self.assertIn('default MUSE_WAKEWORD_RUNNER_EXECUTORCH', kconfig)
+        # One runner, no choice: nothing but the model can start a turn.
+        self.assertNotIn('MUSE_WAKEWORD_RUNNER', kconfig)
+        self.assertNotIn('clap', kconfig.lower())
         # No ET_ENABLE to select: the registry component links nothing
         # until the model and kernel bundle are declared in CMake.
         self.assertNotIn('ET_ENABLE', kconfig)
@@ -487,7 +423,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('s_seed = heap_caps_malloc(', gated)
         self.assertEqual(voice.count('s_seed = heap_caps_malloc('), 1)
         kconfig = (WW / 'Kconfig').read_text()
-        enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_RUNNER')
+        enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_SENSITIVITY')
         self.assertIn('depends on SPIRAM', enable)
 
     def test_synthetic_edges_carry_the_input_epoch_and_time(self):
@@ -514,7 +450,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
 
     def test_enable_wakes_a_resting_voice_task_and_needs_a_running_glue(self):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        setter = between(glue, 'void muse_wakeword_set_enabled(bool on)', 'void muse_wakeword_bench_trigger(')
+        setter = between(glue, 'void muse_wakeword_set_enabled(bool on)', 'static bool post_ptt(')
         not_started = between(setter, 'if (!s_started) {', 'return;')
         # After a failed init only "off" is saved.
         self.assertIn('if (!on) {', not_started)
@@ -579,30 +515,29 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('ww_runner_ok(s_runner)', snapshot)
 
     def test_sound_page_has_wake_word_toggle(self):
-        # One row name for every runner; only the small print differs:
-        # the bench runner says only a clap triggers it.
         ui = (ROOT / 'components/muse/muse_settings_ui.c').read_text()
         sound = between(ui, 'static void build_sound_page(', 'static void tick_sound(void)')
         self.assertIn('switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw)', sound)
-        self.assertIn('#if CONFIG_MUSE_WAKEWORD_RUNNER_BENCH', sound)
-        self.assertIn('note(list, "A clap starts a voice note. There\'s no spoken wake word yet.");', sound)
         self.assertIn('Listens for \\"Hey Muse\\"', sound)
         self.assertNotIn('not implemented', sound)   # user copy, not a placeholder
-        self.assertNotIn('Clap test', sound)
+        self.assertNotIn('clap', sound.lower())
         callback = between(ui, 'static void on_wake_sw(', 'static void build_sound_page(')
         self.assertIn('muse_wakeword_set_enabled(', callback)
         tick = between(ui, 'static void tick_sound(void)', '/* ---------- Sleep')
         self.assertIn('muse_wakeword_enabled()', tick)   # switch tracks serial/Muse toggles
 
-    def test_bench_keys_and_off_by_default(self):
+    def test_serial_keys_and_off_by_default(self):
         input_c = (ROOT / 'components/muse/muse_input.c').read_text()
-        for key in ('"wake.on"', '"wake=1"', '"wake.test=1"'):
+        for key in ('"wake"', '"wake.on"', '"wake.off"'):
             self.assertIn(key, input_c)
+        # No bench triggers: only the model can start a turn.
+        for key in ('"wake=1"', '"wake.test=1"', 'bench_trigger'):
+            self.assertNotIn(key, input_c)
         # The toggle must compare the whole key: an index check here once
         # made "wake.on" turn listening off (caught on the BOX-3).
         self.assertIn('muse_wakeword_set_enabled(!strcmp(line, "wake.on"))', input_c)
         kconfig = (WW / 'Kconfig').read_text()
-        enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_RUNNER')
+        enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_SENSITIVITY')
         self.assertIn('default n', enable)
         settings = (ROOT / 'components/muse/muse_settings.c').read_text()
         self.assertIn('"ww_on"', settings)   # the persisted opt-in

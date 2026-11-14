@@ -21,12 +21,10 @@ same voice note as holding the talk button.
 
 ## Status: ExecuTorch runner implemented; feature still off by default
 
-`ww_runner_et.cpp` (default) drives the embedded int8
-`models/hey_muse.pte` through the ExecuTorch registry component
-(kernel bundle generated at build time); `ww_runner_bench.c` offers serial/clap
-triggers for bring-up only, with no speech detection.
-`MUSE_WAKEWORD_ENABLE` defaults to `n` and no board overlay sets it,
-so shipped builds are unchanged.
+`ww_runner_et.cpp` drives the embedded int8 `models/hey_muse.pte`
+through the ExecuTorch registry component (kernel bundle generated at
+build time). `MUSE_WAKEWORD_ENABLE` defaults to `n` and no board
+overlay sets it, so shipped builds are unchanged.
 
 Verified by `tests/test_muse_wakeword.py`:
 
@@ -62,22 +60,15 @@ A build with it (plus an Error log floor) measured 67 KB smaller but
 slowed inference to ~23 ms/frame, over the 20 ms budget with tap-frame
 drops, so it was rejected.
 
-For plumbing-only bring-up, build instead with
-`CONFIG_MUSE_WAKEWORD_RUNNER_BENCH=y`, flash with
-`tools/muse/board.sh flash box3`, then over serial:
+Over serial:
 
 ```text
 >wake.on       listening on (persisted; >wake.off turns it off)
->wake=1        fires a wake; stay quiet and T_start cancels it
->wake.test=1   wake + speech; the 700 ms silence endpoint ends it
 >wake          prints @wake status (also what the commands return)
 ```
 
-Or clap loudly near the microphones while listening. On-device, the
-same persisted opt-in is the **Sound > Wake word** settings switch
-(on button boards, the quick menu's **Wake word** row); in bench
-builds the switch's small print says a clap starts a voice note,
-since clapping is all the bench runner detects. A submit only
+On the device, the same persisted opt-in is the **Sound > Wake word** settings switch
+(on button boards, the quick menu's **Wake word** row). A submit only
 reaches Muse once the gadget is paired; unpaired, the turn stops
 at the setup caption, and the `muse_wake` log lines plus `@wake`
 counters show the flow. In the Muse app once paired,
