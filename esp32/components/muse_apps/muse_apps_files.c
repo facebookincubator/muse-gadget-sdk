@@ -83,8 +83,9 @@ static state_size_t *size_entry(const char *name, bool make)
 }
 
 /* Room for name at len bytes: 0, or GADGET_ERR_TOO_LARGE, ERR_LIMIT or
- * ERR_NO_MEMORY. With save, it's counted as a save in flight (sizes_saved). */
-static int32_t sizes_take(const char *name, size_t len, bool save)
+ * ERR_NO_MEMORY. It's counted as a save in flight (sizes_saved), and *prev
+ * is the count it replaced (sizes_unsave). */
+static int32_t sizes_take(const char *name, size_t len, uint32_t *prev)
 {
     if (!s_sizes) {
         state_size_t *t = muse_apps_calloc(STATE_NAMES, sizeof(state_size_t));
@@ -112,8 +113,9 @@ static int32_t sizes_take(const char *name, size_t len, bool save)
         r = GADGET_ERR_TOO_LARGE;
     } else if (!room) {
         r = GADGET_ERR_LIMIT;
-    } else if (save) {
+    } else {
         state_size_t *e = size_entry(name, true);
+        *prev = e->size;
         e->size = (uint32_t)len;
         e->saving++;
     }
@@ -121,20 +123,39 @@ static int32_t sizes_take(const char *name, size_t len, bool save)
     return r;
 }
 
-/* A save in flight is done: ok, the VM has len bytes. Once none is left,
- * the count is what the VM has, so a failed save gives its quota back even
- * when another of the same name was queued behind it. */
+/* Under s_sizes_mux: one save of e fewer in flight. Once none is left, the
+ * count is what the VM has. */
+static void sizes_settle(state_size_t *e)
+{
+    if (!--e->saving && e->saved == NO_SIZE) {
+        e->name[0] = '\0';
+    } else if (!e->saving) {
+        e->size = e->saved;
+    }
+}
+
+/* A save that ran (or was dropped) is done: ok, the VM has len bytes. A
+ * failed one gives its quota back once no other of the name is in flight. */
 static void sizes_saved(const char *name, bool ok, size_t len)
 {
     taskENTER_CRITICAL(&s_sizes_mux);
     state_size_t *e = size_entry(name, false);
     if (e && e->saving) {
         e->saved = ok ? (uint32_t)len : e->saved;
-        if (!--e->saving && e->saved == NO_SIZE) {
-            e->name[0] = '\0';
-        } else if (!e->saving) {
-            e->size = e->saved;
-        }
+        sizes_settle(e);
+    }
+    taskEXIT_CRITICAL(&s_sizes_mux);
+}
+
+/* A save refused before it went out: the count is back to prev, the last
+ * accepted save's, or what the VM has. */
+static void sizes_unsave(const char *name, uint32_t prev)
+{
+    taskENTER_CRITICAL(&s_sizes_mux);
+    state_size_t *e = size_entry(name, false);
+    if (e && e->saving) {
+        e->size = prev;
+        sizes_settle(e);
     }
     taskEXIT_CRITICAL(&s_sizes_mux);
 }
@@ -420,18 +441,19 @@ int32_t gadget_state_save(wasm_exec_env_t env, const char *name, const void *dat
     j->len = (size_t)(o - j->body);
     j->data_len = data_len;
     snprintf(j->name, sizeof(j->name), "%s", name);
-    int32_t r = sizes_take(name, data_len, true);
+    uint32_t prev = 0;
+    int32_t r = sizes_take(name, data_len, &prev);
     int32_t op = r ? r : muse_apps_op_begin(env, NULL, 0);
     if (op < 0) {
         if (!r) {
-            sizes_saved(name, false, 0);
+            sizes_unsave(name, prev);
         }
         heap_caps_free(j);
         return op;
     }
     j->op = op;
     if (!muse_apps_vm_job(save_run, save_drop, j)) {
-        sizes_saved(name, false, 0);
+        sizes_unsave(name, prev);
         heap_caps_free(j);
         muse_apps_op_finish(op, GADGET_ERR_NO_MEMORY, NULL, 0);
     }

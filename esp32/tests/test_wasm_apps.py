@@ -912,13 +912,16 @@ class WasmAppsTest(unittest.TestCase):
         files = read("components/muse_apps/muse_apps_files.c")
         self.assertIn("sizes_saved(j->name, ok, j->data_len);", function(files, "static void save_run("))
         self.assertIn("sizes_saved(j->name, false, 0);", function(files, "static void save_drop("))
-        saved = function(files, "static void sizes_saved(")
-        self.assertIn("e->saved = ok ? (uint32_t)len : e->saved;", saved)
-        self.assertIn("e->size = e->saved;", saved)
+        self.assertIn("e->saved = ok ? (uint32_t)len : e->saved;", function(files, "static void sizes_saved("))
+        self.assertIn("e->size = e->saved;", function(files, "static void sizes_settle("))
+        # A save refused before it goes out (no op slot, no queue room) puts
+        # back the count it replaced, which may be another save's in flight.
+        self.assertIn("e->size = prev;", function(files, "static void sizes_unsave("))
         save = function(files, "int32_t gadget_state_save(")
         self.assertEqual(save.count("sizes_take("), 1)
-        self.assertIn("sizes_take(name, data_len, true);", save)
-        self.assertEqual(save.count("sizes_saved(name, false, 0);"), 2)
+        self.assertIn("sizes_take(name, data_len, &prev);", save)
+        self.assertEqual(save.count("sizes_unsave(name, prev);"), 2)
+        self.assertNotIn("sizes_saved(", save)
 
     def test_one_button_doing_both_is_one_button(self):
         present = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons_present(")
