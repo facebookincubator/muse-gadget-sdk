@@ -101,7 +101,8 @@ def assemble_guide(out: Path, guide: str | None = None) -> subprocess.CompletedP
 
 
 class DeviceDescriptionTest(unittest.TestCase):
-    def compile_and_run(self, tmp: Path, harness: str, defines: list[str] = (), ble: bool = False) -> str:
+    def compile_and_run(self, tmp: Path, harness: str, defines: list[str] = (), ble: bool = False,
+                        apps: bool = False) -> str:
         if not (CJSON / "cJSON.c").exists():
             self.skipTest("cJSON sources not available (run idf.py build once)")
         cc = shlex.split(os.environ.get("CC", "cc"))
@@ -115,6 +116,16 @@ class DeviceDescriptionTest(unittest.TestCase):
             (tmp / "ble_client_stubs.c").write_text(BLE_CLIENT_STUBS)
             sources += [ROOT / "main/ble_commands.c", tmp / "ble_client_stubs.c"]
             flags += ["-I", str(ROOT / "tests/ble_commands_fakes"), "-I", str(ROOT / "main")]
+        if apps:   # the apps' own commands, as muse_apps.c advertises them
+            source = (ROOT / "components/muse_apps/muse_apps.c").read_text()
+            (tmp / "apps_advertise.c").write_text(
+                '#include <stdio.h>\n#include <string.h>\n#include "cJSON.h"\n'
+                "void muse_apps_glyph_names(char *out, int cap);\nvoid muse_apps_color_names(char *out, int cap);\n"
+                + "\n".join(function_source(source, signature) for signature in (
+                    "static void add_command(", "static cJSON *one_param(", "static void add_param(",
+                    "void muse_apps_advertise(")))
+            sources += [tmp / "apps_advertise.c", ROOT / "components/muse_apps/muse_apps_icons.c"]
+            flags += ["-I", str(ROOT / "components/muse_apps"), "-DCONFIG_MUSE_WASM_APPS=1"]
         (tmp / "harness.c").write_text(harness)
         built = subprocess.run(
             [*cc, *flags, "-Wno-unused-function", *defines, str(tmp / "harness.c"), *map(str, sources),
@@ -127,7 +138,7 @@ class DeviceDescriptionTest(unittest.TestCase):
 
     def registrations(self, defines: list[str], node_id: str = "homelink-0a1b2c",
                       display_name: str = "MuseGadget-0A1B2C", ble: bool = False,
-                      ssid: str = "0123456789abcdef0123456789abcdef") -> list[str]:
+                      ssid: str = "0123456789abcdef0123456789abcdef", apps: bool = False) -> list[str]:
         family = NOISE[NOISE.index("#ifndef MUSE_DEVICE_FAMILY"):]
         family = family[: family.index("#endif") + len("#endif")]
         functions = "\n".join(function_source(NOISE, signature) for signature in (
@@ -156,6 +167,7 @@ static int bits = 16;
 bool led_status_display_info(int *w, int *h) {{ *w = 800; *h = 480; return true; }}
 int led_status_display_bits(void) {{ return bits; }}
 void ble_commands_register(cJSON *commands);
+void muse_apps_advertise(cJSON *commands);
 {family}
 {functions.replace(cap, "size <= 65536 && !json")}
 int main(void) {{
@@ -171,7 +183,7 @@ int main(void) {{
 }}
 '''
         with tempfile.TemporaryDirectory() as name:
-            output = self.compile_and_run(Path(name), harness, defines, ble)
+            output = self.compile_and_run(Path(name), harness, defines, ble, apps)
         return output.splitlines()
 
     def test_register_describes_the_device(self) -> None:
@@ -222,6 +234,26 @@ int main(void) {{
                 size = max(len(line) for line in lines)
                 print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
                 # cJSON_PrintPreallocated asks for 5 bytes beyond the output.
+                self.assertLessEqual(size + 5, REGISTER_LIMIT)
+
+    def test_register_fits_with_webassembly_apps(self) -> None:
+        # Apps add their app.* commands; Kconfig keeps them apart from the
+        # BLE commands, which together wouldn't fit.
+        kconfig = (ROOT / "components/muse_apps/Kconfig").read_text()
+        self.assertIn("depends on !HOMEHUB_BLE_COMMANDS", kconfig)
+        model_id, model_name = "z" * 64, "~" * 128
+        common = ["-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_LED_BACKEND_MUSE=1",
+                  "-DCONFIG_HOMEHUB_DISPLAY_COMMANDS=1",
+                  f'-DCONFIG_MUSE_DEVICE_MODEL_ID="{model_id}"', f'-DCONFIG_MUSE_DEVICE_MODEL_NAME="{model_name}"']
+        for profile, options in {"full UI, apps": ["CONFIG_MUSE_WATCHER_CAMERA"],
+                                 "full UI, P4 camera, apps": ["CONFIG_MUSE_P4_CSI_CAMERA"]}.items():
+            with self.subTest(profile=profile):
+                lines = self.registrations([*common, *(f"-D{option}=1" for option in options)], "n" * 31, "d" * 31,
+                                           ssid='\\"' * 32, apps=True)
+                for line in lines:
+                    self.assertIn("app.run", json.loads(line)["params"]["commands_v2"])
+                size = max(len(line) for line in lines)
+                print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
                 self.assertLessEqual(size + 5, REGISTER_LIMIT)
 
     def test_register_leaves_out_an_ssid_with_control_characters(self) -> None:

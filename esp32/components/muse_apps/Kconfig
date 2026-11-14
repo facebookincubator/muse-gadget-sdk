@@ -17,7 +17,10 @@ menu "Muse apps"
     config MUSE_WASM_APPS
         bool "WebAssembly apps"
         # Not on e-paper boards (MUSE_UI_FREEINK): apps draw with LVGL, which they don't build.
+        # Not with the BLE commands: both together make link.register larger than its 8 KB,
+        # and the gadget never registers.
         depends on MUSE_ENABLED && SPIRAM && HOMEHUB_DAEMON_REQUESTS && !MUSE_UI_FREEINK
+        depends on !HOMEHUB_BLE_COMMANDS
         select MUSE_APP_VIEW
         select CAPABILITIES_REGISTRY
         default n
