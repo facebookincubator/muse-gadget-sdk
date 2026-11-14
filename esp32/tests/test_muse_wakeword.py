@@ -547,6 +547,15 @@ class WakeWordFirmwareContract(unittest.TestCase):
         tick = between(ui, 'static void tick_sound(void)', '/* ---------- Sleep')
         self.assertIn('muse_wakeword_enabled()', tick)   # switch tracks serial/Muse toggles
 
+    def test_option_needs_psram_and_the_lvgl_ui(self):
+        # The buffers and runner (~325 KB) only fit in PSRAM, and only the
+        # LVGL UI has the controls and the listening indicator.
+        kconfig = (WW / 'Kconfig').read_text()
+        enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_SENSITIVITY')
+        self.assertIn('depends on SPIRAM && !MUSE_UI_FREEINK', enable)
+        self.assertIn('has not been measured', enable)   # no invented false-alarm figure
+        self.assertNotIn('research checkpoint', enable)
+
     def test_serial_keys_and_off_by_default(self):
         input_c = (ROOT / 'components/muse/muse_input.c').read_text()
         for key in ('"wake"', '"wake.on"', '"wake.off"'):

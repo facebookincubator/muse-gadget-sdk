@@ -322,7 +322,7 @@ ww_runner_t *ww_runner_create(const ww_config_t *cfg)
     model_cfg.temp_buffer = runner->temp_arena;
     model_cfg.planned_buffer = runner->planned;
     model_cfg.planned_buffer_size = planned_total;
-    /* Planned buffers (36 KiB for Hey Muse) are not internal-only: in the
+    /* Planned buffers (29.5 KB for Hey Muse) are not internal-only: in the
      * full firmware internal RAM is nearly exhausted once Wi-Fi/BLE are
      * up (~12 KiB free, 4 KiB largest block on BOX-3). Like the arenas
      * they come from ww_runner_et_alloc() (PSRAM where present) once, at

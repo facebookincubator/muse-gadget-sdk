@@ -42,9 +42,9 @@ EXECUTORCH_PYTHON=<python with executorch> MUSE_WAKEWORD=1 tools/muse/board.sh b
 MUSE_WAKEWORD=1 tools/muse/board.sh flash box3
 ```
 
-Then run `>wake.on` and say "Hey Muse". Expect research-checkpoint
-behavior, including false triggers; `@wake` and the `muse_wake`/`ww_et`
-logs show the flow.
+Then run `>wake.on` and say "Hey Muse". The model's false-alarm rate
+has not been measured on a device yet, so expect false triggers; `@wake`
+and the `muse_wake`/`ww_et` logs show the flow.
 
 The overlay already trims for size and speed as follows. ExecuTorch
 runtime logging is compiled out (`CONFIG_ET_ENABLE_LOGGING` unset).
