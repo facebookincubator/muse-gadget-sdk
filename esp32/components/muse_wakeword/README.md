@@ -26,6 +26,10 @@ through the ExecuTorch registry component (kernel bundle generated at
 build time). `MUSE_WAKEWORD_ENABLE` defaults to `n` and no board
 overlay sets it, so shipped builds are unchanged.
 
+While listening is on, the microphone and codecs stay powered: a board
+on battery doesn't rest them when its screen sleeps, so battery life is
+much shorter with the wake word on.
+
 Verified by `tests/test_muse_wakeword.py`:
 
 ```sh

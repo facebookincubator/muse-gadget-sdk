@@ -35,6 +35,11 @@ menu "Muse wake word"
             serial), so flashing this firmware never starts listening
             on its own. No board overlay enables it.
 
+            While listening is on, the microphone and codecs stay
+            powered, so a battery board doesn't rest them when its
+            screen sleeps: expect much shorter battery life with the
+            wake word on.
+
             Detection runs on the device: the ExecuTorch model in
             models/hey_muse.pte, an int8 export of a streaming
             keyword-spotting network trained on synthetic speech from
