@@ -15,6 +15,11 @@
  */
 #include "muse_video.h"
 
+#include "sdkconfig.h"
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
+#endif
+
 #include <string.h>
 
 #include "esp_debug_helpers.h"
@@ -1176,6 +1181,9 @@ void muse_video_end(const muse_video_transport_t *t)
 
 void muse_video_open(void)
 {
+#if CONFIG_MUSE_APP_VIEW
+    muse_app_view_preempt(MUSE_APP_STOP_VIDEO);
+#endif
     if (!muse_video_supported()) {
         return;
     }

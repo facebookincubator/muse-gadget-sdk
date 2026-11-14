@@ -67,6 +67,11 @@ bool muse_settings_ble_on(void);
 /* StopWatch: false selects realtime PTT; true selects voice notes only. */
 bool muse_settings_voice_notes(void);
 void muse_settings_set_voice_notes(bool on);
+/* With CONFIG_MUSE_APP_VIEW, Apps in Settings (off until the person turns
+ * them on): whether the gadget runs the apps their Muse makes. Changing it
+ * restarts the gadget, so Muse learns of the app commands as it reconnects. */
+bool muse_settings_apps_on(void);
+void muse_settings_set_apps_on(bool on);
 
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1]);
 void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]);

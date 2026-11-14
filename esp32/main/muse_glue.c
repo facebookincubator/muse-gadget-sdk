@@ -34,6 +34,12 @@
 #include "identity.h"
 #include "noise_control.h"
 #include "sdk_token_console.h"
+#if CONFIG_MUSE_WASM_APPS
+#include "muse_apps.h"
+#endif
+#if CONFIG_CAPABILITIES_REGISTRY
+#include "board_capabilities.h"
+#endif
 #include "stack_monitor.h"
 #include "wifi_known.h"
 #include "wifi_mgr.h"
@@ -419,6 +425,9 @@ static const muse_link_ops_t s_ops = {
     .req_open = noise_ctrl_req_open,
     .req_send = noise_ctrl_req_send,
     .req_cancel = noise_ctrl_req_cancel,
+#if CONFIG_MUSE_WASM_APPS
+    .req_max_body = noise_ctrl_req_max_body,
+#endif
     .power_save = noise_ctrl_set_power_save,
     .wifi_nap = op_wifi_nap,
     .ble_quiet = ble_server_set_quiet,
@@ -644,10 +653,22 @@ static void boot_task(void *arg) {
     xEventGroupWaitBits(s_ready, BIT_STORAGE, pdFALSE, pdTRUE, portMAX_DELAY);
     load_creds();
     muse_app_run(muse_board_get());
+#if CONFIG_CAPABILITIES_REGISTRY
+    // The battery as a device for apps, now the board is up. Here rather than
+    // in muse_app_run(), so builds without apps keep muse_app.c as it was.
+    board_capabilities_init();
+#endif
     xEventGroupSetBits(s_ready, BIT_MUSE);
     stack_monitor_record(NULL);
     vTaskDelete(NULL);
 }
+
+#if CONFIG_MUSE_WASM_APPS
+// The console's setup lines: the SDK token, then the app loader (muse_apps.h).
+static bool console_line(const char *line) {
+    return sdk_token_console_command(line) || muse_apps_console(line);
+}
+#endif
 
 void muse_glue_start(void) {
     // First, before Link's Wi-Fi, BLE and tunnel and Muse's display take and
@@ -655,7 +676,12 @@ void muse_glue_start(void) {
     muse_input_power_init();
     s_ready = xEventGroupCreate();
     muse_link_register(&s_ops);
+#if CONFIG_MUSE_WASM_APPS
+    muse_input_set_console_hook(console_line);
+    muse_apps_start(noise_ctrl_send_command_result);
+#else
     muse_input_set_console_hook(sdk_token_console_command);
+#endif
     muse_ble_set_name(identity_ble_name());
     ble_companion_t companion = {
         .svcs = muse_ble_services(),

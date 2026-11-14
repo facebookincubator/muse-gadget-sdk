@@ -184,6 +184,12 @@ if(CONFIG_MUSE_ENABLED)
             list(APPEND srcs "muse_video_wifi.c" "muse_video_wire.c")
         endif()
     endif()
+    if(CONFIG_CAPABILITIES_REGISTRY)
+        list(APPEND srcs "board_capabilities.c")    # the battery as a device for apps (components/capabilities_registry)
+    endif()
+    if(CONFIG_MUSE_APP_VIEW)
+        list(APPEND srcs "muse_app_view.c")   # the screen an app draws on (components/muse_apps)
+    endif()
     # Shared core, independent of board selection. Keep it after the BSP so
     # Watcher's independently retained recovery markers keep their link order.
     if(CONFIG_MUSE_POWER_TEST)
@@ -205,7 +211,7 @@ endif()
 set(muse_priv_requires
     esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
     bt esp-tls mbedtls esp_app_format esp_http_client
-    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8
+    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8 capabilities_registry
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt efuse
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved

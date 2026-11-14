@@ -57,6 +57,37 @@ parameters, and its result's `payload` is:
 {"format": "markdown", "guide": "# Acme Lamp\n\nThe lamp on the desk ..."}
 ```
 
+The result may also contain an optional structured `capabilities` object.
+Apps-enabled ESP32 builds generate it at request time from the board's
+screen/button description, registered hardware descriptors and WASM runtime:
+
+- `board`: `name`, `width`, `height`, `round`, `touch`, `safe_inset`, `buttons`
+  (role names), and `exit_hold` (the app-exit button).
+- `devices`: registered hardware, each with `name`, `desc`, `fields` (units
+  and optional bounds), `rate`, `actions` (parameters and optional text), and
+  `events`. Describing them does not read sensors or operate hardware.
+- `wasm`: present only when the build supports apps: `enabled`, `api`,
+  `budget_kb`, `device_dir`, `api_command`, `api_file`, and `api_parts`.
+  The budget is a current snapshot; an app's admission budget is fixed when
+  it starts. Refresh before deciding whether another app can run.
+  `enabled` describes compiled support, not successful runtime initialization;
+  app commands can still return `unavailable` if initialization failed.
+
+`device.guide` is the sole runtime discovery entry point. To retrieve the
+full machine-readable API, call `capabilities.wasm.api_command` (`app.api`)
+with a required integer `part` from 0 through `capabilities.wasm.api_parts - 1`,
+joining each response's `text` in order. `app.api` returns only `part`,
+`parts`, and `text`; it does not duplicate runtime capabilities. Each part
+has at most 6000 bytes. `wasm.api_file` names
+`api.capabilities.json`, generated from the SDK's authored `api.json`.
+The full API and the app-authoring MUSE.md are not embedded in the guide.
+
+The Markdown size limits below apply to `guide`, not the JSON response.
+Consumers must tolerate missing capabilities and unknown future fields.
+Currently apps-off ESP32 builds and the Linux client keep the original
+Markdown-only response; absence of capabilities does not establish that
+hardware is absent. Capabilities add no permissions and contain no secrets.
+
 The guide tells Muse what the device is and how to use it: what it can do,
 what it shows, its controls, how to recover it and its limits. Skip setup and
 pairing: Muse only sees a device that's already set up. It may describe the

@@ -545,6 +545,24 @@ endif
             (about 220 KB), which still covers a push-to-talk turn. Board
             overlays with 2 MB of PSRAM turn it on.
 
+    config CAPABILITIES_REGISTRY
+        bool
+        help
+            The device registry (components/capabilities_registry) and the drivers that
+            describe the gadget's sensors and outputs to it: the battery, and
+            whatever the board file registers (motors, IMUs). Only WebAssembly
+            apps read it so far, and they select it; without it none of this
+            is built.
+
+    config MUSE_APP_VIEW
+        bool
+        help
+            The screen an app runs on (muse_app_view.c): a full-screen LVGL
+            root over the face that the app's objects go under, with touch,
+            gestures and the buttons by role. The power key, a voice call or
+            the video view closes it. WebAssembly apps select it
+            (components/muse_apps).
+
     config MUSE_VIDEO
         bool "Video streaming from a phone to the display"
         depends on MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31) && !MUSE_UI_FREEINK

@@ -25,6 +25,9 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#if CONFIG_MUSE_APP_VIEW
+#include "esp_system.h"
+#endif
 
 #include "muse_link.h"
 
@@ -61,6 +64,9 @@ static struct {
 static SemaphoreHandle_t s_lock;
 /* StopWatch samples this at the next press, never during an active call. */
 static atomic_bool s_voice_notes;
+#if CONFIG_MUSE_APP_VIEW
+static bool s_apps_on;
+#endif
 static nvs_handle_t s_nvs;
 static muse_setting_cb_t s_listener;
 
@@ -139,6 +145,11 @@ esp_err_t muse_settings_init(void)
     if (nvs_get_u8(s_nvs, "ble_on", &b) == ESP_OK) {
         s.ble_on = b;
     }
+#if CONFIG_MUSE_APP_VIEW
+    if (nvs_get_u8(s_nvs, "apps_on", &b) == ESP_OK) {
+        s_apps_on = b;
+    }
+#endif
     load_str("ssid", s.ssid, sizeof(s.ssid));
     load_str("pass", s.pass, sizeof(s.pass));
     load_str("host", s.host, sizeof(s.host));
@@ -176,6 +187,17 @@ void muse_settings_set_voice_notes(bool on)
     save_u8("voice_notes", on);
     notify(MUSE_SETTING_VOICE_NOTES);
 }
+
+#if CONFIG_MUSE_APP_VIEW
+bool muse_settings_apps_on(void) { return s_apps_on; }
+
+void muse_settings_set_apps_on(bool on)
+{
+    s_apps_on = on;
+    save_u8("apps_on", on);
+    esp_restart();   /* Muse learns of the app commands, or that there are none, as it reconnects */
+}
+#endif
 
 /* Home Link owns the saved networks (this is the first); the local copy is only a fallback. */
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1])

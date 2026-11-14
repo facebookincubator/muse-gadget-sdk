@@ -44,6 +44,9 @@
 
 #include "identity.h"
 #include "sdk_token_console.h"
+#if CONFIG_MUSE_WASM_APPS
+#include "muse_apps.h"
+#endif
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
@@ -1428,6 +1431,9 @@ static void on_wifi_scan(void) {
 }
 
 static void set_vm_with_gate_held(const char *url) {
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_vm_changed();  // an app the last VM ran doesn't act on the next one
+#endif
     ble_server_send_status("vm_switching");
     ui_set_status("vm_switching");
     led_status_set_state(LED_STATE_VM_SWITCHING);
@@ -1475,6 +1481,9 @@ static void finish_setup_reset_with_gate_held(void) {
     led_status_set_state(LED_STATE_UNPAIRED);
     ble_server_send_status("unpaired");
     link_pairing_reset();
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_forget_all();  // the next owner doesn't get the last one's apps
+#endif
 }
 
 static bool reset_setup_with_gate_held(const char *source,
@@ -1770,6 +1779,9 @@ static bool reset_setup_from_control(const char *source,
 }
 
 static void reset_default_vm_with_gate_held(void) {
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_vm_changed();
+#endif
     config_erase_key("vm_url");
     ble_server_send_status("vm_switching");
     ui_set_status("vm_switching");
@@ -1843,6 +1855,10 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
                                  "failed to clear setup credentials");
         }
         args->setup_credentials_cleared = true;
+#if CONFIG_MUSE_WASM_APPS
+        // Now, not after the worker's disconnect: a failed start below reboots first.
+        muse_apps_forget_all();
+#endif
     }
 
     if (xTaskCreate(ws_control_task, "ws_control", 8192, args, 4, NULL)
@@ -1957,6 +1973,11 @@ static cJSON *on_ws_command(
         if (!url) return command_error("missing_param", "url is required");
         return queue_ws_control(WS_CONTROL_SET_VM, url);
     }
+#if CONFIG_MUSE_WASM_APPS
+    if (muse_apps_handles(command)) {
+        return muse_apps_command(command, params, request_id, session_generation);
+    }
+#endif
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
     bool draw_file = strcmp(command, "display.draw_file") == 0;
     if (draw_file || strcmp(command, "display.draw_url") == 0) {

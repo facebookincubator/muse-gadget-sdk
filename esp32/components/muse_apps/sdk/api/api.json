@@ -1,0 +1,1833 @@
+{
+  "schema": 1,
+  "title": "Muse gadget apps API",
+  "module": "gadget",
+  "version": [1, 1],
+  "status": "draft",
+  "lvgl": "9.6",
+  "doc": "What a WebAssembly app on a Muse gadget can call, the events it gets and the constants it uses. The firmware embeds its machine-readable projection and serves it in parts with app.api; gen_api.py makes the C header apps include, the reference, and the firmware's import table from it.",
+  "conventions": [
+    "Every function is imported from the module \"gadget\". An app that imports anything else isn't run.",
+    "Integers are 32-bit and signed. Colours are 0xRRGGBB. Opacity runs from 0 (transparent) to 255 (opaque). Angles are whole degrees, clockwise, with 0 at 3 o'clock, as in LVGL. Percentages run from 0 to 100.",
+    "Strings are NUL-terminated UTF-8 in the app's memory. A call copies what it needs before it returns.",
+    "A handle or id is positive; 0 is never a valid one. A function that can fail returns a negative ERR_ constant.",
+    "Nothing blocks. A call that needs the VM, or takes time, returns an operation id at once and finishes later with EV_DONE (a: the id, b: 0 or more on success, or an ERR_). A buffer given to such a call must stay reserved until then.",
+    "Changes to the screen made in one callback appear together on the next frame after it returns. Getters see every change made so far.",
+    "The gadget describes itself: board facts come from sys_info, and its sensors and other hardware from dev_ calls, each with a description the firmware supplies. device.guide gives Muse the same before it writes an app."
+  ],
+  "types": {
+    "int": {"c": "int32_t", "wasm": "i", "doc": "A 32-bit integer."},
+    "bool": {"c": "int32_t", "wasm": "i", "doc": "0 or 1."},
+    "rgb": {"c": "int32_t", "wasm": "i", "doc": "A colour, 0xRRGGBB."},
+    "opa": {"c": "int32_t", "wasm": "i", "doc": "Opacity, 0 to 255."},
+    "coord": {"c": "int32_t", "wasm": "i", "doc": "Pixels, PCT(p) of the parent, or SIZE_CONTENT."},
+    "angle": {"c": "int32_t", "wasm": "i", "doc": "Degrees, clockwise from 3 o'clock."},
+    "percent": {"c": "int32_t", "wasm": "i", "doc": "100 is the natural size."},
+    "handle": {
+      "c": "int32_t",
+      "wasm": "i",
+      "doc": "A UI object, style, canvas or sensor this app made: positive."
+    },
+    "op": {
+      "c": "int32_t",
+      "wasm": "i",
+      "doc": "An operation id (positive) that EV_DONE finishes, or an ERR_."
+    },
+    "result": {"c": "int32_t", "wasm": "i", "doc": "0 or more on success, or an ERR_."},
+    "text": {
+      "c": "int32_t",
+      "wasm": "i",
+      "doc": "Used only by properties: set with ui_set_text, read with ui_get_text."
+    },
+    "i64": {"c": "int64_t", "wasm": "I", "doc": "A 64-bit integer."},
+    "str": {"c": "const char *", "wasm": "$", "doc": "A NUL-terminated UTF-8 string."},
+    "bytes": {
+      "c": ["const void *", "int32_t"],
+      "wasm": "*~",
+      "doc": "Bytes in the app's memory, and their length."
+    },
+    "out": {
+      "c": ["void *", "int32_t"],
+      "wasm": "*~",
+      "doc": "A buffer in the app's memory, and its size in bytes."
+    }
+  },
+  "values": [
+    [
+      "UI_ROOT",
+      "1",
+      "handle",
+      "The app's screen: the parent of top-level objects. It can't be deleted."
+    ],
+    ["SIZE_CONTENT", "0x2FFFFFFF", "coord", "A width or height that fits the object's content."],
+    ["PCT(p)", "(0x20000000 + (p))", "coord", "p percent (0 to 1000) of the parent's content area."],
+    [
+      "RADIUS_CIRCLE",
+      "0x7FFF",
+      "int",
+      "A radius that makes the object round, or its ends fully rounded."
+    ],
+    ["OPA_TRANSP", "0", "opa", "Fully transparent."],
+    ["OPA_COVER", "255", "opa", "Fully opaque."],
+    [
+      "UI_INVALID",
+      "(-0x7FFFFFFF - 1)",
+      "int",
+      "What ui_get returns for a wrong handle or property; the log says which."
+    ]
+  ],
+  "limits": [
+    ["module_bytes", 262144, "The largest .wasm file."],
+    ["budget_bytes", 2097152, "The most memory one app takes: its linear memory and stack, and what the firmware holds for it (objects, styles, canvases, images, chat text, device queues). Gadgets give each app this much, or less where PSRAM is short (never under 1 MB): device.guide capabilities.wasm.budget_kb and sys_info(INFO_MEM_BUDGET) say how much."],
+    ["instructions", 4000000, "Instructions per callback, well under a second. Past that the app traps and stops."],
+    ["instructions_start", 16000000, "Instructions for _initialize and on_start together."],
+    ["objects", 256, "UI objects alive at once, the root included."],
+    ["styles", 32, "Shared styles."],
+    ["timers", 8, "Timers; ids 1 to 8."],
+    ["ops", 4, "Operations in flight (VM reads and writes, chat sends, image loads)."],
+    ["devices_open", 4, "Devices streaming at once (dev_open)."],
+    ["device_queue", 64, "Readings kept per open device; the oldest are dropped past that."],
+    ["device_fields", 8, "Values in one reading."],
+    ["action_params", 8, "Numbers one action takes."],
+    ["chat_messages", 8, "Chat messages kept for the app."],
+    ["chat_text_bytes", 4096, "Text kept per chat message; longer messages are cut and marked."],
+    ["text_bytes", 4096, "A text property or string argument."],
+    ["read_bytes", 65536, "One file_read or state_load."],
+    ["state_bytes", 65536, "All of one app's state files on the VM."],
+    ["name_chars", 32, "A state name: a-z, 0-9, '-', '_' and '.'."],
+    ["log_line_bytes", 200, "One sys_log line; longer ones are cut."],
+    ["image_pixels", 0, "Decoded images and canvases together: no more pixels than the screen has (0 here means the screen's own count)."],
+    ["chart_series", 4, "Series per chart."],
+    ["line_points", 64, "Points per line object."],
+    ["frame_rate", 30, "on_frame calls per second, at most."],
+    ["object_pixels", 4096, "An object's position, width and height in pixels, either way; larger values are clamped."],
+    ["shadow_pixels", 64, "Shadow width, spread and offsets, line dashes, and radii other than RADIUS_CIRCLE; larger values are clamped."],
+    ["styles_per_object", 32, "The app's styles on one object: shared ones from ui_style_add plus each selector ui_style sets; past that ERR_LIMIT."]
+  ],
+  "exports": [
+    {
+      "name": "on_start",
+      "required": true,
+      "args": [],
+      "doc": "Called once the app is loaded: build the screen here."
+    },
+    {
+      "name": "on_event",
+      "required": false,
+      "args": [["type", "int"], ["a", "int"], ["b", "int"]],
+      "doc": "Called for each event (EV_ constants; the table under Events says what a and b hold)."
+    },
+    {
+      "name": "on_frame",
+      "required": false,
+      "args": [["now_ms", "int"]],
+      "doc": "Called up to sys_frame_rate times a second while the screen is on, with sys_millis(). Leave it out unless the app animates something itself: widgets, animations and timers don't need it."
+    },
+    {
+      "name": "on_stop",
+      "required": false,
+      "args": [["reason", "stop"]],
+      "doc": "Called before the app is closed, unless it trapped. Save state here: state_save calls made in on_stop finish (for up to 2 s) before the app's memory is freed."
+    }
+  ],
+  "events": [
+    ["UI", 1, "handle", "UI_ bit", "Something happened to an object the app asked about with ui_on, or an image load finished."],
+    ["BUTTON", 2, "BUTTON_", "BTN_", "A button."],
+    ["KNOB", 3, "steps", "", "The knob turned: positive clockwise."],
+    ["TOUCH_DOWN", 4, "x", "y", "A touch began on the root, or on an object that isn't clickable."],
+    ["TOUCH_MOVE", 5, "x", "y", "The touch moved."],
+    ["TOUCH_UP", 6, "x", "y", "The touch ended."],
+    ["GESTURE", 7, "GESTURE_", "", "A swipe."],
+    ["TIMER", 8, "timer id", "", "A timer fired."],
+    ["DONE", 9, "op id", "result", "An operation finished: b is 0 or more on success (bytes read, say), or an ERR_."],
+    ["CHAT", 10, "CHAT_", "message id or value", "The chat changed, after chat_open."],
+    ["MUSE", 11, "MUSE_", "", "Muse's mode changed."],
+    ["DEV_DATA", 12, "device", "readings waiting", "Readings to take with dev_take, after dev_open. At most one per frame per device."],
+    ["DEV_EVENT", 13, "device", "event index", "A device's event (dev_event gives the index), after dev_open."],
+    ["SCREEN", 14, "1 on, 0 off", "", "The screen went off (on_frame stops) or came back."],
+    ["CONNECTION", 15, "1 up, 0 down", "", "The link to the VM came up or went down."]
+  ],
+  "enums": [
+    {
+      "name": "error",
+      "prefix": "ERR_",
+      "doc": "Why a call failed. Every one is negative.",
+      "values": [
+        ["ARG", -1, "An argument is out of range, a string is too long, or a buffer lies outside the app's memory."],
+        ["HANDLE", -2, "The handle or id isn't one this app holds, or is the wrong kind for the call."],
+        ["NO_MEMORY", -3, "The app's memory budget is used up."],
+        ["LIMIT", -4, "A per-app limit was reached (objects, styles, timers, operations, open sensors)."],
+        ["BUSY", -5, "The thing is in use; try again later."],
+        ["OFFLINE", -6, "The gadget isn't connected to its VM."],
+        ["DENIED", -7, "The app's manifest doesn't ask for this permission, or the VM refused."],
+        ["UNSUPPORTED", -8, "This gadget doesn't have it: a sensor, an output, or a property on this widget."],
+        ["TOO_LARGE", -9, "The data is larger than the call takes."],
+        ["NOT_FOUND", -10, "The file, state or message doesn't exist."],
+        ["TIMEOUT", -11, "The VM didn't answer in time."],
+        ["FAILED", -12, "Anything else; the app's log says why."]
+      ]
+    },
+    {
+      "name": "info",
+      "prefix": "INFO_",
+      "doc": "What sys_info reports.",
+      "values": [
+        ["API_VERSION", 1, "The API version the gadget serves, major * 100 + minor."],
+        ["SCREEN_WIDTH", 2, "The screen's width in pixels."],
+        ["SCREEN_HEIGHT", 3, "The screen's height in pixels."],
+        ["ROUND", 4, "1 on a round screen."],
+        ["SAFE_INSET", 5, "Pixels to keep clear of the edges so nothing is cut off: on a round screen, the inset of the largest centred square."],
+        ["TOUCH", 6, "1 if the screen takes touch."],
+        ["BUTTONS", 7, "The buttons this gadget reports, as bits: 1 << BUTTON_x."],
+        ["KNOB", 8, "1 if the gadget has a knob or wheel (EV_KNOB)."],
+        ["MEM_BUDGET", 10, "The app's memory budget in bytes: limits.budget_bytes, or less on a gadget short of PSRAM."],
+        ["MEM_USED", 11, "Bytes of the budget in use."],
+        ["CONNECTED", 12, "1 while the gadget is connected to its VM."]
+      ]
+    },
+    {
+      "name": "stop",
+      "prefix": "STOP_",
+      "doc": "Why an app is being closed (on_stop).",
+      "values": [
+        ["USER", 1, "The person closed it (the power key, or the exit button held 2 s) or Muse ran app.stop."],
+        ["REPLACED", 2, "Muse started another app."],
+        ["CALL", 3, "A voice call started."],
+        ["VIDEO", 4, "The video view opened."],
+        ["EXIT", 5, "The app called sys_exit."],
+        ["UPDATE", 6, "The gadget is restarting, for an update or a setting."]
+      ]
+    },
+    {
+      "name": "button",
+      "prefix": "BUTTON_",
+      "doc": "Buttons, by role. Which exist depends on the board (INFO_BUTTONS). The power key always closes the app and is never reported. Holding BUTTON_PRIMARY (the talk button) for 2 s closes it too: device.guide names it as exit_hold; the app sees its BTN_DOWN and BTN_LONG, then on_stop, and never its BTN_UP. If the app gives the talk button back to Muse with muse_talk_key(1), that hold is reserved for talking instead; provide an on-screen Close control or use app.stop.",
+      "values": [
+        ["PRIMARY", 1, "The talk button. Muse's push-to-talk while muse_talk_key(1)."],
+        ["SECONDARY", 2, "The second button, where the board has one."],
+        ["UP", 3, "A navigation key."],
+        ["DOWN", 4, "A navigation key."],
+        ["LEFT", 5, "A navigation key."],
+        ["RIGHT", 6, "A navigation key."],
+        ["ENTER", 7, "Select, or a knob's press."],
+        ["BACK", 8, "Escape or back."]
+      ]
+    },
+    {
+      "name": "button_action",
+      "prefix": "BTN_",
+      "doc": "What a button did (EV_BUTTON's b).",
+      "values": [
+        ["DOWN", 1, "Pressed."],
+        ["UP", 2, "Released."],
+        ["LONG", 3, "Still held 600 ms after DOWN; UP still follows."]
+      ]
+    },
+    {
+      "name": "gesture",
+      "prefix": "GESTURE_",
+      "doc": "Swipe directions (EV_GESTURE).",
+      "values": [["LEFT", 1, ""], ["RIGHT", 2, ""], ["UP", 3, ""], ["DOWN", 4, ""]]
+    },
+    {
+      "name": "muse_mode",
+      "prefix": "MUSE_",
+      "doc": "What Muse is doing (muse_mode, EV_MUSE).",
+      "values": [
+        ["IDLE", 0, ""],
+        ["LISTENING", 1, "Recording the person."],
+        ["THINKING", 2, "Waiting for the reply."],
+        ["SPEAKING", 3, "Playing the reply."],
+        ["ERROR", 4, "Something failed; the caption says what."]
+      ]
+    },
+    {
+      "name": "chat_event",
+      "prefix": "CHAT_",
+      "doc": "What changed in the chat (EV_CHAT's a).",
+      "values": [
+        ["MESSAGE", 1, "A new message; b is its id."],
+        ["TEXT", 2, "A message's text grew while Muse writes it; b is its id."],
+        ["DONE", 3, "A message is complete; b is its id."],
+        ["BUSY", 4, "b is 1 while Muse is working on a reply, 0 once it's idle."],
+        ["CONNECTED", 5, "b is 1 once the chat is followed, 0 when the link is lost (it reconnects by itself)."]
+      ]
+    },
+    {
+      "name": "chat_info",
+      "prefix": "CHAT_INFO_",
+      "doc": "What chat_info reports about a message.",
+      "values": [
+        ["ROLE", 1, "A ROLE_ constant."],
+        ["LENGTH", 2, "Bytes of text kept."],
+        ["DONE", 3, "1 once the message is complete."],
+        ["TRUNCATED", 4, "1 if the text was cut to chat_text_bytes."]
+      ]
+    },
+    {
+      "name": "chat_role",
+      "prefix": "ROLE_",
+      "doc": "Who wrote a message.",
+      "values": [
+        ["USER", 1, "The person."],
+        ["MUSE", 2, "Muse."],
+        ["APP", 3, "An app on a gadget, with chat_send. Its \"[name on the gadget]\" prefix is removed."]
+      ]
+    }
+  ],
+  "groups": [
+    ["sys", "System", "Time, logging, board facts, timers and the app's own lifecycle."],
+    [
+      "ui",
+      "UI objects",
+      "LVGL widgets, kept by the firmware. Create them once, change their properties, and ask for their events with ui_on. Properties are P_ constants (Properties, below); style properties set this way apply to the main part in the default state."
+    ],
+    ["style", "Styles", "Style properties for other parts and states, and shared styles."],
+    ["anim", "Animation", "Animating a property to a value."],
+    [
+      "canvas",
+      "Canvas",
+      "Immediate-mode drawing on a canvas object (W_CANVAS). Drawing shows on the next frame."
+    ],
+    ["muse", "Muse", "What Muse is doing, and the talk key."],
+    [
+      "chat",
+      "Chat",
+      "Following the chat and sending to it, through the gadget's link to the VM. The gadget parses the VM's formats; the app sees messages."
+    ],
+    [
+      "files",
+      "Files",
+      "Reading files on the VM (the app's own folder, or the home folder with the files.home permission) and the gadget's own files on its flash, which Muse puts there with files.put (paths from \"/\", with the files.gadget permission)."
+    ],
+    [
+      "state",
+      "State",
+      "Small files the app keeps between runs, on the VM under the gadget's folder (devices/<gadget>/state/<app>/)."
+    ],
+    [
+      "devices",
+      "Devices",
+      "Sensors, motors, relays and anything else the firmware has a driver for. The firmware describes each device: a name, its readings (fields with units), its actions (with their parameters) and its events. Apps find devices by name and read, stream or call them through these few functions, so new hardware needs no new imports and no change to this file. Well-known names (Devices, below) have fixed fields and units so apps work across boards; any other name carries its own description."
+    ]
+  ],
+  "functions": [
+    {
+      "name": "sys_millis",
+      "group": "sys",
+      "args": [],
+      "ret": ["int", "Milliseconds since the gadget started."],
+      "doc": "A clock for timing. Wraps after 24 days."
+    },
+    {
+      "name": "sys_time",
+      "group": "sys",
+      "args": [],
+      "ret": ["i64", "UTC milliseconds since 1970, or 0."],
+      "doc": "The time of day. 0 until the gadget has set its clock from the VM, soon after it connects."
+    },
+    {
+      "name": "sys_log",
+      "group": "sys",
+      "args": [["text", "str", "The line."]],
+      "ret": null,
+      "doc": "Adds a line to the app's log, which Muse reads with app.logs."
+    },
+    {
+      "name": "sys_info",
+      "group": "sys",
+      "args": [["key", "info", "What to report."]],
+      "ret": ["int", "The value, or ERR_ARG."],
+      "doc": "Board facts and the app's memory use."
+    },
+    {
+      "name": "sys_random",
+      "group": "sys",
+      "args": [],
+      "ret": ["int", "32 random bits."],
+      "doc": "From the hardware random number generator."
+    },
+    {
+      "name": "sys_timer",
+      "group": "sys",
+      "args": [
+        ["id", "int", "1 to 8."],
+        ["ms", "int", "10 or more."],
+        ["repeat", "bool", "Fire every ms, not once."]
+      ],
+      "ret": ["result", ""],
+      "errors": ["ARG"],
+      "doc": "Starts or restarts a timer: EV_TIMER after ms milliseconds, while the app runs, screen on or off."
+    },
+    {
+      "name": "sys_timer_stop",
+      "group": "sys",
+      "args": [["id", "int", ""]],
+      "ret": ["result", ""],
+      "errors": ["ARG"],
+      "doc": "Stops a timer."
+    },
+    {
+      "name": "sys_frame_rate",
+      "group": "sys",
+      "args": [["fps", "int", "0 to 30."]],
+      "ret": ["result", ""],
+      "errors": ["ARG"],
+      "doc": "How often on_frame is called while the screen is on. 30 to start with, if the app exports on_frame."
+    },
+    {
+      "name": "sys_keep_awake",
+      "group": "sys",
+      "args": [["on", "bool", ""]],
+      "ret": null,
+      "doc": "Keeps the screen on while on is 1. Use it only while showing something the person is watching."
+    },
+    {
+      "name": "sys_exit",
+      "group": "sys",
+      "args": [],
+      "ret": null,
+      "doc": "Ends the app once the current callback returns, after on_stop(STOP_EXIT)."
+    },
+    {
+      "name": "sys_brightness",
+      "group": "sys",
+      "args": [["percent", "int", "1 to 100, or -1 for the person's own setting."]],
+      "ret": ["result", ""],
+      "errors": ["UNSUPPORTED", "ARG"],
+      "doc": "Sets the screen's brightness while the app runs."
+    },
+    {
+      "name": "ui_create",
+      "group": "ui",
+      "args": [
+        ["type", "widget", "A W_ constant."],
+        ["parent", "handle", "UI_ROOT, or another object other than a roller."]
+      ],
+      "ret": ["handle", "The new object."],
+      "errors": ["ARG", "HANDLE", "LIMIT", "NO_MEMORY"],
+      "doc": "Creates a widget with the theme's look."
+    },
+    {
+      "name": "ui_delete",
+      "group": "ui",
+      "args": [["obj", "handle", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Deletes an object and its children. Their handles become invalid."
+    },
+    {
+      "name": "ui_clean",
+      "group": "ui",
+      "args": [["obj", "handle", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Deletes an object's children."
+    },
+    {
+      "name": "ui_set",
+      "group": "ui",
+      "args": [["obj", "handle", ""], ["prop", "prop", "A P_ constant."], ["value", "int", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "UNSUPPORTED"],
+      "doc": "Sets a property that isn't text."
+    },
+    {
+      "name": "ui_get",
+      "group": "ui",
+      "args": [["obj", "handle", ""], ["prop", "prop", ""]],
+      "ret": ["int", "The value, or UI_INVALID."],
+      "doc": "Reads a property that isn't text."
+    },
+    {
+      "name": "ui_set_text",
+      "group": "ui",
+      "args": [
+        ["obj", "handle", ""],
+        ["prop", "prop", "A text property: P_TEXT, P_OPTIONS..."],
+        ["text", "str", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "UNSUPPORTED", "NO_MEMORY"],
+      "doc": "Sets a text property."
+    },
+    {
+      "name": "ui_get_text",
+      "group": "ui",
+      "args": [
+        ["obj", "handle", ""],
+        ["prop", "prop", ""],
+        ["buf", "out", "Gets the text, cut to fit and always NUL-terminated."]
+      ],
+      "ret": ["result", "The text's full length in bytes."],
+      "errors": ["HANDLE", "ARG", "UNSUPPORTED"],
+      "doc": "Reads a text property, such as what was typed into a text area."
+    },
+    {
+      "name": "ui_on",
+      "group": "ui",
+      "args": [["obj", "handle", ""], ["events", "ui_event", "UI_ bits, 0 for none."]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Chooses which events of this object come to on_event as EV_UI. Replaces the earlier choice."
+    },
+    {
+      "name": "ui_align",
+      "group": "ui",
+      "args": [["obj", "handle", ""], ["align", "align", ""], ["dx", "int", ""], ["dy", "int", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Places an object in its parent, offset by dx, dy."
+    },
+    {
+      "name": "ui_align_to",
+      "group": "ui",
+      "args": [
+        ["obj", "handle", ""],
+        ["base", "handle", "Another object."],
+        ["align", "align", "ALIGN_OUT_ puts it outside base."],
+        ["dx", "int", ""],
+        ["dy", "int", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Places an object relative to another, once (it doesn't follow base later)."
+    },
+    {
+      "name": "ui_set_parent",
+      "group": "ui",
+      "args": [
+        ["obj", "handle", ""],
+        ["parent", "handle", "Not a roller, nor the object or one inside it."]
+      ],
+      "ret": ["result", ""],
+      "errors": ["ARG", "HANDLE"],
+      "doc": "Moves an object to another parent."
+    },
+    {
+      "name": "ui_grid",
+      "group": "ui",
+      "args": [["obj", "handle", ""], ["columns", "str", "Column sizes."], ["rows", "str", "Row sizes."]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG"],
+      "doc": "Lays out the object's children in a grid. Sizes are space-separated: pixels, \"auto\" (fits the content) or \"Nfr\" (N shares of what's left), up to 8 each: ui_grid(obj, \"1fr 1fr 1fr\", \"auto 1fr\"). Place children with ui_grid_cell."
+    },
+    {
+      "name": "ui_grid_cell",
+      "group": "ui",
+      "args": [
+        ["obj", "handle", "A child of a grid."],
+        ["col", "int", ""],
+        ["col_span", "int", ""],
+        ["row", "int", ""],
+        ["row_span", "int", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG"],
+      "doc": "Puts a child in a grid cell; the child stretches to fill it."
+    },
+    {
+      "name": "ui_scroll_to",
+      "group": "ui",
+      "args": [["obj", "handle", ""], ["x", "int", ""], ["y", "int", ""], ["animate", "bool", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Scrolls an object's content."
+    },
+    {
+      "name": "ui_scroll_to_view",
+      "group": "ui",
+      "args": [["obj", "handle", ""], ["animate", "bool", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Scrolls its parents until the object is visible: the newest message in a chat, say."
+    },
+    {
+      "name": "ui_navigation",
+      "group": "ui",
+      "args": [["on", "bool", ""]],
+      "ret": ["result", ""],
+      "doc": "On boards without touch: buttons and the knob move focus between the app's buttons, sliders and other inputs (UP and DOWN, or the knob), ENTER presses or edits, BACK sends UI_CANCEL. Buttons it uses don't come as EV_BUTTON while it's on."
+    },
+    {
+      "name": "ui_text_width",
+      "group": "ui",
+      "args": [["font", "font", ""], ["text", "str", ""]],
+      "ret": ["int", "Pixels."],
+      "doc": "How wide a line of text is."
+    },
+    {
+      "name": "ui_text_height",
+      "group": "ui",
+      "args": [["font", "font", ""], ["width", "int", "Wrap width."], ["text", "str", ""]],
+      "ret": ["int", "Pixels."],
+      "doc": "How tall text is, wrapped at width."
+    },
+    {
+      "name": "ui_span",
+      "group": "ui",
+      "args": [["y", "int", "A row of the screen."], ["margin", "int", "Pixels to keep clear at each end."]],
+      "ret": ["int", "Pixels, centred on the screen; 0 off the screen."],
+      "doc": "How much of row y shows, less margin at each end: on a round screen the circle's chord, else the screen's width. Size text and rows near the top and bottom of a round screen by it."
+    },
+    {
+      "name": "ui_fit_text",
+      "group": "ui",
+      "args": [
+        ["obj", "handle", "A label."],
+        ["width", "int", "The most it may take."],
+        ["font", "font", "The font it would like."]
+      ],
+      "ret": ["result", "The FONT_ it got."],
+      "errors": ["HANDLE", "ARG", "UNSUPPORTED"],
+      "doc": "Fits a label's text on one line width wide: in font, or the next smaller font it fits in, down to FONT_14, then cut short with \"...\". Sets the label's width, font and long mode. Call it after ui_set_text, and again when the text changes, for any text whose length you don't control: a name, a message, a number that can grow."
+    },
+    {
+      "name": "ui_image_load",
+      "group": "ui",
+      "args": [
+        ["obj", "handle", "An image object."],
+        [
+          "path",
+          "str",
+          "In the app's folder on the VM, or from \"/\" on the gadget (files.gadget)."
+        ]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "LIMIT", "OFFLINE"],
+      "doc": "Loads a PNG or JPEG into an image object, from the VM or from the gadget's own files (which work offline). EV_UI with UI_LOADED or UI_LOAD_FAILED says when it's done. The decoded image counts against the budget."
+    },
+    {
+      "name": "ui_image_set",
+      "group": "ui",
+      "args": [["obj", "handle", "An image object."], ["data", "bytes", "A PNG or JPEG file."]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "NO_MEMORY"],
+      "doc": "Shows a PNG or JPEG from the app's memory, decoded at once."
+    },
+    {
+      "name": "ui_line_points",
+      "group": "ui",
+      "args": [["obj", "handle", "A line object."], ["xy", "bytes", "int32_t x, y pairs."]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "TOO_LARGE"],
+      "doc": "Sets a line's points."
+    },
+    {
+      "name": "ui_chart_series",
+      "group": "ui",
+      "args": [["chart", "handle", ""], ["color", "rgb", ""]],
+      "ret": ["result", "The series, 1 to 4."],
+      "errors": ["HANDLE", "LIMIT"],
+      "doc": "Adds a series to a chart."
+    },
+    {
+      "name": "ui_chart_set",
+      "group": "ui",
+      "args": [
+        ["chart", "handle", ""],
+        ["series", "int", ""],
+        ["values", "bytes", "int32_t values, up to P_POINT_COUNT."]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG"],
+      "doc": "Sets a series' points."
+    },
+    {
+      "name": "ui_chart_push",
+      "group": "ui",
+      "args": [["chart", "handle", ""], ["series", "int", ""], ["value", "int", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG"],
+      "doc": "Adds a point to a series, as P_UPDATE_MODE says."
+    },
+    {
+      "name": "ui_table_cell",
+      "group": "ui",
+      "args": [["table", "handle", ""], ["row", "int", ""], ["col", "int", ""], ["text", "str", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "NO_MEMORY"],
+      "doc": "Sets a cell's text, adding rows and columns as needed."
+    },
+    {
+      "name": "ui_table_column_width",
+      "group": "ui",
+      "args": [["table", "handle", ""], ["col", "int", ""], ["width", "int", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG"],
+      "doc": ""
+    },
+    {
+      "name": "ui_scale_needle",
+      "group": "ui",
+      "args": [
+        ["scale", "handle", ""],
+        ["line", "handle", "A line object, child of the scale."],
+        ["length", "int", "Pixels from the centre."],
+        ["value", "int", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Points a line at a value on a round scale."
+    },
+    {
+      "name": "ui_style",
+      "group": "style",
+      "args": [
+        ["obj", "handle", ""],
+        ["selector", "int", "A PART_ plus STATE_ bits."],
+        ["prop", "prop", "A style property."],
+        ["value", "int", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "LIMIT"],
+      "doc": "Sets a style property for one part and state: ui_style(slider, PART_INDICATOR, P_BG_COLOR, 0x00C8FF). Each selector counts once toward limits.styles_per_object."
+    },
+    {
+      "name": "ui_style_create",
+      "group": "style",
+      "args": [],
+      "ret": ["handle", "A style."],
+      "errors": ["LIMIT", "NO_MEMORY"],
+      "doc": "Creates a shared style, to give many objects the same look with one set of calls."
+    },
+    {
+      "name": "ui_style_set",
+      "group": "style",
+      "args": [["style", "handle", ""], ["prop", "prop", "A style property."], ["value", "int", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG"],
+      "doc": "Sets a property in a shared style. Objects using it update."
+    },
+    {
+      "name": "ui_style_add",
+      "group": "style",
+      "args": [
+        ["obj", "handle", ""],
+        ["style", "handle", ""],
+        ["selector", "int", "A PART_ plus STATE_ bits."]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "LIMIT"],
+      "doc": "Gives an object a shared style. With the selectors ui_style has set on it, 32 per object (limits.styles_per_object). Properties set on the object itself still win."
+    },
+    {
+      "name": "ui_animate",
+      "group": "anim",
+      "args": [
+        ["obj", "handle", ""],
+        ["prop", "prop", "A property that isn't text."],
+        ["to", "int", ""],
+        ["ms", "int", ""],
+        ["easing", "int", "An EASE_ plus ANIM_ flags."]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "LIMIT"],
+      "doc": "Animates a property from its value now to to. UI_ANIM_DONE follows, if asked for with ui_on. A new animation of the same property replaces the old one."
+    },
+    {
+      "name": "ui_animate_stop",
+      "group": "anim",
+      "args": [["obj", "handle", ""], ["prop", "prop", "0 for all."]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Stops animations where they are."
+    },
+    {
+      "name": "cv_fill",
+      "group": "canvas",
+      "args": [["canvas", "handle", ""], ["color", "rgb", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Fills the whole canvas."
+    },
+    {
+      "name": "cv_opa",
+      "group": "canvas",
+      "args": [["canvas", "handle", ""], ["opa", "opa", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Opacity for the drawing calls that follow on this canvas. Starts at OPA_COVER."
+    },
+    {
+      "name": "cv_rect",
+      "group": "canvas",
+      "args": [
+        ["canvas", "handle", ""],
+        ["x", "int", ""],
+        ["y", "int", ""],
+        ["w", "int", ""],
+        ["h", "int", ""],
+        ["radius", "int", ""],
+        ["color", "rgb", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "A filled rectangle; with radius RADIUS_CIRCLE, a circle or pill."
+    },
+    {
+      "name": "cv_rect_style",
+      "group": "canvas",
+      "args": [
+        ["canvas", "handle", ""],
+        ["x", "int", ""],
+        ["y", "int", ""],
+        ["w", "int", "Positive pixels, no wider than the canvas."],
+        ["h", "int", "Positive pixels, no taller than the canvas."],
+        ["style", "handle", "A shared style from ui_style_create, painted as it is now."]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG"],
+      "doc": "Draws a rectangle with a shared style: P_RADIUS; P_BG_COLOR, P_BG_OPA, P_BG_GRAD_COLOR and P_BG_GRAD_DIR (GRAD_HOR or GRAD_VER, two colour stops); P_BORDER_COLOR, P_BORDER_WIDTH, P_BORDER_OPA and P_BORDER_SIDE; P_SHADOW_COLOR, P_SHADOW_WIDTH, P_SHADOW_OPA, P_SHADOW_OFFSET_X, P_SHADOW_OFFSET_Y and P_SHADOW_SPREAD. P_OPA and cv_opa multiply the fill, border and shadow opacities. Missing properties give a white fill, square corners and no border or shadow. Other properties are ignored. Border and shadow widths are clamped to 0..64 px, shadow spread to 0..64, and offsets to -4096..4096. Drawing, including shadows, is clipped to the canvas buffer: leave room around the rectangle. It paints once; later style changes affect only later calls, not already drawn pixels. No buffer yet means no drawing. Available since API 1.1."
+    },
+    {
+      "name": "cv_border",
+      "group": "canvas",
+      "args": [
+        ["canvas", "handle", ""],
+        ["x", "int", ""],
+        ["y", "int", ""],
+        ["w", "int", ""],
+        ["h", "int", ""],
+        ["radius", "int", ""],
+        ["width", "int", ""],
+        ["color", "rgb", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "A rectangle's outline, width pixels thick, inside it."
+    },
+    {
+      "name": "cv_line",
+      "group": "canvas",
+      "args": [
+        ["canvas", "handle", ""],
+        ["x1", "int", ""],
+        ["y1", "int", ""],
+        ["x2", "int", ""],
+        ["y2", "int", ""],
+        ["width", "int", ""],
+        ["color", "rgb", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "A line with round ends."
+    },
+    {
+      "name": "cv_arc",
+      "group": "canvas",
+      "args": [
+        ["canvas", "handle", ""],
+        ["cx", "int", ""],
+        ["cy", "int", ""],
+        ["r", "int", "Outer radius."],
+        ["width", "int", ""],
+        ["start", "angle", ""],
+        ["end", "angle", ""],
+        ["color", "rgb", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "An arc, clockwise from start to end."
+    },
+    {
+      "name": "cv_triangle",
+      "group": "canvas",
+      "args": [
+        ["canvas", "handle", ""],
+        ["x1", "int", ""],
+        ["y1", "int", ""],
+        ["x2", "int", ""],
+        ["y2", "int", ""],
+        ["x3", "int", ""],
+        ["y3", "int", ""],
+        ["color", "rgb", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "A filled triangle."
+    },
+    {
+      "name": "cv_text",
+      "group": "canvas",
+      "args": [
+        ["canvas", "handle", ""],
+        ["x", "int", ""],
+        ["y", "int", "The top of the first line."],
+        ["w", "int", "Wrap width."],
+        ["font", "font", ""],
+        ["color", "rgb", ""],
+        ["align", "text_align", ""],
+        ["text", "str", ""]
+      ],
+      "ret": ["result", "The height drawn."],
+      "errors": ["HANDLE", "ARG"],
+      "doc": "Text, wrapped at w."
+    },
+    {
+      "name": "cv_pixels",
+      "group": "canvas",
+      "args": [
+        ["canvas", "handle", ""],
+        ["x", "int", ""],
+        ["y", "int", ""],
+        ["w", "int", ""],
+        ["h", "int", ""],
+        ["data", "bytes", "w * h RGB565 pixels, row by row, little-endian."]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG"],
+      "doc": "Copies pixels in, clipped to the canvas."
+    },
+    {
+      "name": "muse_mode",
+      "group": "muse",
+      "args": [],
+      "ret": ["muse_mode", ""],
+      "doc": "What Muse is doing now; EV_MUSE says when it changes."
+    },
+    {
+      "name": "muse_caption",
+      "group": "muse",
+      "args": [["buf", "out", ""]],
+      "ret": ["result", "The caption's full length."],
+      "doc": "The caption the face would show: what Muse heard, or an error."
+    },
+    {
+      "name": "muse_talk_key",
+      "group": "muse",
+      "args": [["on", "bool", ""]],
+      "ret": null,
+      "doc": "With 1, the talk button is Muse's push-to-talk again, as outside apps, and its presses don't come as EV_BUTTON. Off when the app starts."
+    },
+    {
+      "name": "chat_open",
+      "group": "chat",
+      "perm": "chat.read",
+      "args": [],
+      "ret": ["result", ""],
+      "errors": ["DENIED", "OFFLINE", "NO_MEMORY"],
+      "doc": "Starts following the chat: fetches the latest message, then reports new ones as EV_CHAT. The gadget reconnects by itself."
+    },
+    {
+      "name": "chat_close",
+      "group": "chat",
+      "perm": "chat.read",
+      "args": [],
+      "ret": null,
+      "doc": "Stops following the chat and frees its messages."
+    },
+    {
+      "name": "chat_latest",
+      "group": "chat",
+      "perm": "chat.read",
+      "args": [["n", "int", "0 for the newest, 1 for the one before..."]],
+      "ret": ["int", "A message id, or 0 if there's no such message."],
+      "doc": "The app keeps the last chat_messages messages."
+    },
+    {
+      "name": "chat_info",
+      "group": "chat",
+      "perm": "chat.read",
+      "args": [["id", "int", "A message id."], ["key", "chat_info", ""]],
+      "ret": ["result", ""],
+      "errors": ["NOT_FOUND", "ARG"],
+      "doc": "About a message."
+    },
+    {
+      "name": "chat_text",
+      "group": "chat",
+      "perm": "chat.read",
+      "args": [
+        ["id", "int", ""],
+        ["offset", "int", "Byte offset into the text."],
+        ["buf", "out", "Gets the text from offset, cut to fit and NUL-terminated."]
+      ],
+      "ret": ["result", "Bytes copied, not counting the NUL."],
+      "errors": ["NOT_FOUND", "ARG"],
+      "doc": "A message's text, without attachments or markup the gadget can't show."
+    },
+    {
+      "name": "chat_send",
+      "group": "chat",
+      "perm": "chat.send",
+      "args": [["text", "str", ""]],
+      "ret": ["op", ""],
+      "errors": ["DENIED", "OFFLINE", "LIMIT"],
+      "doc": "Sends a message to Muse, as \"[<app> on the gadget] text\". EV_DONE when the VM has it; the reply comes through chat_open."
+    },
+    {
+      "name": "file_read",
+      "group": "files",
+      "args": [
+        [
+          "path",
+          "str",
+          "Relative to the app's folder, from \"~/\" for the home folder (files.home), or from \"/\" for the gadget's own files (files.gadget)."
+        ],
+        ["offset", "int", ""],
+        ["buf", "out", "Gets the bytes; keep it reserved until EV_DONE."]
+      ],
+      "ret": ["op", ""],
+      "errors": ["ARG", "DENIED", "OFFLINE", "LIMIT"],
+      "doc": "Reads part of a file on the VM, or on the gadget itself (a path from \"/\"). EV_DONE's b is the bytes read, 0 at the end of the file, or ERR_NOT_FOUND."
+    },
+    {
+      "name": "state_save",
+      "group": "state",
+      "args": [["name", "str", "a-z, 0-9, '-', '_' and '.'."], ["data", "bytes", "Copied during the call."]],
+      "ret": ["op", ""],
+      "errors": ["ARG", "OFFLINE", "LIMIT", "TOO_LARGE"],
+      "doc": "Saves a state file on the VM, replacing the last one whole. EV_DONE when it's written."
+    },
+    {
+      "name": "state_load",
+      "group": "state",
+      "args": [["name", "str", ""], ["buf", "out", "Keep it reserved until EV_DONE."]],
+      "ret": ["op", ""],
+      "errors": ["ARG", "OFFLINE", "LIMIT"],
+      "doc": "Loads a state file. EV_DONE's b is its size, or ERR_NOT_FOUND."
+    },
+    {
+      "name": "dev_count",
+      "group": "devices",
+      "args": [],
+      "ret": ["int", "How many devices this gadget has."],
+      "doc": "With dev_name, lists them all."
+    },
+    {
+      "name": "dev_name",
+      "group": "devices",
+      "args": [["index", "int", "0 to dev_count() - 1."], ["buf", "out", "Gets the name, NUL-terminated."]],
+      "ret": ["result", "The name's length."],
+      "errors": ["ARG"],
+      "doc": "A device's name, by position."
+    },
+    {
+      "name": "dev_find",
+      "group": "devices",
+      "args": [["name", "str", "A well-known name (DEV_ constants) or one the gadget lists."]],
+      "ret": ["handle", "The device."],
+      "errors": ["NOT_FOUND", "DENIED"],
+      "doc": "Finds a device by name. ERR_DENIED if the app's manifest names it in neither requires nor uses."
+    },
+    {
+      "name": "dev_describe",
+      "group": "devices",
+      "args": [
+        ["device", "handle", ""],
+        ["buf", "out", "Gets the description as JSON, cut to fit and NUL-terminated."]
+      ],
+      "ret": ["result", "The description's full length."],
+      "errors": ["HANDLE"],
+      "doc": "The device's description, as device.guide gives it (Devices, below). Apps written for one device rarely need it: Muse already read it."
+    },
+    {
+      "name": "dev_field",
+      "group": "devices",
+      "args": [["device", "handle", ""], ["name", "str", ""]],
+      "ret": ["result", "The field's index in a reading's values."],
+      "errors": ["HANDLE", "NOT_FOUND"],
+      "doc": "Where a field is in a reading."
+    },
+    {
+      "name": "dev_read",
+      "group": "devices",
+      "args": [["device", "handle", ""], ["reading", "out", "One gadget_reading_t."]],
+      "ret": ["result", "How many values it holds."],
+      "errors": ["HANDLE", "NOT_FOUND"],
+      "doc": "The latest reading, without opening the device. ERR_NOT_FOUND until there is one: a sensor that streams starts on the first dev_read (taking a moment), and runs until the app stops or calls dev_close. Its t_ms says how fresh it is. To get every reading, use dev_open and dev_take instead."
+    },
+    {
+      "name": "dev_open",
+      "group": "devices",
+      "args": [["device", "handle", ""], ["rate_hz", "int", "Up to the device's rate; 0 for events only."]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "LIMIT", "BUSY"],
+      "doc": "Starts streaming readings into a queue, and the device's events. EV_DEV_DATA says when readings wait, EV_DEV_EVENT brings events. Close it once the app stops needing it: a running sensor costs battery."
+    },
+    {
+      "name": "dev_take",
+      "group": "devices",
+      "args": [["device", "handle", ""], ["readings", "out", "gadget_reading_t array."]],
+      "ret": ["result", "Readings copied, oldest first."],
+      "errors": ["HANDLE"],
+      "doc": "Takes waiting readings off the queue."
+    },
+    {
+      "name": "dev_close",
+      "group": "devices",
+      "args": [["device", "handle", ""]],
+      "ret": ["result", ""],
+      "errors": ["HANDLE"],
+      "doc": "Stops streaming and events."
+    },
+    {
+      "name": "dev_action",
+      "group": "devices",
+      "args": [["device", "handle", ""], ["name", "str", ""]],
+      "ret": ["result", "The action's index."],
+      "errors": ["HANDLE", "NOT_FOUND"],
+      "doc": "Finds an action by name."
+    },
+    {
+      "name": "dev_call",
+      "group": "devices",
+      "args": [
+        ["device", "handle", ""],
+        ["action", "int", "Its index."],
+        ["params", "bytes", "float parameters, in the order the description gives."],
+        ["text", "str", "For actions that take text; \"\" otherwise."]
+      ],
+      "ret": ["result", "The action's result, 0 or more."],
+      "errors": ["HANDLE", "ARG", "BUSY", "FAILED"],
+      "doc": "Runs an action. It doesn't block: a driver whose action takes time starts it and returns."
+    },
+    {
+      "name": "dev_event",
+      "group": "devices",
+      "args": [["device", "handle", ""], ["name", "str", ""]],
+      "ret": ["result", "The event's index, as EV_DEV_EVENT gives it."],
+      "errors": ["HANDLE", "NOT_FOUND"],
+      "doc": "Finds an event by name."
+    }
+  ],
+  "structs": [
+    {
+      "name": "gadget_reading_t",
+      "doc": "One reading of a device.",
+      "fields": [
+        ["t_ms", "int32_t", "sys_millis() when it was taken."],
+        ["count", "int32_t", "How many values it holds."],
+        ["v[8]", "float", "The values, in the order and units of the device's fields."]
+      ]
+    }
+  ],
+  "ui_enums": [
+    {
+      "name": "ui_event",
+      "prefix": "UI_",
+      "bits": true,
+      "doc": "Object events, as bits for ui_on; EV_UI's b holds one.",
+      "values": [
+        ["CLICKED", 1, "Pressed and released without sliding off."],
+        ["PRESSED", 2, ""],
+        ["RELEASED", 4, ""],
+        ["LONG_PRESSED", 8, "Held 400 ms."],
+        ["VALUE_CHANGED", 16, "The person changed its value, selection, checked state or text."],
+        ["FOCUSED", 32, ""],
+        ["DEFOCUSED", 64, ""],
+        ["READY", 128, "A keyboard's OK, or Enter in a one-line text area."],
+        ["CANCEL", 256, "A keyboard's close key, or BACK while navigating."],
+        ["SCROLL_END", 512, "Scrolling stopped."],
+        ["ANIM_DONE", 1024, "An animation on the object finished."],
+        ["LOADED", 2048, "ui_image_load finished. Sent without ui_on."],
+        ["LOAD_FAILED", 4096, "ui_image_load failed; the log says why. Sent without ui_on."]
+      ]
+    },
+    {
+      "name": "part",
+      "prefix": "PART_",
+      "doc": "Parts of a widget, for ui_style and ui_style_add. Combine with a STATE_.",
+      "values": [
+        ["MAIN", 0, "The background."],
+        ["SCROLLBAR", 256, ""],
+        ["INDICATOR", 512, "A bar's, slider's or arc's filled part, a checkbox's box, a scale's major ticks."],
+        ["KNOB", 768, "A slider's, arc's or switch's handle."],
+        ["SELECTED", 1024, "The selected option or text."],
+        ["ITEMS", 1280, "A table's cells, a chart's series, a scale's minor ticks, a keyboard's keys."],
+        ["CURSOR", 1536, "A text area's cursor, a chart's cursor."]
+      ]
+    },
+    {
+      "name": "state",
+      "prefix": "STATE_",
+      "bits": true,
+      "doc": "States, for ui_style and ui_style_add.",
+      "values": [
+        ["DEFAULT", 0, ""],
+        ["CHECKED", 1, ""],
+        ["FOCUSED", 2, ""],
+        ["PRESSED", 4, ""],
+        ["DISABLED", 8, ""],
+        ["EDITED", 16, "A slider or roller being changed with keys."]
+      ]
+    },
+    {
+      "name": "align",
+      "prefix": "ALIGN_",
+      "doc": "Where to put an object, as in LVGL.",
+      "values": [
+        ["DEFAULT", 0, ""],
+        ["TOP_LEFT", 1, ""],
+        ["TOP_MID", 2, ""],
+        ["TOP_RIGHT", 3, ""],
+        ["BOTTOM_LEFT", 4, ""],
+        ["BOTTOM_MID", 5, ""],
+        ["BOTTOM_RIGHT", 6, ""],
+        ["LEFT_MID", 7, ""],
+        ["RIGHT_MID", 8, ""],
+        ["CENTER", 9, ""],
+        ["OUT_TOP_LEFT", 10, "Outside the base, for ui_align_to."],
+        ["OUT_TOP_MID", 11, ""],
+        ["OUT_TOP_RIGHT", 12, ""],
+        ["OUT_BOTTOM_LEFT", 13, ""],
+        ["OUT_BOTTOM_MID", 14, ""],
+        ["OUT_BOTTOM_RIGHT", 15, ""],
+        ["OUT_LEFT_TOP", 16, ""],
+        ["OUT_LEFT_MID", 17, ""],
+        ["OUT_LEFT_BOTTOM", 18, ""],
+        ["OUT_RIGHT_TOP", 19, ""],
+        ["OUT_RIGHT_MID", 20, ""],
+        ["OUT_RIGHT_BOTTOM", 21, ""]
+      ]
+    },
+    {
+      "name": "text_align",
+      "prefix": "TEXT_ALIGN_",
+      "doc": "",
+      "values": [["AUTO", 0, ""], ["LEFT", 1, ""], ["CENTER", 2, ""], ["RIGHT", 3, ""]]
+    },
+    {
+      "name": "font",
+      "prefix": "FONT_",
+      "doc": "The fonts every gadget has: Montserrat, with LVGL's symbols (SYM_).",
+      "values": [
+        ["DEFAULT", 0, "The theme's font, 14 px."],
+        ["14", 1, ""],
+        ["16", 2, ""],
+        ["20", 3, ""],
+        ["28", 4, ""],
+        ["48", 5, "Digits, ':', '.', '-', '%' and the degree sign only."]
+      ]
+    },
+    {
+      "name": "layout",
+      "prefix": "LAYOUT_",
+      "doc": "",
+      "values": [
+        ["NONE", 0, "Children are placed by x, y and align."],
+        ["FLEX", 1, "Children flow in rows or columns (P_FLEX_*)."],
+        ["GRID", 2, "Set with ui_grid."]
+      ]
+    },
+    {
+      "name": "flex_flow",
+      "prefix": "FLEX_",
+      "doc": "",
+      "values": [
+        ["ROW", 0, ""],
+        ["COLUMN", 1, ""],
+        ["ROW_WRAP", 2, ""],
+        ["COLUMN_WRAP", 3, ""],
+        ["ROW_REVERSE", 4, ""],
+        ["COLUMN_REVERSE", 5, ""]
+      ]
+    },
+    {
+      "name": "place",
+      "prefix": "PLACE_",
+      "doc": "How flex places items and tracks.",
+      "values": [
+        ["START", 0, ""],
+        ["END", 1, ""],
+        ["CENTER", 2, ""],
+        ["SPACE_EVENLY", 3, ""],
+        ["SPACE_AROUND", 4, ""],
+        ["SPACE_BETWEEN", 5, ""]
+      ]
+    },
+    {
+      "name": "dir",
+      "prefix": "DIR_",
+      "bits": true,
+      "doc": "",
+      "values": [
+        ["NONE", 0, ""],
+        ["LEFT", 1, ""],
+        ["RIGHT", 2, ""],
+        ["TOP", 4, ""],
+        ["BOTTOM", 8, ""],
+        ["HOR", 3, ""],
+        ["VER", 12, ""],
+        ["ALL", 15, ""]
+      ]
+    },
+    {
+      "name": "scrollbar_mode",
+      "prefix": "SCROLLBAR_",
+      "doc": "",
+      "values": [
+        ["OFF", 0, ""],
+        ["ON", 1, ""],
+        ["ACTIVE", 2, "While scrolling."],
+        ["AUTO", 3, "When the content is larger."]
+      ]
+    },
+    {
+      "name": "snap",
+      "prefix": "SNAP_",
+      "doc": "",
+      "values": [["NONE", 0, ""], ["START", 1, ""], ["END", 2, ""], ["CENTER", 3, ""]]
+    },
+    {
+      "name": "long_mode",
+      "prefix": "LONG_",
+      "doc": "What a label does with text that doesn't fit its size.",
+      "values": [
+        ["WRAP", 0, "Wraps, growing the height."],
+        ["DOTS", 1, "Ends with ..."],
+        ["SCROLL", 2, "Scrolls back and forth."],
+        ["SCROLL_CIRCULAR", 3, "Scrolls round."],
+        ["CLIP", 4, "Cuts it off."]
+      ]
+    },
+    {
+      "name": "grad_dir",
+      "prefix": "GRAD_",
+      "doc": "",
+      "values": [["NONE", 0, ""], ["VER", 1, ""], ["HOR", 2, ""]]
+    },
+    {
+      "name": "text_decor",
+      "prefix": "DECOR_",
+      "bits": true,
+      "doc": "",
+      "values": [["NONE", 0, ""], ["UNDERLINE", 1, ""], ["STRIKETHROUGH", 2, ""]]
+    },
+    {
+      "name": "border_side",
+      "prefix": "BORDER_",
+      "bits": true,
+      "doc": "",
+      "values": [
+        ["NONE", 0, ""],
+        ["BOTTOM", 1, ""],
+        ["TOP", 2, ""],
+        ["LEFT", 4, ""],
+        ["RIGHT", 8, ""],
+        ["FULL", 15, ""]
+      ]
+    },
+    {
+      "name": "arc_mode",
+      "prefix": "ARC_",
+      "doc": "",
+      "values": [["NORMAL", 0, ""], ["SYMMETRICAL", 1, "Fills from the middle."], ["REVERSE", 2, ""]]
+    },
+    {
+      "name": "bar_mode",
+      "prefix": "BAR_",
+      "doc": "",
+      "values": [
+        ["NORMAL", 0, ""],
+        ["SYMMETRICAL", 1, "Fills from zero."],
+        ["RANGE", 2, "From P_START_VALUE to P_VALUE."]
+      ]
+    },
+    {
+      "name": "orientation",
+      "prefix": "ORIENT_",
+      "doc": "",
+      "values": [["AUTO", 0, "From the object's shape."], ["HORIZONTAL", 1, ""], ["VERTICAL", 2, ""]]
+    },
+    {
+      "name": "keyboard_mode",
+      "prefix": "KB_",
+      "doc": "",
+      "values": [["TEXT_LOWER", 0, ""], ["TEXT_UPPER", 1, ""], ["SPECIAL", 2, ""], ["NUMBER", 3, ""]]
+    },
+    {
+      "name": "scale_mode",
+      "prefix": "SCALE_",
+      "doc": "",
+      "values": [
+        ["HORIZONTAL_TOP", 0, ""],
+        ["HORIZONTAL_BOTTOM", 1, ""],
+        ["VERTICAL_LEFT", 2, ""],
+        ["VERTICAL_RIGHT", 3, ""],
+        ["ROUND_INNER", 4, "A dial, labels inside."],
+        ["ROUND_OUTER", 5, "A dial, labels outside."]
+      ]
+    },
+    {
+      "name": "chart_type",
+      "prefix": "CHART_",
+      "doc": "",
+      "values": [["NONE", 0, ""], ["LINE", 1, ""], ["BAR", 2, ""]]
+    },
+    {
+      "name": "chart_update",
+      "prefix": "UPDATE_",
+      "doc": "",
+      "values": [
+        ["SHIFT", 0, "ui_chart_push shifts the points left."],
+        ["CIRCULAR", 1, "ui_chart_push overwrites the oldest point."]
+      ]
+    },
+    {
+      "name": "image_align",
+      "prefix": "IMAGE_",
+      "doc": "How an image fills an image object larger or smaller than itself.",
+      "values": [
+        ["CENTER", 0, ""],
+        ["TOP_LEFT", 1, ""],
+        ["STRETCH", 2, ""],
+        ["TILE", 3, ""],
+        ["CONTAIN", 4, ""],
+        ["COVER", 5, ""]
+      ]
+    },
+    {
+      "name": "easing",
+      "prefix": "EASE_",
+      "doc": "Animation curves; add ANIM_ flags.",
+      "values": [
+        ["LINEAR", 0, ""],
+        ["IN", 1, ""],
+        ["OUT", 2, ""],
+        ["IN_OUT", 3, ""],
+        ["OVERSHOOT", 4, ""],
+        ["BOUNCE", 5, ""],
+        ["STEP", 6, "Jumps at the end."]
+      ]
+    },
+    {
+      "name": "anim_flag",
+      "prefix": "ANIM_",
+      "bits": true,
+      "doc": "",
+      "values": [["REPEAT", 256, "Runs forever."], ["REVERSE", 512, "Runs back to the start after each run."]]
+    }
+  ],
+  "widgets": [
+    [
+      1,
+      "obj",
+      "lv_obj",
+      "A plain container: a box with a background, border and children.",
+      ["MAIN", "SCROLLBAR"]
+    ],
+    [2, "label", "lv_label", "Text.", ["MAIN", "SCROLLBAR", "SELECTED"]],
+    [3, "button", "lv_button", "A container that presses; put a label in it.", ["MAIN"]],
+    [
+      4,
+      "image",
+      "lv_image",
+      "A PNG (8-bit channels) or JPEG (baseline) (ui_image_load, ui_image_set).",
+      ["MAIN"]
+    ],
+    [5, "line", "lv_line", "A polyline through points (ui_line_points).", ["MAIN"]],
+    [
+      6,
+      "arc",
+      "lv_arc",
+      "A ring with a value, which touch can drag.",
+      ["MAIN", "INDICATOR", "KNOB"]
+    ],
+    [7, "bar", "lv_bar", "A progress bar.", ["MAIN", "INDICATOR"]],
+    [8, "slider", "lv_slider", "A bar with a knob to drag.", ["MAIN", "INDICATOR", "KNOB"]],
+    [
+      9,
+      "switch",
+      "lv_switch",
+      "An on/off toggle; P_CHECKED is its state.",
+      ["MAIN", "INDICATOR", "KNOB"]
+    ],
+    [
+      10,
+      "checkbox",
+      "lv_checkbox",
+      "A box with a label; P_CHECKED is its state.",
+      ["MAIN", "INDICATOR"]
+    ],
+    [11, "roller", "lv_roller", "A drum of options to spin.", ["MAIN", "SELECTED"]],
+    [12, "dropdown", "lv_dropdown", "A button that opens a list of options.", ["MAIN", "INDICATOR"]],
+    [
+      13,
+      "textarea",
+      "lv_textarea",
+      "Editable text, for a keyboard.",
+      ["MAIN", "SCROLLBAR", "SELECTED", "CURSOR"]
+    ],
+    [
+      14,
+      "keyboard",
+      "lv_keyboard",
+      "An on-screen keyboard that types into a text area.",
+      ["MAIN", "ITEMS"]
+    ],
+    [
+      15,
+      "scale",
+      "lv_scale",
+      "Ticks and labels in a line or a dial; ui_scale_needle points a line at a value.",
+      ["MAIN", "INDICATOR", "ITEMS"]
+    ],
+    [16, "spinner", "lv_spinner", "A spinning arc for 'working'.", ["MAIN", "INDICATOR"]],
+    [
+      17,
+      "chart",
+      "lv_chart",
+      "Line or bar series (ui_chart_series, ui_chart_set, ui_chart_push).",
+      ["MAIN", "SCROLLBAR", "INDICATOR", "ITEMS", "CURSOR"]
+    ],
+    [18, "table", "lv_table", "Rows and columns of text (ui_table_cell).", ["MAIN", "ITEMS"]],
+    [
+      19,
+      "canvas",
+      "lv_canvas",
+      "Pixels to draw on with the cv_ calls. Its buffer is RGB565 and counts against the budget; P_WIDTH and P_HEIGHT size it, up to the screen.",
+      ["MAIN"]
+    ]
+  ],
+  "props": [
+    [1, "x", "coord", "obj", "rw", "Left edge, from the parent's content area, or the offset from P_ALIGN."],
+    [2, "y", "coord", "obj", "rw", "Top edge, or the offset from P_ALIGN."],
+    [3, "width", "coord", "obj", "rw", ""],
+    [4, "height", "coord", "obj", "rw", ""],
+    [5, "min_width", "coord", "obj", "rw", ""],
+    [6, "max_width", "coord", "obj", "rw", ""],
+    [7, "min_height", "coord", "obj", "rw", ""],
+    [8, "max_height", "coord", "obj", "rw", ""],
+    [9, "align", "align", "obj", "rw", "Where in the parent; P_X and P_Y offset it."],
+    [10, "hidden", "bool", "obj", "rw", "Not drawn, and takes no input or space in a layout."],
+    [11, "clickable", "bool", "obj", "rw", "Takes touch. On for buttons and inputs, off for labels and images."],
+    [12, "scrollable", "bool", "obj", "rw", "Scrolls when its content is larger. On for containers."],
+    [13, "checkable", "bool", "obj", "rw", "A click toggles P_CHECKED."],
+    [14, "event_bubble", "bool", "obj", "rw", "Its events also go to its parent (one ui_on on a list instead of one per row)."],
+    [15, "floating", "bool", "obj", "rw", "Left out of the parent's layout and scrolling."],
+    [16, "checked", "bool", "obj", "rw", "The checked state: a switch's or checkbox's value."],
+    [17, "disabled", "bool", "obj", "rw", "Greyed out; takes no input."],
+    [18, "scroll_dir", "dir", "obj", "rw", ""],
+    [19, "scrollbar_mode", "scrollbar_mode", "obj", "rw", ""],
+    [20, "scroll_snap_x", "snap", "obj", "rw", "Which part of a child to stop on after a horizontal scroll."],
+    [21, "scroll_snap_y", "snap", "obj", "rw", ""],
+    [22, "scroll_x", "int", "obj", "r", "How far it's scrolled; scroll with ui_scroll_to."],
+    [23, "scroll_y", "int", "obj", "r", ""],
+    [24, "index", "int", "obj", "rw", "Its place among its siblings, which sets the drawing order: 0 is drawn first, -1 moves it last."],
+    [25, "child_count", "int", "obj", "r", ""],
+    [26, "layout", "layout", "obj", "rw", ""],
+    [27, "flex_flow", "flex_flow", "obj", "rw", ""],
+    [28, "flex_main_place", "place", "obj", "rw", "Along the flow."],
+    [29, "flex_cross_place", "place", "obj", "rw", "Across the flow, within a track (see flex_track_place)."],
+    [30, "flex_track_place", "place", "obj", "rw", "Where the tracks sit across the flow. A row or column that doesn't wrap is one track, as wide (or tall) as its largest item, so centring its items across the flow takes PLACE_CENTER here and in flex_cross_place."],
+    [31, "flex_grow", "int", "obj", "rw", "A child's share of the free space in its parent's flex track; 0 keeps its own size."],
+    [100, "bg_color", "rgb", "style", "rw", ""],
+    [101, "bg_opa", "opa", "style", "rw", ""],
+    [102, "bg_grad_color", "rgb", "style", "rw", "The gradient's end colour."],
+    [103, "bg_grad_dir", "grad_dir", "style", "rw", ""],
+    [104, "border_color", "rgb", "style", "rw", ""],
+    [105, "border_width", "int", "style", "rw", ""],
+    [106, "border_opa", "opa", "style", "rw", ""],
+    [107, "border_side", "border_side", "style", "rw", ""],
+    [108, "outline_color", "rgb", "style", "rw", ""],
+    [109, "outline_width", "int", "style", "rw", ""],
+    [110, "outline_pad", "int", "style", "rw", "Gap between the object and its outline."],
+    [111, "shadow_color", "rgb", "style", "rw", ""],
+    [112, "shadow_width", "int", "style", "rw", "Blur width, 0 to 64. Shadows cost drawing time; use them on a few objects."],
+    [113, "shadow_opa", "opa", "style", "rw", ""],
+    [114, "shadow_offset_x", "int", "style", "rw", "-64 to 64."],
+    [115, "shadow_offset_y", "int", "style", "rw", "-64 to 64."],
+    [116, "shadow_spread", "int", "style", "rw", "0 to 64."],
+    [117, "radius", "int", "style", "rw", "Corner radius, 0 to 64; RADIUS_CIRCLE for round."],
+    [118, "pad_all", "int", "style", "w", "Sets the four paddings."],
+    [119, "pad_left", "int", "style", "rw", ""],
+    [120, "pad_right", "int", "style", "rw", ""],
+    [121, "pad_top", "int", "style", "rw", ""],
+    [122, "pad_bottom", "int", "style", "rw", ""],
+    [123, "pad_row", "int", "style", "rw", "Gap between rows of a layout."],
+    [124, "pad_column", "int", "style", "rw", "Gap between columns of a layout."],
+    [125, "text_color", "rgb", "style", "rw", ""],
+    [126, "text_opa", "opa", "style", "rw", ""],
+    [127, "text_font", "font", "style", "rw", ""],
+    [128, "text_align", "text_align", "style", "rw", ""],
+    [129, "text_letter_space", "int", "style", "rw", ""],
+    [130, "text_line_space", "int", "style", "rw", "Not negative."],
+    [131, "text_decor", "text_decor", "style", "rw", ""],
+    [132, "line_color", "rgb", "style", "rw", ""],
+    [133, "line_width", "int", "style", "rw", ""],
+    [134, "line_opa", "opa", "style", "rw", ""],
+    [135, "line_rounded", "bool", "style", "rw", ""],
+    [136, "line_dash_width", "int", "style", "rw", "0 to 64."],
+    [137, "line_dash_gap", "int", "style", "rw", "0 to 64."],
+    [138, "arc_color", "rgb", "style", "rw", ""],
+    [139, "arc_width", "int", "style", "rw", ""],
+    [140, "arc_opa", "opa", "style", "rw", ""],
+    [141, "arc_rounded", "bool", "style", "rw", ""],
+    [142, "image_opa", "opa", "style", "rw", ""],
+    [143, "image_recolor", "rgb", "style", "rw", "Tints an image (or a symbol drawn as one)."],
+    [144, "image_recolor_opa", "opa", "style", "rw", ""],
+    [145, "opa", "opa", "style", "rw", "The whole object and its children."],
+    [146, "transform_rotation", "angle", "style", "rw", "Rotates the drawn object about its pivot. Costs drawing time and memory."],
+    [147, "transform_scale", "percent", "style", "rw", "Scales the drawn object about its pivot."],
+    [148, "transform_pivot_x", "coord", "style", "rw", ""],
+    [149, "transform_pivot_y", "coord", "style", "rw", ""],
+    [150, "translate_x", "coord", "style", "rw", "Moves the drawn object without moving it in the layout."],
+    [151, "translate_y", "coord", "style", "rw", ""],
+    [152, "length", "int", "style", "rw", "A scale's tick length (PART_INDICATOR major, PART_ITEMS minor)."],
+    [153, "clip_corner", "bool", "style", "rw", "Clips children to the rounded corners."],
+    [154, "anim_duration", "int", "style", "rw", "Milliseconds for a widget's own animations: a label's scrolling, a roller's spin."],
+    [
+      200,
+      "text",
+      "text",
+      ["label", "checkbox", "textarea", "dropdown"],
+      "rw",
+      "The text. On a dropdown, fixed text to show in place of the selected option."
+    ],
+    [201, "long_mode", "long_mode", ["label"], "rw", ""],
+    [202, "value", "int", ["arc", "bar", "slider"], "rw", ""],
+    [
+      203,
+      "min_value",
+      "int",
+      ["arc", "bar", "slider", "scale", "chart"],
+      "rw",
+      "The range's low end; a chart's Y axis."
+    ],
+    [204, "max_value", "int", ["arc", "bar", "slider", "scale", "chart"], "rw", ""],
+    [205, "start_value", "int", ["bar", "slider"], "rw", "The low end in BAR_RANGE mode."],
+    [206, "bar_mode", "bar_mode", ["bar", "slider"], "rw", ""],
+    [207, "orientation", "orientation", ["bar", "slider", "switch"], "rw", ""],
+    [208, "arc_mode", "arc_mode", ["arc"], "rw", ""],
+    [
+      209,
+      "start_angle",
+      "angle",
+      ["arc"],
+      "rw",
+      "The indicator's start; setting P_VALUE moves it too."
+    ],
+    [210, "end_angle", "angle", ["arc"], "rw", ""],
+    [211, "bg_start_angle", "angle", ["arc"], "rw", "The ring's start."],
+    [212, "bg_end_angle", "angle", ["arc"], "rw", ""],
+    [213, "rotation", "angle", ["arc", "scale", "image"], "rw", "Turns the whole widget."],
+    [214, "options", "text", ["roller", "dropdown"], "rw", "The options, one per line."],
+    [215, "selected", "int", ["roller", "dropdown"], "rw", "The selected option, from 0."],
+    [216, "visible_rows", "int", ["roller"], "rw", ""],
+    [
+      217,
+      "infinite",
+      "bool",
+      ["roller"],
+      "rw",
+      "Spins round instead of stopping at the ends. ERR_ARG if letter spacing leaves its options no height."
+    ],
+    [218, "list_dir", "dir", ["dropdown"], "rw", "Which way the list opens."],
+    [219, "placeholder", "text", ["textarea"], "rw", "Text shown while it's empty."],
+    [220, "one_line", "bool", ["textarea"], "rw", ""],
+    [221, "password", "bool", ["textarea"], "rw", "Shows bullets."],
+    [222, "max_length", "int", ["textarea"], "rw", ""],
+    [223, "accepted_chars", "text", ["textarea"], "rw", "The only characters it takes."],
+    [224, "cursor_pos", "int", ["textarea"], "rw", ""],
+    [225, "textarea", "handle", ["keyboard"], "rw", "The text area it types into."],
+    [226, "keyboard_mode", "keyboard_mode", ["keyboard"], "rw", ""],
+    [227, "scale_mode", "scale_mode", ["scale"], "rw", ""],
+    [228, "total_ticks", "int", ["scale"], "rw", ""],
+    [229, "major_tick_every", "int", ["scale"], "rw", "Every nth tick is major and labelled."],
+    [230, "label_show", "bool", ["scale"], "rw", ""],
+    [231, "angle_range", "angle", ["scale"], "rw", "A dial's sweep."],
+    [232, "spin_time", "int", ["spinner"], "rw", "Milliseconds per turn."],
+    [233, "arc_sweep", "angle", ["spinner"], "rw", "The spinning arc's length."],
+    [234, "chart_type", "chart_type", ["chart"], "rw", ""],
+    [235, "point_count", "int", ["chart"], "rw", "Points per series."],
+    [236, "update_mode", "chart_update", ["chart"], "rw", ""],
+    [237, "hor_div_lines", "int", ["chart"], "rw", "Horizontal grid lines."],
+    [238, "ver_div_lines", "int", ["chart"], "rw", "Vertical grid lines."],
+    [239, "row_count", "int", ["table"], "rw", ""],
+    [240, "column_count", "int", ["table"], "rw", ""],
+    [241, "image_scale", "percent", ["image"], "rw", "Zoom."],
+    [
+      242,
+      "offset_x",
+      "int",
+      ["image"],
+      "rw",
+      "Shifts the picture inside the object, wrapping round."
+    ],
+    [243, "offset_y", "int", ["image"], "rw", ""],
+    [244, "inner_align", "image_align", ["image"], "rw", ""],
+    [245, "y_invert", "bool", ["line"], "rw", "Y points up from the bottom."]
+  ],
+  "devices": {
+    "doc": "What the firmware says about each device, in device.guide and from dev_describe, as JSON. A driver registers its device with this description; nothing here lists the devices a gadget has.",
+    "descriptor": [
+      [
+        "name",
+        "string",
+        "a-z, 0-9 and '_', unique on the gadget. A well-known name when the device is one, so apps for it work unchanged; otherwise the driver's own."
+      ],
+      [
+        "desc",
+        "string",
+        "What it is and where it sits, for Muse: \"Soil moisture probe on the Grove port\"."
+      ],
+      [
+        "fields",
+        "array",
+        "Its readings' values, in order: {\"name\", \"unit\", \"min\", \"max\"}. Up to 8; none for a device that only acts."
+      ],
+      [
+        "rate",
+        "int",
+        "The highest rate dev_open takes, in Hz; 0 when it's only read on demand (dev_read)."
+      ],
+      [
+        "actions",
+        "array",
+        "What it does: {\"name\", \"desc\", \"params\": [{\"name\", \"unit\", \"min\", \"max\"}], \"text\": true if it takes text}."
+      ],
+      [
+        "events",
+        "array",
+        "Names of what it reports by itself (\"tap\", \"door_open\"), in EV_DEV_EVENT's order."
+      ]
+    ],
+    "example": {
+      "name": "soil_moisture",
+      "desc": "Capacitive soil moisture probe on the Grove port",
+      "fields": [{"name": "moisture", "unit": "%", "min": 0, "max": 100}],
+      "rate": 1,
+      "actions": [],
+      "events": []
+    },
+    "well_known": [
+      ["temperature", "Air temperature.", [["c", "°C"]], [], []],
+      ["humidity", "Relative humidity.", [["rh", "%"]], [], []],
+      ["pressure", "Air pressure.", [["hpa", "hPa"]], [], []],
+      ["co2", "CO2.", [["ppm", "ppm"]], [], []],
+      [
+        "voc",
+        "Volatile organic compounds, as Sensirion's VOC index (1 to 500).",
+        [["index", ""]],
+        [],
+        []
+      ],
+      ["light", "Ambient light.", [["lux", "lx"]], [], []],
+      [
+        "accel",
+        "Acceleration in the screen's frame: x right, y up, z out of the screen. Events from the IMU's own feature engine where it has one.",
+        [["x", "g"], ["y", "g"], ["z", "g"]],
+        [],
+        ["tap", "double_tap", "shake", "face_up", "face_down"]
+      ],
+      [
+        "gyro",
+        "Rotation rate, in accel's axes.",
+        [["x", "deg/s"], ["y", "deg/s"], ["z", "deg/s"]],
+        [],
+        []
+      ],
+      [
+        "steps",
+        "Steps counted since dev_open, from the IMU's step counter.",
+        [["count", ""]],
+        [],
+        []
+      ],
+      [
+        "battery",
+        "charging and usb are 0 or 1; volts is 0 where the board can't measure it.",
+        [["percent", "%"], ["volts", "V"], ["charging", ""], ["usb", ""]],
+        [],
+        []
+      ],
+      [
+        "vibration",
+        "A vibration motor.",
+        [],
+        [["buzz", "Buzzes; a new buzz replaces one still running.", [["ms", "ms", 1, 1000]]]],
+        []
+      ],
+      [
+        "speaker",
+        "Beeps on the gadget's speaker; ERR_BUSY while Muse listens or speaks.",
+        [],
+        [
+          [
+            "tone",
+            "Plays a tone.",
+            [["hz", "Hz", 100, 8000], ["ms", "ms", 1, 2000], ["volume", "%", 0, 100]]
+          ]
+        ],
+        []
+      ]
+    ]
+  },
+  "symbols": [
+    ["AUDIO", "F001"],
+    ["VIDEO", "F008"],
+    ["LIST", "F00B"],
+    ["OK", "F00C"],
+    ["CLOSE", "F00D"],
+    ["POWER", "F011"],
+    ["SETTINGS", "F013"],
+    ["HOME", "F015"],
+    ["DOWNLOAD", "F019"],
+    ["REFRESH", "F021"],
+    ["MUTE", "F026"],
+    ["VOLUME_MID", "F027"],
+    ["VOLUME_MAX", "F028"],
+    ["IMAGE", "F03E"],
+    ["PREV", "F048"],
+    ["PLAY", "F04B"],
+    ["PAUSE", "F04C"],
+    ["STOP", "F04D"],
+    ["NEXT", "F051"],
+    ["LEFT", "F053"],
+    ["RIGHT", "F054"],
+    ["PLUS", "F067"],
+    ["MINUS", "F068"],
+    ["WARNING", "F071"],
+    ["SHUFFLE", "F074"],
+    ["UP", "F077"],
+    ["DOWN", "F078"],
+    ["LOOP", "F079"],
+    ["CALL", "F095"],
+    ["ENVELOPE", "F0E0"],
+    ["CHARGE", "F0E7"],
+    ["BELL", "F0F3"],
+    ["KEYBOARD", "F11C"],
+    ["GPS", "F124"],
+    ["WIFI", "F1EB"],
+    ["BATTERY_FULL", "F240"],
+    ["BATTERY_3", "F241"],
+    ["BATTERY_2", "F242"],
+    ["BATTERY_1", "F243"],
+    ["BATTERY_EMPTY", "F244"],
+    ["BLUETOOTH", "F293"],
+    ["TRASH", "F2ED"],
+    ["EDIT", "F304"],
+    ["BACKSPACE", "F55A"]
+  ],
+  "manifest": {
+    "section": "gadget.manifest",
+    "doc": "A JSON object in the custom section gadget.manifest of the .wasm, which GADGET_MANIFEST() in gadget.h writes from one string literal. The gadget reads it before running the app.",
+    "fields": [
+      ["api", "string", true, "The API version the app was written for, \"1.0\". A gadget serving an older minor version, or another major one, refuses the app."],
+      ["name", "string", true, "The app's folder name under ~/workspace/gadgets/apps/: a-z, 0-9 and '-'."],
+      ["title", "string", false, "A name for people: the gadget's launcher shows it under the app's icon."],
+      ["icon", "string", false, "Its glyph in the gadget's launcher, on a coloured disc: one of timer, clock, calendar, check, list, note, chat, mic, music, heart, pulse, moon, sun, cloud, drop, leaf, bolt, star, spark, smile, game, dice, target, bricks, book, chart, compass, globe, cup, bell, home, pin, camera, flag, wind. Without one the launcher shows the title's first letter."],
+      ["color", "string", false, "The disc's colour: one of red, orange, yellow, green, mint, teal, blue, indigo, purple, pink, brown or gray. Without one the gadget picks one from the app's id."],
+      ["requires", "array", false, "Features and device names it can't work without. The gadget refuses the app if one is missing."],
+      ["uses", "array", false, "Permissions, and device names it uses when they're there. A device in neither list can't be found (ERR_DENIED)."]
+    ],
+    "features": [
+      ["touch", "A touch screen."],
+      ["round", "A round screen."],
+      ["rect", "A rectangular screen."],
+      ["buttons2", "Both BUTTON_PRIMARY and BUTTON_SECONDARY."],
+      ["nav", "UP, DOWN, ENTER and BACK, or a knob."]
+    ],
+    "permissions": [
+      ["chat.read", "Follow the chat (chat_open and the other chat_ reads)."],
+      ["chat.send", "Send messages to Muse (chat_send)."],
+      ["files.home", "Read files outside the app's own folder (file_read with \"~/\")."],
+      [
+        "files.gadget",
+        "Read the gadget's own files (file_read and ui_image_load with a path from \"/\")."
+      ]
+    ]
+  }
+}
