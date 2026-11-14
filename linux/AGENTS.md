@@ -35,7 +35,7 @@ pairing and control protocols, so the same app pairs either.
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
 | `ble_setup.py` | Setup commands behind the GATT characteristics (no BlueZ dependency) |
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
-| `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
+| `identity.py` | Persistent identity: the pairing's node id (`homelink-xxxxxx`, or `gadget-xxxxxx` with `MUSEGADGET_GADGET_NODE_ID=1`), `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
 | `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a distrusted root CA |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
@@ -143,9 +143,18 @@ never has a command's parameters, output or error message.
   A Pi has no button, so the app's own confirmation stands in for it, and BLE
   only advertises while `musegadget pair` runs.
 - The BLE name is `MuseGadget` plus the last six hex digits of the identity,
-  with **no hyphen**: the apps compare the text after the prefix with the text
-  after `homelink-` in the node id. `get_device_info` must report
+  with **no hyphen**: the apps compare the text after the prefix with the six
+  hex digits that end the node id. `get_device_info` must report
   `model: "hatch_link"`.
+- Node ids: with `MUSEGADGET_GADGET_NODE_ID=1` in the pairing's environment
+  (`sudo env MUSEGADGET_GADGET_NODE_ID=1 musegadget pair`), a new pairing
+  offers `gadget-` and those six digits (lowercase) in `get_device_info` and
+  the transcript; without it (the default until the Muse apps classify gadget
+  nodes by family) it offers `homelink-` and the same digits. Either way it
+  stores the id in `pairing.json` with the tokens it was issued for. That stored id is the one in use
+  (`link.register`, token refresh, chat turns) until the device is paired
+  again, so a pairing made before ids were stored keeps `homelink-xxxxxx`.
+  Never rename a stored id.
 - The apps always scan Wi-Fi and send `provision_v2` with an SSID. When the
   device is online it offers one open network, "the current connection", and
   ignores the Wi-Fi fields it gets back. It never stores them.
@@ -272,7 +281,12 @@ listed here. Everything else is internal and can change.
 
 - `identity.load_or_create()` returns the device `Identity`. It creates one on
   first use and keeps it across unpairing.
-- `Identity.node_id` is the `homelink-xxxxxx` ID that Muse knows the device by.
+- `Identity.node_id` is the ID that Muse knows the device by: the one stored
+  with its pairing (a pairing made before ids were stored keeps
+  `homelink-xxxxxx`), or, while it isn't paired, the one a new pairing
+  offers (`Identity.setup_node_id`: `gadget-xxxxxx` when
+  `MUSEGADGET_GADGET_NODE_ID` is `1`, else `homelink-xxxxxx`). `load_or_create()` reads it from the pairing, and
+  `Service` follows the pairing it connects with.
   `Identity.ble_name` is the name the Muse app shows during pairing.
 - `config.state_dir()` is the directory for device state. Set
   `MUSEGADGET_STATE_DIR` to move it.
@@ -286,6 +300,9 @@ listed here. Everything else is internal and can change.
 - `config.PAIRING_FILE` is the file that holds the pairing.
 - `config.STATE_DIR_ENV` and `config.SDK_TOKEN_ENV` hold the names of the two
   environment variables, `MUSEGADGET_STATE_DIR` and `MUSEGADGET_SDK_TOKEN`.
+  `config.GADGET_NODE_ID_ENV` names `MUSEGADGET_GADGET_NODE_ID`: `1` makes a
+  new pairing offer a `gadget-` node id. It is off by default until the Muse
+  apps classify gadget nodes by family; turn it on for development.
 
 ### Pairing
 

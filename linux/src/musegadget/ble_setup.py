@@ -194,7 +194,7 @@ class SetupController:
     def device_info(self) -> dict:
         info = {
             "type": "device_info",
-            "node_id": self._identity.node_id,
+            "node_id": self._identity.setup_node_id,
             "version": self._version,
             **self._pairing.device_info(),
             "build_sha": "",

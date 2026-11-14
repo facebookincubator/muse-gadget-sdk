@@ -382,6 +382,17 @@ menu "ESP32 Device SDK"
             authorization headers, signed URL query parameters, private keys,
             or arbitrary response bodies.
 
+    config MUSE_GADGET_NODE_ID_PREFIX
+        bool "New setups offer gadget- node ids"
+        default n
+        help
+            On, a new setup offers node_id "gadget-XXXXXX" instead of
+            "homelink-XXXXXX". Off by default until the Muse apps classify
+            gadget nodes by family; turn it on for development (bench builds,
+            devices/sdkconfig.muse-bench, do). Either way setup stores the id
+            with the device tokens, and a device keeps its stored id until it
+            is set up again.
+
     config HOMEHUB_BLE_NAME_PREFIX
         string "Visible BLE name prefix"
         default "MuseGadget"
@@ -389,7 +400,9 @@ menu "ESP32 Device SDK"
             The device advertises as "<prefix><suffix>-XXXXXX", where XXXXXX
             is the last three Wi-Fi STA MAC octets. Keep prefix and suffix
             together at most 22 characters so the name fits the BLE scan
-            response. The backend node_id ("homelink-XXXXXX") does not change.
+            response. The backend node_id ("gadget-XXXXXX" with
+            MUSE_GADGET_NODE_ID_PREFIX, else "homelink-XXXXXX"; a set-up
+            device keeps its stored one) does not change.
 
     config HOMEHUB_BLE_NAME_SUFFIX
         string "Visible BLE name suffix"
