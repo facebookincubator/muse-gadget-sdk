@@ -55,6 +55,7 @@
 #include <cstring>
 #include <sys/time.h>
 
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -153,7 +154,9 @@ static uint32_t v_press;             /* the last press number */
 static uint32_t v_press_told;        /* the press read() last reported as a flush */
 
 /* Session task only. */
-static muse_vc_call_t s_call;
+/* The large buffers below live in PSRAM: only tasks touch them, and internal
+ * RAM is short on boards with the full UI. */
+EXT_RAM_BSS_ATTR static muse_vc_call_t s_call;
 static muse_vc_turns_t *s_turns;     /* the call's turn table, in PSRAM */
 static uint32_t s_call_gen;          /* the generation s_call belongs to */
 static uint32_t s_pending_gen;       /* a start waiting for the session (or the last call) */
@@ -166,16 +169,16 @@ static char *s_line_buf;
 static uint8_t *s_dec;
 static int16_t *s_pcm;
 static muse_vc_resampler_t s_down;
-static muse_vc_uplink_t s_up;
-static char s_append[MUSE_VC_APPEND_MAX];
-static int16_t s_mic[MIC_PIECE];
+EXT_RAM_BSS_ATTR static muse_vc_uplink_t s_up;
+EXT_RAM_BSS_ATTR static char s_append[MUSE_VC_APPEND_MAX];
+EXT_RAM_BSS_ATTR static int16_t s_mic[MIC_PIECE];
 static size_t s_mic_len, s_mic_off;
 static char s_reply[128];            /* the reply's last words, for the caption */
 static char s_error[EV_TEXT];        /* the server's error message, for the end caption */
-static char s_end_body[END_BODY_MAX]; /* the end-call's answer */
+EXT_RAM_BSS_ATTR static char s_end_body[END_BODY_MAX]; /* the end-call's answer */
 static size_t s_end_len;
 static bool s_drop;                  /* Muse didn't confirm the end-call: drop the connection */
-static char s_end_sent[MUSE_VC_END_CALL_MAX];  /* the end-call body sent for this call */
+EXT_RAM_BSS_ATTR static char s_end_sent[MUSE_VC_END_CALL_MAX];  /* the end-call body sent for this call */
 static bool s_end_was_sent;
 static bool s_end_final;             /* Muse confirmed this call's end-call, or refused it (4xx) */
 
@@ -187,9 +190,9 @@ struct cleanup_t {
     uint8_t tries;
     int64_t since_us, next_us;
 };
-static cleanup_t s_cleanup;
+EXT_RAM_BSS_ATTR static cleanup_t s_cleanup;
 static int64_t s_cleanup_id, s_cleanup_at;   /* its end-call stream in flight, and when it went */
-static char s_cleanup_ans[END_BODY_MAX];
+EXT_RAM_BSS_ATTR static char s_cleanup_ans[END_BODY_MAX];
 static size_t s_cleanup_len;
 static uint32_t s_gate_started, s_gate_done;  /* the start that waited for a cleanup try */
 static uint32_t s_in_read;           /* bytes taken from s_in */
