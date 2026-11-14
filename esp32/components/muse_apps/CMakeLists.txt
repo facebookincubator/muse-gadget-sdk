@@ -47,8 +47,8 @@ if(CONFIG_MUSE_WASM_APPS)
     # for WASI (off) and wants newlib's *at() calls, which picolibc lacks; its
     # platform file wants <sys/stat.h>. Instruction metering gives each call
     # into an app its budget.
-    idf_component_get_property(wamr_lib espressif__wasm-micro-runtime COMPONENT_LIB)
-    idf_component_get_property(wamr_dir espressif__wasm-micro-runtime COMPONENT_DIR)
+    idf_component_get_property(wamr_lib wasm-micro-runtime COMPONENT_LIB)
+    idf_component_get_property(wamr_dir wasm-micro-runtime COMPONENT_DIR)
     set_source_files_properties("${wamr_dir}/core/shared/platform/esp-idf/espidf_file.c"
         TARGET_DIRECTORY ${wamr_lib} PROPERTIES HEADER_FILE_ONLY TRUE)
     # Its memory-map layer takes linear memory outside the app's budget (and

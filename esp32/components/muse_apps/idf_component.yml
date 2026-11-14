@@ -28,8 +28,12 @@ dependencies:
     version: "^1.23"
     rules:
       - if: "$CONFIG{MUSE_APPS_WAMR} == \"y\""
-  # The interpreter, only in builds with apps.
-  espressif/wasm-micro-runtime:
-    version: "2.4.0~1"
+  # The interpreter, only in builds with apps: WAMR 2.4.5 from upstream, the
+  # first release with the fixes for CVE-2026-54912 and CVE-2025-64713 (fast
+  # interpreter loader overflows) and CVE-2026-54913. The component registry
+  # has only 2.4.0, which apps (untrusted modules) mustn't load with.
+  wasm-micro-runtime:
+    git: https://github.com/bytecodealliance/wasm-micro-runtime.git
+    version: 25bd7eb63e828e4bd242cc9b38d260b4b31c6605   # WAMR-2.4.5
     rules:
       - if: "$CONFIG{MUSE_APPS_WAMR} == \"y\""

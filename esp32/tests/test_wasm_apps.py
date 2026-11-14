@@ -129,6 +129,12 @@ class WasmAppsTest(unittest.TestCase):
         manifest = read("components/muse_apps/idf_component.yml")
         # Keyed on an option every target defines, as MUSE_BOARD_ID rules are.
         self.assertIn('if: "$CONFIG{MUSE_APPS_WAMR} == \\"y\\""', manifest)
+        # WAMR 2.4.5 or later: earlier fast-interpreter loaders overflow on
+        # crafted modules (CVE-2026-54912, CVE-2025-64713), and apps are untrusted.
+        wamr = block(manifest, "  wasm-micro-runtime:", "rules:")
+        self.assertIn("git: https://github.com/bytecodealliance/wasm-micro-runtime.git", wamr)
+        self.assertIn("version: 25bd7eb63e828e4bd242cc9b38d260b4b31c6605", wamr)
+        self.assertNotIn("espressif/wasm-micro-runtime", manifest)
         kconfig = read("components/muse_apps/Kconfig")
         self.assertIn('default "y" if MUSE_WASM_APPS', kconfig)
         self.assertIn("default n", block(kconfig, "config MUSE_WASM_APPS", "help"))

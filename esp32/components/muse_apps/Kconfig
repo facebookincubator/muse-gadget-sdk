@@ -24,8 +24,8 @@ menu "Muse apps"
         help
             Muse can run a small WebAssembly app on the screen: app.run reads
             an app (a folder holding app.wasm, or a .wasm file) from the VM
-            over Link's Noise session and runs it with WAMR's interpreter
-            (espressif/wasm-micro-runtime) in place of the face, until
+            over Link's Noise session and runs it with WAMR 2.4.5's
+            interpreter in place of the face, until
             app.stop, another app, the power key, a call or the video view.
             app.install keeps an app on the gadget, in an "apps" LittleFS
             partition, for its launcher (Apps, in Settings); app.list and

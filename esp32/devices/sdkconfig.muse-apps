@@ -17,8 +17,8 @@
 #   MUSE_APPS=1 tools/muse/board.sh build|flash <board>
 CONFIG_MUSE_WASM_APPS=y
 
-# WAMR's fast interpreter only: no AOT, no WASI, no threads, and none of
-# its app framework. Apps import only the gadget's host API
+# WAMR's fast interpreter only: no AOT, no WASI and no threads. Apps
+# import only the gadget's host API
 # (components/muse_apps/sdk/gadget.h).
 CONFIG_WAMR_BUILD_RELEASE=y
 CONFIG_WAMR_ENABLE_INTERP=y
@@ -28,7 +28,6 @@ CONFIG_WAMR_ENABLE_AOT=n
 CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n
 CONFIG_WAMR_ENABLE_LIBC_WASI=n
 CONFIG_WAMR_ENABLE_LIB_PTHREAD=n
-CONFIG_WAMR_ENABLE_APP_FRAMEWORK=n
 CONFIG_WAMR_ENABLE_MULTI_MODULE=n
 CONFIG_WAMR_ENABLE_SHARED_MEMORY=n
 
