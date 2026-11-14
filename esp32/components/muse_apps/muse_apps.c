@@ -1365,8 +1365,8 @@ static void run(req_t *r)
         return;
     }
     if (itself) {
-        unload();
         snprintf(err, sizeof(err), "the app has %s, which would run before its limits: build it as a reactor", itself);
+        unload();   /* after: the name is the module's */
         run_failed(r, covered, "invalid_app", err);
         return;
     }

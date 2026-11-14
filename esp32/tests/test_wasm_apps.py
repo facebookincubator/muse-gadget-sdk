@@ -927,6 +927,11 @@ class WasmAppsTest(unittest.TestCase):
             self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, %s}," % (prop, prop, kind), ui)
         self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64);", read("components/muse_apps/muse_apps_canvas.c"))
 
+    def test_a_refused_modules_reason_is_written_before_it_unloads(self):
+        run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
+        refusal = run[run.index("if (itself) {"):]
+        self.assertLess(refusal.index("snprintf(err"), refusal.index("unload();"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
