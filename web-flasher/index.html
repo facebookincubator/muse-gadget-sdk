@@ -20,6 +20,19 @@ limitations under the License.
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Muse Gadget Web Flasher</title>
+  <script>
+    // The flasher lives at gadgets.muse.ai, which fills in the maker's SDK
+    // token. ?board=<id> carries over; ?classic keeps this page (Device
+    // settings, Japanese). Firmware and boards.json stay on this site.
+    (function () {
+      var params = new URLSearchParams(location.search);
+      if (params.has("classic")) return;
+      var target = new URL("https://gadgets.muse.ai/flash");
+      var board = params.get("board");
+      if (board) target.searchParams.set("board", board);
+      location.replace(target.href);
+    })();
+  </script>
   <!-- Pinned: flasher-hooks.js relies on how this version works. -->
   <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
   <style>
