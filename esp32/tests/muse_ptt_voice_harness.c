@@ -297,6 +297,10 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         clock_us+=(scenario==70 || scenario==72 || scenario==73)?40000:20000;
         assert(frame<100);
         if((scenario==74 || scenario==78) && frame==5) post(MUSE_PTT_UP,false);
+        if(scenario==87 && frame==5) {
+            muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+            xQueueSend(&queue,&u,0);
+        }
         if((scenario==82 || scenario==84) && frame==20) post(MUSE_PTT_UP,false);   /* 400 ms */
         if(scenario==85 || scenario==86) {
             /* Toggle: a waking tap, then a press that starts a note and is let go. */
@@ -453,10 +457,16 @@ int main(int argc,char **argv) {
             mode=MUSE_MODE_IDLE; snprintf(caption,sizeof(caption),"PREVIOUS REPLY"); ready=false;
         }
         if(scenario==85 || scenario==86) assert(NOTE_TOGGLE);
-        post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
+        if(scenario==87) {
+            /* A wake word press, released (listening disabled) 100 ms later. */
+            muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+            xQueueSend(&queue,&e,0);
+        } else post(MUSE_PTT_DOWN,scenario==72 || scenario==78 || scenario>=83);
         int outcome=setjmp(finish);
         if(!outcome) voice_task(NULL);
         bool call_expected=scenario==74 && CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH;
+        /* A short hands-free gesture is never tap-to-call, and shows no hint. */
+        if(scenario==87) assert(!starts && outcome==1 && !caption[0] && mode==MUSE_MODE_IDLE);
         if(scenario==79 || scenario==83) {
             assert(outcome==3 && notes==1 && !starts && clock_us>=1600000);
             /* A waking press shows nothing until it qualifies as a note. */

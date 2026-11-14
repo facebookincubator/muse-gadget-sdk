@@ -133,6 +133,13 @@ class StopWatchPTT(unittest.TestCase):
         voice = (MUSE / 'muse_voice.c').read_text()
         self.assertIn('bool synthetic = pending_down && s_press_synthetic;', voice)
 
+    def test_short_wake_word_turn_never_starts_a_call(self):
+        # Disabling listening during admission posts a synthetic release:
+        # on tap-to-call boards that short gesture must not become a call.
+        for board, realtime in ((0, 1), (1, 1), (0, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 87, board=board, realtime=realtime)
+
     def test_wake_word_note_ends_at_its_release_in_toggle_builds(self):
         self.run_case('voice', 67, board=3, realtime=0)
 

@@ -1512,6 +1512,14 @@ static void voice_task(void *arg)
             pre_reset();
             muse_state_set_level(0);
             if (atomic_load(&s_shutdown) || muse_state_mode(NULL) == MUSE_MODE_OFF) continue;
+            if (synthetic) {
+                /* A hands-free turn that didn't qualify (disabled or ended
+                 * during admission) just ends: never a call, and no hint
+                 * about holding a button nobody pressed. */
+                s_seed_frames = 0;
+                go_idle(result == NOTE_CAPTURE_ERROR ? "MICROPHONE ERROR - TRY AGAIN" : "");
+                continue;
+            }
 #if CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH
             /* Other boards retain tap-to-call beside holding for a note. */
             if (result == NOTE_TAP && s_press_input_epoch == muse_input_call_epoch()
