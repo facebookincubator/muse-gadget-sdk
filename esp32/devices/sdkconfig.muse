@@ -63,6 +63,11 @@ CONFIG_LV_LOG_PRINTF=y
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+# Without the central and observer roles nothing scans, so leave the
+# controller's scanner out too: about 3 KB of IRAM (internal SRAM on the S3)
+# and its advertising-report buffers. Only the S3 and C3 controllers have
+# the option; other chips ignore it.
+CONFIG_BT_CTRL_BLE_SCAN=n
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
 
 # Muse's Hatch client derives its Noise keys with HKDF.
