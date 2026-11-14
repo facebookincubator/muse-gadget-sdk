@@ -51,7 +51,7 @@ menu "Muse wake word"
             (51.3%); High wasn't measured. The int8 model on the device
             has not been measured on a device yet.
 
-            Needs PSRAM: the audio buffers take about 131 KB and the
+            Needs PSRAM: the audio buffers take about 133 KB and the
             ExecuTorch runner about 213 KB more (a 64 KB method arena,
             a 64 KB scratch arena, the model's 29.5 KB planned buffer
             and the 52 KB frontend), far beyond the internal RAM left

@@ -89,7 +89,7 @@ void muse_wakeword_set_ptt_turn(bool active);
  * seeded the turn (the wake task can trail by up to a tap's worth), oldest
  * first, so the note continues without a gap. Pointers into the glue's
  * copy, valid until the next tap. Returns how many (0 once taken). */
-#define MUSE_WAKEWORD_BACKLOG_CHUNKS 29   /* the 25-chunk tap plus the few read before record() */
+#define MUSE_WAKEWORD_BACKLOG_CHUNKS 32   /* the 25-chunk tap plus the few read before record(); a power of two */
 size_t muse_wakeword_take_backlog(const int16_t *chunks[], size_t max);
 
 /* muse_voice ended a hands-free turn by itself (its 15 s cap, a failure,

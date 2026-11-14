@@ -49,6 +49,8 @@ static const char *TAG = "muse_wake";
 _Static_assert(MUSE_AUDIO_CHUNK == MUSE_WW_CHUNK_FRAMES, "the tap carries whole muse_audio chunks");
 _Static_assert(MUSE_WAKEWORD_BACKLOG_CHUNKS >= TAP_CHUNKS + 2,
                "the recorder's backlog must cover a full tap plus the chunks read before it starts");
+_Static_assert((MUSE_WAKEWORD_BACKLOG_CHUNKS & (MUSE_WAKEWORD_BACKLOG_CHUNKS - 1)) == 0,
+               "a power of two keeps the history's slots continuous across the number wrap");
 #define PRE_FRAMES (MUSE_AUDIO_RATE)                   /* 1 s of upload pre-roll */
 #define WAKE_TASK_STACK 8192
 #define WAKE_TASK_PRIO 5                               /* below muse_voice (6) */
@@ -61,8 +63,8 @@ static muse_wakeword_core_t s_core;
  * tail, so neither needs a lock. Only whole chunks are ever written. */
 static StreamBufferHandle_t s_tap;
 static volatile uint32_t s_tap_drops;   /* frames; voice_task only writes */
-/* voice_task only: its numbered copy of the chunks it tapped, for the
- * recorder's backlog (muse_wakeword_take_backlog). */
+/* voice_task only: its numbered copy of the last 32 chunks it tapped,
+ * for the recorder's backlog (muse_wakeword_take_backlog). */
 static muse_ww_history_t s_hist;
 static muse_ww_chunk_t *s_hist_slots;
 /* Set by the wake task before it posts a hands-free press: the number of

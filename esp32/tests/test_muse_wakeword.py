@@ -577,7 +577,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('muse_wakeword_enabled()', tick)   # switch tracks serial/Muse toggles
 
     def test_option_needs_psram_and_the_lvgl_ui(self):
-        # The buffers and runner (~344 KB) only fit in PSRAM, and only the
+        # The buffers and runner (~346 KB) only fit in PSRAM, and only the
         # LVGL UI has the controls and the listening indicator.
         kconfig = (WW / 'Kconfig').read_text()
         enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_SENSITIVITY')
@@ -1018,7 +1018,7 @@ HANDOFF_HARNESS = r"""
 
 #define CHUNK MUSE_WW_CHUNK_FRAMES
 #define TAP 25
-#define HIST 29
+#define HIST 32
 #define PRE (16000)
 
 static void fill(int16_t *pcm, long k) { for (int i = 0; i < CHUNK; i++) pcm[i] = (int16_t)(k % 30000); }
@@ -1103,6 +1103,7 @@ int main(int argc, char **argv)
         int r = run(0, lag);
         if (r) return r;
         r = run(4294967200L, lag);   /* numbers wrap mid-turn */
+        if (!r) r = run(4294967174L, lag);   /* the wrap lands inside the backlog */
         if (r) return 100 + r;
     }
     return 0;

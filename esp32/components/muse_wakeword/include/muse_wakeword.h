@@ -151,6 +151,8 @@ uint32_t muse_ww_ring_drops(const muse_ww_ring_t *ring);
  * with the pre-roll ending at chunk M, the recorder appends the chunks
  * numbered M+1 onward that it had already tapped, so the note has no gap
  * however far the wake task trails. Caller-owned storage, one task.
+ * Give it a power-of-two capacity: a slot is seq % capacity, which only
+ * stays continuous across the uint32 wrap of the numbers then.
  */
 #define MUSE_WW_CHUNK_FRAMES 320   /* muse_audio's 20 ms chunk at 16 kHz */
 
@@ -162,6 +164,7 @@ typedef struct {
 typedef struct {
     muse_ww_chunk_t *slots;
     size_t capacity;
+    size_t held;         /* chunks held, up to capacity */
     uint32_t next_seq;   /* the number the next pushed chunk gets */
 } muse_ww_history_t;
 
