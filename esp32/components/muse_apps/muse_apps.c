@@ -1017,6 +1017,12 @@ static bool imports_allowed(char *err, size_t err_len)
                      imp.module_name ? imp.module_name : "?", imp.name ? imp.name : "?");
             return false;
         }
+        /* WAMR links an import by its parameters and first result only: more
+         * results would reach the native call as arguments it never takes. */
+        if (wasm_func_type_get_result_count(imp.u.func_type) > 1) {
+            snprintf(err, err_len, "imports %s.%s with more than one result", imp.module_name, imp.name);
+            return false;
+        }
     }
     return true;
 }

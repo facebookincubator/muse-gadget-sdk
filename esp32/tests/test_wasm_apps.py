@@ -644,6 +644,11 @@ class WasmAppsTest(unittest.TestCase):
         # 2 * (64 + 1024)^2 fits an int with room.
         self.assertLess(2 * (64 + 1024) ** 2, 2 ** 31)
 
+    def test_imports_have_at_most_one_result(self):
+        """WAMR links an import by its parameters and first result only."""
+        allowed = function(read("components/muse_apps/muse_apps.c"), "static bool imports_allowed(")
+        self.assertIn("wasm_func_type_get_result_count(imp.u.func_type) > 1", allowed)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
