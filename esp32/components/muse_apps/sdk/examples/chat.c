@@ -25,6 +25,8 @@
  * shown at the bottom; the second button, or the button on screen, asks Muse
  * for a joke (chat_send), and the app shows that message like the others. A
  * drag scrolls back; new text scrolls into view again after a few seconds.
+ * The talk button doesn't close it, so the close mark at the top (touch) or a
+ * long press of the second button does.
  * Build from the SDK folder: python3 build.py examples/chat.c
  */
 #include <string.h>
@@ -54,7 +56,7 @@ typedef struct {
 
 static shown_t shown[SHOWN_MAX];
 static int32_t n_shown;
-static int32_t column, tail, dot, spinner, mode_label, footer, joke_button;
+static int32_t column, tail, dot, spinner, mode_label, footer, joke_button, close_button;
 static int32_t st_plain, st_bubble;
 static int32_t font, text_max;
 static int32_t hold_until, holding;
@@ -270,6 +272,15 @@ GADGET_EXPORT(on_start) void on_start(void)
     ui_style(spinner, PART_INDICATOR, P_ARC_WIDTH, 3);
     ui_style(spinner, PART_INDICATOR, P_ARC_COLOR, SLATE);
     mode_label = ui_create(W_LABEL, header);
+    /* The talk button is Muse's here, so it doesn't close the app: this does
+     * on a touch screen, and a long press of the second button. */
+    if (sys_info(INFO_TOUCH) == 1) {
+        close_button = ui_create(W_LABEL, header);
+        ui_set_text(close_button, P_TEXT, SYM_CLOSE);
+        ui_set(close_button, P_TEXT_COLOR, PALE);
+        ui_set(close_button, P_CLICKABLE, 1);
+        ui_on(close_button, UI_CLICKED);
+    }
 
     column = ui_create(W_OBJ, screen);
     ui_style_add(column, st_plain, PART_MAIN);
@@ -297,7 +308,8 @@ GADGET_EXPORT(on_start) void on_start(void)
         ui_set_text(l, P_TEXT, SYM_ENVELOPE "  A joke");
         ui_set(l, P_TEXT_COLOR, PALE);
     }
-    hint = second ? "Talk button: talk to Muse. Second button: a joke." : "Hold the talk button to talk to Muse.";
+    hint = second ? "Talk button: talk to Muse. Second button: a joke, hold to close."
+                  : "Hold the talk button to talk to Muse.";
     footer = ui_create(W_LABEL, screen);
     ui_set(footer, P_WIDTH, PCT(100));
     ui_set(footer, P_LONG_MODE, LONG_WRAP);
@@ -356,11 +368,15 @@ GADGET_EXPORT(on_event) void on_event(int32_t type, int32_t a, int32_t b)
             hold_until = sys_millis() + HOLD_MS;
         } else if (a == joke_button && b == UI_CLICKED) {
             ask_for_a_joke();
+        } else if (a == close_button && b == UI_CLICKED) {
+            sys_exit();
         }
         break;
     case EV_BUTTON:
-        if (a == BUTTON_SECONDARY && b == BTN_DOWN) {
+        if (a == BUTTON_SECONDARY && b == BTN_UP) {
             ask_for_a_joke();
+        } else if (a == BUTTON_SECONDARY && b == BTN_LONG) {
+            sys_exit();   /* the app stops: no UP follows */
         }
         break;
     case EV_DONE:

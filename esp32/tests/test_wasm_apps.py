@@ -896,6 +896,12 @@ class WasmAppsTest(unittest.TestCase):
         present = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons_present(")
         self.assertIn("(aux && !(talk && !strcmp(aux, talk)))", present)
 
+    def test_the_chat_example_can_be_closed(self):
+        chat = read("components/muse_apps/sdk/examples/chat.c")
+        self.assertIn("a == close_button && b == UI_CLICKED", chat)
+        self.assertIn("a == BUTTON_SECONDARY && b == BTN_LONG", chat)
+        self.assertGreaterEqual(chat.count("sys_exit();"), 2)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
