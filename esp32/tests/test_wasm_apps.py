@@ -659,6 +659,16 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("n1 >= sizeof(a) || n2 > 179 ? 0 :", install)
         self.assertIn('name = w2 + n2;', install)
 
+    def test_a_gesture_routed_to_muse_stays_muse_s(self):
+        """muse_talk_key() can switch the talk key between a press and its
+        release: the gesture's release goes where its press went."""
+        buttons = function(read("components/muse/muse_app_view.c"), "unsigned muse_app_view_buttons(unsigned ev)")
+        routed = buttons[buttons.index("if (talk_to_muse && held[i].button == MUSE_APP_BUTTON_PRIMARY)"):]
+        routed = routed[:routed.index("continue;   /* left for Muse's push-to-talk */")]
+        self.assertIn("atomic_fetch_and(&s_app_down, ~(1u << i));", routed)
+        self.assertIn("esp_timer_stop(s_exit_timer);", routed)
+        self.assertIn("esp_timer_stop(s_long_timer);", routed)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

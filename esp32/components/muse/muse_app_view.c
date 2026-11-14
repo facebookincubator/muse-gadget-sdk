@@ -331,6 +331,19 @@ unsigned muse_app_view_buttons(unsigned ev)
     bool talk_to_muse = atomic_load(&s_talk_to_muse);
     for (size_t i = 0; i < sizeof(held) / sizeof(held[0]); i++) {
         if (talk_to_muse && held[i].button == MUSE_APP_BUTTON_PRIMARY) {
+            if (ev & (held[i].press | held[i].release)) {
+                /* The firmware's gesture now: its release must reach the
+                 * firmware even if the app takes the key back meanwhile, and
+                 * the app's hold timers for it stop. */
+                atomic_fetch_and(&s_app_down, ~(1u << i));
+                if (atomic_load(&s_long_button) == held[i].button) {
+                    atomic_store(&s_long_button, 0);
+                    esp_timer_stop(s_long_timer);
+                }
+                if (held[i].button == muse_app_view_exit_button() && s_exit_timer) {
+                    esp_timer_stop(s_exit_timer);
+                }
+            }
             continue;   /* left for Muse's push-to-talk */
         }
         unsigned bits = ev & (held[i].press | held[i].release);
