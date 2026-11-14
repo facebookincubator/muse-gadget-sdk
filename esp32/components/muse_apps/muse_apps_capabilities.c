@@ -16,6 +16,7 @@
 #include "muse_apps_priv.h"
 #include "muse_app_view.h"
 #include "muse_board.h"
+#include "muse_settings.h"
 #include "muse_state.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,7 +130,7 @@ cJSON *muse_apps_capabilities(void)
     JSON_REQUIRE(wasm);
     char version[16];
     snprintf(version, sizeof(version), "%d.%d", MUSE_APPS_API_MAJOR, MUSE_APPS_API_MINOR);
-    JSON_REQUIRE(cJSON_AddBoolToObject(wasm, "enabled", true));
+    JSON_REQUIRE(cJSON_AddBoolToObject(wasm, "enabled", muse_settings_apps_on()));
     JSON_REQUIRE(cJSON_AddStringToObject(wasm, "api", version));
     JSON_REQUIRE(cJSON_AddNumberToObject(wasm, "budget_kb", (double)(muse_apps_mem_budget() / 1024)));
     JSON_REQUIRE(cJSON_AddStringToObject(wasm, "device_dir", muse_apps_device_dir()));

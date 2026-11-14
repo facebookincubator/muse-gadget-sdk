@@ -46,6 +46,7 @@
 #include "muse_board.h"
 #include "capabilities_registry.h"
 #include "muse_link.h"
+#include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
@@ -1938,6 +1939,9 @@ static bool is_path(const char *s)
 
 cJSON *muse_apps_command(const char *command, cJSON *params, const char *request_id, uint64_t session_generation)
 {
+    if (!muse_settings_apps_on()) {
+        return muse_apps_error("apps_off", "apps are off on this gadget: the person can turn on Run apps in Settings");
+    }
     if (!s_state) {
         return muse_apps_error("unavailable", "apps didn't start");
     }
@@ -2111,6 +2115,10 @@ bool muse_apps_console(const char *line)
 {
     if (!s_state) {
         return false;
+    }
+    if (!muse_settings_apps_on() && (!strncmp(line, "app", 3) || !strncmp(line, "files.", 6))) {
+        console_say("{\"ok\":false,\"error\":{\"code\":\"apps_off\",\"message\":\"turn on Run apps in Settings\"}}");
+        return true;
     }
     if (!strcmp(line, "app.begin")) {
         if (!s_stage) {
@@ -2396,6 +2404,9 @@ static void add_param(cJSON *params, const char *name, const char *type, const c
 
 void muse_apps_advertise(cJSON *commands)
 {
+    if (!muse_settings_apps_on()) {
+        return;   /* off in Settings: Muse isn't offered them */
+    }
     cJSON *install = cJSON_CreateObject();
     add_param(install, "path", "string",
               "On this VM, relative to home: an app's folder holding app.wasm (workspace/gadgets/apps/clock), or "

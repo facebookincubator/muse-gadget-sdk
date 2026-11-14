@@ -48,6 +48,8 @@ menu "Muse apps"
             console's ">app" lines drive it over USB serial
             (tools/muse/app.py). Each app has a 2 MB PSRAM budget, and a
             callback that runs more than about 0.7 s of instructions ends it.
+            Apps stay off until the person turns on Run apps in Settings (or
+            the menu): only then is Muse offered the app commands.
 
     # The rule in idf_component.yml that pulls in WAMR reads this. Unlike
     # MUSE_WASM_APPS, it's defined on every target, which the component

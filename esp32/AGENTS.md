@@ -758,7 +758,8 @@ the design, the Wi-Fi protocol and the numbers.
 WebAssembly apps are an optional component, off by default. Enable them on
 boards with the full LVGL UI and PSRAM using
 `MUSE_APPS=1 tools/muse/board.sh build|flash <board>`
-(`CONFIG_MUSE_WASM_APPS`, overlay `devices/sdkconfig.muse-apps`).
+(`CONFIG_MUSE_WASM_APPS`, overlay `devices/sdkconfig.muse-apps`). On the
+gadget they stay off until the person turns on Run apps in Settings.
 
 Before changing or testing apps or their integration hooks, read
 [the component instructions](components/muse_apps/AGENTS.md). They cover

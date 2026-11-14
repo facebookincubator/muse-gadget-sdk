@@ -67,6 +67,7 @@ static unsigned muse_app_view_buttons_present(void) { return (1u << 1) | (1u << 
 static int muse_app_view_exit_button(void) { return 1; }
 static size_t muse_apps_mem_budget(void) { assert(!api_only); return budget; }
 static const char *muse_apps_device_dir(void) { return "workspace/gadgets/devices/test"; }
+static bool muse_settings_apps_on(void) { return true; }
 static int forbidden_read(const capability_t *d, float *v) { (void)d; (void)v; abort(); }
 static const capability_field_t fields[] = {{"value", "V", 1, 5}, {"raw", NULL, 0, 0}};
 static const capability_action_t actions[] = {{"set", "Set a quoted \"value\"", fields, 1, true}};

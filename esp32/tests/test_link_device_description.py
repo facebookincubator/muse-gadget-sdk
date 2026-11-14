@@ -102,7 +102,7 @@ def assemble_guide(out: Path, guide: str | None = None) -> subprocess.CompletedP
 
 class DeviceDescriptionTest(unittest.TestCase):
     def compile_and_run(self, tmp: Path, harness: str, defines: list[str] = (), ble: bool = False,
-                        apps: bool = False) -> str:
+                        apps: bool = False, apps_on: bool = True) -> str:
         if not (CJSON / "cJSON.c").exists():
             self.skipTest("cJSON sources not available (run idf.py build once)")
         cc = shlex.split(os.environ.get("CC", "cc"))
@@ -121,6 +121,7 @@ class DeviceDescriptionTest(unittest.TestCase):
             (tmp / "apps_advertise.c").write_text(
                 '#include <stdio.h>\n#include <string.h>\n#include "cJSON.h"\n'
                 "void muse_apps_glyph_names(char *out, int cap);\nvoid muse_apps_color_names(char *out, int cap);\n"
+                f"static int muse_settings_apps_on(void) {{ return {int(apps_on)}; }}\n"
                 + "\n".join(function_source(source, signature) for signature in (
                     "static void add_command(", "static cJSON *one_param(", "static void add_param(",
                     "void muse_apps_advertise(")))
@@ -138,7 +139,8 @@ class DeviceDescriptionTest(unittest.TestCase):
 
     def registrations(self, defines: list[str], node_id: str = "homelink-0a1b2c",
                       display_name: str = "MuseGadget-0A1B2C", ble: bool = False,
-                      ssid: str = "0123456789abcdef0123456789abcdef", apps: bool = False) -> list[str]:
+                      ssid: str = "0123456789abcdef0123456789abcdef", apps: bool = False,
+                      apps_on: bool = True) -> list[str]:
         family = NOISE[NOISE.index("#ifndef MUSE_DEVICE_FAMILY"):]
         family = family[: family.index("#endif") + len("#endif")]
         functions = "\n".join(function_source(NOISE, signature) for signature in (
@@ -183,7 +185,7 @@ int main(void) {{
 }}
 '''
         with tempfile.TemporaryDirectory() as name:
-            output = self.compile_and_run(Path(name), harness, defines, ble, apps)
+            output = self.compile_and_run(Path(name), harness, defines, ble, apps, apps_on)
         return output.splitlines()
 
     def test_register_describes_the_device(self) -> None:
@@ -255,6 +257,9 @@ int main(void) {{
                 size = max(len(line) for line in lines)
                 print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
                 self.assertLessEqual(size + 5, REGISTER_LIMIT)
+        # Apps are off in Settings until the person turns them on: then there are none to offer.
+        for line in self.registrations(common, apps=True, apps_on=False):
+            self.assertNotIn("app.run", json.loads(line)["params"]["commands_v2"])
 
     def test_register_leaves_out_an_ssid_with_control_characters(self) -> None:
         defines = ['-DCONFIG_MUSE_DEVICE_MODEL_ID="acme-lamp"', '-DCONFIG_MUSE_DEVICE_MODEL_NAME="Acme Lamp"']

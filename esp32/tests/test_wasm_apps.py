@@ -129,8 +129,8 @@ class WasmAppsTest(unittest.TestCase):
         manifest = read("components/muse_apps/idf_component.yml")
         # Keyed on an option every target defines, as MUSE_BOARD_ID rules are.
         self.assertIn('if: "$CONFIG{MUSE_APPS_WAMR} == \\"y\\""', manifest)
-        # WAMR 2.4.5 or later: earlier fast-interpreter loaders overflow on
-        # crafted modules (CVE-2026-54912, CVE-2025-64713), and apps are untrusted.
+        # WAMR 2.4.5 or later: earlier fast-interpreter loaders overflow
+        # (CVE-2026-54912, CVE-2025-64713).
         wamr = block(manifest, "  wasm-micro-runtime:", "rules:")
         self.assertIn("git: https://github.com/bytecodealliance/wasm-micro-runtime.git", wamr)
         self.assertIn("version: 25bd7eb63e828e4bd242cc9b38d260b4b31c6605", wamr)
@@ -254,6 +254,8 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("muse_app_view_home()", function(settings, "static void on_apps("))
         home = function(settings, "static void build_home(")
         self.assertIn('row(list, LV_SYMBOL_LIST, "Apps", NULL, on_apps, NULL);', home)
+        self.assertLess(home.index('switch_row(list, "Run apps", muse_settings_apps_on(), on_apps_sw);'),
+                        home.index('if (muse_settings_apps_on()) {'))
         before = home[:home.index('"Apps"')]
         self.assertGreater(before.rfind("#if CONFIG_MUSE_APP_VIEW"), before.rfind("#endif"))
         self.assertNotIn("WASM", settings)
@@ -274,8 +276,9 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("muse_apps_launcher_hide();", function(apps, "static void hide_launcher("))
         self.assertFalse((ROOT / "components/muse_apps/muse_apps_paint.c").exists())
         menu = read("components/muse/muse_menu.c")
-        self.assertRegex(menu, r"#if CONFIG_MUSE_APP_VIEW\s+ITEM_APPS,")
-        self.assertRegex(menu, r"case ITEM_APPS:[^\n]*\n\s*muse_menu_close\(\);\s*muse_app_view_home\(\);")
+        self.assertRegex(menu, r"#if CONFIG_MUSE_APP_VIEW\s+ITEM_APPS_ON,\s+ITEM_APPS,")
+        self.assertIn("muse_settings_set_apps_on(!muse_settings_apps_on());", menu)
+        self.assertRegex(menu, r"case ITEM_APPS:[^\n]*\n\s*if \(!muse_settings_apps_on\(\)\) \{\s*break;\s*\}\s*muse_menu_close\(\);\s*muse_app_view_home\(\);")
         # LVGL's callbacks only post: the rest runs on the app task under the lock.
         for cb in ["static void on_row(", "static void on_answer("]:
             self.assertIn("muse_apps_post(", function(launcher, cb))
@@ -810,6 +813,22 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("case K_SPREAD: out->num = clamp(v, 0, 32767);",
                       function(read("components/muse_apps/muse_apps_ui.c"), "static int32_t style_value("))
         self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64);", read("components/muse_apps/muse_apps_canvas.c"))
+
+    def test_apps_are_off_until_the_person_turns_them_on(self):
+        """Run apps in Settings, saved, off by default: off, Muse isn't offered
+        the app commands and they're refused; changing it restarts the gadget."""
+        settings = read("components/muse/muse_settings.c")
+        self.assertIn('nvs_get_u8(s_nvs, "apps_on", &b)', settings)
+        self.assertIn("static bool s_apps_on;", settings)
+        self.assertIn('save_u8("apps_on", on);', function(settings, "void muse_settings_set_apps_on("))
+        self.assertIn("esp_restart();", function(settings, "void muse_settings_set_apps_on("))
+        apps = read("components/muse_apps/muse_apps.c")
+        self.assertIn("if (!muse_settings_apps_on()) {", function(apps, "void muse_apps_advertise(")[:120])
+        command = function(apps, "cJSON *muse_apps_command(")
+        self.assertLess(command.index('muse_apps_error("apps_off"'), command.index("app.status"))
+        self.assertIn('apps_off', function(apps, "bool muse_apps_console("))
+        self.assertIn('cJSON_AddBoolToObject(wasm, "enabled", muse_settings_apps_on())',
+                      read("components/muse_apps/muse_apps_capabilities.c"))
 
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")

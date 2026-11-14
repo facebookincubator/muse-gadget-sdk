@@ -1583,6 +1583,11 @@ static void on_apps(lv_event_t *e)
     (void)e;
     muse_app_view_home();
 }
+
+static void on_apps_sw(lv_event_t *e)
+{
+    muse_settings_set_apps_on(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));   /* restarts */
+}
 #endif
 
 static void build_home(lv_obj_t *tile)
@@ -1590,7 +1595,10 @@ static void build_home(lv_obj_t *tile)
     lv_obj_t *list;
     s_home = page(tile, "SETTINGS", false, &list);
 #if CONFIG_MUSE_APP_VIEW
-    row(list, LV_SYMBOL_LIST, "Apps", NULL, on_apps, NULL);
+    switch_row(list, "Run apps", muse_settings_apps_on(), on_apps_sw);
+    if (muse_settings_apps_on()) {
+        row(list, LV_SYMBOL_LIST, "Apps", NULL, on_apps, NULL);
+    }
 #endif
     row(list, LV_SYMBOL_WIFI, "Wi-Fi", &s_home_wifi, on_nav, (void *)&WIFI);
     row(list, LV_SYMBOL_HOME, "Muse", &s_home_hatch, on_nav, (void *)&HATCH);

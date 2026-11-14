@@ -28,6 +28,9 @@ are relative to `esp32/` unless stated otherwise. This file lives in
 with the full LVGL UI and PSRAM, replacing the face. They can be installed
 for the launcher (Apps in Settings or the menu), get buttons and touch,
 follow the chat, read files, keep state and use registered hardware.
+They're off until the person turns on Run apps in Settings (or the menu),
+kept in NVS; off, Muse isn't offered the app commands and they're refused.
+Changing it restarts the gadget, so `link.register` follows it.
 Kconfig keeps them from builds with the BLE commands (together they make
 `link.register` larger than 8 KB) and from boards where an app's exit is out
 of reach (EchoEar-2ST, Waveshare LCD-7, SmartRing-Plus).
@@ -165,10 +168,10 @@ for `_initialize` and `on_start` together. A runaway callback or trap ends
 the app, shows `APP STOPPED` on the face (or a launcher note) and keeps the
 reason in `app.status`. Other counts and limits are in `api.json`.
 
-Apps reach only the host API, with no direct network or memory access and
-VM writes confined to state. Someone with VM write access can have Muse
-run an app. Manifest permissions can permit reading chat/files and
-messaging Muse.
+Apps come from the person's own Muse, which writes them and asks before it
+makes one: they're trusted like Muse's commands, and WAMR's interpreter keeps
+each to its own linear memory. Natives check the app pointers and lengths
+they're given; there's no confirmation on the gadget and no narrower API.
 
 ## Screen, drawing and input
 

@@ -24,6 +24,10 @@ in place of its face, with LVGL widgets, its buttons and touch, its sensors,
 and the chat. Below: a one-time setup, the loop for making an app,
 what an app can do, and three files to save.
 
+My gadget only runs apps once I've turned on Run apps in its Settings (or its
+menu): until then it doesn't offer you the app commands. If you don't see
+`app.run`, ask me to turn it on.
+
 This is the gadget apps API, version 1.1. `gadget.h`, at the end of this
 guide, declares every function, event and constant, with what each does; read
 it before writing an app. Where this guide and the gadget disagree, the
