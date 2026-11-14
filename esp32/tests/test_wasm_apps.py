@@ -617,6 +617,17 @@ class WasmAppsTest(unittest.TestCase):
         forget = function(store, "void muse_apps_store_forget_all(")
         self.assertLess(forget.index("atomic_fetch_add(&s_epoch, 1);"), forget.index("xQueueSend("))
 
+    def test_a_release_the_app_never_saw_pressed_goes_to_the_firmware(self):
+        """Holding push-to-talk (or recording) while an app opens: the release
+        must still reach the firmware, or the mic stays open."""
+        view = read("components/muse/muse_app_view.c")
+        buttons = function(view, "unsigned muse_app_view_buttons(unsigned ev)")
+        guard = "if (!(bits & held[i].press) && !(atomic_load(&s_app_down) & row)) {"
+        self.assertIn(guard, buttons)
+        self.assertLess(buttons.index(guard), buttons.index("ev &= ~bits;"))
+        self.assertIn("atomic_fetch_or(&s_app_down, row);", buttons)
+        self.assertIn("atomic_store(&s_app_down, 0);", function(view, "bool muse_app_view_open("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

@@ -32,6 +32,7 @@ static const char *TAG = "muse_app_view";
 #define EXIT_HOLD_US (2000 * 1000)   /* the exit button held this long closes the app */
 
 static atomic_bool s_open;          /* the root exists and covers the face */
+static atomic_uint s_app_down;      /* held buttons (bit per muse_app_view_buttons() row) whose press the app got */
 static atomic_bool s_talk_to_muse;  /* the talk key records for Muse, not the app */
 static muse_app_view_cbs_t s_cbs;
 static lv_obj_t *s_root;            /* under LVGL's lock */
@@ -166,6 +167,7 @@ bool muse_app_view_open(const muse_app_view_cbs_t *cbs)
         s_touch_down = false;
         s_cbs = *cbs;
         atomic_store(&s_talk_to_muse, false);
+        atomic_store(&s_app_down, 0);
         atomic_store(&s_open, true);
     }
     muse_app_view_unlock();
@@ -335,10 +337,23 @@ unsigned muse_app_view_buttons(unsigned ev)
         if (!bits) {
             continue;
         }
+        unsigned row = 1u << i;
+        if (!(bits & held[i].press) && !(atomic_load(&s_app_down) & row)) {
+            /* Released after a press the app never got (one made before it
+             * opened, holding push-to-talk or recording): the firmware's, so
+             * the mic closes as it would without the app. */
+            continue;
+        }
         ev &= ~bits;
         if ((bits & held[i].press) && muse_state_asleep()) {
             muse_state_set_asleep(false); /* a press on a dark screen only wakes it */
             continue;
+        }
+        if (bits & held[i].press) {
+            atomic_fetch_or(&s_app_down, row);
+        }
+        if (bits & held[i].release) {
+            atomic_fetch_and(&s_app_down, ~row);
         }
         button_edge(held[i].button, bits & held[i].press, bits & held[i].release);
     }
