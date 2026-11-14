@@ -37,7 +37,9 @@ idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include"
     EMBED_TXTFILES ${embed}
-    PRIV_REQUIRES muse capabilities_registry esp_timer esp_hw_support esp_netif esp_partition pthread mbedtls nvs_flash
+    # muse_vstream: muse_video.h includes its header (CONFIG_MUSE_VIDEO).
+    PRIV_REQUIRES muse muse_vstream capabilities_registry esp_timer esp_hw_support esp_netif esp_partition pthread mbedtls
+                  nvs_flash
     # Whole, so the modules' imports override the weak stubs.
     WHOLE_ARCHIVE
 )
