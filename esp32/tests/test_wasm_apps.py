@@ -711,6 +711,14 @@ class WasmAppsTest(unittest.TestCase):
         app = read("tools/muse/app.py")
         self.assertIn('line = "app.install=" + " ".join([(args.id or "-") + look, args.install]', app)
 
+    def test_png_with_16_bit_channels_is_refused(self):
+        """LVGL's lodepng unfilters into its 4-byte-a-pixel buffer before
+        converting: 16-bit channels overran it."""
+        png = function(read("components/muse_apps/muse_apps_ui.c"), "static int32_t decode_png(")
+        self.assertIn("unsigned depth = st.info_png.color.bitdepth;", png)
+        self.assertIn("depth > 8", png)
+        self.assertLess(png.index("depth > 8"), png.index("lodepng_decode32("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

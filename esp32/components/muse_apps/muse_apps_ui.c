@@ -1448,8 +1448,11 @@ static int32_t decode_png(const uint8_t *data, size_t len, uint32_t max_pixels, 
     LodePNGState st;
     lodepng_state_init(&st);
     unsigned err = lodepng_inspect(&w, &h, &st, data, len);
+    /* LVGL's lodepng unfilters into a buffer of 4 bytes a pixel before it
+     * converts: 16-bit channels (up to 8 bytes a pixel) would overrun it. */
+    unsigned depth = st.info_png.color.bitdepth;
     lodepng_state_cleanup(&st);
-    if (err || !w || !h || w > 0xFFFF || h > 0xFFFF) {
+    if (err || !w || !h || w > 0xFFFF || h > 0xFFFF || depth > 8) {
         return GADGET_ERR_ARG;
     }
     if ((uint64_t)w * h > max_pixels) {
