@@ -544,6 +544,12 @@ class WakeWordFirmwareContract(unittest.TestCase):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
         listening = between(glue, 'bool muse_wakeword_listening(void)\n{', '\n}')
         self.assertIn('s_runner_ok', listening)
+        # A requested disable reads as not listening at once, so
+        # wakeword.disable's reply is never enabled:false, listening:true.
+        self.assertIn('s_enabled && s_applied_enabled', listening)
+        app = (ROOT / 'main/app.c').read_text()
+        disable = between(app, 'static cJSON *wakeword_disable_command(void) {', '\n}\n')
+        self.assertLess(disable.index('muse_wakeword_set_enabled(false);'), disable.index('muse_wakeword_status(&st);'))
         snapshot = between(glue, 'static void snapshot_status(void)', '\n}')
         self.assertIn('ww_runner_ok(s_runner)', snapshot)
 

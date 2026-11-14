@@ -108,7 +108,11 @@ bool muse_wakeword_listening(void)
 {
     /* A runner whose model failed to load or run hears nothing:
      * not listening until a reset reloads it. */
-    return s_started && s_applied_enabled && s_runner_ok && !s_applied_playback &&
+    /* Off as soon as a disable is requested (s_enabled), not only once the
+     * wake task applies it: the wake task applies it before the next chunk,
+     * so nothing more is heard, and wakeword.disable's reply and the
+     * indicator must not say listening. On only once applied. */
+    return s_started && s_enabled && s_applied_enabled && s_runner_ok && !s_applied_playback &&
            !s_applied_ptt_turn && !muse_voice_resting();
 }
 
