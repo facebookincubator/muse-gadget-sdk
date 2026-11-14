@@ -159,8 +159,8 @@ panel DMA, and `display.draw_file` needs about 30 KB free.
 
 Callbacks are instruction-metered: 4 million instructions, or 16 million
 for `_initialize` and `on_start` together. Imports aren't metered, so each
-callback also has 2 s on the clock (5 s for the start): the first UI or
-canvas call past it ends the app (`check_deadline()`). A runaway callback or trap ends
+callback also has 2 s on the clock (5 s for the start): the first UI,
+canvas or `sys_log` call past it ends the app (`muse_apps_check_deadline()`). A runaway callback or trap ends
 the app, shows `APP STOPPED` on the face (or a launcher note) and keeps the
 reason in `app.status`. Other counts and limits are in `api.json`.
 

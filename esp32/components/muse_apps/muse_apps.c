@@ -631,7 +631,7 @@ size_t muse_apps_mem_budget(void)
  * (drawing, images, text) is stopped on the first one past its time. Each
  * UI and canvas native takes LVGL's lock first, so it's checked here: the
  * native still finishes, and the app traps once it returns. */
-static void check_deadline(void)
+void muse_apps_check_deadline(void)
 {
     if (s_app.deadline_us && s_app.inst && esp_timer_get_time() > s_app.deadline_us) {
         s_app.deadline_us = 0;
@@ -641,7 +641,7 @@ static void check_deadline(void)
 
 void muse_apps_ui_lock(void)
 {
-    check_deadline();
+    muse_apps_check_deadline();
     if (!s_app.ui_locked) {
         muse_app_view_lock();
         s_app.ui_locked = true;

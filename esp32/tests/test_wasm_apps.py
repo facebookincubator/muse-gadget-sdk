@@ -527,10 +527,14 @@ class WasmAppsTest(unittest.TestCase):
         apps = read("components/muse_apps/muse_apps.c")
         self.assertIn("#define CALL_MAX_US (2 * 1000000LL)", apps)
         self.assertIn("#define START_MAX_US (5 * 1000000LL)", apps)
-        check = function(apps, "static void check_deadline(")
+        check = function(apps, "void muse_apps_check_deadline(")
         self.assertIn("esp_timer_get_time() > s_app.deadline_us", check)
         self.assertIn("wasm_runtime_set_exception(s_app.inst,", check)
         self.assertIn("check_deadline();", function(apps, "void muse_apps_ui_lock("))
+        # The lock is held for the rest of the callback: sys_log, which needs
+        # no lock and is slow on a UART console, checks the clock itself.
+        sys_log = function(read("components/muse_apps/muse_apps_sys.c"), "void gadget_sys_log(")
+        self.assertLess(sys_log.index("muse_apps_check_deadline();"), sys_log.index("muse_apps_log("))
         call = function(apps, "static bool call_app(")
         self.assertLess(call.index("s_app.deadline_us = esp_timer_get_time() + CALL_MAX_US;"),
                         call.index("wasm_runtime_call_wasm("))

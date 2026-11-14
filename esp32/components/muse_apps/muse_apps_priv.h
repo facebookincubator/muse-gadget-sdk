@@ -117,6 +117,9 @@ size_t muse_apps_mem_budget(void);
  * runtime gives it back when the callback returns). Call it before touching
  * any LVGL object. */
 void muse_apps_ui_lock(void);
+/* Ends the app (at its next instruction) once the running callback is past its
+ * time on the clock: for natives that don't take LVGL's lock. App task only. */
+void muse_apps_check_deadline(void);
 
 /* ---- Timers and frames (muse_apps.c) ---- */
 
