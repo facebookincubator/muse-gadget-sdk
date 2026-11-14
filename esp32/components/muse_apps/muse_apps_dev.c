@@ -494,6 +494,11 @@ int32_t gadget_dev_close(wasm_exec_env_t env, int32_t device)
     slot_t *s = slot_of(d);
     if (s) {
         close_slot(s);
+    } else if (warm_has(d)) {   /* started by dev_read alone: dev_close stops it too */
+        if (d->stop) {
+            d->stop(d);
+        }
+        warm_drop(d);
     }
     return 0;
 }

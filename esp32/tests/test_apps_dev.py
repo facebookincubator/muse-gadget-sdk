@@ -415,6 +415,12 @@ int main(int argc, char **argv)
         muse_apps_dev_start();   /* the next app starts clean */
         assert(gadget_dev_take(NULL, 1, r, sizeof(r)) == 0);
         assert(gadget_dev_open(NULL, 1, 10) == 0 && timers_made == 1);   /* the timer is made once */
+        /* Started by dev_read alone (no reading yet): dev_close stops it, once. */
+        have_reading = 0;
+        int started = starts[2], stopped = stops[2];
+        assert(gadget_dev_read(NULL, 3, r, sizeof(r[0])) == GADGET_ERR_NOT_FOUND && starts[2] == started + 1);
+        assert(gadget_dev_close(NULL, 3) == 0 && stops[2] == stopped + 1);
+        assert(gadget_dev_close(NULL, 3) == 0 && stops[2] == stopped + 1);
         muse_apps_dev_stop();
     }
     return 0;
