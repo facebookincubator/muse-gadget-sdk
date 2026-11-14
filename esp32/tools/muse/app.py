@@ -98,11 +98,17 @@ def send(board, data, put=None, install=None, file=None):
     if not f.get("ok"):
         return f
     pieces = [text[i:i + PIECE] for i in range(0, len(text), PIECE)] or [""]
+    sent = 0
     for piece in pieces if put or install is not None or file else pieces[:-1]:
         board.write_line("app+=" + piece)
         f = answer(board, 5)
         if not f.get("ok"):
             return f
+        # The board counts what it decoded: a line cut short on the way shows as fewer bytes.
+        sent += len(base64.b64decode(piece))
+        got = f.get("bytes")
+        if got != sent:
+            raise BoardError("The board has %r bytes of the %d sent: the upload was cut short" % (got, sent))
     if put:
         board.write_line("app.put=" + put)
         return answer(board, 60)
@@ -265,7 +271,7 @@ def main():
                 with open(args.file_upload, "rb") as fh:
                     f = send(board, fh.read(), file=args.as_name or os.path.basename(args.file_upload))
             elif args.file_remove:
-                f = command(board, "files.remove=" + args.file_remove, 10)
+                f = command(board, "files.remove=" + word(args.file_remove, 97), 10)
             else:
                 put = args.put
                 if put and not put.endswith(".wasm"):

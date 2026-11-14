@@ -961,6 +961,12 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("bool apps_gone = muse_apps_catalog_wipe();", forget)
         self.assertIn("if (!apps_gone ||", forget)
 
+    def test_app_py_checks_lengths_and_acknowledged_bytes(self):
+        app = read("tools/muse/app.py")
+        self.assertIn('"files.remove=" + word(args.file_remove, 97)', app)
+        self.assertIn('got = f.get("bytes")', app)
+        self.assertIn("if got != sent:", app)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
