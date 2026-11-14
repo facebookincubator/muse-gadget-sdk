@@ -659,6 +659,21 @@ static int32_t set_state(lv_obj_t *o, lv_state_t st, int32_t v)
     return 0;
 }
 
+/* Gives back what ui_table_cell charged for the cells outside rows x cols,
+ * which LVGL frees when the table shrinks. */
+static void table_refund(slot_t *s, uint32_t rows, uint32_t cols)
+{
+    uint32_t n_rows = lv_table_get_row_count(s->obj), n_cols = lv_table_get_column_count(s->obj);
+    for (uint32_t r = 0; r < n_rows; r++) {
+        for (uint32_t c = r < rows ? cols : 0; c < n_cols; c++) {
+            const char *v = lv_table_get_cell_value(s->obj, r, c);
+            if (v && *v) {
+                charge_delta(s, strlen(v) + 8, 0);
+            }
+        }
+    }
+}
+
 static int32_t obj_set(slot_t *s, int32_t prop, int32_t v)
 {
     lv_obj_t *o = s->obj;
@@ -1134,6 +1149,7 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
         if (v < 0 || v > MAX_TABLE_ROWS) {
             return GADGET_ERR_ARG;
         }
+        table_refund(s, (uint32_t)v, lv_table_get_column_count(o));
         lv_table_set_row_count(o, (uint32_t)v);
         return 0;
     case GADGET_P_COLUMN_COUNT:
@@ -1141,6 +1157,7 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
         if (v < 1 || v > MAX_TABLE_COLS) {
             return GADGET_ERR_ARG;
         }
+        table_refund(s, lv_table_get_row_count(o), (uint32_t)v);
         lv_table_set_column_count(o, (uint32_t)v);
         return 0;
     case GADGET_P_IMAGE_SCALE:

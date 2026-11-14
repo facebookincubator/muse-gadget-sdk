@@ -799,6 +799,14 @@ class WasmAppsTest(unittest.TestCase):
         task = function(apps, "static void *app_task(")
         self.assertIn("int pending = atomic_exchange(&s_view_stop, 0);", task)
 
+    def test_a_shrinking_table_refunds_its_cells(self):
+        ui = read("components/muse_apps/muse_apps_ui.c")
+        self.assertIn("charge_delta(s, strlen(v) + 8, 0);", function(ui, "static void table_refund("))
+        rows = ui[ui.index("case GADGET_P_ROW_COUNT:"):]
+        self.assertLess(rows.index("table_refund(s, (uint32_t)v,"), rows.index("lv_table_set_row_count("))
+        cols = ui[ui.index("case GADGET_P_COLUMN_COUNT:"):]
+        self.assertLess(cols.index("table_refund(s, lv_table_get_row_count(o), (uint32_t)v);"), cols.index("lv_table_set_column_count("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
