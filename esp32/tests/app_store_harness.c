@@ -197,6 +197,8 @@ int main(int argc, char **argv) {
         chmod(cat, 0000);
         muse_apps_catalog_open(dir);
         CHECK(muse_apps_catalog_count() == 0 && files() == before);
+        /* and nothing saves over it meanwhile, which would drop its apps */
+        CHECK(!strcmp(install("late", NULL, "late", NULL, ROOM, &changed), "storage_failed") && files() == before);
         chmod(cat, 0600);
         muse_apps_catalog_open(dir);
         CHECK(muse_apps_catalog_count() == MUSE_APPS_MAX);

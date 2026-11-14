@@ -55,6 +55,7 @@ static EXT_RAM_BSS_ATTR slot_t s_apps[MUSE_APPS_MAX];  // PSRAM: internal RAM is
 static int s_count;
 static char s_dir[128];
 static bool s_persistent;
+static bool s_unread;   // the catalog is there but couldn't be read: saving one now would drop its apps
 
 static void *alloc(size_t n) {
     return heap_caps_malloc(n ? n : 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -207,6 +208,7 @@ static void forget_all(void) {
 
 void muse_apps_catalog_open(const char *dir) {
     forget_all();
+    s_unread = false;
     s_persistent = dir != NULL;
     snprintf(s_dir, sizeof(s_dir), "%s", dir ? dir : "");
     if (!s_persistent) return;
@@ -221,6 +223,7 @@ void muse_apps_catalog_open(const char *dir) {
     /* A catalog that's there but couldn't be read (no memory, a flash error)
      * names nothing: its modules aren't unused, so they stay. */
     bool trusted = !exists || root;
+    s_unread = !trusted;
     bool dropped = false;
     cJSON *item;
     cJSON_ArrayForEach(item, cJSON_GetObjectItem(root, "apps")) {
@@ -273,6 +276,7 @@ const char *muse_apps_catalog_install(const char *id, const char *name, const ch
                                       const uint8_t *data, size_t len, const char *want_sha256,
                                       size_t free_bytes, bool *changed, char *err, size_t err_len) {
     *changed = false;
+    if (s_unread) return fail(err, err_len, "storage_failed", "the installed apps couldn't be read: restart the gadget");
     if (!valid_id(id)) return fail(err, err_len, "bad_id", "an id is 1 to 31 of a-z, 0-9, - and _");
     if (icon && *icon && muse_apps_glyph_find(icon) < 0) {
         snprintf(err, err_len, "no icon %.16s: app.install's description lists them", icon);
@@ -434,6 +438,7 @@ const char *muse_apps_catalog_read(const char *id, uint8_t **out, size_t *len, c
 
 void muse_apps_catalog_wipe(void) {
     forget_all();
+    s_unread = false;   // unpairing removes every app, read or not
     if (!s_persistent) return;
     save();
     delete_unnamed();
