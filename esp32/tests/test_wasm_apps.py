@@ -638,7 +638,10 @@ class WasmAppsTest(unittest.TestCase):
             self.assertIn("[GADGET_P_%s - 100] = {LV_STYLE_%s, %s}," % (prop, prop, kind), ui)
         value = function(ui, "static int32_t style_value(")
         self.assertIn("case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX);", value)
-        self.assertIn("case K_SPREAD: out->num = clamp(v, -SHADOW_MAX, SHADOW_MAX);", value)
+        # Not negative: LVGL then inverts the shadow's core box and overruns its buffer.
+        self.assertIn("case K_SPREAD: out->num = clamp(v, 0, SHADOW_MAX);", value)
+        canvas = read("components/muse_apps/muse_apps_canvas.c")
+        self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64);", canvas)
         self.assertIn("v == GADGET_RADIUS_CIRCLE ? RADIUS_MAX : clamp(v, 0, RADIUS_MAX)", value)
         self.assertIn("v.num >= RADIUS_MAX ? GADGET_RADIUS_CIRCLE : v.num", function(ui, "static int32_t style_api("))
         # 2 * (64 + 1024)^2 fits an int with room.

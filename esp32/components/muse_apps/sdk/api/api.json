@@ -769,7 +769,7 @@
       ],
       "ret": ["result", ""],
       "errors": ["HANDLE", "ARG"],
-      "doc": "Draws a rectangle with a shared style: P_RADIUS; P_BG_COLOR, P_BG_OPA, P_BG_GRAD_COLOR and P_BG_GRAD_DIR (GRAD_HOR or GRAD_VER, two colour stops); P_BORDER_COLOR, P_BORDER_WIDTH, P_BORDER_OPA and P_BORDER_SIDE; P_SHADOW_COLOR, P_SHADOW_WIDTH, P_SHADOW_OPA, P_SHADOW_OFFSET_X, P_SHADOW_OFFSET_Y and P_SHADOW_SPREAD. P_OPA and cv_opa multiply the fill, border and shadow opacities. Missing properties give a white fill, square corners and no border or shadow. Other properties are ignored. Border and shadow widths are clamped to 0..64 px, shadow spread to -64..64, and offsets to -4096..4096. Drawing, including shadows, is clipped to the canvas buffer: leave room around the rectangle. It paints once; later style changes affect only later calls, not already drawn pixels. No buffer yet means no drawing. Available since API 1.1."
+      "doc": "Draws a rectangle with a shared style: P_RADIUS; P_BG_COLOR, P_BG_OPA, P_BG_GRAD_COLOR and P_BG_GRAD_DIR (GRAD_HOR or GRAD_VER, two colour stops); P_BORDER_COLOR, P_BORDER_WIDTH, P_BORDER_OPA and P_BORDER_SIDE; P_SHADOW_COLOR, P_SHADOW_WIDTH, P_SHADOW_OPA, P_SHADOW_OFFSET_X, P_SHADOW_OFFSET_Y and P_SHADOW_SPREAD. P_OPA and cv_opa multiply the fill, border and shadow opacities. Missing properties give a white fill, square corners and no border or shadow. Other properties are ignored. Border and shadow widths are clamped to 0..64 px, shadow spread to 0..64, and offsets to -4096..4096. Drawing, including shadows, is clipped to the canvas buffer: leave room around the rectangle. It paints once; later style changes affect only later calls, not already drawn pixels. No buffer yet means no drawing. Available since API 1.1."
     },
     {
       "name": "cv_border",
@@ -1510,12 +1510,12 @@
     [109, "outline_width", "int", "style", "rw", ""],
     [110, "outline_pad", "int", "style", "rw", "Gap between the object and its outline."],
     [111, "shadow_color", "rgb", "style", "rw", ""],
-    [112, "shadow_width", "int", "style", "rw", "Blur width. Shadows cost drawing time; use them on a few objects."],
+    [112, "shadow_width", "int", "style", "rw", "Blur width, 0..64 px. Shadows cost drawing time; use them on a few objects."],
     [113, "shadow_opa", "opa", "style", "rw", ""],
     [114, "shadow_offset_x", "int", "style", "rw", ""],
     [115, "shadow_offset_y", "int", "style", "rw", ""],
-    [116, "shadow_spread", "int", "style", "rw", ""],
-    [117, "radius", "int", "style", "rw", "Corner radius; RADIUS_CIRCLE for round."],
+    [116, "shadow_spread", "int", "style", "rw", "0..64 px."],
+    [117, "radius", "int", "style", "rw", "Corner radius, up to 1024 px; RADIUS_CIRCLE for round."],
     [118, "pad_all", "int", "style", "w", "Sets the four paddings."],
     [119, "pad_left", "int", "style", "rw", ""],
     [120, "pad_right", "int", "style", "rw", ""],

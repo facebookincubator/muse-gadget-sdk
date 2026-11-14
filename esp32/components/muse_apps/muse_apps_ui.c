@@ -485,7 +485,7 @@ static int32_t style_value(int kind, int32_t v, lv_style_value_t *out)
     switch (kind) {
     case K_INT: out->num = clamp(v, -32767, 32767); return 0;
     case K_SHADOW: out->num = clamp(v, 0, SHADOW_MAX); return 0;
-    case K_SPREAD: out->num = clamp(v, -SHADOW_MAX, SHADOW_MAX); return 0;
+    case K_SPREAD: out->num = clamp(v, 0, SHADOW_MAX); return 0;   /* LVGL inverts its core box on a negative one */
     case K_RADIUS: out->num = v == GADGET_RADIUS_CIRCLE ? RADIUS_MAX : clamp(v, 0, RADIUS_MAX); return 0;
     case K_COORD:
         if (!coord_in(v, false, &c)) {

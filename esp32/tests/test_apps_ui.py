@@ -194,7 +194,7 @@ class CanvasStyles(unittest.TestCase):
         self.assertIn("lv_draw_rect(&layer, &dsc, &a)", styled)
         for field in ("border_width", "shadow_width"):
             self.assertIn("dsc.%s = clamp(dsc.%s, 0, 64)" % (field, field), styled)
-        self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, -64, 64)", styled)
+        self.assertIn("dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64)", styled)
         self.assertIn("w > c->w || h > c->h", styled)
         mapping = function(CANVAS, "static void rect_style(")
         for prop in ("BG_GRAD_COLOR", "BG_GRAD_DIR", "SHADOW_COLOR", "SHADOW_WIDTH",

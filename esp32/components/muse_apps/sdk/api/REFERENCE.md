@@ -660,7 +660,7 @@ A filled rectangle; with radius RADIUS_CIRCLE, a circle or pill.
 int32_t cv_rect_style(int32_t canvas, int32_t x, int32_t y, int32_t w, int32_t h, int32_t style);
 ```
 
-Draws a rectangle with a shared style: P_RADIUS; P_BG_COLOR, P_BG_OPA, P_BG_GRAD_COLOR and P_BG_GRAD_DIR (GRAD_HOR or GRAD_VER, two colour stops); P_BORDER_COLOR, P_BORDER_WIDTH, P_BORDER_OPA and P_BORDER_SIDE; P_SHADOW_COLOR, P_SHADOW_WIDTH, P_SHADOW_OPA, P_SHADOW_OFFSET_X, P_SHADOW_OFFSET_Y and P_SHADOW_SPREAD. P_OPA and cv_opa multiply the fill, border and shadow opacities. Missing properties give a white fill, square corners and no border or shadow. Other properties are ignored. Border and shadow widths are clamped to 0..64 px, shadow spread to -64..64, and offsets to -4096..4096. Drawing, including shadows, is clipped to the canvas buffer: leave room around the rectangle. It paints once; later style changes affect only later calls, not already drawn pixels. No buffer yet means no drawing. Available since API 1.1.
+Draws a rectangle with a shared style: P_RADIUS; P_BG_COLOR, P_BG_OPA, P_BG_GRAD_COLOR and P_BG_GRAD_DIR (GRAD_HOR or GRAD_VER, two colour stops); P_BORDER_COLOR, P_BORDER_WIDTH, P_BORDER_OPA and P_BORDER_SIDE; P_SHADOW_COLOR, P_SHADOW_WIDTH, P_SHADOW_OPA, P_SHADOW_OFFSET_X, P_SHADOW_OFFSET_Y and P_SHADOW_SPREAD. P_OPA and cv_opa multiply the fill, border and shadow opacities. Missing properties give a white fill, square corners and no border or shadow. Other properties are ignored. Border and shadow widths are clamped to 0..64 px, shadow spread to 0..64, and offsets to -4096..4096. Drawing, including shadows, is clipped to the canvas buffer: leave room around the rectangle. It paints once; later style changes affect only later calls, not already drawn pixels. No buffer yet means no drawing. Available since API 1.1.
 
 - `w`: Positive pixels, no wider than the canvas.
 - `h`: Positive pixels, no taller than the canvas.
@@ -1108,12 +1108,12 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_OUTLINE_WIDTH` | int | style | rw |  |
 | `P_OUTLINE_PAD` | int | style | rw | Gap between the object and its outline. |
 | `P_SHADOW_COLOR` | rgb | style | rw |  |
-| `P_SHADOW_WIDTH` | int | style | rw | Blur width. Shadows cost drawing time; use them on a few objects. |
+| `P_SHADOW_WIDTH` | int | style | rw | Blur width, 0..64 px. Shadows cost drawing time; use them on a few objects. |
 | `P_SHADOW_OPA` | opa | style | rw |  |
 | `P_SHADOW_OFFSET_X` | int | style | rw |  |
 | `P_SHADOW_OFFSET_Y` | int | style | rw |  |
-| `P_SHADOW_SPREAD` | int | style | rw |  |
-| `P_RADIUS` | int | style | rw | Corner radius; RADIUS_CIRCLE for round. |
+| `P_SHADOW_SPREAD` | int | style | rw | 0..64 px. |
+| `P_RADIUS` | int | style | rw | Corner radius, up to 1024 px; RADIUS_CIRCLE for round. |
 | `P_PAD_ALL` | int | style | w | Sets the four paddings. |
 | `P_PAD_LEFT` | int | style | rw |  |
 | `P_PAD_RIGHT` | int | style | rw |  |

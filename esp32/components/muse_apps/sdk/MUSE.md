@@ -1104,12 +1104,12 @@ As C defines, for an app:
 #define P_OUTLINE_WIDTH 109  /* int, style */
 #define P_OUTLINE_PAD 110  /* int, style. Gap between the object and its outline. */
 #define P_SHADOW_COLOR 111  /* rgb, style */
-#define P_SHADOW_WIDTH 112  /* int, style. Blur width. Shadows cost drawing time; use them on a few objects. */
+#define P_SHADOW_WIDTH 112  /* int, style. Blur width, 0..64 px. Shadows cost drawing time; use them on a few objects. */
 #define P_SHADOW_OPA 113  /* opa, style */
 #define P_SHADOW_OFFSET_X 114  /* int, style */
 #define P_SHADOW_OFFSET_Y 115  /* int, style */
-#define P_SHADOW_SPREAD 116  /* int, style */
-#define P_RADIUS 117  /* int, style. Corner radius; RADIUS_CIRCLE for round. */
+#define P_SHADOW_SPREAD 116  /* int, style. 0..64 px. */
+#define P_RADIUS 117  /* int, style. Corner radius, up to 1024 px; RADIUS_CIRCLE for round. */
 #define P_PAD_ALL 118  /* int, style, write-only. Sets the four paddings. */
 #define P_PAD_LEFT 119  /* int, style */
 #define P_PAD_RIGHT 120  /* int, style */
@@ -1617,7 +1617,7 @@ GADGET_IMPORT(cv_rect) int32_t cv_rect(int32_t canvas, int32_t x, int32_t y, int
  * P_SHADOW_OFFSET_Y and P_SHADOW_SPREAD. P_OPA and cv_opa multiply the fill,
  * border and shadow opacities. Missing properties give a white fill, square
  * corners and no border or shadow. Other properties are ignored. Border and
- * shadow widths are clamped to 0..64 px, shadow spread to -64..64, and offsets
+ * shadow widths are clamped to 0..64 px, shadow spread to 0..64, and offsets
  * to -4096..4096. Drawing, including shadows, is clipped to the canvas buffer:
  * leave room around the rectangle. It paints once; later style changes affect
  * only later calls, not already drawn pixels. No buffer yet means no drawing.

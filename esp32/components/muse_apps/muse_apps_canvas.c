@@ -287,7 +287,7 @@ int32_t gadget_cv_rect_style(wasm_exec_env_t env, int32_t canvas, int32_t x, int
     dsc.radius = clamp(dsc.radius, 0, GADGET_RADIUS_CIRCLE);
     dsc.border_width = clamp(dsc.border_width, 0, 64);
     dsc.shadow_width = clamp(dsc.shadow_width, 0, 64);
-    dsc.shadow_spread = clamp(dsc.shadow_spread, -64, 64);
+    dsc.shadow_spread = clamp(dsc.shadow_spread, 0, 64);   /* negative: LVGL inverts the shadow's core box and overruns its buffer */
     dsc.shadow_offset_x = clamp(dsc.shadow_offset_x, -MAX_SIDE, MAX_SIDE);
     dsc.shadow_offset_y = clamp(dsc.shadow_offset_y, -MAX_SIDE, MAX_SIDE);
     /* cv_opa and P_OPA multiply each paint property's own opacity. */
