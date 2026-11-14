@@ -545,6 +545,17 @@ class WakeWordFirmwareContract(unittest.TestCase):
         snapshot = between(glue, 'static void snapshot_status(void)', '\n}')
         self.assertIn('ww_runner_ok(s_runner)', snapshot)
 
+    def test_face_shows_when_the_wake_word_is_on(self):
+        # A visible indicator whenever listening is on: lit while the runner
+        # hears, dim while it's paused, hidden when off.
+        ui = (ROOT / 'components/muse/muse_ui.c').read_text()
+        status = between(ui, '/* Status line: connectivity icons + power. */', 's_power_lbl =')
+        self.assertIn('s_listen_icon = make_mic(status,', status)
+        chrome = between(ui, 'static void update_chrome(float now)', '\n}\n')
+        block = between(chrome, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
+        self.assertIn('!muse_wakeword_enabled() ? 0 : muse_wakeword_listening() ? 2 : 1', block)
+        self.assertIn('lv_obj_set_flag(s_listen_icon, LV_OBJ_FLAG_HIDDEN, listen == 0);', block)
+
     def test_sound_page_has_wake_word_toggle(self):
         ui = (ROOT / 'components/muse/muse_settings_ui.c').read_text()
         sound = between(ui, 'static void build_sound_page(', 'static void tick_sound(void)')
