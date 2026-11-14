@@ -51,6 +51,7 @@
 #include "freertos/task.h"
 #include "mbedtls/md.h"
 #include "muse_apps_flash.h"
+#include "nvs.h"
 #include "muse_apps_priv.h"
 
 static const char *TAG = "muse_apps_store";
@@ -152,6 +153,35 @@ cJSON *muse_apps_store_list_result(void) {
     return result;
 }
 
+// An unpairing's wipe, kept in NVS until it's done: the gadget may restart
+// (as unpairing does, shortly after) before the store gets to it.
+#define NVS_SPACE "muse_apps"
+#define NVS_FORGET "forget"
+
+static void forget_mark(bool on) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_SPACE, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGW(TAG, "couldn't %s the unpairing's wipe in NVS", on ? "record" : "clear");
+        return;
+    }
+    if (on) {
+        nvs_set_u8(h, NVS_FORGET, 1);
+    } else {
+        nvs_erase_key(h, NVS_FORGET);
+    }
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static bool forget_marked(void) {
+    nvs_handle_t h;
+    uint8_t v = 0;
+    if (nvs_open(NVS_SPACE, NVS_READONLY, &h) != ESP_OK) return false;
+    bool marked = nvs_get_u8(h, NVS_FORGET, &v) == ESP_OK && v;
+    nvs_close(h);
+    return marked;
+}
+
 // Unpairing removes every app, before the next change: an install that was
 // downloading meanwhile doesn't land for the next owner.
 static bool forget_if_asked(void) {
@@ -160,6 +190,7 @@ static bool forget_if_asked(void) {
     muse_apps_catalog_wipe();
     publish();
     if (s_files) muse_apps_flash_wipe(FILES_ROOT);
+    forget_mark(false);
     ESP_LOGI(TAG, "unpaired: every app and file removed");
     return true;
 }
@@ -482,6 +513,10 @@ static void store_task(void *arg) {
     } else {
         muse_apps_catalog_open(NULL);
     }
+    if (forget_marked()) {   // an unpairing the last run didn't finish wiping for
+        atomic_store(&s_forget, true);
+        forget_if_asked();
+    }
     publish();
     for (st_req_t r;;) {
         if (!xQueueReceive(s_q, &r, portMAX_DELAY)) continue;
@@ -622,6 +657,7 @@ bool muse_apps_store_file_list(const muse_apps_origin_t *o) {
 
 void muse_apps_store_forget_all(void) {
     atomic_fetch_add(&s_epoch, 1);
+    forget_mark(true);   // before anything: kept across a restart until the wipe is done
     atomic_store(&s_forget, true);
     st_req_t r = {.kind = ST_FORGET};
     if (s_q) xQueueSend(s_q, &r, 0);  // full: the flag is seen after the request in hand

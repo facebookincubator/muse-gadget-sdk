@@ -669,6 +669,15 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("esp_timer_stop(s_exit_timer);", routed)
         self.assertIn("esp_timer_stop(s_long_timer);", routed)
 
+    def test_an_unpairing_s_wipe_survives_a_restart(self):
+        store = read("components/muse_apps/muse_apps_store.c")
+        forget = function(store, "void muse_apps_store_forget_all(")
+        self.assertLess(forget.index("forget_mark(true);"), forget.index("xQueueSend("))
+        self.assertIn("forget_mark(false);", function(store, "static bool forget_if_asked("))
+        task = function(store, "static void store_task(")
+        self.assertLess(task.index("if (forget_marked()) {"), task.index("for (st_req_t r;;)"))
+        self.assertIn("nvs_flash", read("components/muse_apps/CMakeLists.txt"))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
