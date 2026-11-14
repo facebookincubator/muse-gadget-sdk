@@ -1252,6 +1252,12 @@ static void run(req_t *r)
     char err[192] = "";
     int64_t t0 = esp_timer_get_time();
     if (r->kind == REQ_RUN_VM) {
+        /* The face, not a covered screen, while it downloads: power and the
+         * face's own controls work as usual meanwhile. */
+        if (covered) {
+            muse_app_view_close();
+            covered = false;
+        }
         /* A folder holds app.wasm; a path to a .wasm file runs that file. */
         if (ends_with(r->path, ".wasm")) {
             snprintf(s_app.source, sizeof(s_app.source), "%s", r->path);

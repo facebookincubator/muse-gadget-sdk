@@ -874,6 +874,16 @@ class WasmAppsTest(unittest.TestCase):
         arc = widget[widget.index("if (t == GADGET_W_ARC) {"):]
         self.assertLess(arc.index("lv_arc_get_max_value(o) : lv_arc_get_min_value(o))"), arc.index("lv_arc_set_min_value("))
 
+    def test_a_vm_app_downloads_behind_the_face(self):
+        """Stop and exit wait behind a download on the app task: the face, not
+        a covered screen, shows meanwhile, and the wait for another transfer
+        counts against the download's timeout."""
+        run = function(read("components/muse_apps/muse_apps.c"), "static void run(")
+        vm = run[run.index("if (r->kind == REQ_RUN_VM) {"):]
+        self.assertLess(vm.index("muse_app_view_close();"), vm.index("muse_apps_vm_file_read("))
+        read_vm = function(read("components/muse_apps/muse_apps_vm.c"), "bool muse_apps_vm_file_read(")
+        self.assertIn("xSemaphoreTake(s_one, pdMS_TO_TICKS(timeout_ms)) != pdTRUE", read_vm)
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",

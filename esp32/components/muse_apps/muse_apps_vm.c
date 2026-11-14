@@ -267,9 +267,14 @@ bool muse_apps_vm_file_read(const char *path, size_t max_bytes, int timeout_ms,
         snprintf(err, err_len, "out of memory");
         return false;
     }
-    xSemaphoreTake(s_one, portMAX_DELAY);
+    // The wait for another transfer (a long files.put) counts against the timeout too.
     int64_t start = esp_timer_get_time();
     int64_t deadline = start + (int64_t)timeout_ms * 1000;
+    if (xSemaphoreTake(s_one, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        free(url);
+        snprintf(err, err_len, "busy with another transfer");
+        return false;
+    }
     size_t chunk = muse_link_req_max_body();
     uint8_t *buf = NULL;
     size_t cap = 0, have = 0;
