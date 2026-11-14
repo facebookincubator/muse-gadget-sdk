@@ -206,6 +206,33 @@ speech for at most 5.2 seconds, then explicitly ends the call. Without that
 server support, use explicit hang-up or the client idle timer. The SDK adds no
 server events or permissions itself.
 
+### Video calls
+
+Add `--video-player` (mpv or ffplay, or any command that reads raw H.264 on
+standard input) or `--video-out FILE` (raw H.264; `-` for standard output,
+which moves the CLI's own messages to standard error) to make a video call:
+
+```sh
+musegadget voice-call --vm-id YOUR_VM_ID --live --video-player
+musegadget voice-call --vm-id YOUR_VM_ID --live --video-out - | ffplay -f h264 -i -
+```
+
+A video call is signaled over the Noise session (`/voice/calls/media-endpoint`,
+`/voice/calls/join`, `/voice/end-call`) and its media goes straight to Muse's
+media endpoint as SRTP: Opus audio both ways and Muse's H.264 video, about
+1 Mbit/s. It tries UDP and TCP on the same port at once and keeps whichever
+answers first, so it works where UDP is blocked. Video calls need the system
+Opus library (`apt install libopus0`); there is no other dependency beyond
+`cryptography`. Half duplex is the default here too: while Muse speaks and for
+about half a second after, live microphone audio is replaced with silence and
+WAV input waits. The call ends on the idle or overall timer, when media stops for 10
+seconds or the endpoint stops answering connectivity checks for 30, or on
+Ctrl-C, and always with an explicit end-call. Video never stalls
+or ends the call: an output that falls behind drops frames and resumes at the
+next keyframe, and one that fails stops video only. In code, use
+`VideoCall(session, device_id=..., video_output=...)` with any object that has a
+nonblocking `write_unit(bytes)`; `voice_video` has the CLI's outputs.
+
 ### Lifecycle diagnostics
 
 Operation-level server errors after readiness are advisory; they increment
@@ -437,12 +464,16 @@ bash install.sh --uninstall              # remove it (add --purge to forget the 
 
 `doctor` checks saved pairing credentials, SDK token format, the systemd
 service, Bluetooth controller power, TCP connectivity to the default
-Muse API on port 443, and whether the system still trusts root CAs that
-musegadget refuses. Each check prints `OK`, `FAIL`, or `WARN` and a next
-step. It exits with code 1 if any check fails, or 0 otherwise. Bluetooth
-problems are warnings because Bluetooth is only needed for pairing. Refused
-root CAs are warnings because musegadget skips them itself; update the
-`ca-certificates` package so the rest of the system does too.
+Muse API on port 443, and whether the system trust store is safe to use.
+Each check prints `OK`, `FAIL`, or `WARN` and a next step. It exits with code
+1 if any check fails, or 0 otherwise. Bluetooth problems are warnings because
+Bluetooth is only needed for pairing.
+
+musegadget uses the system trust store, and won't start or connect (exit code
+78) while that store can't be read or still has one of the root CAs distrusted
+after the eMudhra key compromise. Update the `ca-certificates` package, then
+restart musegadget. The installer updates that package, and stops if the store
+still has one of those roots.
 
 Run it on the gadget with sudo so it can read the root-owned state files.
 It never changes settings, starts services, opens pairing, or prints tokens.

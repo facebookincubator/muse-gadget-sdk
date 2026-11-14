@@ -25,6 +25,7 @@
 #include <thread>
 #include <vector>
 #include "muse_eink_text.h"
+#include "muse_eink_board.h"
 using namespace muse_eink;
 
 #define pdTRUE 1
@@ -44,6 +45,7 @@ static int g_w = 8, g_h = 8, s_task = 1;
 static std::atomic<bool> s_ready{true}, s_paused, s_dark, s_draw_now;
 static std::atomic<bool> s_face_active{true}, s_image_shown, s_need_clean{true};
 static std::atomic<uint32_t> s_navigation_epoch{}, s_presented_epoch{};
+static const BoardRendering *s_board_rendering;
 static int s_fast_count;
 static int64_t now_us;
 static std::vector<bool> ptt;

@@ -67,7 +67,7 @@ static void usage(FILE *out, const char *argv0)
             "  wifi=off|no_network|connecting|connected|failed|not_nearby\n"
             "  ble=off|advertising|connected         passkey=0..999999\n"
             "  paired=true|false  link=boot|unpaired|pairing|confirm|connecting|online|offline|error\n"
-            "  speaker=true|false brightness=10..100 advance=MILLISECONDS\n"
+            "  speaker=true|false call=true|false brightness=10..100 advance=MILLISECONDS\n"
             "\n"
             "Interactive keys: F1..F7 select face states, H is happy, Space is\n"
             "push-to-talk, +/- change level, [/] change progress, S sleeps,\n"
@@ -352,6 +352,10 @@ static bool apply_setting(const char *key, const char *value, bool real_time)
     }
     if (!strcmp(key, "link")) {
         return set_link(value);
+    }
+    if (!strcmp(key, "call") && parse_bool(value, &flag)) {
+        sim_services_set_call(flag);
+        return true;
     }
     if (!strcmp(key, "speaker") && parse_bool(value, &flag)) {
         sim_services_set_speaker(flag);

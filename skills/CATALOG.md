@@ -1,6 +1,6 @@
 # Skill Catalog
 
-53 active skills: 52 device/family skills and one shared Google Cast skill.
+54 active skills: 53 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -79,3 +79,4 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 - [Tesla](gadget-tesla/SKILL.md) — self-hosted status, drive/charge history and efficiency analytics via Fleet API, TeslaMate and Fleet Telemetry; read-only by default.
 - [Google Nest Thermostats](gadget-google-nest-thermostats/SKILL.md) — temperature and setpoints via a Smart Device Management bridge.
+- [VeSync humidifier](gadget-vesync-humidifier/SKILL.md) — cloud only; needs internet and a VeSync account: Levoit humidifier state and control.

@@ -136,8 +136,8 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 // OTA rollback: how long a freshly-installed (PENDING_VERIFY) image has to
 // reach the authenticated control WebSocket before the bootloader reverts it
 // (on every board; on the ESP-Mosaico, not for a Vibe Mode install).
-// The control WS is the recovery channel — if a new image can't reach it,
-// no future device.ota could repair the device, so rolling back is correct.
+// An image that can't reach the control WS can't reach Muse at all, so
+// rolling back is correct.
 #define OTA_VERIFY_TIMEOUT_US (300LL * 1000000LL)
 
 // Static IPs for the raw L3 tunnel. ESP side hosts .1; VM side .2.
@@ -2457,8 +2457,10 @@ static const vm_info_t *find_vm_by_id(const vm_info_t *vms, int count, const cha
     return NULL;
 }
 
-// Runs on an internal-RAM stack: the caller's may be in PSRAM, and this reads
-// and (on token refresh) writes NVS.
+// Reads and (on token refresh) writes NVS, so its stack is in internal RAM
+// (the caller's may be in PSRAM) unless code and rodata run from PSRAM and the
+// board puts setup task stacks there (helper_task.h): with live calls on, the
+// StopWatch has no 8 KB internal block left once Wi-Fi and Link are up.
 static void hatch_vm_task(void *arg) {
     hatch_vm_request_t *req = arg;
     if (config_is_provisioned() && operation_gate_take(pdMS_TO_TICKS(15000), "Muse VM lookup")) {
@@ -2487,7 +2489,7 @@ static void hatch_vm_task(void *arg) {
     }
     xTaskNotifyGive(req->waiter);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 bool app_hatch_vm_credentials(const char *want_vm, char *vm_id, size_t id_cap,
@@ -2497,7 +2499,8 @@ bool app_hatch_vm_credentials(const char *want_vm, char *vm_id, size_t id_cap,
         .vm_name = vm_name, .name_cap = name_cap,
         .waiter = xTaskGetCurrentTaskHandle(),
     };
-    if (xTaskCreate(hatch_vm_task, "muse_vm", 8192, &req, 4, NULL) != pdPASS) {
+    if (helper_task_create(hatch_vm_task, "muse_vm", 8192, &req, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "Muse VM lookup: no memory for its task");
         return false;
     }
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -2603,9 +2606,9 @@ static void on_ws_control_status(const char *status) {
 // startup. Marking the running image valid (a) commits a PENDING_VERIFY image
 // so the bootloader stops trying to revert it, and (b) blesses a normal boot
 // so the running slot becomes a valid rollback target for the *next* OTA.
-// We gate validation on the control WS coming up: that's the channel a future
-// device.ota would arrive on, so if the new image can't reach it, reverting is
-// the only way to keep the device recoverable.
+// We gate validation on the control WS coming up: an image that can't reach
+// it can't reach Muse at all, so reverting is the way to keep the device
+// working.
 static void ota_verify_task(void *arg) {
     (void)arg;
     int64_t deadline = esp_timer_get_time() + OTA_VERIFY_TIMEOUT_US;
@@ -2739,7 +2742,7 @@ void app_run(void) {
 #endif
 
     // Arm OTA rollback verification. If the running image was just installed
-    // by device.ota it boots as PENDING_VERIFY and must reach the control WS
+    // by an OTA update it boots as PENDING_VERIFY and must reach the control WS
     // within OTA_VERIFY_TIMEOUT_US, else the bootloader reverts it on reboot.
     // The one exception is the ESP-Mosaico in Vibe Mode: its Vibe Mode
     // firmware installs apps itself and leaves them PENDING_VERIFY, and that
