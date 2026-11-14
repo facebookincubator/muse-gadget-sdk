@@ -900,6 +900,10 @@ static int32_t widget_set(slot_t *s, int32_t prop, int32_t v)
     case GADGET_P_MAX_VALUE: {
         bool min = prop == GADGET_P_MIN_VALUE;
         if (t == GADGET_W_ARC) {
+            /* LVGL divides by the range when the arc is dragged */
+            if (v == (min ? lv_arc_get_max_value(o) : lv_arc_get_min_value(o))) {
+                return GADGET_ERR_ARG;
+            }
             min ? lv_arc_set_min_value(o, v) : lv_arc_set_max_value(o, v);
         } else if (t == GADGET_W_BAR) {
             min ? lv_bar_set_min_value(o, v) : lv_bar_set_max_value(o, v);

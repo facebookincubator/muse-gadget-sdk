@@ -867,6 +867,12 @@ class WasmAppsTest(unittest.TestCase):
         run = console[console.index('if (!strncmp(line, "app.run=", 8)) {'):]
         self.assertLess(run.index("strlen(line + 8) >= sizeof(r.path) - 12"), run.index("snprintf(r.path"))
 
+    def test_an_arc_range_is_never_empty(self):
+        """LVGL divides by an arc's range when it's dragged."""
+        widget = function(read("components/muse_apps/muse_apps_ui.c"), "static int32_t widget_set(")
+        arc = widget[widget.index("if (t == GADGET_W_ARC) {"):]
+        self.assertLess(arc.index("lv_arc_get_max_value(o) : lv_arc_get_min_value(o))"), arc.index("lv_arc_set_min_value("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
