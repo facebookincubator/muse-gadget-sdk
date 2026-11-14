@@ -1332,6 +1332,7 @@ static void send_drop(void *arg)
 
 int32_t gadget_chat_send(wasm_exec_env_t env, const char *text)
 {
+    muse_apps_check_deadline();   /* it escapes up to SEND_TEXT_MAX bytes each call */
     if (!muse_apps_permitted("chat.send")) {
         return GADGET_ERR_DENIED;
     }

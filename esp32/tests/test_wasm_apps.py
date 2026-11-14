@@ -838,6 +838,10 @@ class WasmAppsTest(unittest.TestCase):
         sweep = function(read("components/muse_apps/muse_apps_flash.c"), "static bool sweep(")
         self.assertIn("if (!dir) return !all || (depth == 0 && errno == ENOENT);", sweep)
 
+    def test_chat_send_checks_the_clock(self):
+        send = function(read("components/muse_apps/muse_apps_chat.c"), "int32_t gadget_chat_send(")
+        self.assertLess(send.index("muse_apps_check_deadline();"), send.index("muse_apps_vm_json_escape("))
+
     def test_stopping_an_app_frees_what_it_held(self):
         stop = function(read("components/muse_apps/muse_apps.c"), "static void stop(")
         for call in ["ops_clear();", "muse_apps_ui_stop();", "muse_apps_canvas_stop();", "muse_apps_chat_stop();",
