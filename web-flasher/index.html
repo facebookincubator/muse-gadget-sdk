@@ -21,9 +21,8 @@ limitations under the License.
   <meta name="color-scheme" content="light dark">
   <title>Muse Gadget Web Flasher</title>
   <script>
-    // The flasher lives at gadgets.muse.ai, which fills in the maker's SDK
-    // token. ?board=<id> carries over; ?classic keeps this page (Device
-    // settings, Japanese). Firmware and boards.json stay on this site.
+    // The flasher has moved to gadgets.muse.ai, which fills in the maker's
+    // SDK token. ?board=<id> carries over; ?classic keeps this page.
     (function () {
       var params = new URLSearchParams(location.search);
       if (params.has("classic")) return;
