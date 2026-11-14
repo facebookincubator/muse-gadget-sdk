@@ -370,7 +370,8 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(frame==note_release_frame) push((scenario>=64 && scenario<=66) || (scenario==69 && NOTE_TOGGLE) ? MUSE_PTT_DOWN : MUSE_PTT_UP);
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-        if((scenario==67 && frame==40) || (scenario==95 && frame==4)) {   /* the wake word's endpointing */
+        if(scenario==96 && frame==3) push(MUSE_PTT_DOWN);   /* a finger lands on the hands-free note */
+        if((scenario==67 && frame==40) || (scenario==95 && frame==4) || (scenario==96 && frame==4)) {   /* the wake word's endpointing */
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
             xQueueSend(&queue,&u,0);
         }
@@ -527,6 +528,24 @@ int main(int argc,char **argv) {
         char why[96];
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>=60 && frame<=60+7 && !turn_ended_calls);
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==96) {
+        /* Endpointing that raced a finger: the wake task read its input
+         * before the press and posts a synthetic release after it. The
+         * finger owns the note now, so only its release ends it. */
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        note_release_frame=60;
+        char why[96];
+        assert(record(true,why,sizeof(why)) && notes==1);
+        assert(frame>=60 && frame<=60+7 && !s_press_synthetic);
         drop_rec(); free(s_pre); return 0;
     }
     if(scenario==95) {

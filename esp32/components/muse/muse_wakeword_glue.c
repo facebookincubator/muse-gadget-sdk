@@ -261,7 +261,12 @@ static void tick(const muse_wakeword_input_t *in)
             atomic_store(&s_backlog_owed, false);
         }
     }
-    if ((act & MUSE_WW_ACTION_POST_PTT_UP) && !post_ptt(MUSE_PTT_UP)) {
+    /* A press noted since this tick's input was read (the voice side
+     * consumed it during inference) has taken the turn over: the finger's
+     * release ends it, so no synthetic release goes. The next tick sees
+     * the press with the core already idle. */
+    bool taken_over = atomic_load(&s_pending_down);
+    if ((act & MUSE_WW_ACTION_POST_PTT_UP) && !taken_over && !post_ptt(MUSE_PTT_UP)) {
         s_up_owed = true;
     }
     if (act & MUSE_WW_ACTION_CONVERTED_TO_PTT) {

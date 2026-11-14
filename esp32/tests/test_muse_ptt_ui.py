@@ -189,6 +189,13 @@ class StopWatchPTT(unittest.TestCase):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 95, board=board, realtime=realtime)
 
+    def test_finger_owns_a_hands_free_note_against_a_racing_release(self):
+        # Endpointing read its input before the press and posts a release
+        # after it: the note must run on until the finger lets go.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 96, board=board, realtime=realtime)
+
     def test_wake_word_note_does_not_repeat_the_idle_pre_roll(self):
         # The seed already ends at the speech start; the idle ring covers
         # the same audio and would play it twice.

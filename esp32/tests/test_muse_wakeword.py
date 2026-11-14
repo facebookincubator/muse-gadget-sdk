@@ -1143,6 +1143,12 @@ class WakeWordHandoff(unittest.TestCase):
         self.assertIn('lag 24 backlog 26 seed 50', out)   # a full tap behind: nothing lost
         self.assertIn('lag 0 backlog 2 seed 50', out)
 
+    def test_glue_posts_no_release_for_a_capture_the_button_took(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        tick = between(glue, 'static void tick(const muse_wakeword_input_t *in)', '\n}\n')
+        self.assertIn('bool taken_over = atomic_load(&s_pending_down);', tick)
+        self.assertIn('(act & MUSE_WW_ACTION_POST_PTT_UP) && !taken_over && !post_ptt(MUSE_PTT_UP)', tick)
+
     def test_glue_numbers_the_tap_and_seeds_from_the_next_chunk(self):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
         tap = between(glue, 'void muse_wakeword_on_audio(', '\n}\n')

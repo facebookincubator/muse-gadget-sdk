@@ -298,6 +298,12 @@ static bool got_event(muse_ptt_t type)
             muse_wakeword_note_ptt(ev.type == MUSE_PTT_DOWN);
         }
 #if CONFIG_MUSE_WAKEWORD_ENABLE
+        if (!ev.synthetic && ev.type == MUSE_PTT_DOWN && type == MUSE_PTT_UP && s_press_synthetic) {
+            /* A finger on a hands-free note takes it over: from now on it's
+             * the button's, ended by the finger's release, and a synthetic
+             * release (endpointing that raced the press) no longer counts. */
+            s_press_synthetic = false;
+        }
         if (ev.type == type && edge_counts(&ev, type)) {
 #else
         if (ev.epoch == muse_input_call_epoch() && ev.type == type) {
