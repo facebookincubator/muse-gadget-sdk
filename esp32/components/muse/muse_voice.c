@@ -283,6 +283,19 @@ static bool edge_counts(const muse_input_event_t *ev, muse_ptt_t type)
     if (type == MUSE_PTT_UP) return s_press_synthetic;
     return !s_button_recording;
 }
+
+/* A real edge in the current input epoch: one the input queue's overflow
+ * made stale is ignored here, so it owns nothing for the wake word either. */
+static bool live_real_edge(const muse_input_event_t *ev)
+{
+    return !ev->synthetic && ev->epoch == muse_input_call_epoch();
+}
+/* Wake word preemption needs real presses even when a drain is only
+ * looking for the other edge. */
+#define NOTE_REAL_EDGE(ev) \
+    do { if (live_real_edge(&(ev))) muse_wakeword_note_ptt((ev).type == MUSE_PTT_DOWN); } while (0)
+#else
+#define NOTE_REAL_EDGE(ev) ((void)0)
 #endif
 
 /* Consume through the requested edge, leaving later edges for the next
@@ -292,13 +305,9 @@ static bool got_event(muse_ptt_t type)
     muse_input_event_t ev;
     while (xQueueReceive(s_queue, &ev, 0) == pdTRUE) {
         muse_state_poke();
-        if (!EV_SYNTHETIC(ev)) {
-            /* Wake word preemption needs real presses even when
-             * this drain is only looking for the other edge. */
-            muse_wakeword_note_ptt(ev.type == MUSE_PTT_DOWN);
-        }
+        NOTE_REAL_EDGE(ev);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-        if (!ev.synthetic && ev.type == MUSE_PTT_DOWN && type == MUSE_PTT_UP && s_press_synthetic) {
+        if (live_real_edge(&ev) && ev.type == MUSE_PTT_DOWN && type == MUSE_PTT_UP && s_press_synthetic) {
             /* A finger on a hands-free note takes it over: from now on it's
              * the button's, ended by the finger's release, and a synthetic
              * release (endpointing that raced the press) no longer counts. */
@@ -406,6 +415,20 @@ static void take_pre(rec_stats_t *st, size_t chunks)
  */
 static bool record(bool seeded, char *why, size_t cap)
 {
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* A hands-free turn takes the chunks this task already read past its
+     * seed (the wake task trails it) before anything goes. If overload
+     * overwrote some, the note can't be continuous: it ends here, unsent. */
+    const int16_t *later[MUSE_WAKEWORD_BACKLOG_CHUNKS];
+    size_t backlog = 0;
+    if (seeded && s_seed_frames &&
+        !muse_wakeword_take_backlog(later, MUSE_WAKEWORD_BACKLOG_CHUNKS, &backlog)) {
+        s_seed_frames = 0;
+        muse_wakeword_turn_ended();
+        if (cap) why[0] = '\0';
+        return false;
+    }
+#endif
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
@@ -433,11 +456,9 @@ static bool record(bool seeded, char *why, size_t cap)
             take(&st, s_seed + off);
             n += MUSE_AUDIO_CHUNK;
         }
-        /* Then what this task had already read past the seed's end when the
-         * wake task (which trails it) seeded the turn, so the command has no
-         * gap. Live reads follow from the next chunk on. */
-        const int16_t *later[MUSE_WAKEWORD_BACKLOG_CHUNKS];
-        size_t backlog = muse_wakeword_take_backlog(later, MUSE_WAKEWORD_BACKLOG_CHUNKS);
+        /* Then what this task had already read past the seed's end (taken
+         * above), so the command has no gap. Live reads follow from the
+         * next chunk on. */
         for (size_t i = 0; i < backlog; i++) {
             take(&st, later[i]);
             n += MUSE_AUDIO_CHUNK;
@@ -1521,9 +1542,7 @@ static void voice_task(void *arg)
                 continue;
             }
             muse_state_poke();
-            if (!EV_SYNTHETIC(ev)) {
-                muse_wakeword_note_ptt(ev.type == MUSE_PTT_DOWN);
-            }
+            NOTE_REAL_EDGE(ev);
             /* Synthetic (wake word) edges carry no call epoch/mark. */
             if (ev.type != MUSE_PTT_DOWN ||
                 (!EV_SYNTHETIC(ev) && ev.epoch != muse_input_call_epoch())) {

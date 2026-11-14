@@ -34,7 +34,8 @@ static int turn_ended_calls;
  * edges and seeds themselves. */
 esp_err_t muse_wakeword_init(QueueHandle_t q) { (void)q; return ESP_OK; }
 void muse_wakeword_on_audio(const int16_t *pcm, size_t frames) { (void)pcm; (void)frames; }
-void muse_wakeword_note_ptt(bool down) { (void)down; }
+static int note_ptt_calls;
+void muse_wakeword_note_ptt(bool down) { (void)down; note_ptt_calls++; }
 void muse_wakeword_set_enabled(bool on) { (void)on; }
 bool muse_wakeword_enabled(void) { return false; }
 bool muse_wakeword_listening(void) { return false; }
@@ -45,13 +46,15 @@ const char *muse_wakeword_runner_kind(void) { return "fake"; }
  * "had already tapped" past the seed, with sample values that continue it. */
 static int16_t backlog_pcm[3][MUSE_AUDIO_CHUNK];
 static size_t backlog_n, backlog_takes;
-size_t muse_wakeword_take_backlog(const int16_t *chunks[], size_t max)
+static bool backlog_lost;   /* scenario 97: overload overwrote part of it */
+bool muse_wakeword_take_backlog(const int16_t *chunks[], size_t max, size_t *count)
 {
     backlog_takes++;
     size_t n = backlog_n < max ? backlog_n : max;
     for (size_t i = 0; i < n; i++) chunks[i] = backlog_pcm[i];
     backlog_n = 0;   /* once per turn */
-    return n;
+    *count = n;
+    return !backlog_lost;
 }
 void muse_wakeword_status(muse_wakeword_status_t *out) { *out = (muse_wakeword_status_t){ .runner = "fake" }; }
 #endif
@@ -371,7 +374,11 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
         if(scenario==96 && frame==3) push(MUSE_PTT_DOWN);   /* a finger lands on the hands-free note */
-        if((scenario==67 && frame==40) || (scenario==95 && frame==4) || (scenario==96 && frame==4)) {   /* the wake word's endpointing */
+        if(scenario==98 && frame==3) {   /* a press the queue's overflow made stale */
+            muse_input_event_t d={.type=MUSE_PTT_DOWN,.epoch=muse_input_call_epoch()-1,.at_us=clock_us};
+            xQueueSend(&queue,&d,0);
+        }
+        if((scenario==67 && frame==40) || (scenario==95 && frame==4) || (scenario==96 && frame==4) || (scenario==98 && frame==10)) {   /* the wake word's endpointing */
             muse_input_event_t u={.type=MUSE_PTT_UP,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
             xQueueSend(&queue,&u,0);
         }
@@ -529,6 +536,43 @@ int main(int argc,char **argv) {
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>=60 && frame<=60+7 && !turn_ended_calls);
         drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==98) {
+        /* A press the input queue's overflow made stale lands on a
+         * hands-free note: it takes nothing over and the wake word doesn't
+         * hear it, so the wake word's release still ends the note. */
+        clock_us=1000000;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        char why[96];
+        assert(record(true,why,sizeof(why)) && notes==1);
+        assert(frame>10 && frame<=10+7 && s_press_synthetic && !note_ptt_calls);
+        drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==97) {
+        /* Overload overwrote part of the audio after the seed: the note
+         * can't be continuous, so the turn ends before anything goes. */
+        clock_us=1000000;
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        int16_t seed[2*MUSE_AUDIO_CHUNK]={0};
+        muse_voice_seed_preroll(seed,2*MUSE_AUDIO_CHUNK);
+        backlog_n=3; backlog_lost=true;
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+#if HOLD_NOTES
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+#endif
+        char why[96]="x";
+        assert(!record(true,why,sizeof(why)) && !why[0]);
+        assert(backlog_takes==1 && !notes && !note_frames && !s_rec_n && !s_seed_frames && turn_ended_calls==1 && !frame);
+        free(s_seed); s_seed=NULL; drop_rec(); free(s_pre); return 0;
     }
     if(scenario==96) {
         /* Endpointing that raced a finger: the wake task read its input

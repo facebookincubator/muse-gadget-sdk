@@ -143,6 +143,12 @@ size_t muse_ww_ring_snapshot(const muse_ww_ring_t *ring, int16_t *out, size_t ou
 size_t muse_ww_ring_fill(const muse_ww_ring_t *ring);
 uint32_t muse_ww_ring_drops(const muse_ww_ring_t *ring);
 
+/* The tapped audio skipped chunks (the voice side dropped some while the
+ * tap was full). Nothing from before the gap may seed a turn: clears the
+ * pre-roll and ends a wake still waiting for speech (ARMED). A capture
+ * already running is left alone. Returns true if it ended a wake. */
+bool muse_wakeword_core_gap(muse_wakeword_core_t *core, muse_ww_ring_t *preroll);
+
 /*
  * Numbered audio chunks for the hand-off from the wake task to the
  * recorder. The glue numbers every chunk it taps and keeps the latest
@@ -172,9 +178,13 @@ void muse_ww_history_init(muse_ww_history_t *h, muse_ww_chunk_t *slots, size_t c
 /* Copies one chunk in, numbers it, and returns its slot (overwriting the oldest). */
 const muse_ww_chunk_t *muse_ww_history_push(muse_ww_history_t *h, const int16_t *pcm);
 /* The held chunks numbered `from` or later, oldest first, at most max:
- * pointers into the slots, valid until the next push. Chunks no longer
- * held are skipped; a `from` past the newest gives none. */
-size_t muse_ww_history_since(const muse_ww_history_t *h, uint32_t from, const int16_t *out[], size_t max);
+ * pointers into the slots, valid until the next push. *complete (if not
+ * NULL) says whether that is every chunk from `from` to the newest: false
+ * when some were already overwritten, don't fit in max, or `from` is past
+ * the newest. A caller that needs continuous audio must not use an
+ * incomplete run. */
+size_t muse_ww_history_since(const muse_ww_history_t *h, uint32_t from, const int16_t *out[], size_t max,
+                             bool *complete);
 
 #ifdef __cplusplus
 }

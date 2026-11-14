@@ -93,6 +93,17 @@ void muse_wakeword_core_abort(muse_wakeword_core_t *core)
     go_idle(core);
 }
 
+bool muse_wakeword_core_gap(muse_wakeword_core_t *core, muse_ww_ring_t *preroll)
+{
+    muse_ww_ring_clear(preroll);
+    if (!core || core->state != MUSE_WW_ARMED) {
+        return false;   /* idle, or a capture already seeded and running */
+    }
+    core->stats.cancels++;
+    go_idle(core);
+    return true;
+}
+
 static bool speech_now(const muse_wakeword_core_t *core, const muse_wakeword_input_t *in)
 {
     return in->event == WW_EVENT_SPEECH_START || (core->cfg.energy_endpointing && in->voiced);
@@ -355,24 +366,29 @@ const muse_ww_chunk_t *muse_ww_history_push(muse_ww_history_t *h, const int16_t 
     return slot;
 }
 
-size_t muse_ww_history_since(const muse_ww_history_t *h, uint32_t from, const int16_t *out[], size_t max)
+size_t muse_ww_history_since(const muse_ww_history_t *h, uint32_t from, const int16_t *out[], size_t max,
+                             bool *complete)
 {
-    if (!h || !out || !h->capacity) {
-        return 0;
+    bool all = false;
+    size_t n = 0;
+    if (h && out && h->capacity) {
+        /* Numbers wrap, so compare distances back from the next one. */
+        uint32_t held = (uint32_t)h->held;
+        uint32_t back = h->next_seq - from;   /* chunks from `from` to the newest */
+        if (back <= UINT32_MAX / 2) {          /* else `from` is in the future */
+            all = back <= held && back <= max;
+            if (back > held) {
+                back = held;   /* older ones are gone */
+            }
+            n = back < max ? back : max;
+            uint32_t first = h->next_seq - back;
+            for (size_t i = 0; i < n; i++) {
+                out[i] = h->slots[(first + i) % h->capacity].pcm;
+            }
+        }
     }
-    /* Numbers wrap, so compare distances back from the next one. */
-    uint32_t held = (uint32_t)h->held;
-    uint32_t back = h->next_seq - from;   /* chunks from `from` to the newest */
-    if (back == 0 || back > UINT32_MAX / 2) {
-        return 0;   /* nothing newer, or `from` is in the future */
-    }
-    if (back > held) {
-        back = held;   /* older ones are gone */
-    }
-    size_t n = back < max ? back : max;
-    uint32_t first = h->next_seq - back;
-    for (size_t i = 0; i < n; i++) {
-        out[i] = h->slots[(first + i) % h->capacity].pcm;
+    if (complete) {
+        *complete = all;
     }
     return n;
 }

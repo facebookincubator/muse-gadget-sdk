@@ -84,13 +84,15 @@ void muse_wakeword_set_playback(bool on);
  * muse_voice's own pre_reset() after a turn. */
 void muse_wakeword_set_ptt_turn(bool active);
 
-/* Voice task only, once per hands-free turn, right after its seed: the
- * chunks it had already tapped past the seed's end when the wake task
+/* Voice task only, once per hands-free turn, before anything of it goes:
+ * the chunks it had already tapped past the seed's end when the wake task
  * seeded the turn (the wake task can trail by up to a tap's worth), oldest
  * first, so the note continues without a gap. Pointers into the glue's
- * copy, valid until the next tap. Returns how many (0 once taken). */
+ * copy, valid until the next tap; *count says how many (0 once taken).
+ * Returns false if some of them were already overwritten (sustained
+ * overload): the note can't be continuous, so the turn must end unsent. */
 #define MUSE_WAKEWORD_BACKLOG_CHUNKS 32   /* the 25-chunk tap plus the few read before record(); a power of two */
-size_t muse_wakeword_take_backlog(const int16_t *chunks[], size_t max);
+bool muse_wakeword_take_backlog(const int16_t *chunks[], size_t max, size_t *count);
 
 /* muse_voice ended a hands-free turn by itself (its 15 s cap, a failure,
  * or a turn that never started or didn't qualify), not at the glue's own

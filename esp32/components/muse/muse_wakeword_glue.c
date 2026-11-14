@@ -22,6 +22,7 @@
 
 #if CONFIG_MUSE_WAKEWORD_ENABLE
 
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,6 +73,7 @@ static muse_ww_chunk_t *s_hist_slots;
 static atomic_uint s_seed_end;
 static atomic_bool s_backlog_owed;
 static uint32_t s_last_seq;    /* wake task only: the chunk being ticked */
+static bool s_have_seq;        /* wake task only: s_last_seq is set */
 static muse_ww_ring_t s_pre;    /* wake task only: upload pre-roll */
 static int16_t *s_snap;         /* PRE_FRAMES, for muse_voice_seed_preroll */
 static bool s_started;
@@ -157,12 +159,18 @@ void muse_wakeword_note_ptt(bool down)
     }
 }
 
-size_t muse_wakeword_take_backlog(const int16_t *chunks[], size_t max)
+bool muse_wakeword_take_backlog(const int16_t *chunks[], size_t max, size_t *count)
 {
+    *count = 0;
     if (!s_started || !atomic_exchange(&s_backlog_owed, false)) {
-        return 0;
+        return true;   /* nothing owed: the seed stands alone */
     }
-    return muse_ww_history_since(&s_hist, atomic_load(&s_seed_end), chunks, max);
+    bool complete;
+    *count = muse_ww_history_since(&s_hist, atomic_load(&s_seed_end), chunks, max, &complete);
+    if (!complete) {
+        ESP_LOGW(TAG, "hands-free note dropped: audio after its seed was lost to overload");
+    }
+    return complete;
 }
 
 void muse_wakeword_turn_ended(void)
@@ -398,6 +406,15 @@ static void wake_task(void *arg)
             snapshot_status();
             continue;
         }
+        if (s_have_seq && item.seq != s_last_seq + 1) {
+            /* The voice side dropped chunks while the tap was full: no seed
+             * may span the gap or come from before it. */
+            ESP_LOGW(TAG, "tap overflowed: %" PRIu32 " chunks not heard", (uint32_t)(item.seq - s_last_seq - 1));
+            if (muse_wakeword_core_gap(&s_core, &s_pre)) {
+                muse_state_set_caption("%s", "");   /* the wake's prompt, as when no speech follows */
+            }
+        }
+        s_have_seq = true;
         if (!s_applied_playback && !s_applied_ptt_turn) {
             muse_ww_ring_push(&s_pre, item.pcm, MUSE_AUDIO_CHUNK);
         }
