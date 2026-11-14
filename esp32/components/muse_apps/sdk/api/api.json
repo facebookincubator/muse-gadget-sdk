@@ -1401,7 +1401,13 @@
     ],
     [2, "label", "lv_label", "Text.", ["MAIN", "SCROLLBAR", "SELECTED"]],
     [3, "button", "lv_button", "A container that presses; put a label in it.", ["MAIN"]],
-    [4, "image", "lv_image", "A PNG or JPEG (ui_image_load, ui_image_set).", ["MAIN"]],
+    [
+      4,
+      "image",
+      "lv_image",
+      "A PNG (8-bit channels) or JPEG (baseline) (ui_image_load, ui_image_set).",
+      ["MAIN"]
+    ],
     [5, "line", "lv_line", "A polyline through points (ui_line_points).", ["MAIN"]],
     [
       6,
@@ -1534,8 +1540,8 @@
     [133, "line_width", "int", "style", "rw", ""],
     [134, "line_opa", "opa", "style", "rw", ""],
     [135, "line_rounded", "bool", "style", "rw", ""],
-    [136, "line_dash_width", "int", "style", "rw", ""],
-    [137, "line_dash_gap", "int", "style", "rw", ""],
+    [136, "line_dash_width", "int", "style", "rw", "0..1024 px."],
+    [137, "line_dash_gap", "int", "style", "rw", "0..1024 px."],
     [138, "arc_color", "rgb", "style", "rw", ""],
     [139, "arc_width", "int", "style", "rw", ""],
     [140, "arc_opa", "opa", "style", "rw", ""],

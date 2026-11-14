@@ -1042,7 +1042,7 @@ Finds an event by name.
 | `W_OBJ` | `lv_obj` | MAIN, SCROLLBAR | A plain container: a box with a background, border and children. |
 | `W_LABEL` | `lv_label` | MAIN, SCROLLBAR, SELECTED | Text. |
 | `W_BUTTON` | `lv_button` | MAIN | A container that presses; put a label in it. |
-| `W_IMAGE` | `lv_image` | MAIN | A PNG or JPEG (ui_image_load, ui_image_set). |
+| `W_IMAGE` | `lv_image` | MAIN | A PNG (8-bit channels) or JPEG (baseline) (ui_image_load, ui_image_set). |
 | `W_LINE` | `lv_line` | MAIN | A polyline through points (ui_line_points). |
 | `W_ARC` | `lv_arc` | MAIN, INDICATOR, KNOB | A ring with a value, which touch can drag. |
 | `W_BAR` | `lv_bar` | MAIN, INDICATOR | A progress bar. |
@@ -1132,8 +1132,8 @@ Object properties (any object) and style properties work with `ui_set` and `ui_g
 | `P_LINE_WIDTH` | int | style | rw |  |
 | `P_LINE_OPA` | opa | style | rw |  |
 | `P_LINE_ROUNDED` | bool | style | rw |  |
-| `P_LINE_DASH_WIDTH` | int | style | rw |  |
-| `P_LINE_DASH_GAP` | int | style | rw |  |
+| `P_LINE_DASH_WIDTH` | int | style | rw | 0..1024 px. |
+| `P_LINE_DASH_GAP` | int | style | rw | 0..1024 px. |
 | `P_ARC_COLOR` | rgb | style | rw |  |
 | `P_ARC_WIDTH` | int | style | rw |  |
 | `P_ARC_OPA` | opa | style | rw |  |

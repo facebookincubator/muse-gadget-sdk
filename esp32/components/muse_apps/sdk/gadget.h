@@ -454,7 +454,7 @@
 #define W_OBJ 1  /* A plain container: a box with a background, border and children. */
 #define W_LABEL 2  /* Text. */
 #define W_BUTTON 3  /* A container that presses; put a label in it. */
-#define W_IMAGE 4  /* A PNG or JPEG (ui_image_load, ui_image_set). */
+#define W_IMAGE 4  /* A PNG (8-bit channels) or JPEG (baseline) (ui_image_load, ui_image_set). */
 #define W_LINE 5  /* A polyline through points (ui_line_points). */
 #define W_ARC 6  /* A ring with a value, which touch can drag. */
 #define W_BAR 7  /* A progress bar. */
@@ -539,8 +539,8 @@
 #define P_LINE_WIDTH 133  /* int, style */
 #define P_LINE_OPA 134  /* opa, style */
 #define P_LINE_ROUNDED 135  /* bool, style */
-#define P_LINE_DASH_WIDTH 136  /* int, style */
-#define P_LINE_DASH_GAP 137  /* int, style */
+#define P_LINE_DASH_WIDTH 136  /* int, style. 0..1024 px. */
+#define P_LINE_DASH_GAP 137  /* int, style. 0..1024 px. */
 #define P_ARC_COLOR 138  /* rgb, style */
 #define P_ARC_WIDTH 139  /* int, style */
 #define P_ARC_OPA 140  /* opa, style */
