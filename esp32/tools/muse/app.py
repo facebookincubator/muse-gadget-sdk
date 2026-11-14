@@ -232,7 +232,9 @@ def main():
             elif args.event:
                 f = command(board, "app.event=" + args.event)
             elif args.vm:
-                f = command(board, "app.run=" + args.vm, 60)
+                # A path the console can tell from an installed app's id: a folder ends in "/".
+                vm = args.vm if "/" in args.vm or args.vm.endswith(".wasm") else args.vm + "/"
+                f = command(board, "app.run=" + word(vm), 60)
             elif args.install:
                 # The console's "app.install=ID[:ICON:COLOR] PATH [NAME]", ID "-" for the manifest's:
                 # always with an ID, since a bare path's word is limited to an ID's 63 bytes.
