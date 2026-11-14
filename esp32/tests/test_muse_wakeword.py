@@ -574,7 +574,13 @@ class WakeWordFirmwareContract(unittest.TestCase):
         kconfig = (WW / 'Kconfig').read_text()
         enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_SENSITIVITY')
         self.assertIn('depends on SPIRAM && !MUSE_UI_FREEINK', enable)
-        self.assertIn('has not been measured', enable)   # no invented false-alarm figure
+        self.assertIn('about 34 false wakes an hour', enable)   # the checkpoint's own figures
+        self.assertIn('has not been measured on a device', enable)
+        readme = (WW / 'models/README.md').read_text()
+        self.assertIn('| Default | 0.95 | 78.7% | 33.8 |', readme)
+        detector = (WW / 'ww_detector.c').read_text()
+        for value in ('0.99f', '0.95f', '0.90f'):   # the thresholds the help quotes
+            self.assertIn(value, detector)
         self.assertNotIn('research checkpoint', enable)
 
     def test_serial_keys_and_off_by_default(self):
@@ -668,6 +674,21 @@ int main(int argc, char **argv) {
         return off == N && g_count == whole_count &&
             !memcmp(whole, g_frames, sizeof(whole)) ? 0 : 1;
     }
+    if (!strcmp(mode, "sensitivity")) {
+        /* The Kconfig choice reaches the threshold: 0.97 wakes at Default
+         * and High, never at Low. */
+        const ww_sensitivity_t levels[] = { WW_SENSITIVITY_LOW, WW_SENSITIVITY_DEFAULT, WW_SENSITIVITY_HIGH };
+        for (int l = 0; l < 3; l++) {
+            ww_detector_t det;
+            ww_detector_init(&det, levels[l]);
+            int fired = 0;
+            for (int i = 0; i < WW_DETECTOR_WARMUP_FRAMES + WW_DETECTOR_SMOOTH_FRAMES; i++)
+                fired += ww_detector_push(&det, 0.97f);
+            printf("%d", fired);
+        }
+        printf("\n");
+        return 0;
+    }
     if (!strcmp(mode, "detector")) {
         ww_detector_t det;
         ww_detector_init(&det, WW_SENSITIVITY_DEFAULT);
@@ -715,6 +736,9 @@ int main(int argc, char **argv) {
 
     def test_arbitrary_chunking_is_bit_identical(self):
         self.assertEqual(self.run_mode('split'), 'frames 9 equal 1')
+
+    def test_sensitivity_choice_sets_the_threshold(self):
+        self.assertEqual(self.run_mode('sensitivity'), '011')
 
     def test_detector_warmup_fire_and_cooldown(self):
         self.assertEqual(self.run_mode('detector'), 'detector ok')

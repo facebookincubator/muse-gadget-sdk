@@ -44,8 +44,12 @@ menu "Muse wake word"
             the wake word) and ends with that speech, the talk button,
             or 15 s. A detection with no speech after it sends nothing;
             one followed by speech sends a voice note, so a false
-            trigger near conversation uploads one. The false-alarm rate
-            of this model has not been measured on a device yet.
+            trigger near conversation uploads one. This checkpoint's own
+            streaming test (fp32, on its training bundle's test set)
+            reports about 34 false wakes an hour at Default sensitivity
+            (78.7% of wake words caught) and about 4 an hour at Low
+            (51.3%); High wasn't measured. The int8 model on the device
+            has not been measured on a device yet.
 
             Needs PSRAM: the audio buffers take about 112 KB and the
             ExecuTorch runner about 213 KB more (a 64 KB method arena,
@@ -59,17 +63,19 @@ menu "Muse wake word"
         default MUSE_WAKEWORD_SENSITIVITY_DEFAULT
         depends on MUSE_WAKEWORD_ENABLE
         help
-            Passed to the runner as a preset. Raw detection thresholds are
-            the runner's, never Kconfig values.
+            The detector's threshold on the smoothed wake posterior
+            (ww_detector.c): Low 0.99, Default 0.95, High 0.90. False wakes
+            per hour on the checkpoint's own fp32 streaming test: about 4
+            at Low and 34 at Default; High wasn't measured.
 
         config MUSE_WAKEWORD_SENSITIVITY_LOW
-            bool "Low (fewest false triggers)"
+            bool "Low (about 4 false wakes an hour)"
 
         config MUSE_WAKEWORD_SENSITIVITY_DEFAULT
-            bool "Default"
+            bool "Default (about 34 false wakes an hour)"
 
         config MUSE_WAKEWORD_SENSITIVITY_HIGH
-            bool "High (easiest to trigger)"
+            bool "High (easiest to trigger; not measured)"
     endchoice
 
     choice MUSE_WAKEWORD_VAD
