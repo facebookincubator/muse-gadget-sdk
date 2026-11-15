@@ -152,9 +152,12 @@ bool muse_options_pending(void)
 
 bool muse_options_waiting(void)
 {
+    /* Only an answer on its way keeps the connection open. An unanswered
+     * question goes stale when the idle connection closes (and Voice PE-style
+     * builds without a picker can never answer one). */
     portENTER_CRITICAL(&s_lock);
-    bool waiting = s_question && (s_question->status == MUSE_OPTIONS_READY ||
-                    s_question->status == MUSE_OPTIONS_QUEUED || s_question->status == MUSE_OPTIONS_SENDING);
+    bool waiting = s_question && (s_question->status == MUSE_OPTIONS_QUEUED ||
+                    s_question->status == MUSE_OPTIONS_SENDING);
     portEXIT_CRITICAL(&s_lock);
     return waiting;
 }

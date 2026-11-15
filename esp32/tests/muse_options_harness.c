@@ -33,11 +33,13 @@ static void basic(void)
     assert(q.count == 3 && q.selected == -1 && q.state_version == 3);
     assert(!strcmp(q.labels[1], "寿司") && !strcmp(q.question, "Which meal?"));
     assert(!muse_options_request(q.generation, -1) && !muse_options_request(q.generation, 3));
+    assert(!muse_options_waiting()); /* an unanswered question doesn't hold the connection */
     assert(muse_options_request(q.generation, 1));
+    assert(muse_options_waiting());
     assert(!muse_options_request(q.generation, 0));
     receive(root); /* duplicate full row cannot reopen an answer */
     assert(muse_options_pending() && muse_options_take(&taken) && !muse_options_take(&taken));
-    assert(taken.selected == 1);
+    assert(taken.selected == 1 && muse_options_waiting());
     cJSON *body = muse_options_chat_body(&taken, "interaction-test");
     assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "message")), "寿司"));
     cJSON *origin = cJSON_GetObjectItem(cJSON_GetObjectItem(body, "metadata"), "message_origin");
@@ -50,6 +52,7 @@ static void basic(void)
     assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(body, "state"), "selectedText")), "寿司"));
     cJSON_Delete(body);
     muse_options_result(q.generation, MUSE_OPTIONS_SELECTED, false, "Save failed");
+    assert(!muse_options_waiting());
     receive(root);
     assert(view().status == MUSE_OPTIONS_SELECTED && !view().saved);
     assert(!muse_options_request(q.generation, 1));
@@ -123,7 +126,7 @@ static void encoded(void)
 static void state_events(void)
 {
     cJSON *root=fixture(); receive(root);
-    assert(muse_options_waiting());
+    assert(!muse_options_waiting());
     cJSON *event=cJSON_Parse("{\"host_message_id\":\"assistant-1\",\"widget_id\":\"meal-1\",\"state\":{\"version\":4,\"data\":{\"selectedText\":\"Salad\"}}}");
     assert(muse_options_receive(event));
     assert(view().selected==2 && view().saved && !muse_options_waiting());
