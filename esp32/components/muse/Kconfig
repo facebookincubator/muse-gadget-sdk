@@ -123,7 +123,6 @@ menu "Muse"
             bool "M5Stack AtomS3 + Atomic Voice Base (ESP32-S3, no PSRAM)"
             depends on IDF_TARGET_ESP32S3
 
-
         config MUSE_BOARD_M5STACK_STICKS3
             bool "M5Stack StickS3 (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
