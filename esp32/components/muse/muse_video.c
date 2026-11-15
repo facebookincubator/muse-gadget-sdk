@@ -1181,14 +1181,16 @@ void muse_video_end(const muse_video_transport_t *t)
 
 void muse_video_open(void)
 {
-#if CONFIG_MUSE_APP_VIEW
-    muse_app_view_preempt(MUSE_APP_STOP_VIDEO);
-#endif
     if (!muse_video_supported()) {
         return;
     }
     ESP_LOGI(TAG, "view open");
     s_open = true;
+#if CONFIG_MUSE_APP_VIEW
+    /* After s_open: an app view opening meanwhile sees the video and closes
+     * (muse_app_view_open), or is open and stops here. */
+    muse_app_view_preempt(MUSE_APP_STOP_VIDEO);
+#endif
     for (int i = 0; i < s_ntransports; i++) {
         if (s_transports[i]->request) {
             s_transports[i]->request(true);

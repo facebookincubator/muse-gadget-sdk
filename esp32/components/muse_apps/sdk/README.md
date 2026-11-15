@@ -70,7 +70,7 @@ that the physical gadget lacks a screen or sensors.
 |---|---|
 | `examples/hello.c` (1.3 KB built) | A greeting, a spinner and a seconds count; a tap or a button changes the colour. The starting point `MUSE.md` gives Muse |
 | `examples/stopwatch.c` (5 KB) | A big label in a ring that fills each minute; a tap or the talk button starts and stops it, the second button (or one on screen) takes laps and resets. It blinks while paused, and laps slide in |
-| `examples/chat.c` (6 KB) | Muse's chat in bubbles in a scrolling column, the reply growing as Muse writes it, and what Muse is doing at the top. The talk button still talks to Muse; the second button asks it for a joke |
+| `examples/chat.c` (6 KB) | Muse's chat in bubbles in a scrolling column, the reply growing as Muse writes it, and what Muse is doing at the top. The talk button still talks to Muse (with touch or a second button to close it); the second button asks it for a joke |
 | `examples/dashboard.c` (3 KB) | The battery, a motion chart from the accelerometer, a soil probe if there is one, Muse's latest reply, and a count kept between runs |
 | `examples/canvas_effects.c` | Canvas cards with rounded borders, gradients and shadows, reusing a shared style |
 
