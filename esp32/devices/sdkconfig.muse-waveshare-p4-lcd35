@@ -18,6 +18,8 @@
 # console is UART0 on the CH343 bridge; the C6 is an SDIO coprocessor.
 # Load after sdkconfig.defaults and devices/sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32p4"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-p4-lcd35"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5"
 CONFIG_MUSE_BOARD_WAVESHARE_P4_LCD35=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"

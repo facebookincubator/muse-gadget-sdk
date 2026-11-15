@@ -86,6 +86,7 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_ostb_echoear_2st.c")
     elseif(CONFIG_MUSE_BOARD_RETERMINAL_STICKY)
         list(APPEND srcs "boards/board_reterminal_sticky.c")
+        list(APPEND srcs "boards/board_reterminal_sticky_eink.cpp")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_216)
         list(APPEND srcs "boards/board_waveshare_s3_216.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_206)
@@ -100,6 +101,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_waveshare_s3_143.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_146)
         list(APPEND srcs "boards/board_waveshare_s3_146.c" "boards/muse_lcd_bands.c")
+    elseif(CONFIG_MUSE_BOARD_LILYGO_S3_AMOLED_175)
+        list(APPEND srcs "boards/board_lilygo_s3_amoled_175.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_ESP_MOSAICO)
         list(APPEND srcs "boards/board_esp_mosaico.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_DFROBOT_UNIHIKER_K10)
@@ -108,6 +111,8 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_aipi.c")
     elseif(CONFIG_MUSE_BOARD_ATK_DNESP32S3_BOX)
         list(APPEND srcs "boards/board_atk_dnesp32s3_box.c")
+    elseif(CONFIG_MUSE_BOARD_ATK_DNESP32S3_BOX2)
+        list(APPEND srcs "boards/board_atk_dnesp32s3_box2.c")
     elseif(CONFIG_MUSE_BOARD_ESPRESSIF_BOX_3)
         list(APPEND srcs "boards/board_espressif_box_3.c" "boards/box_3_microphone.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_C6_18)
@@ -181,6 +186,12 @@ if(CONFIG_MUSE_ENABLED)
             list(APPEND srcs "muse_video_wifi.c" "muse_video_wire.c")
         endif()
     endif()
+    if(CONFIG_CAPABILITIES_REGISTRY)
+        list(APPEND srcs "board_capabilities.c")    # the battery as a device for apps (components/capabilities_registry)
+    endif()
+    if(CONFIG_MUSE_APP_VIEW)
+        list(APPEND srcs "muse_app_view.c")   # the screen an app draws on (components/muse_apps)
+    endif()
     # Shared core, independent of board selection. Keep it after the BSP so
     # Watcher's independently retained recovery markers keep their link order.
     if(CONFIG_MUSE_POWER_TEST)
@@ -202,7 +213,7 @@ endif()
 set(muse_priv_requires
     esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
     bt esp-tls mbedtls esp_app_format esp_http_client
-    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8
+    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8 capabilities_registry
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt efuse
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved

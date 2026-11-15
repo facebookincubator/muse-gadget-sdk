@@ -21,6 +21,8 @@
 # is not used by the status backend. 4 MB flash leaves no room for OTA: single
 # factory app slot (see partitions_cyd_4mb.csv).
 CONFIG_IDF_TARGET="esp32"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-esp32-2432s028"
+CONFIG_MUSE_DEVICE_MODEL_NAME="ESP32-2432S028 Cheap Yellow Display"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # CYD ILI9341 status display; no status LED: the display shows the status

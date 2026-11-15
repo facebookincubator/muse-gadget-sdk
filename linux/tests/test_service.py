@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import os
+import re
 import stat
 import tempfile
 import time
@@ -26,10 +28,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from musegadget import config, muse_api, service as service_module
+from musegadget import commands, config, device_guide, muse_api, service as service_module
 from musegadget.executor import Account, Executor
 from musegadget.identity import Identity
-from musegadget.link_client import MAX_IMAGE_BYTES, DeviceDescription, Outcome
+from musegadget.link_client import (
+    MAX_CONTROL_MESSAGE_BYTES, MAX_IMAGE_BYTES, REGISTER_ID_BYTES, DeviceDescription, Outcome, encode_message,
+)
 from musegadget.noise import ApplicationResponse, ServiceFrame
 from musegadget.service import MAX_LOCAL_REQUEST, Backoff, Service
 
@@ -216,8 +220,8 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
                 assert register["method"] == "link.register"
                 assert register["params"] == {
                     "node_id": "homelink-000001", "display_name": "Lamp", "version": "2.0",
-                    "platform": "linux", "device_family": "homehub", "model_id": "linux",
-                    "is_wakeup_supported": False,
+                    "platform": "linux", "device_family": "gadget", "model_id": "muse-gadget-linux",
+                    "metadata": {"model_name": "Linux gadget"}, "is_wakeup_supported": False,
                     "commands_v2": {"lamp.on": {"description": "Turn on the lamp", "required": {}, "optional": {}}},
                 }
                 await vm.send_message({"type": "res", "id": register["id"], "ok": True})
@@ -259,6 +263,75 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
 
     asyncio.run(bounded_scenario(scenario()))
     assert served == (["vm-1", "vm-1"] if failure else ["vm-1"])
+
+
+
+def test_the_service_describes_the_linux_client_with_its_guide():
+    async def describe():
+        return Service(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current())).describe()
+
+    params = asyncio.run(describe()).register_params()
+    assert params["commands_v2"]["device.guide"] == device_guide.SPEC
+    guide = device_guide.default_guide()
+    assert guide.startswith("# Linux gadget\n")
+    assert "Hatch" not in guide and len(guide.encode()) <= 2048
+    # The rules for this repository's guides (protocols/DEVICE.md, Guides in this repository).
+    assert not re.search(r"https?://|www\.|<[A-Za-z!/]|^\s*(```|~~~)|[\x00-\x09\x0b-\x1f\x7f-\x9f]", guide, re.M)
+    assert len(re.findall(r"^# ", guide, re.M)) == 1
+
+
+def test_the_service_sizes_drop_ins_with_its_own_model_and_guide():
+    # Drop-ins that overfill the registration budget: big ones, then smaller
+    # and smaller ones that pack what is left down to less than the model can add.
+    sizes = [4000] * 70 + [2 ** n for n in range(11, -1, -1) for _ in range(2)]
+    drop_ins = [commands.DropInCommand(f"pump.p{i:03d}", "x" * size, ("/bin/true",), {}, {}, 1000)
+                for i, size in enumerate(sizes)]
+    model = {"model_id": "z" * 64, "model_name": "~" * 128,
+             "guide": "# Acme Robot\n\n" + "x" * (device_guide.MAX_BYTES - 14)}
+
+    def register_bytes(device):
+        return len(encode_message(device.register_message("0" * REGISTER_ID_BYTES)))
+
+    async def describe(**model):
+        return Service(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current(), drop_ins),
+                       display_name="Robot", **model).describe()
+
+    default, robot = asyncio.run(describe()), asyncio.run(describe(**model))
+    assert MAX_CONTROL_MESSAGE_BYTES - register_bytes(default) < 150
+    # Changing what describe() returned would overflow; the service's own settings are sized.
+    assert register_bytes(dataclasses.replace(default, **model)) > MAX_CONTROL_MESSAGE_BYTES
+    assert register_bytes(robot) <= MAX_CONTROL_MESSAGE_BYTES
+    assert (robot.model_id, robot.model_name, robot.guide) == tuple(model.values())
+    assert robot.register_params()["commands_v2"]["device.guide"] == device_guide.SPEC
+    assert len(robot.commands) < len(default.commands)
+
+
+@pytest.mark.parametrize("field, value", [
+    ("model_id", "Acme Robot"), ("model_name", 'Acme "Robot"'), ("guide", ""),
+])
+def test_the_service_refuses_a_model_muse_would_not_take(field, value):
+    async def make():
+        Service(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current()), **{field: value})
+
+    with pytest.raises(ValueError):
+        asyncio.run(make())
+
+
+def test_an_invalid_description_fails_before_any_request(paired_device, monkeypatch):
+    def fetch(*args):
+        raise AssertionError("fetched VMs")
+
+    monkeypatch.setattr(muse_api, "fetch_vms_with_status", fetch)
+
+    class Robot(Service):
+        def describe(self):
+            return dataclasses.replace(super().describe(), model_id="Acme Robot")
+
+    async def scenario():
+        await Robot(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current())).run()
+
+    with pytest.raises(ValueError, match="model_id"):
+        asyncio.run(scenario())
 
 
 def test_cancelling_a_service_does_not_reconnect(paired_device):

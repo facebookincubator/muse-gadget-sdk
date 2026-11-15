@@ -27,6 +27,10 @@
 struct test_queue { muse_input_event_t items[64]; int n; } queue;
 static int scenario, frame, starts, ends, allocations, notes, writes, delivered, tail_reads;
 static int64_t clock_us;
+static float ring_values[32];
+static int ring_count, reply_step;
+static int64_t ring_times[32];
+static bool completion_press_injected;
 static int talk_edges;
 static bool talk_values[64];
 static int64_t talk_times[64];
@@ -93,7 +97,14 @@ BaseType_t xQueueReceive(QueueHandle_t q, void *p, TickType_t t) {
     return pdTRUE;
 }
 int64_t esp_timer_get_time(void) { return clock_us; }
-void vTaskDelay(int ms) { clock_us += (int64_t)ms*1000; }
+void vTaskDelay(int ms) {
+    clock_us += (int64_t)ms*1000;
+    if (scenario==47 && !completion_press_injected && ring_count &&
+        ring_values[ring_count-1]==1 && clock_us-ring_times[ring_count-1]>=50000) {
+        completion_press_injected=true;
+        push(MUSE_PTT_DOWN);
+    }
+}
 void *heap_caps_malloc(size_t n, unsigned caps) { (void)caps; ++allocations; return malloc(n); }
 void *heap_caps_realloc(void *p, size_t n, unsigned caps) { (void)caps; return realloc(p,n); }
 static int pokes;
@@ -109,7 +120,14 @@ void muse_state_set_level(float v) {
     level=v;
     if(frame<128) level_at[frame]=v;
 }
-void muse_state_set_progress(float v) { (void)v; }
+static bool ring_script;
+void muse_state_set_progress(float v) {
+    if (ring_script) {
+        assert(ring_count<32);
+        ring_values[ring_count]=v;
+        ring_times[ring_count++]=clock_us;
+    }
+}
 void muse_state_set_caption(const char *fmt,...) {
     va_list ap; va_start(ap,fmt); vsnprintf(caption,sizeof(caption),fmt,ap); va_end(ap);
 }
@@ -166,7 +184,24 @@ muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) {
     return ev;
 }
 bool muse_hatch_turn_caption(size_t x,char *p,size_t n) { (void)x;(void)p;(void)n;return false; }
-size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) { (void)p;(void)n;(void)ms;return 0; }
+float muse_turn_progress(size_t played,int *message) {
+    (void)played;
+    if (!ring_script) { *message=-1; return 0; }
+    *message=reply_step<=3 ? 0 : 1;
+    static const float fractions[]={0,.2f,.1f,1.f,.1f,.4f,.4f};
+    return fractions[reply_step];
+}
+size_t muse_hatch_turn_read(int16_t *p,size_t n,int ms) {
+    (void)ms;
+    if (!ring_script) return 0;
+    if (reply_step++<5) { for(size_t i=0;i<n;i++) p[i]=100; return n; }
+    if (scenario==46) push(MUSE_PTT_DOWN);
+    else {
+        hatch_end=scenario==45 ? MUSE_HATCH_EV_ERROR : MUSE_HATCH_EV_DONE;
+        hatch_end_text=scenario==44 ? "REPLY INCOMPLETE" : scenario==45 ? "LOST CONNECTION TO MUSE" : "";
+    }
+    return 0;
+}
 
 #if CONFIG_MUSE_REALTIME_VOICE
 static int pending_at_ready = -1;
@@ -598,6 +633,28 @@ int main(int argc,char **argv) {
     }
     if (scenario==9) {
         assert(ptt_held_on_waking()); assert(clock_us>=300000 && !delivered);
+        return 0;
+    }
+    if (scenario>=43 && scenario<=47) {
+        ring_script=true;
+        bool received;
+        assert(hatch_reply(&received, false)==(scenario==46 || scenario==47));
+        assert(ring_values[0]==0); /* Clear the previous recording's value. */
+        assert(ring_values[1]==.2f && ring_values[2]==.2f); /* Revised estimate can't rewind. */
+        assert(ring_values[3]==.99f && ring_values[4]==.99f); /* Next message keeps the ring near completion. */
+        if (scenario==43) {
+            assert(ring_values[ring_count-1]==1);
+            for(int i=1;i<ring_count;i++) assert(ring_values[i]>=ring_values[i-1]);
+            for(int i=0;i<ring_count-1;i++) assert(ring_values[i]<1);
+            assert(clock_us-ring_times[ring_count-1]>=300000);
+            assert(mode==MUSE_MODE_SPEAKING);
+        } else if (scenario==47) {
+            assert(completion_press_injected && ring_values[ring_count-1]==0);
+            assert(clock_us-ring_times[ring_count-2]<300000);
+        } else {
+            assert(ring_values[ring_count-1]==0);
+            for(int i=0;i<ring_count;i++) assert(ring_values[i]<1);
+        }
         return 0;
     }
     if (scenario==42) {

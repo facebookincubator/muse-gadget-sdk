@@ -14,8 +14,10 @@
 
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
+import os
 import re
 import socket
 import ssl
@@ -133,7 +135,7 @@ def test_the_table_matches_the_published_roots():
         assert tls.distrusted_name(der) == name
 
 
-def test_a_reissued_certificate_for_a_distrusted_key_is_refused(monkeypatch):
+def test_a_reissued_certificate_for_a_distrusted_key_is_recognised(monkeypatch):
     key = ec.generate_private_key(ec.SECP256R1())
     original = make_cert("Original", key, ca=True).public_bytes(Encoding.DER)
     reissue = make_cert("Reissue", key, ca=True).public_bytes(Encoding.DER)
@@ -144,61 +146,214 @@ def test_a_reissued_certificate_for_a_distrusted_key_is_refused(monkeypatch):
     assert tls.distrusted_name(CA("Unrelated").der) is None
 
 
-def test_system_roots_reads_the_ca_file_and_every_file_in_the_ca_directory(tmp_path, monkeypatch):
-    in_file, in_directory = CA("In file"), CA("In directory")
-    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(in_file.der))
+SERVER_AUTH = bytes.fromhex("06082b06010505070301")      # 1.3.6.1.5.5.7.3.1
+EMAIL_PROTECTION = bytes.fromhex("06082b06010505070304")  # 1.3.6.1.5.5.7.3.4
+
+
+def trusted_pem(cert_der: bytes, *, trust: bytes = b"", reject: bytes = b"") -> str:
+    """An OpenSSL ``TRUSTED CERTIFICATE`` trusted for ``trust`` and rejected for ``reject``."""
+    aux = b""
+    if trust:
+        aux += bytes([0x30, len(trust)]) + trust
+    if reject:
+        aux += bytes([0xA0, len(reject)]) + reject
+    body = base64.encodebytes(cert_der + bytes([0x30, len(aux)]) + aux).decode()
+    return f"-----BEGIN TRUSTED CERTIFICATE-----\n{body}-----END TRUSTED CERTIFICATE-----\n"
+
+
+def use_store(monkeypatch, cafile, capath) -> None:
+    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
+                        lambda: SimpleNamespace(cafile=cafile and str(cafile), capath=capath and str(capath)))
+
+
+def test_check_trust_store_reads_the_ca_file_and_the_hashed_files(tmp_path, monkeypatch):
+    (g3, g3_der), (comodo, comodo_der), (c1, c1_der), (_, c3_der) = published_roots()
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der)
+                                         + ssl.DER_cert_to_PEM_cert(g3_der))
     directory = tmp_path / "certs"
     (directory / "nested").mkdir(parents=True)
-    (directory / "root.pem").write_text(ssl.DER_cert_to_PEM_cert(in_directory.der))
+    (directory / "0a1b2c3d.0").write_text(ssl.DER_cert_to_PEM_cert(g3_der))
+    (directory / "4e5f6a7b.0").write_text(trusted_pem(comodo_der, reject=SERVER_AUTH))
+    (directory / "5c8f9a0b.R1").write_text(ssl.DER_cert_to_PEM_cert(c1_der))
+    # OpenSSL never looks up other files, such as a distro's own trust bundle.
+    (directory / "ca-bundle.trust.crt").write_text(ssl.DER_cert_to_PEM_cert(c3_der))
     (directory / "README").write_text("not a certificate\n")
-    monkeypatch.setattr(tls.ssl, "get_default_verify_paths", lambda: SimpleNamespace(
-        cafile=str(tmp_path / "bundle.pem"), capath=str(directory)))
-    assert sorted(tls.system_roots()) == sorted([in_file.der, in_directory.der])
+    use_store(monkeypatch, tmp_path / "bundle.pem", directory)
+    assert tls.check_trust_store() == sorted([g3, comodo, c1])
 
 
-def test_system_roots_without_a_ca_file_or_directory_is_empty(monkeypatch):
-    monkeypatch.setattr(tls.ssl, "get_default_verify_paths",
-                        lambda: SimpleNamespace(cafile=None, capath=None))
-    assert tls.system_roots() == []
+def test_check_trust_store_reads_every_directory_ssl_cert_dir_lists(tmp_path, monkeypatch):
+    (g3, g3_der), (comodo, comodo_der), _, _ = published_roots()
+    one, two = tmp_path / "one", tmp_path / "two"
+    one.mkdir()
+    two.mkdir()
+    (one / "0a1b2c3d.0").write_text(ssl.DER_cert_to_PEM_cert(g3_der))
+    (two / "4e5f6a7b.0").write_text(ssl.DER_cert_to_PEM_cert(comodo_der))
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "absent.pem"))
+    monkeypatch.setenv("SSL_CERT_DIR", f"{one}{os.pathsep}{two}")
+    assert tls.check_trust_store() == sorted([g3, comodo])
 
 
-def test_the_client_context_refuses_a_distrusted_root_and_trusts_the_rest(tmp_path, monkeypatch):
-    good, bad = CA("Good root"), CA("Bad root")
-    monkeypatch.setattr(tls, "DISTRUSTED_ROOTS", (("Bad root", "0" * 64, spki_sha256(bad.key.public_key())),))
-    monkeypatch.setattr(tls, "system_roots", lambda: [good.der, bad.der])
-    context = tls._build_context()
-    assert context.get_ca_certs(binary_form=True) == [good.der]
+def test_check_trust_store_tells_a_clean_store_from_an_unreadable_one(tmp_path, monkeypatch):
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    use_store(monkeypatch, tmp_path / "bundle.pem", None)
+    assert tls.check_trust_store() == []
+    assert tls.trust_store_problem() is None
+    (tmp_path / "empty").mkdir()
+    for cafile, capath in ((None, None), (None, tmp_path / "empty"),
+                           (tmp_path / "absent.pem", tmp_path / "absent")):
+        use_store(monkeypatch, cafile, capath)
+        assert tls.check_trust_store() is None
+        assert tls.trust_store_problem() == "can't read the system trust store"
+
+
+def test_a_directory_that_cant_be_listed_makes_the_store_unreadable(tmp_path, monkeypatch):
+    # OpenSSL opens hashed files by name, so it might read a root from a
+    # directory this check can't list.
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    (tmp_path / "certs").mkdir()
+    real_scandir = tls.os.scandir
+
+    def scandir(path):
+        if str(path) == str(tmp_path / "certs"):
+            raise PermissionError(path)
+        return real_scandir(path)
+
+    monkeypatch.setattr(tls.os, "scandir", scandir)
+    use_store(monkeypatch, tmp_path / "bundle.pem", tmp_path / "certs")
+    assert tls.check_trust_store() is None
+
+
+@pytest.mark.parametrize("variable,value", [
+    ("SSL_CERT_DIR", "file:///etc/ssl/legacy.pem"),
+    ("SSL_CERT_DIR", "{tmp}/bundle.pem"),
+    ("SSL_CERT_URI", "file:///etc/ssl/certs"),
+])
+def test_an_openssl_store_the_check_cant_read_makes_the_store_unreadable(tmp_path, monkeypatch,
+                                                                         variable, value):
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    (tmp_path / "certs").mkdir()
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "bundle.pem"))
+    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "certs"))
+    monkeypatch.delenv("SSL_CERT_URI", raising=False)
+    assert tls.check_trust_store() == []
+    monkeypatch.setenv(variable, value.format(tmp=tmp_path))
+    assert tls.check_trust_store() is None
+
+
+def test_a_hashed_file_that_doesnt_load_makes_the_store_unreadable(tmp_path, monkeypatch):
+    # OpenSSL's directory lookup reads certificates one at a time and skips
+    # other entries, so it may take a root from a file that fails to load here.
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der))
+    directory = tmp_path / "certs"
+    directory.mkdir()
+    damaged = (ssl.DER_cert_to_PEM_cert(published_roots()[0][1])
+               + "-----BEGIN X509 CRL-----\nMAA=\n-----END X509 CRL-----\n")
+    use_store(monkeypatch, tmp_path / "bundle.pem", directory)
+    for name in ("14bc7599.0", "14BC7599.1"):     # OpenSSL's store loader ignores case
+        (directory / name).write_text(damaged)
+        assert tls.check_trust_store() is None
+        (directory / name).unlink()
+    (directory / "README").write_text(damaged)    # never looked up
+    assert tls.check_trust_store() == []
+
+
+def test_the_client_context_refuses_an_unsafe_trust_store(tmp_path, monkeypatch):
+    monkeypatch.setattr(tls, "_context", None)
+    for problem in ("can't read the system trust store",
+                    "the system trust store still trusts emSign ECC Root CA - G3"):
+        monkeypatch.setattr(tls, "trust_store_problem", lambda: problem)
+        with pytest.raises(tls.TrustStoreError, match=f"{problem}; {tls.FIX}"):
+            tls.client_context()
+        assert tls._context is None
+
+
+def test_the_client_context_is_the_system_trust_store(tmp_path, monkeypatch):
+    # The distro's trust settings apply as OpenSSL reads them: a root trusted
+    # only for email, or rejected for TLS, doesn't anchor a server certificate.
+    plain, tls_root, email_only, rejected = CA("Plain"), CA("TLS"), CA("Email only"), CA("Rejected")
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_text(ssl.DER_cert_to_PEM_cert(plain.der)
+                      + trusted_pem(tls_root.der, trust=SERVER_AUTH)
+                      + trusted_pem(email_only.der, trust=EMAIL_PROTECTION)
+                      + trusted_pem(rejected.der, reject=SERVER_AUTH))
+    (tmp_path / "certs").mkdir()
+    monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
+    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "certs"))
+    monkeypatch.setattr(tls, "_context", None)
+    assert tls.trust_store_problem() is None
+    context = tls.client_context()
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
-
-    handshake(context, server_context(good, tmp_path))
-    with pytest.raises(ssl.SSLCertVerificationError):
-        handshake(context, server_context(bad, tmp_path))
-
-
-def test_no_system_roots_falls_back_to_default_trust_with_a_warning(monkeypatch, caplog):
-    monkeypatch.setattr(tls, "system_roots", lambda: [])
-    context = tls._build_context()
-    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
-    assert "found no system root CAs" in caplog.text
-
-
-def test_a_store_of_only_distrusted_roots_trusts_nothing(monkeypatch):
-    der = published_roots()[0][1]
-    monkeypatch.setattr(tls, "system_roots", lambda: [der])
-    context = tls._build_context()
-    assert context.get_ca_certs() == []
-    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+    for ca in (plain, tls_root):
+        handshake(context, server_context(ca, tmp_path))
+    for ca in (email_only, rejected):
+        with pytest.raises(ssl.SSLCertVerificationError):
+            handshake(context, server_context(ca, tmp_path))
 
 
 def test_the_client_context_is_built_once(monkeypatch):
     built = []
     monkeypatch.setattr(tls, "_context", None)
-    monkeypatch.setattr(tls, "_build_context", lambda: built.append(object()) or built[-1])
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: None)
+    monkeypatch.setattr(tls.ssl, "create_default_context", lambda: built.append(object()) or built[-1])
     assert tls.client_context() is tls.client_context()
     assert len(built) == 1
 
 
-def test_distrusted_system_roots_names_each_root_once(monkeypatch):
-    g3 = published_roots()[0][1]
-    monkeypatch.setattr(tls, "system_roots", lambda: [g3, CA("Fine").der, g3])
-    assert tls.distrusted_system_roots() == ["emSign ECC Root CA - G3"]
+UNSAFE = ("can't read the system trust store",
+          "the system trust store still trusts emSign ECC Root CA - G3")
+
+
+@pytest.mark.parametrize("problem", UNSAFE)
+@pytest.mark.parametrize("argv", [["run"], ["pair"], ["voice-call", "--vm-id", "vm-1"]])
+def test_commands_that_connect_refuse_to_start_on_an_unsafe_trust_store(monkeypatch, capsys, argv, problem):
+    from unittest.mock import Mock
+
+    from musegadget import cli, muse_api, service
+
+    connect = Mock(side_effect=AssertionError("must not start"))
+    for module, name in ((muse_api, "fetch_vms_with_status"), (service, "run_service")):
+        monkeypatch.setattr(module, name, connect)
+    monkeypatch.setattr(tls, "_context", None)
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: problem)
+    assert cli.main(argv) == cli.EXIT_TRUST_STORE == 78
+    output = capsys.readouterr()
+    assert problem in output.err and tls.FIX in output.err
+    assert "Setup open" not in output.out
+    connect.assert_not_called()
+
+
+def test_the_service_checks_the_trust_store_before_connecting(monkeypatch):
+    import asyncio
+    from unittest.mock import Mock
+
+    from musegadget import config, muse_api
+    from musegadget.executor import Account, Executor
+    from musegadget.identity import Identity
+    from musegadget.service import Service
+
+    connect = Mock(side_effect=AssertionError("must not connect"))
+    monkeypatch.setattr(muse_api, "fetch_vms_with_status", connect)
+    monkeypatch.setattr(config, "load_json", connect)    # the first step of each connection
+    monkeypatch.setattr(tls, "_context", None)
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: UNSAFE[1])
+
+    async def run() -> None:
+        await Service(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current())).run()
+
+    with pytest.raises(tls.TrustStoreError):
+        asyncio.run(run())
+    connect.assert_not_called()
+
+
+def test_pairing_checks_the_trust_store_before_opening_setup(monkeypatch):
+    from unittest.mock import Mock
+
+    from musegadget import pair
+
+    on_open = Mock()
+    monkeypatch.setattr(tls, "_context", None)
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: UNSAFE[0])
+    with pytest.raises(tls.TrustStoreError):
+        pair.pair(on_open=on_open)
+    on_open.assert_not_called()
