@@ -2931,14 +2931,14 @@ void app_run(void) {
         ui_set_ble("companion");
 #endif
 #if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43 && \
-    !CONFIG_MUSE_BOARD_WAVESHARE_S3_175
+    !CONFIG_MUSE_BOARD_WAVESHARE_S3_175 && !CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
         // so bring the stack up now; it stays silent until advertising is on.
         // The CrowPanel starts it lazily instead, after muse_app_run() has
-        // reserved its internal I2S DMA buffers. So does the 1.75: the idle
-        // stack leaves no 8 KB block for the muse_vm task and chat never
-        // connects (#351).
+        // reserved its internal I2S DMA buffers. So do the 1.75 and 1.75C:
+        // the idle stack leaves no 8 KB block for the muse_vm task and chat
+        // never connects (#351).
         start_ble_setup_server_if_needed();
 #endif
     }

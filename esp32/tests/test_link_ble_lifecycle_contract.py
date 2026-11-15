@@ -90,14 +90,17 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         companion = _function_body(source, "void app_ble_companion_set(bool advertise) {")
 
         # Boards that can't spare internal RAM at boot leave BLE down once
-        # paired: the 1.75's idle stack leaves no 8 KB block for muse_vm
-        # (issue 351). The settings switch still brings it up on demand.
+        # paired: the 1.75 and 1.75C's idle stack leaves no 8 KB block for
+        # muse_vm (issue 351). The settings switch still brings it up on demand.
         guard = next(
             line for line in body.replace("\\\n", " ").splitlines()
             if line.startswith("#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM")
         )
-        self.assertIn("!CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43", guard)
-        self.assertIn("!CONFIG_MUSE_BOARD_WAVESHARE_S3_175", guard)
+        # Whole terms: the 1.75's option is a prefix of the 1.75C's.
+        terms = guard.split()
+        self.assertIn("!CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43", terms)
+        self.assertIn("!CONFIG_MUSE_BOARD_WAVESHARE_S3_175", terms)
+        self.assertIn("!CONFIG_MUSE_BOARD_WAVESHARE_S3_175C", terms)
         self.assertIn("if (advertise) start_ble_setup_server_if_needed();", companion)
 
     def test_forgetting_phones_works_before_ble_starts(self) -> None:
