@@ -34,7 +34,7 @@ import socket
 import time
 from dataclasses import dataclass, field
 
-from musegadget import __version__, config, device_guide, muse_api
+from musegadget import __version__, config, device_guide, muse_api, tls
 from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import (
@@ -117,6 +117,7 @@ class Service:
         except ValueError as exc:
             log.error("invalid device description: %s", exc)
             raise
+        tls.client_context()    # raises tls.TrustStoreError before any connection
         backoff = Backoff()
         token_rejected = False
         while not self._stop.is_set():

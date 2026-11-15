@@ -61,7 +61,7 @@ bool ota_installed_by_vibe_mode(void) {
         && esp_ota_get_partition_description(factory, &vibe_mode) == ESP_OK
         && esp_ota_get_state_partition(running, &state) == ESP_OK
         && state == ESP_OTA_IMG_PENDING_VERIFY
-        // device.ota's own update, if one ever lands here, keeps its check.
+        // ota_start's own update, if one ever lands here, keeps its check.
         && !ota_verify_recorded_for_running();
 #else
     return false;
