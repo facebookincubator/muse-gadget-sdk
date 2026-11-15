@@ -212,6 +212,16 @@ static bool delete_unnamed(void) {
     return all;
 }
 
+// Whether sha's module is there at bytes. Only a missing file (ENOENT) or
+// another size says it isn't: a flash error (EIO) leaves it as listed.
+static bool module_there(const char *sha, double bytes) {
+    char file[224];
+    struct stat st;
+    app_path(file, sizeof(file), sha);
+    if (stat(file, &st) != 0) return errno != ENOENT;
+    return st.st_size == bytes;
+}
+
 static void forget_all(void) {
     for (int i = 0; i < s_count; i++) free(s_apps[i].ram);
     memset(s_apps, 0, sizeof(s_apps));
@@ -228,7 +238,7 @@ void muse_apps_catalog_open(const char *dir) {
     snprintf(path, sizeof(path), "%s/" CATALOG, s_dir);
     size_t len = 0;
     struct stat cat;
-    bool exists = stat(path, &cat) == 0;
+    bool exists = stat(path, &cat) == 0 || errno != ENOENT;
     char *text = (char *)read_all(path, CATALOG_MAX, &len);
     cJSON *root = text ? cJSON_Parse(text) : NULL;
     free(text);
@@ -245,11 +255,8 @@ void muse_apps_catalog_open(const char *dir) {
         const char *icon = cJSON_GetStringValue(cJSON_GetObjectItem(item, "icon"));
         const char *color = cJSON_GetStringValue(cJSON_GetObjectItem(item, "color"));
         cJSON *bytes = cJSON_GetObjectItem(item, "bytes");
-        char file[224];
-        struct stat st;
         if (id && name && sha && valid_id(id) && valid_sha(sha) && cJSON_IsNumber(bytes) && find(id) < 0 &&
-            s_count < MUSE_APPS_MAX && (app_path(file, sizeof(file), sha), stat(file, &st) == 0) &&
-            st.st_size == bytes->valuedouble) {
+            s_count < MUSE_APPS_MAX && module_there(sha, bytes->valuedouble)) {
             slot_t *s = &s_apps[s_count++];
             snprintf(s->e.id, sizeof(s->e.id), "%s", id);
             set_name(s->e.name, name);
@@ -426,8 +433,8 @@ const char *muse_apps_catalog_read(const char *id, uint8_t **out, size_t *len, c
         char path[224];
         struct stat st;
         app_path(path, sizeof(path), s->e.sha256);
-        if (stat(path, &st) == 0 && st.st_size == (off_t)s->e.bytes) {
-            /* there, but not read: no memory or a flash error, not damage */
+        if (stat(path, &st) == 0 ? st.st_size == (off_t)s->e.bytes : errno != ENOENT) {
+            /* there (or not known to be gone), but not read: no memory or a flash error, not damage */
             return fail(err, err_len, "no_memory", "couldn't read the app: try again");
         }
     } else if (!data) {

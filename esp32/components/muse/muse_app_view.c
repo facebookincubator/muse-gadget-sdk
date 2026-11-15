@@ -26,6 +26,9 @@
 #include "muse_link.h"
 #include "muse_state.h"
 #include "muse_voice.h"
+#if CONFIG_MUSE_VIDEO
+#include "muse_video.h"
+#endif
 
 static const char *TAG = "muse_app_view";
 
@@ -127,6 +130,15 @@ int muse_app_view_exit_button(void)
     return MUSE_APP_BUTTON_PRIMARY;
 }
 
+static bool video_open(void)
+{
+#if CONFIG_MUSE_VIDEO
+    return muse_video_is_open();
+#else
+    return false;
+#endif
+}
+
 bool muse_app_view_open(const muse_app_view_cbs_t *cbs)
 {
     if (!muse_board || !muse_board->display_lock) {
@@ -175,16 +187,17 @@ bool muse_app_view_open(const muse_app_view_cbs_t *cbs)
         esp_timer_stop(s_long_timer);
         esp_timer_stop(s_exit_timer);
         atomic_store(&s_open, true);
-        /* A call that started meanwhile found no view to stop (it checks after
-         * it's on, we after we are): its hang-up buttons stay its own. */
-        if (muse_voice_in_call()) {
+        /* A call or the video view that started meanwhile found no view to
+         * stop (each checks after it's on, we after we are): a call's hang-up
+         * buttons stay its own, and the video keeps the screen. */
+        if (muse_voice_in_call() || video_open()) {
             atomic_store(&s_open, false);
             lv_obj_delete(s_root);
             s_root = NULL;
         }
     }
     muse_app_view_unlock();
-    if (!s_root && !muse_voice_in_call()) {
+    if (!s_root && !muse_voice_in_call() && !video_open()) {
         ESP_LOGW(TAG, "no memory for the app's screen");
     }
     return s_root != NULL;
@@ -366,24 +379,38 @@ unsigned muse_app_view_buttons(unsigned ev)
             continue;
         }
         unsigned row = 1u << i;
-        if (!(bits & held[i].press) && !(atomic_load(&s_app_down) & row)) {
+        bool was_down = atomic_load(&s_app_down) & row;
+        if (!(bits & held[i].press) && !was_down) {
             /* Released after a press the app never got (one made before it
              * opened, holding push-to-talk or recording): the firmware's, so
              * the mic closes as it would without the app. */
             continue;
         }
         ev &= ~bits;
-        if ((bits & held[i].press) && muse_state_asleep()) {
+        bool press = bits & held[i].press, release = bits & held[i].release;
+        if (release && !was_down) {
+            /* Both edges in one poll with the button up for the app: a tap
+             * for it, and the release also reaches the firmware, ending a
+             * press it holds from before the app opened. */
+            ev |= held[i].release;
+        } else if (release) {
+            /* Both edges in one poll after the app's press: let go, then
+             * pressed again, so the release comes first and the new press is held. */
+            atomic_fetch_and(&s_app_down, ~row);
+            button_edge(held[i].button, false, true);
+            release = false;
+            if (!press) {
+                continue;
+            }
+        }
+        if (muse_state_asleep()) {
             muse_state_set_asleep(false); /* a press on a dark screen only wakes it */
             continue;
         }
-        if (bits & held[i].press) {
+        if (!release) {
             atomic_fetch_or(&s_app_down, row);
         }
-        if (bits & held[i].release) {
-            atomic_fetch_and(&s_app_down, ~row);
-        }
-        button_edge(held[i].button, bits & held[i].press, bits & held[i].release);
+        button_edge(held[i].button, true, release);
     }
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!(ev & keys[i].bit)) {
