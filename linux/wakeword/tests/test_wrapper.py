@@ -3,49 +3,56 @@
 # you may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
 # Distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
 
-"""Signal/wrapper tests without torch; opt in separately to real wheel tests."""
+"""The native Hey Muse library through musegadget.wakeword.
+
+Contract tests run anywhere. The rest need the library built by
+linux/wakeword/build.sh, found through MUSE_WAKEWORD_LIBRARY or the default
+build directory (CI builds it first), and skip without it. All audio here is
+self-made (tones and silence); MUSE_WAKEWORD_CLIPS can point at a directory
+of 16 kHz WAV files with known wake words for a local end-to-end run.
+"""
 
 from __future__ import annotations
 
-import ctypes
-import gc
+import ast
 import math
 import os
 import struct
 import sys
 import unittest
 import warnings
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(os.environ.get("MUSE_SDK_LINUX", Path(__file__).resolve().parents[2]))
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
-from musegadget.wakeword import (
+from musegadget.wakeword import (  # noqa: E402
     ResearchWakeWordWarning,
     WakeWordDetector,
     WakeWordUnavailableError,
-    _WheelModel,
+    _candidates,
 )
 
+MODEL = ROOT.parent / "esp32" / "components" / "muse_wakeword" / "models" / "hey_muse.pte"
 
-class ScriptedModel:
-    def __init__(self, path):
-        self.frames = 0
-        self.fail_at = None
-        self.error = RuntimeError("scripted wheel inference error")
-        self.closed = False
 
-    def posteriors(self, features):
-        self.frames += 1
-        if self.frames == self.fail_at:
-            raise self.error
-        return (1.0, 0.0, 0.0)
+def library_available() -> bool:
+    return any(path.is_file() for path in _candidates())
 
-    def reset(self):
-        self.frames = 0
 
-    def close(self):
-        self.closed = True
+def tones(seconds=6.0, rate=16000) -> bytes:
+    samples = []
+    for i in range(int(seconds * rate)):
+        t = i / rate
+        samples.append(int(7000 * math.sin(2 * math.pi * (250 + 150 * t) * t) * (int(t * 3) % 2)))
+    return struct.pack("<%dh" % len(samples), *samples)
+
+
+def detector(**options) -> WakeWordDetector:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ResearchWakeWordWarning)
+        return WakeWordDetector(**options)
 
 
 class ContractTests(unittest.TestCase):
@@ -57,194 +64,169 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(WakeWordUnavailableError):
             WakeWordDetector(model_path="/nonexistent/hey_muse.pte")
 
-    def test_missing_library_actionable(self):
-        with patch.dict(
-            os.environ, {"MUSE_WAKEWORD_LIBRARY": "/nonexistent/library.so"}
-        ):
-            with self.assertRaisesRegex(WakeWordUnavailableError, "build_signal.sh"):
+    def test_an_empty_model_file_is_refused_not_replaced(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
+            with self.assertRaises(WakeWordUnavailableError):
+                WakeWordDetector(model_path=f.name)
+
+    def test_missing_library_is_actionable(self):
+        with patch.dict(os.environ, {"MUSE_WAKEWORD_LIBRARY": "/nonexistent/library.so"}):
+            with self.assertRaisesRegex(WakeWordUnavailableError, "setup.sh"):
                 WakeWordDetector()
 
-    def test_import_is_lazy(self):
-        # No construction/import side effects: check the module in a fresh namespace.
-        import ast
+    def test_library_lookup_order(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MUSE_WAKEWORD_LIBRARY", None)
+            with patch.object(sys, "prefix", "/opt/env"):
+                found = _candidates()
+        self.assertEqual(found[0], Path("/opt/env/lib/musegadget/libmuse_wakeword.so"))
+        self.assertEqual(found[1].parts[-3:], ("wakeword", "build", "libmuse_wakeword.so"))
+        with patch.dict(os.environ, {"MUSE_WAKEWORD_LIBRARY": "/x/lib.so"}):
+            self.assertEqual(_candidates(), [Path("/x/lib.so")])
 
+    def test_import_loads_nothing(self):
         tree = ast.parse((ROOT / "src/musegadget/wakeword.py").read_text())
-        top_level_imports = [
-            node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))
-        ]
         modules = [
             node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
-            for node in top_level_imports
+            for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
         ]
-        self.assertNotIn("torch", modules)
-        self.assertNotIn("executorch.runtime", modules)
-
-
-class SignalWrapperTests(unittest.TestCase):
-    def setUp(self):
-        self.model_patch = patch("musegadget.wakeword._WheelModel", ScriptedModel)
-        self.model_patch.start()
-        self.addCleanup(self.model_patch.stop)
-        warning_context = warnings.catch_warnings()
-        warning_context.__enter__()
-        warnings.simplefilter("ignore", ResearchWakeWordWarning)
-        self.addCleanup(warning_context.__exit__, None, None, None)
-        self.detector = WakeWordDetector()
-        self.addCleanup(self.detector.close)
-        self.library = self.detector._library
-        self.library.ww_signal_frames_seen.argtypes = [ctypes.c_void_p]
-        self.library.ww_signal_frames_seen.restype = ctypes.c_uint64
-
-    def frames_seen(self):
-        return self.library.ww_signal_frames_seen(self.detector._handle)
-
-    def test_byte_chunking_reset_and_full_consumption_after_fire(self):
-        samples = [
-            int(5000 * math.sin(i * 2 * math.pi * 440 / 16000)) for i in range(16000)
+        for heavy in ("torch", "executorch", "executorch.runtime", "numpy"):
+            self.assertNotIn(heavy, modules)
+        top_level_calls = [
+            node for node in tree.body
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
         ]
-        pcm = struct.pack(f"<{len(samples)}h", *samples)
-        self.assertTrue(self.detector.feed(pcm))
-        self.assertEqual(self.frames_seen(), 49)
-        self.assertEqual(self.detector._model.frames, 49)
-        self.detector.reset()
-        chunk_fire = False
-        for start in range(0, len(pcm), 137):
-            chunk_fire |= self.detector.feed(pcm[start : start + 137])
-        self.assertTrue(chunk_fire)
-        self.assertEqual(self.frames_seen(), 49)
-        self.assertEqual(self.detector._model.frames, 49)
-        self.detector.feed(b"\x7f")
-        self.detector.reset()
-        self.assertFalse(self.detector.feed(b"\0" * 1023))
-        self.assertEqual(self.frames_seen(), 0)
-        self.assertFalse(self.detector.feed(b"\0"))
-        self.assertEqual(self.frames_seen(), 1)
+        self.assertEqual(top_level_calls, [])
 
-    def test_empty_and_closed(self):
-        self.assertFalse(self.detector.feed(b""))
-        with self.assertRaises(TypeError):
-            self.detector.feed(bytearray(640))
-        model = self.detector._model
-        self.detector.close()
-        self.detector.close()
-        self.assertTrue(model.closed)
-        self.assertIsNone(self.detector._callback)
-        for operation in (lambda: self.detector.feed(b""), self.detector.reset):
-            with self.assertRaisesRegex(RuntimeError, "closed"):
-                operation()
 
-    def test_repeated_reset(self):
-        for _ in range(10):
-            self.detector.reset()
-            self.assertFalse(self.detector.feed(bytes(640)))
-        self.assertEqual(self.frames_seen(), 0)
+@unittest.skipUnless(library_available(), "build the library with linux/wakeword/build.sh")
+class NativeLibraryTests(unittest.TestCase):
+    def test_tones_and_silence_never_wake(self):
+        with detector() as d:
+            self.assertFalse(d.feed(b"\0" * 64000))
+            self.assertFalse(d.feed(tones()))
 
-    def test_context_warning_and_cleanup(self):
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always", ResearchWakeWordWarning)
-            with WakeWordDetector(sensitivity="low") as detector:
-                self.assertFalse(detector.feed(bytes(640)))
-            self.assertEqual(len(caught), 1)
-            self.assertIn(
-                "not validated on real microphone recordings",
-                str(caught[0].message),
-            )
+    def test_split_samples_and_chunking_are_consistent(self):
+        pcm = tones()
+        with detector() as d:
+            whole = d.feed(pcm)
+            for size in (1, 3, 641, 32001):
+                d.reset()
+                fired = False
+                for start in range(0, len(pcm), size):
+                    fired |= d.feed(pcm[start:start + size])
+                self.assertEqual(fired, whole, size)
+
+    def test_construction_warns_about_synthetic_training(self):
+        with self.assertWarns(ResearchWakeWordWarning):
+            WakeWordDetector().close()
+
+    def test_close_is_idempotent_and_final(self):
+        d = detector()
+        d.close()
+        d.close()
         with self.assertRaises(RuntimeError):
-            detector.reset()
+            d.feed(b"\0\0")
+        with self.assertRaises(RuntimeError):
+            d.reset()
 
-    def test_warning_as_error(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", ResearchWakeWordWarning)
-            with self.assertRaises(ResearchWakeWordWarning):
-                WakeWordDetector()
-        gc.collect()
+    def test_input_must_be_bytes(self):
+        with detector() as d, self.assertRaises(TypeError):
+            d.feed(bytearray(4))
 
-    def test_callback_error_propagates_and_poison_requires_reset(self):
-        model = self.detector._model
-        model.fail_at = 3
-        with self.assertRaisesRegex(RuntimeError, "scripted wheel") as caught:
-            self.detector.feed(bytes(5000))
-        self.assertIs(caught.exception, model.error)
-        self.assertEqual(model.frames, 3)
-        with self.assertRaisesRegex(RuntimeError, "reset required"):
-            self.detector.feed(b"")
-        model.fail_at = None
-        self.detector.reset()
-        self.assertFalse(self.detector.feed(bytes(1024)))
-        self.assertEqual(model.frames, 1)
+    def test_the_shipped_model_loads_from_a_file_too(self):
+        with detector(model_path=MODEL) as d:
+            self.assertFalse(d.feed(tones()))
 
-    def test_callback_base_exception_not_swallowed(self):
-        self.detector._model.fail_at = 1
-        self.detector._model.error = KeyboardInterrupt("scripted cancellation")
-        with self.assertRaises(KeyboardInterrupt):
-            self.detector.feed(bytes(1024))
-        self.assertTrue(self.detector._poisoned)
+    def test_a_file_that_is_not_the_model_is_refused(self):
+        import tempfile
 
-    def test_failed_reset_keeps_stream_unavailable(self):
-        with patch.object(
-            self.detector._model, "reset", side_effect=OSError("model unreadable")
-        ):
-            with self.assertRaises(OSError):
-                self.detector.reset()
-        with self.assertRaisesRegex(RuntimeError, "reset required"):
-            self.detector.feed(b"")
-        self.detector.reset()
-        self.assertFalse(self.detector.feed(bytes(1024)))
+        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
+            f.write(MODEL.read_bytes()[:4096])
+            f.flush()
+            with self.assertRaises(WakeWordUnavailableError):
+                detector(model_path=f.name)
+
+    def test_the_environment_copy_is_found_without_an_override(self):
+        import shutil
+        import tempfile
+
+        built = next(path for path in _candidates() if path.is_file())
+        with tempfile.TemporaryDirectory() as prefix:
+            copy = Path(prefix) / "lib" / "musegadget" / "libmuse_wakeword.so"
+            copy.parent.mkdir(parents=True)
+            shutil.copyfile(built, copy)
+            environment = {k: v for k, v in os.environ.items() if k != "MUSE_WAKEWORD_LIBRARY"}
+            with patch.dict(os.environ, environment, clear=True), patch.object(sys, "prefix", prefix):
+                self.assertEqual(_candidates()[0], copy)
+                with detector() as d:
+                    self.assertFalse(d.feed(tones(1.0)))
+
+    def test_a_model_planning_huge_buffers_is_refused(self):
+        # forward's two planned buffers declared at 2 GiB and 2 GiB + 32,
+        # whose rounded sum wraps a 32-bit size_t.
+        import tempfile
+
+        data = bytearray(MODEL.read_bytes())
+        for offset, fmt, value in ((0x10, "<Q", 0x9D8), (0xC0, "<I", 0x8FC), (0x9BC, "<I", 3),
+                                   (0x9C0, "<q", 0), (0x9C8, "<q", 0x80000000), (0x9D0, "<q", 0x80000020)):
+            struct.pack_into(fmt, data, offset, value)
+        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
+            f.write(bytes(data))
+            f.flush()
+            with self.assertRaises(WakeWordUnavailableError):
+                detector(model_path=f.name)
+
+    def test_the_native_resampler_matches_the_python_filter(self):
+        from musegadget.wakeword_input import Pcm24To16
+
+        samples = []
+        for i in range(24000):
+            t = i / 24000
+            samples.append(int(12000 * math.sin(2 * math.pi * (300 + 3000 * t) * t)))
+        pcm = struct.pack("<%dh" % len(samples), *samples)
+        reference = struct.unpack("<%dh" % (len(pcm) // 3), Pcm24To16().feed(pcm)[: len(pcm) // 3 * 2])
+        with detector() as d:
+            for size in (2, 6, 642, 1920, len(pcm)):
+                resampler = d.resampler()
+                out = b"".join(resampler.feed(pcm[i:i + size]) for i in range(0, len(pcm), size))
+                got = struct.unpack("<%dh" % (len(out) // 2), out)
+                self.assertEqual(len(got), len(reference))
+                self.assertLessEqual(max(abs(a - b) for a, b in zip(got, reference)), 1, size)
+                resampler.reset()
+                self.assertEqual(resampler.feed(pcm[:1920]), out[:1280])
+                resampler.close()
+
+    def test_independent_instances_have_independent_state(self):
+        pcm = tones()
+        with detector() as a, detector() as b:
+            a.feed(pcm[: len(pcm) // 2])
+            self.assertEqual(b.feed(pcm), detector().feed(pcm))
 
 
 @unittest.skipUnless(
-    os.environ.get("MUSE_WAKEWORD_RUN_WHEEL_TESTS") == "1",
-    "requires explicit real-wheel test environment",
+    library_available() and os.environ.get("MUSE_WAKEWORD_CLIPS"),
+    "set MUSE_WAKEWORD_CLIPS to a directory of 16 kHz WAV clips with a wake word each",
 )
-class WheelRuntimeTests(unittest.TestCase):
-    def setUp(self):
-        warning_context = warnings.catch_warnings()
-        warning_context.__enter__()
-        warnings.simplefilter("ignore", ResearchWakeWordWarning)
-        self.addCleanup(warning_context.__exit__, None, None, None)
-
-    def test_synthetic_public_runtime_checker(self):
-        from musegadget.wakeword_check import check
-
-        report = check()
-        self.assertTrue(report["ok"])
-        self.assertEqual(report["synthetic_frames"], 300)
-        self.assertEqual(report["reset_replay"], "bit-identical")
-        self.assertEqual(report["independent_instances"], "bit-identical")
-
-    def test_actual_pcm_chunking(self):
-        with WakeWordDetector() as detector:
-            first = detector.feed(bytes(32000))
-            detector.reset()
-            second = False
-            for start in range(0, 32000, 137):
-                second |= detector.feed(bytes(min(137, 32000 - start)))
-            self.assertEqual(first, second)
-
-    def test_corrupt_model_fails_closed(self):
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "broken.pte"
-            path.write_bytes(b"not an ExecuTorch program")
-            with self.assertRaises(WakeWordUnavailableError):
-                WakeWordDetector(model_path=path)
-
-    def test_wheel_instances_do_not_share_history(self):
-        path = ROOT / "src/musegadget/data/wakeword/hey_muse_xnnpack.pte"
-        model = _WheelModel(path)
-        other = _WheelModel(path)
-        try:
-            features = [math.sin(i * 0.3) for i in range(40)]
-            reference = [model.posteriors(features) for _ in range(80)]
-            for index in range(80):
-                model.posteriors([0.0] * 40)
-                self.assertEqual(other.posteriors(features), reference[index])
-            model.reset()
-            self.assertEqual([model.posteriors(features) for _ in range(80)], reference)
-        finally:
-            model.close()
-            other.close()
+class ClipTests(unittest.TestCase):
+    def test_the_clips_wake_it(self):
+        # Detection isn't perfect: report how many clips woke it, and
+        # require most of them to.
+        clips = sorted(Path(os.environ["MUSE_WAKEWORD_CLIPS"]).glob("*.wav"))
+        self.assertTrue(clips)
+        caught = 0
+        with detector() as d:
+            for clip in clips:
+                with wave.open(str(clip)) as w:
+                    self.assertEqual((w.getframerate(), w.getnchannels(), w.getsampwidth()), (16000, 1, 2))
+                    pcm = w.readframes(w.getnframes())
+                d.reset()
+                caught += d.feed(pcm)
+        print(f"{caught} of {len(clips)} clips woke the detector", file=sys.stderr)
+        self.assertGreater(caught, len(clips) // 2)
 
 
 if __name__ == "__main__":

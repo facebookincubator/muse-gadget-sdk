@@ -92,7 +92,10 @@ class WakeWordInput:
         self._realtime = realtime
         self._room = asyncio.Event()
         self._room.set()
-        self._resampler = Pcm24To16()
+        # The detector's own native resampler when it has one: the Python
+        # filter costs far more CPU than detection itself.
+        native = getattr(detector, "resampler", None)
+        self._resampler = native() if callable(native) else Pcm24To16()
         self._wake = asyncio.Event()
         self._changed = asyncio.Event()
         self._queue = deque()
