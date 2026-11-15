@@ -21,7 +21,7 @@
 // dropped, and the first tap after a kept image shows the page it covered.
 // The runner extracts the production rendering and page task code into
 // page_render.inc and page_task.inc; FreeRTOS, the display, the download
-// slot and Muse's captions are fakes here.
+// slot and Muse's captions are fakes here; muse_text.c is the real one.
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "fonts/epaper_154g_caption_font.h"
 #include "image_fetch.h"
 #include "led_status.h"
 #include "muse_chat.h"
@@ -100,8 +101,6 @@ bool muse_hatch_turn_caption(size_t played, char *out, size_t cap) {
     return true;
 }
 
-void muse_text_to_ascii(char *s, size_t cap) { (void)s, (void)cap; }
-
 #include "page_render.inc"
 #include "page_task.inc"
 
@@ -140,6 +139,7 @@ static void image_drawn(void) {
 int main(void) {
     s_cache = s_cache_store;
     s_strip = s_strip_store;
+    muse_text_keep_latin();  // as voice_board_init() does
     static int page_task_handle;
     s_page_task = &page_task_handle;
     (void)page_task;
@@ -240,6 +240,14 @@ int main(void) {
     page_tap();
     assert(!page_serve());
     assert(s_draw_done == 3 && s_cache_shown == 0);
+
+    // Accented letters reach the page, which has them; curly quotes still
+    // get their stand-ins.
+    reset_counts();
+    turn_until_speaking("Caf\u00e9 \u201cma\u00f1ana\u201d");
+    speak_and_end();
+    assert(s_draw_done == 1);
+    assert(!strcmp(s_cache, "Caf\u00e9 \"ma\u00f1ana\""));
 
     // A one-page reply has nothing to turn.
     reset_counts();
