@@ -32,6 +32,9 @@
 #include "muse_state.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+#include "wg1200_card_prompt.h"
+#endif
 
 static const char *TAG = "muse_ble";
 
@@ -171,6 +174,10 @@ static void run_command(char *cmd)
         muse_settings_set_brightness(n);
     } else if (!strcmp(cmd, "sleep") && parse_int(v, 0, 3600, &n)) {
         muse_settings_set_sleep_s(n);
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    } else if (wg1200_card_prompt_command(cmd, v, &res)) {
+        /* card.prompt=, card.prompt+= and card.prompt? (swipe-down card) */
+#endif
     } else {
         res = "error: unknown command or bad value";
     }

@@ -34,6 +34,11 @@ void muse_settings_ui_tick(bool visible);
 /* True when a sub-page is open (the tileview must not steal horizontal swipes). */
 bool muse_settings_ui_in_subpage(void);
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+void muse_settings_ui_open_wg1200_page(const char *name);
+void muse_settings_ui_trigger_wg1200_weather_card(void);
+#endif
+
 #if LV_USE_SNAPSHOT
 /* Bench screenshots: opens a settings page by name ("home", "wifi", "muse",
  * "ble", "sound", "sleep", "battery", "power") on the next tick. */

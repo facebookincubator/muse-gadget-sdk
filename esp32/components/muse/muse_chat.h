@@ -162,6 +162,11 @@ size_t muse_hatch_turn_audio_wait(const int16_t *pcm, size_t frames, int wait_ms
  * press ends a typed turn; a typed turn is refused while a voice turn runs.
  */
 void muse_hatch_text_turn(char *text);
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+/* As muse_hatch_text_turn, and also drives the on-screen THINKING/SPEAKING
+ * avatar and paged reply captions on the WG1200 touchscreen. */
+void muse_chat_ui_text_turn(char *text);
+#endif
 void muse_hatch_text_cancel(void);
 
 /*

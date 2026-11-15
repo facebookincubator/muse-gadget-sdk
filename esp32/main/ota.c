@@ -232,6 +232,19 @@ static void ota_task(void *arg) {
     const char *ota_url = ctx->url;
     log_request_headers("ota download", "GET", ota_url, user_agent);
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    const esp_partition_t *next_part = esp_ota_get_next_update_partition(NULL);
+    if (!next_part || next_part->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0
+        || next_part->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY) {
+        ESP_LOGW(TAG, "WG1200 dual-boot safety: refusing OTA into WeatherXM partition (%s)",
+                 next_part ? next_part->label : "none");
+        emit(ctx, OTA_RESULT_SKIPPED,
+             "WG1200 dual-boot protects WeatherXM ota_0/factory partitions",
+             NULL, running);
+        goto done;
+    }
+#endif
+
     esp_http_client_config_t http_cfg = {
         .url = ota_url,
         .crt_bundle_attach = esp_crt_bundle_attach,
