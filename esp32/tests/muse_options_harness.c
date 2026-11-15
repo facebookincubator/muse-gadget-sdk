@@ -222,6 +222,25 @@ static void several_widgets_and_outer_id(void)
     assert(!muse_options_request(again.generation,0));      /* can't be answered twice */
     cJSON_Delete(root);
 }
+/* A late copy of an answered question never displaces a newer one or
+ * becomes answerable again. */
+static void late_answered_row(void)
+{
+    muse_options_clear();
+    cJSON *a=cJSON_Parse("{\"message_id\":\"m-a\",\"widgets\":[{\"widget_id\":\"a\",\"kind\":\"option\",\"data\":{\"options\":[\"Tea\",\"Coffee\"]}}]}");
+    cJSON *b=cJSON_Parse("{\"message_id\":\"m-b\",\"widgets\":[{\"widget_id\":\"b\",\"kind\":\"option\",\"data\":{\"options\":[\"Red\",\"Blue\"]}}]}");
+    receive(a);
+    muse_options_t q=view(), taken;
+    assert(muse_options_request(q.generation,0) && muse_options_take(&taken));
+    muse_options_result(q.generation,MUSE_OPTIONS_SELECTED,false,"Answer sent. Selection could not be saved.");
+    receive(b);
+    muse_options_t nb=view();
+    assert(!strcmp(nb.widget_id,"b") && nb.status==MUSE_OPTIONS_READY);
+    receive(a);   /* A's late canonical row, still unselected on the server */
+    muse_options_t now=view();
+    assert(!strcmp(now.widget_id,"b") && now.generation==nb.generation && now.status==MUSE_OPTIONS_READY);
+    cJSON_Delete(a); cJSON_Delete(b);
+}
 int main(int argc,char **argv)
 {
     assert(argc==2); int mode=atoi(argv[1]);
@@ -236,6 +255,7 @@ int main(int argc,char **argv)
     else if (mode==15) question_sources();
     else if (mode==16) transcript_question();
     else if (mode==17) several_widgets_and_outer_id();
+    else if (mode==18) late_answered_row();
     else return 2;
     return 0;
 }

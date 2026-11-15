@@ -71,6 +71,9 @@ class MuseOptions(unittest.TestCase):
     def test_several_widgets_keep_one_question_and_outer_message_id(self):
         self.run_case(17)
 
+    def test_late_row_of_an_answered_question_does_not_reopen_it(self):
+        self.run_case(18)
+
     def run_case(self, mode):
         result = subprocess.run([str(self.binary), str(mode)], capture_output=True, text=True,
                                 env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0:halt_on_error=1',
