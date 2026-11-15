@@ -93,4 +93,3 @@ Draw text over a frame you have pushed:
   http://doc.divoom-gz.com/web/#/12?page_id=196
 - Community command references are linked from the official doc index above;
   prefer the official docs when they disagree.
-
