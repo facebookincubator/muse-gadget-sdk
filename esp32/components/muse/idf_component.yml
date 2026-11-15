@@ -20,8 +20,7 @@ dependencies:
   espressif/esp-sr:
     version: "==2.5.2"
     rules:
-      - if: "target == esp32s3"
-      - if: "$CONFIG{MUSE_VOICE_SOFTWARE_AEC} == True"
+      - if: "$CONFIG{MUSE_VOICE_AEC_SR} == \"y\""
   # Video over Wi-Fi announces itself with it (muse_video_wifi.c).
   espressif/mdns:
     version: "^1.8"

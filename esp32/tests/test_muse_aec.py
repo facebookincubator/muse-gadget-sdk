@@ -26,6 +26,21 @@ class SoftwareAEC(unittest.TestCase):
             subprocess.run(command, check=True, capture_output=True, text=True)
             subprocess.run([binary], check=True, capture_output=True, text=True)
 
+    def test_esp_sr_rule_uses_a_symbol_every_build_defines(self):
+        # A rule on a symbol a build lacks (the AEC option without live calls,
+        # or on a Link-only build) stops the component manager.
+        muse = ROOT / 'components/muse'
+        manifest = (muse / 'idf_component.yml').read_text()
+        self.assertIn('if: "$CONFIG{MUSE_VOICE_AEC_SR} == \\"y\\""', manifest)
+        self.assertNotIn('$CONFIG{MUSE_VOICE_SOFTWARE_AEC}', manifest)
+        kc = (muse / 'Kconfig').read_text()
+        sym = kc[kc.index('config MUSE_VOICE_AEC_SR'):]
+        sym = sym[:sym.index('\n\n')]
+        self.assertNotIn('depends on', sym)
+        self.assertIn('default "n"', sym)
+        self.assertGreater(kc.index('config MUSE_VOICE_AEC_SR'),
+                           kc.index('endif', kc.index('config MUSE_VOICE_SOFTWARE_AEC')))
+
 
 if __name__ == '__main__':
     unittest.main()
