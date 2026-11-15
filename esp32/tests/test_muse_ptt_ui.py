@@ -19,11 +19,15 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
+# Unused functions are dropped at link time. Apple's linker spells that
+# -dead_strip and only makes position-independent executables on Apple silicon.
+LINK_GC = ['-Wl,-dead_strip'] if sys.platform == 'darwin' else ['-Wl,--gc-sections', '-no-pie']
 FAKE_HEADERS = [
     'esp_attr.h', 'esp_err.h', 'esp_heap_caps.h', 'esp_log.h', 'esp_timer.h',
     'esp_codec_dev.h', 'lvgl.h', 'driver/gpio.h', 'nvs.h', 'nvs_flash.h',
@@ -82,9 +86,9 @@ class StopWatchPTT(unittest.TestCase):
                 command = [*shlex.split(os.environ.get('CC', 'cc')), '-std=gnu11',
                            '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                            '-Wno-unused-variable', '-Wno-unused-function',
-                           '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
+                           '-ffunction-sections', '-fdata-sections', *LINK_GC,
                            '-g', '-O1', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-                           '-no-pie', '-include', str(ROOT / 'tests/host_compat.h'),
+                           '-include', str(ROOT / 'tests/host_compat.h'),
                            '-I', str(stage), str(source)]
                 if kind == 'voice' and realtime:
                     command.append(str(MUSE / 'muse_voice_call_core.c'))

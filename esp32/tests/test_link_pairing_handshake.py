@@ -32,6 +32,8 @@ import sys
 import tempfile
 import unittest
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -114,7 +116,7 @@ class LinkPairingHandshakeTest(unittest.TestCase):
                     command.extend([
                         str(ROOT / "tests/link_pairing_handshake_harness.c"),
                         str(ROOT / "main/pairing_transcript.c"),
-                        str(ROOT / "main/pairing_signer_policy.c"), str(cjson / "cJSON.c"),
+                        str(ROOT / "main/pairing_signer_policy.c"), *cjson_source(cjson),
                         *library_args, "-o", str(executable),
                     ])
                     run(command, temp)
