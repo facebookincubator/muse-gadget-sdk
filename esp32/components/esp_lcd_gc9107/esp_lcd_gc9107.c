@@ -76,7 +76,8 @@ esp_err_t esp_lcd_new_panel_gc9107(const esp_lcd_panel_io_handle_t io, const esp
         break;
     }
 #elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
-    // ESP-IDF 6.0 replaced rgb_endian with rgb_ele_order.
+    // Changed from the 2.0.0 release: ESP-IDF 6.0 replaced rgb_endian with
+    // rgb_ele_order.
     switch (panel_dev_config->rgb_ele_order) {
     case LCD_RGB_ELEMENT_ORDER_RGB:
         gc9107->madctl_val = 0;

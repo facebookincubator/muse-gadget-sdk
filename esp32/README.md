@@ -489,6 +489,14 @@ their upstream licenses:
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- The GC9107 initialization sequence in
+  [`components/muse/boards/board_m5stack_atoms3.c`](components/muse/boards/board_m5stack_atoms3.c),
+  from M5GFX's `Panel_GC9107` (LovyanGFX), is FreeBSD. See
+  [`devices/licenses/LovyanGFX.txt`](devices/licenses/LovyanGFX.txt).
+- [`components/esp_lcd_gc9107`](components/esp_lcd_gc9107), Espressif's GC9107
+  panel driver 2.0.0 from the ESP Component Registry with one change to build
+  on ESP-IDF 6, is Apache-2.0 under Espressif's copyright. See
+  [`components/esp_lcd_gc9107/license.txt`](components/esp_lcd_gc9107/license.txt).
 - [`components/muse/boards/viewe_smartring_display_init.h`](components/muse/boards/viewe_smartring_display_init.h),
   the SmartRing-Plus panel initialization table from VIEWE's BSP, is
   Apache-2.0 under VIEWE's copyright, as its header says.

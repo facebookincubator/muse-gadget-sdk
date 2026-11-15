@@ -12,8 +12,9 @@
  * https://github.com/m5stack/M5Unified
  * https://github.com/m5stack/M5GFX
  * https://docs.m5stack.com/en/atom/Atomic_Voice_Base
- * The GC9107 initialization table below follows M5GFX's Panel_GC9107 and
- * retains its upstream FreeBSD license; see the root README's attribution.
+ * The GC9107 initialization table below is adapted from M5GFX's
+ * Panel_GC9107 (LovyanGFX, FreeBSD); its notice is retained in
+ * devices/licenses/LovyanGFX.txt.
  */
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
