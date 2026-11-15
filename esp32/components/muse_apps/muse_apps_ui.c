@@ -704,7 +704,8 @@ static int32_t obj_set(slot_t *s, int32_t prop, int32_t v)
     case GADGET_P_HIDDEN: return set_flag(o, LV_OBJ_FLAG_HIDDEN, v);
     case GADGET_P_CLICKABLE: return set_flag(o, LV_OBJ_FLAG_CLICKABLE, v);
     case GADGET_P_SCROLLABLE: return set_flag(o, LV_OBJ_FLAG_SCROLLABLE, v);
-    case GADGET_P_CHECKABLE: return set_flag(o, LV_OBJ_FLAG_CHECKABLE, v);
+    case GADGET_P_CHECKABLE:   /* a slider checked on release would change its track mid-drag: slider_guard */
+        return s->type == GADGET_W_SLIDER && v ? GADGET_ERR_UNSUPPORTED : set_flag(o, LV_OBJ_FLAG_CHECKABLE, v);
     case GADGET_P_EVENT_BUBBLE: return set_flag(o, LV_OBJ_FLAG_EVENT_BUBBLE, v);
     case GADGET_P_FLOATING: return set_flag(o, LV_OBJ_FLAG_FLOATING, v);
     case GADGET_P_CHECKED: return set_state(o, LV_STATE_CHECKED, v);

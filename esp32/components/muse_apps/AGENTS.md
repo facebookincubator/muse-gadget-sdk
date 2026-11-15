@@ -170,8 +170,8 @@ reason in `app.status`. An app with a start function, `__post_instantiate`
 or `__wasm_call_ctors` (which WAMR would run before the limit applies), or
 callbacks not as `gadget.h` declares them, is refused. Objects' pixels are
 clamped to 4096 and shadows, radii and dashes to 64 px, and an object takes
-32 of the app's styles (shared ones plus `ui_style` selectors). Other counts
-and limits are in `api.json`.
+32 of the app's styles (shared ones plus `ui_style` selectors). A slider
+can't be made checkable. Other counts and limits are in `api.json`.
 
 Apps come from the person's own Muse, which writes them and asks before it
 makes one: they're trusted like Muse's commands, and WAMR's interpreter keeps

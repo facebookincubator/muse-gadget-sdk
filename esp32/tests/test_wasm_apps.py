@@ -758,6 +758,8 @@ class WasmAppsTest(unittest.TestCase):
         # Measured in the state LVGL measures it in: not pressed, on release.
         self.assertLess(guard.index("lv_obj_remove_state(o, LV_STATE_PRESSED);"), guard.index("lv_obj_get_height(o)"))
         self.assertIn("lv_obj_add_event_cb(o, slider_guard, LV_EVENT_ALL | LV_EVENT_PREPROCESS, NULL);", ui)
+        # LVGL toggles a checkable object's state on release, after the guard: no checkable sliders.
+        self.assertIn("s->type == GADGET_W_SLIDER && v ? GADGET_ERR_UNSUPPORTED : set_flag(o, LV_OBJ_FLAG_CHECKABLE, v);", ui)
 
     def test_unpair_records_the_apps_wipe_before_its_worker_starts(self):
         """A worker that can't start reboots: the wipe must already be recorded."""
