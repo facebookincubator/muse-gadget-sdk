@@ -14,6 +14,10 @@ local API.
 Verified working with Home Link on 2026-11-12 (a `Channel/GetIndex` call
 through the Link returned the device's current channel).
 
+## Prerequisites
+
+Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
+
 ## The API
 
 Every command is a JSON `POST` to a single endpoint on port 80:
@@ -38,7 +42,8 @@ it on every call; the device accepts some malformed requests silently.
 
 ### Show something
 
-Switch to the custom channel before pushing frames:
+Note the current channel (`Channel/GetIndex`) so you can switch back when
+asked, then switch to the custom channel before pushing frames:
 
 ```json
 {"Command":"Channel/SetIndex","SelectIndex":3}
@@ -79,8 +84,8 @@ Draw text over a frame you have pushed:
   over gallery or SD-card content.
 - **The local API has no authentication.** Anyone on the subnet can drive the
   display. Keep the device on a trusted LAN segment and never port-forward it.
-- Play a GIF from a URL only at 16×16, 32×32, or 64×64 (`Device/PlayTFGif`);
-  other sizes can crash the device, per Divoom's own documentation.
+- Use only the commands above. No reboot, settings, firmware or URL/SD-card
+  playback commands (such as `Device/PlayTFGif`).
 
 ## Sources
 
