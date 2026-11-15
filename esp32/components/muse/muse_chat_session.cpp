@@ -1786,7 +1786,7 @@ static void on_event(cJSON *line)
         int i = s_turn.phase == P_WAIT_REPLY && id ? find_msg(id) : -1;
         /* Done events can carry widgets without repeating the streamed text. */
         const char *text = i >= 0 && s_turn.msgs[i].len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
-        if (muse_options_receive_message(payload, text) && s_turn.text) {
+        if (muse_options_receive_message(payload, id, text) && s_turn.text) {
             /* Serial diagnostics expose only widget data, never credentials. */
             char *widgets = cJSON_PrintUnformatted(cJSON_GetObjectItem(payload, "widgets"));
             if (widgets) {

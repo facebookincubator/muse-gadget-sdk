@@ -50,8 +50,10 @@ void muse_options_result(uint32_t generation, muse_options_status_t status,
 /* Session-task JSON adapter; not linked into Link-only or simulator builds. */
 struct cJSON;
 bool muse_options_receive(const struct cJSON *payload);
-/* streamed_text must belong to this payload's message, never a previous reply. */
-bool muse_options_receive_message(const struct cJSON *payload, const char *streamed_text);
+/* message_id: the row's id when the event carries it outside the payload (or NULL).
+ * streamed_text must belong to this payload's message, never a previous reply. */
+bool muse_options_receive_message(const struct cJSON *payload, const char *message_id,
+                                  const char *streamed_text);
 struct cJSON *muse_options_chat_body(const muse_options_t *q, const char *interaction_id);
 struct cJSON *muse_options_state_body(const muse_options_t *q, const char *mutation_id);
 bool muse_options_state_response(const muse_options_t *q, const struct cJSON *response);

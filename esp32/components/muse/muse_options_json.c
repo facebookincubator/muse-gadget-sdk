@@ -81,7 +81,7 @@ static bool transcript_question(char *out, size_t cap, const cJSON *payload)
 }
 
 static bool receive_widget(const cJSON *widget, const char *message, const cJSON *payload,
-                           const char *streamed_text)
+                           const char *streamed_text, muse_options_t *out)
 {
     const char *kind = string(widget, "kind");
     if (!kind || strcmp(kind, "option")) return false;
@@ -120,7 +120,7 @@ static bool receive_widget(const cJSON *widget, const char *message, const cJSON
     if (!q.question[0] && !transcript_question(q.question, sizeof(q.question), payload)) {
         question_text(q.question, sizeof(q.question), streamed_text);
     }
-    if (ok) ok = muse_options_publish(&q);
+    if (ok) *out = q;
     cJSON_Delete(data_owned);
     cJSON_Delete(state_owned);
     return ok;
@@ -128,10 +128,10 @@ static bool receive_widget(const cJSON *widget, const char *message, const cJSON
 
 bool muse_options_receive(const cJSON *payload)
 {
-    return muse_options_receive_message(payload, NULL);
+    return muse_options_receive_message(payload, NULL, NULL);
 }
 
-bool muse_options_receive_message(const cJSON *payload, const char *streamed_text)
+bool muse_options_receive_message(const cJSON *payload, const char *message_id, const char *streamed_text)
 {
     const char *host = string(payload, "host_message_id"), *widget_id = string(payload, "widget_id");
     if (host && widget_id) {
@@ -157,12 +157,16 @@ bool muse_options_receive_message(const cJSON *payload, const char *streamed_tex
     }
     const char *id = string(payload, "message_id");
     if (!id) id = string(payload, "id");
+    if (!id) id = message_id;   /* the event can carry the row's id outside its payload */
+    /* One question is retained: publish only the message's last option widget,
+     * so replaying a row with several can't replace an answered question. */
     const cJSON *widgets = member(payload, "widgets"), *widget;
+    muse_options_t q = { .selected = -1 };
     bool found = false;
     cJSON_ArrayForEach(widget, widgets) {
-        if (receive_widget(widget, id, payload, streamed_text)) found = true;
+        if (receive_widget(widget, id, payload, streamed_text, &q)) found = true;
     }
-    return found;
+    return found && muse_options_publish(&q);
 }
 
 cJSON *muse_options_chat_body(const muse_options_t *q, const char *interaction_id)

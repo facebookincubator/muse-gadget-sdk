@@ -197,6 +197,31 @@ static void transcript_question(void)
     receive(root); assert(!strcmp(view().question,"What do you want for lunch?"));
     cJSON_Delete(root);
 }
+/* A row with several option widgets keeps one question, and replaying it
+ * never replaces or reopens the answered one. The row's id can also come
+ * from the event, outside the payload. */
+static void several_widgets_and_outer_id(void)
+{
+    muse_options_clear();
+    cJSON *root=cJSON_Parse("{\"widgets\":["
+        "{\"widget_id\":\"a\",\"kind\":\"option\",\"data\":{\"options\":[\"Tea\",\"Coffee\"]}},"
+        "{\"widget_id\":\"b\",\"kind\":\"option\",\"data\":{\"options\":[\"Red\",\"Blue\"]}}]}");
+    assert(!muse_options_receive_message(root,NULL,NULL));   /* no id anywhere: not actionable */
+    assert(muse_options_receive_message(root,"outer",NULL));
+    muse_options_t q=view();
+    assert(!strcmp(q.message_id,"outer") && !strcmp(q.widget_id,"b") && q.status==MUSE_OPTIONS_READY);
+    assert(muse_options_request(q.generation,1));
+    assert(muse_options_receive_message(root,"outer",NULL));  /* the same row again */
+    muse_options_t again=view();
+    assert(again.generation==q.generation && again.status==MUSE_OPTIONS_QUEUED && again.selected==1);
+    muse_options_t taken; assert(muse_options_take(&taken));
+    muse_options_result(q.generation,MUSE_OPTIONS_SELECTED,false,"");
+    assert(muse_options_receive_message(root,"outer",NULL));
+    again=view();
+    assert(again.generation==q.generation && again.status==MUSE_OPTIONS_SELECTED);
+    assert(!muse_options_request(again.generation,0));      /* can't be answered twice */
+    cJSON_Delete(root);
+}
 int main(int argc,char **argv)
 {
     assert(argc==2); int mode=atoi(argv[1]);
@@ -210,6 +235,7 @@ int main(int argc,char **argv)
     else if (mode==14) question_text();
     else if (mode==15) question_sources();
     else if (mode==16) transcript_question();
+    else if (mode==17) several_widgets_and_outer_id();
     else return 2;
     return 0;
 }

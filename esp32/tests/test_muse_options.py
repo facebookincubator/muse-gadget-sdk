@@ -68,6 +68,9 @@ class MuseOptions(unittest.TestCase):
     def test_canonical_transcript_question_excludes_user_and_nontext_blocks(self):
         self.run_case(16)
 
+    def test_several_widgets_keep_one_question_and_outer_message_id(self):
+        self.run_case(17)
+
     def run_case(self, mode):
         result = subprocess.run([str(self.binary), str(mode)], capture_output=True, text=True,
                                 env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0:halt_on_error=1',
