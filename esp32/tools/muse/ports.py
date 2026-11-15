@@ -146,7 +146,9 @@ def paced(port, ports=None):
 
 def command_ports(ports=None):
     """Ports of boards that take serial commands, USB Serial/JTAG first."""
-    kinds = dict.fromkeys(USB[b] for b in COMMANDS)
+    # One entry per USB device kind, so a kind that several boards share (or
+    # that a board lists beside another) yields each port once.
+    kinds = dict.fromkeys(u for b in COMMANDS for u in _usbs(USB[b]))
     return [p.device for usb in kinds for p in devices(usb, ports)]
 
 
