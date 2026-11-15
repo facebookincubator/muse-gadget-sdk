@@ -1,0 +1,46 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# WebAssembly apps (app.run), for any board with the full UI and
+# PSRAM, loaded after its own overlay:
+#   MUSE_APPS=1 tools/muse/board.sh build|flash <board>
+CONFIG_MUSE_WASM_APPS=y
+
+# WAMR's fast interpreter only: no AOT, no WASI and no threads. Apps
+# import only the gadget's host API
+# (components/muse_apps/sdk/gadget.h).
+CONFIG_WAMR_BUILD_RELEASE=y
+CONFIG_WAMR_ENABLE_INTERP=y
+CONFIG_WAMR_INTERP_FAST=y
+CONFIG_WAMR_INTERP_LOADER_NORMAL=y
+CONFIG_WAMR_ENABLE_AOT=n
+CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n
+CONFIG_WAMR_ENABLE_LIBC_WASI=n
+CONFIG_WAMR_ENABLE_LIB_PTHREAD=n
+CONFIG_WAMR_ENABLE_MULTI_MODULE=n
+CONFIG_WAMR_ENABLE_SHARED_MEMORY=n
+
+# The apps' fonts (FONT_ in apps/gadget.h): 14 to 28 px are the UI's already;
+# 48 px for big numbers.
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# Images for ui_image_set and ui_image_load: LVGL's PNG (lodepng) and JPEG
+# (TJpgDec) decoders, which the apps module calls once per image to decode it
+# into PSRAM (LVGL's image cache is off on these boards).
+CONFIG_LV_USE_LODEPNG=y
+CONFIG_LV_USE_TJPGD=y
+
+# The installed apps' filesystem keeps its buffers in PSRAM: internal RAM is
+# what audio's DMA and TLS need.
+CONFIG_LITTLEFS_MALLOC_STRATEGY_SPIRAM=y

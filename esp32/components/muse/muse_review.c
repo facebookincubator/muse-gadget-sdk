@@ -17,23 +17,27 @@
 #include "muse_review.h"
 
 #include <string.h>
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "muse_chat_priv.h"
 #include "muse_text.h"
 
-#define REVIEW_CAP (32 * 1024)
+#define REVIEW_CAP MUSE_REVIEW_CAP
 
 static SemaphoreHandle_t s_lock;
 static char *s_text;
 static uint32_t s_turn, s_next_turn, s_version;
-static bool s_have_turn, s_active;
+static bool s_have_turn, s_active, s_shortened, s_failed;
+static uint32_t s_content_version;
 static int s_page, s_pages;   /* s_pages: 0 until the text is paged */
 
 esp_err_t muse_review_init(void)
 {
-    s_lock = xSemaphoreCreateMutex();
+    if (!s_lock) s_lock = xSemaphoreCreateMutex();
     return s_lock ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
@@ -48,22 +52,38 @@ uint32_t muse_review_turn(void)
 
 void muse_review_store(uint32_t turn, const char *text)
 {
+    muse_review_store_complete(turn, text, false);
+}
+
+void muse_review_store_complete(uint32_t turn, const char *text, bool shortened)
+{
     if (!s_lock || !text || !text[0]) return;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (!s_text) s_text = heap_caps_malloc(REVIEW_CAP, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_failed = !s_text;
+#ifdef ESP_PLATFORM
+    if (s_failed) ESP_LOGW("muse_review", "reply storage allocation failed");
+#endif
     if (s_text) {
+        s_content_version++;
         bool fresh = !s_have_turn || turn != s_turn;
         s_version++;
         if (fresh) {
             s_text[0] = '\0';
+            s_shortened = false;
             s_turn = turn;
             s_have_turn = true;
             s_active = false;
             s_page = 0;
-        } else if (s_text[0]) {
+        } else if (s_text[0] && !s_shortened) {
             strlcat(s_text, "\n\n", REVIEW_CAP);
         }
-        strlcat(s_text, text, REVIEW_CAP);
+        if (!s_shortened) {
+            size_t used = strlen(s_text);
+            if (strlen(text) >= REVIEW_CAP - used) shortened = true;
+            strlcat(s_text, text, REVIEW_CAP);
+        }
+        s_shortened |= shortened;
         s_pages = 0;   /* steps before the next paging aren't clamped to the old count */
         /* Truncation must not leave half a UTF-8 character at the end. */
         size_t len = strlen(s_text);
@@ -75,6 +95,28 @@ void muse_review_store(uint32_t turn, const char *text)
             if (len - at < need) s_text[at] = '\0';
         }
     }
+    xSemaphoreGive(s_lock);
+}
+
+void muse_review_unavailable(void)
+{
+    if (!s_lock) return;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_failed = true;
+    xSemaphoreGive(s_lock);
+}
+
+void muse_review_snapshot(char *out, size_t cap, muse_review_snapshot_t *snapshot)
+{
+    *snapshot = (muse_review_snapshot_t){0};
+    if (out && cap) out[0] = '\0';
+    if (!s_lock) { snapshot->failed = true; return; }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    snapshot->revision = s_content_version;
+    snapshot->available = s_text && s_text[0];
+    snapshot->failed = s_failed;
+    snapshot->shortened = s_shortened;
+    if (out && cap && snapshot->available) strlcpy(out, s_text, cap);
     xSemaphoreGive(s_lock);
 }
 

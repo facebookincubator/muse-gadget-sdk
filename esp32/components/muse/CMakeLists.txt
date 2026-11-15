@@ -38,6 +38,12 @@ if(CONFIG_MUSE_ENABLED)
         "muse_lang.c"
         "muse_link.c"
         "muse_ble.c")
+    if(CONFIG_MUSE_BOARD_SENSECAP_WATCHER OR CONFIG_MUSE_LATEST_REPLY)
+        list(APPEND srcs "muse_review.c")
+    endif()
+    if(CONFIG_MUSE_LATEST_REPLY)
+        list(APPEND srcs "muse_latest_reply.c")
+    endif()
     if(CONFIG_MUSE_UI_FREEINK)
         # E-paper: FreeInk draws the face, Settings and the keyboard.
         list(APPEND srcs "eink/muse_eink_ui.cpp" "eink/muse_eink_settings.cpp" "eink/muse_eink_fonts.cpp")
@@ -51,6 +57,9 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
         if(CONFIG_MUSE_REALTIME_VOICE)
             list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
+            if(CONFIG_MUSE_VOICE_SOFTWARE_AEC)
+                list(APPEND srcs "muse_aec.c")
+            endif()
         endif()
     else()
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
@@ -122,12 +131,14 @@ if(CONFIG_MUSE_ENABLED)
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_C6_206)
         list(APPEND srcs "boards/board_waveshare_c6_206.c")
     elseif(CONFIG_MUSE_BOARD_SENSECAP_WATCHER)
-        list(APPEND srcs "boards/board_sensecap_watcher.c" "boards/muse_lcd_bands.c" "muse_review.c")
+        list(APPEND srcs "boards/board_sensecap_watcher.c" "boards/muse_lcd_bands.c")
         if(CONFIG_MUSE_WATCHER_CAMERA)
             list(APPEND srcs "boards/watcher_camera.c")
         endif()
     elseif(CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV)
         list(APPEND srcs "boards/board_m5stack_cardputer_adv.c")
+    elseif(CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
+        list(APPEND srcs "boards/board_m5stack_atoms3.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STICKS3)
         list(APPEND srcs "boards/board_m5stack_sticks3.c")
     elseif(CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43)
@@ -184,10 +195,19 @@ if(CONFIG_MUSE_ENABLED)
             list(APPEND srcs "muse_video_wifi.c" "muse_video_wire.c")
         endif()
     endif()
+    if(CONFIG_CAPABILITIES_REGISTRY)
+        list(APPEND srcs "board_capabilities.c")    # the battery as a device for apps (components/capabilities_registry)
+    endif()
+    if(CONFIG_MUSE_APP_VIEW)
+        list(APPEND srcs "muse_app_view.c")   # the screen an app draws on (components/muse_apps)
+    endif()
     # Shared core, independent of board selection. Keep it after the BSP so
     # Watcher's independently retained recovery markers keep their link order.
     if(CONFIG_MUSE_POWER_TEST)
         list(APPEND srcs "muse_power_test.c")
+        if(CONFIG_MUSE_BOARD_RETERMINAL_STICKY)
+            list(APPEND srcs "boards/board_reterminal_sticky_power_test.c" "boards/sticky_power_test_display.cpp")
+        endif()
         if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_216 OR CONFIG_MUSE_BOARD_AIPI)
             list(APPEND srcs "boards/board_power_test_generic.c")
         endif()
@@ -205,7 +225,7 @@ endif()
 set(muse_priv_requires
     esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
     bt esp-tls mbedtls esp_app_format esp_http_client
-    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8
+    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8 capabilities_registry
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt efuse
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved

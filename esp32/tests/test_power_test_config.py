@@ -21,7 +21,7 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-OVERLAYS = sorted((ROOT / "devices").glob("sdkconfig.muse-*-power-test"))
+OVERLAYS = sorted((ROOT / "devices").glob("sdkconfig.*-power-test"))
 DEFINITION = re.compile(r"^\s*(?:menu)?config\s+([A-Za-z0-9_]+)\s*$", re.M)
 
 

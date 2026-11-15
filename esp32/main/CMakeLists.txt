@@ -78,6 +78,8 @@ set(GADGET_REQUIRES
     mbedtls
     efuse
     muse
+    # WebAssembly apps (CONFIG_MUSE_WASM_APPS); without them it builds nothing.
+    muse_apps
     # The voice board's. Requirements are resolved before the configuration
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s

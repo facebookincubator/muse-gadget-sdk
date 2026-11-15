@@ -80,6 +80,7 @@ before adding a feature to one.
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-206` | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher` | manual |
 | M5Stack Cardputer ADV (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
+| M5Stack AtomS3 + Atomic Voice Base (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-atoms3` | `tools/muse/board.sh build atoms3` |
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
 | Elecrow CrowPanel Advance 4.3 V1.3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-crowpanel-advance-43` | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
@@ -184,7 +185,7 @@ controls and unverified hardware behavior.
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|lilygo175|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|lilygo175|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -219,7 +220,7 @@ arguments, except on the SenseCAP Watcher: `idf.py flash` runs plain esptool,
 which fails on its USB bridge (see "Flash it"). Build the Watcher with
 `idf.py`, flash it with `tools/muse/board.sh flash watcher`, then
 `idf.py … -p PORT monitor` as usual; reading from the bridge works. Muse builds use `partitions_muse.csv` and need 16 MB of flash or
-more, except the StickS3, StickC Plus2, Cardputer ADV, AI Passport and Waveshare 1.43C, which have 8 MB and use
+more, except the StickS3, StickC Plus2, Cardputer ADV, AtomS3, AI Passport and Waveshare 1.43C, which have 8 MB and use
 `partitions_muse_8mb.csv`.
 
 On the Watcher, rotation opens and pages through the latest reply. A short
@@ -468,6 +469,7 @@ Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
 `components/muse/boards/viewe_smartring_display_init.h` (Apache-2.0, VIEWE),
 `components/muse/boards/waveshare_s3_185b_init.h` (Apache-2.0, Waveshare),
+`components/esp_lcd_gc9107` (Apache-2.0, Espressif),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
@@ -508,7 +510,13 @@ The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
 ideaspark, CYD, SenseCAP Indicator, Waveshare S3 LCD 3.5 status-screen and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
 `MuseGadget-xvf3800-XXXXXX` on the reSpeaker XVF3800,
-`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). It uses
+`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). Its
+node id, the name Muse knows it by, ends in the same six hex digits in
+lowercase: setup offers `gadget-XXXXXX` with `CONFIG_MUSE_GADGET_NODE_ID_PREFIX`
+(off by default; bench builds turn it on), else `homelink-XXXXXX`, and stores
+it with the device tokens. A device keeps its stored id, and one set up by earlier firmware, which
+stored none, keeps `homelink-XXXXXX`, until it is set up again
+(`main/identity.h`, `tests/test_link_node_id.py`). It uses
 **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.
@@ -665,12 +673,12 @@ Keep within the session's bounds:
 
 - Up to 3 requests at once; another is refused (its callback gets -1).
 - Send a body in pieces of at most 8 KB (4 KB on Muse boards without PSRAM
-  and the CYD, 2 KB on the Cardputer ADV and AI Passport): a larger piece ends
+  and the CYD, 2 KB on the Cardputer ADV, AtomS3 and AI Passport): a larger piece ends
   that request.
   Queued body bytes are capped at 16 KB with PSRAM and 4 KB without, and
   `noise_ctrl_req_send()` waits up to `wait_ms` for room.
 - Each response frame has to fit the session's inbound buffer (12 KB, 17 KB on
-  Muse boards without PSRAM and the CYD). A larger one ends the whole session,
+  Muse boards without PSRAM other than the AtomS3 and AI Passport, and the CYD). A larger one ends the whole session,
   which reconnects, and the request with `NOISE_CTRL_REQ_TOO_LARGE`. Ask for
   responses that stay under it: read large files in parts.
 - The callback runs on the session task: copy what you need and return. Do
@@ -752,6 +760,20 @@ the design, the Wi-Fi protocol and the numbers.
 - **Untrusted input:** everything from the network is. Keep the checks in
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the
   decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
+
+## WebAssembly apps
+
+WebAssembly apps are an optional component, off by default. Enable them on
+boards with the full LVGL UI and PSRAM using
+`MUSE_APPS=1 tools/muse/board.sh build|flash <board>`
+(`CONFIG_MUSE_WASM_APPS`, overlay `devices/sdkconfig.muse-apps`). On the
+gadget they stay off until the person turns on Run apps in Settings.
+
+Before changing or testing apps or their integration hooks, read
+[the component instructions](components/muse_apps/AGENTS.md). They cover
+the API, runtime, memory, capabilities, storage, input and focused tests.
+For app authoring and the guide to send Muse, see
+[the SDK README](components/muse_apps/sdk/README.md).
 
 ## Configuration gotchas
 
@@ -874,9 +896,9 @@ against the policy, and `link.register`'s size.
 
 Muse calls a gadget's commands by name: the firmware lists them in
 `link.register` and answers each `link.invoke`. A command you add lives in two
-places, which must use the same name. (`device.health`, `device.guide` and
-`device.ota` are handled in `noise_control.cpp` itself; everything else goes
-through `on_ws_command()`.)
+places, which must use the same name. (`device.health` and `device.guide` are
+handled in `noise_control.cpp` itself; everything else goes through
+`on_ws_command()`.)
 
 1. **Advertise it** in `build_register_json()` in `main/noise_control.cpp`:
    `add_command(commands, "relay.set", "<description>", required, optional)`.

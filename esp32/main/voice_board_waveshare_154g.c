@@ -17,7 +17,8 @@
 /* Waveshare ESP32-S3-ePaper-1.54G voice: one ES8311 codec with an analog
  * microphone and an NS4150B speaker amplifier, and the green LED on GPIO3 for
  * the voice states (the e-paper is too slow for them). The reply's first page
- * goes on the e-paper with the page count.
+ * goes on the e-paper with the page count, in GNU Unifont's 8x16 letters, and
+ * a PWR tap shows the next. PWR taps and holds beep.
  * Pins: Waveshare's schematic and Example/ESP-IDF_5.5.1/07_Audio_Test
  * (github.com/waveshareteam/ESP32-S3-ePaper-1.54G).
  */
@@ -43,6 +44,7 @@
 #include "link_pairing.h"
 #include "muse_chat.h"
 #include "muse_text.h"
+#include "fonts/epaper_154g_caption_font.h"
 #include "pixel_font.h"
 
 #define AUDIO_POWER 42  // active low
@@ -212,18 +214,54 @@ static void cue(bool end) {
     if (err != ESP_OK) ESP_LOGW(TAG, "cue failed: %s", esp_err_to_name(err));
 }
 
+// One cue at a time: a turn's cues and the PWR beeps. Under s_cue_lock.
+static SemaphoreHandle_t s_cue_lock;
+static TaskHandle_t s_cue_task;
+
+enum { BEEP_TAP = 1, BEEP_HOLD = 2 };
+
+// PWR beeps play here, so the PWR task keeps polling during the tone: the
+// higher tone for a tap, the lower for a hold.
+static void cue_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        uint32_t beep = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &beep, portMAX_DELAY);
+        // A turn has its own cues and its reply; no beep over either.
+        if (xSemaphoreTake(s_cue_lock, 0) != pdTRUE) continue;
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool recording = s_recording;
+        bool playing = s_playing;
+        xSemaphoreGive(s_lock);
+        if (!recording && !playing) cue(beep == BEEP_HOLD);
+        xSemaphoreGive(s_cue_lock);
+    }
+}
+
+static void page_tap(void);
+
+// epd_154g.c calls these: a PWR hold turns the screen, a tap shows the
+// reply's next page.
+void epd154g_turn_feedback(void) {
+    if (s_cue_task) xTaskNotify(s_cue_task, BEEP_HOLD, eSetValueWithOverwrite);
+}
+
+void epd154g_pwr_tap(void) {
+    if (s_cue_task) xTaskNotify(s_cue_task, BEEP_TAP, eSetValueWithOverwrite);
+    page_tap();
+}
+
 // ---- Page rendering (host-tested) -------------------------------------------
 
-// The 5x8 font at twice its size, 12 x 18 pixel cells with spacing: 16
-// columns and 10 lines on the 200 x 200 panel, with a margin all round. The
-// page count, at the font's own size, sits in the bottom margin at the right.
-#define PAGE_SCALE  2
-#define PAGE_COLS   16
-#define PAGE_LINES  10
+// GNU Unifont's 8x16 cells (fonts/epaper_154g_caption_font.h): 24 columns
+// and 11 lines on the 200 x 200 panel, with a margin all round. The page
+// count, in the 5x8 pixel font, sits in the bottom margin at the right.
+#define PAGE_COLS   24
+#define PAGE_LINES  11
 #define PAGE_LEFT   4
 #define PAGE_TOP    10
-#define CELL_W      ((PIXEL_FONT_WIDTH + 1) * PAGE_SCALE)
-#define CELL_H      ((PIXEL_FONT_HEIGHT + 1) * PAGE_SCALE)
+#define CELL_W      8
+#define CELL_H      16
 #define PAGE_W      200
 #define PAGE_BYTES  (PAGE_COLS * 4 * PAGE_LINES + PAGE_LINES)
 #define COUNT_BYTES 24
@@ -232,18 +270,48 @@ static void cue(bool end) {
 // first, starting at row `y`.
 typedef void (*page_band_fn)(int y, int height, const uint8_t *rgb565);
 
-static void strip_glyph(uint8_t *strip, int x, int y, int scale, unsigned char c) {
+// Invalid UTF-8 consumes one byte. Never inspect a byte beyond the terminating NUL.
+static uint32_t utf8_next(const char **cursor) {
+    const unsigned char *p = (const unsigned char *)*cursor;
+    if (!*p) return 0;
+    uint32_t code = *p;
+    unsigned count = 1;
+    if (code >= 0xc2 && code <= 0xdf) { count = 2; code &= 0x1f; }
+    else if (code >= 0xe0 && code <= 0xef) { count = 3; code &= 0x0f; }
+    else if (code >= 0xf0 && code <= 0xf4) { count = 4; code &= 7; }
+    else if (code >= 0x80) { (*cursor)++; return '?'; }
+    for (unsigned i = 1; i < count; i++) {
+        if (!p[i] || (p[i] & 0xc0) != 0x80) { (*cursor)++; return '?'; }
+        code = code << 6 | (p[i] & 0x3f);
+    }
+    if ((count == 3 && code < 0x800) || (count == 4 && code < 0x10000)
+        || (code >= 0xd800 && code <= 0xdfff) || code > 0x10ffff) {
+        (*cursor)++; return '?';
+    }
+    *cursor += count;
+    return code;
+}
+
+static void strip_letter(uint8_t *strip, int x, uint32_t code) {
+    const uint8_t *glyph = epaper_154g_caption_glyph(code);
+    if (!glyph) glyph = epaper_154g_caption_glyph('?');
+    for (int row = 0; row < CELL_H; row++) {
+        for (int col = 0; col < CELL_W; col++) {
+            if (!(glyph[row] >> (7 - col) & 1)) continue;
+            size_t at = ((size_t)row * PAGE_W + x + col) * 2;
+            strip[at] = strip[at + 1] = 0;
+        }
+    }
+}
+
+static void strip_small(uint8_t *strip, int x, int y, unsigned char c) {
     if (c < PIXEL_FONT_FIRST || c > PIXEL_FONT_LAST) c = '?';
     const uint8_t *glyph = pixel_font[c - PIXEL_FONT_FIRST];
     for (int col = 0; col < PIXEL_FONT_WIDTH; col++) {
         for (int row = 0; row < PIXEL_FONT_HEIGHT; row++) {
             if (!(glyph[col] >> row & 1)) continue;
-            for (int dy = 0; dy < scale; dy++) {
-                for (int dx = 0; dx < scale; dx++) {
-                    size_t at = ((size_t)(y + row * scale + dy) * PAGE_W + x + col * scale + dx) * 2;
-                    strip[at] = strip[at + 1] = 0;
-                }
-            }
+            size_t at = ((size_t)(y + row) * PAGE_W + x + col) * 2;
+            strip[at] = strip[at + 1] = 0;
         }
     }
 }
@@ -258,11 +326,9 @@ static void render_page(const char *page, const char *count, uint8_t *strip, pag
     const char *p = page;
     for (int line = 0; line < PAGE_LINES; line++) {
         memset(strip, 0xFF, strip_bytes);
-        for (int col = 0; *p && *p != '\n'; p++) {
-            unsigned char c = (unsigned char)*p;
-            if (c >= 0x80 && c < 0xC0) continue;  // UTF-8 continuation bytes
-            if (col < PAGE_COLS) strip_glyph(strip, PAGE_LEFT + col * CELL_W, 0, PAGE_SCALE, c);
-            col++;
+        for (int col = 0; *p && *p != '\n'; col++) {
+            uint32_t code = utf8_next(&p);
+            if (col < PAGE_COLS) strip_letter(strip, PAGE_LEFT + col * CELL_W, code);
         }
         if (*p == '\n') p++;
         band(PAGE_TOP + line * CELL_H, CELL_H, strip);
@@ -270,7 +336,7 @@ static void render_page(const char *page, const char *count, uint8_t *strip, pag
     memset(strip, 0xFF, strip_bytes);
     int x = PAGE_W - PAGE_LEFT - (int)strlen(count) * (PIXEL_FONT_WIDTH + 1);
     for (const char *c = count; *c; c++, x += PIXEL_FONT_WIDTH + 1) {
-        strip_glyph(strip, x, 1, 1, (unsigned char)*c);
+        strip_small(strip, x, 3, (unsigned char)*c);
     }
     band(PAGE_TOP + PAGE_LINES * CELL_H, PAGE_W - PAGE_TOP - PAGE_LINES * CELL_H, strip);
 }
@@ -280,9 +346,9 @@ static void render_page(const char *page, const char *count, uint8_t *strip, pag
 #define CACHE_PAGES 16
 
 // The page task does what was asked last: show the cached page s_cache_shown
-// with the page count, or go back to the status screen. Older requests are
-// dropped.
-typedef enum { PAGE_NONE, PAGE_SHOW, PAGE_STATUS } page_want_t;
+// with the page count, show the next one, or go back to the status screen.
+// Older requests are dropped; a PWR tap never replaces a pending request.
+typedef enum { PAGE_NONE, PAGE_SHOW, PAGE_NEXT, PAGE_STATUS } page_want_t;
 static portMUX_TYPE s_page_mux = portMUX_INITIALIZER_UNLOCKED;
 static page_want_t s_want;         // under s_page_mux
 static TaskHandle_t s_page_task;
@@ -315,23 +381,32 @@ static void draw_band(int y, int height, const uint8_t *rgb565) {
 }
 
 // The last request, drawn through the same calls as display.draw_url. The
-// screen is display.draw_url's while a download runs: the request waits for
-// it to end (returns true), and the page task retries. It holds the download
-// slot while it draws so that none starts halfway through. Neither the reply's
-// page nor the status screen replaces an image drawn since the turn began.
+// screen is display.draw_url's while a download runs: a request from the
+// voice task waits for it to end (returns true), and the page task retries;
+// a PWR tap is dropped, since the image would cover the page it asks for. It
+// holds the download slot while it draws so that none starts halfway through.
+// Neither the reply's page nor the status screen replaces an image drawn
+// since the turn began; the first tap after one shows the page it kept off.
 static bool page_serve(void) {
     static char page[PAGE_BYTES];
     taskENTER_CRITICAL(&s_page_mux);
     bool none = s_want == PAGE_NONE;
     taskEXIT_CRITICAL(&s_page_mux);
     if (none) return false;
-    if (!image_fetch_claim()) return true;
+    if (!image_fetch_claim()) {
+        taskENTER_CRITICAL(&s_page_mux);
+        bool tap = s_want == PAGE_NEXT;
+        if (tap) s_want = PAGE_NONE;
+        taskEXIT_CRITICAL(&s_page_mux);
+        return !tap;
+    }
     // Only this task clears s_want; a newer request may have replaced it.
     taskENTER_CRITICAL(&s_page_mux);
     page_want_t want = s_want;
     s_want = PAGE_NONE;
     taskEXIT_CRITICAL(&s_page_mux);
-    bool image = image_fetch_drawn() != atomic_load(&s_turn_images);
+    unsigned drawn = image_fetch_drawn();
+    bool image = drawn != atomic_load(&s_turn_images);
     if (want == PAGE_STATUS) {
         if (!image) led_status_show_animation();
         image_fetch_release();
@@ -339,7 +414,12 @@ static bool page_serve(void) {
     }
     char count[COUNT_BYTES] = "";
     xSemaphoreTake(s_cache_lock, portMAX_DELAY);
-    bool any = s_cache_pages > 0 && !image;
+    bool any = s_cache_pages > 0 && (!image || want == PAGE_NEXT);
+    if (any && want == PAGE_NEXT && !image) {
+        // Round to the first after the last; one page has nothing to turn.
+        any = s_cache_pages > 1;
+        if (any) s_cache_shown = (s_cache_shown + 1) % s_cache_pages;
+    }
     if (any) {
         memcpy(page, s_cache + (size_t)s_cache_shown * PAGE_BYTES, PAGE_BYTES);
         if (s_cache_pages > 1) {
@@ -347,6 +427,8 @@ static bool page_serve(void) {
         }
     }
     xSemaphoreGive(s_cache_lock);
+    // The page is up over the image now: the next tap turns it.
+    if (any && image) atomic_store(&s_turn_images, drawn);
     if (any) render_page(page, count, s_strip, draw_band);
     image_fetch_release();
     // The e-paper refresh blocks here, not on the voice task. A download that
@@ -365,6 +447,16 @@ static void page_task(void *arg) {
         ulTaskNotifyTake(pdTRUE, waiting ? pdMS_TO_TICKS(PAGE_RETRY_MS) : portMAX_DELAY);
         waiting = page_serve();
     }
+}
+
+// A PWR tap, on the PWR task.
+static void page_tap(void) {
+    if (!s_page_task) return;
+    taskENTER_CRITICAL(&s_page_mux);
+    bool idle = s_want == PAGE_NONE;
+    if (idle) s_want = PAGE_NEXT;
+    taskEXIT_CRITICAL(&s_page_mux);
+    if (idle) xTaskNotifyGive(s_page_task);
 }
 
 static void queue_page_request(page_want_t want) {
@@ -387,14 +479,14 @@ static void queue_page_request(page_want_t want) {
 static int cache_reply_pages(size_t until) {
     static char page[PAGE_BYTES], last[PAGE_BYTES];
     if (!muse_hatch_turn_caption(SIZE_MAX, last, sizeof(last))) return 0;
-    muse_text_to_ascii(last, sizeof(last));
+    muse_text_to_caption(last, sizeof(last));
     xSemaphoreTake(s_cache_lock, portMAX_DELAY);
     int n = 0;
     for (size_t at = 0, steps = 0; n < CACHE_PAGES && steps < 20000;
          at += VOICE_MIC_RATE / 10, steps++) {
         if (at > until) at = until;
         if (!muse_hatch_turn_caption(at, page, sizeof(page))) break;
-        muse_text_to_ascii(page, sizeof(page));
+        muse_text_to_caption(page, sizeof(page));
         if (!n || strcmp(page, s_cache + (size_t)(n - 1) * PAGE_BYTES)) {
             memcpy(s_cache + (size_t)n++ * PAGE_BYTES, page, PAGE_BYTES);
         }
@@ -503,6 +595,7 @@ void led_status_show_volume(int percent) { (void)percent; }
 // and the codec warm-up take about 0.3 s after voice.c shows LISTENING; the
 // LED turns steady only once they are done.
 esp_err_t voice_board_mic_start(void) {
+    xSemaphoreTake(s_cue_lock, portMAX_DELAY);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     esp_err_t err = power_up();
     s_recording = err == ESP_OK;
@@ -515,6 +608,7 @@ esp_err_t voice_board_mic_start(void) {
         atomic_store(&s_mic_ready, true);
         if (s_led_task) xTaskNotifyGive(s_led_task);
     }
+    xSemaphoreGive(s_cue_lock);
     return err;
 }
 
@@ -525,11 +619,13 @@ void voice_board_mic_stop(void) {
     xSemaphoreGive(s_lock);
     if (!recording) return;
     atomic_store(&s_mic_ready, false);
+    xSemaphoreTake(s_cue_lock, portMAX_DELAY);
     if (long_enough) cue(true);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_recording = false;
     release();
     xSemaphoreGive(s_lock);
+    xSemaphoreGive(s_cue_lock);
     vTaskPrioritySet(NULL, s_priority);
 }
 
@@ -577,10 +673,17 @@ esp_err_t voice_board_speaker_write(const int32_t *frames, size_t count) {
     bool audible = false;
     for (size_t i = 0; i < count * 2; i++) audible |= frames[i] / 65536 != 0;
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool starting = !s_playing && audible;
+    xSemaphoreGive(s_lock);
+    // The reply's first sound waits for a PWR beep to end, so none of it is
+    // lost under the beep; once it plays, cue_task leaves the speaker alone.
+    if (starting) xSemaphoreTake(s_cue_lock, portMAX_DELAY);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
     // A cue owns the speaker; a reply keeps its pace without writing over it.
     if (!s_playing && audible && !s_cue) s_playing = speaker_on();
     bool playing = s_playing && !s_cue;
     xSemaphoreGive(s_lock);
+    if (starting) xSemaphoreGive(s_cue_lock);
     if (!playing) {
         vTaskDelay(pdMS_TO_TICKS(count * 1000 / VOICE_SPEAKER_RATE));
         return ESP_OK;
@@ -672,11 +775,15 @@ esp_err_t voice_board_init(void) {
     if (xTaskCreate(led_task, "voice_led", 2048, NULL, 3, &s_led_task) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
+    // Unifont has the accented letters muse_text_to_caption() then keeps.
+    muse_text_keep_latin();
     s_cache_lock = xSemaphoreCreateMutex();
+    s_cue_lock = xSemaphoreCreateMutex();
     s_strip = heap_caps_malloc((size_t)PAGE_W * CELL_H * 2, MALLOC_CAP_SPIRAM);
     s_cache = heap_caps_malloc((size_t)CACHE_PAGES * PAGE_BYTES, MALLOC_CAP_SPIRAM);
-    if (!s_cache_lock || !s_strip || !s_cache) return ESP_ERR_NO_MEM;
-    if (xTaskCreate(page_task, "voice_page", 3072, NULL, 2, &s_page_task) != pdPASS) {
+    if (!s_cache_lock || !s_cue_lock || !s_strip || !s_cache) return ESP_ERR_NO_MEM;
+    if (xTaskCreate(cue_task, "voice_cue", 3072, NULL, 3, &s_cue_task) != pdPASS ||
+        xTaskCreate(page_task, "voice_page", 3072, NULL, 2, &s_page_task) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "ES8311 ready: 16000 Hz duplex; audio rail off until used");
