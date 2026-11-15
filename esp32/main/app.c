@@ -845,11 +845,14 @@ static void defer_unpair_after_revocation(void) {
     atomic_store_explicit(&s_unpair_pending, true, memory_order_release);
 }
 
+// node_id: the id the tokens are for: identity_node_id(), except in setup,
+// which mints for the id it offers (identity_setup_node_id()).
 static bool mint_and_store_device_tokens_unlocked(const char *source_token,
                                                   const char *username,
+                                                  const char *node_id,
                                                   bool *revoked) {
     vm_device_tokens_t tokens = {0};
-    int rc = vm_api_mint_device_token(source_token, identity_node_id(), &tokens);
+    int rc = vm_api_mint_device_token(source_token, node_id, &tokens);
     if (rc == 0) {
         bool ok = store_token_pair_unlocked(tokens.access_token, tokens.refresh_token);
         if (ok) identity_note_paired_sdk_token();
@@ -875,7 +878,12 @@ static bool accept_pairing_credentials(const char *access_token,
     if (!access_token || !*access_token) return false;
     auth_lock_take();
     bool ok = false;
-    if (refresh_token && *refresh_token) {
+    // The node id device_info offered, which the app's tokens are for, goes
+    // with them: stored first, so no tokens from this setup are ever kept
+    // without it (a failed setup clears both).
+    if (!config_set_str("node_id", identity_setup_node_id())) {
+        ESP_LOGW(TAG, "could not store the node id");
+    } else if (refresh_token && *refresh_token) {
         ok = store_token_pair_unlocked(access_token, refresh_token);
         if (ok) {
             identity_note_paired_sdk_token();
@@ -886,9 +894,16 @@ static bool accept_pairing_credentials(const char *access_token,
         ok = false;
     } else {
         ESP_LOGI(TAG, "no refresh_token supplied; minting device token pair");
-        ok = mint_and_store_device_tokens_unlocked(access_token, username, NULL);
+        ok = mint_and_store_device_tokens_unlocked(access_token, username,
+                                                   identity_setup_node_id(), NULL);
     }
     auth_lock_give();
+    // From here the device goes by the new setup's id (a device set up by
+    // earlier firmware leaves its homelink- id behind with its old tokens).
+    if (ok && identity_refresh_node_id()) {
+        ESP_LOGI(TAG, "node id is now %s", identity_node_id());
+        noise_ctrl_set_node_id(identity_node_id());
+    }
     return ok;
 }
 
@@ -908,7 +923,7 @@ static bool migrate_legacy_auth_token_locked(bool *revoked) {
         return false;
     }
     ESP_LOGI(TAG, "migrating legacy auth_token to device token pair");
-    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, revoked);
+    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, identity_node_id(), revoked);
     free(legacy);
     return ok;
 }
@@ -961,7 +976,7 @@ static bool ensure_access_token_ready_with_gate_held(
     if (!refresh) {
         if (vm_auth_backoff_active_unlocked()) goto done;
         ESP_LOGI(TAG, "access_token has no refresh_token; minting device pair");
-        ok = mint_and_store_device_tokens_unlocked(access, NULL, &revoked);
+        ok = mint_and_store_device_tokens_unlocked(access, NULL, identity_node_id(), &revoked);
         goto done;
     }
 
@@ -1525,7 +1540,8 @@ static void on_get_device_info(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "device_info");
-    cJSON_AddStringToObject(root, "node_id", identity_node_id());
+    // The id a setup on this connection takes (identity.h).
+    cJSON_AddStringToObject(root, "node_id", identity_setup_node_id());
     cJSON_AddStringToObject(root, "version", desc ? desc->version : "unknown");
     link_pairing_add_device_info(root);
     char build_sha[17] = {0};
@@ -2722,7 +2738,8 @@ void app_run(void) {
     }
     ESP_LOGI(TAG, "========================");
 
-    link_pairing_init(identity_node_id(), identity_device_id(), identity_mac(),
+    // Setup offers the new-setup id (identity.h).
+    link_pairing_init(identity_setup_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
 #if !CONFIG_MUSE_ENABLED

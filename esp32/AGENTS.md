@@ -508,7 +508,13 @@ The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
 ideaspark, CYD, SenseCAP Indicator, Waveshare S3 LCD 3.5 status-screen and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
 `MuseGadget-xvf3800-XXXXXX` on the reSpeaker XVF3800,
-`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). It uses
+`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). Its
+node id, the name Muse knows it by, ends in the same six hex digits in
+lowercase: setup offers `gadget-XXXXXX` with `CONFIG_MUSE_GADGET_NODE_ID_PREFIX`
+(off by default; bench builds turn it on), else `homelink-XXXXXX`, and stores
+it with the device tokens. A device keeps its stored id, and one set up by earlier firmware, which
+stored none, keeps `homelink-XXXXXX`, until it is set up again
+(`main/identity.h`, `tests/test_link_node_id.py`). It uses
 **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.

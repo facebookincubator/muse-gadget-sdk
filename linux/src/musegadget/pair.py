@@ -61,7 +61,7 @@ class _SystemNetwork:
 
 
 def _verify_and_save(credentials: Credentials, commit: Callable[[Callable[[], bool]], bool],
-                     sdk_token: str | None = None) -> None:
+                     sdk_token: str | None = None, node_id: str | None = None) -> None:
     api_url = credentials.api_url if credentials.api_url.startswith("https://") else ""
     api_url_v2 = credentials.api_url_v2 if credentials.api_url_v2.startswith("https://") else ""
     vms, status = muse_api.fetch_vms_with_status(
@@ -83,6 +83,10 @@ def _verify_and_save(credentials: Credentials, commit: Callable[[Callable[[], bo
         # Muse records the SDK token only at pairing; see Service.
         "sdk_token_hint": config.sdk_token_hint(sdk_token),
     }
+    if node_id:
+        # The id get_device_info offered, which the tokens are for, in the
+        # same write: the device's node id until it is paired again.
+        record["node_id"] = node_id
 
     def save() -> bool:
         config.save_json(config.PAIRING_FILE, record)
@@ -115,7 +119,7 @@ def pair(*, on_open: Callable[[SetupWindow], None], force: bool = False,
         return PairResult(PairOutcome.INVALID_SDK_TOKEN, sdk_token_problem=str(exc))
     ident = identity.load_or_create()
     pairing = PairingSession(
-        node_id=ident.node_id,
+        node_id=ident.setup_node_id,
         device_id=ident.device_id,
         mac=ident.mac,
         firmware_version=__version__,
@@ -140,7 +144,8 @@ def pair(*, on_open: Callable[[SetupWindow], None], force: bool = False,
         version=__version__,
         transport=server,
         network=_SystemNetwork(),
-        provision=lambda credentials, commit: _verify_and_save(credentials, commit, sdk_token),
+        provision=lambda credentials, commit: _verify_and_save(
+            credentials, commit, sdk_token, ident.setup_node_id),
         on_complete=finish,
     )
     window = threading.Timer(timeout_s, server.stop)

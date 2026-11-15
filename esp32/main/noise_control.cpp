@@ -2749,6 +2749,12 @@ extern "C" void noise_ctrl_set_power_save(bool on) {
     s_power_save = on;
 }
 
+extern "C" void noise_ctrl_set_node_id(const char *node_id) {
+    if (!node_id || !*node_id || strncmp(s_node_id, node_id, sizeof(s_node_id)) == 0) return;
+    // Changes only when setup stores new credentials; a registration follows.
+    snprintf(s_node_id, sizeof(s_node_id), "%s", node_id);
+}
+
 extern "C" void noise_ctrl_set_host(const char *host) {
     snprintf(s_noise_host, sizeof(s_noise_host), "%s",
              host && *host ? host : NOISE_DEFAULT_HOST);
