@@ -966,6 +966,13 @@ static void build_answer(lv_obj_t *face, int ring_in)
     l->font = caption_font();
     /* Rim hints fix a narrow reading column; doubled letters wouldn't fit it. */
     l->scale = s_w >= 400 && !muse_board->rim_controls ? 2 : 1;
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    /* No speaker, so every caption is read, the long "SENT:" prompt of a
+     * swipe-down card included: Montserrat's small letters, wrapped to the
+     * box by their own widths (reply_glyph_px), put it on a page or two. */
+    l->font = &lv_font_montserrat_14;
+    l->scale = 1;
+#endif
     cw = lv_font_get_glyph_width(l->font, 'M', ' ') * l->scale;
     pitch = (lv_font_get_line_height(l->font) + CAPTION_LINE_SPACE) * l->scale;
     int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 - s_h / 2;
@@ -978,6 +985,9 @@ static void build_answer(lv_obj_t *face, int ring_in)
     /* The widest page isn't the biggest: a round screen narrows towards the bottom. */
     /* Keep read replies in a central column clear of dedicated rim hints. */
     int max_cols = muse_board->rim_controls ? 13 : 24;
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    max_cols = s_w / cw;   /* columns of its widest letter: the page fills the screen's width */
+#endif
     for (int c = 4; c <= max_cols && fits_across(c * cw, top, ring_in); c++) {
         int n = (reply_bottom(c * cw, ring_in) - top + CAPTION_LINE_SPACE) / pitch;
         /* A third of the caption spare for characters wider than a byte. */

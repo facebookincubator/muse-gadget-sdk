@@ -47,6 +47,7 @@
 #endif
 #if CONFIG_MUSE_BOARD_WXM_WG1200
 #include <math.h>
+#include "esp_log.h"
 #include "esp_random.h"
 #include "boards/board_wxm_wg1200.h"
 #include "wg1200_card_prompt.h"
@@ -1740,7 +1741,8 @@ void muse_settings_ui_trigger_wg1200_weather_card(void)
     const size_t cap = 4096;
     char *prompt = malloc(cap);
     if (prompt) {
-        wg1200_card_prompt_expand(tpl, telemetry, location, style, prompt, cap);
+        size_t len = wg1200_card_prompt_expand(tpl, telemetry, location, style, prompt, cap);
+        ESP_LOGI("wg1200_card", "weather card: \"%s\" style, %u-char prompt", style, (unsigned)len);
         send_wg1200_text(prompt);
     }
     free(tpl);

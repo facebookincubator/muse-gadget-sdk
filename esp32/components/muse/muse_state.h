@@ -20,6 +20,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if defined(__has_include) && __has_include("sdkconfig.h")
+#include "sdkconfig.h"   /* the board picks MUSE_CAPTION_MAX; host tests build without one */
+#endif
+
 /*
  * Shared state between the voice pipeline (writer) and the UI (reader).
  * Scalars are plain word-sized stores; the caption is guarded by a spinlock.
@@ -57,7 +61,11 @@ void muse_state_set_progress(float progress);
 float muse_state_progress(void);
 
 /* Room for a page of reply text; longer captions are cut short. */
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+#define MUSE_CAPTION_MAX 1600   /* its 480 px screen reads replies in a small font */
+#else
 #define MUSE_CAPTION_MAX 400
+#endif
 
 void muse_state_set_caption(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 /* Copies the caption if it changed since *version; returns true on change. */

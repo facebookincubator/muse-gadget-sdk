@@ -322,6 +322,11 @@ enum mark_t : uint8_t { M_RELEASE, M_SENT, M_ACK, M_TEXT, M_DONE, M_TTS, M_MP3, 
 static const char *const MARK_NAMES[M_COUNT] = { "release", "sent", "ack", "text", "done", "tts", "mp3", "audio" };
 static int64_t s_marks[M_COUNT];
 static char s_reply_shown[EV_TEXT];   /* the pre-speech caption last sent */
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+#define SENT_PAGE_S 8                 /* how long each page of a touchscreen turn's prompt stays up */
+static char *s_sent;                  /* "SENT: <prompt>" of a touchscreen turn, shown until the reply */
+static int s_sent_slot;               /* the SENT_PAGE_S period whose page is up, -1 before the first */
+#endif
 
 static void mark(mark_t m);
 static bool open_note(void);
@@ -1112,16 +1117,24 @@ static bool turn_start(uint32_t gen, bool text
     s_turn.start_us = now_us();
     resampler_init(&s_turn.up, MIC_RATE, DICT_RATE);
 #if CONFIG_MUSE_BOARD_WXM_WG1200
+    free(s_sent);
+    s_sent = nullptr;
+    s_sent_slot = -1;
     if (ui_text) {
         if (prompt_text && prompt_text[0]) {
-            snprintf(s_turn.committed, sizeof(s_turn.committed), "SENT: %s", prompt_text);
+            /* The whole prompt, however long: its pages take turns on screen. */
+            size_t n = strlen(prompt_text) + sizeof("SENT: ");
+            s_sent = static_cast<char *>(psram_alloc(n));
+            if (s_sent) {
+                snprintf(s_sent, n, "SENT: %s", prompt_text);
+            }
         }
         muse_state_set_asleep(false);
         muse_state_poke();
         muse_state_set_progress(0);
         muse_state_set_mode(MUSE_MODE_THINKING);
         char page[MUSE_CAPTION_MAX];
-        if (s_turn.committed[0] && muse_hatch_caption_at(s_turn.committed, 0, page, sizeof(page)) && page[0]) {
+        if (s_sent && muse_hatch_caption_at(s_sent, 0, page, sizeof(page)) && page[0]) {
             strlcpy(s_reply_shown, page, sizeof(s_reply_shown));
             muse_state_set_caption("%s", page);
         } else {
@@ -1359,7 +1372,7 @@ static void text_begin(const char *text, bool ui_text = false)
         if (s_turn.ui_text) {
             muse_state_set_mode(MUSE_MODE_THINKING);
             char page[MUSE_CAPTION_MAX];
-            if (s_turn.committed[0] && muse_hatch_caption_at(s_turn.committed, 0, page, sizeof(page)) && page[0]) {
+            if (s_sent && muse_hatch_caption_at(s_sent, 0, page, sizeof(page)) && page[0]) {
                 strlcpy(s_reply_shown, page, sizeof(s_reply_shown));
                 muse_state_set_caption("%s", page);
             } else {
@@ -1977,20 +1990,22 @@ static void start_tts(void)
         return;
     }
 #if CONFIG_MUSE_BOARD_WXM_WG1200
-    if (s_turn.ui_text && !has_reply_text() && s_turn.committed[0] && s_turn.chat_us > 0) {
-        size_t len = strlen(s_turn.committed);
-        size_t cycle = len + TEXT_HOLD_S * TEXT_CHARS_PER_S;
+    if (s_turn.ui_text && !has_reply_text() && s_sent && s_turn.chat_us > 0) {
+        /* The prompt's pages take turns until the reply starts: it's there to
+         * check what went out, not to be read at speaking pace. */
         int64_t elapsed_us = now_us() - s_turn.chat_us;
-        size_t elapsed_chars = elapsed_us > 0 ? (size_t)(elapsed_us * TEXT_CHARS_PER_S / 1000000LL) : 0;
-        size_t at = cycle ? (elapsed_chars % cycle) : 0;
-        if (at >= len) {
-            at = len ? len - 1 : 0;
-        }
-        char page[MUSE_CAPTION_MAX];
-        if (muse_hatch_caption_at(s_turn.committed, at, page, sizeof(page)) && page[0] &&
-            strcmp(page, s_reply_shown) != 0) {
-            strlcpy(s_reply_shown, page, sizeof(s_reply_shown));
-            muse_state_set_caption("%s", page);
+        int slot = elapsed_us > 0 ? (int)(elapsed_us / (SENT_PAGE_S * 1000000LL)) : 0;
+        if (slot != s_sent_slot) {
+            s_sent_slot = slot;
+            char page[MUSE_CAPTION_MAX];
+            int pages = muse_chat_caption_page(s_sent, 0, page, sizeof(page));
+            if (pages > 1 && slot % pages) {
+                muse_chat_caption_page(s_sent, slot % pages, page, sizeof(page));
+            }
+            if (page[0]) {
+                strlcpy(s_reply_shown, page, sizeof(s_reply_shown));
+                muse_state_set_caption("%s", page);
+            }
         }
         return;
     }
