@@ -93,7 +93,8 @@ def test_no_wake_means_no_vm_lookup_or_voice_admission(tmp_path, monkeypatch, ca
     output = capsys.readouterr()
     assert "no_wake_word" in output.out
     # The notice states the measured false-wake rate and what a wake does.
-    assert "34 false wakes an hour" in output.err and "sends audio to Muse" in output.err
+    assert "falsely about 0.3 to 1.4 times an hour" in output.err and "sends audio to Muse" in output.err
+    assert "hears no speech" in output.err
 
 
 def test_wake_admits_existing_noise_voice_call_with_original_rate_preroll(
@@ -147,18 +148,62 @@ def test_wake_admits_existing_noise_voice_call_with_original_rate_preroll(
         tasks.append(asyncio.create_task(serve()))
         return client
 
+    from musegadget import voice_call
+
+    speech_timeouts = []
+    original_init = voice_call.VoiceCall.__init__
+
+    def init(self, *unused, **options):
+        speech_timeouts.append(options.get("speech_timeout"))
+        original_init(self, *unused, **options)
+
+    monkeypatch.setattr(voice_call.VoiceCall, "__init__", init)
     monkeypatch.setattr(muse_api, "fetch_vms_with_status", fetch)
     monkeypatch.setattr(LinkSession, "_open", open_fake)
     assert (
         cli.main(args + ["--wake-model", "custom.pte", "--wake-sensitivity", "low"])
         == 0
     )
+    # A wake-started call ends if the caller never speaks.
+    assert speech_timeouts == [cli.WAKE_SPEECH_TIMEOUT]
     assert tasks[0].done() and tasks[0].exception() is None
     assert Detector.instance.calls == 3 and Detector.instance.closed
     assert (
         Detector.instance.model_path == "custom.pte"
         and Detector.instance.sensitivity == "low"
     )
+
+
+def test_a_wake_started_video_call_keeps_its_idle_timer(tmp_path, monkeypatch):
+    # VideoCall has no speech events, so it takes no speech_timeout.
+    args = prepare_audio(tmp_path, monkeypatch, TONE * 4)
+    args += ["--video-out", str(tmp_path / "muse.h264")]
+    from musegadget import video_call
+
+    constructed = []
+
+    class Recorder:
+        def __init__(self, session, **options):
+            constructed.append(options)
+            raise RuntimeError("synthetic stop")
+
+    async def ready(self, timeout):
+        return None
+
+    async def run(self, stop):
+        await stop.wait()
+
+    monkeypatch.setattr(video_call, "VideoCall", Recorder)
+    monkeypatch.setattr(muse_api, "fetch_vms_with_status",
+                        lambda *unused: ([{"vm_id": "target", "vm_auth_token": "synthetic"}], 200))
+    monkeypatch.setattr(LinkSession, "wait_transport_ready", ready)
+    monkeypatch.setattr(LinkSession, "run", run)
+    try:
+        cli.main(args)
+    except RuntimeError:
+        pass
+    assert len(constructed) == 1
+    assert "speech_timeout" not in constructed[0] and constructed[0]["video_output"] is not None
 
 
 def test_invalid_wake_options_are_rejected_before_audio_or_credentials(capsys):

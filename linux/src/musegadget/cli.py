@@ -28,6 +28,8 @@ log = logging.getLogger("musegadget")
 
 # EX_CONFIG: the trust store needs fixing first, so the systemd unit doesn't restart on it.
 EXIT_TRUST_STORE = 78
+# Seconds a call started by a wake word waits for the caller to speak.
+WAKE_SPEECH_TIMEOUT = 5.0
 
 
 def _setup_open(window: SetupWindow) -> None:
@@ -250,6 +252,11 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
                            half_duplex=not args.full_duplex, mic_threshold=args.mic_threshold,
                            idle_timeout=args.idle_timeout, overall_timeout=args.overall_timeout)
             if video is None:
+                if detector is not None:
+                    # A false wake opens a call too: one that hears no speech
+                    # ends. (Video calls have no server speech events; their
+                    # idle timer stands.)
+                    options["speech_timeout"] = WAKE_SPEECH_TIMEOUT
                 call = VoiceCall(session, **options)
             else:
                 from musegadget.video_call import VideoCall
@@ -326,15 +333,15 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
 
             try:
                 detector = WakeWordDetector(model_path=args.wake_model, sensitivity=args.wake_sensitivity)
-            except WakeWordUnavailableError:
-                print("Wake word unavailable: install the supplied ExecuTorch wheel and "
-                      "build the small signal library with linux/wakeword/setup.sh; "
-                      "see skills/gadget-linux-wakeword/SKILL.md.",
-                      file=sys.stderr)
+            except WakeWordUnavailableError as exc:
+                print(f"Wake word unavailable: {exc}", file=sys.stderr)
                 return 1
-            print("Wake word on. The model's own test reports about 34 false wakes an hour at "
-                  "default sensitivity and about 4 at low (high wasn't measured); each wake "
-                  "starts a call that sends audio to Muse.", file=sys.stderr)
+            guard = ("" if video else f", and a call that hears no speech in its first "
+                     f"{WAKE_SPEECH_TIMEOUT:g} s ends")
+            print("Wake word on. Measured on synthetic voices, it wakes falsely about 0.3 to "
+                  "1.4 times an hour (low to high sensitivity); real voices haven't been "
+                  f"measured. Each wake starts a call that sends audio to Muse{guard}.",
+                  file=sys.stderr)
         audio = LiveAudio() if args.live else WavAudio(args.in_wav, args.out_wav)
         reason = asyncio.run(run(audio))
         print(f"{'Video' if video else 'Voice'} call ended: {reason}.", file=report)
@@ -509,10 +516,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="maximum call seconds (default: %(default)s)")
     voice.add_argument("--wake-word", action=argparse.BooleanOptionalAction, default=False,
                        help="listen locally for Hey Muse before a call; off by default")
-    voice.add_argument("--wake-model", help="alternative compatible XNNPACK wake-word PTE")
+    voice.add_argument("--wake-model", help="alternative wake-word model with the bundled model's contract")
     voice.add_argument("--wake-sensitivity", choices=("low", "default", "high"), default="default",
-                       help="wake-word sensitivity: low (about 4 false wakes an hour), default "
-                            "(about 34) or high (not measured); default: %(default)s")
+                       help="wake-word sensitivity: low (fewest false wakes), default or high "
+                            "(easiest to trigger); default: %(default)s")
     voice.add_argument("--wake-timeout", type=positive_seconds,
                        help="optional maximum seconds waiting for a wake word")
     voice.add_argument("--thread-id", help="target thread, otherwise the primary thread")

@@ -291,6 +291,28 @@ def test_silent_keepalives_neither_gate_mic_nor_extend_idle():
     asyncio.run(scenario())
 
 
+def test_speech_timeout_ends_a_call_nobody_speaks_in():
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.1)
+            task = asyncio.create_task(call.run(source(b"\0" * FRAME_BYTES), Output()))
+            media, start = await admit(vm)
+            await asyncio.wait_for(hangup(vm, media, start), 1)
+            assert await task == "no_speech"
+    asyncio.run(scenario())
+
+
+def test_speech_start_satisfies_the_speech_timeout():
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.15, idle_timeout=0.4)
+            task = asyncio.create_task(call.run(source(b"\0" * FRAME_BYTES), Output()))
+            media, start = await admit(vm, extra=[{"type": "input_audio_buffer.speech_started"}])
+            await asyncio.wait_for(hangup(vm, media, start), 2)
+            assert await task == "idle_timeout"   # not "no_speech"
+    asyncio.run(scenario())
+
+
 def test_missing_readiness_times_out_without_audio_and_still_hangs_up():
     async def scenario():
         async with connected(register_device=False) as (session, vm, unused):
