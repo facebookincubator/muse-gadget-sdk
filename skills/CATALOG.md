@@ -1,6 +1,6 @@
 # Skill Catalog
 
-55 active skills: 54 device/family skills and one shared Google Cast skill.
+56 active skills: 55 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
@@ -22,6 +22,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Amazon Echo](gadget-amazon-echo/SKILL.md) — cloud only; needs internet, a Linux Home Link and an Amazon login: TTS, volume, media and confirmed switching.
 - [Apple HomePod mini](gadget-apple-homepod-mini/SKILL.md) — supported volume, transport and grouping controls.
 - [Apple TV 4K](gadget-apple-tv-4k/SKILL.md) — paired remote, apps and keyboard.
+- [Divoom Pixoo-64](gadget-pixoo-64/SKILL.md) — still frames and text via the local HTTP API.
 - [Freebox Player Pop](gadget-freebox-player-pop/SKILL.md) — Cast and Android TV Remote v2.
 - [Google Home](gadget-google-home-speaker/SKILL.md) — audio-only Cast.
 - [Google Home Max](gadget-google-home-max/SKILL.md) — audio-only Cast.
