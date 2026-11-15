@@ -67,6 +67,7 @@ class LinkNoiseTunnelTest(unittest.TestCase):
             constants = "#define SMALL_CONTROL_SESSION 0\n#define CARDPUTER_CONTROL_SESSION 0\n" + "\n".join(line for line in control.splitlines()
                                   if line.startswith(("#define CTRL_STREAM_ID",
                                                       "#define CTRL_BODY_CHUNK_MAX",
+                                                      "#define RX_IDLE_TIMEOUT_MS",
                                                       "#define OUT_SVC_SCRATCH",
                                                       "#define OUT_ENV_SCRATCH",
                                                       "#define WS_HEADROOM")))
@@ -144,6 +145,12 @@ class LinkNoiseTunnelTest(unittest.TestCase):
 
     def test_control_attempted_send_failure_is_fatal(self):
         self.run_harness("failures")
+
+    def test_silent_session_pings_then_reconnects(self):
+        self.run_harness("rx_idle")
+
+    def test_dead_connection_reconnects_at_tunnel_timeout(self):
+        self.run_harness("dead_connection")
 
     def test_config_guard_rejects_either_stale_tcp_limit(self):
         source = (ROOT / "cmake" / "validate_config.cmake").read_text()
