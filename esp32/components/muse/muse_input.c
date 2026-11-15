@@ -56,6 +56,9 @@
 #include "muse_review.h"
 #include "muse_wheel.h"
 #endif
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -606,6 +609,13 @@ static void power_release(void)
 {
     if (!s_power_down) return;
     s_power_down = false;
+#if CONFIG_MUSE_APP_VIEW
+    /* With an app open, the power key closes it instead of sleeping the screen. */
+    if (!s_power_swallow && muse_app_view_power()) {
+        s_power_swallow = false;
+        return;
+    }
+#endif
     if (!s_power_swallow) set_asleep(true, muse_board->power_button);
     s_power_swallow = false;
 }
@@ -683,6 +693,12 @@ static void input_task(void *arg)
             muse_video_close();
             ev &= ~(presses | MUSE_BTN_POWER_LONG);
         }
+#endif
+#if CONFIG_MUSE_APP_VIEW
+        /* An open app takes the talk, speaker and aux buttons; the power key still closes it.
+         * A toggled voice note that's recording keeps the talk key: its next press stops it. */
+        unsigned keep = NOTE_TOGGLED() ? ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE) : 0;
+        ev = muse_app_view_buttons(ev & ~keep) | keep;
 #endif
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",
