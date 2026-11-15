@@ -1,0 +1,5 @@
+# Optional voice-note control mode; load after sdkconfig.muse and the board.
+# Press once to record, press again to send. The normal 15 s limit applies.
+# Does not add TTS. Mutually exclusive with experimental live voice calls.
+CONFIG_MUSE_REALTIME_VOICE=n
+CONFIG_MUSE_VOICE_NOTE_TOGGLE=y

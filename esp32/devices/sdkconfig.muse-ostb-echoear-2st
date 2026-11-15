@@ -3,6 +3,8 @@
 # Reference: https://docs.yishierniao.cn/details/ai/echoear-2st/product.html
 # Variant GPIOs and validation limitations: devices/ostb-echoear-2st.md.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-ostb-echoear-2st"
+CONFIG_MUSE_DEVICE_MODEL_NAME="OSTB EchoEar-2ST"
 CONFIG_MUSE_BOARD_OSTB_ECHOEAR_2ST=y
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

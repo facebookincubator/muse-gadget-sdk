@@ -53,6 +53,7 @@ static void esp_tls_conn_destroy(esp_tls_t *) {}
 // These are extracted from the checked-out production source by the runner.
 #include "noise_reconnect.inc"
 #include "noise_upgrade.inc"
+static void note_attempt_failed(const char *) {}
 static session_result_t upgrade_result(esp_tls_t *tls) {
 #include "noise_upgrade_result.inc"
     return SESSION_OK;

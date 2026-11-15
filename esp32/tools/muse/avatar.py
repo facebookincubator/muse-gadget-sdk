@@ -35,6 +35,9 @@
    in components/muse/avatar/firmware-BOARD/ (the hashes of its avatar and app
    image in VERIFIED there) and it says how to flash it.
 
+--status says which avatar the next build uses and what this tool last flashed;
+--restore previous|default goes back, through the same checks.
+
 Exit status: 0 done, 1 failed, 2 no usable board, 3 the board isn't set up.
 """
 import argparse
@@ -63,8 +66,10 @@ import make_gifs  # noqa: E402
 ROOT = make_gifs.ROOT
 AVATAR_DIR = os.path.join(ROOT, "components", "muse", "avatar")
 AVATAR_SRC = make_gifs.CUSTOM_SRC
+DEFAULT_SRC = make_gifs.DEFAULT_SRC
 LAST_REPLY = os.path.join(AVATAR_DIR, "last_reply.md")
 AVATAR_NAME = os.path.join("components", "muse", "avatar", "muse_pixel.c")   # as Muse and you see it
+FLASHED = "flashed"   # in AVATAR_DIR: what this tool has flashed, one line each
 BUILD_LOG = "/tmp/muse_build_{}.log"   # where board.sh build logs
 LOCK = ".lock"
 TMP_SUFFIX = ".tmp"
@@ -79,17 +84,21 @@ ERROR_LINES = 60
 
 # muse_board->name, as "@status" reports it -> tools/muse/board.sh's name
 BOARDS = {
+    "DFRobot UNIHIKER K10": "k10",
     "Espressif ESP32-S3-BOX-3": "box3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75C": "s3",
     "Waveshare ESP32-S3-Touch-AMOLED-1.75": "s3n",
+    "Waveshare ESP32-S3-Touch-LCD-1.85B": "185b",
     "Waveshare ESP32-S3-Touch-LCD-1.85C": "185c",
     "Waveshare ESP32-S3-Touch-AMOLED-1.43C": "143c",
     "Waveshare ESP32-S3-Touch-LCD-1.46": "146",
     "Waveshare ESP32-S3-Touch-AMOLED-2.16": "s3-216",
     "Waveshare ESP32-S3-Touch-AMOLED-2.06": "s3-206",
     "Waveshare ESP32-S3-Touch-AMOLED-1.43": "143",
+    "LilyGO T-Display-S3 AMOLED 1.75": "lilygo175",
     "AIPI Lite": "aipi",
     "ALIENTEK ATK-DNESP32S3-BOX": "atk-box",
+    "ALIENTEK ATK-DNESP32S3-BOX2": "atk-box2",
     "OSTB EchoEar-2ST": "echoear",
     "Waveshare ESP32-C6-Touch-AMOLED-1.8": "c6",
     "Waveshare ESP32-S3-Touch-AMOLED-1.8": "s3-18",
@@ -115,8 +124,9 @@ BOARDS = {
     "Deotaland RoRoLee": "rorolee",
     "Waveshare ESP32-S3-Touch-LCD-1.9": "lcd19",
     "VIEWE SmartRing-Plus": "smartring-plus",
+    "Waveshare ESP32-S3-Touch-LCD-3.5": "s3lcd35",
 }
-CHAT_BOARDS = ("s3", "s3n", "s3-18", "s3-216", "s3-206", "185c", "143c", "143", "146", "aipi", "atk-box", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus")
+CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "lilygo175", "aipi", "atk-box", "atk-box2", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35")
 
 
 class Stop(Exception):
@@ -341,7 +351,8 @@ def build_dir(key, root=ROOT):
 
 
 def build_candidate(src, key, work):
-    """Builds the firmware for `key` with `src` as the avatar, in a copy of this tree under `work`.
+    """Builds the firmware for `key` with `src` as the avatar (the default one if None), in a copy
+    of this tree under `work`.
 
     It reuses the configuration of your own build for that board (build-muse-*/sdkconfig: your
     SDK token, Wi-Fi and options); without one, it's configured from the defaults, as a first
@@ -357,8 +368,9 @@ def build_candidate(src, key, work):
         say(f"  with the configuration of your {b} build")
     else:
         say(f"  no {b} build here yet: configured from the defaults")
-    os.makedirs(os.path.join(root, "components", "muse", "avatar"))
-    shutil.copyfile(src, os.path.join(root, "components", "muse", "avatar", "muse_pixel.c"))
+    if src:
+        os.makedirs(os.path.join(root, "components", "muse", "avatar"))
+        shutil.copyfile(src, os.path.join(root, "components", "muse", "avatar", "muse_pixel.c"))
     ok, out = build(key, root)
     return ok, out, root
 
@@ -407,10 +419,42 @@ def write_atomic(path, text):
     sync_dir(d)
 
 
+def recover_previous():
+    """Finishes a committed slot swap, or drops its staging file if the avatar never changed.
+
+    The outgoing avatar stays in .prev.next until the new current file is durable;
+    .prev is untouched until then, since it may be the file being restored.
+    """
+    pending = AVATAR_SRC + ".prev.next"
+    default = AVATAR_SRC + ".prev-default"
+    pending_default = default + ".next"
+    if os.path.exists(pending):
+        if os.path.exists(AVATAR_SRC) and sha256(AVATAR_SRC) == sha256(pending):
+            os.remove(pending)  # the outgoing file is still current: no swap committed
+        else:
+            if os.path.exists(default):
+                os.remove(default)
+                sync_dir(AVATAR_DIR)
+            os.replace(pending, AVATAR_SRC + ".prev")
+        sync_dir(AVATAR_DIR)
+    if os.path.exists(pending_default):
+        if os.path.exists(AVATAR_SRC):
+            # A new custom avatar replaced the default. An older .prev isn't
+            # the previous selection; the durable marker takes its place.
+            if os.path.exists(AVATAR_SRC + ".prev"):
+                os.remove(AVATAR_SRC + ".prev")
+                sync_dir(AVATAR_DIR)
+            os.replace(pending_default, default)
+        else:
+            os.remove(pending_default)  # still the default: no swap committed
+        sync_dir(AVATAR_DIR)
+
+
 def recover():
     """Clears what an interrupted run left half written. Your avatar files are whole either way."""
     if not os.path.isdir(AVATAR_DIR):
         return
+    recover_previous()
     for name in os.listdir(AVATAR_DIR):
         if name.startswith(".") and name.endswith(TMP_SUFFIX):
             path = os.path.join(AVATAR_DIR, name)
@@ -453,19 +497,38 @@ def image_path(key, root):
     return path if os.path.isfile(path) else None
 
 
+def renderer(custom, default):
+    """Which avatar a build with yours at `custom` and the default at `default` draws, and its sha256:
+    {"renderer": "custom" or "default", "renderer_sha256": ...}."""
+    if os.path.exists(custom):
+        return {"renderer": "custom", "renderer_sha256": sha256(custom)}
+    return {"renderer": "default", "renderer_sha256": sha256(default) if os.path.exists(default) else None}
+
+
+def current():
+    """The avatar the next build here draws."""
+    return renderer(AVATAR_SRC, DEFAULT_SRC)
+
+
+def built_with(root):
+    """The avatar the tree at `root` builds."""
+    return renderer(os.path.join(root, "components", "muse", "avatar", "muse_pixel.c"),
+                    os.path.join(root, "avatar", "muse_pixel.c"))
+
+
 def kept_dir(key):
     """Where the firmware checked with your avatar stays until it's flashed (gitignored)."""
     return os.path.join(AVATAR_DIR, f"firmware-{key}")
 
 
-def checked_build(root, key, src):
-    """The hashes of the candidate `src` and of the app image built with it in `root`, or None if
-    that build doesn't have this candidate or made no image to flash."""
-    built = os.path.join(root, "components", "muse", "avatar", "muse_pixel.c")
+def checked_build(root, key, meant):
+    """The hashes of the avatar `meant` ({"renderer", "renderer_sha256"}, as checked) and of the app
+    image built with it in `root`, or None if that build has another avatar or made no image."""
+    built = built_with(root)
     image = image_path(key, root)
-    if image is None or not os.path.exists(built) or sha256(built) != sha256(src):
+    if image is None or built != meant:
         return None
-    return {"board": key, "renderer_sha256": sha256(src), "image_sha256": sha256(image)}
+    return {"board": key, **built, "image_sha256": sha256(image)}
 
 
 def kept_record(dest):
@@ -478,9 +541,10 @@ def kept_record(dest):
 
 def drop_kept():
     """Removes kept builds of an avatar other than the one you have now: they'd flash that one."""
-    now = sha256(AVATAR_SRC) if os.path.exists(AVATAR_SRC) else None
+    now = current()
     for d in sorted(glob.glob(os.path.join(AVATAR_DIR, "firmware-*"))):
-        if (kept_record(d) or {}).get("renderer_sha256") != now:
+        rec = kept_record(d) or {}
+        if {k: rec.get(k) for k in now} != now:
             shutil.rmtree(d, ignore_errors=True)
             say(f"  removed {rel(d)}: it was built with the avatar before")
 
@@ -504,12 +568,8 @@ def verify_kept(key):
     if record is None:
         raise Stop(f"There's no checked build in {rel(dest)}. Run this again with --board {key}.")
     image = image_path(key, dest)
-    now = {"board": key,
-           "renderer_sha256": sha256(AVATAR_SRC) if os.path.exists(AVATAR_SRC) else None,
-           "image_sha256": sha256(image) if image else None}
-    kept_src = os.path.join(dest, "components", "muse", "avatar", "muse_pixel.c")
-    if (record != now or not os.path.exists(kept_src)
-            or sha256(kept_src) != now["renderer_sha256"]):
+    now = {"board": key, **current(), "image_sha256": sha256(image) if image else None}
+    if record != now or {**built_with(dest), "board": key, "image_sha256": now["image_sha256"]} != now:
         raise Stop(f"The build in {rel(dest)} isn't the one checked with your avatar any more, so it "
                    f"isn't flashed. Run this again with --board {key}.")
     return dest
@@ -525,15 +585,28 @@ def save_reply(reply):
     write_atomic(LAST_REPLY, reply)
 
 
+def lf(text):
+    """`text` with the line endings reading it as text gives."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def promote(code, gifs_dir):
-    """Makes the checked `code` your avatar, keeping the one it replaces as muse_pixel.c.prev
-    (unless it's the same file: that would lose the one before)."""
+    """Makes the checked `code` your avatar (None: the default one), keeping the one it replaces
+    as muse_pixel.c.prev."""
     if os.path.exists(AVATAR_SRC):
-        with open(AVATAR_SRC, encoding="utf-8") as f:
-            old = f.read()
-        if old != code:
-            write_atomic(AVATAR_SRC + ".prev", old)
-    write_atomic(AVATAR_SRC, code)
+        with open(AVATAR_SRC, encoding="utf-8", newline="") as f:
+            old = f.read()   # as it is on disk: recover_previous() compares the staged copy's bytes with it
+        if code is None or lf(old) != lf(code):  # replacing a file with itself keeps the previous selection
+            write_atomic(AVATAR_SRC + ".prev.next", old)
+    elif code is not None:
+        write_atomic(AVATAR_SRC + ".prev-default.next", "")
+    if code is None:
+        if os.path.exists(AVATAR_SRC):
+            os.remove(AVATAR_SRC)
+            sync_dir(AVATAR_DIR)
+    else:
+        write_atomic(AVATAR_SRC, code)
+    recover_previous()
     if gifs_dir and os.path.isdir(gifs_dir):
         gifs = os.path.join(AVATAR_DIR, "gifs")
         shutil.rmtree(gifs, ignore_errors=True)
@@ -543,13 +616,75 @@ def promote(code, gifs_dir):
 Made = collections.namedtuple("Made", "gifs root")   # root: the tree whose firmware build has it, or None
 
 
+def install(code, key, work):
+    """Checks `code` (None: the default avatar) here, and with `key` builds the firmware with it in a
+    copy of this tree under `work`; only if it all passes does it become your avatar.
+    Returns (Made, None), or (None, the errors in the avatar). A failure elsewhere stops."""
+    round_dir = tempfile.mkdtemp(prefix="round-", dir=work)
+    src = None
+    if code is not None:
+        src = os.path.join(round_dir, "muse_pixel.c")
+        with open(src, "w", encoding="utf-8") as f:
+            f.write(code)
+        meant = {"renderer": "custom", "renderer_sha256": sha256(src)}   # a copy only this run writes
+    else:
+        # The default is a file in the tree anyone can edit, and this doesn't lock it: what's checked is
+        # its hash now, which the build and the switch to it must still have (else it stops).
+        meant = {"renderer": "default", "renderer_sha256": sha256(DEFAULT_SRC)}
+    gifs_dir = os.path.join(AVATAR_DIR, f".gifs-{os.path.basename(round_dir)}{TMP_SUFFIX}")
+    try:
+        errors, gifs = host_check(src or DEFAULT_SRC, gifs_dir)
+        root = record = None
+        if not errors and key:
+            ok, out, root = build_candidate(src, key, round_dir)
+            if not ok:
+                errors = build_errors(key, root) if src else None
+                if not errors:
+                    raise Stop(out + f"\n\nThe firmware build failed, but not in the avatar. See "
+                               f"{BUILD_LOG.format(key)}. Your avatar is as it was.")
+            else:
+                record = checked_build(root, key, meant)
+                if record is None:
+                    raise Stop("The firmware built, but there's no app image of it with this avatar "
+                               "to flash, so it isn't used. Your avatar is as it was.")
+        if errors:
+            shutil.rmtree(gifs_dir, ignore_errors=True)
+            shutil.rmtree(round_dir, ignore_errors=True)
+            return None, errors
+        if code is None and sha256(DEFAULT_SRC) != meant["renderer_sha256"]:
+            shutil.rmtree(gifs_dir, ignore_errors=True)
+            raise Stop(f"{rel(DEFAULT_SRC)} changed while it was being checked, so your avatar is as it was. "
+                       "Run this again.")
+        had = os.path.exists(AVATAR_SRC)
+        older = code is not None and not had and os.path.exists(AVATAR_SRC + ".prev")
+        promote(code, gifs_dir)
+        if code is None and not had:
+            say("You have no avatar of your own: builds use the default one.")
+        elif code is None:
+            say(f"Removed {rel(AVATAR_SRC)}: builds use the default avatar (yours is "
+                f"{rel(AVATAR_SRC + '.prev')})")
+        elif older:
+            # One previous slot: it now holds the default, so the older avatar of yours goes.
+            say(f"Saved {rel(AVATAR_SRC)} (the one before is the default avatar; your older avatar, "
+                f"{rel(AVATAR_SRC + '.prev')}, was removed)")
+        else:
+            say(f"Saved {rel(AVATAR_SRC)}" + (f" (the one before is {rel(AVATAR_SRC + '.prev')})"
+                                              if os.path.exists(AVATAR_SRC + ".prev") else ""))
+        gifs = [(os.path.join(AVATAR_DIR, "gifs", os.path.basename(p)), n) for p, n in gifs or []]
+        if record is None:
+            drop_kept()
+            return Made(gifs, None), None
+        return Made(gifs, keep_build(root, record)), None
+    finally:
+        shutil.rmtree(gifs_dir, ignore_errors=True)
+
+
 def make_avatar(board, key, reply, work=None):
     """Checks the avatar in `reply` (and builds the firmware for `key`'s board with it, in a copy
     of this tree under `work`, if given), sending errors back to Muse through `board`, if any.
     Only once it passes does it become your avatar. Returns Made(GIF previews, built tree)."""
     own = work is None
     work = work or new_work()
-    gifs_dir = None
     try:
         for attempt in range(FIX_ROUNDS + 1):
             save_reply(reply)
@@ -562,36 +697,9 @@ def make_avatar(board, key, reply, work=None):
             say(f"Checking the muse_pixel.c Muse sent ({len(code.encode())} bytes)")
             if attempt == 0 and description(code):
                 say(f"  Muse drew: {description(code)[:300]}")
-            round_dir = tempfile.mkdtemp(prefix=f"round{attempt}-", dir=work)
-            src = os.path.join(round_dir, "muse_pixel.c")
-            with open(src, "w", encoding="utf-8") as f:
-                f.write(code)
-            gifs_dir = os.path.join(AVATAR_DIR, f".gifs-{os.path.basename(round_dir)}{TMP_SUFFIX}")
-            errors, gifs = host_check(src, gifs_dir)
-            root = record = None
-            if not errors and key:
-                ok, out, root = build_candidate(src, key, round_dir)
-                if not ok:
-                    errors = build_errors(key, root)
-                    if not errors:
-                        raise Stop(out + f"\n\nThe firmware build failed, but not in the avatar. See "
-                                   f"{BUILD_LOG.format(key)}. Your avatar is as it was.")
-                else:
-                    record = checked_build(root, key, src)
-                    if record is None:
-                        raise Stop("The firmware built, but there's no app image of it with this avatar "
-                                   "to flash, so it isn't used. Your avatar is as it was.")
-            if not errors:
-                promote(code, gifs_dir)
-                say(f"Saved {rel(AVATAR_SRC)}" + (f" (the one before is {rel(AVATAR_SRC + '.prev')})"
-                                                  if os.path.exists(AVATAR_SRC + ".prev") else ""))
-                gifs = [(os.path.join(AVATAR_DIR, "gifs", os.path.basename(p)), n) for p, n in gifs or []]
-                if record is None:
-                    drop_kept()
-                    return Made(gifs, None)
-                return Made(gifs, keep_build(root, record))
-            shutil.rmtree(gifs_dir, ignore_errors=True)
-            shutil.rmtree(round_dir, ignore_errors=True)   # its tree copy and build
+            made, errors = install(code, key, work)
+            if made:
+                return made
             if board is None or attempt == FIX_ROUNDS:
                 raise Stop(errors + "\n\nThe muse_pixel.c Muse sent doesn't build or run, so your avatar is as it "
                            f"was. Muse's reply is in {rel(LAST_REPLY)}.")
@@ -599,10 +707,95 @@ def make_avatar(board, key, reply, work=None):
             reply = ask(board, "That muse_pixel.c doesn't work:\n\n```\n" + errors + "\n```\n\nFix it and send "
                         "the whole file again, the same way: one ```c block and nothing after it.", "fix")
     finally:
-        if gifs_dir:
-            shutil.rmtree(gifs_dir, ignore_errors=True)   # a failed candidate's; a promoted one's has moved
         if own:
             shutil.rmtree(work, ignore_errors=True)
+
+
+def restore(which, key, work):
+    """Goes back to your previous avatar (muse_pixel.c.prev, checked like a new one; the one you
+    have becomes the previous) or to the default one. Returns Made."""
+    if which == "previous" and os.path.exists(AVATAR_SRC + ".prev-default"):
+        code = None
+        say("Going back to your previous avatar, the default one")
+    elif which == "previous":
+        if not os.path.exists(AVATAR_SRC + ".prev"):
+            raise Stop(f"There's no previous avatar ({rel(AVATAR_SRC + '.prev')}) to go back to.")
+        with open(AVATAR_SRC + ".prev", encoding="utf-8") as f:
+            code = f.read()
+        say(f"Checking your previous avatar ({len(code.encode())} bytes)")
+    else:
+        code = None
+        say("Going back to the default avatar")
+    made, errors = install(code, key, work)
+    if errors:
+        raise Stop(errors + f"\n\nThe {which} avatar doesn't build or run here, so your avatar is as it was.")
+    return made
+
+
+def record_flash(key, port, record):
+    """Adds what was just flashed to FLASHED: a record of what this tool wrote, not of the board."""
+    path, old = os.path.join(AVATAR_DIR, FLASHED), ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+    when = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    write_atomic(path, old + f"{when} board={key} port={port} renderer={record['renderer']} "
+                               f"renderer_sha256={record['renderer_sha256']} "
+                               f"image_sha256={record['image_sha256']}\n")
+
+
+def last_flashes():
+    """The last FLASHED record of each board, as dicts."""
+    last = {}
+    try:
+        with open(os.path.join(AVATAR_DIR, FLASHED), encoding="utf-8") as f:
+            for line in f:
+                when, *fields = line.split()
+                rec = dict(x.split("=", 1) for x in fields if "=" in x)
+                rec["when"] = when
+                last[rec.get("board")] = rec
+    except OSError:
+        pass
+    return last
+
+
+def short(sha):
+    return (sha or "?")[:12]
+
+
+def described(rec):
+    return f"{'your avatar' if rec.get('renderer') == 'custom' else 'the default avatar'} " \
+           f"(sha256 {short(rec.get('renderer_sha256'))})"
+
+
+def status():
+    """Says, from this computer alone, which avatar the next build uses, and what this tool flashed."""
+    now = current()
+    say("On this computer (what the next firmware build uses):")
+    src = AVATAR_SRC if now["renderer"] == "custom" else DEFAULT_SRC
+    with open(src, encoding="utf-8") as f:
+        what = description(f.read())
+    say(f"  {described(now)}, {rel(src)}" + (f": {what[:120]}" if what else ""))
+    prev = AVATAR_SRC + ".prev"
+    say("  previous: the default avatar" if os.path.exists(AVATAR_SRC + ".prev-default") else
+        f"  previous: {rel(prev)} (sha256 {short(sha256(prev))})" if os.path.exists(prev) else "  no previous avatar")
+    for d in sorted(glob.glob(os.path.join(AVATAR_DIR, "firmware-*"))):
+        key = os.path.basename(d)[len("firmware-"):]
+        try:
+            verify_kept(key)
+            say(f"  retained checked build for {key}: {rel(d)} (has the avatar here)")
+        except Stop:
+            say(f"  build for {key} in {rel(d)} doesn't match the avatar here any more; it won't be flashed")
+    last = last_flashes()
+    say("Last flashed by this tool (what it wrote, not what the board runs now):")
+    if not last:
+        say("  nothing yet")
+    for key, rec in sorted(last.items(), key=lambda kv: str(kv[0])):
+        same = {k: rec.get(k) for k in now} == now
+        say(f"  {key} on {rec.get('port')} at {rec['when']}: {described(rec)}, image {short(rec.get('image_sha256'))}"
+            + (" (the avatar here now)" if same else " (not the avatar here now)"))
+    say("The board doesn't report which image it runs, so this can't tell what the board plugged in shows: "
+        "it may have been flashed since, by another tool or computer.")
 
 
 def main():
@@ -610,15 +803,23 @@ def main():
     ap.add_argument("--port", help="the board's serial port (found by itself when there's one board)")
     ap.add_argument("--board", choices=sorted(set(BOARDS.values())),
                     help="the board, if it doesn't answer yet: flashes s3, s3-18, aipi, box3, sticks3, stopwatch, cores3, core2, rorolee or watcher firmware with serial "
-                         "chat first, or with --reply, the firmware to build")
+                         "chat first, or with --reply or --restore, the firmware to build")
     ap.add_argument("--edit", metavar="CHANGE", help="ask Muse to change the avatar you have, not redraw it")
     ap.add_argument("--reply", metavar="FILE", help="use this reply from Muse instead of asking through the board")
     ap.add_argument("--no-flash", action="store_true", help="stop after building the firmware, and keep the build to flash")
+    ap.add_argument("--status", action="store_true",
+                    help="say which avatar the next build uses and what this tool last flashed (needs no board)")
+    ap.add_argument("--restore", choices=("previous", "default"),
+                    help="go back to your previous avatar or to the default one, checked, built and flashed like a new one")
     args = ap.parse_args()
-    if args.edit and not os.path.exists(AVATAR_SRC):
-        raise Stop(f"You have no avatar to change yet ({rel(AVATAR_SRC)}). Run this without --edit first.", 2)
-
-    with lock():
+    if sum(map(bool, (args.status, args.restore, args.reply, args.edit))) > 1:
+        raise Stop("Use one of --status, --restore, --reply and --edit at a time.", 2)
+    with lock():   # status reads, and --edit checks, what a run beside it could be changing
+        if args.status:
+            status()
+            return
+        if args.edit and not os.path.exists(AVATAR_SRC):
+            raise Stop(f"You have no avatar to change yet ({rel(AVATAR_SRC)}). Run this without --edit first.", 2)
         run(args)
 
 
@@ -626,13 +827,14 @@ def run(args):
     board, key, port = None, args.board, args.port
     work = new_work()
     try:
-        if not (args.reply and args.no_flash):
+        local = args.reply or args.restore   # the avatar comes from this computer, not from Muse
+        if not (local and args.no_flash):
             port = port or chat.pick_port()
             say(f"Board on {port}")
             try:
                 board, st = open_board(port)
             except Stop:
-                if args.reply and args.board:
+                if local and args.board:
                     st = None   # it gets flashed anyway; it needn't answer
                 elif args.board in CHAT_BOARDS:
                     ok, out = build(args.board)
@@ -646,10 +848,12 @@ def run(args):
             if st:
                 say("  " + summary(st))
                 key = BOARDS.get(st.get("board"), key)
-                if not args.reply:
+                if not local:
                     check_board(st)
 
-        if args.reply:
+        if args.restore:
+            made = restore(args.restore, key, work)
+        elif args.reply:
             with open(args.reply, encoding="utf-8") as f:
                 made = make_avatar(None, key, f.read(), work)
         else:
@@ -668,16 +872,22 @@ def run(args):
         if board:
             board.close()
             board = None
-        flash(key, port, verify_kept(key))   # a failure keeps it, and says how to flash it
-        shutil.rmtree(made.root, ignore_errors=True)
+        kept = verify_kept(key)
+        record = kept_record(kept)
+        flash(key, port, kept)   # a failure keeps it, and says how to flash it
+        record_flash(key, port, record)
+        shutil.rmtree(kept, ignore_errors=True)
+        say(f"Flashed {port} with the build checked with your avatar (image sha256 "
+            f"{short(record['image_sha256'])}).")
         time.sleep(6)
         try:
             with chat.Board(port) as b:
                 st = b.status(timeout=5)
         except chat.BoardError:
             st = None
-        say("Done: your avatar is on the board." if st else
-            "Flashed. The board hasn't answered yet; your avatar shows once it has booted.")
+        # Its answer says it booted, not which image it runs: look at the screen for the avatar.
+        say(f"The board answered after booting ({summary(st)})." if st else
+            "The board hasn't answered since; it may still be booting.")
     finally:
         if board:
             board.close()

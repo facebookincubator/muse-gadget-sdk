@@ -68,9 +68,9 @@ class WaveshareS3Lcd19(unittest.TestCase):
 
     def test_ili9341_stays_on_the_fnk0104b(self):
         # Rules are ANDed: a second rule that excludes fnk0104b drops the
-        # FNK0104B's panel driver.
+        # FNK0104B's panel driver. The UNIHIKER K10 shares the panel.
         rules = dict(dependencies())['espressif/esp_lcd_ili9341']
-        self.assertEqual(rules, ['"$CONFIG{MUSE_BOARD_ID} == \\"fnk0104b\\""'])
+        self.assertEqual(rules, ['"$CONFIG{MUSE_BOARD_ID} in [\\"fnk0104b\\", \\"dfrobot_unihiker_k10\\"]"'])
 
     def test_lcd19_gets_its_panel_touch_and_lvgl_components(self):
         deps = dict(dependencies())

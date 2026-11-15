@@ -328,6 +328,14 @@ def test_drop_in_cannot_replace_a_builtin(account):
     assert executor.specs()["system.run"] == COMMAND_SPECS["system.run"]
 
 
+def test_drop_in_cannot_take_the_guide_command(account):
+    # LinkSession answers device.guide itself, so a drop-in by that name would never run.
+    fake = commands.DropInCommand("device.guide", "x", ("/bin/false",), {}, {}, 1000)
+    executor = Executor(account, [fake])
+    assert executor.drop_ins == {}
+    assert "device.guide" not in executor.specs()
+
+
 def test_unknown_commands_are_still_unsupported(account):
     result = Executor(account).run("pump.set", {})
     assert result == {"ok": False, "error": "unsupported command: pump.set"}
@@ -528,7 +536,8 @@ def test_drop_in_returns_when_parent_exits_with_descendant_holding_pipes(account
                 pass
 
 
-REGISTER_METADATA = {"node_id": "homelink-abcdef", "display_name": "pi", "version": "0.1.0"}
+REGISTER_METADATA = {"node_id": "homelink-abcdef", "display_name": "pi", "version": "0.1.0",
+                     "model_id": "acme-robot", "model_name": "Acme Robot", "guide": "# Acme Robot\n"}
 
 
 def registration_size(specs, metadata=REGISTER_METADATA):
@@ -603,7 +612,7 @@ def test_no_drop_in_registration_remains_byte_identical(account):
     from musegadget.link_client import DeviceDescription, encode_message
     device = DeviceDescription(commands=Executor(account).specs(**REGISTER_METADATA), **REGISTER_METADATA)
     original = {"type": "req", "id": "0" * 36, "method": "link.register", "params": {
-        **REGISTER_METADATA, "platform": "linux", "device_family": "homehub", "model_id": "linux",
+        **REGISTER_METADATA, "platform": "linux", "device_family": "gadget",
         "is_wakeup_supported": False, "commands_v2": COMMAND_SPECS,
     }}
     # Object-key order in the original wire is the register_params order.

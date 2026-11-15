@@ -39,6 +39,18 @@ def test_invalid_pairing_is_reported_without_echoing_contents(
     assert "secret" not in doctor.format_check(result)
 
 
+@pytest.mark.parametrize("stamp", [None, "123", True, -1, float("nan"), float("inf")])
+def test_invalid_pairing_timestamp_is_reported(tmp_path: Path, stamp: object) -> None:
+    config.save_json(config.PAIRING_FILE, {
+        "access_token": "secret-access", "refresh_token": "secret-refresh",
+        "access_token_saved_at": stamp,
+    }, tmp_path)
+    result = doctor.check_pairing(tmp_path)
+    assert result["status"] == "FAIL"
+    assert "timestamp" in result["detail"]
+    assert "secret" not in doctor.format_check(result)
+
+
 def test_pairing_accepts_saved_tokens_without_creating_identity(tmp_path: Path) -> None:
     (tmp_path / config.PAIRING_FILE).write_text(
         json.dumps({"access_token": "secret-access", "refresh_token": "secret-refresh"}),
@@ -199,6 +211,22 @@ def test_network_reuses_setup_probe_with_timeout(
     probe.assert_called_once_with(timeout=5.0)
 
 
+@pytest.mark.parametrize("problem,status", [
+    (None, "OK"),
+    ("the system trust store still trusts emSign ECC Root CA - G3", "FAIL"),
+    ("can't read the system trust store", "FAIL"),
+])
+def test_trust_store_fails_while_musegadget_would_refuse_to_connect(
+    monkeypatch: pytest.MonkeyPatch, problem: str | None, status: str,
+) -> None:
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=problem))
+    result: doctor.CheckResult = doctor.check_trust_store()
+    assert result["status"] == status
+    if problem:
+        assert problem[1:] in result["detail"]
+        assert "update your ca-certificates package" in result["hint"].lower()
+
+
 @pytest.mark.parametrize("status,exit_code", [("OK", 0), ("FAIL", 1), ("WARN", 0)])
 def test_cli_renders_checks_and_sets_exit_status(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
@@ -236,6 +264,7 @@ def test_doctor_continues_after_failures_without_changing_saved_files(
     before: dict[str, bytes] = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     monkeypatch.setattr(doctor.shutil, "which", Mock(return_value=None))
     monkeypatch.setattr(doctor.network, "is_online", Mock(return_value=True))
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
     results: tuple[doctor.CheckResult, ...] = doctor.run_checks()
-    assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK"]
+    assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK", "OK"]
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before

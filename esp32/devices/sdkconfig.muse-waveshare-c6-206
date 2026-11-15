@@ -21,6 +21,8 @@
 # replies show as text. Link's TLS, Wi-Fi and BLE buffers are trimmed to fit
 # internal RAM.
 CONFIG_IDF_TARGET="esp32c6"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-c6-206"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-C6-Touch-AMOLED-2.06"
 CONFIG_MUSE_BOARD_WAVESHARE_C6_206=y
 CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=1
 

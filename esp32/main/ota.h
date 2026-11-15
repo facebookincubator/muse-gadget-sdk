@@ -59,5 +59,5 @@ void ota_verify_forget(void);
 // Whether the running image is a PENDING_VERIFY install by the ESP-Mosaico's
 // Vibe Mode firmware, which accepts its own installs: the one image the
 // health check leaves alone. False on every other board and build, and for an
-// image device.ota recorded.
+// image ota_start recorded.
 bool ota_installed_by_vibe_mode(void);

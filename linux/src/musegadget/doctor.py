@@ -23,7 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from musegadget import config, network
+from musegadget import config, network, tls
 from musegadget.muse_api import API_BASE
 
 
@@ -52,11 +52,9 @@ def check_pairing(directory: Path) -> CheckResult:
         return {"name": "Pairing", "status": "FAIL",
                 "detail": f"Cannot read saved pairing (OS error {exc.errno}).",
                 "hint": f"Check the state directory: {directory}."}
-    if not isinstance(saved, dict) or not all(
-        isinstance(saved.get(key), str) and saved[key].strip()
-        for key in ("access_token", "refresh_token")
-    ):
-        return {"name": "Pairing", "status": "FAIL", "detail": "Saved pairing lacks device tokens.",
+    problem = config.pairing_problem(saved)
+    if problem is not None:
+        return {"name": "Pairing", "status": "FAIL", "detail": problem,
                 "hint": "Run sudo musegadget pair --force to pair again."}
     return {"name": "Pairing", "status": "OK", "detail": "Device tokens are saved.",
             "hint": "This checks local structure, not whether Muse accepts the tokens."}
@@ -154,6 +152,22 @@ def check_network() -> CheckResult:
             "hint": "Check DNS, internet access, and outbound HTTPS firewall rules."}
 
 
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def check_trust_store() -> CheckResult:
+    """Check the system trust store, which musegadget won't use while it holds a distrusted root."""
+    problem: str | None = tls.trust_store_problem()
+    if problem is None:
+        return {"name": "Root CAs", "status": "OK",
+                "detail": "The system trust store has none of the distrusted root CAs.",
+                "hint": "Keep the ca-certificates package up to date."}
+    return {"name": "Root CAs", "status": "FAIL",
+            "detail": f"{_sentence(problem)}, so musegadget won't connect.",
+            "hint": f"{_sentence(tls.FIX)}."}
+
+
 def run_checks() -> tuple[CheckResult, ...]:
     """Collect independent checks, leaving device files and services unchanged."""
     if platform.system() != "Linux":
@@ -161,7 +175,7 @@ def run_checks() -> tuple[CheckResult, ...]:
                  "hint": "Run sudo musegadget doctor on the Linux gadget itself."},)
     directory: Path = config.state_dir()
     return (check_pairing(directory), check_sdk_token(directory), check_service(),
-            check_bluetooth(), check_network())
+            check_bluetooth(), check_network(), check_trust_store())
 
 
 def format_check(result: CheckResult) -> str:

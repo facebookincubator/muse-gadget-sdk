@@ -59,7 +59,10 @@ static const char *TAG = "board";
 #define LCD_DC GPIO_NUM_46
 #define LCD_RST GPIO_NUM_NC   /* panel reset is tied to the board reset */
 #define LCD_BL GPIO_NUM_45    /* active high */
-#define DRAW_BUF_LINES 32
+/* Two buffers of 16 rows, 15 KB of internal RAM. 32 rows took 30 KB, which
+ * left no 8 KB block once Muse was paired, so the Muse VM lookup task couldn't
+ * start and every turn failed with CAN'T REACH MUSE. */
+#define DRAW_BUF_LINES 16
 
 #define I2C_SDA GPIO_NUM_16   /* shared by the FT6336U and the ES8311 */
 #define I2C_SCL GPIO_NUM_15

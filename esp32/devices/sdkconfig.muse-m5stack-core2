@@ -20,6 +20,8 @@
 # (pins, AXP rail setup, panel/touch/audio init) and
 # https://github.com/m5stack/M5Unified (AXP192 registers, mic pins).
 CONFIG_IDF_TARGET="esp32"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-m5stack-core2"
+CONFIG_MUSE_DEVICE_MODEL_NAME="M5Stack Core2"
 CONFIG_MUSE_BOARD_M5STACK_CORE2=y
 # Signed apps without Secure Boot use the Secure Boot V2 (RSA) scheme, which
 # the ESP32 supports from chip revision 3.0 (the D0WDQ6-V3 is one).

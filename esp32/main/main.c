@@ -21,6 +21,7 @@
 #include "esp_psram.h"
 #endif
 #include "diagnostic_log.h"
+#include "link_events.h"
 #if CONFIG_MUSE_POWER_TEST
 #include "muse_power_test.h"
 #endif
@@ -63,10 +64,14 @@ void app_main(void) {
                  "support log capture disabled: PSRAM unavailable");
     }
 #endif
+    if (!link_events_init()) {
+        ESP_LOGW("link.main", "connectivity history disabled: PSRAM unavailable");
+    }
     ESP_LOGI("link.main", CONFIG_GADGET_PRODUCT_NAME " starting");
-#if CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
-    // The C5's TCP windows are sized for lwIP buffers in PSRAM
-    // (sdkconfig.defaults.esp32c5). Without it they fall back to internal RAM.
+#if CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP && CONFIG_SPIRAM_IGNORE_NOTFOUND
+    // The C5's TCP windows are sized for lwIP buffers in PSRAM. Its defaults
+    // (sdkconfig.defaults.esp32c5) require PSRAM at boot; a config that lets
+    // it boot without falls back to internal RAM.
     if (!esp_psram_is_initialized()) {
         ESP_LOGE("link.main", "PSRAM did not start: network buffers fall back to internal RAM");
     }
