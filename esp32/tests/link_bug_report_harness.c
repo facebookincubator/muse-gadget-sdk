@@ -30,7 +30,6 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/task.h"
-#include "tunnel_netif.h"
 
 static TaskFunction_t g_pending_task;
 static void *g_pending_arg;
@@ -47,6 +46,8 @@ static char *g_payload_json;
 static const char *g_log_data;
 static size_t g_log_len;
 static bool g_log_truncated;
+static bool g_health_fails;
+static bool g_health_full;
 
 static void fail_at(const char *file, int line, const char *fmt, ...) {
     va_list ap;
@@ -77,6 +78,8 @@ static void reset_fakes(void) {
     g_log_data = NULL;
     g_log_len = 0;
     g_log_truncated = false;
+    g_health_fails = false;
+    g_health_full = false;
     snprintf(g_expected_request_id, sizeof(g_expected_request_id),
              "request-1");
 }
@@ -187,18 +190,6 @@ esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info) {
     return ESP_OK;
 }
 
-bool noise_tunnel_is_connected(void) { return true; }
-
-void tunnel_netif_get_stats(tunnel_stats_t *out) {
-    *out = (tunnel_stats_t){
-        .rx_pkts = 11,
-        .rx_bytes = 1200,
-        .tx_pkts = 12,
-        .tx_bytes = 1300,
-        .tx_dropped = 2,
-    };
-}
-
 void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result) {
@@ -212,6 +203,38 @@ void noise_ctrl_send_command_result(
                          ? strdup(payload->valuestring)
                          : NULL;
     cJSON_Delete(result);
+}
+
+// Mirrors the device.health shape. The full variant holds a worst-case
+// connectivity history: 128 lines at the longest detail and largest counters,
+// numbered e000 (oldest) to e127.
+cJSON *noise_ctrl_device_health_json(bool for_bug_report) {
+    if (g_health_fails) return NULL;
+    cJSON *health = cJSON_CreateObject();
+    CHECK(health != NULL, "health allocation failed");
+    cJSON_AddStringToObject(health, "overall", "ok");
+    cJSON_AddBoolToObject(health, "tunnel_connected", true);
+    cJSON *events = cJSON_CreateArray();
+    CHECK(events != NULL, "events allocation failed");
+    cJSON_AddItemToObject(health, "connectivity_events", events);
+    if (g_health_full) {
+        char detail[107];
+        memset(detail, 'd', sizeof(detail) - 1);
+        detail[sizeof(detail) - 1] = '\0';
+        for (int i = 0; i < 128; i++) {
+            char line[256];
+            snprintf(line, sizeof(line),
+                     "4294967295s ago tunnel_tx_blocked: e%03d %s "
+                     "(dma_free=4294967295 dma_largest=4294967295)", i, detail);
+            cJSON_AddItemToArray(events, cJSON_CreateString(line));
+        }
+    } else {
+        cJSON_AddItemToArray(events, cJSON_CreateString(
+            "12s ago tunnel_down: keepalive timeout (dma_free=1 dma_largest=1)"));
+    }
+    if (!for_bug_report) cJSON_AddStringToObject(health, "network_ssid", "Office");
+    cJSON_AddStringToObject(health, "version", "1.2.3");
+    return health;
 }
 
 static const esp_app_desc_t g_app = {
@@ -277,8 +300,12 @@ static void test_success_owns_input_and_returns_restricted_log_report(void) {
               && strstr(report, "\"rssi_dbm\":-47")
               && strstr(report, "\"tail_base64\":")
               && strstr(report, "\"sensitivity\":\"restricted\"")
-              && strstr(report, "\"contains_pii\":true"),
+              && strstr(report, "\"contains_pii\":true")
+              && strstr(report, "\"device_health\":{")
+              && strstr(report, "12s ago tunnel_down: keepalive timeout"),
           "diagnostic schema incomplete: %s", report);
+    CHECK(strstr(report, "network_ssid") == NULL,
+          "device_health leaked the SSID");
     CHECK(strstr(report, "\"report_id\"") == NULL,
           "report duplicated the correlation ID");
     const char *forbidden[] = {
@@ -351,6 +378,13 @@ static void test_logs_degrade_safely_and_maximum_stays_bounded(void) {
           "missing log snapshot should keep a report without logs");
 
     reset_fakes();
+    g_health_fails = true;
+    expect_start_and_run("request-1");
+    CHECK(strstr(report_json(), "\"device_health\"") == NULL
+              && strstr(report_json(), "\"logs\":"),
+          "missing device_health should keep the rest of the report");
+
+    reset_fakes();
     char *large_events = malloc(DIAGNOSTIC_LOG_CAPACITY_BYTES + 1);
     CHECK(large_events != NULL, "large event allocation failed");
     for (size_t i = 0; i < DIAGNOSTIC_LOG_CAPACITY_BYTES; i++) {
@@ -363,6 +397,7 @@ static void test_logs_degrade_safely_and_maximum_stays_bounded(void) {
     g_overwritten_lines = 7;
     g_dropped_lines = 2;
     g_truncated_lines = 1;
+    g_health_full = true;
     expect_start_and_run("request-1");
     CHECK(strlen(report_json()) <= BUG_REPORT_MAX_BYTES,
           "maximum log report exceeded cap");
@@ -374,6 +409,14 @@ static void test_logs_degrade_safely_and_maximum_stays_bounded(void) {
               && strstr(report_json(), "\"dropped_lines\":2")
               && strstr(report_json(), "\"truncated_lines\":1"),
           "log-loss counters were not serialized");
+    // Over the cap: the oldest events go, the newest and the logs stay.
+    CHECK(strstr(report_json(), "\"device_health\":{")
+              && strstr(report_json(), "e127 ")
+              && !strstr(report_json(), "e000 "),
+          "oversized report should keep only the newest events");
+    CHECK(strstr(report_json(), "\"tail_base64\":\"eHh4")
+              && strlen(report_json()) > 4 * (DIAGNOSTIC_LOG_CAPACITY_BYTES / 3),
+          "oversized report should keep the full log tail");
     free(large_events);
 }
 

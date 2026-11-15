@@ -15,6 +15,11 @@
  */
 #include "muse_video.h"
 
+#include "sdkconfig.h"
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
+#endif
+
 #include <string.h>
 
 #include "esp_debug_helpers.h"
@@ -260,76 +265,161 @@ const muse_video_caps_t *muse_video_caps(void)
 
 /* ---- drawing (UI core) -------------------------------------------------- */
 
+/*
+ * Output rows [row, row + rows) of one picture (a band, with two) into dst:
+ * vis_h of its rows shown as out_h. Writes exactly those rows, and reads
+ * only rows the decoder has finished and the picture holds; anything else
+ * is drawn black.
+ */
+static void fill_part(uint8_t *dst, int stride, int row, int rows, const fill_arg_t *a, const muse_pic_t *pp,
+                      const uint8_t *const volatile *picp, volatile int *have, int vis_h, int out_h)
+{
+    slot_t *sl = a->s;
+    if (rows <= 0) {
+        return;
+    }
+    if (vis_h <= 0 || out_h <= 0 || row < 0 || row + rows > out_h) {
+        memset(dst, 0, (size_t)rows * stride);
+        return;
+    }
+    int sr = 0, need;
+    if (a->scale == 1 || a->scale == 2) {
+        sr = row / a->scale;
+        need = (row + rows + a->scale - 1) / a->scale;
+    } else if (a->scale == 3) {
+        need = muse_yuv_up32_src_rows(vis_h, row + rows);
+    } else {
+        need = muse_yuv_src_rows(vis_h, out_h, row + rows);
+    }
+    while (*have < need && !sl->done) {
+        vTaskDelay(1);   /* the decoder is a macroblock row or so behind */
+    }
+    /* The picture as the decoder last reported it, read after the wait. */
+    const uint8_t *pic = *picp;
+    const muse_pic_t p = *pp;
+    /* Only rows the decoder has finished, and only what the decoded picture
+     * holds: a stream whose pictures (or bands) are smaller than it said is
+     * drawn black, not read past. */
+    if (!pic || *have < need || need > p.h || a->vis_w > p.w || sl->failed) {
+        memset(dst, 0, (size_t)rows * stride);
+        return;
+    }
+    const int ys = p.y_stride, cs = p.c_stride;
+    const uint8_t *y = p.y + (size_t)sr * ys;
+    const uint8_t *u = p.u + (size_t)(sr / 2) * cs;
+    const uint8_t *v = p.v + (size_t)(sr / 2) * cs;
+    if (a->scale == 3) {
+        muse_yuv_up32(p.y, p.u, p.v, ys, cs, a->vis_w, vis_h, row, rows, dst, stride);
+    } else if (a->scale == 0) {
+        muse_yuv_scaled(p.y, p.u, p.v, ys, cs, a->vis_w, vis_h, a->out_w, out_h, row, rows, dst, stride);
+    } else if (a->scale == 2) {
+        muse_yuv_up2(y, u, v, ys, cs, a->vis_w, rows, dst, stride);
+    } else {
+        muse_yuv_1x(y, u, v, ys, cs, a->vis_w, rows, dst, stride);
+    }
+}
+
+/*
+ * Two bands: the output rows from the top band, and in *vis0 the picture
+ * rows they show. The top band holds the picture's first h0 rows, the
+ * bottom band the rest, each a picture of its own, so the seam is where
+ * the top band's visible rows end, on a row each band's converter can
+ * start at: a source row pair at one to one, two times and scaled, and
+ * the 3/2 scale's whole pattern (four source rows, six output rows) there.
+ */
+static int band_seam(const fill_arg_t *a, int h0, int *vis0)
+{
+    int v = h0 < a->vis_h ? h0 : a->vis_h, out0;
+    v = v < 0 ? 0 : v;
+    if (a->scale == 3) {
+        v &= ~3;
+        out0 = v * 3 / 2;
+    } else if (a->scale == 2) {
+        v &= ~1;
+        out0 = 2 * v;
+    } else if (a->scale == 1) {
+        v &= ~1;
+        out0 = v;
+    } else {
+        v &= ~1;
+        out0 = (int)((int64_t)a->out_h * v / a->vis_h) & ~1;
+    }
+    if (out0 > a->out_h) {
+        out0 = a->out_h;
+    }
+    *vis0 = v;
+    return out0;
+}
+
 static void fill(uint8_t *dst, int stride, int row, int rows, void *arg)
 {
     fill_arg_t *a = arg;
     slot_t *sl = a->s;
-    /* With two bands, the bottom half of the output comes from the bottom
-     * band, as if it were a picture of its own (pieces never straddle). */
-    int vis_h = a->vis_h, out_h = a->out_h;
-    const uint8_t *pic = sl->pic;
-    const muse_pic_t *pp = &sl->p0;
-    volatile int *have = &sl->rows;
-    int w = sl->w, h = sl->h;
-    if (sl->bands == 2) {
-        /* The bands may differ in height (capability_tile_split): the top's
-         * share of the output is its share of the picture. */
-        int h0 = sl->h0, vis0 = vis_h * h0 / h, out0 = out_h * h0 / h;
-        if (row < out0 && row + rows > out0) {
-            /* A piece across the seam: each band its part. */
-            int top = out0 - row;
-            fill(dst, stride, row, top, arg);
-            fill(dst + (size_t)top * stride, stride, out0, rows - top, arg);
-            return;
-        }
-        if (row >= out0) {
-            row -= out0;
-            vis_h -= vis0;
-            out_h -= out0;
-            h -= h0;
-            while (!sl->pic1 && !sl->done) {
-                vTaskDelay(1);
-            }
-            pic = sl->pic1;
-            pp = &sl->p1;
-            have = &sl->rows1;
-        } else {
-            vis_h = vis0;
-            out_h = out0;
-            h = h0;
-        }
-    }
-    int sr = a->scale == 1 || a->scale == 2 ? row / a->scale : 0;
-    int need = a->scale == 1 || a->scale == 2 ? (row + rows) / a->scale
-             : a->scale == 3 ? muse_yuv_up32_src_rows(vis_h, row + rows)
-             : muse_yuv_src_rows(vis_h, out_h, row + rows);
-    while (*have < need && !sl->done) {
-        vTaskDelay(1);   /* the decoder is a macroblock row or so behind */
-    }
-    if (!pic) {
+    if (sl->bands != 2) {
+        fill_part(dst, stride, row, rows, a, &sl->p0, &sl->pic, &sl->rows, a->vis_h, a->out_h);
         return;
     }
-    /* Only what the decoded picture holds: a stream whose pictures (or
-     * bands) are smaller than it said is drawn black, not read past. */
-    if (need > pp->h || a->vis_w > pp->w || sl->failed) {
-        memset(dst, 0, (size_t)rows * stride);
-        return;
+    /* A piece across the seam: each band its part. */
+    int vis0, out0 = band_seam(a, sl->h0, &vis0);
+    int top = row >= out0 ? 0 : row + rows <= out0 ? rows : out0 - row;
+    fill_part(dst, stride, row, top, a, &sl->p0, &sl->pic, &sl->rows, vis0, out0);
+    if (rows > top) {
+        while (!sl->pic1 && !sl->done) {
+            vTaskDelay(1);
+        }
+        fill_part(dst + (size_t)top * stride, stride, row + top - out0, rows - top, a, &sl->p1, &sl->pic1, &sl->rows1,
+                  a->vis_h - vis0, a->out_h - out0);
     }
-    (void)w;
-    (void)h;
-    const int ys = pp->y_stride, cs = pp->c_stride;
-    const uint8_t *y = pp->y + (size_t)sr * ys;
-    const uint8_t *u = pp->u + (size_t)(sr / 2) * cs;
-    const uint8_t *v = pp->v + (size_t)(sr / 2) * cs;
-    if (a->scale == 3) {
-        muse_yuv_up32(pp->y, pp->u, pp->v, ys, cs, a->vis_w, vis_h, row, rows, dst, stride);
-    } else if (a->scale == 0) {
-        muse_yuv_scaled(pp->y, pp->u, pp->v, ys, cs, a->vis_w, vis_h, a->out_w, out_h, row, rows, dst, stride);
-    } else if (a->scale == 2) {
-        muse_yuv_up2(y, u, v, ys, cs, a->vis_w, rows / 2, dst, stride);
+}
+
+/*
+ * Where a picture goes on the panel and how it's scaled: what fill() is
+ * given, and the top-left corner at (*x1, *y1). False when it has nothing
+ * to show.
+ */
+static bool place(slot_t *sl, fill_arg_t *a, int *x1, int *y1)
+{
+    int pw = sl->w, ph = sl->h;
+    int vis_w = (s_params.width && s_params.width <= pw ? s_params.width : pw) & ~1;
+    int vis_h = (s_params.height && s_params.height <= ph ? s_params.height : ph) & ~3;
+    if (vis_w <= 0 || vis_h <= 0) {
+        return false;
+    }
+    /* Two times upscaled when that fits the panel; one to one when the
+     * picture is the panel's size or more; between the two (on the S31),
+     * scaled up to fill the panel's width. */
+    int scale = 2 * vis_w <= muse_board->width && 2 * vis_h <= muse_board->height ? 2 : 1;
+    int ow, oh;
+    if (scale == 1 && MAX_SRC > 240 && vis_w * 3 / 2 == muse_board->width && vis_h * 3 / 2 <= muse_board->height &&
+        vis_w % 4 == 0 && vis_h % 4 == 0) {
+        scale = 3;   /* 320 on the 480 panel: the cheap 3/2 path */
+        ow = vis_w * 3 / 2;
+        oh = vis_h * 3 / 2 & ~3;
+    } else if (scale == 1 && MAX_SRC > 240 && vis_w < muse_board->width && vis_h < muse_board->height) {
+        scale = 0;
+        ow = muse_board->width & ~3;
+        oh = (vis_h * ow / vis_w) & ~3;
+        if (oh > muse_board->height) {
+            oh = muse_board->height & ~3;
+            ow = (vis_w * oh / vis_h) & ~3;
+        }
     } else {
-        muse_yuv_1x(y, u, v, ys, cs, a->vis_w, rows, dst, stride);
+        if (scale * vis_w > muse_board->width) {
+            vis_w = muse_board->width / scale & ~1;
+        }
+        if (scale * vis_h > muse_board->height) {
+            vis_h = muse_board->height / scale & ~3;
+        }
+        ow = scale * vis_w;
+        oh = scale * vis_h;
     }
+    if (ow <= 0 || oh <= 0) {
+        return false;
+    }
+    *x1 = (muse_board->width - ow) / 2 & ~1;
+    *y1 = (muse_board->height - oh) / 2 & ~1;
+    *a = (fill_arg_t){ sl, vis_w, vis_h, scale, ow, oh };
+    return true;
 }
 
 static void pause_lvgl(bool pause)
@@ -434,11 +524,10 @@ static void show_task(void *arg)
         pause_lvgl(true);
         s_show_stage = 2;
         s_stage_t = esp_timer_get_time();
-        int pw = sl->w, ph = sl->h;
-        int vis_w = (s_params.width && s_params.width <= pw ? s_params.width : pw) & ~1;
-        int vis_h = (s_params.height && s_params.height <= ph ? s_params.height : ph) & ~3;
-        if (vis_w <= 0 || vis_h <= 0) {
-            /* Nothing to show, and nothing to divide by below. */
+        fill_arg_t a;
+        int x1, y1;
+        if (!place(sl, &a, &x1, &y1)) {
+            /* Nothing to show, and nothing to divide by. */
             s_dropped++;
             while (!sl->done) {
                 vTaskDelay(1);
@@ -446,38 +535,8 @@ static void show_task(void *arg)
             xSemaphoreGive(s_slots);
             continue;
         }
-        /* Two times upscaled when that fits the panel; one to one when the
-         * picture is the panel's size or more; between the two (on the S31),
-         * scaled up to fill the panel's width. */
-        int scale = 2 * vis_w <= muse_board->width && 2 * vis_h <= muse_board->height ? 2 : 1;
-        int ow, oh;
-        if (scale == 1 && MAX_SRC > 240 && vis_w * 3 / 2 == muse_board->width && vis_h * 3 / 2 <= muse_board->height &&
-            vis_w % 4 == 0 && vis_h % 4 == 0) {
-            scale = 3;   /* 320 on the 480 panel: the cheap 3/2 path */
-            ow = vis_w * 3 / 2;
-            oh = vis_h * 3 / 2 & ~3;
-        } else if (scale == 1 && MAX_SRC > 240 && vis_w < muse_board->width && vis_h < muse_board->height) {
-            scale = 0;
-            ow = muse_board->width & ~3;
-            oh = (vis_h * ow / vis_w) & ~3;
-            if (oh > muse_board->height) {
-                oh = muse_board->height & ~3;
-                ow = (vis_w * oh / vis_h) & ~3;
-            }
-        } else {
-            if (scale * vis_w > muse_board->width) {
-                vis_w = muse_board->width / scale & ~1;
-            }
-            if (scale * vis_h > muse_board->height) {
-                vis_h = muse_board->height / scale & ~3;
-            }
-            ow = scale * vis_w;
-            oh = scale * vis_h;
-        }
-        int x1 = (muse_board->width - ow) / 2 & ~1, y1 = (muse_board->height - oh) / 2 & ~1;
-        fill_arg_t a = { sl, vis_w, vis_h, scale, ow, oh };
         int64_t d0 = esp_timer_get_time();
-        muse_board->draw_frame(x1, y1, x1 + ow, y1 + oh, PIECE_ROWS, fill, &a);
+        muse_board->draw_frame(x1, y1, x1 + a.out_w, y1 + a.out_h, PIECE_ROWS, fill, &a);
         s_show_stage = 3;
         s_stage_t = esp_timer_get_time();
         while (!sl->done) {
@@ -603,6 +662,21 @@ static void on_progress1(void *ctx, const muse_pic_t *pic, int rows)
     sl->p1 = *pic;
     sl->pic1 = pic->y;
     sl->rows1 = rows;
+}
+
+/*
+ * Two bands as the protocol codes them: each whole macroblock rows (as the
+ * decoders report them), the top band with at least one of the picture's
+ * rows below it, the two making the stream's height rounded up to a
+ * macroblock.
+ */
+static bool bands_fit(int h0, int h1)
+{
+    int H = (int)s_params.height, H16 = (H + 15) & ~15;
+    if (h0 <= 0 || h1 <= 0 || h0 % 16 || h1 % 16 || h0 >= H) {
+        return false;
+    }
+    return h0 + h1 == H16;
 }
 
 /*
@@ -819,8 +893,9 @@ static void decode_task(void *arg)
             }
         }
         /* An access unit that may make a decoder reallocate its pictures
-         * (new parameter sets, a keyframe) frees the one the show task may
-         * still be drawing: wait for that one first (both slots ours). */
+         * (muse_vdec_may_realloc: a parameter set or IDR slice, a VP8
+         * keyframe) frees the one the show task may still be drawing: wait
+         * for that one first (both slots ours). */
         bool reset = muse_vdec_may_realloc(dec, bands == 2 ? s_au + 4 : s_au, len0) ||
                        (bands == 2 && muse_vdec_may_realloc(dec, s_au + 4 + len0, (uint32_t)n - 4 - len0));
         if (reset) {
@@ -874,7 +949,7 @@ static void decode_task(void *arg)
             }
         }
         uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
-        if (got && bands == 2 && h + s_band.h != (int)((s_params.height + 15) & ~15)) {
+        if (got && bands == 2 && !bands_fit(h, s_band.h)) {
             static int64_t told_h;
             if (now - told_h > 5000000) {
                 told_h = now;
@@ -1106,6 +1181,9 @@ void muse_video_end(const muse_video_transport_t *t)
 
 void muse_video_open(void)
 {
+#if CONFIG_MUSE_APP_VIEW
+    muse_app_view_preempt(MUSE_APP_STOP_VIDEO);
+#endif
     if (!muse_video_supported()) {
         return;
     }

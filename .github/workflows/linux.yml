@@ -29,16 +29,20 @@ concurrency:
 jobs:
   tests:
     name: Tests (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: newest
+            os: ubuntu-latest
             python: "3.x"
             pins: ""
           # The oldest versions the package supports (Debian 11).
+          # setup-python has no Python 3.9 build for Ubuntu 26.04
+          # (ubuntu-latest), so pin this leg to Ubuntu 24.04.
           - name: oldest
+            os: ubuntu-24.04
             python: "3.9"
             pins: "cryptography==3.3.2 websockets==13.1"
     defaults:
@@ -53,6 +57,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # libopus for the video call tests (they skip without it).
+      - name: Install libopus
+        run: sudo apt-get update && sudo apt-get install -y libopus0
+
       - name: Install
         env:
           PINS: ${{ matrix.pins }}
@@ -60,6 +68,12 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+      # The installer tests need root (in a private mount namespace) to make
+      # files another uid owns; without root or podman they skip.
+      - name: Run installer tests as root
+        if: matrix.name == 'newest'
+        run: sudo env "PATH=$PATH" python -m pytest -q -rs -p no:cacheprovider tests/test_install_sh.py
 
   shellcheck:
     name: ShellCheck install.sh

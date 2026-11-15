@@ -95,18 +95,44 @@ static void log_message(const char *, const char *fmt, ...) {
 #define ESP_LOGI log_message
 #include "noise_tunnel.inc"
 
+// Connectivity history double: "<kind>: <detail>" in record order.
+static std::vector<std::string> events;
+extern "C" void link_events_record(link_event_kind_t kind, const char *fmt, ...) {
+    static const char *const names[] = {"wifi_down", "wifi_up", "session_up", "session_down",
+                                        "tunnel_up", "tunnel_down", "tunnel_tx_blocked",
+                                        "stall_probe"};
+    char buf[LINK_EVENTS_DETAIL_MAX];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    events.push_back(std::string(names[kind]) + ": " + buf);
+}
+
 static std::vector<uint8_t> sent;
-static bool exhaust_after_send, fail_send, refill, fail_open;
+static bool exhaust_after_send, fail_send, refill, fail_open, fail_reset;
+// A failed Reset seal poisons Noise; encode/precondition failures do not.
+static bool reset_poisons = true;
+static bool send_fails_without_poison;
 static bool session_alive = true;
 static unsigned pings;
+// Ordered record of stream-level emits: 'R' reset, 'O' open.
+static std::string stream_ops;
 static bool open_stream(void *) {
+    stream_ops += 'O';
     if (fail_open) { session_alive = false; poison_noise_session(); }
     return !fail_open;
+}
+static bool reset_stream(void *) {
+    stream_ops += 'R';
+    if (fail_reset && reset_poisons) { session_alive = false; poison_noise_session(); }
+    return !fail_reset;
 }
 static bool send_body(void *, const uint8_t *data, size_t len) {
     assert(len == 1);
     if (*data == 0) {
         ++pings;
+        if (send_fails_without_poison) return false;
         if (fail_send) { session_alive = false; poison_noise_session(); }
         return !fail_send;
     }
@@ -122,7 +148,8 @@ static bool send_body(void *, const uint8_t *data, size_t len) {
     if (fail_send) { session_alive = false; poison_noise_session(); }
     return !fail_send;
 }
-static const noise_tunnel_emit_t emit = {nullptr, open_stream, send_body, nullptr};
+static const noise_tunnel_emit_t emit = {nullptr, open_stream, send_body, nullptr,
+                                         reset_stream};
 
 // In-place emit: the batch arrives inside its slot with room around it.
 static unsigned inplace_calls;
@@ -139,7 +166,7 @@ static bool send_body_inplace(void *, uint8_t *buf, size_t headroom, size_t len,
     return true;
 }
 static const noise_tunnel_emit_t emit_inplace = {
-    nullptr, open_stream, send_body, send_body_inplace};
+    nullptr, open_stream, send_body, send_body_inplace, reset_stream};
 static void enqueue(uint8_t value) {
     assert(noise_tunnel_send_packet(&value, 1));
 }
@@ -147,9 +174,13 @@ static void reopen() {
     noise_tunnel_on_session_down();
     session_alive = true;
     reset_noise_session();
-    fail_open = false;
+    fail_open = fail_reset = false;
+    reset_poisons = true;
     pings = 0;
+    stream_ops.clear();
     assert(noise_tunnel_on_session_up(&emit));
+    // A fresh session's first open has no stale server stream to reset.
+    assert(stream_ops == "O");
     dma_free = 64 * 1024;
     dma_largest = 20 * 1024;
     exhaust_after_send = fail_send = refill = false;
@@ -250,7 +281,17 @@ static void handle_invoke_request(const char *, size_t,
 #include "control_inbound.inc"
 static unsigned ws_pings, delays, stack_polls;
 static uint64_t last_activity_us;
-static bool ws_send_ping(esp_tls_t *) { ++ws_pings; return true; }
+// Inbound liveness for the extracted loop. Existing cases don't model pongs, so
+// by default every turn sees fresh RX; rx_silent_since_us opts a case into it.
+static bool rx_silent;
+static uint64_t rx_silent_since_us, last_ws_ping_us;
+// A live connection: the peer answers a WebSocket ping at once.
+static bool ws_pong;
+static bool ws_send_ping(esp_tls_t *) {
+    ++ws_pings;
+    if (ws_pong) rx_silent_since_us = now_us;
+    return true;
+}
 static void vTaskDelay(int ticks) { assert(ticks == 1); ++delays; }
 static uint64_t last_busy_us;
 static void idle_wait(esp_tls_t *, uint64_t) { vTaskDelay(1); }   // traffic still recent
@@ -259,6 +300,8 @@ static void stack_monitor_poll(void *) { ++stack_polls; }
 static void req_end_all() {}
 #define ESP_LOGD log_message
 #define KEEPALIVE_INTERVAL_MS 60000
+static const char *last_end_reason;
+static bool last_went_silent;
 static bool control_tx_turn(bool tunnel_opened = true,
                             noise_ctrl_session_generation_t session_generation = 1) {
     ClientSession &session = *noise_session;
@@ -267,9 +310,14 @@ static bool control_tx_turn(bool tunnel_opened = true,
     esp_tls_t *tls = nullptr;
     void *stack = nullptr;
     bool error = false, did = false;
+    const char *end_reason = nullptr;
+    bool went_silent = false;
+    const uint64_t last_rx_us = rx_silent ? rx_silent_since_us : now_us;
     do {
 #include "control_tx_turn.inc"
     } while (false);
+    last_end_reason = end_reason;
+    last_went_silent = went_silent;
     return error;
 }
 static void cleanup_control() {
@@ -305,6 +353,8 @@ static void reset_control() {
     heartbeat_sent = false;
     last_heartbeat_us = 0;
     last_activity_us = now_us;
+    rx_silent = ws_pong = false;
+    last_ws_ping_us = 0;
 }
 static std::string payload(size_t len) {
     std::string json(len, ' ');
@@ -696,6 +746,167 @@ static void test_heartbeat() {
     reset_control();
 }
 
+static void test_dead_connection() {
+    // A WAN drop leaves TCP half-open, so tunnel pongs and control traffic stop
+    // together. Unanswered pings plus silent control reconnect at the tunnel
+    // timeout instead of reopening the tunnel and waiting out RX_IDLE_TIMEOUT_MS.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    uint64_t start = now_us;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US - 1000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(pings == 3 && noise_tunnel_is_connected());
+    now_us = start + TUN_KEEPALIVE_TIMEOUT_US;
+    assert(control_tx_turn());
+    assert(strcmp(last_end_reason, "no response from VM (tunnel keepalive)") == 0);
+    assert(last_went_silent);
+    assert(logs.back() == "tunnel keepalive unanswered and nothing received since; reconnecting");
+    assert(stream_ops == "O");  // no reopen on the dead connection
+
+    // Control heard from after the tunnel's last frame still counts as a dead
+    // connection when nothing has arrived since the first unanswered ping. A
+    // WebSocket ping probes it 5s after that tunnel ping.
+    reset_control();
+    start = now_us;
+    while (now_us - start < 10000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US - 1000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(pings == 3 && ws_pings == 1 && noise_tunnel_is_connected());
+    now_us = start + TUN_KEEPALIVE_TIMEOUT_US;
+    assert(control_tx_turn());
+    assert(strcmp(last_end_reason, "no response from VM (tunnel keepalive)") == 0);
+    assert(stream_ops == "O");
+
+    // Same, but the connection is alive and only the tunnel backend is gone:
+    // the pong to that WebSocket ping keeps the session and the tunnel reopens.
+    reset_control();
+    start = now_us;
+    while (now_us - start < 10000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    rx_silent = ws_pong = true;
+    rx_silent_since_us = now_us;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(ws_pings == 1 && !noise_tunnel_is_connected());
+    now_us += 1000000;
+    assert(!control_tx_turn());
+    assert(noise_tunnel_is_connected() && stream_ops == "ORO");
+
+    // Only one ping got past the DMA gate, just before the timeout: too recent
+    // to be unanswered, so reopen the tunnel rather than reconnect.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    start = now_us;
+    dma_free = 0;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US - 5000000) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(pings == 0);
+    dma_free = 64 * 1024;
+    now_us += 1000000;
+    assert(!control_tx_turn() && pings == 1);
+    now_us = start + TUN_KEEPALIVE_TIMEOUT_US;
+    assert(!control_tx_turn());
+    assert(!noise_tunnel_is_connected() && !noise_tunnel_take_unanswered_timeout());
+
+    // Control still receiving: only the tunnel backend is gone. Keep the
+    // session and reopen the tunnel, as before.
+    reset_control();
+    start = now_us;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(!noise_tunnel_is_connected() && !noise_tunnel_take_unanswered_timeout());
+    now_us += 1000000;
+    assert(!control_tx_turn());
+    assert(noise_tunnel_is_connected() && stream_ops == "ORO");
+
+    // DMA-gated pings were never sent, so their silence proves nothing: no
+    // reconnect at the tunnel timeout. The reopen that follows waits on the
+    // same DMA gate, and gives up on the session once it has waited the TX
+    // stall timeout, before the RX-idle limit.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    start = now_us;
+    dma_free = 0;
+    while (now_us - start < TUN_KEEPALIVE_TIMEOUT_US + TUN_TX_STALL_TIMEOUT_US) {
+        now_us += 1000000;
+        assert(!control_tx_turn());
+    }
+    assert(pings == 0 && !noise_tunnel_is_connected());
+    bool ended = false;
+    while (!ended && now_us - start < static_cast<uint64_t>(RX_IDLE_TIMEOUT_MS) * 1000) {
+        now_us += 1000000;
+        ended = control_tx_turn();
+    }
+    assert(ended && now_us - start < static_cast<uint64_t>(RX_IDLE_TIMEOUT_MS) * 1000);
+    assert(strcmp(last_end_reason, "tunnel reopen failed") == 0);
+    assert(!last_went_silent && stream_ops == "O");
+}
+static void test_rx_idle() {
+    // A half-open connection accepts every write, so only silence reveals it:
+    // ping after 60s idle, reconnect once nothing has come back for 150s.
+    // Control only: with the tunnel open, unanswered tunnel pings end a silent
+    // session sooner (test_dead_connection).
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    now_us += 59999999;
+    assert(!control_tx_turn(false) && ws_pings == 0);
+    now_us += 1;
+    assert(!control_tx_turn(false) && ws_pings == 1);
+    now_us += 60000000;
+    assert(!control_tx_turn(false) && ws_pings == 2);
+    now_us = rx_silent_since_us + 149999999;
+    assert(!control_tx_turn(false));
+    now_us += 1;
+    assert(control_tx_turn(false));
+    assert(strcmp(last_end_reason, "no response from VM") == 0);
+    assert(last_went_silent);
+    assert(logs.back() == "nothing received for 150s; reconnecting");
+
+    // Sending doesn't hide silence: RX idle pings even while TX is active,
+    // at most once per interval.
+    reset_control();
+    rx_silent = true;
+    rx_silent_since_us = now_us;
+    now_us += 60000000;
+    last_activity_us = now_us;
+    assert(!control_tx_turn(false) && ws_pings == 1);
+    now_us += 30000000;
+    last_activity_us = now_us;
+    assert(!control_tx_turn(false) && ws_pings == 1);
+    now_us += 30000000;
+    last_activity_us = now_us;
+    assert(!control_tx_turn(false) && ws_pings == 2);
+
+    // Inbound traffic keeps an idle session alive indefinitely.
+    reset_control();
+    for (int i = 0; i < 20; ++i) {
+        now_us += 60000000;
+        assert(!control_tx_turn(false));
+    }
+    assert(ws_pings == 20);
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     if (strcmp(argv[1], "inplace") == 0) {
@@ -724,6 +935,8 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[1], "ping_fragmentation") == 0) test_ping_fragmentation();
         else if (strcmp(argv[1], "lifecycle") == 0) test_control_lifecycle();
         else if (strcmp(argv[1], "failures") == 0) test_control_failures();
+        else if (strcmp(argv[1], "rx_idle") == 0) test_rx_idle();
+        else if (strcmp(argv[1], "dead_connection") == 0) test_dead_connection();
         else assert(false);
         cleanup_control();
         drain_stale_results();
@@ -823,11 +1036,87 @@ int main(int argc, char **argv) {
     ++now_us;
     noise_tunnel_tick(&emit);
     assert(!noise_tunnel_is_connected() && pings == 0);
+    // Reopen seals Reset + Request, so it waits out DMA pressure without
+    // consuming the retry interval.
+    const uint64_t last_attempt = s_last_open_attempt_us;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(!noise_tunnel_is_connected() && stream_ops == "O");
+    assert(s_last_open_attempt_us == last_attempt);
     dma_free = 16 * 1024;
-    noise_tunnel_maybe_reopen(&emit);
+    dma_largest = 2 * 1024 - 1;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(!noise_tunnel_is_connected() && stream_ops == "O");
+    assert(s_last_open_attempt_us == last_attempt);
+    dma_largest = 2 * 1024;
+    assert(noise_tunnel_maybe_reopen(&emit));
     assert(noise_tunnel_is_connected());
+    // The locally-declared-dead stream is still open on the server; the reused
+    // stream id is only accepted if the Reset precedes the new Request.
+    assert(stream_ops == "ORO");
     assert(noise_tunnel_pump_tx(&emit) == 0 && sent.empty());
     for (uint8_t i = 1; i <= 8; ++i) enqueue(i);
+
+    // When the server dropped the stream (Reset, non-200), reopen sends no Reset.
+    reopen();
+    noise_tunnel_on_session_down();
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(noise_tunnel_is_connected() && stream_ops == "OO");
+
+    // A failed ping also abandons the stream locally, so it needs a Reset.
+    reopen();
+    now_us += TUN_KEEPALIVE_INTERVAL_US;
+    send_fails_without_poison = true;
+    noise_tunnel_tick(&emit);
+    send_fails_without_poison = false;
+    assert(!noise_tunnel_is_connected() && pings == 1);
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(noise_tunnel_is_connected() && stream_ops == "ORO");
+
+    // A Reset is only needed once: if the reopened Request is then rejected,
+    // the server has dropped the id and the next retry is a bare open.
+    noise_tunnel_on_session_down();
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit));
+    assert(noise_tunnel_is_connected() && stream_ops == "OROO");
+
+    // A failed Reset tears the session down and is not followed by an open,
+    // whether or not the failure poisoned Noise.
+    for (bool poisons : {true, false}) {
+        reopen();
+        now_us = s_last_rx_us + TUN_KEEPALIVE_TIMEOUT_US;
+        noise_tunnel_tick(&emit);
+        assert(!noise_tunnel_is_connected());
+        fail_reset = true;
+        reset_poisons = poisons;
+        now_us += TUN_REOPEN_INTERVAL_US;
+        assert(control_tx_turn());
+        assert(session_alive == !poisons && noise_session->isEstablished() == !poisons);
+        assert(!noise_tunnel_is_connected() && stream_ops == "OR");
+    }
+
+    // After a server drop, a reopen held back by DMA headroom while control
+    // stays alive (fresh RX every turn) would leave the tunnel down forever.
+    // Once it has waited the stall timeout, the loop tears the session down
+    // without sealing anything.
+    reopen();
+    noise_tunnel_on_server_drop("server reset stream, code=3");
+    stream_ops.clear();
+    dma_free = 0;
+    now_us += TUN_REOPEN_INTERVAL_US;
+    const uint64_t gate_start = now_us;
+    const auto gate_seals = crypto.seals;
+    while (now_us < gate_start + TUN_TX_STALL_TIMEOUT_US) {
+        assert(!control_tx_turn());
+        assert(!noise_tunnel_is_connected() && session_alive && stream_ops.empty());
+        now_us += 1000000;
+    }
+    assert(control_tx_turn());
+    assert(stream_ops.empty() && crypto.seals == gate_seals);
+    assert(strcmp(last_end_reason, "tunnel reopen failed") == 0);
+    assert(logs.back().find("tunnel reopen blocked 30s on DMA headroom") != std::string::npos);
+    dma_free = 64 * 1024;
 
     // The void ping hook poisons Noise while there are no data/results queued.
     // The actual loop must notice this on the same turn, before WS keepalive.
@@ -849,6 +1138,112 @@ int main(int argc, char **argv) {
     now_us += TUN_REOPEN_INTERVAL_US;
     assert(control_tx_turn());
     assert(!session_alive);
+
+    // Inbound pongs keep keepalive satisfied, so a DMA gate that never reopens
+    // would blackhole outbound forever. The loop tears the session down once
+    // queued batches make no progress for the stall timeout, without a seal.
+    reopen();
+    enqueue(61);
+    dma_free = 0;
+    const uint8_t pong = 0;
+    const uint64_t stall_start = now_us;
+    while (now_us < stall_start + TUN_TX_STALL_TIMEOUT_US) {
+        noise_tunnel_on_inbound(&pong, 1);
+        assert(!control_tx_turn());
+        assert(noise_tunnel_is_connected() && session_alive && sent.empty());
+        now_us += 1000000;
+    }
+    assert(control_tx_turn());
+    assert(sent.empty() && pings == 0 && crypto.seals == 0);
+    assert(logs.back().find("tunnel TX stalled 30s on DMA headroom") != std::string::npos);
+
+    // Any progress restarts the clock, even if the gate closes again mid-turn.
+    reopen();
+    enqueue(71);
+    enqueue(72);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += TUN_TX_STALL_TIMEOUT_US - 1;
+    dma_free = 64 * 1024;
+    exhaust_after_send = true;
+    assert(noise_tunnel_pump_tx(&emit) == 1);
+    exhaust_after_send = false;
+    now_us += TUN_TX_STALL_TIMEOUT_US - 1;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    ++now_us;
+    assert(noise_tunnel_pump_tx(&emit) == -1);
+    assert((sent == std::vector<uint8_t>{71}));
+
+    // A reopen drops the stale queue and the stall with it.
+    reopen();
+    enqueue(81);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += TUN_TX_STALL_TIMEOUT_US;
+    reopen();
+    enqueue(82);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    dma_free = 64 * 1024;
+    assert(noise_tunnel_pump_tx(&emit) == 1);
+
+    // Connectivity history: one outage is one tunnel_down/tunnel_up pair. A
+    // DMA-gated and a refused reopen add no entries; recovery summarizes them.
+    reopen();
+    const uint8_t first_pong = 0;
+    noise_tunnel_on_inbound(&first_pong, 1);
+    events.clear();
+    stream_ops.clear();
+    now_us += TUN_KEEPALIVE_TIMEOUT_US;
+    noise_tunnel_tick(&emit);
+    assert(!noise_tunnel_is_connected());
+    assert((events == std::vector<std::string>{
+        "tunnel_down: keepalive timeout, last ping 65s ago"}));
+    dma_free = 0;
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit) && stream_ops.empty());
+    now_us += 10 * 1000 * 1000;
+    dma_free = 64 * 1024;
+    assert(noise_tunnel_maybe_reopen(&emit) && stream_ops == "RO");
+    noise_tunnel_on_server_drop("server reset stream, code=3");
+    now_us += TUN_REOPEN_INTERVAL_US;
+    assert(noise_tunnel_maybe_reopen(&emit) && stream_ops == "ROO");
+    assert(events.size() == 1);
+    noise_tunnel_on_inbound(&first_pong, 1);
+    assert((events == std::vector<std::string>{
+        "tunnel_down: keepalive timeout, last ping 65s ago",
+        "tunnel_up: back after 20s: 2 reopens, 10s DMA wait, last fail: server reset stream, code=3"}));
+    assert(logs.back() == "tunnel restored after 20s down (2 reopen attempts)");
+
+    // A TX block that clears on its own is recorded once it lasts 5s.
+    events.clear();
+    enqueue(91);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += 6 * 1000 * 1000;
+    dma_free = 64 * 1024;
+    assert(noise_tunnel_pump_tx(&emit) == 1);
+    assert((events == std::vector<std::string>{
+        "tunnel_tx_blocked: outbound blocked 6s on DMA headroom (min dma_free=0); resumed"}));
+    events.clear();
+    enqueue(92);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += 4 * 1000 * 1000;
+    dma_free = 64 * 1024;
+    assert(noise_tunnel_pump_tx(&emit) == 1);
+    assert(events.empty());
+
+    // A stall teardown records once; the session teardown that follows doesn't.
+    enqueue(93);
+    dma_free = 0;
+    assert(noise_tunnel_pump_tx(&emit) == 0);
+    now_us += TUN_TX_STALL_TIMEOUT_US;
+    assert(noise_tunnel_pump_tx(&emit) == -1);
+    noise_tunnel_on_session_down();
+    assert((events == std::vector<std::string>{
+        "tunnel_tx_blocked: outbound blocked 30s on DMA headroom (min dma_free=0); "
+        "tearing down session"}));
 
     // Any future ungated seal failure is caught even with both TX queues empty.
     reopen();

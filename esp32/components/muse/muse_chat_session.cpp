@@ -230,7 +230,8 @@ struct msg_t {
     bool done;
     tts_t tts;
     uint32_t pcm_start;      /* where its speech starts in the reply audio */
-    uint32_t pcm_frames;     /* how long it is; 0 until the MP3 has all arrived */
+    uint32_t pcm_frames;     /* estimated duration, refined as MP3 completes */
+    uint32_t pcm_end;        /* final queued cursor, including the caption hold */
 };
 
 struct resampler_t {
@@ -1917,6 +1918,7 @@ static void pace_silently(void)
         s_turn.pcm_out += n;
     }
     if (s_turn.pcm_out >= end) {
+        m.pcm_end = s_turn.pcm_out;
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
         s_turn.silent = false;
@@ -1983,6 +1985,7 @@ static void decode(void)
         m.pcm_frames = s_turn.pcm_out - m.pcm_start + rest;
     }
     if (s_turn.mp3_ended && !s_turn.mp3_len) {
+        m.pcm_end = s_turn.pcm_out;
         m.pcm_frames = s_turn.pcm_out - m.pcm_start;
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
@@ -2651,18 +2654,44 @@ extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
     return MUSE_HATCH_EV_NONE;
 }
 
+/* Both caption paging and the rim follow the message at the playback cursor. */
+static int reply_message_at(size_t played)
+{
+    int message = -1;
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        const msg_t &m = s_turn.msgs[i];
+        if (m.tts >= TTS_ACTIVE && m.len && m.pcm_start <= played) message = i;
+    }
+    return message;
+}
+
+static uint32_t reply_frames(const msg_t &m, size_t caption_len)
+{
+    return m.pcm_frames ? m.pcm_frames : (uint32_t)((uint64_t)caption_len * MIC_RATE / SPEECH_CHARS_PER_S);
+}
+
+extern "C" float muse_turn_progress(size_t played, int *message)
+{
+    int i = reply_message_at(played);
+    if (message) *message = i;
+    if (i < 0) return 0;
+    const msg_t &m = s_turn.msgs[i];
+    size_t len = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
+    uint32_t frames = reply_frames(m, len);
+    if (!frames) return 0;
+    size_t elapsed = played - m.pcm_start;
+    bool complete = m.tts == TTS_FINISHED && m.pcm_end && played >= m.pcm_end;
+    if (complete) return 1;
+    float fraction = (float)elapsed / frames;
+    return fraction < 0.99f ? fraction : 0.99f;
+}
+
 extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
 {
-    /* The message being spoken: the last one whose speech has started. */
-    const msg_t *m = nullptr;
-    const char *text = nullptr;
-    for (int i = 0; i < s_turn.nmsgs && s_turn.texts; i++) {
-        const msg_t &c = s_turn.msgs[i];
-        if (c.tts >= TTS_ACTIVE && c.len && c.pcm_start <= played) {
-            m = &c;
-            text = s_turn.texts + i * TEXT_MAX;
-        }
-    }
+    if (!s_turn.texts) return false;
+    int i = reply_message_at(played);
+    const msg_t *m = i >= 0 ? &s_turn.msgs[i] : nullptr;
+    const char *text = i >= 0 ? s_turn.texts + i * TEXT_MAX : nullptr;
     if (!m) {
         /* Nothing said yet: the reply's opening page, to read while the speech is on its way. */
         for (int i = 0; i < s_turn.nmsgs && s_turn.texts; i++) {
@@ -2673,7 +2702,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         return false;
     }
     size_t len = CAPTION_LEN(text);
-    uint32_t frames = m->pcm_frames ? m->pcm_frames : (uint32_t)(len * MIC_RATE / SPEECH_CHARS_PER_S);
+    uint32_t frames = reply_frames(*m, len);
     size_t at = frames ? (size_t)((uint64_t)(played - m->pcm_start) * len / frames) : 0;
     if (at >= len) {
         at = len ? len - 1 : 0;

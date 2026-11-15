@@ -141,7 +141,11 @@ else()
     # Both LVGL's SDL display driver and its SDL2 OS abstraction include SDL
     # headers while LVGL itself is compiled.
     target_link_libraries(lvgl PRIVATE ${MUSE_SIM_SDL_TARGET})
-    target_compile_definitions(lvgl PRIVATE _POSIX_C_SOURCE=200809L)
+    # usleep() was removed from POSIX.1-2008, so _POSIX_C_SOURCE=200809L
+    # alone hides its declaration on glibc; _DEFAULT_SOURCE re-exposes it.
+    # LVGL's pthread OS layer calls usleep(), and GCC 14+ turns the
+    # resulting implicit declaration into an error.
+    target_compile_definitions(lvgl PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
 endif()
 
 set(MUSE_COMPONENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../components/muse")
@@ -209,6 +213,24 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py")
+    # Reuse the simulator adapters, but include the production UI directly so
+    # the regression can check the rendered label's font and geometry.
+    get_target_property(caption_sources muse_simulator SOURCES)
+    list(REMOVE_ITEM caption_sources src/main.c "${MUSE_COMPONENT_DIR}/muse_ui.c")
+    add_executable(muse_caption_layout_test tests/caption_layout_harness.c ${caption_sources})
+    get_target_property(caption_includes muse_simulator INCLUDE_DIRECTORIES)
+    get_target_property(caption_libraries muse_simulator LINK_LIBRARIES)
+    target_include_directories(muse_caption_layout_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_caption_layout_test PRIVATE ${caption_libraries})
+    get_target_property(caption_compile_options muse_simulator COMPILE_OPTIONS)
+    target_compile_options(muse_caption_layout_test PRIVATE ${caption_compile_options})
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_caption_layout_test PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_caption_layout COMMAND muse_caption_layout_test)
+    set_tests_properties(muse_caption_layout PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
     find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
     add_test(
         NAME muse_simulator_headless

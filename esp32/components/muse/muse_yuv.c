@@ -103,13 +103,34 @@ static inline uint32_t px2(int y, int rv, int g, int bu)
     return p | p << 16;
 }
 
+/* The last n (1 to 3) output rows of a two times upscaled source row pair,
+ * on the C path: output row i comes from source row i / 2, so the pair's
+ * second row is read only for a third output row. */
+static void IRAM_ATTR up2_part(const uint8_t *y0, int ystride, const uint8_t *cu, const uint8_t *cv, int src_w,
+                               uint8_t *out, int out_stride, int n)
+{
+    for (int i = 0; i < n; i++) {
+        const uint8_t *ys = i < 2 ? y0 : y0 + ystride;
+        uint32_t *w = (uint32_t *)(out + (size_t)i * out_stride);
+        for (int x = 0; x < src_w; x += 2) {
+            int U = cu[x >> 1], V = cv[x >> 1];
+            int rv = s_rv[V], g = s_gu[U] + s_gv[V], bu = s_bu[U];
+            w[x] = px2(s_y[ys[x]], rv, g, bu);
+            w[x + 1] = px2(s_y[ys[x + 1]], rv, g, bu);
+        }
+    }
+}
+
 void IRAM_ATTR muse_yuv_up2(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
-                            int src_w, int src_rows, uint8_t *out, int out_stride)
+                            int src_w, int out_rows, uint8_t *out, int out_stride)
 {
     if (!s_init) {
         init_tables();
     }
     int simd_w = s_pie ? src_w & ~15 : 0;
+    /* Whole source row pairs make four output rows each; a destination
+     * that ends inside a pair gets only the rows it has room for. */
+    int src_rows = (out_rows & ~3) / 2;
     for (int r = 0; r < src_rows; r += 2) {
         const uint8_t *y0 = y + r * ystride, *y1 = y0 + ystride;
         const uint8_t *cu = u + (r / 2) * cstride, *cv = v + (r / 2) * cstride;
@@ -140,6 +161,11 @@ void IRAM_ATTR muse_yuv_up2(const uint8_t *y, const uint8_t *u, const uint8_t *v
             w3[x + 1] = p;
         }
     }
+    if (out_rows & 3) {
+        int r = src_rows;
+        up2_part(y + (size_t)r * ystride, ystride, u + (size_t)(r / 2) * cstride, v + (size_t)(r / 2) * cstride,
+                 src_w, out + (size_t)2 * r * out_stride, out_stride, out_rows & 3);
+    }
 }
 
 static inline uint16_t px1(int y, int rv, int g, int bu)
@@ -154,7 +180,8 @@ void IRAM_ATTR muse_yuv_1x(const uint8_t *y, const uint8_t *u, const uint8_t *v,
         init_tables();
     }
     int simd_w = s_pie ? src_w & ~15 : 0;
-    for (int r = 0; r < src_rows; r += 2) {
+    int pairs = src_rows & ~1;
+    for (int r = 0; r < pairs; r += 2) {
         const uint8_t *y0 = y + r * ystride, *y1 = y0 + ystride;
         const uint8_t *cu = u + (r / 2) * cstride, *cv = v + (r / 2) * cstride;
         uint32_t *w0 = (uint32_t *)(out + r * out_stride), *w1 = (uint32_t *)(out + (r + 1) * out_stride);
@@ -168,6 +195,19 @@ void IRAM_ATTR muse_yuv_1x(const uint8_t *y, const uint8_t *u, const uint8_t *v,
             int rv = s_rv[V], g = s_gu[U] + s_gv[V], bu = s_bu[U];
             w0[x >> 1] = px1(s_y[y0[x]], rv, g, bu) | (uint32_t)px1(s_y[y0[x + 1]], rv, g, bu) << 16;
             w1[x >> 1] = px1(s_y[y1[x]], rv, g, bu) | (uint32_t)px1(s_y[y1[x + 1]], rv, g, bu) << 16;
+        }
+    }
+    if (src_rows & 1) {
+        /* An odd last row on its own (C path): the row after it is neither
+         * read nor written. */
+        int r = pairs;
+        const uint8_t *y0 = y + (size_t)r * ystride;
+        const uint8_t *cu = u + (size_t)(r / 2) * cstride, *cv = v + (size_t)(r / 2) * cstride;
+        uint32_t *w0 = (uint32_t *)(out + (size_t)r * out_stride);
+        for (int x = 0; x < src_w; x += 2) {
+            int U = cu[x >> 1], V = cv[x >> 1];
+            int rv = s_rv[V], g = s_gu[U] + s_gv[V], bu = s_bu[U];
+            w0[x >> 1] = px1(s_y[y0[x]], rv, g, bu) | (uint32_t)px1(s_y[y0[x + 1]], rv, g, bu) << 16;
         }
     }
 }
@@ -249,21 +289,24 @@ static void IRAM_ATTR avg_rows(const uint8_t *a, const uint8_t *b, int n, uint8_
     }
 }
 
-/* Source row r of a plane, 3/2 expanded, in out (out_n + 15 bytes). */
-static const uint8_t *row32(const uint8_t *plane, int stride, int src_w, int r2, uint8_t *tmp_a, uint8_t *tmp_b,
-                            uint8_t *out)
+/* Source row r of a plane, 3/2 expanded, in out (out_n + 15 bytes). Source
+ * rows at or past src_h (the plane's rows) are never read: the last one
+ * stands in for them. */
+static const uint8_t *row32(const uint8_t *plane, int stride, int src_w, int src_h, int r2, uint8_t *tmp_a,
+                            uint8_t *tmp_b, uint8_t *out)
 {
     /* Output row r2 of this plane: rows 3k, 3k + 1, 3k + 2 come from source
      * rows 2k, (2k + 2k + 1) / 2 and 2k + 1. */
     int k = r2 / 3, ph = r2 % 3;
-    const uint8_t *s0 = plane + (size_t)(2 * k) * stride;
+    int r0 = 2 * k < src_h ? 2 * k : src_h - 1, r1 = 2 * k + 1 < src_h ? 2 * k + 1 : src_h - 1;
+    const uint8_t *s0 = plane + (size_t)r0 * stride, *s1 = plane + (size_t)r1 * stride;
     if (ph == 0) {
         expand32(s0, src_w, out);
     } else if (ph == 2) {
-        expand32(s0 + stride, src_w, out);
+        expand32(s1, src_w, out);
     } else {
         expand32(s0, src_w, tmp_a);
-        expand32(s0 + stride, src_w, tmp_b);
+        expand32(s1, src_w, tmp_b);
         avg_rows(tmp_a, tmp_b, src_w * 3 / 2, out);
     }
     return out;
@@ -293,17 +336,20 @@ void IRAM_ATTR muse_yuv_up32(const uint8_t *y, const uint8_t *u, const uint8_t *
     uint8_t *yp[2] = {buf, buf + MAXW}, *cu = buf + 2 * MAXW, *cv = cu + MAXW / 2, *t0 = buf + 3 * MAXW,
             *t1 = buf + 4 * MAXW;
     int out_w = src_w * 3 / 2;
-    if (out_w > 480) {
+    if (out_w > 480 || src_h < 2) {
         return;
     }
-    (void)src_h;
     for (int r = row; r < row + rows; r += 2) {
-        row32(y, ystride, src_w, r, t0, t1, yp[0]);
-        row32(y, ystride, src_w, r + 1, t0, t1, yp[1]);
+        /* Row pairs; a destination that ends inside one gets its first row only. */
+        int n = row + rows - r < 2 ? 1 : 2;
+        row32(y, ystride, src_w, src_h, r, t0, t1, yp[0]);
+        if (n == 2) {
+            row32(y, ystride, src_w, src_h, r + 1, t0, t1, yp[1]);
+        }
         /* The pair's chroma is row r / 2 of the 3/2 expanded chroma plane. */
-        row32(u, cstride, src_w / 2, r / 2, t0, t1, cu);
-        row32(v, cstride, src_w / 2, r / 2, t0, t1, cv);
-        muse_yuv_1x(yp[0], cu, cv, MAXW, MAXW / 2, out_w, 2, out + (size_t)(r - row) * out_stride, out_stride);
+        row32(u, cstride, src_w / 2, src_h / 2, r / 2, t0, t1, cu);
+        row32(v, cstride, src_w / 2, src_h / 2, r / 2, t0, t1, cv);
+        muse_yuv_1x(yp[0], cu, cv, MAXW, MAXW / 2, out_w, n, out + (size_t)(r - row) * out_stride, out_stride);
     }
 }
 
@@ -336,13 +382,13 @@ static void selftest(void)
             memset(b, 0xA5, sizeof(b));
             s_pie = false;
             if (up) {
-                muse_yuv_up2(y, u, v, W, W / 2, W, H, a, OW * 2);
+                muse_yuv_up2(y, u, v, W, W / 2, W, 2 * H, a, OW * 2);
             } else {
                 muse_yuv_1x(y, u, v, W, W / 2, W, H, a, W * 2);
             }
             s_pie = true;
             if (up) {
-                muse_yuv_up2(y, u, v, W, W / 2, W, H, b, OW * 2);
+                muse_yuv_up2(y, u, v, W, W / 2, W, 2 * H, b, OW * 2);
             } else {
                 muse_yuv_1x(y, u, v, W, W / 2, W, H, b, W * 2);
             }

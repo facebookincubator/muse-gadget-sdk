@@ -109,6 +109,18 @@ class StopWatchPTT(unittest.TestCase):
         block = kconfig.split("config MUSE_VOICE_NOTE_TOGGLE", 1)[1].split("\n\n", 1)[0]
         self.assertIn("!MUSE_BOARD_SENSECAP_WATCHER", block)
         self.assertIn("!MUSE_UI_FREEINK", block)
+    def test_reply_ring_advances_without_rewinding_across_messages(self):
+        for board, realtime in ((1, 1), (0, 1), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 43, board=board, realtime=realtime)
+
+    def test_reply_ring_clears_on_incomplete_error_and_interruption(self):
+        for scenario in (44, 45, 46):
+            self.run_case('voice', scenario)
+
+    def test_reply_completion_is_visible_but_ptt_still_interrupts(self):
+        self.run_case('voice', 43)
+        self.run_case('voice', 47)
 
     def test_release_tail_is_sample_bounded_even_with_fast_reads(self):
         self.run_case('voice', 22)
