@@ -508,7 +508,13 @@ The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
 ideaspark, CYD, SenseCAP Indicator, Waveshare S3 LCD 3.5 status-screen and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
 `MuseGadget-xvf3800-XXXXXX` on the reSpeaker XVF3800,
-`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). It uses
+`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). Its
+node id, the name Muse knows it by, ends in the same six hex digits in
+lowercase: setup offers `gadget-XXXXXX` with `CONFIG_MUSE_GADGET_NODE_ID_PREFIX`
+(off by default; bench builds turn it on), else `homelink-XXXXXX`, and stores
+it with the device tokens. A device keeps its stored id, and one set up by earlier firmware, which
+stored none, keeps `homelink-XXXXXX`, until it is set up again
+(`main/identity.h`, `tests/test_link_node_id.py`). It uses
 **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.
@@ -753,6 +759,20 @@ the design, the Wi-Fi protocol and the numbers.
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the
   decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
 
+## WebAssembly apps
+
+WebAssembly apps are an optional component, off by default. Enable them on
+boards with the full LVGL UI and PSRAM using
+`MUSE_APPS=1 tools/muse/board.sh build|flash <board>`
+(`CONFIG_MUSE_WASM_APPS`, overlay `devices/sdkconfig.muse-apps`). On the
+gadget they stay off until the person turns on Run apps in Settings.
+
+Before changing or testing apps or their integration hooks, read
+[the component instructions](components/muse_apps/AGENTS.md). They cover
+the API, runtime, memory, capabilities, storage, input and focused tests.
+For app authoring and the guide to send Muse, see
+[the SDK README](components/muse_apps/sdk/README.md).
+
 ## Configuration gotchas
 
 - `sdkconfig.defaults.esp32c5` is loaded after `sdkconfig.defaults` for C5
@@ -874,9 +894,9 @@ against the policy, and `link.register`'s size.
 
 Muse calls a gadget's commands by name: the firmware lists them in
 `link.register` and answers each `link.invoke`. A command you add lives in two
-places, which must use the same name. (`device.health`, `device.guide` and
-`device.ota` are handled in `noise_control.cpp` itself; everything else goes
-through `on_ws_command()`.)
+places, which must use the same name. (`device.health` and `device.guide` are
+handled in `noise_control.cpp` itself; everything else goes through
+`on_ws_command()`.)
 
 1. **Advertise it** in `build_register_json()` in `main/noise_control.cpp`:
    `add_command(commands, "relay.set", "<description>", required, optional)`.

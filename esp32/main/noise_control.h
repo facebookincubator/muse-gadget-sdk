@@ -70,6 +70,10 @@ void noise_ctrl_set_agent_name_cb(noise_ctrl_agent_name_cb cb);
 // Override the Noise host. NULL or empty restores the compiled default.
 void noise_ctrl_set_host(const char *host);
 
+// The node id link.register sends from the next registration on: setup gives
+// a device set up by earlier firmware its new id without a restart.
+void noise_ctrl_set_node_id(const char *node_id);
+
 // Off (the default), the session checks for traffic every tick. On, once it
 // has been quiet POWER_SAVE_QUIET_MS, every POWER_SAVE_POLL_MS instead, so the
 // CPU can sleep between (Muse with its screen off); traffic goes back to every

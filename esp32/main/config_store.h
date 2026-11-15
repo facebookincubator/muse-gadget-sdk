@@ -59,6 +59,9 @@ bool config_unpair(void);
 bool config_clear_setup(void);
 
 bool config_is_provisioned(void);
+// The node id stored with the device tokens (identity.h). False if none is
+// stored (not set up, or set up by firmware that stored none).
+bool config_get_node_id(char *out, size_t size);
 bool config_setup_complete(void);
 bool config_mark_setup_complete(void);
 bool config_clear_setup_complete(void);

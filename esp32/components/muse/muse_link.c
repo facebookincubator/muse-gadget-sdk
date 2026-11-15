@@ -147,6 +147,14 @@ void muse_link_req_cancel(int64_t id)
     }
 }
 
+#if CONFIG_MUSE_WASM_APPS
+size_t muse_link_req_max_body(void)
+{
+    /* Without Link's answer, what any board's session takes. */
+    return s_ops && s_ops->req_max_body ? s_ops->req_max_body() : 4096;
+}
+#endif
+
 void muse_link_ble_apply(void)
 {
     if (s_ops && s_ops->ble_apply) {

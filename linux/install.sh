@@ -19,7 +19,8 @@
 #   bash install.sh [--from SOURCE] [--run-as USER] [--sdk-token TOKEN] [--yes] [--no-pair]
 #   bash install.sh --uninstall [--purge]
 #
-# Installs system packages, a pinned uv, and musegadget into /opt/musegadget;
+# Installs system packages (bringing ca-certificates up to date), a pinned and
+# checksum-verified uv, and musegadget into /opt/musegadget;
 # sets BlueZ's GATT MTU for the Android app; installs and starts the
 # musegadget service; then opens Bluetooth pairing for the Muse app.
 
@@ -180,14 +181,135 @@ install_packages() {
     fi
 }
 
-install_uv() {
-    if [ -x "$PREFIX/bin/uv" ] && [ "$("$PREFIX/bin/uv" --version | awk '{print $2}')" = "$UV_VERSION" ]; then
+# musegadget uses the system trust store, and distros remove distrusted root
+# CAs in ca-certificates updates, so bring that one package up to date.
+update_ca_certificates() {
+    local updated=0
+    if [ "$DISTRO_FAMILY" = fedora ]; then
+        as_root dnf upgrade -y -q ca-certificates >/dev/null 2>&1 && updated=1
+    elif [ "$DISTRO_FAMILY" = debian ]; then
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 &&
+            as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --only-upgrade \
+                ca-certificates >/dev/null 2>&1 && updated=1
+    else
+        # Upgrading one package without the rest is a partial upgrade on Arch.
+        say "ca-certificates: left to pacman -Syu, which keeps it current on Arch."
         return
     fi
-    say "Installing uv $UV_VERSION"
-    as_root mkdir -p "$PREFIX/bin"
-    curl -fsSL "https://astral.sh/uv/$UV_VERSION/install.sh" |
-        as_root env UV_INSTALL_DIR="$PREFIX/bin" UV_NO_MODIFY_PATH=1 sh -s -- --quiet
+    if [ "$updated" = 1 ]; then
+        say "ca-certificates is up to date."
+    else
+        warn "couldn't update ca-certificates; continuing with the installed version."
+    fi
+}
+
+# Root runs what is under $PREFIX, so no other account may be able to change
+# any of it.
+
+# True if $1 is a real directory (not a symlink), owned by root and not
+# writable by group or others.
+root_only_dir() {
+    local uid mode kind
+    read -r uid mode kind <<<"$(as_root env LC_ALL=C stat -c '%u %a %F' -- "$1" 2>/dev/null)"
+    [ "$kind" = directory ] && [ "$uid" = 0 ] && (( (8#$mode & 8#022) == 0 ))
+}
+
+# Prints the first path under $1 that an account other than root could change.
+# uv makes the venv's .lock writable by everyone on purpose; it only holds a
+# lock, and nothing runs or reads it.
+first_unsafe_path() {
+    as_root find "$1" ! -type l ! -path "$VENV/.lock" \( ! -uid 0 -o -perm /022 \) -print -quit
+}
+
+prepare_prefix() {
+    local dir
+    for dir in "$(dirname "$PREFIX")" "$PREFIX" "$PREFIX/bin"; do
+        if as_root test -e "$dir" || as_root test -L "$dir"; then
+            root_only_dir "$dir" ||
+                die "$dir must be a directory that only root can change. Fix its owner and mode, or remove $PREFIX with 'bash install.sh --uninstall', then run this installer again."
+        else
+            as_root install -d -o 0 -g 0 -m 0755 "$dir"
+        fi
+    done
+    # Left by an earlier run that was stopped part way.
+    as_root rm -rf -- "$PREFIX"/.uv.* "$PREFIX"/.venv.*
+}
+
+# Fails if anything under $PREFIX is writable by another account.
+check_prefix() {
+    local unsafe
+    unsafe="$(first_unsafe_path "$PREFIX")"
+    [ -z "$unsafe" ] || die "$unsafe can be changed by an account other than root. Run 'bash install.sh --uninstall', then this installer again."
+}
+
+uv_target() {
+    case "$ARCH" in
+        amd64|x86_64) echo x86_64-unknown-linux-gnu ;;
+        arm64|aarch64) echo aarch64-unknown-linux-gnu ;;
+        armhf)
+            # A Pi Zero or Pi 1 is ARMv6; newer boards run ARMv7 code.
+            case "$(uname -m)" in
+                armv6*) echo arm-unknown-linux-musleabihf ;;
+                *) echo armv7-unknown-linux-gnueabihf ;;
+            esac ;;
+        *) die "no uv build for $ARCH." ;;
+    esac
+}
+
+# SHA-256 of uv's release archive for each target, and of the uv binary in it.
+uv_release() {
+    case "$1" in
+        x86_64-unknown-linux-gnu)
+            UV_ARCHIVE_SHA256=9ec303873e00deed44d1b2b52b85ab7aa55d849588d7242298748390eaea07ef
+            UV_BINARY_SHA256=83f28650272b5543e939debbc7a5578d087952399fd945e9267b1db0ccc27d33 ;;
+        aarch64-unknown-linux-gnu)
+            UV_ARCHIVE_SHA256=35cbad89f226a06cd8b295f946e7083e15cd6fa058e09c2e02bb388be39a8fe4
+            UV_BINARY_SHA256=b5a863358779ca7f74488b9fb53c88a18851985858944807f198879383d0de49 ;;
+        armv7-unknown-linux-gnueabihf)
+            UV_ARCHIVE_SHA256=0390a683afc68c10c3cef45d80678015c6d097260a612ab6bca006ec68f75918
+            UV_BINARY_SHA256=a2e16a8866ee99e14e0935a6fbc002504ba0eeea858d86fbd29774e80e7c1bf4 ;;
+        arm-unknown-linux-musleabihf)
+            UV_ARCHIVE_SHA256=0ac0dc5e822e8acc9bcd53d3854ebbeef80c806d5722ee8666b8fa49582c8ff3
+            UV_BINARY_SHA256=9fde3996869c31d753441ee2e7d7cb2cb2b78dd2a7e3e1661970a40c722763fc ;;
+        *) die "no uv build for $1." ;;
+    esac
+}
+
+sha256_of() { as_root sha256sum -- "$1" | awk '{print $1}'; }
+
+remove_uv_tmp() { if [ -n "${UV_TMP:-}" ]; then as_root rm -rf -- "$UV_TMP"; UV_TMP=""; fi; }
+
+# Installs the pinned uv as a new root-owned file. An existing uv is never
+# run: it is copied into a directory only root can read, and the copy is kept
+# only if it is exactly the pinned binary. Otherwise uv comes from its GitHub
+# release, checked before it is unpacked.
+install_uv() {
+    local target bin="$PREFIX/bin/uv"
+    target="$(uv_target)"
+    uv_release "$target"
+    # Not under $TMPDIR, which another account may own.
+    UV_TMP="$(as_root mktemp -d "$PREFIX/.uv.XXXXXX")"
+    trap remove_uv_tmp EXIT
+    if as_root test -f "$bin" && ! as_root test -L "$bin"; then
+        as_root cp -- "$bin" "$UV_TMP/uv" || true
+    fi
+    # uvx came with the old installer; nothing here uses it.
+    as_root rm -rf -- "$bin" "$PREFIX/bin/uvx"
+    if ! as_root test -f "$UV_TMP/uv" || [ "$(sha256_of "$UV_TMP/uv")" != "$UV_BINARY_SHA256" ]; then
+        say "Installing uv $UV_VERSION"
+        as_root rm -f -- "$UV_TMP/uv"
+        as_root curl -fsSL --proto '=https' --tlsv1.2 -o "$UV_TMP/uv.tar.gz" \
+            "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-$target.tar.gz" ||
+            die "couldn't download uv $UV_VERSION."
+        [ "$(sha256_of "$UV_TMP/uv.tar.gz")" = "$UV_ARCHIVE_SHA256" ] ||
+            die "the uv $UV_VERSION download doesn't match its checksum."
+        as_root tar -xzf "$UV_TMP/uv.tar.gz" -C "$UV_TMP" --no-same-owner --no-same-permissions \
+            --strip-components 1 "uv-$target/uv"
+        [ "$(sha256_of "$UV_TMP/uv")" = "$UV_BINARY_SHA256" ] ||
+            die "uv $UV_VERSION doesn't match its checksum."
+    fi
+    as_root install -o 0 -g 0 -m 0755 "$UV_TMP/uv" "$bin"
+    remove_uv_tmp
 }
 
 enable_bluez() {
@@ -197,29 +319,58 @@ enable_bluez() {
     fi
 }
 
+# Root's uv ignores uv.toml and pyproject.toml settings, which another account
+# could have written in or above the current directory, and copies files
+# rather than linking them to its cache.
+run_uv() { as_root env UV_NO_CONFIG=1 UV_LINK_MODE=copy "$PREFIX/bin/uv" "$@"; }
+
+data_dir() {
+    "$1/bin/python" -I -c 'import musegadget, os; print(os.path.join(os.path.dirname(musegadget.__file__), "data"))'
+}
+
 install_musegadget() {
-    local uv="$PREFIX/bin/uv"
+    # A new venv each time, so nothing left in an earlier one runs as root.
+    # It's built beside the old one, which keeps working if this fails.
     # The system interpreter is required: dbus and gi come from apt and are
     # built for it.
-    if [ ! -x "$VENV/bin/python" ]; then
-        say "Creating $VENV"
-        as_root "$uv" venv --quiet --python /usr/bin/python3 --system-site-packages "$VENV"
-    fi
+    local new
+    say "Creating $VENV"
+    new="$(as_root mktemp -d "$PREFIX/.venv.XXXXXX")"
+    as_root chmod 0755 "$new"
+    run_uv venv --quiet --relocatable --allow-existing --python /usr/bin/python3 \
+        --system-site-packages "$new"
     say "Installing musegadget from $SOURCE"
-    as_root "$uv" pip install --quiet --python "$VENV/bin/python" --no-deps --reinstall "$SOURCE"
-    local data
-    data="$("$VENV/bin/python" -c 'import musegadget, os; print(os.path.join(os.path.dirname(musegadget.__file__), "data"))')"
-    as_root "$uv" pip install --quiet --python "$VENV/bin/python" --require-hashes \
-        -r "$data/requirements.lock"
+    run_uv pip install --quiet --python "$new/bin/python" --no-deps --reinstall "$SOURCE"
+    run_uv pip install --quiet --python "$new/bin/python" --require-hashes \
+        -r "$(data_dir "$new")/requirements.lock"
+    as_root rm -rf -- "$VENV"
+    as_root mv -T -- "$new" "$VENV"
     as_root ln -sf "$VENV/bin/musegadget" /usr/local/bin/musegadget
-    DATA_DIR="$data"
+    DATA_DIR="$(data_dir "$VENV")"
+}
+
+# musegadget won't connect while the trust store can't be read or still has a
+# distrusted root CA, so stop before installing a service that can't start.
+check_trust_store() {
+    local problem
+    # As the service runs it: as root, without this shell's SSL_CERT_* settings
+    # (and, with -I, without importing from the current directory).
+    problem="$(as_root env -u SSL_CERT_FILE -u SSL_CERT_DIR -u SSL_CERT_URI "$VENV/bin/python" -I \
+        -c 'from musegadget import tls; print(tls.trust_store_problem() or "")')" ||
+        die "couldn't check the system trust store."
+    [ -z "$problem" ] && return
+    # An earlier install's service would keep restarting the new code, which refuses to run.
+    if systemd_running && [ -e "$UNIT" ]; then
+        as_root systemctl stop musegadget.service >/dev/null 2>&1 || true
+    fi
+    die "musegadget won't connect: $problem. Update your ca-certificates package, then run this installer again."
 }
 
 configure_bluez() {
     # The Muse Android app writes (MTU - 3)-byte packets and fails above 512,
     # so keep the negotiated MTU at 256, as the ESP32 firmware does.
     local result
-    result="$(as_root python3 - "$BLUEZ_CONF" <<'EOF'
+    result="$(as_root python3 -I - "$BLUEZ_CONF" <<'EOF'
 import re, shutil, sys
 path = sys.argv[1]
 try:
@@ -261,7 +412,7 @@ disable_bluez_battery() {
     systemd_running || return 0
     local unit_text result
     unit_text="$(systemctl cat bluetooth.service 2>/dev/null || true)"
-    result="$(as_root python3 - "$BLUEZ_DROPIN" "$unit_text" <<'EOF'
+    result="$(as_root python3 -I - "$BLUEZ_DROPIN" "$unit_text" <<'EOF'
 import os, re, sys
 path, unit_text = sys.argv[1], sys.argv[2]
 # The last non-empty ExecStart= across the unit and its drop-ins is the one
@@ -354,12 +505,12 @@ Pair with your Muse:
   3. When asked for Wi-Fi, pick the network shown; no password is needed.
 
 EOF
-    as_root /usr/local/bin/musegadget pair || warn "not paired. Run 'sudo musegadget pair' to try again."
+    as_root "$VENV/bin/musegadget" pair || warn "not paired. Run 'sudo musegadget pair' to try again."
 }
 
 summary() {
     echo
-    as_root /usr/local/bin/musegadget info
+    as_root "$VENV/bin/musegadget" info
     cat <<EOF
 
 Service:   sudo systemctl status musegadget
@@ -398,7 +549,9 @@ uninstall() {
 }
 
 main() {
-    SOURCE="$DEFAULT_SOURCE" RUN_AS="" SDK_TOKEN="" ASSUME_YES=0 NO_PAIR=0 UNINSTALL=0 PURGE=0
+    SOURCE="$DEFAULT_SOURCE" RUN_AS="" SDK_TOKEN="" ASSUME_YES=0 NO_PAIR=0 UNINSTALL=0 PURGE=0 UV_TMP=""
+    # Nothing the installer creates should be writable by group or others.
+    umask 022
     while [ $# -gt 0 ]; do
         case "$1" in
             --from) SOURCE="${2:?--from needs a value}"; shift 2 ;;
@@ -426,9 +579,13 @@ main() {
     fi
     choose_account
     install_packages
+    update_ca_certificates
     enable_bluez
+    prepare_prefix
     install_uv
     install_musegadget
+    check_prefix
+    check_trust_store
     configure_bluez
     save_sdk_token
     install_service
@@ -437,4 +594,5 @@ main() {
 }
 
 # Everything runs from main, so a truncated download never runs a partial script.
-main "$@"
+# Sourcing this file (as the tests do) only defines the functions.
+if ! (return 0 2>/dev/null); then main "$@"; fi

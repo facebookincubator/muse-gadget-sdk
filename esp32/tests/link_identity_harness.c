@@ -70,6 +70,15 @@ bool config_set_str(const char *key, const char *value) {
     return true;
 }
 
+// The stored node id and the pairing credentials (identity.c).
+bool config_get_node_id(char *out, size_t size) {
+    return config_get_str("node_id", out, size) && out[0];
+}
+
+bool config_is_provisioned(void) {
+    return find("access_token") >= 0 || find("auth_token") >= 0;
+}
+
 static void erase(const char *key) {
     int i = find(key);
     if (i >= 0) memset(&s_entries[i], 0, sizeof(s_entries[i]));
