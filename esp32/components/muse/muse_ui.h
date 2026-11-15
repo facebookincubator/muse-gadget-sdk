@@ -31,6 +31,10 @@ esp_err_t muse_ui_start(void);
 /* From any task: the screen has gone dark for sleep (and not yet woken). */
 bool muse_ui_dark(void);
 
+/* From any task: the brightness a running app asks for, 1 to 100, or 0 for
+ * the person's own setting again. */
+void muse_ui_app_brightness(int pct);
+
 /* From any task: the face tile is the currently visible tile. */
 bool muse_ui_face_active(void);
 

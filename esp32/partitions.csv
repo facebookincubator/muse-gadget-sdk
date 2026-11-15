@@ -14,10 +14,10 @@
 
 # Name,    Type, SubType, Offset,   Size,    Flags
 # Vendor-specified layout (8 MB flash). Dual-OTA app slots (2 MB each) for
-# device.ota + auto-rollback, plus factory product-parameter partitions
+# OTA updates + auto-rollback, plus factory product-parameter partitions
 # (prod_data primary / prod_bak backup) at FIXED offsets — do not move these,
 # they are written during manufacturing. otadata selects the boot slot;
-# device.ota writes the inactive ota slot. Slots are capped at 2 MB by the
+# an OTA update writes the inactive ota slot. Slots are capped at 2 MB by the
 # prod_data offset (0x420000); watch the build's check_sizes line.
 #
 # The partition table lives at CONFIG_PARTITION_TABLE_OFFSET=0x10000 (see

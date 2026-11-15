@@ -21,6 +21,9 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"   /* the ops table's layout depends on it: the same in every file */
+#endif
 
 #include "muse_wifi.h"
 
@@ -73,6 +76,9 @@ typedef struct {
                         muse_link_req_cb cb, void *ctx);
     bool (*req_send)(int64_t id, const void *data, size_t len, bool end_body, int wait_ms);
     void (*req_cancel)(int64_t id);
+#if CONFIG_MUSE_WASM_APPS
+    size_t (*req_max_body)(void);                 /* the largest reply one frame can carry */
+#endif
     void (*power_save)(bool on);                  /* screen off: the session polls less */
     void (*wifi_nap)(bool nap);                   /* screen off a while: leave Wi-Fi until false */
     void (*ble_quiet)(bool quiet);                /* a Wi-Fi video stream: no BLE advertising until false */
@@ -111,4 +117,9 @@ int64_t muse_link_req_open(const char *verb, const char *path, const char *const
                            muse_link_req_cb cb, void *ctx);
 bool muse_link_req_send(int64_t id, const void *data, size_t len, bool end_body, int wait_ms);
 void muse_link_req_cancel(int64_t id);
+#if CONFIG_MUSE_WASM_APPS
+/* The largest reply body one frame of Link's session can carry; bound a reply that
+ * could be larger, e.g. with Range (noise_ctrl_req_max_body). */
+size_t muse_link_req_max_body(void);
+#endif
 void muse_link_ble_apply(void);

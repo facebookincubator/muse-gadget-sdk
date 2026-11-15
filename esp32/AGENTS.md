@@ -73,6 +73,7 @@ before adding a feature to one.
 | OSTB EchoEar-2ST (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-ostb-echoear-2st` | `tools/muse/board.sh build echoear` |
 | Espressif ESP32-S3-BOX-3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-box-3` | `tools/muse/board.sh build box3` |
 | ALIENTEK ATK-DNESP32S3-BOX V1.1 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-atk-dnesp32s3-box` | `tools/muse/board.sh build atk-box` |
+| ALIENTEK ATK-DNESP32S3-BOX2 (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-atk-dnesp32s3-box2` | `tools/muse/board.sh build atk-box2` |
 | AIPI Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-aipi` | manual |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18` | manual |
 | Waveshare ESP32-S3-Touch-AMOLED-1.8 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-18` | `tools/muse/board.sh build s3-18` |
@@ -91,6 +92,7 @@ before adding a feature to one.
 | Waveshare ESP32-S3-Touch-LCD-1.28 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd128` | `tools/muse/board.sh build lcd128` |
 | Waveshare ESP32-S3-Touch-LCD-1.46 (also 1.46B, 1.46C) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-146` | `tools/muse/board.sh build 146` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-143` | `tools/muse/board.sh build 143` |
+| LilyGO T-Display-S3 AMOLED 1.75 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-lilygo-s3-amoled-175` | `tools/muse/board.sh build lilygo175` |
 | Waveshare ESP32-S3-Touch-LCD-3.49 V2 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd349` | `tools/muse/board.sh build lcd349` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | `esp32p4` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35` | `tools/muse/board.sh build p4lcd35` |
 | SpotPear ESP32-AI-1.28 v1.0 (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-spotpear-esp32-ai-128` | `tools/muse/board.sh build spotpear` |
@@ -182,7 +184,7 @@ controls and unverified hardware behavior.
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|lilygo175|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -313,12 +315,13 @@ flash size and status backend.
    | `top-right`, or `top-left` with live calls (`yellow` on older firmware) | M5Stack StopWatch |
    | `USR1` | Seeed XIAO ESP32-S3 1.47 Touch Display |
    | `power` | M5Stack CoreS3 |
+   | `M`, `R`, `L` or `Q` | ALIENTEK ATK-DNESP32S3-BOX2 |
    | `front` | M5Stack StickS3, or StickC Plus2 — tell them apart by the port: the StickS3 is native USB, the Plus2 is a CH9102 `usbserial` |
    | `top` | Waveshare ESP32-S3-Touch-AMOLED-1.75C |
    | `key` | Waveshare ESP32-S3-Touch-AMOLED-2.16 |
    | `bottom right` | AIPI Lite |
    | `wheel` | Seeed SenseCAP Watcher |
-   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the Waveshare ESP32-S3-Touch-LCD-1.85B or 3.49, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee, the Waveshare ESP32-S3-Touch-LCD-1.9, the Waveshare ESP32-S3-Touch-LCD-3.5 or the SpotPear ESP32-AI-1.28 v1.0 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
+   | `boot` | Waveshare ESP32-C6-Touch-AMOLED-1.8, the ESP32-S3-Touch-AMOLED-1.75, 1.8, 2.06, 1.43C or 1.43, the LilyGO T-Display-S3 AMOLED 1.75, the Elecrow CrowPanel Advance 4.3, the Guition JC3248W535, the Waveshare ESP32-S3-Touch-LCD-1.85B or 3.49, the VN ESP32-S3 1.83-inch NV3023, the Deotaland RoRoLee, the Waveshare ESP32-S3-Touch-LCD-1.9, the Waveshare ESP32-S3-Touch-LCD-3.5 or the SpotPear ESP32-AI-1.28 v1.0 — tell the C6 by its target (`esp32c6`), and the S3 boards by the `muse: board:` line a reset logs |
 
 Ask the user only when these come up empty or contradict each other, and say
 what you found and what's ambiguous rather than asking from scratch.
@@ -419,6 +422,9 @@ port) and let it finish. It takes several minutes, mostly waiting for Muse:
 ```sh
 python3 tools/muse/avatar.py                    # draw their avatar
 python3 tools/muse/avatar.py --edit "CHANGE"    # change the one they have
+python3 tools/muse/avatar.py --restore previous # swap back to the previous avatar
+python3 tools/muse/avatar.py --restore default  # use the bundled default avatar
+python3 tools/muse/avatar.py --status           # host selection, checked builds and flash history
 ```
 
 It checks the board, asks their Muse for the renderer through the board,
@@ -426,6 +432,11 @@ checks it on the host and builds the firmware with it in a copy of the tree,
 and only then saves it to `components/muse/avatar/muse_pixel.c` (gitignored)
 and flashes. It doesn't rebuild their own `build-muse-*/`: flashing that with
 `tools/muse/board.sh` before a `board.sh build` puts the previous avatar back.
+`--restore` rechecks the selected source and builds it before changing the
+selection. A previous default is remembered too. With `--no-flash`, only the
+host selection changes; the checked build is retained and the device stays as
+it was. `--status` needs no board and reports this computer's selection and
+this tool's flash history; it cannot identify what the attached board runs.
 Progress and errors go to stderr. Relay the line that starts with `Muse drew:`
 and the GIF paths. On failure, pass the message on. The exit status says what
 kind of failure it was:
@@ -734,12 +745,27 @@ the design, the Wi-Fi protocol and the numbers.
   start).
 - **Test** with `tests/test_muse_video.py` (the ring and the Wi-Fi messages,
   and the wiring under the options), `tests/test_video_untrusted.py`
-  (hostile sizes, the port's guards), `tests/test_tinyh264_pie.py` and
+  (hostile sizes, the port's guards, every drawn piece written exactly),
+  `tests/test_tinyh264_pie.py` and
   `tests/test_libvpx_vp8.py`; on a board, with Muse Gadgets Test (Android:
   `adb logcat -s MuseCam`; iPhone: Xcode's console).
 - **Untrusted input:** everything from the network is. Keep the checks in
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the
   decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
+
+## WebAssembly apps
+
+WebAssembly apps are an optional component, off by default. Enable them on
+boards with the full LVGL UI and PSRAM using
+`MUSE_APPS=1 tools/muse/board.sh build|flash <board>`
+(`CONFIG_MUSE_WASM_APPS`, overlay `devices/sdkconfig.muse-apps`). On the
+gadget they stay off until the person turns on Run apps in Settings.
+
+Before changing or testing apps or their integration hooks, read
+[the component instructions](components/muse_apps/AGENTS.md). They cover
+the API, runtime, memory, capabilities, storage, input and focused tests.
+For app authoring and the guide to send Muse, see
+[the SDK README](components/muse_apps/sdk/README.md).
 
 ## Configuration gotchas
 
@@ -815,11 +841,54 @@ the design, the Wi-Fi protocol and the numbers.
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
   output: app slots are 2 MB (4 MB on Muse).
 
+## Describe your device
+
+Muse learns what a gadget is from its `link.register`, and how to use it from
+its `device.guide` command; `../protocols/DEVICE.md` has the rules. Every
+device built with this SDK registers `device_family: "gadget"`; other families
+are reserved for Muse's own devices.
+
+- **Model.** Each board's overlay sets `CONFIG_MUSE_DEVICE_MODEL_ID` and
+  `CONFIG_MUSE_DEVICE_MODEL_NAME` after `CONFIG_IDF_TARGET`. The id names the
+  hardware, so every profile of a board uses the same one; boards in
+  `devices/` use `muse-gadget-<board>`. A build without them reports
+  `muse-gadget` ("Muse Gadget"). The build fails on a value outside the rules.
+- **Guide.** `device.guide` returns the Markdown file `CONFIG_MUSE_DEVICE_GUIDE`
+  names. `main/guide.md` covers boards with a status light or status screen,
+  `devices/guides/muse.md` (set in `devices/sdkconfig.muse`) the boards with
+  the full UI, and `devices/guides/voice.md` the Voice PE and the reSpeaker Lite and XVF3800.
+  Give a board its own guide in `devices/guides/` when these would be wrong
+  about it, and set it in its overlay. A relative path is looked up in the
+  project directory, then in `esp32/`. A leading HTML comment (the license
+  header) is left out, and a guide over 4096 bytes fails the build.
+- **Guides in this repository** are generic to the board: what it is and what
+  it can do, what it shows, its controls, recovery and limits, in at most 2048
+  bytes. They skip setup and pairing, since Muse only sees a device that's
+  already set up. They follow "Guides in this repository" in
+  `../protocols/DEVICE.md`, and CI checks them.
+- **Your own gadget's guide** is free-form: say what it's for and how you want
+  Muse to use it. Keep the file anywhere in your project and point
+  `CONFIG_MUSE_DEVICE_GUIDE` at it; only the 4096-byte limit is checked. For
+  a desk light whose firmware adds `light.set` and `timer.start`:
+
+  ```markdown
+  # Focus light
+
+  The lamp on my desk, used as a focus timer. "Focus" means 25 minutes of
+  work: call `light.set` with red, then `timer.start` with 1500 seconds.
+  The light turns green by itself when the timer ends. A press on the
+  button ends a focus session early.
+  ```
+
+`tests/test_link_device_description.py` checks the model lines, that every
+guide an overlay names embeds within the limit, this repository's guides
+against the policy, and `link.register`'s size.
+
 ## Adding a command
 
 Muse calls a gadget's commands by name: the firmware lists them in
 `link.register` and answers each `link.invoke`. A command you add lives in two
-places, which must use the same name. (`device.health` and `device.ota` are
+places, which must use the same name. (`device.health` and `device.guide` are
 handled in `noise_control.cpp` itself; everything else goes through
 `on_ws_command()`.)
 
@@ -860,6 +929,8 @@ handled in `noise_control.cpp` itself; everything else goes through
 6. **Add a host test** in `tests/`. `test_link_sensecap_sensors.py` checks
    that `sensors.read` is advertised and dispatched under the same option, and
    runs its parser against a harness.
+7. **Update the guides** (Describe your device, above) only if the command
+   needs a rule its description can't carry.
 
 Report environmental sensors (temperature, humidity, CO2, tVOC, light and so
 on) through `sensors.read`, on every board that has them, so Muse has one

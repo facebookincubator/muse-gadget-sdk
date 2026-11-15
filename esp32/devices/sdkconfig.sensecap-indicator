@@ -20,6 +20,8 @@
 # It overrides the ESP32-C5 assumptions in sdkconfig.defaults; C5-only options
 # there are ignored for this target.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-sensecap-indicator"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Seeed SenseCAP Indicator"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # No status LED: the display shows the status colour in edge bars.
