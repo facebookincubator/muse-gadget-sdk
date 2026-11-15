@@ -64,6 +64,7 @@ static struct {
 static SemaphoreHandle_t s_lock;
 /* StopWatch samples this at the next press, never during an active call. */
 static atomic_bool s_voice_notes;
+static atomic_bool s_vibration_on = true;
 #if CONFIG_MUSE_APP_VIEW
 static bool s_apps_on;
 #endif
@@ -130,8 +131,11 @@ esp_err_t muse_settings_init(void)
     if (nvs_get_u8(s_nvs, "speaker", &b) == ESP_OK) {
         s.speaker_on = b;
     }
+    if (nvs_get_u8(s_nvs, "vibration", &b) == ESP_OK) {
+        atomic_store(&s_vibration_on, b != 0);
+    }
     load_u8("mic_gain", &s.mic_gain);
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
     if (nvs_get_u8(s_nvs, "voice_notes", &b) == ESP_OK) {
         atomic_store(&s_voice_notes, b != 0);
     }
@@ -173,6 +177,7 @@ void muse_settings_set_listener(muse_setting_cb_t cb)
 
 int muse_settings_volume(void) { return s.volume; }
 bool muse_settings_speaker_on(void) { return s.speaker_on; }
+bool muse_settings_vibration_on(void) { return atomic_load(&s_vibration_on); }
 int muse_settings_mic_gain(void) { return s.mic_gain; }
 int muse_settings_brightness(void) { return s.brightness; }
 int muse_settings_sleep_s(void) { return s.sleep_s; }
@@ -247,6 +252,12 @@ void muse_settings_set_speaker_on(bool on)
     s.speaker_on = on;
     save_u8("speaker", on);
     notify(MUSE_SETTING_SPEAKER);
+}
+
+void muse_settings_set_vibration_on(bool on)
+{
+    atomic_store(&s_vibration_on, on);
+    save_u8("vibration", on);
 }
 
 void muse_settings_set_mic_gain(int db)

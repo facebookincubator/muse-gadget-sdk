@@ -166,6 +166,8 @@ typedef struct {
      * light sleep), the task is notified or timeout_ms passes, so the
      * buttons needn't be polled. NULL: polled. */
     void (*wait_buttons)(int timeout_ms);
+    /* Queues a short vibration pulse without blocking the caller. NULL: no motor. */
+    void (*vibrate)(unsigned duration_ms);
     esp_err_t (*read_power)(muse_power_t *out);
     /* Turns the board off; returns only on failure. NULL: it can't from
      * software (a physical switch does), and Settings has no Power off. */

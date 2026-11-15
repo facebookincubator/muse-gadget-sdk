@@ -17,6 +17,7 @@
 #include "muse_settings.c"
 
 static bool saved, value;
+static bool vibration_saved, vibration_value;
 static int commits, notices;
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { assert(!"must preserve existing NVS"); return ESP_FAIL; }
@@ -26,11 +27,13 @@ esp_err_t nvs_open(const char *ns,nvs_open_mode_t mode,nvs_handle_t *h) {
 esp_err_t nvs_get_u8(nvs_handle_t h,const char *key,uint8_t *v) {
     assert(h==1);
     if(!strcmp(key,"voice_notes") && saved) { *v=value; return ESP_OK; }
+    if(!strcmp(key,"vibration") && vibration_saved) { *v=vibration_value; return ESP_OK; }
     return ESP_FAIL;
 }
 esp_err_t nvs_get_u16(nvs_handle_t h,const char *key,uint16_t *v) { (void)h;(void)key;(void)v;return ESP_FAIL; }
 esp_err_t nvs_get_str(nvs_handle_t h,const char *key,char *v,size_t *n) { (void)h;(void)key;(void)v;(void)n;return ESP_FAIL; }
 esp_err_t nvs_set_u8(nvs_handle_t h,const char *key,uint8_t v) {
+    if(!strcmp(key,"vibration")) { assert(h==1); vibration_saved=true; vibration_value=v; return ESP_OK; }
     assert(h==1 && !strcmp(key,"voice_notes")); saved=true; value=v; return ESP_OK;
 }
 esp_err_t nvs_commit(nvs_handle_t h) { assert(h==1); ++commits; return ESP_OK; }
@@ -47,5 +50,9 @@ int main(int argc,char **argv) {
     assert(muse_settings_voice_notes()==(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE));
     muse_settings_set_voice_notes(false);
     assert(!muse_settings_voice_notes() && !value && commits==2 && notices==2);
+    assert(muse_settings_vibration_on() && !vibration_saved);
+    muse_settings_set_vibration_on(false);
+    atomic_store(&s_vibration_on,true); /* fresh process's default */
+    assert(muse_settings_init()==ESP_OK && !muse_settings_vibration_on() && vibration_saved && !vibration_value);
     return 0;
 }
