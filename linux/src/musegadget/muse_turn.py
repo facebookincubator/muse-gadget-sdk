@@ -332,7 +332,7 @@ class MuseTurn:
         if not self.acknowledged:
             if len(self._pending) >= _MAX_PENDING_EVENTS:
                 raise ValueError("too many chat events before Muse acknowledged the turn")
-            self._pending_text_bytes += sum(len(payload[key].encode("utf-8")) for key in
+            self._pending_text_bytes += sum(len(payload[key].encode("utf-8", errors="surrogatepass")) for key in
                                             ("text", "display_text", "content", "transcript")
                                             if isinstance(payload.get(key), str))
             if self._pending_text_bytes > _MAX_TEXT_BYTES:
