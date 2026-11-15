@@ -2156,7 +2156,7 @@ static void update_status(muse_mode_t mode, float now)
         }
     }
 
-    static char caption[MUSE_CAPTION_MAX];
+    MUSE_CAPTION_BSS static char caption[MUSE_CAPTION_MAX];
     bool fresh = muse_state_caption(caption, sizeof(caption), &s_caption_version);
     const char *shown = caption;
     int answer = -1;

@@ -60,11 +60,15 @@ float muse_state_level(void);
 void muse_state_set_progress(float progress);
 float muse_state_progress(void);
 
-/* Room for a page of reply text; longer captions are cut short. */
+/* Room for a page of reply text; longer captions are cut short. A static
+ * that holds one takes MUSE_CAPTION_BSS. */
 #if CONFIG_MUSE_BOARD_WXM_WG1200
-#define MUSE_CAPTION_MAX 1600   /* its 480 px screen reads replies in a small font */
+#include "esp_attr.h"
+#define MUSE_CAPTION_MAX 1600               /* its 480 px screen reads replies in a small font */
+#define MUSE_CAPTION_BSS EXT_RAM_BSS_ATTR   /* and pages that size stay out of internal RAM */
 #else
 #define MUSE_CAPTION_MAX 400
+#define MUSE_CAPTION_BSS
 #endif
 
 void muse_state_set_caption(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
