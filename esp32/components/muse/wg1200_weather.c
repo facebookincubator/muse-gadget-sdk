@@ -1029,6 +1029,9 @@ static void update_daily_precip_locked(float cml_val, uint32_t pkt_sta_id)
     }
 }
 
+/* How long the paired station may stay silent before a neighbor is accepted. */
+#define PAIRED_STATION_SILENCE_US (180LL * 1000000LL)
+
 static bool should_accept_station(uint32_t station_id, int16_t rssi)
 {
     int64_t now_us = esp_timer_get_time();
@@ -1037,9 +1040,12 @@ static bool should_accept_station(uint32_t station_id, int16_t rssi)
             s_paired_station_last_seen_us = now_us;
             return true;
         }
-        /* If paired station is actively transmitting (seen within 180s), ignore neighbor stations */
-        if (s_paired_station_last_seen_us != 0 &&
-            (now_us - s_paired_station_last_seen_us) < 180LL * 1000000LL) {
+        /* While the paired station is transmitting (heard within 180 s), ignore
+         * neighbor stations. One not heard yet counts from boot (last seen 0 is
+         * esp_timer's zero), so a neighbor's first packet after a restart can't
+         * take over, and re-anchor the day's rain, before the paired station
+         * has had its chance to report. */
+        if ((now_us - s_paired_station_last_seen_us) < PAIRED_STATION_SILENCE_US) {
             return false;
         }
     }

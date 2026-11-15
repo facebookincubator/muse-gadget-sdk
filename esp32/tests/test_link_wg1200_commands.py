@@ -132,6 +132,14 @@ class LinkWg1200CommandsTest(unittest.TestCase):
         sync_factory_nvs_fn = extract_c_block(
             weather_src, "static void sync_factory_nvs_readonly("
         )
+        silence_define = next(
+            line
+            for line in weather_src.splitlines()
+            if line.startswith("#define PAIRED_STATION_SILENCE_US")
+        )
+        accept_station_fn = extract_c_block(
+            weather_src, "static bool should_accept_station("
+        )
         get_state_fn = extract_c_block(weather_src, "void wg1200_weather_get_state(")
         add_metric_fn = extract_c_block(weather_src, "static void add_sensor_metric(")
         sensors_cmd_fn = extract_c_block(
@@ -406,6 +414,8 @@ static esp_err_t nvs_get_blob(nvs_handle_t h, const char *key, void *out, size_t
 {init_rain_fn}
 {load_region_fn}
 {sync_factory_nvs_fn}
+{silence_define}
+{accept_station_fn}
 {get_state_fn}
 {add_metric_fn}
 {sensors_cmd_fn}
@@ -459,8 +469,50 @@ void test_boot_configure(bool factory_ok, bool ota0_ok) {{
 int test_boot_calls(void) {{ return s_boot_calls; }}
 const char *test_booted_label(void) {{ return s_booted_label; }}
 
+/* One accept/ignore decision per step, at `at_s` seconds of uptime. */
+static void station_step(cJSON *res, const char *name, int at_s, uint32_t id, int16_t rssi) {{
+    s_now_us = (int64_t)at_s * 1000000LL;
+    bool accepted = should_accept_station(id, rssi);
+    if (accepted) {{
+        /* As the packet decoders do once a station's packet is taken. */
+        s_state.outdoor_valid = true;
+        s_state.station_id = id;
+        s_state.rssi_dbm = rssi;
+        s_state.outdoor_updated_us = s_now_us;
+    }}
+    cJSON_AddBoolToObject(res, name, accepted);
+}}
+
+cJSON *test_run_station_filter(void) {{
+    const uint32_t paired = 0x0000346FU, neighbor = 0x00002EB0U;
+    cJSON *res = cJSON_CreateObject();
+
+    /* Paired, just booted: the neighbor reports first. */
+    memset(&s_state, 0, sizeof(s_state));
+    s_paired_station_id = paired;
+    s_paired_station_last_seen_us = 0;
+    station_step(res, "boot_neighbor_first", 20, neighbor, -66);
+    station_step(res, "boot_paired", 25, paired, -80);
+    station_step(res, "neighbor_while_paired_active", 60, neighbor, -40);
+    station_step(res, "neighbor_at_silence_limit", 25 + 179, neighbor, -40);
+    station_step(res, "neighbor_after_paired_silent", 25 + 181, neighbor, -66);
+    station_step(res, "paired_returns", 25 + 200, paired, -80);
+
+    /* Paired, but that station never reports (replaced or out of range). */
+    memset(&s_state, 0, sizeof(s_state));
+    s_paired_station_last_seen_us = 0;
+    station_step(res, "absent_paired_in_grace", 179, neighbor, -66);
+    station_step(res, "absent_paired_after_grace", 181, neighbor, -66);
+
+    /* Nothing inherited from the stock firmware: the first station heard. */
+    memset(&s_state, 0, sizeof(s_state));
+    s_paired_station_id = 0;
+    s_paired_station_last_seen_us = 0;
+    station_step(res, "unpaired_first", 20, neighbor, -66);
+    return res;
+}}
+
 cJSON *test_run_factory_nvs_sync(void) {{
-    (void)s_paired_station_last_seen_us;
     memset(&s_state, 0, sizeof(s_state));
     memset(&s_rain_rtc, 0, sizeof(s_rain_rtc));
     s_paired_station_id = 0;
@@ -523,6 +575,7 @@ int test_boot_calls(void);
 const char *test_booted_label(void);
 cJSON *test_run_factory_nvs_sync(void);
 cJSON *test_run_sx1262_cs_guard(void);
+cJSON *test_run_station_filter(void);
 }}
 
 #define CONFIG_MUSE_BOARD_WXM_WG1200 1
@@ -609,6 +662,14 @@ int main(int argc, char **argv) {{
     }}
     if (strcmp(argv[1], "sx1262_cs") == 0) {{
         cJSON *res = test_run_sx1262_cs_guard();
+        char *out = cJSON_PrintUnformatted(res);
+        puts(out ? out : "{{}}");
+        free(out);
+        cJSON_Delete(res);
+        return 0;
+    }}
+    if (strcmp(argv[1], "station_filter") == 0) {{
+        cJSON *res = test_run_station_filter();
         char *out = cJSON_PrintUnformatted(res);
         puts(out ? out : "{{}}");
         free(out);
@@ -875,6 +936,22 @@ int main(int argc, char **argv) {{
         self.assertEqual(int(res["paired_station_id"]), 0x1234ABCD)
         self.assertEqual(res["tz_offset_hours"], -5)
         self.assertAlmostEqual(res["daily_rain_mm"], 2.5)
+
+    def test_neighbor_station_cannot_take_over_before_paired_reports(self) -> None:
+        res = self.run_harness("station_filter")
+        # After a restart the paired station hasn't been heard yet: a neighbor
+        # that reports first is still ignored, so the day's rain isn't re-anchored.
+        self.assertFalse(res["boot_neighbor_first"])
+        self.assertTrue(res["boot_paired"])
+        self.assertFalse(res["neighbor_while_paired_active"])
+        self.assertFalse(res["neighbor_at_silence_limit"])
+        # A paired station silent for 180 s gives way, and takes over again at once.
+        self.assertTrue(res["neighbor_after_paired_silent"])
+        self.assertTrue(res["paired_returns"])
+        # A paired station that never reports only holds neighbors off for 180 s.
+        self.assertFalse(res["absent_paired_in_grace"])
+        self.assertTrue(res["absent_paired_after_grace"])
+        self.assertTrue(res["unpaired_first"])
 
     def test_sx1262_aborts_spi_transfer_when_nss_assert_fails(self) -> None:
         res = self.run_harness("sx1262_cs")
