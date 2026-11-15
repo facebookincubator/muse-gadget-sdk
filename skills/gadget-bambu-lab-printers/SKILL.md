@@ -36,11 +36,13 @@ Walk through these in order. For a missing layer, give the user the step instead
    it with the host's other device credentials, in a local file with restricted permissions. Clients read it
    from there in-process. The code is never pasted into chat, logged, passed in a command-line argument, or
    put in a URL passed on a command line. Validate the printer's TLS identity with a configured or pinned
-   trust path before sending the code; do not disable certificate validation.
-2. **Cloud-kept mode, for status, camera and monitoring.** Set **LAN Only** to off and **LAN Only Liveview** to on
-   on the printer touchscreen. Liveview is a separate toggle from LAN Only Mode: with Liveview on and LAN Only off,
-   the printer stays on Bambu Cloud, Bambu Handy and its live video keep working, and the local camera stream opens
-   on the LAN. Verify Handy live video after changing the setting, and revert if it breaks.
+   trust path before sending the code; do not disable certificate validation. If the printer's certificate
+   changes, stop and ask the owner before trusting the new one.
+2. **Cloud-kept mode, for P2S camera snapshots and monitoring.** LAN status works in either mode and needs no
+   change. For the camera, set **LAN Only** to off and **LAN Only Liveview** to on on the printer touchscreen.
+   Liveview is a separate toggle from LAN Only Mode: with Liveview on and LAN Only off, the printer stays on Bambu
+   Cloud, Bambu Handy and its live video keep working, and the local camera stream opens on the LAN. Verify Handy
+   live video after changing the setting, and revert if it breaks.
 3. **Developer Mode is the owner's decision, made knowingly, and only for print starts.** Starting prints
    from third-party tools requires LAN Only mode plus Developer Mode, enabled by the owner on the printer's
    touchscreen. Before they decide, state the trade plainly: while it is on, Bambu Handy, cloud printing,
@@ -53,7 +55,8 @@ Walk through these in order. For a missing layer, give the user the step instead
 
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
-- The guided setup check passes for the path being used (LAN status, camera and monitoring, or Developer-Mode print start).
+- The guided setup check passes for the path being used (LAN status in either mode, P2S camera and
+  monitoring, or Developer-Mode print start).
 - For a print start: a file the user explicitly selected, already sliced for this exact printer model, plus the user's
   confirmation that the build plate is clear and the printer is ready. Do not substitute another file.
 - For pausing: the user's explicit request for that job, or a standing authorization the user gave for
@@ -94,8 +97,9 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
    the print is healthy, and when it finishes normally. A change to FAILED, an unexpected PAUSE, or a non-zero
    `print_error` always alerts, even though the print is no longer active. Keep the previous percent and layer in a
    state file so a stall is detectable, and suppress a repeat alert for the same job and problem for at least an hour.
-5. **Pause only a clear-cut visual failure** (obvious spaghetti, a fully detached or dragged part, an empty
-   plate well into the print, a large nozzle blob) when the user has authorized it. Publish
+5. **Pause.** On the user's explicit request for that job, pause it. Under a standing monitoring authorization,
+   pause only a clear-cut visual failure seen in a fresh snapshot (obvious spaghetti, a fully detached or dragged
+   part, an empty plate well into the print, a large nozzle blob). Publish
    `{"print": {"sequence_id": "0", "command": "pause"}}` to `device/<serial>/request`, once. Borderline or
    telemetry-only problems get an alert, not a pause. Pause acceptance in cloud mode has not been confirmed:
    always verify after pausing (see below), and never present a cloud-mode pause as working until it is.
@@ -106,6 +110,7 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
    - Confirm with the user this exact file, this exact printer and a clear build plate.
    - Upload the selected file over the local file channel, then send one documented start request for it. If
      any check fails or is unclear, stop and report.
+
    Report the start with the slicer's own estimates (filament, time) and the exact file and printer used,
    not guesses.
 
@@ -115,6 +120,7 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
   expected job name and progressing layers.
 - If the printer stayed idle or the result is uncertain, report it and inspect the current job. Never resend
   a start automatically, and never restart a running print.
+- After a requested pause, stop or resume, re-read status and report it done only when the state has changed.
 - A published MQTT command is not proof it took effect. After a pause, wait about 15 seconds, read status again,
   and report the pause as done only when `gcode_state` reads PAUSE. If status still reads RUNNING after a pause
   attempt, report the pause as failed and tell the user to pause in Bambu Handy right away. Control commands can
@@ -129,14 +135,16 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 - No cloud camera path: Bambu Handy is phone-only, and Bambu's cloud liveview uses a proprietary
   peer-to-peer ticket system that refuses third-party clients (OrcaSlicer gets a 403 on cloud liveview while
   its cloud status works). LAN access through Home Link is the working route.
-- No arbitrary or raw G-code, firmware or configuration changes, calibration or homing moves, or bypassing
-  thermal and motion protections.
-- Pause, stop or resume only on the user's explicit request for that job, or under a standing monitoring
-  authorization with criteria agreed in advance. Intervening in someone else's print wastes filament and can ruin the part.
+- No arbitrary or raw G-code, firmware or configuration changes, temperature, speed or light changes, calibration
+  or homing moves, or bypassing thermal and motion protections.
+- Pause, stop or resume only on the user's explicit request for that job. The one exception is a single pause of a
+  clear-cut visual failure under a standing monitoring authorization with criteria agreed in advance. Intervening
+  in someone else's print wastes filament and can ruin the part.
 - No starting prints outside Developer Mode, and no resume or stop under a pause authorization. Resuming is
   the user's decision, and stop destroys the print.
 - Timelapse recording is separate from liveview: the P2S has no microSD slot and records timelapses to a
   USB flash drive in the front USB-A port, which is not included in the box.
+- Changing LAN Only, LAN Only Liveview or Developer Mode is the owner's decision, never the agent's.
 - Developer Mode relaxes Bambu's LAN authorization; it belongs on a trusted home network only.
 - Bambu can change firmware authorization or LAN behavior at any time; an update may close paths this skill
   relies on.
