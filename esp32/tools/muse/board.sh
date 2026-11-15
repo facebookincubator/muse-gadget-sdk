@@ -25,7 +25,7 @@
 # MUSE_VIDEO=1 adds devices/sdkconfig.muse-video (the phone camera over
 # Wi-Fi, on boards whose panel driver has draw_frame) in build-muse-<profile>-video/.
 # MUSE_WAKEWORD=1 adds devices/sdkconfig.muse-wakeword (the "Hey Muse" wake
-# word; needs EXECUTORCH_PYTHON) in build-muse-<profile>-wakeword/.
+# word) in build-muse-<profile>-wakeword/.
 # MUSE_APPS=1 adds devices/sdkconfig.muse-apps (WebAssembly apps: app.run) in
 # build-muse-<profile>-apps/.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master

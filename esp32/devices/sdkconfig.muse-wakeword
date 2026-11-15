@@ -12,18 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The "Hey Muse" wake word with the ExecuTorch runner, for a board with the
-# full UI and PSRAM, loaded after its own overlay:
+# The "Hey Muse" wake word, for a board with the full UI and PSRAM, loaded
+# after its own overlay:
 #   MUSE_WAKEWORD=1 tools/muse/board.sh build|flash <board>
-# The build needs a Python with executorch (EXECUTORCH_PYTHON; see
-# docs/executorch.md). Listening still needs the runtime opt-in.
+# Listening still needs the opt-in on the device.
 # components/muse_wakeword/README.md has the measurements behind these.
 CONFIG_MUSE_WAKEWORD_ENABLE=y
 
-# Inference speed over flash: the size-optimized runtime ran over the
-# 20 ms frame budget on the BOX-3.
+# ExecuTorch at the project's -O2: its default -Os makes inference about
+# 40% slower.
 # CONFIG_ET_OPTIMIZE_SIZE is not set
 
-# ExecuTorch's own logging off (about 91 KB of flash); et_model and runner
-# errors still reach the console.
+# ExecuTorch's own logging off; the runner's errors still reach the console.
 # CONFIG_ET_ENABLE_LOGGING is not set
+
+# The delegate reads the model's weights from flash instead of copying
+# them into PSRAM.
+# CONFIG_ESPNN_DELEGATE_CONSTANTS_TO_PSRAM is not set

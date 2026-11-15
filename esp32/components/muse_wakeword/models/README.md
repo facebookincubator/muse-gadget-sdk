@@ -16,96 +16,81 @@ limitations under the License.
 
 # Hey Muse wake word model
 
-`hey_muse.pte` is the int8 ExecuTorch export embedded by
-`ww_runner_et.cpp` (Cadence-backend PTQ; runs on kernels registered
-from a bundle generated at build time from this file — Cadence
-generic/portable kernels).
-`hey_muse.json` is its generated provenance sidecar (checkpoint and
-PTE hashes, frontend config, class order, model ops, and the int8
-calibration/parity record). The
-runner does not read the JSON on device — the matching frontend
-constants are generated into `../ww_frontend_config.h` by the same
-export. No bundle is committed: the build generates one from this
-file at configure time (see `../../../docs/executorch.md`) and
-refuses to proceed if it does not cover this model.
+`hey_muse.pte` is the wake word model the runner (`../ww_runner_espnn.cpp`)
+embeds.
+`hey_muse.json` records its contract (input, output and state tensors,
+front end, detector cutoffs), provenance and evaluation; `../ww_model.h`
+holds the same contract for the C code, and the host tests check that
+the two agree. [`ATTRIBUTION.md`](ATTRIBUTION.md) credits the training data.
 
-- Architecture: ExecuTorch `StreamingWakeWord`
-  (`examples/models/mlperf_tiny/streaming_wakeword.py`), one LFBE
-  frame in, posterior over `wakeword | silence | other` out.
-- Wake phrases: "Hey Muse", "Ok Muse", "Okay Muse" (see the
-  sidecar for the exact training variants).
-- Frontend (frozen; `ww_frontend.c` implements exactly this):
-  16 kHz PCM, 480-sample periodic Hann window centered in a
-  512-point FFT, 320-sample hop, power spectrum, 40 Slaney mel
-  filters with Slaney area normalization, `log(mel + 1e-6)`, then
-  the checkpoint's per-mel mean/std normalization.
-- No VAD. Endpointing after a wake is the SDK-side energy tier.
+## The model
+
+- **Wake phrase:** "Hey Muse".
+- **Architecture:** [microWakeWord](https://github.com/kahrendt/microWakeWord)'s
+  streaming MixedNet: a 24-filter first convolution (kernel 5, stride 3)
+  and four blocks of mixed depthwise convolutions (kernels 5; 7 and 11;
+  9 and 15; 23) with 32 pointwise filters each, then one output unit.
+  11,089 parameters and 10.7 thousand multiply-adds per inference
+  (0.36 million a second). Trained with distillation from an ensemble of
+  three larger models trained on the same data.
+- **Front end:** TensorFlow Lite Micro's microfrontend, as microWakeWord
+  and ESPHome run it (`esphome/esp-micro-speech-features`): 16 kHz audio,
+  30 ms windows every 10 ms, 40 channels from 125 to 7500 Hz, noise
+  reduction, PCAN gain control and log scale.
+- **Streaming:** every 30 ms the model takes the newest three feature
+  frames plus its six int8 state tensors (2,160 bytes) and returns the
+  wake probability and the next state. It keeps no state of its own, so
+  the runner holds the state and resets it by writing zero points.
+- **Export:** int8 everywhere, through ExecuTorch's ESP-NN delegate: the
+  whole program is one delegate call, with no CPU operators, so no
+  kernel library is linked. Graph inputs and outputs are left out of
+  ExecuTorch's memory plan so the runner binds its own buffers once.
+  The probabilities are bit-identical to TensorFlow Lite Micro running
+  the same weights converted with microWakeWord's streaming TFLite
+  converter on the same machine: 101,018 of 101,018 inferences on x86-64
+  Linux and 330 of 330 on an ESP32-S3. (One convolution's int8 weights
+  and per-channel scales come from that conversion: PyTorch's PT2E weight
+  observer floors small per-channel scales at 2^-12, which would
+  otherwise make that layer coarser.) Across machines, the
+  microfrontend's start-up tables, which it computes with the C math
+  library, can differ in the last bit: on the test clips that changed one
+  feature value and two of 1,329 probabilities (by at most 4/256) between
+  x86-64 and Arm or the ESP32, with the same detections.
+- **Detector** (`../ww_detector.c`): fires when the mean of the last five
+  probabilities is above the sensitivity's cutoff, then ignores 2 s.
+- **Size:** 23,492 bytes. On an ESP32-S3 at 240 MHz an inference takes
+  0.6 ms with the runner's buffers in internal RAM (about 49 KB of it,
+  front end included; a test image without the UI) and 1.2 to 1.5 ms with
+  them in PSRAM, as on a SenseCAP Watcher with its UI (14 KB internal,
+  29 KB PSRAM). `../README.md` has the measurements.
 
 ## Measured accuracy
 
-From the checkpoint's own streaming test (fp32, the clean-voice training
-bundle's test set), at the detector thresholds `ww_detector.c` uses:
+All wake word examples are **synthetic speech**: text-to-speech voices,
+including one engine, that the model never trained on, in nine
+conditions (clean, quiet, TV at 10, 5 and 0 dB SNR, music, noise,
+reverberation, reverberation with TV), with 23.5 hours of real non-wake
+audio (speech from meetings, debates, podcasts and broadcasts, music
+and room noise) for the false wakes. None of it was used in training or
+to choose the model. Real voices haven't been measured.
 
-| Sensitivity | Threshold | Wake words caught | False wakes per hour |
+| Sensitivity | Cutoff | Wake words caught | False wakes per hour |
 | --- | --- | --- | --- |
-| Low | 0.99 | 51.3% | 3.98 |
-| Default | 0.95 | 78.7% | 33.8 |
-| High | 0.90 | not measured | not measured |
+| Low | 0.26 | 71.4% | 0.34 |
+| Default | 0.22 | 73.9% | 0.38 |
+| High | 0.13 | 80.1% | 1.36 |
 
-No threshold reaches one false wake an hour or fewer. These are not
-measurements of the int8 model on a device, which haven't been made; the
-int8 export's parity check against fp32 is in `hey_muse.json`. A false
-wake followed by speech within 2.5 s sends a voice note.
+At the Default cutoff, 5.7% of near-miss phrases ("hey music",
+"hey news", "hey mute" and similar) are taken for the wake word. Each
+false wake followed by speech within 2.5 s sends a voice note.
 
+## Training data and recipe
 
-
-## Attribution
-
-This model (`hey_muse.pte`, Cadence int8 export of checkpoint epoch 11
-(checkpoint SHA-256 `cafa78914c2280b653c2589b11985b5a6116c63a3bfdabd0d446c1a59febc5d3`),
-was trained on synthetic speech generated with Piper, plus Google
-Speech Commands recordings as negatives and backgrounds. No Piper code
-ships in the firmware; Piper was used only to generate training audio
-on the training host (phonemization via espeak-ng at generation time
-only). The voice model cards below are the authoritative per-voice
-license statements. All eight voice files were pinned to HuggingFace
-revision `e7229f7d33a10e145e109b886d661984201ac3c4`.
-
-- Piper: [piper-tts 1.8.0](https://pypi.org/project/piper-tts/),
-  [piper1-gpl repository](https://github.com/OHF-voice/piper1-gpl),
-  licensed under [GPL-3.0-or-later](https://spdx.org/licenses/GPL-3.0-or-later.html).
-- Espeak-ng (phonemizer used by the Piper voices):
-  [espeak-ng](https://github.com/espeak-ng/espeak-ng/), GPL-3.0.
-
-Voices used (training, validation, and held-out test pools; LibriTTS
-splits are 724 train / 90 validation / 90 test speakers, and Norman is
-test-only):
-
-| Voice | Dataset / source | License | Trained from |
-| --- | --- | --- | --- |
-| [en_GB-cori-medium](https://huggingface.co/rhasspy/piper-voices/blob/e7229f7d33a10e145e109b886d661984201ac3c4/en/en_GB/cori/medium/MODEL_CARD) | LibriVox | Public domain | Scratch |
-| [en_GB-cori-high](https://huggingface.co/rhasspy/piper-voices/blob/e7229f7d33a10e145e109b886d661984201ac3c4/en/en_GB/cori/high/MODEL_CARD) | LibriVox | Public domain | Scratch |
-| [en_US-kristin-medium](https://huggingface.co/rhasspy/piper-voices/blob/e7229f7d33a10e145e109b886d661984201ac3c4/en/en_US/kristin/medium/MODEL_CARD) | LibriVox | Public domain | Scratch |
-| [en_US-john-medium](https://huggingface.co/rhasspy/piper-voices/blob/e7229f7d33a10e145e109b886d661984201ac3c4/en/en_US/john/medium/MODEL_CARD) | LibriVox | Public domain | Kristin |
-| [en_US-ljspeech-medium](https://huggingface.co/rhasspy/piper-voices/blob/e7229f7d33a10e145e109b886d661984201ac3c4/en/en_US/ljspeech/medium/MODEL_CARD) | LJ Speech | Public domain | Scratch |
-| [en_US-ljspeech-high](https://huggingface.co/rhasspy/piper-voices/blob/e7229f7d33a10e145e109b886d661984201ac3c4/en/en_US/ljspeech/high/MODEL_CARD) | LJ Speech | Public domain | Scratch |
-| [en_US-norman-medium](https://huggingface.co/rhasspy/piper-voices/blob/e7229f7d33a10e145e109b886d661984201ac3c4/en/en_US/norman/medium/MODEL_CARD) | LibriVox | Public domain | Scratch |
-| [en_US-libritts-high](https://huggingface.co/rhasspy/piper-voices/blob/e7229f7d33a10e145e109b886d661984201ac3c4/en/en_US/libritts/high/MODEL_CARD) | LibriTTS | CC BY 4.0 | Scratch |
-
-LibriTTS attribution (required by its licence): LibriTTS, a corpus
-based on public-domain LibriVox audiobooks, from
-[OpenSLR 60](http://www.openslr.org/60/), is licensed under
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The
-`en_US-libritts-high` Piper voice was trained on LibriTTS, and this
-wake-word model was trained on speech synthesized with that voice;
-it does not contain LibriTTS recordings.
-
-LibriVox and LJ Speech recordings used to train the other Piper
-voices above are in the public domain, as stated on their model
-cards: [LibriVox](https://librivox.org) and
-[LJ Speech](https://keithito.com/LJ-Speech-Dataset/).
-
-Google Speech Commands v0.02, used for negative speech and
-backgrounds, is licensed under
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); dataset:
-[http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz](http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz).
+Training used only public-domain, CC0 and CC BY material: synthetic
+"Hey Muse" and near-miss phrases from Piper voices (including blends of
+LibriTTS speakers and accent variants), and real non-wake speech, music,
+noise and room impulse responses. [`ATTRIBUTION.md`](ATTRIBUTION.md) lists
+every source and credits each CC BY work. The network and its streaming
+conversion follow microWakeWord; it was trained in PyTorch and exported
+with ExecuTorch 1.6.0.dev20261112 (commit `2a00808`), the release the
+firmware's `pytorch/executorch` component is built from.

@@ -18,21 +18,16 @@
 
 #include <string.h>
 
-/*
- * Thresholds are the checkpoint bundle's operating points, re-derived
- * from its calibration corpus with this 5-frame smoothing applied
- * (see models/hey_muse.json for the bundle identity).
- */
-static float ww_detector_threshold(ww_sensitivity_t sensitivity)
+float ww_detector_cutoff(ww_sensitivity_t sensitivity)
 {
     switch (sensitivity) {
     case WW_SENSITIVITY_LOW:
-        return 0.99f;
+        return 0.26f;
     case WW_SENSITIVITY_HIGH:
-        return 0.90f;
+        return 0.13f;
     case WW_SENSITIVITY_DEFAULT:
     default:
-        return 0.95f;
+        return 0.22f;
     }
 }
 
@@ -42,7 +37,7 @@ void ww_detector_init(ww_detector_t *detector, ww_sensitivity_t sensitivity)
         return;
     }
     memset(detector, 0, sizeof(*detector));
-    detector->threshold = ww_detector_threshold(sensitivity);
+    detector->cutoff = ww_detector_cutoff(sensitivity);
 }
 
 void ww_detector_reset(ww_detector_t *detector)
@@ -50,39 +45,34 @@ void ww_detector_reset(ww_detector_t *detector)
     if (detector == NULL) {
         return;
     }
-    const float threshold = detector->threshold;
+    const float cutoff = detector->cutoff;
     memset(detector, 0, sizeof(*detector));
-    detector->threshold = threshold;
+    detector->cutoff = cutoff;
 }
 
-bool ww_detector_push(ww_detector_t *detector, float posterior)
+bool ww_detector_push(ww_detector_t *detector, float probability)
 {
     if (detector == NULL) {
         return false;
     }
-
-    detector->frames_seen++;
-    if (detector->frames_seen <= WW_DETECTOR_WARMUP_FRAMES) {
+    detector->probs[detector->head] = probability;
+    detector->head = (detector->head + 1) % WW_DETECTOR_WINDOW;
+    if (detector->count < WW_DETECTOR_WINDOW) {
+        detector->count++;
+    }
+    float mean = 0.0f;
+    for (int i = 0; i < detector->count; i++) {
+        mean += detector->probs[i];
+    }
+    mean = detector->count == WW_DETECTOR_WINDOW ? mean / WW_DETECTOR_WINDOW : 0.0f;
+    if (detector->refractory > 0) {
+        detector->refractory -= WW_DETECTOR_STRIDE;
         return false;
     }
-
-    if (detector->ring_count == WW_DETECTOR_SMOOTH_FRAMES) {
-        detector->sum -= detector->ring[detector->ring_head];
-    } else {
-        detector->ring_count++;
-    }
-    detector->ring[detector->ring_head] = posterior;
-    detector->sum += posterior;
-    detector->ring_head = (uint8_t)((detector->ring_head + 1) % WW_DETECTOR_SMOOTH_FRAMES);
-
-    if (detector->cooldown_left > 0) {
-        detector->cooldown_left--;
-        return false;
-    }
-
-    const float smoothed = detector->sum / (float)detector->ring_count;
-    if (smoothed >= detector->threshold) {
-        detector->cooldown_left = WW_DETECTOR_COOLDOWN_FRAMES;
+    if (mean > detector->cutoff) {
+        detector->refractory = WW_DETECTOR_REFRACTORY_FRAMES;
+        detector->count = 0;
+        detector->head = 0;
         return true;
     }
     return false;

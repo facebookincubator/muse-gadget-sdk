@@ -26,33 +26,36 @@ extern "C" {
 #endif
 
 /*
- * Posterior detector for the streaming wake word model: a 5-frame
- * moving average of the wakeword posterior against a sensitivity
- * threshold, 30-frame warm-up suppression (the model receptive field
- * is 30 frames; the first 29 outputs are meaningless), and a 1 s
- * (50-frame) refractory period after a fire. Pure state machine, no
- * allocation or platform calls, so host tests pin it directly.
+ * Detector over the model's wake probabilities, one per 30 ms inference,
+ * as microWakeWord's runners apply it: it fires when the mean of the last
+ * five probabilities is above the sensitivity's cutoff, and the five must
+ * all be real (no firing in the first 150 ms). After a fire it clears its
+ * window and ignores 2 s of inferences. Pure state machine, no allocation
+ * or platform calls, so host tests pin it directly.
+ *
+ * Cutoffs, from models/hey_muse.json:
+ *   Low 0.26 (fewest false wakes), Default 0.22, High 0.13 (easiest to
+ *   trigger).
  */
 
-#define WW_DETECTOR_SMOOTH_FRAMES 5
-#define WW_DETECTOR_WARMUP_FRAMES 29
-#define WW_DETECTOR_COOLDOWN_FRAMES 50
+#define WW_DETECTOR_WINDOW 5
+#define WW_DETECTOR_REFRACTORY_FRAMES 200   /* 2 s of 10 ms feature frames */
+#define WW_DETECTOR_STRIDE 3                /* feature frames per inference */
 
 typedef struct {
-    float threshold;
-    float ring[WW_DETECTOR_SMOOTH_FRAMES];
-    float sum;
-    uint8_t ring_count;
-    uint8_t ring_head;
-    uint32_t frames_seen;
-    uint32_t cooldown_left;
+    float cutoff;
+    float probs[WW_DETECTOR_WINDOW];
+    int count;
+    int head;
+    int refractory;   /* feature frames left */
 } ww_detector_t;
 
+float ww_detector_cutoff(ww_sensitivity_t sensitivity);
 void ww_detector_init(ww_detector_t *detector, ww_sensitivity_t sensitivity);
 void ww_detector_reset(ww_detector_t *detector);
 
-/* Feed one frame's wakeword posterior; true exactly on the firing frame. */
-bool ww_detector_push(ww_detector_t *detector, float posterior);
+/* Feed one inference's probability (0..1); true exactly on the firing one. */
+bool ww_detector_push(ww_detector_t *detector, float probability);
 
 #ifdef __cplusplus
 }

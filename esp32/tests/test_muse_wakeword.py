@@ -21,6 +21,7 @@ import hashlib
 import json
 import os
 import shlex
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -320,31 +321,28 @@ class WakeWordFirmwareContract(unittest.TestCase):
         # One runner, no choice: nothing but the model can start a turn.
         self.assertNotIn('MUSE_WAKEWORD_RUNNER', kconfig)
         self.assertNotIn('clap', kconfig.lower())
-        # No ET_ENABLE to select: the registry component links nothing
-        # until the model and kernel bundle are declared in CMake.
         self.assertNotIn('ET_ENABLE', kconfig)
-        self.assertIn('ww_runner_et.cpp', cmake)
+        self.assertIn('ww_runner_espnn.cpp', cmake)
         self.assertIn('models/hey_muse.pte', cmake)
-        self.assertIn('executorch_add_model', cmake)
-        self.assertIn('"${EXECUTORCH_PYTHON}" "${_et_dir}/tools/gen_kernels.py"', cmake)
-        # The bundle is generated at build time; no committed bundle dir.
-        self.assertNotIn('"${CMAKE_CURRENT_SOURCE_DIR}/et_kernels"', cmake)
+        # The program is one ESP-NN delegate call: only the backend is
+        # declared, so no kernel bundle and no executorch Python at build time.
+        self.assertIn('executorch_add_backend(EspNNBackend)', cmake)
+        for gone in ('executorch_add_model', 'executorch_add_kernels', 'gen_kernels.py', 'EXECUTORCH_PYTHON'):
+            self.assertNotIn(gone, cmake)
         self.assertFalse((WW / 'et_kernels').exists())
+        self.assertFalse((WW / 'tools/export_hey_muse.py').exists())
         self.assertTrue((WW / 'models/hey_muse.pte').is_file())
 
     def test_runner_copies_unaligned_embedded_pte(self):
-        # et_model_create requires 16-byte-aligned program
-        # data, but EMBED_FILES alignment is layout luck: after the
-        # Oct 2026 rebase the embedded .pte landed at a 4-aligned
-        # address, load failed (0x12), wake init died, and the
-        # Settings toggle reverted instantly. The runner must copy a
-        # misaligned .pte into owned aligned storage instead.
-        src = (WW / 'ww_runner_et.cpp').read_text()
-        self.assertIn('heap_caps_aligned_alloc', src)
+        # Program::load needs aligned program data, but EMBED_FILES
+        # alignment is layout luck: an embed that once landed 4-aligned made
+        # the load fail and the Settings toggle revert. The embed is 16-aligned
+        # in flash (custom asm), and the runner copies a misaligned
+        # caller-supplied model into aligned storage it owns.
+        src = (WW / 'ww_runner_espnn.cpp').read_text()
+        self.assertIn('% kAlign) != 0', src)
         self.assertIn('pte_copy', src)
-        self.assertIn('free(runner->pte_copy)', src)
-        # Zero-copy normal path: the embed itself is 16-aligned in
-        # flash (custom asm), so the copy above is only a fallback.
+        self.assertIn('ww_free(r->pte_copy)', src)
         cmake = (WW / 'CMakeLists.txt').read_text()
         self.assertIn('hey_muse_pte.S.in', cmake)
         self.assertNotIn('EMBED_FILES ${', cmake)
@@ -352,39 +350,57 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('.balign 16', asm)
         self.assertIn('_binary_hey_muse_pte_start', asm)
 
-    def test_runner_gives_kernels_a_temp_arena(self):
-        # et_model leaves temp_arena_size at 0 by default, which makes
-        # Method fall back to PAL malloc for kernel scratch during
-        # execute. The always-on runner opts into a bounded pool in the
-        # same default location class as its planned buffers instead.
-        runner = (WW / 'ww_runner_et.cpp').read_text()
-        self.assertRegex(runner, r'kTempArenaBytes\s*=\s*[1-9]')
-        self.assertIn('model_cfg.temp_arena_size = kTempArenaBytes', runner)
-        self.assertIn('model_cfg.temp_location = ET_MEM_DEFAULT', runner)
+    def test_runner_binds_its_buffers_once_and_sizes_the_arena(self):
+        # Zero-copy: every input and output is bound once at load, each
+        # state's input and output share one buffer, a step is one execute();
+        # the method arena is exactly what a counting load used.
+        runner = (WW / 'ww_runner_espnn.cpp').read_text()
+        bind = between(runner, 'bool bind_io(ww_runner_t *r)', '\n}\n')
+        self.assertIn('m.set_input(EValue(Tensor(h)), 1 + k)', bind)
+        self.assertIn('m.set_output_data_ptr(buf, out->nbytes(), 1 + k)', bind)
+        step = between(runner, 'void on_features(', '\n}\n')
+        self.assertIn('r->method->execute()', step)
+        self.assertNotIn('set_input', step)
+        self.assertIn('class CountingAllocator', runner)
+        self.assertIn('r->arena_bytes = round16(used)', runner)
+        # No temp allocator: the delegate keeps its own arena.
+        self.assertIn('r->memory.emplace(allocator, &*r->planned, nullptr)', runner)
 
-    def test_model_is_declared_and_bundle_is_build_time(self):
-        # The embedded .pte only runs on firmware whose build-time kernel
-        # bundle registers its ops. The bundle is generated at configure
-        # time from the declared model, so the tree carries the model,
-        # its recorded ops, and the declaration — and no committed
-        # bundle that could go stale when the component is updated.
+    def test_model_sidecar_matches_the_binary_and_the_code(self):
         sidecar = json.loads((WW / 'models/hey_muse.json').read_text())
         pte = WW / 'models/hey_muse.pte'
         self.assertEqual(sidecar['pte_size'], pte.stat().st_size)
-        self.assertEqual(
-            sidecar['pte_sha256'], hashlib.sha256(pte.read_bytes()).hexdigest()
-        )
-        self.assertTrue(sidecar['model_ops'])
-        cmake = (WW / 'CMakeLists.txt').read_text()
-        self.assertIn(
-            'executorch_add_model(PTE "${CMAKE_CURRENT_SOURCE_DIR}/models/hey_muse.pte")',
-            cmake,
-        )
-        self.assertFalse((WW / 'et_kernels').exists())
-        # The component's generator runs unmodified, with its check that the
-        # installed executorch is the one the component was built from.
-        self.assertFalse((WW / 'tools/make_kernel_bundle.py').exists())
-        self.assertNotIn('_check_version', cmake)
+        self.assertEqual(sidecar['pte_sha256'], hashlib.sha256(pte.read_bytes()).hexdigest())
+        model_h = (WW / 'ww_model.h').read_text()
+
+        def define(name):
+            for line in model_h.splitlines():
+                if line.startswith('#define ' + name + ' '):
+                    return line.split(None, 2)[2].split('/*')[0].strip().strip('()f')
+            raise AssertionError(name)
+
+        self.assertEqual(sidecar['input']['shape'], [1, 40, 3, 1])
+        self.assertEqual(float(define('WW_MODEL_INPUT_SCALE')), sidecar['input']['scale'])
+        self.assertEqual(int(define('WW_MODEL_INPUT_ZERO_POINT')), sidecar['input']['zero_point'])
+        self.assertEqual(int(define('WW_MODEL_OUTPUT_ZERO_POINT')), sidecar['output']['zero_point'])
+        self.assertEqual(sidecar['output']['scale'], 1 / 256)
+        self.assertEqual(int(define('WW_MODEL_STATES')), len(sidecar['state']))
+        self.assertEqual(int(define('WW_MODEL_STATE_BYTES')), sidecar['state_bytes'])
+        self.assertEqual(sum(eval('*'.join(map(str, t['shape']))) for t in sidecar['state']),
+                         sidecar['state_bytes'])
+        self.assertEqual({t['zero_point'] for t in sidecar['state']},
+                         {int(define('WW_MODEL_STATE_ZERO_POINT'))})
+        frontend = (WW / 'ww_frontend.c').read_text()
+        fe = sidecar['frontend']
+        for text in ('window.size_ms = %d' % fe['window_ms'], 'window.step_size_ms = %d' % fe['step_ms'],
+                     'lower_band_limit = 125.0f', 'upper_band_limit = 7500.0f',
+                     'smoothing_bits = 10', 'strength = 0.95f', 'offset = 80.0f', 'gain_bits = 21',
+                     'scale_shift = 6', '0.0390625f'):
+            self.assertIn(text, frontend)
+        # Training data attribution ships with the binary.
+        attribution = (WW / 'models/ATTRIBUTION.md').read_text()
+        for source in ('LibriTTS', 'LibriSpeech', 'AMI', 'VoxPopuli', 'MUSAN', 'Kevin MacLeod'):
+            self.assertIn(source, attribution)
 
     def test_muse_can_only_turn_listening_off(self):
         # Only audio after a detection on the device may leave it, so no
@@ -459,6 +475,10 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('if (!s_up_owed && post_ptt(MUSE_PTT_DOWN))', down)
         self.assertIn('muse_wakeword_core_abort(&s_core);', down)
         self.assertIn('muse_voice_seed_preroll(NULL, 0);', down)
+        # The LISTENING state shown before posting goes back to idle, so a
+        # refused press leaves no capture on screen and auto-sleep resumes.
+        refused = down[down.index('muse_voice_seed_preroll(NULL, 0);'):]
+        self.assertIn('if (muse_state_mode(NULL) == MUSE_MODE_LISTENING) {\n                muse_state_set_mode(MUSE_MODE_IDLE);', refused)
 
     def test_enable_wakes_a_resting_voice_task_and_needs_a_running_glue(self):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
@@ -535,8 +555,10 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('CONFIG_MUSE_WAKEWORD_ENABLE=y', overlay)
         self.assertIn('# CONFIG_ET_OPTIMIZE_SIZE is not set', overlay)
         self.assertIn('# CONFIG_ET_ENABLE_LOGGING is not set', overlay)
+        self.assertIn('# CONFIG_ESPNN_DELEGATE_CONSTANTS_TO_PSRAM is not set', overlay)
         board = (ROOT / 'tools/muse/board.sh').read_text()
         self.assertIn('B=$B-wakeword; defaults="$defaults;devices/sdkconfig.muse-wakeword"', board)
+        self.assertNotIn('EXECUTORCH_PYTHON', board)
 
     def test_listening_needs_a_working_runner(self):
         # A runner that failed to load or run hears nothing, so the
@@ -577,19 +599,23 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('muse_wakeword_enabled()', tick)   # switch tracks serial/Muse toggles
 
     def test_option_needs_psram_and_the_lvgl_ui(self):
-        # The buffers and runner (~346 KB) only fit in PSRAM, and only the
-        # LVGL UI has the controls and the listening indicator.
+        # The audio buffers (~133 KB) only fit in PSRAM, and only the LVGL UI
+        # has the controls and the listening indicator.
         kconfig = (WW / 'Kconfig').read_text()
         enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_SENSITIVITY')
         self.assertIn('depends on SPIRAM && !MUSE_UI_FREEINK', enable)
-        self.assertIn('about 34 false wakes an hour', enable)   # the checkpoint's own figures
-        self.assertIn('has not been measured on a device', enable)
-        readme = (WW / 'models/README.md').read_text()
-        self.assertIn('| Default | 0.95 | 78.7% | 33.8 |', readme)
-        detector = (WW / 'ww_detector.c').read_text()
-        for value in ('0.99f', '0.95f', '0.90f'):   # the thresholds the help quotes
-            self.assertIn(value, detector)
-        self.assertNotIn('research checkpoint', enable)
+        sensitivity = between(kconfig, 'choice MUSE_WAKEWORD_SENSITIVITY', 'endchoice')
+        sidecar = json.loads((WW / 'models/hey_muse.json').read_text())
+        for name, label in (('low', 'Low'), ('default', 'Default'), ('high', 'High')):
+            cutoff = sidecar['detector']['cutoffs'][name]
+            measured = sidecar['evaluation']['by_sensitivity'][name]
+            self.assertIn('%s %.2f' % (label, cutoff), sensitivity)
+            self.assertIn('%.2ff' % cutoff, (WW / 'ww_detector.c').read_text())
+            row = '| %s | %.2f | %.1f%% | %.2f |' % (label, cutoff, measured['recall_percent'],
+                                                    measured['false_wakes_per_hour'])
+            self.assertIn(row, (WW / 'models/README.md').read_text())
+        self.assertIn('synthetic', sensitivity)   # how it was measured
+        self.assertIn("Real voices haven't", sensitivity)
 
     def test_serial_keys_and_off_by_default(self):
         input_c = (ROOT / 'components/muse/muse_input.c').read_text()
@@ -608,398 +634,454 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('"ww_on"', settings)   # the persisted opt-in
 
 
-class WakeWordFrontendDetector(unittest.TestCase):
-    """The SDK-owned LFBE frontend and posterior detector used by the
-    ExecuTorch runner. Inference itself is covered on device; these pin
-    framing, the frozen 512/480/320 geometry, silence values, and the
-    detector warm-up/smoothing/cooldown state machine on the host."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.tmp.cleanup)
-        cls.binary = Path(cls.tmp.name) / 'ww_frontend_harness'
-        harness = Path(cls.tmp.name) / 'harness.c'
-        harness.write_text(r'''
-#include <math.h>
-#include <stdio.h>
-#include <string.h>
-#include "ww_detector.h"
-#include "ww_frontend.h"
-
-static float g_frames[16][WW_FRONTEND_N_MELS];
-static size_t g_count;
-static void on_frame(void *ctx, const float frame[WW_FRONTEND_N_MELS]) {
-    (void)ctx;
-    if (g_count < 16) memcpy(g_frames[g_count], frame, sizeof(g_frames[0]));
-    g_count++;
-}
-
-int main(int argc, char **argv) {
-    ww_frontend_t *fe = ww_frontend_create();
-    if (!fe) return 2;
-    const char *mode = argc > 1 ? argv[1] : "";
-    if (!strcmp(mode, "silence")) {
-        int16_t zeros[512] = {0};
-        size_t n = ww_frontend_push(fe, zeros, 512, on_frame, NULL);
-        float worst = 0;
-        for (int m = 0; m < WW_FRONTEND_N_MELS; m++) {
-            float want = (logf(WW_FRONTEND_LOG_EPS) - kWwFrontendNormMean[m]) /
-                kWwFrontendNormStd[m];
-            float d = fabsf(g_frames[0][m] - want);
-            if (d > worst) worst = d;
-        }
-        printf("frames %zu worst %.9g\n", n, worst);
-        return n == 1 && g_count == 1 && worst < 1e-5f ? 0 : 1;
-    }
-    if (!strcmp(mode, "sine") || !strcmp(mode, "split")) {
-        enum { N = 3219 };
-        static int16_t pcm[N];
-        for (int i = 0; i < N; i++)
-            pcm[i] = (int16_t)(12000.0f * sinf(2.0f * 3.1415926535f * 1000.0f * (float)i / 16000.0f));
-        g_count = 0;
-        ww_frontend_push(fe, pcm, N, on_frame, NULL);
-        if (!strcmp(mode, "sine")) {
-            int best = 0;
-            for (int m = 1; m < WW_FRONTEND_N_MELS; m++)
-                if (g_frames[0][m] > g_frames[0][best]) best = m;
-            printf("frames %zu argmax %d peak %.9g\n", g_count, best, g_frames[0][best]);
-            return g_count == 9 ? 0 : 1;
-        }
-        static float whole[16][WW_FRONTEND_N_MELS];
-        size_t whole_count = g_count;
-        memcpy(whole, g_frames, sizeof(whole));
-        ww_frontend_reset(fe);
-        g_count = 0;
-        const size_t chunks[] = {1, 319, 17, 511, 320, 999, 1052};
-        size_t off = 0;
-        for (size_t i = 0; i < sizeof(chunks) / sizeof(chunks[0]); i++) {
-            ww_frontend_push(fe, pcm + off, chunks[i], on_frame, NULL);
-            off += chunks[i];
-        }
-        printf("frames %zu equal %d\n", g_count,
-               g_count == whole_count && !memcmp(whole, g_frames, sizeof(whole)));
-        return off == N && g_count == whole_count &&
-            !memcmp(whole, g_frames, sizeof(whole)) ? 0 : 1;
-    }
-    if (!strcmp(mode, "sensitivity")) {
-        /* The Kconfig choice reaches the threshold: 0.97 wakes at Default
-         * and High, never at Low. */
-        const ww_sensitivity_t levels[] = { WW_SENSITIVITY_LOW, WW_SENSITIVITY_DEFAULT, WW_SENSITIVITY_HIGH };
-        for (int l = 0; l < 3; l++) {
-            ww_detector_t det;
-            ww_detector_init(&det, levels[l]);
-            int fired = 0;
-            for (int i = 0; i < WW_DETECTOR_WARMUP_FRAMES + WW_DETECTOR_SMOOTH_FRAMES; i++)
-                fired += ww_detector_push(&det, 0.97f);
-            printf("%d", fired);
-        }
-        printf("\n");
-        return 0;
-    }
-    if (!strcmp(mode, "detector")) {
-        ww_detector_t det;
-        ww_detector_init(&det, WW_SENSITIVITY_DEFAULT);
-        for (int i = 0; i < WW_DETECTOR_WARMUP_FRAMES; i++)
-            if (ww_detector_push(&det, 1.0f)) return 1;
-        if (!ww_detector_push(&det, 1.0f)) return 1; /* valid frame 30 */
-        for (int i = 0; i < WW_DETECTOR_COOLDOWN_FRAMES; i++)
-            if (ww_detector_push(&det, 1.0f)) return 1;
-        if (!ww_detector_push(&det, 1.0f)) return 1;
-        ww_detector_reset(&det);
-        for (int i = 0; i < WW_DETECTOR_WARMUP_FRAMES; i++)
-            if (ww_detector_push(&det, 1.0f)) return 1;
-        printf("detector ok\n");
-        return 0;
-    }
-    return 2;
-}
-''')
-        cc = shlex.split(os.environ.get('CC', 'cc'))
-        result = subprocess.run(
-            [*cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', *SANITIZE,
-             '-I', str(WW), '-I', str(WW / 'include'), str(harness),
-             str(WW / 'ww_frontend.c'), str(WW / 'ww_detector.c'), '-lm',
-             '-o', str(cls.binary)],
-            capture_output=True, text=True)
-        if result.returncode:
-            raise AssertionError(result.stdout + result.stderr)
-
-    def run_mode(self, mode):
-        ran = subprocess.run([str(self.binary), mode], capture_output=True, env=ENV)
-        self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
-        self.assertEqual(ran.stderr, b'')
-        return ran.stdout.decode().strip()
-
-    def test_silence_frame_matches_log_eps_normalization(self):
-        out = self.run_mode('silence').split()
-        self.assertEqual(out[:2], ['frames', '1'])
-        self.assertLess(float(out[-1]), 1e-5)
-
-    def test_sine_peaks_at_the_1khz_mel(self):
-        out = self.run_mode('sine').split()
-        self.assertEqual(out[1], '9')
-        self.assertIn(int(out[3]), (12, 13))
-        self.assertGreater(float(out[5]), 2.0)
-
-    def test_arbitrary_chunking_is_bit_identical(self):
-        self.assertEqual(self.run_mode('split'), 'frames 9 equal 1')
-
-    def test_sensitivity_choice_sets_the_threshold(self):
-        self.assertEqual(self.run_mode('sensitivity'), '011')
-
-    def test_detector_warmup_fire_and_cooldown(self):
-        self.assertEqual(self.run_mode('detector'), 'detector ok')
-
-
-ET_FAKES = {
-    'esp_heap_caps.h': r"""
-#pragma once
-#include <stddef.h>
-#include <stdint.h>
-#ifdef __cplusplus
-extern "C" {
-#endif
-#define MALLOC_CAP_DEFAULT (1u << 0)
-#define MALLOC_CAP_INTERNAL (1u << 1)
-#define MALLOC_CAP_SPIRAM (1u << 2)
-#define MALLOC_CAP_8BIT (1u << 3)
-void *heap_caps_aligned_alloc(size_t alignment, size_t size, uint32_t caps);
-void heap_caps_free(void *ptr);
-size_t heap_caps_get_minimum_free_size(uint32_t caps);
-size_t heap_caps_get_free_size(uint32_t caps);
-size_t heap_caps_get_total_size(uint32_t caps);
-#ifdef __cplusplus
-}
-#endif
-""",
-    'esp_log.h': r"""
-#pragma once
-static inline void fake_log(const char *tag, const char *fmt, ...) { (void)tag; (void)fmt; }
-#define ESP_LOGI(tag, ...) fake_log(tag, __VA_ARGS__)
-#define ESP_LOGW(tag, ...) fake_log(tag, __VA_ARGS__)
-#define ESP_LOGE(tag, ...) fake_log(tag, __VA_ARGS__)
-""",
-    'esp_timer.h': r"""
-#pragma once
-#include <stdint.h>
-#ifdef __cplusplus
-extern "C" {
-#endif
-int64_t esp_timer_get_time(void);
-#ifdef __cplusplus
-}
-#endif
-""",
-    'freertos/FreeRTOS.h': '#pragma once\n',
-    'freertos/task.h': r"""
-#pragma once
-static inline unsigned uxTaskGetStackHighWaterMark(void *task) { (void)task; return 0; }
-""",
-    'et_model.h': r"""
-#pragma once
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#ifdef __cplusplus
-extern "C" {
-#endif
-typedef enum { ET_MEM_DEFAULT = 0, ET_MEM_INTERNAL, ET_MEM_PSRAM } et_mem_location_t;
-typedef struct {
-    const uint8_t *pte; size_t pte_size;
-    size_t arena_size; et_mem_location_t arena_location; void *arena_buffer;
-    size_t temp_arena_size; et_mem_location_t temp_location; void *temp_buffer;
-    et_mem_location_t planned_location; void *planned_buffer; size_t planned_buffer_size;
-    bool verify;
-} et_model_config_t;
-#define ET_MODEL_CONFIG_DEFAULT(p, n) {(p), (n), 0, ET_MEM_DEFAULT, NULL, 0, ET_MEM_DEFAULT, NULL, ET_MEM_DEFAULT, NULL, 0, false}
-typedef struct { int32_t scalar_type; size_t ndim; int32_t dims[8]; size_t nbytes; } et_tensor_info_t;
-typedef struct et_model et_model_t;
-et_model_t *et_model_create(const et_model_config_t *cfg);
-void et_model_destroy(et_model_t *model);
-bool et_model_load_method(et_model_t *model, const char *name);
-bool et_model_planned_info(et_model_t *model, const char *name, size_t *n, size_t *bytes);
-size_t et_model_num_inputs(et_model_t *model);
-size_t et_model_num_outputs(et_model_t *model);
-bool et_model_input_info(et_model_t *model, size_t index, et_tensor_info_t *out);
-bool et_model_output_info(et_model_t *model, size_t index, et_tensor_info_t *out);
-bool et_model_set_input(et_model_t *model, size_t index, const void *data, size_t nbytes);
-bool et_model_execute(et_model_t *model);
-const void *et_model_output_data(et_model_t *model, size_t index, size_t *out_nbytes);
-const char *et_model_last_error(et_model_t *model);
-#ifdef __cplusplus
-}
-#endif
-""",
-}
-
-ET_HARNESS = r"""
-/* Drives ww_runner_et.cpp against a fake et_model that behaves like the
- * registry component's: a method load without caller buffers allocates
- * its arenas and planned memory, and every load zeroes planned memory. */
+DETECTOR_HARNESS = r"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "esp_heap_caps.h"
-#include "et_model.h"
-#include "ww_runner.h"
+#include "ww_detector.h"
 
-/* The embedded-model symbols must link; the harness passes its own model. */
-const uint8_t _binary_hey_muse_pte_start[16];
-const uint8_t _binary_hey_muse_pte_end[16];
-__attribute__((aligned(16))) static const uint8_t g_pte[64] = {1};
-
-static int g_allocs, g_frees, g_loads, g_fail_load, g_fail_exec;
-#define PLANNED 36864
-
-void *heap_caps_aligned_alloc(size_t alignment, size_t size, uint32_t caps) {
-    (void)caps;
-    void *p = NULL;
-    if (posix_memalign(&p, alignment, size)) return NULL;
-    g_allocs++;
-    return p;
-}
-void heap_caps_free(void *p) { if (p) { g_frees++; free(p); } }
-size_t heap_caps_get_minimum_free_size(uint32_t c) { (void)c; return 0; }
-size_t heap_caps_get_free_size(uint32_t c) { (void)c; return 0; }
-size_t heap_caps_get_total_size(uint32_t c) { (void)c; return 0; }
-int64_t esp_timer_get_time(void) { return 0; }
-
-struct et_model { et_model_config_t cfg; bool loaded; void *owned[3]; };
-static void drop(et_model_t *m) {
-    for (int i = 0; i < 3; i++) { heap_caps_free(m->owned[i]); m->owned[i] = NULL; }
-    m->loaded = false;
-}
-et_model_t *et_model_create(const et_model_config_t *cfg) {
-    et_model_t *m = calloc(1, sizeof(*m));
-    if (m) m->cfg = *cfg;
-    return m;
-}
-void et_model_destroy(et_model_t *m) { if (m) { drop(m); free(m); } }
-bool et_model_load_method(et_model_t *m, const char *name) {
-    drop(m);
-    g_loads++;
-    if (strcmp(name, "forward") || g_fail_load) return false;
-    if (!m->cfg.arena_buffer) m->owned[0] = heap_caps_aligned_alloc(16, m->cfg.arena_size, 0);
-    if (!m->cfg.temp_buffer) m->owned[1] = heap_caps_aligned_alloc(16, m->cfg.temp_arena_size, 0);
-    void *planned = m->cfg.planned_buffer;
-    if (!planned) planned = m->owned[2] = heap_caps_aligned_alloc(16, PLANNED, 0);
-    else if (m->cfg.planned_buffer_size < PLANNED) return false;
-    memset(planned, 0, PLANNED);
-    m->loaded = true;
-    return true;
-}
-bool et_model_planned_info(et_model_t *m, const char *name, size_t *n, size_t *bytes) {
-    if (!name && !m->loaded) return false;
-    if (n) *n = 1;
-    if (bytes) *bytes = PLANNED;
-    return true;
-}
-size_t et_model_num_inputs(et_model_t *m) { (void)m; return 1; }
-size_t et_model_num_outputs(et_model_t *m) { (void)m; return 1; }
-bool et_model_input_info(et_model_t *m, size_t i, et_tensor_info_t *o) {
-    (void)m; (void)i; memset(o, 0, sizeof(*o)); o->nbytes = 40 * sizeof(float); return true;
-}
-bool et_model_output_info(et_model_t *m, size_t i, et_tensor_info_t *o) {
-    (void)m; (void)i; memset(o, 0, sizeof(*o)); o->nbytes = 3 * sizeof(float); return true;
-}
-bool et_model_set_input(et_model_t *m, size_t i, const void *d, size_t n) {
-    (void)i; (void)d; return m->loaded && n == 40 * sizeof(float);
-}
-bool et_model_execute(et_model_t *m) { return m->loaded && !g_fail_exec; }
-const void *et_model_output_data(et_model_t *m, size_t i, size_t *n) {
-    static const float out[3] = {0.0f, 1.0f, 0.0f};
-    (void)m; (void)i; *n = sizeof(out); return out;
-}
-const char *et_model_last_error(et_model_t *m) { (void)m; return "fake"; }
-
-static int16_t g_pcm[640];
-
+/* stdin: one probability per line; stdout: the 0-based indices that fire. */
 int main(int argc, char **argv) {
-    const char *mode = argc > 1 ? argv[1] : "";
-    ww_config_t cfg = { .model = g_pte, .model_len = sizeof(g_pte), .sample_rate_hz = 16000,
-                        .sensitivity = WW_SENSITIVITY_DEFAULT, .vad = WW_VAD_ENERGY };
-    ww_runner_t *r = ww_runner_create(&cfg);
-    if (!r || !ww_runner_ok(r)) return 2;
-    if (!strcmp(mode, "reset")) {
-        int allocs = g_allocs, loads = g_loads;
-        for (int i = 0; i < 5; i++) ww_runner_reset(r);
-        printf("allocs %d reloads %d ok %d\n", g_allocs - allocs, g_loads - loads, ww_runner_ok(r));
-    } else if (!strcmp(mode, "recover")) {
-        g_fail_exec = 1;
-        ww_runner_feed(r, g_pcm, 640);   /* first frame: inference fails */
-        int after_fail = ww_runner_ok(r);
-        g_fail_exec = 0;
-        g_fail_load = 1;
-        ww_runner_reset(r);              /* reload fails too */
-        int after_bad_reload = ww_runner_ok(r);
-        g_fail_load = 0;
-        ww_runner_reset(r);              /* and recovers */
-        printf("failed %d bad_reload %d recovered %d\n", after_fail, after_bad_reload, ww_runner_ok(r));
-    } else {
-        return 2;
+    ww_detector_t det;
+    ww_sensitivity_t s = argc > 1 && !strcmp(argv[1], "low") ? WW_SENSITIVITY_LOW
+                       : argc > 1 && !strcmp(argv[1], "high") ? WW_SENSITIVITY_HIGH
+                       : WW_SENSITIVITY_DEFAULT;
+    ww_detector_init(&det, s);
+    printf("cutoff %.2f\n", (double)det.cutoff);
+    char line[64];
+    int i = 0;
+    while (fgets(line, sizeof line, stdin)) {
+        if (!strncmp(line, "reset", 5)) {
+            ww_detector_reset(&det);
+            continue;
+        }
+        if (ww_detector_push(&det, strtof(line, NULL))) printf("%d\n", i);
+        i++;
     }
-    ww_runner_destroy(r);
-    printf("balanced %d\n", g_allocs == g_frees);
     return 0;
 }
 """
 
 
-class WakeWordExecuTorchRunner(unittest.TestCase):
-    """ww_runner_et.cpp's memory and failure handling against a fake
-    et_model with the component's allocation behaviour: reset reloads
-    the model into memory allocated once at create, and a runner that
-    cannot detect says so."""
+def detector_model(probs, cutoff):
+    """microWakeWord's rule restated: the mean of the last five must be
+    above the cutoff with five real values; a fire clears the window and
+    ignores the next 2 s (200 feature frames, 3 per inference)."""
+    window, fired, refractory = [], [], 0
+    for i, p in enumerate(probs):
+        window = (window + [p])[-5:]
+        if refractory > 0:
+            refractory -= 3
+            continue
+        if len(window) == 5 and sum(window) / 5 > cutoff:
+            fired.append(i)
+            refractory, window = 200, []
+    return fired
+
+
+class WakeWordDetector(unittest.TestCase):
+    """ww_detector.c against detector_model() on scripted probabilities."""
 
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
-        tmp = Path(cls.tmp.name)
-        for name, text in ET_FAKES.items():
-            (tmp / 'inc' / name).parent.mkdir(parents=True, exist_ok=True)
-            (tmp / 'inc' / name).write_text(text)
-        harness = tmp / 'harness.c'
-        harness.write_text(ET_HARNESS)
-        cls.binary = tmp / 'ww_et_harness'
+        harness = Path(cls.tmp.name) / 'detector.c'
+        harness.write_text(DETECTOR_HARNESS)
+        cls.binary = Path(cls.tmp.name) / 'detector'
         cc = shlex.split(os.environ.get('CC', 'cc'))
-        cxx = shlex.split(os.environ.get('CXX', 'c++'))
-        inc = ['-I', str(tmp / 'inc'), '-I', str(WW), '-I', str(WW / 'include')]
-        objs = []
-        for src, tool, std in ((harness, cc, '-std=gnu11'),
-                               (WW / 'ww_frontend.c', cc, '-std=gnu11'),
-                               (WW / 'ww_detector.c', cc, '-std=gnu11'),
-                               (WW / 'ww_runner_et.cpp', cxx, '-std=gnu++17')):
-            obj = tmp / (src.name + '.o')
-            result = subprocess.run(
-                [*tool, std, '-Wall', '-Wextra', '-Werror', *SANITIZE, *inc,
-                 '-c', str(src), '-o', str(obj)], capture_output=True, text=True)
-            if result.returncode:
-                raise AssertionError(result.stdout + result.stderr)
-            objs.append(str(obj))
-        result = subprocess.run([*cxx, *SANITIZE, *objs, '-lm', '-o', str(cls.binary)],
-                                capture_output=True, text=True)
+        result = subprocess.run(
+            [*cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', *SANITIZE,
+             '-I', str(WW), '-I', str(WW / 'include'), str(harness),
+             str(WW / 'ww_detector.c'), '-o', str(cls.binary)],
+            capture_output=True, text=True)
         if result.returncode:
             raise AssertionError(result.stdout + result.stderr)
 
-    def run_mode(self, mode):
-        ran = subprocess.run([str(self.binary), mode], capture_output=True, env=ENV)
-        self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
-        return ran.stdout.decode().split('\n')
+    def run_detector(self, lines, sensitivity='default'):
+        ran = subprocess.run([str(self.binary), sensitivity], input='\n'.join(lines) + '\n',
+                             capture_output=True, text=True, env=ENV)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        out = ran.stdout.split()
+        return float(out[1]), [int(x) for x in out[2:]]
 
-    def test_reset_reloads_without_allocating(self):
-        # Every reset reloads (zeroing the streaming state) into the
-        # memory allocated at create: nothing is freed and reallocated,
-        # so a reset after a reply cannot fail on a fragmented heap.
-        out = self.run_mode('reset')
-        self.assertEqual(out[0], 'allocs 0 reloads 5 ok 1')
-        self.assertEqual(out[1], 'balanced 1')
+    def test_cutoffs_follow_the_sensitivity_and_the_sidecar(self):
+        cutoffs = json.loads((WW / 'models/hey_muse.json').read_text())['detector']['cutoffs']
+        for name in ('low', 'default', 'high'):
+            cutoff, _ = self.run_detector([], name)
+            self.assertAlmostEqual(cutoff, cutoffs[name], places=6)
+        # Low sensitivity is the strictest cutoff, High the most permissive.
+        self.assertGreater(cutoffs['low'], cutoffs['default'])
+        self.assertGreater(cutoffs['default'], cutoffs['high'])
 
-    def test_failed_runner_reports_not_ok_until_a_reload_works(self):
-        out = self.run_mode('recover')
-        self.assertEqual(out[0], 'failed 0 bad_reload 0 recovered 1')
-        self.assertEqual(out[1], 'balanced 1')
+    def test_needs_five_real_values_and_a_mean_strictly_above(self):
+        _, fired = self.run_detector(['1.0'] * 4)
+        self.assertEqual(fired, [])
+        _, fired = self.run_detector(['1.0'] * 5)
+        self.assertEqual(fired, [4])
+        _, fired = self.run_detector(['0.22'] * 10)   # equal to the cutoff
+        self.assertEqual(fired, [])
+
+    def test_refractory_is_two_seconds_and_clears_the_window(self):
+        _, fired = self.run_detector(['1.0'] * 200)
+        self.assertEqual(fired, detector_model([1.0] * 200, 0.22))
+        self.assertEqual(fired[:2], [4, 72])   # 67 inferences ignored after a fire
+
+    def test_reset_clears_the_window_and_the_refractory(self):
+        _, fired = self.run_detector(['1.0'] * 5 + ['reset'] + ['1.0'] * 5)
+        self.assertEqual(fired, [4, 9])
+
+    def test_matches_the_restated_rule_on_a_long_random_stream(self):
+        state, probs = 7, []
+        for _ in range(5000):
+            state = (1103515245 * state + 12345) & 0x7fffffff
+            probs.append(((state >> 8) % 257) / 256.0)   # output steps are 1/256
+        lines = ['%.8f' % p for p in probs]
+        for name, cutoff in (('low', 0.26), ('default', 0.22), ('high', 0.13)):
+            _, fired = self.run_detector(lines, name)
+            self.assertEqual(fired, detector_model([float(x) for x in lines], cutoff))
+
+
+def wake_word_deps():
+    """The registry components the runner builds against: pytorch/executorch,
+    espressif/esp-nn and esphome/esp-micro-speech-features, from
+    MUSE_WAKEWORD_DEPS or from managed_components/ after a wake-word
+    configure (CI runs one)."""
+    names = {'executorch': 'pytorch__executorch', 'esp-nn': 'espressif__esp-nn',
+             'esp-micro-speech-features': 'esphome__esp-micro-speech-features'}
+    for base in filter(None, (os.environ.get('MUSE_WAKEWORD_DEPS'), str(ROOT / 'managed_components'))):
+        found = {}
+        for short, managed in names.items():
+            for candidate in (Path(base) / short, Path(base) / managed):
+                if (candidate / 'idf_component.yml').is_file():
+                    found[short] = candidate
+        if len(found) == 3:
+            return found
+    return None
+
+
+def synthetic_speech(rate=16000):
+    """Self-authored test audio: six crude formant-synthesized "hey muse"-like
+    vowel sequences (an impulse train through three moving resonators) over
+    a fixed-LCG noise floor. No recordings or text-to-speech."""
+    import math
+    import struct
+
+    def interp(points, n):
+        out = []
+        for i in range(n):
+            t = i / n
+            for (t0, v0), (t1, v1) in zip(points, points[1:]):
+                if t0 <= t <= t1:
+                    out.append(v0 + (v1 - v0) * (t - t0) / (t1 - t0))
+                    break
+            else:
+                out.append(points[-1][1])
+        return out
+
+    def resonate(x, freqs, bw):
+        y1 = y2 = 0.0
+        out = []
+        for s, f in zip(x, freqs):
+            r = math.exp(-math.pi * bw / rate)
+            y = (1 - r) * s + 2 * r * math.cos(2 * math.pi * f / rate) * y1 - r * r * y2
+            y2, y1 = y1, y
+            out.append(y)
+        return out
+
+    def phrase(pitch, speed, seed):
+        n = int(0.75 / speed * rate)
+        f0 = interp([(0, pitch * 1.1), (0.4, pitch), (1, pitch * 0.85)], n)
+        phase, src, st = 0.0, [], seed
+        for i in range(n):
+            phase += f0[i] / rate
+            pulse = 1.0 if phase >= 1.0 else 0.0
+            phase -= int(phase)
+            st = (1103515245 * st + 12345) & 0x7fffffff
+            src.append(pulse * 40 + (st / 0x7fffffff - 0.5) * 0.4)
+        f1 = interp([(0, 600), (0.25, 450), (0.4, 300), (0.55, 280), (0.75, 320), (1, 300)], n)
+        f2 = interp([(0, 1900), (0.25, 2100), (0.4, 1100), (0.55, 2100), (0.75, 1000), (1, 1400)], n)
+        f3 = interp([(0, 2600), (0.4, 2400), (1, 2500)], n)
+        amp = interp([(0, 0), (0.05, 1), (0.35, 1), (0.42, 0.3), (0.5, 1), (0.85, 0.9), (1, 0)], n)
+        y = [p + q + s for p, q, s in zip(resonate(src, f1, 90), resonate(src, f2, 120), resonate(src, f3, 160))]
+        return [v * g for v, g in zip(y, amp)]
+
+    out = []
+    for k, (pitch, speed) in enumerate([(120, 1.0), (180, 1.1), (100, 0.9), (220, 1.2), (150, 1.0), (130, 0.85)]):
+        out += [0.0] * int(0.6 * rate)
+        p = phrase(pitch, speed, 1000 + k)
+        peak = max(abs(v) for v in p) or 1
+        out += [v / peak * 9000 for v in p]
+    out += [0.0] * int(0.6 * rate)
+    pcm, st = [], 777
+    for v in out:
+        st = (1103515245 * st + 12345) & 0x7fffffff
+        pcm.append(int(max(-32768, min(32767, round(v + (st / 0x7fffffff - 0.5) * 300)))))
+    return struct.pack('<%dh' % len(pcm), *pcm)
+
+
+# SHA-256 of the wake probabilities ((p * 256) - 128 as bytes, one per 30 ms)
+# for synthetic_speech(): the same bytes TensorFlow Lite Micro's reference
+# kernels give for the same weights (models/README.md), so a change here is
+# a change in the front end, the model or the runtime.
+SYNTHETIC_PROBABILITIES_SHA256 = 'badf5323b84b666a2a4e277f3ce8db5504673bd81ef3a988f13e8b964a48c093'
+
+RUNNER_HARNESS = r"""
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "ww_runner.h"
+
+static unsigned g_count;
+static void on_score(void *ctx, float p) {
+    (void)ctx;
+    printf("%02x", (unsigned)((int)(p * 256.0f + 0.5f) - 128) & 0xffu);
+    g_count++;
+}
+
+static int16_t *load(const char *path, size_t *n) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long bytes = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    int16_t *pcm = malloc((size_t)bytes);
+    *n = fread(pcm, 2, (size_t)bytes / 2, f);
+    fclose(f);
+    return pcm;
+}
+
+#ifdef COUNT_ALLOCS
+int g_counting, g_allocs;
+void *__real_malloc(size_t n);
+void *__real_calloc(size_t a, size_t b);
+void *__real_realloc(void *p, size_t n);
+void *__real_aligned_alloc(size_t a, size_t n);
+void *__wrap_malloc(size_t n) { g_allocs += g_counting; return __real_malloc(n); }
+void *__wrap_calloc(size_t a, size_t b) { g_allocs += g_counting; return __real_calloc(a, b); }
+void *__wrap_realloc(void *p, size_t n) { g_allocs += g_counting; return __real_realloc(p, n); }
+void *__wrap_aligned_alloc(size_t a, size_t n) { g_allocs += g_counting; return __real_aligned_alloc(a, n); }
+#endif
+
+static size_t feed_all(ww_runner_t *r, const int16_t *pcm, size_t n, size_t chunk, int *wakes) {
+    size_t calls = 0;
+    for (size_t off = 0; off < n; off += chunk, calls++) {
+        size_t k = n - off < chunk ? n - off : chunk;
+        if (ww_runner_feed(r, pcm + off, k) == WW_EVENT_WAKE) (*wakes)++;
+    }
+    return calls;
+}
+
+int main(int argc, char **argv) {
+    const char *mode = argv[1];
+    size_t n = 0;
+    int16_t *pcm = argc > 2 && strcmp(mode, "model") ? load(argv[2], &n) : NULL;
+    ww_config_t cfg = { .sample_rate_hz = 16000, .sensitivity = WW_SENSITIVITY_DEFAULT, .vad = WW_VAD_ENERGY };
+    if (!strcmp(mode, "bad")) {
+        static uint8_t junk[4096];
+        for (size_t i = 0; i < sizeof junk; i++) junk[i] = (uint8_t)(i * 37 + 11);
+        cfg.model = junk;
+        cfg.model_len = sizeof junk;
+        ww_runner_t *r = ww_runner_create(&cfg);
+        ww_config_t bad_rate = { .sample_rate_hz = 8000 };
+        printf("junk %d rate %d\n", r != NULL, ww_runner_create(&bad_rate) != NULL);
+        return 0;
+    }
+    if (!strcmp(mode, "model")) {
+        /* argv[2]: a model file, loaded as an app-supplied model */
+        FILE *f = fopen(argv[2], "rb");
+        static uint8_t buf[1 << 16];
+        size_t len = f ? fread(buf, 1, sizeof buf, f) : 0;
+        if (f) fclose(f);
+        cfg.model = buf;
+        cfg.model_len = len;
+        ww_runner_t *m = ww_runner_create(&cfg);
+        printf("model %d\n", m != NULL && ww_runner_ok(m));
+        ww_runner_destroy(m);
+        return 0;
+    }
+    ww_runner_t *r = ww_runner_create(&cfg);
+    if (!r || !ww_runner_ok(r)) return 3;
+    ww_runner_set_score_hook(r, on_score, NULL);
+    int wakes = 0;
+    if (!strcmp(mode, "digest")) {
+        feed_all(r, pcm, n, (size_t)atoi(argv[3]), &wakes);
+        printf("\ncount %u wakes %d ok %d\n", g_count, wakes, ww_runner_ok(r));
+    } else if (!strcmp(mode, "reset")) {
+        feed_all(r, pcm, n / 2, 320, &wakes);
+        ww_runner_reset(r);
+        printf("\n");
+        feed_all(r, pcm, n, 320, &wakes);
+        printf("\n");
+    } else if (!strcmp(mode, "gates")) {
+        ww_runner_set_listening(r, false);
+        feed_all(r, pcm, n, 320, &wakes);
+        ww_runner_set_listening(r, true);
+        ww_runner_set_suppressed(r, true);
+        feed_all(r, pcm, n, 320, &wakes);
+        printf("muted %u", g_count);
+        ww_runner_set_suppressed(r, false);
+        printf("\n");
+        feed_all(r, pcm, n, 320, &wakes);
+        printf("\nnull %d\n", ww_runner_feed(r, NULL, 320) == WW_EVENT_NONE && ww_runner_feed(NULL, pcm, 320) == WW_EVENT_NONE);
+    }
+#ifdef COUNT_ALLOCS
+    else if (!strcmp(mode, "allocs")) {
+        g_counting = 1;
+        feed_all(r, pcm, n, 320, &wakes);
+        ww_runner_reset(r);
+        ww_runner_set_suppressed(r, true);
+        ww_runner_set_suppressed(r, false);
+        ww_runner_set_listening(r, false);
+        ww_runner_set_listening(r, true);
+        feed_all(r, pcm, n, 999, &wakes);
+        g_counting = 0;
+        printf("\nallocs %d\n", g_allocs);
+    }
+#endif
+    ww_runner_destroy(r);
+    free(pcm);
+    return 0;
+}
+"""
+
+
+class WakeWordRunner(unittest.TestCase):
+    """ww_runner_espnn.cpp with the real ExecuTorch runtime, ESP-NN delegate
+    (esp-nn's portable C kernels) and microfrontend, built for the host from
+    the same pinned registry components as the firmware, with the stand-ins
+    in components/muse_wakeword/host/."""
+
+    @classmethod
+    def setUpClass(cls):
+        deps = wake_word_deps()
+        if deps is None:
+            raise unittest.SkipTest('needs the wake word registry components: configure a '
+                                    'wake-word build first or set MUSE_WAKEWORD_DEPS')
+        import concurrent.futures
+        import re
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        tmp = Path(cls.tmp.name)
+        et, nn, mf = deps['executorch'], deps['esp-nn'], deps['esp-micro-speech-features']
+        generated = (et / 'et_generated.cmake').read_text()
+
+        def listed(name):
+            block = re.search(r'set\(%s\n(.*?)\n\)' % name, generated, re.S).group(1)
+            return [et / p for p in re.findall(r'"(src/[^"]+)"', block)]
+
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        cxx = shlex.split(os.environ.get('CXX', 'c++'))
+        et_defs = ['-DC10_USING_CUSTOM_GENERATED_MACROS', '-DET_USE_BUILTIN_FUNCTION_NAME=0',
+                   '-DFLATBUFFERS_MAX_ALIGNMENT=1024', '-DET_ENABLE_PROGRAM_VERIFICATION=0',
+                   '-DET_LOG_ENABLED=0', '-DET_MIN_LOG_LEVEL=Error']
+        et_inc = ['-I', str(et / 'include'), '-I', str(et / 'priv_include')]
+        nn_inc = ['-I', str(nn / 'include'), '-I', str(nn / 'src/common')]
+        host = ['-I', str(WW / 'host')]
+        ww_inc = ['-I', str(WW), '-I', str(WW / 'include'), '-I', str(mf / 'include')]
+        cxx_flags = ['-std=gnu++17', '-fno-exceptions', '-fno-rtti']
+        jobs = []
+        for src in listed('ET_CORE_SRCS') + listed('ET_ESPNN_SRCS'):
+            jobs.append((cxx, cxx_flags + ['-w', *host, *et_inc, *nn_inc, *et_defs], src))
+        jobs.append((cxx, cxx_flags + ['-w', *et_inc, *et_defs], WW / 'host/et_pal.cpp'))
+        for src in sorted(nn.glob('src/*/*_ansi.c')) + [nn / 'src/common/esp_nn_multicore.c']:
+            jobs.append((cc, ['-std=gnu11', '-w', *host, *nn_inc], src))
+        for src in sorted(mf.glob('src/*.c')):
+            jobs.append((cc, ['-std=gnu11', '-w', '-I', str(mf / 'include'), '-I', str(mf / 'src')], src))
+        strict = ['-Wall', '-Wextra', '-Werror']
+        jobs.append((cc, ['-std=gnu11', *strict, '-ffp-contract=off', *ww_inc], WW / 'ww_frontend.c'))
+        jobs.append((cc, ['-std=gnu11', *strict, *ww_inc], WW / 'ww_detector.c'))
+        et_system = ['-isystem', str(et / 'include')]
+        jobs.append((cxx, cxx_flags + [*strict, *ww_inc, *et_system, *et_defs], WW / 'ww_runner_espnn.cpp'))
+        pte = WW / 'models/hey_muse.pte'
+        asm = tmp / 'hey_muse_pte.S'
+        asm.write_text((WW / 'hey_muse_pte.S.in').read_text()
+                       .replace('@HEY_MUSE_PTE_PATH@', str(pte))
+                       .replace('@HEY_MUSE_PTE_LEN@', str(pte.stat().st_size)))
+        jobs.append((cc, [], asm))
+        harness = tmp / 'runner.c'
+        harness.write_text(RUNNER_HARNESS)
+
+        def build(variant, extra, link_extra, harness_defs):
+            out = tmp / variant
+            out.mkdir()
+
+            def one(job):
+                tool, flags, src = job
+                obj = out / (hashlib.sha256(str(src).encode()).hexdigest()[:12] + '.o')
+                ran = subprocess.run([*tool, *extra, *flags, '-c', str(src), '-o', str(obj)],
+                                     capture_output=True, text=True)
+                if ran.returncode:
+                    raise AssertionError(f'{src}: {ran.stderr}')
+                return str(obj)
+
+            with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 2) as pool:
+                objs = list(pool.map(one, jobs + [(cc, ['-std=gnu11', *strict, *harness_defs,
+                                                         '-I', str(WW / 'include')], harness)]))
+            binary = out / 'runner'
+            ran = subprocess.run([*cxx, *extra, *objs, *link_extra, '-lm', '-o', str(binary)],
+                                 capture_output=True, text=True)
+            if ran.returncode:
+                raise AssertionError(ran.stderr)
+            return binary
+
+        cls.binary = build('asan', SANITIZE, [], [])
+        cls.counting = build('plain', ['-O1'], ['-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,'
+                                                '--wrap=aligned_alloc'], ['-DCOUNT_ALLOCS'])
+        cls.speech = tmp / 'speech.raw'
+        cls.speech.write_bytes(synthetic_speech())
+
+    def run_mode(self, *args, binary=None):
+        ran = subprocess.run([str(binary or self.binary), *map(str, args)],
+                             capture_output=True, text=True, env=ENV)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        return ran.stdout.split('\n')
+
+    def test_probabilities_are_the_reference_bytes_at_any_chunking(self):
+        for chunk in (320, 1, 7, 999, 16000):
+            out = self.run_mode('digest', self.speech, chunk)
+            self.assertEqual(hashlib.sha256(bytes.fromhex(out[0])).hexdigest(),
+                             SYNTHETIC_PROBABILITIES_SHA256, chunk)
+            self.assertEqual(out[1], 'count 290 wakes 0 ok 1')
+
+    def test_reset_starts_the_stream_over(self):
+        first, second = self.run_mode('reset', self.speech)[:2]
+        whole = self.run_mode('digest', self.speech, 320)[0]
+        self.assertEqual(second, whole)
+        self.assertTrue(whole.startswith(first[:len(first) - 8]))
+
+    def test_paused_and_suppressed_runners_infer_nothing(self):
+        out = self.run_mode('gates', self.speech)
+        self.assertEqual(out[0], 'muted 0')
+        self.assertEqual(hashlib.sha256(bytes.fromhex(out[1])).hexdigest(),
+                         SYNTHETIC_PROBABILITIES_SHA256)
+        self.assertEqual(out[2], 'null 1')
+
+    def test_feed_and_reset_never_allocate(self):
+        out = self.run_mode('allocs', self.speech, binary=self.counting)
+        self.assertEqual(out[1], 'allocs 0')
+
+    def test_a_model_that_breaks_the_contract_is_refused(self):
+        self.assertEqual(self.run_mode('bad')[0], 'junk 0 rate 0')
+
+    def model_file(self, data):
+        path = Path(self.tmp.name) / f'model-{len(data)}-{hashlib.sha256(data).hexdigest()[:8]}.pte'
+        path.write_bytes(data)
+        return path
+
+    def test_the_model_also_loads_from_a_file(self):
+        model = (WW / 'models/hey_muse.pte').read_bytes()
+        self.assertEqual(self.run_mode('model', self.model_file(model))[0], 'model 1')
+
+    def test_a_model_planning_huge_buffers_is_refused_before_allocating(self):
+        # The shipped model with forward's two planned buffers declared at
+        # 2 GiB and 2 GiB + 32: their rounded sum wraps a 32-bit size_t.
+        data = bytearray((WW / 'models/hey_muse.pte').read_bytes())
+        for offset, fmt, value in ((0x10, '<Q', 0x9d8), (0xc0, '<I', 0x8fc), (0x9bc, '<I', 3),
+                                   (0x9c0, '<q', 0), (0x9c8, '<q', 0x80000000), (0x9d0, '<q', 0x80000020)):
+            struct.pack_into(fmt, data, offset, value)
+        self.assertEqual(self.run_mode('model', self.model_file(bytes(data)))[0], 'model 0')
 
 
 HANDOFF_HARNESS = r"""
@@ -1248,6 +1330,9 @@ class WakeWordHandoff(unittest.TestCase):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
         task = between(glue, 'static void wake_task(void *arg)', '\n}\n')
         self.assertIn('if (s_have_seq && item.seq != s_last_seq + 1) {', task)
+        # Re-enabling empties the tap, which skips numbers: not a lost chunk.
+        enable = between(glue, 'static void apply_requests(void)', '} else {')
+        self.assertLess(enable.index('xStreamBufferReset(s_tap);'), enable.index('s_have_seq = false;'))
         self.assertLess(task.index('muse_wakeword_core_gap(&s_core, &s_pre)'), task.index('muse_ww_ring_push(&s_pre, item.pcm'))
         take = between(glue, 'bool muse_wakeword_take_backlog(', '\n}\n')
         self.assertIn('&complete);', take)

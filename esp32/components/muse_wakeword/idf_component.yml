@@ -13,11 +13,22 @@
 # limitations under the License.
 
 dependencies:
-  # ExecuTorch runtime, only in builds with the wake word on: without it the
-  # component manager neither downloads it nor puts it in dependencies.lock.
-  # Pinned exact: a kernel bundle refuses any other component version,
-  # including a respin of the same version.
+  # Only in builds with the wake word on: without it the component manager
+  # neither downloads these nor puts them in dependencies.lock. Pinned exact.
+  # ExecuTorch runtime and its ESP-NN delegate.
   pytorch/executorch:
     version: "==1.6.0-dev.20261112"
+    rules:
+      - if: "$CONFIG{MUSE_WAKEWORD_EXECUTORCH} == \"y\""
+  # The delegate's kernels: ExecuTorch asks for ^1.4; pin the release the
+  # model was checked with (dependencies.lock isn't committed).
+  espressif/esp-nn:
+    version: "==1.5.0"
+    rules:
+      - if: "$CONFIG{MUSE_WAKEWORD_EXECUTORCH} == \"y\""
+  # TensorFlow Lite Micro's microfrontend in plain C, as ESPHome's
+  # micro_wake_word uses it: the features the model was trained on.
+  esphome/esp-micro-speech-features:
+    version: "==1.2.3"
     rules:
       - if: "$CONFIG{MUSE_WAKEWORD_EXECUTORCH} == \"y\""
