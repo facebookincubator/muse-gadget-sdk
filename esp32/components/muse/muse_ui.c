@@ -2568,12 +2568,12 @@ static void frame_tick(lv_timer_t *timer)
 
     if (mode != s_last_mode) {
         if (muse_voice_in_call()) s_level = 0;   /* do not smooth speaker energy into the mic meter */
+        bool to_face = mode == MUSE_MODE_LISTENING;
 #if CONFIG_MUSE_BOARD_WXM_WG1200
-        if (mode == MUSE_MODE_LISTENING ||
-            (mode == MUSE_MODE_THINKING && s_last_mode == MUSE_MODE_IDLE)) {
-#else
-        if (mode == MUSE_MODE_LISTENING) {
+        /* A touchscreen turn has no listening: it starts by thinking. */
+        to_face = to_face || (mode == MUSE_MODE_THINKING && s_last_mode == MUSE_MODE_IDLE);
 #endif
+        if (to_face) {
             image_hide_locked();
             muse_ui_show_face();
         }
