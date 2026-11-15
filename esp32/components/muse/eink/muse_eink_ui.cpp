@@ -48,6 +48,7 @@
 
 #include "muse_eink.h"
 #include "muse_eink_priv.h"
+#include "muse_eink_board.h"
 
 extern "C" {
 #include "muse_ble.h"
@@ -73,6 +74,9 @@ using freeink::ui::BitmapMode;
 using freeink::ui::BitmapRef;
 using freeink::ui::InputSnapshot;
 using freeink::ui::TextStyle;
+
+const BoardRendering * __attribute__((weak)) board_rendering() { return nullptr; }
+static const BoardRendering *s_board_rendering;
 
 static const char *TAG = "muse_eink";
 
@@ -707,6 +711,7 @@ static bool present_image(void)
         xSemaphoreGive(s_image_mutex);
         return false;
     }
+    if (s_board_rendering && s_board_rendering->invalidate) s_board_rendering->invalidate();
     uint8_t *fb = s_display.getFrameBuffer();
     size_t fb_len = (size_t)s_display.getDisplayWidthBytes() * s_display.getDisplayHeight();
     static uint8_t *planes;
@@ -792,6 +797,8 @@ static void on_image(const ActionEvent &, void *)
 
 static void present(void)
 {
+    if (s_board_rendering && s_board_rendering->present)
+        return s_board_rendering->present(s_need_clean.exchange(false));
     bool clean = s_need_clean.exchange(false) || ++s_fast_count >= CLEAN_EVERY;
     int64_t t = esp_timer_get_time();
     s_display.displayBuffer(clean ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
@@ -966,7 +973,11 @@ static void ui_task(void *arg)
                 redraw = true;
             }
         }
-        if (!redraw) continue;
+        if (!redraw) {
+            if (!s_image_shown && s_board_rendering && s_board_rendering->present &&
+                s_board_rendering->pending && s_board_rendering->pending()) s_board_rendering->present(false);
+            continue;
+        }
         s_drawn = s_face;
         draw(InputSnapshot{});
     }
@@ -1042,6 +1053,9 @@ extern "C" esp_err_t muse_ui_start(void)
     s_image_mutex = xSemaphoreCreateMutex();
     s_touch_q = xQueueCreate(32, sizeof(TouchEvent));
     if (!s_art || !s_art_rows || !s_image_mutex || !s_touch_q) return ESP_ERR_NO_MEM;
+
+    s_board_rendering = board_rendering();
+    if (s_board_rendering && s_board_rendering->begin) s_board_rendering->begin(&s_display);
 
     layout();
     static App app(target, target.deviceContext());

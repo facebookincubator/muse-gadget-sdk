@@ -86,6 +86,20 @@ def load_json(name: str, directory: Path | None = None) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def pairing_problem(saved: object) -> str | None:
+    """Describe an invalid saved pairing without including credential values."""
+    if not isinstance(saved, dict) or not all(
+        isinstance(saved.get(key), str) and saved[key].strip()
+        for key in ("access_token", "refresh_token")
+    ):
+        return "Saved pairing lacks device tokens."
+    # Older records omit the timestamp and are refreshed on first use.
+    stamp = saved.get("access_token_saved_at", 0)
+    if type(stamp) not in (int, float) or not 0 <= stamp < float("inf"):
+        return "Saved pairing has an invalid token timestamp."
+    return None
+
+
 def save_json(name: str, data: dict, directory: Path | None = None) -> None:
     """Atomically write ``data``, readable only by the owner.
 

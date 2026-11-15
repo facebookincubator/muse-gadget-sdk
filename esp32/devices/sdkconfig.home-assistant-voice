@@ -23,11 +23,15 @@
 # there are ignored for this target. Flashing replaces the vendor firmware; the
 # XMOS keeps its own firmware and is never reflashed.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-home-assistant-voice"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Home Assistant Voice Preview Edition"
+CONFIG_MUSE_DEVICE_GUIDE="devices/guides/voice.md"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # The LED ring shows the status colours; push-to-talk voice chat is on.
 CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING=y
 CONFIG_HOMEHUB_VOICE=y
+CONFIG_HOMEHUB_VOICE_BOARD_VOICE_PE=y
 # Advertise as <prefix>-ha-voice-XXXXXX to tell this board apart from real
 # devices: MuseGadget-ha-voice in the open-source build, HomeLink-ha-voice in the
 # internal one.

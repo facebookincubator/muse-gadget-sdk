@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185c|143c|146|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus> [serial|port]
+#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -26,12 +26,14 @@
 # Wi-Fi, on boards whose panel driver has draw_frame) in build-muse-<profile>-video/.
 # MUSE_CAMERA=1 adds devices/sdkconfig.muse-<profile>-camera (camera.capture,
 # for a board that has one) in build-muse-<profile>-camera/.
+# MUSE_APPS=1 adds devices/sdkconfig.muse-apps (WebAssembly apps: app.run) in
+# build-muse-<profile>-apps/.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master
 # (IDF_EXPORT_S31) and Espressif's esp-mosaico-utils (MOSAICO_UTILS), and
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-18|s3-216|s3-206|185c|143c|143|146|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus}
+cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -39,14 +41,18 @@ case $board in
     s3-18)   profile=waveshare-s3-18;      target=esp32s3 ;;
     s3-216)  profile=waveshare-s3-216;     target=esp32s3 ;;
     s3-206)  profile=waveshare-s3-206;     target=esp32s3 ;;
+    185b)    profile=waveshare-s3-185b;    target=esp32s3 ;;
     185c)    profile=waveshare-s3-185c;    target=esp32s3 ;;
     143c)    profile=waveshare-s3-143c;    target=esp32s3 ;;
     143)     profile=waveshare-s3-143;     target=esp32s3 ;;
+    lilygo175) profile=lilygo-s3-amoled-175; target=esp32s3 ;;
     146)     profile=waveshare-s3-146;     target=esp32s3 ;;
     # ESP-Mosaico: ESP-IDF master (IDF_EXPORT_S31, default ~/.espressif/esp-idf-s31).
     mosaico) profile=esp-mosaico;          target=esp32s31 ;;
+    k10)     profile=dfrobot-unihiker-k10; target=esp32s3 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;
     atk-box) profile=atk-dnesp32s3-box;     target=esp32s3 ;;
+    atk-box2) profile=atk-dnesp32s3-box2;   target=esp32s3 ;;
     echoear) profile=ostb-echoear-2st; target=esp32s3 ;;
     box3)    profile=espressif-box-3;       target=esp32s3 ;;
     c6)      profile=waveshare-c6-18;      target=esp32c6 ;;
@@ -71,6 +77,7 @@ case $board in
     rorolee) profile=deotaland-rorolee;    target=esp32s3 ;;
     smartring-plus) profile=viewe-smartring-plus; target=esp32s3 ;;
     lcd19)   profile=waveshare-s3-lcd19;   target=esp32s3 ;;
+    s3lcd35) profile=waveshare-s3-lcd-35;  target=esp32s3 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.
@@ -91,8 +98,8 @@ if [ "$target" = esp32s31 ]; then
     # Vibe Mode 0.2 tools talk only to 0.2 boards, whose layout keeps Vibe Mode
     # in `vibe_mode` (app/test) instead of `factory`: build for the checkout's
     # generation, in a directory of its own.
-    [ -d "$MOSAICO_UTILS/esp-mosaico-vibe-mode" ] && vibe2=1
-    echo "ESP-Mosaico: building for Vibe Mode ${vibe2:+0.2}${vibe2:-0.1} (utils at $MOSAICO_UTILS)" >&2
+    [ -d "$MOSAICO_UTILS/esp-mosaico-vibe-mode" ] && vibe2=0.2
+    echo "ESP-Mosaico: building for Vibe Mode ${vibe2:-0.1} (utils at $MOSAICO_UTILS)" >&2
 fi
 if [ -n "${IDF_EXPORT:-}" ]; then
     . "$IDF_EXPORT" >/dev/null 2>&1
@@ -111,6 +118,9 @@ fi
 if [ -n "${MUSE_CAMERA:-}" ]; then
     [ -f "devices/sdkconfig.muse-$profile-camera" ] || { echo "no camera overlay for $board" >&2; exit 1; }
     B=$B-camera; defaults="$defaults;devices/sdkconfig.muse-$profile-camera"
+fi
+if [ -n "${MUSE_APPS:-}" ]; then
+    B=$B-apps; defaults="$defaults;devices/sdkconfig.muse-apps"
 fi
 if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"

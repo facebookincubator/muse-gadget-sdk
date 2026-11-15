@@ -18,10 +18,15 @@
  * Waveshare ESP32-S3-Touch-LCD-1.46: round 412 px SPD2010 QSPI panel with the
  * controller's own capacitive touch on I2C, PCM5101 I2S DAC for the speaker
  * (no control interface), an I2S MEMS mic on a bus of its own, TCA9554 I/O
- * expander (display and touch resets live on its EXIO2/EXIO1 pins), no PMU.
- * BOOT (GPIO0) is the talk button; holding a finger on the face tile also
- * talks. Same shell and pin family as the Touch-LCD-1.85C, with the SPD2010
- * panel the SenseCAP Watcher uses.
+ * expander (display and touch resets live on its EXIO2/EXIO1 pins), no PMU:
+ * a GPIO power latch for the battery, the PWR key on a GPIO and the battery
+ * voltage on an ADC pin. BOOT (GPIO0) is the talk button; holding a finger
+ * on the face tile also talks. Same shell and pin family as the
+ * Touch-LCD-1.85C, with the SPD2010 panel the SenseCAP Watcher uses.
+ *
+ * The 1.46B and 1.46C are this board with cover glass: Waveshare documents
+ * all three on one wiki page with one pin table and one vendor repo, so this
+ * file drives them too.
  */
 #include <math.h>
 
@@ -29,8 +34,12 @@
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "driver/ledc.h"
+#include "driver/rtc_io.h"
 #include "driver/spi_master.h"
 #include "driver/usb_serial_jtag.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_lcd_panel_io.h"
@@ -95,6 +104,12 @@ static const char *TAG = "board";
 
 #define MIC_GAIN_OFFSET_DB 0
 
+/* Power (vendor PWR_Key and BAT_Driver). PWR switches the battery on while
+ * held; the firmware keeps it on by driving the latch high. */
+#define PWR_GPIO GPIO_NUM_6          /* PWR key, low while pressed */
+#define POWER_HOLD_GPIO GPIO_NUM_7   /* high keeps the battery connected */
+#define BATT_ADC ADC_CHANNEL_7       /* GPIO8, through a 200K/100K divider */
+
 #define DRAW_BUF_LINES 104      /* four bands to the screen (muse_lcd_bands.h) */
 #define LCD_CHUNK_BYTES (LCD_RES * 8 * 2)
 
@@ -105,6 +120,9 @@ static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_touch_handle_t s_tp;
 static lv_indev_t *s_touch_indev;
 static muse_gpio_button_t s_boot;
+static muse_gpio_button_t s_pwr;
+static adc_oneshot_unit_handle_t s_adc;
+static adc_cali_handle_t s_cali;
 static i2s_chan_handle_t s_tx, s_rx;
 static int32_t s_mic_dc[2];
 static int s_mic_gain_q8 = 256;
@@ -206,6 +224,16 @@ static esp_err_t tca_reset_pulse(uint8_t bit)
 
 static esp_err_t init(void)
 {
+    /* First, so a board switched on from its battery stays on once PWR is
+     * let go. On USB power the latch changes nothing. Light sleep is off on
+     * this board, so the pad keeps its level without a hold. */
+    const gpio_config_t hold = {
+        .pin_bit_mask = 1ULL << POWER_HOLD_GPIO,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&hold), TAG, "power hold");
+    ESP_RETURN_ON_ERROR(gpio_set_level(POWER_HOLD_GPIO, 1), TAG, "power hold on");
+
     const i2c_master_bus_config_t i2c_cfg = {
         .i2c_port = I2C_NUM_0,
         .sda_io_num = I2C_SDA,
@@ -229,8 +257,29 @@ static esp_err_t init(void)
     ESP_RETURN_ON_ERROR(tca_reset_pulse(EXIO_TOUCH_RST_BIT), TAG, "touch reset");
 
     ESP_RETURN_ON_ERROR(muse_gpio_button_init(&s_boot, GPIO_NUM_0), TAG, "boot button");
-    /* BOOT is held at flashing time; don't count a held button as a press. */
+    /* BOOT is held at flashing time, and PWR while switching on from the
+     * battery; don't count a held button as a press. */
     s_boot.pressed = gpio_get_level(GPIO_NUM_0) == 0;
+    ESP_RETURN_ON_ERROR(muse_gpio_button_init(&s_pwr, PWR_GPIO), TAG, "power button");
+    s_pwr.pressed = gpio_get_level(PWR_GPIO) == 0;
+
+    const adc_oneshot_unit_init_cfg_t adc_cfg = { .unit_id = ADC_UNIT_1 };
+    ESP_RETURN_ON_ERROR(adc_oneshot_new_unit(&adc_cfg, &s_adc), TAG, "adc");
+    const adc_oneshot_chan_cfg_t chan_cfg = {
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(s_adc, BATT_ADC, &chan_cfg), TAG, "adc channel");
+    const adc_cali_curve_fitting_config_t cali_cfg = {
+        .unit_id = ADC_UNIT_1,
+        .chan = BATT_ADC,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali) != ESP_OK) {
+        ESP_LOGW(TAG, "battery ADC uncalibrated");
+        s_cali = NULL;
+    }
     return ESP_OK;
 }
 
@@ -481,6 +530,10 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
 static unsigned poll_buttons(void)
 {
     unsigned ev = muse_gpio_button_poll(&s_boot);
+    /* PWR is the power button: it sleeps and wakes the screen, never talks. */
+    unsigned pwr = muse_gpio_button_poll(&s_pwr);
+    ev |= (pwr & MUSE_BTN_TALK_PRESS ? MUSE_BTN_POWER_PRESS : 0) |
+          (pwr & MUSE_BTN_TALK_RELEASE ? MUSE_BTN_POWER_RELEASE : 0);
 
     static bool tp_down = false;          /* finger currently on screen */
     static bool tp_talking = false;       /* hold threshold reached */
@@ -519,17 +572,32 @@ static unsigned poll_buttons(void)
 
 static void wait_buttons(int timeout_ms)
 {
-    muse_gpio_buttons_wait((muse_gpio_button_t *const[]){ &s_boot }, 1, timeout_ms);
+    muse_gpio_buttons_wait((muse_gpio_button_t *const[]){ &s_boot, &s_pwr }, 2, timeout_ms);
 }
 
-/* Battery sense (GPIO8) and the PWR button's power hold (GPIO7) aren't
- * handled yet, so the meter only knows whether a USB host is on the chip's
- * own port. */
 static esp_err_t read_power(muse_power_t *out)
 {
-    out->battery_mv = 0;
-    out->battery_pct = -1;
-    out->charging = false;
+    int sum = 0;
+    for (int i = 0; i < 8; i++) {
+        int v;
+        ESP_RETURN_ON_ERROR(adc_oneshot_read(s_adc, BATT_ADC, &v), TAG, "battery adc");
+        sum += v;
+    }
+    int raw = sum / 8;
+    int mv;
+    if (s_cali) {
+        ESP_RETURN_ON_ERROR(adc_cali_raw_to_voltage(s_cali, raw, &mv), TAG, "battery cali");
+    } else {
+        mv = raw * 3300 / 4096;   /* 12 dB attenuation, full scale ~3.3 V */
+    }
+    /* 3:1 divider, with the vendor's measured 0.990476 correction. */
+    out->battery_mv = (int)((int64_t)mv * 3000000 / 990476);
+    /* Rough Li-ion window as on the 1.85C: 3.3 V empty, 4.2 V full. Far
+     * below empty no cell is fitted: no battery rather than 0%. */
+    int pct = (out->battery_mv - 3300) * 100 / (4200 - 3300);
+    out->battery_pct = out->battery_mv < 2500 ? -1 : pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    out->charging = false;   /* no charge-state line reaches the chip */
+    /* No VBUS sense either: a USB host on the chip's own port is the closest. */
     out->usb = usb_serial_jtag_is_connected();
     return ESP_OK;
 }
@@ -545,8 +613,17 @@ static esp_err_t power_off(void)
 {
     set_brightness(0);
     muse_lcd_bands_run(panel_off, NULL);
-    /* No PMU; deep sleep is the closest thing to off. BOOT wakes it. */
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+    /* Dropping the latch cuts the battery once PWR is up. On USB power deep
+     * sleep is the closest thing to off, and PWR wakes it. */
+    gpio_set_level(POWER_HOLD_GPIO, 0);
+    while (gpio_get_level(PWR_GPIO) == 0) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_RETURN_ON_ERROR(esp_sleep_enable_ext0_wakeup(PWR_GPIO, 0), TAG, "power button wake");
+    /* Keep PWR's pull-up through deep sleep, as while awake (muse_gpio_button_init). */
+    rtc_gpio_pullup_en(PWR_GPIO);
+    rtc_gpio_pulldown_dis(PWR_GPIO);
     esp_deep_sleep_start();
     return ESP_FAIL;
 }
@@ -561,6 +638,7 @@ static const muse_board_t s_board = {
     .talk_button = "BOOT",
     /* BOOT is on the side edge, toward the top of the puck. */
     .talk_hint = { LV_ALIGN_TOP_LEFT, 20, 16 },
+    .power_button = "PWR",   /* for Settings: PWR turns it back on */
     .frame_ms = 40,
     .init = init,
     .display_start = display_start,

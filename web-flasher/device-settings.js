@@ -276,7 +276,12 @@ export class DeviceSettingsSession {
       const opened = await this.opening?.then(() => true, () => false);
       if (!opened) return;
       await this.reader?.cancel().catch(() => {});
-      await this.reading;
+      if (this.reading) {
+        await this.reading;
+      } else {
+        // Writer acquisition can fail before readLoop() takes over cleanup.
+        this.reader?.releaseLock();
+      }
       // Let the last write finish: paced-serial.js holds the port's own
       // writer through each write, and the port can't close while it's held.
       let timer;

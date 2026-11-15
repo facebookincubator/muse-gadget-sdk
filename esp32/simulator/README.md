@@ -188,7 +188,7 @@ Supported scenario keys are:
 - `ble`: `off`, `advertising`, or `connected`; plus `passkey` and `paired`
 - `link`: `boot`, `unpaired`, `pairing`, `confirm`, `connecting`, `online`,
   `offline`, or `error`
-- `speaker`, `brightness`, and `advance` in milliseconds
+- `speaker`, `call` (preview the live-call layout), `brightness`, and `advance` in milliseconds
 
 Invalid options and scenario values return a nonzero exit status and identify
 the bad line.

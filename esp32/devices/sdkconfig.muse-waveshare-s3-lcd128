@@ -19,6 +19,8 @@
 # attached board's esptool chip and flash ID.
 # Load last, after sdkconfig.defaults and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-s3-lcd128"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-S3-Touch-LCD-1.28"
 CONFIG_MUSE_BOARD_WAVESHARE_S3_LCD128=y
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

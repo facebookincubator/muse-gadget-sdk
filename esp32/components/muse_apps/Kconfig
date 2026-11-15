@@ -1,0 +1,62 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+menu "Muse apps"
+
+    config MUSE_WASM_APPS
+        bool "WebAssembly apps"
+        # Not on e-paper boards (MUSE_UI_FREEINK): apps draw with LVGL, which they don't build.
+        # Not with the BLE commands: both together make link.register larger than its 8 KB,
+        # and the gadget never registers.
+        # Not on boards where an app's exit is out of reach: no button the app view can use
+        # (EchoEar-2ST, Waveshare LCD-7) or the only one inside the case (SmartRing-Plus).
+        depends on MUSE_ENABLED && SPIRAM && HOMEHUB_DAEMON_REQUESTS && !MUSE_UI_FREEINK
+        depends on !HOMEHUB_BLE_COMMANDS
+        depends on !MUSE_BOARD_OSTB_ECHOEAR_2ST && !MUSE_BOARD_WAVESHARE_S3_LCD7 && !MUSE_BOARD_VIEWE_SMARTRING_PLUS
+        select MUSE_APP_VIEW
+        select CAPABILITIES_REGISTRY
+        default n
+        help
+            Muse can run a small WebAssembly app on the screen: app.run reads
+            an app (a folder holding app.wasm, or a .wasm file) from the VM
+            over Link's Noise session and runs it with WAMR 2.4.5's
+            interpreter in place of the face, until
+            app.stop, another app, the power key, a call or the video view.
+            app.install keeps an app on the gadget, in an "apps" LittleFS
+            partition, for its launcher (Apps, in Settings); app.list and
+            app.remove manage them, and app.run {id} runs one. files.put
+            copies files (images and the like) from the VM to a "files"
+            partition, for apps to read offline.
+            Apps build their screen from LVGL widgets, get touch and the
+            buttons, follow the chat and message Muse (with their manifest's
+            permissions), read files and keep state on the VM, and use the
+            gadget's devices (components/capabilities_registry). app.status, app.logs and
+            device.guide tell Muse how an app is doing and what the board has.
+            The API is apps API 1.1: components/muse_apps/sdk/api/api.json,
+            from which sdk/gadget.h and sdk/api/REFERENCE.md are generated. The
+            console's ">app" lines drive it over USB serial
+            (tools/muse/app.py). Each app has a 2 MB PSRAM budget, and a
+            callback that runs more than about 0.7 s of instructions ends it.
+            Apps stay off until the person turns on Run apps in Settings (or
+            the menu): only then is Muse offered the app commands.
+
+    # The rule in idf_component.yml that pulls in WAMR reads this. Unlike
+    # MUSE_WASM_APPS, it's defined on every target, which the component
+    # manager needs (a rule naming an undefined option fails the build).
+    config MUSE_APPS_WAMR
+        string
+        default "y" if MUSE_WASM_APPS
+        default "n"
+
+endmenu

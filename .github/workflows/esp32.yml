@@ -32,29 +32,16 @@ jobs:
   host-tests:
     name: Host tests
     runs-on: ubuntu-latest
-    container: espressif/idf:v6.0.3
-    defaults:
-      run:
-        shell: bash
-        working-directory: esp32
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      # test_noise_core links against the host's PSA Crypto library.
-      - name: Install host crypto library
-        working-directory: .
+      # Run on the host before ESP-IDF pulls its large container image.
+      - name: Free disk space (preinstalled Android SDK, ~12 GB)
         run: |
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config
-
-      # The discovery and pairing tests compile cJSON from managed_components/,
-      # which the component manager fetches on configure.
-      - name: Fetch managed components
-        run: |
-          . "$IDF_PATH/export.sh" > /dev/null
-          idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
+          sudo rm -rf /usr/local/lib/android
+          df -h /
 
       # Exercise the actual FreeInk router without a board or Arduino runtime.
       - name: Check out pinned FreeInk host-test source
@@ -65,12 +52,24 @@ jobs:
           path: freeink-host-source
           persist-credentials: false
 
-      - name: Run host tests
+      - name: Run host tests in ESP-IDF
+        uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
         env:
-          FREEINK_SOURCE_DIR: ${{ github.workspace }}/freeink-host-source
-        run: |
-          . "$IDF_PATH/export.sh" > /dev/null
-          python -m unittest discover -s tests -p 'test_*.py' -v
+          FREEINK_SOURCE_DIR: ../freeink-host-source
+        with:
+          esp_idf_version: v6.0.3
+          target: esp32c5
+          path: esp32
+          extra_docker_args: -e FREEINK_SOURCE_DIR
+          command: |
+            set -e
+            # test_noise_core links against the host PSA Crypto library.
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config
+            . "$IDF_PATH/export.sh" > /dev/null
+            # Fetch cJSON from managed_components/ for discovery and pairing.
+            idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
+            python -m unittest discover -s tests -p "test_*.py" -v
 
   simulator:
     name: UI simulator (${{ matrix.name }})
@@ -109,7 +108,6 @@ jobs:
   build:
     name: Build ${{ matrix.board }}
     runs-on: ubuntu-latest
-    container: espressif/idf:v6.0.3
     strategy:
       fail-fast: false
       matrix:
@@ -153,6 +151,9 @@ jobs:
           - board: waveshare-s3-epaper-154g
             target: esp32s3
             overlays: ";devices/sdkconfig.waveshare-s3-epaper-154g"
+          - board: waveshare-s3-lcd-35
+            target: esp32s3
+            overlays: ";devices/sdkconfig.waveshare-s3-lcd-35"
           - board: home-assistant-voice
             target: esp32s3
             overlays: ";devices/sdkconfig.home-assistant-voice"
@@ -162,6 +163,9 @@ jobs:
           - board: seeed-respeaker-lite
             target: esp32s3
             overlays: ";devices/sdkconfig.seeed-respeaker-lite"
+          - board: seeed-respeaker-xvf3800
+            target: esp32s3
+            overlays: ";devices/sdkconfig.seeed-respeaker-xvf3800"
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"
@@ -172,12 +176,18 @@ jobs:
           - board: muse-waveshare-s3-175c-video
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-video"
+          - board: muse-waveshare-s3-185b
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-185b"
           - board: muse-waveshare-s3-185c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-185c"
           - board: muse-waveshare-s3-143
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-143"
+          - board: muse-lilygo-s3-amoled-175
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-lilygo-s3-amoled-175"
           - board: muse-waveshare-s3-146
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-146"
@@ -208,12 +218,18 @@ jobs:
           - board: muse-waveshare-p4-lcd35-camera
             target: esp32p4
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35;devices/sdkconfig.muse-waveshare-p4-lcd35-camera"
+          - board: muse-aipi-voice-note-toggle
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-aipi;devices/sdkconfig.muse-voice-note-toggle"
           - board: muse-aipi
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-aipi"
           - board: muse-atk-dnesp32s3-box
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-atk-dnesp32s3-box"
+          - board: muse-atk-dnesp32s3-box2
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-atk-dnesp32s3-box2"
           - board: muse-waveshare-c6-18
             target: esp32c6
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18"
@@ -256,6 +272,9 @@ jobs:
           - board: muse-m5stack-stopwatch-video
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
+          - board: muse-m5stack-stopwatch-apps
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-apps"
           - board: muse-seeed-xiao-s3-147
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147"
@@ -289,6 +308,12 @@ jobs:
           - board: muse-waveshare-s3-lcd19
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd19"
+          - board: muse-waveshare-s3-lcd-35
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-lcd-35"
+          - board: muse-dfrobot-unihiker-k10
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-dfrobot-unihiker-k10"
     defaults:
       run:
         shell: bash
@@ -298,15 +323,28 @@ jobs:
         with:
           persist-credentials: false
 
+      # Run on the host before ESP-IDF pulls its large container image.
+      - name: Free disk space (preinstalled Android SDK, ~12 GB)
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          df -h /
+
       # The build fails if the app no longer fits its partition.
       - name: Build
+        uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
         env:
           TARGET: ${{ matrix.target }}
           DEFAULTS: sdkconfig.defaults${{ matrix.overlays }}
-        run: |
-          . "$IDF_PATH/export.sh" > /dev/null
-          idf.py -B build -DIDF_TARGET="$TARGET" -DSDKCONFIG=build/sdkconfig \
-            -DSDKCONFIG_DEFAULTS="$DEFAULTS" build
+        with:
+          esp_idf_version: v6.0.3
+          target: ${{ matrix.target }}
+          path: esp32
+          extra_docker_args: -e TARGET -e DEFAULTS
+          command: |
+            set -e
+            . "$IDF_PATH/export.sh" > /dev/null
+            idf.py -B build -DIDF_TARGET="$TARGET" -DSDKCONFIG=build/sdkconfig \
+              -DSDKCONFIG_DEFAULTS="$DEFAULTS" build
 
       # Boards listed in web-flasher/boards.json also go on the web flasher.
       - name: Package for the web flasher

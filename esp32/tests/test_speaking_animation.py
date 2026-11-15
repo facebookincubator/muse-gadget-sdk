@@ -78,6 +78,7 @@ int main(void) {
         if(fabsf(s.gaze)>gaze_max) gaze_max=fabsf(s.gaze);
     }
     assert(peak>.7f && s.energy==0);
+    /* Custom avatars read this shared range; a renderer softens it itself. */
     assert(mouth_max>.5f && mouth_min<.05f && brow_max>.5f && wide_max>.4f && gaze_max>.4f);
     /* Brief replies must rotate their openers too. */
     s=(muse_speaking_t){0};
@@ -109,6 +110,13 @@ int main(void) {
         float mt=(i%150)*.04f;
         muse_pose_t p={.t=i*.04f+1,.mode_t=mt,.mode=(i%150)<100 ? MUSE_MODE_SPEAKING : MUSE_MODE_LISTENING,
                       .level=(i%20)<12 ? .8f : 0};
+        muse_pixel_render(&p);
+        muse_pixel_scale(pixels,64,0,63,0,63);
+    }
+    /* Voice, a pause long enough for the closed-eye smile, then voice again. */
+    for(int i=0;i<100;i++) {
+        muse_pose_t p={.t=100+i*.04f,.mode_t=i*.04f,.mode=MUSE_MODE_SPEAKING,
+                      .level=(i<25 || i>=60) ? .8f : 0};
         muse_pixel_render(&p);
         muse_pixel_scale(pixels,64,0,63,0,63);
     }

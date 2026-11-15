@@ -405,3 +405,17 @@ def test_side_chat_pending_follow_up_waits_for_the_follow_up_task():
     assert turn.acknowledge(side_ack("u2"), follow_up=True) == [
         Reply("r2", "Answer two", "", done=True, bound=True), TaskFinished()]
     assert turn.complete(turn.last_activity) and turn.settled(turn.last_activity + 1.01)
+
+
+def test_an_unready_row_for_a_done_reply_does_not_answer_a_follow_up():
+    turn = side_turn()
+    turn.expect_follow_up()
+    turn.acknowledge(side_ack("u2"), follow_up=True)
+    turn.feed(event("delta.message_done", "r2", session="side", content="Answer"))
+    assert "u2" in turn._unanswered_follow_up_ids
+    # Not ready yet: as before the reply helper was shared, this answers nothing.
+    turn.feed(event("message.assistant", "r2", parent="u2", session="side",
+                    content="Answer", display_text_ready=False))
+    assert "u2" in turn._unanswered_follow_up_ids
+    turn.feed(event("message.assistant", "r2", parent="u2", session="side", display_text="Answer"))
+    assert "u2" not in turn._unanswered_follow_up_ids
