@@ -16,6 +16,9 @@
 
 #include "ble_commands.h"
 #include "noise_control.h"
+#if CONFIG_MUSE_WASM_APPS
+#include "muse_apps.h"
+#endif
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
 #include "noise_tunnel.h"
@@ -53,7 +56,6 @@ extern "C" {
     CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
 #include "reterminal_battery.h"
 #endif
-#include "ota.h"
 #include "tunnel_netif.h"
 #if CONFIG_MUSE_ENABLED
 extern "C" {
@@ -129,9 +131,9 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // but the tunnel stream (multiplexed on this session) carries ~8 KB IP-packet
 // batches, so scratch must fit a full batch plus ServiceFrame/envelope overhead.
 // Chat subscriptions deliver 16 KB body chunks plus framing, even on boards
-// without PSRAM. Reserve enough inbound space for those frames. Not on the
-// ESP32-C3 AI Passport: three 17 KB buffers beside its UI leave too little to
-// upload a voice note. It takes 12 KB, as Link boards without PSRAM do.
+// without PSRAM. Reserve enough inbound space for those frames. The ESP32-C3
+// AI Passport and AtomS3 take 12 KB: larger buffers leave too little RAM for
+// the session to stay up beside Wi-Fi and the UI.
 // With PSRAM it is the protocol's largest frame, as Muse's chat session uses,
 // so extra requests (display.draw_file) can take large replies in few frames;
 // the two buffers cost 104 KB of PSRAM more than 12 KB ones.
@@ -139,7 +141,8 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // can't be skipped: Noise's nonces and the ordered framer would desync), the
 // request in flight ends with NOISE_CTRL_REQ_TOO_LARGE, and the session
 // reconnects.
-#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                             CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define SVC_FRAME_SCRATCH (12 * 1024)
 #elif CONFIG_SPIRAM
 #define SVC_FRAME_SCRATCH (64 * 1024)
@@ -147,10 +150,12 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define SVC_FRAME_SCRATCH (SMALL_CONTROL_SESSION ? 17 * 1024 : 12288)
 #endif
 
-// The ADV and the ESP32-C3 AI Passport cannot allocate the session with the
-// larger inbound buffers and the usual outbound buffers together. Keep this
-// reduction local to those boards.
-#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT)
+// These small boards cannot allocate the session with the larger inbound
+// buffers and the usual outbound buffers together. Keep this reduction local
+// to the profiles that need it.
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || \
+                              CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                              CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define CARDPUTER_CONTROL_SESSION 1
 #else
 #define CARDPUTER_CONTROL_SESSION 0
@@ -184,7 +189,8 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define WS_BUF_SIZE (SMALL_CONTROL_SESSION ? 7 * 1024 : 16 * 1024)
 #endif
 // Inbound WebSocket frames: SVC_FRAME_SCRATCH plus framing and the AEAD tag.
-#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                             CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define WS_RX_BUF_SIZE (SVC_FRAME_SCRATCH + 1024)
 #else
 #define WS_RX_BUF_SIZE (SMALL_CONTROL_SESSION ? 17 * 1024 : WS_BUF_SIZE)
@@ -1484,8 +1490,11 @@ static char *build_register_json(void) {
                 nullptr, nullptr);
     add_command(commands, "device.guide",
                 "This device's usage guide (Markdown): what it is, its "
-                "controls and limits.",
-                nullptr, nullptr);
+                "controls and limits."
+#if CONFIG_MUSE_WASM_APPS
+                " Also returns structured capabilities: board, devices and WASM API discovery."
+#endif
+                , nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
                 "Scan local network for devices (ARP, mDNS, SSDP, SNMP, NetBIOS)",
@@ -1607,6 +1616,10 @@ static char *build_register_json(void) {
     }
 #endif
 
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_advertise(commands);   // app.run and app.stop
+#endif
+
 #if CONFIG_HOMEHUB_VOICE
     cJSON *volume_optional = cJSON_CreateObject();
     cJSON *volume_param = cJSON_CreateObject();
@@ -1690,22 +1703,6 @@ static char *build_register_json(void) {
         cJSON_GetObjectItem(commands, "camera.capture"), "timeout_ms", 30000);
 #endif
 
-    if (ota_is_enabled()) {
-        cJSON *ota_required = cJSON_CreateObject();
-        cJSON_AddItemToObject(ota_required, "url",
-                              string_param("HTTPS URL of the .bin firmware image to flash."));
-        cJSON *ota_optional = cJSON_CreateObject();
-        cJSON *force_param = cJSON_CreateObject();
-        cJSON_AddStringToObject(force_param, "type", "boolean");
-        cJSON_AddStringToObject(force_param, "description",
-                                "Install even if the image version is not newer.");
-        cJSON_AddItemToObject(ota_optional, "force", force_param);
-        add_command(commands, "device.ota",
-                    "Download a firmware image from `url` and apply it "
-                    "(esp_https_ota), then reboot.",
-                    ota_required, ota_optional);
-    }
-
 #if CONFIG_HOMEHUB_BLE_COMMANDS
     ble_commands_register(commands);
 #endif
@@ -1730,14 +1727,9 @@ static char *build_register_json(void) {
     return json;
 }
 
-// ---- OTA callback ----------------------------------------------------------
+// ---- Async results ---------------------------------------------------------
 
-struct ota_ctx {
-    noise_ctrl_session_generation_t session_generation;
-    char request_id[64];
-};
-
-// Queued result from OTA or other async operations.
+// Queued result from an asynchronous command.
 static void queue_result(noise_ctrl_session_generation_t session_generation,
                          const char *request_id, cJSON *result) {
     if (!session_generation || !s_result_q || !request_id) {
@@ -1757,45 +1749,6 @@ static void queue_result(noise_ctrl_session_generation_t session_generation,
         cJSON_Delete(result);
         ESP_LOGW(TAG, "result queue full, dropping result for %s", request_id);
     }
-}
-
-static void noise_ota_status(const ota_event_t *ev, void *user) {
-    auto *ctx = static_cast<ota_ctx *>(user);
-    cJSON *result = cJSON_CreateObject();
-
-    switch (ev->result) {
-        case OTA_RESULT_APPLIED: {
-            cJSON_AddBoolToObject(result, "ok", true);
-            char payload[192];
-            snprintf(payload, sizeof(payload),
-                     "{\"status\":\"applied\",\"version\":\"%s\",\"rebooting\":true}",
-                     ev->new_version ? ev->new_version : "");
-            cJSON_AddStringToObject(result, "payload_json", payload);
-            break;
-        }
-        case OTA_RESULT_SKIPPED: {
-            cJSON_AddBoolToObject(result, "ok", true);
-            char payload[192];
-            snprintf(payload, sizeof(payload),
-                     "{\"status\":\"skipped\",\"version\":\"%s\",\"running\":\"%s\"}",
-                     ev->new_version ? ev->new_version : "",
-                     ev->running_version ? ev->running_version : "");
-            cJSON_AddStringToObject(result, "payload_json", payload);
-            break;
-        }
-        default: {
-            cJSON_AddBoolToObject(result, "ok", false);
-            cJSON *error = cJSON_CreateObject();
-            cJSON_AddStringToObject(error, "code", "ota_failed");
-            cJSON_AddStringToObject(error, "message",
-                                    ev->detail ? ev->detail : "ota failed");
-            cJSON_AddItemToObject(result, "error", error);
-            break;
-        }
-    }
-
-    queue_result(ctx->session_generation, ctx->request_id, result);
-    free(ctx);
 }
 
 // ---- Inbound message dispatch -----------------------------------------------
@@ -1903,7 +1856,12 @@ static void send_device_guide(
     cJSON *guide = cJSON_CreateStringReference(muse_device_guide_md);
     if (!cJSON_AddBoolToObject(result, "ok", true) || !payload
         || !cJSON_AddStringToObject(payload, "format", "markdown")
-        || !cJSON_AddItemToObject(payload, "guide", guide)) {
+        || !cJSON_AddItemToObject(payload, "guide", guide)
+#if CONFIG_MUSE_WASM_APPS
+        /* Once guide is attached, result owns it, including on a later failure. */
+        || !(guide = nullptr, muse_apps_add_capabilities(payload))
+#endif
+        ) {
         cJSON_Delete(guide);
         cJSON_Delete(result);
         result = cJSON_CreateObject();
@@ -1958,38 +1916,7 @@ static void handle_invoke_request(
 
     ESP_LOGI(TAG, "invoke request: command=%s", command);
 
-    if (strcmp(command, "device.ota") == 0) {
-        cJSON *url = cmd_params ? cJSON_GetObjectItem(cmd_params, "url") : nullptr;
-        cJSON *force = cmd_params ? cJSON_GetObjectItem(cmd_params, "force") : nullptr;
-        if (cJSON_IsString(url) && url->valuestring && url->valuestring[0]) {
-            auto *ctx = static_cast<ota_ctx *>(malloc(sizeof(ota_ctx)));
-            if (ctx) {
-                ctx->session_generation = session_generation;
-                strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
-                ctx->request_id[sizeof(ctx->request_id) - 1] = '\0';
-                ota_start(url->valuestring, cJSON_IsTrue(force),
-                          noise_ota_status, ctx);
-            } else {
-                cJSON *result = cJSON_CreateObject();
-                cJSON_AddBoolToObject(result, "ok", false);
-                cJSON *error = cJSON_CreateObject();
-                cJSON_AddStringToObject(error, "code", "out_of_memory");
-                cJSON_AddStringToObject(error, "message",
-                                        "failed to allocate OTA context");
-                cJSON_AddItemToObject(result, "error", error);
-                queue_result(session_generation, request_id, result);
-            }
-        } else {
-            cJSON *result = cJSON_CreateObject();
-            cJSON_AddBoolToObject(result, "ok", false);
-            cJSON *error = cJSON_CreateObject();
-            cJSON_AddStringToObject(error, "code", "invalid_params");
-            cJSON_AddStringToObject(error, "message",
-                                    "device.ota requires a non-empty url");
-            cJSON_AddItemToObject(result, "error", error);
-            queue_result(session_generation, request_id, result);
-        }
-    } else if (strcmp(command, "device.health") == 0) {
+    if (strcmp(command, "device.health") == 0) {
         send_device_health(session_generation, request_id);
     } else if (strcmp(command, "device.guide") == 0) {
         send_device_guide(session_generation, request_id);
@@ -2381,6 +2308,10 @@ static session_result_t run_session(stack_monitor_t *stack) {
             end_reason = "link.register build failed";
             goto cleanup;
         }
+#if CONFIG_MUSE_WASM_APPS
+        // Apps add to it, and it must stay under 8 KB.
+        ESP_LOGI(TAG, "link.register: %u bytes", (unsigned)strlen(reg_json));
+#endif
         control_tx = {reg_json, strlen(reg_json), 0, false, session_generation};
         control_tx.is_registration = true;
     }
@@ -2419,6 +2350,9 @@ static session_result_t run_session(stack_monitor_t *stack) {
     uint64_t last_ws_ping_us = 0;
     bool heartbeat_sent = false;
     uint64_t last_heartbeat_us = 0;
+#if CONFIG_MUSE_WASM_APPS
+    int64_t dma_held_since_us = 0, dma_held_warned_us = 0;
+#endif
 
     // Tunnel data-plane stream, multiplexed on this session. Deferred: it is
     // opened from inside the loop only after the link.register reply arrives
@@ -2635,6 +2569,32 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 clear_pending_json_body(control_tx);
             }
         }
+#if CONFIG_MUSE_WASM_APPS
+        // Apps builds run closest to the DMA reserve, and a control message it
+        // holds back (the registration, a command's result) waits silently:
+        // say so every 5 s while it does.
+        {
+            size_t dma_free = 0;
+            bool waiting = control_tx.json || uxQueueMessagesWaiting(s_result_q);
+            bool short_of_dma = !noise_tx_has_dma_headroom(&dma_free)
+                                || !noise_tx_has_contiguous_dma_headroom();
+            int64_t now = esp_timer_get_time();
+            if (!waiting || !short_of_dma) {
+                dma_held_since_us = 0;
+            } else if (!dma_held_since_us) {
+                dma_held_since_us = now;
+                dma_held_warned_us = now;
+            } else if (now - dma_held_warned_us >= 5000000) {
+                dma_held_warned_us = now;
+                ESP_LOGW(TAG, "%s held for %d s: DMA-capable RAM is short (%u bytes free; sending needs %u)",
+                         !control_tx.json ? "a command result"
+                         : control_tx.is_registration ? "link.register"
+                         : control_tx.is_heartbeat ? "link.heartbeat" : "a control message",
+                         (int)((now - dma_held_since_us) / 1000000), (unsigned)dma_free,
+                         (unsigned)NOISE_TX_DMA_RESERVE_BYTES);
+            }
+        }
+#endif
 
 #if CONFIG_HOMEHUB_DAEMON_REQUESTS
         {
@@ -2835,6 +2795,12 @@ extern "C" void noise_ctrl_set_command_cb(noise_ctrl_command_cb cb) {
 
 extern "C" void noise_ctrl_set_power_save(bool on) {
     s_power_save = on;
+}
+
+extern "C" void noise_ctrl_set_node_id(const char *node_id) {
+    if (!node_id || !*node_id || strncmp(s_node_id, node_id, sizeof(s_node_id)) == 0) return;
+    // Changes only when setup stores new credentials; a registration follows.
+    snprintf(s_node_id, sizeof(s_node_id), "%s", node_id);
 }
 
 extern "C" void noise_ctrl_set_host(const char *host) {

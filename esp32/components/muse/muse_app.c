@@ -38,7 +38,7 @@
 #if CONFIG_MUSE_BOARD_WXM_WG1200
 #include "wg1200_weather.h"
 #endif
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 #include "muse_review.h"
 #endif
 
@@ -78,8 +78,12 @@ void muse_app_run(const muse_board_t *board)
     ESP_ERROR_CHECK(muse_settings_init());
     muse_settings_set_listener(on_setting);
     muse_state_init();
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
+#if CONFIG_MUSE_LATEST_REPLY
+    if (muse_review_init() != ESP_OK) ESP_LOGW(TAG, "latest reply storage unavailable");
+#else
     ESP_ERROR_CHECK(muse_review_init());
+#endif
 #endif
     muse_battery_init();
 #if CONFIG_MUSE_LATIN_FONT

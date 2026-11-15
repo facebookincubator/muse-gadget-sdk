@@ -35,9 +35,9 @@ pairing and control protocols, so the same app pairs either.
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
 | `ble_setup.py` | Setup commands behind the GATT characteristics (no BlueZ dependency) |
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
-| `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
+| `identity.py` | Persistent identity: the pairing's node id (`homelink-xxxxxx`, or `gadget-xxxxxx` with `MUSEGADGET_GADGET_NODE_ID=1`), `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
-| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store minus distrusted root CAs |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a distrusted root CA |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
@@ -96,18 +96,28 @@ Reinstalling keeps the pairing. It restarts the service, which kills any
 command Muse is running at that moment, so check the log for recent `invoke`
 lines first.
 
-For a quicker loop, build a wheel and install it into the existing venv:
+To install a wheel you built, give it to the installer:
 
 ```sh
 uv build --wheel
 # on the device:
-sudo /opt/musegadget/bin/uv pip install --python /opt/musegadget/venv/bin/python --no-deps --reinstall musegadget-*.whl
-sudo systemctl restart musegadget
+bash install.sh --from musegadget-*.whl --run-as USER --yes   # copy just one wheel
 ```
+
+Pass the same `--run-as` as before: without it, commands run as the account
+running the installer.
+
+Upgrade through the installer only. It checks `/opt/musegadget/bin/uv`
+against a pinned checksum, and builds a new venv, before running anything there
+as root. Don't run that uv with `sudo` yourself.
 
 Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
 `--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
-keep it that way.
+keep it that way. Root runs everything under `/opt/musegadget`, so the
+installer never runs a file there that another account could have changed.
+To move to a new uv, update `UV_VERSION` and both checksums for each target
+in `uv_release`, from the release's `.sha256` files and the binaries in the
+archives. `tests/test_install_sh.py` checks that each target has both.
 
 ## Run and debug
 
@@ -133,9 +143,18 @@ never has a command's parameters, output or error message.
   A Pi has no button, so the app's own confirmation stands in for it, and BLE
   only advertises while `musegadget pair` runs.
 - The BLE name is `MuseGadget` plus the last six hex digits of the identity,
-  with **no hyphen**: the apps compare the text after the prefix with the text
-  after `homelink-` in the node id. `get_device_info` must report
+  with **no hyphen**: the apps compare the text after the prefix with the six
+  hex digits that end the node id. `get_device_info` must report
   `model: "hatch_link"`.
+- Node ids: with `MUSEGADGET_GADGET_NODE_ID=1` in the pairing's environment
+  (`sudo env MUSEGADGET_GADGET_NODE_ID=1 musegadget pair`), a new pairing
+  offers `gadget-` and those six digits (lowercase) in `get_device_info` and
+  the transcript; without it (the default) it offers `homelink-` and the same
+  digits. Either way it
+  stores the id in `pairing.json` with the tokens it was issued for. That stored id is the one in use
+  (`link.register`, token refresh, chat turns) until the device is paired
+  again, so a pairing made before ids were stored keeps `homelink-xxxxxx`.
+  Never rename a stored id.
 - The apps always scan Wi-Fi and send `provision_v2` with an SSID. When the
   device is online it offers one open network, "the current connection", and
   ignores the Wi-Fi fields it gets back. It never stores them.
@@ -164,7 +183,7 @@ never has a command's parameters, output or error message.
   `model_id` and `metadata.model_name` from the `DeviceDescription`
   (`../protocols/DEVICE.md`). Every device built with this SDK registers
   `device_family: "gadget"`; other families are reserved for Muse's own
-  devices. Don't advertise `device.ota`: it installs ESP32 firmware.
+  devices.
 - Messages from the device to the Muse (`musegadget send-user-msg`) go as separate
   `POST /chat/stream` requests on the same session, with `device_id` set to the
   node id and `"output_modality": "text"`. `session_id` picks the chat;
@@ -262,7 +281,12 @@ listed here. Everything else is internal and can change.
 
 - `identity.load_or_create()` returns the device `Identity`. It creates one on
   first use and keeps it across unpairing.
-- `Identity.node_id` is the `homelink-xxxxxx` ID that Muse knows the device by.
+- `Identity.node_id` is the ID that Muse knows the device by: the one stored
+  with its pairing (a pairing made before ids were stored keeps
+  `homelink-xxxxxx`), or, while it isn't paired, the one a new pairing
+  offers (`Identity.setup_node_id`: `gadget-xxxxxx` when
+  `MUSEGADGET_GADGET_NODE_ID` is `1`, else `homelink-xxxxxx`). `load_or_create()` reads it from the pairing, and
+  `Service` follows the pairing it connects with.
   `Identity.ble_name` is the name the Muse app shows during pairing.
 - `config.state_dir()` is the directory for device state. Set
   `MUSEGADGET_STATE_DIR` to move it.
@@ -276,11 +300,15 @@ listed here. Everything else is internal and can change.
 - `config.PAIRING_FILE` is the file that holds the pairing.
 - `config.STATE_DIR_ENV` and `config.SDK_TOKEN_ENV` hold the names of the two
   environment variables, `MUSEGADGET_STATE_DIR` and `MUSEGADGET_SDK_TOKEN`.
+  `config.GADGET_NODE_ID_ENV` names `MUSEGADGET_GADGET_NODE_ID`: `1` makes a
+  new pairing offer a `gadget-` node id. It is off by default; turn it on for
+  development.
 
 ### Pairing
 
 - `pair.pair(on_open=..., force=False, timeout_s=600)` opens Bluetooth setup
-  so that the Muse app can pair the device. It prints nothing.
+  so that the Muse app can pair the device. It prints nothing. Like
+  `Service.run()`, it first raises `tls.TrustStoreError` for an unsafe trust store.
 - Just before setup opens, it calls `on_open` with a `SetupWindow`. Use it to
   tell the user what to do. `ble_name` is the device to choose in the Muse
   app, `timeout_s` is how long setup stays open, and `has_sdk_token` is false
@@ -298,7 +326,8 @@ listed here. Everything else is internal and can change.
   model_name=..., guide=...)` is a dataclass. A dataclass subclass can add fields with defaults. `executor`
   is an `executor.Executor` instance.
 - `await Service.run()` runs until `Service.stop()` is called or `serve()`
-  returns `Outcome.STOPPED`.
+  returns `Outcome.STOPPED`. It first raises `tls.TrustStoreError` if the
+  system trust store can't be read or still has a distrusted root CA.
 - To describe your own device, or to run your own work while it is connected,
   subclass `Service` and override any of these three methods.
 - `describe()` returns the `DeviceDescription` to register with Muse.
