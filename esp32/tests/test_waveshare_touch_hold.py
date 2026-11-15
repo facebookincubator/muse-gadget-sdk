@@ -23,7 +23,9 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-BOARDS = ("board_waveshare_s3_146.c", "board_waveshare_s3_143c.c")
+BOARDS = ("board_waveshare_s3_146.c", "board_waveshare_s3_143c.c", "board_waveshare_s3_185c.c")
+# The 1.85C has no scroll check (a slow swipe off the face still talks there).
+SCROLL_CHECKED = ("board_waveshare_s3_146.c", "board_waveshare_s3_143c.c")
 
 
 def function(source, name):
@@ -62,7 +64,7 @@ static unsigned muse_gpio_button_poll(muse_gpio_button_t *b) { return b == &s_pw
 static int lv_indev_get_state(lv_indev_t *i) { (void)i; return pressed; }
 __attribute__((unused)) static lv_obj_t *lv_indev_get_scroll_obj(lv_indev_t *i) { (void)i; return scrolling ? &tileview : NULL; }
 static bool muse_ui_face_active(void) { return face; }
-static bool muse_ui_volume_swiping(void) { return volume_swiping; }
+__attribute__((unused)) static bool muse_ui_volume_swiping(void) { return volume_swiping; }
 %(poll)s
 static unsigned step(TickType_t ms) { now += ms; return poll_buttons(); }
 static void hold_talks(void) {
@@ -172,7 +174,7 @@ class WaveshareTouchHold(unittest.TestCase):
         self.run_case("0")
 
     def test_slow_swipe_off_face_never_talks(self):
-        self.run_case("1")
+        self.run_case("1", boards=SCROLL_CHECKED)
 
     def test_volume_drag_cancels_hold_until_next_touch(self):
         self.run_case("4")
