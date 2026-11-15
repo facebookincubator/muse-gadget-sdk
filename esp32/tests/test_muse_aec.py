@@ -41,6 +41,19 @@ class SoftwareAEC(unittest.TestCase):
         self.assertGreater(kc.index('config MUSE_VOICE_AEC_SR'),
                            kc.index('endif', kc.index('config MUSE_VOICE_SOFTWARE_AEC')))
 
+    def test_call_loop_keeps_reference_and_hold_fence(self):
+        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
+        loop = voice[voice.index('static void run_call('):]
+        loop = loop[:loop.index('\n}\n')]
+        # A short playback read is padded and played whole, so the speaker
+        # gets exactly the chunk AEC takes as its reference.
+        pad = loop.index('if (aec && n && n < MUSE_AUDIO_CHUNK)')
+        self.assertLess(pad, loop.index('muse_audio_write(out, n);'))
+        # Audio the call may not take reaches AEC as silence and is never sent.
+        self.assertIn('muse_aec_feed(aec, aec_mic ? s_chunk : silence,', loop)
+        self.assertIn('if (clean_n && aec_mic)', loop)
+        self.assertIn('!c.server_hold', loop[loop.index('bool aec_mic'):loop.index('if (aec_mic)')])
+
 
 if __name__ == '__main__':
     unittest.main()
