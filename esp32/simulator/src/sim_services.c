@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "muse_console.h"
+#include "muse_audio.h"
 #include "muse_input.h"
 #include "muse_menu.h"
 #include "muse_settings.h"
@@ -50,6 +51,7 @@ static muse_hatch_status_t s_chat = {
 };
 static muse_link_state_t s_link = MUSE_LINK_ONLINE;
 static int s_brightness = 75;
+static int s_volume = 70;
 static bool s_speaker = true;
 
 static void copy_text(char *out, size_t cap, const char *text)
@@ -86,6 +88,7 @@ void sim_services_reset(void)
     };
     s_link = MUSE_LINK_ONLINE;
     s_brightness = 75;
+    s_volume = 70;
     s_speaker = true;
     s_in_call = false;
 }
@@ -147,6 +150,10 @@ int muse_settings_brightness(void)
 {
     return s_brightness;
 }
+
+int muse_settings_volume(void) { return s_volume; }
+void muse_settings_set_volume(int pct) { s_volume = pct; }
+void muse_audio_set_volume(int pct) { (void)pct; }
 
 bool muse_settings_speaker_on(void)
 {
