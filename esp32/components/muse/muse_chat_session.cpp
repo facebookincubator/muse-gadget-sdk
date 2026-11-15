@@ -81,7 +81,7 @@ extern "C" {
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call_priv.h"
 #endif
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 #include "muse_review.h"
 #endif
 
@@ -118,8 +118,8 @@ static const char *TAG = "muse_chat_session";
 static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP3 buffer empty");
 #define EV_TEXT 72
 #define CAPTION_TEXT 1024                  /* a message's text, for captions timed to its speech */
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-#define TEXT_MAX (32 * 1024)               /* the whole reply, kept for wheel review, in PSRAM */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
+#define TEXT_MAX (32 * 1024)               /* the whole reply, kept for later review, in PSRAM */
 #else
 #define TEXT_MAX CAPTION_TEXT
 #endif
@@ -230,7 +230,8 @@ struct msg_t {
     bool done;
     tts_t tts;
     uint32_t pcm_start;      /* where its speech starts in the reply audio */
-    uint32_t pcm_frames;     /* how long it is; 0 until the MP3 has all arrived */
+    uint32_t pcm_frames;     /* estimated duration, refined as MP3 completes */
+    uint32_t pcm_end;        /* final queued cursor, including the caption hold */
 };
 
 struct resampler_t {
@@ -242,7 +243,7 @@ struct resampler_t {
 struct turn_t {
     phase_t phase;
     uint32_t gen;
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
     uint32_t review;         /* this turn's identity for reply review (typed turns all have gen 0) */
 #endif
     bool text;               /* typed at the console: the reply goes there, unspoken */
@@ -1069,7 +1070,7 @@ static bool turn_start(uint32_t gen, bool text)
     s_turn.note = note;
     s_turn.texts = texts;
     s_turn.gen = gen;
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
     s_turn.review = muse_review_turn();
 #endif
     s_turn.text = text;
@@ -1493,11 +1494,15 @@ static void message_done(int i, const char *final_text)
     }
     m.done = true;
     mark(M_DONE);
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-    /* Keep complete final text, rather than the 1 KB automatic-caption copy. */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
+    /* Keep complete final text, rather than the 1 KB automatic-caption copy.
+     * turn_detach()'s own "working on it" notice isn't an answer: keep the last one. */
     const char *review = final_text && final_text[0] ? final_text
         : m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
-    muse_review_store(s_turn.review, review);
+    if (strcmp(m.id, "local-notice")) {
+        muse_review_store_complete(s_turn.review, review,
+            !(final_text && final_text[0]) && review && m.len > strlen(review));
+    }
 #endif
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */
@@ -1799,7 +1804,7 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
         const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "text"));
         if (text && text[0] && s_turn.text) {
             mark(M_TEXT);
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
             append_text(m, text);
 #else
             m.len += strlen(text);
@@ -1917,6 +1922,7 @@ static void pace_silently(void)
         s_turn.pcm_out += n;
     }
     if (s_turn.pcm_out >= end) {
+        m.pcm_end = s_turn.pcm_out;
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
         s_turn.silent = false;
@@ -1983,6 +1989,7 @@ static void decode(void)
         m.pcm_frames = s_turn.pcm_out - m.pcm_start + rest;
     }
     if (s_turn.mp3_ended && !s_turn.mp3_len) {
+        m.pcm_end = s_turn.pcm_out;
         m.pcm_frames = s_turn.pcm_out - m.pcm_start;
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
@@ -2489,7 +2496,15 @@ extern "C" void muse_hatch_start(void)
     s_turn.chunk = static_cast<uint8_t *>(psram_alloc(DICT_CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL)));
     s_turn.mp3 = static_cast<uint8_t *>(psram_alloc(MP3_BUF));
     s_turn.note = VOICE_NOTE ? static_cast<uint8_t *>(psram_alloc(NOTE_PART_BYTES)) : nullptr;
+#if CONFIG_MUSE_LATEST_REPLY
+    s_turn.texts = static_cast<char *>(heap_caps_malloc(MAX_MSGS * TEXT_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!s_turn.texts) {
+        ESP_LOGW(TAG, "latest reply receiver allocation failed");
+        muse_review_unavailable();
+    }
+#else
     s_turn.texts = static_cast<char *>(psram_alloc(MAX_MSGS * TEXT_MAX));   /* captions just stay untimed without it */
+#endif
     s_pcm = static_cast<int16_t *>(psram_alloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(int16_t)));
     s_pcm16 = static_cast<int16_t *>(psram_alloc((MINIMP3_MAX_SAMPLES_PER_FRAME + 8) * sizeof(int16_t)));
     for (auto &s : s_streams) {
@@ -2651,18 +2666,44 @@ extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
     return MUSE_HATCH_EV_NONE;
 }
 
+/* Both caption paging and the rim follow the message at the playback cursor. */
+static int reply_message_at(size_t played)
+{
+    int message = -1;
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        const msg_t &m = s_turn.msgs[i];
+        if (m.tts >= TTS_ACTIVE && m.len && m.pcm_start <= played) message = i;
+    }
+    return message;
+}
+
+static uint32_t reply_frames(const msg_t &m, size_t caption_len)
+{
+    return m.pcm_frames ? m.pcm_frames : (uint32_t)((uint64_t)caption_len * MIC_RATE / SPEECH_CHARS_PER_S);
+}
+
+extern "C" float muse_turn_progress(size_t played, int *message)
+{
+    int i = reply_message_at(played);
+    if (message) *message = i;
+    if (i < 0) return 0;
+    const msg_t &m = s_turn.msgs[i];
+    size_t len = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
+    uint32_t frames = reply_frames(m, len);
+    if (!frames) return 0;
+    size_t elapsed = played - m.pcm_start;
+    bool complete = m.tts == TTS_FINISHED && m.pcm_end && played >= m.pcm_end;
+    if (complete) return 1;
+    float fraction = (float)elapsed / frames;
+    return fraction < 0.99f ? fraction : 0.99f;
+}
+
 extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
 {
-    /* The message being spoken: the last one whose speech has started. */
-    const msg_t *m = nullptr;
-    const char *text = nullptr;
-    for (int i = 0; i < s_turn.nmsgs && s_turn.texts; i++) {
-        const msg_t &c = s_turn.msgs[i];
-        if (c.tts >= TTS_ACTIVE && c.len && c.pcm_start <= played) {
-            m = &c;
-            text = s_turn.texts + i * TEXT_MAX;
-        }
-    }
+    if (!s_turn.texts) return false;
+    int i = reply_message_at(played);
+    const msg_t *m = i >= 0 ? &s_turn.msgs[i] : nullptr;
+    const char *text = i >= 0 ? s_turn.texts + i * TEXT_MAX : nullptr;
     if (!m) {
         /* Nothing said yet: the reply's opening page, to read while the speech is on its way. */
         for (int i = 0; i < s_turn.nmsgs && s_turn.texts; i++) {
@@ -2673,7 +2714,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         return false;
     }
     size_t len = CAPTION_LEN(text);
-    uint32_t frames = m->pcm_frames ? m->pcm_frames : (uint32_t)(len * MIC_RATE / SPEECH_CHARS_PER_S);
+    uint32_t frames = reply_frames(*m, len);
     size_t at = frames ? (size_t)((uint64_t)(played - m->pcm_start) * len / frames) : 0;
     if (at >= len) {
         at = len ? len - 1 : 0;

@@ -21,6 +21,9 @@
 #include "noise_control.h"
 
 #define BUG_REPORT_REQUEST_ID_MAX_BYTES 63
+// The server drops larger bug reports. A full log tail (~22 KB base64)
+// plus a full connectivity history (~15-30 KB) can exceed it, so the report
+// drops the oldest connectivity events until it fits.
 #define BUG_REPORT_MAX_BYTES (32 * 1024)
 
 typedef enum {

@@ -36,10 +36,11 @@ import time
 from dataclasses import dataclass
 from typing import Iterable
 
-from musegadget import __version__
+from musegadget import __version__, device_guide
 from musegadget.commands import DropInCommand, InvalidCommand
 from musegadget.link_client import (
-    DeviceDescription, MAX_CONTROL_MESSAGE_BYTES, REGISTER_ID_BYTES, encode_message,
+    DEFAULT_MODEL_ID, DEFAULT_MODEL_NAME, DeviceDescription, MAX_CONTROL_MESSAGE_BYTES,
+    REGISTER_ID_BYTES, encode_message,
 )
 
 log = logging.getLogger(__name__)
@@ -138,18 +139,21 @@ def error(message: str) -> dict:
 class Executor:
     def __init__(self, account: Account, drop_ins: Iterable[DropInCommand] = ()) -> None:
         self.account = account
-        self._drop_ins = {c.name: c for c in drop_ins if c.name not in COMMAND_SPECS}
+        # The session answers device.guide itself, so a drop-in by that name would never run.
+        self._drop_ins = {c.name: c for c in drop_ins
+                          if c.name not in COMMAND_SPECS and c.name != device_guide.COMMAND}
         self.drop_ins = dict(self._drop_ins)
 
-    def specs(self, *, node_id: str = "", display_name: str = "",
-              version: str = __version__) -> dict:
+    def specs(self, *, node_id: str = "", display_name: str = "", version: str = __version__,
+              model_id: str = DEFAULT_MODEL_ID, model_name: str = DEFAULT_MODEL_NAME,
+              guide: str | None = None) -> dict:
         """Admit whole definitions in name order using the actual register envelope.
 
         Service supplies its metadata. Refused definitions aren't executable; the
         built-ins are always retained. No command count or character-count estimate.
         """
         specs = dict(COMMAND_SPECS)
-        device = DeviceDescription(node_id, display_name, version, specs)
+        device = DeviceDescription(node_id, display_name, version, specs, model_id, model_name, guide)
 
         def fits() -> bool:
             encoded = encode_message(device.register_message("0" * REGISTER_ID_BYTES))
@@ -287,9 +291,23 @@ class Executor:
 
     def file_op(self, op: str, params: dict) -> dict:
         request = json.dumps({**params, "op": op})
+        options = self._child_options()
+        # The child runs with a scrubbed env and cwd="/", so it can only
+        # import musegadget.fileops when the package happens to be
+        # installed into sys.executable's environment. When the service
+        # runs from a source tree (a checkout, an embedded port) it is
+        # not, and every file operation dies with ModuleNotFoundError
+        # before reading the request. Put the package's parent directory
+        # on the child's PYTHONPATH so the child can always import the
+        # same package this process is running.
+        package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(options.get("env") or {})
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = package_root + (os.pathsep + existing if existing else "")
+        options["env"] = env
         proc = subprocess.run(
             [sys.executable, "-m", "musegadget.fileops"], input=request.encode(),
-            capture_output=True, timeout=60, cwd="/", **self._child_options(),
+            capture_output=True, timeout=60, cwd="/", **options,
         )
         try:
             return json.loads(proc.stdout)

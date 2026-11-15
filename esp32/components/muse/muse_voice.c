@@ -38,6 +38,9 @@
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+#include "muse_aec.h"
+#endif
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call.h"
 #include "muse_voice_call_core.h"
@@ -80,6 +83,8 @@ static const char *TAG = "muse_voice";
 #define RETRY_MAX_US (120LL * 1000000)
 #define STALL_US (30LL * 1000000)               /* Hatch took none of a note this long: give up */
 #define ACK_WAIT_US (30LL * 1000000)            /* asleep, waiting for the VM to have a note */
+#define REPLY_COMPLETE_HOLD_MS 300
+#define REPLY_COMPLETE_POLL_MS 10
 
 static QueueHandle_t s_queue;
 static uint32_t s_press_input_epoch;
@@ -451,6 +456,7 @@ static void go_idle(const char *caption);
  */
 static bool hatch_reply(bool *delivered, bool incoming)
 {
+    muse_state_set_progress(0); /* Recording progress must not carry into the reply. */
     muse_state_set_mode(MUSE_MODE_THINKING);
     /* Until there's a transcript or reply; a late reply has no note to send. */
     muse_state_set_caption(incoming ? "MUSE HAS AN ANSWER" : "SENDING VOICE NOTE");
@@ -461,6 +467,9 @@ static bool hatch_reply(bool *delivered, bool incoming)
     char incomplete[sizeof(text)] = "";
     bool done = false, speaking = false, replied = false;
     size_t played = 0;
+    int progress_message = -1;
+    int progress_logged = -1;
+    float progress = 0;
     int64_t t0 = esp_timer_get_time();
     *delivered = false;
     for (;;) {
@@ -503,6 +512,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
         if (got_event(MUSE_PTT_DOWN)) {
             ESP_LOGI(TAG, "reply interrupted");
             muse_hatch_turn_cancel();
+            muse_state_set_progress(0);
             muse_state_set_level(0);
             return true;
         }
@@ -517,11 +527,33 @@ static bool hatch_reply(bool *delivered, bool incoming)
             muse_audio_write(buf, n);
             played += n;
         } else if (done) {
+            muse_state_set_progress(!incomplete[0] && played ? 1 : 0);
+            ESP_LOGI(TAG, "reply progress: %s", incomplete[0] ? "incomplete" : "complete");
             break;
         } else if (speaking) {
             /* Between messages: keep the speaker fed so it doesn't replay stale DMA. */
             muse_state_set_level(0);
             muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+        }
+        if (speaking) {
+            int message;
+            float next = muse_turn_progress(played, &message);
+            if (message != progress_message) {
+                progress_message = message;
+                progress_logged = -1;
+            }
+            /* Keep the ring forward-only across messages. Their count is unknown,
+             * so hold at 99% until the entire turn has completed successfully. */
+            if (next > 0.99f) next = 0.99f;
+            if (next > progress) progress = next;
+            muse_state_set_progress(incomplete[0] ? 0 : progress);
+            int percent = (int)(progress * 100);
+            int bucket = percent == 99 ? 99 : percent / 10 * 10;
+            if (!incomplete[0] && message >= 0 && bucket != progress_logged) {
+                progress_logged = bucket;
+                ESP_LOGI(TAG, "reply progress: message %d, %d%% (PCM cursor %.2fs)",
+                         message, percent, (double)played / MUSE_AUDIO_RATE);
+            }
         }
         /* The page being said, or before the speech the reply's opening page. */
         if ((speaking || replied) && muse_hatch_turn_caption(played, page, sizeof(page))) {
@@ -539,6 +571,20 @@ static bool hatch_reply(bool *delivered, bool incoming)
     if (!played) {
         /* No speech (TTS unavailable): leave the reply text up for a moment. */
         vTaskDelay(pdMS_TO_TICKS(2500));
+    } else {
+        /* Keep the final caption and full ring visible long enough to register.
+         * A new press still interrupts immediately and starts the next note. */
+        for (int elapsed = 0; elapsed < REPLY_COMPLETE_HOLD_MS;
+             elapsed += REPLY_COMPLETE_POLL_MS) {
+            if (got_event(MUSE_PTT_DOWN)) {
+                ESP_LOGI(TAG, "reply interrupted after completion");
+                muse_hatch_turn_cancel();
+                muse_state_set_progress(0);
+                muse_state_set_level(0);
+                return true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(REPLY_COMPLETE_POLL_MS));
+        }
     }
     return false;
 }
@@ -1117,6 +1163,9 @@ static void run_call(bool ptt, size_t waking_chunks)
     muse_state_set_level(0);
     muse_state_set_progress(0);
     muse_state_set_caption("CONNECTING TO MUSE...");
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+    muse_aec_t *aec = ptt ? NULL : muse_aec_start();
+#endif
     if (ptt) {
         muse_voice_call_start_ptt();
         /* These were captured while this waking press was held. Enqueue
@@ -1173,7 +1222,11 @@ static void run_call(bool ptt, size_t waking_chunks)
         }
         bool mic = captured && !c.hung_up && !c.server_hold && c.input_epoch == muse_input_call_epoch();
         if (ptt) mic = mic && capture_window && (c.held || c.release_until) && press == c.press && status.capture;
-        else mic = mic && c.live && muse_vc_gate_mic_open(&c.gate, now);
+        else mic = mic && c.live &&
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+                   !aec &&
+#endif
+                   muse_vc_gate_mic_open(&c.gate, now);
         if (mic) mic = muse_voice_call_audio(s_chunk, MUSE_AUDIO_CHUNK);
         if (ptt && mic) {
             c.awaiting = true;
@@ -1183,11 +1236,28 @@ static void run_call(bool ptt, size_t waking_chunks)
             }
         }
         bool show_mic = mic && c.live && (!ptt || c.held);
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+        /* AEC sends its cleaned frames below, so `mic` is false in this
+         * mode. Keep the listening meter responsive when playback is idle.
+         * Audio the call may not take (a server hold, say) reaches AEC as
+         * silence, so none of it is sent in a later frame. */
+        bool aec_mic = aec && captured && c.live && !c.hung_up && !c.server_hold &&
+                       c.input_epoch == muse_input_call_epoch();
+        if (aec_mic) show_mic = true;
+#endif
         float mic_level = show_mic ? muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK) : 0;
         if (s_monitor) s_monitor_db = show_mic ? muse_audio_dbfs(s_chunk, MUSE_AUDIO_CHUNK) : -100.0f;
         bool flushed = false;
         size_t n = c.hung_up || (ptt && (c.held || c.release_until)) ? 0 :
             muse_voice_call_read(out, MUSE_AUDIO_CHUNK, &flushed);
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+        /* AEC's reference is one whole chunk per pass, so play exactly that:
+         * a short read must not slide the echo away from its reference. */
+        if (aec && n && n < MUSE_AUDIO_CHUNK) {
+            memset(out + n, 0, (MUSE_AUDIO_CHUNK - n) * sizeof(int16_t));
+            n = MUSE_AUDIO_CHUNK;
+        }
+#endif
         if (flushed) muse_vc_gate_flush(&c.gate, now);
         if (n) {
             muse_vc_gate_playout(&c.gate, out, n, now, CALL_SPEAKER_LAG_US);
@@ -1195,6 +1265,25 @@ static void run_call(bool ptt, size_t waking_chunks)
         } else {
             muse_audio_write(silence, MUSE_AUDIO_CHUNK);
         }
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+        if (aec) {
+            /* Advance the reference even when a mic read fails; otherwise
+             * each missed chunk shifts speaker echo out of alignment. */
+            size_t clean_n = muse_aec_feed(aec, aec_mic ? s_chunk : silence,
+                          n && muse_settings_speaker_on() ? out : silence,
+                          muse_settings_speaker_on() ? n : 0);
+            if (clean_n && aec_mic) {
+                int16_t *clean = muse_aec_output(aec);
+                /* Below the near-end speech floor, a residual during
+                 * playback should be silence to the server's voice detector. */
+                if (!muse_vc_gate_mic_open(&c.gate, now) &&
+                    muse_audio_dbfs(clean, clean_n) < -55.0f) {
+                    memset(clean, 0, clean_n * sizeof(int16_t));
+                }
+                muse_voice_call_audio(clean, clean_n);
+            }
+        }
+#endif
         bool speaking = !muse_vc_gate_mic_open(&c.gate, now) && !(ptt && (c.held || c.release_until));
         if (ptt && !c.held && !status.sending &&
             ((!status.heard && !status.reply_open) || (status.reply_done && !speaking))) c.awaiting = false;
@@ -1244,6 +1333,9 @@ static void run_call(bool ptt, size_t waking_chunks)
         }
     }
     muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+#if CONFIG_MUSE_VOICE_SOFTWARE_AEC
+    muse_aec_stop(aec);
+#endif
     muse_state_set_level(0);
     s_monitor_db = -100.0f;
     if (!atomic_load(&s_shutdown)) go_idle(ended && text[0] ? text : "CALL ENDED");

@@ -62,6 +62,8 @@ class LinkPairingTranscriptTest(unittest.TestCase):
     def test_firmware_v5_transcripts_match_shared_mobile_vectors(self) -> None:
         self.assertEqual({v["name"] for v in VECTORS}, {
             "official_v5", "community_v5", "community_app_v5",
+            # The same devices offering gadget- node ids (node gadget-000001).
+            "community_gadget_v5", "community_app_gadget_v5",
         })
         for vector in VECTORS:
             with self.subTest(vector=vector["name"]):

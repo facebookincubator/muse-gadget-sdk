@@ -173,6 +173,10 @@ static bool link_pairing_provisioning_session_valid(uint32_t generation) {
 }
 static void identity_note_paired_sdk_token(void) {}
 static const char *identity_node_id(void) { return "node"; }
+/* The id a new setup offers and stores with its tokens (identity.h). */
+static const char *identity_setup_node_id(void) { return "gadget-node"; }
+static bool identity_refresh_node_id(void) { return false; }
+static void noise_ctrl_set_node_id(const char *node) { (void)node; }
 static bool wifi_mgr_is_connected(void) { return true; }
 static bool s_noise_running;
 static bool noise_ctrl_is_running(void) { return s_noise_running; }

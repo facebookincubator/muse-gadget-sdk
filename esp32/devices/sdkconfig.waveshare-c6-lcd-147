@@ -16,6 +16,8 @@
 # Status-screen board: shows state on the display with edge bars and animation.
 # 4 MB flash: one app slot, no OTA.
 CONFIG_IDF_TARGET="esp32c6"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-c6-lcd-147"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-C6-LCD-1.47"
 
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_waveshare_c6_lcd_147.csv"

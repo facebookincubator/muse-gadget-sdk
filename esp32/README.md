@@ -180,6 +180,13 @@ a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
 
+If nothing comes back from Muse, the device reconnects on its own: after about
+65 seconds when its tunnel pings go unanswered, or after 150 seconds of
+silence. Boards with PSRAM keep a short history of Wi-Fi, session and tunnel
+outages, which Muse reads with `device.health`. After a silent drop, the device
+checks the internet by opening a TCP connection to 1.1.1.1 (then 8.8.8.8) on
+port 443; it sends no data.
+
 ## USB settings in a browser
 
 The [web flasher](../web-flasher/README.md#device-settings)'s Device settings
@@ -188,6 +195,17 @@ brightness, screen sleep, speaker volume, speaker on/off and microphone gain.
 It works on boards with the full UI, using their existing console commands.
 
 ## Boards
+
+On LVGL touch-screen boards with speaker audio, drag up or down on the main
+avatar or its background to raise or lower volume. A temporary percentage
+appears above a vertical filled bar while dragging; lifting your finger saves
+the setting, then the indicator briefly holds and fades away. Dragging through
+three quarters of the screen height covers the full 0–100 range. Horizontal
+swipes still open Settings. Buttons, reply paging, Settings, wake touches and
+image/video views retain their existing controls. Reaching 0% mutes the speaker
+immediately; increasing volume unmutes it and restores the speaker icon.
+The gesture is unavailable on boards without touch or speaker audio and on
+the separate FreeInk UI.
 
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
 settings. Audio and image support vary by board, so check the feature table in
@@ -224,12 +242,14 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
 | ALIENTEK ATK-DNESP32S3-BOX V1.1 | UI, push-to-talk, two-key menu, images | `tools/muse/board.sh build atk-box`, see [setup](devices/atk-dnesp32s3-box.md) |
+| ALIENTEK ATK-DNESP32S3-BOX2 (experimental) | UI, push-to-talk, menu, speaker and power keys, turns over with the box (battery unverified) | `tools/muse/board.sh build atk-box2`, see [setup](devices/atk-dnesp32s3-box2.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.8 | UI, touch, push-to-talk, settings, images (unverified) | `tools/muse/board.sh build s3-18` |
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | UI, touch, push-to-talk with text replies | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Cardputer ADV (experimental) | UI, GO/Space push-to-talk with text replies, Esc/Enter/arrow menu controls | `tools/muse/board.sh build cardputer-adv` |
+| M5Stack AtomS3 + Atomic Voice Base (experimental) | UI, front-button push-to-talk, voice notes with text replies | `tools/muse/board.sh build atoms3` |
 | M5Stack StickS3 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
@@ -240,6 +260,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Waveshare ESP32-S3-Touch-LCD-3.49 V2 | UI, touch, push-to-talk, settings, images | `tools/muse/board.sh build lcd349` |
 | Waveshare ESP32-S3-Touch-LCD-1.46 (also 1.46B, 1.46C) | UI, touch, hold-the-face or BOOT push-to-talk, settings, images | `tools/muse/board.sh build 146` |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build 143` |
+| LilyGO T-Display-S3 AMOLED 1.75 | UI, touch, settings; text replies, no audio | `tools/muse/board.sh build lilygo175` |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings, images; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
 | SpotPear ESP32-AI-1.28 v1.0 (experimental) | Round UI, BOOT push-to-talk, MAX98357A speaker and NP0557 mic | `tools/muse/board.sh build spotpear` |
 | VIEWE SmartRing-Plus | UI, round touch, on-screen mic, settings, images | `tools/muse/board.sh build smartring-plus` |
@@ -314,10 +335,29 @@ same Wi-Fi, then open Phone camera on the board: the phone encodes H.264 or
 VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and
 [`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
 
+[`../protocols/DEVICE.md`](../protocols/DEVICE.md) says how a gadget describes
+itself to Muse: its family, its model and its usage guide.
+
+To let Muse run a small app of its own on a board's screen,
+build it with `MUSE_APPS=1 tools/muse/board.sh build <board>`: Muse writes a
+WebAssembly app on its VM, and the board's `app.run` command loads it and runs
+it in place of the face, with LVGL widgets, the buttons and touch, the chat
+and the board's sensors (apps API 1.1, [`components/muse_apps/sdk/api/`](components/muse_apps/sdk/api/README.md)).
+`app.install` keeps an app on the board, for its launcher (Apps, in Settings).
+[`components/muse_apps/sdk/README.md`](components/muse_apps/sdk/README.md) shows how to write one and how to ask Muse
+for one, and [`AGENTS.md`](AGENTS.md#webassembly-apps) how it works.
+
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
+
+On full-size LVGL displays at least 400 pixels wide, turning the speaker off
+shows replies in the original pixel caption font at twice its normal size
+(always on such boards without a speaker; not on boards with rim controls,
+such as the StopWatch). The text is centred beneath the smaller avatar;
+turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
+visible when the larger text fills the reading area.
 
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
@@ -359,7 +399,9 @@ and builds without it don't change. With it on:
   background work, whose results may arrive later.
 - **Other boards:** tap the talk button to start a call, press again to hang up;
   holding still sends a voice note. The mic is off while Muse talks, except on
-  the Voice PE when its audio chip reports echo cancellation.
+  the Voice PE when its audio chip reports echo cancellation. ESP32-S3 boards
+  with enough PSRAM can opt into [software echo cancellation](docs/software-aec.md)
+  to allow hands-free interruption during playback.
 - A call also ends when Muse ends it, after 45 seconds of quiet (not counting
   time Muse is still working on something), or after 15 minutes. Muse may not
   hang up by itself when it says goodbye: press to end the call. If the
@@ -413,6 +455,29 @@ enable live voice calls, and is off by default for every board. It isn't
 available on the SenseCAP Watcher (a short wheel click sleeps) or on
 e-paper boards with the FreeInk UI.
 
+### Latest reply on the Waveshare 1.75C
+
+With `CONFIG_MUSE_LATEST_REPLY` (on by default for the 1.75C), swipe right
+from Main to reread the latest answer received by the gadget. Scroll vertically;
+swipe left to return. The same three bottom dots indicate Latest reply, Main,
+and Settings on all three screens. The reader uses the main screen's pixel
+caption font. While reading, a floating
+**New reply ↓** button scrolls smoothly to the top of a newer answer. Returning
+from Main preserves the displayed answer and its scroll position. Completed
+messages from one gadget turn are joined together.
+
+The answer survives screen sleep and clears on reboot. Empty or failed requests
+keep the preceding answer. This is local reply retention, not server chat history.
+The combined answer is capped at 32 KiB, ending in `...` if cut.
+It uses PSRAM: eight 32 KiB receiver slots, a 32 KiB saved answer, a 32 KiB display
+snapshot, plus LVGL layout memory. The new-reply animation temporarily needs
+one extra 32 KiB snapshot while both answers are on screen. It does not write
+conversation text to flash.
+Screenshot builds also accept `>ui=reply`, `>ui.reply=down`, and `>ui.reply=new`
+on the USB console for repeatable on-device checks. `>ui.reply=test-long` replaces
+the saved answer with an oversized synthetic reply; `>ui.reply=end` scrolls to
+the end to check truncation. These commands are disabled in normal builds.
+
 ## Tests
 
 The tests run on your computer, with no board attached:
@@ -452,10 +517,22 @@ their upstream licenses:
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
   Sticky's Link status profile), is MIT and retains the source's copyright and
   license notice.
+- The ST7789 tuning table in
+  [`components/muse/boards/board_atk_dnesp32s3_box2.c`](components/muse/boards/board_atk_dnesp32s3_box2.c),
+  from 78/xiaozhi-esp32's ATK-DNESP32S3-BOX2 board, is MIT. See
+  [`devices/licenses/xiaozhi-esp32.txt`](devices/licenses/xiaozhi-esp32.txt).
 - The JD9853A initialization sequence in
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- The GC9107 initialization sequence in
+  [`components/muse/boards/board_m5stack_atoms3.c`](components/muse/boards/board_m5stack_atoms3.c),
+  from M5GFX's `Panel_GC9107` (LovyanGFX), is FreeBSD. See
+  [`devices/licenses/LovyanGFX.txt`](devices/licenses/LovyanGFX.txt).
+- [`components/esp_lcd_gc9107`](components/esp_lcd_gc9107), Espressif's GC9107
+  panel driver 2.0.0 from the ESP Component Registry with one change to build
+  on ESP-IDF 6, is Apache-2.0 under Espressif's copyright. See
+  [`components/esp_lcd_gc9107/license.txt`](components/esp_lcd_gc9107/license.txt).
 - [`components/muse/boards/viewe_smartring_display_init.h`](components/muse/boards/viewe_smartring_display_init.h),
   the SmartRing-Plus panel initialization table from VIEWE's BSP, is
   Apache-2.0 under VIEWE's copyright, as its header says.
@@ -466,6 +543,10 @@ their upstream licenses:
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
   Medium (SIL OFL 1.1); see its README.
+- [`main/fonts/epaper_154g_caption_font.h`](main/fonts/epaper_154g_caption_font.h),
+  the Waveshare 1.54G's reply font, is a subset of GNU Unifont 16.0.04 (SIL OFL
+  1.1, or GPL-2.0+ with the font embedding exception); see
+  [`main/fonts/README.md`](main/fonts/README.md).
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.

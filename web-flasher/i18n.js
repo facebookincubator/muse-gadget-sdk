@@ -133,6 +133,7 @@ export const STRINGS = Object.freeze({
     "footer.built.before": " Built from ",
     "footer.built.after": ".",
 
+    "note.muse-waveshare-s3-175c": "Check that your board is the **1.75C (32 MB flash)** before installing. The 1.75 without the C has different wiring, and its USB port looks the same.",
     "note.muse-sensecap-watcher": "Pick the **second** USB Dual_Serial port, the one with the higher number; the first is the camera chip. Flashing is slow on this board, about 4 minutes; keep the tab in front. Muse overwrites the Watcher's factory data, which is unique to each device, so **back it up first** and don't erase the device: `esp32/tools/muse/paced_esptool.py --chip esp32s3 -p PORT read-flash 0x9000 0x32000 nvsfactory.bin`",
     "note.reterminal-sticky": "Flashing takes about 3 minutes; keep the tab in front. Muse replaces Seeed's factory firmware. To go back to it later, back up the flash first: `python -m esptool --chip esp32s3 -p PORT read-flash 0 ALL sticky-factory.bin`",
   }),
@@ -249,6 +250,7 @@ export const STRINGS = Object.freeze({
     "footer.built.before": " ビルド元：",
     "footer.built.after": "",
 
+    "note.muse-waveshare-s3-175c": "インストールする前に、お使いのボードが**1.75C（32 MBフラッシュ）**であることを確認してください。末尾にCが付かない1.75は配線が異なりますが、USBポートの見た目は同じです。",
     "note.muse-sensecap-watcher": "番号が大きい方の**2番目**の USB Dual_Serial ポートを選択してください（1番目はカメラチップ用です）。このボードへの書き込みには約4分かかります。タブを前面に表示したままにしてください。Museは各Watcherに固有の工場出荷時データを上書きするため、**必ず事前にバックアップを取り**、デバイスの消去（イレース）は行わないでください：`esp32/tools/muse/paced_esptool.py --chip esp32s3 -p PORT read-flash 0x9000 0x32000 nvsfactory.bin`",
     "note.reterminal-sticky": "書き込みには約3分かかります。タブを前面に表示したままにしてください。MuseはSeeedの工場出荷時ファームウェアを上書きします。あとから元に戻せるよう、事前にフラッシュメモリをバックアップしてください：`python -m esptool --chip esp32s3 -p PORT read-flash 0 ALL sticky-factory.bin`",
   }),
