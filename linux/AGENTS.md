@@ -149,8 +149,8 @@ never has a command's parameters, output or error message.
 - Node ids: with `MUSEGADGET_GADGET_NODE_ID=1` in the pairing's environment
   (`sudo env MUSEGADGET_GADGET_NODE_ID=1 musegadget pair`), a new pairing
   offers `gadget-` and those six digits (lowercase) in `get_device_info` and
-  the transcript; without it (the default until the Muse apps classify gadget
-  nodes by family) it offers `homelink-` and the same digits. Either way it
+  the transcript; without it (the default) it offers `homelink-` and the same
+  digits. Either way it
   stores the id in `pairing.json` with the tokens it was issued for. That stored id is the one in use
   (`link.register`, token refresh, chat turns) until the device is paired
   again, so a pairing made before ids were stored keeps `homelink-xxxxxx`.
@@ -301,8 +301,8 @@ listed here. Everything else is internal and can change.
 - `config.STATE_DIR_ENV` and `config.SDK_TOKEN_ENV` hold the names of the two
   environment variables, `MUSEGADGET_STATE_DIR` and `MUSEGADGET_SDK_TOKEN`.
   `config.GADGET_NODE_ID_ENV` names `MUSEGADGET_GADGET_NODE_ID`: `1` makes a
-  new pairing offer a `gadget-` node id. It is off by default until the Muse
-  apps classify gadget nodes by family; turn it on for development.
+  new pairing offer a `gadget-` node id. It is off by default; turn it on for
+  development.
 
 ### Pairing
 

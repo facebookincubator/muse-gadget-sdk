@@ -29,8 +29,8 @@ IDENTITY_FILE = "identity.json"
 PAIRING_FILE = "pairing.json"
 SDK_TOKEN_ENV = "MUSEGADGET_SDK_TOKEN"
 SDK_TOKEN_FILE = "sdk_token"
-# "1": new pairings offer gadget- node ids (identity.py). Off by default until
-# the Muse apps classify gadget nodes by family; turn it on for development.
+# "1": new pairings offer gadget- node ids (identity.py). Off by default; turn
+# it on for development.
 GADGET_NODE_ID_ENV = "MUSEGADGET_GADGET_NODE_ID"
 COMMANDS_DIR_ENV = "MUSEGADGET_COMMANDS_DIR"
 DEFAULT_COMMANDS_DIR = Path("/etc/musegadget/commands.d")

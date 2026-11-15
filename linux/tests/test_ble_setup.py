@@ -339,7 +339,7 @@ def test_provision_refusal_without_session_keys_does_not_deadlock():
 
 
 def test_device_info_without_gadget_node_ids(monkeypatch):
-    # The default until the Muse apps classify gadget nodes by family.
+    # Off by default.
     monkeypatch.delenv(config.GADGET_NODE_ID_ENV)
     h = Harness()
     h.send({"action": "get_device_info"})

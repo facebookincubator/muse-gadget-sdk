@@ -387,11 +387,10 @@ menu "ESP32 Device SDK"
         default n
         help
             On, a new setup offers node_id "gadget-XXXXXX" instead of
-            "homelink-XXXXXX". Off by default until the Muse apps classify
-            gadget nodes by family; turn it on for development (bench builds,
-            devices/sdkconfig.muse-bench, do). Either way setup stores the id
-            with the device tokens, and a device keeps its stored id until it
-            is set up again.
+            "homelink-XXXXXX". Off by default; turn it on for development
+            (bench builds, devices/sdkconfig.muse-bench, do). Either way
+            setup stores the id with the device tokens, and a device keeps
+            its stored id until it is set up again.
 
     config HOMEHUB_BLE_NAME_PREFIX
         string "Visible BLE name prefix"

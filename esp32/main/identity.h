@@ -26,8 +26,7 @@
 // ble_name "MuseGadget-XXXXXX" (upper) is the advertised BLE name.
 //
 // Node ids: a new setup offers "gadget-XXXXXX" with
-// CONFIG_MUSE_GADGET_NODE_ID_PREFIX (off by default until the Muse apps
-// classify gadget nodes by family), else "homelink-XXXXXX"
+// CONFIG_MUSE_GADGET_NODE_ID_PREFIX (off by default), else "homelink-XXXXXX"
 // (identity_setup_node_id()), and stores it with the device tokens (NVS
 // "node_id"). The stored id is the one
 // in use (identity_node_id()) until the device is set up again. A device set

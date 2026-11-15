@@ -20,7 +20,7 @@
 # code, plus a buffer the size of the screen (RGB565) while taking one.
 CONFIG_LV_USE_SNAPSHOT=y
 
-# New setups offer gadget-XXXXXX node ids (off in release images until the
-# Muse apps classify gadget nodes by family). A device keeps the id it was set
-# up with until it is set up again.
+# New setups offer gadget-XXXXXX node ids (off by default; on here for
+# development). A device keeps the id it was set up with until it is set up
+# again.
 CONFIG_MUSE_GADGET_NODE_ID_PREFIX=y
