@@ -49,8 +49,9 @@ typedef void (*muse_vdec_progress_t)(void *ctx, const muse_pic_t *pic, int rows)
  * error, before anything is allocated for it. */
 muse_vdec_t *muse_vdec_open(uint8_t codec, int max_w, int max_h);
 /* True if the access unit may make the decoder reallocate its pictures (an
- * H.264 sequence parameter set, a VP8 keyframe): pictures it handed out
- * before may be freed by muse_vdec_decode, so wait for their readers first. */
+ * H.264 parameter set or IDR slice, with or without a start code before it;
+ * a VP8 keyframe): pictures it handed out before may be freed by
+ * muse_vdec_decode, so wait for their readers first. */
 bool muse_vdec_may_realloc(const muse_vdec_t *d, const uint8_t *buf, uint32_t len);
 void muse_vdec_close(muse_vdec_t *d);
 bool muse_vdec_has(uint8_t codec);
