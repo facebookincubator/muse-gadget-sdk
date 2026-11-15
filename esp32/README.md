@@ -359,11 +359,13 @@ such as the StopWatch). The text is centred beneath the smaller avatar;
 turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
 visible when the larger text fills the reading area.
 
-The ExecuTorch runtime for the on-device "Hey Muse" wake word (off by
-default; not enabled on any board yet) comes from the ESP Component
-Registry, and only into builds with `MUSE_WAKEWORD_ENABLE`;
-[`docs/executorch.md`](docs/executorch.md) says how the pin and its
-kernel bundle are updated.
+The on-device "Hey Muse" wake word (off by default; not enabled on any
+board yet) runs its model with the ExecuTorch runtime and ESP-NN delegate
+and TensorFlow Lite Micro's microfrontend, which come from the ESP
+Component Registry only into builds with `MUSE_WAKEWORD_ENABLE`;
+[`docs/executorch.md`](docs/executorch.md) says how the pins are updated,
+and [`components/muse_wakeword/models/README.md`](components/muse_wakeword/models/README.md)
+describes the model.
 
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the

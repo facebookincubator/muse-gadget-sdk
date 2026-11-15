@@ -16,53 +16,66 @@ limitations under the License.
 
 # muse_wakeword
 
-Hands-free activation: saying "Hey Muse" (or "Ok Muse") starts the
-same voice note as holding the talk button.
+Hands-free activation: saying "Hey Muse" starts the same voice note as
+holding the talk button.
 
-## Status: ExecuTorch runner implemented; feature still off by default
+## Status: off by default
 
-`ww_runner_et.cpp` drives the embedded int8 `models/hey_muse.pte`
-through the ExecuTorch registry component (kernel bundle generated at
-build time). `MUSE_WAKEWORD_ENABLE` defaults to `n` and no board
-overlay sets it, so shipped builds are unchanged.
+`ww_runner_espnn.cpp` runs the embedded int8 `models/hey_muse.pte`
+(model card in [`models/README.md`](models/README.md)) through
+ExecuTorch's ESP-NN delegate, on TensorFlow Lite Micro's microfrontend
+features (`ww_frontend.c`), with microWakeWord's detector
+(`ww_detector.c`). `MUSE_WAKEWORD_ENABLE` defaults to `n` and no board
+overlay sets it, so shipped builds are unchanged: without it the
+component compiles nothing and the registry components aren't
+downloaded.
 
 While listening is on, the microphone and codecs stay powered: a board
 on battery doesn't rest them when its screen sleeps, so battery life is
 much shorter with the wake word on.
 
-Verified by `tests/test_muse_wakeword.py`:
+## Cost
+
+Measured on a SenseCAP Watcher (ESP32-S3, 240 MHz) running the full
+firmware (UI, BLE), listening:
+
+| | This runner | The earlier ExecuTorch runner |
+|---|---|---|
+| Inference | 1.2 ms per 30 ms | 17.7 ms per 20 ms |
+| Front end + inference | 3.2 to 3.8 ms per 30 ms (11 to 13% of one core) | 20 ms per 20 ms (the audio tap overflowed) |
+| Internal RAM | 14 KB (front end tables and small delegate tables) | not measured |
+| PSRAM | 29 KB for the runner, plus the 133 KB of audio buffers | not measured |
+| Model | 23 KB | 74 KB |
+
+The runner and the delegate put their larger buffers in internal RAM
+only when 48 KB of it would stay free, which on the Watcher with its UI
+it doesn't. In a test image without the UI, where everything fits in
+internal RAM, inference takes 0.6 ms (4.2% of a core with the front
+end).
+
+Verified by `tests/test_muse_wakeword.py`, whose `WakeWordRunner` class
+builds this runner for the host against the same registry components
+(they're in `managed_components/` after a wake-word configure, or set
+`MUSE_WAKEWORD_DEPS`):
 
 ```sh
 python3 -m unittest tests.test_muse_wakeword -v
 ```
 
-## Trying it on a BOX-3
+## Trying it
 
-For the real runner, build with the committed overlay
-`devices/sdkconfig.muse-wakeword` (token setup as usual):
+Build with the committed overlay `devices/sdkconfig.muse-wakeword`
+(token setup as usual), on a board with PSRAM and the LVGL UI:
 
 ```sh
-EXECUTORCH_PYTHON=<python with executorch> MUSE_WAKEWORD=1 tools/muse/board.sh build box3
-MUSE_WAKEWORD=1 tools/muse/board.sh flash box3
+MUSE_WAKEWORD=1 tools/muse/board.sh build watcher
 ```
 
-Then run `>wake.on` and say "Hey Muse". The model's false-alarm rate
-has not been measured on a device yet, so expect false triggers; `@wake`
-and the `muse_wake`/`ww_et` logs show the flow.
-
-The overlay already trims for size and speed as follows. ExecuTorch
-runtime logging is compiled out (`CONFIG_ET_ENABLE_LOGGING` unset).
-Measured on BOX-3 it saves ~91 KB with no latency cost (inference
-still ~15 ms/frame), and `et_model`/runner error logs still reach
-the console. Program verification is already off
-(`CONFIG_ET_PROGRAM_VERIFICATION` unset; the runtime falls back to
-minimal header checks), and the build-time kernel bundle already
-registers only the kernels the model uses, so there is nothing
-further to prune there. `CONFIG_ET_OPTIMIZE_SIZE` defaults to `y` in
-the registry component; the overlay unsets it.
-A build with it (plus an Error log floor) measured 67 KB smaller but
-slowed inference to ~23 ms/frame, over the 20 ms budget with tap-frame
-drops, so it was rejected.
+The overlay builds ExecuTorch at the project's `-O2`
+(`CONFIG_ET_OPTIMIZE_SIZE` unset), turns its logging off and leaves the
+model's weights in flash. Then run `>wake.on` and say "Hey Muse". `@wake`
+and the `muse_wake`/`ww` logs show the flow; after 15 s of listening the
+runner logs its timing and heap.
 
 Over serial:
 

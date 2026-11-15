@@ -19,117 +19,89 @@ limitations under the License.
 The [ExecuTorch](https://github.com/pytorch/executorch) runtime comes
 from the ESP Component Registry, pinned exact in the wake word
 component's
-[`idf_component.yml`](../components/muse_wakeword/idf_component.yml):
+[`idf_component.yml`](../components/muse_wakeword/idf_component.yml),
+next to the microfrontend the model's features come from:
 
 ```yaml
 pytorch/executorch:
   version: "==1.6.0-dev.20261112"
   rules:
     - if: "$CONFIG{MUSE_WAKEWORD_EXECUTORCH} == \"y\""
+espressif/esp-nn:
+  version: "==1.5.0"
+  rules:
+    - if: "$CONFIG{MUSE_WAKEWORD_EXECUTORCH} == \"y\""
+esphome/esp-micro-speech-features:
+  version: "==1.2.3"
+  rules:
+    - if: "$CONFIG{MUSE_WAKEWORD_EXECUTORCH} == \"y\""
 ```
 
-The rule keeps it out of every build without `MUSE_WAKEWORD_ENABLE`:
-those builds don't download it, list it in `dependencies.lock`, or
-compile any of it. `MUSE_WAKEWORD_EXECUTORCH` is a string that is
+The rules keep all three out of every build without `MUSE_WAKEWORD_ENABLE`:
+those builds don't download them, list them in `dependencies.lock`, or
+compile any of them. `MUSE_WAKEWORD_EXECUTORCH` is a string that is
 always defined (`"y"` with the feature, `"n"` without), because the
 component manager can't evaluate a bool whose dependencies are unmet.
-
-Do not loosen the pin to a range: a kernel bundle is made for one
-component version, a respin included, and the build refuses a bundle
-made for another version.
+ExecuTorch itself asks for `espressif/esp-nn` `^1.4`; the pin holds the
+delegate's kernels at the release the model was checked with.
 
 There is no vendored tree. The component manager downloads the
-component into `managed_components/` at build time
-(`managed_components/` and `dependencies.lock` are gitignored build
-artifacts; `tools/muse/board.sh` deletes them around every build).
-The component's own `README.md` covers using the runtime; this page
-covers the pin, build-time bundle generation, and updating it.
+components into `managed_components/` at build time, checking the
+publisher's checksums (`managed_components/` and `dependencies.lock` are
+gitignored build artifacts; `tools/muse/board.sh` deletes them around
+every build). The component's own `README.md` covers using the runtime;
+this page covers how the wake word uses it and updating the pin.
 
-The component links nothing into firmware until a model and a kernel
-bundle are declared. The wake word component declares them in its
-`CMakeLists.txt`, only with the feature on. A project that declares
-nothing and calls `et_model` fails to link instead of failing every
-model load.
+## How the wake word uses it
 
-## Kernel bundle
+`models/hey_muse.pte` runs entirely in the ESP-NN delegate: the program
+is one delegate call with no CPU operators. So the wake word component
+declares only the backend, `executorch_add_backend(EspNNBackend)`: the
+build links the runtime and the delegate, no kernel library and no prim
+ops, generates no kernel bundle, and needs no executorch Python. A model
+that needed CPU kernels would need a kernel bundle (the component's
+`tools/gen_kernels.py`).
 
-The component registers only the kernels in the project's kernel
-bundle. Nothing is committed: the wake word component generates the
-bundle at configure time, into the build directory, by running the
-component's own `tools/gen_kernels.py` unmodified. The generator checks
-that the installed executorch is the one the component was built from
-(its version and commit) before it generates anything, so a mismatched
-code generator can't produce the bundle. The build then declares the
-generated bundle, and refuses one whose component version, commit, or
-model hash does not match the declared model and component.
+`ww_runner_espnn.cpp` drives ExecuTorch's `Program`/`Method` API
+directly rather than the component's `et_model` C API, so it can bind
+the model's inputs and outputs to its own buffers once and run each
+step as a single `execute()` (the file's header explains). The method
+arena is sized exactly when the runner starts.
 
-Wakeword builds need a Python with executorch and PyYAML installed.
-Use the nightly the component was built from, which the component's
-`VERSION` names: for `1.6.0-dev.20261112` that is
-`executorch==1.6.0.dev20261112` (commit `2a00808`) from
-`https://download.pytorch.org/whl/nightly/cpu`, with
-`torch==2.14.0` from `https://download.pytorch.org/whl/test/cpu`.
-The generator refuses any other version, the stable
-`executorch==1.6.0` from PyPI included. Point the build
-at it with `-DEXECUTORCH_PYTHON=<python>` or the `EXECUTORCH_PYTHON`
-environment variable; without one, configuration fails with a message
-saying so. Default builds need nothing: the bundle step only runs for
-the ExecuTorch runner. Do not commit a generated bundle directory: a
-component update needs no SDK change beyond the version pin, and the
-bundle regenerates from the declared model on the next configure.
+The overlay `devices/sdkconfig.muse-wakeword` sets the component's
+options for the wake word: `CONFIG_ET_OPTIMIZE_SIZE` off (the default
+`-Os` makes inference about 40% slower), `CONFIG_ET_ENABLE_LOGGING` off,
+and `CONFIG_ESPNN_DELEGATE_CONSTANTS_TO_PSRAM` off (weights are read
+from flash).
 
-## Updating the component
+The delegate in this release reads the clock around every operator and
+converts the model's streaming state between layouts on every step, even
+with profiling off, and keeps about 17 KB of tables that a newer
+delegate can read in place from the model. A change proposed upstream
+removes that work: about 160 µs per inference (a quarter of the ESP-NN
+time) and 17 KB of RAM on an ESP32-S3. It needs no SDK change beyond a
+version bump and, for the stateful form, a re-export.
 
-Bump the `==` pin in [`components/muse_wakeword/idf_component.yml`](../components/muse_wakeword/idf_component.yml),
-and re-export the model only if the new component needs it (the
-exporter is `components/muse_wakeword/tools/export_hey_muse.py`; its
-sidecar records the export, and the build-time bundle check is the
-gate that the model's ops are covered). Nothing else in the SDK
-changes: the bundle regenerates at configure time, so no bundle commit
-is needed, and no SDK update is needed at all until someone chooses
-to bump the pin.
+The host tests build the same runner, delegate and microfrontend from the
+same components, with small host stand-ins for the ESP-IDF headers the
+delegate includes in `components/muse_wakeword/host/`.
 
-Review the update before opening a PR: build the wake-word firmware
-with the matching executorch Python (see above) and check the
-configure log says the bundle generated, plus the usual file/size
-deltas. The component isn't vendored, so a PR shows only the pin; what
-the build itself verifies is the exact version, the publisher's
-checksums (the component manager checks every file it downloads) and
-the generator's executorch version check. Review the component's
-release as you would any dependency update. Then build the consumers: this SDK's
-wake-word firmware for one Xtensa and one RISC-V board (the builds
-that actually link the component), plus a normal board build, which
-must still pass without downloading ExecuTorch:
+## Updating the components
 
-```sh
-tools/muse/board.sh build box3
-```
+Bump the `==` pins in
+[`components/muse_wakeword/idf_component.yml`](../components/muse_wakeword/idf_component.yml).
+Re-export the model only if the new release needs it, and keep `models/hey_muse.json` in step. Then:
 
-With a board attached, flash the wake-word firmware and confirm the
-boot log's runner-ready line and `@wake` status over serial. Note
-the binary size change in the PR: when enabled, the registered kernels
-cost roughly 0.2 MB of flash text (plus the ~80 KB embedded model
-in the application component). Rollback is reverting the PR — pin
-and any models version together.
+- build the wake-word firmware for an ESP32-S3 board
+  (`MUSE_WAKEWORD=1 tools/muse/board.sh build box3`) and a normal build,
+  which must still pass without downloading either component;
+- run the host tests, whose `WakeWordRunner` class builds the runner
+  against the downloaded components and checks the model's output bytes;
+- with a board attached, flash the wake-word firmware and check the
+  boot log's `Hey Muse runner ready` line, `>wake.on`, and the timing
+  line the runner logs after 15 s of listening.
 
-Models (`.pte` files) are not part of the component and are never
-regenerated here; they ship with the application component (today:
-`components/muse_wakeword/models/`).
+Note the binary size change in the PR. Rollback is reverting the PR.
 
-## Using the component
-
-- `#include <et_model.h>` — small C inference API (model bytes in
-  flash, arenas via heap_caps with internal/PSRAM placement).
-  Application pipelines built on it (the wake word frontend and
-  detector in `components/muse_wakeword`) live with the
-  application, not in this runtime component.
-- `#include <executorch/...>` — full C++ runtime. ESP-IDF has no
-  mmap, so `MmapDataLoader` exists but always fails with
-  `NotSupported`; use `BufferDataLoader`. Runtime logs go to ESP_LOG
-  under the `executorch` tag (`CONFIG_ET_ENABLE_LOGGING`,
-  `CONFIG_ET_LOG_LEVEL_*`). `CONFIG_ET_OPTIMIZE_SIZE` defaults to `y`
-  in this component; wake word builds unset it (inference time
-  matters more than the flash it saves). `CONFIG_ET_PROGRAM_VERIFICATION`
-  compiles in full `.pte` verification, which `et_model_config_t.verify`
-  requires. `CONFIG_ET_MAX_KERNEL_NUM` sizes the kernel registry; the
-  default, 0, sizes it from the bundle.
+Models (`.pte` files) are not part of the component; they ship with the
+application component (`components/muse_wakeword/models/`).
