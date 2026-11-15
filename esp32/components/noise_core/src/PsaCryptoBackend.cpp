@@ -21,8 +21,21 @@
 #include <array>
 #include <cstdint>
 
+#if NOISE_CORE_X25519_HACL
+// HACL* Curve25519 (X25519Hacl.c, Kconfig NOISE_CORE_X25519_HACL): X25519
+// without PSA's generic curve code; same results (RFC 7748).
+extern "C" void noise_core_x25519_hacl(
+    uint8_t out[32],
+    const uint8_t scalar[32],
+    const uint8_t u[32]);
+#endif
+
 namespace musegadgets::noise::core {
 namespace {
+
+#if NOISE_CORE_X25519_HACL
+constexpr uint8_t kX25519BasePoint[CryptoBackend::kX25519KeySize] = {9};
+#endif
 
 constexpr uint8_t kX25519LowByteClampMask = 0xf8;
 constexpr uint8_t kX25519HighByteClearMask = 0x7f;
@@ -171,7 +184,7 @@ Status ValidateAesInputs(
   return OkStatus();
 }
 
-void ClampX25519PrivateKey(
+[[maybe_unused]] void ClampX25519PrivateKey(
     ConstByteSpan privateKey32,
     std::array<uint8_t, CryptoBackend::kX25519KeySize>& out) noexcept {
   std::copy_n(privateKey32.data(), out.size(), out.data());
@@ -180,7 +193,7 @@ void ClampX25519PrivateKey(
   out[31] |= kX25519HighByteSetMask;
 }
 
-Status ImportX25519PrivateKey(
+[[maybe_unused]] Status ImportX25519PrivateKey(
     ConstByteSpan privateKey32,
     psa_key_usage_t usage,
     PsaKey& key) noexcept {
@@ -305,6 +318,24 @@ Status PsaCryptoBackend::X25519GenerateKeypair(
     return status;
   }
 
+#if NOISE_CORE_X25519_HACL
+  {
+    std::array<uint8_t, kX25519KeySize> privateKey{};
+    std::array<uint8_t, kX25519KeySize> publicKey{};
+    status = PsaStatusToStatus(
+        psa_generate_random(privateKey.data(), privateKey.size()));
+    if (!status.ok()) {
+      SecureZeroize(privateKey);
+      return status;
+    }
+    noise_core_x25519_hacl(
+        publicKey.data(), privateKey.data(), kX25519BasePoint);
+    std::copy(privateKey.begin(), privateKey.end(), privateKey32.data());
+    std::copy(publicKey.begin(), publicKey.end(), publicKey32.data());
+    SecureZeroize(privateKey);
+    return OkStatus();
+  }
+#endif
   psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
   psa_set_key_usage_flags(
       &attributes, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
@@ -354,6 +385,11 @@ Status PsaCryptoBackend::X25519PublicFromPrivate(
   if (!status.ok()) {
     return status;
   }
+#if NOISE_CORE_X25519_HACL
+  noise_core_x25519_hacl(
+      publicKey32.data(), privateKey32.data(), kX25519BasePoint);
+  return OkStatus();
+#endif
 
   PsaKey key;
   status = ImportX25519PrivateKey(
@@ -390,13 +426,24 @@ Status PsaCryptoBackend::X25519Dh(
     return status;
   }
 
+  std::array<uint8_t, kX25519KeySize> shared{};
+#if NOISE_CORE_X25519_HACL
+  noise_core_x25519_hacl(
+      shared.data(), privateKey32.data(), peerPublic32.data());
+  if (IsAllZero(ConstByteSpan(shared))) {
+    status = Status::InvalidArgument();
+  } else {
+    std::copy(shared.begin(), shared.end(), sharedSecret32.data());
+  }
+  SecureZeroize(shared);
+  return status;
+#endif
   PsaKey key;
   status = ImportX25519PrivateKey(privateKey32, PSA_KEY_USAGE_DERIVE, key);
   if (!status.ok()) {
     return status;
   }
 
-  std::array<uint8_t, kX25519KeySize> shared{};
   size_t sharedLen = 0;
   status = PsaStatusToStatus(psa_raw_key_agreement(
       PSA_ALG_ECDH,

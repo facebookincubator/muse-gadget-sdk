@@ -136,6 +136,52 @@ class NoiseCoreCompileTest(unittest.TestCase):
                 msg=run_proc.stdout + run_proc.stderr,
             )
 
+    def test_noise_xx_vector_and_x25519_both_backends(self) -> None:
+        """cacophony's Noise_XX_25519_AESGCM_SHA256 vector and RFC 7748 through
+        the backend, with X25519 from PSA and from HACL* (NOISE_CORE_X25519_HACL,
+        built from ESP-IDF's Everest copy, so it needs IDF_PATH)."""
+        cxx = _cxx_command()
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        if not shutil.which(cc[0]):
+            self.skipTest("C compiler not available")
+        idf_path = os.environ.get("IDF_PATH")
+        if not idf_path:
+            self.skipTest("Set IDF_PATH to build HACL* Curve25519 from ESP-IDF")
+        everest = Path(idf_path) / "components/mbedtls/mbedtls/tf-psa-crypto/drivers/everest"
+        if not (everest / "library/legacy/Hacl_Curve25519.c").exists():
+            self.skipTest(f"no HACL* Curve25519 in {idf_path}")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            flags = _psa_crypto_flags(cxx, tmp)
+            for mode in ("psa", "hacl"):
+                extra: list[str] = []
+                if mode == "hacl":
+                    obj = tmp / "x25519_hacl.o"
+                    proc = subprocess.run(
+                        [*cc, "-c", "-O1", "-Wall", "-Wno-unused-function",
+                         "-I", str(everest / "library"),
+                         "-I", str(everest / "include/tf-psa-crypto/private/everest"),
+                         "-I", str(everest / "include/tf-psa-crypto/private/everest/kremlib"),
+                         str(COMPONENT / "src" / "X25519Hacl.c"), "-o", str(obj)],
+                        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+                    extra = [str(obj), "-DNOISE_CORE_X25519_HACL=1"]
+                binary = tmp / f"noise_xx_{mode}"
+                proc = subprocess.run(
+                    [*cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror", *EMBEDDED_CXX_FLAGS, "-O1",
+                     "-I", str(COMPONENT / "include"),
+                     str(ROOT / "tests" / "noise_xx_vector_harness.cpp"),
+                     str(COMPONENT / "src" / "PsaCryptoBackend.cpp"),
+                     str(COMPONENT / "src" / "Status.cpp"),
+                     *extra, *flags, "-o", str(binary)],
+                    cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+                run = subprocess.run([str(binary)], text=True, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+                with self.subTest(mode):
+                    self.assertEqual(run.returncode, 0, msg=run.stdout + run.stderr)
+                    self.assertIn("3 handshake + 3 transport messages and the handshake hash match", run.stdout)
+                    self.assertRegex(run.stdout, r"x25519: (\d+)/\1 checks pass")
 
 if __name__ == "__main__":
     unittest.main()
