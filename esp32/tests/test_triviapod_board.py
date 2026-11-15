@@ -49,6 +49,16 @@ class TriviaPodSharesStopWatch(unittest.TestCase):
         self.assertIn("CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD=y", overlay)
         self.assertIn('CONFIG_ESPTOOLPY_FLASHSIZE="32MB"', overlay)
 
+    def test_overlay_keeps_the_stopwatch_ram_headroom(self):
+        # Same chip, PSRAM and board file: without these, the 8 KB setup tasks
+        # and link.register run short of internal RAM as on the StopWatch.
+        stopwatch = (ESP32 / "devices/sdkconfig.muse-m5stack-stopwatch").read_text()
+        overlay = (ESP32 / "devices/sdkconfig.muse-m5stack-triviapod").read_text()
+        for line in ("CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y", "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024"):
+            with self.subTest(line=line):
+                self.assertIn(line, stopwatch)
+                self.assertIn(line, overlay)
+
 
 if __name__ == "__main__":
     unittest.main()
