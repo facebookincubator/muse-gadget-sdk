@@ -31,11 +31,18 @@
  */
 const char *muse_ptest_board_name(void);
 const muse_ptest_state_t *muse_ptest_board_matrix(const char *name, size_t *count);
+/* Optional timing hook, weak default returns requested_ms. Zero rejects arm.
+ * A board may extend a bounded workload, <= 600000 ms per state. The core
+ * includes effective durations in the plan and one-hour/charging guard bounds. */
+uint32_t muse_ptest_board_capture_ms(const muse_ptest_state_t *state, uint32_t settle_ms, uint32_t requested_ms);
 esp_err_t muse_ptest_board_init(void);
 esp_err_t muse_ptest_board_power(muse_ptest_readback_t *out);
 esp_err_t muse_ptest_board_apply(const muse_ptest_state_t *state);
 esp_err_t muse_ptest_board_readback(muse_ptest_readback_t *out);
 esp_err_t muse_ptest_board_service(muse_ptest_load_t load);
+/* Optional independent actuator cleanup, called even when fw_apply fails before
+ * reaching the BSP (e.g. a radio/PM error). Weak default is a no-op. */
+esp_err_t muse_ptest_board_stop(void);
 esp_err_t muse_ptest_board_uart_restore(void);
 esp_err_t muse_ptest_board_prepare_deep(bool held);
 esp_err_t muse_ptest_board_release_deep_holds(void);

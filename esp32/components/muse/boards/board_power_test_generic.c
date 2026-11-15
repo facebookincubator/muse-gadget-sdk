@@ -42,6 +42,13 @@
 #ifndef CONFIG_MUSE_BOARD_WAVESHARE_S3_216
 #define CONFIG_MUSE_BOARD_WAVESHARE_S3_216 0
 #endif
+#ifndef CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+#define CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD 0
+#endif
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+#include "muse_triviapod_power.h"
+#include "triviapod_power_test_motor.h"
+#endif
 #if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C || CONFIG_MUSE_BOARD_WAVESHARE_S3_216
 #include "bsp/esp-bsp.h"
 #endif
@@ -66,11 +73,20 @@ static const muse_ptest_state_t s_matrix[] = {
     STATE("lcd_anim_bl_100", "full-screen LVGL color animation at board frame_ms, brightness 100%, CPU 240MHz", MUSE_PTEST_LCD, 240, 100, false),
     STATE("codecs_closed_pre", "codecs uninitialized/closed, display dark", MUSE_PTEST_IDLE, 80, -1, false),
     STATE("codecs_open", "16kHz stereo-slot codecs open, no drain; amplifier managed by codec driver", MUSE_PTEST_CODECS_IDLE, 80, -1, false),
+#if !CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
     STATE("codecs_open_amp_on", "skipped: board has no independent amplifier control", MUSE_PTEST_UNSUPPORTED, 80, -1, true),
+#endif
     STATE("mic_capture_16k", "16kHz stereo slots drained/discarded, board mic slot, 0dB gain; codec driver keeps speaker amplifier on", MUSE_PTEST_MIC, 80, -1, false),
     STATE("sine_1k_minus18dbfs", "1kHz sine -18dBFS peak, volume 25/100, 16kHz stereo slots", MUSE_PTEST_SINE, 80, -1, true),
     STATE("codecs_closed_post", "paired baseline after codec close", MUSE_PTEST_IDLE, 80, -1, false),
     STATE("wifi_scanning", "unassociated active scans, no credentials/NVS; completed scans counted", MUSE_PTEST_WIFI_SCAN, 80, -1, false),
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    STATE("motor_idle_pre", "motor off, paired fixed-80MHz dark baseline", MUSE_PTEST_IDLE, 80, -1, false),
+    STATE("motor_on_60pct", "IO9 PWM1 2000Hz 60%, bounded continuous diagnostic, 30s independent guard", MUSE_PTEST_IDLE, 80, -1, false),
+    STATE("motor_idle_between", "matched 30/70ms scheduler, motor disabled; 302s capture, discard 1s each end", MUSE_PTEST_IDLE, 80, -1, false),
+    STATE("motor_pulses_30_70ms", "30ms pulse then 70ms at +1s, every 5s, 2000Hz 60%; 302s capture, discard 1s each end", MUSE_PTEST_IDLE, 80, -1, false),
+    STATE("motor_idle_post", "matched 30/70ms scheduler, motor disabled; 302s capture, discard 1s each end", MUSE_PTEST_IDLE, 80, -1, false),
+#endif
     STATE("baseline_post", "display paused/dark, panel sleep if available, codecs closed, radio off, DFS + automatic light sleep (expected skipped with USB host)", MUSE_PTEST_IDLE, 0, -1, false),
 };
 #undef STATE
@@ -82,6 +98,9 @@ static lv_obj_t *s_screen;
 static lv_timer_t *s_animation;
 static unsigned s_hue;
 static bool s_paused, s_panel_asleep;
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+static bool s_static_paused;
+#endif
 static esp_codec_dev_handle_t s_spk, s_mic;
 static bool s_audio_attempted, s_spk_open, s_mic_open;
 static bool s_spk_needs_close, s_mic_needs_close;
@@ -142,7 +161,7 @@ static void codec_read_devices_init(void)
 {
     /* Read-only devices survive for the image lifetime; no codec constructor. */
     (void)read_device(0x18, &s_codec_read_devices[0]);
-    (void)read_device(0x40, &s_codec_read_devices[1]);
+    if (!CONFIG_MUSE_BOARD_AIPI && !CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD) { (void)read_device(0x40, &s_codec_read_devices[1]); }
 }
 
 static uint8_t codec_read(bool adc, const uint8_t *regs, size_t n, uint8_t *values)
@@ -157,7 +176,7 @@ static uint8_t codec_read(bool adc, const uint8_t *regs, size_t n, uint8_t *valu
 
 static bool codec_shutdown_matches(void)
 {
-    bool has_adc = !CONFIG_MUSE_BOARD_AIPI;
+    bool has_adc = !CONFIG_MUSE_BOARD_AIPI && !CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD;
     if (s_spk_needs_close || s_mic_needs_close || s_codec_regs.dac_mask != 0x7f) { return false; }
     /* Shutdown readbacks, not written values: reserved bits read as zero. */
     const uint8_t *d = s_codec_regs.dac;
@@ -175,7 +194,7 @@ static void codec_snapshot(void)
     static const uint8_t adc[] = {0x01,0x06,0x40,0x47};
     memset(&s_codec_regs, 0, sizeof(s_codec_regs));
     s_codec_regs.dac_mask = (uint8_t)codec_read(false, dac, sizeof(dac), s_codec_regs.dac);
-    bool has_adc = !CONFIG_MUSE_BOARD_AIPI;
+    bool has_adc = !CONFIG_MUSE_BOARD_AIPI && !CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD;
     if (has_adc) {
         s_codec_regs.adc_variant = 3;
         s_codec_regs.adc_mask = codec_read(true, adc, sizeof(adc), s_codec_regs.adc);
@@ -200,16 +219,21 @@ static TickType_t s_charge_wait = portMAX_DELAY;
 #define CHARGE_EXPIRED_MAGIC 0x43484731u
 static RTC_NOINIT_ATTR uint32_t s_charge_expired;
 static int64_t s_boot_retry_us;
+#if !CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
 static i2c_master_dev_handle_t s_pmu_device;
+#endif
 _Static_assert(sizeof(s_codec_history) + sizeof(s_charge_expired) <= MUSE_PTEST_RTC_RECOVERY_BYTES, "recovery RTC budget");
 
 bool muse_ptest_board_charging_supported(void)
 {
-    return CONFIG_MUSE_BOARD_WAVESHARE_S3_175C || CONFIG_MUSE_BOARD_WAVESHARE_S3_216;
+    return CONFIG_MUSE_BOARD_WAVESHARE_S3_175C || CONFIG_MUSE_BOARD_WAVESHARE_S3_216 || CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD;
 }
 
 static esp_err_t set_charging(bool on)
 {
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    return muse_triviapod_charge(on);
+#else
     esp_err_t e = ESP_OK;
 #if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C || CONFIG_MUSE_BOARD_WAVESHARE_S3_216
     /* Board init may never run, or fail before creating the bus. Retry only
@@ -226,6 +250,7 @@ static esp_err_t set_charging(bool on)
         if (!e && actual != write[1]) { e = ESP_FAIL; }
     }
     return e;
+#endif
 }
 
 /* Caller holds the mutex, or is booting/polling before a guard exists. */
@@ -347,6 +372,9 @@ static esp_err_t console_lock(void);
 esp_err_t muse_ptest_board_power(muse_ptest_readback_t *out)
 {
     boot_charge_retry();
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    muse_triviapod_ptest_motor_retry();
+#endif
     if (!s_board) { return ESP_ERR_INVALID_STATE; }
     esp_err_t e = console_lock();
     if (e) { return e; }
@@ -424,6 +452,9 @@ static esp_err_t audio_open(void)
 static esp_err_t display_apply(const muse_ptest_state_t *state)
 {
     bool lit = state->backlight_pct >= 0;
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    if (s_static_paused) { muse_triviapod_pause_static(false); s_static_paused = false; }
+#endif
     bool animated = !strcmp(state->id, "lcd_anim_bl_100");
     s_board->set_brightness(0);
     /* AIPI panel commands share the flush bus: send while LVGL is paused. */
@@ -450,7 +481,10 @@ static esp_err_t display_apply(const muse_ptest_state_t *state)
         s_board->set_brightness(state->backlight_pct);
     }
     /* Pause outside the LVGL lock: the adapter waits for its task. */
-    if (!animated && s_board->display_pause && !s_paused) {
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    if (lit && !animated) { muse_triviapod_pause_static(true); s_static_paused = true; }
+#endif
+    if (!animated && (!CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD || !lit) && s_board->display_pause && !s_paused) {
         s_board->display_pause(true);
         s_paused = true;
     }
@@ -463,6 +497,10 @@ static esp_err_t display_apply(const muse_ptest_state_t *state)
 
 esp_err_t muse_ptest_board_apply(const muse_ptest_state_t *state)
 {
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    esp_err_t motor_error = muse_triviapod_ptest_motor_apply(NULL);
+    if (motor_error) { return motor_error; }
+#endif
     if (CONFIG_MUSE_BOARD_AIPI && s_board && s_board->read_power) {
         esp_err_t e = s_board->read_power(&s_power);
         if (e) { return e; }
@@ -480,7 +518,11 @@ esp_err_t muse_ptest_board_apply(const muse_ptest_state_t *state)
     if (e) { return e; }
     if (display_error) { return display_error; }
     if (audio && s_board->audio_power) { s_board->audio_power(state->amplifier); }
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    return muse_triviapod_ptest_motor_apply(state);
+#else
     return ESP_OK;
+#endif
 }
 
 esp_err_t muse_ptest_board_readback(muse_ptest_readback_t *out)
@@ -492,12 +534,28 @@ esp_err_t muse_ptest_board_readback(muse_ptest_readback_t *out)
     out->codecs_open = s_spk_open && s_mic_open;
     out->configured_volume = s_volume;
     out->io_frames = s_frames;
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    muse_triviapod_ptest_motor_readback(out);
+#endif
     return ESP_OK;
+}
+
+esp_err_t muse_ptest_board_stop(void)
+{
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    return muse_triviapod_ptest_motor_apply(NULL);
+#else
+    return ESP_OK;
+#endif
 }
 
 esp_err_t muse_ptest_board_service(muse_ptest_load_t load)
 {
     if (charge_expired()) { return ESP_ERR_TIMEOUT; }
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    esp_err_t motor_error = muse_triviapod_ptest_motor_service();
+    if (motor_error) { return motor_error; }
+#endif
     if (load != s_load) { return ESP_ERR_INVALID_STATE; }
     if (load != MUSE_PTEST_MIC && load != MUSE_PTEST_SINE) { return ESP_OK; }
     int16_t pcm[160 * 2];
@@ -595,6 +653,10 @@ esp_err_t muse_ptest_board_init(void)
      * attempt recovery before task allocation or any board initialization. */
     s_charge_restore_pending = muse_ptest_board_charging_supported();
     (void)restore_charging_locked(3);
+#if CONFIG_MUSE_BOARD_M5STACK_TRIVIAPOD
+    esp_err_t motor_error = muse_triviapod_ptest_motor_apply(NULL);
+    if (motor_error) { return motor_error; }
+#endif
     s_boot_retry_us = esp_timer_get_time() + 5000000;
     if (xTaskCreatePinnedToCore(init_on_ui_core, "ptest_init", 8192,
             xTaskGetCurrentTaskHandle(), MUSE_UI_PRIORITY, NULL, MUSE_UI_CORE) != pdPASS) { return ESP_ERR_NO_MEM; }

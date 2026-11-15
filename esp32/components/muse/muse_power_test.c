@@ -333,6 +333,11 @@ static void emit(const char *fmt, ...)
     if (n > 0 && n < (int)sizeof(buf)) { fw_write(buf, (size_t)n); }
 }
 
+static uint32_t capture_ms(const muse_ptest_state_t *state)
+{
+    return muse_ptest_board_capture_ms(state, s_run.settle_ms, s_run.capture_ms);
+}
+
 static void emit_actual(const muse_ptest_readback_t *a)
 {
     emit("{\"usb\":%s,\"charging\":%s,\"expander_input\":%u,\"expander_output\":%u,\"expander_direction\":%u,",
@@ -342,6 +347,9 @@ static void emit_actual(const muse_ptest_readback_t *a)
     emit("\"wifi_started\":%s,\"wifi_scans\":%" PRIu32 ",\"pm_min_mhz\":%d,\"pm_max_mhz\":%d,\"auto_light_sleep\":%s,\"cpu_readback_mhz\":%d,\"slept_us\":%" PRId64 ",\"sleep_count\":%" PRIu32 ",",
          a->wifi_started ? "true" : "false", a->wifi_scans, a->pm_min_mhz, a->pm_max_mhz,
          a->auto_light_sleep ? "true" : "false", a->cpu_readback_mhz, a->slept_us, a->sleep_count);
+    if (a->motor_valid || a->motor_mode) {
+        emit("\"motor_valid\":%s,\"motor_mode\":%u,\"motor_duty_raw\":%u,\"motor_pulses_including_settle\":%u,\"motor_max_on_ms\":%u,", a->motor_valid ? "true" : "false", a->motor_mode, a->motor_duty, a->motor_pulses, a->motor_max_on_ms);
+    }
     static const char *const codec_names[] = { "unknown", "cold", "initialized", "suspended" };
     emit("\"knobs_applied\":%u,\"codec_state\":\"%s\"}", a->knobs_applied,
          a->codec_state <= MUSE_PTEST_CODEC_SUSPENDED ? codec_names[a->codec_state] : "unknown");
@@ -411,8 +419,10 @@ static void emit_plan(void)
         const muse_ptest_state_t *s = run_state(i);
         emit("%s{\"index\":%u,\"id\":\"%s\",\"timed\":%s,\"cpu_mhz\":%d,\"backlight_pct\":%d,\"amplifier\":%s,\"note\":\"%s\",",
              i ? "," : "", (unsigned)i, s->id, s->load == MUSE_PTEST_UNSUPPORTED ? "false" : "true", s->cpu_mhz, s->backlight_pct, s->amplifier ? "true" : "false", s->note);
-        emit("\"deep_sleep\":%s,\"poll_ms\":%u,\"role\":\"%s\",\"ref_group\":\"%s\",\"knobs\":",
+        emit("\"deep_sleep\":%s,\"poll_ms\":%u,\"role\":\"%s\",\"ref_group\":\"%s\",",
              s->load == MUSE_PTEST_DEEP_SLEEP ? "true" : "false", s->poll_ms, s->role, s->ref_group);
+        emit("\"capture_ms\":%" PRIu32 ",", capture_ms(s));
+        emit("\"knobs\":");
         emit_knobs(s);
         emit("}");
     }
@@ -566,7 +576,9 @@ static void finish_run(run_status_t status, esp_err_t error)
     s_run.finished_us = fw_now();
     if (error) { remember_error(); save_run(); } /* checkpoint before reset-prone restoration */
     /* One safe resting state, even on abort. Never drops EXP_PWR_SYSTEM. */
-    s_run.restore_error = fw_apply(resting_state());
+    s_run.restore_error = muse_ptest_board_stop();
+    esp_err_t apply_error = fw_apply(resting_state());
+    if (!s_run.restore_error) { s_run.restore_error = apply_error; }
     if (!s_run.restore_error) {
         muse_ptest_readback_t restored = {0};
         s_run.restore_error = fw_readback(&restored); /* USB allowed outside RUN_RUNNING */
@@ -694,17 +706,21 @@ static void command(const char *line)
     if (strncmp(line, ">ptest.arm=", 11)) { emit_error("unknown_command", ESP_ERR_INVALID_ARG); return; }
     arm_t a;
     if (!parse_arm(line + 11, &a)) { emit_error("invalid_arm_json_or_bounds", ESP_ERR_INVALID_ARG); return; }
-    unsigned timed = 0, deep = 0;
+    uint64_t duration = 0;
     if (a.matrix == MATRIX_SLEEP && a.repeats != 1) { emit_error("sleep_requires_one_repeat_cold_not_reversible", ESP_ERR_INVALID_ARG); return; }
     if (a.matrix == MATRIX_SLEEP && a.usb_powered) { emit_error("usb_powered_requires_peripheral_matrix", ESP_ERR_NOT_SUPPORTED); return; }
     if (!matrix_count(a.matrix) || matrix_count(a.matrix) > MUSE_PTEST_MAX_RECORDS / a.repeats) {
         emit_error("matrix_unavailable_or_exceeds_capacity", ESP_ERR_NOT_SUPPORTED); return;
     }
     for (size_t i = 0; i < matrix_count(a.matrix); i++) {
-        timed += matrix_states(a.matrix)[i].load != MUSE_PTEST_UNSUPPORTED;
-        deep += matrix_states(a.matrix)[i].load == MUSE_PTEST_DEEP_SLEEP;
+        const muse_ptest_state_t *state = &matrix_states(a.matrix)[i];
+        uint32_t ms = muse_ptest_board_capture_ms(state, a.settle_ms, a.capture_ms);
+        if (!ms || ms > 600000u) { emit_error("board_state_duration_invalid", ESP_ERR_INVALID_ARG); return; }
+        if (state->load != MUSE_PTEST_UNSUPPORTED) { duration += a.settle_ms + ms + 10000u; }
+        if (state->load == MUSE_PTEST_DEEP_SLEEP) { duration += 10000u; }
     }
-    uint32_t bound = a.repeats * (timed * (a.settle_ms + a.capture_ms + 10000u) + deep * 10000u) + 10000u;
+    uint64_t bound64 = a.repeats * duration + 10000u;
+    uint32_t bound = bound64 <= UINT32_MAX ? (uint32_t)bound64 : UINT32_MAX;
     if (bound > 3600000u) { emit_error("arm_total_duration_exceeds_one_hour", ESP_ERR_INVALID_ARG); return; }
     if (s_run.status == RUN_ARMED || s_run.status == RUN_RUNNING) { emit_error("already_active", ESP_ERR_INVALID_STATE); return; }
     if (s_init_error) { emit_error("board_initialization_failed", s_init_error); return; }
@@ -912,7 +928,7 @@ static void tick(void)
             r->status = REC_CAPTURE;
             save_run();
         }
-    } else if (r->status == REC_CAPTURE && now - r->measure_start_us >= (int64_t)s_run.capture_ms * 1000) {
+    } else if (r->status == REC_CAPTURE && now - r->measure_start_us >= (int64_t)capture_ms(s) * 1000) {
         e = sample(r);
         if (e && usb_aborts(r->actual.usb)) { abort_run(e, false); return; }
         r->end_us = fw_now();
@@ -1167,6 +1183,9 @@ static void fw_codec_regs(muse_ptest_codec_regs_t *out) { muse_ptest_board_codec
 static void fw_dryrun_mode(bool on) { muse_ptest_board_usb_dryrun(on); }
 #endif
 
+__attribute__((weak)) esp_err_t muse_ptest_board_stop(void) { return ESP_OK; }
+__attribute__((weak)) uint32_t muse_ptest_board_capture_ms(const muse_ptest_state_t *state, uint32_t settle_ms, uint32_t requested_ms)
+{ (void)state; (void)settle_ms; return requested_ms; }
 __attribute__((weak)) bool muse_ptest_board_charging_supported(void) { return false; }
 __attribute__((weak)) esp_err_t muse_ptest_board_charging(bool off, uint32_t guard_ms)
 {
@@ -1255,7 +1274,7 @@ void muse_power_test_run(void)
             muse_ptest_load_t load = run_state(r->state_index)->load;
             delay_ms = (load == MUSE_PTEST_MIC || load == MUSE_PTEST_SINE) ? 1 : running_poll_ms();
             if (s_run.matrix == MATRIX_SLEEP && (r->status == REC_SETTLE || r->status == REC_CAPTURE)) {
-                int64_t deadline = r->status == REC_SETTLE ? r->applied_us + (int64_t)s_run.settle_ms * 1000 : r->measure_start_us + (int64_t)s_run.capture_ms * 1000;
+                int64_t deadline = r->status == REC_SETTLE ? r->applied_us + (int64_t)s_run.settle_ms * 1000 : r->measure_start_us + (int64_t)capture_ms(run_state(r->state_index)) * 1000;
                 int64_t remaining = deadline - fw_now();
                 uint32_t boundary_ms = remaining > 0 ? (uint32_t)((remaining + 999) / 1000) : 1;
                 if (boundary_ms < delay_ms) { delay_ms = boundary_ms; }

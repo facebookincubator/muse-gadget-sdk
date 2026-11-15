@@ -94,3 +94,76 @@ Steps, from run 1 at the 5 V input:
 - Windows are cut from each record's own start and end times, mapped to
   host time through the board's console replies, with 1 s guards.
 - Two runs per board give no confidence interval.
+
+## TriviaPOD (2026-11-10)
+
+The [TriviaPOD power-test image](triviapod.md) on one unit, three sweeps,
+each a separate run.
+
+- POWER-Z KM003C on the USB input, computer attached, battery fitted (4174 to
+  4190 mV in the readbacks), `"charging_off":1`: the M5PM1 charge bit was
+  cleared for each run and set again after it, both with readback.
+- Five seconds settling, 20 s capture, 302 s for the pulse row and its two
+  controls, 1 s guards, meter read 20 times per second with ±10 ms jitter.
+- Firmware: image built from this change (`muse-gadget.bin` SHA-256
+  `e9f3bb0d4961cf66629ae85017e1e330fcfccef34c1f3c58619cf29bc0ab495b`).
+- The console is the native USB Serial/JTAG, so the DFS baselines are
+  USB-awake idle and reported skipped, as on the 1.75C.
+
+All 81 rows are in [usb5v-profile.csv](usb5v-profile.csv). Mean mA / mW at
+the 5 V input:
+
+| State | Run 1 | Run 2 | Run 3 |
+|---|---:|---:|---:|
+| `cpu_fixed_40_idle` | 27.15 / 142.4 | 14.52 / 76.2 | 14.51 / 76.2 |
+| `cpu_fixed_240_idle` | 41.35 / 216.7 | 28.71 / 150.6 | 28.75 / 150.8 |
+| `lcd_black_bl_100` | 40.38 / 211.7 | 27.74 / 145.5 | 27.80 / 145.8 |
+| `lcd_white_bl_100` | 138.50 / 722.8 | 126.24 / 659.3 | 126.15 / 658.8 |
+| `lcd_anim_bl_100` | 115.54 / 603.6 | 103.87 / 543.0 | 103.59 / 541.5 |
+| `codecs_open` | 52.91 / 277.2 | 51.50 / 269.9 | 51.52 / 270.0 |
+| `mic_capture_16k` | 53.11 / 278.3 | 51.61 / 270.5 | 51.67 / 270.7 |
+| `sine_1k_minus18dbfs` | 53.26 / 279.0 | 51.86 / 271.8 | 51.84 / 271.6 |
+| `wifi_scanning` | 57.10 / 299.0 | 55.86 / 292.6 | 56.08 / 293.7 |
+| `motor_idle_pre` | 21.48 / 112.7 | 21.39 / 112.2 | 21.37 / 112.1 |
+| `motor_on_60pct` | 70.86 / 371.0 | 70.64 / 369.9 | 70.52 / 369.2 |
+| `motor_idle_between` | 21.40 / 112.3 | 21.33 / 111.9 | 21.31 / 111.8 |
+| `motor_pulses_30_70ms` | 22.59 / 118.5 | 22.60 / 118.6 | 22.55 / 118.3 |
+| `motor_idle_post` | 21.27 / 111.6 | 21.24 / 111.4 | 21.23 / 111.4 |
+| `baseline_post` (DFS) | 17.20 / 90.3 | 17.17 / 90.1 | 17.18 / 90.1 |
+
+Run 1 came right after flashing: its codec history is `unknown` and the
+ES8311 registers read as a running codec. Before the first codec open it is
+11.7 to 12.7 mA above runs 2 and 3, whose history is `suspended`
+(`codecs_closed_pre` 33.91 against 21.24 and 21.27 mA). From `codecs_open` to
+`wifi_scanning` it is 1.0 to 1.5 mA above them, and from the motor rows on
+the three runs agree within 0.34 mA.
+
+Steps inside a run, the same in all three: CPU fixed 240 over 40 MHz
+14.21 ± 0.03 mA; white over black at 100 % 98.32 ± 0.19 mA.
+
+### Vibration motor
+
+IO9/PWM1 at 2000 Hz and 60 % duty. Each delta is the motor row minus the
+mean of the motor-off rows before and after it.
+
+| Run | Continuous, mA / mW | Pulses, mA / mW | Idle drift over the pulse rows, mA |
+|---|---:|---:|---:|
+| 1 | +49.41 / +258.5 | +1.249 / +6.53 | -0.126 |
+| 2 | +49.28 / +257.8 | +1.322 / +6.91 | -0.090 |
+| 3 | +49.18 / +257.2 | +1.276 / +6.67 | -0.086 |
+
+- Motor on continuously: **49.29 ± 0.12 mA, 257.9 ± 0.6 mW** (mean and
+  sample SD of the three runs).
+- A 30 ms and a 70 ms pulse every 5 s: **1.28 ± 0.04 mA, 6.7 ± 0.2 mW** as a
+  mean over 300 s, or 33.5 ± 1.1 mJ per pair of pulses.
+- Each run logged 124 pulses. The longest time from the enabling write to
+  the verified stop was 108.34 ms, which includes the I2C work.
+
+## TriviaPOD limits
+
+- One unit, three runs.
+- USB input with the battery fitted. The sweep does not measure battery
+  current and gives no battery runtime.
+- The pulse figure is a window mean at this schedule. At 20 Hz the meter does
+  not resolve a single pulse or its peak.
+- The pulse schedule is a test pattern, not a recording of real use.

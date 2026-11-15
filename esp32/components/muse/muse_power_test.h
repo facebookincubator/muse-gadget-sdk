@@ -107,11 +107,16 @@ typedef struct {
     uint32_t adc_samples;
     uint32_t wifi_scans;
     bool wifi_started;
+    uint8_t motor_pulses; /* successful pulse starts, per state (includes settle) */
     int16_t pm_min_mhz, pm_max_mhz;
     bool auto_light_sleep;
+    bool motor_valid; /* cached successful IO9/PWM1 readback, no capture I2C */
     int16_t cpu_readback_mhz; /* instantaneous clock at the boundary */
+    uint16_t motor_duty; /* raw enabled duty register, 0x8999 / 0 */
     int64_t slept_us;        /* measured automatic light sleep, if enabled */
     uint32_t sleep_count;
+    uint16_t motor_max_on_ms; /* conservative enable-operation to verified-stop span */
+    uint8_t motor_mode; /* 0 off, 1 continuous, 2 paired pulses, 3 matched idle */
 } muse_ptest_readback_t;
 
 /* Never returns to app_run/muse_glue. Compiled only in opt-in power-test builds. */

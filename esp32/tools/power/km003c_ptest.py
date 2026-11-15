@@ -10,6 +10,7 @@
 # limitations under the License.
 
 """Measure USB-powered PTEST windows with a POWER-Z KM003C (docs/power/km003c.md)."""
+import random
 import argparse
 from contextlib import ExitStack, closing
 import json
@@ -48,9 +49,11 @@ class Console:
 
 class Recorder(threading.Thread):
     """Samples are read only after join; USB reads have bounded timeouts."""
-    def __init__(self, meter, rate_hz):
+    def __init__(self, meter, rate_hz, jitter_s=0):
         super().__init__(daemon=True)
         self.meter, self.period = meter, 1.0 / rate_hz
+        self.jitter_s = jitter_s
+        self.schedule_random = random.Random(0)  # repeatable phase dither, not security
         self.samples, self.error = [], None
         self.stopped = threading.Event()
     def run(self):
@@ -61,8 +64,8 @@ class Recorder(threading.Thread):
             except Exception as e:
                 self.error = e
                 return
-            self.samples.append((r.host_time_s, abs(r.ibus_a) * 1e6, r.vbus_v))
-            next_read += self.period
+            self.samples.append((r.host_time_s, r.ibus_a * 1e6, r.vbus_v))
+            next_read += self.period + self.schedule_random.uniform(-self.jitter_s, self.jitter_s)
             now = time.monotonic()
             if next_read <= now:  # A slow read restarts the schedule; never burst to catch up.
                 next_read = now + self.period
@@ -93,14 +96,14 @@ def summarise(samples, window, guard_s, rate_hz):
     if hi <= lo or len(inside) < max(2, 0.8 * rate_hz * (hi - lo)):
         return None
     stats = CurrentStats(4096)
-    stats.add([s[1] for s in inside])
+    stats.add([abs(s[1]) for s in inside])
     vbus_v = sum(s[2] for s in inside) / len(inside)
     # Charge integrates at the observed rate; coverage is against the requested rate.
     expected = rate_hz * (hi - lo)
     coverage = dict(expected_sample_count_estimate=expected, coverage_ratio_estimate=len(inside) / expected,
                     missing_sample_count_estimate=max(0.0, expected - len(inside)))
     return {**stats.summary(hi - lo, vbus_v * 1000, len(inside) / (hi - lo)), **coverage, "mean_vbus_v": vbus_v,
-            "mean_power_mW": sum(s[1] * s[2] for s in inside) / len(inside) / 1000, "included_s": hi - lo}
+            "mean_power_mW": sum(abs(s[1]) * s[2] for s in inside) / len(inside) / 1000, "included_s": hi - lo}
 
 def ptest_lines(console, seconds):
     for line in console.lines(seconds):
@@ -110,10 +113,12 @@ def ptest_lines(console, seconds):
                 raise ValueError("expected PTEST JSON object")
             yield time.monotonic(), message
 
-def collect_results(console, run_id):
+def collect_results(console, run_id, motor_pulses=None):
     for _ in range(2):  # One bounded retry for a missing results response.
         console.send("ptest.results", wake=True)
         for _, message in ptest_lines(console, 5):
+            if message.get("type") == "motor_pulse" and motor_pulses is not None:
+                motor_pulses.append(message)
             if message.get("type") == "results":
                 error = None
                 if message.get("run_id") != run_id or message.get("state") != "complete":
@@ -145,13 +150,17 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--guard-s", type=float, default=1.0, help="dropped at both window ends")
     parser.add_argument("--rate-hz", type=float, default=20.0)
+    parser.add_argument("--jitter-ms", type=float, default=0, help="uniform +/- polling jitter to avoid pulse phase aliasing; use 10 for motor rows")
     parser.add_argument("--boot-wait-s", type=float, default=20.0, help="console open may reset board")
     parser.add_argument("--meter-serial")
     parser.add_argument("--charging-off", action="store_true")
     args = parser.parse_args(argv)
     if not 0 < args.rate_hz <= 40 or args.guard_s < 0 or args.capture_ms / 1000 <= 2 * args.guard_s:
         parser.error("rate must be in (0, 40]; capture must exceed twice the nonnegative guard")
+    if not 0 <= args.jitter_ms / 1000 < 0.5 / args.rate_hz:
+        parser.error("jitter must be nonnegative and less than half the sample period")
     ack, anchors, results, results_error, records = None, [], {}, None, {}
+    motor_pulses = []
     with ExitStack() as stack:
         meter = stack.enter_context(closing(meter_factory(args.meter_serial)))
         writer = stack.enter_context(closing(JSONLWriter(args.output)))
@@ -160,7 +169,7 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
         for signum in (signal.SIGTERM, signal.SIGHUP):
             previous = signal.signal(signum, interrupted)
             stack.callback(signal.signal, signum, previous)
-        recorder = Recorder(meter, args.rate_hz)
+        recorder = Recorder(meter, args.rate_hz, args.jitter_ms / 1000)
         armed = False
         try:
             console = stack.enter_context(closing(console_factory(args.console)))
@@ -194,6 +203,7 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
                     console.send("ptest.status")
                     next_poll = time.monotonic() + 10
                 for at, m in ptest_lines(console, 1):
+                    if m.get("type") == "motor_pulse": motor_pulses.append(m)
                     if m.get("type") == "status" and m.get("run_id") == args.run_id:
                         anchors.append((m["now_us"] / 1e6, at))
                         finished = m.get("state") not in ("armed", "running")
@@ -202,7 +212,7 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
                 raise TimeoutError("run exceeded duration bound")
             armed = False  # The run has ended; nothing left to abort.
             recorder.stop()
-            results, results_error = collect_results(console, args.run_id)
+            results, results_error = collect_results(console, args.run_id, motor_pulses)
             if results.get("run_id") == args.run_id:
                 records = {(r["id"], r["repeat"]): r for r in results.get("records", [])}
                 if len(records) != len(results.get("records", [])):
@@ -233,7 +243,7 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
         writer.write({"type": "header", "meter": "POWER-Z KM003C", "measures": "USB 5 V input",
                       "arm_ack": ack, "results_state": results.get("state"), "results_error": results_error,
                       "results": results, "guard_s": args.guard_s, "charging_off": args.charging_off,
-                      "rate_hz": args.rate_hz, "meter_error": repr(recorder.error) if recorder.error else None,
+                      "rate_hz": args.rate_hz, "jitter_ms": args.jitter_ms, "motor_pulses": motor_pulses, "meter_error": repr(recorder.error) if recorder.error else None,
                       "errors": failures})
         print(f"{'state':<26} {'status':<9} {'mean mA':>8} {'p95 mA':>8} {'mean mW':>8}")
         for row in rows:
@@ -241,8 +251,10 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
             if "mean_uA" in row:
                 print(f"{row['state']:<26} {str(row['status']):<9} {row['mean_uA'] / 1000:8.2f} "
                       f"{row['p95_uA'] / 1000:8.2f} {row['mean_power_mW']:8.1f}")
+        if not failures:
+            writer.write({"type": "samples", "columns": ["host_time_s", "signed_current_uA", "vbus_v"], "samples": samples})
         if failures:
-            writer.write({"type": "partial_capture", "anchors": anchors, "samples": samples})
+            writer.write({"type": "partial_capture", "anchors": anchors, "columns": ["host_time_s", "signed_current_uA", "vbus_v"], "samples": samples})
             print(f"power-test failed: {'; '.join(failures)}; data saved to {args.output}", file=sys.stderr)
         return int(bool(failures))
 
