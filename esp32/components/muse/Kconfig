@@ -14,6 +14,15 @@
 
 menu "Muse"
 
+    config MUSE_LATEST_REPLY
+        bool "Latest reply screen"
+        depends on MUSE_BOARD_WAVESHARE_S3_175C && SPIRAM && MUSE_HATCH
+        default y
+        help
+            Swipe right from Main to reread the latest received answer.
+            Keeps up to 32 KiB in PSRAM until reboot; receiver message slots
+            use 256 KiB. No conversation text is written to flash.
+
     choice MUSE_BOARD
         prompt "Board with the full UI"
         default MUSE_BOARD_NONE
@@ -530,7 +539,37 @@ if MUSE_REALTIME_VOICE
             talk over Muse. Otherwise, and on other boards, the mic is shut
             while Muse is audibly talking and for a moment after.
 
+    config MUSE_VOICE_SOFTWARE_AEC
+        bool "Software echo cancellation for hands-free voice interruption"
+        depends on IDF_TARGET_ESP32S3 && MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+        select MUSE_STATIC_BUFFERS_IN_PSRAM
+        default n
+        help
+            Use Espressif's full-duplex echo canceller to keep the mic
+            available while Muse speaks. Requires a board with enough
+            internal RAM and PSRAM, plus a calibrated speaker reference
+            delay. If initialization fails, calls remain half-duplex.
+
+    config MUSE_VOICE_AEC_REF_DELAY_CHUNKS
+        int "Speaker-to-mic reference delay in 20 ms chunks"
+        depends on MUSE_VOICE_SOFTWARE_AEC
+        range 1 10
+        default 2
+        help
+            Set per board after measuring the delay between a speaker write
+            and its echo in the microphone. The Waveshare 2.06 watch measured
+            about 50 ms, so two chunks place the reference within the AEC
+            filter's remaining adjustment range. Other boards need a bench
+            measurement before enabling this feature.
+
 endif
+
+    # Always defined, so idf_component.yml can key esp-sr on it in every build
+    # (a bool whose dependencies are unmet isn't written to sdkconfig).
+    config MUSE_VOICE_AEC_SR
+        string
+        default "y" if MUSE_VOICE_SOFTWARE_AEC
+        default "n"
 
     config MUSE_HATCH_COMPACT_BUFFERS
         bool "Smaller voice session buffers, for 2 MB of PSRAM"
@@ -544,6 +583,24 @@ endif
             128 KB of speech, 2 s of mic backlog and 1 s of decoded audio
             (about 220 KB), which still covers a push-to-talk turn. Board
             overlays with 2 MB of PSRAM turn it on.
+
+    config CAPABILITIES_REGISTRY
+        bool
+        help
+            The device registry (components/capabilities_registry) and the drivers that
+            describe the gadget's sensors and outputs to it: the battery, and
+            whatever the board file registers (motors, IMUs). Only WebAssembly
+            apps read it so far, and they select it; without it none of this
+            is built.
+
+    config MUSE_APP_VIEW
+        bool
+        help
+            The screen an app runs on (muse_app_view.c): a full-screen LVGL
+            root over the face that the app's objects go under, with touch,
+            gestures and the buttons by role. The power key, a voice call or
+            the video view closes it. WebAssembly apps select it
+            (components/muse_apps).
 
     config MUSE_VIDEO
         bool "Video streaming from a phone to the display"

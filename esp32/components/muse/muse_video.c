@@ -15,6 +15,11 @@
  */
 #include "muse_video.h"
 
+#include "sdkconfig.h"
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
+#endif
+
 #include <string.h>
 
 #include "esp_debug_helpers.h"
@@ -1181,6 +1186,11 @@ void muse_video_open(void)
     }
     ESP_LOGI(TAG, "view open");
     s_open = true;
+#if CONFIG_MUSE_APP_VIEW
+    /* After s_open: an app view opening meanwhile sees the video and closes
+     * (muse_app_view_open), or is open and stops here. */
+    muse_app_view_preempt(MUSE_APP_STOP_VIDEO);
+#endif
     for (int i = 0; i < s_ntransports; i++) {
         if (s_transports[i]->request) {
             s_transports[i]->request(true);

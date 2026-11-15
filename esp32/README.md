@@ -337,6 +337,15 @@ VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../pro
 [`../protocols/DEVICE.md`](../protocols/DEVICE.md) says how a gadget describes
 itself to Muse: its family, its model and its usage guide.
 
+To let Muse run a small app of its own on a board's screen,
+build it with `MUSE_APPS=1 tools/muse/board.sh build <board>`: Muse writes a
+WebAssembly app on its VM, and the board's `app.run` command loads it and runs
+it in place of the face, with LVGL widgets, the buttons and touch, the chat
+and the board's sensors (apps API 1.1, [`components/muse_apps/sdk/api/`](components/muse_apps/sdk/api/README.md)).
+`app.install` keeps an app on the board, for its launcher (Apps, in Settings).
+[`components/muse_apps/sdk/README.md`](components/muse_apps/sdk/README.md) shows how to write one and how to ask Muse
+for one, and [`AGENTS.md`](AGENTS.md#webassembly-apps) how it works.
+
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
@@ -389,7 +398,9 @@ and builds without it don't change. With it on:
   background work, whose results may arrive later.
 - **Other boards:** tap the talk button to start a call, press again to hang up;
   holding still sends a voice note. The mic is off while Muse talks, except on
-  the Voice PE when its audio chip reports echo cancellation.
+  the Voice PE when its audio chip reports echo cancellation. ESP32-S3 boards
+  with enough PSRAM can opt into [software echo cancellation](docs/software-aec.md)
+  to allow hands-free interruption during playback.
 - A call also ends when Muse ends it, after 45 seconds of quiet (not counting
   time Muse is still working on something), or after 15 minutes. Muse may not
   hang up by itself when it says goodbye: press to end the call. If the
@@ -442,6 +453,29 @@ use the existing text-caption path. This option does not add TTS or
 enable live voice calls, and is off by default for every board. It isn't
 available on the SenseCAP Watcher (a short wheel click sleeps) or on
 e-paper boards with the FreeInk UI.
+
+### Latest reply on the Waveshare 1.75C
+
+With `CONFIG_MUSE_LATEST_REPLY` (on by default for the 1.75C), swipe right
+from Main to reread the latest answer received by the gadget. Scroll vertically;
+swipe left to return. The same three bottom dots indicate Latest reply, Main,
+and Settings on all three screens. The reader uses the main screen's pixel
+caption font. While reading, a floating
+**New reply ↓** button scrolls smoothly to the top of a newer answer. Returning
+from Main preserves the displayed answer and its scroll position. Completed
+messages from one gadget turn are joined together.
+
+The answer survives screen sleep and clears on reboot. Empty or failed requests
+keep the preceding answer. This is local reply retention, not server chat history.
+The combined answer is capped at 32 KiB, ending in `...` if cut.
+It uses PSRAM: eight 32 KiB receiver slots, a 32 KiB saved answer, a 32 KiB display
+snapshot, plus LVGL layout memory. The new-reply animation temporarily needs
+one extra 32 KiB snapshot while both answers are on screen. It does not write
+conversation text to flash.
+Screenshot builds also accept `>ui=reply`, `>ui.reply=down`, and `>ui.reply=new`
+on the USB console for repeatable on-device checks. `>ui.reply=test-long` replaces
+the saved answer with an oversized synthetic reply; `>ui.reply=end` scrolls to
+the end to check truncation. These commands are disabled in normal builds.
 
 ## Tests
 
@@ -500,6 +534,10 @@ their upstream licenses:
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
   Medium (SIL OFL 1.1); see its README.
+- [`main/fonts/epaper_154g_caption_font.h`](main/fonts/epaper_154g_caption_font.h),
+  the Waveshare 1.54G's reply font, is a subset of GNU Unifont 16.0.04 (SIL OFL
+  1.1, or GPL-2.0+ with the font embedding exception); see
+  [`main/fonts/README.md`](main/fonts/README.md).
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.

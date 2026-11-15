@@ -15,6 +15,11 @@
  */
 
 #include "muse_ui.h"
+#if CONFIG_MUSE_LATEST_REPLY
+#include "muse_latest_reply.h"
+#endif
+
+#include <stdatomic.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -54,6 +59,9 @@
 #endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 #include "muse_review.h"
+#endif
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
 #endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
@@ -139,11 +147,19 @@ static void tile_changed_cb(lv_event_t *e)
 {
     lv_obj_t *tv = lv_event_get_target(e);
     s_face_active = (lv_tileview_get_tile_active(tv) == s_face);
+#if CONFIG_MUSE_LATEST_REPLY
+    muse_latest_reply_set_visible(lv_tileview_get_tile_active(tv) == muse_latest_reply_tile());
+#endif
 }
 
 /* From any task: the face tile is the currently visible tile. */
 bool muse_ui_face_active(void)
 {
+#if CONFIG_MUSE_APP_VIEW
+    if (muse_app_view_tick()) {
+        return false;   /* an app covers it: a held touch is the app's, not push-to-talk */
+    }
+#endif
     return s_face_active;
 }
 
@@ -152,7 +168,12 @@ bool muse_ui_volume_swiping(void)
     return s_volume_swiping;
 }
 static lv_obj_t *s_settings;
-static lv_obj_t *s_dots[2];
+#if CONFIG_MUSE_LATEST_REPLY
+#define PAGE_DOTS 3
+#else
+#define PAGE_DOTS 2
+#endif
+static lv_obj_t *s_dots[PAGE_DOTS];
 static lv_obj_t *s_wifi_icon;
 static lv_obj_t *s_ble_icon;
 static lv_obj_t *s_cover;
@@ -620,7 +641,7 @@ static int caption_band_h(void)
 #define SMALL_BAND_Y ((s_tall || s_tv) ? -30 : -3)
 #endif
 
-#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT || CONFIG_MUSE_LATEST_REPLY
 /* A caption's font off a small screen's band: caption_font(), or with
  * CONFIG_MUSE_LATIN_FONT, Unifont's 8x16 for the whole of a caption with
  * accented letters and no CJK. */
@@ -639,7 +660,9 @@ static const lv_font_t *caption_font_for(const char *text)
     (void)text;
     return caption_font();
 }
+#endif
 
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
 #if CONFIG_MUSE_CJK_FONT
 #define CJK_BAND_PAD 6          /* px each side of a CJK caption on a small screen */
 #define CJK_LINE_SPACE 4
@@ -1313,7 +1336,12 @@ static void build_screen(void)
         lv_obj_set_style_bg_color(s_tv, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_tv, LV_OPA_COVER, 0);
         lv_obj_set_scrollbar_mode(s_tv, LV_SCROLLBAR_MODE_OFF);
+#if CONFIG_MUSE_LATEST_REPLY
+        muse_latest_reply_build(s_tv, caption_font_for);
+        s_face = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);
+#else
         s_face = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);
+#endif
         /* It never scrolls, but LVGL would size its scrollbars from all its
          * children every time it draws any part of it. */
         lv_obj_set_scrollbar_mode(s_face, LV_SCROLLBAR_MODE_OFF);
@@ -1321,7 +1349,14 @@ static void build_screen(void)
          * shows as a different-coloured square around the character. */
         lv_obj_set_style_bg_color(s_face, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_face, LV_OPA_COVER, 0);
-        s_settings = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_LEFT);
+        s_settings = lv_tileview_add_tile(s_tv,
+#if CONFIG_MUSE_LATEST_REPLY
+            2,
+#else
+            1,
+#endif
+            0, LV_DIR_LEFT);
+        lv_tileview_set_tile(s_tv, s_face, LV_ANIM_OFF);
         lv_obj_add_event_cb(s_tv, tile_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
         face = s_face;
         if (muse_board->audio_init) {
@@ -1698,7 +1733,7 @@ static void build_overlays(void)
     }
 
     /* Page dots. */
-    for (int i = 0; i < 2 && s_tv; i++) {
+    for (int i = 0; i < PAGE_DOTS && s_tv; i++) {
         lv_obj_t *d = lv_obj_create(scr);
         lv_obj_remove_style_all(d);
         lv_obj_set_size(d, 8, 8);
@@ -1706,7 +1741,7 @@ static void build_overlays(void)
         lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(d, lv_color_hex(COLOR_DOT_OFF), 0);
         lv_obj_remove_flag(d, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_align(d, LV_ALIGN_BOTTOM_MID, i ? 8 : -8, -14);
+        lv_obj_align(d, LV_ALIGN_BOTTOM_MID, (2 * i - (PAGE_DOTS - 1)) * 8, -14);
         s_dots[i] = d;
     }
 
@@ -1800,6 +1835,10 @@ static void build_overlays(void)
     }
 }
 
+#if CONFIG_MUSE_APP_VIEW
+static atomic_int s_app_brightness;   /* an app's own, 0 for the person's setting */
+#endif
+
 static void apply_brightness(int pct)
 {
     if (pct != s_brightness) {
@@ -1819,6 +1858,9 @@ static bool update_sleep(void)
     bool asleep = muse_state_asleep();
     if (asleep && !s_dark) {
         muse_menu_close();
+#if CONFIG_MUSE_LATEST_REPLY
+        if (s_tv) lv_tileview_set_tile(s_tv, s_face, LV_ANIM_OFF);
+#endif
         apply_brightness(0);
         if (muse_board->panel_sleep) {
             muse_board->panel_sleep(true);
@@ -1838,6 +1880,12 @@ static bool update_sleep(void)
     }
     if (!s_dark) {
         int target = muse_settings_brightness();
+#if CONFIG_MUSE_APP_VIEW
+        int app = atomic_load(&s_app_brightness);
+        if (app > 0) {
+            target = app;
+        }
+#endif
         if (s_preview_brightness >= 0) {
             if (s_preview_brightness == target) {
                 s_preview_brightness = -1;
@@ -1881,15 +1929,25 @@ static void update_chrome(float now)
         bool subpage = muse_settings_ui_in_subpage();
         s_swipe_enabled = !page || !subpage;
         update_tileview_swipe();
-        int shown = page * 2 + subpage;
+        bool hide_dots = page && subpage;
+#if CONFIG_MUSE_LATEST_REPLY
+        int selected = page ? 2 : lv_tileview_get_tile_active(s_tv) == s_face ? 1 : 0;
+#else
+        int selected = page;
+#endif
+        int shown = selected * 2 + subpage;
         if (shown != s_shown_page) {
-            for (int i = 0; i < 2; i++) {
-                lv_obj_set_style_bg_color(s_dots[i], lv_color_hex(i == page ? COLOR_ACCENT : COLOR_DOT_OFF), 0);
-                lv_obj_set_flag(s_dots[i], LV_OBJ_FLAG_HIDDEN, page && subpage);
+            for (int i = 0; i < PAGE_DOTS; i++) {
+                lv_obj_set_style_bg_color(s_dots[i], lv_color_hex(i == selected ? COLOR_ACCENT : COLOR_DOT_OFF), 0);
+                lv_obj_set_flag(s_dots[i], LV_OBJ_FLAG_HIDDEN, hide_dots);
             }
             s_shown_page = shown;
         }
+#if CONFIG_MUSE_LATEST_REPLY
+        muse_settings_ui_tick(page);
+#else
         muse_settings_ui_tick(lv_obj_get_scroll_x(s_tv) > 0);
+#endif
     }
 
     /* Joining, the icon blinks: the compact layout has no state label. */
@@ -2331,6 +2389,9 @@ static void frame_tick(lv_timer_t *timer)
         if (s_tv) lv_tileview_set_tile(s_tv, settings ? s_settings : s_face, LV_ANIM_OFF);
     }
 #endif
+#if CONFIG_MUSE_LATEST_REPLY
+    muse_latest_reply_tick();
+#endif
     update_control_hints(muse_state_mode(NULL));
     if (s_snapshot) {
         s_snapshot = false;
@@ -2363,6 +2424,13 @@ static void frame_tick(lv_timer_t *timer)
         return;   /* video covers everything */
     }
 #endif
+#if CONFIG_MUSE_APP_VIEW
+    if (muse_app_view_tick()) {
+        muse_menu_close();
+        update_chrome(now);   /* the pairing card stays above the app */
+        return;   /* an app covers everything else */
+    }
+#endif
     update_chrome(now);
     if (muse_menu_tick(now)) {
         image_hide_locked();
@@ -2371,7 +2439,13 @@ static void frame_tick(lv_timer_t *timer)
     if (s_image_dsc.data) {
         return;   /* the image covers the face */
     }
-    if (s_tv && lv_obj_get_scroll_x(s_tv) != 0) {
+    if (s_tv && lv_obj_get_scroll_x(s_tv) !=
+#if CONFIG_MUSE_LATEST_REPLY
+        s_w
+#else
+        0
+#endif
+    ) {
         /* Off screen, or sliding to or from settings: hold still so the
          * slide gets the whole frame time. */
         return;
@@ -2478,6 +2552,13 @@ void muse_ui_set_swipe_enabled(bool enabled)
     s_shown_page = -1;
     s_next_settings_tick = 0;
 }
+
+#if CONFIG_MUSE_APP_VIEW
+void muse_ui_app_brightness(int pct)
+{
+    atomic_store(&s_app_brightness, pct > 100 ? 100 : pct);
+}
+#endif
 
 void muse_ui_preview_brightness(int pct)
 {

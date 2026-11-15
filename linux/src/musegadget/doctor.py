@@ -152,17 +152,20 @@ def check_network() -> CheckResult:
             "hint": "Check DNS, internet access, and outbound HTTPS firewall rules."}
 
 
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 def check_trust_store() -> CheckResult:
-    """Report distrusted root CAs left in the OS trust store; musegadget skips them anyway."""
-    present: list[str] = tls.distrusted_system_roots()
-    if not present:
+    """Check the system trust store, which musegadget won't use while it holds a distrusted root."""
+    problem: str | None = tls.trust_store_problem()
+    if problem is None:
         return {"name": "Root CAs", "status": "OK",
-                "detail": "The system trust store has none of the root CAs that musegadget refuses.",
-                "hint": "musegadget refuses them itself if a later update brings one back."}
-    return {"name": "Root CAs", "status": "WARN",
-            "detail": f"The system trust store still trusts {', '.join(present)}.",
-            "hint": "musegadget refuses them, but other software here doesn't. "
-                    "Update the ca-certificates package."}
+                "detail": "The system trust store has none of the distrusted root CAs.",
+                "hint": "Keep the ca-certificates package up to date."}
+    return {"name": "Root CAs", "status": "FAIL",
+            "detail": f"{_sentence(problem)}, so musegadget won't connect.",
+            "hint": f"{_sentence(tls.FIX)}."}
 
 
 def run_checks() -> tuple[CheckResult, ...]:
