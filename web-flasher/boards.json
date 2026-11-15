@@ -22,6 +22,13 @@
     ]
   },
   {
+    "board": "muse-m5stack-atoms3",
+    "name": "M5Stack AtomS3 + Atomic Voice Base (experimental)",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
     "board": "muse-waveshare-s3-175c",
     "name": "Waveshare ESP32-S3-Touch-AMOLED-1.75C",
     "usb": [

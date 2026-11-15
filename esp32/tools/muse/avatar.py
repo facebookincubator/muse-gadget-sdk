@@ -107,6 +107,7 @@ BOARDS = {
     "M5Stack StickS3": "sticks3",
     "Elecrow CrowPanel Advance 4.3 V1.3": "crowpanel-43",
     "M5Stack Cardputer ADV": "cardputer-adv",
+    "M5Stack AtomS3 + Atomic Voice Base": "atoms3",
     "M5Stack StickC Plus2": "plus2",
     "M5Stack StopWatch": "stopwatch",
     "Seeed XIAO ESP32-S3 1.47 Touch Display": "xiao147",
