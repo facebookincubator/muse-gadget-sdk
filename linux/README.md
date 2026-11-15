@@ -235,66 +235,66 @@ nonblocking `write_unit(bytes)`; `voice_video` has the CLI's outputs.
 
 ### Optional Hey Muse wake word
 
-Wake-word listening is **off by default**. Inference uses the supplied
-ExecuTorch wheel's Python runtime; only the reused C frontend and detector are
-compiled locally. No ExecuTorch source checkout or second embedded runtime is
-needed. The setup skill is
-[`gadget-linux-wakeword`](../skills/gadget-linux-wakeword/SKILL.md).
+Wake-word listening is **off by default**. Detection runs in a small native
+library built from the ESP32 firmware's own wake word runner and model
+(`libmuse_wakeword.so`, about 170 KB): TensorFlow Lite Micro's microfrontend,
+the int8 model through ExecuTorch's ESP-NN delegate, and the detector, on one
+thread, with no torch or other Python packages at run time. It uses about
+0.4% of one core, with the 24 to 16 kHz resampling of its tap. The setup skill is
+[`gadget-linux-wakeword`](../skills/gadget-linux-wakeword/SKILL.md), and
+[`wakeword/README.md`](wakeword/README.md) has the details.
 
-From the SDK repository root, preview an isolated setup using the actual trusted
-wheel and a matching interpreter, then remove `--dry-run` to install. The standard
-CPU wheels for both ExecuTorch and Torch are published at
-**https://download.pytorch.org/whl/cpu**, as documented in
-[ExecuTorch Getting Started](https://docs.pytorch.org/executorch/main/getting-started.html).
-The setup skill explains how to download explicit CPU version pins before
-passing the resulting files to the helper; do not substitute PyPI's Linux CUDA
-build or treat index provenance as proof of PTE compatibility:
+From the SDK repository root, preview the setup, then remove `--dry-run` to
+install:
 
 ```sh
-bash linux/wakeword/setup.sh --wheel /trusted/path/executorch.whl \
-  --torch-wheel /trusted/path/compatible-torch.whl \
-  --python python3.12 --dry-run
+bash linux/wakeword/setup.sh --dry-run
 ```
 
-The helper installs the wheel and voice extra into `linux/.venv-wakeword`, builds
-`libmuse_wakeword_signal.so` with a C compiler, and verifies wheel/PTE compatibility
-without opening the microphone, pairing, or restarting the normal service.
-System prerequisites require the explicit `--install-system-packages` option;
-reusing an existing environment requires `--reuse-venv`. The optional wheel can
-require a newer Python than the base SDK's 3.9 minimum. A different wheel source
-revision is acceptable only if its sequential and reset checks pass.
+The helper installs the voice extra into `linux/.venv-wakeword`, builds the
+library (`linux/wakeword/build.sh`: a C/C++ compiler plus three pinned,
+checksum-verified ESP Component Registry archives, the same ones the firmware
+uses), and checks it without opening the microphone, pairing, or restarting
+the normal service. System prerequisites require the explicit
+`--install-system-packages` option; reusing an existing environment requires
+`--reuse-venv`; `--library FILE` uses an already built library.
 
 To check an environment again, without audio or network access:
 
 ```sh
-MUSE_WAKEWORD_LIBRARY="$PWD/linux/wakeword/build/libmuse_wakeword_signal.so" \
-  linux/.venv-wakeword/bin/python -m musegadget.wakeword_check
+linux/.venv-wakeword/bin/python -m musegadget.wakeword_check
 ```
 
 Enable live listening only when wanted:
 
 ```sh
-MUSE_WAKEWORD_LIBRARY="$PWD/linux/wakeword/build/libmuse_wakeword_signal.so" \
-  linux/.venv-wakeword/bin/musegadget voice-call --vm-id YOUR_VM_ID --live --wake-word
+linux/.venv-wakeword/bin/musegadget voice-call --vm-id YOUR_VM_ID --live --wake-word
 ```
 
-Waiting audio stays local. A detection admits the same realtime voice call as
-above, retaining up to one second of pre-roll at 24 kHz. Only the detector's tap
-is resampled to 16 kHz; voice upload and playback stay unchanged. Detection is
-paused throughout the call (including speaker playback and server input holds).
-After a successful hangup, live mode resets the detector and returns to local
-listening. Ctrl-C stops it; omit `--wake-word` or use `--no-wake-word` for the
-original immediate-call behavior. The normal `musegadget run` service never
-opens the microphone or enables this feature.
+Setup installs the library into the environment (`lib/musegadget/`), where
+it is found first; `MUSE_WAKEWORD_LIBRARY` overrides that, and a checkout run
+in place falls back to `linux/wakeword/build/`. Waiting audio stays local. A detection admits
+the same realtime voice call as above, retaining up to one second of pre-roll
+at 24 kHz. Only the detector's tap is resampled to 16 kHz; voice upload and
+playback stay unchanged. Detection is paused throughout the call (including
+speaker playback and server input holds). A voice call started by a wake word
+ends if Muse hears no speech from the caller within its first 5 s, so a false wake
+in a quiet room doesn't stream on. After a successful hangup, live mode resets
+the detector and returns to local listening. Ctrl-C stops it; omit
+`--wake-word` or use `--no-wake-word` for the original immediate-call
+behavior. The normal `musegadget run` service never opens the microphone or
+enables this feature.
 
-`--wake-sensitivity low|default|high` selects the ESP32 detector's presets. The
-model's own streaming test (fp32, on its training bundle's test set) reports
-about 4 false wakes an hour at low (51.3% of wake words caught) and about 34 at
-default (78.7%); high wasn't measured, and none of this was measured with a
-Linux microphone. Each false wake starts a call that sends audio until the call
-ends (by default after 45 quiet seconds).
-`--wake-model PATH` selects a compatible XNNPACK PTE. `--wake-timeout SECONDS`
-bounds each local wait; call idle/overall timers start only after activation.
+`--wake-sensitivity low|default|high` selects the ESP32 detector's presets.
+Measured on synthetic voices (held-out text-to-speech voices) and 23.5 hours
+of real non-wake audio, low wakes falsely about 0.3 times an hour and catches
+71% of wake words, default about 0.4 and 74%, high about 1.4 and 80%; real
+voices and Linux microphones haven't been measured. Each false wake followed
+by speech starts a call that sends audio until the call ends (by default
+after 45 quiet seconds).
+`--wake-model PATH` selects another model with the bundled model's contract.
+`--wake-timeout SECONDS` bounds each local wait; call idle/overall timers
+start only after activation.
 WAV mode also accepts `--wake-word`, runs at most one call, and exits without
 admitting a call if the file ends before a detection. Audio queued after a
 detection (the pre-roll and capture from before the call was ready) is sent up

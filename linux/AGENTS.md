@@ -42,7 +42,7 @@ pairing and control protocols, so the same app pairs either.
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
 | `video_call.py`, `voice_video.py`, `rtc/` | Video calls: JOIN over Noise, SRTP media (ICE-lite over UDP/TCP, Opus, H.264), H.264 outputs |
-| `wakeword.py`, `wakeword_input.py`, `wakeword_check.py` | Optional Hey Muse detector, wake-word admission in front of a voice call, local wheel check |
+| `wakeword.py`, `wakeword_input.py`, `wakeword_check.py` | Optional Hey Muse detector (the native library from `wakeword/`), wake-word admission in front of a voice call, local check |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
@@ -243,12 +243,15 @@ never has a command's parameters, output or error message.
   bounded one-second pre-roll/four-second startup queue; always await `aclose()`.
   The call reads the listener itself and sends its queued backlog at up to
   three times real time (wall-clock paced) until it is down to one frame.
-  Its detector tap alone uses a streaming 24-to-16 kHz FIR. Active calls never
+  Its detector tap alone uses a streaming 24-to-16 kHz FIR (native from the
+  detector's `resampler()`; `Pcm24To16` is the Python reference). Active calls never
   run detection, and live mode resets/re-arms only after successful cleanup.
-  Inference uses the supplied wheel's public ExecuTorch runtime; native code is
-  only the shared C frontend/detector. See `wakeword/README.md` and
-  `../skills/gadget-linux-wakeword/SKILL.md` for isolated setup. The helper requires
-  an explicit trusted wheel and verifies it locally before any microphone use.
+  Detection is `wakeword/build.sh`'s `libmuse_wakeword.so`: the ESP32 runner,
+  model and front end (`../esp32/components/muse_wakeword`), loaded with
+  ctypes; no Python ML packages. A wake-started voice call passes
+  `speech_timeout` and ends as `no_speech` when Muse hears no caller speech
+  (video calls keep their idle timer). See
+  `wakeword/README.md` and `../skills/gadget-linux-wakeword/SKILL.md` for setup.
   Hardware-free tests use synthetic detectors and tones, never recordings.
 - Tests use self-authored tones/zeros and synthetic identities only. Never put
   real recordings, credentials, internal documents or captured events here.

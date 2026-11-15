@@ -10,8 +10,8 @@ embedded in the library.
 
 | | |
 |---|---|
-| Library | about 145 KB (x86-64 and aarch64), model included; links libc, libm and libstdc++ |
-| CPU, listening | about 0.2% of one core: an hour of audio in 6.6 s on an x86-64 server core, front end included |
+| Library | about 170 KB (x86-64 and aarch64), model included; links libc, libm and libstdc++ |
+| CPU, listening | about 0.4% of one x86-64 server core through the Python wrapper, the tap's 24 to 16 kHz resampling included (the detector alone: an hour of audio in 6.6 s) |
 | Memory | 2.7 MB peak RSS for `ww-run` over an hour of audio |
 | Results | the ESP32 runner's code and model; bit-identical to TensorFlow Lite Micro with the same weights, up to last-bit differences in the front end's start-up tables between C math libraries |
 
@@ -38,9 +38,11 @@ It downloads the archives from `components-file.espressif.com` unless
 `--deps DIR` holds them (same file names; `--offline` refuses to download),
 and writes `libmuse_wakeword.so` and `ww-run` to `linux/wakeword/build/`.
 It needs a C11 and C++17 compiler, `unzip`, `sha256sum` and, to download,
-`curl`. Compiling takes 8 s on one core of an Apple M4 Max and under
-4 s on a many-core x86-64 server; a Raspberry Pi 4 should take well under a
-minute with its four cores (not measured on one).
+`curl`. It is a Linux script (GNU `stat`, `ld` version scripts). Its
+compile steps take under 4 s on a many-core x86-64 server, and compiling
+the same sources one at a time took 8 s on an Apple M4 Max (macOS, aarch64);
+a Raspberry Pi 4 should take well under a minute with its four cores (not
+measured on one).
 
 `ww-run FILE` runs the same library on a 16 kHz mono WAV (or raw PCM) and
 prints each wake: `ww-run --scores OUT.f32 FILE` also writes every
@@ -75,11 +77,19 @@ with WakeWordDetector(model_path=None, sensitivity="default") as detector:
   detector and an odd trailing byte. It never allocates.
 - `close() -> None`: idempotent; feed/reset after close raise `RuntimeError`.
 - Importing the module loads nothing. Construction loads the library from
-  `MUSE_WAKEWORD_LIBRARY` or `linux/wakeword/build/` and raises
-  `WakeWordUnavailableError`, with setup guidance, when it's missing.
+  `MUSE_WAKEWORD_LIBRARY`, else the environment's copy
+  (`<sys.prefix>/lib/musegadget/`, where `setup.sh` installs it), else
+  `linux/wakeword/build/`, and raises `WakeWordUnavailableError`, with setup
+  guidance, when none loads.
 - `model_path` loads another model with the same contract
   (`esp32/components/muse_wakeword/models/hey_muse.json`) instead of the
-  embedded one; a file that doesn't match is refused.
+  embedded one. A model from a file gets ExecuTorch's full flatbuffer
+  verification and the runner's size checks; one that doesn't match is
+  refused.
+- `resampler()` returns a native streaming 24 to 16 kHz resampler (the
+  filter of `wakeword_input.Pcm24To16`, in `ww_resample.c`), which
+  `WakeWordInput` uses for the detector's tap: in Python that filter takes
+  about 10% of a server core, many times what detection does.
 - One instance serializes calls; independent instances have independent
   state. A failed inference makes the stream unavailable until `reset()`.
 

@@ -5,7 +5,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 ## Gadget setup
 
-- [Linux Hey Muse wake word](gadget-linux-wakeword/SKILL.md) — install prerequisites from a supplied ExecuTorch wheel, build the shared C frontend/detector, and verify local inference before opting in to microphone use.
+- [Linux Hey Muse wake word](gadget-linux-wakeword/SKILL.md) — build the native detector library from the SDK checkout and verify it locally before opting in to microphone use.
 
 ## Shared protocol
 

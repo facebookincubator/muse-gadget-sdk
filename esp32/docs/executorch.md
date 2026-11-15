@@ -84,13 +84,16 @@ version bump and, for the stateful form, a re-export.
 
 The host tests build the same runner, delegate and microfrontend from the
 same components, with small host stand-ins for the ESP-IDF headers the
-delegate includes in `components/muse_wakeword/host/`.
+delegate includes in `components/muse_wakeword/host/`. So does the Linux
+client's native library (`linux/wakeword/build.sh`), from the same registry
+archives.
 
 ## Updating the components
 
 Bump the `==` pins in
-[`components/muse_wakeword/idf_component.yml`](../components/muse_wakeword/idf_component.yml).
-Re-export the model only if the new release needs it, and keep `models/hey_muse.json` in step. Then:
+[`components/muse_wakeword/idf_component.yml`](../components/muse_wakeword/idf_component.yml),
+and the matching archive names and SHA-256 sums in
+`linux/wakeword/build.sh`. Re-export the model only if the new release needs it, and keep `models/hey_muse.json` in step. Then:
 
 - build the wake-word firmware for an ESP32-S3 board
   (`MUSE_WAKEWORD=1 tools/muse/board.sh build box3`) and a normal build,
