@@ -419,3 +419,17 @@ def test_an_unready_row_for_a_done_reply_does_not_answer_a_follow_up():
     assert "u2" in turn._unanswered_follow_up_ids
     turn.feed(event("message.assistant", "r2", parent="u2", session="side", display_text="Answer"))
     assert "u2" not in turn._unanswered_follow_up_ids
+
+
+def test_a_lone_surrogate_held_before_the_acknowledgement_reads_like_one_after_it():
+    acknowledged_first = MuseTurn("chat")
+    acknowledged_first.acknowledge({"result": {"message_id": "u1"}})
+    assert acknowledged_first.feed(event("delta.text_append", "r1", parent="u1", text="Done \ud83c")) == [
+        Reply("r1", "Done ", "Done ", done=False, bound=True),
+    ]
+
+    held_first = MuseTurn("chat")
+    assert held_first.feed(event("delta.text_append", "r1", parent="u1", text="Done \ud83c")) == []
+    assert held_first.acknowledge({"result": {"message_id": "u1"}}) == [
+        Reply("r1", "Done ", "Done ", done=False, bound=True),
+    ]

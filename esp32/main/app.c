@@ -44,6 +44,9 @@
 
 #include "identity.h"
 #include "sdk_token_console.h"
+#if CONFIG_MUSE_WASM_APPS
+#include "muse_apps.h"
+#endif
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
@@ -843,11 +846,14 @@ static void defer_unpair_after_revocation(void) {
     atomic_store_explicit(&s_unpair_pending, true, memory_order_release);
 }
 
+// node_id: the id the tokens are for: identity_node_id(), except in setup,
+// which mints for the id it offers (identity_setup_node_id()).
 static bool mint_and_store_device_tokens_unlocked(const char *source_token,
                                                   const char *username,
+                                                  const char *node_id,
                                                   bool *revoked) {
     vm_device_tokens_t tokens = {0};
-    int rc = vm_api_mint_device_token(source_token, identity_node_id(), &tokens);
+    int rc = vm_api_mint_device_token(source_token, node_id, &tokens);
     if (rc == 0) {
         bool ok = store_token_pair_unlocked(tokens.access_token, tokens.refresh_token);
         if (ok) identity_note_paired_sdk_token();
@@ -873,7 +879,12 @@ static bool accept_pairing_credentials(const char *access_token,
     if (!access_token || !*access_token) return false;
     auth_lock_take();
     bool ok = false;
-    if (refresh_token && *refresh_token) {
+    // The node id device_info offered, which the app's tokens are for, goes
+    // with them: stored first, so no tokens from this setup are ever kept
+    // without it (a failed setup clears both).
+    if (!config_set_str("node_id", identity_setup_node_id())) {
+        ESP_LOGW(TAG, "could not store the node id");
+    } else if (refresh_token && *refresh_token) {
         ok = store_token_pair_unlocked(access_token, refresh_token);
         if (ok) {
             identity_note_paired_sdk_token();
@@ -884,9 +895,16 @@ static bool accept_pairing_credentials(const char *access_token,
         ok = false;
     } else {
         ESP_LOGI(TAG, "no refresh_token supplied; minting device token pair");
-        ok = mint_and_store_device_tokens_unlocked(access_token, username, NULL);
+        ok = mint_and_store_device_tokens_unlocked(access_token, username,
+                                                   identity_setup_node_id(), NULL);
     }
     auth_lock_give();
+    // From here the device goes by the new setup's id (a device set up by
+    // earlier firmware leaves its homelink- id behind with its old tokens).
+    if (ok && identity_refresh_node_id()) {
+        ESP_LOGI(TAG, "node id is now %s", identity_node_id());
+        noise_ctrl_set_node_id(identity_node_id());
+    }
     return ok;
 }
 
@@ -906,7 +924,7 @@ static bool migrate_legacy_auth_token_locked(bool *revoked) {
         return false;
     }
     ESP_LOGI(TAG, "migrating legacy auth_token to device token pair");
-    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, revoked);
+    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, identity_node_id(), revoked);
     free(legacy);
     return ok;
 }
@@ -959,7 +977,7 @@ static bool ensure_access_token_ready_with_gate_held(
     if (!refresh) {
         if (vm_auth_backoff_active_unlocked()) goto done;
         ESP_LOGI(TAG, "access_token has no refresh_token; minting device pair");
-        ok = mint_and_store_device_tokens_unlocked(access, NULL, &revoked);
+        ok = mint_and_store_device_tokens_unlocked(access, NULL, identity_node_id(), &revoked);
         goto done;
     }
 
@@ -1429,6 +1447,9 @@ static void on_wifi_scan(void) {
 }
 
 static void set_vm_with_gate_held(const char *url) {
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_vm_changed();  // an app the last VM ran doesn't act on the next one
+#endif
     ble_server_send_status("vm_switching");
     ui_set_status("vm_switching");
     led_status_set_state(LED_STATE_VM_SWITCHING);
@@ -1476,6 +1497,9 @@ static void finish_setup_reset_with_gate_held(void) {
     led_status_set_state(LED_STATE_UNPAIRED);
     ble_server_send_status("unpaired");
     link_pairing_reset();
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_forget_all();  // the next owner doesn't get the last one's apps
+#endif
 }
 
 static bool reset_setup_with_gate_held(const char *source,
@@ -1517,7 +1541,8 @@ static void on_get_device_info(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "device_info");
-    cJSON_AddStringToObject(root, "node_id", identity_node_id());
+    // The id a setup on this connection takes (identity.h).
+    cJSON_AddStringToObject(root, "node_id", identity_setup_node_id());
     cJSON_AddStringToObject(root, "version", desc ? desc->version : "unknown");
     link_pairing_add_device_info(root);
     char build_sha[17] = {0};
@@ -1771,6 +1796,9 @@ static bool reset_setup_from_control(const char *source,
 }
 
 static void reset_default_vm_with_gate_held(void) {
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_vm_changed();
+#endif
     config_erase_key("vm_url");
     ble_server_send_status("vm_switching");
     ui_set_status("vm_switching");
@@ -1844,6 +1872,10 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
                                  "failed to clear setup credentials");
         }
         args->setup_credentials_cleared = true;
+#if CONFIG_MUSE_WASM_APPS
+        // Now, not after the worker's disconnect: a failed start below reboots first.
+        muse_apps_forget_all();
+#endif
     }
 
     if (xTaskCreate(ws_control_task, "ws_control", 8192, args, 4, NULL)
@@ -1981,6 +2013,11 @@ static cJSON *on_ws_command(
         if (!url) return command_error("missing_param", "url is required");
         return queue_ws_control(WS_CONTROL_SET_VM, url);
     }
+#if CONFIG_MUSE_WASM_APPS
+    if (muse_apps_handles(command)) {
+        return muse_apps_command(command, params, request_id, session_generation);
+    }
+#endif
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
     bool draw_file = strcmp(command, "display.draw_file") == 0;
     if (draw_file || strcmp(command, "display.draw_url") == 0) {
@@ -2730,7 +2767,8 @@ void app_run(void) {
     }
     ESP_LOGI(TAG, "========================");
 
-    link_pairing_init(identity_node_id(), identity_device_id(), identity_mac(),
+    // Setup offers the new-setup id (identity.h).
+    link_pairing_init(identity_setup_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
 #if !CONFIG_MUSE_ENABLED

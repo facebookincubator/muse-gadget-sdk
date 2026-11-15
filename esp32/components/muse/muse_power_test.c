@@ -566,7 +566,9 @@ static void finish_run(run_status_t status, esp_err_t error)
     s_run.finished_us = fw_now();
     if (error) { remember_error(); save_run(); } /* checkpoint before reset-prone restoration */
     /* One safe resting state, even on abort. Never drops EXP_PWR_SYSTEM. */
-    s_run.restore_error = fw_apply(resting_state());
+    s_run.restore_error = muse_ptest_board_stop();
+    esp_err_t apply_error = fw_apply(resting_state());
+    if (!s_run.restore_error) { s_run.restore_error = apply_error; }
     if (!s_run.restore_error) {
         muse_ptest_readback_t restored = {0};
         s_run.restore_error = fw_readback(&restored); /* USB allowed outside RUN_RUNNING */
@@ -922,7 +924,7 @@ static void tick(void)
             r->actual.io_frames -= s_capture_frames;
             r->actual.adc_samples -= s_capture_adc;
             r->actual.wifi_scans -= s_capture_scans;
-            if ((s->load == MUSE_PTEST_MIC || s->load == MUSE_PTEST_SINE) && !r->actual.io_frames) { e = ESP_FAIL; }
+            if ((s->load == MUSE_PTEST_MIC || s->load == MUSE_PTEST_SINE || s->load == MUSE_PTEST_EPAPER) && !r->actual.io_frames) { e = ESP_FAIL; }
             if (s->load == MUSE_PTEST_ADC_SAMPLE && !r->actual.adc_samples) { e = ESP_FAIL; }
             if (s->load == MUSE_PTEST_WIFI_SCAN && !r->actual.wifi_scans) { e = ESP_FAIL; }
         }
@@ -1167,6 +1169,7 @@ static void fw_codec_regs(muse_ptest_codec_regs_t *out) { muse_ptest_board_codec
 static void fw_dryrun_mode(bool on) { muse_ptest_board_usb_dryrun(on); }
 #endif
 
+__attribute__((weak)) esp_err_t muse_ptest_board_stop(void) { return ESP_OK; }
 __attribute__((weak)) bool muse_ptest_board_charging_supported(void) { return false; }
 __attribute__((weak)) esp_err_t muse_ptest_board_charging(bool off, uint32_t guard_ms)
 {

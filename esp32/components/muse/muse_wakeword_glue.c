@@ -269,6 +269,12 @@ static void tick(const muse_wakeword_input_t *in)
             muse_wakeword_core_abort(&s_core);
             muse_voice_seed_preroll(NULL, 0);
             atomic_store(&s_backlog_owed, false);
+            /* And take back the capture state shown above: no turn will
+             * replace it, and auto-sleep waits for IDLE. */
+            if (muse_state_mode(NULL) == MUSE_MODE_LISTENING) {
+                muse_state_set_mode(MUSE_MODE_IDLE);
+                muse_state_set_caption("%s", "");
+            }
         }
     }
     /* A press noted since this tick's input was read (the voice side
@@ -310,6 +316,7 @@ static void apply_requests(void)
                 tick(&in);
             }
             xStreamBufferReset(s_tap);   /* no task blocks on it here: we are its reader */
+            s_have_seq = false;          /* the chunks skipped while off weren't lost */
             muse_ww_ring_clear(&s_pre);
             muse_wakeword_core_reset(&s_core);   /* an owed release still goes */
             atomic_store(&s_pending_down, false);

@@ -130,3 +130,57 @@ def test_the_pairing_remembers_the_sdk_token_it_presented(state, monkeypatch):
     assert config.load_json(config.PAIRING_FILE)["sdk_token_hint"] == "mgst_AbC1234"
     pair_module._verify_and_save(credentials, lambda save: save())
     assert config.load_json(config.PAIRING_FILE)["sdk_token_hint"] == "none"
+
+
+class CapturingController(CompletingController):
+    """Records what pair() hands the setup controller."""
+
+    seen: dict = {}
+
+    def __init__(self, *, pairing, identity, provision, **kwargs):
+        super().__init__(**kwargs)
+        CapturingController.seen = {"pairing": pairing, "identity": identity, "provision": provision}
+
+
+def _credentials(access: str = "a"):
+    return types.SimpleNamespace(
+        access_token=access, refresh_token="r", username="u", noise_host="",
+        api_url="https://api.example", api_url_v2="https://api.example")
+
+
+@pytest.mark.parametrize("gadget_ids, offered", [("1", "gadget-abcdef"), (None, "homelink-abcdef")])
+def test_a_new_pairing_offers_and_stores_its_node_id(state, monkeypatch, gadget_ids, offered):
+    # A new pairing offers gadget- + the identity's six hex digits in
+    # get_device_info and the transcript, and stores it in the same write as
+    # the tokens it was issued for.
+    # Off (the default), the offer is homelink- as before; stored either way.
+    if gadget_ids:
+        monkeypatch.setenv(config.GADGET_NODE_ID_ENV, gadget_ids)
+    monkeypatch.setattr(pair_module, "SetupController", CapturingController)
+    monkeypatch.setattr(pair_module.muse_api, "fetch_vms_with_status",
+                        lambda *args: ([{"vm_id": "vm"}], 200))
+    assert pair(on_open=lambda window: None, timeout_s=60).outcome is PairOutcome.PAIRED
+    seen = CapturingController.seen
+    assert seen["identity"].setup_node_id == offered
+    seen["provision"](_credentials(), lambda save: save())
+    saved = config.load_json(config.PAIRING_FILE)
+    assert saved["node_id"] == offered and saved["access_token"] == "a"
+
+
+def test_pairing_again_replaces_a_homelink_node_id(state, monkeypatch, capsys):
+    # A pairing made before ids were stored keeps homelink- until the device is
+    # paired again; the new pairing stores the gadget id with its tokens.
+    (state / config.PAIRING_FILE).write_text(json.dumps({"access_token": "old", "refresh_token": "r"}))
+    assert cli.main(["info"]) == 0
+    assert "node id:   homelink-abcdef\n" in capsys.readouterr().out
+    monkeypatch.setattr(pair_module.muse_api, "fetch_vms_with_status",
+                        lambda *args: ([{"vm_id": "vm"}], 200))
+    monkeypatch.setenv(config.GADGET_NODE_ID_ENV, "1")
+    pair_module._verify_and_save(_credentials("new"), lambda save: save(), None, "gadget-abcdef")
+    assert config.load_json(config.PAIRING_FILE)["node_id"] == "gadget-abcdef"
+    assert cli.main(["info"]) == 0
+    assert "node id:   gadget-abcdef\n" in capsys.readouterr().out
+    assert cli.main(["unpair"]) == 0
+    capsys.readouterr()
+    assert cli.main(["info"]) == 0
+    assert "node id:   gadget-abcdef (when paired)\n" in capsys.readouterr().out

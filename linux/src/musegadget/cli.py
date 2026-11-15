@@ -431,7 +431,7 @@ def cmd_info(args: argparse.Namespace) -> int:
         sdk_token = "not valid"
     paired_with = (pairing or {}).get("sdk_token_hint")
     print(f"version:   {__version__}")
-    print(f"node id:   {ident.node_id}")
+    print(f"node id:   {ident.node_id}{'' if pairing else ' (when paired)'}")
     print(f"BLE name:  {ident.ble_name}")
     print(f"SDK token: {sdk_token}")
     if pairing is None:

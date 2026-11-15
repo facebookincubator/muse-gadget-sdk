@@ -15,13 +15,15 @@
  */
 
 /*
- * Aligned embed of models/hey_muse.pte, configured by CMakeLists.txt.
+ * Aligned embed of models/hey_muse.pte, configured by CMakeLists.txt (and
+ * by the host builds of the runner).
  *
  * ESP-IDF EMBED_FILES emits no alignment directive, so the data lands
  * only 4-aligned depending on rodata layout — and ExecuTorch
- * Program::load rejects program data that is not 8-byte aligned.
+ * Program::load rejects program data not aligned to alignof(max_align_t)
+ * (8 bytes on Xtensa, 16 on x86-64 hosts).
  * Embedding it ourselves with .balign 16 keeps the model in flash
- * (zero RAM copy); ww_runner_et.cpp still copies as a fallback if a
+ * (zero RAM copy); ww_runner_espnn.cpp still copies as a fallback if a
  * caller-supplied model is ever misaligned. Same section and symbol
  * names as the IDF-generated embed.
  */
@@ -38,3 +40,9 @@ _binary_hey_muse_pte_end:
     .global hey_muse_pte_length
 hey_muse_pte_length:
     .long @HEY_MUSE_PTE_LEN@
+#if defined(__linux__) && defined(__ELF__)
+    /* Built on a Linux host: keep the symbols inside the library or
+     * program, and no executable stack. */
+    .hidden hey_muse_pte, _binary_hey_muse_pte_start, _binary_hey_muse_pte_end, hey_muse_pte_length
+    .section .note.GNU-stack, "", %progbits
+#endif

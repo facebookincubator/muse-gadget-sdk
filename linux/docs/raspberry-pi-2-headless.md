@@ -79,7 +79,7 @@ Note the identity:
 
 ```sh
 sudo musegadget info
-# node id:   homelink-XXXXXX
+# node id:   homelink-XXXXXX (when paired)
 # BLE name:  MuseGadgetXXXXXX
 # paired:    no
 ```

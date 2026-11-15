@@ -1,6 +1,6 @@
 # Skill Catalog
 
-55 active skills: 53 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+57 active skills: 55 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
@@ -26,6 +26,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Amazon Echo](gadget-amazon-echo/SKILL.md) — cloud only; needs internet, a Linux Home Link and an Amazon login: TTS, volume, media and confirmed switching.
 - [Apple HomePod mini](gadget-apple-homepod-mini/SKILL.md) — supported volume, transport and grouping controls.
 - [Apple TV 4K](gadget-apple-tv-4k/SKILL.md) — paired remote, apps and keyboard.
+- [Divoom Pixoo-64](gadget-pixoo-64/SKILL.md) — still frames and text via the local HTTP API.
 - [Freebox Player Pop](gadget-freebox-player-pop/SKILL.md) — Cast and Android TV Remote v2.
 - [Google Home](gadget-google-home-speaker/SKILL.md) — audio-only Cast.
 - [Google Home Max](gadget-google-home-max/SKILL.md) — audio-only Cast.
@@ -35,6 +36,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Google Nest Mini / Home Mini](gadget-google-nest-mini/SKILL.md) — audio-only Cast.
 - [Google Pixel Tablet](gadget-google-pixel-tablet/SKILL.md) — Cast in supported docked/locked Hub Mode.
 - [Google TV Streamer](gadget-google-tv-streamer/SKILL.md) — Cast and Android TV Remote v2.
+- [Insignia Fire TVs](gadget-insignia-fire-tv/SKILL.md) — PIN-paired local remote, app launch, volume and mute through Home Link.
 - [LG webOS TVs](gadget-lg-webos-tvs/SKILL.md) — local remote/apps/inputs; Cast when advertised.
 - [Logitech Squeezebox](gadget-logitech-squeezebox/SKILL.md) — playback through an existing Lyrion server.
 - [Roku TVs and players](gadget-roku-tvs-and-players/SKILL.md) — local remote, apps, text entry and power over ECP; network-control setting must allow it.

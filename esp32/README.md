@@ -196,6 +196,17 @@ It works on boards with the full UI, using their existing console commands.
 
 ## Boards
 
+On LVGL touch-screen boards with speaker audio, drag up or down on the main
+avatar or its background to raise or lower volume. A temporary percentage
+appears above a vertical filled bar while dragging; lifting your finger saves
+the setting, then the indicator briefly holds and fades away. Dragging through
+three quarters of the screen height covers the full 0–100 range. Horizontal
+swipes still open Settings. Buttons, reply paging, Settings, wake touches and
+image/video views retain their existing controls. Reaching 0% mutes the speaker
+immediately; increasing volume unmutes it and restores the speaker icon.
+The gesture is unavailable on boards without touch or speaker audio and on
+the separate FreeInk UI.
+
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
 settings. Audio and image support vary by board, so check the feature table in
 [`devices/`](devices). The others show status on a light, a ring or a simple
@@ -238,6 +249,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | UI, touch, push-to-talk with text replies | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Cardputer ADV (experimental) | UI, GO/Space push-to-talk with text replies, Esc/Enter/arrow menu controls | `tools/muse/board.sh build cardputer-adv` |
+| M5Stack AtomS3 + Atomic Voice Base (experimental) | UI, front-button push-to-talk, voice notes with text replies | `tools/muse/board.sh build atoms3` |
 | M5Stack StickS3 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
@@ -326,6 +338,15 @@ VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../pro
 [`../protocols/DEVICE.md`](../protocols/DEVICE.md) says how a gadget describes
 itself to Muse: its family, its model and its usage guide.
 
+To let Muse run a small app of its own on a board's screen,
+build it with `MUSE_APPS=1 tools/muse/board.sh build <board>`: Muse writes a
+WebAssembly app on its VM, and the board's `app.run` command loads it and runs
+it in place of the face, with LVGL widgets, the buttons and touch, the chat
+and the board's sensors (apps API 1.1, [`components/muse_apps/sdk/api/`](components/muse_apps/sdk/api/README.md)).
+`app.install` keeps an app on the board, for its launcher (Apps, in Settings).
+[`components/muse_apps/sdk/README.md`](components/muse_apps/sdk/README.md) shows how to write one and how to ask Muse
+for one, and [`AGENTS.md`](AGENTS.md#webassembly-apps) how it works.
+
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
@@ -338,11 +359,13 @@ such as the StopWatch). The text is centred beneath the smaller avatar;
 turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
 visible when the larger text fills the reading area.
 
-The ExecuTorch runtime for the on-device "Hey Muse" wake word (off by
-default; not enabled on any board yet) comes from the ESP Component
-Registry, and only into builds with `MUSE_WAKEWORD_ENABLE`;
-[`docs/executorch.md`](docs/executorch.md) says how the pin and its
-kernel bundle are updated.
+The on-device "Hey Muse" wake word (off by default; not enabled on any
+board yet) runs its model with the ExecuTorch runtime and ESP-NN delegate
+and TensorFlow Lite Micro's microfrontend, which come from the ESP
+Component Registry only into builds with `MUSE_WAKEWORD_ENABLE`;
+[`docs/executorch.md`](docs/executorch.md) says how the pins are updated,
+and [`components/muse_wakeword/models/README.md`](components/muse_wakeword/models/README.md)
+describes the model.
 
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
@@ -384,7 +407,9 @@ and builds without it don't change. With it on:
   background work, whose results may arrive later.
 - **Other boards:** tap the talk button to start a call, press again to hang up;
   holding still sends a voice note. The mic is off while Muse talks, except on
-  the Voice PE when its audio chip reports echo cancellation.
+  the Voice PE when its audio chip reports echo cancellation. ESP32-S3 boards
+  with enough PSRAM can opt into [software echo cancellation](docs/software-aec.md)
+  to allow hands-free interruption during playback.
 - A call also ends when Muse ends it, after 45 seconds of quiet (not counting
   time Muse is still working on something), or after 15 minutes. Muse may not
   hang up by itself when it says goodbye: press to end the call. If the
@@ -438,6 +463,29 @@ enable live voice calls, and is off by default for every board. It isn't
 available on the SenseCAP Watcher (a short wheel click sleeps) or on
 e-paper boards with the FreeInk UI.
 
+### Latest reply on the Waveshare 1.75C
+
+With `CONFIG_MUSE_LATEST_REPLY` (on by default for the 1.75C), swipe right
+from Main to reread the latest answer received by the gadget. Scroll vertically;
+swipe left to return. The same three bottom dots indicate Latest reply, Main,
+and Settings on all three screens. The reader uses the main screen's pixel
+caption font. While reading, a floating
+**New reply ↓** button scrolls smoothly to the top of a newer answer. Returning
+from Main preserves the displayed answer and its scroll position. Completed
+messages from one gadget turn are joined together.
+
+The answer survives screen sleep and clears on reboot. Empty or failed requests
+keep the preceding answer. This is local reply retention, not server chat history.
+The combined answer is capped at 32 KiB, ending in `...` if cut.
+It uses PSRAM: eight 32 KiB receiver slots, a 32 KiB saved answer, a 32 KiB display
+snapshot, plus LVGL layout memory. The new-reply animation temporarily needs
+one extra 32 KiB snapshot while both answers are on screen. It does not write
+conversation text to flash.
+Screenshot builds also accept `>ui=reply`, `>ui.reply=down`, and `>ui.reply=new`
+on the USB console for repeatable on-device checks. `>ui.reply=test-long` replaces
+the saved answer with an oversized synthetic reply; `>ui.reply=end` scrolls to
+the end to check truncation. These commands are disabled in normal builds.
+
 ## Tests
 
 The tests run on your computer, with no board attached:
@@ -485,6 +533,14 @@ their upstream licenses:
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- The GC9107 initialization sequence in
+  [`components/muse/boards/board_m5stack_atoms3.c`](components/muse/boards/board_m5stack_atoms3.c),
+  from M5GFX's `Panel_GC9107` (LovyanGFX), is FreeBSD. See
+  [`devices/licenses/LovyanGFX.txt`](devices/licenses/LovyanGFX.txt).
+- [`components/esp_lcd_gc9107`](components/esp_lcd_gc9107), Espressif's GC9107
+  panel driver 2.0.0 from the ESP Component Registry with one change to build
+  on ESP-IDF 6, is Apache-2.0 under Espressif's copyright. See
+  [`components/esp_lcd_gc9107/license.txt`](components/esp_lcd_gc9107/license.txt).
 - [`components/muse/boards/viewe_smartring_display_init.h`](components/muse/boards/viewe_smartring_display_init.h),
   the SmartRing-Plus panel initialization table from VIEWE's BSP, is
   Apache-2.0 under VIEWE's copyright, as its header says.
@@ -495,6 +551,10 @@ their upstream licenses:
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
   Medium (SIL OFL 1.1); see its README.
+- [`main/fonts/epaper_154g_caption_font.h`](main/fonts/epaper_154g_caption_font.h),
+  the Waveshare 1.54G's reply font, is a subset of GNU Unifont 16.0.04 (SIL OFL
+  1.1, or GPL-2.0+ with the font embedding exception); see
+  [`main/fonts/README.md`](main/fonts/README.md).
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.
