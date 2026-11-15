@@ -1190,7 +1190,7 @@ static bool volume_swipe_allowed(void)
         s_touch_talk_down || muse_state_asleep() || muse_menu_is_open() ||
         s_image_dsc.data || !lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(s_cover, LV_OBJ_FLAG_HIDDEN) ||
-        (s_tv && lv_obj_get_scroll_x(s_tv) != 0)) return false;
+        (s_tv && lv_obj_get_scroll_x(s_tv) != lv_obj_get_x(s_face))) return false;
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     if (s_full_reply) return false;
 #endif
