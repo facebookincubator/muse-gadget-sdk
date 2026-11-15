@@ -127,7 +127,7 @@ BOARDS = {
     "VIEWE SmartRing-Plus": "smartring-plus",
     "Waveshare ESP32-S3-Touch-LCD-3.5": "s3lcd35",
 }
-CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "lilygo175", "aipi", "atk-box", "atk-box2", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "atoms3", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35")
+CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "lilygo175", "aipi", "atk-box", "atk-box2", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35")
 
 
 class Stop(Exception):
@@ -153,7 +153,7 @@ def open_board(port):
     if st is None:
         board.close()
         raise Stop(f"The board on {port} doesn't answer. Its firmware is probably older than serial chat: "
-                   "run this again with --board s3, s3-18, aipi, sticks3, atoms3, stopwatch, cores3, core2, rorolee or watcher to flash it first.", 2)
+                   "run this again with --board s3, s3-18, aipi, sticks3, stopwatch, cores3, core2, rorolee or watcher to flash it first.", 2)
     return board, st
 
 
@@ -803,7 +803,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--port", help="the board's serial port (found by itself when there's one board)")
     ap.add_argument("--board", choices=sorted(set(BOARDS.values())),
-                    help="the board, if it doesn't answer yet: flashes s3, s3-18, aipi, box3, sticks3, atoms3, stopwatch, cores3, core2, rorolee or watcher firmware with serial "
+                    help="the board, if it doesn't answer yet: flashes s3, s3-18, aipi, box3, sticks3, stopwatch, cores3, core2, rorolee or watcher firmware with serial "
                          "chat first, or with --reply or --restore, the firmware to build")
     ap.add_argument("--edit", metavar="CHANGE", help="ask Muse to change the avatar you have, not redraw it")
     ap.add_argument("--reply", metavar="FILE", help="use this reply from Muse instead of asking through the board")

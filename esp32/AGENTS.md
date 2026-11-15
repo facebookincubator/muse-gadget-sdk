@@ -667,12 +667,12 @@ Keep within the session's bounds:
 
 - Up to 3 requests at once; another is refused (its callback gets -1).
 - Send a body in pieces of at most 8 KB (4 KB on Muse boards without PSRAM
-  and the CYD, 2 KB on the Cardputer ADV and AI Passport): a larger piece ends
+  and the CYD, 2 KB on the Cardputer ADV, AtomS3 and AI Passport): a larger piece ends
   that request.
   Queued body bytes are capped at 16 KB with PSRAM and 4 KB without, and
   `noise_ctrl_req_send()` waits up to `wait_ms` for room.
 - Each response frame has to fit the session's inbound buffer (12 KB, 17 KB on
-  Muse boards without PSRAM and the CYD). A larger one ends the whole session,
+  Muse boards without PSRAM other than the AtomS3 and AI Passport, and the CYD). A larger one ends the whole session,
   which reconnects, and the request with `NOISE_CTRL_REQ_TOO_LARGE`. Ask for
   responses that stay under it: read large files in parts.
 - The callback runs on the session task: copy what you need and return. Do

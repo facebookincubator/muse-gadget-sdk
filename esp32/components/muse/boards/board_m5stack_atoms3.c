@@ -203,11 +203,6 @@ static void set_brightness(int pct)
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 }
 
-static void panel_sleep(bool sleep)
-{
-    esp_lcd_panel_disp_sleep(s_panel, sleep);
-}
-
 static void display_pause(bool pause)
 {
     if (pause) esp_lv_adapter_pause(-1);
@@ -294,7 +289,6 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
-    .panel_sleep = panel_sleep,
     .display_pause = display_pause,
     .audio_init = audio_init,
     .mic_slot = 0,
