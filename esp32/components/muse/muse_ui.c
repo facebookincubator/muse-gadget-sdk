@@ -1793,7 +1793,9 @@ static void build_overlays(void)
     }
 
 #if CONFIG_MUSE_HATCH
-    if (muse_board->touch) muse_options_ui_start(s_w, s_h, muse_board->round, caption_font());
+    /* Answers go out through the voice task, which display-only boards don't run. */
+    if (muse_board->touch && (muse_board->audio_init || muse_board->mic_init))
+        muse_options_ui_start(s_w, s_h, muse_board->round, caption_font());
 #endif
 
     /* BLE pairing code, or the Muse app's ask for the talk button: a centred

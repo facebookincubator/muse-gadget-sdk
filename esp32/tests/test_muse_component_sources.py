@@ -64,6 +64,14 @@ endfunction()
         self.assert_option_support(sources)
         self.assertIn('muse_options_ui.c', sources)
 
+    def test_display_only_touch_boards_get_no_picker(self):
+        # Answers go out through the voice task, which needs a speaker or mic.
+        ui = (MUSE / 'muse_ui.c').read_text()
+        start = ui.index('muse_options_ui_start(')
+        guard = ui[ui.rindex('if (', 0, start):start]
+        self.assertIn('muse_board->touch', guard)
+        self.assertIn('muse_board->audio_init || muse_board->mic_init', guard)
+
     def test_freeink_chat_build_uses_shared_support_without_lvgl_picker(self):
         sources = self.sources(CONFIG_MUSE_ENABLED=True, CONFIG_MUSE_HATCH=True,
                                CONFIG_MUSE_UI_FREEINK=True)
