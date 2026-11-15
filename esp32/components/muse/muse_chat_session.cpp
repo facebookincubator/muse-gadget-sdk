@@ -1495,11 +1495,14 @@ static void message_done(int i, const char *final_text)
     m.done = true;
     mark(M_DONE);
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
-    /* Keep complete final text, rather than the 1 KB automatic-caption copy. */
+    /* Keep complete final text, rather than the 1 KB automatic-caption copy.
+     * turn_detach()'s own "working on it" notice isn't an answer: keep the last one. */
     const char *review = final_text && final_text[0] ? final_text
         : m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
-    muse_review_store_complete(s_turn.review, review,
-        !(final_text && final_text[0]) && review && m.len > strlen(review));
+    if (strcmp(m.id, "local-notice")) {
+        muse_review_store_complete(s_turn.review, review,
+            !(final_text && final_text[0]) && review && m.len > strlen(review));
+    }
 #endif
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */

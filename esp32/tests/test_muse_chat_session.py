@@ -469,6 +469,20 @@ static void detach() {
     check_turn();
     assert(s_turn.phase == P_IDLE && s_pending.active && s_pending.busy && done_events == 1);
 }
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
+/* The detached turn's "working on it" notice never replaces the last answer. */
+static void detach_notice_keeps_the_review() {
+    assert(muse_review_init() == 0);
+    s_turn.texts = static_cast<char *>(calloc(MAX_MSGS, TEXT_MAX));
+    begin();
+    reply("earlier", "Earlier answer");
+    assert(!strcmp(reviewed(), "Earlier answer"));
+    detach();
+    assert(!strcmp(reviewed(), "Earlier answer"));
+    free(s_turn.texts);
+    s_turn.texts = nullptr;
+}
+#endif
 static void detaches_only_while_muse_works() {
     begin();   /* Muse doesn't say it's working: the turn waits, then fails as before */
     clock_us += DETACH_US + 1;
@@ -712,6 +726,7 @@ int main(int argc, char **argv) {
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
     case 20: review_keeps_caption_pace(); break;
+    case 35: detach_notice_keeps_the_review(); break;
 #endif
     default: return 2;
     }
@@ -822,6 +837,9 @@ int main(int argc, char **argv) {
     def test_watcher_review_keeps_the_caption_pace_inside_the_turn_cap(self):
         self.run_case(20, watcher=True)
 
+    def test_review_keeps_the_last_answer_through_a_detach_notice(self):
+        self.run_case(35, watcher=True)
+
     def test_dictated_turns_name_the_device_and_typed_turns_do_not(self):
         for watcher in (False, True):
             for name, case in [('dictated', 21), ('typed', 22)]:
@@ -853,7 +871,7 @@ int main(int argc, char **argv) {
         self.run_case(29)
 
     def test_latest_reply_capture_and_caption_pace(self):
-        for case in (0, 1, 2, 18, 19, 20):
+        for case in (0, 1, 2, 18, 19, 20, 35):
             with self.subTest(case=case):
                 result = subprocess.run([str(self.binary.parent / 'session-latest'), str(case)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
