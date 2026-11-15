@@ -810,7 +810,8 @@ int main(int argc, char **argv) {
         latest = [flag.replace('CONFIG_MUSE_BOARD_SENSECAP_WATCHER', 'CONFIG_MUSE_LATEST_REPLY') for flag in watcher]
         commands += [
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags, *latest,
-             str(out / 'session.cpp'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-latest')],
+             str(out / 'session.cpp'), str(out / 'options.o'), str(out / 'options-json.o'),
+             str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-latest')],
         ]
         for command in commands:
             result = subprocess.run(command, capture_output=True, text=True)
