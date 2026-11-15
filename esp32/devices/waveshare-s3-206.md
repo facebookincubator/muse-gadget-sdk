@@ -73,6 +73,9 @@ different.
   wake the chip from light sleep, so use BOOT to wake it. The PMU powers the
   board on and off itself.
 - Replies from Muse are text and show as captions, as on the other boards.
+- Live voice calls can opt into [software echo cancellation](../docs/software-aec.md)
+  with a two-chunk (40 ms) speaker reference delay. This was bench-tested on
+  this board; the default build keeps half-duplex calls.
 - The motor, IMU, RTC and TF card are not integrated.
 
 ## Notes for maintainers
@@ -123,3 +126,9 @@ built with ESP-IDF v6.1:
 - After a screen-off on battery, BOOT wakes the board and touch still responds.
 
 Not yet checked: the home-network tunnel, images from Muse, and long runs.
+
+An opt-in live-call AEC build was also checked on a real 2.06 watch with
+ESP-IDF v6.0.3: software AEC initialized, repeated hands-free interruptions
+worked in one call, and a silent-listener call completed without the watch
+interrupting its own speaker. A long-duration, battery, and other-board test
+has not been done.

@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "fonts/epaper_154g_caption_font.h"
 #include "pixel_font.h"
 #include "page_render.inc"
 
@@ -61,25 +62,24 @@ static int ink(int x0, int y0, int x1, int y1) {
 
 int main(void) {
     const char *sample =
-        "Sure! Here is\nthe plan for\ntomorrow: leave\nat 8:30, pick up\nthe parcel, "
-        "then\nlunch with Anna\nat 12. The rain\nshould stop by\nnoon, so take a\n"
-        "light jacket.";
+        "Конечно! Завтра выезд\nв 8:30, потом забрать\nпосылку и обед с Анной\nв 12. Дождь закончится\n"
+        "к полудню.\nTomorrow: leave at 8:30,\npick up the parcel, then\nlunch with Anna at 12.\n"
+        "The rain should stop by\nnoon, so take a light\njacket.";
     render(sample, "1/3");
 
     // Margins: nothing in the top 10 rows or the 4 columns at each side.
     assert(ink(0, 0, PAGE_W, PAGE_TOP) == 0);
     assert(ink(0, 0, PAGE_LEFT, PAGE_W) == 0);
     assert(ink(PAGE_W - PAGE_LEFT, 0, PAGE_W, PAGE_W) == 0);
-    // Each line of text inside its own band, glyphs 16 rows tall.
+    // Each of the 11 lines inside its own 16-row band.
     for (int line = 0; line < PAGE_LINES; line++) {
         int y = PAGE_TOP + line * CELL_H;
-        assert(ink(0, y, PAGE_W, y + PIXEL_FONT_HEIGHT * PAGE_SCALE) > 0);
-        assert(ink(0, y + PIXEL_FONT_HEIGHT * PAGE_SCALE, PAGE_W, y + CELL_H) == 0);
+        assert(ink(0, y, PAGE_W, y + CELL_H) > 0);
     }
-    // The count: right-aligned in the bottom margin, the font's own size.
+    // The count: right-aligned in the bottom margin, in the 5x8 font.
     int bottom = PAGE_TOP + PAGE_LINES * CELL_H;
     int count_x = PAGE_W - PAGE_LEFT - 3 * (PIXEL_FONT_WIDTH + 1);
-    assert(ink(count_x, bottom + 1, PAGE_W - PAGE_LEFT, bottom + 1 + PIXEL_FONT_HEIGHT) > 0);
+    assert(ink(count_x, bottom + 3, PAGE_W - PAGE_LEFT, bottom + 3 + PIXEL_FONT_HEIGHT) > 0);
     assert(ink(0, bottom, count_x, PAGE_W) == 0);
 
     const char *pgm = getenv("PAGE_PGM");
@@ -97,19 +97,34 @@ int main(void) {
     render("one page only", "");
     assert(ink(0, bottom, PAGE_W, PAGE_W) == 0);
 
-    // A line longer than the page clips at 16 columns; a UTF-8 letter the
-    // font lacks is one '?', its continuation byte skipped.
-    render("ABCDEFGHIJKLMNOPQRSTUVWXYZ\n\xc3\xa9", "");
+    // A line longer than the page clips at 24 columns.
+    render("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123", "");
     assert(ink(PAGE_LEFT + PAGE_COLS * CELL_W, 0, PAGE_W, PAGE_W) == 0);
+    assert(ink(PAGE_LEFT + (PAGE_COLS - 1) * CELL_W, PAGE_TOP, PAGE_LEFT + PAGE_COLS * CELL_W,
+               PAGE_TOP + CELL_H) > 0);
+
+    // Cyrillic has its own glyphs; a letter the font lacks (U+4E00) and an
+    // invalid byte draw as '?', one cell each.
     render("?", "");
-    uint8_t question[PAGE_W][PAGE_W];
+    static uint8_t question[PAGE_W][PAGE_W];
     memcpy(question, s_ink, sizeof(question));
-    render("\n\xc3\xa9", "");
-    int y = PAGE_TOP + CELL_H;
+    render("\xd0\x96", "");  // Ж
+    assert(ink(0, 0, PAGE_W, PAGE_W) > 0);
+    assert(memcmp(s_ink, question, sizeof(question)) != 0);
+    render("\xe4\xb8\x80", "");
+    assert(memcmp(s_ink, question, sizeof(question)) == 0);
+    render("\xff", "");
+    assert(memcmp(s_ink, question, sizeof(question)) == 0);
+
+    // Exact pixels: the first cell is the font's bitmap, leftmost pixel in bit 7.
+    render("\xd0\x96R", "");
+    const uint8_t *zhe = epaper_154g_caption_glyph(0x416);
     for (int r = 0; r < CELL_H; r++) {
-        assert(memcmp(s_ink[y + r], question[PAGE_TOP + r], PAGE_W) == 0);
+        for (int c = 0; c < CELL_W; c++) {
+            assert(s_ink[PAGE_TOP + r][PAGE_LEFT + c] == (zhe[r] >> (7 - c) & 1));
+        }
     }
 
-    puts("PASS waveshare 1.54G page: margins, line bands, count placement, clipping, UTF-8 fallback");
+    puts("PASS waveshare 1.54G page: margins, 11 line bands, count placement, clipping, Cyrillic and fallback, exact glyph pixels");
     return 0;
 }

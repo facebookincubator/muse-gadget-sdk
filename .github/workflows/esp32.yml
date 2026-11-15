@@ -145,6 +145,9 @@ jobs:
           - board: reterminal-sticky
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky"
+          - board: reterminal-sticky-power-test
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky;devices/sdkconfig.reterminal-sticky-power-test"
           - board: reterminal-sticky-link
             target: esp32s3
             overlays: ";devices/sdkconfig.reterminal-sticky-link"
@@ -257,6 +260,9 @@ jobs:
           - board: muse-m5stack-cardputer-adv
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv"
+          - board: muse-m5stack-atoms3
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-atoms3"
           - board: muse-espressif-box-3
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-espressif-box-3"
@@ -272,6 +278,9 @@ jobs:
           - board: muse-m5stack-stopwatch-video
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
+          - board: muse-m5stack-stopwatch-apps
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-apps"
           - board: muse-seeed-xiao-s3-147
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147"
