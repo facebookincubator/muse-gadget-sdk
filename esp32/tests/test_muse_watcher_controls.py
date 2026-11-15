@@ -20,7 +20,7 @@ class WatcherControls(unittest.TestCase):
         out = Path(cls.tmp.name)
         (out / "freertos").mkdir()
         (out / "esp_err.h").write_text("typedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_ERR_NO_MEM 1\n")
-        (out / "esp_heap_caps.h").write_text("#include <stdlib.h>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\n#define heap_caps_malloc(n, caps) malloc(n)\n")
+        (out / "esp_heap_caps.h").write_text("#include <stdlib.h>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\n#define heap_caps_malloc(n, caps) (fail_alloc ? NULL : malloc(n))\nextern int fail_alloc;\n")
         (out / "freertos/FreeRTOS.h").write_text("#define portMAX_DELAY 0\n")
         (out / "freertos/semphr.h").write_text("typedef int SemaphoreHandle_t;\n#define xSemaphoreCreateMutex() 1\n#define xSemaphoreTake(lock, wait) ((void)0)\n#define xSemaphoreGive(lock) ((void)0)\n")
         source = (MUSE / "muse_input.c").read_text()
@@ -37,6 +37,7 @@ class WatcherControls(unittest.TestCase):
 #include "muse_wheel.h"
 #include "muse_review.h"
 #include "muse_chat_priv.h"
+int fail_alloc;
 static int cols = 10, lines = 2;
 void muse_state_page(const char *text, int *c, int *l) { (void)text; *c = cols; *l = lines; }
 static void click(void) {
@@ -115,6 +116,46 @@ static void cjk_capacity(void) {
         }
     }
     assert(!strcmp(joined, reply));   /* every line shown, in order */
+}
+static void snapshot(void) {
+    muse_review_snapshot_t state;
+    static char text[MUSE_REVIEW_CAP];
+    muse_review_snapshot(text, sizeof(text), &state);
+    assert(state.failed && !state.available);
+    assert(muse_review_init() == ESP_OK);
+    muse_review_snapshot(text, sizeof(text), &state);
+    assert(!state.failed && !state.available && !state.revision);
+    fail_alloc = 1;
+    uint32_t turn = muse_review_turn();
+    muse_review_store(turn, "lost allocation");
+    muse_review_snapshot(text, sizeof(text), &state);
+    assert(state.failed && !state.available);
+    fail_alloc = 0;
+    muse_review_store(turn, "first");
+    muse_review_store(turn, "second");
+    muse_review_snapshot(text, sizeof(text), &state);
+    assert(state.available && !state.failed && !state.shortened);
+    assert(!strcmp(text, "first\n\nsecond") && !muse_review_active());
+    uint32_t revision = state.revision;
+    muse_review_step(1);
+    muse_review_close();
+    muse_review_snapshot(NULL, 0, &state);
+    assert(state.revision == revision); // navigation isn't new content
+    muse_review_store(muse_review_turn(), "");
+    muse_review_snapshot(NULL, 0, &state);
+    assert(state.revision == revision);
+    static char large[MUSE_REVIEW_CAP + 8];
+    memset(large, 'a', MUSE_REVIEW_CAP - 2);
+    strcpy(large + MUSE_REVIEW_CAP - 2, "界");
+    muse_review_store(muse_review_turn(), large);
+    muse_review_snapshot(text, sizeof(text), &state);
+    assert(state.shortened && strlen(text) == MUSE_REVIEW_CAP - 2);
+    muse_review_store(muse_review_turn(), "new");
+    muse_review_snapshot(text, sizeof(text), &state);
+    assert(!state.shortened && !strcmp(text, "new"));
+    muse_review_store_complete(muse_review_turn(), "receiver cut", true);
+    muse_review_snapshot(text, sizeof(text), &state);
+    assert(state.shortened);
 }
 static void retained(void) {
     cols = 10; lines = 2;
@@ -295,6 +336,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "pages")) pages();
     else if (!strcmp(argv[1], "cjk")) cjk_capacity();
     else if (!strcmp(argv[1], "retained")) retained();
+    else if (!strcmp(argv[1], "snapshot")) snapshot();
     else if (!strcmp(argv[1], "long")) long_reply();
     else if (!strcmp(argv[1], "view")) view();
     else if (!strcmp(argv[1], "fast")) fast_turns();
@@ -370,3 +412,6 @@ int main(int argc, char **argv) {
     def test_camera_double_click_does_not_record_or_sleep(self):
         result = subprocess.run([str(self.camera_binary), "routing"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_snapshots_failures_revisions_and_utf8_truncation(self):
+        self.run_case("snapshot")

@@ -231,6 +231,19 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_caption_layout COMMAND muse_caption_layout_test)
     set_tests_properties(muse_caption_layout PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
+    add_executable(muse_latest_reply_test tests/latest_reply_harness.c ${caption_sources}
+        "${MUSE_COMPONENT_DIR}/muse_review.c"
+        "${MUSE_COMPONENT_DIR}/muse_chat_text.c")
+    target_include_directories(muse_latest_reply_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_latest_reply_test PRIVATE ${caption_libraries})
+    target_compile_options(muse_latest_reply_test PRIVATE ${caption_compile_options})
+    target_compile_definitions(muse_latest_reply_test PRIVATE CONFIG_MUSE_LATEST_REPLY=1)
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_latest_reply_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_latest_reply COMMAND muse_latest_reply_test)
+    set_tests_properties(muse_latest_reply PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
     find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
     add_test(
         NAME muse_simulator_headless

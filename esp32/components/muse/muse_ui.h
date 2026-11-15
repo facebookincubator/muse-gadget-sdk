@@ -23,8 +23,8 @@
 #include "sdkconfig.h"
 
 /*
- * Bring up the display and build the UI: the avatar on the first tile,
- * settings one swipe to the left. Also owns screen sleep and brightness.
+ * Bring up the display and build the UI: the avatar on the main tile,
+ * settings one swipe left, and optional Latest reply one swipe right. Also owns screen sleep and brightness.
  */
 esp_err_t muse_ui_start(void);
 
