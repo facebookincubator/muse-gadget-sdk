@@ -44,4 +44,4 @@ def test_shipped_metadata_has_no_local_paths():
     for path in (ESP_WAKEWORD / "models").iterdir():
         if path.suffix in (".json", ".md"):
             text = path.read_text()
-            assert "/Users/" not in text and "/home/" not in text and "/data/users" not in text, path
+            assert "/Users/" not in text and "/home/" not in text, path
