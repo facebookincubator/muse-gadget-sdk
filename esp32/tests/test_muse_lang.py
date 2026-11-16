@@ -34,8 +34,17 @@ VN_BAND_COLUMNS = 284 // 8
 GADGET_NAME = "MuseGadget-A1B2C3"
 
 
-def tables() -> dict[str, list[tuple[str, str]]]:
+# Each language's tables, and the Montserrat letter fonts its menu falls back on.
+LANGUAGES = {
+    "vi": ("#if CONFIG_MUSE_UI_LANG_VI\n", "#elif CONFIG_MUSE_UI_LANG_PT_BR\n", "muse_font_vi", (12, 14, 20, 28)),
+    "pt_br": ("#elif CONFIG_MUSE_UI_LANG_PT_BR\n", "#endif /* language tables */", "muse_font_pt", (12, 14, 16, 20, 28)),
+}
+
+
+def tables(lang: str = "vi") -> dict[str, list[tuple[str, str]]]:
     source = (MUSE / "muse_lang.c").read_text(encoding="utf-8")
+    start, end, _, _ = LANGUAGES[lang]
+    source = source[source.index(start):source.index(end)]
     found = {}
     for name, body in re.findall(r"static const muse_lang_entry_t (\w+)\[\] = \{(.*?)\n\};", source, re.S):
         found[name] = [(en.replace('\\"', '"'), text.replace('\\"', '"')) for en, text in ENTRY.findall(body)]
@@ -43,8 +52,10 @@ def tables() -> dict[str, list[tuple[str, str]]]:
 
 
 class LangTest(unittest.TestCase):
+    lang = "vi"
+
     def setUp(self) -> None:
-        self.tables = tables()
+        self.tables = tables(self.lang)
 
     def test_tables_have_entries(self) -> None:
         self.assertEqual(sorted(self.tables), ["MENU", "MESSAGES", "STATUS"])
@@ -94,13 +105,23 @@ class LangTest(unittest.TestCase):
             for en, text in entries:
                 missing = sorted({c for c in text if ord(c) not in latin})
                 self.assertEqual(missing, [], f"{name}: {text!r}")
-        # The menu is in Montserrat too: ASCII built in, the rest from its
-        # Vietnamese letters at each size.
-        for px in (12, 14, 20, 28):
-            has = glyphs(f"muse_font_vi_{px}.c")
+        # The menu is in Montserrat too: ASCII built in, the rest from the
+        # language's letters at each size.
+        _, _, font, sizes = LANGUAGES[self.lang]
+        for px in sizes:
+            has = glyphs(f"{font}_{px}.c")
             for en, text in self.tables["MENU"]:
                 missing = sorted({c for c in text if ord(c) > 0x7E and ord(c) not in has})
                 self.assertEqual(missing, [], f"{px} px: {text!r}")
+
+
+class PortugueseLangTest(LangTest):
+    lang = "pt_br"
+
+    def test_status_names_have_no_accents(self) -> None:
+        # The state label is unscii 8, which has ASCII only.
+        for en, text in self.tables["STATUS"]:
+            self.assertTrue(text.isascii(), en)
 
 
 if __name__ == "__main__":
