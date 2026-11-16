@@ -545,3 +545,160 @@ def test_installer_stops_when_the_trust_store_check_fails(tmp_path):
     assert result.returncode != 0
     assert "carried on" not in result.stdout
     assert "couldn't check the system trust store" in result.stderr
+
+
+# --- Proxy -------------------------------------------------------------------
+
+PROXY = "http://user:p%40ss@proxy.example:3128"
+
+
+def run_proxy(tmp_path, body):
+    """Run install.sh's proxy functions with the drop-in directory under tmp_path.
+
+    as_root runs commands directly, and install drops -o/-g (recording them) so
+    this needs no root.
+    """
+    folder = tmp_path / "musegadget.service.d"
+    script = f"""
+source "{INSTALL_SH}"
+as_root() {{ "$@"; }}
+install() {{
+    local args=()
+    while [ $# -gt 0 ]; do
+        case "$1" in -o|-g) echo "install $1 $2" >>"{tmp_path}/owners"; shift 2 ;; *) args+=("$1"); shift ;; esac
+    done
+    command install "${{args[@]}}"
+}}
+PROXY_DIR="{folder}" PROXY_DROPIN="{folder}/proxy.conf" PROXY_ENV="{folder}/proxy.env"
+PROXY="" NO_PROXY_HOSTS="" REMOVE_PROXY=0
+{body}
+"""
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+
+
+def test_proxy_is_saved_for_the_service_in_a_root_only_file(tmp_path):
+    result = run_proxy(tmp_path, f'PROXY="{PROXY}" NO_PROXY_HOSTS="localhost,.lan"; save_proxy')
+    assert result.returncode == 0, result.stderr
+    folder = tmp_path / "musegadget.service.d"
+    env_file, dropin = folder / "proxy.env", folder / "proxy.conf"
+    assert env_file.read_text() == f"https_proxy={PROXY}\nno_proxy=localhost,.lan\n"
+    assert dropin.read_text() == ("# Written by the musegadget installer (--proxy).\n"
+                                  f"[Service]\nEnvironmentFile={env_file}\n")
+    assert env_file.stat().st_mode & 0o777 == 0o600
+    assert dropin.stat().st_mode & 0o777 == 0o644
+    assert (tmp_path / "owners").read_text().count("install -o 0") == 3
+    assert "http://proxy.example:3128" in result.stdout
+    assert "p%40ss" not in result.stdout + result.stderr
+
+
+def test_no_proxy_line_is_left_out_without_hosts(tmp_path):
+    result = run_proxy(tmp_path, f'PROXY="{PROXY}"; save_proxy')
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "musegadget.service.d" / "proxy.env").read_text() == f"https_proxy={PROXY}\n"
+
+
+def test_a_later_run_reuses_the_saved_proxy(tmp_path):
+    result = run_proxy(tmp_path, f"""
+PROXY="{PROXY}" NO_PROXY_HOSTS="localhost"; save_proxy
+PROXY="" NO_PROXY_HOSTS=""; load_saved_proxy
+echo "loaded $PROXY $NO_PROXY_HOSTS"
+""")
+    assert result.returncode == 0, result.stderr
+    assert f"loaded {PROXY} localhost" in result.stdout
+
+
+def test_a_given_proxy_wins_over_the_saved_one(tmp_path):
+    result = run_proxy(tmp_path, f"""
+PROXY="{PROXY}"; save_proxy
+PROXY="http://other.example:8080"; load_saved_proxy
+echo "loaded $PROXY"
+""")
+    assert result.returncode == 0, result.stderr
+    assert "loaded http://other.example:8080" in result.stdout
+
+
+def test_a_run_without_proxy_keeps_the_saved_one(tmp_path):
+    result = run_proxy(tmp_path, f'PROXY="{PROXY}"; save_proxy; PROXY=""; save_proxy')
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "musegadget.service.d" / "proxy.env").read_text() == f"https_proxy={PROXY}\n"
+
+
+def test_proxy_none_removes_the_saved_proxy(tmp_path):
+    result = run_proxy(tmp_path, f'PROXY="{PROXY}"; save_proxy; PROXY="" REMOVE_PROXY=1; save_proxy')
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "musegadget.service.d").exists()
+    assert "connects directly" in result.stdout
+
+
+def test_a_tampered_saved_proxy_stops_the_installer(tmp_path):
+    folder = tmp_path / "musegadget.service.d"
+    folder.mkdir()
+    (folder / "proxy.env").write_text("https_proxy=socks5://proxy.example:1080\n")
+    result = run_proxy(tmp_path, 'load_saved_proxy; echo "carried on"')
+    assert result.returncode != 0
+    assert "carried on" not in result.stdout
+    assert "saved proxy" in result.stderr and "is not valid" in result.stderr
+
+
+@pytest.mark.parametrize("url,valid", [
+    ("http://proxy.example:3128", True),
+    ("http://user:p%40ss@10.0.0.1:8080", True),
+    ("http://[2001:db8::1]:3128", True),
+    ("https://proxy.example:3128", False),
+    ("socks5://proxy.example:1080", False),
+    ("proxy.example:3128", False),
+    ("http://", False),
+    ("http://proxy.example:3128 extra", False),
+    ('http://proxy.example:3128"', False),
+    ("http://user:pa$s@proxy.example", False),
+    (r"http://user:pa\ss@proxy.example", False),
+    ("http://proxy.example:3128\nEvil=1", False),
+])
+def test_valid_proxy(url, valid):
+    script = f'source "{INSTALL_SH}"; valid_proxy {shlex.quote(url)} && echo valid || echo invalid'
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert result.stdout.strip() == ("valid" if valid else "invalid")
+
+
+@pytest.mark.parametrize("proxy,no_proxy,expected", [
+    (PROXY, "localhost", f"{PROXY}|{PROXY}|localhost"),
+    (PROXY, "", f"{PROXY}|{PROXY}|unset"),
+    ("", "", "unset|unset|unset"),
+])
+def test_root_commands_get_the_proxy_through_sudo(proxy, no_proxy, expected):
+    # The sudo stand-in clears the environment, as sudo's env_reset does.
+    script = f"""
+source "{INSTALL_SH}"
+id() {{ echo 1000; }}
+sudo() {{ env -i PATH="$PATH" "$@"; }}
+export https_proxy=http://leaked.example:1 http_proxy=http://leaked.example:1
+PROXY="{proxy}" NO_PROXY_HOSTS="{no_proxy}"
+as_root sh -c 'echo "${{http_proxy-unset}}|${{https_proxy-unset}}|${{no_proxy-unset}}"'
+"""
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
+@pytest.mark.parametrize("args,message", [
+    (["--proxy", "socks5://proxy.example:1080"], "--proxy needs an http:// URL"),
+    (["--proxy", "http://proxy.example:3128", "--no-proxy", "a b"], "--no-proxy needs a comma-separated"),
+    (["--no-proxy", "localhost"], "--no-proxy goes with --proxy."),
+    (["--proxy", "none", "--no-proxy", "localhost"], "not --proxy none"),
+])
+def test_bad_proxy_options_stop_before_anything_runs(args, message):
+    # Checked before the installer asks for sudo or reads the system.
+    result = subprocess.run(["bash", str(INSTALL_SH), *args], capture_output=True, text=True, timeout=60)
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+def test_main_saves_the_proxy_before_the_service_starts():
+    text = INSTALL_SH.read_text()
+    main = text.split("\nmain() {", 1)[1]
+    steps = ("load_saved_proxy", "check_system", "install_packages", "install_uv",
+             "save_proxy", "install_service", "pair")
+    order = [main.index(f"\n    {step}\n") for step in steps]
+    assert order == sorted(order)
+    uninstall = text.split("\nuninstall() {", 1)[1].split("\n}\n", 1)[0]
+    assert "\n    remove_proxy\n" in uninstall

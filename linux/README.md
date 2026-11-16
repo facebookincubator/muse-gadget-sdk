@@ -57,6 +57,33 @@ The installer checks your system, installs what it needs into
 your account, it asks, and tells you if that account can use sudo. Then it
 opens Bluetooth pairing.
 
+### Behind a proxy
+
+If the machine reaches the internet only through an HTTP proxy, give it to
+the installer:
+
+```sh
+bash install.sh --sdk-token mgst_… --proxy http://proxy.example:3128
+```
+
+The installer uses the proxy for its own downloads and for pairing, and saves
+it for the service in `/etc/systemd/system/musegadget.service.d/`, in a file
+only root can read, since the URL can hold a password
+(`http://user:password@host:port`). Later runs reuse it. `--no-proxy HOSTS`
+lists hosts to reach directly, `--proxy none` removes the proxy, and
+`--uninstall` removes it too.
+
+`sudo` drops your shell's proxy settings, so when you run `musegadget pair`
+or `musegadget doctor` yourself, set `https_proxy` (and `no_proxy`) and keep
+them:
+
+```sh
+sudo --preserve-env=https_proxy,no_proxy musegadget pair
+```
+
+Only HTTP proxies that support `CONNECT` work; SOCKS proxies don't. Video
+calls send their media directly, not through the proxy.
+
 ## Set it up with Muse
 
 When the installer says pairing is open, go to the Muse app:
@@ -464,7 +491,8 @@ bash install.sh --uninstall              # remove it (add --purge to forget the 
 
 `doctor` checks saved pairing credentials, SDK token format, the systemd
 service, Bluetooth controller power, TCP connectivity to the default
-Muse API on port 443, and whether the system trust store is safe to use.
+Muse API on port 443 (through the proxy, if one is set), and whether the
+system trust store is safe to use.
 Each check prints `OK`, `FAIL`, or `WARN` and a next step. It exits with code
 1 if any check fails, or 0 otherwise. Bluetooth problems are warnings because
 Bluetooth is only needed for pairing.

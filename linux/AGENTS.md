@@ -75,7 +75,7 @@ Apple Silicon wheel, so run it under an x86-64 Python on a Mac:
 
 ```sh
 uv run --no-project --isolated --python cpython-3.9-macos-x86_64 \
-  --with pytest --with cryptography==3.3.2 --with websockets==13.1 \
+  --with pytest --with cryptography==3.3.2 --with websockets==15.0.1 \
   env PYTHONPATH=src python -m pytest -q
 ```
 
