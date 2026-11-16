@@ -69,8 +69,9 @@ jobs:
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
-            # The wake word's registry components (ExecuTorch, esp-nn, the
-            # microfrontend) for its host runner tests.
+            # Registry components for the wake word runner tests (ExecuTorch,
+            # esp-nn, the microfrontend). No apostrophes in this command: the
+            # action wraps it in single quotes.
             idf.py -B build-host-wakeword -DIDF_TARGET=esp32s3 -DSDKCONFIG=build-host-wakeword/sdkconfig \
               -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-wakeword" \
               reconfigure
