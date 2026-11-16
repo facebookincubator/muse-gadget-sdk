@@ -476,8 +476,8 @@ an active service and reachable API alone do not establish that connection.
 
 ### Root CAs
 
-musegadget uses the system trust store and checks it for root CAs tied to
-eMudhra's 2026 incident:
+musegadget uses the system trust store and checks it for four root CAs
+linked to eMudhra:
 
 - **Compromised:** emSign ECC Root CA - G3, whose intermediates' private keys
   became public, and Comodo AAA Services root, which cross-signed them.

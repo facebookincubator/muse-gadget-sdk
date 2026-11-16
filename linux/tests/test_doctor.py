@@ -241,7 +241,7 @@ def test_trust_store_warns_about_retired_roots(monkeypatch: pytest.MonkeyPatch) 
     result: doctor.CheckResult = doctor.check_trust_store()
     assert result["status"] == "WARN"
     assert warning[1:] in result["detail"] and "still connects" in result["detail"]
-    assert "deselect them" in result["hint"]
+    assert "deselect it in the system trust store" in result["hint"]
 
 
 @pytest.mark.parametrize("status,exit_code", [("OK", 0), ("FAIL", 1), ("WARN", 0)])
