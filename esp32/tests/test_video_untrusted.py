@@ -325,6 +325,28 @@ def idr16(mbs, idr_pic_id):
 AU_MAX = 64 * 1024   # tests/vdec_stale_harness.c's buffer, as muse_video.c's s_au
 VSTREAM_INC = ROOT / "components/muse_vstream/include"
 VP8 = ROOT / "components/libvpx_vp8/src"
+VP8_KEYS = ROOT / "tests/vectors/vp8/p0_keyframes.ivf"   # 240 x 240, a keyframe then inter frames
+
+
+def ivf_frames(path):
+    ivf, frames, at = path.read_bytes(), [], 32
+    while at + 12 <= len(ivf):
+        n = int.from_bytes(ivf[at:at + 4], "little")
+        frames.append(ivf[at + 12:at + 12 + n])
+        at += 12 + n
+    return frames
+
+
+def vp8_failing_resize(key):
+    """key cut to a key frame of a smaller size (224 wide) whose first
+    partition runs past the frame: the decoder frees its pictures for the new
+    size, then fails. The ring takes it (muse_vstream.c: the partition's
+    length fits the frame)."""
+    first = int.from_bytes(key[:3], "little") >> 5
+    small = bytearray(key[:10 + first - 5])   # 3-byte tag, 7-byte key frame header
+    small[6:8] = (224).to_bytes(2, "little")
+    assert first <= len(small)
+    return bytes(small)
 
 
 def sanitizers(cc, tmp):
@@ -440,6 +462,18 @@ class StaleStreamState(unittest.TestCase):
         f = self.frames({"v_a": key[:28], "v_b": frames[1].ljust(AU_MAX, b"\0"), "v_c": key[:4], "v_k": key})
         self.check("vp8_vdec", "vp8", {k[2:]: v for k, v in f.items()}, 1, (240, 240))
 
+    def test_vp8_inter_frame_after_a_failed_size_change(self):
+        # A key frame of another size frees every picture, then fails, leaving
+        # the references without memory. The inter frame after it predicted
+        # from them through NULL; it is refused now, and the next key frame
+        # decodes.
+        frames = ivf_frames(VP8_KEYS)
+        key, inter = frames[0], frames[1]
+        self.assertEqual((key[0] & 1, inter[0] & 1), (0, 1))
+        f = self.frames({"v_key": key, "v_small": vp8_failing_resize(key), "v_inter": inter, "v_key2": key})
+        seq = self.run_harness("vp8_vdec", "vp8", [f["v_key"], f["v_small"], f["v_inter"], f["v_key2"]])
+        self.assertEqual([line[2] for line in seq], ["1", "-1", "-1", "1"], seq)
+
     def test_decoders_keep_no_stream_position_across_calls(self):
         src = (TINY / "h264bsd_decoder.c").read_text()
         body = src[src.index("u32 h264bsdDecode(storage_t *pStorage"):]
@@ -447,6 +481,145 @@ class StaleStreamState(unittest.TestCase):
         self.assertIn("pStorage->prevBufPointer = NULL;", body)
         self.assertIn("if (readBytes > len)", body)
         self.assertIn("pStorage->prevBytesConsumed <= len)", src)
+
+
+# PIPE BANDS WIRE: VP8 frames as sent on the network (header, access unit)
+# through the ring and admitted as muse_video.c's decode task does: drop all
+# but a keyframe while waiting for one (after a gap or a failed decode), and
+# split the bands by the layout the ring checked the frame in. Prints
+# "NUMBER drop", or the number and each band's muse_vdec result, or "lost".
+PIPE_HARNESS = r"""
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "muse_vdec.h"
+#include "muse_vstream.h"
+#define AU_MAX (64 * 1024)
+static uint8_t wire[1 << 18], ring[1 << 18], au[AU_MAX];
+int main(int argc, char **argv)
+{
+    FILE *f = argc == 3 ? fopen(argv[2], "rb") : NULL;
+    if (!f) return 2;
+    size_t n = fread(wire, 1, sizeof(wire), f);
+    fclose(f);
+    muse_vstream_t vs;
+    muse_vstream_init(&vs, ring, sizeof(ring), AU_MAX);
+    vs.codec = MUSE_VIDEO_CODEC_VP8;
+    vs.bands = (uint8_t)atoi(argv[1]);
+    muse_vstream_start(&vs);
+    muse_vstream_write(&vs, wire, n);
+    muse_vdec_t *d[2] = { muse_vdec_open(MUSE_VIDEO_CODEC_VP8, 240, 240), muse_vdec_open(MUSE_VIDEO_CODEC_VP8, 240, 240) };
+    if (!d[0] || !d[1]) return 2;
+    bool need_key = true;
+    muse_vframe_t fr;
+    int32_t got;
+    while ((got = muse_vstream_pop(&vs, au, AU_MAX, &fr)) != 0) {
+        bool key = got > 0 && (fr.flags & MUSE_VIDEO_FRAME_KEY);
+        if (got < 0 || (fr.after_gap && !key)) need_key = true;
+        if (got < 0 || (need_key && !key)) {
+            if (got < 0) printf("lost\n");
+            else printf("%u drop\n", fr.number);
+            continue;
+        }
+        need_key = false;
+        uint32_t len[2] = { (uint32_t)got, 0 };
+        const uint8_t *band[2] = { au, NULL };
+        if (fr.bands == 2) {
+            len[0] = au[0] | au[1] << 8 | au[2] << 16 | (uint32_t)au[3] << 24;
+            if (len[0] > (uint32_t)got - 4) return 3;   /* the ring checked it */
+            band[0] = au + 4;
+            band[1] = au + 4 + len[0];
+            len[1] = (uint32_t)got - 4 - len[0];
+        }
+        printf("%u", fr.number);
+        for (int k = 0; k < fr.bands; k++) {
+            muse_pic_t pic;
+            int rc = muse_vdec_decode(d[k], band[k], len[k], &pic);
+            printf(" %d", rc);
+            need_key |= rc == MUSE_VDEC_ERROR;
+        }
+        printf("\n");
+    }
+    muse_vdec_close(d[0]);
+    muse_vdec_close(d[1]);
+    return 0;
+}
+"""
+
+
+def wire_frame(number, key, au):
+    return bytes([0x56, 1 if key else 0]) + number.to_bytes(2, "little") + len(au).to_bytes(4, "little") + au
+
+
+def vp8_key_band(n):
+    """A VP8 keyframe tag (first partition n - 10), sync code and 240 x 240, padded to n bytes."""
+    tag = 1 << 4 | (n - 10) << 5
+    return tag.to_bytes(3, "little") + b"\x9d\x01\x2a" + (240).to_bytes(2, "little") * 2 + b"\x55" * (n - 10)
+
+
+class StreamLayoutTest(unittest.TestCase):
+    """Validation and decoding agree on one band layout, the stream's: the
+    ring checks a frame in the layout `start` gave and the decode task splits
+    it the same way, so a keyframe flag can't carry a frame the decoder reads
+    as something else (tests/test_muse_video.py checks the ring alone)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory(prefix="vpipe-")
+        tmp = Path(cls.tmp.name)
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        src, cls.exe = tmp / "pipe.c", tmp / "pipe"
+        src.write_text(PIPE_HARNESS)
+        vstream = ROOT / "components/muse_vstream"
+        r = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", *sanitizers(cc, tmp), "-DCONFIG_MUSE_VIDEO_VP8=1",
+                            f"-I{TINY}", f"-I{VP8}", "-I", str(MUSE), "-I", str(VSTREAM_INC), str(src),
+                            str(MUSE / "muse_vdec.c"), str(vstream / "muse_vstream.c"),
+                            *sorted(map(str, TINY.glob("*.c"))), *sorted(map(str, VP8.rglob("*.c"))), "-lm",
+                            "-o", str(cls.exe)], capture_output=True, text=True)
+        if r.returncode:
+            raise AssertionError(r.stdout + r.stderr)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def run_wire(self, bands, data):
+        path = Path(self.tmp.name, "stream.bin")
+        path.write_bytes(data)
+        r = subprocess.run([str(self.exe), str(bands), str(path)], capture_output=True, text=True, timeout=120,
+                           env=dict(os.environ, ASAN_OPTIONS="detect_leaks=0"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("runtime error", r.stderr)
+        return [line.split() for line in r.stdout.splitlines()]
+
+    def test_a_keyframe_flag_on_a_frame_shaped_as_two_bands(self):
+        # One band. After a key frame of a new size that failed (frame 2), a
+        # keyframe-flagged frame laid out as two bands of keyframes: as one
+        # frame its first bytes, the band length, are an inter frame's tag.
+        # The ring used to take it as two bands, the decode task then decoded
+        # it whole, and the inter frame predicted from references the failed
+        # key frame had freed. It isn't a frame of this stream now, and the
+        # key frame after it decodes.
+        frames = ivf_frames(VP8_KEYS)
+        key, inter = frames[0], frames[1]
+        top = 1 | 1 << 4 | 8 << 5   # as a tag: an inter frame, version 0, shown, first partition 8
+        two = top.to_bytes(4, "little") + vp8_key_band(top) + vp8_key_band(40)
+
+        def stream(flag):
+            return (wire_frame(0, True, key) + wire_frame(1, False, inter) +
+                    wire_frame(2, True, vp8_failing_resize(key)) + wire_frame(3, flag, two) + wire_frame(4, True, key))
+
+        self.assertEqual(self.run_wire(1, stream(True)), [["0", "1"], ["1", "1"], ["2", "-1"], ["4", "1"]])
+        # The one-bit control: without the flag, frame 3 is an inter frame to
+        # the ring too, dropped while waiting for a keyframe.
+        self.assertEqual(self.run_wire(1, stream(False)),
+                         [["0", "1"], ["1", "1"], ["2", "-1"], ["3", "drop"], ["4", "1"]])
+        # In a two-band stream the same layout is two frames, one per decoder,
+        # and a one-band frame isn't one.
+        both = len(key).to_bytes(4, "little") + key + key
+        self.assertEqual(self.run_wire(2, wire_frame(0, True, both) + wire_frame(1, True, key)),
+                         [["0", "1", "1"], ["lost"]])
+        self.assertEqual(self.run_wire(1, wire_frame(0, True, both) + wire_frame(1, True, key)), [["1", "1"]])
 
 
 class VideoDrawingTest(unittest.TestCase):
@@ -524,6 +697,7 @@ int main(int argc, char **argv)
     if (!d[0] || !d[1]) return 2;
     muse_vstream_t vs;
     muse_vstream_init(&vs, ring, sizeof(ring), sizeof(buf));
+    vs.bands = bands ? 2 : 1;
     muse_vstream_start(&vs);
     for (int i = 1 + bands; i < argc; i++) {
         FILE *f = fopen(argv[i], "rb");
