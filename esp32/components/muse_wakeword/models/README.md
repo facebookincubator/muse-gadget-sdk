@@ -59,10 +59,10 @@ the two agree. [`ATTRIBUTION.md`](ATTRIBUTION.md) credits the training data.
 - **Detector** (`../ww_detector.c`): fires when the mean of the last five
   probabilities is above the sensitivity's cutoff, then ignores 2 s.
 - **Size:** 23,492 bytes. On an ESP32-S3 at 240 MHz an inference takes
-  0.6 ms with the runner's buffers in internal RAM (about 49 KB of it,
-  front end included; a test image without the UI) and 1.2 to 1.5 ms with
-  them in PSRAM, as on a SenseCAP Watcher with its UI (14 KB internal,
-  29 KB PSRAM). `../README.md` has the measurements.
+  0.6 to 0.7 ms back to back and about 1.2 ms while listening in the full
+  firmware, where the caches are cold at each 30 ms step (SenseCAP
+  Watcher with its UI: 14 KB internal RAM, 29 KB PSRAM). `../README.md`
+  has the measurements.
 
 ## Measured accuracy
 
