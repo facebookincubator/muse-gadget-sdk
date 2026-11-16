@@ -761,6 +761,30 @@ the design, the Wi-Fi protocol and the numbers.
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the
   decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
 
+## Cable mirror
+
+`MUSE_MIRROR=1 tools/muse/board.sh build|flash <board>` (overlay
+`devices/sdkconfig.muse-mirror`, `CONFIG_MUSE_MIRROR`) adds the mirror in
+`components/muse_mirror`. `tools/muse/mirror.py PORT` then shows the screen in
+a desktop window over the console cable, the chip's own USB or a USB-UART
+bridge: the mouse touches, the board's keys and typing go to the board, the
+computer can play and record its sound, and Ctrl/Cmd+S and +R save
+screenshots and recordings. `docs/mirror.md` is the guide,
+`../protocols/MIRROR.md` the wire format.
+
+- **Boards:** the full LVGL UI with PSRAM; not the FreeInk e-paper UI.
+- **The port:** the viewer holds the console. Close it before flashing or
+  `idf.py monitor`; it never resets the board.
+- **Trust:** whatever is on the cable controls the board, as the console
+  already does; there is no pairing or key.
+- **Without the board:** `devices/sdkconfig.muse-virtual-display` builds a
+  board with no panel, keys or codec for any ESP32-S3 with 8 MB of flash and
+  octal PSRAM. Its size, shape and name are in menuconfig (Muse mirror); a
+  name that holds a known model, such as "1.75C", gets that board drawn in the
+  window. Its sound is the computer's.
+- **Test** with `tests/test_muse_mirror*.py`; the viewer's need PySide6 and
+  numpy (`tools/muse/requirements-mirror.txt`).
+
 ## WebAssembly apps
 
 WebAssembly apps are an optional component, off by default. Enable them on

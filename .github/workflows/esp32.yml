@@ -69,6 +69,8 @@ jobs:
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
+            # The mirror tests decode its messages with numpy (tools/muse/requirements-mirror.txt).
+            python -m pip install -q "numpy>=1.26"
             python -m unittest discover -s tests -p "test_*.py" -v
 
   simulator:
