@@ -72,7 +72,8 @@ jobs:
             # Registry components for the wake word runner tests (ExecuTorch,
             # esp-nn, the microfrontend). No apostrophes in this command: the
             # action wraps it in single quotes.
-            idf.py -B build-host-wakeword -DIDF_TARGET=esp32s3 -DSDKCONFIG=build-host-wakeword/sdkconfig \
+            # The action exports IDF_TARGET=esp32c5: override it for this one.
+            IDF_TARGET=esp32s3 idf.py -B build-host-wakeword -DSDKCONFIG=build-host-wakeword/sdkconfig \
               -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-wakeword" \
               reconfigure
             python -m unittest discover -s tests -p "test_*.py" -v
