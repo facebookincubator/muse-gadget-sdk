@@ -30,6 +30,8 @@ import os
 import queue
 import shutil
 import subprocess
+
+from musegadget import reaper
 import threading
 import time
 
@@ -165,7 +167,7 @@ class VideoPlayer:
     """Runs a player that reads raw H.264 on standard input and streams units to it."""
 
     def __init__(self, command: list) -> None:
-        self._process = subprocess.Popen(command, stdin=subprocess.PIPE,
+        self._process = reaper.ReapingPopen(command, stdin=subprocess.PIPE,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             fd = os.dup(self._process.stdin.fileno())
