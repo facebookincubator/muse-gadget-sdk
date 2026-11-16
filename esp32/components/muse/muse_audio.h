@@ -60,3 +60,5 @@ float muse_audio_level(const int16_t *mono, size_t frames);
 
 /* Short UI chirp: rising for "go", falling for "done". */
 void muse_audio_chirp(int rising);
+/* Two-note "ping" for a reply that just arrived. */
+void muse_audio_notify(void);

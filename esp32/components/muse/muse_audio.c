@@ -481,3 +481,23 @@ void muse_audio_chirp(int rising)
     }
     muse_audio_write(buf, N);
 }
+
+void muse_audio_notify(void)
+{
+    /* E6 then A6, 110 ms each with a bell-like decay: short and clear on the
+     * Watcher's small speaker, quieter than speech. */
+    enum { MS = 110, N = MUSE_AUDIO_RATE * MS / 1000 };
+    static int16_t buf[N];
+    static const float NOTES[] = { 1318.5f, 1760.0f };
+    for (size_t k = 0; k < sizeof(NOTES) / sizeof(NOTES[0]); k++) {
+        float phase = 0;
+        for (int i = 0; i < N; i++) {
+            float x = (float)i / N;
+            phase += 2.0f * (float)M_PI * NOTES[k] / MUSE_AUDIO_RATE;
+            float env = (x < 0.05f ? x / 0.05f : 1.0f) * expf(-4.0f * x);
+            float v = sinf(phase) + 0.25f * sinf(2.0f * phase);
+            buf[i] = (int16_t)(v * env * 6000.0f);
+        }
+        muse_audio_write(buf, N);
+    }
+}

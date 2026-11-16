@@ -39,6 +39,7 @@ static volatile float s_level;
 static volatile float s_progress;
 static volatile int64_t s_last_poke_us;
 static volatile int64_t s_happy_until_us;
+static volatile int64_t s_flash_start_us;   /* 0 = no reply flash */
 static volatile bool s_asleep;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -287,6 +288,34 @@ void muse_state_wait_awake(uint32_t timeout_ms)
 void muse_state_nudge(void)
 {
     xEventGroupSetBits(s_wake, NUDGE_BIT);
+}
+
+#define FLASH_SECS 0.9f
+
+void muse_state_flash(void)
+{
+    if (muse_state_asleep()) {
+        muse_state_set_asleep(false);
+    }
+    muse_state_poke();
+    s_flash_start_us = esp_timer_get_time();
+}
+
+float muse_state_flash_level(void)
+{
+    int64_t start = s_flash_start_us;
+    if (!start) {
+        return 0;
+    }
+    float t = (float)(esp_timer_get_time() - start) / 1e6f;
+    if (t < 0 || t >= FLASH_SECS) {
+        s_flash_start_us = 0;
+        return 0;
+    }
+    /* Two pulses, like a phone's double buzz: each rises fast, fades out. */
+    float half = FLASH_SECS / 2;
+    float x = (t < half ? t : t - half) / half;
+    return x < 0.15f ? x / 0.15f : (1.0f - x) / 0.85f;
 }
 
 void muse_state_make_happy(void)
