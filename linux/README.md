@@ -469,16 +469,44 @@ Each check prints `OK`, `FAIL`, or `WARN` and a next step. It exits with code
 1 if any check fails, or 0 otherwise. Bluetooth problems are warnings because
 Bluetooth is only needed for pairing.
 
-musegadget uses the system trust store, and won't start or connect (exit code
-78) while that store can't be read or still has one of the root CAs distrusted
-after the eMudhra key compromise. Update the `ca-certificates` package, then
-restart musegadget. The installer updates that package, and stops if the store
-still has one of those roots.
-
 Run it on the gadget with sudo so it can read the root-owned state files.
 It never changes settings, starts services, opens pairing, or prints tokens.
 It does not validate credentials online or confirm a live Muse VM session;
 an active service and reachable API alone do not establish that connection.
+
+### Root CAs
+
+musegadget uses the system trust store and checks it for four root CAs
+linked to eMudhra:
+
+- **Compromised:** emSign ECC Root CA - G3, whose intermediates' private keys
+  became public, and Comodo AAA Services root, which cross-signed them.
+  musegadget won't start or connect (exit code 78), and `doctor` reports
+  `FAIL`, while the store can't be read or still trusts either. Update the
+  `ca-certificates` package, then restart musegadget. The installer updates
+  that package, and stops if the store still trusts one of these roots.
+- **Retired:** emSign Root CA - C1 and emSign ECC Root CA - C3, which Mozilla
+  removed at eMudhra's request as it retires its dual-purpose roots, not
+  because of a compromise. Some distros' `ca-certificates` packages still
+  include them. musegadget still connects, but logs a warning, `doctor`
+  reports `WARN`, and the installer prints a warning.
+
+To stop trusting the retired roots yourself on Debian, Ubuntu or Raspberry Pi
+OS, put `!` in front of their lines in `/etc/ca-certificates.conf` (change the
+existing lines rather than adding new ones), then rebuild the store:
+
+```sh
+sudo sed -i -e 's|^mozilla/emSign_Root_CA_-_C1\.crt$|!&|' \
+    -e 's|^mozilla/emSign_ECC_Root_CA_-_C3\.crt$|!&|' /etc/ca-certificates.conf
+sudo update-ca-certificates
+```
+
+`sudo dpkg-reconfigure ca-certificates` lets you deselect them interactively
+instead. On Fedora and Arch, put a copy of each certificate in the p11-kit
+blocklist (`/etc/pki/ca-trust/source/blocklist/` on Fedora,
+`/etc/ca-certificates/trust-source/blocklist/` on Arch), then run
+`sudo update-ca-trust`. The PEM block for each root, under its name, is in
+[`tests/vectors/distrusted_roots.pem`](tests/vectors/distrusted_roots.pem).
 
 ## Develop
 

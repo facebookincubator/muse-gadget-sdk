@@ -135,6 +135,59 @@ def test_the_table_matches_the_published_roots():
         assert tls.distrusted_name(der) == name
 
 
+def test_the_roots_are_split_into_compromised_and_retired():
+    assert [name for name, _, _ in tls.COMPROMISED_ROOTS] == [
+        "emSign ECC Root CA - G3", "Comodo AAA Services root"]
+    assert [name for name, _, _ in tls.RETIRED_ROOTS] == [
+        "emSign Root CA - C1", "emSign ECC Root CA - C3"]
+    assert tls.DISTRUSTED_ROOTS == tls.COMPROMISED_ROOTS + tls.RETIRED_ROOTS
+
+
+@pytest.mark.parametrize("found,problem,warning", [
+    ([], None, None),
+    (["emSign ECC Root CA - C3", "emSign Root CA - C1"], None,
+     "the system trust store still trusts emSign ECC Root CA - C3, emSign Root CA - C1, "
+     "which Mozilla has retired"),
+    (["Comodo AAA Services root", "emSign Root CA - C1"],
+     "the system trust store still trusts Comodo AAA Services root",
+     "the system trust store still trusts emSign Root CA - C1, which Mozilla has retired"),
+    (["Comodo AAA Services root", "emSign ECC Root CA - G3"],
+     "the system trust store still trusts Comodo AAA Services root, emSign ECC Root CA - G3", None),
+    (None, "can't read the system trust store", None),
+])
+def test_only_compromised_roots_are_a_problem(monkeypatch, found, problem, warning):
+    monkeypatch.setattr(tls, "check_trust_store", lambda: found)
+    assert tls.trust_store_problem() == problem
+    assert tls.trust_store_warning() == warning
+
+
+def test_a_store_with_only_retired_roots_is_safe_to_use(tmp_path, monkeypatch):
+    _, _, (c1, c1_der), (c3, c3_der) = published_roots()
+    (tmp_path / "bundle.pem").write_text(ssl.DER_cert_to_PEM_cert(CA("Fine").der)
+                                         + ssl.DER_cert_to_PEM_cert(c1_der)
+                                         + ssl.DER_cert_to_PEM_cert(c3_der))
+    use_store(monkeypatch, tmp_path / "bundle.pem", None)
+    assert tls.check_trust_store() == sorted([c1, c3])
+    assert tls.trust_store_problem() is None
+    assert tls.trust_store_warning() == (
+        f"the system trust store still trusts {', '.join(sorted([c1, c3]))}, "
+        "which Mozilla has retired")
+
+
+def test_the_client_context_warns_once_about_retired_roots(monkeypatch, caplog):
+    warning = "the system trust store still trusts emSign Root CA - C1, which Mozilla has retired"
+    built = []
+    monkeypatch.setattr(tls, "_context", None)
+    monkeypatch.setattr(tls, "trust_store_problem", lambda: None)
+    monkeypatch.setattr(tls, "trust_store_warning", lambda: warning)
+    monkeypatch.setattr(tls.ssl, "create_default_context", lambda: built.append(object()) or built[-1])
+    with caplog.at_level("WARNING", logger=tls.__name__):
+        assert tls.client_context() is tls.client_context()
+    assert len(built) == 1
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == [f"{warning}; {tls.RETIRED_FIX}."]
+
+
 def test_a_reissued_certificate_for_a_distrusted_key_is_recognised(monkeypatch):
     key = ec.generate_private_key(ec.SECP256R1())
     original = make_cert("Original", key, ca=True).public_bytes(Encoding.DER)
@@ -291,13 +344,37 @@ def test_the_client_context_is_the_system_trust_store(tmp_path, monkeypatch):
             handshake(context, server_context(ca, tmp_path))
 
 
-def test_the_client_context_is_built_once(monkeypatch):
+def test_the_client_context_connects_despite_retired_roots_but_not_compromised_ones(
+        tmp_path, monkeypatch, caplog):
+    (g3, g3_der), _, (c1, c1_der), _ = published_roots()
+    plain = CA("Plain")
+    bundle = tmp_path / "bundle.pem"
+    (tmp_path / "certs").mkdir()
+    monkeypatch.setenv("SSL_CERT_FILE", str(bundle))
+    monkeypatch.setenv("SSL_CERT_DIR", str(tmp_path / "certs"))
+    monkeypatch.delenv("SSL_CERT_URI", raising=False)
+    bundle.write_text(ssl.DER_cert_to_PEM_cert(plain.der) + ssl.DER_cert_to_PEM_cert(c1_der))
+    monkeypatch.setattr(tls, "_context", None)
+    with caplog.at_level("WARNING", logger=tls.__name__):
+        handshake(tls.client_context(), server_context(plain, tmp_path))
+    assert [record.getMessage() for record in caplog.records] == [
+        f"the system trust store still trusts {c1}, which Mozilla has retired; {tls.RETIRED_FIX}."]
+    bundle.write_text(bundle.read_text() + ssl.DER_cert_to_PEM_cert(g3_der))
+    monkeypatch.setattr(tls, "_context", None)
+    with pytest.raises(tls.TrustStoreError, match=f"still trusts {g3}; "):
+        tls.client_context()
+
+
+def test_the_client_context_is_built_once(monkeypatch, caplog):
     built = []
     monkeypatch.setattr(tls, "_context", None)
     monkeypatch.setattr(tls, "trust_store_problem", lambda: None)
+    monkeypatch.setattr(tls, "trust_store_warning", lambda: None)
     monkeypatch.setattr(tls.ssl, "create_default_context", lambda: built.append(object()) or built[-1])
-    assert tls.client_context() is tls.client_context()
+    with caplog.at_level("WARNING", logger=tls.__name__):
+        assert tls.client_context() is tls.client_context()
     assert len(built) == 1
+    assert caplog.records == []
 
 
 UNSAFE = ("can't read the system trust store",
