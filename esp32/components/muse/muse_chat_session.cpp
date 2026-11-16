@@ -1582,7 +1582,7 @@ static bool pending_held(const char *id)
 }
 
 /* A finished message's text. Canonical rows can carry only a transcript;
- * collect its public assistant text into a bounded buffer owned by the caller. */
+ * collect its public assistant text into a bounded buffer; release it with free(). */
 static const char *reply_text(cJSON *payload, char **owned)
 {
     *owned = nullptr;
