@@ -37,21 +37,29 @@ much shorter with the wake word on.
 ## Cost
 
 Measured on a SenseCAP Watcher (ESP32-S3, 240 MHz) running the full
-firmware (UI, BLE), listening:
+firmware (UI, BLE), listening with the screen on:
 
 | | This runner | The earlier ExecuTorch runner |
 |---|---|---|
-| Inference | 1.2 ms per 30 ms | 17.7 ms per 20 ms |
-| Front end + inference | 3.2 to 3.8 ms per 30 ms (11 to 13% of one core) | 20 ms per 20 ms (the audio tap overflowed) |
+| Inference | 1.2 ms per 30 ms (0.9 ms with the screen off) | 17.7 ms per 20 ms |
+| Front end + inference, CPU time | 2.5 ms per 30 ms (8 to 9% of one core) | 20 ms per 20 ms (the audio tap overflowed) |
 | Internal RAM | 14 KB (front end tables and small delegate tables) | not measured |
 | PSRAM | 29 KB for the runner, plus the 133 KB of audio buffers | not measured |
 | Model | 23 KB | 74 KB |
 
+Run back to back, the same runner takes 0.7 ms per inference on the
+Watcher with its buffers in PSRAM, close to the 0.6 ms of a test image
+without the UI that has everything in internal RAM. Listening is slower because it runs one
+inference every 30 ms, and in between the UI, radios and audio push the
+model's code and weights out of the chip's caches (32 KB instructions,
+64 KB data), so each inference reloads them from flash. Measured as wall
+time, the wake task also shares its core and priority with the UI's
+rendering task, which adds another 2 to 4% of a core: the runner's own
+log reports that (3.2 to 3.8 ms per 30 ms).
+
 The runner and the delegate put their larger buffers in internal RAM
 only when 48 KB of it would stay free, which on the Watcher with its UI
-it doesn't. In a test image without the UI, where everything fits in
-internal RAM, inference takes 0.6 ms (4.2% of a core with the front
-end).
+it doesn't; that costs little (above).
 
 Verified by `tests/test_muse_wakeword.py`, whose `WakeWordRunner` class
 builds this runner for the host against the same registry components
