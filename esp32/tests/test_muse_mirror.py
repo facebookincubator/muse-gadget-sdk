@@ -287,7 +287,7 @@ class CableFramingTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'posix', 'C harness requires a POSIX sanitizer toolchain')
     def test_firmware_session_pump(self):
         source = (ROOT / 'components/muse_mirror/muse_mirror_session.c').read_text()
-        impl = source[source.index('static void serial_end(void)\n'):source.index('static atomic_uint s_log_dropped')]
+        impl = source[source.index('static void viewer_release(void)\n'):source.index('static atomic_uint s_log_dropped')]
         start = source.index('static bool serial_enqueue')
         impl += source[start:source.index('#define ZIP_MIN', start)]
         declarations = source[source.index('typedef struct { uint16_t len; uint8_t b[IN_MAX]; } serial_msg_t;'):source.index('static QueueHandle_t s_serial_in;')]
@@ -298,7 +298,8 @@ class CableFramingTests(unittest.TestCase):
             exe = folder / 'session-harness'
             command = shlex.split(os.environ.get('CC', 'cc')) + [
                 '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
-                '-I' + str(folder), str(ROOT / 'tests/muse_mirror_session_harness.c'), '-o', str(exe)]
+                '-I' + str(folder), '-I' + str(ROOT / 'components/muse_mirror'),
+                str(ROOT / 'tests/muse_mirror_session_harness.c'), '-o', str(exe)]
             result = subprocess.run(command, capture_output=True, text=True, env={**os.environ, 'TMPDIR': tempfile.gettempdir()})
             self.assertEqual(result.returncode, 0, result.stderr)
             result = subprocess.run([exe], capture_output=True, timeout=10)

@@ -51,9 +51,9 @@ static bool viewer_send(const void *p, size_t n, int ms) {
     reports++;
     return send_ok;
 }
-static void serial_end(void);
+static void viewer_drop(void);
 #include "text_session.inc"
-static void serial_end(void) { drops++; connected = false; text_reset(); }
+static void viewer_drop(void) { drops++; connected = false; text_reset(); }
 
 int main(void) {
     muse_mirror_text_t m;

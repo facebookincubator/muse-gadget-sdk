@@ -782,6 +782,9 @@ screenshots and recordings. `docs/mirror.md` is the guide,
   octal PSRAM. Its size, shape and name are in menuconfig (Muse mirror); a
   name that holds a known model, such as "1.75C", gets that board drawn in the
   window. Its sound is the computer's.
+- **ESP-Mosaico:** `tools/muse/mirror.py iris:DEVICE_ID` reaches it over ESP-Iris on
+  its USB-C (`CONFIG_MUSE_MIRROR_IRIS`, `components_mosaico/muse_mosaico_iris`).
+  The viewer then holds the Iris data port: close it before Vibe Mode installs.
 - **Test** with `tests/test_muse_mirror*.py`; the viewer's need PySide6 and
   numpy (`tools/muse/requirements-mirror.txt`).
 

@@ -235,3 +235,53 @@ Muse's compact keypad commits any pending multi-tap character before an
 external edit; Enter sends its normal Ready event. A standard LVGL keyboard
 receives Ready for Enter; without a keyboard, one-line fields receive Ready
 and multiline fields receive a newline. Text is not logged by the mirror.
+
+## ESP-Iris
+
+On the ESP-Mosaico (`CONFIG_MUSE_MIRROR_IRIS`) the same payloads also travel
+over ESP-Iris on the board's USB-C port. The viewer speaks ESP-Iris on the
+board's data port itself (ESP-Iris `protocol/spec.md`: a HELLO it acknowledges
+as the data role, then RPCs and the SCREEN mirror with media credit); no
+ESP-Iris Gateway is involved. There is no console handshake, and no envelope or
+CRC of the cable's. The cable and Iris share the
+board's one viewer; while one has it, the other is refused.
+
+| Service `0x4d55` | Request | Reply |
+|---|---|---|
+| Method 1, board | empty | the board metadata JSON with `"iris_pipe":1` added |
+| Method 2, stream | `op:u8, epoch:u32, 0:u32, 0:u32` | the request, unchanged |
+| Method 3, input | `epoch:u32`, then one host payload | the epoch |
+
+Board payloads go through a byte pipe that Iris pulls on its SCREEN channel,
+as the viewer's credit allows (128 KB, topped up below 64 KB), so nothing
+waits on a request from the computer. The viewer starts it with SCREEN
+`MIRROR_START`: a description with format 1 and quality `0x4d55`. The
+board answers with a 128 x 65535 RGB565 "screen" (stride 256, quality
+`0x4d55`); a request without that quality, such as a screenshot, is refused.
+Each tile is whole 256-byte rows: `epoch:u32, valid:u32`, `valid` bytes of
+the pipe, then zero padding to the end of the row. In the pipe each payload is
+`length:u32` followed by the payload. A tile carries what the pipe holds
+when Iris asks, so payloads run across tiles; with nothing to send the board
+gives Iris no tile, and Iris asks again within 10 ms. After the last row the
+pipe goes on in the next frame from row 0.
+
+Stream op 0 with a nonzero random epoch admits the viewer: the board empties
+the pipe, and the session's `B` goes first, as on the cable. Op 0 with a new
+epoch admits it afresh. Op 2 with its epoch ends the session and releases
+its keys; the viewer then stops the stream. Other ops, epoch 0 and nonzero
+reserved words are refused. Tiles stamped with another epoch are bytes the
+last viewer left on their way and are skipped. A tile that does not follow
+the last one (its frame and row), a nonzero `dropped` count, or two
+seconds without data make the viewer start a new epoch; after three such starts in a row without a whole payload it
+reconnects. A send waits up to its deadline for room in the board's pipe
+(twice the 32 KB largest message, plus headers) and drops the viewer when
+the stream has stopped or the deadline passes.
+
+Each host payload is one RPC carrying the viewer's epoch. The board takes it
+on the Iris task without waiting: an input with another epoch, or one that
+finds the 32-message queue full, is refused. `S` goes to the sound ring at
+once, as on the cable. The viewer sends only the newest of a drag's queued
+positions, never a press or a release. A refused position is dropped; any
+other refused input is tried twice more, 30 ms apart, and then the viewer
+reconnects. Sound goes as on the chip's own USB: the board's `A` messages
+(PCM) down the pipe, the viewer's `S 02` microphone chunks as input RPCs.

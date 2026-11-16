@@ -16,8 +16,9 @@
 # this directory then): starts ESP-Iris for the board file, which calls
 # muse_mosaico_iris_start() if it is linked in. WHOLE_ARCHIVE, since nothing
 # else references it and the board file only declares it weak.
+# muse_mirror_iris.c, under CONFIG_MUSE_MIRROR_IRIS, carries the mirror over it.
 idf_component_register(
-    SRCS "muse_mosaico_iris.c"
-    PRIV_REQUIRES esp_iris esp_mosaico_app_recovery
+    SRCS "muse_mosaico_iris.c" "muse_mirror_iris.c"
+    PRIV_REQUIRES esp_iris esp_mosaico_app_recovery esp_timer muse muse_mirror
     WHOLE_ARCHIVE
 )

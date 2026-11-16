@@ -100,7 +100,13 @@ DEVICES = [('2.16',
    'body': {'shape': 'rect', 'w': 65.5, 'h': 70.4, 'x': 14.4, 'y': 19.5, 'r': 8.0, 'finish': 'white'},
    'glass': {'border': 0, 'r': 0},
    'photo': {'file': 'sensecap-watcher.png', 'screen': (160, 217, 409, 409)},
-   'keys': [('wheel', 1, 'face', (49.6, 12.3), 7.0)]})]
+   'keys': [('wheel', 1, 'face', (49.6, 12.3), 7.0)]}),
+ ('Mosaico',                    # drawn with the 2.16's outline, its own keys
+  {'screen_mm': 38.99,
+   'body': {'shape': 'rect', 'w': 44.6, 'h': 44.6, 'x': 2.8, 'y': 2.8, 'r': 5.5, 'finish': 'white'},
+   'glass': {'border': 2.15, 'r': 4.5},
+   'keys': [],
+   'extra': [('RST', None, 'bottom', 13.3)]})]
 GENERIC = dict(screen_mm=None, body=dict(shape="rect", w=None, h=None, x=3.0, y=3.0, r=3.0, finish="white"),
                glass=dict(border=1.5, r=2.0))
 GENERIC_ROUND = dict(screen_mm=None, body=dict(shape="round", d=None, x=3.0, finish="white"),
@@ -766,6 +772,99 @@ class Link:
                 self.logs.flush()
             if self.alive:
                 self.stopped.wait(2)
+
+def iris_module():
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import mirror_iris
+    finally:
+        sys.path.pop(0)
+    return mirror_iris
+
+class IrisLink(Link):
+    """A board over ESP-Iris (iris:DEVICE_ID), on its USB data port. The messages are the cable's, so run() is
+    Link's; self.sock is a mirror_iris.IrisClient."""
+
+    def __init__(self, host, port=None, log_file=None, fast=0):
+        super().__init__(host, 0, log_file)
+        self.native = True          # the board's USB: room for PCM both ways
+        self.received = 0           # message bytes, for --stats
+
+    def connect(self):
+        self.have_board = False
+        self.audio_capable = False
+        mirror_iris, device = iris_module(), self.host.removeprefix("iris:").lower()
+        if mirror_iris.gateway_running():
+            raise ConnectionError("waiting: an ESP-Iris Gateway is running and may be installing firmware")
+        port = dict(mirror_iris.usb_boards()).get(device)
+        if not port:
+            raise ConnectionError("no ESP-Iris board %s on USB" % device)
+        client = mirror_iris.IrisClient(port)
+        try:
+            client.open()
+        except BaseException:
+            client.close()
+            raise
+        return client
+
+    def receive(self):
+        while self.alive:
+            client = self.sock
+            if client is None:
+                raise ConnectionError("closed")
+            msg = client.receive()
+            if msg is not None:
+                self.received += len(msg)
+                return msg
+        raise ConnectionError("closed")
+
+    def writer(self, client):
+        """Each message is an RPC. Of a drag's queued positions only the newest goes, as on the board's queue;
+        a press and a release always go."""
+        is_move = iris_module().is_move
+        down, held = False, None
+        while self.alive and self.sock is client:
+            if held is not None:
+                payload, held = held, None
+            else:
+                try:
+                    payload = self.out.get(timeout=.1)
+                except queue.Empty:
+                    continue
+            while down and is_move(payload):
+                try:
+                    following = self.out.get_nowait()
+                except queue.Empty:
+                    break
+                if not is_move(following):
+                    held = following
+                    break
+                payload = following
+            try:
+                client.input(payload)
+            except (OSError, ValueError, ConnectionError) as e:
+                client.broken = client.broken or str(e)      # the picture stops too, and the link reconnects
+                client.cancel_read()
+                return
+            if len(payload) == 5 and payload[0] <= 1:
+                down = payload[0] == 1
+
+    def close(self):
+        client = self.sock
+        if client is not None and threading.current_thread() is not self.thread:
+            client.close()           # END and MIRROR_STOP go out before the port closes
+        super().close()
+
+    def disconnect(self):
+        self.text_open = False
+        with self.tx_lock:
+            client, self.sock = self.sock, None
+        if client:
+            client.close()
+
+def open_link(host, port, **options):
+    """A Link for a serial port; for iris:DEVICE_ID an IrisLink, which finds its own port."""
+    return (IrisLink if host.startswith("iris:") else Link)(host, port, **options)
 
 def rgb565_to_rgb(fb):
     p = fb.astype(np.uint32)
@@ -2064,7 +2163,7 @@ def run_window(targets, scale, on_top, wall, log_file=None, fast=None):
                 d.link.close()
             super().closeEvent(e)
 
-    links = [Link(h, p, log_file=log_file, fast=(fast or {}).get(h, 0)) for h, p in targets]
+    links = [open_link(h, p, log_file=log_file, fast=(fast or {}).get(h, 0)) for h, p in targets]
     bridge = Bridge()
     win = Window(links)
     bridge.board.connect(win.on_board)
@@ -2096,7 +2195,7 @@ def run_window(targets, scale, on_top, wall, log_file=None, fast=None):
 def board_name(port, baud, seconds=3.0):
     """The board's name from a short session of its own, or None."""
     names = []
-    link = Link(port, baud)
+    link = open_link(port, baud)
     link.on_status = lambda text: None
     link.on_board = lambda info: names.append(info.get("name"))
     link.start()
@@ -2127,8 +2226,8 @@ def mac_app_name(name):
 
 def main():
     ap = argparse.ArgumentParser(description="Muse screen, touch and keys over the console cable")
-    ap.add_argument("ports", nargs="*", help="console serial ports; none: discover native USB boards")
-    ap.add_argument("--list", action="store_true", help="list native USB boards without opening them")
+    ap.add_argument("ports", nargs="*", help="console serial ports, or iris:DEVICE_ID; none: discover native USB and ESP-Iris boards")
+    ap.add_argument("--list", action="store_true", help="list native USB and ESP-Iris boards")
     ap.add_argument("--baud", type=int, default=115200, help="console baud rate for UART bridges")
     ap.add_argument("--fast", type=int, default=460800, choices=(0, 230400, 460800, 921600),
                     help="the speed a UART bridge runs at during the session; 0 keeps --baud")
@@ -2142,20 +2241,30 @@ def main():
         ap.error("--scale must be finite and positive")
     if not math.isfinite(args.seconds) or args.seconds <= 0 or args.baud <= 0:
         ap.error("--seconds and --baud must be positive")
-    if any(not is_port(p) for p in args.ports):
-        ap.error("targets must be serial ports, such as /dev/ttyACM0 or COM7")
+    iris = [p for p in args.ports if p.startswith("iris:")]
+    if any(not is_port(p) and p not in iris for p in args.ports):
+        ap.error("targets must be serial ports, such as /dev/ttyACM0 or COM7, or iris:DEVICE_ID")
     usb = usb_boards() if args.list or not args.ports else []
+    if args.list or not args.ports:
+        try:
+            found = [("iris:" + device, port) for device, port in iris_module().usb_boards()]
+        except ImportError:
+            found = []
+        if found and not args.list and iris_module().gateway_running():
+            print("An ESP-Iris Gateway is running and may be installing firmware: the mirror connects to %s "
+                  "once it exits." % ", ".join(t for t, _ in found), file=sys.stderr)
+        usb += found
     if args.list:
-        for port, mac in usb:
-            print("%-40s %s" % ("USB " + mac, port))
+        for target, detail in usb:
+            print("%-40s %s" % ((target, detail) if target.startswith("iris:") else ("USB " + detail, target)))
         return 0
     targets = [(p, args.baud) for p in dict.fromkeys(args.ports or [p for p, _ in usb])]
-    fast = {p: args.fast for p in args.ports}
+    fast = {p: args.fast for p in args.ports if p not in iris}
     if not targets:
         print("No native USB boards found. For a UART bridge, pass its console port explicitly.", file=sys.stderr)
         return 1
     if args.stats or args.png:
-        link = Link(*targets[0], log_file=args.log, fast=fast.get(targets[0][0], 0))
+        link = open_link(*targets[0], log_file=args.log, fast=fast.get(targets[0][0], 0))
         link.on_status = lambda text: text and not text.startswith("connecting") and print(text, file=sys.stderr)
         try:
             link.start()
@@ -2164,7 +2273,8 @@ def main():
                 time.sleep(args.seconds)
                 elapsed = time.monotonic() - start
                 print("%d updates in %.2f s, %.1f updates/s, %d damaged" % (link.changes, elapsed, link.changes / elapsed,
-                                                                           link.damaged))
+                                                                           link.damaged)
+                      + (", %.1f KB/s" % (link.received / 1024 / elapsed) if isinstance(link, IrisLink) else ""))
             return save_png(link, args.png) if args.png else (0 if link.fb is not None else 1)
         finally:
             link.close()

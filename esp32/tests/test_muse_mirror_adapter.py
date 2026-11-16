@@ -61,7 +61,7 @@ static struct {void (*on_key)(int,bool);bool touch;} s_cfg={.on_key=on_key,.touc
 static int64_t esp_timer_get_time(void) {return 1000;}
 static void dirty_add(int x1,int y1,int x2,int y2) {(void)x1;(void)y1;(void)x2;(void)y2;}
 static bool viewer_send(const void *p,size_t n,int ms) {(void)p;(void)n;(void)ms;return true;}
-static void serial_end(void) {}
+static void viewer_drop(void) {}
 static int sounds;
 static bool option_input(const uint8_t *b,size_t n) {if (n!=2||b[0]<7||b[0]>10) return false;sounds++;return true;}
 '''

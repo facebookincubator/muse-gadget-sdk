@@ -78,7 +78,7 @@ serial-port group membership appropriate to your system if access is denied.
 Close `idf.py monitor` and other readers of the same port first.
 
 Discovery reads descriptors without opening ports and lists Espressif
-native USB Serial/JTAG (`303a:1001`). It does not identify the board model.
+native USB Serial/JTAG (`303a:1001`) and ESP-Iris boards. It does not identify the board model.
 For USB-UART bridges, such as the Watcher's, pass the console
 port explicitly. Use `--baud` if that firmware's console differs from
 115200. The viewer asks the board to run the session at `--fast` baud
@@ -143,6 +143,30 @@ length limits. Escape is consumed while a field is open.
 Text entry follows the board under the mouse in a multi-board window.
 Without an open field, digits and navigation keys return to board controls.
 Typed text is sent over the same cable and is not written to console logs.
+
+## ESP-Mosaico over ESP-Iris
+
+The ESP-Mosaico's USB-C port belongs to ESP-Iris, which Vibe Mode installs
+through, and its console is the UART on the header. Its mirror build
+(`MUSE_MIRROR=1 tools/muse/board.sh build mosaico`, then the same with `flash`)
+also carries the mirror over Iris (`CONFIG_MUSE_MIRROR_IRIS`). The viewer
+opens the board's ESP-Iris data port itself, the second of the two serial
+ports the USB-C shows, so no other software runs on the computer:
+
+```sh
+python tools/muse/mirror.py --list                 # iris:DEVICE_ID and its port
+python tools/muse/mirror.py iris:DEVICE_ID         # or no target: every board found
+```
+
+The screen, touch, buttons, typing and sound both ways work as on the
+cable. The viewer locks the port as the ESP-Iris Gateway does, so only one
+of them holds it: close the viewer before Vibe Mode installs through it. While
+a Gateway runs on the computer (it may be installing firmware, during which
+the port goes away and comes back), the viewer says so and waits for it to
+exit instead of opening the port. On an ESP-Mosaico the viewer got 24.7 screen
+updates a second (31.2 KB/s, deflated) with the avatar on screen. Without
+deflate it got 22.4 (383 KB/s), and a message to the board took 1.8 ms (90%
+within 10.8 ms) while the screen streamed.
 
 ## Limits and checks
 

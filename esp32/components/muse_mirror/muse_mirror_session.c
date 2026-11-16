@@ -15,6 +15,7 @@
  */
 #include "sdkconfig.h"
 #include "muse_mirror_session.h"
+#include "muse_mirror_link.h"
 #include "muse_mirror_core.h"
 #include "muse_mirror_audio.h"
 #include "muse_console.h"
@@ -105,6 +106,8 @@ static atomic_bool s_serial_open, s_session_busy;
 #define SERIAL_QUIET_MS 6000
 #define SERIAL_HELLO 0xffff
 #define SERIAL_BYE 0xfffe
+#define LINK_HELLO 0xfffd      /* the link rides in b[] */
+#define LINK_BYE 0xfffc
 #define LOG_WAIT_MS 50
 #define SERIAL_QUEUE 32
 static const uint8_t s_mark[] = { 0, 'M', 'I', 'R', 'R', 'O', 'R', '1', '\n' };
@@ -137,12 +140,16 @@ static char *s_audio_flag;           /* "audio" in s_board, five characters */
 static atomic_int s_baud;            /* the speed a UART console was raised to for this session */
 static bool s_zip_viewer;            /* mirror task: this viewer inflates 'Z' messages */
 static muse_mirror_adpcm_t s_adpcm;  /* mirror task: carried from chunk to chunk on a UART */
+static const muse_mirror_link_t *_Atomic s_link;        /* mirror task: the viewer's link; NULL on the cable */
+static const muse_mirror_link_t *_Atomic s_link_owner;  /* the link that has the viewer or asked for it */
+static bool s_link_down;             /* the link's task: its viewer's finger is down */
 
 static bool viewer_send(const void *buf, size_t len, int ms);
 static void serial_end(void);
+static void viewer_drop(void);
 
 bool muse_mirror_connected(void) {
-    return s_serial;
+    return s_serial || s_link;
 }
 
 /* Mirror task: what the audio path gathered for a listening viewer. */
@@ -150,7 +157,7 @@ static void audio_pump(void) {
     for (int i = 0; i < AUD_BURST && muse_mirror_connected(); i++) {
         if (!muse_mirror_audio_take(s_aud_msg + 2, &s_aud_msg[1])) return;
         bool sent;
-        if (s_cfg.uart) {
+        if (s_cfg.uart && !s_link) {
             s_aud_packed[0] = 'a';
             s_aud_packed[1] = s_aud_msg[1];
             muse_mirror_adpcm(&s_adpcm, s_aud_msg + 2, s_aud_packed + 2);
@@ -159,7 +166,7 @@ static void audio_pump(void) {
             s_aud_msg[0] = 'A';
             sent = viewer_send(s_aud_msg, AUD_MSG, SEND_MS);
         }
-        if (!sent) serial_end();
+        if (!sent) viewer_drop();
     }
 }
 
@@ -176,7 +183,7 @@ static size_t uart_baud(void) {
 static void viewer_options(void) {
     s_zip_viewer = false;
     s_adpcm = (muse_mirror_adpcm_t){ 0 };
-    s_audio = s_audio_rings && (!s_cfg.uart || uart_baud() >= AUDIO_BAUD);
+    s_audio = s_audio_rings && (s_link ? s_link->audio : !s_cfg.uart || uart_baud() >= AUDIO_BAUD);
     if (s_audio_flag) memcpy(s_audio_flag, s_audio ? "true " : "false", 5);
 }
 
@@ -219,7 +226,7 @@ static void text_pump(void) {
     if (viewer_send(msg, 2, SEND_MS)) {
         s_text_sent = open;
     } else {
-        serial_end();
+        viewer_drop();
     }
 }
 
@@ -305,7 +312,7 @@ void muse_mirror_set_screen_state(uint8_t state) {
 /* On a UART a message takes wire time: with sound at most 250 ms of it, inside the viewer's 300 ms cushion;
  * without, 2 s, inside SEND_MS. A raw row always fits (start() checks it against MSG_MAX). */
 static size_t msg_cap(void) {
-    if (!s_cfg.uart) return MSG_MAX;
+    if (!s_cfg.uart || s_link) return MSG_MAX;
     size_t row = (size_t)s_w * 2 + MUSE_MIRROR_RECT_HDR + 8, wire = uart_baud() / 10 * (s_audio ? 1 : 8) / 4;
     return wire < row ? row : wire < MSG_MAX ? wire : MSG_MAX;
 }
@@ -373,12 +380,12 @@ static void input(const uint8_t *buf, size_t len) {
         bool ok = !atomic_load(&s_text_field)
                   || xQueueSend(s_text_in, &text, pdMS_TO_TICKS(SEND_MS)) == pdTRUE;
         memset(&text, 0, sizeof(text));
-        if (!ok) serial_end();
+        if (!ok) viewer_drop();
         return;
     }
     if (len == 1 && buf[0] == 'R') {
         dirty_add(0, 0, s_w - 1, s_h - 1);
-        if (!viewer_send(s_board, s_board_len, SEND_MS)) serial_end();
+        if (!viewer_send(s_board, s_board_len, SEND_MS)) viewer_drop();
         return;
     }
     if (option_input(buf, len)) return;
@@ -431,46 +438,82 @@ static bool serial_send(const void *buf, size_t len, int ms)
 
 static bool viewer_send(const void *buf, size_t len, int ms)
 {
+    if (s_link) return s_link->send(buf, len, ms);
     return s_serial && serial_send(buf, len, ms);
 }
 
-static void serial_end(void)
+/* Nothing a leaving viewer held stays held, whatever carried it. */
+static void viewer_release(void)
 {
-    if (!s_serial) return;
     text_reset();
     muse_mirror_audio_reset();
     keys_release();
     pointer_put(s_ptr_x, s_ptr_y, false);
     capture_set(false);
+}
+
+static void serial_end(void)
+{
+    if (!s_serial) return;
+    viewer_release();
     s_serial = false;
     s_serial_open = false;             /* the console's session stops within a second */
+}
+
+/* With s_serial or s_link set: the board, then the whole screen. */
+static bool viewer_admit(void)
+{
+    text_reset();
+    viewer_options();
+    capture_set(true);
+    if (!viewer_send(s_board, s_board_len, SEND_MS)) return false;
+    dirty_add(0, 0, s_w - 1, s_h - 1);
+    return true;
+}
+
+/* The link's viewer is gone. A drop also frees the link to ask again. */
+static void link_end(bool dropped)
+{
+    const muse_mirror_link_t *link = s_link;
+    if (!link) return;
+    viewer_release();
+    s_link = NULL;
+    if (dropped) atomic_compare_exchange_strong(&s_link_owner, &link, NULL);
 }
 
 static void serial_admit(void)
 {
     if (!s_serial_open) return;
-    text_reset();
-    viewer_options();
+    link_end(false);                   /* a link whose BYE found the queue full */
     s_serial = true;
-    capture_set(true);
-    if (!viewer_send(s_board, s_board_len, SEND_MS)) {
-        serial_end();
-        return;
-    }
-    dirty_add(0, 0, s_w - 1, s_h - 1);
+    if (!viewer_admit()) serial_end();
+}
+
+static void link_admit(const muse_mirror_link_t *link)
+{
+    if (atomic_load(&s_link_owner) != link) return;   /* it left, or the session dropped it, since */
+    if (s_link) viewer_release();                     /* a new viewer on the same link */
+    s_link = link;
+    if (!viewer_admit()) link_end(true);
 }
 
 static void serial_pump(void)
 {
     serial_msg_t m;
     for (int i = 0; i < 8 && s_serial_in && xQueueReceive(s_serial_in, &m, 0) == pdTRUE; i++) {
+        const muse_mirror_link_t *link = NULL;
+        if (m.len == LINK_HELLO || m.len == LINK_BYE) memcpy(&link, m.b, sizeof(link));
         if (m.len == SERIAL_HELLO) {
             serial_admit();
         } else if (m.len == SERIAL_BYE) {
             if (s_serial) viewer_send("E", 1, 500);   /* the viewer stops sending and asks again */
             serial_end();
             xSemaphoreGive(s_serial_done);
-        } else if (s_serial && s_serial_open && m.len <= SERIAL_INPUT_MAX) {
+        } else if (m.len == LINK_HELLO) {
+            link_admit(link);
+        } else if (m.len == LINK_BYE) {
+            if (s_link == link) link_end(false);
+        } else if ((s_link || (s_serial && s_serial_open)) && m.len <= SERIAL_INPUT_MAX) {
             input(m.b, m.len);
         }
     }
@@ -509,13 +552,22 @@ static int serial_log(const char *fmt, va_list ap)
     return ok ? n : 0;
 }
 
-static bool serial_enqueue(const serial_msg_t *m, bool *pointer_down)
+static bool serial_enqueue(const serial_msg_t *m, bool *pointer_down, int wait)
 {
     bool pointer = m->len == 5 && m->b[0] <= 1;
     bool move = pointer && m->b[0] && *pointer_down;
-    if (xQueueSend(s_serial_in, m, move ? 0 : pdMS_TO_TICKS(SEND_MS)) != pdTRUE) return move;
+    if (xQueueSend(s_serial_in, m, move ? 0 : wait) != pdTRUE) return move;
     if (pointer) *pointer_down = m->b[0] != 0;
     xTaskNotifyGive(s_task);
+    return true;
+}
+
+/* The viewer's microphone, 'S': too long for the queue, and the ring takes it from any task. */
+static bool mic_input(const uint8_t *b, size_t n)
+{
+    if (n <= 2 || b[0] != 'S') return false;
+    if (b[1] == 3 && n == 2 + MUSE_MIRROR_ADPCM_CHUNK) muse_mirror_audio_mic_adpcm(b + 2);
+    else if (b[1] == 2 && n == 2 + MUSE_MIRROR_AUDIO_CHUNK) muse_mirror_audio_mic_put(b + 2, MUSE_MIRROR_AUDIO_CHUNK / 2);
     return true;
 }
 
@@ -531,6 +583,11 @@ esp_err_t muse_mirror_serial_session(int baud)
         return ESP_ERR_INVALID_STATE;
     }
     if (atomic_exchange(&s_session_busy, true)) return ESP_ERR_INVALID_STATE;
+    if (atomic_load(&s_link_owner)) {
+        s_session_busy = false;
+        ESP_LOGW(TAG, "mirror busy: another viewer has it");
+        return ESP_ERR_INVALID_STATE;
+    }
     vprintf_like_t log = esp_log_set_vprintf(serial_log);
     vTaskDelay(pdMS_TO_TICKS(50));     /* a log line already on its way finishes first */
     serial_msg_t *m = s_serial_msg;
@@ -558,12 +615,8 @@ esp_err_t muse_mirror_serial_session(int baud)
             if (n && !muse_console_read(m->b, n, IN_MS)) break;
             m->len = n;
             heard = esp_timer_get_time();
-            if (n > 2 && m->b[0] == 'S') {   /* too long for the queue, and the ring takes it from any task */
-                if (m->b[1] == 3 && n == 2 + MUSE_MIRROR_ADPCM_CHUNK) muse_mirror_audio_mic_adpcm(m->b + 2);
-                else if (m->b[1] == 2 && n == 2 + MUSE_MIRROR_AUDIO_CHUNK) muse_mirror_audio_mic_put(m->b + 2, MUSE_MIRROR_AUDIO_CHUNK / 2);
-                continue;
-            }
-            if (!serial_enqueue(m, &pointer_down)) break;
+            if (mic_input(m->b, n)) continue;
+            if (!serial_enqueue(m, &pointer_down, pdMS_TO_TICKS(SEND_MS))) break;
         }
     }
     s_serial_open = false;
@@ -585,6 +638,62 @@ esp_err_t muse_mirror_serial_session(int baud)
     esp_log_set_vprintf(log);
     s_session_busy = false;
     return ESP_OK;
+}
+
+static void viewer_drop(void) {
+    if (s_link) link_end(true);
+    else serial_end();
+}
+
+static serial_msg_t *s_link_msg;   /* PSRAM, from the first link: its RPC or socket task's stack stays small */
+
+bool muse_mirror_link_open(const muse_mirror_link_t *link)
+{
+    if (!link || !link->send || !s_ready || !s_serial_in) return false;
+    const muse_mirror_link_t *was = NULL, *mine = link;
+    if (!atomic_compare_exchange_strong(&s_link_owner, &was, link) && was != link) return false;
+    if (!s_link_msg) s_link_msg = alloc(sizeof(*s_link_msg), false);
+    if (atomic_load(&s_session_busy) || !s_link_msg) {   /* the cable has the viewer, or no memory */
+        if (!was) atomic_compare_exchange_strong(&s_link_owner, &mine, NULL);
+        return false;
+    }
+    s_link_down = false;
+    s_link_msg->len = LINK_HELLO;
+    memcpy(s_link_msg->b, &link, sizeof(link));
+    if (xQueueSend(s_serial_in, s_link_msg, 0) != pdTRUE) {
+        if (!was) atomic_compare_exchange_strong(&s_link_owner, &mine, NULL);
+        return false;
+    }
+    xTaskNotifyGive(s_task);
+    return true;
+}
+
+bool muse_mirror_link_input(const muse_mirror_link_t *link, const uint8_t *msg, size_t len)
+{
+    if (!link || atomic_load(&s_link_owner) != link || !msg || !len) return false;
+    if (mic_input(msg, len)) return true;
+    if (len > SERIAL_INPUT_MAX) return false;
+    s_link_msg->len = len;
+    memcpy(s_link_msg->b, msg, len);
+    /* Never waits: the mirror task's send may be waiting on this task to make room. */
+    return serial_enqueue(s_link_msg, &s_link_down, 0);
+}
+
+void muse_mirror_link_close(const muse_mirror_link_t *link)
+{
+    const muse_mirror_link_t *mine = link;
+    if (!link || !atomic_compare_exchange_strong(&s_link_owner, &mine, NULL)) return;
+    s_link_msg->len = LINK_BYE;
+    memcpy(s_link_msg->b, &link, sizeof(link));
+    /* A BYE that finds no room is not needed: the link's next send fails and drops the viewer. */
+    if (xQueueSend(s_serial_in, s_link_msg, pdMS_TO_TICKS(500)) == pdTRUE) xTaskNotifyGive(s_task);
+}
+
+const char *muse_mirror_link_board(size_t *len)
+{
+    if (!s_ready) return NULL;
+    if (len) *len = s_board_len;
+    return s_board;
 }
 
 #define ZIP_MIN   256                              /* shorter messages go as they are */
@@ -640,7 +749,7 @@ static void mirror_task(void *arg) {
         last_beat = last_frame = now;
         size_t len = build_msg(), packed = zip(len);
         if (len && !viewer_send(packed ? s_zmsg : s_msg, packed ? packed : len, SEND_MS)) {
-            serial_end();
+            viewer_drop();
             continue;
         }
         xSemaphoreTake(s_lock, portMAX_DELAY);

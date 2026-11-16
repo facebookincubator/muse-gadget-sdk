@@ -23,6 +23,16 @@ menu "Muse mirror"
             its existing USB or UART console. Logs share the framed stream.
             The screen copies and message buffer use PSRAM. For development.
 
+    config MUSE_MIRROR_IRIS
+        bool "Mirror over ESP-Iris on the ESP-Mosaico's USB-C"
+        depends on MUSE_MIRROR && MUSE_BOARD_ESP_MOSAICO && ESP_IRIS_ENABLE
+        default y
+        help
+            tools/muse/mirror.py iris:DEVICE_ID reaches the board on its ESP-Iris
+            data port, the USB-C port Vibe Mode installs through; no Gateway.
+            Builds with esp-mosaico-utils only
+            (MOSAICO_UTILS, which tools/muse/board.sh passes).
+
     config MUSE_VIRTUAL_DISPLAY_NAME
         string "Virtual display: name"
         depends on MUSE_BOARD_VIRTUAL_DISPLAY

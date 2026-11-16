@@ -22,6 +22,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include "muse_mirror_link.h"
 
 
 #define IN_MAX 1024
@@ -29,6 +30,8 @@
 #define SERIAL_QUIET_MS 6000
 #define SERIAL_HELLO 0xffff
 #define SERIAL_BYE 0xfffe
+#define LINK_HELLO 0xfffd
+#define LINK_BYE 0xfffc
 #define SEND_MS 3000
 #define KEYS 11
 #define MUSE_MIRROR_ADPCM_CHUNK 164
@@ -45,6 +48,9 @@ static bool queue_stalled;
 static int s_serial_in, s_serial_done;
 static int s_w = 10, s_h = 10, s_ptr_x, s_ptr_y;
 static bool s_serial, send_ok = true, pointer_down;
+static const muse_mirror_link_t *_Atomic s_link, *_Atomic s_link_owner;
+static bool s_link_down;
+static void *alloc(size_t size, bool zero) { return zero ? calloc(1, size) : malloc(size); }
 static atomic_bool s_serial_open;
 static atomic_bool s_session_busy;
 static bool s_ready = true, pump_on_send;
@@ -161,6 +167,88 @@ static bool muse_console_read(void *p, size_t n, int ms)
     return true;
 }
 #include "session_impl.inc"
+static void put(int kind);
+static bool link_send(const void *p, size_t n, int ms) { (void)p; (void)n; (void)ms; return true; }
+static const muse_mirror_link_t link_a = { .send = link_send }, link_b = { .send = link_send };
+
+/* A transport other than the cable shares the queue, and the board has one viewer at a time. */
+static void links(void)
+{
+    count = head = 0;
+    pump_on_send = false; send_ok = true;
+    s_serial = false; s_serial_open = false;
+    boards = dirty = inputs = 0;
+    assert(muse_mirror_link_open(&link_a) && s_link_owner == &link_a && count == 1);
+    assert(!muse_mirror_link_open(&link_b));
+    assert(muse_mirror_serial_session(0) == ESP_ERR_INVALID_STATE && !s_session_busy);
+    serial_pump();
+    assert(s_link == &link_a && boards == 1 && dirty == 1);
+    uint8_t tap[2] = { 3, 2 };
+    assert(muse_mirror_link_input(&link_a, tap, 2) && !muse_mirror_link_input(&link_b, tap, 2));
+    serial_pump();
+    assert(inputs == 1 && last_input == 2);
+    /* The microphone goes to the ring, never the queue; a message too long for the queue is refused. */
+    uint8_t mic[2 + MUSE_MIRROR_ADPCM_CHUNK] = { 'S', 3 };
+    for (size_t i = 0; i < MUSE_MIRROR_ADPCM_CHUNK; i++) mic[2 + i] = (uint8_t)(i + 2);
+    mic_packed = 0;
+    assert(muse_mirror_link_input(&link_a, mic, sizeof(mic)) && mic_packed == 1 && !count);
+    uint8_t big[SERIAL_INPUT_MAX + 1] = { 'R' };
+    assert(!muse_mirror_link_input(&link_a, big, sizeof(big)) && !count);
+    /* A new viewer on the same link replaces the last: what it held goes, the board goes out again. */
+    held = 6; pointer_down = true;
+    assert(muse_mirror_link_open(&link_a));
+    serial_pump();
+    assert(s_link == &link_a && boards == 2 && !held && !pointer_down);
+    /* The link leaves; leaving twice changes nothing. */
+    held = 6;
+    muse_mirror_link_close(&link_a);
+    assert(!s_link_owner);
+    serial_pump();
+    assert(!s_link && !held);
+    muse_mirror_link_close(&link_a);
+    assert(!count);
+    /* A link that leaves and comes straight back is admitted. */
+    assert(muse_mirror_link_open(&link_a));
+    serial_pump();
+    muse_mirror_link_close(&link_a);
+    assert(muse_mirror_link_open(&link_a));
+    serial_pump();
+    assert(s_link == &link_a && s_link_owner == &link_a);
+    /* The session drops a link whose send fails; its late input is not taken, and it may ask again. */
+    assert(muse_mirror_link_input(&link_a, tap, 2));
+    viewer_drop();
+    int before = inputs;
+    serial_pump();
+    assert(inputs == before && !s_link && !s_link_owner);
+    assert(!muse_mirror_link_input(&link_a, tap, 2));
+    send_ok = false;
+    before = boards;
+    assert(muse_mirror_link_open(&link_b));
+    serial_pump();
+    assert(!s_link && !s_link_owner && boards == before + 1);
+    send_ok = true;
+    /* While the cable has the viewer, or the queue is full, an open is refused and leaves no claim. */
+    s_session_busy = true;
+    assert(!muse_mirror_link_open(&link_a) && !s_link_owner);
+    s_session_busy = false;
+    queue_stalled = true;
+    assert(!muse_mirror_link_open(&link_a) && !s_link_owner);
+    queue_stalled = false;
+    /* A link left but its BYE found the queue full: the cable's viewer still gets the screen, not the link. */
+    s_link = &link_a;
+    s_serial_open = true;
+    held = 6;
+    put(SERIAL_HELLO);
+    serial_pump();
+    assert(!s_link && s_serial && !held);
+    s_serial = false; s_serial_open = false;
+    /* The board message for a link's own request, once the session runs. */
+    size_t n = 0;
+    assert(muse_mirror_link_board(&n) == s_board && n == s_board_len);
+    s_ready = false;
+    assert(!muse_mirror_link_board(&n));
+    s_ready = true;
+}
 static void put(int kind)
 {
     if (!count) head = 0;
@@ -194,16 +282,16 @@ int main(void)
     assert(inputs == 16 && !count);
     bool down = false;
     serial_msg_t m = { .len = 5, .b = { 1, 10, 0, 20, 0 } };
-    assert(serial_enqueue(&m, &down) && down && count == 1);
+    assert(serial_enqueue(&m, &down, SEND_MS) && down && count == 1);
     queue_stalled = true;
     m.b[1] = 122;
-    assert(serial_enqueue(&m, &down) && down && count == 1 && waited == 0);
+    assert(serial_enqueue(&m, &down, SEND_MS) && down && count == 1 && waited == 0);
     m.b[0] = 0;
-    assert(serial_enqueue(&m, &down) && !down && count == 2 && waited == SEND_MS);
+    assert(serial_enqueue(&m, &down, SEND_MS) && !down && count == 2 && waited == SEND_MS);
     assert(queue[1].b[1] == 122 && queue[1].b[0] == 0);
     queue_stalled = true;
     m.len = 3; m.b[0] = 6; m.b[1] = 1; m.b[2] = 0;
-    assert(serial_enqueue(&m, &down) && count == 3 && waited == SEND_MS);
+    assert(serial_enqueue(&m, &down, SEND_MS) && count == 3 && waited == SEND_MS);
     count = head = 0;
     send_ok = true;
     pump_on_send = true;
@@ -262,5 +350,6 @@ int main(void)
     assert(muse_mirror_serial_session(0) == ESP_OK);
     assert(payload_reads == 1 && inputs == before && !count && !s_session_busy);
     assert(wire_at == wire_size);
+    links();
     return 0;
 }

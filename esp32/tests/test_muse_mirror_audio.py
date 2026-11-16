@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
                       '#if CONFIG_MUSE_CONSOLE_UART\n        .uart = true,\n#endif', adapter)
         session = (MIRROR / 'muse_mirror_session.c').read_text()
         self.assertIn('s_audio_rings = config->audio && muse_mirror_audio_init();', session)
-        self.assertIn('s_audio = s_audio_rings && (!s_cfg.uart || uart_baud() >= AUDIO_BAUD);', session)
+        self.assertIn('s_audio = s_audio_rings && (s_link ? s_link->audio : !s_cfg.uart || uart_baud() >= AUDIO_BAUD);', session)
         self.assertIn('memcpy(s_audio_flag, s_audio ? "true " : "false", 5);', session)
         self.assertIn('    if (!s_audio) return true;\n', session)
 
