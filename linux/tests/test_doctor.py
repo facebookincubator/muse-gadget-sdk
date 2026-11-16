@@ -211,20 +211,37 @@ def test_network_reuses_setup_probe_with_timeout(
     probe.assert_called_once_with(timeout=5.0)
 
 
-@pytest.mark.parametrize("problem,status", [
-    (None, "OK"),
-    ("the system trust store still trusts emSign ECC Root CA - G3", "FAIL"),
-    ("can't read the system trust store", "FAIL"),
+@pytest.mark.parametrize("problem", [
+    "the system trust store still trusts emSign ECC Root CA - G3",
+    "can't read the system trust store",
 ])
 def test_trust_store_fails_while_musegadget_would_refuse_to_connect(
-    monkeypatch: pytest.MonkeyPatch, problem: str | None, status: str,
+    monkeypatch: pytest.MonkeyPatch, problem: str,
 ) -> None:
     monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=problem))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning",
+                        Mock(return_value="the system trust store still trusts emSign Root CA - C1"))
     result: doctor.CheckResult = doctor.check_trust_store()
-    assert result["status"] == status
-    if problem:
-        assert problem[1:] in result["detail"]
-        assert "update your ca-certificates package" in result["hint"].lower()
+    assert result["status"] == "FAIL"     # a failure wins over the retired-root warning
+    assert problem[1:] in result["detail"]
+    assert "update your ca-certificates package" in result["hint"].lower()
+
+
+def test_trust_store_is_ok_without_distrusted_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=None))
+    assert doctor.check_trust_store()["status"] == "OK"
+
+
+def test_trust_store_warns_about_retired_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    warning = ("the system trust store still trusts emSign ECC Root CA - C3, "
+               "emSign Root CA - C1, which Mozilla has retired")
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=warning))
+    result: doctor.CheckResult = doctor.check_trust_store()
+    assert result["status"] == "WARN"
+    assert warning[1:] in result["detail"] and "still connects" in result["detail"]
+    assert "deselect them" in result["hint"]
 
 
 @pytest.mark.parametrize("status,exit_code", [("OK", 0), ("FAIL", 1), ("WARN", 0)])
@@ -265,6 +282,7 @@ def test_doctor_continues_after_failures_without_changing_saved_files(
     monkeypatch.setattr(doctor.shutil, "which", Mock(return_value=None))
     monkeypatch.setattr(doctor.network, "is_online", Mock(return_value=True))
     monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=None))
     results: tuple[doctor.CheckResult, ...] = doctor.run_checks()
     assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK", "OK"]
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before

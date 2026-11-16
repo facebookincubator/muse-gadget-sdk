@@ -16,14 +16,15 @@
 
 Every HTTPS and WSS connection uses this one context. It is OpenSSL's
 default trust, so the distro's own trust and reject settings apply, and so
-do its ca-certificates updates, which remove distrusted roots. Until the
-store no longer holds any of ``DISTRUSTED_ROOTS``, musegadget refuses to
-connect at all.
+do its ca-certificates updates. While the store still holds any of
+``COMPROMISED_ROOTS``, musegadget refuses to connect at all; for
+``RETIRED_ROOTS`` it only warns.
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import ssl
@@ -33,20 +34,28 @@ import warnings
 from cryptography import x509
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-# (name, certificate SHA-256, SubjectPublicKeyInfo SHA-256). Mozilla removed
-# these after the private keys of eMudhra intermediates under emSign ECC Root
-# CA - G3 became public (Mozilla Bug 2083449). Comodo AAA Services root
-# cross-signed those intermediates; Mozilla removed emSign C1 and C3 at
-# eMudhra's request. Distros have shipped the removal in ca-certificates;
-# this table spots a store that hasn't been updated. The key hash also
-# catches any reissue of the same root.
-DISTRUSTED_ROOTS = (
+log = logging.getLogger(__name__)
+
+# (name, certificate SHA-256, SubjectPublicKeyInfo SHA-256). The key hash
+# also catches any reissue of the same root.
+#
+# Compromised: the private keys of eMudhra intermediates under emSign ECC
+# Root CA - G3 became public (Mozilla Bug 2083449), and Comodo AAA Services
+# root cross-signed those intermediates. musegadget won't connect while the
+# system trust store still trusts either.
+COMPROMISED_ROOTS = (
     ("emSign ECC Root CA - G3",
      "86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b",
      "8d417db2dd8bf5e3084d1e3f196d583849d81bdd4c00c70b9d39369e96b8c782"),
     ("Comodo AAA Services root",
      "d7a7a0fb5d7e2731d771e9484ebcdef71d5f0c3e0a2948782bc83ee0ea699ef4",
      "bd153ed7b0434f6886b17bce8bbe84ed340c7132d702a8f4fa318f756ecbd6f3"),
+)
+# Retired: Mozilla removed these at eMudhra's request, as part of eMudhra's
+# plan to retire its dual-purpose roots (Mozilla Bugs 2018979 and 2083709),
+# not because of a key compromise. Some distros' ca-certificates packages
+# still ship them, so musegadget only warns while the store trusts them.
+RETIRED_ROOTS = (
     ("emSign Root CA - C1",
      "125609aa301da0a249b97a8239cb6a34216f44dcac9f3954b14292f2e8c8608f",
      "b7408b4d2be0238ba37004dd34e276c6019bd2f24c9db7d4980f5f6c359a4bcc"),
@@ -54,6 +63,8 @@ DISTRUSTED_ROOTS = (
      "bc4d809b15189d78db3e1d8cf4f9726a795da1643ca5f1358e1ddb0edc0d7eb3",
      "eabc185c4e82d942b1a5978ba3c0181487d6b3b9974e5c49f72f6d0bd9637150"),
 )
+DISTRUSTED_ROOTS = COMPROMISED_ROOTS + RETIRED_ROOTS
+_RETIRED_NAMES = frozenset(name for name, _, _ in RETIRED_ROOTS)
 
 _context: ssl.SSLContext | None = None
 _context_lock = threading.Lock()
@@ -92,10 +103,12 @@ _URI = re.compile(r"(?:^|:)[A-Za-z][A-Za-z0-9+.-]*:/")    # a scheme, as in file
 
 
 FIX = "update your ca-certificates package, then restart musegadget"
+RETIRED_FIX = ("to stop trusting a retired root, deselect it in the system trust store "
+               "(see \"Root CAs\" in the musegadget README)")
 
 
 class TrustStoreError(Exception):
-    """The system trust store can't be read or still holds a distrusted root."""
+    """The system trust store can't be read or still holds a compromised root."""
 
 
 def check_trust_store() -> list[str] | None:
@@ -152,19 +165,34 @@ def check_trust_store() -> list[str] | None:
 
 
 def trust_store_problem() -> str | None:
-    """Why the system trust store isn't safe to use, or None if it is."""
+    """Why the system trust store isn't safe to use, or None if it is.
+
+    Only an unreadable store or a compromised root is a problem; see
+    ``trust_store_warning()`` for retired roots.
+    """
     found = check_trust_store()
     if found is None:
         return "can't read the system trust store"
-    if found:
-        return f"the system trust store still trusts {', '.join(found)}"
+    compromised = [name for name in found if name not in _RETIRED_NAMES]
+    if compromised:
+        return f"the system trust store still trusts {', '.join(compromised)}"
     return None
+
+
+def trust_store_warning() -> str | None:
+    """The retired roots the system trust store still trusts, as a sentence, or None."""
+    retired = [name for name in check_trust_store() or () if name in _RETIRED_NAMES]
+    if not retired:
+        return None
+    return (f"the system trust store still trusts {', '.join(retired)}, "
+            "which Mozilla has retired")
 
 
 def client_context() -> ssl.SSLContext:
     """The shared client context for every HTTPS and WSS connection: the system trust store.
 
     Raises ``TrustStoreError`` instead while ``trust_store_problem()`` finds one.
+    Logs a warning, once, while ``trust_store_warning()`` finds a retired root.
     """
     global _context
     with _context_lock:
@@ -172,5 +200,8 @@ def client_context() -> ssl.SSLContext:
             problem = trust_store_problem()
             if problem is not None:
                 raise TrustStoreError(f"musegadget won't connect: {problem}; {FIX}.")
+            warning = trust_store_warning()
+            if warning is not None:
+                log.warning("%s; %s.", warning, RETIRED_FIX)
             _context = ssl.create_default_context()
         return _context
