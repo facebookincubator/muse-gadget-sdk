@@ -168,7 +168,7 @@ def _check_network_through(proxy: str) -> CheckResult:
                 "hint": "TLS, token validity, and the Muse VM connection are not tested."}
     return {"name": "Muse API TCP", "status": "FAIL",
             "detail": f"Could not reach {API_BASE} on port 443 through the proxy {shown}.",
-            "hint": "Check the proxy address and credentials, and that it allows CONNECT to port 443."}
+            "hint": "Check the proxy address, its port and credentials, and that it allows CONNECT to port 443."}
 
 
 def _sentence(text: str) -> str:

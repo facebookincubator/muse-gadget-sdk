@@ -112,11 +112,15 @@ plain_value() {
 
 # HTTP CONNECT is the one kind of proxy that urllib, websockets and the setup
 # probe all support. websockets refuses a path, query or fragment, and its
-# error, which the service logs, shows the whole URL with any password.
+# error, which the service logs, shows the whole URL with any password. The
+# port is required: without one, urllib uses 443 and websockets 80.
 valid_proxy() {
-    local rest="${1#http://}"
+    local rest="${1#http://}" port
     case "$1" in http://?*) ;; *) return 1 ;; esac
-    case "${rest%/}" in ""|*/*|*\?*|*\#*) return 1 ;; esac
+    rest="${rest%/}"
+    case "$rest" in ""|*/*|*\?*|*\#*) return 1 ;; esac
+    port="${rest##*:}"
+    case "$port" in "$rest"|""|*[!0-9]*) return 1 ;; esac
     plain_value "$1"
 }
 
@@ -682,7 +686,7 @@ main() {
         [ -z "$NO_PROXY_HOSTS" ] || die "--no-proxy goes with a proxy, not --proxy none."
     elif [ -n "$PROXY" ]; then
         valid_proxy "$PROXY" ||
-            die "--proxy needs an http:// URL without spaces or quotes, such as http://proxy.example:3128."
+            die "--proxy needs an http:// URL with a port and without spaces or quotes, such as http://proxy.example:3128."
     elif [ -n "$NO_PROXY_HOSTS" ]; then
         die "--no-proxy goes with --proxy."
     fi

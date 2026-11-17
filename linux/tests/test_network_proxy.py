@@ -165,6 +165,13 @@ def test_an_unsupported_proxy_is_offline_without_connecting(monkeypatch, connect
     assert connections == []
 
 
+def test_a_proxy_without_a_port_is_offline_without_connecting(monkeypatch, connections):
+    # urllib's HTTPS requests would use port 443 and websockets port 80.
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1")
+    assert network.is_online(timeout=1) is False
+    assert connections == []
+
+
 @pytest.mark.parametrize("url,shown", [
     ("http://user:secret@proxy.example:3128", "http://proxy.example:3128"),
     ("http://proxy.example", "http://proxy.example"),

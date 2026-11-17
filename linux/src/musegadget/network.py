@@ -69,10 +69,12 @@ def _tunnel_opens(proxy: str, host: str, timeout: float) -> bool:
     """True if the proxy answers 2xx to an HTTP CONNECT for host:443."""
     parts = urllib.parse.urlsplit(proxy)
     try:
-        port = parts.port or 80   # urllib's default for a proxy without a port
+        port = parts.port
     except ValueError:
         return False
-    if parts.scheme.lower() != "http" or not parts.hostname:
+    # Without a port, urllib's HTTPS requests use 443 and websockets uses 80,
+    # so no probe could stand in for both.
+    if port is None or parts.scheme.lower() != "http" or not parts.hostname:
         return False
     request = f"CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n"
     if parts.username is not None:

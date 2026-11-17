@@ -658,6 +658,9 @@ def test_a_tampered_saved_proxy_stops_the_installer(tmp_path):
     ("http://proxy.example:3128?x=1", False),
     ("http://proxy.example:3128#x", False),
     ("http:///", False),
+    ("http://proxy.example", False),
+    ("http://user:pw@proxy.example", False),
+    ("http://[2001:db8::1]", False),
 ])
 def test_valid_proxy(url, valid):
     script = f'source "{INSTALL_SH}"; valid_proxy {shlex.quote(url)} && echo valid || echo invalid'

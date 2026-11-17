@@ -81,7 +81,8 @@ them:
 sudo --preserve-env=https_proxy,no_proxy musegadget pair
 ```
 
-Only HTTP proxies that support `CONNECT` work; SOCKS proxies don't. Video
+Only HTTP proxies that support `CONNECT` work, given with their port; SOCKS
+proxies don't. Video
 calls send their media directly, not through the proxy.
 
 ## Set it up with Muse
