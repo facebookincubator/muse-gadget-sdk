@@ -109,14 +109,11 @@ class ContractTests(unittest.TestCase):
                 f.truncate(_MAX_MODEL_BYTES + 1)
             with self.assertRaises(OSError):
                 _read_model(big)
+            # A FIFO with no writer: opening it must neither block nor read.
             fifo = Path(tmp) / "fifo.pte"
             os.mkfifo(fifo)
-            with self.assertRaises(OSError):
-                fd = os.open(fifo, os.O_RDWR)   # so opening it can't block
-                try:
-                    _read_model(fifo)
-                finally:
-                    os.close(fd)
+            with self.assertRaisesRegex(OSError, "not a regular file"):
+                _read_model(fifo)
             small = Path(tmp) / "small.pte"
             small.write_bytes(b"x" * 10)
             self.assertEqual(_read_model(small), b"x" * 10)

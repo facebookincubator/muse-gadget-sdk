@@ -79,8 +79,11 @@ def _read_model(path: Path) -> bytes:
     file, so a file swapped or grown after the check can't get past it. An
     empty buffer would mean the embedded model to the runner: never
     substitute it for a requested file."""
-    with open(path, "rb") as f:
-        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+    # Non-blocking open, so a FIFO or device can't stall it, and the type
+    # checked on that descriptor before anything is read.
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    with open(fd, "rb", closefd=True) as f:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError("not a regular file")
         data = f.read(_MAX_MODEL_BYTES + 1)
     if not 0 < len(data) <= _MAX_MODEL_BYTES:
