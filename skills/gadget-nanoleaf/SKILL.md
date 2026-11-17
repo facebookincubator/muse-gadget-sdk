@@ -23,12 +23,12 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 ## Workflow
 
 1. Confirm the device is a supported Nanoleaf controller on the local network as described in Identify the Device, and confirm the exact model before acting.
-2. Check user-only approved storage for an existing token for this device. If no stored token exists, pair first. Give the user the physical step instead of improvising around it — ask the user to hold the controller power button for 5–7 seconds until the LED flashes. Then, within 30 seconds, send `POST http://<device-ip>:16021/api/v1/new` with no token in the path. The response returns an `auth_token`. Store it as described in Prerequisites and do not show it in chat.
+2. Check user-only approved storage for an existing token for this device. If no stored token exists, pair first. Give the user the physical step instead of improvising around it — ask the user to hold the controller power button for 5–7 seconds until the LED flashes. Skylight has no power button: ask the user to open the pairing window from the Nanoleaf app (Device Settings > Connect to API) instead. Then, within 30 seconds, send `POST http://<device-ip>:16021/api/v1/new` with no token in the path. The response returns an `auth_token`. Store it as described in Prerequisites and do not show it in chat.
 3. Read the current state before any write. Use `GET` on the full state at `http://<device-ip>:16021/api/v1/{token}/state` and on attribute sub-endpoints such as `http://<device-ip>:16021/api/v1/{token}/state/on`. Resolve every value you will use or report from the actual responses, not from memory or assumption.
 4. Treat a state question as a question only. A state question is never permission to change anything — if the user only asked about state, report the values read in step 3 and stop.
 5. If the values already read match the requested change, treat an already-set value as success and do not send a write.
 6. Apply only the requested change with `PUT http://<device-ip>:16021/api/v1/{token}/state` and a JSON body for that change only, such as `{"on":{"value":true}}`, `{"brightness":{"value":50,"duration":0}}`, `{"hue":...}`, `{"sat":...}`, or `{"ct":{"value":...}}`, replacing the placeholder parts with the requested values. Brightness and saturation are 0–100, hue is 0–360 degrees and `ct` is in kelvin; keep each value within the `min` and `max` the state read reported. Elements panels are tunable white only: use brightness and `ct`, not hue or saturation. Success is HTTP 204.
-7. Handle errors from the response, never by resending unchanged. Never resend a command automatically. A 401 means the token is no longer accepted — re-pair for a fresh token using step 2. A 403 from `POST /api/v1/new` means the pairing window was not open — ask the user to hold the power button again. A 422 means a malformed body — fix the body, do not resend it unchanged.
+7. Handle errors from the response, never by resending unchanged. Never resend a command automatically. A 401 means the token is no longer accepted — re-pair for a fresh token using step 2. A 403 from `POST /api/v1/new` means the pairing window was not open — ask the user to open it again. A 422 means a malformed body — fix the body, do not resend it unchanged.
 
 ## Verify the Result
 
@@ -45,3 +45,4 @@ Read the same attributes back with the same `GET` state calls used in the Workfl
 ## Sources
 
 - [Nanoleaf Open API documentation](https://forum.nanoleaf.me/docs/openapi) (needs a free Nanoleaf developer account) — discovery, authorization, state and the PUT bodies above
+- [Nanoleaf API authentication](https://support.nanoleaf.me/hc/en-us/articles/41108368751892-API-Authentication-Security) — pairing, including Skylight
