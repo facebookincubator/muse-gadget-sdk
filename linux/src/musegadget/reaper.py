@@ -115,6 +115,14 @@ class ChildReaper:
 class ReapingPopen(subprocess.Popen):
     """A Popen whose exit status may already have been reaped and stashed."""
 
+    def _execute_child(self, *args, **kwargs):
+        # A stashed status for this pid belongs to an earlier process that
+        # had it. Start the child under the lock, so the reaper can't stash
+        # the new child's status before that stale entry is dropped.
+        with _lock:
+            super()._execute_child(*args, **kwargs)
+            _statuses.pop(self.pid, None)
+
     def _try_wait(self, wait_flags):
         # Same contract as Popen._try_wait: a (pid, raw status) pair,
         # where pid is 0 while the child is still running. The caller

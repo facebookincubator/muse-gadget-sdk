@@ -69,6 +69,20 @@ def test_reaping_popen_poll_keeps_exit_codes_while_reaper_drains(running_reaper)
         assert proc.returncode == 3
 
 
+def test_reaping_popen_ignores_a_stale_status_for_a_reused_pid(monkeypatch):
+    # Pretend an earlier process with the new child's pid left a status.
+    spawn = subprocess.Popen._execute_child
+
+    def spawn_with_stale_status(self, *args, **kwargs):
+        spawn(self, *args, **kwargs)
+        reaper._statuses[self.pid] = 9 << 8
+
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", spawn_with_stale_status)
+    proc = reaper.ReapingPopen(["sh", "-c", "sleep 0.2; exit 3"])
+    assert proc.poll() is None
+    assert proc.wait() == 3
+
+
 def test_run_helper_keeps_exit_code_and_output(running_reaper):
     result = reaper.run(
         [sys.executable, "-c", "import sys; sys.stdout.write('x'); sys.exit(5)"],
