@@ -215,6 +215,7 @@ int main(void) {{
             "full UI, P4 camera": ["CONFIG_HOMEHUB_LED_BACKEND_MUSE", "CONFIG_HOMEHUB_DISPLAY_COMMANDS",
                                    "CONFIG_MUSE_P4_CSI_CAMERA"],
             "voice": ["CONFIG_HOMEHUB_VOICE"],
+            "LED matrix": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS", "CONFIG_HOMEHUB_LED_MATRIX"],
         }
         model_id, model_name = "z" * 64, "~" * 128
         self.assertTrue(VALID_MODEL_NAME.fullmatch(model_name))

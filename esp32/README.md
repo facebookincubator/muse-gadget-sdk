@@ -222,6 +222,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Waveshare ESP32-C6-LCD-1.47 | Status on screen, images | `tools/board.sh waveshare-c6-lcd-147 build` |
 | ESP32-2432S028 Cheap Yellow Display (experimental) | Status on screen, images | `tools/board.sh esp32-2432s028 build` |
 | ESP32-C3 with 0.42" OLED | Status and agent name as text | `tools/board.sh c3-oled-042 build` |
+| M5Stack CoreMatrix | Status and 1-bit images on a 16×16 white LED matrix, and a button | `tools/board.sh m5stack-corematrix build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
 | Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours, push-to-talk | `tools/board.sh waveshare-s3-epaper-154g build` |

@@ -31,6 +31,7 @@ static const char *TAG = "link.button";
 #define DOUBLE_CLICK_MS    400
 #define POLL_MS            50
 
+static button_read_cb s_read = NULL;
 static button_cb s_short_press_cb = NULL;
 static button_cb s_double_press_cb = NULL;
 static button_cb s_long_press_cb = NULL;
@@ -41,6 +42,16 @@ void button_set_press_cb(button_press_cb cb) {
     s_press_cb = cb;
 }
 #endif
+
+void button_set_reader(button_read_cb read) {
+    s_read = read;
+}
+
+static bool read_button(bool *pressed) {
+    if (s_read) return s_read(pressed);
+    *pressed = gpio_get_level(BTN_GPIO) == 0;
+    return true;
+}
 
 static void button_task(void *arg) {
     stack_monitor_t stack = STACK_MONITOR_INIT;
@@ -54,7 +65,14 @@ static void button_task(void *arg) {
 #endif
 
     while (1) {
-        bool pressed = (gpio_get_level(BTN_GPIO) == 0);
+        bool pressed = was_pressed;
+        if (!read_button(&pressed)) {
+            // No edge: drop any click or hold in progress.
+            fired = true;
+            click_count = 0;
+            vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+            continue;
+        }
 
         if (pressed && !was_pressed) {
             press_start = esp_timer_get_time();
@@ -113,6 +131,13 @@ bool button_init(button_cb on_short_press, button_cb on_double_press,
     s_short_press_cb = on_short_press;
     s_double_press_cb = on_double_press;
     s_long_press_cb = on_long_press;
+
+    if (s_read) {
+        xTaskCreate(button_task, "btn", 4096, NULL, 2, NULL);
+        ESP_LOGI(TAG, "button ready (tap=retry wifi, 2x=rescan, hold %ds=reset setup)",
+                 LONG_PRESS_MS / 1000);
+        return true;
+    }
 
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << BTN_GPIO),
