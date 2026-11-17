@@ -103,6 +103,7 @@ static void test_ring(void)
     CHECK(muse_vstream_available(&s) == sizeof(ring));
 
     /* Two bands: the top band's length after the header. */
+    s.bands = 2;
     n = make_frame(f, 4, MUSE_VIDEO_FRAME_KEY, 200, 0x55);
     uint8_t *au = f + MUSE_VIDEO_FRAME_HEADER_LEN;
     au[0] = 96;   /* top band: 96 bytes from au + 4 */
@@ -112,7 +113,7 @@ static void test_ring(void)
     au[100] = au[101] = au[102] = 0;
     au[103] = 1;
     muse_vstream_write(&s, f, n);
-    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 200 && fr.number == 4 && !fr.after_gap);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 200 && fr.number == 4 && !fr.after_gap && fr.bands == 2);
     /* The same, arriving in pieces as TCP may deliver it: with only the band
      * length in (or part of the start code after it), it waits, not skipped. */
     uint32_t resyncs = s.resyncs;
@@ -123,6 +124,17 @@ static void test_ring(void)
     muse_vstream_write(&s, f + MUSE_VIDEO_FRAME_HEADER_LEN + 6, n - MUSE_VIDEO_FRAME_HEADER_LEN - 6);
     CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 200 && fr.number == 4);
     CHECK(s.resyncs == resyncs);
+    /* Only in the stream's layout: a one-band frame isn't a two-band one, nor
+     * the reverse. */
+    uint8_t one[300];
+    size_t n1 = make_frame(one, 6, MUSE_VIDEO_FRAME_KEY, 100, 0x77);
+    muse_vstream_write(&s, one, n1);
+    muse_vstream_write(&s, f, n);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 200 && fr.number == 4 && fr.after_gap);
+    s.bands = 1;
+    muse_vstream_write(&s, f, n);
+    muse_vstream_write(&s, one, n1);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 100 && fr.number == 6 && fr.after_gap && fr.bands == 1);
 
     /* A client ignoring credits: the excess is counted, then the next frame resyncs. */
     n = make_frame(f, 5, 0, 1500, 0x66);
@@ -189,6 +201,7 @@ static void test_ring_vp8(void)
     CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 100 && fr.number == 4 && fr.after_gap);
 
     /* Two bands: the top band's length, then two frames. */
+    s.bands = 2;
     memset(f, 0, sizeof(f));
     make_frame(f, 5, MUSE_VIDEO_FRAME_KEY, 4 + 100 + 80, 0x66);
     uint8_t *au = f + MUSE_VIDEO_FRAME_HEADER_LEN;
@@ -200,7 +213,27 @@ static void test_ring_vp8(void)
     make_vp8(band, 0, true, 80, 0x67);
     memcpy(au + 104, band + MUSE_VIDEO_FRAME_HEADER_LEN, 80);
     muse_vstream_write(&s, f, MUSE_VIDEO_FRAME_HEADER_LEN + 184);
-    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 184 && fr.number == 5 && !fr.after_gap);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 184 && fr.number == 5 && !fr.after_gap && fr.bands == 2);
+    /* A one-band keyframe isn't a frame of a two-band stream. */
+    n = make_vp8(band, 6, true, 150, 0x68);
+    muse_vstream_write(&s, band, n);
+    muse_vstream_write(&s, f, MUSE_VIDEO_FRAME_HEADER_LEN + 184);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 184 && fr.number == 5 && fr.after_gap);
+
+    /* Nor, in a one-band stream, a keyframe-flagged frame shaped as two
+     * bands: as one frame, its first bytes (the band length) are an inter
+     * frame's tag. */
+    s.bands = 1;
+    const uint32_t top = 17 | 3 << 5;   /* as a tag: an inter frame, version 0, shown, first partition 3 */
+    au[0] = (uint8_t)top;
+    make_vp8(band, 0, true, top, 0x66);
+    memcpy(au + 4, band + MUSE_VIDEO_FRAME_HEADER_LEN, top);
+    make_vp8(band, 0, true, 184 - 4 - top, 0x67);
+    memcpy(au + 4 + top, band + MUSE_VIDEO_FRAME_HEADER_LEN, 184 - 4 - top);
+    muse_vstream_write(&s, f, MUSE_VIDEO_FRAME_HEADER_LEN + 184);
+    n = make_vp8(band, 7, true, 150, 0x69);
+    muse_vstream_write(&s, band, n);
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 150 && fr.number == 7 && fr.after_gap && fr.bands == 1);
 }
 
 /* The framed message's JSON, parsed back. */

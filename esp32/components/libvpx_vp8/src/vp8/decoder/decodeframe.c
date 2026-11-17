@@ -1340,7 +1340,15 @@ int vp8_decode_frame(VP8D_COMP *pbi) {
       xd->dst = *yv12_fb_new;
     }
   }
-  if ((!pbi->decoded_key_frame && pc->frame_type != KEY_FRAME)) {
+  /* Muse gadget port: pictures are allocated on first use (vp8_alloc_fb), and
+   * a size change frees them all; a key frame that fails after one leaves the
+   * references without memory, so an inter frame needs all three to have
+   * some, as it needs a decoded key frame. */
+  if ((!pbi->decoded_key_frame && pc->frame_type != KEY_FRAME) ||
+      (pc->frame_type != KEY_FRAME &&
+       (!pbi->dec_fb_ref[LAST_FRAME]->buffer_alloc ||
+        !pbi->dec_fb_ref[GOLDEN_FRAME]->buffer_alloc ||
+        !pbi->dec_fb_ref[ALTREF_FRAME]->buffer_alloc))) {
     return -1;
   }
 

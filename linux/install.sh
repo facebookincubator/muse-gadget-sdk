@@ -181,8 +181,8 @@ install_packages() {
     fi
 }
 
-# musegadget uses the system trust store, and distros remove distrusted root
-# CAs in ca-certificates updates, so bring that one package up to date.
+# musegadget uses the system trust store, and ca-certificates updates are how
+# distros stop trusting root CAs, so bring that one package up to date.
 update_ca_certificates() {
     local updated=0
     if [ "$DISTRO_FAMILY" = fedora ]; then
@@ -350,20 +350,35 @@ install_musegadget() {
 }
 
 # musegadget won't connect while the trust store can't be read or still has a
-# distrusted root CA, so stop before installing a service that can't start.
+# compromised root CA, so stop before installing a service that can't start.
+# A retired root CA only gets a warning.
 check_trust_store() {
-    local problem
+    local out problem
     # As the service runs it: as root, without this shell's SSL_CERT_* settings
     # (and, with -I, without importing from the current directory).
-    problem="$(as_root env -u SSL_CERT_FILE -u SSL_CERT_DIR -u SSL_CERT_URI "$VENV/bin/python" -I \
-        -c 'from musegadget import tls; print(tls.trust_store_problem() or "")')" ||
+    # Prints the problem, then the warning, one line each (empty for none).
+    out="$(as_root env -u SSL_CERT_FILE -u SSL_CERT_DIR -u SSL_CERT_URI "$VENV/bin/python" -I \
+        -c 'from musegadget import tls; print(tls.trust_store_problem() or ""); print(tls.trust_store_warning() or "")')" ||
         die "couldn't check the system trust store."
-    [ -z "$problem" ] && return
+    problem="${out%%$'\n'*}"
+    if [ -z "$problem" ]; then
+        warn_retired_roots "${out#$'\n'}"
+        return
+    fi
     # An earlier install's service would keep restarting the new code, which refuses to run.
     if systemd_running && [ -e "$UNIT" ]; then
         as_root systemctl stop musegadget.service >/dev/null 2>&1 || true
     fi
     die "musegadget won't connect: $problem. Update your ca-certificates package, then run this installer again."
+}
+
+warn_retired_roots() {  # $1 = tls.trust_store_warning(), or empty
+    [ -n "$1" ] || return 0
+    if [ "$DISTRO_FAMILY" = debian ]; then
+        warn "$1. musegadget still connects. To stop trusting a retired root, put '!' in front of its line in /etc/ca-certificates.conf (mozilla/emSign_Root_CA_-_C1.crt or mozilla/emSign_ECC_Root_CA_-_C3.crt), then run 'sudo update-ca-certificates'."
+    else
+        warn "$1. musegadget still connects. To stop trusting a retired root, deselect it in the system trust store (see \"Root CAs\" in the musegadget README)."
+    fi
 }
 
 configure_bluez() {
