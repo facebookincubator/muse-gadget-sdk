@@ -32,7 +32,9 @@ import sys
 import tempfile
 import unittest
 
-from host_cjson import cjson_source
+# Also run as tests.test_link_pairing_handshake (see above).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from host_cjson import cjson_source  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
