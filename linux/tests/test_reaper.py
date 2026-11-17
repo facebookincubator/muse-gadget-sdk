@@ -60,6 +60,15 @@ def test_reaping_popen_reads_status_the_reaper_already_drained(running_reaper):
     assert proc.wait() == 7
 
 
+def test_reaping_popen_poll_keeps_exit_codes_while_reaper_drains(running_reaper):
+    # The executor waits for its shells with poll(), which bypasses _try_wait.
+    for _ in range(20):
+        proc = reaper.ReapingPopen(["sh", "-c", "exit 3"])
+        while proc.poll() is None:
+            time.sleep(0.02)
+        assert proc.returncode == 3
+
+
 def test_run_helper_keeps_exit_code_and_output(running_reaper):
     result = reaper.run(
         [sys.executable, "-c", "import sys; sys.stdout.write('x'); sys.exit(5)"],

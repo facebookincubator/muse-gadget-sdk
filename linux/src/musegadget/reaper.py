@@ -54,11 +54,10 @@ _lock = threading.Lock()
 _statuses: dict[int, int] = {}
 
 
-def _stash(pid: int, status: int) -> None:
-    with _lock:
-        if len(_statuses) >= _MAX_STASHED:
-            _statuses.clear()
-        _statuses[pid] = status
+def _stash_locked(pid: int, status: int) -> None:
+    if len(_statuses) >= _MAX_STASHED:
+        _statuses.clear()
+    _statuses[pid] = status
 
 
 def _take_status(pid: int) -> int | None:
@@ -70,15 +69,18 @@ def drain_children() -> int:
     """Reap every exited child, stashing exit statuses. Returns the count."""
     reaped = 0
     while True:
-        try:
-            pid, status = os.waitpid(-1, os.WNOHANG)
-        except ChildProcessError:
-            return reaped
-        except InterruptedError:
-            continue
-        if pid <= 0:
-            return reaped
-        _stash(pid, status)
+        # Reap and stash under the lock, so ReapingPopen never sees a child
+        # gone from waitpid but not yet in the stash.
+        with _lock:
+            try:
+                pid, status = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                return reaped
+            except InterruptedError:
+                continue
+            if pid <= 0:
+                return reaped
+            _stash_locked(pid, status)
         reaped += 1
 
 
@@ -120,7 +122,22 @@ class ReapingPopen(subprocess.Popen):
         status = _take_status(self.pid)
         if status is not None:
             return (self.pid, status)
-        return super()._try_wait(wait_flags)
+        try:
+            return os.waitpid(self.pid, wait_flags)
+        except ChildProcessError:
+            # The reaper got there first; it stashes under the lock.
+            status = _take_status(self.pid)
+            return (self.pid, 0 if status is None else status)
+
+    def poll(self):
+        # Popen.poll() calls waitpid itself rather than _try_wait, so it
+        # needs the stash too; the executor polls its shells with it.
+        with _lock:
+            if self.returncode is None:
+                status = _statuses.pop(self.pid, None)
+                if status is not None:
+                    self._handle_exitstatus(status)
+            return super().poll()
 
 
 def run(*popenargs, timeout=None, check=False, input=None,
