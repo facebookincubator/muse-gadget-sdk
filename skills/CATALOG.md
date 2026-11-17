@@ -1,6 +1,6 @@
 # Skill Catalog
 
-57 active skills: 55 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+58 active skills: 56 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
@@ -74,6 +74,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Ecowitt gateways](gadget-ecowitt-gateways/SKILL.md) — read-only live weather from the user's own station.
 - [Tuya cloud devices](gadget-tuya-cloud-devices/SKILL.md) — cloud only; needs internet and a Tuya end-user API key: status, confirmed control, weather, stats and snapshots.
 - [SinricPro cloud devices](gadget-sinricpro-cloud-devices/SKILL.md) — cloud only; needs internet and a SinricPro API key: state, actions, scenes and schedules.
+- [ESP32 Matter controller](gadget-esp32-matter-controller/SKILL.md) — add, control and watch Matter devices with chip-tool-remote through an ESP32 gadget.
 
 ## Read-only network and camera access
 

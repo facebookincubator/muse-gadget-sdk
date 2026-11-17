@@ -47,3 +47,11 @@ dependencies:
     version: "~1.4.2"
     rules:
       - if: '$CONFIG{MUSE_BOARD_ID} == "waveshare_p4_lcd35"'
+  # The Matter forwarder (HOMEHUB_CHIP_TOOL_FORWARDER), which brings esp-matter.
+  espressif/chip_tool_forwarder:
+    git: "https://github.com/espressif/chip-tool-remote-forwarder.git"
+    path: "components/chip_tool_forwarder"
+    # v0.1.0, pinned by its commit: a tag can be moved.
+    version: "639157e759e031a640979ec7f5c31c694382d1de"
+    rules:
+      - if: "$CONFIG{HOMEHUB_CHIP_TOOL_FORWARDER} == True"
