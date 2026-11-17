@@ -77,7 +77,8 @@ Only after the user explicitly asks to enable the microphone:
 
 The normal service remains unchanged. Waiting audio stays local; detection
 pauses through calls and playback, then resets/re-arms after successful
-cleanup. A wake-started voice call ends if the caller doesn't speak within 5 s.
+cleanup. A wake-started voice call ends if no speech follows the wake word within
+5 s of audio.
 Ctrl-C stops listening. Omit `--wake-word` or use `--no-wake-word` for
 immediate calls. Never choose a VM on the user's behalf or start a voice call
 as an installation check; it can replace another active call and upload audio

@@ -240,7 +240,7 @@ never has a command's parameters, output or error message.
   stream reset succeeds; report the incomplete drain separately.
 - `voice-call --wake-word` waits for local detection before admitting a call;
   the default is unchanged. `WakeWordInput` owns the capture iterator and a
-  bounded one-second pre-roll/four-second startup queue; always await `aclose()`.
+  bounded one-second pre-roll/80-second startup queue; always await `aclose()`.
   The call reads the listener itself and sends its queued backlog at up to
   three times real time (wall-clock paced) until it is down to one frame.
   Its detector tap alone uses a streaming 24-to-16 kHz FIR (native from the
@@ -249,8 +249,10 @@ never has a command's parameters, output or error message.
   Detection is `wakeword/build.sh`'s `libmuse_wakeword.so`: the ESP32 runner,
   model and front end (`../esp32/components/muse_wakeword`), loaded with
   ctypes; no Python ML packages. A wake-started voice call passes
-  `speech_timeout` and ends as `no_speech` when Muse hears no caller speech
-  (video calls keep their idle timer). See
+  `speech_timeout` with `speech_after_bytes` (the listener's pre-roll) and
+  ends as `no_speech` when no locally voiced audio follows the pre-roll;
+  server VAD events don't count, since the pre-roll is the wake word itself.
+  Video calls keep their idle timer and pace the queued backlog as voice does. See
   `wakeword/README.md` and `../skills/gadget-linux-wakeword/SKILL.md` for setup.
   Hardware-free tests use synthetic detectors and tones, never recordings.
 - Tests use self-authored tones/zeros and synthetic identities only. Never put

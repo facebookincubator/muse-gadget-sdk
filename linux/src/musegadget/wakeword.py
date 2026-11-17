@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import stat
 import sys
 import threading
 import warnings
@@ -53,13 +54,29 @@ class _Config(ctypes.Structure):
 def _candidates() -> list[Path]:
     override = os.environ.get("MUSE_WAKEWORD_LIBRARY")
     if override:
-        return [Path(override).expanduser()]
+        # Absolute, so ctypes loads this file: a bare name ("lib.so", which
+        # is what Path makes of "./lib.so") would search the loader's paths.
+        return [Path(override).expanduser().absolute()]
     return [
         # The copy linux/wakeword/setup.sh installs into its environment.
         Path(sys.prefix) / "lib" / "musegadget" / "libmuse_wakeword.so",
         # A source checkout run in place: what linux/wakeword/build.sh builds.
         Path(__file__).resolve().parents[2] / "wakeword" / "build" / "libmuse_wakeword.so",
     ]
+
+
+def _read_model(path: Path) -> bytes:
+    """A regular file of 1 to _MAX_MODEL_BYTES bytes, read through one open
+    file, so a file swapped or grown after the check can't get past it. An
+    empty buffer would mean the embedded model to the runner: never
+    substitute it for a requested file."""
+    with open(path, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError("not a regular file")
+        data = f.read(_MAX_MODEL_BYTES + 1)
+    if not 0 < len(data) <= _MAX_MODEL_BYTES:
+        raise OSError("not a model file")
+    return data
 
 
 def _load_library() -> ctypes.CDLL:
@@ -114,11 +131,7 @@ class WakeWordDetector:
         if model_path is not None:
             path = Path(model_path).expanduser()
             try:
-                # An empty buffer would mean the embedded model to the
-                # runner: never substitute it for a requested file.
-                if not path.is_file() or not 0 < path.stat().st_size <= _MAX_MODEL_BYTES:
-                    raise OSError("not a model file")
-                data = path.read_bytes()
+                data = _read_model(path)
             except OSError as exc:
                 raise WakeWordUnavailableError(f"Wake-word model not found: {path}") from exc
             self._model = ctypes.create_string_buffer(data, len(data))
@@ -216,7 +229,6 @@ class Resampler24To16:
         self._handle = library.muse_ww_resampler_create()
         if not self._handle:
             raise MemoryError("no memory for the resampler")
-        self._odd = b""
 
     def feed(self, pcm: bytes) -> bytes:
         if len(pcm) % 2:

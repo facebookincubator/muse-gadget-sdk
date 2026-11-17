@@ -85,6 +85,32 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(found[1].parts[-3:], ("wakeword", "build", "libmuse_wakeword.so"))
         with patch.dict(os.environ, {"MUSE_WAKEWORD_LIBRARY": "/x/lib.so"}):
             self.assertEqual(_candidates(), [Path("/x/lib.so")])
+        # A file in the current directory stays that file, not a bare name
+        # ctypes would look up on the loader's search path.
+        with patch.dict(os.environ, {"MUSE_WAKEWORD_LIBRARY": "./lib.so"}):
+            self.assertEqual(_candidates(), [Path.cwd() / "lib.so"])
+
+    def test_model_files_are_read_once_and_bounded(self):
+        import tempfile
+        from musegadget.wakeword import _MAX_MODEL_BYTES, _read_model
+
+        with tempfile.TemporaryDirectory() as tmp:
+            big = Path(tmp) / "big.pte"
+            with open(big, "wb") as f:
+                f.truncate(_MAX_MODEL_BYTES + 1)
+            with self.assertRaises(OSError):
+                _read_model(big)
+            fifo = Path(tmp) / "fifo.pte"
+            os.mkfifo(fifo)
+            with self.assertRaises(OSError):
+                fd = os.open(fifo, os.O_RDWR)   # so opening it can't block
+                try:
+                    _read_model(fifo)
+                finally:
+                    os.close(fd)
+            small = Path(tmp) / "small.pte"
+            small.write_bytes(b"x" * 10)
+            self.assertEqual(_read_model(small), b"x" * 10)
 
     def test_import_loads_nothing(self):
         tree = ast.parse((ROOT / "src/musegadget/wakeword.py").read_text())

@@ -104,3 +104,18 @@ def test_a_supplied_library_skips_the_build(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "build.sh" not in result.stdout
     assert str(library) in result.stdout and "lib/musegadget/libmuse_wakeword.so" in result.stdout
+
+
+def test_build_never_deletes_what_is_already_in_its_output(tmp_path):
+    # With --out . from linux/, "src" was the package: the build works in
+    # scratch space of its own and leaves everything else alone.
+    out = tmp_path / "out"
+    for name in ("src", "obj"):
+        (out / name).mkdir(parents=True)
+        (out / name / "keep").write_text("mine")
+    result = subprocess.run(["bash", str(ROOT / "wakeword" / "build.sh"), "--out", str(out), "--offline",
+                             "--deps", str(tmp_path)], capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0 and "--offline" in result.stderr   # no archives here
+    assert (out / "src" / "keep").read_text() == "mine"
+    assert (out / "obj" / "keep").read_text() == "mine"
+    assert not [p for p in out.iterdir() if p.name.startswith(".ww-build")]

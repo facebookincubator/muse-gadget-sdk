@@ -43,8 +43,8 @@ from musegadget.rtc.join import ENDPOINT_TYPES, build_join, parse_join_response
 from musegadget.rtc.media import MediaSession
 from musegadget.rtc.opus import ensure_available as ensure_opus
 from musegadget.voice_audio import Pcm48To24, _upsample24_to_48
-from musegadget.voice_call import (FRAME_BYTES, MAX_PLAYBACK_BYTES, SAMPLE_RATE, SETTLE_SECONDS, pcm_rms,
-                                   positive_seconds)
+from musegadget.voice_call import (CATCH_UP_RATE, FRAME_BYTES, MAX_PLAYBACK_BYTES, SAMPLE_RATE,
+                                   SETTLE_SECONDS, pcm_rms, positive_seconds)
 
 log = logging.getLogger(__name__)
 FRAME_48K_BYTES = 1920  # 20 ms of mono 48 kHz PCM16
@@ -266,9 +266,20 @@ class VideoCall:
         deadline = time.monotonic()
         last_speech = 0.0
 
+        # A wake word listener hands over queued capture (its pre-roll and
+        # what was heard while the call started): pace that against the
+        # clock, a little faster than real time while frames are queued, as
+        # voice calls do, rather than bursting it out as fast as it comes.
+        queued_source = realtime and hasattr(source, "backlog_bytes")
+
         async def pace(frame: bytes) -> None:
             nonlocal deadline
             self.media.send_audio(frame)
+            if queued_source:
+                step = FRAME_SECONDS / CATCH_UP_RATE if source.backlog_bytes > FRAME_BYTES else FRAME_SECONDS
+                deadline = max(deadline + step, time.monotonic() - FRAME_SECONDS)
+                await asyncio.sleep(max(0.0, deadline - time.monotonic()))
+                return
             deadline += FRAME_SECONDS
             if not realtime:
                 await asyncio.sleep(max(0.0, deadline - time.monotonic()))
@@ -296,7 +307,7 @@ class VideoCall:
             while len(pending) >= FRAME_48K_BYTES:
                 await send(bytes(pending[:FRAME_48K_BYTES]))
                 del pending[:FRAME_48K_BYTES]
-            if realtime:
+            if realtime and not queued_source:
                 deadline = time.monotonic()
         if pending:
             await send(bytes(pending).ljust(FRAME_48K_BYTES, b"\0"))

@@ -66,9 +66,13 @@ for tool in "$CC" "$CXX" unzip sha256sum; do
 done
 mkdir -p "$OUT"
 OUT=$(CDPATH='' cd -- "$OUT" && pwd)
-SRC="$OUT/src"
-OBJ="$OUT/obj"
-rm -rf "$SRC" "$OBJ"
+# Scratch space of its own, so no --out can make this delete anything
+# that was already there (with --out . from linux/, "src" would be the
+# package itself).
+WORK=$(mktemp -d "$OUT/.ww-build.XXXXXX")
+trap 'rm -rf -- "$WORK"' EXIT
+SRC="$WORK/src"
+OBJ="$WORK/obj"
 mkdir -p "$OUT/archives" "$SRC" "$OBJ"
 
 for entry in "${ARCHIVES[@]}"; do
@@ -183,5 +187,4 @@ mv -- "$OUT/libmuse_wakeword.so.part" "$OUT/libmuse_wakeword.so"
 "$CC" -O2 -std=c11 -I"$WW/include" "$HERE/tools/ww_run.c" -o "$OUT/ww-run.part" \
     -L"$OUT" -l:libmuse_wakeword.so -Wl,-rpath,'$ORIGIN' -lm
 mv -- "$OUT/ww-run.part" "$OUT/ww-run"
-rm -rf "$SRC" "$OBJ"
 printf 'Built %s (%s bytes) and %s\n' "$OUT/libmuse_wakeword.so" "$(stat -c %s "$OUT/libmuse_wakeword.so")" "$OUT/ww-run"

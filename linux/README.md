@@ -278,8 +278,9 @@ the same realtime voice call as above, retaining up to one second of pre-roll
 at 24 kHz. Only the detector's tap is resampled to 16 kHz; voice upload and
 playback stay unchanged. Detection is paused throughout the call (including
 speaker playback and server input holds). A voice call started by a wake word
-ends if Muse hears no speech from the caller within its first 5 s, so a false wake
-in a quiet room doesn't stream on. After a successful hangup, live mode resets
+ends if the microphone picks up no speech in the first 5 s of audio after the
+wake word's pre-roll (the pre-roll holds the wake word itself, so it doesn't
+count), so a false wake in a quiet room doesn't stream on. After a successful hangup, live mode resets
 the detector and returns to local listening. Ctrl-C stops it; omit
 `--wake-word` or use `--no-wake-word` for the original immediate-call
 behavior. The normal `musegadget run` service never opens the microphone or
@@ -299,9 +300,10 @@ WAV mode also accepts `--wake-word`, runs at most one call, and exits without
 admitting a call if the file ends before a detection. Audio queued after a
 detection (the pre-roll and capture from before the call was ready) is sent up
 to three times faster than real time until it has caught up, so speech doesn't
-arrive later and later. A live capture backlog that still exceeds four seconds
-fails that call closed rather than silently truncating the user's question;
-live mode then returns to listening.
+arrive later and later. The queue holds up to 80 seconds, enough for the call
+to start within its own connection and readiness limits; a live capture backlog
+beyond that fails the call closed rather than silently truncating the user's
+question, and live mode then returns to listening.
 Startup needs the configured VM to be reachable.
 
 ### Lifecycle diagnostics
