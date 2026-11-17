@@ -761,12 +761,29 @@ static void canonical_reply_is_bounded_at_a_whole_character() {
     incoming_play(s_turn.gen + 1);
     assert(s_turn.nmsgs == 1 && s_turn.msgs[0].tts == TTS_QUEUED && s_turn.msgs[0].len == TEXT_MAX - 2);
 }
+static void canonical_reply_reads_one_message_without_commentary() {
+    detach();
+    cJSON *line = cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{
+        "message_id":"final","reply_to_message_id":"note","transcript":{"messages":[
+            {"id":"assistant-msg-early","role":"assistant","content":[{"type":"text","text":"Already said"}]},
+            {"id":"assistant-msg-final","role":"assistant","content":[
+                {"type":"text","recipient":"commentary","text":"Hidden aside"},
+                {"type":"text","text":"Final answer"}]},
+            {"id":"assistant-msg-after","role":"assistant","content":[{"type":"text","text":"Not this row"}]}]}}})");
+    assert(line);
+    on_event(line);
+    cJSON_Delete(line);
+    assert(s_incoming && cJSON_GetArraySize(s_pending.replies) == 1);
+    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(s_pending.replies, 0),
+        "display_text")), "Final answer"));
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
     case 36: canonical_late_progress_and_completion(); break;
     case 37: canonical_reply_during_notice(); break;
     case 38: canonical_reply_is_bounded_at_a_whole_character(); break;
+    case 39: canonical_reply_reads_one_message_without_commentary(); break;
     case 0: rejected_deltas(); break;
     case 1: valid_parents(); break;
     case 2: bounded_rejections(); break;
@@ -930,6 +947,9 @@ int main(int argc, char **argv) {
 
     def test_long_transcript_only_late_reply_keeps_whole_utf8_characters(self):
         self.run_case(38)
+
+    def test_transcript_only_reply_reads_its_own_message_without_commentary(self):
+        self.run_case(39)
 
     def test_late_reply_is_the_row_naming_the_request_and_plays_once(self):
         self.run_case(24)

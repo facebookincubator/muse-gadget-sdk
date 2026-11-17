@@ -1581,9 +1581,38 @@ static bool pending_held(const char *id)
     return false;
 }
 
+/* A transcript block that is reply text: not commentary, which isn't shown. */
+static bool reply_block(cJSON *block)
+{
+    const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
+    const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
+    const char *to = cJSON_GetStringValue(cJSON_GetObjectItem(block, "recipient"));
+    return type && !strcmp(type, "text") && text && text[0] && !(to && !strcasecmp(to, "commentary"));
+}
+
+/* The transcript's assistant message with this id, else its last one with reply text:
+ * one message, so earlier ones in the transcript aren't repeated. */
+static cJSON *reply_row(cJSON *rows, const char *id)
+{
+    cJSON *row, *block, *last = nullptr;
+    cJSON_ArrayForEach(row, rows) {
+        const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(row, "role"));
+        cJSON *blocks = cJSON_GetObjectItem(row, "content");
+        if (!role || strcmp(role, "assistant") || !cJSON_IsArray(blocks)) continue;
+        bool text = false;
+        cJSON_ArrayForEach(block, blocks) text = text || reply_block(block);
+        if (!text) continue;
+        const char *own = cJSON_GetStringValue(cJSON_GetObjectItem(row, "id"));
+        if (own && !strncmp(own, "assistant-msg-", 14)) own += 14;
+        if (id && own && !strcmp(own, id)) return row;
+        last = row;
+    }
+    return last;
+}
+
 /* A finished message's text. Canonical rows can carry only a transcript;
- * collect its public assistant text into a bounded buffer; release it with free(). */
-static const char *reply_text(cJSON *payload, char **owned)
+ * collect one assistant message's text into a bounded buffer; release it with free(). */
+static const char *reply_text(cJSON *payload, const char *id, char **owned)
 {
     *owned = nullptr;
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
@@ -1591,34 +1620,28 @@ static const char *reply_text(cJSON *payload, char **owned)
     text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
     if (text && text[0]) return text;
     cJSON *rows = cJSON_GetObjectItem(cJSON_GetObjectItem(payload, "transcript"), "messages");
-    if (!cJSON_IsArray(rows)) return nullptr;
-    cJSON *row, *block;
+    cJSON *row = cJSON_IsArray(rows) ? reply_row(rows, id) : nullptr;
+    if (!row) return nullptr;
+    cJSON *block;
     size_t used = 0;
-    cJSON_ArrayForEach(row, rows) {
-        const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(row, "role"));
-        if (!role || strcmp(role, "assistant")) continue;
-        cJSON *blocks = cJSON_GetObjectItem(row, "content");
-        if (!cJSON_IsArray(blocks)) continue;
-        cJSON_ArrayForEach(block, blocks) {
-            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-            text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
-            if (!type || strcmp(type, "text") || !text || !text[0]) continue;
-            if (!*owned) {
-                *owned = static_cast<char *>(psram_alloc(TEXT_MAX));
-                if (!*owned) return nullptr;
-                (*owned)[0] = '\0';
-            }
-            size_t room = TEXT_MAX - 1 - used;
-            if (used && room) {
-                (*owned)[used++] = '\n';
-                room--;
-            }
-            size_t n = whole_chars(text, strnlen(text, room));
-            memcpy(*owned + used, text, n);
-            used += n;
-            (*owned)[used] = '\0';
-            if (n < strlen(text) || used == TEXT_MAX - 1) return *owned;
+    cJSON_ArrayForEach(block, cJSON_GetObjectItem(row, "content")) {
+        if (!reply_block(block)) continue;
+        text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
+        if (!*owned) {
+            *owned = static_cast<char *>(psram_alloc(TEXT_MAX));
+            if (!*owned) return nullptr;
+            (*owned)[0] = '\0';
         }
+        size_t room = TEXT_MAX - 1 - used;
+        if (used && room) {
+            (*owned)[used++] = '\n';
+            room--;
+        }
+        size_t n = whole_chars(text, strnlen(text, room));
+        memcpy(*owned + used, text, n);
+        used += n;
+        (*owned)[used] = '\0';
+        if (n < strlen(text) || used == TEXT_MAX - 1) return *owned;
     }
     return *owned;
 }
@@ -1653,7 +1676,7 @@ static void pending_event(const char *event, cJSON *payload, cJSON *line)
         return;
     }
     char *owned;
-    const char *text = reply_text(payload, &owned);
+    const char *text = reply_text(payload, id, &owned);
     if (!text || !text[0]) {
         free(owned);
         return;
@@ -1858,7 +1881,7 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
         cJSON *ready = cJSON_GetObjectItem(payload, "display_text_ready");
         if (done || !cJSON_IsFalse(ready)) {
             char *owned;
-            const char *text = reply_text(payload, &owned);
+            const char *text = reply_text(payload, id, &owned);
             message_done(i, text);
             free(owned);
         }
