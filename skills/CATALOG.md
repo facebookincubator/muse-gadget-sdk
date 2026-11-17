@@ -1,6 +1,6 @@
 # Skill Catalog
 
-57 active skills: 55 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+58 active skills: 56 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
@@ -55,6 +55,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Bambu Lab printers](gadget-bambu-lab-printers/SKILL.md) — local status, filament and owner-approved prints in Developer Mode.
 - [Bambu Lab P2S](gadget-bambu-lab-p2s/SKILL.md) — status, chamber-camera snapshots, monitoring and agreed failure pauses.
 - [HomeWhiz laundry](gadget-homewhiz-laundry/SKILL.md) — cloud only; needs internet and a HomeWhiz account: washer and dryer cycle state, read-only.
+- [VeSync purifiers](gadget-vesync-purifier/SKILL.md) — cloud only; needs internet and a VeSync account: Levoit purifier power, mode, fan level and filter life, guarded per exact model.
 
 ## Vacuums
 
