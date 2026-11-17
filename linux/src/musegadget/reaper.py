@@ -56,7 +56,7 @@ _statuses: dict[int, int] = {}
 
 def _stash_locked(pid: int, status: int) -> None:
     if len(_statuses) >= _MAX_STASHED:
-        _statuses.clear()
+        del _statuses[next(iter(_statuses))]  # the oldest, as above
     _statuses[pid] = status
 
 
