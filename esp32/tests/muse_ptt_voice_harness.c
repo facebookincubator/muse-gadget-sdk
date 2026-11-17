@@ -209,6 +209,9 @@ void muse_hatch_turn_audio(const int16_t *p,size_t n) {
         memcpy(uploaded_pcm+note_frames,p,n*sizeof(*p));
     }
     note_frames+=n; note_burst+=n;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if(scenario==102 && note_frames>=MUSE_AUDIO_CHUNK) turn_wanted=false;   /* off after the first chunk went */
+#endif
     if(note_burst>note_max_burst) note_max_burst=note_burst;
 }
 size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) {
@@ -396,6 +399,9 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(scenario==100 && frame==3) {   /* listening turned off, and straight back on */
             wanted_disables++;
         }
+        if(scenario==103 && frame==2) push(MUSE_PTT_DOWN);   /* a finger takes the hands-free note over */
+        if(scenario==103 && frame==4) turn_wanted=false;     /* then listening is turned off */
+        if(scenario==103 && frame==8) push(MUSE_PTT_UP);     /* and the finger lets go */
         if(scenario==98 && frame==3) {   /* a press the queue's overflow made stale */
             muse_input_event_t d={.type=MUSE_PTT_DOWN,.epoch=muse_input_call_epoch()-1,.at_us=clock_us};
             xQueueSend(&queue,&d,0);
@@ -664,6 +670,44 @@ int main(int argc,char **argv) {
         assert(turn_ended_calls==ended_before+1);   /* the glue hears the turn is over */
         assert(frame<=4);   /* it stops at once, not at a release or the cap */
         free(s_seed); s_seed=NULL; free(s_pre); return 0;
+    }
+    if(scenario==101 || scenario==102) {
+        /* Listening turned off after admission (101: before the turn opens;
+         * 102: after the first buffered chunk went). 101 opens no turn and
+         * sends nothing; 102 sends no more and abandons the turn. */
+        clock_us=1000000;
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        int16_t seed[3*MUSE_AUDIO_CHUNK]={0};
+        muse_voice_seed_preroll(seed,3*MUSE_AUDIO_CHUNK);
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+        if(scenario==101) turn_wanted=false;
+        s_rec=NULL;   /* stream as taken, so every chunk sent is visible */
+        char why[96];
+        assert(!record(true,why,sizeof(why)) && why[0]=='\0');
+        if(scenario==101) assert(notes==0 && note_frames==0 && turn_cancels==0);
+        else assert(notes==1 && note_frames==MUSE_AUDIO_CHUNK && turn_cancels==1);
+        assert(frame==0);   /* stopped before any live read */
+        free(s_seed); s_seed=NULL; free(s_pre); return 0;
+    }
+    if(scenario==103) {
+        /* A finger took the hands-free note over, then listening was turned
+         * off: the note is the button's now, and goes when the finger lets go. */
+        clock_us=1000000;
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        int16_t seed[MUSE_AUDIO_CHUNK]={0};
+        muse_voice_seed_preroll(seed,MUSE_AUDIO_CHUNK);
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+        char why[96];
+        assert(record(true,why,sizeof(why)));
+        assert(!s_press_synthetic && turn_cancels==0 && s_rec!=NULL && s_rec_n>=8*MUSE_AUDIO_CHUNK);
+        free(s_seed); s_seed=NULL; drop_rec(); free(s_pre); return 0;
     }
     if(scenario==95) {
         /* The wake task trailed the voice task when it seeded the turn: the

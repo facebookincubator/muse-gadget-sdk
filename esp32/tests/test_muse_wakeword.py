@@ -1411,8 +1411,9 @@ class WakeWordHandoff(unittest.TestCase):
         self.assertLess(setter.index('atomic_fetch_add(&s_disables, 1)'), setter.index('s_enabled = on;'))
         self.assertIn('.disables = atomic_load(&s_disables)', between(glue, 'static bool post_ptt(', '\n}\n'))
         voice = (ROOT / 'components/muse/muse_voice.c').read_text()
-        self.assertIn('if (!muse_wakeword_turn_wanted(s_press_disables)) return NOTE_CANCELLED;', voice)
-        self.assertIn('if (seeded && !muse_wakeword_turn_wanted(s_press_disables)) {', voice)
+        self.assertIn('return s_press_synthetic && !muse_wakeword_turn_wanted(s_press_disables);', voice)
+        self.assertIn('if (hands_free_off()) return NOTE_CANCELLED;', voice)
+        self.assertIn('bool dropped = seeded && hands_free_off();', voice)
 
     def test_glue_expires_a_waiting_wake_by_the_clock(self):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()

@@ -205,6 +205,19 @@ class StopWatchPTT(unittest.TestCase):
                 self.run_case('voice', 99, board=board, realtime=realtime)
                 self.run_case('voice', 100, board=board, realtime=realtime)
 
+    def test_turning_listening_off_after_admission_sends_nothing_more(self):
+        # Off before the turn opens: no turn and nothing sent. Off after the
+        # first buffered chunk went: no more go, and the turn is abandoned.
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 101, board=board, realtime=realtime)
+                self.run_case('voice', 102, board=board, realtime=realtime)
+
+    def test_turning_listening_off_leaves_a_note_the_button_took_over(self):
+        for board, realtime in ((1, 1), (1, 0), (3, 0)):
+            with self.subTest(board=board, realtime=realtime):
+                self.run_case('voice', 103, board=board, realtime=realtime)
+
     def test_wake_word_note_with_lost_audio_ends_unsent(self):
         # Sustained overload overwrote part of the audio after the seed: the
         # turn ends before anything goes, rather than sending a note with a hole.
