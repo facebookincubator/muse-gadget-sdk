@@ -88,8 +88,9 @@ static bool s_started;
 static volatile bool s_enabled;      /* desired listening opt-in */
 /* Disable generation: bumped by every disable. A press carries the value
  * from when its wake was heard, and muse_voice drops the turn once it
- * moves (muse_wakeword_turn_wanted), so nothing heard before a disable
- * ever leaves the device. */
+ * moves (muse_wakeword_turn_wanted): audio already streamed has left, but
+ * nothing more leaves once listening is off, and the note isn't committed
+ * or kept. */
 static atomic_uint s_disables;
 static uint32_t s_arm_gen;           /* wake task only: s_disables when the wake was heard */
 static volatile bool s_playback;     /* desired: own-voice playback active */
@@ -214,13 +215,13 @@ void muse_wakeword_set_enabled(bool on)
         return;
     }
     muse_settings_set_wakeword_on(on);
-    if (!on) {
-        atomic_fetch_add(&s_disables, 1);
-    }
     /* Publish only. The wake task applies the transition, so a
      * redundant enable cannot reset a live session out from under
      * muse_voice (which would orphan the synthetic hold). */
     s_enabled = on;
+    if (!on) {
+        atomic_fetch_add(&s_disables, 1);
+    }
     /* A voice task resting asleep on battery re-checks now rather than at
      * its 60 s backstop: listening keeps the codecs on. */
     muse_state_nudge();
