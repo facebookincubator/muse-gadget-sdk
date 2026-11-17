@@ -427,6 +427,10 @@ static vpx_codec_err_t vp8_decode(vpx_codec_alg_priv_t *ctx,
         }
 #endif
 
+        /* Muse gadget port: this frees every picture (vp8_alloc_frame_buffers
+         * allocates them on first use), so no inter frame may follow until a
+         * key frame of the new size decodes, even if this one fails. */
+        pbi->decoded_key_frame = 0;
         if (vp8_alloc_frame_buffers(pc, pc->Width, pc->Height)) {
           vpx_internal_error(&pc->error, VPX_CODEC_MEM_ERROR,
                              "Failed to allocate frame buffers");

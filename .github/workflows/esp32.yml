@@ -69,6 +69,13 @@ jobs:
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
+            # Registry components for the wake word runner tests (ExecuTorch,
+            # esp-nn, the microfrontend). No apostrophes in this command: the
+            # action wraps it in single quotes.
+            # The action exports IDF_TARGET=esp32c5: override it for this one.
+            IDF_TARGET=esp32s3 idf.py -B build-host-wakeword -DSDKCONFIG=build-host-wakeword/sdkconfig \
+              -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-wakeword" \
+              reconfigure
             python -m unittest discover -s tests -p "test_*.py" -v
 
   simulator:
@@ -248,6 +255,10 @@ jobs:
           - board: muse-watcher-power-test
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test"
+          # The opt-in "Hey Muse" wake word (not on the web flasher).
+          - board: muse-sensecap-watcher-wakeword
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-wakeword"
           - board: muse-waveshare-s3-175c-power-test
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-power-test"

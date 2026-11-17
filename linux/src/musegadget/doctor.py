@@ -157,15 +157,20 @@ def _sentence(text: str) -> str:
 
 
 def check_trust_store() -> CheckResult:
-    """Check the system trust store, which musegadget won't use while it holds a distrusted root."""
+    """Check the system trust store, which musegadget won't use while it holds a compromised root."""
     problem: str | None = tls.trust_store_problem()
-    if problem is None:
-        return {"name": "Root CAs", "status": "OK",
-                "detail": "The system trust store has none of the distrusted root CAs.",
-                "hint": "Keep the ca-certificates package up to date."}
-    return {"name": "Root CAs", "status": "FAIL",
-            "detail": f"{_sentence(problem)}, so musegadget won't connect.",
-            "hint": f"{_sentence(tls.FIX)}."}
+    if problem is not None:
+        return {"name": "Root CAs", "status": "FAIL",
+                "detail": f"{_sentence(problem)}, so musegadget won't connect.",
+                "hint": f"{_sentence(tls.FIX)}."}
+    warning: str | None = tls.trust_store_warning()
+    if warning is not None:
+        return {"name": "Root CAs", "status": "WARN",
+                "detail": f"{_sentence(warning)}. musegadget still connects.",
+                "hint": f"{_sentence(tls.RETIRED_FIX)}."}
+    return {"name": "Root CAs", "status": "OK",
+            "detail": "The system trust store has none of the distrusted root CAs.",
+            "hint": "Keep the ca-certificates package up to date."}
 
 
 def run_checks() -> tuple[CheckResult, ...]:

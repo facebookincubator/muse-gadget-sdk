@@ -1,7 +1,11 @@
 # Skill Catalog
 
-55 active skills: 54 device/family skills and one shared Google Cast skill.
+56 active skills: 54 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
+
+## Gadget setup
+
+- [Linux Hey Muse wake word](gadget-linux-wakeword/SKILL.md) — build the native detector library from the SDK checkout and verify it locally before opting in to microphone use.
 
 ## Shared protocol
 

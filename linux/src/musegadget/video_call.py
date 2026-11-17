@@ -43,8 +43,8 @@ from musegadget.rtc.join import ENDPOINT_TYPES, build_join, parse_join_response
 from musegadget.rtc.media import MediaSession
 from musegadget.rtc.opus import ensure_available as ensure_opus
 from musegadget.voice_audio import Pcm48To24, _upsample24_to_48
-from musegadget.voice_call import (FRAME_BYTES, MAX_PLAYBACK_BYTES, SAMPLE_RATE, SETTLE_SECONDS, pcm_rms,
-                                   positive_seconds)
+from musegadget.voice_call import (CATCH_UP_RATE, FRAME_BYTES, MAX_PLAYBACK_BYTES, READY_TIMEOUT_S,
+                                   SAMPLE_RATE, SETTLE_SECONDS, pcm_rms, positive_seconds)
 
 log = logging.getLogger(__name__)
 FRAME_48K_BYTES = 1920  # 20 ms of mono 48 kHz PCM16
@@ -74,7 +74,7 @@ def _result(reply: dict, what: str, *, acknowledged: bool = False) -> dict:
 class VideoCall:
     def __init__(self, session, *, device_id: str, video_output, thread_id: str | None = None,
                  half_duplex: bool = True, mic_threshold: int = 0, idle_timeout: float = 45,
-                 overall_timeout: float = 300, ready_timeout: float = 35,
+                 overall_timeout: float = 300, ready_timeout: float = READY_TIMEOUT_S,
                  cleanup_timeout: float = 10, media_timeout: float = 10) -> None:
         if not 0 <= mic_threshold <= 32767:
             raise ValueError("mic threshold must be between 0 and 32767")
@@ -89,6 +89,8 @@ class VideoCall:
         self.call_id = str(uuid.uuid4())
         self.started_at = datetime.now(timezone.utc)
         self.reason = ""
+        self.cleanup_error: Exception | None = None
+        self.cleanup_cancelled = False
         self.end_call_acknowledged = False
         self.media: MediaSession | None = None
         self.video_frames = 0
@@ -147,9 +149,11 @@ class VideoCall:
                     cancelled = True
                 except Exception:
                     break
+            self.cleanup_cancelled = cancelled
             try:
                 cleanup.result()
             except Exception as exc:
+                self.cleanup_error = exc
                 if error is None and not cancelled:
                     raise
                 log.warning("video call cleanup failed (%s)", type(exc).__name__)
@@ -262,9 +266,20 @@ class VideoCall:
         deadline = time.monotonic()
         last_speech = 0.0
 
+        # A wake word listener hands over queued capture (its pre-roll and
+        # what was heard while the call started): pace that against the
+        # clock, a little faster than real time while frames are queued, as
+        # voice calls do, rather than bursting it out as fast as it comes.
+        queued_source = realtime and hasattr(source, "backlog_bytes")
+
         async def pace(frame: bytes) -> None:
             nonlocal deadline
             self.media.send_audio(frame)
+            if queued_source:
+                step = FRAME_SECONDS / CATCH_UP_RATE if source.backlog_bytes > FRAME_BYTES else FRAME_SECONDS
+                deadline = max(deadline + step, time.monotonic() - FRAME_SECONDS)
+                await asyncio.sleep(max(0.0, deadline - time.monotonic()))
+                return
             deadline += FRAME_SECONDS
             if not realtime:
                 await asyncio.sleep(max(0.0, deadline - time.monotonic()))
@@ -292,7 +307,7 @@ class VideoCall:
             while len(pending) >= FRAME_48K_BYTES:
                 await send(bytes(pending[:FRAME_48K_BYTES]))
                 del pending[:FRAME_48K_BYTES]
-            if realtime:
+            if realtime and not queued_source:
                 deadline = time.monotonic()
         if pending:
             await send(bytes(pending).ljust(FRAME_48K_BYTES, b"\0"))
