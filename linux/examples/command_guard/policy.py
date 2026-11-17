@@ -238,7 +238,14 @@ def _lex(command: str) -> list:
     command = command.replace("\r", "\n").replace("\n", " ; ")
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    # Bash only starts a comment at the start of a word ("ok#;id" runs id),
+    # so never let shlex drop text as a comment.
+    lexer.commenters = ""
     return list(lexer)
+
+
+def _is_operator(token: str) -> bool:
+    return bool(token) and all(ch in "();<>|&" for ch in token)
 
 
 def _segmentize(tokens: list) -> tuple:
@@ -251,6 +258,16 @@ def _segmentize(tokens: list) -> tuple:
     i = 0
     while i < len(tokens):
         tok = tokens[i]
+        if tok not in _SEPARATORS and tok not in _REDIRECTIONS and _is_operator(tok):
+            # An operator spelling not listed above (">|", "&>>", "<>", "|&",
+            # ";;" ...): treat it as a redirection if it has < or >, else as a
+            # separator, so it is never read as an ordinary argument.
+            if "<" in tok or ">" in tok:
+                redirs.append((">" if ">" in tok else "<",
+                               tokens[i + 1] if i + 1 < len(tokens) else ""))
+                i += 2
+                continue
+            tok = "|" if "|" in tok else ";"
         if tok in ("|", "||"):
             pipe = True
         if tok in _SEPARATORS:

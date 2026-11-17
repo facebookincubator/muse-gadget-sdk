@@ -181,6 +181,18 @@ def test_newlines_and_double_slash(pol, shell, expected):
     assert layer1(pol, "system.run", {"command": shell}) == expected, shell
 
 
+@pytest.mark.parametrize("shell,expected", [
+    ("echo ok#;sudo -n id", "block"),         # "#" mid-word is not a comment
+    ("echo ok#; rm /home/pi/notes.txt", "confirm"),
+    ("echo hi >| /etc/cron.d/x", "block"),     # other redirection spellings
+    ("echo hi &>> /etc/x", "block"),
+    ("echo hi >| /home/pi/x", "confirm"),
+    ("ls |& cat", "confirm"),
+])
+def test_comments_and_other_operators(pol, shell, expected):
+    assert layer1(pol, "system.run", {"command": shell}) == expected, shell
+
+
 def test_file_read_double_slash_blocks(pol):
     assert layer1(pol, "file.read", {"path": "//home/pi/.ssh/id_rsa"}) == "block"
 
