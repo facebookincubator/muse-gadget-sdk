@@ -150,6 +150,32 @@ def test_detector_failure_does_not_admit_a_call():
     asyncio.run(scenario())
 
 
+def test_startup_queue_covers_every_start_stage_at_its_limit():
+    # Derived from the stage limits themselves, so they can't drift apart.
+    from musegadget import muse_api, voice_call
+    stages = muse_api.FETCH_TIMEOUT_S + voice_call.TRANSPORT_READY_TIMEOUT_S + voice_call.READY_TIMEOUT_S
+    assert wake.MAX_BUFFER_BYTES >= wake.PREROLL_BYTES + stages * wake.SAMPLE_RATE * 2
+    assert voice_call.VoiceCall.__init__.__kwdefaults__["ready_timeout"] == voice_call.READY_TIMEOUT_S
+
+    # A start that takes every stage's full limit, with the pre-roll queued
+    # ahead of it, still fits (and the call then gets all of it).
+    async def scenario():
+        frames = [b"\1\0" * (FRAME_BYTES // 2)] * ((wake.PREROLL_BYTES + stages * wake.SAMPLE_RATE * 2)
+                                                  // FRAME_BYTES)
+        listener = wake.WakeWordInput(source(frames), Detector(fire_at=1))
+        try:
+            assert await listener.wait()
+            await listener._task
+            got = 0
+            async for frame in listener.frames():
+                got += len(frame)
+            assert got >= stages * wake.SAMPLE_RATE * 2
+        finally:
+            await listener.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_live_startup_backlog_is_bounded_and_wav_backpressure_preserves_audio():
     async def scenario():
         # More than the startup queue's 80 s (40 ms frames), plus a margin.

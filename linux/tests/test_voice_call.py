@@ -316,6 +316,38 @@ def test_speech_after_the_preroll_satisfies_the_speech_timeout():
     asyncio.run(scenario())
 
 
+def test_a_preroll_dropped_during_a_hold_still_ends_where_it_ended():
+    # The pre-roll boundary is a position in the capture: frames dropped
+    # while input is held count toward it, so the command spoken after the
+    # hold isn't mistaken for pre-roll (which would end the call).
+    async def scenario():
+        release = asyncio.Event()
+
+        async def capture():
+            for _ in range(3):
+                yield TONE   # the wake word's pre-roll, dropped while held
+            await release.wait()
+            yield TONE       # the command
+
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.15, idle_timeout=0.4,
+                             speech_after_bytes=3 * len(TONE))
+            task = asyncio.create_task(call.run(capture(), Output(), realtime_input=True))
+            media, start = await admit(vm, extra=[{"type": "hatch.voice.switch_input_hold", "held": True}])
+            await asyncio.wait_for(call.ready.wait(), 1)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(vm.next_frame(), 0.06)
+            await chunk(vm, media, line({"type": "hatch.voice.switch_input_hold", "held": False}))
+            while call.held:   # the release has to land before the command
+                await asyncio.sleep(0.005)
+            release.set()
+            command = await next_event(vm)
+            assert base64.b64decode(command["audio"]) == TONE
+            await asyncio.wait_for(hangup(vm, media, start), 2)
+            assert await task == "idle_timeout"   # not "no_speech"
+    asyncio.run(scenario())
+
+
 def test_the_wake_words_preroll_and_server_vad_dont_count_as_speech():
     # The pre-roll is the wake word itself, so it is speech, and Muse's VAD
     # may say so; neither may keep a false wake's call open.

@@ -43,8 +43,8 @@ from musegadget.rtc.join import ENDPOINT_TYPES, build_join, parse_join_response
 from musegadget.rtc.media import MediaSession
 from musegadget.rtc.opus import ensure_available as ensure_opus
 from musegadget.voice_audio import Pcm48To24, _upsample24_to_48
-from musegadget.voice_call import (CATCH_UP_RATE, FRAME_BYTES, MAX_PLAYBACK_BYTES, SAMPLE_RATE,
-                                   SETTLE_SECONDS, pcm_rms, positive_seconds)
+from musegadget.voice_call import (CATCH_UP_RATE, FRAME_BYTES, MAX_PLAYBACK_BYTES, READY_TIMEOUT_S,
+                                   SAMPLE_RATE, SETTLE_SECONDS, pcm_rms, positive_seconds)
 
 log = logging.getLogger(__name__)
 FRAME_48K_BYTES = 1920  # 20 ms of mono 48 kHz PCM16
@@ -74,7 +74,7 @@ def _result(reply: dict, what: str, *, acknowledged: bool = False) -> dict:
 class VideoCall:
     def __init__(self, session, *, device_id: str, video_output, thread_id: str | None = None,
                  half_duplex: bool = True, mic_threshold: int = 0, idle_timeout: float = 45,
-                 overall_timeout: float = 300, ready_timeout: float = 35,
+                 overall_timeout: float = 300, ready_timeout: float = READY_TIMEOUT_S,
                  cleanup_timeout: float = 10, media_timeout: float = 10) -> None:
         if not 0 <= mic_threshold <= 32767:
             raise ValueError("mic threshold must be between 0 and 32767")

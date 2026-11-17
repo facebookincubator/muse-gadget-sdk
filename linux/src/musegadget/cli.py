@@ -198,7 +198,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
     from musegadget.link_client import DeviceDescription, LinkSession
     from musegadget.service import DEFAULT_NOISE_HOST
     from musegadget.voice_audio import LiveAudio, WavAudio
-    from musegadget.voice_call import VoiceCall
+    from musegadget.voice_call import TRANSPORT_READY_TIMEOUT_S, VoiceCall
     from musegadget.wakeword_input import WakeWordBacklogError
 
     tls.client_context()
@@ -227,10 +227,12 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
         current_pairing = config.load_json(config.PAIRING_FILE)
         if not current_pairing or not current_pairing.get("access_token"):
             raise ConnectionError("paired device credentials are no longer available")
-        vms, status = await asyncio.to_thread(
+        # The whole lookup within its limit, not just each socket operation:
+        # wake word capture is queued for exactly the start's stage limits.
+        vms, status = await asyncio.wait_for(asyncio.to_thread(
             muse_api.fetch_vms_with_status, current_pairing["access_token"],
             muse_api.api_root(current_pairing.get("api_url_v2", "")),
-        )
+        ), muse_api.FETCH_TIMEOUT_S)
         if status != 200:
             raise ConnectionError("VM lookup failed; refresh the paired device credentials")
         matches = [vm for vm in vms if vm["vm_id"] == args.vm_id]
@@ -247,7 +249,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
         stop = asyncio.Event()
         connection = asyncio.create_task(session.run(stop))
         try:
-            await session.wait_transport_ready(35)
+            await session.wait_transport_ready(TRANSPORT_READY_TIMEOUT_S)
             options = dict(device_id=ident.node_id, thread_id=args.thread_id,
                            half_duplex=not args.full_duplex, mic_threshold=args.mic_threshold,
                            idle_timeout=args.idle_timeout, overall_timeout=args.overall_timeout)

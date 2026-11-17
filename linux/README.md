@@ -300,9 +300,9 @@ WAV mode also accepts `--wake-word`, runs at most one call, and exits without
 admitting a call if the file ends before a detection. Audio queued after a
 detection (the pre-roll and capture from before the call was ready) is sent up
 to three times faster than real time until it has caught up, so speech doesn't
-arrive later and later. The queue holds up to 80 seconds, enough for the call
-to start within its own connection and readiness limits; a live capture backlog
-beyond that fails the call closed rather than silently truncating the user's
+arrive later and later. The queue holds the pre-roll plus every start stage's
+full limit (VM lookup 15 s, transport 35 s, call readiness 35 s) and a little
+slack, 91 seconds; a live capture backlog beyond that fails the call closed rather than silently truncating the user's
 question, and live mode then returns to listening.
 Startup needs the configured VM to be reachable.
 

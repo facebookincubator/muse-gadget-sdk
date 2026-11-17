@@ -54,6 +54,11 @@ FRAME_SECONDS = FRAME_SAMPLES / SAMPLE_RATE
 # admission) reports `backlog_bytes`; queued audio is sent this much faster
 # than real time until the queue is down to one frame.
 CATCH_UP_RATE = 3.0
+# How long a call start may take, stage by stage after the VM lookup: the
+# Noise transport, then the call's own readiness. Wake word capture is
+# queued for the whole start (wakeword_input sizes its queue from these).
+TRANSPORT_READY_TIMEOUT_S = 35
+READY_TIMEOUT_S = 35
 MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 4
 MAX_PLAYBACK_BYTES = SAMPLE_RATE * 2 * 5
 # Words held with an unconfirmed reply have their own budget, so observing a
@@ -201,7 +206,7 @@ class VoiceCall:
     def __init__(self, session, *, device_id: str, thread_id: str | None = None,
                  half_duplex: bool = True,
                  mic_threshold: int = 0, idle_timeout: float = 45,
-                 overall_timeout: float = 300, ready_timeout: float = 35,
+                 overall_timeout: float = 300, ready_timeout: float = READY_TIMEOUT_S,
                  cleanup_timeout: float = 10,
                  speech_timeout: float | None = None,
                  speech_after_bytes: int = 0,
@@ -219,7 +224,8 @@ class VoiceCall:
         # With speech_timeout, a call ends as "no_speech" once that much
         # microphone audio has gone out with no speech in it: a false
         # wake-word trigger must not stream on. Speech is judged locally
-        # (frame RMS), and only after the first speech_after_bytes of input:
+        # (frame RMS), and only after the first speech_after_bytes of the
+        # source (whether sent or dropped during a hold):
         # the wake word's own pre-roll is speech, and so is anything Muse's
         # VAD makes of it, so neither may count. Audio time, not wall time,
         # so queued capture still being caught up isn't cut short.
@@ -227,7 +233,7 @@ class VoiceCall:
         if not isinstance(speech_after_bytes, int) or speech_after_bytes < 0:
             raise ValueError("speech_after_bytes must be a non-negative integer")
         self._speech_after_bytes = speech_after_bytes
-        self._input_bytes = 0
+        self._source_bytes = 0
         self._quiet_bytes = 0
         self._heard_speech = False
         self._no_speech = False
@@ -837,6 +843,13 @@ class VoiceCall:
                 pcm = b"\0" * FRAME_BYTES
             if not pcm or len(pcm) > FRAME_BYTES or len(pcm) % 2:
                 raise ValueError("input must contain 1–960 PCM16LE samples per frame")
+            # Where this frame sits in the source, counted as it is taken
+            # (discarded or sent): the pre-roll boundary is a position in the
+            # capture, so a pre-roll dropped during an input hold still ends
+            # where it ended.
+            source_start = self._source_bytes
+            if not eof:
+                self._source_bytes += len(pcm)
             if realtime and not eof and self._gated():
                 continue
             while self._gated():
@@ -869,14 +882,13 @@ class VoiceCall:
             except _InputGated:
                 continue  # Never replay a frame invalidated while it waited for the wire.
             if self.speech_timeout is not None and not self._heard_speech:
-                past_preroll = self._input_bytes >= self._speech_after_bytes
+                past_preroll = eof or source_start >= self._speech_after_bytes
                 if past_preroll and not muted and rms >= 300:
                     self._heard_speech = True
                 elif past_preroll:
                     self._quiet_bytes += len(pcm)
                     if self._quiet_bytes >= self.speech_timeout * SAMPLE_RATE * 2:
                         self._no_speech = True
-            self._input_bytes += len(pcm)
             duration = len(pcm) / (SAMPLE_RATE * 2)
             queued = getattr(source, "backlog_bytes", None)
             if queued is None:
