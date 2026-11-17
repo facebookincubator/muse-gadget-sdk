@@ -104,9 +104,13 @@ plain_value() {
 }
 
 # HTTP CONNECT is the one kind of proxy that urllib, websockets and the setup
-# probe all support.
+# probe all support. websockets refuses a path, query or fragment, and its
+# error, which the service logs, shows the whole URL with any password.
 valid_proxy() {
-    case "$1" in http://?*) plain_value "$1" ;; *) return 1 ;; esac
+    local rest="${1#http://}"
+    case "$1" in http://?*) ;; *) return 1 ;; esac
+    case "${rest%/}" in ""|*/*|*\?*|*\#*) return 1 ;; esac
+    plain_value "$1"
 }
 
 # The proxy URL without credentials, for messages.

@@ -112,7 +112,7 @@ against a pinned checksum, and builds a new venv, before running anything there
 as root. Don't run that uv with `sudo` yourself.
 
 Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
-`--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
+`--from SOURCE`, `--proxy URL`, `--no-proxy HOSTS`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
 keep it that way. Root runs everything under `/opt/musegadget`, so the
 installer never runs a file there that another account could have changed.
 To move to a new uv, update `UV_VERSION` and both checksums for each target
