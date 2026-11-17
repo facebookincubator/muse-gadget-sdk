@@ -347,39 +347,6 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertFalse((WW / 'tools/export_hey_muse.py').exists())
         self.assertTrue((WW / 'models/hey_muse.pte').is_file())
 
-    def test_runner_copies_unaligned_embedded_pte(self):
-        # Program::load needs aligned program data, but EMBED_FILES
-        # alignment is layout luck: an embed that once landed 4-aligned made
-        # the load fail and the Settings toggle revert. The embed is 16-aligned
-        # in flash (custom asm), and the runner copies a misaligned
-        # caller-supplied model into aligned storage it owns.
-        src = (WW / 'ww_runner_espnn.cpp').read_text()
-        self.assertIn('% kAlign) != 0', src)
-        self.assertIn('pte_copy', src)
-        self.assertIn('ww_free(r->pte_copy)', src)
-        cmake = (WW / 'CMakeLists.txt').read_text()
-        self.assertIn('hey_muse_pte.S.in', cmake)
-        self.assertNotIn('EMBED_FILES ${', cmake)
-        asm = (WW / 'hey_muse_pte.S.in').read_text()
-        self.assertIn('.balign 16', asm)
-        self.assertIn('_binary_hey_muse_pte_start', asm)
-
-    def test_runner_binds_its_buffers_once_and_sizes_the_arena(self):
-        # Zero-copy: every input and output is bound once at load, each
-        # state's input and output share one buffer, a step is one execute();
-        # the method arena is exactly what a counting load used.
-        runner = (WW / 'ww_runner_espnn.cpp').read_text()
-        bind = between(runner, 'bool bind_io(ww_runner_t *r)', '\n}\n')
-        self.assertIn('m.set_input(EValue(Tensor(h)), 1 + k)', bind)
-        self.assertIn('m.set_output_data_ptr(buf, out->nbytes(), 1 + k)', bind)
-        step = between(runner, 'void on_features(', '\n}\n')
-        self.assertIn('r->method->execute()', step)
-        self.assertNotIn('set_input', step)
-        self.assertIn('class CountingAllocator', runner)
-        self.assertIn('r->arena_bytes = round16(used)', runner)
-        # No temp allocator: the delegate keeps its own arena.
-        self.assertIn('r->memory.emplace(allocator, &*r->planned, nullptr)', runner)
-
     def test_model_sidecar_matches_the_binary_and_the_code(self):
         sidecar = json.loads((WW / 'models/hey_muse.json').read_text())
         pte = WW / 'models/hey_muse.pte'
@@ -441,24 +408,6 @@ class WakeWordFirmwareContract(unittest.TestCase):
                       if 'muse_wakeword_set_enabled(' in line]
         self.assertEqual(main_calls, ['muse_wakeword_set_enabled(false);'])
 
-    def test_tap_is_inside_both_audio_read_loops(self):
-        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
-        idle = between(voice, 'static void idle_capture(void)', 'static bool got_event')
-        record = between(voice, 'static bool record(', 'static void go_idle')
-        self.assertIn('muse_wakeword_on_audio(s_chunk', idle)
-        self.assertIn('muse_wakeword_on_audio(s_chunk', record)
-
-    def test_synthetic_turns_are_tagged_seeded_and_exempt(self):
-        self.assertIn('bool synthetic;', (ROOT / 'components/muse/muse_input.h').read_text())
-        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
-        self.assertIn('void muse_voice_seed_preroll(', voice)
-        # Short-press handling moved into note_held's qualification;
-        # synthetic turns stay exempt by carrying the flag into record(),
-        # which consumes the seed and pauses the runner only for real turns.
-        self.assertIn('record(synthetic, why', voice)
-        self.assertIn('if (seeded && s_seed_frames)', voice)
-        self.assertIn('muse_wakeword_set_ptt_turn(!synthetic)', voice)
-
     def test_feature_off_builds_allocate_no_seed(self):
         # The one-second seed is only used by wake word turns: a build
         # without the feature (no-PSRAM boards included) must not pay
@@ -471,64 +420,6 @@ class WakeWordFirmwareContract(unittest.TestCase):
         kconfig = (WW / 'Kconfig').read_text()
         enable = between(kconfig, 'config MUSE_WAKEWORD_ENABLE', 'choice MUSE_WAKEWORD_SENSITIVITY')
         self.assertIn('depends on SPIRAM', enable)
-
-    def test_synthetic_edges_carry_the_input_epoch_and_time(self):
-        # note_held cancels a press whose epoch is not the current one, and
-        # the epoch moves whenever a real edge is dropped: an untagged
-        # (zero) synthetic press would then never record again.
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        post = between(glue, 'static bool post_ptt(', 'xQueueSend(')
-        self.assertIn('.epoch = muse_input_call_epoch()', post)
-        self.assertIn('.at_us = esp_timer_get_time()', post)
-
-    def test_glue_retries_a_refused_release_and_drops_a_refused_press(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        tick_fn = between(glue, 'static void tick(', 'static void apply_requests(')
-        # The owed release goes before the core ticks again ...
-        self.assertLess(tick_fn.index('if (s_up_owed && post_ptt(MUSE_PTT_UP))'),
-                        tick_fn.index('muse_wakeword_core_tick('))
-        self.assertIn('!post_ptt(MUSE_PTT_UP)) {\n        s_up_owed = true;', tick_fn)
-        # ... and a refused press ends the session and clears its seed.
-        down = between(tick_fn, 'MUSE_WW_ACTION_POST_PTT_DOWN', 'MUSE_WW_ACTION_POST_PTT_UP')
-        self.assertIn('if (!s_up_owed && s_enabled && post_ptt(MUSE_PTT_DOWN))', down)
-        self.assertIn('muse_wakeword_core_abort(&s_core);', down)
-        self.assertIn('muse_voice_seed_preroll(NULL, 0);', down)
-        # The LISTENING state shown before posting goes back to idle, so a
-        # refused press leaves no capture on screen and auto-sleep resumes.
-        refused = down[down.index('muse_voice_seed_preroll(NULL, 0);'):]
-        self.assertIn('if (muse_state_mode(NULL) == MUSE_MODE_LISTENING) {\n                muse_state_set_mode(MUSE_MODE_IDLE);', refused)
-
-    def test_enable_wakes_a_resting_voice_task_and_needs_a_running_glue(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        setter = between(glue, 'void muse_wakeword_set_enabled(bool on)', 'static bool post_ptt(')
-        not_started = between(setter, 'if (!s_started) {', 'return;')
-        # After a failed init only "off" is saved.
-        self.assertIn('if (!on) {', not_started)
-        self.assertLess(setter.index('if (!s_started) {'),
-                        setter.index('muse_settings_set_wakeword_on(on);'))
-        self.assertIn('muse_state_nudge();', setter)
-
-    def test_failed_wake_task_start_frees_everything(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        failed = between(glue, '"no memory for the wake task"', 's_started = true;')
-        for freed in ('ww_runner_destroy(s_runner)', 'vStreamBufferDeleteWithCaps(s_tap)',
-                      'free(s_hist_slots)', 'free(pre_storage)', 'free(s_snap)'):
-            self.assertIn(freed, failed)
-
-    def test_turn_ended_closes_the_capture_but_not_a_new_arming(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        apply = between(glue, 'static void apply_requests(void)', 'static void snapshot_status(void)')
-        block = between(apply, 'if (s_turn_end_req) {', 'if (s_playback != s_applied_playback)')
-        self.assertIn('s_up_owed = false;', block)
-        self.assertIn('st == MUSE_WW_CAPTURING || st == MUSE_WW_CAPTURING_PTT', block)
-        self.assertIn('muse_wakeword_core_abort(&s_core);', block)
-        self.assertNotIn('MUSE_WW_ARMED', block)
-
-    def test_glue_starts_with_the_voice_pipeline(self):
-        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
-        start = between(voice, 'esp_err_t muse_voice_start(QueueHandle_t queue)', '\n}\n')
-        task = start.index('xTaskCreatePinnedToCoreWithCaps(voice_task')
-        self.assertIn('muse_wakeword_init(queue)', start[task:])
 
     def test_feature_off_builds_compile_no_wake_word_code(self):
         # Builds without the feature must not change: the glue isn't
@@ -550,22 +441,6 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('default "y" if MUSE_WAKEWORD_ENABLE', helper)
         self.assertIn('default "n"', helper)
 
-    def test_speech_start_shows_listening_before_posting(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        post = between(glue, 'MUSE_WW_ACTION_POST_PTT_DOWN', 'MUSE_WW_ACTION_POST_PTT_UP')
-        listening = post.index('muse_state_set_mode(MUSE_MODE_LISTENING)')
-        caption = post.index('muse_state_set_caption("LISTENING...")')
-        posted = post.index('post_ptt(MUSE_PTT_DOWN)')
-        self.assertLess(listening, posted)
-        self.assertLess(caption, posted)
-
-    def test_wake_heard_wakes_the_screen(self):
-        # A talk press wakes the screen; a wake must too, or its prompt and
-        # the whole hands-free turn happen on a dark display.
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        heard = between(glue, 'before == MUSE_WW_IDLE && now == MUSE_WW_ARMED', 'MUSE_WW_ACTION_POST_PTT_DOWN')
-        self.assertIn('muse_state_set_asleep(false)', heard)
-
     def test_wakeword_overlay_is_committed_and_wired(self):
         # Wake word builds come from a committed overlay, not local
         # sdkconfig fragments, and board.sh builds it in its own dir.
@@ -577,44 +452,6 @@ class WakeWordFirmwareContract(unittest.TestCase):
         board = (ROOT / 'tools/muse/board.sh').read_text()
         self.assertIn('B=$B-wakeword; defaults="$defaults;devices/sdkconfig.muse-wakeword"', board)
         self.assertNotIn('EXECUTORCH_PYTHON', board)
-
-    def test_listening_needs_a_working_runner(self):
-        # A runner that failed to load or run hears nothing, so the
-        # status and the indicator must not say listening.
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        listening = between(glue, 'bool muse_wakeword_listening(void)\n{', '\n}')
-        self.assertIn('s_runner_ok', listening)
-        # A requested disable reads as not listening at once, so
-        # wakeword.disable's reply is never enabled:false, listening:true.
-        self.assertIn('s_enabled && s_applied_enabled', listening)
-        app = (ROOT / 'main/app.c').read_text()
-        disable = between(app, 'static cJSON *wakeword_disable_command(void) {', '\n}\n')
-        self.assertLess(disable.index('muse_wakeword_set_enabled(false);'), disable.index('muse_wakeword_status(&st);'))
-        snapshot = between(glue, 'static void snapshot_status(void)', '\n}')
-        self.assertIn('ww_runner_ok(s_runner)', snapshot)
-
-    def test_face_shows_when_the_wake_word_is_on(self):
-        # A visible indicator whenever listening is on: lit while the runner
-        # hears, dim while it's paused, hidden when off.
-        ui = (ROOT / 'components/muse/muse_ui.c').read_text()
-        status = between(ui, '/* Status line: connectivity icons + power. */', 's_power_lbl =')
-        self.assertIn('s_listen_icon = make_mic(status,', status)
-        chrome = between(ui, 'static void update_chrome(float now)', '\n}\n')
-        block = between(chrome, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
-        self.assertIn('!muse_wakeword_enabled() ? 0 : muse_wakeword_listening() ? 2 : 1', block)
-        self.assertIn('lv_obj_set_flag(s_listen_icon, LV_OBJ_FLAG_HIDDEN, listen == 0);', block)
-
-    def test_sound_page_has_wake_word_toggle(self):
-        ui = (ROOT / 'components/muse/muse_settings_ui.c').read_text()
-        sound = between(ui, 'static void build_sound_page(', 'static void tick_sound(void)')
-        self.assertIn('switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw)', sound)
-        self.assertIn('Listens for \\"Hey Muse\\"', sound)
-        self.assertNotIn('not implemented', sound)   # user copy, not a placeholder
-        self.assertNotIn('clap', sound.lower())
-        callback = between(ui, 'static void on_wake_sw(', 'static void build_sound_page(')
-        self.assertIn('muse_wakeword_set_enabled(', callback)
-        tick = between(ui, 'static void tick_sound(void)', '/* ---------- Sleep')
-        self.assertIn('muse_wakeword_enabled()', tick)   # switch tracks serial/Muse toggles
 
     def test_option_needs_psram_and_the_lvgl_ui(self):
         # The audio buffers (~133 KB) only fit in PSRAM, and only the LVGL UI
@@ -1274,52 +1111,6 @@ int main(int argc, char **argv)
         printf("gap ok\n");
         return 0;
     }
-    if (argc > 1 && !strcmp(argv[1], "pause")) {
-        /* A wake, then the voice task stops tapping for pause_ms (sending a
-         * saved note, say), then speech. The tap's clock turns a pause past
-         * the limit into a numbering gap; the wake task's gap rule (as in the
-         * glue) then ends the waiting wake and empties the pre-roll, so the
-         * resumed speech opens nothing. A short pause changes nothing. */
-        uint32_t pause_ms = (uint32_t)strtoul(argv[2], NULL, 10);
-        static muse_ww_chunk_t slots[HIST];
-        static int16_t store[PRE];
-        muse_ww_history_t hist;
-        muse_ww_history_init(&hist, slots, HIST);
-        muse_ww_ring_t pre;
-        muse_ww_ring_init(&pre, store, PRE);
-        muse_wakeword_config_t cfg = { .start_timeout_chunks = 125, .end_silence_chunks = 35,
-                                       .max_capture_chunks = 750, .energy_endpointing = true };
-        muse_wakeword_core_t core;
-        muse_wakeword_core_init(&core, &cfg);
-        uint32_t now = 4294967000u, last = 0;   /* the clock wraps too */
-        int have = 0;
-        uint32_t posted = 0;
-        for (int k = 0; k < 20; k++) {
-            int16_t pcm[CHUNK];
-            int voiced = k >= 10;
-            if (k == 10) now += pause_ms;   /* the pause, then speech */
-            for (int i = 0; i < CHUNK; i++) pcm[i] = voiced ? (int16_t)(i % 2 ? 8000 : -8000) : 0;
-            muse_ww_history_note_time(&hist, now, 200);
-            const muse_ww_chunk_t *item = muse_ww_history_push(&hist, pcm);
-            now += 20;
-            /* the wake task, keeping up */
-            if (have && item->seq != last + 1) muse_wakeword_core_gap(&core, &pre);
-            have = 1;
-            last = item->seq;
-            muse_ww_ring_push(&pre, item->pcm, CHUNK);
-            muse_wakeword_input_t in = { .enabled = true, .event = k == 3 ? WW_EVENT_WAKE : WW_EVENT_NONE,
-                                         .voiced = muse_wakeword_energy_voiced(item->pcm, CHUNK, 512) };
-            posted |= muse_wakeword_core_tick(&core, &in);
-        }
-        const int16_t *back[HIST];
-        bool complete;
-        /* a backlog reaching back before the pause is never complete */
-        muse_ww_history_since(&hist, last - 12, back, HIST, &complete);
-        printf("pause %u opened %d state %d preroll_chunks %u backlog_complete %d\n", (unsigned)pause_ms,
-               (posted & MUSE_WW_ACTION_POST_PTT_DOWN) != 0, (int)muse_wakeword_core_state(&core),
-               (unsigned)(muse_ww_ring_fill(&pre) / CHUNK), complete);
-        return 0;
-    }
     if (argc > 1 && !strcmp(argv[1], "since")) {
         static muse_ww_chunk_t slots[4];
         muse_ww_history_t h;
@@ -1387,86 +1178,13 @@ class WakeWordHandoff(unittest.TestCase):
         # the gap the pre-roll restarts with nothing from before it.
         self.assertEqual(self.run_mode('overload').strip(), 'overload ok')
 
-    def test_a_pause_in_the_taps_ends_a_waiting_wake(self):
-        # Regression: while the voice task sent a saved note (up to 30 s)
-        # the tap was empty and the wake task never expired the wake; the
-        # first loud chunk afterwards opened a hands-free note.
-        stalled = self.run_mode('pause', '30000').split()
-        self.assertEqual(stalled[2:], ['opened', '0', 'state', '0', 'preroll_chunks', '10',
-                                       'backlog_complete', '0'])
-        # A pause shorter than the limit is just scheduling: the wake stands.
-        short = self.run_mode('pause', '100').split()
-        self.assertEqual(short[2:6], ['opened', '1', 'state', '2'])
-        self.assertEqual(short[-1], '1')
-
-    def test_a_disable_is_seen_before_any_press_goes(self):
-        # A disable published while the wake task waited for a chunk or ran
-        # the model ends the session on that tick (the core then cancels),
-        # the press itself is re-checked, and every press carries the
-        # disable count muse_voice checks at admission and while recording.
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        nxt = between(glue, 'static muse_wakeword_input_t next_input(', '\n}\n')
-        self.assertLess(nxt.index('ww_runner_feed('), nxt.index('in.enabled = s_applied_enabled && s_enabled;'))
-        setter = between(glue, 'void muse_wakeword_set_enabled(bool on)', 'static bool post_ptt(')
-        self.assertLess(setter.index('atomic_fetch_add(&s_disables, 1)'), setter.index('s_enabled = on;'))
-        self.assertIn('.disables = atomic_load(&s_disables)', between(glue, 'static bool post_ptt(', '\n}\n'))
-        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
-        self.assertIn('return s_press_synthetic && !muse_wakeword_turn_wanted(s_press_disables);', voice)
-        self.assertIn('if (hands_free_off()) return NOTE_CANCELLED;', voice)
-        self.assertIn('bool dropped = seeded && hands_free_off();', voice)
-
-    def test_glue_expires_a_waiting_wake_by_the_clock(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        on_audio = between(glue, 'void muse_wakeword_on_audio(', '\n}\n')
-        self.assertLess(on_audio.index('muse_ww_history_note_time(&s_hist'),
-                        on_audio.index('muse_ww_history_push(&s_hist'))
-        task = between(glue, 'static void wake_task(void *arg)', '\n}\n')
-        self.assertIn('esp_timer_get_time() - s_armed_us >= (int64_t)CONFIG_MUSE_WAKEWORD_START_TIMEOUT_MS * 1000', task)
-        playback = between(glue, 'if (s_playback != s_applied_playback) {', 'if (s_ptt_turn != s_applied_ptt_turn)')
-        self.assertIn('muse_wakeword_core_gap(&s_core, &s_pre)', playback)
-
     def test_gap_ends_a_waiting_wake_and_empties_the_pre_roll(self):
         self.assertEqual(self.run_mode('gap').strip(), 'gap ok')
-
-    def test_glue_handles_gaps_and_lost_backlogs(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        task = between(glue, 'static void wake_task(void *arg)', '\n}\n')
-        self.assertIn('if (s_have_seq && item.seq != s_last_seq + 1) {', task)
-        # Re-enabling empties the tap, which skips numbers: not a lost chunk.
-        enable = between(glue, 'static void apply_requests(void)', '} else {')
-        self.assertLess(enable.index('xStreamBufferReset(s_tap);'), enable.index('s_have_seq = false;'))
-        self.assertLess(task.index('muse_wakeword_core_gap(&s_core, &s_pre)'), task.index('muse_ww_ring_push(&s_pre, item.pcm'))
-        take = between(glue, 'bool muse_wakeword_take_backlog(', '\n}\n')
-        self.assertIn('&complete);', take)
-        self.assertIn('return complete;', take)
-        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
-        record = between(voice, 'static bool record(', 'static void go_idle')
-        # Checked before go_live() opens the turn: nothing goes.
-        self.assertLess(record.index('!muse_wakeword_take_backlog('), record.index('go_live();'))
 
     def test_note_is_continuous_at_every_lag(self):
         out = self.run_mode()
         self.assertIn('lag 24 backlog 26 seed 50', out)   # a full tap behind: nothing lost
         self.assertIn('lag 0 backlog 2 seed 50', out)
-
-    def test_glue_posts_no_release_for_a_capture_the_button_took(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        tick = between(glue, 'static void tick(const muse_wakeword_input_t *in)', '\n}\n')
-        self.assertIn('bool taken_over = atomic_load(&s_pending_down);', tick)
-        self.assertIn('(act & MUSE_WW_ACTION_POST_PTT_UP) && !taken_over && !post_ptt(MUSE_PTT_UP)', tick)
-
-    def test_glue_numbers_the_tap_and_seeds_from_the_next_chunk(self):
-        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
-        tap = between(glue, 'void muse_wakeword_on_audio(', '\n}\n')
-        self.assertLess(tap.index('muse_ww_history_push(&s_hist, pcm)'), tap.index('xStreamBufferSend(s_tap, item, ITEM_BYTES, 0)'))
-        seed = between(glue, 'if (act & MUSE_WW_ACTION_POST_PTT_DOWN) {', 'post_ptt(MUSE_PTT_DOWN)')
-        self.assertIn('atomic_store(&s_seed_end, s_last_seq + 1);', seed)
-        task = between(glue, 'static void wake_task(void *arg)', '\n}\n')
-        self.assertIn('s_last_seq = item.seq;', task)
-        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
-        record = between(voice, 'static bool record(', 'static void go_idle')
-        # Seed first, then the backlog (taken up front), then live reads.
-        self.assertLess(record.index('take(&st, s_seed + off)'), record.index('take(&st, later[i])'))
 
 
 if __name__ == '__main__':

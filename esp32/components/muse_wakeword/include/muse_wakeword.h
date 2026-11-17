@@ -172,20 +172,11 @@ typedef struct {
     size_t capacity;
     size_t held;         /* chunks held, up to capacity */
     uint32_t next_seq;   /* the number the next pushed chunk gets */
-    uint32_t last_ms;    /* when the newest chunk was tapped */
-    bool timed;          /* last_ms is set */
 } muse_ww_history_t;
 
 void muse_ww_history_init(muse_ww_history_t *h, muse_ww_chunk_t *slots, size_t capacity);
 /* Copies one chunk in, numbers it, and returns its slot (overwriting the oldest). */
 const muse_ww_chunk_t *muse_ww_history_push(muse_ww_history_t *h, const int16_t *pcm);
-/* The tap's clock, called with each chunk's time (ms, wrapping) just before
- * pushing it. If more than max_pause_ms passed since the previous chunk, the
- * audio between them was never tapped (the voice task was busy elsewhere,
- * say sending a saved note): the next chunk is numbered one past, so the
- * wake task sees a gap (muse_wakeword_core_gap), and no backlog reaches
- * back across the pause. Returns true when it made a gap. */
-bool muse_ww_history_note_time(muse_ww_history_t *h, uint32_t now_ms, uint32_t max_pause_ms);
 /* The held chunks numbered `from` or later, oldest first, at most max:
  * pointers into the slots, valid until the next push. *complete (if not
  * NULL) says whether that is every chunk from `from` to the newest: false
