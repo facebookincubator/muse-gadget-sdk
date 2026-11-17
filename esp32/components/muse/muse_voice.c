@@ -122,6 +122,20 @@ static inline void note_press_synthetic(const muse_input_event_t *ev)
     (void)ev;
 #endif
 }
+
+/* Whether the note being recorded must be dropped because listening was
+ * turned off: only while the wake word still owns it. A finger that took
+ * it over (got_event clears s_press_synthetic) makes it the button's, and
+ * a disable no longer touches it. Checked before the turn opens, before
+ * each buffered chunk goes, and on every live chunk. */
+static inline bool hands_free_off(void)
+{
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    return s_press_synthetic && !muse_wakeword_turn_wanted(s_press_disables);
+#else
+    return false;
+#endif
+}
 static volatile bool s_monitor;
 static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
@@ -461,9 +475,17 @@ static bool record(bool seeded, char *why, size_t cap)
 #endif
     s_rec_n = s_sent = 0;
     s_live = s_tried = false;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* Turned off since admission: the turn never opens, nothing goes. */
+    bool dropped = seeded && hands_free_off();
+    if (!dropped && (!s_rec || (muse_hatch_ready() && !s_held_count))) {
+        go_live();
+    }
+#else
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
         go_live();
     }
+#endif
     muse_state_set_caption(s_live ? "LISTENING..." : "RECORDING...");
     bool heard = false, ok = true;
     bool gave_up = false;   /* Hatch failed this note: it's kept, and goes later */
@@ -474,17 +496,19 @@ static bool record(bool seeded, char *why, size_t cap)
     size_t n = 0;
     if (seeded && s_seed_frames) {
         /* A hands-free turn: the seeded audio already includes the wake
-         * word, and the button ring would double-count the overlap. */
+         * word, and the button ring would double-count the overlap. Each
+         * chunk goes only while listening is still on. */
         size_t seeded_frames = s_seed_frames;
         s_seed_frames = 0;
-        for (size_t off = 0; off < seeded_frames; off += MUSE_AUDIO_CHUNK) {
+        for (size_t off = 0; off < seeded_frames && !(dropped = dropped || hands_free_off());
+             off += MUSE_AUDIO_CHUNK) {
             take(&st, s_seed + off);
             n += MUSE_AUDIO_CHUNK;
         }
         /* Then what this task had already read past the seed's end (taken
          * above), so the command has no gap. Live reads follow from the
          * next chunk on. */
-        for (size_t i = 0; i < backlog; i++) {
+        for (size_t i = 0; i < backlog && !(dropped = dropped || hands_free_off()); i++) {
             take(&st, later[i]);
             n += MUSE_AUDIO_CHUNK;
         }
@@ -498,15 +522,16 @@ static bool record(bool seeded, char *why, size_t cap)
     /* Link-only boards upload synchronously. Replay the longer buffered hold
      * in short bursts between mic reads, rather than stalling capture while
      * sending the whole prefix. The voice-session backend has a larger FIFO. */
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if (!dropped) take_pre(&st, MUSE_LOW_MEM ? PRE_CHUNKS : s_pre_fill);
+#else
     take_pre(&st, MUSE_LOW_MEM ? PRE_CHUNKS : s_pre_fill);
+#endif
     bool released = false;
     size_t stop_at = MAX_FRAMES;
-#if CONFIG_MUSE_WAKEWORD_ENABLE
-    bool dropped = false;   /* a hands-free note whose opt-in was turned off */
-#endif
     while (n + MUSE_AUDIO_CHUNK <= stop_at) {
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-        if (seeded && !muse_wakeword_turn_wanted(s_press_disables)) {
+        if (dropped || hands_free_off()) {
             dropped = true;
             break;
         }
@@ -567,7 +592,7 @@ static bool record(bool seeded, char *why, size_t cap)
         }
     }
 #if CONFIG_MUSE_WAKEWORD_ENABLE
-    if (seeded && !dropped && !muse_wakeword_turn_wanted(s_press_disables)) {
+    if (!dropped && hands_free_off()) {
         dropped = true;   /* turned off during the release's tail */
     }
     if (dropped) {
@@ -856,7 +881,7 @@ static note_result_t note_held(bool wake, bool barge_in)
     if (s_press_synthetic) {
 #if CONFIG_MUSE_WAKEWORD_ENABLE
         /* Listening turned off since the press was posted: no turn. */
-        if (!muse_wakeword_turn_wanted(s_press_disables)) return NOTE_CANCELLED;
+        if (hands_free_off()) return NOTE_CANCELLED;
 #endif
         /* A wake detection already qualified a hands-free turn and its seed
          * holds the start, so there's no hold to measure: record() takes it
