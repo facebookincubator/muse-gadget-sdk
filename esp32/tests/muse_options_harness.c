@@ -239,7 +239,12 @@ static void late_answered_row(void)
     receive(a);   /* A's late canonical row, still unselected on the server */
     muse_options_t now=view();
     assert(!strcmp(now.widget_id,"b") && now.generation==nb.generation && now.status==MUSE_OPTIONS_READY);
-    cJSON_Delete(a); cJSON_Delete(b);
+    /* Nor does a late copy that carries the phone's selection hide B. */
+    cJSON *picked=cJSON_Parse("{\"message_id\":\"m-a\",\"widgets\":[{\"widget_id\":\"a\",\"kind\":\"option\",\"data\":{\"options\":[\"Tea\",\"Coffee\"]},\"state\":{\"version\":2,\"data\":{\"selectedText\":\"Tea\"}}}]}");
+    receive(picked);
+    now=view();
+    assert(!strcmp(now.widget_id,"b") && now.generation==nb.generation && now.status==MUSE_OPTIONS_READY);
+    cJSON_Delete(a); cJSON_Delete(b); cJSON_Delete(picked);
 }
 int main(int argc,char **argv)
 {

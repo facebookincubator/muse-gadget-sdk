@@ -13,8 +13,8 @@
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static muse_options_t *s_question;
 static uint32_t s_generation, s_revision;
-/* Questions answered here and since replaced, by a hash of their ids: a late
- * copy of one must not come back as a new, answerable question. */
+/* Questions since replaced, by a hash of their ids: a late copy of one must
+ * not displace the newer question or come back as an answerable one. */
 static uint32_t s_answered[4];
 static unsigned s_answered_next;
 
@@ -133,14 +133,13 @@ bool muse_options_publish(const muse_options_t *q)
         return true;
     }
     uint32_t key = question_key(q);
-    for (unsigned i = 0; q->selected < 0 && i < sizeof(s_answered) / sizeof(s_answered[0]); ++i) {
+    for (unsigned i = 0; i < sizeof(s_answered) / sizeof(s_answered[0]); ++i) {
         if (s_answered[i] == key) {
             portEXIT_CRITICAL(&s_lock);
-            return true;   /* answered here already: keep the current question */
+            return true;   /* superseded already: keep the current question */
         }
     }
-    if (s_question->status == MUSE_OPTIONS_QUEUED || s_question->status == MUSE_OPTIONS_SENDING ||
-        s_question->status == MUSE_OPTIONS_SELECTED || s_question->status == MUSE_OPTIONS_UNCERTAIN) {
+    if (s_question->status != MUSE_OPTIONS_EMPTY) {
         s_answered[s_answered_next++ % (sizeof(s_answered) / sizeof(s_answered[0]))] = question_key(s_question);
     }
     *s_question = *q;
