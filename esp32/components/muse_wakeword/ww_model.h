@@ -42,4 +42,7 @@
 #define WW_MODEL_OUTPUT_ZERO_POINT (-128) /* output scale is 1/256 */
 #define WW_MODEL_STATES 6
 #define WW_MODEL_STATE_BYTES 2160         /* all six states together */
+/* State k is int8 [1, channels[k], lengths[k], 1]. */
+#define WW_MODEL_STATE_CHANNELS { 40, 24, 32, 32, 32, 32 }
+#define WW_MODEL_STATE_LENGTHS { 2, 4, 10, 14, 22, 16 }
 #define WW_MODEL_STATE_ZERO_POINT (-128)  /* the same for every state */

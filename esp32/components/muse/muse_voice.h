@@ -23,6 +23,7 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "sdkconfig.h"
 
 /*
  * StopWatch with realtime enabled defaults to a held-mic call: hold yellow to
@@ -57,10 +58,12 @@ const char *muse_voice_call_hint(void);    /* yellow button, NULL outside PTT */
 void muse_voice_shutdown(int wait_ms);
 void muse_voice_cancel_shutdown(void);
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
 /* Wake word: the next record() starts with this audio (copied,
  * whole 20 ms chunks, at most a second) instead of the push-to-talk
  * pre-roll ring, so a hands-free note includes the wake word itself. */
 void muse_voice_seed_preroll(const int16_t *pcm, size_t frames);   /* NULL clears */
+#endif
 
 /* While on (settings' Sound page), idle mic audio feeds muse_voice_monitor_db(). */
 void muse_voice_set_monitor(bool on);

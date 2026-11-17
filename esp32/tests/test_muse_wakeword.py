@@ -19,6 +19,7 @@ model written from the design rules, not from the C."""
 
 import hashlib
 import json
+import math
 import os
 import shlex
 import struct
@@ -104,7 +105,10 @@ def model(ticks, start, end, cap, energy):
         if playback:
             if ev == WAKE:
                 stats[4] += 1
-            trace.append((state, 0))
+            if state == ARMED:   # a reply (or button turn) ends a waiting wake
+                state, act = IDLE, CANCELLED
+                stats[1] += 1
+            trace.append((state, act))
             continue
         if state == IDLE:
             if ev == WAKE:
@@ -202,6 +206,15 @@ class WakeWordCore(unittest.TestCase):
     def test_playback_suppresses_wake(self):
         trace = self.run_core([tick('W', playback=1), tick('s'), tick()])
         self.assertEqual(trace[0], (IDLE, 0))
+
+    def test_playback_ends_a_waiting_wake_for_good(self):
+        # Regression: ARMED used to survive playback with its start timer
+        # paused, so a wake just before a late reply opened a note on the
+        # first loud chunk after the reply, however long it was.
+        ticks = [tick('W'), tick()] + [tick(playback=1)] * 200 + [tick(voiced=1)] * 3
+        trace = self.run_core(ticks)
+        self.assertEqual(trace[2], (IDLE, CANCELLED))
+        self.assertFalse(any(a & POST_DOWN for _, a in trace))
 
     def test_real_press_cancels_arming_and_converts_capture(self):
         armed = self.run_core([tick('W'), tick(down=1), tick('s')])
@@ -386,8 +399,12 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertEqual(sidecar['output']['scale'], 1 / 256)
         self.assertEqual(int(define('WW_MODEL_STATES')), len(sidecar['state']))
         self.assertEqual(int(define('WW_MODEL_STATE_BYTES')), sidecar['state_bytes'])
-        self.assertEqual(sum(eval('*'.join(map(str, t['shape']))) for t in sidecar['state']),
-                         sidecar['state_bytes'])
+        self.assertEqual(sum(math.prod(t['shape']) for t in sidecar['state']), sidecar['state_bytes'])
+        # The runner checks each state's exact shape against these.
+        listed = lambda name: [int(v) for v in define(name).strip('{} ').split(',')]
+        self.assertEqual([[1, c, n, 1] for c, n in zip(listed('WW_MODEL_STATE_CHANNELS'),
+                                                        listed('WW_MODEL_STATE_LENGTHS'))],
+                         [t['shape'] for t in sidecar['state']])
         self.assertEqual({t['zero_point'] for t in sidecar['state']},
                          {int(define('WW_MODEL_STATE_ZERO_POINT'))})
         frontend = (WW / 'ww_frontend.c').read_text()
@@ -1256,6 +1273,52 @@ int main(int argc, char **argv)
         printf("gap ok\n");
         return 0;
     }
+    if (argc > 1 && !strcmp(argv[1], "pause")) {
+        /* A wake, then the voice task stops tapping for pause_ms (sending a
+         * saved note, say), then speech. The tap's clock turns a pause past
+         * the limit into a numbering gap; the wake task's gap rule (as in the
+         * glue) then ends the waiting wake and empties the pre-roll, so the
+         * resumed speech opens nothing. A short pause changes nothing. */
+        uint32_t pause_ms = (uint32_t)strtoul(argv[2], NULL, 10);
+        static muse_ww_chunk_t slots[HIST];
+        static int16_t store[PRE];
+        muse_ww_history_t hist;
+        muse_ww_history_init(&hist, slots, HIST);
+        muse_ww_ring_t pre;
+        muse_ww_ring_init(&pre, store, PRE);
+        muse_wakeword_config_t cfg = { .start_timeout_chunks = 125, .end_silence_chunks = 35,
+                                       .max_capture_chunks = 750, .energy_endpointing = true };
+        muse_wakeword_core_t core;
+        muse_wakeword_core_init(&core, &cfg);
+        uint32_t now = 4294967000u, last = 0;   /* the clock wraps too */
+        int have = 0;
+        uint32_t posted = 0;
+        for (int k = 0; k < 20; k++) {
+            int16_t pcm[CHUNK];
+            int voiced = k >= 10;
+            if (k == 10) now += pause_ms;   /* the pause, then speech */
+            for (int i = 0; i < CHUNK; i++) pcm[i] = voiced ? (int16_t)(i % 2 ? 8000 : -8000) : 0;
+            muse_ww_history_note_time(&hist, now, 200);
+            const muse_ww_chunk_t *item = muse_ww_history_push(&hist, pcm);
+            now += 20;
+            /* the wake task, keeping up */
+            if (have && item->seq != last + 1) muse_wakeword_core_gap(&core, &pre);
+            have = 1;
+            last = item->seq;
+            muse_ww_ring_push(&pre, item->pcm, CHUNK);
+            muse_wakeword_input_t in = { .enabled = true, .event = k == 3 ? WW_EVENT_WAKE : WW_EVENT_NONE,
+                                         .voiced = muse_wakeword_energy_voiced(item->pcm, CHUNK, 512) };
+            posted |= muse_wakeword_core_tick(&core, &in);
+        }
+        const int16_t *back[HIST];
+        bool complete;
+        /* a backlog reaching back before the pause is never complete */
+        muse_ww_history_since(&hist, last - 12, back, HIST, &complete);
+        printf("pause %u opened %d state %d preroll_chunks %u backlog_complete %d\n", (unsigned)pause_ms,
+               (posted & MUSE_WW_ACTION_POST_PTT_DOWN) != 0, (int)muse_wakeword_core_state(&core),
+               (unsigned)(muse_ww_ring_fill(&pre) / CHUNK), complete);
+        return 0;
+    }
     if (argc > 1 && !strcmp(argv[1], "since")) {
         static muse_ww_chunk_t slots[4];
         muse_ww_history_t h;
@@ -1322,6 +1385,28 @@ class WakeWordHandoff(unittest.TestCase):
         # a seed from the old queued items is reported incomplete, and after
         # the gap the pre-roll restarts with nothing from before it.
         self.assertEqual(self.run_mode('overload').strip(), 'overload ok')
+
+    def test_a_pause_in_the_taps_ends_a_waiting_wake(self):
+        # Regression: while the voice task sent a saved note (up to 30 s)
+        # the tap was empty and the wake task never expired the wake; the
+        # first loud chunk afterwards opened a hands-free note.
+        stalled = self.run_mode('pause', '30000').split()
+        self.assertEqual(stalled[2:], ['opened', '0', 'state', '0', 'preroll_chunks', '10',
+                                       'backlog_complete', '0'])
+        # A pause shorter than the limit is just scheduling: the wake stands.
+        short = self.run_mode('pause', '100').split()
+        self.assertEqual(short[2:6], ['opened', '1', 'state', '2'])
+        self.assertEqual(short[-1], '1')
+
+    def test_glue_expires_a_waiting_wake_by_the_clock(self):
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        on_audio = between(glue, 'void muse_wakeword_on_audio(', '\n}\n')
+        self.assertLess(on_audio.index('muse_ww_history_note_time(&s_hist'),
+                        on_audio.index('muse_ww_history_push(&s_hist'))
+        task = between(glue, 'static void wake_task(void *arg)', '\n}\n')
+        self.assertIn('esp_timer_get_time() - s_armed_us >= (int64_t)CONFIG_MUSE_WAKEWORD_START_TIMEOUT_MS * 1000', task)
+        playback = between(glue, 'if (s_playback != s_applied_playback) {', 'if (s_ptt_turn != s_applied_ptt_turn)')
+        self.assertIn('muse_wakeword_core_gap(&s_core, &s_pre)', playback)
 
     def test_gap_ends_a_waiting_wake_and_empties_the_pre_roll(self):
         self.assertEqual(self.run_mode('gap').strip(), 'gap ok')
