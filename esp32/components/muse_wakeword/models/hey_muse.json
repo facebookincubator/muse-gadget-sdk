@@ -1,0 +1,210 @@
+{
+  "schema_version": 2,
+  "model": "Hey Muse streaming MixedNet (microWakeWord architecture), int8",
+  "wake_phrase": "Hey Muse",
+  "pte_sha256": "ad31331ef5d1782b60952df634c32a4c065492a8c635b240982bb681b6b95cbc",
+  "pte_size": 23492,
+  "format": "ExecuTorch program, one ESP-NN delegate call (EspNNBackend), no CPU operators; graph inputs and outputs not memory planned",
+  "executorch": {
+    "version": "1.6.0.dev20261112",
+    "commit": "2a00808457ac01c592030c1b1a62be8fa68c1fd9",
+    "esp_idf_component": "pytorch/executorch==1.6.0-dev.20261112"
+  },
+  "architecture": {
+    "first_conv_filters": 24,
+    "first_conv_kernel_size": 5,
+    "stride": 3,
+    "pointwise_filters": [
+      32,
+      32,
+      32,
+      32
+    ],
+    "mixconv_kernel_sizes": [
+      [
+        5
+      ],
+      [
+        7,
+        11
+      ],
+      [
+        9,
+        15
+      ],
+      [
+        23
+      ]
+    ],
+    "residual_connection": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "training_clip_ms": 1500,
+    "parameters": 11089,
+    "macs_per_inference": 10712
+  },
+  "frontend": {
+    "implementation": "TensorFlow Lite Micro microfrontend (esphome/esp-micro-speech-features 1.2.3)",
+    "sample_rate": 16000,
+    "window_ms": 30,
+    "step_ms": 10,
+    "channels": 40,
+    "lower_band_limit_hz": 125.0,
+    "upper_band_limit_hz": 7500.0,
+    "noise_reduction": {
+      "smoothing_bits": 10,
+      "even_smoothing": 0.025,
+      "odd_smoothing": 0.06,
+      "min_signal_remaining": 0.05
+    },
+    "pcan_gain_control": {
+      "strength": 0.95,
+      "offset": 80.0,
+      "gain_bits": 21
+    },
+    "log_scale": {
+      "scale_shift": 6
+    },
+    "feature": "uint16 * 0.0390625"
+  },
+  "input": {
+    "shape": [
+      1,
+      40,
+      3,
+      1
+    ],
+    "dtype": "int8",
+    "scale": 0.10196078568696976,
+    "zero_point": -128,
+    "layout": "channel c of feature frame f (oldest first) at index c * 3 + f",
+    "quantization": "clamp(lrintf(feature / scale) + zero_point, -128, 127)"
+  },
+  "output": {
+    "shape": [
+      1,
+      1
+    ],
+    "dtype": "int8",
+    "scale": 0.00390625,
+    "zero_point": -128,
+    "probability": "(q - zero_point) * scale"
+  },
+  "state": [
+    {
+      "shape": [
+        1,
+        40,
+        2,
+        1
+      ],
+      "dtype": "int8",
+      "scale": 0.10196078568696976,
+      "zero_point": -128
+    },
+    {
+      "shape": [
+        1,
+        24,
+        4,
+        1
+      ],
+      "dtype": "int8",
+      "scale": 1.7268990278244019,
+      "zero_point": -128
+    },
+    {
+      "shape": [
+        1,
+        32,
+        10,
+        1
+      ],
+      "dtype": "int8",
+      "scale": 0.03635837882757187,
+      "zero_point": -128
+    },
+    {
+      "shape": [
+        1,
+        32,
+        14,
+        1
+      ],
+      "dtype": "int8",
+      "scale": 0.03352862596511841,
+      "zero_point": -128
+    },
+    {
+      "shape": [
+        1,
+        32,
+        22,
+        1
+      ],
+      "dtype": "int8",
+      "scale": 0.03193733096122742,
+      "zero_point": -128
+    },
+    {
+      "shape": [
+        1,
+        32,
+        16,
+        1
+      ],
+      "dtype": "int8",
+      "scale": 0.02244524098932743,
+      "zero_point": -128
+    }
+  ],
+  "state_bytes": 2160,
+  "state_contract": "each state's output has its input's qparams; pass it back as the next inference's input; initial value is its zero point (float 0)",
+  "detector": {
+    "window": 5,
+    "rule": "fire when the mean of the last 5 probabilities is above the cutoff; the window must be full",
+    "refractory_s": 2.0,
+    "cutoffs": {
+      "low": 0.26,
+      "default": 0.22,
+      "high": 0.13
+    }
+  },
+  "reference": {
+    "tflite_int8_sha256": "1bd8ef085b789f2168008af5a6576ccc50548fc5b9d0351da03dd634f74b84e2",
+    "note": "The same weights converted with microWakeWord's streaming TFLite conversion; one convolution's int8 weights and per-channel scales are taken from it because PT2E's weight observer floors small per-channel scales at 2^-12.",
+    "parity": "ExecuTorch + ESP-NN probabilities equal TensorFlow Lite Micro's on the same machine for every inference: 101,018 of 101,018 on x86-64 Linux (5 streams) and 330 of 330 on an ESP32-S3. Across machines the microfrontend's start-up tables (computed with the C math library) can differ in the last bit."
+  },
+  "evaluation": {
+    "positives": "synthetic speech only: text-to-speech voices and an engine never used in training, pooled over 9 conditions (clean, quiet, TV at 10/5/0 dB SNR, music, noise, reverberation, reverberation + TV)",
+    "negatives_hours": 23.5,
+    "recall_at_false_wakes_per_hour": {
+      "0.1": 58.6,
+      "0.25": 67.9,
+      "1.0": 79.2
+    },
+    "by_sensitivity": {
+      "low": {
+        "cutoff": 0.26,
+        "false_wakes_per_hour": 0.34,
+        "recall_percent": 71.4
+      },
+      "default": {
+        "cutoff": 0.22,
+        "false_wakes_per_hour": 0.38,
+        "recall_percent": 73.9
+      },
+      "high": {
+        "cutoff": 0.13,
+        "false_wakes_per_hour": 1.36,
+        "recall_percent": 80.1
+      }
+    },
+    "near_miss_accepts_percent_at_default": 5.7,
+    "real_voices": "not measured"
+  },
+  "training_data": "public domain, CC0 and CC BY only; see ATTRIBUTION.md"
+}
