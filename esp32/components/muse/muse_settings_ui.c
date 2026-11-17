@@ -148,8 +148,13 @@ static lv_obj_t *s_text_back;
 
 /* ---------- building blocks ---------- */
 
-/* Screen text in CONFIG_MUSE_UI_LANGUAGE (muse_lang.c); English without one. */
+/* Screen text in Brazilian Portuguese (muse_lang.c); the other languages
+ * keep these pages in English. */
+#if CONFIG_MUSE_UI_LANG_PT_BR
 #define T(en) muse_lang_menu(en)
+#else
+#define T(en) (en)
+#endif
 
 /* Network and phone names can have characters the fonts lack (muse_text.h). */
 #define SHOWN_MAX 96
@@ -652,7 +657,7 @@ static void on_text_show(lv_event_t *e)
     (void)e;
     bool pw = !lv_textarea_get_password_mode(s_text_ta);
     lv_textarea_set_password_mode(s_text_ta, pw);
-    lv_label_set_text(lv_obj_get_child(s_text_show, 0), pw ? "Show" : "Hide");
+    lv_label_set_text(lv_obj_get_child(s_text_show, 0), T(pw ? "Show" : "Hide"));
 }
 
 /* Beside the keyboard's field, a button to show a password. */
@@ -662,7 +667,7 @@ static void fit_show_button(bool password)
     lv_obj_set_width(s_text_ta, password ? w - show_w - gap : w);
     lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, password ? -(show_w + gap) / 2 : 0, y);
     lv_obj_align(s_text_show, LV_ALIGN_TOP_MID, (w - show_w) / 2, y);
-    lv_label_set_text(lv_obj_get_child(s_text_show, 0), "Show");
+    lv_label_set_text(lv_obj_get_child(s_text_show, 0), T("Show"));
     if (password) {
         lv_obj_remove_flag(s_text_show, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -808,7 +813,7 @@ static void open_text(const char *title, const char *initial, bool password, int
     lv_textarea_set_max_length(s_text_ta, max_len);
     lv_textarea_set_password_mode(s_text_ta, password);
     lv_textarea_set_text(s_text_ta, initial ? initial : "");
-    lv_textarea_set_placeholder_text(s_text_ta, hint ? hint : "");
+    lv_textarea_set_placeholder_text(s_text_ta, hint ? T(hint) : "");
     if (s_text_kp) {
         muse_keypad_reset(s_text_kp, password);
     } else {
