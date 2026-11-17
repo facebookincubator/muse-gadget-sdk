@@ -152,7 +152,7 @@ def test_detector_failure_does_not_admit_a_call():
 
 def test_live_startup_backlog_is_bounded_and_wav_backpressure_preserves_audio():
     async def scenario():
-        # More than the startup queue's 80 s (40 ms frames), plus a margin.
+        # More than the startup queue (40 ms frames), plus a margin.
         frames = [b"\0" * FRAME_BYTES] * (wake.MAX_BUFFER_BYTES // FRAME_BYTES + 25)
         listener = wake.WakeWordInput(source(frames), Detector(fire_at=1))
         try:
