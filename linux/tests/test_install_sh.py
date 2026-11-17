@@ -671,11 +671,18 @@ def test_valid_proxy(url, valid):
     ("", "", "unset|unset|unset"),
 ])
 def test_root_commands_get_the_proxy_through_sudo(proxy, no_proxy, expected):
-    # The sudo stand-in clears the environment, as sudo's env_reset does.
+    # The sudo stand-in clears the environment, as sudo's env_reset does, keeps
+    # what --preserve-env names, and shows its command line on stderr.
     script = f"""
 source "{INSTALL_SH}"
 id() {{ echo 1000; }}
-sudo() {{ env -i PATH="$PATH" "$@"; }}
+sudo() {{
+    echo "sudo $*" >&2
+    local keep=() names=() name
+    case "$1" in --preserve-env=*) IFS=, read -ra names <<<"${{1#--preserve-env=}}"; shift ;; esac
+    for name in ${{names[@]+"${{names[@]}}"}}; do keep+=("$name=${{!name}}"); done
+    env -i PATH="$PATH" ${{keep[@]+"${{keep[@]}}"}} "$@"
+}}
 export https_proxy=http://leaked.example:1 http_proxy=http://leaked.example:1
 PROXY="{proxy}" NO_PROXY_HOSTS="{no_proxy}"
 as_root sh -c 'echo "${{http_proxy-unset}}|${{https_proxy-unset}}|${{no_proxy-unset}}"'
@@ -683,6 +690,7 @@ as_root sh -c 'echo "${{http_proxy-unset}}|${{https_proxy-unset}}|${{no_proxy-un
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == expected
+    assert "p%40ss" not in result.stderr
 
 
 @pytest.mark.parametrize("args,message", [

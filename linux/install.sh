@@ -83,12 +83,19 @@ ask() {
 
 # sudo drops the caller's environment, so with a proxy every root command
 # gets it explicitly: the package manager, curl, uv, git and musegadget pair.
+# It goes through the environment, not the command line, which other accounts
+# can read (ps, sudo's log) and the URL can hold a password.
 as_root() {
-    local cmd=("$@")
-    if [ -n "${PROXY:-}" ]; then
-        cmd=(env "http_proxy=$PROXY" "https_proxy=$PROXY" ${NO_PROXY_HOSTS:+"no_proxy=$NO_PROXY_HOSTS"} "$@")
+    if [ -z "${PROXY:-}" ]; then
+        if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
+        return
     fi
-    if [ "$(id -u)" -eq 0 ]; then "${cmd[@]}"; else sudo "${cmd[@]}"; fi
+    (
+        keep=http_proxy,https_proxy
+        export http_proxy="$PROXY" https_proxy="$PROXY"
+        if [ -n "${NO_PROXY_HOSTS:-}" ]; then export no_proxy="$NO_PROXY_HOSTS"; keep+=,no_proxy; fi
+        if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo --preserve-env="$keep" "$@"; fi
+    )
 }
 
 systemd_running() { [ -d /run/systemd/system ]; }
