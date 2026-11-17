@@ -171,7 +171,7 @@ static const lv_font_t *settings_font(const lv_font_t *font)
         return muse_lang_montserrat(font);
     }
     if (font == &lv_font_unscii_16 || font == &lv_font_montserrat_16) {
-        return &lv_font_montserrat_20;
+        return muse_lang_montserrat(&lv_font_montserrat_20);
     }
     if (font == &lv_font_montserrat_20) {
         return muse_lang_montserrat(&lv_font_montserrat_28);
@@ -769,7 +769,7 @@ static void build_text_page(lv_obj_t *tile)
     int top = text_y(98);
     if (narrow_panel()) {
         /* Portrait panels need a header inside the screen, not the round layout. */
-        lv_obj_set_style_text_font(s_text_title, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(s_text_title, settings_font(&lv_font_montserrat_16), 0);
         single_line(s_text_title, muse_board->width - 16);
         lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 8);
         lv_obj_set_width(s_text_ta, muse_board->width - 60);
