@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 API_BASE = "https://api.muse.ai"
 FETCH_PATH = "/fetch_vms"
 REFRESH_PATH = "/device_token/refresh"
+FETCH_TIMEOUT_S = 15   # the VM lookup's socket timeout (callers may bound the whole lookup by it)
 
 
 def api_root(api_url_v2: str = "") -> str:
@@ -71,7 +72,7 @@ def fetch_vms_with_status(
     req.add_header("X-API-Version", "1.0.0")
     req.add_header("User-Agent", user_agent())
     try:
-        with urllib.request.urlopen(req, timeout=15, context=tls.client_context()) as resp:
+        with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_S, context=tls.client_context()) as resp:
             status = resp.getcode()
             data = json.loads(resp.read())
     except urllib.error.HTTPError as exc:

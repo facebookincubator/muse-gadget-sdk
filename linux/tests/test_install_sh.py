@@ -28,6 +28,7 @@ import hashlib
 import io
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -487,3 +488,60 @@ def test_every_target_has_both_checksums():
         )
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
         assert len(out) == 2 and all(re.fullmatch("[0-9a-f]{64}", h) for h in out), target
+
+
+def check_trust_store_in_installer(tmp_path, problem, warning, family="debian", status=0):
+    """Run install.sh's check_trust_store against a fake venv Python that reports these."""
+    python = tmp_path / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f"#!/bin/sh\nprintf '%s\\n%s\\n' {shlex.quote(problem)} {shlex.quote(warning)}\n"
+                      f"exit {status}\n")
+    python.chmod(0o755)
+    script = (
+        f'source "{INSTALL_SH}"; as_root() {{ "$@"; }}; systemd_running() {{ false; }}; '
+        f'VENV="{tmp_path / "venv"}"; DISTRO_FAMILY={family}; check_trust_store; echo "carried on"'
+    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+
+
+RETIRED_WARNING = ("the system trust store still trusts emSign ECC Root CA - C3, "
+                   "emSign Root CA - C1, which Mozilla has retired")
+
+
+def test_installer_carries_on_with_a_clean_trust_store(tmp_path):
+    result = check_trust_store_in_installer(tmp_path, "", "")
+    assert result.returncode == 0, result.stderr
+    assert "carried on" in result.stdout
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("family,hint", [
+    ("debian", "put '!' in front of its line in /etc/ca-certificates.conf"),
+    ("fedora", '"Root CAs" in the musegadget README'),
+])
+def test_installer_only_warns_about_retired_roots(tmp_path, family, hint):
+    result = check_trust_store_in_installer(tmp_path, "", RETIRED_WARNING, family)
+    assert result.returncode == 0, result.stderr
+    assert "carried on" in result.stdout
+    assert "warning:" in result.stderr and RETIRED_WARNING in result.stderr
+    assert "musegadget still connects" in result.stderr and hint in result.stderr
+
+
+@pytest.mark.parametrize("problem,warning", [
+    ("the system trust store still trusts emSign ECC Root CA - G3", RETIRED_WARNING),
+    ("the system trust store still trusts emSign ECC Root CA - G3", ""),
+    ("can't read the system trust store", ""),
+])
+def test_installer_stops_on_a_compromised_root_or_an_unreadable_store(tmp_path, problem, warning):
+    result = check_trust_store_in_installer(tmp_path, problem, warning)
+    assert result.returncode != 0
+    assert "carried on" not in result.stdout
+    assert f"musegadget won't connect: {problem}. Update your ca-certificates package" in result.stderr
+    assert "still connects" not in result.stderr
+
+
+def test_installer_stops_when_the_trust_store_check_fails(tmp_path):
+    result = check_trust_store_in_installer(tmp_path, "", "", status=1)
+    assert result.returncode != 0
+    assert "carried on" not in result.stdout
+    assert "couldn't check the system trust store" in result.stderr
