@@ -43,6 +43,7 @@ static int step, scenario, captions, silence_writes;
 static int64_t now;
 static float progress;
 static muse_mode_t mode;
+static void muse_wakeword_set_playback(bool active) { (void)active; }
 void muse_state_poke(void) {}
 void muse_state_set_progress(float p) { progress=p; }
 void muse_state_set_mode(muse_mode_t m) { mode=m; }
