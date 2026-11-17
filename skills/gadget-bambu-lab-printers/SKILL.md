@@ -159,4 +159,6 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 - [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI) — community documentation of the Bambu MQTT and cloud HTTP protocols.
 - [ha-bambulab](https://github.com/greghesp/ha-bambulab) — the Home Assistant integration and its `pybambu` client, another working implementation of the same MQTT reports.
 
-> P2S camera, monitoring and failure-pause sections contributed by @sidhanthp, verified on a real P2S in cloud mode; Handy live video confirmed working alongside the LAN camera.
+> P2S camera, monitoring and failure-pause sections contributed by @sidhanthp. Status, camera and monitoring
+> verified on a real P2S in cloud mode, with Handy live video working alongside the LAN camera; cloud-mode pause
+> is not yet confirmed.
