@@ -76,6 +76,8 @@ static void capture_set(bool on) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_capture = on ? CAPTURE_REQUEST : CAPTURE_OFF;
     s_generation++;
+    s_core.tail_on = false;   /* the last viewer's unfinished update is not the next one's */
+    s_core.ndirty = 0;
     xSemaphoreGive(s_lock);
 }
 
