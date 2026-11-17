@@ -38,6 +38,10 @@ if(CONFIG_MUSE_ENABLED)
         "muse_lang.c"
         "muse_link.c"
         "muse_ble.c")
+    if(CONFIG_MUSE_WAKEWORD_ENABLE)
+        # Wake word tap and task; without it, muse_wakeword_glue.h's inline stubs.
+        list(APPEND srcs "muse_wakeword_glue.c")
+    endif()
     if(CONFIG_MUSE_BOARD_SENSECAP_WATCHER OR CONFIG_MUSE_LATEST_REPLY)
         list(APPEND srcs "muse_review.c")
     endif()
@@ -236,6 +240,7 @@ list(APPEND muse_priv_requires camera)
 if(IDF_TARGET STREQUAL "esp32p4")
     list(APPEND muse_priv_requires esp_driver_jpeg)
 endif()
+list(APPEND muse_priv_requires muse_wakeword)   # registers empty unless MUSE_WAKEWORD_ENABLE
 
 idf_component_register(
     SRCS ${srcs}

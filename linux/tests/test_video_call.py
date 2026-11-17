@@ -427,6 +427,61 @@ def test_unacknowledged_end_call_is_an_error():
     assert not asyncio.run(scenario()).end_call_acknowledged
 
 
+
+@pytest.mark.parametrize("cleanup", ["end_call_failed", "interrupted"])
+def test_cleanup_outcome_is_recorded_under_an_earlier_failure(cleanup):
+    # The first failure still propagates; the caller can see a failed
+    # end-call or a Ctrl-C that came in while the call was cleaning up.
+    opus_or_skip()
+
+    async def scenario():
+        edge = FakeEdge(udp=True, tcp=False)
+        await edge.start()
+        session = FakeSession(edge)
+        original = session.request
+        ending = asyncio.Event()
+
+        async def request(method, path, body=b"", **kwargs):
+            if path == "/voice/end-call":
+                ending.set()
+                if cleanup == "end_call_failed":
+                    return {"ok": False, "status": 503, "response": None}
+                await asyncio.sleep(0.2)
+            reply = await original(method, path, body, **kwargs)
+            if path == "/voice/calls/join":
+                edge.server_pwd = None  # media never connects
+            return reply
+
+        session.request = request
+        call = VideoCall(session, device_id="d", video_output=Units(), ready_timeout=0.5)
+
+        async def frames():
+            yield bytes(1920)
+
+        class Out:
+            def write(self, pcm):
+                pass
+
+            def flush(self):
+                pass
+
+        task = asyncio.create_task(call.run(frames(), Out()))
+        try:
+            if cleanup == "interrupted":
+                await asyncio.wait_for(ending.wait(), 5)
+                task.cancel()
+            with pytest.raises((ConnectionError, asyncio.TimeoutError)):
+                await asyncio.wait_for(task, 5)
+        finally:
+            edge.close()
+        return call
+
+    call = asyncio.run(scenario())
+    if cleanup == "end_call_failed":
+        assert call.cleanup_error is not None and not call.cleanup_cancelled
+    else:
+        assert call.cleanup_cancelled and call.cleanup_error is None
+
 def test_quiet_live_microphone_lets_the_idle_timer_fire():
     opus_or_skip()
     hiss = struct.pack("<h", 120) * 960  # steady low noise, below speech level
@@ -663,3 +718,46 @@ def test_a_second_keyframe_is_requested_after_video_starts():
         return edge
 
     assert asyncio.run(scenario()).plis >= 2  # one on connect, one after the first frame
+
+
+def test_queued_wake_word_capture_is_paced_not_burst():
+    # A wake word listener hands over its pre-roll and the capture queued while
+    # the call started: video calls catch it up at three times real time, as
+    # voice calls do, rather than sending it all at once.
+    class Media:
+        def __init__(self):
+            self.sent = []
+
+        def send_audio(self, frame):
+            self.sent.append(time.monotonic())
+
+    class Queued:
+        def __init__(self, frames):
+            self.frames = list(frames)
+
+        @property
+        def backlog_bytes(self):
+            return sum(map(len, self.frames))
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.frames:
+                await asyncio.sleep(3600)   # live capture with nothing new yet
+            return self.frames.pop(0)
+
+    async def scenario():
+        call = VideoCall(None, device_id="homelink-synthetic", video_output=None)
+        call.media = Media()
+        frame = b"\0" * 1920   # 40 ms at 24 kHz
+        task = asyncio.create_task(call._input(Queued([frame] * 25), realtime=True))   # 1 s queued
+        await asyncio.sleep(0.6)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        sent = call.media.sent
+        assert len(sent) >= 48   # 50 frames of 20 ms at 48 kHz, nearly all out
+        spread = sent[47] - sent[0]
+        assert 0.25 < spread < 0.5, spread   # about 1 s / 3, not a burst
+
+    asyncio.run(scenario())

@@ -26,3 +26,4 @@ def _trust_store_is_clean(request, monkeypatch):
     if request.module.__name__.endswith("test_tls"):
         return      # test_tls checks the trust store itself
     monkeypatch.setattr(tls, "trust_store_problem", lambda: None)
+    monkeypatch.setattr(tls, "trust_store_warning", lambda: None)
