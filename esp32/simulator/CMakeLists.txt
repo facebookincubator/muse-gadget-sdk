@@ -286,6 +286,7 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_executable(muse_settings_text_test
         tests/settings_text_harness.c
         "${MUSE_COMPONENT_DIR}/muse_keypad.c"
+        "${MUSE_COMPONENT_DIR}/muse_lang.c"
         "${MUSE_COMPONENT_DIR}/muse_text.c"
     )
     target_include_directories(muse_settings_text_test PRIVATE
