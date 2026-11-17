@@ -566,6 +566,15 @@ their upstream licenses:
   copyright, with Google's patent grant. See
   [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
   [`PATENTS`](components/libvpx_vp8/PATENTS).
+- [`components/muse_wakeword/models/hey_muse.pte`](components/muse_wakeword/models),
+  the opt-in wake word model, was trained for this SDK on public-domain, CC0
+  and CC BY data; [`ATTRIBUTION.md`](components/muse_wakeword/models/ATTRIBUTION.md)
+  credits it as CC BY requires.
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
-under their own licenses.
+under their own licenses. For the opt-in wake word these are the ExecuTorch
+runtime with its ESP-NN delegate (`pytorch/executorch`: BSD-3-Clause and
+others, see its `LICENSE`), `espressif/esp-nn` (Apache-2.0) and
+`esphome/esp-micro-speech-features`, TensorFlow Lite Micro's microfrontend
+(Apache-2.0; its kissfft files BSD-3-Clause); builds without the wake word
+don't fetch them.
