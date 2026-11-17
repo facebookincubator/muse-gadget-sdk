@@ -93,6 +93,7 @@ static uint32_t s_press_mark;   /* the press's pending-call mark (muse_input_cle
 static int64_t s_press_us;
 #if CONFIG_MUSE_WAKEWORD_ENABLE
 static bool s_press_synthetic;   /* the press came from the wake word glue */
+static uint32_t s_press_disables;   /* its disable count (muse_wakeword_turn_wanted) */
 static bool s_button_recording;  /* record() is taking a button (not hands-free) note */
 #else
 /* Builds without the wake word have no hands-free presses: the constant
@@ -116,6 +117,7 @@ static inline void note_press_synthetic(const muse_input_event_t *ev)
 {
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     s_press_synthetic = ev->synthetic;
+    s_press_disables = ev->disables;
 #else
     (void)ev;
 #endif
@@ -499,7 +501,16 @@ static bool record(bool seeded, char *why, size_t cap)
     take_pre(&st, MUSE_LOW_MEM ? PRE_CHUNKS : s_pre_fill);
     bool released = false;
     size_t stop_at = MAX_FRAMES;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    bool dropped = false;   /* a hands-free note whose opt-in was turned off */
+#endif
     while (n + MUSE_AUDIO_CHUNK <= stop_at) {
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+        if (seeded && !muse_wakeword_turn_wanted(s_press_disables)) {
+            dropped = true;
+            break;
+        }
+#endif
         if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
             break;
         }
@@ -555,6 +566,25 @@ static bool record(bool seeded, char *why, size_t cap)
             stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
         }
     }
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if (seeded && !dropped && !muse_wakeword_turn_wanted(s_press_disables)) {
+        dropped = true;   /* turned off during the release's tail */
+    }
+    if (dropped) {
+        /* Turning listening off drops the hands-free note: whatever was
+         * streamed is abandoned and nothing is kept to send later. */
+        ESP_LOGI(TAG, "hands-free note dropped: listening was turned off");
+        if (s_live) muse_hatch_turn_cancel();
+        s_live = false;
+        free(s_rec);   /* can_record() allocated it for this note */
+        s_rec = NULL;
+        s_button_recording = false;
+        muse_state_set_level(0);
+        if (!released) muse_wakeword_turn_ended();
+        if (cap) why[0] = '\0';
+        return false;
+    }
+#endif
     take_pre(&st, s_pre_fill);
     muse_state_set_level(0);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
@@ -824,6 +854,10 @@ static note_result_t note_held(bool wake, bool barge_in)
     if (wake || barge_in || s_press_synthetic) s_pre_fill = 0;
     int settle = barge_in ? SETTLE_CHUNKS : 0;
     if (s_press_synthetic) {
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+        /* Listening turned off since the press was posted: no turn. */
+        if (!muse_wakeword_turn_wanted(s_press_disables)) return NOTE_CANCELLED;
+#endif
         /* A wake detection already qualified a hands-free turn and its seed
          * holds the start, so there's no hold to measure: record() takes it
          * now, and the wake core hears every chunk from here (endpointing,

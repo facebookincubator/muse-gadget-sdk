@@ -83,8 +83,23 @@ static bool s_started;
  * reader of the tap and the single writer of the pre-roll ring, the
  * session core, and the runner, applying flag transitions at its loop
  * boundary in apply_requests(). That keeps the runner single-threaded
- * (see ww_runner.h). */
+ * (see ww_runner.h).
+ *
+ * Who writes what:
+ *   s_enabled, s_disables     any task, through muse_wakeword_set_enabled
+ *   s_playback, s_ptt_turn    muse_voice (the voice task)
+ *   s_pending_down/up         muse_voice; the wake task reads and clears
+ *   s_applied_*               the wake task; the tap and status read
+ * A disable takes effect without waiting for apply_requests(): the wake
+ * task reads s_enabled again after each inference and just before posting
+ * a press, and muse_voice drops a hands-free turn whose press was posted
+ * under an older s_disables (muse_wakeword_turn_wanted). */
 static volatile bool s_enabled;      /* desired listening opt-in */
+/* Counts disables (set_enabled(false) callers, any task). Every synthetic
+ * press carries the count it was posted under; muse_voice drops a
+ * hands-free turn once the count moves, even if listening is turned back
+ * on before it looks, so nothing heard before a disable is ever sent. */
+static atomic_uint s_disables;
 static volatile bool s_playback;     /* desired: own-voice playback active */
 static volatile bool s_ptt_turn;     /* desired: physical PTT turn recording */
 static atomic_bool s_pending_down, s_pending_up;   /* physical, from muse_voice */
@@ -108,6 +123,13 @@ const char *muse_wakeword_runner_kind(void)
 bool muse_wakeword_enabled(void)
 {
     return s_started && s_enabled;
+}
+
+bool muse_wakeword_turn_wanted(uint32_t disables)
+{
+    /* The count goes up before the flag goes down, so a press posted just
+     * before a disable fails at least one of the two checks. */
+    return s_started && s_enabled && atomic_load(&s_disables) == disables;
 }
 
 bool muse_wakeword_listening(void)
@@ -206,6 +228,9 @@ void muse_wakeword_set_enabled(bool on)
         return;
     }
     muse_settings_set_wakeword_on(on);
+    if (!on) {
+        atomic_fetch_add(&s_disables, 1);   /* before the flag: see muse_wakeword_turn_wanted */
+    }
     /* Publish only. The wake task applies the transition, so a
      * redundant enable cannot reset a live session out from under
      * muse_voice (which would orphan the synthetic hold). */
@@ -221,7 +246,7 @@ static bool post_ptt(muse_ptt_t type)
      * whose epoch is stale, so a zero here would end every hands-free turn
      * once any real edge had been dropped. */
     muse_input_event_t ev = { .type = type, .synthetic = true, .epoch = muse_input_call_epoch(),
-                              .at_us = esp_timer_get_time() };
+                              .at_us = esp_timer_get_time(), .disables = atomic_load(&s_disables) };
     if (xQueueSend(s_queue, &ev, 0) != pdTRUE) {
         ESP_LOGW(TAG, "input queue full, synthetic %s %s", type == MUSE_PTT_DOWN ? "down" : "up",
                  type == MUSE_PTT_DOWN ? "dropped" : "retried next chunk");
@@ -267,10 +292,11 @@ static void tick(const muse_wakeword_input_t *in)
          * reason when it cannot (for example, Muse is not set up yet). */
         muse_state_set_mode(MUSE_MODE_LISTENING);
         muse_state_set_caption("LISTENING...");
-        /* Never a press ahead of an owed release. A press the queue
-         * refused opens no turn: drop the session and its seed, so no
-         * stray release or stale pre-roll follows it. */
-        if (!s_up_owed && post_ptt(MUSE_PTT_DOWN)) {
+        /* Never a press ahead of an owed release, and never one after a
+         * disable (checked again here, at the last moment). A press not
+         * posted opens no turn: drop the session and its seed, so no stray
+         * release or stale pre-roll follows it. */
+        if (!s_up_owed && s_enabled && post_ptt(MUSE_PTT_DOWN)) {
             ESP_LOGI(TAG, "speech started, pre-roll %.2fs", (double)s_seeded_frames / MUSE_AUDIO_RATE);
         } else {
             muse_wakeword_core_abort(&s_core);
@@ -303,8 +329,10 @@ static void tick(const muse_wakeword_input_t *in)
     if (act & MUSE_WW_ACTION_CANCELLED) {
         if (before == MUSE_WW_ARMED) {
             muse_state_set_caption("%s", "");   /* ours to clear; no churn beyond that */
+            ESP_LOGI(TAG, "wake ignored (no speech followed)");
+        } else {
+            ESP_LOGI(TAG, "hands-free note dropped (listening turned off)");
         }
-        ESP_LOGI(TAG, "wake ignored (no speech followed)");
     }
 }
 
@@ -401,9 +429,12 @@ static muse_wakeword_input_t next_input(const int16_t *pcm)
         .ptt_down = atomic_exchange(&s_pending_down, false),
         .ptt_up = atomic_exchange(&s_pending_up, false),
         .playback = s_applied_playback || s_applied_ptt_turn,
-        .enabled = s_applied_enabled,
     };
     in.event = ww_runner_feed(s_runner, pcm, MUSE_AUDIO_CHUNK);
+    /* The requested flag, read after inference: a disable published while
+     * this task waited for the chunk or ran the model ends the session on
+     * this very tick, before it can open a turn. */
+    in.enabled = s_applied_enabled && s_enabled;
     return in;
 }
 
@@ -441,6 +472,9 @@ static void wake_task(void *arg)
             if (muse_wakeword_core_gap(&s_core, &s_pre)) {
                 muse_state_set_caption("%s", "");   /* the wake's prompt, as when no speech follows */
             }
+            /* The front end, model state and detector window would run
+             * across the gap as if it weren't there: start them over. */
+            ww_runner_reset(s_runner);
         }
         s_have_seq = true;
         if (!s_applied_playback && !s_applied_ptt_turn) {

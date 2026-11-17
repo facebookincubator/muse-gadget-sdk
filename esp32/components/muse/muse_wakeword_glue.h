@@ -70,6 +70,11 @@ void muse_wakeword_note_ptt(bool down);
  * tick (disabling closes any hands-free capture in progress). */
 void muse_wakeword_set_enabled(bool on);
 bool muse_wakeword_enabled(void);
+/* For muse_voice, with the `disables` count a synthetic press carries:
+ * whether its hands-free turn may still go (listening on, and not turned
+ * off since the press was posted). Checked at admission and while
+ * recording; a turn that fails it is dropped, never sent. */
+bool muse_wakeword_turn_wanted(uint32_t disables);
 /* Enabled, not suppressed by playback, and not resting: what the
  * listening indicator shows. Resting follows muse_wakeword_enabled(). */
 bool muse_wakeword_listening(void);
@@ -119,6 +124,7 @@ static inline void muse_wakeword_on_audio(const int16_t *pcm, size_t frames)
 static inline void muse_wakeword_note_ptt(bool down) { (void)down; }
 static inline void muse_wakeword_set_enabled(bool on) { (void)on; }
 static inline bool muse_wakeword_enabled(void) { return false; }
+static inline bool muse_wakeword_turn_wanted(uint32_t disables) { (void)disables; return false; }
 static inline bool muse_wakeword_listening(void) { return false; }
 static inline void muse_wakeword_set_playback(bool on) { (void)on; }
 static inline void muse_wakeword_set_ptt_turn(bool active) { (void)active; }

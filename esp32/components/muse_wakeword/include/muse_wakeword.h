@@ -53,7 +53,7 @@ enum {
     MUSE_WW_ACTION_NONE = 0,
     MUSE_WW_ACTION_POST_PTT_DOWN = 1u << 0,
     MUSE_WW_ACTION_POST_PTT_UP = 1u << 1,
-    MUSE_WW_ACTION_CANCELLED = 1u << 2,        /* a wake ended with nothing posted */
+    MUSE_WW_ACTION_CANCELLED = 1u << 2,        /* a wake ended unsent (with POST_PTT_UP: its note is dropped) */
     MUSE_WW_ACTION_SUBMITTED = 1u << 3,        /* a capture ended and goes to Muse */
     MUSE_WW_ACTION_CONVERTED_TO_PTT = 1u << 4,
 };
