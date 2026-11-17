@@ -37,6 +37,7 @@
 #include "muse_mem.h"
 #include "muse_settings.h"
 #include "muse_state.h"
+#include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VOICE_SOFTWARE_AEC
 #include "muse_aec.h"
@@ -90,6 +91,46 @@ static QueueHandle_t s_queue;
 static uint32_t s_press_input_epoch;
 static uint32_t s_press_mark;   /* the press's pending-call mark (muse_input_clear_call_pending) */
 static int64_t s_press_us;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+static bool s_press_synthetic;   /* the turn is the wake word's (cleared if a finger takes it over) */
+static uint32_t s_press_disables;   /* its press's disable generation */
+static bool s_button_recording;  /* record() is taking a button (not hands-free) note */
+#else
+static const bool s_press_synthetic = false;   /* folds the hands-free paths away */
+#endif
+
+/* Whether an input event was posted by the wake word glue. */
+static inline bool ev_synthetic(const muse_input_event_t *ev)
+{
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    return ev->synthetic;
+#else
+    (void)ev;
+    return false;
+#endif
+}
+
+/* The press that starts a turn: remember whether it was hands-free. */
+static inline void note_press_synthetic(const muse_input_event_t *ev)
+{
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    s_press_synthetic = ev->synthetic;
+    s_press_disables = ev->disables;
+#else
+    (void)ev;
+#endif
+}
+
+/* A hands-free turn whose listening was turned off since its wake: it is
+ * admitted, opened and sent nothing more. */
+static inline bool hands_free_off(void)
+{
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    return s_press_synthetic && !muse_wakeword_turn_wanted(s_press_disables);
+#else
+    return false;
+#endif
+}
 static volatile bool s_monitor;
 static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
@@ -173,6 +214,13 @@ static muse_adpcm_t s_pre_enc;
 static int16_t s_chunk[MUSE_AUDIO_CHUNK];
 static int s_settle;
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* Wake word pre-roll seeded for the next record(), whole chunks. */
+#define SEED_FRAMES (MUSE_AUDIO_RATE)   /* one second, matching the glue */
+static int16_t *s_seed;
+static volatile size_t s_seed_frames;
+#endif
+
 /*
  * The note being recorded (HOLD_NOTES), kept whole in case it can't go now.
  * Streaming, Hatch has had s_sent frames of it.
@@ -250,10 +298,37 @@ static void idle_capture(void)
     }
     if (s_settle > 0) {
         s_settle--;
-        return;
+        return;   /* Muse's own tail: not pre-roll, and not wake word input either */
     }
+    muse_wakeword_on_audio(s_chunk, MUSE_AUDIO_CHUNK);   /* wake tap: copy and return */
     pre_put_preroll();
 }
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* Whether a queued edge counts for a phase looking for `type`. Real edges
+ * count in their own input epoch. Wake word edges never shape a button
+ * note: a synthetic release only ends a hands-free turn, and a synthetic
+ * press doesn't count while a button note records. */
+static bool edge_counts(const muse_input_event_t *ev, muse_ptt_t type)
+{
+    if (!ev->synthetic) return ev->epoch == muse_input_call_epoch();
+    if (type == MUSE_PTT_UP) return s_press_synthetic;
+    return !s_button_recording;
+}
+
+/* A real edge in the current input epoch: one the input queue's overflow
+ * made stale is ignored here, so it owns nothing for the wake word either. */
+static bool live_real_edge(const muse_input_event_t *ev)
+{
+    return !ev->synthetic && ev->epoch == muse_input_call_epoch();
+}
+/* Wake word preemption needs real presses even when a drain is only
+ * looking for the other edge. */
+#define NOTE_REAL_EDGE(ev) \
+    do { if (live_real_edge(&(ev))) muse_wakeword_note_ptt((ev).type == MUSE_PTT_DOWN); } while (0)
+#else
+#define NOTE_REAL_EDGE(ev) ((void)0)
+#endif
 
 /* Consume through the requested edge, leaving later edges for the next
  * phase (notably a quick release after interrupting a saved note's reply). */
@@ -262,13 +337,28 @@ static bool got_event(muse_ptt_t type)
     muse_input_event_t ev;
     while (xQueueReceive(s_queue, &ev, 0) == pdTRUE) {
         muse_state_poke();
+        NOTE_REAL_EDGE(ev);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+        if (live_real_edge(&ev) && ev.type == MUSE_PTT_DOWN && type == MUSE_PTT_UP && s_press_synthetic) {
+            /* A finger on a hands-free note takes it over: from now on it's
+             * the button's, ended by the finger's release, and a synthetic
+             * release (endpointing that raced the press) no longer counts. */
+            s_press_synthetic = false;
+        }
+        if (ev.type == type && edge_counts(&ev, type)) {
+#else
         if (ev.epoch == muse_input_call_epoch() && ev.type == type) {
+#endif
             if (type == MUSE_PTT_DOWN) {
                 s_press_input_epoch = ev.epoch;
                 s_press_mark = ev.mark;
                 s_press_us = ev.at_us;
+                note_press_synthetic(&ev);
             }
             return true;
+        }
+        if (ev_synthetic(&ev) && ev.type == MUSE_PTT_DOWN) {
+            muse_wakeword_turn_ended();   /* a hands-free press dropped: its capture closes */
         }
         muse_input_clear_call_pending(ev.mark);   /* a press dropped here starts nothing */
     }
@@ -315,6 +405,7 @@ static void feed_live(void)
 /* Streams the note being recorded from its start, then the rest as it comes. */
 static void go_live(void)
 {
+    if (hands_free_off()) return;
     muse_hatch_turn_begin();
     s_live = s_tried = true;
     s_sent = 0;
@@ -324,6 +415,7 @@ static void go_live(void)
 /* One chunk of speech: into the stats, and on to Hatch, by way of the kept note if there is one. */
 static void take(rec_stats_t *st, const int16_t *pcm)
 {
+    if (hands_free_off()) return;
     keep(st, pcm, MUSE_AUDIO_CHUNK);
     if (!s_rec) {
         if (s_live) {
@@ -355,10 +447,29 @@ static void take_pre(rec_stats_t *st, size_t chunks)
  * kept note to fall back on (why says what failed). There is no start chirp:
  * anything played now would land on top of the first words.
  */
-static bool record(char *why, size_t cap)
+static bool record(bool seeded, char *why, size_t cap)
 {
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* A hands-free turn takes the chunks this task already read past its
+     * seed (the wake task trails it) before anything goes. If overload
+     * overwrote some, the note can't be continuous: it ends here, unsent. */
+    const int16_t *later[MUSE_WAKEWORD_BACKLOG_CHUNKS];
+    size_t backlog = 0;
+    if (seeded && s_seed_frames &&
+        !muse_wakeword_take_backlog(later, MUSE_WAKEWORD_BACKLOG_CHUNKS, &backlog)) {
+        s_seed_frames = 0;
+        free(s_rec);   /* can_record() allocated it for this note */
+        s_rec = NULL;
+        muse_wakeword_turn_ended();
+        if (cap) why[0] = '\0';
+        return false;
+    }
+#endif
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    s_button_recording = !seeded;
+#endif
     s_rec_n = s_sent = 0;
     s_live = s_tried = false;
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
@@ -371,17 +482,35 @@ static bool record(char *why, size_t cap)
     rec_stats_t st = { 0 };
 
     size_t n = s_pre_fill * MUSE_AUDIO_CHUNK;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if (seeded && s_seed_frames) {
+        /* A hands-free turn: the seeded audio already includes the wake
+         * word, and the button ring would double-count the overlap. Then
+         * what this task had already read past the seed's end (taken
+         * above), so the command has no gap. */
+        for (size_t off = 0; off < s_seed_frames; off += MUSE_AUDIO_CHUNK) {
+            take(&st, s_seed + off);
+            n += MUSE_AUDIO_CHUNK;
+        }
+        for (size_t i = 0; i < backlog; i++) {
+            take(&st, later[i]);
+            n += MUSE_AUDIO_CHUNK;
+        }
+    }
+    s_seed_frames = 0;   /* used once, never by a button turn */
+#endif
     /* Link-only boards upload synchronously. Replay the longer buffered hold
      * in short bursts between mic reads, rather than stalling capture while
      * sending the whole prefix. The voice-session backend has a larger FIFO. */
     take_pre(&st, MUSE_LOW_MEM ? PRE_CHUNKS : s_pre_fill);
     bool released = false;
     size_t stop_at = MAX_FRAMES;
-    while (n + MUSE_AUDIO_CHUNK <= stop_at) {
+    while (n + MUSE_AUDIO_CHUNK <= stop_at && !hands_free_off()) {
         if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
             break;
         }
         muse_state_set_level(muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK));
+        muse_wakeword_on_audio(s_chunk, MUSE_AUDIO_CHUNK);   /* live endpointing feed */
 #if MUSE_LOW_MEM
         if (s_pre_fill) {
             /* Keep new input behind the opening backlog until it drains. */
@@ -425,13 +554,32 @@ static bool record(char *why, size_t cap)
          * Capture runs 60-80 ms behind real time and people let go on their
          * last syllable, so keep going briefly after release.
          */
-        if (!released && got_event(NOTE_TOGGLE ? MUSE_PTT_DOWN : MUSE_PTT_UP)) {
+        /* A wake word note ends at its synthetic release (endpointing or
+         * disable) in toggle builds too: no second press is coming. */
+        if (!released && got_event(NOTE_TOGGLE && !seeded ? MUSE_PTT_DOWN : MUSE_PTT_UP)) {
             released = true;
             stop_at = n + TAIL_FRAMES < MAX_FRAMES ? n + TAIL_FRAMES : MAX_FRAMES;
         }
     }
+    if (hands_free_off()) {
+        /* Listening was turned off: drop the note, abandon a streamed start. */
+        if (s_live) muse_hatch_turn_cancel();
+        s_live = false;
+        free(s_rec);
+        s_rec = NULL;
+        muse_state_set_level(0);
+        if (!released) muse_wakeword_turn_ended();
+        if (cap) why[0] = '\0';
+        return false;
+    }
     take_pre(&st, s_pre_fill);
     muse_state_set_level(0);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    s_button_recording = false;
+#endif
+    if (seeded && !released) {
+        muse_wakeword_turn_ended();   /* the cap or a failure ended it, not the glue */
+    }
 
     char tail[160];
     int tl = 0;
@@ -456,6 +604,7 @@ static void go_idle(const char *caption);
  */
 static bool hatch_reply(bool *delivered, bool incoming)
 {
+    muse_wakeword_set_playback(true);   /* never trigger on Muse's own voice */
     muse_state_set_progress(0); /* Recording progress must not carry into the reply. */
     muse_state_set_mode(MUSE_MODE_THINKING);
     /* Until there's a transcript or reply; a late reply has no note to send. */
@@ -503,6 +652,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
             case MUSE_HATCH_EV_ERROR:
                 ESP_LOGW(TAG, "muse: %s", text);
                 muse_state_set_level(0);
+                muse_wakeword_set_playback(false);
                 go_idle(text);
                 return false;
             default:
@@ -514,6 +664,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
             muse_hatch_turn_cancel();
             muse_state_set_progress(0);
             muse_state_set_level(0);
+            muse_wakeword_set_playback(false);
             return true;
         }
         size_t n = muse_hatch_turn_read(buf, MUSE_AUDIO_CHUNK, speaking || done ? 0 : 20);
@@ -561,6 +712,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
         }
     }
     muse_state_set_level(0);
+    muse_wakeword_set_playback(false);
     ESP_LOGI(TAG, "muse reply: %.2fs of audio, %.2fs total", (double)played / MUSE_AUDIO_RATE,
              (esp_timer_get_time() - t0) / 1e6);
     if (incomplete[0]) {
@@ -684,8 +836,24 @@ typedef enum {
  */
 static note_result_t note_held(bool wake, bool barge_in)
 {
-    if (wake || barge_in) s_pre_fill = 0;
+    /* A wake word press brings its own pre-roll (the seed, which ends where
+     * speech started), so the idle ring would repeat that audio. */
+    if (wake || barge_in || s_press_synthetic) s_pre_fill = 0;
     int settle = barge_in ? SETTLE_CHUNKS : 0;
+    if (s_press_synthetic) {
+        if (hands_free_off()) return NOTE_CANCELLED;
+        /* A wake detection already qualified a hands-free turn and its seed
+         * holds the start, so there's no hold to measure: record() takes it
+         * now, and the wake core hears every chunk from here (endpointing,
+         * caps, a press taking it over). After a barge-in, Muse's own tail
+         * is still skipped. */
+        for (int i = 0; i < settle; i++) {
+            if (muse_audio_read(s_chunk, MUSE_AUDIO_CHUNK) != ESP_OK) {
+                return atomic_load(&s_shutdown) ? NOTE_CANCELLED : NOTE_CAPTURE_ERROR;
+            }
+        }
+        return NOTE_ACCEPTED;
+    }
     size_t captured = 0;
     if (!wake) {
         muse_state_set_mode(MUSE_MODE_LISTENING);
@@ -695,11 +863,16 @@ static note_result_t note_held(bool wake, bool barge_in)
         if (atomic_load(&s_shutdown) || s_press_input_epoch != muse_input_call_epoch()) return NOTE_CANCELLED;
         muse_input_event_t ev;
         bool edge = xQueuePeek(s_queue, &ev, 0) == pdTRUE;
+        if (edge && ev_synthetic(&ev) && !s_press_synthetic) {
+            xQueueReceive(s_queue, &ev, 0);   /* wake word edges never shape a button note */
+            if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
+            continue;
+        }
         int64_t until = edge ? ev.at_us : esp_timer_get_time();
         bool eligible = !settle && (NOTE_TOGGLE ? captured >= NOTE_MIN_RECORD_FRAMES :
             !note_requires_hold() ||
             (until - s_press_us >= NOTE_MIN_HOLD_US && captured >= NOTE_MIN_RECORD_FRAMES));
-        if (edge && NOTE_TOGGLE && ev.type != MUSE_PTT_END_CALL) {
+        if (edge && NOTE_TOGGLE && !s_press_synthetic && ev.type != MUSE_PTT_END_CALL) {
             if (ev.type == MUSE_PTT_UP) {
                 xQueueReceive(s_queue, &ev, 0);   /* letting go doesn't stop a toggled note */
                 continue;
@@ -712,7 +885,7 @@ static note_result_t note_held(bool wake, bool barge_in)
         if (edge) {
             /* Leave an admitted release for record()'s capture-lag tail, and
              * a later DOWN for the next gesture. Never borrow its hold time. */
-            if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP) {
+            if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP && ev_synthetic(&ev) == s_press_synthetic) {
                 if (eligible) return NOTE_ACCEPTED;
                 xQueueReceive(s_queue, &ev, 0);
                 int64_t held_us = until - s_press_us;
@@ -755,6 +928,11 @@ static bool ptt_held_on_waking(void)
             return false;
         }
         if (xQueuePeek(s_queue, &ev, 0) == pdTRUE) {
+            if (ev_synthetic(&ev)) {
+                xQueueReceive(s_queue, &ev, 0);   /* not this finger's release */
+                if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
+                continue;
+            }
             s_pre_fill = 0;
             if (ev.type != MUSE_PTT_DOWN) xQueueReceive(s_queue, &ev, 0);
             return false;
@@ -843,7 +1021,7 @@ typedef enum {
  * Gives Hatch a note from *sent on, waiting for room as it goes, then ends
  * the turn. Stops for a press only if `yield`.
  */
-static feed_t feed_rest(const int16_t *pcm, size_t frames, size_t *sent, bool yield)
+static feed_t feed_rest(const int16_t *pcm, size_t frames, size_t *sent, bool yield, bool wake_owned)
 {
     char text[96];
     int64_t moved = esp_timer_get_time();
@@ -854,6 +1032,9 @@ static feed_t feed_rest(const int16_t *pcm, size_t frames, size_t *sent, bool yi
                 ESP_LOGW(TAG, "muse: %s", text);
                 return FEED_FAILED;
             }
+        }
+        if (wake_owned && hands_free_off()) {
+            return FEED_FAILED;   /* listening turned off: nothing more goes, no commit */
         }
         if (*sent == frames) {
             break;
@@ -915,7 +1096,7 @@ static bool send_held(bool quiet)
     }
     muse_hatch_turn_begin();
     size_t sent = 0;
-    feed_t fed = feed_rest(h->pcm, h->frames, &sent, true);
+    feed_t fed = feed_rest(h->pcm, h->frames, &sent, true, false);
     bool delivered = false, interrupted = false;
     if (fed == FED && quiet) {
         delivered = wait_delivered();
@@ -992,7 +1173,7 @@ static bool finish_note(void)
     if (s_rec) {
         bool fed = false, interrupted = false;
         delivered = false;
-        if (s_live && s_sent == s_rec_n) {
+        if (s_live && s_sent == s_rec_n && !hands_free_off()) {
             muse_hatch_turn_end();   /* before the chirp, which takes ~90 ms */
             fed = true;
         }
@@ -1001,7 +1182,7 @@ static bool finish_note(void)
             /* Hatch is behind (still connecting, say): the rest from the kept note. */
             muse_state_set_mode(MUSE_MODE_THINKING);
             muse_state_set_caption("SENDING VOICE NOTE");
-            fed = feed_rest(s_rec, s_rec_n, &s_sent, false) == FED;
+            fed = feed_rest(s_rec, s_rec_n, &s_sent, false, true) == FED;
             if (!fed) {
                 muse_hatch_turn_cancel();
             }
@@ -1009,8 +1190,8 @@ static bool finish_note(void)
         if (fed) {
             interrupted = hatch_reply(&delivered, false);
         }
-        if (delivered || interrupted) {
-            drop_rec();
+        if (delivered || interrupted || hands_free_off()) {
+            drop_rec();   /* a hands-free note whose listening was turned off is never kept */
         } else {
             hold_rec(s_tried);
         }
@@ -1094,6 +1275,11 @@ static void call_input(call_ui_t *c)
     while (xQueueReceive(s_queue, &ev, 0) == pdTRUE) {
         muse_state_poke();
         muse_input_clear_call_pending(ev.mark);   /* in the call now, or dropped */
+        if (ev_synthetic(&ev)) {
+            /* A call is never driven by the wake word: drop its edges. */
+            if (ev.type == MUSE_PTT_DOWN) muse_wakeword_turn_ended();
+            continue;
+        }
         if (ev.epoch != c->input_epoch) continue;
         if (c->hung_up) continue;
         if (ev.type == MUSE_PTT_END_CALL || (!c->ptt && ev.type == MUSE_PTT_DOWN)) {
@@ -1160,6 +1346,7 @@ static void run_call(bool ptt, size_t waking_chunks)
         if (!atomic_load(&s_shutdown)) go_idle("INPUT LOST - PRESS AGAIN");
         return;
     }
+    muse_wakeword_set_ptt_turn(true);   /* a call pauses the runner like a recorded turn */
     muse_state_set_level(0);
     muse_state_set_progress(0);
     muse_state_set_caption("CONNECTING TO MUSE...");
@@ -1333,6 +1520,7 @@ static void run_call(bool ptt, size_t waking_chunks)
         }
     }
     muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+    muse_wakeword_set_ptt_turn(false);
 #if CONFIG_MUSE_VOICE_SOFTWARE_AEC
     muse_aec_stop(aec);
 #endif
@@ -1360,11 +1548,17 @@ static void voice_task(void *arg)
     muse_audio_selftest();
     for (;;) {
         bool wake = false;
+        /* This press came from the wake word glue. One that interrupted a
+         * reply (pending_down) keeps that: it is a voice note, not a call. */
+        bool synthetic = pending_down && s_press_synthetic;
         if (!pending_down) {
             muse_input_event_t ev;
             bool asleep = muse_state_asleep();
             bool battery = muse_state_on_battery();
-            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback;
+            /* The wake word opt-in keeps the codecs powered. Not
+             * muse_wakeword_listening(): it reads false while resting, and
+             * briefly after a reply until the wake task applies playback off. */
+            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && !muse_wakeword_enabled();
 #if HOLD_NOTES
             /* A press goes first: send_held() leaves it queued and returns
              * without backing off, so retrying before it's read would spin. */
@@ -1393,22 +1587,28 @@ static void voice_task(void *arg)
             }
             if (s_chirp) {
                 s_chirp = false;
+                muse_wakeword_set_playback(true);
                 muse_audio_chirp(1);
+                muse_wakeword_set_playback(false);
                 pre_reset();
             }
             if (s_mp3test) {
                 s_mp3test = false;
+                muse_wakeword_set_playback(true);
                 int16_t *pcm = NULL;
                 size_t n = muse_hatch_mp3_selftest(&pcm);
                 for (size_t i = 0; i < n; i += MUSE_AUDIO_CHUNK) {
                     muse_audio_write(pcm + i, n - i < MUSE_AUDIO_CHUNK ? n - i : MUSE_AUDIO_CHUNK);
                 }
                 free(pcm);
+                muse_wakeword_set_playback(false);
                 pre_reset();
             }
             if (s_loopback) {
                 s_loopback = false;
+                muse_wakeword_set_playback(true);
                 muse_audio_loopback_test(muse_settings_volume());
+                muse_wakeword_set_playback(false);
                 pre_reset();
             }
             /* A press goes first (a waking one too: it may only wake Muse). */
@@ -1432,14 +1632,19 @@ static void voice_task(void *arg)
                 continue;
             }
             muse_state_poke();
-            if (ev.type != MUSE_PTT_DOWN || ev.epoch != muse_input_call_epoch()) {
+            NOTE_REAL_EDGE(ev);
+            /* Synthetic (wake word) edges carry no call epoch/mark. */
+            if (ev.type != MUSE_PTT_DOWN ||
+                (!ev_synthetic(&ev) && ev.epoch != muse_input_call_epoch())) {
                 muse_input_clear_call_pending(ev.mark);
                 continue;
             }
             s_press_input_epoch = ev.epoch;
             s_press_mark = ev.mark;
             s_press_us = ev.at_us;
+            note_press_synthetic(&ev);
             wake = ev.wake;
+            synthetic = ev_synthetic(&ev);
         }
         bool ptt = muse_voice_ptt_enabled();
         if (wake && ptt && !ptt_held_on_waking()) {
@@ -1469,11 +1674,12 @@ static void voice_task(void *arg)
         if (atomic_load(&s_shutdown)) {
             pending_down = false;
             muse_input_clear_call_pending(s_press_mark);
+            if (synthetic) muse_wakeword_turn_ended();
             continue;
         }
         muse_wifi_power(MUSE_WIFI_FULL);
 #if CONFIG_MUSE_REALTIME_VOICE
-        if (ptt) {
+        if (ptt && !synthetic) {   /* a wake word turn is a voice note, not a call */
             pending_down = false;
             if (muse_voice_call_ready()) run_call(true, wake ? s_pre_fill : 0);
             else {
@@ -1488,6 +1694,7 @@ static void voice_task(void *arg)
         muse_input_clear_call_pending(s_press_mark);
         if (!can_record()) {
             pending_down = false;
+            if (synthetic) muse_wakeword_turn_ended();
             pre_reset();
             continue;
         }
@@ -1499,7 +1706,14 @@ static void voice_task(void *arg)
             drop_rec();
             pre_reset();
             muse_state_set_level(0);
+            if (synthetic) muse_wakeword_turn_ended();
             if (atomic_load(&s_shutdown) || muse_state_mode(NULL) == MUSE_MODE_OFF) continue;
+            if (synthetic) {
+                /* A hands-free turn that didn't qualify just ends: never a
+                 * call, and no hint about a button nobody pressed. */
+                go_idle(result == NOTE_CAPTURE_ERROR ? "MICROPHONE ERROR - TRY AGAIN" : "");
+                continue;
+            }
 #if CONFIG_MUSE_REALTIME_VOICE && !CONFIG_MUSE_BOARD_M5STACK_STOPWATCH
             /* Other boards retain tap-to-call beside holding for a note. */
             if (result == NOTE_TAP && s_press_input_epoch == muse_input_call_epoch()
@@ -1515,7 +1729,9 @@ static void voice_task(void *arg)
             continue;
         }
         char why[96];
-        bool ok = record(why, sizeof(why));
+        muse_wakeword_set_ptt_turn(!synthetic);   /* a real turn pauses the runner */
+        bool ok = record(synthetic, why, sizeof(why));
+        muse_wakeword_set_ptt_turn(false);
         note_toggled(false);
         if (!ok) {
             pre_reset();
@@ -1530,6 +1746,20 @@ static void voice_task(void *arg)
         }
     }
 }
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+void muse_voice_seed_preroll(const int16_t *pcm, size_t frames)
+{
+    if (!s_seed || !pcm) {
+        s_seed_frames = 0;   /* NULL clears a seed whose press never went */
+        return;
+    }
+    size_t n = frames < SEED_FRAMES ? frames : SEED_FRAMES;
+    n -= n % MUSE_AUDIO_CHUNK;   /* whole chunks only: take() works in chunks */
+    memcpy(s_seed, pcm, n * sizeof(int16_t));
+    s_seed_frames = n;   /* publish after the copy */
+}
+#endif
 
 esp_err_t muse_voice_start(QueueHandle_t queue)
 {
@@ -1550,6 +1780,16 @@ esp_err_t muse_voice_start(QueueHandle_t queue)
         muse_state_set_caption("AUDIO INIT FAILED");
         return ESP_ERR_NO_MEM;
     }
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* The wake word rides the voice pipeline (its tap is this task's reads,
+     * its presses go to the same queue), and needs the seed buffer. */
+    s_seed = heap_caps_malloc(SEED_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);
+    if (!s_seed || muse_wakeword_init(queue) != ESP_OK) {
+        ESP_LOGW(TAG, "wake word unavailable; push-to-talk unaffected");
+        free(s_seed);   /* heap_caps_malloc memory: free() returns it */
+        s_seed = NULL;
+    }
+#endif
     return ESP_OK;
 }
 

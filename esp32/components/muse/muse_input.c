@@ -52,6 +52,7 @@
 #include "muse_latest_reply.h"
 #endif
 #include "muse_voice.h"
+#include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
@@ -986,6 +987,22 @@ static bool console_command(char *line, bool whole)
         return true;
     }
 #endif
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if (!strcmp(line, "wake") || !strcmp(line, "wake.on") || !strcmp(line, "wake.off")) {
+        if (line[4] == '.') {
+            muse_wakeword_set_enabled(!strcmp(line, "wake.on"));
+        }
+        muse_wakeword_status_t st;
+        muse_wakeword_status(&st);
+        printf("@wake {\"enabled\":%s,\"listening\":%s,\"runner\":\"%s\",\"wakes\":%u,\"cancels\":%u,"
+               "\"submits\":%u,\"drops\":%u}\n",
+               st.enabled ? "true" : "false", st.listening ? "true" : "false", st.runner,
+               (unsigned)st.wakes, (unsigned)st.cancels, (unsigned)st.submits,
+               (unsigned)st.dropped_frames);
+        fflush(stdout);
+        return true;
+    }
+#endif
     if (!strncmp(line, "face=", 5)) {
         set_face(line + 5);
         return true;
@@ -1021,7 +1038,8 @@ static bool console_command(char *line, bool whole)
  * the device's state, "power" the battery meter (muse_battery.h) and
  * "power.reset" starts it over, "nap" sleeps and leaves Wi-Fi at once (as
  * two minutes asleep on battery would; 'w' rejoins), "face=" shows a face
- * (see set_face), and "chat=" sends a typed message to Hatch (see chat_line
+ * (see set_face), "wake" prints the wake word state, "wake.on" and "wake.off"
+ * toggle listening, and "chat=" sends a typed message to Hatch (see chat_line
  * and tools/muse/chat.py).
  */
 static void serial_task(void *arg)
