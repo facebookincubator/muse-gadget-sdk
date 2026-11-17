@@ -46,6 +46,9 @@
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
+#if CONFIG_MUSE_MIRROR
+#include "muse_mirror.h"
+#endif
 #include "muse_pixel.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
@@ -1280,7 +1283,7 @@ static void on_volume_swipe(lv_event_t *e)
     case LV_EVENT_PRESSED:
         s_volume_swipe = (muse_volume_swipe_t){0};
         if (volume_swipe_allowed()) {
-            lv_indev_get_point(s_indev, &point);
+            lv_indev_get_point(lv_indev_active(), &point);
             muse_volume_swipe_begin(&s_volume_swipe, point.x, point.y, s_h, muse_settings_volume());
         }
         break;
@@ -1290,7 +1293,7 @@ static void on_volume_swipe(lv_event_t *e)
             finish_volume_swipe();
             break;
         }
-        lv_indev_get_point(s_indev, &point);
+        lv_indev_get_point(lv_indev_active(), &point);
         int old_value = s_volume_swipe.value;
         if (muse_volume_swipe_move(&s_volume_swipe, point.x, point.y)) {
             s_volume_swiping = true;
@@ -2551,6 +2554,10 @@ esp_err_t muse_ui_start(void)
     }
     build_overlays();
     lv_timer_create(frame_tick, muse_board->frame_ms, NULL);
+#if CONFIG_MUSE_MIRROR
+    lv_indev_t *mirror_pointer = muse_mirror_start(disp);
+    if (mirror_pointer) lv_indev_add_event_cb(mirror_pointer, on_any_press, LV_EVENT_PRESSED, NULL);
+#endif
     s_ready = true;
     muse_board->display_unlock();
 
