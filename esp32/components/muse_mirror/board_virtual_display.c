@@ -40,6 +40,11 @@
 #define W CONFIG_MUSE_VIRTUAL_DISPLAY_WIDTH
 #define H CONFIG_MUSE_VIRTUAL_DISPLAY_HEIGHT
 #define BUF_LINES 40
+#if CONFIG_MUSE_VIRTUAL_DISPLAY_ROUND
+#define ROUND true
+#else
+#define ROUND false   /* a disabled bool is left undefined */
+#endif
 
 static const char *TAG = "board";
 static SemaphoreHandle_t s_lv_lock;
@@ -183,7 +188,7 @@ static const muse_board_t s_board = {
     .name = CONFIG_MUSE_VIRTUAL_DISPLAY_NAME,
     .width = W,
     .height = H,
-    .round = CONFIG_MUSE_VIRTUAL_DISPLAY_ROUND,
+    .round = ROUND,
     .touch = true,
     .diagonal_in = CONFIG_MUSE_VIRTUAL_DISPLAY_DIAGONAL / 100.0f,
     /* Pressed only from the mirror window; named as the round Waveshare 1.75C names them. */
