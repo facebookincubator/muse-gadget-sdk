@@ -75,6 +75,14 @@ jobs:
         if: matrix.name == 'newest'
         run: sudo env "PATH=$PATH" python -m pytest -q -rs -p no:cacheprovider tests/test_install_sh.py
 
+      # The wake word's native library (the ESP32 runner, built from pinned
+      # registry archives), then the detector tests against it.
+      - name: Wake-word library
+        run: bash wakeword/build.sh --out "$RUNNER_TEMP/wakeword"
+
+      - name: Wake-word tests
+        run: MUSE_WAKEWORD_LIBRARY="$RUNNER_TEMP/wakeword/libmuse_wakeword.so" python -m pytest -q wakeword/tests
+
   shellcheck:
     name: ShellCheck install.sh
     runs-on: ubuntu-latest
