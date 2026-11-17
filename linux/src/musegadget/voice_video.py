@@ -30,10 +30,10 @@ import os
 import queue
 import shutil
 import subprocess
-
-from musegadget import reaper
 import threading
 import time
+
+from musegadget import reaper
 
 log = logging.getLogger(__name__)
 
