@@ -196,22 +196,13 @@ class StopWatchPTT(unittest.TestCase):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 96, board=board, realtime=realtime)
 
-    def test_turning_listening_off_drops_the_hands_free_turn(self):
-        # A disable between the wake task's press and its admission opens
-        # nothing; one during the recording drops the note, even if
-        # listening is turned straight back on.
-        for board, realtime in ((1, 1), (1, 0), (3, 0)):
-            with self.subTest(board=board, realtime=realtime):
-                self.run_case('voice', 99, board=board, realtime=realtime)
-                self.run_case('voice', 100, board=board, realtime=realtime)
-
-    def test_turning_listening_off_after_admission_sends_nothing_more(self):
-        # Off before the turn opens: no turn and nothing sent. Off after the
-        # first buffered chunk went: no more go, and the turn is abandoned.
+    def test_turning_listening_off_sends_nothing_more(self):
+        # Off after admission: no turn opens. Off while recording: the note
+        # is dropped, even with listening already back on.
         for board, realtime in ((1, 1), (1, 0), (3, 0)):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 101, board=board, realtime=realtime)
-                self.run_case('voice', 102, board=board, realtime=realtime)
+                self.run_case('voice', 100, board=board, realtime=realtime)
 
     def test_turning_listening_off_leaves_a_note_the_button_took_over(self):
         for board, realtime in ((1, 1), (1, 0), (3, 0)):

@@ -115,10 +115,9 @@ uint32_t muse_wakeword_core_tick(muse_wakeword_core_t *core, const muse_wakeword
         return MUSE_WW_ACTION_NONE;
     }
 
-    /* Disable is immediate: close a synthetic hold so the turn it
-     * opened ends now, as a cancel: turning listening off must not send
-     * what it was capturing (muse_voice drops that note). A converted
-     * capture is the button's to end, but the session is over either way. */
+    /* Disable is immediate: a synthetic hold closes as a cancel (muse_voice
+     * drops that note); a converted capture is the button's to end, but
+     * the session is over either way. */
     if (!in->enabled) {
         uint32_t act = MUSE_WW_ACTION_NONE;
         if (core->state == MUSE_WW_CAPTURING) {
@@ -182,9 +181,8 @@ uint32_t muse_wakeword_core_tick(muse_wakeword_core_t *core, const muse_wakeword
         return MUSE_WW_ACTION_NONE;
     }
 
-    /* The gadget must never trigger on its own voice. A wake still
-     * waiting for speech ends: a reply (or a button turn) starting means
-     * the moment passed, and its start timeout must not resume after it. */
+    /* The gadget must never trigger on its own voice, and a wake still
+     * waiting for speech ends: its moment has passed. */
     if (in->playback) {
         if (in->event == WW_EVENT_WAKE) {
             core->stats.suppressed_wakes++;
@@ -371,21 +369,6 @@ const muse_ww_chunk_t *muse_ww_history_push(muse_ww_history_t *h, const int16_t 
     }
     memcpy(slot->pcm, pcm, sizeof(slot->pcm));
     return slot;
-}
-
-bool muse_ww_history_note_time(muse_ww_history_t *h, uint32_t now_ms, uint32_t max_pause_ms)
-{
-    if (!h) {
-        return false;
-    }
-    bool paused = h->timed && (uint32_t)(now_ms - h->last_ms) > max_pause_ms;
-    if (paused) {
-        h->next_seq++;   /* a number no chunk gets: the gap */
-        h->held = 0;     /* nothing from before it may join a backlog */
-    }
-    h->last_ms = now_ms;
-    h->timed = true;
-    return paused;
 }
 
 size_t muse_ww_history_since(const muse_ww_history_t *h, uint32_t from, const int16_t *out[], size_t max,

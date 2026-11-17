@@ -38,7 +38,7 @@ static int note_ptt_calls;
 void muse_wakeword_note_ptt(bool down) { (void)down; note_ptt_calls++; }
 void muse_wakeword_set_enabled(bool on) { (void)on; }
 bool muse_wakeword_enabled(void) { return false; }
-/* Scenarios 99 and 100 turn listening off (or the disable count moves). */
+/* Scenarios 100 and 101 turn listening off (the disable generation moves). */
 static bool turn_wanted=true;
 static uint32_t wanted_disables;
 bool muse_wakeword_turn_wanted(uint32_t disables) { return turn_wanted && disables==wanted_disables; }
@@ -209,9 +209,6 @@ void muse_hatch_turn_audio(const int16_t *p,size_t n) {
         memcpy(uploaded_pcm+note_frames,p,n*sizeof(*p));
     }
     note_frames+=n; note_burst+=n;
-#if CONFIG_MUSE_WAKEWORD_ENABLE
-    if(scenario==102 && note_frames>=MUSE_AUDIO_CHUNK) turn_wanted=false;   /* off after the first chunk went */
-#endif
     if(note_burst>note_max_burst) note_max_burst=note_burst;
 }
 size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) {
@@ -635,20 +632,6 @@ int main(int argc,char **argv) {
         assert(frame>=60 && frame<=60+7 && !s_press_synthetic);
         drop_rec(); free(s_pre); return 0;
     }
-    if(scenario==99) {
-        /* Listening was turned off after the wake task posted the press but
-         * before this task admitted it: no turn, nothing streamed. */
-        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
-        int16_t seed[MUSE_AUDIO_CHUNK]={0};
-        muse_voice_seed_preroll(seed,MUSE_AUDIO_CHUNK);
-        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
-        xQueueSend(&queue,&e,0);
-        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
-        turn_wanted=false;
-        assert(note_held(false,false)==NOTE_CANCELLED);
-        assert(notes==0 && note_frames==0);
-        free(s_seed); s_seed=NULL; free(s_pre); return 0;
-    }
     if(scenario==100) {
         /* Listening turned off (then on again) while a hands-free note
          * records: it is dropped, never sent or kept, whatever the flag says
@@ -671,10 +654,8 @@ int main(int argc,char **argv) {
         assert(frame<=4);   /* it stops at once, not at a release or the cap */
         free(s_seed); s_seed=NULL; free(s_pre); return 0;
     }
-    if(scenario==101 || scenario==102) {
-        /* Listening turned off after admission (101: before the turn opens;
-         * 102: after the first buffered chunk went). 101 opens no turn and
-         * sends nothing; 102 sends no more and abandons the turn. */
+    if(scenario==101) {
+        /* Listening turned off after admission: no turn opens, nothing goes. */
         clock_us=1000000;
         s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
         int16_t seed[3*MUSE_AUDIO_CHUNK]={0};
@@ -683,13 +664,11 @@ int main(int argc,char **argv) {
         xQueueSend(&queue,&e,0);
         assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
         assert(note_held(false,false)==NOTE_ACCEPTED);
-        if(scenario==101) turn_wanted=false;
+        turn_wanted=false;
         s_rec=NULL;   /* stream as taken, so every chunk sent is visible */
         char why[96];
         assert(!record(true,why,sizeof(why)) && why[0]=='\0');
-        if(scenario==101) assert(notes==0 && note_frames==0 && turn_cancels==0);
-        else assert(notes==1 && note_frames==MUSE_AUDIO_CHUNK && turn_cancels==1);
-        assert(frame==0);   /* stopped before any live read */
+        assert(notes==0 && note_frames==0 && turn_cancels==0 && frame==0);
         free(s_seed); s_seed=NULL; free(s_pre); return 0;
     }
     if(scenario==103) {

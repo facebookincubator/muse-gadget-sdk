@@ -54,8 +54,7 @@ typedef struct {
     bool synthetic;   /* posted by the wake word glue, not a finger: an
                        * intentional hold, ended by endpointing, and a real
                        * press during it takes over instead of retriggering */
-    uint32_t disables;   /* synthetic: the glue's disable count when posted
-                          * (muse_wakeword_turn_wanted) */
+    uint32_t disables;   /* synthetic: the disable generation at the wake */
 #endif
 } muse_input_event_t;
 
