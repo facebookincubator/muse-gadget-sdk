@@ -20,7 +20,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Meross smart plugs](gadget-meross-smart-plugs/SKILL.md) — local switching with supplied keys.
 - [TP-Link Kasa EP10](gadget-tplink-kasa-ep10/SKILL.md) — relay and LED; no metering.
 - [TP-Link Kasa EP25](gadget-tplink-kasa-ep25/SKILL.md) — relay, LED, energy and supported auto-off.
-- [Nanoleaf](gadget-nanoleaf/SKILL.md) — power, brightness and colour on Light Panels, Shapes, Canvas, Lines, Elements and Skylight through the local API after controller button pairing.
+- [Nanoleaf](gadget-nanoleaf/SKILL.md) — power, brightness and color through the local API after button pairing.
 
 ## Speakers, displays and TVs
 
