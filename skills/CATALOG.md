@@ -77,10 +77,10 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 ## Read-only network and camera access
 
+- [NUT UPS](gadget-nut-ups/SKILL.md) — read-only UPS and battery status from a Network UPS Tools upsd server, using upsc on a Linux gadget.
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
 - [Wyze RTSP cameras](gadget-wyze-rtsp-cameras/SKILL.md) — viewing/capture with compatible legacy firmware already installed.
 - [yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
-- [NUT UPS](gadget-nut-ups/SKILL.md) — read-only UPS and battery status from a Network UPS Tools upsd server through a Linux gadget; raw TCP, not Home Link.
 
 ## Vehicles and climate
 

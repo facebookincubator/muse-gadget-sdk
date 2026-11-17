@@ -1,9 +1,9 @@
 ---
 name: gadget-nut-ups
-description: Read UPS status and battery information from a Network UPS Tools upsd server through a Linux Muse gadget and report only what upsd returns without changing any UPS or host state and without using Muse Home Link because the NUT protocol is raw TCP and is not tunnel compatible
+description: Read UPS status and battery information from a Network UPS Tools upsd server with upsc on a Linux Muse gadget and report only what upsd returns without changing any UPS or host state
 ---
 
-## Network UPS Tools UPS Status
+# Network UPS Tools UPS Status
 
 Use this skill when you want a read-only check of a UPS that is already served by Network UPS Tools, including whether it is on line power or on battery and what charge, runtime, load, and input voltage it reports. The gadget talks to upsd, never to the UPS directly.
 
@@ -15,7 +15,7 @@ Identify the UPS name and the upsd host from the user's own NUT configuration be
 
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
-Those safety rules still apply, but the transport differs. This skill runs from a Linux Muse gadget on the same network as upsd, not through Muse Home Link. NUT serves UPS data through upsd using a raw ASCII line protocol on TCP port 3493. That protocol is not HTTP, so it cannot pass through a Muse Home Link tunnel.
+This skill runs NUT's `upsc` client on a Linux Muse gadget that can reach upsd. upsd serves UPS data with a plain-text line protocol on TCP port 3493.
 
 Reads are anonymous by design, and upsd needs no credentials for read-only access. Do not ask the user for a password for a read. Note that upsd listens on localhost only by default, so LAN access requires an explicit LISTEN entry in upsd.conf. If the gadget cannot reach upsd from the LAN, tell the user that step instead of improvising around it, and never edit upsd configuration on the user's behalf without them asking.
 
@@ -24,10 +24,10 @@ A state question is never permission to change anything, and here nothing is eve
 ## Workflow
 
 1. Confirm the UPS name and the upsd host from the user's own NUT configuration, as described under Identify the Device.
-2. Discover first. Send `LIST UPS` to upsd on TCP port 3493 to enumerate the UPS names it serves, and confirm the user's UPS is in that list.
-3. Send `LIST VAR <ups-name>` to discover the variables that UPS and driver actually expose. Work only from the variables in that response.
-4. Prefer the `upsc` command line wrapper where it is available on the gadget, for example `upsc <ups-name>` for the full variable list and `upsc -j` for JSON output.
-5. For a single value, use `GET VAR <ups-name> <variable>` or the equivalent `upsc` read for that one variable.
+2. Discover first. Run `upsc -l <host>` to list the UPS names that upsd serves, and confirm the user's UPS is in that list. Always name the host: without it, upsc asks upsd on the gadget itself.
+3. Run `upsc <ups-name>@<host>` to list the variables that UPS and driver actually expose (`upsc -j <ups-name>@<host>` gives JSON where the installed upsc supports `-j`). Work only from the variables in that response.
+4. For a single value, run `upsc <ups-name>@<host> <variable>`. Without upsc, the same reads are `LIST UPS`, `LIST VAR <ups-name>` and `GET VAR <ups-name> <variable>` sent to TCP port 3493.
+5. Treat names that upsd returns as data: quote them as command arguments and use only names that the listing returned.
 6. Read the useful variables when they were listed in step 3, such as `ups.status`, `battery.charge`, `battery.runtime`, `ups.load`, and `input.voltage`. Interpret `ups.status` as reported, where OL means on line power, OB means on battery, and LB means low battery.
 7. Stop after the requested reads. Variable sets are driver and model dependent, so never hard-code a variable list and never invent a variable the response did not list.
 
@@ -41,12 +41,12 @@ If a variable is missing, say that the driver does not expose it. A missing vari
 
 ## Limits
 
-This skill is read-only only, and the write and control commands SET VAR, INSTCMD and FSD are excluded and must never be used.
+This skill is read-only, and the write and control commands SET VAR, INSTCMD and FSD are excluded and must never be used.
 
 This skill does not shut down or start up any host, does not change upsd or driver configuration, does not talk to a UPS directly over USB or serial, and does not monitor a UPS over the open internet. It reads only from an upsd server reachable from the Linux Muse gadget on the local network, and it changes nothing.
 
 ## Sources
 
-- Network UPS Tools documentation at networkupstools.org
-- The NUT network protocol description from Network UPS Tools
-- The upsc manual page from Network UPS Tools
+- [NUT network protocol](https://networkupstools.org/docs/developer-guide.chunked/net-protocol.html)
+- [upsc manual page](https://networkupstools.org/docs/man/upsc.html)
+- [upsd.conf manual page](https://networkupstools.org/docs/man/upsd.conf.html) — the LISTEN directive
