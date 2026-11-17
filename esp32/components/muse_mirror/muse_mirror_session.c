@@ -311,11 +311,12 @@ void muse_mirror_set_screen_state(uint8_t state) {
     if (s_w) dirty_add(0, 0, 0, 0);       /* a frame goes out with it; one pixel's worth of rectangle */
 }
 
-/* On a UART a message takes wire time: with sound at most 250 ms of it, inside the viewer's 300 ms cushion;
- * without, 2 s, inside SEND_MS. A raw row always fits (start() checks it against MSG_MAX). */
+/* On a UART a message takes wire time: at most 250 ms of it, inside the viewer's 300 ms sound cushion, and
+ * short enough that a key the viewer taps or lets go is not held past the input task's long-press times.
+ * A raw row always fits (start() checks it against MSG_MAX). */
 static size_t msg_cap(void) {
     if (!s_cfg.uart || s_link) return MSG_MAX;
-    size_t row = (size_t)s_w * 2 + MUSE_MIRROR_RECT_HDR + 8, wire = uart_baud() / 10 * (s_audio ? 1 : 8) / 4;
+    size_t row = (size_t)s_w * 2 + MUSE_MIRROR_RECT_HDR + 8, wire = uart_baud() / 10 / 4;
     return wire < row ? row : wire < MSG_MAX ? wire : MSG_MAX;
 }
 

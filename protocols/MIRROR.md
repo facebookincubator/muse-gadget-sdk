@@ -76,9 +76,10 @@ a frame. The viewer prints timestamped console lines and can append them
 with `--log FILE`.
 
 The native USB driver has timed writes. Muse's UART adapter has no TX ring
-or hardware flow control; each write waits for wire time. At 115200 baud a
-32 KiB frame, the largest, takes about 2.85 seconds before other overhead,
-within the three seconds a frame may take to send.
+or hardware flow control; each write waits for wire time. On a UART the board
+keeps a screen message to about 250 ms of wire time (2880 bytes at 115200
+baud), so sound and the viewer's key releases are not held up behind it; the
+rest of an update follows in the next messages.
 
 A viewer that sends `Z` takes deflated messages. The board then sends a
 screen message of 256 bytes or more as `Z` followed by the raw deflate
