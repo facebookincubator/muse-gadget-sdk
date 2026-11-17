@@ -46,6 +46,7 @@
 static const char *TAG = "muse_wake";
 
 #define TAP_CHUNKS 25                                  /* 500 ms of scheduling slack */
+#define TAP_PAUSE_MS 200                               /* longer between taps: audio went unheard */
 #define ITEM_BYTES (sizeof(muse_ww_chunk_t))           /* a numbered chunk */
 _Static_assert(MUSE_AUDIO_CHUNK == MUSE_WW_CHUNK_FRAMES, "the tap carries whole muse_audio chunks");
 _Static_assert(MUSE_WAKEWORD_BACKLOG_CHUNKS >= TAP_CHUNKS + 2,
@@ -96,6 +97,7 @@ static volatile bool s_runner_ok = true;   /* wake task writes: the runner can d
 static uint32_t s_capture_chunks;                    /* wake task only, for the log */
 static size_t s_seeded_frames;
 static bool s_up_owed;   /* wake task only: a synthetic release the full queue refused */
+static int64_t s_armed_us;   /* wake task only: when the waiting wake was heard */
 static volatile bool s_turn_end_req;   /* muse_voice ended the hands-free turn itself */
 
 const char *muse_wakeword_runner_kind(void)
@@ -137,6 +139,10 @@ void muse_wakeword_on_audio(const int16_t *pcm, size_t frames)
         s_tap_drops += frames;   /* the voice loops only ever pass whole chunks */
         return;
     }
+    /* A pause in the taps (the voice task away sending a saved note, say)
+     * becomes a numbering gap: the wake task then ends a wake still waiting
+     * for speech and drops its pre-roll, and no backlog spans the pause. */
+    muse_ww_history_note_time(&s_hist, (uint32_t)(esp_timer_get_time() / 1000), TAP_PAUSE_MS);
     /* Numbered and kept for the recorder first, so a chunk the full tap
      * drops still reaches a hands-free note. */
     const muse_ww_chunk_t *item = muse_ww_history_push(&s_hist, pcm);
@@ -240,6 +246,7 @@ static void tick(const muse_wakeword_input_t *in)
     }
     if (before == MUSE_WW_IDLE && now == MUSE_WW_ARMED) {
         ESP_LOGI(TAG, "wake heard (runner=%s), listening for speech", muse_wakeword_runner_kind());
+        s_armed_us = esp_timer_get_time();
         muse_state_set_asleep(false);   /* like a talk press: the prompt must be seen */
         muse_state_set_caption("HEY MUSE HEARD - SPEAK NOW");
     }
@@ -347,6 +354,12 @@ static void apply_requests(void)
         s_applied_playback = s_playback;
         ww_runner_set_suppressed(s_runner, s_applied_playback || s_applied_ptt_turn);
         muse_ww_ring_clear(&s_pre);   /* Muse's own output is never pre-roll */
+        if (s_applied_playback && muse_wakeword_core_gap(&s_core, &s_pre)) {
+            /* A reply started before the speech did: the wake is over, and
+             * its start timeout must not resume once the reply ends. */
+            muse_state_set_caption("%s", "");
+            ESP_LOGI(TAG, "wake ignored (a reply started)");
+        }
         if (!s_applied_playback) {
             ww_runner_reset(s_runner);   /* no stale model state across turns */
         }
@@ -407,6 +420,14 @@ static void wake_task(void *arg)
             if (!s_applied_enabled && muse_wakeword_core_state(&s_core) != MUSE_WW_IDLE) {
                 muse_wakeword_input_t in = { 0 };
                 tick(&in);
+            } else if (muse_wakeword_core_state(&s_core) == MUSE_WW_ARMED &&
+                       esp_timer_get_time() - s_armed_us >= (int64_t)CONFIG_MUSE_WAKEWORD_START_TIMEOUT_MS * 1000) {
+                /* No audio is coming, but the wake's time is up all the
+                 * same: end it (and its pre-roll) by the clock. */
+                if (muse_wakeword_core_gap(&s_core, &s_pre)) {
+                    muse_state_set_caption("%s", "");
+                    ESP_LOGI(TAG, "wake ignored (no speech followed)");
+                }
             } else if (s_up_owed && post_ptt(MUSE_PTT_UP)) {
                 s_up_owed = false;   /* the tap is dry, but the release still goes */
             }
@@ -416,7 +437,7 @@ static void wake_task(void *arg)
         if (s_have_seq && item.seq != s_last_seq + 1) {
             /* The voice side dropped chunks while the tap was full: no seed
              * may span the gap or come from before it. */
-            ESP_LOGW(TAG, "tap overflowed: %" PRIu32 " chunks not heard", (uint32_t)(item.seq - s_last_seq - 1));
+            ESP_LOGW(TAG, "tap gap: audio dropped or paused before chunk %" PRIu32, item.seq);
             if (muse_wakeword_core_gap(&s_core, &s_pre)) {
                 muse_state_set_caption("%s", "");   /* the wake's prompt, as when no speech follows */
             }

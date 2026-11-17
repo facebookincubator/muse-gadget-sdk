@@ -226,26 +226,34 @@ void unload(ww_runner_t *r)
     r->allocator.reset();
 }
 
-/* Checks a tensor against the contract and makes an app-owned TensorImpl
- * over data with its shape and dim order. */
-TensorImpl *bind_tensor(BoundTensor &t, const TensorInfo &info, void *data, size_t want_bytes)
+/* Checks a tensor against the contract (int8, exactly the shape `want`,
+ * a dim order that is a permutation) and makes an app-owned TensorImpl over
+ * data with its shape and dim order. */
+TensorImpl *bind_tensor(BoundTensor &t, const TensorInfo &info, void *data, const int32_t (&want)[kMaxDims])
 {
     const size_t dims = info.sizes().size();
-    if (info.scalar_type() != ScalarType::Char || info.nbytes() != want_bytes || dims == 0 ||
-        dims > kMaxDims || info.dim_order().size() != dims) {
+    if (info.scalar_type() != ScalarType::Char || dims != kMaxDims || info.dim_order().size() != dims) {
         return nullptr;
     }
+    size_t elements = 1;
+    bool seen[kMaxDims] = {};
     for (size_t d = 0; d < dims; d++) {
+        const size_t order = info.dim_order()[d];
+        if (info.sizes()[d] != want[d] || order >= dims || seen[order]) {
+            return nullptr;
+        }
+        seen[order] = true;
         t.sizes[d] = info.sizes()[d];
         t.dim_order[d] = info.dim_order()[d];
+        elements *= (size_t)want[d];   /* the contract's shapes are small: no overflow */
+    }
+    if (info.nbytes() != elements) {
+        return nullptr;
     }
     /* Strides follow the dim order (outermost first). */
     TensorImpl::StridesType stride = 1;
     for (size_t k = dims; k-- > 0;) {
         const size_t d = t.dim_order[k];
-        if (d >= dims) {
-            return nullptr;
-        }
         t.strides[d] = stride;
         stride *= t.sizes[d];
     }
@@ -303,21 +311,29 @@ bool bind_io(ww_runner_t *r)
         p_info->nbytes() != 1) {
         return false;
     }
-    TensorImpl *x = bind_tensor(r->tensors[0], x_info.get(), r->x, WW_MODEL_INPUT_BYTES);
+    static constexpr int32_t kInputShape[kMaxDims] = { 1, WW_MODEL_FEATURES, WW_MODEL_STRIDE, 1 };
+    const auto p_sizes = p_info->sizes();
+    if (p_sizes.size() != 2 || p_sizes[0] != 1 || p_sizes[1] != 1) {
+        return false;
+    }
+    TensorImpl *x = bind_tensor(r->tensors[0], x_info.get(), r->x, kInputShape);
     if (x == nullptr || m.set_input(EValue(Tensor(x)), 0) != Error::Ok ||
         m.set_output_data_ptr(r->p, 1, 0) != Error::Ok) {
         return false;
     }
+    static constexpr int32_t kChannels[WW_MODEL_STATES] = WW_MODEL_STATE_CHANNELS;
+    static constexpr int32_t kLengths[WW_MODEL_STATES] = WW_MODEL_STATE_LENGTHS;
     size_t off = 0;
     for (size_t k = 0; k < WW_MODEL_STATES; k++) {
         auto in = meta.input_tensor_meta(1 + k);
         auto out = meta.output_tensor_meta(1 + k);
         if (!in.ok() || !out.ok() || out->nbytes() != in->nbytes() ||
-            out->scalar_type() != ScalarType::Char || off + in->nbytes() > WW_MODEL_STATE_BYTES) {
+            out->scalar_type() != ScalarType::Char || in->nbytes() > WW_MODEL_STATE_BYTES - off) {
             return false;
         }
+        const int32_t shape[kMaxDims] = { 1, kChannels[k], kLengths[k], 1 };
         int8_t *buf = r->state + off;
-        TensorImpl *h = bind_tensor(r->tensors[1 + k], in.get(), buf, in->nbytes());
+        TensorImpl *h = bind_tensor(r->tensors[1 + k], in.get(), buf, shape);
         if (h == nullptr || m.set_input(EValue(Tensor(h)), 1 + k) != Error::Ok ||
             m.set_output_data_ptr(buf, out->nbytes(), 1 + k) != Error::Ok) {
             return false;
