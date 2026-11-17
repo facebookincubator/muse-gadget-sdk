@@ -198,11 +198,13 @@ class StopWatchPTT(unittest.TestCase):
 
     def test_turning_listening_off_sends_nothing_more(self):
         # Off after admission: no turn opens. Off while recording: the note
-        # is dropped, even with listening already back on.
+        # is dropped, even with listening already back on. Off while a note
+        # is still uploading: no more goes, no commit, nothing kept.
         for board, realtime in ((1, 1), (1, 0), (3, 0)):
             with self.subTest(board=board, realtime=realtime):
                 self.run_case('voice', 101, board=board, realtime=realtime)
                 self.run_case('voice', 100, board=board, realtime=realtime)
+                self.run_case('voice', 104, board=board, realtime=realtime)
 
     def test_turning_listening_off_leaves_a_note_the_button_took_over(self):
         for board, realtime in ((1, 1), (1, 0), (3, 0)):

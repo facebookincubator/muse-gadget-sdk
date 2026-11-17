@@ -413,7 +413,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
         # without the feature (no-PSRAM boards included) must not pay
         # 32 KB of internal RAM for it.
         voice = (ROOT / 'components/muse/muse_voice.c').read_text()
-        start = between(voice, 'esp_err_t muse_voice_start(', 's_pre = heap_caps_malloc')
+        start = between(voice, 'esp_err_t muse_voice_start(', '\n}\n')
         gated = between(start, '#if CONFIG_MUSE_WAKEWORD_ENABLE', '#endif')
         self.assertIn('s_seed = heap_caps_malloc(', gated)
         self.assertEqual(voice.count('s_seed = heap_caps_malloc('), 1)

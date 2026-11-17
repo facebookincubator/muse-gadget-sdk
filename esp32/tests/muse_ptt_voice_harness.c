@@ -671,6 +671,22 @@ int main(int argc,char **argv) {
         assert(notes==0 && note_frames==0 && turn_cancels==0 && frame==0);
         free(s_seed); s_seed=NULL; free(s_pre); return 0;
     }
+    if(scenario==104) {
+#if HOLD_NOTES
+        /* A hands-free note recorded faster than it uploaded, then listening
+         * turned off before finish_note(): nothing more goes, no commit, and
+         * nothing is kept to send later. */
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        s_rec=calloc(10*MUSE_AUDIO_CHUNK,sizeof(*s_rec));
+        s_rec_n=10*MUSE_AUDIO_CHUNK; s_sent=2*MUSE_AUDIO_CHUNK; s_live=true;
+        turn_wanted=false;
+        finish_note();
+        assert(note_frames==0 && turn_ends==0 && turn_cancels==1 && s_rec==NULL && s_held_count==0);
+#endif
+        free(s_pre); return 0;
+    }
     if(scenario==103) {
         /* A finger took the hands-free note over, then listening was turned
          * off: the note is the button's now, and goes when the finger lets go. */

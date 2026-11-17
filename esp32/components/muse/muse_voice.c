@@ -1021,7 +1021,7 @@ typedef enum {
  * Gives Hatch a note from *sent on, waiting for room as it goes, then ends
  * the turn. Stops for a press only if `yield`.
  */
-static feed_t feed_rest(const int16_t *pcm, size_t frames, size_t *sent, bool yield)
+static feed_t feed_rest(const int16_t *pcm, size_t frames, size_t *sent, bool yield, bool wake_owned)
 {
     char text[96];
     int64_t moved = esp_timer_get_time();
@@ -1032,6 +1032,9 @@ static feed_t feed_rest(const int16_t *pcm, size_t frames, size_t *sent, bool yi
                 ESP_LOGW(TAG, "muse: %s", text);
                 return FEED_FAILED;
             }
+        }
+        if (wake_owned && hands_free_off()) {
+            return FEED_FAILED;   /* listening turned off: nothing more goes, no commit */
         }
         if (*sent == frames) {
             break;
@@ -1093,7 +1096,7 @@ static bool send_held(bool quiet)
     }
     muse_hatch_turn_begin();
     size_t sent = 0;
-    feed_t fed = feed_rest(h->pcm, h->frames, &sent, true);
+    feed_t fed = feed_rest(h->pcm, h->frames, &sent, true, false);
     bool delivered = false, interrupted = false;
     if (fed == FED && quiet) {
         delivered = wait_delivered();
@@ -1170,7 +1173,7 @@ static bool finish_note(void)
     if (s_rec) {
         bool fed = false, interrupted = false;
         delivered = false;
-        if (s_live && s_sent == s_rec_n) {
+        if (s_live && s_sent == s_rec_n && !hands_free_off()) {
             muse_hatch_turn_end();   /* before the chirp, which takes ~90 ms */
             fed = true;
         }
@@ -1179,7 +1182,7 @@ static bool finish_note(void)
             /* Hatch is behind (still connecting, say): the rest from the kept note. */
             muse_state_set_mode(MUSE_MODE_THINKING);
             muse_state_set_caption("SENDING VOICE NOTE");
-            fed = feed_rest(s_rec, s_rec_n, &s_sent, false) == FED;
+            fed = feed_rest(s_rec, s_rec_n, &s_sent, false, true) == FED;
             if (!fed) {
                 muse_hatch_turn_cancel();
             }
@@ -1187,8 +1190,8 @@ static bool finish_note(void)
         if (fed) {
             interrupted = hatch_reply(&delivered, false);
         }
-        if (delivered || interrupted) {
-            drop_rec();
+        if (delivered || interrupted || hands_free_off()) {
+            drop_rec();   /* a hands-free note whose listening was turned off is never kept */
         } else {
             hold_rec(s_tried);
         }
@@ -1761,9 +1764,6 @@ void muse_voice_seed_preroll(const int16_t *pcm, size_t frames)
 esp_err_t muse_voice_start(QueueHandle_t queue)
 {
     s_queue = queue;
-#if CONFIG_MUSE_WAKEWORD_ENABLE
-    s_seed = heap_caps_malloc(SEED_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);   /* NULL: no seeded turns */
-#endif
     s_pre = heap_caps_malloc(PRE_CAP_CHUNKS * sizeof(pre_chunk_t), MUSE_BIG_CAPS);
     if (!s_pre || muse_audio_init(muse_settings_volume(), muse_settings_mic_gain()) != ESP_OK) {
         muse_state_set_mode(MUSE_MODE_ERROR);
@@ -1783,6 +1783,7 @@ esp_err_t muse_voice_start(QueueHandle_t queue)
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     /* The wake word rides the voice pipeline (its tap is this task's reads,
      * its presses go to the same queue), and needs the seed buffer. */
+    s_seed = heap_caps_malloc(SEED_FRAMES * sizeof(int16_t), MUSE_BIG_CAPS);
     if (!s_seed || muse_wakeword_init(queue) != ESP_OK) {
         ESP_LOGW(TAG, "wake word unavailable; push-to-talk unaffected");
         free(s_seed);   /* heap_caps_malloc memory: free() returns it */
