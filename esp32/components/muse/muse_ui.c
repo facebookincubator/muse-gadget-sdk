@@ -2484,7 +2484,8 @@ static void frame_tick(lv_timer_t *timer)
     s_level += (level - s_level) * (level > s_level ? 0.6f : 0.2f);
 
     muse_pose_t pose = {
-        .mode = mode,
+        /* A pending reply keeps its green progress ring, but isn't speech. */
+        .mode = mode == MUSE_MODE_SPEAKING && muse_voice_reply_waiting() ? MUSE_MODE_IDLE : mode,
         .t = now,
         .mode_t = mode_t,
         .level = s_level,
