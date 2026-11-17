@@ -13,6 +13,12 @@ static uint32_t s_seen_generation, s_seen_revision;
 static bool s_expanded;
 static lv_point_t s_press_point;
 static bool s_dragged;
+static volatile bool s_shown;   /* read by the boards' touch-hold detectors */
+
+bool muse_options_ui_open(void)
+{
+    return s_shown;
+}
 
 static void open_options(lv_event_t *e)
 {
@@ -160,5 +166,6 @@ void muse_options_ui_tick(bool available)
     bool unanswered = have && s_view->status == MUSE_OPTIONS_READY;
     if (!unanswered) s_expanded = false;
     lv_obj_set_flag(s_open, LV_OBJ_FLAG_HIDDEN, !unanswered || !available || s_expanded);
-    lv_obj_set_flag(s_overlay, LV_OBJ_FLAG_HIDDEN, !have || !available || !s_expanded);
+    s_shown = have && available && s_expanded;
+    lv_obj_set_flag(s_overlay, LV_OBJ_FLAG_HIDDEN, !s_shown);
 }

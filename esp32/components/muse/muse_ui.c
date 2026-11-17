@@ -154,7 +154,7 @@ static void tile_changed_cb(lv_event_t *e)
 }
 
 /* From any task: the face tile is the currently visible tile. */
-bool muse_ui_face_active(void)
+static bool face_shown(void)
 {
 #if CONFIG_MUSE_APP_VIEW
     if (muse_app_view_tick()) {
@@ -162,6 +162,12 @@ bool muse_ui_face_active(void)
     }
 #endif
     return s_face_active;
+}
+
+bool muse_ui_face_active(void)
+{
+    /* The option picker covers it too: a held touch chooses, it doesn't talk. */
+    return !muse_options_ui_open() && face_shown();
 }
 
 bool muse_ui_volume_swiping(void)
@@ -1940,7 +1946,7 @@ static const char *idle_name(muse_wifi_state_t wifi)
 
 static void update_chrome(float now)
 {
-    muse_options_ui_tick(muse_ui_face_active() && !muse_voice_in_call() && !s_image_dsc.data &&
+    muse_options_ui_tick(face_shown() && !muse_voice_in_call() && !s_image_dsc.data &&
                          muse_state_mode(NULL) != MUSE_MODE_LISTENING &&
                          lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
     if (now < s_next_settings_tick) {

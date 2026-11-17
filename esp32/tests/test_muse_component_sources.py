@@ -72,6 +72,13 @@ endfunction()
         self.assertIn('muse_board->touch', guard)
         self.assertIn('muse_board->audio_init || muse_board->mic_init', guard)
 
+    def test_open_picker_is_not_the_face_for_touch_to_talk(self):
+        # Boards with touch-and-hold talk poll muse_ui_face_active(); a held
+        # choice in the open picker must not start a voice note.
+        ui = (MUSE / 'muse_ui.c').read_text()
+        start = ui.index('bool muse_ui_face_active(void)')
+        self.assertIn('!muse_options_ui_open()', ui[start:ui.index('}', start)])
+
     def test_freeink_chat_build_uses_shared_support_without_lvgl_picker(self):
         sources = self.sources(CONFIG_MUSE_ENABLED=True, CONFIG_MUSE_HATCH=True,
                                CONFIG_MUSE_UI_FREEINK=True)
