@@ -153,8 +153,11 @@ def test_wake_admits_existing_noise_voice_call_with_original_rate_preroll(
     speech_timeouts = []
     original_init = voice_call.VoiceCall.__init__
 
+    preroll = []
+
     def init(self, *unused, **options):
         speech_timeouts.append(options.get("speech_timeout"))
+        preroll.append(options.get("speech_after_bytes"))
         original_init(self, *unused, **options)
 
     monkeypatch.setattr(voice_call.VoiceCall, "__init__", init)
@@ -166,6 +169,8 @@ def test_wake_admits_existing_noise_voice_call_with_original_rate_preroll(
     )
     # A wake-started call ends if the caller never speaks.
     assert speech_timeouts == [cli.WAKE_SPEECH_TIMEOUT]
+    # ... counting only speech after the wake word's own pre-roll.
+    assert preroll == [3 * len(TONE)]
     assert tasks[0].done() and tasks[0].exception() is None
     assert Detector.instance.calls == 3 and Detector.instance.closed
     assert (

@@ -204,6 +204,7 @@ class VoiceCall:
                  overall_timeout: float = 300, ready_timeout: float = 35,
                  cleanup_timeout: float = 10,
                  speech_timeout: float | None = None,
+                 speech_after_bytes: int = 0,
                  on_event: Optional[Callable[[VoiceEvent], None]] = None) -> None:
         if not 0 <= mic_threshold <= 32767:
             raise ValueError("mic threshold must be between 0 and 32767")
@@ -215,12 +216,21 @@ class VoiceCall:
         self.overall_timeout = positive_seconds(overall_timeout)
         self.ready_timeout = positive_seconds(ready_timeout)
         self.cleanup_timeout = positive_seconds(cleanup_timeout)
-        # With speech_timeout, a call whose caller hasn't spoken (no speech
-        # start or caller turn from Muse) that long after readiness ends as
-        # "no_speech": a false wake-word trigger must not stream on.
+        # With speech_timeout, a call ends as "no_speech" once that much
+        # microphone audio has gone out with no speech in it: a false
+        # wake-word trigger must not stream on. Speech is judged locally
+        # (frame RMS), and only after the first speech_after_bytes of input:
+        # the wake word's own pre-roll is speech, and so is anything Muse's
+        # VAD makes of it, so neither may count. Audio time, not wall time,
+        # so queued capture still being caught up isn't cut short.
         self.speech_timeout = None if speech_timeout is None else positive_seconds(speech_timeout)
+        if not isinstance(speech_after_bytes, int) or speech_after_bytes < 0:
+            raise ValueError("speech_after_bytes must be a non-negative integer")
+        self._speech_after_bytes = speech_after_bytes
+        self._input_bytes = 0
+        self._quiet_bytes = 0
         self._heard_speech = False
-        self._ready_mono = 0.0
+        self._no_speech = False
         self.call_id = str(uuid.uuid4())
         self.started_at = datetime.now(timezone.utc)
         self.ready = asyncio.Event()
@@ -413,7 +423,7 @@ class VoiceCall:
         if thread_id is not None and (not isinstance(thread_id, str) or not thread_id.strip()):
             raise ValueError("invalid voice thread identity")
         self.session_id, self.thread_id = session_id, thread_id
-        self._activity = self._ready_mono = time.monotonic()
+        self._activity = time.monotonic()
         self.ready.set()
 
     def _track_turn(self, event: dict) -> bool:
@@ -485,7 +495,6 @@ class VoiceCall:
                 self.held = event["held"]
             elif kind == "input_audio_buffer.speech_started":
                 self._activity = time.monotonic()
-                self._heard_speech = True
             elif kind == "conversation.item.added":
                 item = event.get("item")
                 control_id = item.get("call_id") if isinstance(item, dict) else None
@@ -502,8 +511,6 @@ class VoiceCall:
                     self.reason = "remote_stop"
                     return
             elif kind in ("hatch.voice.turn_started", "hatch.voice.turn_settled"):
-                if kind == "hatch.voice.turn_started":
-                    self._heard_speech = True
                 if self._on_event is None:
                     if not self._track_turn(event):
                         continue
@@ -861,6 +868,15 @@ class VoiceCall:
                                    "send_timestamp_ms": int(time.time() * 1000)})
             except _InputGated:
                 continue  # Never replay a frame invalidated while it waited for the wire.
+            if self.speech_timeout is not None and not self._heard_speech:
+                past_preroll = self._input_bytes >= self._speech_after_bytes
+                if past_preroll and not muted and rms >= 300:
+                    self._heard_speech = True
+                elif past_preroll:
+                    self._quiet_bytes += len(pcm)
+                    if self._quiet_bytes >= self.speech_timeout * SAMPLE_RATE * 2:
+                        self._no_speech = True
+            self._input_bytes += len(pcm)
             duration = len(pcm) / (SAMPLE_RATE * 2)
             queued = getattr(source, "backlog_bytes", None)
             if queued is None:
@@ -906,8 +922,7 @@ class VoiceCall:
                     and now - self._activity >= self.idle_timeout):
                 self.reason = "idle_timeout"
                 return
-            if (self.speech_timeout is not None and self.ready.is_set() and not self._heard_speech
-                    and now - self._ready_mono >= self.speech_timeout):
+            if self._no_speech:
                 self.reason = "no_speech"
                 return
             await asyncio.sleep(min(0.1, self.idle_timeout, self.overall_timeout))

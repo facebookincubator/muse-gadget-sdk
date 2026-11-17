@@ -29,7 +29,12 @@ from collections import deque
 from musegadget.voice_call import FRAME_BYTES, SAMPLE_RATE
 
 PREROLL_BYTES = SAMPLE_RATE * 2
-MAX_BUFFER_BYTES = SAMPLE_RATE * 2 * 4
+# Capture queued from the wake until the call reads it: enough for the call
+# to start within its own limits (the VM lookup, the transport's 35 s and
+# the call's 35 s readiness) rather than failing a slow start. The call then
+# catches up at CATCH_UP_RATE. 80 s at 24 kHz is under 4 MB.
+STARTUP_SECONDS = 80
+MAX_BUFFER_BYTES = SAMPLE_RATE * 2 * STARTUP_SECONDS
 
 
 class WakeWordBacklogError(BufferError):
@@ -102,6 +107,9 @@ class WakeWordInput:
         self._buffer_bytes = 0
         self._preroll = deque()
         self._preroll_bytes = 0
+        # How much of the queued capture is the pre-roll (which holds the wake
+        # word itself), set at the wake: the call doesn't count it as speech.
+        self.preroll_bytes = 0
         self._active = False
         self._eof = False
         self._error = None
@@ -120,7 +128,7 @@ class WakeWordInput:
     def _enqueue(self, pcm):
         if self._buffer_bytes + len(pcm) > MAX_BUFFER_BYTES:
             raise WakeWordBacklogError(
-                "wake-word capture exceeded the four-second admission buffer"
+                f"wake-word capture exceeded the {STARTUP_SECONDS}-second admission buffer"
             )
         self._queue.append(pcm)
         self._buffer_bytes += len(pcm)
@@ -155,6 +163,7 @@ class WakeWordInput:
                     detected = self._detector.feed(self._resampler.feed(pcm))
                     if detected:
                         self._active = True
+                        self.preroll_bytes = self._preroll_bytes
                         for frame in self._preroll:
                             self._enqueue(frame)
                         self._preroll.clear()
@@ -227,3 +236,6 @@ class WakeWordInput:
             self._queue.clear()
             self._preroll.clear()
             self._buffer_bytes = self._preroll_bytes = 0
+            close = getattr(self._resampler, "close", None)
+            if callable(close) and (self._task is None or self._task.done()):
+                close()   # the native resampler's memory, now rather than at GC

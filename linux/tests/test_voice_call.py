@@ -302,14 +302,33 @@ def test_speech_timeout_ends_a_call_nobody_speaks_in():
     asyncio.run(scenario())
 
 
-def test_speech_start_satisfies_the_speech_timeout():
+def test_speech_after_the_preroll_satisfies_the_speech_timeout():
     async def scenario():
         async with connected(register_device=False) as (session, vm, unused):
-            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.15, idle_timeout=0.4)
-            task = asyncio.create_task(call.run(source(b"\0" * FRAME_BYTES), Output()))
-            media, start = await admit(vm, extra=[{"type": "input_audio_buffer.speech_started"}])
+            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.15, idle_timeout=0.4,
+                             speech_after_bytes=len(TONE))
+            task = asyncio.create_task(call.run(source(TONE, TONE), Output()))
+            media, start = await admit(vm)
+            for _ in range(2):
+                assert (await next_event(vm))["type"] == "input_audio_buffer.append"
             await asyncio.wait_for(hangup(vm, media, start), 2)
             assert await task == "idle_timeout"   # not "no_speech"
+    asyncio.run(scenario())
+
+
+def test_the_wake_words_preroll_and_server_vad_dont_count_as_speech():
+    # The pre-roll is the wake word itself, so it is speech, and Muse's VAD
+    # may say so; neither may keep a false wake's call open.
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.15, idle_timeout=5,
+                             speech_after_bytes=3 * len(TONE))
+            task = asyncio.create_task(call.run(source(TONE, TONE, TONE), Output()))
+            media, start = await admit(vm, extra=[{"type": "input_audio_buffer.speech_started"}])
+            for _ in range(3):
+                assert (await next_event(vm))["type"] == "input_audio_buffer.append"
+            await asyncio.wait_for(hangup(vm, media, start), 2)
+            assert await task == "no_speech"
     asyncio.run(scenario())
 
 

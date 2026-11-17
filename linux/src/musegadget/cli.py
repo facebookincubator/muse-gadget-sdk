@@ -254,9 +254,10 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
             if video is None:
                 if detector is not None:
                     # A false wake opens a call too: one that hears no speech
-                    # ends. (Video calls have no server speech events; their
-                    # idle timer stands.)
+                    # after the wake word's pre-roll ends. (Video calls keep
+                    # their idle timer.)
                     options["speech_timeout"] = WAKE_SPEECH_TIMEOUT
+                    options["speech_after_bytes"] = getattr(source, "preroll_bytes", 0)
                 call = VoiceCall(session, **options)
             else:
                 from musegadget.video_call import VideoCall
