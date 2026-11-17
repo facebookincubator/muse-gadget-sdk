@@ -116,13 +116,14 @@ uint32_t muse_wakeword_core_tick(muse_wakeword_core_t *core, const muse_wakeword
     }
 
     /* Disable is immediate: close a synthetic hold so the turn it
-     * opened ends now; a converted capture is the button's to end, but
-     * the session is over either way. */
+     * opened ends now, as a cancel: turning listening off must not send
+     * what it was capturing (muse_voice drops that note). A converted
+     * capture is the button's to end, but the session is over either way. */
     if (!in->enabled) {
         uint32_t act = MUSE_WW_ACTION_NONE;
         if (core->state == MUSE_WW_CAPTURING) {
-            act = MUSE_WW_ACTION_POST_PTT_UP | MUSE_WW_ACTION_SUBMITTED;
-            core->stats.submits++;
+            act = MUSE_WW_ACTION_POST_PTT_UP | MUSE_WW_ACTION_CANCELLED;
+            core->stats.cancels++;
         } else if (core->state == MUSE_WW_ARMED) {
             act = MUSE_WW_ACTION_CANCELLED;
             core->stats.cancels++;

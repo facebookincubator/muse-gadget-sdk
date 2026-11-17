@@ -38,6 +38,10 @@ static int note_ptt_calls;
 void muse_wakeword_note_ptt(bool down) { (void)down; note_ptt_calls++; }
 void muse_wakeword_set_enabled(bool on) { (void)on; }
 bool muse_wakeword_enabled(void) { return false; }
+/* Scenarios 99 and 100 turn listening off (or the disable count moves). */
+static bool turn_wanted=true;
+static uint32_t wanted_disables;
+bool muse_wakeword_turn_wanted(uint32_t disables) { return turn_wanted && disables==wanted_disables; }
 bool muse_wakeword_listening(void) { return false; }
 void muse_wakeword_set_playback(bool on) { (void)on; }
 void muse_wakeword_set_ptt_turn(bool active) { (void)active; }
@@ -210,8 +214,9 @@ void muse_hatch_turn_audio(const int16_t *p,size_t n) {
 size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) {
     (void)ms; muse_hatch_turn_audio(p,n); return n;
 }
-void muse_hatch_turn_end(void) {}
-void muse_hatch_turn_cancel(void) {}
+static int turn_ends, turn_cancels;
+void muse_hatch_turn_end(void) { ++turn_ends; }
+void muse_hatch_turn_cancel(void) { ++turn_cancels; }
 bool muse_hatch_incoming(void) { return false; }
 void muse_state_set_asleep(bool v) { (void)v; }
 /* One scripted way for hatch_reply() to end, arriving after a long turn. */
@@ -388,6 +393,9 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(scenario==64 && frame==2) push(MUSE_PTT_UP);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
         if(scenario==96 && frame==3) push(MUSE_PTT_DOWN);   /* a finger lands on the hands-free note */
+        if(scenario==100 && frame==3) {   /* listening turned off, and straight back on */
+            wanted_disables++;
+        }
         if(scenario==98 && frame==3) {   /* a press the queue's overflow made stale */
             muse_input_event_t d={.type=MUSE_PTT_DOWN,.epoch=muse_input_call_epoch()-1,.at_us=clock_us};
             xQueueSend(&queue,&d,0);
@@ -620,6 +628,42 @@ int main(int argc,char **argv) {
         assert(record(true,why,sizeof(why)) && notes==1);
         assert(frame>=60 && frame<=60+7 && !s_press_synthetic);
         drop_rec(); free(s_pre); return 0;
+    }
+    if(scenario==99) {
+        /* Listening was turned off after the wake task posted the press but
+         * before this task admitted it: no turn, nothing streamed. */
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        int16_t seed[MUSE_AUDIO_CHUNK]={0};
+        muse_voice_seed_preroll(seed,MUSE_AUDIO_CHUNK);
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        turn_wanted=false;
+        assert(note_held(false,false)==NOTE_CANCELLED);
+        assert(notes==0 && note_frames==0);
+        free(s_seed); s_seed=NULL; free(s_pre); return 0;
+    }
+    if(scenario==100) {
+        /* Listening turned off (then on again) while a hands-free note
+         * records: it is dropped, never sent or kept, whatever the flag says
+         * by the time anyone looks. */
+        clock_us=1000000;
+        s_seed=malloc(SEED_FRAMES*sizeof(*s_seed));
+        int16_t seed[MUSE_AUDIO_CHUNK]={0};
+        muse_voice_seed_preroll(seed,MUSE_AUDIO_CHUNK);
+        muse_input_event_t e={.type=MUSE_PTT_DOWN,.synthetic=true,.epoch=muse_input_call_epoch(),.at_us=clock_us};
+        xQueueSend(&queue,&e,0);
+        assert(got_event(MUSE_PTT_DOWN) && s_press_synthetic);
+        assert(note_held(false,false)==NOTE_ACCEPTED);
+        s_rec=malloc(MAX_FRAMES*sizeof(*s_rec));
+        char why[96];
+        int ended_before=turn_ended_calls;
+        assert(!record(true,why,sizeof(why)));
+        assert(why[0]=='\0' && s_rec==NULL && turn_ends==0);
+        assert(turn_cancels==(notes>0));   /* a streamed start is abandoned */
+        assert(turn_ended_calls==ended_before+1);   /* the glue hears the turn is over */
+        assert(frame<=4);   /* it stops at once, not at a release or the cap */
+        free(s_seed); s_seed=NULL; free(s_pre); return 0;
     }
     if(scenario==95) {
         /* The wake task trailed the voice task when it seeded the turn: the

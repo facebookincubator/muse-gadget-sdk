@@ -62,9 +62,9 @@ def model(ticks, start, end, cap, energy):
         ev = EV[ev_ch] if enabled else NONE   # harness: listening == enabled
         act = 0
         if not enabled:
-            if state == CAPTURING:
-                act = POST_UP | SUBMITTED
-                stats[2] += 1
+            if state == CAPTURING:   # a hands-free note is dropped, not sent
+                act = POST_UP | CANCELLED
+                stats[1] += 1
             elif state == ARMED:
                 act = CANCELLED
                 stats[1] += 1
@@ -262,7 +262,8 @@ class WakeWordCore(unittest.TestCase):
     def test_disable_closes_an_open_capture_and_cancels_arming(self):
         ticks = [tick('W'), tick('s'), tick(), tick(enabled=0), tick('W', enabled=0)]
         trace = self.run_core(ticks, energy=0)
-        self.assertEqual(trace[3][1], POST_UP | SUBMITTED)
+        # Turning listening off cancels the hands-free note: never submitted.
+        self.assertEqual(trace[3][1], POST_UP | CANCELLED)
         self.assertEqual(trace[4], (IDLE, 0))
         armed = self.run_core([tick('W'), tick(enabled=0)])
         self.assertEqual(armed[1][1], CANCELLED)
@@ -489,7 +490,7 @@ class WakeWordFirmwareContract(unittest.TestCase):
         self.assertIn('!post_ptt(MUSE_PTT_UP)) {\n        s_up_owed = true;', tick_fn)
         # ... and a refused press ends the session and clears its seed.
         down = between(tick_fn, 'MUSE_WW_ACTION_POST_PTT_DOWN', 'MUSE_WW_ACTION_POST_PTT_UP')
-        self.assertIn('if (!s_up_owed && post_ptt(MUSE_PTT_DOWN))', down)
+        self.assertIn('if (!s_up_owed && s_enabled && post_ptt(MUSE_PTT_DOWN))', down)
         self.assertIn('muse_wakeword_core_abort(&s_core);', down)
         self.assertIn('muse_voice_seed_preroll(NULL, 0);', down)
         # The LISTENING state shown before posting goes back to idle, so a
@@ -1397,6 +1398,21 @@ class WakeWordHandoff(unittest.TestCase):
         short = self.run_mode('pause', '100').split()
         self.assertEqual(short[2:6], ['opened', '1', 'state', '2'])
         self.assertEqual(short[-1], '1')
+
+    def test_a_disable_is_seen_before_any_press_goes(self):
+        # A disable published while the wake task waited for a chunk or ran
+        # the model ends the session on that tick (the core then cancels),
+        # the press itself is re-checked, and every press carries the
+        # disable count muse_voice checks at admission and while recording.
+        glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
+        nxt = between(glue, 'static muse_wakeword_input_t next_input(', '\n}\n')
+        self.assertLess(nxt.index('ww_runner_feed('), nxt.index('in.enabled = s_applied_enabled && s_enabled;'))
+        setter = between(glue, 'void muse_wakeword_set_enabled(bool on)', 'static bool post_ptt(')
+        self.assertLess(setter.index('atomic_fetch_add(&s_disables, 1)'), setter.index('s_enabled = on;'))
+        self.assertIn('.disables = atomic_load(&s_disables)', between(glue, 'static bool post_ptt(', '\n}\n'))
+        voice = (ROOT / 'components/muse/muse_voice.c').read_text()
+        self.assertIn('if (!muse_wakeword_turn_wanted(s_press_disables)) return NOTE_CANCELLED;', voice)
+        self.assertIn('if (seeded && !muse_wakeword_turn_wanted(s_press_disables)) {', voice)
 
     def test_glue_expires_a_waiting_wake_by_the_clock(self):
         glue = (ROOT / 'components/muse/muse_wakeword_glue.c').read_text()
