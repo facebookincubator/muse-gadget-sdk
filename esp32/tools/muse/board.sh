@@ -29,6 +29,7 @@
 # MUSE_POWER_TEST=1 adds the board's diagnostic overlay and a -power-test suffix.
 # MUSE_APPS=1 adds devices/sdkconfig.muse-apps (WebAssembly apps: app.run) in
 # build-muse-<profile>-apps/.
+# MUSE_MIRROR=1 adds the cable mirror in build-muse-<profile>-mirror/.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master
 # (IDF_EXPORT_S31) and Espressif's esp-mosaico-utils (MOSAICO_UTILS), and
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
@@ -122,6 +123,9 @@ if [ -n "${MUSE_WAKEWORD:-}" ]; then
 fi
 if [ -n "${MUSE_APPS:-}" ]; then
     B=$B-apps; defaults="$defaults;devices/sdkconfig.muse-apps"
+fi
+if [ -n "${MUSE_MIRROR:-}" ]; then
+    B=$B-mirror; defaults="$defaults;devices/sdkconfig.muse-mirror"
 fi
 if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"
