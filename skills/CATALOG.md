@@ -1,6 +1,6 @@
 # Skill Catalog
 
-57 active skills: 55 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+58 active skills: 56 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
@@ -80,6 +80,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
 - [Wyze RTSP cameras](gadget-wyze-rtsp-cameras/SKILL.md) — viewing/capture with compatible legacy firmware already installed.
 - [yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
+- [Calix GigaSpire routers](gadget-calix-gigaspire/SKILL.md) — read-only gateway, device, DHCP and wireless status through an existing local connector on a Linux gadget.
 
 ## Vehicles and climate
 
