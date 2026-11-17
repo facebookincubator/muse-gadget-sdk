@@ -39,11 +39,11 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Insignia Fire TVs](gadget-insignia-fire-tv/SKILL.md) — PIN-paired local remote, app launch, volume and mute through Home Link.
 - [LG webOS TVs](gadget-lg-webos-tvs/SKILL.md) — local remote/apps/inputs; Cast when advertised.
 - [Logitech Squeezebox](gadget-logitech-squeezebox/SKILL.md) — playback through an existing Lyrion server.
+- [Music Assistant](gadget-music-assistant/SKILL.md) — playback, volume and queues on named players, authorized with a long-lived token.
 - [Roku TVs and players](gadget-roku-tvs-and-players/SKILL.md) — local remote, apps, text entry and power over ECP; network-control setting must allow it.
 - [Samsung Tizen TVs](gadget-samsung-tizen-tvs/SKILL.md) — local remote and model-specific Frame Art.
 - [Sonos speakers](gadget-sonos-speakers/SKILL.md) — playback, volume and grouping.
 - [VIZIO D40f-G9](gadget-vizio-d40f-g9/SKILL.md) — SmartCast management; Cast when advertised.
-- [Music Assistant](gadget-music-assistant/SKILL.md) — playback, volume and queues on named players, authorised with a long-lived token.
 
 ## Printers and appliances
 
