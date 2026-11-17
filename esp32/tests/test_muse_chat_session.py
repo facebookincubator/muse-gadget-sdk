@@ -777,6 +777,18 @@ static void canonical_reply_reads_one_message_without_commentary() {
     assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(s_pending.replies, 0),
         "display_text")), "Final answer"));
 }
+static void canonical_reply_never_reads_another_message() {
+    detach();
+    cJSON *line = cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{
+        "message_id":"tool","reply_to_message_id":"note","transcript":{"messages":[
+            {"id":"assistant-msg-early","role":"assistant","content":[{"type":"text","text":"Already said"}]},
+            {"id":"assistant-msg-tool","role":"assistant","content":[
+                {"type":"text","recipient":"commentary","text":"Hidden aside"}]}]}}})");
+    assert(line);
+    on_event(line);
+    cJSON_Delete(line);
+    assert(!s_incoming && cJSON_GetArraySize(s_pending.replies) == 0);
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
@@ -784,6 +796,7 @@ int main(int argc, char **argv) {
     case 37: canonical_reply_during_notice(); break;
     case 38: canonical_reply_is_bounded_at_a_whole_character(); break;
     case 39: canonical_reply_reads_one_message_without_commentary(); break;
+    case 40: canonical_reply_never_reads_another_message(); break;
     case 0: rejected_deltas(); break;
     case 1: valid_parents(); break;
     case 2: bounded_rejections(); break;
@@ -950,6 +963,9 @@ int main(int argc, char **argv) {
 
     def test_transcript_only_reply_reads_its_own_message_without_commentary(self):
         self.run_case(39)
+
+    def test_transcript_only_reply_never_reads_another_message_in_its_place(self):
+        self.run_case(40)
 
     def test_late_reply_is_the_row_naming_the_request_and_plays_once(self):
         self.run_case(24)

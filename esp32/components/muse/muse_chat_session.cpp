@@ -1590,24 +1590,29 @@ static bool reply_block(cJSON *block)
     return type && !strcmp(type, "text") && text && text[0] && !(to && !strcasecmp(to, "commentary"));
 }
 
-/* The transcript's assistant message with this id, else its last one with reply text:
- * one message, so earlier ones in the transcript aren't repeated. */
+/* The transcript's assistant message with this id, even one with no reply text,
+ * so another message isn't read in its place. Only when its messages carry no
+ * ids: the last one with reply text. */
 static cJSON *reply_row(cJSON *rows, const char *id)
 {
     cJSON *row, *block, *last = nullptr;
+    bool ids = false;
     cJSON_ArrayForEach(row, rows) {
         const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(row, "role"));
-        cJSON *blocks = cJSON_GetObjectItem(row, "content");
-        if (!role || strcmp(role, "assistant") || !cJSON_IsArray(blocks)) continue;
-        bool text = false;
-        cJSON_ArrayForEach(block, blocks) text = text || reply_block(block);
-        if (!text) continue;
+        if (!role || strcmp(role, "assistant")) continue;
         const char *own = cJSON_GetStringValue(cJSON_GetObjectItem(row, "id"));
-        if (own && !strncmp(own, "assistant-msg-", 14)) own += 14;
-        if (id && own && !strcmp(own, id)) return row;
-        last = row;
+        if (own && own[0]) {
+            ids = true;
+            if (!strncmp(own, "assistant-msg-", 14)) own += 14;
+            if (id && !strcmp(own, id)) return row;
+        }
+        bool text = false;
+        cJSON_ArrayForEach(block, cJSON_GetObjectItem(row, "content")) {
+            text = text || reply_block(block);
+        }
+        if (text) last = row;
     }
-    return last;
+    return ids ? nullptr : last;
 }
 
 /* A finished message's text. Canonical rows can carry only a transcript;
