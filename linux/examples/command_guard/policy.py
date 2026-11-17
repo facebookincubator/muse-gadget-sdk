@@ -153,7 +153,8 @@ class Policy:
             p = os.path.join(self.home, p[2:])
         if not os.path.isabs(p):
             p = os.path.join(cwd or self.home, p)
-        return os.path.normpath(p)
+        # normpath keeps a leading "//", which Linux treats as "/".
+        return "/" + os.path.normpath(p).lstrip("/")
 
     # ``expand`` kept for callers that only need home/normalisation (no cwd).
     def expand(self, path: str) -> str:
@@ -218,7 +219,7 @@ _WRITE_REDIRECTIONS = {">", ">>", ">&", "&>"}
 # presence means the validator cannot fully account for the command, so it is
 # never plain-allowed (block rules still apply). Note: "*"/"?" globs are not
 # here — they do not hide the command, and read-only globs are common.
-_UNVALIDATABLE_CHARS = ("$", "`", "\\")
+_UNVALIDATABLE_CHARS = ("$", "`", "\\", "\n", "\r")
 
 _POWER = ("shutdown", "reboot", "poweroff", "halt")
 # find actions that run, delete or write rather than only list.
@@ -232,6 +233,9 @@ _PKG_MANAGERS = ("apt", "apt-get", "dnf", "yum", "pacman", "pip", "pip3",
 
 def _lex(command: str) -> list:
     """Operator-aware tokenisation. Raises ValueError on unbalanced quotes."""
+    # shlex treats a newline as whitespace, but the shell runs each line as
+    # its own command; split on it like ";" so every line is classified.
+    command = command.replace("\r", "\n").replace("\n", " ; ")
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     return list(lexer)
@@ -451,4 +455,6 @@ def evaluate(policy: Policy, command: str, params: dict) -> RuleDecision:
             return RuleDecision(CONFIRM, f"write outside the account home ({raw}); "
                                          "confirmation required")
         return RuleDecision(ALLOW, "file read on a non-sensitive path")
-    return RuleDecision(ALLOW, "unknown command; the executor will reject it")
+    # Owner drop-in commands (commands.d) are configured by the device owner;
+    # anything else is rejected by the executor.
+    return RuleDecision(ALLOW, f"{command} is not a shell or file command; not inspected")

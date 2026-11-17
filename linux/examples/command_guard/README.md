@@ -135,6 +135,7 @@ nothing. That is why unknown-but-harmless-looking calls are `confirm`, not
 | A read-only command combined with operators, redirections or substitutions the guard cannot fully validate | confirm |
 | A destructive target that is not, or strictly contains, the path named in the request (Layer 2) | confirm / block |
 | Any other shell command not on the read-only allowlist | confirm (configurable: `default_shell_action`) |
+| Owner drop-in commands from `commands.d` | allow (the owner configured them) |
 
 Customise by editing a copy of `policy.json` and pointing
 `MUSEGADGET_GUARD_POLICY` at it: sensitive paths, system write paths, extra
@@ -150,7 +151,7 @@ the same `--run-as` account and reads the same SDK token:
 sudo PYTHONPATH=linux/examples \
   MUSEGADGET_GUARD_POLICY=/path/policy.json \
   MUSEGADGET_GUARD_LEDGER=/var/lib/musegadget/guard-ledger.jsonl \
-  python3 -m command_guard.service run --run-as pi
+  /opt/musegadget/venv/bin/python -m command_guard.service run --run-as pi
 ```
 
 Both environment paths are optional (defaults: the `policy.json` next to the

@@ -171,6 +171,20 @@ def test_globs_onto_sensitive_paths_block(pol, shell):
     assert layer1(pol, "system.run", {"command": shell}) == "block", shell
 
 
+@pytest.mark.parametrize("shell,expected", [
+    ("pwd\n/bin/sh -c 'id'", "confirm"),   # a newline starts a new command
+    ("echo ok\nrm /home/pi/notes.txt", "confirm"),
+    ("ls\nsudo id", "block"),
+    ("cat //etc/shadow", "block"),           # "//" is "/" on Linux
+])
+def test_newlines_and_double_slash(pol, shell, expected):
+    assert layer1(pol, "system.run", {"command": shell}) == expected, shell
+
+
+def test_file_read_double_slash_blocks(pol):
+    assert layer1(pol, "file.read", {"path": "//home/pi/.ssh/id_rsa"}) == "block"
+
+
 def test_sensitive_cwd_blocks_bare_names(pol):
     decision = policy_module.evaluate(pol, "system.run", {
         "command": "cat id_rsa", "cwd": "/home/pi/.ssh"})

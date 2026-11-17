@@ -27,9 +27,10 @@ the guard's ledger is locked accordingly (see ``ledger.py``).
 
 Run it exactly like ``musegadget run``, but through this example:
 
+    sudo PYTHONPATH=linux/examples \\
     MUSEGADGET_GUARD_POLICY=/path/policy.json \\
     MUSEGADGET_GUARD_LEDGER=/var/lib/musegadget/guard-ledger.jsonl \\
-    sudo PYTHONPATH=linux/examples python3 -m command_guard.service run --run-as pi
+    /opt/musegadget/venv/bin/python -m command_guard.service run --run-as pi
 
 or from your own code:
 
@@ -49,7 +50,7 @@ import signal
 import sys
 from dataclasses import dataclass
 
-from musegadget import __version__, config, identity as identity_mod
+from musegadget import __version__, commands, config, identity as identity_mod
 from musegadget.executor import Account, Executor, error
 from musegadget.service import Service
 
@@ -147,7 +148,9 @@ def main(argv: list | None = None) -> int:
     guard = build_guard(home=account.home)
     log.info("musegadget %s (command guard enabled): commands run as %s",
              __version__, account.name)
-    run_guarded_service(identity_mod.load_or_create(), Executor(account), guard, sdk_token)
+    drop_ins = commands.load(config.commands_dir())
+    run_guarded_service(identity_mod.load_or_create(), Executor(account, drop_ins),
+                        guard, sdk_token)
     return 0
 
 
