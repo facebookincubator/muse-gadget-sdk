@@ -221,22 +221,16 @@ class VoiceCall:
         self.overall_timeout = positive_seconds(overall_timeout)
         self.ready_timeout = positive_seconds(ready_timeout)
         self.cleanup_timeout = positive_seconds(cleanup_timeout)
-        # With speech_timeout, a call ends as "no_speech" once that much
-        # microphone audio has gone out with no speech in it: a false
-        # wake-word trigger must not stream on. Speech is judged locally
-        # (frame RMS), and only after the first speech_after_bytes of the
-        # source (whether sent or dropped during a hold):
-        # the wake word's own pre-roll is speech, and so is anything Muse's
-        # VAD makes of it, so neither may count. Audio time, not wall time,
-        # so queued capture still being caught up isn't cut short.
+        # False-wake guard: with speech_timeout, the call ends as "no_speech"
+        # after that much sent audio with no locally voiced frame in it,
+        # counting only from speech_after_bytes into the capture (the wake
+        # word's own pre-roll never counts, nor does Muse's VAD).
         self.speech_timeout = None if speech_timeout is None else positive_seconds(speech_timeout)
         if not isinstance(speech_after_bytes, int) or speech_after_bytes < 0:
             raise ValueError("speech_after_bytes must be a non-negative integer")
         self._speech_after_bytes = speech_after_bytes
         self._source_bytes = 0
-        self._quiet_bytes = 0
-        self._heard_speech = False
-        self._no_speech = False
+        self._quiet_left = None if speech_timeout is None else self.speech_timeout * SAMPLE_RATE * 2
         self.call_id = str(uuid.uuid4())
         self.started_at = datetime.now(timezone.utc)
         self.ready = asyncio.Event()
@@ -843,13 +837,8 @@ class VoiceCall:
                 pcm = b"\0" * FRAME_BYTES
             if not pcm or len(pcm) > FRAME_BYTES or len(pcm) % 2:
                 raise ValueError("input must contain 1–960 PCM16LE samples per frame")
-            # Where this frame sits in the source, counted as it is taken
-            # (discarded or sent): the pre-roll boundary is a position in the
-            # capture, so a pre-roll dropped during an input hold still ends
-            # where it ended.
-            source_start = self._source_bytes
-            if not eof:
-                self._source_bytes += len(pcm)
+            position = self._source_bytes  # in the capture, whether sent or dropped
+            self._source_bytes += 0 if eof else len(pcm)
             if realtime and not eof and self._gated():
                 continue
             while self._gated():
@@ -881,14 +870,8 @@ class VoiceCall:
                                    "send_timestamp_ms": int(time.time() * 1000)})
             except _InputGated:
                 continue  # Never replay a frame invalidated while it waited for the wire.
-            if self.speech_timeout is not None and not self._heard_speech:
-                past_preroll = eof or source_start >= self._speech_after_bytes
-                if past_preroll and not muted and rms >= 300:
-                    self._heard_speech = True
-                elif past_preroll:
-                    self._quiet_bytes += len(pcm)
-                    if self._quiet_bytes >= self.speech_timeout * SAMPLE_RATE * 2:
-                        self._no_speech = True
+            if self._quiet_left is not None and (eof or position >= self._speech_after_bytes):
+                self._quiet_left = None if not muted and rms >= 300 else self._quiet_left - len(pcm)
             duration = len(pcm) / (SAMPLE_RATE * 2)
             queued = getattr(source, "backlog_bytes", None)
             if queued is None:
@@ -934,7 +917,7 @@ class VoiceCall:
                     and now - self._activity >= self.idle_timeout):
                 self.reason = "idle_timeout"
                 return
-            if self._no_speech:
+            if self._quiet_left is not None and self._quiet_left <= 0:
                 self.reason = "no_speech"
                 return
             await asyncio.sleep(min(0.1, self.idle_timeout, self.overall_timeout))

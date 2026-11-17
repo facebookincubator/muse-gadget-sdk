@@ -40,7 +40,8 @@ DEPS=""
 OFFLINE=0
 REGISTRY="https://components-file.espressif.com/components"
 
-# name|version|archive|sha256
+# name|version|archive|sha256, in step with the pins in
+# ../../esp32/components/muse_wakeword/idf_component.yml
 ARCHIVES=(
   "pytorch/executorch|1.6.0-dev.20261112|pytorch__executorch-v1.6.0-dev.20261112.zip|7885747a7a47fe81b72f52b52884c122439a3304b117d0774dc05af3e03ba312"
   "espressif/esp-nn|1.5.0|espressif__esp-nn-v1.5.0.zip|50bdc2b89b54c1fae5d308a5961bb7a261453bbcc4e384ff1c696dea7514e1ce"

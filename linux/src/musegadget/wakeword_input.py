@@ -32,10 +32,7 @@ from musegadget.voice_call import FRAME_BYTES, READY_TIMEOUT_S, SAMPLE_RATE, TRA
 PREROLL_SECONDS = 1
 PREROLL_BYTES = SAMPLE_RATE * 2 * PREROLL_SECONDS
 # Capture queued from the wake until the call reads it: the pre-roll plus
-# everything heard while the call starts, which may take every stage's full
-# limit (the VM lookup, the transport, the call's readiness; derived from
-# the same constants, so they can't drift apart), with a little slack. The
-# call then catches up at CATCH_UP_RATE. About 4.4 MB at 24 kHz.
+# a start that takes every stage's full limit, and a little slack.
 STARTUP_SECONDS = PREROLL_SECONDS + FETCH_TIMEOUT_S + TRANSPORT_READY_TIMEOUT_S + READY_TIMEOUT_S + 5
 MAX_BUFFER_BYTES = SAMPLE_RATE * 2 * STARTUP_SECONDS
 
