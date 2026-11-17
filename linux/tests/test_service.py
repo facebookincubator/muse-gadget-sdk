@@ -720,3 +720,59 @@ def test_repeated_rejection_backoff_is_bounded_in_the_run_loop(tmp_path, monkeyp
     assert all(service_module.AUTH_BACKOFF_MIN_S <= delay <= service_module.BACKOFF_MAX_S
                for delay in delays)
     assert delays[-1] == service_module.BACKOFF_MAX_S
+
+
+@pytest.mark.parametrize("stored, used", [
+    ({"node_id": "gadget-000001"}, "gadget-000001"),
+    ({"node_id": "homelink-000001"}, "homelink-000001"),   # a stored id is never renamed
+    ({}, "homelink-000001"),                                # paired before ids were stored
+])
+def test_a_token_refresh_names_and_keeps_the_paired_node_id(monkeypatch, stored, used):
+    calls = []
+
+    def refresh(refresh_token, node_id, api, sdk_token):
+        calls.append(node_id)
+        return {"access_token": "a2", "refresh_token": "r2"}, 200
+
+    monkeypatch.setattr("musegadget.service.muse_api.refresh_device_token", refresh)
+    monkeypatch.setattr("musegadget.service.config.save_json", lambda *args: None)
+    stale = {"access_token": "a", "refresh_token": "r", "access_token_saved_at": 0, **stored}
+
+    async def scenario():
+        service = Service(identity=Identity("02:00:00:00:00:01").for_pairing(stale),
+                          executor=Executor(Account.current()))
+        return await service._maybe_refresh(stale)
+
+    rotated = asyncio.run(scenario())
+    assert calls == [used]
+    assert rotated["access_token"] == "a2"
+    assert Identity("02:00:00:00:00:01").for_pairing(rotated).node_id == used
+
+
+@pytest.mark.parametrize("stored, used", [
+    ({"node_id": "gadget-000001"}, "gadget-000001"),
+    ({"node_id": "homelink-000001"}, "homelink-000001"),
+    ({}, "homelink-000001"),
+])
+def test_the_service_registers_with_the_pairings_node_id(monkeypatch, stored, used):
+    # The service follows the pairing it connects with, even one made after
+    # it started (a `pair --force` meanwhile).
+    pairing = {"access_token": "a", "refresh_token": "r", "access_token_saved_at": int(time.time()), **stored}
+    monkeypatch.setattr(service_module.tls, "client_context", lambda: None)
+    monkeypatch.setattr(service_module.config, "load_json", lambda name, *args: dict(pairing))
+    monkeypatch.setattr(service_module.muse_api, "fetch_vms_with_status",
+                        lambda *args: ([{"vm_id": "vm", "vm_name": "vm", "vm_auth_token": "t",
+                                         "is_default": True}], 200))
+    seen = []
+
+    class Probe(Service):
+        async def _session(self, vm, pairing):
+            seen.append((self.identity.node_id, self.describe().node_id))
+            return Outcome.STOPPED, 0.0
+
+    async def scenario():
+        probe = Probe(identity=Identity("02:00:00:00:00:01"), executor=Executor(Account.current()))
+        await probe.run()
+
+    asyncio.run(scenario())
+    assert seen == [(used, used)]

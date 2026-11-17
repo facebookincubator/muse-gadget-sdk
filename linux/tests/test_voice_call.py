@@ -179,6 +179,31 @@ def test_actual_noise_duplex_wav_audio_and_cancelled_response_is_not_call_end(tm
         assert wav.readframes(wav.getnframes()) == TONE * 2
 
 
+def test_cancellation_during_cleanup_after_a_failure_is_recorded():
+    # The original failure still propagates, but the caller can tell a
+    # Ctrl-C arrived while the call was cleaning up.
+    async def scenario():
+        failed = asyncio.Event()
+
+        async def failing_source():
+            failed.set()
+            raise RuntimeError("synthetic source failure")
+            yield TONE
+
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", cleanup_timeout=1)
+            task = asyncio.create_task(call.run(failing_source(), Output()))
+            media, start = await admit(vm)
+            await asyncio.wait_for(failed.wait(), 1)
+            await asyncio.sleep(0.05)  # shutdown is now waiting on the end-call
+            task.cancel()
+            await hangup(vm, media, start)
+            with pytest.raises(RuntimeError):
+                await asyncio.wait_for(task, 2)
+            assert call.cleanup_cancelled and call.cleanup_error is None
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("failure", ["source", "cancel", "server", "identity", "truncated", "oversize"])
 def test_hangup_on_errors_and_cancellation_preserves_original_failure(failure):
     async def broken_source():
@@ -263,6 +288,47 @@ def test_silent_keepalives_neither_gate_mic_nor_extend_idle():
             finally:
                 pings.cancel()
                 await asyncio.gather(pings, return_exceptions=True)
+    asyncio.run(scenario())
+
+
+def test_speech_timeout_ends_a_call_nobody_speaks_in():
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.1)
+            task = asyncio.create_task(call.run(source(b"\0" * FRAME_BYTES), Output()))
+            media, start = await admit(vm)
+            await asyncio.wait_for(hangup(vm, media, start), 1)
+            assert await task == "no_speech"
+    asyncio.run(scenario())
+
+
+def test_speech_after_the_preroll_satisfies_the_speech_timeout():
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.15, idle_timeout=0.4,
+                             speech_after_bytes=len(TONE))
+            task = asyncio.create_task(call.run(source(TONE, TONE), Output()))
+            media, start = await admit(vm)
+            for _ in range(2):
+                assert (await next_event(vm))["type"] == "input_audio_buffer.append"
+            await asyncio.wait_for(hangup(vm, media, start), 2)
+            assert await task == "idle_timeout"   # not "no_speech"
+    asyncio.run(scenario())
+
+
+def test_the_wake_words_preroll_and_server_vad_dont_count_as_speech():
+    # The pre-roll is the wake word itself, so it is speech, and Muse's VAD
+    # may say so; neither may keep a false wake's call open.
+    async def scenario():
+        async with connected(register_device=False) as (session, vm, unused):
+            call = VoiceCall(session, device_id="homelink-synthetic", speech_timeout=0.15, idle_timeout=5,
+                             speech_after_bytes=3 * len(TONE))
+            task = asyncio.create_task(call.run(source(TONE, TONE, TONE), Output()))
+            media, start = await admit(vm, extra=[{"type": "input_audio_buffer.speech_started"}])
+            for _ in range(3):
+                assert (await next_event(vm))["type"] == "input_audio_buffer.append"
+            await asyncio.wait_for(hangup(vm, media, start), 2)
+            assert await task == "no_speech"
     asyncio.run(scenario())
 
 

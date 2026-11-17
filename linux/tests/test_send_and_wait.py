@@ -647,3 +647,20 @@ def test_cli_refuses_a_bad_wait_before_sending(local_reply, capsys, wait):
     assert exit_info.value.code == 2
     assert "from 1 to 600" in capsys.readouterr().err
     assert received == []
+
+
+@pytest.mark.parametrize("field", ["text", "display_text", "content", "transcript"])
+@pytest.mark.parametrize("ack_first", [False, True])
+def test_reply_with_lone_surrogates_reads_the_same_before_and_after_ack(field, ack_first):
+    async def scenario():
+        reader = service_module._ReplyReader(service_module.MuseTurn("main"))
+        if ack_first:
+            reader.acknowledge(ACK["response"], fresh=False)
+        name = "delta.text_append" if field == "text" else "message.assistant"
+        reader.take(event(name, "r1", parent="u1", **{field: "Done \ud83c\udf89"}))
+        if not ack_first:
+            reader.acknowledge(ACK["response"], fresh=False)
+        assert reader.turn.replies["r1"].text == "Done "
+        assert reader.turn.replies["r1"].done == (field != "text")
+
+    run(scenario())

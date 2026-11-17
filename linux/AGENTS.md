@@ -35,13 +35,14 @@ pairing and control protocols, so the same app pairs either.
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
 | `ble_setup.py` | Setup commands behind the GATT characteristics (no BlueZ dependency) |
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
-| `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
+| `identity.py` | Persistent identity: the pairing's node id (`homelink-xxxxxx`, or `gadget-xxxxxx` with `MUSEGADGET_GADGET_NODE_ID=1`), `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
-| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a distrusted root CA |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a compromised root CA (a retired one only logs a warning) |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
 | `video_call.py`, `voice_video.py`, `rtc/` | Video calls: JOIN over Noise, SRTP media (ICE-lite over UDP/TCP, Opus, H.264), H.264 outputs |
+| `wakeword.py`, `wakeword_input.py`, `wakeword_check.py` | Optional Hey Muse detector (the native library from `wakeword/`), wake-word admission in front of a voice call, local check |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
@@ -143,9 +144,18 @@ never has a command's parameters, output or error message.
   A Pi has no button, so the app's own confirmation stands in for it, and BLE
   only advertises while `musegadget pair` runs.
 - The BLE name is `MuseGadget` plus the last six hex digits of the identity,
-  with **no hyphen**: the apps compare the text after the prefix with the text
-  after `homelink-` in the node id. `get_device_info` must report
+  with **no hyphen**: the apps compare the text after the prefix with the six
+  hex digits that end the node id. `get_device_info` must report
   `model: "hatch_link"`.
+- Node ids: with `MUSEGADGET_GADGET_NODE_ID=1` in the pairing's environment
+  (`sudo env MUSEGADGET_GADGET_NODE_ID=1 musegadget pair`), a new pairing
+  offers `gadget-` and those six digits (lowercase) in `get_device_info` and
+  the transcript; without it (the default) it offers `homelink-` and the same
+  digits. Either way it
+  stores the id in `pairing.json` with the tokens it was issued for. That stored id is the one in use
+  (`link.register`, token refresh, chat turns) until the device is paired
+  again, so a pairing made before ids were stored keeps `homelink-xxxxxx`.
+  Never rename a stored id.
 - The apps always scan Wi-Fi and send `provision_v2` with an SSID. When the
   device is online it offers one open network, "the current connection", and
   ignores the Wi-Fi fields it gets back. It never stores them.
@@ -228,6 +238,24 @@ never has a command's parameters, output or error message.
   bounded, restart idle after settlement, and never suspend the overall timer.
 - A validated end-call ACK is not undone by a delayed media EOF if a bounded
   stream reset succeeds; report the incomplete drain separately.
+- `voice-call --wake-word` waits for local detection before admitting a call;
+  the default is unchanged. `WakeWordInput` owns the capture iterator and a
+  bounded one-second pre-roll and a startup queue sized from the start
+  stages' limits (`wakeword_input.STARTUP_SECONDS`); always await `aclose()`.
+  The call reads the listener itself and sends its queued backlog at up to
+  three times real time (wall-clock paced) until it is down to one frame.
+  Its detector tap alone uses a streaming 24-to-16 kHz FIR (native from the
+  detector's `resampler()`; `Pcm24To16` is the Python reference). Active calls never
+  run detection, and live mode resets/re-arms only after successful cleanup.
+  Detection is `wakeword/build.sh`'s `libmuse_wakeword.so`: the ESP32 runner,
+  model and front end (`../esp32/components/muse_wakeword`), loaded with
+  ctypes; no Python ML packages. A wake-started voice call passes
+  `speech_timeout` with `speech_after_bytes` (the listener's pre-roll) and
+  ends as `no_speech` when no locally voiced audio follows the pre-roll;
+  server VAD events don't count, since the pre-roll is the wake word itself.
+  Video calls keep their idle timer and pace the queued backlog as voice does. See
+  `wakeword/README.md` and `../skills/gadget-linux-wakeword/SKILL.md` for setup.
+  Hardware-free tests use synthetic detectors and tones, never recordings.
 - Tests use self-authored tones/zeros and synthetic identities only. Never put
   real recordings, credentials, internal documents or captured events here.
   `test_streaming.py`, `test_voice_call.py` and `test_voice_cli.py` exercise real
@@ -272,7 +300,12 @@ listed here. Everything else is internal and can change.
 
 - `identity.load_or_create()` returns the device `Identity`. It creates one on
   first use and keeps it across unpairing.
-- `Identity.node_id` is the `homelink-xxxxxx` ID that Muse knows the device by.
+- `Identity.node_id` is the ID that Muse knows the device by: the one stored
+  with its pairing (a pairing made before ids were stored keeps
+  `homelink-xxxxxx`), or, while it isn't paired, the one a new pairing
+  offers (`Identity.setup_node_id`: `gadget-xxxxxx` when
+  `MUSEGADGET_GADGET_NODE_ID` is `1`, else `homelink-xxxxxx`). `load_or_create()` reads it from the pairing, and
+  `Service` follows the pairing it connects with.
   `Identity.ble_name` is the name the Muse app shows during pairing.
 - `config.state_dir()` is the directory for device state. Set
   `MUSEGADGET_STATE_DIR` to move it.
@@ -286,6 +319,9 @@ listed here. Everything else is internal and can change.
 - `config.PAIRING_FILE` is the file that holds the pairing.
 - `config.STATE_DIR_ENV` and `config.SDK_TOKEN_ENV` hold the names of the two
   environment variables, `MUSEGADGET_STATE_DIR` and `MUSEGADGET_SDK_TOKEN`.
+  `config.GADGET_NODE_ID_ENV` names `MUSEGADGET_GADGET_NODE_ID`: `1` makes a
+  new pairing offer a `gadget-` node id. It is off by default; turn it on for
+  development.
 
 ### Pairing
 
@@ -310,7 +346,7 @@ listed here. Everything else is internal and can change.
   is an `executor.Executor` instance.
 - `await Service.run()` runs until `Service.stop()` is called or `serve()`
   returns `Outcome.STOPPED`. It first raises `tls.TrustStoreError` if the
-  system trust store can't be read or still has a distrusted root CA.
+  system trust store can't be read or still has a compromised root CA.
 - To describe your own device, or to run your own work while it is connected,
   subclass `Service` and override any of these three methods.
 - `describe()` returns the `DeviceDescription` to register with Muse.

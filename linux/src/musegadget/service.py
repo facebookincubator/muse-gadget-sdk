@@ -131,6 +131,9 @@ class Service:
                 log.warning("%s Run `musegadget pair --force` to pair again.", problem)
                 await self._sleep(UNPAIRED_POLL_S)
                 continue
+            # The node id this pairing was made for (identity.py): what
+            # describe() registers and a token refresh names.
+            self.identity = self.identity.for_pairing(pairing)
             self._warn_if_sdk_token_changed(pairing)
             pairing = await self._maybe_refresh(pairing)
             if pairing is None:
@@ -641,7 +644,8 @@ def _text_bytes(event: dict) -> int:
     payload = event.get("payload")
     if not isinstance(payload, dict):
         return 0
-    return sum(len(payload[key].encode("utf-8")) for key in ("text", "display_text", "content", "transcript")
+    return sum(len(payload[key].encode("utf-8", errors="surrogatepass")) for key in
+               ("text", "display_text", "content", "transcript")
                if isinstance(payload.get(key), str))
 
 

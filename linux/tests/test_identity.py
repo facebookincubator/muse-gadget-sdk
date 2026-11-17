@@ -20,9 +20,16 @@ import stat
 from musegadget import config, identity
 
 
-def test_names_share_the_suffix():
+def test_names_share_the_suffix(monkeypatch):
     ident = identity.Identity("02:00:00:ab:cd:ef")
-    assert ident.node_id == "homelink-abcdef"
+    # Gadget ids off (the default): new pairings offer homelink- as before.
+    monkeypatch.delenv(config.GADGET_NODE_ID_ENV, raising=False)
+    assert ident.node_id == "homelink-abcdef"   # not paired: a new pairing's
+    assert ident.setup_node_id == "homelink-abcdef"
+    monkeypatch.setenv(config.GADGET_NODE_ID_ENV, "1")
+    assert ident.node_id == "gadget-abcdef"
+    assert ident.setup_node_id == "gadget-abcdef"
+    assert ident.legacy_node_id == "homelink-abcdef"
     assert ident.device_id == "hatch-link:02:00:00:ab:cd:ef"
     assert ident.ble_name == "MuseGadgetABCDEF"
 
@@ -45,3 +52,26 @@ def test_corrupt_identity_is_replaced(tmp_path):
     (tmp_path / config.IDENTITY_FILE).write_text('{"mac": "nope"}')
     ident = identity.load_or_create(tmp_path, lambda n: bytes(range(n)))
     assert ident.mac == "02:01:02:03:04:05"
+
+
+def test_the_node_id_is_the_pairings(monkeypatch):
+    monkeypatch.setenv(config.GADGET_NODE_ID_ENV, "1")
+    # The id stored with the tokens is the one in use, a homelink- one
+    # included; a pairing made before ids were stored keeps homelink-.
+    ident = identity.Identity("02:00:00:ab:cd:ef")
+    assert ident.for_pairing({"node_id": "gadget-abcdef"}).node_id == "gadget-abcdef"
+    assert ident.for_pairing({"node_id": "homelink-abcdef"}).node_id == "homelink-abcdef"
+    assert ident.for_pairing({"access_token": "a"}).node_id == "homelink-abcdef"
+    for bad in (None, "", 7, "gadget-ABCDEF", "gadget-abc", "gadget-abcdef\n"):
+        assert ident.for_pairing({"node_id": bad}).node_id == "homelink-abcdef"
+    assert ident.for_pairing(None).node_id == "gadget-abcdef"
+    assert ident.for_pairing({"node_id": "homelink-abcdef"}) == ident   # the same device
+
+
+def test_load_reads_the_pairings_node_id(tmp_path):
+    first = identity.load_or_create(tmp_path)
+    assert first.node_id == first.setup_node_id
+    config.save_json(config.PAIRING_FILE, {"access_token": "a"}, tmp_path)
+    assert identity.load_or_create(tmp_path).node_id == first.legacy_node_id
+    config.save_json(config.PAIRING_FILE, {"access_token": "a", "node_id": first.setup_node_id}, tmp_path)
+    assert identity.load_or_create(tmp_path).node_id == first.setup_node_id

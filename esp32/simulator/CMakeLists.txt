@@ -229,7 +229,31 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
             -fsanitize=address,undefined -fno-omit-frame-pointer)
     endif()
     add_test(NAME muse_caption_layout COMMAND muse_caption_layout_test)
+    add_executable(muse_volume_swipe_test tests/volume_swipe_harness.c ${caption_sources})
+    target_include_directories(muse_volume_swipe_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_volume_swipe_test PRIVATE ${caption_libraries})
+    target_compile_options(muse_volume_swipe_test PRIVATE ${caption_compile_options})
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_volume_swipe_test PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_volume_swipe COMMAND muse_volume_swipe_test)
+    set_tests_properties(muse_volume_swipe PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
     set_tests_properties(muse_caption_layout PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
+    add_executable(muse_latest_reply_test tests/latest_reply_harness.c ${caption_sources}
+        "${MUSE_COMPONENT_DIR}/muse_review.c"
+        "${MUSE_COMPONENT_DIR}/muse_chat_text.c")
+    target_include_directories(muse_latest_reply_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_latest_reply_test PRIVATE ${caption_libraries})
+    target_compile_options(muse_latest_reply_test PRIVATE ${caption_compile_options})
+    target_compile_definitions(muse_latest_reply_test PRIVATE CONFIG_MUSE_LATEST_REPLY=1)
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_latest_reply_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_latest_reply COMMAND muse_latest_reply_test)
+    set_tests_properties(muse_latest_reply PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
     find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
     add_test(
@@ -268,6 +292,7 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
         tests/settings_fakes compat ../tests/link_fakes "${MUSE_COMPONENT_DIR}"
     )
     target_compile_definitions(muse_settings_text_test PRIVATE _POSIX_C_SOURCE=200809L)
+    add_test(NAME muse_settings_volume_sync COMMAND muse_settings_text_test 466 466 1 1.75 volume)
     target_compile_options(muse_settings_text_test PRIVATE -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections)
     target_link_libraries(muse_settings_text_test PRIVATE ${MUSE_SIM_LVGL_TARGET} ${MUSE_SIM_SDL_TARGET} Threads::Threads m)
     if(APPLE)

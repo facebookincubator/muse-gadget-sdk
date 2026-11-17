@@ -41,10 +41,12 @@ class LinkWaveshare154gPageTest(unittest.TestCase):
         compiled = subprocess.run(cmd, capture_output=True, text=True)
         if compiled.returncode:
             raise AssertionError(compiled.stdout + compiled.stderr)
-        policy = [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(out), "-I", str(ROOT / "main"),
+        # muse_text.c uses strlcpy, which glibc doesn't declare under -std=c11.
+        policy = [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-include", str(ROOT / "tests/host_compat.h"),
+                  "-I", str(out), "-I", str(ROOT / "main"),
                   "-I", str(ROOT / "components/muse"),
                   str(ROOT / "tests/link_waveshare_154g_page_policy_harness.c"), str(ROOT / "main/pixel_font.c"),
-                  "-o", str(out / "policy")]
+                  str(ROOT / "components/muse/muse_text.c"), "-o", str(out / "policy")]
         compiled = subprocess.run(policy, capture_output=True, text=True)
         if compiled.returncode:
             raise AssertionError(compiled.stdout + compiled.stderr)

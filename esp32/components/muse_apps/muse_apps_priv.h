@@ -193,7 +193,7 @@ int32_t muse_apps_store_file_load(const char *name, size_t max, uint8_t **out, s
 void muse_apps_run_installed(const muse_apps_origin_t *o, const char *id, const char *name, uint8_t *bytes,
                              size_t len);
 void muse_apps_open_failed(const muse_apps_origin_t *o, const char *code, const char *message);
-/* Closes the running app if it's installed app id (NULL: any installed app).
+/* Closes the running app if it's installed app id (NULL, for unpairing: any app).
  * Any task but the app task. */
 void muse_apps_stop_installed(const char *id);
 /* The installed app running now, or "". Any task. */
