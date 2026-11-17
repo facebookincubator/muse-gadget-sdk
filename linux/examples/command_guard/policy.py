@@ -43,6 +43,7 @@ How the shell command is inspected (hardened):
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import shlex
@@ -165,6 +166,23 @@ class Policy:
                 return True
         return False
 
+    def may_glob_sensitive(self, path: str, cwd: str = "") -> bool:
+        """Whether a glob (``*``, ``?``, ``[``) could expand onto a sensitive
+        path, e.g. ``~/.ss?/id_rsa`` or ``/etc/sha*``. As in the shell, a
+        wildcard does not match a leading dot unless the pattern has one."""
+        if not any(ch in path for ch in "*?["):
+            return False
+        parts = self.resolve(path, cwd).strip("/").split("/")
+        for prefix in self.sensitive_paths:
+            want = prefix.strip("/").split("/")
+            if len(parts) < len(want):
+                continue
+            if all(fnmatch.fnmatchcase(name, pat)
+                   and (not name.startswith(".") or pat.startswith("."))
+                   for name, pat in zip(want, parts)):
+                return True
+        return False
+
     def is_system_write(self, path: str, cwd: str = "") -> bool:
         resolved = self.resolve(path, cwd)
         for prefix in self.system_write_paths:
@@ -203,6 +221,9 @@ _WRITE_REDIRECTIONS = {">", ">>", ">&", "&>"}
 _UNVALIDATABLE_CHARS = ("$", "`", "\\")
 
 _POWER = ("shutdown", "reboot", "poweroff", "halt")
+# find actions that run, delete or write rather than only list.
+_FIND_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir", "-delete",
+                 "-fprint", "-fprint0", "-fprintf", "-fls")
 _SHELLS = ("sh", "bash", "zsh", "dash", "ksh", "fish")
 _DOWNLOADERS = ("curl", "wget", "fetch")
 _PKG_MANAGERS = ("apt", "apt-get", "dnf", "yum", "pacman", "pip", "pip3",
@@ -275,7 +296,9 @@ def _classify_segment(policy: Policy, tokens: list, cwd: str) -> RuleDecision:
 
     # Any argument that resolves to a sensitive path blocks the command.
     for token in tokens[1:]:
-        if _looks_like_path(token) and policy.is_sensitive(token.strip("'\""), cwd):
+        clean = token.strip("'\"")
+        if _looks_like_path(token) and (policy.is_sensitive(clean, cwd)
+                                        or policy.may_glob_sensitive(clean, cwd)):
             return RuleDecision(BLOCK, f"command touches sensitive path {token}")
 
     if "rm" in words:
@@ -307,6 +330,9 @@ def _classify_segment(policy: Policy, tokens: list, cwd: str) -> RuleDecision:
         if sub in policy.readonly_systemctl:
             return RuleDecision(ALLOW, f"read-only command: systemctl {sub}")
         return RuleDecision(CONFIRM, f"systemctl {sub} may change the system; confirmation required")
+
+    if first == "find" and any(t in _FIND_ACTIONS for t in tokens):
+        return RuleDecision(CONFIRM, "find that runs, deletes or writes; confirmation required")
 
     if first in policy.readonly_commands:
         return RuleDecision(ALLOW, f"read-only command: {first}")
@@ -351,6 +377,10 @@ def _check_system_run(policy: Policy, command: str, cwd: str) -> RuleDecision:
                                      "confirmation required")
     if not tokens:
         return RuleDecision(policy.default_shell_action, "empty command")
+
+    # Bare file names are relative to cwd, so a sensitive cwd taints them all.
+    if policy.is_sensitive(cwd):
+        return RuleDecision(BLOCK, f"working directory {cwd} is a sensitive path")
 
     segments, redirs, pipe = _segmentize(tokens)
     all_words = [_basename(t) for seg in segments for t in seg]

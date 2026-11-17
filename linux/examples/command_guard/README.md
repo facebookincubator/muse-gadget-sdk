@@ -127,10 +127,11 @@ nothing. That is why unknown-but-harmless-looking calls are `confirm`, not
 | `sudo …` in `system.run` | block |
 | `rm -rf /`, `rm -rf ~` or the home directory itself, `mkfs`, `dd of=/dev/…`, `shutdown` / `reboot` / `poweroff` / `halt` | block |
 | `curl … \| sh`, `wget … \| bash` | block |
-| Read or write of `/var/lib/musegadget/` (the SDK token), `~/.ssh/`, `/etc/shadow` (after resolving the path) | block |
+| Read or write of `/var/lib/musegadget/` (the SDK token), `~/.ssh/`, `/etc/shadow` (after resolving the path, including a glob that could match one, or a command run from inside one) | block |
 | `file.write` under `/etc/`, `/opt/musegadget/`, `/usr/`; a redirection (`>`) into any of those | block |
 | Package installs without sudo (`apt install`, `pip install`, …) | confirm |
 | Deletes and moves (irreversible, where a reversible alternative such as trash may exist) | confirm |
+| `find` with `-exec`, `-ok`, `-delete` or `-fprint`/`-fls` | confirm |
 | A read-only command combined with operators, redirections or substitutions the guard cannot fully validate | confirm |
 | A destructive target that is not, or strictly contains, the path named in the request (Layer 2) | confirm / block |
 | Any other shell command not on the read-only allowlist | confirm (configurable: `default_shell_action`) |

@@ -162,6 +162,35 @@ def test_relative_path_resolved_against_cwd_blocks_sensitive(pol):
     assert decision.action == "block"
 
 
+@pytest.mark.parametrize("shell", [
+    "cat ~/.ss?/id_rsa",                   # a glob onto a sensitive path
+    "cat /etc/sha*",
+    "tail /home/pi/.*/id_rsa",
+])
+def test_globs_onto_sensitive_paths_block(pol, shell):
+    assert layer1(pol, "system.run", {"command": shell}) == "block", shell
+
+
+def test_sensitive_cwd_blocks_bare_names(pol):
+    decision = policy_module.evaluate(pol, "system.run", {
+        "command": "cat id_rsa", "cwd": "/home/pi/.ssh"})
+    assert decision.action == "block"
+
+
+@pytest.mark.parametrize("shell", [
+    "find /home/pi -name '*.tmp' -delete",
+    "find . -exec python3 -c 'print(1)' {} +",
+    "find / -fprint /etc/x",
+])
+def test_find_actions_confirm(pol, shell):
+    assert layer1(pol, "system.run", {"command": shell}) == "confirm", shell
+
+
+def test_plain_find_and_home_glob_still_allowed(pol):
+    assert layer1(pol, "system.run", {"command": "find /home/pi -name '*.txt'"}) == "allow"
+    assert layer1(pol, "system.run", {"command": "ls /home/pi/*"}) == "allow"
+
+
 def test_dotdot_traversal_on_file_read_blocks(pol):
     decision = policy_module.evaluate(pol, "file.read", {
         "path": "/home/pi/../../etc/shadow"})
