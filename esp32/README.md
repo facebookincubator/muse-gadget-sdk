@@ -287,6 +287,12 @@ Boards without PSRAM, like the classic ESP32 and the ESP32-C6, run without the
 home-network tunnel, which needs more memory than they have. Muse can still
 reach the device and control it.
 
+## Cable screen mirror
+
+Full Muse LVGL builds can mirror their screen and controls over the console
+cable with `MUSE_MIRROR=1`. See [the mirror guide](docs/mirror.md) for building
+the opt-in firmware, starting the desktop viewer, and saving captures.
+
 ## Power characterization
 
 Start at [Power profiling](docs/power/README.md). Read the

@@ -42,6 +42,9 @@
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
+#if CONFIG_MUSE_MIRROR
+#include "muse_mirror.h"
+#endif
 #include "muse_settings.h"
 #if !CONFIG_MUSE_UI_FREEINK
 #include "muse_settings_ui.h"   /* LVGL only; e-paper builds use FreeInk */
@@ -98,6 +101,13 @@ static const char *TAG = "muse_input";
 static QueueHandle_t s_queue;
 static bool (*s_console_hook)(const char *line);
 static TaskHandle_t s_input;
+#if CONFIG_MUSE_MIRROR
+void muse_input_inject(unsigned events)
+{
+    atomic_fetch_or(&s_touch_talk_events, events);
+    if (s_input) xTaskNotifyGive(s_input);
+}
+#endif
 static bool s_talk_down;
 #if CONFIG_MUSE_VOICE_NOTE_TOGGLE
 static atomic_bool s_note_toggled;   /* a toggled voice note is recording, talk released */
@@ -557,6 +567,10 @@ static bool update_power(void)
     static bool paused;
     bool pause = muse_board->display_pause && muse_state_on_battery() && muse_state_asleep()
                  && muse_ui_dark() && muse_voice_resting();
+#if CONFIG_MUSE_MIRROR
+    /* The viewer needs LVGL timers even while the physical screen is dark. */
+    pause = pause && !muse_mirror_connected();
+#endif
     bool want_low = pause && !muse_console_host();
     if (pause == paused && want_low == s_cpu_low) {
         return paused;
@@ -893,6 +907,12 @@ static bool console_command(char *line, bool whole)
     if (whole && s_console_hook && s_console_hook(line)) {
         return true;
     }
+#if CONFIG_MUSE_MIRROR
+    if (whole && (!strcmp(line, "mirror") || !strncmp(line, "mirror=", 7))) {
+        muse_mirror_serial_session(line[6] ? atoi(line + 7) : 0);
+        return true;
+    }
+#endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     if (!strcmp(line, "review.next") || !strcmp(line, "review.prev")) {
         set_asleep(false, "reply review");

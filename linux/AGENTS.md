@@ -76,7 +76,7 @@ Apple Silicon wheel, so run it under an x86-64 Python on a Mac:
 
 ```sh
 uv run --no-project --isolated --python cpython-3.9-macos-x86_64 \
-  --with pytest --with cryptography==3.3.2 --with websockets==13.1 \
+  --with pytest --with cryptography==3.3.2 --with websockets==15.0.1 \
   env PYTHONPATH=src python -m pytest -q
 ```
 
@@ -113,7 +113,7 @@ against a pinned checksum, and builds a new venv, before running anything there
 as root. Don't run that uv with `sudo` yourself.
 
 Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
-`--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
+`--from SOURCE`, `--proxy URL`, `--no-proxy HOSTS`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
 keep it that way. Root runs everything under `/opt/musegadget`, so the
 installer never runs a file there that another account could have changed.
 To move to a new uv, update `UV_VERSION` and both checksums for each target
