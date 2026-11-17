@@ -1,6 +1,6 @@
 # Skill Catalog
 
-57 active skills: 55 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+58 active skills: 56 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
@@ -43,6 +43,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Samsung Tizen TVs](gadget-samsung-tizen-tvs/SKILL.md) — local remote and model-specific Frame Art.
 - [Sonos speakers](gadget-sonos-speakers/SKILL.md) — playback, volume and grouping.
 - [VIZIO D40f-G9](gadget-vizio-d40f-g9/SKILL.md) — SmartCast management; Cast when advertised.
+- [Music Assistant](gadget-music-assistant/SKILL.md) — playback, volume and queues on named players, authorised with a long-lived token.
 
 ## Printers and appliances
 
