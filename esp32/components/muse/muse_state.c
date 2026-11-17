@@ -39,7 +39,9 @@ static volatile float s_level;
 static volatile float s_progress;
 static volatile int64_t s_last_poke_us;
 static volatile int64_t s_happy_until_us;
+#if CONFIG_MUSE_REPLY_NOTIFY
 static volatile int64_t s_flash_start_us;   /* 0 = no reply flash */
+#endif
 static volatile bool s_asleep;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -290,6 +292,7 @@ void muse_state_nudge(void)
     xEventGroupSetBits(s_wake, NUDGE_BIT);
 }
 
+#if CONFIG_MUSE_REPLY_NOTIFY
 #define FLASH_SECS 0.9f
 
 void muse_state_flash(void)
@@ -317,6 +320,7 @@ float muse_state_flash_level(void)
     float x = (t < half ? t : t - half) / half;
     return x < 0.15f ? x / 0.15f : (1.0f - x) / 0.85f;
 }
+#endif
 
 void muse_state_make_happy(void)
 {

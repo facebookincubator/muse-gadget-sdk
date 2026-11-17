@@ -482,6 +482,7 @@ void muse_audio_chirp(int rising)
     muse_audio_write(buf, N);
 }
 
+#if CONFIG_MUSE_REPLY_NOTIFY
 void muse_audio_notify(void)
 {
     /* E6 then A6, 110 ms each with a bell-like decay: short and clear on the
@@ -501,3 +502,4 @@ void muse_audio_notify(void)
         muse_audio_write(buf, N);
     }
 }
+#endif
