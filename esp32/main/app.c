@@ -2027,11 +2027,18 @@ static cJSON *wg1200_notify_command(cJSON *params) {
     }
 
     cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_CreateObject();
+    if (!result || !payload) {
+        cJSON_Delete(result);
+        cJSON_Delete(payload);
+        return command_error("out_of_memory", "failed to allocate notify result");
+    }
+    cJSON_AddStringToObject(payload, "title", title_str);
+    cJSON_AddNumberToObject(payload, "beep_ms", muted ? 0 : beep_ms);
+    cJSON_AddNumberToObject(payload, "duration_s", duration_s);
+    cJSON_AddBoolToObject(payload, "muted", muted);
     cJSON_AddBoolToObject(result, "ok", true);
-    cJSON_AddStringToObject(result, "title", title_str);
-    cJSON_AddNumberToObject(result, "beep_ms", muted ? 0 : beep_ms);
-    cJSON_AddNumberToObject(result, "duration_s", duration_s);
-    cJSON_AddBoolToObject(result, "muted", muted);
+    cJSON_AddItemToObject(result, "payload", payload);
     return result;
 }
 #endif

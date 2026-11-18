@@ -914,9 +914,10 @@ int main(int argc, char **argv) {{
             ),
         )
         self.assertTrue(ok["ok"])
-        self.assertEqual(ok["title"], "Wind Alert")
-        self.assertEqual(ok["beep_ms"], 250)
-        self.assertEqual(ok["duration_s"], 45)
+        # Only ok and payload reach Muse.
+        self.assertEqual(ok["payload"]["title"], "Wind Alert")
+        self.assertEqual(ok["payload"]["beep_ms"], 250)
+        self.assertEqual(ok["payload"]["duration_s"], 45)
         self.assertEqual(ok["_beep_called"], 250)
         self.assertEqual(ok["_ui_title"], "Wind Alert")
         self.assertEqual(ok["_ui_msg"], "Gusts reaching 14 m/s")
@@ -928,8 +929,8 @@ int main(int argc, char **argv) {{
             "muted",
         )
         self.assertTrue(muted["ok"])
-        self.assertTrue(muted["muted"])
-        self.assertEqual(muted["beep_ms"], 0)
+        self.assertTrue(muted["payload"]["muted"])
+        self.assertEqual(muted["payload"]["beep_ms"], 0)
         self.assertEqual(muted["_beep_called"], 0)
 
     def test_boot_weatherxm_is_not_dispatched(self) -> None:
