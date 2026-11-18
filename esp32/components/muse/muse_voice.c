@@ -644,6 +644,16 @@ static bool hatch_reply(bool *delivered, bool incoming)
                 }
                 break;
             case MUSE_HATCH_EV_REPLY:
+#if CONFIG_MUSE_REPLY_NOTIFY
+                if (!replied) {
+                    /* In place of a vibration motor: flash the screen and,
+                     * with the speaker on and the volume up, ping. */
+                    muse_state_flash();
+                    if (muse_settings_speaker_on() && muse_settings_volume() > 0) {
+                        muse_audio_notify();
+                    }
+                }
+#endif
                 replied = *delivered = true;
                 /* Once speech starts, the caption follows it. The event only
                  * has room for the page's start; the page itself comes below. */

@@ -187,6 +187,9 @@ static lv_obj_t *s_dots[PAGE_DOTS];
 static lv_obj_t *s_wifi_icon;
 static lv_obj_t *s_ble_icon;
 static lv_obj_t *s_cover;
+#if CONFIG_MUSE_REPLY_NOTIFY
+static lv_obj_t *s_flash;   /* white veil that blinks when a reply arrives */
+#endif
 static lv_obj_t *s_pair;
 static lv_obj_t *s_pair_code;
 static lv_obj_t *s_pair_title;
@@ -1850,6 +1853,17 @@ static void build_overlays(void)
     lv_obj_set_width(s_pair_hint, lv_pct(100));
     lv_label_set_long_mode(s_pair_hint, LV_LABEL_LONG_MODE_WRAP);
 
+#if CONFIG_MUSE_REPLY_NOTIFY
+    /* Reply flash: drawn over everything, never takes a touch. */
+    s_flash = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_flash);
+    lv_obj_set_size(s_flash, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(s_flash, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(s_flash, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(s_flash, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+#endif
+
     /* Sleep cover: swallows the waking touch. */
     s_cover = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(s_cover);
@@ -2462,6 +2476,17 @@ static void frame_tick(lv_timer_t *timer)
     if (update_sleep()) {
         return;
     }
+#if CONFIG_MUSE_REPLY_NOTIFY
+    {
+        float flash = muse_state_flash_level();
+        if (flash > 0) {
+            lv_obj_set_style_bg_opa(s_flash, (lv_opa_t)(flash * 170), 0);
+            lv_obj_remove_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+        } else if (!lv_obj_has_flag(s_flash, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_add_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
 #if CONFIG_MUSE_VIDEO
     if (muse_video_tick()) {
         muse_menu_close();
