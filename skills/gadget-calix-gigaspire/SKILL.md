@@ -1,9 +1,9 @@
 ---
 name: gadget-calix-gigaspire
-description: Read read-only status including connected devices and DHCP and wireless and system information from Calix GigaSpire routers through a Linux Muse gadget on the home network and not through a Muse Home Link tunnel without changing any router settings or handling router credentials
+description: Read read-only status including connected devices and DHCP and wireless and system information from Calix GigaSpire routers through a Linux Muse gadget on the router's own LAN, using an existing read-only connector whose credentials stay on that host. It changes no router settings and handles no router credentials.
 ---
 
-## Calix GigaSpire Routers
+# Calix GigaSpire Routers
 
 Use this skill when you want read-only status from a Calix GigaSpire router acting as the home gateway, such as connected devices, DHCP leases, wireless state, or system information, answered through an existing local connector rather than by changing any router setting.
 
@@ -45,7 +45,7 @@ If reads disagree, or a read returns an empty body where a populated result was 
 
 This skill is read-only only. It never changes any router setting.
 
-This skill runs only from a Linux Muse gadget on the router's own LAN. It does not work through a Muse Home Link tunnel.
+This skill runs only from a Linux Muse gadget on the router's own LAN, because the connector it uses runs there and the router credentials it relies on never leave that host.
 
 Excluded by name are DHCP reservation changes, device renaming, WPS pairing changes, MAC filtering or quarantine actions, SSID or password changes, radio changes, firmware updates, and router reboots. If a request asks for any of those, stop and report that it is outside this skill's scope.
 
@@ -58,3 +58,5 @@ Do not probe the gateway's failed-login lockout behavior, and do not resend requ
 This skill is the documented exception to the official-docs-only convention. No public official API documentation for the GigaSpire local interface exists, and Calix publishes its EXOS material through a provider-gated channel. The workflow above therefore rests on bench-verified local evidence from a running installation rather than on public official documentation.
 
 No private connector internals are described here. Credentials stay on the gateway-side host in the connector's own approved storage.
+
+- [Calix official site](https://www.calix.com) — the vendor. No public API documentation for the GigaSpire local interface is published there or elsewhere; see the exception note above.
