@@ -224,3 +224,7 @@ esp_err_t jpeg_encoder_process(jpeg_encoder_handle_t encoder, const jpeg_encode_
 
 int mbedtls_base64_encode(unsigned char *dst, size_t dlen, size_t *olen,
                           const unsigned char *src, size_t slen);
+
+/* The UI's state (muse_state.h) */
+void muse_state_set_asleep(bool asleep);
+void muse_state_set_hint(const char *text);

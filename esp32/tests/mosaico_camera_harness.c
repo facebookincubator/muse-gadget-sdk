@@ -19,7 +19,8 @@
  * for a Camera Module descriptor, every capture leaves esp_video torn down
  * and the sensor asleep, an SC101IOT gets PCLK delay 0 and the flash only
  * when its auto exposure is near the ceiling (an OV3640 neither), the flash
- * is off again after, and the JPEG is the frame turned upright. */
+ * is off again after, the screen wakes and says so once the camera is on, and
+ * the JPEG is the frame turned upright. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,6 +48,8 @@ static uint8_t buffers[2][W * H * 2];
 static struct fake_i2c_bus { int unused; } board_bus, own_bus;
 static struct fake_i2c_dev { int unused; } eeprom_dev;
 static i2c_master_bus_handle_t eeprom_on, sccb_bus = &own_bus;
+static bool screen_asleep;
+static int cues;
 
 const char *esp_err_to_name(esp_err_t err)
 {
@@ -309,6 +312,19 @@ int mbedtls_base64_encode(unsigned char *dst, size_t dlen, size_t *olen,
     return 0;
 }
 
+void muse_state_set_asleep(bool asleep)
+{
+    screen_asleep = asleep;
+}
+
+void muse_state_set_hint(const char *text)
+{
+    /* Once the sensor is awake, on a screen that's lit. */
+    assert(video_live && level[PWDN] == 0 && !screen_asleep);
+    assert(strcmp(text, "TAKING A PHOTO") == 0);
+    cues++;
+}
+
 static uint16_t crc16_modbus(const uint8_t *p, size_t n)
 {
     uint16_t crc = 0xFFFF;
@@ -347,6 +363,7 @@ static bool capture(char **b64, const char **error)
 {
     *error = NULL;
     flash_on_at = -1;
+    screen_asleep = true;
     bool ok = mosaico_camera_capture(b64, error);
     assert(!video_live && video_inits == video_deinits);
     assert(opens == closes && ppa_live == 0 && encoders_live == 0);
@@ -374,13 +391,13 @@ int main(void)
     assert(!capture(&b64, &error) && strcmp(error, "no camera") == 0);
     program_eeprom(0x07, false);
     assert(!capture(&b64, &error) && strcmp(error, "no camera") == 0);
-    assert(video_inits == 0 && !sets[PWDN] && !sets[FLASH]);
+    assert(video_inits == 0 && !sets[PWDN] && !sets[FLASH] && cues == 0);
 
     /* A Camera Module whose sensor doesn't answer: esp_video comes up and
      * goes, and the sensor sleeps again. */
     program_eeprom(0x07, true);
     assert(!capture(&b64, &error) && strcmp(error, "no camera") == 0);
-    assert(video_inits == 1);
+    assert(video_inits == 1 && cues == 0 && screen_asleep);
 
     /* A lit scene: PCLK delay 0, the table's other bits kept; no flash; the
      * frame from after 1.5 s, upright, at quality 70 (90 and 80 are over
@@ -392,6 +409,7 @@ int main(void)
     int64_t start = now_us;
     assert(capture(&b64, &error));
     assert(flash_on_at < 0 && rotations == 1 && kept_at - start >= 1500000 && last_quality == 70);
+    assert(cues == 1 && !screen_asleep);
     assert(regs[0x36][0x40] == 0x04);
     assert(strncmp(b64, "/9", 2) == 0 && strlen(b64) == (140000 + 2) / 3 * 4);
     free(b64);
@@ -412,6 +430,7 @@ int main(void)
     frames = false;
     assert(!capture(&b64, &error) && strcmp(error, "camera sent no frame") == 0);
     frames = true;
+    assert(cues == 4);   /* the camera came on for each, failed or not */
 
     /* v1.0: the board's own bus, which the slots share. */
     sccb_bus = &board_bus;

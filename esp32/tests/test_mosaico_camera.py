@@ -15,8 +15,9 @@
 """components/muse/boards/mosaico_camera.c (mosaico_camera_harness.c, against
 a scripted slot EEPROM, esp_video device, PPA and JPEG encoder): the slot's
 pins move only for a Camera Module, every capture tears esp_video down and
-puts the sensor to sleep, the flash fires only for a dark frame, and the JPEG
-is the frame turned upright."""
+puts the sensor to sleep, the flash fires only for a dark frame, the screen
+wakes and says so while the camera is on, and the JPEG is the frame turned
+upright."""
 
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ HEADERS = ("esp_err.h", "esp_check.h", "esp_heap_caps.h", "esp_log.h", "esp_time
            "esp_video_device.h", "esp_video_init.h", "esp_video_ioctl.h", "fcntl.h", "unistd.h",
            "sys/ioctl.h", "sys/mman.h", "driver/gpio.h", "driver/i2c_master.h", "driver/jpeg_encode.h",
            "driver/ppa.h", "freertos/FreeRTOS.h", "freertos/task.h", "linux/videodev2.h",
-           "mbedtls/base64.h", "esp_cam_sensor_types.h")
+           "mbedtls/base64.h", "esp_cam_sensor_types.h", "muse_state.h")
 
 
 class MosaicoCameraTest(unittest.TestCase):

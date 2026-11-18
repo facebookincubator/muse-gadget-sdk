@@ -695,7 +695,8 @@ edge (`no_ring`): the panel is square.
   [Camera Module](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp-mosaico/user_guide_camera.html)
   in the left expansion slot (an OV3640 on module v1.2, an SC101IOT on
   v1.4). `camera.capture` takes one frame, turns it upright and returns a
-  JPEG of at most 150 KB. On an SC101IOT the module's flash fires when the
+  JPEG of at most 150 KB. While it does, the screen wakes and shows TAKING A
+  PHOTO. On an SC101IOT the module's flash fires when the
   sensor's auto exposure value reaches 1300 (288 in a lit room and 1398
   with the lens covered, on that module). The camera's D2 and flash
   lines are the S31's USB Serial/JTAG pins, so that port on the expansion

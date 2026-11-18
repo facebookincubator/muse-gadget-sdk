@@ -49,6 +49,7 @@
 #include "freertos/task.h"
 #include "linux/videodev2.h"
 #include "mbedtls/base64.h"
+#include "muse_state.h"
 
 /* GPIO33 (D2) and GPIO34 (the flash) are the USB Serial/JTAG pads, which
  * reach only this slot: setting them up as GPIOs turns that port off. */
@@ -371,6 +372,9 @@ static esp_err_t capture(camera_frame_t *out)
         return ESP_ERR_INVALID_RESPONSE;
     }
     ESP_RETURN_ON_ERROR(open_camera(), TAG, "open");
+    /* Muse can ask for a photo at any time: wake the screen and say so. */
+    muse_state_set_asleep(false);
+    muse_state_set_hint("TAKING A PHOTO");
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     esp_err_t err = ESP_OK;
     for (int i = 0; i < BUFFERS && err == ESP_OK; i++) {
