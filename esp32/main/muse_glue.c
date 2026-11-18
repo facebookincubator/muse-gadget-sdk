@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_netif.h"
@@ -104,12 +105,13 @@ typedef struct {
     bool forgotten;             // KEEP_FORGET will forget it
     network_proxy_config_t proxy;
 } saved_net_t;
-static saved_net_t s_saved[MUSE_WIFI_SAVED_MAX];
+// With their proxies these take about 2.4 KB: in PSRAM where the board allows.
+EXT_RAM_BSS_ATTR static saved_net_t s_saved[MUSE_WIFI_SAVED_MAX];
 static int s_saved_count;
 static bool s_proxy_pending;
 static int s_proxy_result;
 static char s_proxy_ssid[MUSE_SSID_MAX + 1];
-static network_proxy_config_t s_proxy_next;
+EXT_RAM_BSS_ATTR static network_proxy_config_t s_proxy_next;
 // Muse changed the saved networks and the keeper hasn't written them yet, so
 // NVS is behind the copies here.
 static volatile bool s_editing;
