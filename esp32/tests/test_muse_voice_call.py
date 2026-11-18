@@ -33,6 +33,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
 TESTS = ROOT / 'tests'
@@ -632,7 +634,7 @@ class VoicePeCallLoop(unittest.TestCase):
                 '-Wno-unused-variable', '-I', str(FAKES / 'voice_pe'), '-I', str(FAKES), '-I', str(JSON_SRC),
                 '-I', str(TESTS), '-I', str(ROOT / 'main'), '-I', str(MUSE),
                 str(TESTS / 'voice_pe_call_harness.c'), str(MUSE / 'muse_voice_call_core.c'),
-                str(JSON_SRC / 'cJSON.c'), '-lm', '-o', str(cls.binary)]])
+                *cjson_source(JSON_SRC), '-lm', '-o', str(cls.binary)]])
 
     def run_case(self, case):
         result = subprocess.run([str(self.binary), str(case)], capture_output=True, text=True, env=ENV)

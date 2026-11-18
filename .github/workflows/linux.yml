@@ -44,7 +44,7 @@ jobs:
           - name: oldest
             os: ubuntu-24.04
             python: "3.9"
-            pins: "cryptography==3.3.2 websockets==13.1"
+            pins: "cryptography==3.3.2 websockets==15.0.1"
     defaults:
       run:
         working-directory: linux

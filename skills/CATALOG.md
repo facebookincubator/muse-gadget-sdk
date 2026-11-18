@@ -20,6 +20,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Meross smart plugs](gadget-meross-smart-plugs/SKILL.md) — local switching with supplied keys.
 - [TP-Link Kasa EP10](gadget-tplink-kasa-ep10/SKILL.md) — relay and LED; no metering.
 - [TP-Link Kasa EP25](gadget-tplink-kasa-ep25/SKILL.md) — relay, LED, energy and supported auto-off.
+- [Nanoleaf](gadget-nanoleaf/SKILL.md) — power, brightness and color through the local API after button pairing.
 
 ## Speakers, displays and TVs
 
@@ -53,8 +54,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Dyson HP04](gadget-dyson-pure-hot-cool-hp04/SKILL.md) — local status and supported fan/heating controls.
 - [Miele G 7566](gadget-miele-g7566-dishwasher/SKILL.md) — local status; commands only if supported and permitted.
 - [Moonraker 3D printers](gadget-moonraker-3d-printers/SKILL.md) — existing-service status and print/job controls.
-- [Bambu Lab printers](gadget-bambu-lab-printers/SKILL.md) — local status, filament and owner-approved prints in Developer Mode.
-- [Bambu Lab P2S](gadget-bambu-lab-p2s/SKILL.md) — status, chamber-camera snapshots, monitoring and agreed failure pauses.
+- [Bambu Lab printers](gadget-bambu-lab-printers/SKILL.md) — local status, filament, P2S chamber-camera snapshots and monitoring, and owner-approved prints in Developer Mode.
 - [HomeWhiz laundry](gadget-homewhiz-laundry/SKILL.md) — cloud only; needs internet and a HomeWhiz account: washer and dryer cycle state, read-only.
 
 ## Vacuums
