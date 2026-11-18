@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 import unittest
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 JSON = Path(os.environ.get(
     'CJSON_SOURCE_DIR', ROOT / 'managed_components/espressif__cjson/cJSON'
@@ -841,7 +843,7 @@ int main(int argc, char **argv) {
                  '-I', str(ROOT / 'components/minimp3/include')]
         commands = [
             [*shlex.split(os.environ.get('CC', 'cc')), '-std=c11', *flags,
-             '-c', str(JSON / 'cJSON.c'), '-o', str(out / 'cjson.o')],
+             '-c', *cjson_source(JSON), '-o', str(out / 'cjson.o')],
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags,
              str(out / 'session.cpp'), str(out / 'cjson.o'), '-o', str(out / 'session')],
         ]

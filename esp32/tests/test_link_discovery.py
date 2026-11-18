@@ -20,6 +20,7 @@ import tempfile
 import unittest
 
 from test_link_ota import function_source
+from host_cjson import cjson_source
 
 ROOT = Path(__file__).resolve().parents[1]
 # CI supplies pinned upstream sources; local IDF builds already have cJSON.
@@ -49,7 +50,7 @@ class LinkDiscoveryTest(unittest.TestCase):
         # glibc hides ip_mreq in strict C11 mode without its default extensions.
         flags = ["-Wall", "-Wextra", "-Werror", "-D_DEFAULT_SOURCE", "-DCJSON_NESTING_LIMIT=16", "-I", str(JSON), "-I", str(out)]
         commands = [
-            [*cc, "-std=c11", *flags, "-c", str(JSON / "cJSON.c"), "-o", str(out / "cjson.o")],
+            [*cc, "-std=c11", *flags, "-c", *cjson_source(JSON), "-o", str(out / "cjson.o")],
             [*cc, "-std=c11", *flags, str(ROOT / "tests/link_discovery_harness.c"), str(out / "cjson.o"), "-lm", "-o", str(out / "discovery")],
             [*cxx, "-std=c++17", *flags, str(ROOT / "tests/link_discovery_payload_harness.cpp"), str(out / "cjson.o"), "-lm", "-o", str(out / "payload")],
             [*cc, "-std=c11", *flags, str(ROOT / "tests/link_discover_task_harness.c"), str(out / "cjson.o"), "-lm", "-o", str(out / "discover_task")],
