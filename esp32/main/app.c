@@ -2154,9 +2154,6 @@ static cJSON *on_ws_command(
     if (strcmp(command, "sensors.read") == 0) {
         return wg1200_weather_sensors_command();
     }
-    if (strcmp(command, "device.boot_weatherxm") == 0) {
-        return wg1200_boot_weatherxm_command(params);
-    }
     if (strcmp(command, "wg1200.notify") == 0) {
         return wg1200_notify_command(params);
     }

@@ -1666,14 +1666,6 @@ static char *build_register_json(void) {
                 "(each with age_s) and lora_radio.",
                 nullptr, nullptr);
     {
-        cJSON *boot_wxm_optional = cJSON_CreateObject();
-        cJSON_AddItemToObject(boot_wxm_optional, "slot",
-                              string_param("Partition: 'ota_0' or 'factory'."));
-        add_command(commands, "device.boot_weatherxm",
-                    "Reboot into stock WeatherXM OS ('ota_0' or 'factory').",
-                    nullptr, boot_wxm_optional);
-    }
-    {
         cJSON *notify_required = cJSON_CreateObject();
         cJSON_AddItemToObject(notify_required, "message",
                               string_param("Card body text."));

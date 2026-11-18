@@ -13,7 +13,7 @@ Use this skill when the user's paired Muse Gadget is a WeatherXM WG1200 (`muse-g
 
 ## Identify the Device
 
-- Confirm `link.register` / device capabilities list `muse-gadget-wxm-wg1200` (`WeatherXM WG1200`) with `sensors.read`, `display.draw_file`, `wg1200.notify`, and `device.boot_weatherxm`.
+- Confirm `link.register` / device capabilities list `muse-gadget-wxm-wg1200` (`WeatherXM WG1200`) with `sensors.read`, `display.draw_file`, and `wg1200.notify`.
 - Note that the WG1200 has a `480x480` touchscreen, a top button, and a passive alert buzzer, **but no microphone**. Users interact from the Muse app or from one-tap actions on the WG1200 touchscreen.
 
 ## Prerequisites
@@ -42,7 +42,7 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 
 ## Limits
 
-- Read-only weather telemetry; only call `device.boot_weatherxm` when the user explicitly asks to switch the console back to WeatherXM OS.
+- Read-only weather telemetry. Muse can't switch the console back to WeatherXM OS: the user does that on the device (hold the top button for 10 s, or Settings > WeatherXM).
 
 ## Sources
 

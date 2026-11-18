@@ -37,8 +37,6 @@ Home Link network tunnel.
   results) and the Home Link tunnel routes approved unicast IPv4 HTTP or
   TCP-interleaved RTSP traffic between Muse and local LAN cameras or APIs. The
   user approves each LAN IP once in the Muse app.
-- `device.boot_weatherxm` reboots into stock WeatherXM OS (`ota_0` or
-  `factory`); call it only when the user explicitly asks to switch back.
 
 ## Controls
 

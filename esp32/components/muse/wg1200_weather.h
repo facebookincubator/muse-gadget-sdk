@@ -114,7 +114,9 @@ const char *wg1200_weather_region_name(wg1200_weather_region_t region);
 cJSON *wg1200_weather_sensors_command(void);
 
 /**
- * Handle the `device.boot_weatherxm` gadget command for WG1200.
+ * Reboot into stock WeatherXM OS, for the serial console's `>boot.weatherxm`.
+ * Not a Muse command: switching takes the gadget off Muse until someone
+ * switches it back, so only the device itself does it.
  */
 cJSON *wg1200_boot_weatherxm_command(const cJSON *params);
 

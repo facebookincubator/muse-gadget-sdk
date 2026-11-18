@@ -676,7 +676,9 @@ int main(int argc, char **argv) {{
         cJSON_Delete(res);
         return 0;
     }}
-    if (strcmp(argv[1], "invoke") == 0 && argc >= 4) {{
+    /* "boot": the console's >boot.weatherxm helper, called directly. */
+    bool direct_boot = strcmp(argv[1], "boot") == 0;
+    if ((strcmp(argv[1], "invoke") == 0 || direct_boot) && argc >= 4) {{
         test_weather_seed_valid_readings();
         test_boot_configure(true, true);
         if (argc >= 5) {{
@@ -691,7 +693,8 @@ int main(int argc, char **argv) {{
             }}
         }}
         cJSON *params = cJSON_Parse(argv[3]);
-        cJSON *res = dispatch_wg1200_command(argv[2], params);
+        cJSON *res = direct_boot ? wg1200_boot_weatherxm_command(params)
+                                 : dispatch_wg1200_command(argv[2], params);
         cJSON_AddNumberToObject(res, "_beep_called", s_last_beep_ms);
         cJSON_AddStringToObject(res, "_ui_title", s_last_title);
         cJSON_AddStringToObject(res, "_ui_msg", s_last_msg);
@@ -793,11 +796,9 @@ int main(int argc, char **argv) {{
         self.assertIn("rain_rate", commands["sensors.read"]["description"])
         self.assertIn("rain_daily", commands["sensors.read"]["description"])
 
-        self.assertIn("device.boot_weatherxm", commands)
-        self.assertIn("slot", commands["device.boot_weatherxm"]["optional"])
-        self.assertEqual(
-            commands["device.boot_weatherxm"]["optional"]["slot"]["type"], "string"
-        )
+        # Switching to WeatherXM OS takes the gadget off Muse: only the device
+        # itself (button hold, Settings, serial console) does it.
+        self.assertNotIn("device.boot_weatherxm", commands)
 
         self.assertIn("wg1200.notify", commands)
         notify_cmd = commands["wg1200.notify"]
@@ -876,8 +877,14 @@ int main(int argc, char **argv) {{
         self.assertEqual(muted["beep_ms"], 0)
         self.assertEqual(muted["_beep_called"], 0)
 
-    def test_dispatch_boot_weatherxm_slots_and_validation(self) -> None:
-        default_res = self.run_harness("invoke", "device.boot_weatherxm", "{}")
+    def test_boot_weatherxm_is_not_dispatched(self) -> None:
+        res = self.run_harness("invoke", "device.boot_weatherxm", "{}")
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["error"]["code"], "unknown_command")
+        self.assertEqual(res["_boot_calls"], 0)
+
+    def test_console_boot_weatherxm_slots_and_validation(self) -> None:
+        default_res = self.run_harness("boot", "device.boot_weatherxm", "{}")
         self.assertTrue(default_res["ok"])
         self.assertEqual(default_res["boot_target"], "ota_0")
         self.assertEqual(default_res["payload"]["wxm_label"], "ota_0")
@@ -886,7 +893,7 @@ int main(int argc, char **argv) {{
         self.assertEqual(default_res["_booted_label"], "ota_0")
 
         factory_res = self.run_harness(
-            "invoke", "device.boot_weatherxm", json.dumps({"slot": "factory"})
+            "boot", "device.boot_weatherxm", json.dumps({"slot": "factory"})
         )
         self.assertTrue(factory_res["ok"])
         self.assertEqual(factory_res["boot_target"], "factory")
@@ -896,21 +903,21 @@ int main(int argc, char **argv) {{
         self.assertEqual(factory_res["_booted_label"], "factory")
 
         bad_slot = self.run_harness(
-            "invoke", "device.boot_weatherxm", json.dumps({"slot": "ota_1"})
+            "boot", "device.boot_weatherxm", json.dumps({"slot": "ota_1"})
         )
         self.assertFalse(bad_slot["ok"])
         self.assertEqual(bad_slot["error"]["code"], "invalid_params")
         self.assertEqual(bad_slot["_boot_calls"], 0)
 
         bad_type = self.run_harness(
-            "invoke", "device.boot_weatherxm", json.dumps({"slot": 123})
+            "boot", "device.boot_weatherxm", json.dumps({"slot": 123})
         )
         self.assertFalse(bad_type["ok"])
         self.assertEqual(bad_type["error"]["code"], "invalid_params")
         self.assertEqual(bad_type["_boot_calls"], 0)
 
         missing_factory = self.run_harness(
-            "invoke",
+            "boot",
             "device.boot_weatherxm",
             json.dumps({"slot": "factory"}),
             "no_factory",
@@ -920,7 +927,7 @@ int main(int argc, char **argv) {{
         self.assertEqual(missing_factory["_boot_calls"], 0)
 
         missing_all = self.run_harness(
-            "invoke", "device.boot_weatherxm", "{}", "no_partitions"
+            "boot", "device.boot_weatherxm", "{}", "no_partitions"
         )
         self.assertFalse(missing_all["ok"])
         self.assertEqual(missing_all["error"]["code"], "unavailable")

@@ -193,8 +193,6 @@ mode).
   - `wg1200.notify`: shows a dismissible alert card overlay (`message`,
     optional `title`, `beep_ms` `0–1000`, `duration_s`) with an optional buzzer
     chime.
-  - `device.boot_weatherxm`: switches `otadata` back to `ota_0` or `factory`
-    and reboots into WeatherXM OS when explicitly requested by the user.
 
 ## Limits and hardware verification
 
@@ -208,8 +206,8 @@ mode).
   - Cold boot and reboot in `ota_1`, 8 MB octal PSRAM, and both USB ports
     (`303a:1001` USB Serial/JTAG and `1a86:7523` CH340) answering `>status`.
   - Non-destructive `ota_1` ↔ `ota_0` switching via touchscreen, 10 s button
-    hold, `>boot.weatherxm` and `device.boot_weatherxm`, with stock WeatherXM
-    station identity and NVS preserved.
+    hold and `>boot.weatherxm`, with stock WeatherXM station identity and NVS
+    preserved.
   - BLE pairing, Wi-Fi, Home Link Noise control session, `device.guide`, and
     the `10.42.0.1` Home Link tunnel (`int=82K/62K dma=74K/62K psram=3491K`).
   - `BMP390` barometric pressure, `SX1262` `EU868` LoRa packet reception and

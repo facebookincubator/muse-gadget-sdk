@@ -1600,7 +1600,7 @@ esp_err_t wg1200_weather_set_region(wg1200_weather_region_t region)
     return ESP_OK;
 }
 
-/* ── Gadget Commands: sensors.read & device.boot_weatherxm ───────────────── */
+/* ── sensors.read, and the console's >boot.weatherxm ───────────────────── */
 
 static void add_sensor_metric(cJSON *payload, const char *name, double val, const char *unit, double age_s)
 {
