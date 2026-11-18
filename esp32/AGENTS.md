@@ -80,6 +80,7 @@ before adding a feature to one.
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | `esp32c6` | `devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-206` | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher` | manual |
 | M5Stack Cardputer ADV (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
+| M5Stack AtomS3 + Atomic Voice Base (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-atoms3` | `tools/muse/board.sh build atoms3` |
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
 | Elecrow CrowPanel Advance 4.3 V1.3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-crowpanel-advance-43` | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
@@ -184,7 +185,7 @@ controls and unverified hardware behavior.
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|lilygo175|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|lilygo175|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -219,7 +220,7 @@ arguments, except on the SenseCAP Watcher: `idf.py flash` runs plain esptool,
 which fails on its USB bridge (see "Flash it"). Build the Watcher with
 `idf.py`, flash it with `tools/muse/board.sh flash watcher`, then
 `idf.py … -p PORT monitor` as usual; reading from the bridge works. Muse builds use `partitions_muse.csv` and need 16 MB of flash or
-more, except the StickS3, StickC Plus2, Cardputer ADV, AI Passport and Waveshare 1.43C, which have 8 MB and use
+more, except the StickS3, StickC Plus2, Cardputer ADV, AtomS3, AI Passport and Waveshare 1.43C, which have 8 MB and use
 `partitions_muse_8mb.csv`.
 
 On the Watcher, rotation opens and pages through the latest reply. A short
@@ -468,6 +469,7 @@ Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `components/muse/boards/ostb_echoear_display_init.h` (MIT, 78/xiaozhi-esp32),
 `components/muse/boards/viewe_smartring_display_init.h` (Apache-2.0, VIEWE),
 `components/muse/boards/waveshare_s3_185b_init.h` (Apache-2.0, Waveshare),
+`components/esp_lcd_gc9107` (Apache-2.0, Espressif),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
@@ -508,7 +510,13 @@ The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
 ideaspark, CYD, SenseCAP Indicator, Waveshare S3 LCD 3.5 status-screen and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
 `MuseGadget-xvf3800-XXXXXX` on the reSpeaker XVF3800,
-`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). It uses
+`MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). Its
+node id, the name Muse knows it by, ends in the same six hex digits in
+lowercase: setup offers `gadget-XXXXXX` with `CONFIG_MUSE_GADGET_NODE_ID_PREFIX`
+(off by default; bench builds turn it on), else `homelink-XXXXXX`, and stores
+it with the device tokens. A device keeps its stored id, and one set up by earlier firmware, which
+stored none, keeps `homelink-XXXXXX`, until it is set up again
+(`main/identity.h`, `tests/test_link_node_id.py`). It uses
 **community pairing v5**, so the phone app must support v5
 and list community devices. Community pairing needs the explicit device press but has no
 manufacturer attestation, and it doesn't stop an active man-in-the-middle.
@@ -665,12 +673,12 @@ Keep within the session's bounds:
 
 - Up to 3 requests at once; another is refused (its callback gets -1).
 - Send a body in pieces of at most 8 KB (4 KB on Muse boards without PSRAM
-  and the CYD, 2 KB on the Cardputer ADV and AI Passport): a larger piece ends
+  and the CYD, 2 KB on the Cardputer ADV, AtomS3 and AI Passport): a larger piece ends
   that request.
   Queued body bytes are capped at 16 KB with PSRAM and 4 KB without, and
   `noise_ctrl_req_send()` waits up to `wait_ms` for room.
 - Each response frame has to fit the session's inbound buffer (12 KB, 17 KB on
-  Muse boards without PSRAM and the CYD). A larger one ends the whole session,
+  Muse boards without PSRAM other than the AtomS3 and AI Passport, and the CYD). A larger one ends the whole session,
   which reconnects, and the request with `NOISE_CTRL_REQ_TOO_LARGE`. Ask for
   responses that stay under it: read large files in parts.
 - The callback runs on the session task: copy what you need and return. Do
@@ -690,7 +698,11 @@ too. Streamed pieces name no request, so the late reply is known by its
 finished `message.assistant` row, whose `reply_to_message_id` names the
 request. With no turn running, that row is held until the voice task is idle
 (`muse_hatch_incoming()`), then played as a turn of its own that wakes the
-screen. Messages the turn already played aren't announced again, and rows that
+screen. Reply text may be in `display_text`, `content`, or canonical
+`transcript.messages[].content[]` text blocks; from a transcript, only the
+message's own assistant text is used, without commentary. This applies to
+replies during a turn and late replies.
+Messages the turn already played aren't announced again, and rows that
 arrive together play in one turn. The request is forgotten once its reply
 plays, 10 s after Muse stops saying it's working, or 30 minutes after it was
 remembered. A battery board resting when the reply comes plays it when it
@@ -752,6 +764,33 @@ the design, the Wi-Fi protocol and the numbers.
 - **Untrusted input:** everything from the network is. Keep the checks in
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the
   decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
+
+## Cable mirror
+
+`MUSE_MIRROR=1 tools/muse/board.sh build|flash <board>` (overlay
+`devices/sdkconfig.muse-mirror`, `CONFIG_MUSE_MIRROR`) adds the mirror in
+`components/muse_mirror`. `tools/muse/mirror.py PORT` then shows the screen in
+a desktop window over the console cable, the chip's own USB or a USB-UART
+bridge: the mouse touches, the board's keys and typing go to the board, the
+computer can play and record its sound, and Ctrl/Cmd+S and +R save
+screenshots and recordings. `docs/mirror.md` is the guide,
+`../protocols/MIRROR.md` the wire format.
+
+- **Boards:** the full LVGL UI with PSRAM; not the FreeInk e-paper UI.
+- **The port:** the viewer holds the console. Close it before flashing or
+  `idf.py monitor`; it never resets the board.
+- **Trust:** whatever is on the cable controls the board, as the console
+  already does; there is no pairing or key.
+- **Without the board:** `devices/sdkconfig.muse-virtual-display` builds a
+  board with no panel, keys or codec for any ESP32-S3 with 8 MB of flash and
+  octal PSRAM. Its size, shape and name are in menuconfig (Muse mirror); a
+  name that holds a known model, such as "1.75C", gets that board drawn in the
+  window. Its sound is the computer's.
+- **ESP-Mosaico:** `tools/muse/mirror.py iris:DEVICE_ID` reaches it over ESP-Iris on
+  its USB-C (`CONFIG_MUSE_MIRROR_IRIS`, `components_mosaico/muse_mosaico_iris`).
+  The viewer then holds the Iris data port: close it before Vibe Mode installs.
+- **Test** with `tests/test_muse_mirror*.py`; the viewer's need PySide6 and
+  numpy (`tools/muse/requirements-mirror.txt`).
 
 ## WebAssembly apps
 

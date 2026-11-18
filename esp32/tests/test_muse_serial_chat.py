@@ -235,6 +235,18 @@ class PacingTest(unittest.TestCase):
         with self.assertRaises(chat.ports.NotFound):
             chat.ports.find("core2", ports=[cp2104, ch9102])
 
+    def test_atoms3_finds_stock_or_idf_usb_without_listing_ports_twice(self) -> None:
+        stock = SimpleNamespace(device="/dev/cu.usbmodem2101", vid=0x303A, pid=0x8120,
+                                serial_number="A1")
+        self.assertEqual(chat.ports.find("atoms3", ports=[self.STICKS3]), self.STICKS3.device)
+        self.assertEqual(chat.ports.find("atoms3", ports=[stock]), stock.device)
+        self.assertEqual(chat.ports.command_ports([self.STICKS3]), [self.STICKS3.device])
+        self.assertEqual(chat.ports.command_ports([self.STICKS3, stock]),
+                         [self.STICKS3.device, stock.device])
+        ch9102 = SimpleNamespace(device="/dev/cu.wchusbserial-01", vid=0x1A86, pid=0x55D4,
+                                 serial_number="5413")
+        self.assertEqual(chat.ports.command_ports([ch9102]), [ch9102.device])
+
     def test_lcd7_uses_ch343_for_chat_and_flash(self) -> None:
         lcd7 = SimpleNamespace(device="/dev/cu.usbmodem12345", vid=0x1A86, pid=0x55D3,
                                serial_number="12345")

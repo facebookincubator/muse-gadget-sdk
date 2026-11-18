@@ -50,6 +50,15 @@ SAMPLE_RATE = 24000
 FRAME_SAMPLES = 960
 FRAME_BYTES = FRAME_SAMPLES * 2
 FRAME_SECONDS = FRAME_SAMPLES / SAMPLE_RATE
+# A source that queues capture before the call can take it (wake-word
+# admission) reports `backlog_bytes`; queued audio is sent this much faster
+# than real time until the queue is down to one frame.
+CATCH_UP_RATE = 3.0
+# How long a call start may take, stage by stage after the VM lookup: the
+# Noise transport, then the call's own readiness. Wake word capture is
+# queued for the whole start (wakeword_input sizes its queue from these).
+TRANSPORT_READY_TIMEOUT_S = 35
+READY_TIMEOUT_S = 35
 MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 4
 MAX_PLAYBACK_BYTES = SAMPLE_RATE * 2 * 5
 # Words held with an unconfirmed reply have their own budget, so observing a
@@ -197,8 +206,10 @@ class VoiceCall:
     def __init__(self, session, *, device_id: str, thread_id: str | None = None,
                  half_duplex: bool = True,
                  mic_threshold: int = 0, idle_timeout: float = 45,
-                 overall_timeout: float = 300, ready_timeout: float = 35,
+                 overall_timeout: float = 300, ready_timeout: float = READY_TIMEOUT_S,
                  cleanup_timeout: float = 10,
+                 speech_timeout: float | None = None,
+                 speech_after_bytes: int = 0,
                  on_event: Optional[Callable[[VoiceEvent], None]] = None) -> None:
         if not 0 <= mic_threshold <= 32767:
             raise ValueError("mic threshold must be between 0 and 32767")
@@ -210,6 +221,16 @@ class VoiceCall:
         self.overall_timeout = positive_seconds(overall_timeout)
         self.ready_timeout = positive_seconds(ready_timeout)
         self.cleanup_timeout = positive_seconds(cleanup_timeout)
+        # False-wake guard: with speech_timeout, the call ends as "no_speech"
+        # after that much sent audio with no locally voiced frame in it,
+        # counting only from speech_after_bytes into the capture (the wake
+        # word's own pre-roll never counts, nor does Muse's VAD).
+        self.speech_timeout = None if speech_timeout is None else positive_seconds(speech_timeout)
+        if not isinstance(speech_after_bytes, int) or speech_after_bytes < 0:
+            raise ValueError("speech_after_bytes must be a non-negative integer")
+        self._speech_after_bytes = speech_after_bytes
+        self._source_bytes = 0
+        self._quiet_left = None if speech_timeout is None else self.speech_timeout * SAMPLE_RATE * 2
         self.call_id = str(uuid.uuid4())
         self.started_at = datetime.now(timezone.utc)
         self.ready = asyncio.Event()
@@ -217,6 +238,9 @@ class VoiceCall:
         self._mic_epoch = 0
         self.reason = ""
         self.cleanup_error: Exception | None = None
+        # A cancellation that arrived while an earlier error was already
+        # propagating: the error still wins, but the caller can see both.
+        self.cleanup_cancelled = False
         self.end_call_acknowledged = False
         self.media_drain_incomplete = False
         self.advisory_error_count = 0
@@ -334,6 +358,7 @@ class VoiceCall:
                         cancelled = True
                     except Exception:
                         break
+                self.cleanup_cancelled = cancelled
                 try:
                     cleanup.result()
                 except Exception as exc:
@@ -812,6 +837,8 @@ class VoiceCall:
                 pcm = b"\0" * FRAME_BYTES
             if not pcm or len(pcm) > FRAME_BYTES or len(pcm) % 2:
                 raise ValueError("input must contain 1–960 PCM16LE samples per frame")
+            position = self._source_bytes  # in the capture, whether sent or dropped
+            self._source_bytes += 0 if eof else len(pcm)
             if realtime and not eof and self._gated():
                 continue
             while self._gated():
@@ -843,7 +870,20 @@ class VoiceCall:
                                    "send_timestamp_ms": int(time.time() * 1000)})
             except _InputGated:
                 continue  # Never replay a frame invalidated while it waited for the wire.
-            next_send = time.monotonic() + len(pcm) / (SAMPLE_RATE * 2)
+            if self._quiet_left is not None and (eof or position >= self._speech_after_bytes):
+                self._quiet_left = None if not muted and rms >= 300 else self._quiet_left - len(pcm)
+            duration = len(pcm) / (SAMPLE_RATE * 2)
+            queued = getattr(source, "backlog_bytes", None)
+            if queued is None:
+                next_send = time.monotonic() + duration
+            else:
+                # Queued capture (pre-roll and audio from before the call was
+                # ready) catches up instead of arriving later and later: pace
+                # against a wall-clock schedule, so send latency never adds up,
+                # and step faster than real time while frames are queued. The
+                # schedule keeps at most one frame of credit.
+                step = duration / CATCH_UP_RATE if queued > FRAME_BYTES else duration
+                next_send = max(next_send + step, time.monotonic() - duration)
 
     async def _play(self) -> None:
         while True:
@@ -876,6 +916,9 @@ class VoiceCall:
             if (self.ready.is_set() and not self._active_turns
                     and now - self._activity >= self.idle_timeout):
                 self.reason = "idle_timeout"
+                return
+            if self._quiet_left is not None and self._quiet_left <= 0:
+                self.reason = "no_speech"
                 return
             await asyncio.sleep(min(0.1, self.idle_timeout, self.overall_timeout))
 

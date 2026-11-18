@@ -80,6 +80,17 @@ class PowerTest(unittest.TestCase):
         self.assertEqual(before["boot_id"], after["boot_id"])
         self.assertGreater(after["now_us"], before["now_us"])
 
+    def test_epaper_requires_completed_refresh_in_capture(self):
+        for empty in (False, True):
+            commands = ["generic_board 4"]
+            if empty:
+                commands.append("empty_work 0")
+            _, result = self.run_commands(*commands, arm(), "usb 0", "advance 180000", ">ptest.results")
+            self.assertEqual(result["state"], "error" if empty else "complete")
+            row = result["records"][0]
+            self.assertEqual(row["valid"], not empty)
+            self.assertEqual(row["actual"]["io_frames"] > 0, not empty)
+
     def test_board_identity_is_additive_in_status_ack_and_results(self):
         status, ack, results = self.run_commands(
             ">ptest.status", arm(), "usb 0", "advance 180000", ">ptest.results",

@@ -15,6 +15,7 @@ static muse_board_t test_board;
 const muse_board_t *muse_board = &test_board;
 static char saved_ssid[MUSE_SSID_MAX + 1], saved_pass[MUSE_PASS_MAX + 1];
 static unsigned saves;
+static int volume_setting = 70;
 
 void muse_voice_set_monitor(bool on) { (void)on; }
 float muse_voice_monitor_db(void) { abort(); }   /* no meter without a microphone */
@@ -45,8 +46,8 @@ void muse_settings_set_speaker_on(bool v) { (void)v; abort(); }
 void muse_settings_set_volume(int v) { (void)v; abort(); }
 void muse_settings_set_wifi_on(bool v) { (void)v; abort(); }
 int muse_settings_sleep_s(void) { abort(); }
-bool muse_settings_speaker_on(void) { abort(); }
-int muse_settings_volume(void) { abort(); }
+bool muse_settings_speaker_on(void) { return true; }
+int muse_settings_volume(void) { return volume_setting; }
 bool muse_settings_wifi_on(void) { abort(); }
 void muse_state_set_asleep(bool v) { (void)v; abort(); }
 void muse_ui_preview_brightness(int v) { (void)v; abort(); }
@@ -229,7 +230,19 @@ int main(int argc, char **argv)
         s_text_scale = test_board.height;
     }
     s_tiny = test_board.round && test_board.width < 300;   /* as muse_settings_ui_build */
-    if (!strcmp(scenario, "other")) {
+    if (!strcmp(scenario, "volume")) {
+        test_board.epaper = true;   /* no microphone meter services */
+        s_vol_sl = lv_slider_create(s_tile);
+        s_vol_val = lv_label_create(s_tile);
+        lv_slider_set_value(s_vol_sl, 30, LV_ANIM_OFF);
+        tick_sound();
+        assert(lv_slider_get_value(s_vol_sl) == 70);
+        assert(!strcmp(lv_label_get_text(s_vol_val), "70%"));
+        volume_setting = 25;   /* the avatar gesture changed the saved volume */
+        tick_sound();
+        assert(lv_slider_get_value(s_vol_sl) == 25);
+        assert(!strcmp(lv_label_get_text(s_vol_val), "25%"));
+    } else if (!strcmp(scenario, "other")) {
         on_wifi_other(NULL);
         check_entry();
         assert(!lv_textarea_get_password_mode(s_text_ta));

@@ -704,7 +704,8 @@ static int32_t obj_set(slot_t *s, int32_t prop, int32_t v)
     case GADGET_P_HIDDEN: return set_flag(o, LV_OBJ_FLAG_HIDDEN, v);
     case GADGET_P_CLICKABLE: return set_flag(o, LV_OBJ_FLAG_CLICKABLE, v);
     case GADGET_P_SCROLLABLE: return set_flag(o, LV_OBJ_FLAG_SCROLLABLE, v);
-    case GADGET_P_CHECKABLE: return set_flag(o, LV_OBJ_FLAG_CHECKABLE, v);
+    case GADGET_P_CHECKABLE:   /* a slider checked on release would change its track mid-drag: slider_guard */
+        return s->type == GADGET_W_SLIDER && v ? GADGET_ERR_UNSUPPORTED : set_flag(o, LV_OBJ_FLAG_CHECKABLE, v);
     case GADGET_P_EVENT_BUBBLE: return set_flag(o, LV_OBJ_FLAG_EVENT_BUBBLE, v);
     case GADGET_P_FLOATING: return set_flag(o, LV_OBJ_FLAG_FLOATING, v);
     case GADGET_P_CHECKED: return set_state(o, LV_STATE_CHECKED, v);
@@ -1811,6 +1812,29 @@ static void chart_guard(lv_event_t *e)
     }
 }
 
+/* LVGL 9.5 divides by a vertical slider's track (its height less the top and
+ * bottom padding) when a pointer drags or lets go of it. With no track there's
+ * no value to work out, so skip that. */
+static void slider_guard(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_PRESSING && code != LV_EVENT_RELEASED && code != LV_EVENT_PRESS_LOST) {
+        return;
+    }
+    lv_obj_t *o = lv_event_get_current_target(e);
+    if (code != LV_EVENT_PRESSING) {
+        /* LVGL leaves the pressed state before it works out the value: so
+         * does the check, in case the padding is the pressed state's. */
+        lv_obj_remove_state(o, LV_STATE_PRESSED);
+    }
+    int32_t h = lv_obj_get_height(o);
+    lv_slider_orientation_t m = lv_slider_get_orientation(o);
+    bool vertical = m == LV_SLIDER_ORIENTATION_VERTICAL || (m == LV_SLIDER_ORIENTATION_AUTO && lv_obj_get_width(o) < h);
+    if (vertical && h == lv_obj_get_style_pad_top(o, LV_PART_MAIN) + lv_obj_get_style_pad_bottom(o, LV_PART_MAIN)) {
+        lv_event_stop_processing(e);
+    }
+}
+
 static lv_obj_t *create(int type, lv_obj_t *parent)
 {
     switch (type) {
@@ -1893,6 +1917,8 @@ int32_t gadget_ui_create(wasm_exec_env_t env, int32_t type, int32_t parent)
     }
     if (type == GADGET_W_CHART) {
         lv_obj_add_event_cb(o, chart_guard, LV_EVENT_DRAW_MAIN | LV_EVENT_PREPROCESS, NULL);
+    } else if (type == GADGET_W_SLIDER) {
+        lv_obj_add_event_cb(o, slider_guard, LV_EVENT_ALL | LV_EVENT_PREPROCESS, NULL);
     }
     slot_t *s = &s_ui->slots[idx];
     uint32_t gen = s->gen ? s->gen : 1;

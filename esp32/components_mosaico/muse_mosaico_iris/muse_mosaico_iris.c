@@ -14,18 +14,25 @@
  * limitations under the License.
  */
 
+#include "sdkconfig.h"
 #include "esp_err.h"
 #include "esp_iris.h"
 #include "iris_ota_support.h"
+
+void muse_mirror_iris_register(void);
 
 /*
  * ESP-Iris on the ESP-Mosaico's USB-C port, as Espressif's application
  * template starts it: the board's Vibe Mode firmware switches a running app
  * back to Vibe Mode over it to install the next build, a crash loop falls back
  * to Vibe Mode, and it marks a newly installed app healthy a few seconds in.
+ * The mirror's RPCs register before Iris starts, as its other services do.
  */
 void muse_mosaico_iris_start(void)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_iris_boot_probe());
+#if CONFIG_MUSE_MIRROR_IRIS
+    muse_mirror_iris_register();
+#endif
     iris_ota_support_start();
 }

@@ -879,8 +879,9 @@ static void decode_task(void *arg)
         s_slot_wait_t = 0;
         s_slot_wait_us += (uint32_t)(esp_timer_get_time() - t_slot);
         /* Two bands: the top band's access unit after its length, the
-         * bottom band's after that. */
-        int bands = s_params.tiles == 2 && s_band_task ? 2 : 1;
+         * bottom band's after that. The ring checked the frame in this
+         * layout. */
+        int bands = fr.bands == 2 && s_band_task ? 2 : 1;
         uint32_t len0 = (uint32_t)n;
         if (bands == 2) {
             len0 = n >= 4 ? (uint32_t)(s_au[0] | s_au[1] << 8 | s_au[2] << 16 | (uint32_t)s_au[3] << 24) : UINT32_MAX;
@@ -1149,6 +1150,7 @@ bool muse_video_begin(const muse_video_transport_t *t, const muse_video_params_t
     s_tp = t;
     s_params = *vp;
     t->ring->codec = vp->codec;   /* how the ring tells a frame from noise */
+    t->ring->bands = vp->tiles == 2 && s_band_task ? 2 : 1;   /* and in which layout (muse_vframe_t.bands) */
     s_gen++;
     s_shown = s_dropped = 0;
     s_last_shown_t = 0;
@@ -1181,14 +1183,16 @@ void muse_video_end(const muse_video_transport_t *t)
 
 void muse_video_open(void)
 {
-#if CONFIG_MUSE_APP_VIEW
-    muse_app_view_preempt(MUSE_APP_STOP_VIDEO);
-#endif
     if (!muse_video_supported()) {
         return;
     }
     ESP_LOGI(TAG, "view open");
     s_open = true;
+#if CONFIG_MUSE_APP_VIEW
+    /* After s_open: an app view opening meanwhile sees the video and closes
+     * (muse_app_view_open), or is open and stops here. */
+    muse_app_view_preempt(MUSE_APP_STOP_VIDEO);
+#endif
     for (int i = 0; i < s_ntransports; i++) {
         if (s_transports[i]->request) {
             s_transports[i]->request(true);

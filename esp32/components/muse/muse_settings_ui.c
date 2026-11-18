@@ -34,6 +34,7 @@
 #include "muse_board.h"
 #include "muse_chat.h"
 #include "muse_input.h"
+#include "muse_lang.h"
 #include "muse_keypad.h"
 #include "muse_link.h"
 #include "muse_settings.h"
@@ -41,6 +42,7 @@
 #include "muse_text.h"
 #include "muse_ui.h"
 #include "muse_voice.h"
+#include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_APP_VIEW
 #include "muse_app_view.h"
@@ -125,6 +127,9 @@ static lv_obj_t *s_ble_sw, *s_ble_status;
 static lv_obj_t *s_notes_sw;
 #endif
 static lv_obj_t *s_spk_sw, *s_vol_val, *s_vol_sl, *s_gain_val, *s_gain_sl, *s_bright_val, *s_bright_sl, *s_mic_bar, *s_mic_val;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+static lv_obj_t *s_wake_sw;
+#endif
 
 /* Sleep page. */
 static const int SLEEP_CHOICES[] = { 0, 30, 60, 120, 300, 600 };
@@ -147,6 +152,14 @@ static lv_obj_t *s_text_back;
 
 /* ---------- building blocks ---------- */
 
+/* Screen text in Brazilian Portuguese (muse_lang.c); the other languages
+ * keep these pages in English. */
+#if CONFIG_MUSE_UI_LANG_PT_BR
+#define T(en) muse_lang_menu(en)
+#else
+#define T(en) (en)
+#endif
+
 /* Network and phone names can have characters the fonts lack (muse_text.h). */
 #define SHOWN_MAX 96
 
@@ -157,16 +170,22 @@ static bool wide_layout(void)
 
 static const lv_font_t *settings_font(const lv_font_t *font)
 {
+#if CONFIG_MUSE_UI_LANG_PT_BR
+    /* unscii has no accented letters: Montserrat 16 with the Portuguese ones. */
+    if (font == &lv_font_unscii_16) {
+        font = &lv_font_montserrat_16;
+    }
+#endif
     if (!wide_layout()) {
-        return font;
+        return muse_lang_montserrat(font);
     }
     if (font == &lv_font_unscii_16 || font == &lv_font_montserrat_16) {
-        return &lv_font_montserrat_20;
+        return muse_lang_montserrat(&lv_font_montserrat_20);
     }
     if (font == &lv_font_montserrat_20) {
-        return &lv_font_montserrat_28;
+        return muse_lang_montserrat(&lv_font_montserrat_28);
     }
-    return font;
+    return muse_lang_montserrat(font);
 }
 
 /* A 172 px portrait panel cannot fit an icon, name and status side by side. */
@@ -208,14 +227,18 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, 
     lv_obj_t *l = lv_label_create(parent);
     lv_obj_set_style_text_font(l, settings_font(font), 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
-    lv_label_set_text(l, muse_text_showable(text, shown, sizeof(shown)));
+    text = T(text);
+    lv_label_set_text(l, muse_lang_showable(text) ? text : muse_text_showable(text, shown, sizeof(shown)));
     return l;
 }
 
 static void set_text(lv_obj_t *l, const char *text)
 {
     char shown[SHOWN_MAX];
-    text = muse_text_showable(text, shown, sizeof(shown));
+    text = T(text);
+    if (!muse_lang_showable(text)) {
+        text = muse_text_showable(text, shown, sizeof(shown));
+    }
     if (strcmp(lv_label_get_text(l), text) != 0) {
         lv_label_set_text(l, text);
     }
@@ -638,7 +661,7 @@ static void on_text_show(lv_event_t *e)
     (void)e;
     bool pw = !lv_textarea_get_password_mode(s_text_ta);
     lv_textarea_set_password_mode(s_text_ta, pw);
-    lv_label_set_text(lv_obj_get_child(s_text_show, 0), pw ? "Show" : "Hide");
+    lv_label_set_text(lv_obj_get_child(s_text_show, 0), T(pw ? "Show" : "Hide"));
 }
 
 /* Beside the keyboard's field, a button to show a password. */
@@ -648,7 +671,7 @@ static void fit_show_button(bool password)
     lv_obj_set_width(s_text_ta, password ? w - show_w - gap : w);
     lv_obj_align(s_text_ta, LV_ALIGN_TOP_MID, password ? -(show_w + gap) / 2 : 0, y);
     lv_obj_align(s_text_show, LV_ALIGN_TOP_MID, (w - show_w) / 2, y);
-    lv_label_set_text(lv_obj_get_child(s_text_show, 0), "Show");
+    lv_label_set_text(lv_obj_get_child(s_text_show, 0), T("Show"));
     if (password) {
         lv_obj_remove_flag(s_text_show, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -755,7 +778,7 @@ static void build_text_page(lv_obj_t *tile)
     int top = text_y(98);
     if (narrow_panel()) {
         /* Portrait panels need a header inside the screen, not the round layout. */
-        lv_obj_set_style_text_font(s_text_title, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(s_text_title, settings_font(&lv_font_montserrat_16), 0);
         single_line(s_text_title, muse_board->width - 16);
         lv_obj_align(s_text_title, LV_ALIGN_TOP_MID, 0, 8);
         lv_obj_set_width(s_text_ta, muse_board->width - 60);
@@ -794,7 +817,7 @@ static void open_text(const char *title, const char *initial, bool password, int
     lv_textarea_set_max_length(s_text_ta, max_len);
     lv_textarea_set_password_mode(s_text_ta, password);
     lv_textarea_set_text(s_text_ta, initial ? initial : "");
-    lv_textarea_set_placeholder_text(s_text_ta, hint ? hint : "");
+    lv_textarea_set_placeholder_text(s_text_ta, hint ? T(hint) : "");
     if (s_text_kp) {
         muse_keypad_reset(s_text_kp, password);
     } else {
@@ -948,9 +971,9 @@ static bool rebuild_scan_list(void)
         saved_seen |= saved;
         char buf[24];
         if (muse_board->epaper) {
-            snprintf(buf, sizeof(buf), "%s", saved ? "saved" : s_aps[i].secure ? "secured" : "open");
+            snprintf(buf, sizeof(buf), "%s", T(saved ? "saved" : s_aps[i].secure ? "secured" : "open"));
         } else {
-            snprintf(buf, sizeof(buf), "%s%d dBm", saved ? "saved  " : (s_aps[i].secure ? "" : "open  "), s_aps[i].rssi);
+            snprintf(buf, sizeof(buf), "%s%d dBm", T(saved ? "saved  " : (s_aps[i].secure ? "" : "open  ")), s_aps[i].rssi);
         }
         lv_label_set_text(v, buf);
     }
@@ -998,8 +1021,7 @@ static void build_wifi_page(lv_obj_t *tile)
         snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
         lv_label_set_text(mac, buf);
     }
-    note(list, "Muse remembers up to 8 networks and joins the strongest one in range. Tap a saved one twice to "
-               "forget it.");
+    note(list, "Muse remembers up to 8 networks and joins the strongest one in range. Tap a saved one twice to forget it.");
 }
 
 static void tick_wifi(void)
@@ -1009,27 +1031,27 @@ static void tick_wifi(void)
     char buf[128];
     switch (w.state) {
     case MUSE_WIFI_OFF:
-        strlcpy(buf, "Wi-Fi is off", sizeof(buf));
+        strlcpy(buf, T("Wi-Fi is off"), sizeof(buf));
         break;
     case MUSE_WIFI_NO_NETWORK:
-        strlcpy(buf, "No saved networks. Scan and pick one.", sizeof(buf));
+        strlcpy(buf, T("No saved networks. Scan and pick one."), sizeof(buf));
         break;
     case MUSE_WIFI_CONNECTING:
-        snprintf(buf, sizeof(buf), "Joining %s\n%s", w.ssid, w.detail);
+        snprintf(buf, sizeof(buf), T("Joining %s\n%s"), w.ssid, w.detail);
         break;
     case MUSE_WIFI_CONNECTED:
         if (muse_board->epaper) {
-            snprintf(buf, sizeof(buf), "Connected to %s\n%s", w.ssid, w.ip);
+            snprintf(buf, sizeof(buf), T("Connected to %s\n%s"), w.ssid, w.ip);
         } else {
-            snprintf(buf, sizeof(buf), "Connected to %s\n%s  -  %d dBm", w.ssid, w.ip, w.rssi);
+            snprintf(buf, sizeof(buf), T("Connected to %s\n%s  -  %d dBm"), w.ssid, w.ip, w.rssi);
         }
         break;
     case MUSE_WIFI_NOT_NEARBY:
-        strlcpy(buf, "No saved network nearby\nLooking again within a minute", sizeof(buf));
+        strlcpy(buf, T("No saved network nearby\nLooking again within a minute"), sizeof(buf));
         break;
     case MUSE_WIFI_FAILED:
     default:
-        snprintf(buf, sizeof(buf), "Couldn't join %s\n%s", w.ssid, w.detail);
+        snprintf(buf, sizeof(buf), T("Couldn't join %s\n%s"), w.ssid, w.detail);
         break;
     }
     set_text(s_wifi_status, buf);
@@ -1133,10 +1155,7 @@ static void build_hatch_page(lv_obj_t *tile)
     row(list, NULL, "Device token", &s_hatch_token, on_hatch_token, NULL);
     row(list, NULL, "SDK token", &s_hatch_sdk_token, on_hatch_sdk_token, NULL);
     button(list, "Test connection", COLOR_ACCENT, on_hatch_test, NULL);
-    note(list, "Pair with the Muse app to use your account; a device token here overrides it, and a long one is "
-               "easier to send over Bluetooth. The VM ID picks one of your VMs. The SDK token is from "
-               "gadgets.muse.ai; one set here replaces the firmware's. "
-               "Reset pairing forgets Wi-Fi and the app pairing, then restarts.");
+    note(list, "Pair with the Muse app to use your account; a device token here overrides it, and a long one is easier to send over Bluetooth. The VM ID picks one of your VMs. The SDK token is from gadgets.muse.ai; one set here replaces the firmware's. Reset pairing forgets Wi-Fi and the app pairing, then restarts.");
 }
 
 static void tick_hatch(void)
@@ -1145,7 +1164,7 @@ static void tick_hatch(void)
     const char *paired = !muse_link_hatch_linked()    ? "not paired"
                          : muse_link_sdk_token_changed() ? "paired with another SDK token, pair again to use this one"
                                                          : "paired";
-    snprintf(link, sizeof(link), "Muse app: %s\n%s", paired, muse_link_state_name(muse_link_state()));
+    snprintf(link, sizeof(link), T("Muse app: %s\n%s"), T(paired), T(muse_link_state_name(muse_link_state())));
     set_text(s_link_status, link);
     if (s_link_reset_armed_us && esp_timer_get_time() - s_link_reset_armed_us >= 5000000) {
         s_link_reset_armed_us = 0;
@@ -1156,7 +1175,7 @@ static void tick_hatch(void)
     muse_hatch_status(&h);
     char buf[96];
     if (h.detail[0]) {
-        snprintf(buf, sizeof(buf), "%s\n%s", muse_hatch_state_name(h.state), h.detail);
+        snprintf(buf, sizeof(buf), "%s\n%s", T(muse_hatch_state_name(h.state)), h.detail);
     } else {
         strlcpy(buf, muse_hatch_state_name(h.state), sizeof(buf));
     }
@@ -1207,8 +1226,7 @@ static void build_ble_page(lv_obj_t *tile)
     s_ble_sw = switch_row(list, "Phone setup", muse_settings_ble_on(), on_ble_sw);
     s_ble_status = note(list, "");
     button(list, "Forget paired phones", COLOR_DANGER, on_ble_forget, NULL);
-    note(list, "When on, Muse is visible to phones nearby. Open tools/ble_setup.html in Chrome, "
-               "connect, and enter the code Muse shows to pair.");
+    note(list, "When on, Muse is visible to phones nearby. Open tools/ble_setup.html in Chrome, connect, and enter the code Muse shows to pair.");
 }
 
 static void tick_ble(void)
@@ -1218,14 +1236,14 @@ static void tick_ble(void)
     char buf[96];
     switch (b.state) {
     case MUSE_BLE_OFF:
-        strlcpy(buf, "Off", sizeof(buf));
+        strlcpy(buf, T("Off"), sizeof(buf));
         break;
     case MUSE_BLE_ADVERTISING:
-        snprintf(buf, sizeof(buf), "Visible as %s", b.name);
+        snprintf(buf, sizeof(buf), T("Visible as %s"), b.name);
         break;
     case MUSE_BLE_CONNECTED:
     default:
-        snprintf(buf, sizeof(buf), "Phone connected\n%s", b.secure ? "Paired" : "Waiting for pairing");
+        snprintf(buf, sizeof(buf), T("Phone connected\n%s"), T(b.secure ? "Paired" : "Waiting for pairing"));
         break;
     }
     set_text(s_ble_status, buf);
@@ -1254,6 +1272,15 @@ static void on_speaker_sw(lv_event_t *e)
 static void on_notes_sw(lv_event_t *e)
 {
     muse_settings_set_voice_notes(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+#endif
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* The listening opt-in, shared with wake.on and the quick menu, and persisted
+ * by muse_wakeword_set_enabled. */
+static void on_wake_sw(lv_event_t *e)
+{
+    muse_wakeword_set_enabled(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
 #endif
 
@@ -1304,8 +1331,7 @@ static void build_sound_page(lv_obj_t *tile)
     s_sound = page(tile, "SOUND", true, &list);
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     s_notes_sw = switch_row(list, "Voice notes", muse_settings_voice_notes(), on_notes_sw);
-    note(list, "Off: hold yellow to talk live, release to listen; blue ends the call. "
-               "On: hold yellow to send a voice note. Applies to the next call.");
+    note(list, "Off: hold yellow to talk live, release to listen; blue ends the call. On: hold yellow to send a voice note. Applies to the next call.");
 #endif
     if (muse_board->audio_init) {
         s_spk_sw = switch_row(list, "Speaker", muse_settings_speaker_on(), on_speaker_sw);
@@ -1334,6 +1360,11 @@ static void build_sound_page(lv_obj_t *tile)
         note(list, "Talk at arm's length: the bar should reach green (-30 to -15 dBFS) without going orange.");
     }
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    s_wake_sw = switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw);
+    note(list, "Listens for \"Hey Muse\" so you can start a voice note without holding the talk button.");
+#endif
+
     if (!muse_board->epaper) {
         s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
         set_val(s_bright_val, "%d%%", muse_settings_brightness());
@@ -1347,6 +1378,15 @@ static void tick_sound(void)
     if (screen_only()) {
         return;
     }
+    /* The avatar's volume gesture (or phone) may have changed the setting
+     * since this slider was built. Never overwrite an in-progress preview. */
+    if (s_vol_sl && !lv_slider_is_dragged(s_vol_sl)) {
+        int volume = muse_settings_volume();
+        if (lv_slider_get_value(s_vol_sl) != volume) {
+            lv_slider_set_value(s_vol_sl, volume, LV_ANIM_OFF);
+            set_val(s_vol_val, "%d%%", volume);
+        }
+    }
 #if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
     lv_obj_set_state(s_notes_sw, LV_STATE_CHECKED, muse_settings_voice_notes());
 #endif
@@ -1354,6 +1394,12 @@ static void tick_sound(void)
     if (s_spk_sw && on != lv_obj_has_state(s_spk_sw, LV_STATE_CHECKED)) {
         lv_obj_set_state(s_spk_sw, LV_STATE_CHECKED, on);
     }
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    bool wake_on = muse_wakeword_enabled();   /* also toggled by the menu, serial, wakeword.disable */
+    if (s_wake_sw && wake_on != lv_obj_has_state(s_wake_sw, LV_STATE_CHECKED)) {
+        lv_obj_set_state(s_wake_sw, LV_STATE_CHECKED, wake_on);
+    }
+#endif
     if (muse_board->epaper) return;
     float db = muse_voice_monitor_db();
     int v = (int)(db + 70.0f);
@@ -1443,8 +1489,7 @@ static void build_battery_page(lv_obj_t *tile)
     s_batt_busy = info_row(list, "CPU busy");
     s_batt_awake = note(list, "");
     button(list, LV_SYMBOL_REFRESH "  Start over", COLOR_ACCENT, on_battery_reset, NULL);
-    note(list, "Measures from unplugging USB until it's plugged back in. The gauge moves in 1% steps, so give it a "
-               "few hours. Chip asleep is time in light sleep; CPU busy is time a core was running a task.");
+    note(list, "Measures from unplugging USB until it's plugged back in. The gauge moves in 1% steps, so give it a few hours. Chip asleep is time in light sleep; CPU busy is time a core was running a task.");
 }
 
 /* A per-mille figure as a percentage. */
@@ -1471,19 +1516,19 @@ static void tick_battery(void)
 
     int h = (int)(b.secs / 3600), m = (int)(b.secs / 60 % 60);
     if (h) {
-        snprintf(t, sizeof(t), "%d h %d min", h, m);
+        snprintf(t, sizeof(t), T("%d h %d min"), h, m);
     } else {
-        snprintf(t, sizeof(t), "%d min", m);
+        snprintf(t, sizeof(t), T("%d min"), m);
     }
     if (!b.started) {
-        strlcpy(buf, p.battery_pct < 0 ? "No battery" : "Unplug USB to start measuring.", sizeof(buf));
+        strlcpy(buf, T(p.battery_pct < 0 ? "No battery" : "Unplug USB to start measuring."), sizeof(buf));
     } else {
-        snprintf(buf, sizeof(buf), b.running ? "On battery for %s" : "Last run: %s on battery", t);
+        snprintf(buf, sizeof(buf), T(b.running ? "On battery for %s" : "Last run: %s on battery"), t);
     }
     set_text(s_batt_status, buf);
 
     if (p.battery_pct < 0) {
-        strlcpy(buf, "None", sizeof(buf));
+        strlcpy(buf, T("None"), sizeof(buf));
     } else if (p.battery_mv) {
         snprintf(buf, sizeof(buf), "%s%d%%  %d.%02d V", p.charging ? LV_SYMBOL_CHARGE " " : "", p.battery_pct,
                  p.battery_mv / 1000, p.battery_mv % 1000 / 10);
@@ -1499,10 +1544,10 @@ static void tick_battery(void)
     } else if (muse_battery_drain(&b, &rate10, &full_h)) {
         snprintf(buf, sizeof(buf), "%d%%, %d.%d%%/h", used, rate10 / 10, rate10 % 10);
         set_text(s_batt_drain, buf);
-        snprintf(buf, sizeof(buf), "lasts ~%d h", full_h);
+        snprintf(buf, sizeof(buf), T("lasts ~%d h"), full_h);
         set_text(s_batt_full, buf);
     } else {
-        snprintf(buf, sizeof(buf), "%d%% so far", used > 0 ? used : 0);
+        snprintf(buf, sizeof(buf), T("%d%% so far"), used > 0 ? used : 0);
         set_text(s_batt_drain, buf);
         set_text(s_batt_full, "measuring");
     }
@@ -1519,7 +1564,7 @@ static void tick_battery(void)
     }
     buf[0] = '\0';
     if (b.started && b.awake[0]) {
-        snprintf(buf, sizeof(buf), "Also kept awake by: %s", b.awake);
+        snprintf(buf, sizeof(buf), T("Also kept awake by: %s"), b.awake);
     }
     set_text(s_batt_awake, buf);
 }
@@ -1546,13 +1591,13 @@ static void build_power_page(lv_obj_t *tile)
     const char *sleep = muse_board->power_button ? muse_board->power_button : muse_board->aux_button;
     if (power && !strcmp(power, "screen")) {
         /* Touch-only boards (the LCD-7 and LCD-1.28) wake on a tap. */
-        snprintf(text, sizeof(text), "Tap the screen to turn it back on.");
+        snprintf(text, sizeof(text), "%s", T("Tap the screen to turn it back on."));
     } else if (sleep) {
-        snprintf(text, sizeof(text), "Press the %s button to turn it back on. To just turn the screen off, press the %s button.",
+        snprintf(text, sizeof(text), T("Press the %s button to turn it back on. To just turn the screen off, press the %s button."),
                  power, sleep);
     } else {
         /* No button turns the screen off (the 1.85C's BOOT talks). */
-        snprintf(text, sizeof(text), "Press the %s button to turn it back on.", power);
+        snprintf(text, sizeof(text), T("Press the %s button to turn it back on."), power);
     }
     note(list, text);
 }

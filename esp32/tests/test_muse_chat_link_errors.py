@@ -19,6 +19,8 @@ import subprocess
 import tempfile
 import unittest
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -363,7 +365,7 @@ int main(int argc,char **argv) {
         compiled = subprocess.run([
             os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
             '-I', str(cjson), '-I', str(ROOT / 'tests'), '-I', str(ROOT / 'components/muse'),
-            str(c), str(cjson / 'cJSON.c'), '-o', str(cls.binary)
+            str(c), *cjson_source(cjson), '-o', str(cls.binary)
         ], capture_output=True, text=True)
         if compiled.returncode:
             raise RuntimeError(compiled.stderr)

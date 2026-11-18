@@ -14,6 +14,15 @@
 
 menu "Muse"
 
+    config MUSE_LATEST_REPLY
+        bool "Latest reply screen"
+        depends on MUSE_BOARD_WAVESHARE_S3_175C && SPIRAM && MUSE_HATCH
+        default y
+        help
+            Swipe right from Main to reread the latest received answer.
+            Keeps up to 32 KiB in PSRAM until reboot; receiver message slots
+            use 256 KiB. No conversation text is written to flash.
+
     choice MUSE_BOARD
         prompt "Board with the full UI"
         default MUSE_BOARD_NONE
@@ -119,6 +128,10 @@ menu "Muse"
             bool "M5Stack Cardputer ADV (ESP32-S3, keyboard, no PSRAM)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_M5STACK_ATOMS3
+            bool "M5Stack AtomS3 + Atomic Voice Base (ESP32-S3, no PSRAM)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_M5STACK_STICKS3
             bool "M5Stack StickS3 (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
@@ -190,6 +203,14 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD_35
             bool "Waveshare ESP32-S3-Touch-LCD-3.5 (ESP32-S3, 480x320 touch LCD, ES8311 speaker and mic)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_VIRTUAL_DISPLAY
+            bool "Virtual display, seen only through the cable mirror (any ESP32-S3 with PSRAM)"
+            depends on IDF_TARGET_ESP32S3
+            help
+                No panel, touch, keys or codec: the UI draws into PSRAM and
+                tools/muse/mirror.py shows it and gives it touch, keys and
+                sound. Size and shape: Muse mirror menu (components/muse_mirror).
     endchoice
 
     config MUSE_ENABLED
@@ -227,6 +248,7 @@ menu "Muse"
         default "crowpanel_advance_43" if MUSE_BOARD_CROWPANEL_ADVANCE_43
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
+        default "m5stack_atoms3" if MUSE_BOARD_M5STACK_ATOMS3
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "seeed_xiao_s3_147" if MUSE_BOARD_SEEED_XIAO_S3_147
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
@@ -244,6 +266,7 @@ menu "Muse"
         default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
         default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
         default "waveshare_s3_lcd_35" if MUSE_BOARD_WAVESHARE_S3_LCD_35
+        default "virtual_display" if MUSE_BOARD_VIRTUAL_DISPLAY
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -286,7 +309,7 @@ menu "Muse"
         bool "Isolated board BSP power-characterization firmware"
         # Boards implementing boards/muse_power_test_board.h; extend this list
         # only after the new board's diagnostic hooks and matrix pass tests.
-        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_ESP_MOSAICO) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
         default n
         help
             DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
@@ -377,7 +400,7 @@ menu "Muse"
             language you speak to it, and the serial console stays in
             English for the tools that read it. The button menu and the
             pairing card are translated; the touch boards' settings pages
-            aren't yet.
+            are in Brazilian Portuguese only.
 
         config MUSE_UI_LANG_EN
             bool "English"
@@ -385,6 +408,13 @@ menu "Muse"
         config MUSE_UI_LANG_VI
             bool "Vietnamese"
             select MUSE_LATIN_FONT
+
+        config MUSE_UI_LANG_PT_BR
+            bool "Brazilian Portuguese"
+            select MUSE_LATIN_FONT
+            help
+                Also translates the touch boards' settings pages and the
+                latest-reply page.
     endchoice
 
     choice MUSE_JC3248W535_MIC
@@ -471,6 +501,17 @@ menu "Muse"
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
+    config MUSE_REPLY_NOTIFY
+        bool "Flash the screen and ping when a reply arrives"
+        depends on MUSE_HATCH && !MUSE_UI_FREEINK
+        default n
+        help
+            When Muse's reply to a voice note arrives, the screen wakes and
+            flashes twice, and with the speaker on and the volume above zero
+            a short two-note ping plays first. For boards without a vibration
+            motor (the SenseCAP Watcher), so a reply is noticed with the
+            device out of hand.
+
     config MUSE_REALTIME_VOICE
         bool "Live voice calls with Muse (experimental)"
         depends on (MUSE_HATCH || HOMEHUB_VOICE) && SPIRAM
@@ -543,7 +584,37 @@ if MUSE_REALTIME_VOICE
             talk over Muse. Otherwise, and on other boards, the mic is shut
             while Muse is audibly talking and for a moment after.
 
+    config MUSE_VOICE_SOFTWARE_AEC
+        bool "Software echo cancellation for hands-free voice interruption"
+        depends on IDF_TARGET_ESP32S3 && MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+        select MUSE_STATIC_BUFFERS_IN_PSRAM
+        default n
+        help
+            Use Espressif's full-duplex echo canceller to keep the mic
+            available while Muse speaks. Requires a board with enough
+            internal RAM and PSRAM, plus a calibrated speaker reference
+            delay. If initialization fails, calls remain half-duplex.
+
+    config MUSE_VOICE_AEC_REF_DELAY_CHUNKS
+        int "Speaker-to-mic reference delay in 20 ms chunks"
+        depends on MUSE_VOICE_SOFTWARE_AEC
+        range 1 10
+        default 2
+        help
+            Set per board after measuring the delay between a speaker write
+            and its echo in the microphone. The Waveshare 2.06 watch measured
+            about 50 ms, so two chunks place the reference within the AEC
+            filter's remaining adjustment range. Other boards need a bench
+            measurement before enabling this feature.
+
 endif
+
+    # Always defined, so idf_component.yml can key esp-sr on it in every build
+    # (a bool whose dependencies are unmet isn't written to sdkconfig).
+    config MUSE_VOICE_AEC_SR
+        string
+        default "y" if MUSE_VOICE_SOFTWARE_AEC
+        default "n"
 
     config MUSE_HATCH_COMPACT_BUFFERS
         bool "Smaller voice session buffers, for 2 MB of PSRAM"
