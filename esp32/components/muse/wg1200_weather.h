@@ -38,6 +38,17 @@ typedef enum {
     WG1200_REGION_COUNT = 3,
 } wg1200_weather_region_t;
 
+/* Bits of wg1200_weather_state_t.outdoor_missing. */
+#define WG1200_MISSING_TEMP     (1u << 0)
+#define WG1200_MISSING_HUMIDITY (1u << 1)
+#define WG1200_MISSING_WIND     (1u << 2)
+#define WG1200_MISSING_GUST     (1u << 3)
+#define WG1200_MISSING_WIND_DIR (1u << 4)
+#define WG1200_MISSING_UV       (1u << 5)
+#define WG1200_MISSING_LIGHT    (1u << 6)
+#define WG1200_MISSING_BATTERY  (1u << 7)
+#define WG1200_MISSING_RAIN     (1u << 8)
+
 typedef struct {
     /* Indoor BMP390 barometer (I2C0 0x77, powered via PCA9535 IO1_2) */
     bool bmp390_detected;
@@ -77,6 +88,9 @@ typedef struct {
     int16_t rssi_dbm;
     int8_t snr_db;
     int64_t outdoor_updated_us;
+    /* Readings the latest packet carried as the station's "no value"
+     * sentinel (WG1200_MISSING_*): sensors.read reports them as null. */
+    uint16_t outdoor_missing;
 
     /* The paired station's last valid GPS fix (WS1001 WEATHER_GPS_SIGNED
      * packets), kept in muse_nvs so it survives restarts. */

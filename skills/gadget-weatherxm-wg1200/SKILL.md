@@ -25,7 +25,7 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 
 ## Workflow
 
-1. **Read local microclimate (`sensors.read`).** Each metric object reports `{ "value": <number>, "unit": "<unit>", "age_s": <seconds> }`:
+1. **Read local microclimate (`sensors.read`).** Each metric object reports `{ "value": <number>, "unit": "<unit>", "age_s": <seconds> }`, or is `null` when the station's latest packet had no value for it:
    - **Outdoor (`SX1262` LoRa from `WS1001`/`WS1300`):** `outdoor_temperature` (`C`), `outdoor_humidity` (`%`), `wind_speed` (`m/s`), `wind_gust` (`m/s`), `wind_direction` (`deg`), `rain_rate` (`mm/h`), `rain_daily` (`mm`), `rain_accumulated` (`mm`), `uv_index` (`UVI`), `illuminance` (`lx`), `solar_irradiance` (`W/m2`), `station_battery` (`mV`), `lora_rssi` (`dBm`), and `lora_snr` (`dB`), plus `lora_radio` (`sx1262_detected`, `region`, `freq_hz`, `rx_packets_total`, `rx_packets_valid`, `station_model`, `station_id`).
    - **Indoor (`BMP390`):** `barometric_pressure` (`hPa`) and `gateway_temperature` (`C`, console internal temperature; use `outdoor_temperature` for ambient air).
    - Report active rain only when `rain_rate.value > 0`; `rain_daily.value` is cumulative since reset/day boundary and stays positive after rain ends.

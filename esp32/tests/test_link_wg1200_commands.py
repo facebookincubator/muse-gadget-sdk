@@ -145,6 +145,7 @@ class LinkWg1200CommandsTest(unittest.TestCase):
         )
         get_state_fn = extract_c_block(weather_src, "void wg1200_weather_get_state(")
         add_metric_fn = extract_c_block(weather_src, "static void add_sensor_metric(")
+        add_outdoor_fn = extract_c_block(weather_src, "static void add_outdoor_metric(")
         sensors_cmd_fn = extract_c_block(
             weather_src, "cJSON *wg1200_weather_sensors_command("
         )
@@ -422,6 +423,7 @@ static esp_err_t nvs_get_blob(nvs_handle_t h, const char *key, void *out, size_t
 {accept_station_fn}
 {get_state_fn}
 {add_metric_fn}
+{add_outdoor_fn}
 {sensors_cmd_fn}
 {boot_err_fn}
 {boot_cmd_fn}
@@ -455,6 +457,10 @@ void test_weather_seed_valid_readings(void) {{
     s_state.rssi_dbm = -74;
     s_state.snr_db = 9;
     s_state.outdoor_updated_us = 5000000LL;
+}}
+
+void test_weather_mark_missing(void) {{
+    s_state.outdoor_missing = WG1200_MISSING_TEMP | WG1200_MISSING_HUMIDITY | WG1200_MISSING_LIGHT;
 }}
 
 void test_weather_clear_readings(void) {{
@@ -595,6 +601,7 @@ extern "C" {{
 #include "wg1200_weather.h"
 void test_weather_seed_valid_readings(void);
 void test_weather_clear_readings(void);
+void test_weather_mark_missing(void);
 void test_boot_configure(bool factory_ok, bool ota0_ok);
 int test_boot_calls(void);
 const char *test_booted_label(void);
@@ -720,6 +727,8 @@ int main(int argc, char **argv) {{
                 s_speaker_on = false;
             }} else if (strcmp(argv[4], "no_readings") == 0) {{
                 test_weather_clear_readings();
+            }} else if (strcmp(argv[4], "missing") == 0) {{
+                test_weather_mark_missing();
             }} else if (strcmp(argv[4], "no_factory") == 0) {{
                 test_boot_configure(false, true);
             }} else if (strcmp(argv[4], "no_partitions") == 0) {{
@@ -870,6 +879,18 @@ int main(int argc, char **argv) {{
         self.assertEqual(payload["lora_radio"]["region"], "US 915 MHz")
         self.assertEqual(payload["lora_radio"]["station_model"], "WS1001")
         self.assertEqual(payload["lora_radio"]["station_id"], "0x1234ABCD")
+        # One name per reading.
+        for alias in ("temperature", "humidity", "pressure"):
+            self.assertNotIn(alias, payload)
+
+        # The station's "no value" sentinels are null, not readings.
+        missing = self.run_harness("invoke", "sensors.read", "{}", "missing")["payload"]
+        self.assertIsNone(missing["outdoor_temperature"])
+        self.assertIsNone(missing["outdoor_humidity"])
+        self.assertIsNone(missing["illuminance"])
+        self.assertIsNone(missing["solar_irradiance"])
+        self.assertEqual(missing["wind_gust"]["value"], 4.8)
+        self.assertEqual(missing["barometric_pressure"]["value"], 1004.5)
 
     def test_dispatch_wg1200_notify_and_validation(self) -> None:
         err = self.run_harness("invoke", "wg1200.notify", "{}")

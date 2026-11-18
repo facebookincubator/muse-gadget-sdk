@@ -1148,8 +1148,8 @@ static bool ws1001_try_decode(const uint8_t *pl, uint8_t len, int16_t rssi, int8
     uint16_t wg_raw = (uint16_t)(((pl[15] & 0x04) << 6) | pl[18]);
     float wind_gust = (wg_raw != 0x01FF) ? (wg_raw / 10.0f) : 0.0f;
 
-    uint16_t wind_dir = (uint16_t)(pl[19] | ((pl[20] & 0x80) << 1));
-    if (wind_dir == 0x01FF) wind_dir = 0;
+    uint16_t wind_dir_raw = (uint16_t)(pl[19] | ((pl[20] & 0x80) << 1));
+    uint16_t wind_dir = (wind_dir_raw != 0x01FF) ? wind_dir_raw : 0;
 
     uint16_t illum_raw = (uint16_t)(((pl[20] & 0x7F) << 8) | pl[21]);
     uint32_t illum_lux = (illum_raw != 0x7FFF) ? ((uint32_t)illum_raw * 10U) : 0;
@@ -1158,6 +1158,14 @@ static bool ws1001_try_decode(const uint8_t *pl, uint8_t len, int16_t rssi, int8
     float uv_index = (float)pl[22] * 0.1f;
     uint16_t rain_raw = ((uint16_t)pl[23] << 8) | pl[24];
     float rain_cml_mm = (rain_raw != 0xFFFF) ? ((float)rain_raw * 0.254f) : NAN;
+
+    uint16_t missing = (temp_raw == 0x07FF ? WG1200_MISSING_TEMP : 0) |
+                       (hum_raw == 0x03FF ? WG1200_MISSING_HUMIDITY : 0) |
+                       (ws_raw == 0x01FF ? WG1200_MISSING_WIND : 0) |
+                       (wg_raw == 0x01FF ? WG1200_MISSING_GUST : 0) |
+                       (wind_dir_raw == 0x01FF ? WG1200_MISSING_WIND_DIR : 0) |
+                       (illum_raw == 0x7FFF ? WG1200_MISSING_LIGHT : 0) |
+                       (rain_raw == 0xFFFF ? WG1200_MISSING_RAIN : 0);
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_ws1300_native_rate = false;
@@ -1187,6 +1195,7 @@ static bool ws1001_try_decode(const uint8_t *pl, uint8_t len, int16_t rssi, int8
     s_state.battery_low = (batt_mv < 2600);
     s_state.rssi_dbm = rssi;
     s_state.snr_db = snr;
+    s_state.outdoor_missing = missing;
     s_state.outdoor_updated_us = esp_timer_get_time();
     s_state.rx_packets_valid++;
     xSemaphoreGive(s_state_mutex);
@@ -1263,6 +1272,15 @@ static bool ws1300_try_decode(const uint8_t *pl, uint8_t len, int16_t rssi, int8
     uint16_t pr_raw = ((uint16_t)pl[33] << 8) | pl[34];
 
     uint32_t illum_lux = ((uint32_t)pl[36] << 16) | ((uint32_t)pl[37] << 8) | pl[38];
+    uint16_t missing = (temp_raw == 0x7FFF ? WG1200_MISSING_TEMP : 0) |
+                       (pl[22] == 0xFF ? WG1200_MISSING_HUMIDITY : 0) |
+                       (ws_raw == 0xFFFF ? WG1200_MISSING_WIND : 0) |
+                       (wg_raw == 0xFFFF ? WG1200_MISSING_GUST : 0) |
+                       (wd_raw == 0xFFFF ? WG1200_MISSING_WIND_DIR : 0) |
+                       (pl[35] == 0xFF ? WG1200_MISSING_UV : 0) |
+                       (illum_lux == 0xFFFFFF ? WG1200_MISSING_LIGHT : 0) |
+                       (pl[13] == 0xFF ? WG1200_MISSING_BATTERY : 0) |
+                       (isnan(rain_cml_mm) ? WG1200_MISSING_RAIN : 0);
     if (illum_lux == 0xFFFFFF) illum_lux = 0;
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -1296,6 +1314,7 @@ static bool ws1300_try_decode(const uint8_t *pl, uint8_t len, int16_t rssi, int8
     s_state.battery_low = batt_low;
     s_state.rssi_dbm = rssi;
     s_state.snr_db = snr;
+    s_state.outdoor_missing = missing;
     s_state.outdoor_updated_us = esp_timer_get_time();
     s_state.rx_packets_valid++;
     xSemaphoreGive(s_state_mutex);
@@ -1614,6 +1633,17 @@ static void add_sensor_metric(cJSON *payload, const char *name, double val, cons
     cJSON_AddItemToObject(payload, name, m);
 }
 
+/* A reading the station's latest packet didn't carry is null, as on other boards. */
+static void add_outdoor_metric(cJSON *payload, uint16_t missing, uint16_t bit, const char *name,
+                               double val, const char *unit, double age_s)
+{
+    if (missing & bit) {
+        cJSON_AddNullToObject(payload, name);
+    } else {
+        add_sensor_metric(payload, name, val, unit, age_s);
+    }
+}
+
 cJSON *wg1200_weather_sensors_command(void)
 {
     wg1200_weather_state_t st;
@@ -1637,25 +1667,23 @@ cJSON *wg1200_weather_sensors_command(void)
          * so its temperature reflects gateway PCB/enclosure heat rather than ambient room air. */
         add_sensor_metric(payload, "gateway_temperature", st.indoor_temp_c, "C", age_s);
         add_sensor_metric(payload, "barometric_pressure", st.indoor_pressure_hpa, "hPa", age_s);
-        add_sensor_metric(payload, "pressure", st.indoor_pressure_hpa, "hPa", age_s);
     }
 
     if (st.outdoor_valid) {
         double age_s = (double)(now_us - st.outdoor_updated_us) / 1e6;
-        add_sensor_metric(payload, "outdoor_temperature", st.outdoor_temp_c, "C", age_s);
-        add_sensor_metric(payload, "temperature", st.outdoor_temp_c, "C", age_s);
-        add_sensor_metric(payload, "outdoor_humidity", st.outdoor_humidity_pct, "%", age_s);
-        add_sensor_metric(payload, "humidity", st.outdoor_humidity_pct, "%", age_s);
-        add_sensor_metric(payload, "wind_speed", st.wind_speed_ms, "m/s", age_s);
-        add_sensor_metric(payload, "wind_gust", st.wind_gust_ms, "m/s", age_s);
-        add_sensor_metric(payload, "wind_direction", st.wind_dir_deg, "deg", age_s);
+        uint16_t m = st.outdoor_missing;
+        add_outdoor_metric(payload, m, WG1200_MISSING_TEMP, "outdoor_temperature", st.outdoor_temp_c, "C", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_HUMIDITY, "outdoor_humidity", st.outdoor_humidity_pct, "%", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_WIND, "wind_speed", st.wind_speed_ms, "m/s", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_GUST, "wind_gust", st.wind_gust_ms, "m/s", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_WIND_DIR, "wind_direction", st.wind_dir_deg, "deg", age_s);
         add_sensor_metric(payload, "rain_rate", st.rain_rate_mm_h, "mm/h", age_s);
         add_sensor_metric(payload, "rain_daily", st.rain_daily_mm, "mm", age_s);
-        add_sensor_metric(payload, "rain_accumulated", st.rain_accum_mm, "mm", age_s);
-        add_sensor_metric(payload, "uv_index", st.uv_index, "UVI", age_s);
-        add_sensor_metric(payload, "illuminance", st.illuminance_lux, "lx", age_s);
-        add_sensor_metric(payload, "solar_irradiance", st.solar_rad_wm2, "W/m2", age_s);
-        add_sensor_metric(payload, "station_battery", st.battery_mv, "mV", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_RAIN, "rain_accumulated", st.rain_accum_mm, "mm", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_UV, "uv_index", st.uv_index, "UVI", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_LIGHT, "illuminance", st.illuminance_lux, "lx", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_LIGHT, "solar_irradiance", st.solar_rad_wm2, "W/m2", age_s);
+        add_outdoor_metric(payload, m, WG1200_MISSING_BATTERY, "station_battery", st.battery_mv, "mV", age_s);
         add_sensor_metric(payload, "lora_rssi", st.rssi_dbm, "dBm", age_s);
         add_sensor_metric(payload, "lora_snr", st.snr_db, "dB", age_s);
     }

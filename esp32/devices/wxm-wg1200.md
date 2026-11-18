@@ -183,7 +183,8 @@ mode).
     (`outdoor_temperature`, `outdoor_humidity`, `wind_speed`, `wind_gust`,
     `wind_direction`, `rain_rate`, `rain_daily`, `rain_accumulated`,
     `uv_index`, `illuminance`, `solar_irradiance`, `station_battery`,
-    `lora_rssi`, `lora_snr`, each with `age_s`, and `lora_radio` metadata). Tap
+    `lora_rssi`, `lora_snr`, each with `age_s` or null when the station sent no
+    value, and `lora_radio` metadata). Tap
     **LoRa Region** in **Settings > Weather** to cycle `EU868` / `US915` / `AS923`.
   - `display.draw_file` / `display.draw_url` / `display.show_animation`: draws
     `480×480` baseline JPEGs on the screen and wakes it if asleep. When

@@ -26,7 +26,8 @@ Home Link network tunnel.
   `WS1300` LoRa weather station (`outdoor_temperature`, `outdoor_humidity`,
   `wind_speed`, `wind_gust`, `wind_direction`, `rain_rate`, `rain_daily`,
   `uv_index`, `illuminance`, `solar_irradiance`, `station_battery`) plus indoor
-  `gateway_temperature` and `barometric_pressure`, each with `age_s`.
+  `gateway_temperature` and `barometric_pressure`, each with `age_s`, or null
+  when the station sent no value for it.
 - `display.draw_file` and `display.draw_url` draw `480x480` **baseline** JPEG
   images on the screen and wake it if asleep. Transcode or crop camera
   snapshots and progressive JPEGs to `480x480` baseline JPEG before sending;

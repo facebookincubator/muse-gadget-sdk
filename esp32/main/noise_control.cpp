@@ -1663,7 +1663,7 @@ static char *build_register_json(void) {
                 "outdoor_humidity, wind_speed, wind_gust, wind_direction, "
                 "rain_rate, rain_daily, uv_index, illuminance, "
                 "solar_irradiance, station_battery, lora_rssi, lora_snr "
-                "(each with age_s) and lora_radio.",
+                "(each with age_s, or null with no current value) and lora_radio.",
                 nullptr, nullptr);
     {
         cJSON *notify_required = cJSON_CreateObject();
