@@ -37,7 +37,7 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 
 ## Verify the Result
 
-Verify writes by reading the same property back with the corresponding read method. For example, confirm power with `getPowerStatus`, volume or mute with `getVolumeInformation`, and input or app state with `getPlayingContentInfo`.
+Verify writes by reading the same property back with the corresponding read method. For example, confirm power with `getPowerStatus`, volume or mute with `getVolumeInformation`, and the input with `getPlayingContentInfo`. `getPlayingContentInfo` covers inputs and broadcast, not apps: while an app is in front it can return an error instead. For an app launch, report that `setActiveApp` was accepted and that the app itself could not be read back.
 
 Report the value returned by the read-back, not just the value sent. If the read-back does not match the intended value, say so plainly, do not resend the command automatically, and wait before any further attempt the user authorises.
 
