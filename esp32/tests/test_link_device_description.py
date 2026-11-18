@@ -397,6 +397,15 @@ int main(void) {
         self.assertIn("Seeed reSpeaker XVF3800 running", voice)
         self.assertIn("The reSpeaker XVF3800 shows no state", voice)
         self.assertNotIn("sdkconfig.muse-waveshare-s3-lcd7", guides)
+        self.assertEqual(guides["sdkconfig.muse-waveshare-s3-175c"],
+                         "devices/guides/muse-waveshare-s3-175c.md")
+        waveshare = " ".join(
+            (ROOT / "devices/guides/muse-waveshare-s3-175c.md").read_text().split())
+        self.assertIn("Waveshare ESP32-S3-Touch-AMOLED-1.75C", waveshare)
+        self.assertIn("Top button (upper right side): hold to record a voice note",
+                      waveshare)
+        self.assertIn("Drag up or down on the avatar to change the volume",
+                      waveshare)
         self.assertEqual(guides["sdkconfig.muse"], "devices/guides/muse.md")
         muse = " ".join((ROOT / "devices/guides/muse.md").read_text().split())
         self.assertIn("on boards with a microphone, people talk to Muse", muse)
