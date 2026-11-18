@@ -67,3 +67,14 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # actually slept, and how long each power lock kept the chip awake.
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
+# Internal RAM is tight at boot and around pairing (the heartbeat's minimum
+# free dips under 8 KB), and code and rodata run from PSRAM above, so:
+# - setup task stacks (pairing, provisioning, the Muse VM lookup) go to
+#   PSRAM: the 8 KB provisioning and lookup stacks otherwise find no free
+#   block, and pairing ends with error_operation_in_progress or Muse can't
+#   reach its VM (the StopWatch and CrowPanel do the same);
+# - allocations of 1 KB and up try PSRAM first (sdkconfig.muse: 4 KB),
+#   leaving the 16 KB of DMA-capable RAM Link waits for before it sends
+#   link.register.
+CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
