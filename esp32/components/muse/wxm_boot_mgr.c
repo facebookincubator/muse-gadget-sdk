@@ -50,7 +50,12 @@ static const char *TAG = "wxm_boot";
  * Redirect all default NVS operations (Muse settings, Link, Wi-Fi, NimBLE)
  * to the dedicated "muse_nvs" partition at 0xF21000 so WeatherXM's "nvs"
  * partition at 0xF000 is never modified or erased.
+ * They mount muse_nvs in plaintext: fail the build rather than silently
+ * ignore NVS encryption.
  */
+#if CONFIG_NVS_ENCRYPTION
+#error "WG1200 mounts muse_nvs in plaintext; NVS encryption isn't supported on this board"
+#endif
 
 esp_err_t __real_nvs_flash_init(void);
 esp_err_t __real_nvs_flash_init_partition(const char *partition_label);
