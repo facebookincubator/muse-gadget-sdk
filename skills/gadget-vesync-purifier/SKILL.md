@@ -12,8 +12,8 @@ Use this skill when the user asks to check or control a Levoit air purifier conn
 Exact model identification is mandatory before offering any operation. VeSync purifier capabilities are model-fragmented: modes, fan levels, and sensors differ between models that share the VeSync and Levoit names, so never infer a capability from the VeSync or Levoit name alone.
 
 1. Sign in to the VeSync cloud (see Prerequisites) and fetch the account device list. One device list covers all VeSync device classes.
-2. Find the purifier the user means in that list and record its exact model name as reported by the device list response.
-3. Check that exact model's row in the Model Guard Table below before offering, reading, or changing anything. If the model is not in the table, resolve its modes, fan levels, and sensors from the device list response for that exact model — do not borrow another model's row.
+2. Find the purifier the user means in that list (if more than one could match, ask which) and record its exact model from the device type code the list reports (for example, `LAP-C201S-AUSR` is a Core 200S).
+3. Check that exact model's row in the Model Guard Table below before offering, reading, or changing anything. If the model is not in the table, use only the modes, fan levels, and sensors the client lists for that exact device type (pyvesync's per-model `modes`, `fan_levels` and `features`) — do not borrow another model's row.
 
 ## Cloud-Only Verdict
 
@@ -30,20 +30,21 @@ VeSync devices have no local API. This skill does not use Muse Home Link or the 
 
 ## Model Guard Table
 
-Check the row for the user's exact model before offering any operation. Only offer a mode, fan level, or reading that the row — or, where the row says so, the device list response for that exact model — supports.
+Check the row for the user's exact model before offering any operation. Only offer a mode, fan level, or reading that the row supports. Setting a fan level puts the purifier in manual mode.
 
 | Model | Modes | Fan levels | Air-quality sensing | Notes |
 |---|---|---|---|---|
 | Levoit Core 200S | Manual and sleep ONLY — no auto mode | 1–3 | None — no air-quality or PM sensor | Reports filter-life percentage. Never report an air-quality value for this model. |
-| Levoit Core 300S, 400S, 600S | Capability-resolved from the device response — only offer a mode the device list response for that exact model reports | Capability-resolved from the device response — only offer a fan level the device list response for that exact model reports | Capability-resolved from the device response — only report air quality where that exact model reports a sensor | Larger Core models with their own mode and fan ranges. Do not borrow the Core 200S row. Reports filter-life percentage where the device response provides it. |
-| Levoit Vital 100S, 200S | Capability-resolved from the device response — only offer a mode the device list response for that exact model reports | Capability-resolved from the device response — only offer a fan level the device list response for that exact model reports | Capability-resolved from the device response — only report air quality where that exact model reports a sensor | Vital line. Resolve modes and fan levels from the exact model's reported capabilities. Reports filter-life percentage where the device response provides it. |
-| Levoit EverestAir | Auto, sleep, and turbo | Per the device list response for this exact model | PM1, PM2.5, and PM10 sensing | Reports filter-life percentage. |
+| Levoit Core 300S | Manual, sleep, and auto | 1–3 | Air quality level and PM2.5 | Reports filter-life percentage. |
+| Levoit Core 400S, 600S | Manual, sleep, and auto | 1–4 | Air quality level and PM2.5 | Reports filter-life percentage. |
+| Levoit Vital 100S, 200S | Manual, sleep, auto, and pet | 1–4 | Air quality level and PM2.5 | Reports filter-life percentage. |
+| Levoit EverestAir | Manual, sleep, auto, and turbo | 1–3 | PM1, PM2.5, and PM10 sensing | Reports filter-life percentage. |
 
 ## Workflow
 
 1. Identify the device: fetch the VeSync device list, confirm the exact model, and check its row in the Model Guard Table.
 2. Read state first, before any write: power state, current mode, fan level, and filter-life percentage. Read air quality / PM values only where the model has a sensor per the guard table — the Core 200S has none, so never report an air-quality value for it, and never present a missing sensor reading as zero or as clean air.
-3. Confirm the requested operation is allowed for that exact model: writes are power, mode, and fan speed where the guard table row for the exact model allows them, plus display on/off and child lock only where the device list response for that exact model reports them.
+3. Confirm the requested operation is allowed for that exact model: writes are power, mode, and fan speed where the guard table row for the exact model allows them, plus display on/off and child lock only where the device's state read reports them.
 4. Get clear consent for the change itself. A state question ("is it running?", "what's the filter at?") is never permission to change anything. A rejected or cancelled prompt is not authorization — stop there.
 5. Send the single requested change through the VeSync cloud API. If the device is already at the requested value, treat an already-set value as success and send nothing.
 6. Never resend a command automatically. If a call fails or the result is unclear, report what happened and let the user decide the next step.
