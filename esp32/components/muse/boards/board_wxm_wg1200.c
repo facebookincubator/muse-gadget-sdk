@@ -246,6 +246,27 @@ void wg1200_buzzer_beep(uint32_t duration_ms)
     (void)wg1200_io_set_level(WG1200_EXP_BUZZER_EN, 0);
 }
 
+/* Plays wg1200_buzzer_beep_async()'s beeps, so a caller that mustn't block
+ * (the Link session's wg1200.notify) doesn't wait out the beep. */
+static TaskHandle_t s_buzzer_task;
+
+static void buzzer_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        uint32_t ms = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &ms, portMAX_DELAY);
+        wg1200_buzzer_beep(ms);
+    }
+}
+
+void wg1200_buzzer_beep_async(uint32_t duration_ms)
+{
+    if (duration_ms && s_buzzer_task) {
+        xTaskNotify(s_buzzer_task, duration_ms, eSetValueWithOverwrite);
+    }
+}
+
 /* --- ST7701S 9-bit SPI bit-bang helpers (used only during boot before SPI3 init) --- */
 
 static void st7701_spi_write_9bit(uint8_t dc, uint8_t data)
@@ -450,6 +471,10 @@ static esp_err_t init(void)
 
     ESP_RETURN_ON_ERROR(muse_gpio_button_init(&s_btn_top, WG1200_BTN_TOP_GPIO), TAG, "top button GPIO38");
     ESP_RETURN_ON_ERROR(backlight_init(), TAG, "backlight");
+    if (xTaskCreatePinnedToCoreWithCaps(buzzer_task, "wg1200_buzz", 3072, NULL, 4, &s_buzzer_task,
+                                        tskNO_AFFINITY, MUSE_BIG_CAPS) != pdPASS) {
+        ESP_LOGW(TAG, "no buzzer task: wg1200.notify won't beep");
+    }
 
     return ESP_OK;
 }

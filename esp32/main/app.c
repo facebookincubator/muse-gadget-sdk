@@ -2023,7 +2023,7 @@ static cJSON *wg1200_notify_command(cJSON *params) {
 
     bool muted = !muse_settings_speaker_on();
     if (beep_ms > 0 && !muted) {
-        wg1200_buzzer_beep((uint32_t)beep_ms);
+        wg1200_buzzer_beep_async((uint32_t)beep_ms);   /* this is the Link session's task */
     }
 
     cJSON *result = cJSON_CreateObject();

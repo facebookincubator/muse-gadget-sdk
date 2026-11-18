@@ -61,8 +61,11 @@ esp_err_t wg1200_io_set_level(uint8_t pin, uint8_t level);
 int wg1200_io_get_level(uint8_t pin);
 esp_err_t wg1200_io_set_direction(uint8_t pin, bool is_output);
 
-/* Short non-blocking or blocking buzzer beep via PCA9535 IO1_5 */
+/* Buzzer beep via PCA9535 IO1_5; returns once it has played. */
 void wg1200_buzzer_beep(uint32_t duration_ms);
+/* The same beep played by a task of its own: returns at once. A beep asked
+ * for while one plays follows it (the latest request wins). */
+void wg1200_buzzer_beep_async(uint32_t duration_ms);
 
 #ifdef __cplusplus
 }

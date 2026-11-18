@@ -654,7 +654,7 @@ static int led_status_display_bits(void) {{ return 16; }}
 static bool ota_is_enabled(void) {{ return true; }}
 
 static bool muse_settings_speaker_on(void) {{ return s_speaker_on; }}
-static void wg1200_buzzer_beep(uint32_t duration_ms) {{ s_last_beep_ms = (int)duration_ms; }}
+static void wg1200_buzzer_beep_async(uint32_t duration_ms) {{ s_last_beep_ms = (int)duration_ms; }}
 static bool muse_ui_notify_show(const char *title, const char *message, int duration_s) {{
     if (!s_ui_ready) return false;
     snprintf(s_last_title, sizeof(s_last_title), "%s", title ? title : "");
