@@ -1,6 +1,6 @@
 # Skill Catalog
 
-56 active skills: 54 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+57 active skills: 55 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
@@ -20,6 +20,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Meross smart plugs](gadget-meross-smart-plugs/SKILL.md) — local switching with supplied keys.
 - [TP-Link Kasa EP10](gadget-tplink-kasa-ep10/SKILL.md) — relay and LED; no metering.
 - [TP-Link Kasa EP25](gadget-tplink-kasa-ep25/SKILL.md) — relay, LED, energy and supported auto-off.
+- [Nanoleaf](gadget-nanoleaf/SKILL.md) — power, brightness and color through the local API after button pairing.
 
 ## Speakers, displays and TVs
 
