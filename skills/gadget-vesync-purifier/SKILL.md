@@ -3,7 +3,7 @@ name: gadget-vesync-purifier
 description: "Cloud only: needs internet access and the user's VeSync account; does not use Muse Home Link or the local network. Read and control a VeSync-connected Levoit air purifier through the VeSync cloud API — power, mode, fan level, filter life, and air quality where the model has a sensor. VeSync purifiers have no local API."
 ---
 
-## VeSync Air Purifiers
+# VeSync Air Purifiers
 
 Use this skill when the user asks to check or control a Levoit air purifier connected to their VeSync account — for example reading power state, mode, fan level, filter life, or air quality, or changing power, mode, fan speed, display, or child lock. This is a separate skill for purifiers only: never apply humidifier operations or humidity targets to a purifier.
 
@@ -61,5 +61,5 @@ After any write, re-read the device state through the VeSync cloud and confirm t
 
 ## Sources
 
-- pyvesync library documentation on PyPI — the Python library documenting the VeSync cloud API, login flow, device list, and purifier controls this skill is built on.
-- VeSync and Levoit official product support pages — model identification, model families (Core, Vital, EverestAir), and manufacturer-stated capabilities for each purifier model.
+- [pyvesync on PyPI](https://pypi.org/project/pyvesync/) — the Python library documenting the VeSync cloud API, login flow, device list, and purifier controls this skill is built on.
+- [VeSync official site](https://www.vesync.com) and [Levoit official site](https://levoit.com) — model identification, model families (Core, Vital, EverestAir), and manufacturer-stated capabilities for each purifier model.
