@@ -46,7 +46,9 @@ void muse_ui_preview_brightness(int pct);
 /*
  * display.draw_url, from any task. An image covers the face until a tap, a
  * talk, the menu or muse_ui_image_hide(). Pixels are RGB565, high byte first.
- * The size is false without PSRAM for the image or before the UI is up.
+ * The size is false without PSRAM for the image. Before the UI is up, the
+ * LVGL UI already gives the board's size, so display.* can be listed early;
+ * draws fail until the UI starts.
  */
 bool muse_ui_image_size(int *w, int *h);
 /* What the panel shows of those pixels: 16 (colour), or 2 on a four-gray e-paper. */
