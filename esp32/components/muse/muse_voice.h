@@ -82,6 +82,10 @@ void muse_voice_request_mp3test(void);
 /* Asleep with nothing to play: codecs off, Wi-Fi dozing. */
 bool muse_voice_resting(void);
 
+/* Reply audio has drained: use a quiet avatar pose, retaining reply status,
+ * captions and progress. False again as soon as more audio plays. */
+bool muse_voice_reply_waiting(void);
+
 /* Voice notes recorded out of Hatch's reach wait to go, the oldest from the
  * last half hour: worth keeping Wi-Fi up for. */
 bool muse_voice_notes_waiting(void);

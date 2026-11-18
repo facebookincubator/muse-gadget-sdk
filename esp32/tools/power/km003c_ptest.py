@@ -13,6 +13,7 @@
 import argparse
 from contextlib import ExitStack, closing
 import json
+import os
 import signal
 import sys
 import threading
@@ -21,8 +22,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.power.km003c_backend import KM003CBackend
 from tools.power.ppk2_stats import CurrentStats, JSONLWriter
+from tools.power.iris_console import IrisConsole, validate_iris_args
 
 class Console:
+    arm_timeout_s = 10
+    results_timeout_s = 5
+    clock_uncertainty_s = 0.0
+    status_pending = False
+    poll_after_reply = False
+
+    @property
+    def line_time_s(self):
+        return time.monotonic()
+
+    def battery(self):
+        return None  # No gauge side channel on the serial console.
+
     def __init__(self, port):
         import serial
         self.port = serial.Serial(port=None, baudrate=115200, timeout=0.2)
@@ -108,12 +123,14 @@ def ptest_lines(console, seconds):
             message = json.loads(line[6:])
             if not isinstance(message, dict):
                 raise ValueError("expected PTEST JSON object")
-            yield time.monotonic(), message
+            at = console.line_time_s
+            yield at, message
 
 def collect_results(console, run_id):
     for _ in range(2):  # One bounded retry for a missing results response.
         console.send("ptest.results", wake=True)
-        for _, message in ptest_lines(console, 5):
+        timeout = console.results_timeout_s
+        for _, message in ptest_lines(console, timeout):
             if message.get("type") == "results":
                 error = None
                 if message.get("run_id") != run_id or message.get("state") != "complete":
@@ -135,9 +152,13 @@ def reconcile(ack, repeats, records, windows):
         if (record["status"] == "ok" or record.get("measure_start_us", 0)) and key not in measured:
             return "missing captured window"
 
-def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
+def main(argv=None, *, meter_factory=KM003CBackend, console_factory=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--console", required=True)
+    transport = parser.add_mutually_exclusive_group(required=True)
+    transport.add_argument("--console")
+    transport.add_argument("--iris-device-id", help="explicit ESP-Mosaico device ID, through its managed Gateway")
+    parser.add_argument("--mosaico-workspace", type=Path, default=os.environ.get("MOSAICO_WORKSPACE", Path.home() / "mosaico/esp-mosaico-vibe"))
+    parser.add_argument("--iris-python", default="python3")
     parser.add_argument("--output", type=Path, required=True, help="new JSONL file (never overwritten)")
     parser.add_argument("--run-id", default=time.strftime("usb5v-%Y%m%d-%H%M%S"))
     parser.add_argument("--settle-ms", type=int, default=5000)
@@ -149,9 +170,26 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
     parser.add_argument("--meter-serial")
     parser.add_argument("--charging-off", action="store_true")
     args = parser.parse_args(argv)
+    if args.iris_device_id is not None and args.charging_off:
+        parser.error("ESP-Mosaico has no supported charge-control command")
+    if args.iris_device_id is not None:
+        try:
+            args.iris_device_id, args.mosaico_workspace = validate_iris_args(args.iris_device_id, args.mosaico_workspace)
+        except ValueError as error:
+            parser.error(str(error))
+    if console_factory is None:
+        console_factory = (lambda _: IrisConsole(args.iris_device_id, args.mosaico_workspace, args.iris_python)) if args.iris_device_id is not None else Console
     if not 0 < args.rate_hz <= 40 or args.guard_s < 0 or args.capture_ms / 1000 <= 2 * args.guard_s:
         parser.error("rate must be in (0, 40]; capture must exceed twice the nonnegative guard")
     ack, anchors, results, results_error, records = None, [], {}, None, {}
+    battery = None
+    clock_uncertainty_s = 0.0
+
+    def check_clock(console):
+        nonlocal clock_uncertainty_s
+        clock_uncertainty_s = max(clock_uncertainty_s, console.clock_uncertainty_s)
+        if clock_uncertainty_s > args.guard_s:
+            raise ValueError("Iris clock uncertainty exceeds the capture edge guard")
     with ExitStack() as stack:
         meter = stack.enter_context(closing(meter_factory(args.meter_serial)))
         writer = stack.enter_context(closing(JSONLWriter(args.output)))
@@ -166,6 +204,10 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
             console = stack.enter_context(closing(console_factory(args.console)))
             for _ in console.lines(args.boot_wait_s):
                 pass
+            battery = console.battery()
+            if battery is not None:
+                if battery["battery_pct"] != 100 or abs(battery["battery_ma"]) > 2:
+                    raise ValueError(f"battery must be full and within 2 mA of zero before arm: {battery}")
             recorder.start()
             arm = dict(run_id=args.run_id, settle_ms=args.settle_ms, capture_ms=args.capture_ms,
                        repeats=args.repeats, usb_powered=1)
@@ -173,7 +215,8 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
                 arm["charging_off"] = 1
             armed = True  # A partial send may already have armed the device.
             console.send("ptest.arm=" + json.dumps(arm), wake=False)
-            for at, m in ptest_lines(console, 10):
+            arm_timeout = console.arm_timeout_s
+            for at, m in ptest_lines(console, arm_timeout):
                 if m.get("type") in ("arm_ack", "error"):
                     ack = m
                     if "now_us" in m: anchors.append((m["now_us"] / 1e6, at))
@@ -183,6 +226,7 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
                 raise ValueError(f"USB sweep did not arm: {ack.get('message')} ({ack.get('error')})")
             if not ack or ack.get("type") != "arm_ack" or not ack.get("usb_powered") or not anchors:
                 raise ValueError("USB sweep did not arm")
+            check_clock(console)
             if args.charging_off and ack.get("charging_off") is not True:
                 raise ValueError("charging_off not acknowledged")
             deadline = time.monotonic() + ack.get("max_duration_ms", 3600000) / 1000 + 30
@@ -190,11 +234,15 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
             while time.monotonic() < deadline and not finished:
                 if recorder.error is not None:
                     raise RuntimeError(f"meter error: {recorder.error}")
-                if time.monotonic() >= next_poll:
+                pending = console.status_pending
+                if time.monotonic() >= next_poll and not pending:
                     console.send("ptest.status")
                     next_poll = time.monotonic() + 10
                 for at, m in ptest_lines(console, 1):
                     if m.get("type") == "status" and m.get("run_id") == args.run_id:
+                        check_clock(console)
+                        if console.poll_after_reply:
+                            next_poll = time.monotonic() + 10
                         anchors.append((m["now_us"] / 1e6, at))
                         finished = m.get("state") not in ("armed", "running")
                         if finished: break
@@ -234,6 +282,9 @@ def main(argv=None, *, meter_factory=KM003CBackend, console_factory=Console):
                       "arm_ack": ack, "results_state": results.get("state"), "results_error": results_error,
                       "results": results, "guard_s": args.guard_s, "charging_off": args.charging_off,
                       "rate_hz": args.rate_hz, "meter_error": repr(recorder.error) if recorder.error else None,
+                      "console_transport": "esp-iris" if args.iris_device_id is not None else "serial",
+                      "device_id": args.iris_device_id, "battery_before": battery,
+                      "clock_uncertainty_s": clock_uncertainty_s,
                       "errors": failures})
         print(f"{'state':<26} {'status':<9} {'mean mA':>8} {'p95 mA':>8} {'mean mW':>8}")
         for row in rows:

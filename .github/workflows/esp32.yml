@@ -69,6 +69,8 @@ jobs:
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
+            # The mirror tests decode its messages with numpy (tools/muse/requirements-mirror.txt).
+            python -m pip install -q "numpy>=1.26"
             # Registry components for the wake word runner tests (ExecuTorch,
             # esp-nn, the microfrontend). No apostrophes in this command: the
             # action wraps it in single quotes.

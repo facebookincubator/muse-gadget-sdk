@@ -698,7 +698,11 @@ too. Streamed pieces name no request, so the late reply is known by its
 finished `message.assistant` row, whose `reply_to_message_id` names the
 request. With no turn running, that row is held until the voice task is idle
 (`muse_hatch_incoming()`), then played as a turn of its own that wakes the
-screen. Messages the turn already played aren't announced again, and rows that
+screen. Reply text may be in `display_text`, `content`, or canonical
+`transcript.messages[].content[]` text blocks; from a transcript, only the
+message's own assistant text is used, without commentary. This applies to
+replies during a turn and late replies.
+Messages the turn already played aren't announced again, and rows that
 arrive together play in one turn. The request is forgotten once its reply
 plays, 10 s after Muse stops saying it's working, or 30 minutes after it was
 remembered. A battery board resting when the reply comes plays it when it
@@ -760,6 +764,33 @@ the design, the Wi-Fi protocol and the numbers.
 - **Untrusted input:** everything from the network is. Keep the checks in
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the
   decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
+
+## Cable mirror
+
+`MUSE_MIRROR=1 tools/muse/board.sh build|flash <board>` (overlay
+`devices/sdkconfig.muse-mirror`, `CONFIG_MUSE_MIRROR`) adds the mirror in
+`components/muse_mirror`. `tools/muse/mirror.py PORT` then shows the screen in
+a desktop window over the console cable, the chip's own USB or a USB-UART
+bridge: the mouse touches, the board's keys and typing go to the board, the
+computer can play and record its sound, and Ctrl/Cmd+S and +R save
+screenshots and recordings. `docs/mirror.md` is the guide,
+`../protocols/MIRROR.md` the wire format.
+
+- **Boards:** the full LVGL UI with PSRAM; not the FreeInk e-paper UI.
+- **The port:** the viewer holds the console. Close it before flashing or
+  `idf.py monitor`; it never resets the board.
+- **Trust:** whatever is on the cable controls the board, as the console
+  already does; there is no pairing or key.
+- **Without the board:** `devices/sdkconfig.muse-virtual-display` builds a
+  board with no panel, keys or codec for any ESP32-S3 with 8 MB of flash and
+  octal PSRAM. Its size, shape and name are in menuconfig (Muse mirror); a
+  name that holds a known model, such as "1.75C", gets that board drawn in the
+  window. Its sound is the computer's.
+- **ESP-Mosaico:** `tools/muse/mirror.py iris:DEVICE_ID` reaches it over ESP-Iris on
+  its USB-C (`CONFIG_MUSE_MIRROR_IRIS`, `components_mosaico/muse_mosaico_iris`).
+  The viewer then holds the Iris data port: close it before Vibe Mode installs.
+- **Test** with `tests/test_muse_mirror*.py`; the viewer's need PySide6 and
+  numpy (`tools/muse/requirements-mirror.txt`).
 
 ## WebAssembly apps
 

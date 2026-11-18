@@ -19,6 +19,16 @@
 # components/muse_wakeword/README.md has the measurements behind these.
 CONFIG_MUSE_WAKEWORD_ENABLE=y
 
+# The runner leaves too little internal RAM for an 8 KB helper-task stack
+# (the Muse VM lookup), so setup-task stacks go to PSRAM, as on the
+# StopWatch and CrowPanel boards. The PSRAM gate in helper_task.h keeps
+# this inert on boards without code and read-only data in PSRAM.
+# Allocations of 512 B and up likewise try PSRAM first (the shared overlay
+# uses 4 KB), leaving the 16 KB of DMA-capable RAM Link waits for before
+# it sends link.register; without it the tunnel never opens.
+CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+
 # ExecuTorch at the project's -O2: its default -Os makes inference about
 # 40% slower.
 # CONFIG_ET_OPTIMIZE_SIZE is not set

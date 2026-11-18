@@ -446,6 +446,8 @@ class WakeWordFirmwareContract(unittest.TestCase):
         # sdkconfig fragments, and board.sh builds it in its own dir.
         overlay = (ROOT / 'devices/sdkconfig.muse-wakeword').read_text()
         self.assertIn('CONFIG_MUSE_WAKEWORD_ENABLE=y', overlay)
+        self.assertIn('CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y', overlay)
+        self.assertIn('CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512', overlay)
         self.assertIn('# CONFIG_ET_OPTIMIZE_SIZE is not set', overlay)
         self.assertIn('# CONFIG_ET_ENABLE_LOGGING is not set', overlay)
         self.assertIn('# CONFIG_ESPNN_DELEGATE_CONSTANTS_TO_PSRAM is not set', overlay)

@@ -19,11 +19,15 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
+# Unused functions are dropped at link time. Apple's linker spells that
+# -dead_strip and only makes position-independent executables on Apple silicon.
+LINK_GC = ['-Wl,-dead_strip'] if sys.platform == 'darwin' else ['-Wl,--gc-sections', '-no-pie']
 # Builds with the wake word compiled in (boards with PSRAM, as the option needs).
 WAKEWORD_BUILDS = {(1, 1), (0, 1), (1, 0), (3, 0)}
 FAKE_HEADERS = [
@@ -84,9 +88,9 @@ class StopWatchPTT(unittest.TestCase):
                 command = [*shlex.split(os.environ.get('CC', 'cc')), '-std=gnu11',
                            '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                            '-Wno-unused-variable', '-Wno-unused-function',
-                           '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
+                           '-ffunction-sections', '-fdata-sections', *LINK_GC,
                            '-g', '-O1', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-                           '-no-pie', '-include', str(ROOT / 'tests/host_compat.h'),
+                           '-include', str(ROOT / 'tests/host_compat.h'),
                            '-I', str(stage), str(source)]
                 if kind == 'voice' and (board, realtime) in WAKEWORD_BUILDS:
                     # The wake word paths, with the harness's no-op glue hooks.
