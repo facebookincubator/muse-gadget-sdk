@@ -21,9 +21,10 @@ blob or programs feature-page registers itself.
 ## Optional dependency
 
 `MUSE_BMI270_DRIVER` is an always-defined component-manager selector:
-`"y"` only for `MUSE_BOARD_M5STACK_STOPWATCH && CAPABILITIES_REGISTRY`,
-otherwise `"n"`. The manifest fetches the driver only when this selector is
-on. The adapter's sources are likewise in the StopWatch CMake block behind
+`"y"` only for `MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CAPABILITIES_REGISTRY`
+(the StopWatch and the TriviaPOD, which builds its board file), otherwise
+`"n"`. The manifest fetches the driver only when this selector is on. The
+adapter's sources are likewise in that board file's CMake block behind
 `CONFIG_CAPABILITIES_REGISTRY`.
 
 Thus a StopWatch apps-off build and apps builds for other boards do not

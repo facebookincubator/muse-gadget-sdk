@@ -675,10 +675,11 @@ endif
             protocols/VIDEO.md has the wire format.
 
     # Always defined for component-manager rules, even when the registry bool
-    # is omitted from sdkconfig. Only the StopWatch currently uses this driver.
+    # is omitted from sdkconfig. Only the StopWatch family (the StopWatch and
+    # the TriviaPOD, one board file) uses this driver.
     config MUSE_BMI270_DRIVER
         string
-        default "y" if MUSE_BOARD_M5STACK_STOPWATCH && CAPABILITIES_REGISTRY
+        default "y" if MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CAPABILITIES_REGISTRY
         default "n"
 
     # Always defined, so idf_component.yml can key mDNS on it in every build
