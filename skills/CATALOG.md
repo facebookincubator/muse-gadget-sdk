@@ -1,6 +1,6 @@
 # Skill Catalog
 
-60 active skills: 58 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+62 active skills: 60 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
