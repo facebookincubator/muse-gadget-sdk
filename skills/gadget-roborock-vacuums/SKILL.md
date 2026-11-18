@@ -30,29 +30,20 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 3. For a requested operation, send the documented local cleaning, pause or return-to-dock command supported by this model.
 4. Correlate the response and poll/subscribe to fresh state as supported. If local communication fails, report it rather than quietly switching to a cloud channel.
 
-## Wi-Fi RSSI via GET_NETWORK_INFO
+## Wi-Fi Signal via GET_NETWORK_INFO
 
-The local channel also answers the `get_network_info` RPC with the
-robot's live Wi-Fi state: SSID, BSSID, frequency and **RSSI** of its
-current AP link (verified on a QX Revo Ultra 2: docked robot reading
-−26 dBm on its 2.4 GHz IoT network). Send it through the same local
-client session as any other command — in python-roborock's device
-API this is the v1 `command` trait with `RoborockCommand.GET_NETWORK_INFO`,
-NOT the `network_info` trait, whose refresh only echoes the seeded
-discovery data (IP) and never returns RSSI.
+When the user asks about the robot's Wi-Fi (for example, why it keeps
+dropping offline), send the `get_network_info` RPC through the same local
+session as any other command. It returns the robot's current Wi-Fi link,
+including the signal strength (`rssi`, in dBm) alongside its SSID, BSSID,
+IP and MAC address. In python-roborock's device API this is the v1
+`command` trait with `RoborockCommand.GET_NETWORK_INFO`; the
+`network_info` trait may return cached data instead of a fresh reading.
+Response fields can vary by model and firmware.
 
-Uses, in order of value:
-
-- A **docked robot is a fixed RSSI point** in whatever room its dock
-  occupies; sampled on a poll cadence it joins an RSSI time series
-  for coarse presence corroboration (variance is the signal; a flat
-  series abstains).
-- While **cleaning**, the same reading is a mobile survey: log RSSI
-  with robot state (and pose, where the map lane provides it) to
-  build a per-room radio map that calibrates fixed points.
-
-Keep it read-only and corroboration-grade: RSSI from a vacuum is
-occupancy-trend evidence, never a person locator.
+Treat the SSID, BSSID, IP and MAC address as private network details:
+report the signal strength the user asked about, not the identifiers.
+Read it on request only; don't poll it in the background.
 
 ## Verify the Result
 
@@ -70,3 +61,4 @@ occupancy-trend evidence, never a person locator.
 
 - [python-roborock device support](https://github.com/Python-roborock/python-roborock)
 - [Roborock local TCP channel](https://github.com/Python-roborock/python-roborock/blob/HEAD/roborock/devices/transport/local_channel.py)
+- [python-roborock `get_network_info`](https://github.com/Python-roborock/python-roborock/blob/HEAD/docs/V1_API_COMMANDS.md#get_network_info)
