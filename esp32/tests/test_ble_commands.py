@@ -21,6 +21,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_cjson import cjson_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
 JSON = Path(os.environ.get(
@@ -38,7 +40,7 @@ class BleCommandsTest(unittest.TestCase):
             cjson = Path(tmp) / "cjson.o"
             built = subprocess.run(
                 [*cc, "-std=c11", "-w", "-DCJSON_NESTING_LIMIT=16", "-c",
-                 str(JSON / "cJSON.c"), "-o", str(cjson)],
+                 *cjson_source(JSON), "-o", str(cjson)],
                 capture_output=True, text=True)
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
             built = subprocess.run(

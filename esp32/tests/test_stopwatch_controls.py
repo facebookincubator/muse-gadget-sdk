@@ -309,6 +309,7 @@ int main(int argc, char **argv) {
 #include <stdio.h>
 #include <string.h>
 typedef void lv_obj_t;
+#define T(en) (en)
 #define LV_SYMBOL_POWER "P"
 #define COLOR_DANGER 1
 #define COLOR_TEXT 2

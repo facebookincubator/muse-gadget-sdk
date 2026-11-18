@@ -35,3 +35,6 @@ lv_obj_t *muse_keypad_create(lv_obj_t *parent, lv_obj_t *ta, bool round);
 /* Back to lower-case letters with nothing pending. A password gets a key that
  * shows and hides it. */
 void muse_keypad_reset(lv_obj_t *kp, bool password);
+
+/* LVGL context: commit a pending multi-tap before external editing. */
+lv_obj_t *muse_keypad_for_textarea(lv_obj_t *ta);

@@ -86,6 +86,7 @@ static const char *TAG = "muse_voice";
 #define ACK_WAIT_US (30LL * 1000000)            /* asleep, waiting for the VM to have a note */
 #define REPLY_COMPLETE_HOLD_MS 300
 #define REPLY_COMPLETE_POLL_MS 10
+#define REPLY_AUDIO_GAP_US 200000   /* tolerate brief decoder/network gaps and the speaker's DMA tail */
 
 static QueueHandle_t s_queue;
 static uint32_t s_press_input_epoch;
@@ -139,6 +140,9 @@ static volatile bool s_mp3test;
 static atomic_int s_call_view;
 static atomic_bool s_ptt_call;
 static atomic_bool s_shutdown;
+static atomic_bool s_reply_waiting;
+
+bool muse_voice_reply_waiting(void) { return atomic_load(&s_reply_waiting); }
 
 muse_voice_view_t muse_voice_call_view(void) { return atomic_load(&s_call_view); }
 bool muse_voice_in_call(void) { return muse_voice_call_view() != MUSE_VOICE_VIEW_NONE; }
@@ -605,6 +609,7 @@ static void go_idle(const char *caption);
 static bool hatch_reply(bool *delivered, bool incoming)
 {
     muse_wakeword_set_playback(true);   /* never trigger on Muse's own voice */
+    atomic_store(&s_reply_waiting, false);
     muse_state_set_progress(0); /* Recording progress must not carry into the reply. */
     muse_state_set_mode(MUSE_MODE_THINKING);
     /* Until there's a transcript or reply; a late reply has no note to send. */
@@ -620,6 +625,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
     int progress_logged = -1;
     float progress = 0;
     int64_t t0 = esp_timer_get_time();
+    int64_t last_audio_us = t0;
     *delivered = false;
     for (;;) {
         muse_state_poke();   /* an active turn is activity: don't auto-sleep mid-reply */
@@ -638,6 +644,16 @@ static bool hatch_reply(bool *delivered, bool incoming)
                 }
                 break;
             case MUSE_HATCH_EV_REPLY:
+#if CONFIG_MUSE_REPLY_NOTIFY
+                if (!replied) {
+                    /* In place of a vibration motor: flash the screen and,
+                     * with the speaker on and the volume up, ping. */
+                    muse_state_flash();
+                    if (muse_settings_speaker_on() && muse_settings_volume() > 0) {
+                        muse_audio_notify();
+                    }
+                }
+#endif
                 replied = *delivered = true;
                 /* Once speech starts, the caption follows it. The event only
                  * has room for the page's start; the page itself comes below. */
@@ -651,6 +667,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
                 break;
             case MUSE_HATCH_EV_ERROR:
                 ESP_LOGW(TAG, "muse: %s", text);
+                atomic_store(&s_reply_waiting, false);
                 muse_state_set_level(0);
                 muse_wakeword_set_playback(false);
                 go_idle(text);
@@ -661,6 +678,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
         }
         if (got_event(MUSE_PTT_DOWN)) {
             ESP_LOGI(TAG, "reply interrupted");
+            atomic_store(&s_reply_waiting, false);
             muse_hatch_turn_cancel();
             muse_state_set_progress(0);
             muse_state_set_level(0);
@@ -669,6 +687,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
         }
         size_t n = muse_hatch_turn_read(buf, MUSE_AUDIO_CHUNK, speaking || done ? 0 : 20);
         if (n) {
+            atomic_store(&s_reply_waiting, false);
             if (!speaking) {
                 speaking = true;
                 muse_state_set_mode(MUSE_MODE_SPEAKING);
@@ -676,8 +695,10 @@ static bool hatch_reply(bool *delivered, bool incoming)
             }
             muse_state_set_level(muse_audio_level(buf, n));
             muse_audio_write(buf, n);
+            last_audio_us = esp_timer_get_time();
             played += n;
         } else if (done) {
+            atomic_store(&s_reply_waiting, true);
             muse_state_set_progress(!incomplete[0] && played ? 1 : 0);
             ESP_LOGI(TAG, "reply progress: %s", incomplete[0] ? "incomplete" : "complete");
             break;
@@ -685,6 +706,9 @@ static bool hatch_reply(bool *delivered, bool incoming)
             /* Between messages: keep the speaker fed so it doesn't replay stale DMA. */
             muse_state_set_level(0);
             muse_audio_write(silence, MUSE_AUDIO_CHUNK);
+            if (esp_timer_get_time() - last_audio_us >= REPLY_AUDIO_GAP_US) {
+                atomic_store(&s_reply_waiting, true);
+            }
         }
         if (speaking) {
             int message;
@@ -717,6 +741,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
              (esp_timer_get_time() - t0) / 1e6);
     if (incomplete[0]) {
         ESP_LOGW(TAG, "muse: %s", incomplete);
+        atomic_store(&s_reply_waiting, false);
         go_idle(incomplete);
         return false;
     }
@@ -730,6 +755,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
              elapsed += REPLY_COMPLETE_POLL_MS) {
             if (got_event(MUSE_PTT_DOWN)) {
                 ESP_LOGI(TAG, "reply interrupted after completion");
+                atomic_store(&s_reply_waiting, false);
                 muse_hatch_turn_cancel();
                 muse_state_set_progress(0);
                 muse_state_set_level(0);
@@ -738,6 +764,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
             vTaskDelay(pdMS_TO_TICKS(REPLY_COMPLETE_POLL_MS));
         }
     }
+    atomic_store(&s_reply_waiting, false);
     return false;
 }
 

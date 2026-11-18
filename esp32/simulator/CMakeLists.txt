@@ -166,6 +166,8 @@ add_executable(muse_simulator
     src/sim_platform.c
     src/sim_services.c
     "${MUSE_COMPONENT_DIR}/muse_ui.c"
+    "${MUSE_COMPONENT_DIR}/muse_options.c"
+    "${MUSE_COMPONENT_DIR}/muse_options_ui.c"
     "${MUSE_COMPONENT_DIR}/muse_state.c"
     "${MUSE_COMPONENT_DIR}/muse_text.c"
     "${MUSE_COMPONENT_DIR}/muse_lang.c"
@@ -240,6 +242,18 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_volume_swipe COMMAND muse_volume_swipe_test)
     set_tests_properties(muse_volume_swipe PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
+    add_executable(muse_options_ui_test tests/options_ui_harness.c ${caption_sources})
+    target_include_directories(muse_options_ui_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_options_ui_test PRIVATE ${caption_libraries})
+    target_compile_options(muse_options_ui_test PRIVATE ${caption_compile_options})
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_options_ui_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_options_ui COMMAND muse_options_ui_test)
+    add_test(NAME muse_options_round_466 COMMAND muse_options_ui_test 466 466 1)
+    add_test(NAME muse_options_rectangle COMMAND muse_options_ui_test 320 480 0)
+    set_tests_properties(muse_options_ui muse_options_round_466 muse_options_rectangle PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;ASAN_OPTIONS=detect_leaks=0:halt_on_error=1" TIMEOUT 30)
     set_tests_properties(muse_caption_layout PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
     add_executable(muse_latest_reply_test tests/latest_reply_harness.c ${caption_sources}
@@ -286,6 +300,7 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_executable(muse_settings_text_test
         tests/settings_text_harness.c
         "${MUSE_COMPONENT_DIR}/muse_keypad.c"
+        "${MUSE_COMPONENT_DIR}/muse_lang.c"
         "${MUSE_COMPONENT_DIR}/muse_text.c"
     )
     target_include_directories(muse_settings_text_test PRIVATE

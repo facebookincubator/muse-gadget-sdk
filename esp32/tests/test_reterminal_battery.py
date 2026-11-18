@@ -19,6 +19,8 @@ import subprocess
 import tempfile
 import unittest
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # Compile the production driver against controllable ESP-IDF calls. Each harness
@@ -183,7 +185,7 @@ class ReterminalBatteryTest(unittest.TestCase):
         json_dir = Path(os.environ.get(
             "CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"))
         result = subprocess.run([*self.cc, "-I", str(json_dir), "-c",
-            str(json_dir / "cJSON.c"), "-o", str(self.out / "cjson.o")],
+            *cjson_source(json_dir), "-o", str(self.out / "cjson.o")],
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         noise = (ROOT / "main/noise_control.cpp").read_text()

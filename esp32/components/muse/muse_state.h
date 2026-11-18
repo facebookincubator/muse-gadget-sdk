@@ -103,6 +103,11 @@ bool muse_state_asleep(void);
 void muse_state_wait_awake(uint32_t timeout_ms);
 void muse_state_nudge(void);
 
+/* A reply from Muse arrived: wakes the screen and flashes it twice
+ * (muse_state_flash_level, read by the UI each frame). */
+void muse_state_flash(void);
+float muse_state_flash_level(void);   /* 0..1, 0 when no flash is running */
+
 /* Touch/pet reaction. */
 void muse_state_make_happy(void);
 float muse_state_happiness(void);

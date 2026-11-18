@@ -23,6 +23,16 @@ card. They come from the `Montserrat-Medium.ttf` LVGL generates its own from
 Montserrat is by Julieta Ulanovsky and the Montserrat Project Authors, under
 the SIL Open Font License, version 1.1.
 
+`muse_font_pt_12.c`, `_14.c`, `_16.c`, `_20.c` and `_28.c` are Montserrat
+Medium's 26 Portuguese letters (À-Ã, Ç, É, Ê, Í, Ó-Õ, Ú, Ü and their lower
+case) at the same sizes plus 16 px, which the touch settings pages use, built
+in only with `CONFIG_MUSE_UI_LANG_PT_BR`. They come from the same
+`Montserrat-Medium.ttf` with lv_font_conv 1.5.3:
+`lv_font_conv --font Montserrat-Medium.ttf --size <px> --bpp 4 --format lvgl
+--lv-font-name muse_font_pt_<px> --no-compress -r
+0xC0-0xC3,0xC7,0xC9-0xCA,0xCD,0xD3-0xD5,0xDA,0xDC,0xE0-0xE3,0xE7,0xE9-0xEA,0xED,0xF3-0xF5,0xFA,0xFC`,
+with the include changed to `lvgl.h` as in the Vietnamese ones.
+
 GNU Unifont is by Roman Czyborra, Paul Hardy and contributors
 (https://unifoundry.com/unifont/). Its compiled fonts are licensed under the
 SIL Open Font License, version 1.1 (https://openfontlicense.org), and under
