@@ -22,6 +22,7 @@ VeSync devices have no local API. This skill does not use Muse Home Link or the 
 ## Prerequisites
 
 - The user's VeSync account email and password. Signing in produces a session token and an account ID, using the same VeSync cloud login as all other VeSync device classes.
+- Credentials are sent only to the VeSync API, through the client — never to any other service.
 - Sign in only with the user's own VeSync account. Account credentials and session tokens are personal — never use another person's account, and never share or publish your own credentials or token.
 - The password and the session token live only in user-only approved storage. They are never pasted into chat and never logged.
 - If the user's VeSync account was created with Google or Apple sign-in, it has no password until the user sets one in the VeSync app. If sign-in fails for that reason, give the user that step — set a password in the VeSync app first — instead of improvising around it.
@@ -49,7 +50,7 @@ Check the row for the user's exact model before offering any operation. Only off
 
 ## Verify the Result
 
-After any write, re-read the device state through the VeSync cloud and confirm the reported power state, mode, fan level, display, or child lock matches what was requested. Report the verified state, not just that a command was sent. For a read-only request, report exactly what the cloud returned, including filter-life percentage, and report air quality only for models with a sensor per the guard table.
+After any write, wait briefly — cloud state lags — then re-read the device state through the VeSync cloud and confirm the reported power state, mode, fan level, display, or child lock matches what was requested. Report the verified state, not just that a command was sent. If the read-back fails or comes back empty, report the change as unconfirmed rather than trusting any cached state the client shows. Background refreshes of device state (the app's, or another integration's polling) are separate from this read-back; only the read-back around the requested change verifies it. For a read-only request, report exactly what the cloud returned, including filter-life percentage, and report air quality only for models with a sensor per the guard table.
 
 ## Limits
 
@@ -61,5 +62,5 @@ After any write, re-read the device state through the VeSync cloud and confirm t
 
 ## Sources
 
-- [pyvesync on PyPI](https://pypi.org/project/pyvesync/) — the Python library documenting the VeSync cloud API, login flow, device list, and purifier controls this skill is built on.
+- [pyvesync on PyPI](https://pypi.org/project/pyvesync/) — the Python library documenting the VeSync cloud API, login flow, device list, and purifier controls this skill is built on. Checked against pyvesync 3.5.1, the version pinned by the Home Assistant VeSync integration (Home Assistant 2026.11.1), through which this skill's device validation was read.
 - [VeSync official site](https://www.vesync.com) and [Levoit official site](https://levoit.com) — model identification, model families (Core, Vital, EverestAir), and manufacturer-stated capabilities for each purifier model.
