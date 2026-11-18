@@ -31,7 +31,7 @@ There is no stable hand-written REST specification. Pin behavior to the official
 
 ## Verify the Result
 
-Verify every write by reading the player and queue state back from the server and comparing it with what the user asked for. Confirm the affected player is the named player, report its transport state, volume, now-playing item, and queue as returned, and note any difference plainly. For reads, report only what the server response showed. Confirm at the end that no test queue or test track was left on a shared player and that no unnamed player was changed.
+Verify every write by reading the player and queue state back from the server and comparing it with what the user asked for. Confirm the affected player is the named player, report its transport state, volume, now-playing item, and queue as returned, and note any difference plainly. For reads, report only what the server response showed. Confirm at the end that no test queue or test track was left on a shared player, and that no player changed beyond the named player and any group members the user agreed to in step 3.
 
 ## Limits
 
