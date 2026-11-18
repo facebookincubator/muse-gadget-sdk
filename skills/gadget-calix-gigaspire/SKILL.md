@@ -55,7 +55,7 @@ Do not probe the gateway's failed-login lockout behavior, and do not resend requ
 
 ## Sources
 
-This skill is the documented exception to the official-docs-only convention. No public official API documentation for the GigaSpire local interface exists, and Calix publishes its EXOS material through a provider-gated channel. The workflow above therefore rests on bench-verified local evidence from a running installation rather than on public official documentation.
+This skill is the documented exception to the official-docs-only convention. No public official API documentation for the GigaSpire local interface exists, and Calix publishes its EXOS material through a provider-gated channel. The workflow above therefore rests on bench-verified local evidence from a running installation rather than on public official documentation. That evidence was gathered on a GigaSpire BLAST u6 (GS5229E) running EXOS 26.1.0; other models or EXOS versions may differ.
 
 No private connector internals are described here. Credentials stay on the gateway-side host in the connector's own approved storage.
 
