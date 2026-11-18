@@ -229,11 +229,12 @@ cloud endpoint overrides using loopback/private IP literals, single-label names,
 
 Proxy credentials share the remembered network's NVS storage and reset/forget
 lifecycle. Firmware predating proxy support ignores the added fields; rewriting
-a network on that firmware may discard its proxy settings. Proxy authentication
-travels in plaintext to the selected proxy, while the cloud session remains
-protected by TLS. PAC/Automatic mode, TLS-to-proxy and app configuration UI are
-follow-ups. OTA and diagnostic-upload HTTP clients retain their existing direct
-paths.
+a network on that firmware may discard its proxy settings, and once proxies
+make the saved-network list longer than it reads, it drops the other saved
+networks. Proxy authentication travels in plaintext to the selected proxy,
+while the cloud session remains protected by TLS. PAC/Automatic mode,
+TLS-to-proxy and app configuration UI are follow-ups. OTA, image downloads and
+diagnostic uploads keep their existing direct paths.
 
 ## USB settings in a browser
 
