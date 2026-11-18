@@ -708,7 +708,9 @@ typedef struct {
     double lon;
 } station_gps_nvs_blob_t;
 
-/* Retain daily rain + rain rate across warm reboots / OTA / dual-boot switches */
+/* Retain daily rain across warm reboots / OTA / dual-boot switches. The
+ * rain-rate tip times are esp_timer seconds, which restart from zero at boot,
+ * so a restore clears them (init_rain_tracking_state). */
 typedef struct {
     uint32_t magic;
     int32_t daily_current_day_idx;
@@ -1401,6 +1403,7 @@ static void wg1200_weather_task(void *arg)
 static void init_rain_tracking_state(bool stock_nvs_mounted)
 {
     if (s_rain_rtc.magic == DAILY_PRECIP_NVS_MAGIC) {
+        reset_precip_rate_params_locked();
         ESP_LOGI(TAG, "Restored rain tracking from RTC RAM (day=%ld, sta=0x%08lX, baseline=%.2f, daily=%.2f mm)",
                  (long)s_rain_rtc.daily_current_day_idx,
                  (unsigned long)s_rain_rtc.daily_station_id,

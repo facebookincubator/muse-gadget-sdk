@@ -120,6 +120,9 @@ class LinkWg1200CommandsTest(unittest.TestCase):
             weather_src, "static void sx1262_cs_deselect("
         )
         sx_read_cmd_fn = extract_c_block(weather_src, "static void sx1262_read_cmd(")
+        reset_rate_fn = extract_c_block(
+            weather_src, "static void reset_precip_rate_params_locked("
+        )
         get_precip_rate_fn = extract_c_block(
             weather_src, "static float get_precip_rate_locked("
         )
@@ -410,6 +413,7 @@ static esp_err_t nvs_get_blob(nvs_handle_t h, const char *key, void *out, size_t
 {sx_cs_select_fn}
 {sx_cs_deselect_fn}
 {sx_read_cmd_fn}
+{reset_rate_fn}
 {get_precip_rate_fn}
 {init_rain_fn}
 {load_region_fn}
@@ -535,6 +539,27 @@ cJSON *test_run_factory_nvs_sync(void) {{
     return res;
 }}
 
+/* A warm restart keeps RTC RAM, but esp_timer starts again from zero. */
+cJSON *test_run_rain_warm_restart(void) {{
+    memset(&s_rain_rtc, 0, sizeof(s_rain_rtc));
+    s_rain_rtc.magic = DAILY_PRECIP_NVS_MAGIC;
+    s_rain_rtc.daily_current_day_idx = 20405;
+    s_rain_rtc.daily_precip_cached = 3.0f;
+    s_rain_rtc.rate_station_id = 0x1234ABCDU;
+    s_rain_rtc.init_tip_cml = 10.0f;      /* one tip, an hour into the last boot */
+    s_rain_rtc.init_tip_ts = 2600;
+    s_rain_rtc.oldest_tip_cml = 10.254f;
+    s_rain_rtc.oldest_tip_ts = 3600;
+    s_now_us = 30LL * 1000000LL;          /* 30 s after the restart */
+    init_rain_tracking_state(false);
+
+    cJSON *res = cJSON_CreateObject();
+    cJSON_AddNumberToObject(res, "rain_rate", get_precip_rate_locked());
+    cJSON_AddNumberToObject(res, "daily_rain_mm", s_rain_rtc.daily_precip_cached);
+    cJSON_AddNumberToObject(res, "rate_station_id", (double)s_rain_rtc.rate_station_id);
+    return res;
+}}
+
 cJSON *test_run_sx1262_cs_guard(void) {{
     uint8_t irq_buf[2] = {{0xFF, 0xFF}};
     s_sim_nss_timeout = true;
@@ -576,6 +601,7 @@ const char *test_booted_label(void);
 cJSON *test_run_factory_nvs_sync(void);
 cJSON *test_run_sx1262_cs_guard(void);
 cJSON *test_run_station_filter(void);
+cJSON *test_run_rain_warm_restart(void);
 }}
 
 #define CONFIG_MUSE_BOARD_WXM_WG1200 1
@@ -662,6 +688,14 @@ int main(int argc, char **argv) {{
     }}
     if (strcmp(argv[1], "sx1262_cs") == 0) {{
         cJSON *res = test_run_sx1262_cs_guard();
+        char *out = cJSON_PrintUnformatted(res);
+        puts(out ? out : "{{}}");
+        free(out);
+        cJSON_Delete(res);
+        return 0;
+    }}
+    if (strcmp(argv[1], "rain_warm_restart") == 0) {{
+        cJSON *res = test_run_rain_warm_restart();
         char *out = cJSON_PrintUnformatted(res);
         puts(out ? out : "{{}}");
         free(out);
@@ -959,6 +993,14 @@ int main(int argc, char **argv) {{
         self.assertFalse(res["absent_paired_in_grace"])
         self.assertTrue(res["absent_paired_after_grace"])
         self.assertTrue(res["unpaired_first"])
+
+    def test_rain_rate_restarts_after_warm_reboot(self) -> None:
+        res = self.run_harness("rain_warm_restart")
+        # The last boot's tip times mean nothing after a restart: no phantom
+        # rate from them, but the day's rain and the station are kept.
+        self.assertEqual(res["rain_rate"], 0)
+        self.assertAlmostEqual(res["daily_rain_mm"], 3.0)
+        self.assertEqual(int(res["rate_station_id"]), 0x1234ABCD)
 
     def test_sx1262_aborts_spi_transfer_when_nss_assert_fails(self) -> None:
         res = self.run_harness("sx1262_cs")
