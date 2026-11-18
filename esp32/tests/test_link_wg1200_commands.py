@@ -1080,6 +1080,12 @@ int main(int argc, char **argv) {{
         with self.assertRaises(ports_mod.NotFound):
             ports_mod.find("wg1200", ports=[usj, usj2, ch340])
 
+        # chat.py's command ports: one per WG1200 (its USB Serial/JTAG), and
+        # no CH340 1a86:7523, which the WG1200 shares with boards that don't
+        # take serial commands.
+        self.assertEqual(ports_mod.command_ports(ports=[usj, ch340]), ["/dev/cu.usbmodem11301"])
+        self.assertEqual(ports_mod.command_ports(ports=[ch340]), [])
+
 
 if __name__ == "__main__":
     unittest.main()
