@@ -20,6 +20,7 @@
 #endif
 
 #include <stdatomic.h>
+#include "muse_options_ui.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -156,7 +157,7 @@ static void tile_changed_cb(lv_event_t *e)
 }
 
 /* From any task: the face tile is the currently visible tile. */
-bool muse_ui_face_active(void)
+static bool face_shown(void)
 {
 #if CONFIG_MUSE_APP_VIEW
     if (muse_app_view_tick()) {
@@ -164,6 +165,12 @@ bool muse_ui_face_active(void)
     }
 #endif
     return s_face_active;
+}
+
+bool muse_ui_face_active(void)
+{
+    /* The option picker covers it too: a held touch chooses, it doesn't talk. */
+    return !muse_options_ui_open() && face_shown();
 }
 
 bool muse_ui_volume_swiping(void)
@@ -1808,6 +1815,12 @@ static void build_overlays(void)
         update_control_hints(MUSE_MODE_BOOT);
     }
 
+#if CONFIG_MUSE_HATCH
+    /* Answers go out through the voice task, which display-only boards don't run. */
+    if (muse_board->touch && (muse_board->audio_init || muse_board->mic_init))
+        muse_options_ui_start(s_w, s_h, muse_board->round, caption_font());
+#endif
+
     /* BLE pairing code, or the Muse app's ask for the talk button: a centred
      * column in one typeface, the code large. The small card grows with the hint. */
     s_pair = lv_obj_create(lv_layer_top());
@@ -1936,6 +1949,9 @@ static const char *idle_name(muse_wifi_state_t wifi)
 
 static void update_chrome(float now)
 {
+    muse_options_ui_tick(face_shown() && !muse_voice_in_call() && !s_image_dsc.data &&
+                         muse_state_mode(NULL) != MUSE_MODE_LISTENING &&
+                         lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
     if (now < s_next_settings_tick) {
         return;
     }

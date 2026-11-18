@@ -851,8 +851,10 @@ class WasmAppsTest(unittest.TestCase):
         for board in ["MUSE_BOARD_OSTB_ECHOEAR_2ST", "MUSE_BOARD_WAVESHARE_S3_LCD7", "MUSE_BOARD_VIEWE_SMARTRING_PLUS"]:
             self.assertIn("!" + board, kconfig)
         # Boards that turn a held touch on the face into push-to-talk don't, under an app.
-        face = function(read("components/muse/muse_ui.c"), "bool muse_ui_face_active(")
+        ui = read("components/muse/muse_ui.c")
+        face = function(ui, "static bool face_shown(")
         self.assertLess(face.index("if (muse_app_view_tick()) {"), face.index("return s_face_active;"))
+        self.assertIn("face_shown()", function(ui, "bool muse_ui_face_active("))
 
     def test_apps_are_off_until_the_person_turns_them_on(self):
         """Run apps in Settings, saved, off by default: off, Muse isn't offered

@@ -365,6 +365,14 @@ such as the StopWatch). The text is centred beneath the smaller avatar;
 turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
 visible when the larger text fills the reading area.
 
+On PSRAM boards with the LVGL touchscreen UI, Muse's text-option questions
+open a scrollable picker. Tap one answer to send it as a follow-up message;
+the subsequent reply uses the normal caption path. The picker stays inside
+round displays, and repeated taps cannot submit the same question twice.
+See [reply option selection](docs/reply-option-selection.md) for supported
+prompts, USB diagnostics, validation, and the current server limitation on
+synchronizing selected-button state with the phone.
+
 The on-device "Hey Muse" wake word (off by default; not enabled on any
 board yet) runs its model with the ExecuTorch runtime and ESP-NN delegate
 and TensorFlow Lite Micro's microfrontend, which come from the ESP
