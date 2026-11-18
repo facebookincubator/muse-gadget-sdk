@@ -26,14 +26,12 @@ notes, and replies show on screen and play aloud with the speaker on.
   vertically, and swipe left to return. The saved answer clears on
   reboot.
 - When Muse asks a question with options, the choices appear on the
-  screen; a held touch on a choice answers it.
+  screen; tap one to answer.
 - If it lists `display.*` commands, Muse can show images on its screen
   until `display.show_animation` or a press on the device.
 - If it lists `device.discover`, it's a bridge to the home network. The
   scan takes up to about 90 seconds: work from the last result rather
   than starting another.
-- If it lists `ble.*` commands, it can talk to nearby Bluetooth LE
-  devices: one at a time, and only devices the user means.
 - `device.health` reports its battery level and charging state.
 
 ## Controls
@@ -52,8 +50,9 @@ notes, and replies show on screen and play aloud with the speaker on.
 
 - Settings > Reset pairing forgets Wi-Fi and the pairing; set it up again
   in the Muse app.
-- If it's frozen, hold the bottom button to power it off, then press the
-  top button to turn it on again.
+- If it's frozen, hold the bottom button to power it off; if that does
+  nothing, hold the top button for about 10 seconds. Press the top
+  button to turn it on again.
 
 ## Limits
 
