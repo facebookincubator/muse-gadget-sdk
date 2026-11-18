@@ -698,7 +698,11 @@ too. Streamed pieces name no request, so the late reply is known by its
 finished `message.assistant` row, whose `reply_to_message_id` names the
 request. With no turn running, that row is held until the voice task is idle
 (`muse_hatch_incoming()`), then played as a turn of its own that wakes the
-screen. Messages the turn already played aren't announced again, and rows that
+screen. Reply text may be in `display_text`, `content`, or canonical
+`transcript.messages[].content[]` text blocks; from a transcript, only the
+message's own assistant text is used, without commentary. This applies to
+replies during a turn and late replies.
+Messages the turn already played aren't announced again, and rows that
 arrive together play in one turn. The request is forgotten once its reply
 plays, 10 s after Muse stops saying it's working, or 30 minutes after it was
 remembered. A battery board resting when the reply comes plays it when it

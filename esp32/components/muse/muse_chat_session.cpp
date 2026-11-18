@@ -1599,11 +1599,74 @@ static bool pending_held(const char *id)
     return false;
 }
 
-/* A finished message's text: its display text, else its content. */
-static const char *reply_text(cJSON *payload)
+/* A transcript block that is reply text: not commentary, which isn't shown. */
+static bool reply_block(cJSON *block)
 {
+    const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
+    const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
+    const char *to = cJSON_GetStringValue(cJSON_GetObjectItem(block, "recipient"));
+    return type && !strcmp(type, "text") && text && text[0] && !(to && !strcasecmp(to, "commentary"));
+}
+
+/* The transcript's assistant message with this id, even one with no reply text,
+ * so another message isn't read in its place. Only when its messages carry no
+ * ids: the last one with reply text. */
+static cJSON *reply_row(cJSON *rows, const char *id)
+{
+    cJSON *row, *block, *last = nullptr;
+    bool ids = false;
+    cJSON_ArrayForEach(row, rows) {
+        const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(row, "role"));
+        if (!role || strcmp(role, "assistant")) continue;
+        const char *own = cJSON_GetStringValue(cJSON_GetObjectItem(row, "id"));
+        if (own && own[0]) {
+            ids = true;
+            if (!strncmp(own, "assistant-msg-", 14)) own += 14;
+            if (id && !strcmp(own, id)) return row;
+        }
+        bool text = false;
+        cJSON_ArrayForEach(block, cJSON_GetObjectItem(row, "content")) {
+            text = text || reply_block(block);
+        }
+        if (text) last = row;
+    }
+    return ids ? nullptr : last;
+}
+
+/* A finished message's text. Canonical rows can carry only a transcript;
+ * collect one assistant message's text into a bounded buffer; release it with free(). */
+static const char *reply_text(cJSON *payload, const char *id, char **owned)
+{
+    *owned = nullptr;
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
-    return text ? text : cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
+    if (text && text[0]) return text;
+    text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
+    if (text && text[0]) return text;
+    cJSON *rows = cJSON_GetObjectItem(cJSON_GetObjectItem(payload, "transcript"), "messages");
+    cJSON *row = cJSON_IsArray(rows) ? reply_row(rows, id) : nullptr;
+    if (!row) return nullptr;
+    cJSON *block;
+    size_t used = 0;
+    cJSON_ArrayForEach(block, cJSON_GetObjectItem(row, "content")) {
+        if (!reply_block(block)) continue;
+        text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
+        if (!*owned) {
+            *owned = static_cast<char *>(psram_alloc(TEXT_MAX));
+            if (!*owned) return nullptr;
+            (*owned)[0] = '\0';
+        }
+        size_t room = TEXT_MAX - 1 - used;
+        if (used && room) {
+            (*owned)[used++] = '\n';
+            room--;
+        }
+        size_t n = whole_chars(text, strnlen(text, room));
+        memcpy(*owned + used, text, n);
+        used += n;
+        (*owned)[used] = '\0';
+        if (n < strlen(text) || used == TEXT_MAX - 1) return *owned;
+    }
+    return *owned;
 }
 
 /* With no turn running: Muse's status, and the reply of a request still waiting on it. */
@@ -1629,11 +1692,16 @@ static void pending_event(const char *event, cJSON *payload, cJSON *line)
         return;   /* only the finished row names the request */
     }
     const char *id = msg_id(payload, line);
-    const char *text = reply_text(payload);
     /* An id too long for a turn's message couldn't be played as itself. */
     if (!ours || !id || strlen(id) >= sizeof(msg_t::id) || pending_played(id) || pending_held(id) ||
         cJSON_GetArraySize(s_pending.replies) >= MAX_MSGS ||
-        cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready")) || !text || !text[0]) {
+        cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready"))) {
+        return;
+    }
+    char *owned;
+    const char *text = reply_text(payload, id, &owned);
+    if (!text || !text[0]) {
+        free(owned);
         return;
     }
     if (!s_pending.replies) {
@@ -1654,6 +1722,7 @@ static void pending_event(const char *event, cJSON *payload, cJSON *line)
         row = nullptr;
     }
     free(kept);
+    free(owned);
     if (row && cJSON_AddItemToArray(s_pending.replies, row)) {
         ESP_LOGI(TAG, "the reply to a request that outlived its turn has come: holding it for the voice task");
         s_incoming = true;
@@ -1847,10 +1916,12 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
             add_reply_text(i, text);
         }
     } else if (done || full) {
-        const char *text = reply_text(payload);
         cJSON *ready = cJSON_GetObjectItem(payload, "display_text_ready");
         if (done || !cJSON_IsFalse(ready)) {
+            char *owned;
+            const char *text = reply_text(payload, id, &owned);
             message_done(i, text);
+            free(owned);
         }
     }
 }

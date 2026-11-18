@@ -34,7 +34,7 @@ import socket
 import time
 from dataclasses import dataclass, field
 
-from musegadget import __version__, config, device_guide, muse_api, tls
+from musegadget import __version__, config, device_guide, muse_api, reaper, tls
 from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import (
@@ -723,4 +723,5 @@ def run_service(identity: Identity, executor: Executor, sdk_token: str | None = 
         finally:
             server.close()
 
+    reaper.start_child_reaper()
     asyncio.run(main())
