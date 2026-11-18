@@ -31,6 +31,7 @@
 
 #include "muse_board.h"
 #include "muse_mem.h"
+#include "muse_mirror_audio.h"
 #include "muse_settings.h"
 
 static const char *TAG = "muse_audio";
@@ -412,6 +413,7 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
             s_hpf_y1 = y;
             mono[i] = (int16_t)(y > 32767 ? 32767 : (y < -32768 ? -32768 : y));
         }
+        muse_mirror_audio_capture(mono, n);
         mono += n;
         frames -= n;
     }
@@ -420,6 +422,7 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 
 esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
 {
+    bool mirror_only = muse_mirror_audio_playback(mono, frames);
     if (muse_board->mic_init) {
         (void)mono;
         vTaskDelay(pdMS_TO_TICKS((frames * 1000 + MUSE_AUDIO_RATE - 1) / MUSE_AUDIO_RATE));
@@ -427,7 +430,7 @@ esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
     }
     /* Speaker off still plays silence at the same pace, so captions timed to
      * the audio scroll as if it were heard. */
-    bool mute = !muse_settings_speaker_on();
+    bool mute = mirror_only || !muse_settings_speaker_on();
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
         for (size_t i = 0; i < n; i++) {

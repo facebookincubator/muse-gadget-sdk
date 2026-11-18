@@ -319,3 +319,10 @@ void muse_keypad_reset(lv_obj_t *kp, bool password)
         }
     }
 }
+
+lv_obj_t *muse_keypad_for_textarea(lv_obj_t *ta)
+{
+    if (!s_kp || s_ta != ta || !lv_obj_is_visible(s_kp)) return NULL;
+    commit();
+    return s_kp;
+}

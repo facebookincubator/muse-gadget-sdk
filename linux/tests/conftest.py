@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests don't depend on the trust store of the machine that runs them."""
+"""Tests don't depend on the trust store or proxy settings of the machine that runs them."""
 
 from __future__ import annotations
 
@@ -27,3 +27,10 @@ def _trust_store_is_clean(request, monkeypatch):
         return      # test_tls checks the trust store itself
     monkeypatch.setattr(tls, "trust_store_problem", lambda: None)
     monkeypatch.setattr(tls, "trust_store_warning", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_proxy_from_the_environment(monkeypatch):
+    for name in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY",
+                 "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
