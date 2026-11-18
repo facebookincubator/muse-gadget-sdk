@@ -26,8 +26,10 @@
 // It's serial-only: BLE CMD writes never reach it, so no one nearby can
 // change a gadget's token.
 
+// Also handles wifi_proxy= JSON settings/readback (esp32/README.md). Both
+// entry points stay serial-only.
 // Handles one console line, without its leading '>'. False if the line isn't
-// this command. Muse boards' console calls it (muse_input_set_console_hook).
+// either command. Muse boards' console calls it (muse_input_set_console_hook).
 bool sdk_token_console_command(const char *line);
 
 // Reads '>' lines on boards without the Muse console: on the console UART,

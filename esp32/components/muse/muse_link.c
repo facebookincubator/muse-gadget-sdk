@@ -299,3 +299,13 @@ void muse_wifi_forget(const char *ssid)
         s_ops->wifi_forget(ssid);
     }
 }
+
+int muse_link_wifi_proxy_get(const char *ssid, network_proxy_config_t *out)
+{
+    return s_ops && s_ops->wifi_proxy_get ? s_ops->wifi_proxy_get(ssid, out) : -1;
+}
+
+bool muse_link_wifi_proxy_set(const char *ssid, const network_proxy_config_t *proxy)
+{
+    return s_ops && s_ops->wifi_proxy_set && s_ops->wifi_proxy_set(ssid, proxy);
+}

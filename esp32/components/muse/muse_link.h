@@ -27,6 +27,8 @@
 
 #include "muse_wifi.h"
 
+typedef struct network_proxy_config network_proxy_config_t;
+
 /*
  * Muse runs inside Home Link, which owns the radios, the setup credentials and
  * the Hatch account. Link registers these operations at boot
@@ -83,6 +85,8 @@ typedef struct {
     void (*wifi_nap)(bool nap);                   /* screen off a while: leave Wi-Fi until false */
     void (*ble_quiet)(bool quiet);                /* a Wi-Fi video stream: no BLE advertising until false */
     int (*wifi_saved)(muse_wifi_saved_t *out, int max);   /* most recently joined first */
+    int (*wifi_proxy_get)(const char *ssid, network_proxy_config_t *out);
+    bool (*wifi_proxy_set)(const char *ssid, const network_proxy_config_t *proxy);
     void (*wifi_forget)(const char *ssid);        /* one saved network; empty forgets them all */
 } muse_link_ops_t;
 
@@ -123,3 +127,8 @@ void muse_link_req_cancel(int64_t id);
 size_t muse_link_req_max_body(void);
 #endif
 void muse_link_ble_apply(void);
+
+/* Proxy state: 0 saved, 1 saving, -1 unknown network, -2 last save failed.
+ * Set queues a write on Link's internal-stack keeper; get polls its result. */
+int muse_link_wifi_proxy_get(const char *ssid, network_proxy_config_t *out);
+bool muse_link_wifi_proxy_set(const char *ssid, const network_proxy_config_t *proxy);

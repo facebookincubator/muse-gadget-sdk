@@ -187,6 +187,54 @@ outages, which Muse reads with `device.health`. After a silent drop, the device
 checks the internet by opening a TCP connection to 1.1.1.1 (then 8.8.8.8) on
 port 443; it sends no data.
 
+## Per-network proxy
+
+For Wi-Fi networks that require a proxy, open **Settings → Wi-Fi → Configure
+Proxy** beneath the saved network. Select **Off**, **Manual: HTTP CONNECT** or
+**Manual: SOCKS5**, enter the server and port, optionally enter a username and
+password, then tap **Save**. The device confirms the NVS write and reconnects
+when editing the active network. Other remembered networks keep their own
+settings. Proxy servers are host names or unbracketed IP literals (127 bytes
+maximum), with a port from 1 to 65535. Authentication fields accept up to 63
+bytes each; HTTP Basic user names cannot contain a colon.
+
+The serial equivalent works on headless boards too; send each command as one
+line followed by a newline, using the exact saved SSID:
+
+```text
+>wifi_proxy={"ssid":"Office","proxy":{"type":"http","host":"proxy.example","port":8080,"username":"user","password":"example"}}
+>wifi_proxy={"ssid":"Office"}
+>wifi_proxy={"ssid":"Office","proxy":{"type":"off"}}
+```
+
+Use `"type":"socks5"` for SOCKS5. The status command shows the protocol,
+server, port, authentication presence and whether a write is pending; credentials
+are omitted. Full UI boards answer `saving` and then `saved` (or a storage
+error) after the keeper writes and reads back the value. Headless boards answer
+`saved` after readback; the change applies to subsequent cloud connections.
+
+The encrypted BLE `provision_v2` object optionally accepts the same `proxy`
+object. An absent field preserves the saved setting for that SSID; an explicit
+`{"type":"off"}` clears it. Invalid fields produce `error_invalid_proxy` before
+Wi-Fi or credentials change. The Muse phone app needs its own change to send
+this field.
+
+Link's WSS channel, the full UI's Noise channel and cloud API token/VM requests
+use the proxy. HTTP CONNECT and SOCKS5 negotiate a TCP tunnel before TLS;
+cloud hostname and certificate verification remain enabled. SOCKS5 resolves
+cloud hostnames at the proxy. A refused or unreachable proxy fails the
+connection. LAN tunnel/discovery traffic keeps its existing direct sockets;
+cloud endpoint overrides using loopback/private IP literals, single-label names,
+`localhost` or `.local` names also connect directly.
+
+Proxy credentials share the remembered network's NVS storage and reset/forget
+lifecycle. Firmware predating proxy support ignores the added fields; rewriting
+a network on that firmware may discard its proxy settings. Proxy authentication
+travels in plaintext to the selected proxy, while the cloud session remains
+protected by TLS. PAC/Automatic mode, TLS-to-proxy and app configuration UI are
+follow-ups. OTA and diagnostic-upload HTTP clients retain their existing direct
+paths.
+
 ## USB settings in a browser
 
 The [web flasher](../web-flasher/README.md#device-settings)'s Device settings
@@ -443,7 +491,7 @@ A few things worth knowing:
   revoke it on gadgets.muse.ai, generate a new one, and rebuild or send the
   new one over serial.
 - **We strongly recommend enabling NVS encryption** if your board supports it.
-  NVS stores Wi-Fi credentials and device tokens in flash; without encryption,
+  NVS stores Wi-Fi/proxy credentials and device tokens in flash; without encryption,
   anyone with physical access to the board can read them. Enable it with
   `CONFIG_HOMEHUB_NVS_ENCRYPTION` in `idf.py menuconfig` (under "ESP32 Device
   SDK"). The encryption key is derived from an HMAC key in eFuse, which is
@@ -509,6 +557,11 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 Run `idf.py build` once first so the downloaded components are in place.
+The loopback proxy/TLS tests also use the OpenSSL CLI and development library
+(`openssl` with `pkg-config` on macOS; `openssl libssl-dev pkg-config` on Debian
+or Ubuntu). They compile the production transport with a host ESP-TLS substitute
+using real TLS, verify SNI/certificates, and exercise HTTP/SOCKS5 handshakes,
+authentication, refusals, timeouts and direct local connections.
 
 Two crypto tests are skipped unless the host has what they need. Install the
 host Mbed TLS library (`brew install mbedtls pkgconf` on macOS,

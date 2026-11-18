@@ -42,6 +42,7 @@
 #endif
 #include "stack_monitor.h"
 #include "wifi_known.h"
+#include "network_proxy_tls.h"
 #include "wifi_mgr.h"
 
 #include "muse_ble.h"
@@ -65,6 +66,7 @@ static const char *TAG = "link.muse";
 #define KEEP_BLE        BIT1    // phone setup setting changed
 #define KEEP_SAVE       BIT2    // remember s_ssid/s_pass first
 #define KEEP_RELOAD     BIT3    // Link may have changed the saved networks
+#define KEEP_PROXY      BIT5    // persist a per-network proxy on the keeper
 #define KEEP_FORGET     BIT4    // forget the networks marked in s_saved
 
 #define CONNECT_TIMEOUT_MS 20000
@@ -95,14 +97,19 @@ static volatile bool s_joining;
 static volatile bool s_nap;     // Muse's screen off a while: stay off Wi-Fi
 static char s_fail[40];
 
-// The saved networks, most recently joined first, without their passwords.
+// The saved networks, most recently joined first; Wi-Fi passwords stay in NVS.
 typedef struct {
     char ssid[MUSE_SSID_MAX + 1];
     bool hidden;
     bool forgotten;             // KEEP_FORGET will forget it
+    network_proxy_config_t proxy;
 } saved_net_t;
 static saved_net_t s_saved[MUSE_WIFI_SAVED_MAX];
 static int s_saved_count;
+static bool s_proxy_pending;
+static int s_proxy_result;
+static char s_proxy_ssid[MUSE_SSID_MAX + 1];
+static network_proxy_config_t s_proxy_next;
 // Muse changed the saved networks and the keeper hasn't written them yet, so
 // NVS is behind the copies here.
 static volatile bool s_editing;
@@ -126,19 +133,19 @@ static bool load_creds(void) {
     char pass[MUSE_PASS_MAX + 1] = {0};
     if (!config_get_str("ssid", ssid, sizeof(ssid))) ssid[0] = '\0';
     if (!config_get_str("password", pass, sizeof(pass))) pass[0] = '\0';
-    saved_net_t saved[MUSE_WIFI_SAVED_MAX];
+    saved_net_t *saved = malloc(sizeof(s_saved));
     int n = -1;
     wifi_known_list_t *list = malloc(sizeof(*list));
-    if (list) {
+    if (list && saved) {
         n = wifi_known_load(list);
         for (int i = 0; i < n; i++) {
             strlcpy(saved[i].ssid, list->nets[i].ssid, sizeof(saved[i].ssid));
             saved[i].hidden = list->nets[i].hidden;
             saved[i].forgotten = false;
+            saved[i].proxy = list->nets[i].proxy;
         }
-        wifi_known_wipe(list);
-        free(list);
     }
+    if (list) { wifi_known_wipe(list); free(list); }
     bool changed = false;
     portENTER_CRITICAL(&s_lock);
     if (!s_editing) {
@@ -149,11 +156,13 @@ static bool load_creds(void) {
             changed = true;
         }
         if (n >= 0) {
+            network_proxy_wipe(s_saved, sizeof(s_saved));
             memcpy(s_saved, saved, n * sizeof(saved[0]));
             s_saved_count = n;
         }
     }
     portEXIT_CRITICAL(&s_lock);
+    if (saved) { network_proxy_wipe(saved, sizeof(s_saved)); free(saved); }
     memset(pass, 0, sizeof(pass));
     s_linked = config_is_provisioned();
     return changed;
@@ -261,6 +270,8 @@ static void op_wifi_set(const char *ssid, const char *pass) {
         // First, moving it up or pushing out the oldest.
         int at = 0;
         while (at < s_saved_count && strcmp(s_saved[at].ssid, ssid) != 0) at++;
+        network_proxy_config_t proxy = {0};
+        if (at < s_saved_count) proxy = s_saved[at].proxy;
         // Picked from a scan, it broadcasts its name; typed, it may not.
         bool hidden = !seen_in_scan_locked(ssid) && (at == s_saved_count || s_saved[at].hidden);
         if (at == s_saved_count && s_saved_count < MUSE_WIFI_SAVED_MAX) s_saved_count++;
@@ -269,6 +280,8 @@ static void op_wifi_set(const char *ssid, const char *pass) {
         strlcpy(s_saved[0].ssid, ssid, sizeof(s_saved[0].ssid));
         s_saved[0].hidden = hidden;
         s_saved[0].forgotten = false;
+        s_saved[0].proxy = proxy;
+        network_proxy_wipe(&proxy, sizeof(proxy));
     }
     portEXIT_CRITICAL(&s_lock);
     keeper_kick(KEEP_SAVE);
@@ -285,6 +298,40 @@ static int op_wifi_saved(muse_wifi_saved_t *out, int max) {
     }
     portEXIT_CRITICAL(&s_lock);
     return n;
+}
+
+static int op_wifi_proxy_get(const char *ssid, network_proxy_config_t *out) {
+    int state = -1;
+    memset(out, 0, sizeof(*out));
+    portENTER_CRITICAL(&s_lock);
+    for (int i = 0; i < s_saved_count; i++) {
+        if (!s_saved[i].forgotten && !strcmp(ssid, s_saved[i].ssid)) {
+            *out = s_saved[i].proxy;
+            state = !strcmp(ssid, s_proxy_ssid) ? s_proxy_pending ? 1 : s_proxy_result : 0;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&s_lock);
+    return state;
+}
+
+static bool op_wifi_proxy_set(const char *ssid, const network_proxy_config_t *proxy) {
+    if (!network_proxy_valid(proxy)) return false;
+    bool queued = false;
+    portENTER_CRITICAL(&s_lock);
+    for (int i = 0; !s_proxy_pending && i < s_saved_count; i++) {
+        if (!s_saved[i].forgotten && !strcmp(ssid, s_saved[i].ssid)) {
+            strlcpy(s_proxy_ssid, ssid, sizeof(s_proxy_ssid));
+            s_proxy_next = *proxy;
+            if (proxy->type == NETWORK_PROXY_OFF) memset(&s_proxy_next, 0, sizeof(s_proxy_next));
+            s_proxy_pending = true;
+            queued = true;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&s_lock);
+    if (queued) keeper_kick(KEEP_PROXY);
+    return queued;
 }
 
 static void op_wifi_forget(const char *ssid) {
@@ -433,6 +480,8 @@ static const muse_link_ops_t s_ops = {
     .ble_quiet = ble_server_set_quiet,
     .wifi_saved = op_wifi_saved,
     .wifi_forget = op_wifi_forget,
+    .wifi_proxy_get = op_wifi_proxy_get,
+    .wifi_proxy_set = op_wifi_proxy_set,
 };
 
 // ---- Keeper: joins a saved network and applies BLE, on an internal stack ----
@@ -499,6 +548,36 @@ static bool none_nearby_lately(void) {
 // leaves Wi-Fi alone instead of dropping a network it has no copy of.
 #define WIFI_OVERRIDE (CONFIG_HOMEHUB_WIFI_SSID[0] != '\0')
 
+static void save_proxy(int64_t *next_try) {
+    // s_proxy_pending owns these fields until the result is published.
+    bool ok = wifi_known_set_proxy(s_proxy_ssid, &s_proxy_next);
+    network_proxy_config_t check;
+    if (ok) ok = wifi_known_get_proxy(s_proxy_ssid, &check)
+                 && network_proxy_equal(&check, &s_proxy_next);
+    wifi_ap_record_t ap;
+    bool active = wifi_mgr_is_connected() && esp_wifi_sta_get_ap_info(&ap) == ESP_OK
+                  && !strcmp((const char *)ap.ssid, s_proxy_ssid);
+    if (ok && active) {
+        network_proxy_set_active(&s_proxy_next);
+        // Both Noise sessions re-open using the new configuration.
+        wifi_mgr_disconnect();
+        *next_try = 0;
+    }
+    load_creds();
+    portENTER_CRITICAL(&s_lock);
+    if (ok) {
+        for (int i = 0; i < s_saved_count; i++) {
+            if (!strcmp(s_saved[i].ssid, s_proxy_ssid)) s_saved[i].proxy = s_proxy_next;
+        }
+    }
+    s_proxy_result = ok ? 0 : -2;
+    s_proxy_pending = false;
+    network_proxy_wipe(&s_proxy_next, sizeof(s_proxy_next));
+    portEXIT_CRITICAL(&s_lock);
+    network_proxy_wipe(&check, sizeof(check));
+    printf("@wifi_proxy %s\n", ok ? "saved" : "error storage");
+}
+
 static void keeper_task(void *arg) {
     (void)arg;
     xEventGroupWaitBits(s_ready, BIT_LINK | BIT_MUSE, pdFALSE, pdTRUE, portMAX_DELAY);
@@ -527,6 +606,7 @@ static void keeper_task(void *arg) {
             backoff = RETRY_MIN_US;
             away_backoff = AWAY_MIN_US;
         }
+        if (pending & KEEP_PROXY) save_proxy(&next_try);
         if (pending & KEEP_RELOAD) {
             // Link saves a network it has already joined (provisioning), so
             // don't treat that as a change to rejoin: dropping Wi-Fi mid-setup

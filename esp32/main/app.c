@@ -50,6 +50,7 @@
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
+#include "network_proxy_tls.h"
 #include "customer_product_info.h"
 #include "ble_coex.h"
 #if CONFIG_HOMEHUB_BLE_COMMANDS
@@ -1263,6 +1264,7 @@ static void on_provision(const char *ssid, const char *password,
                          const char *api_url,
                          const char *api_url_v2,
                          const char *noise_host,
+                         const network_proxy_config_t *proxy,
                          uint32_t session_generation) {
     if (session_generation == 0) return;
     if (!operation_gate_take(0, "BLE provision")) {
@@ -1290,6 +1292,13 @@ static void on_provision(const char *ssid, const char *password,
     ui_set_status("wifi_connected");
     led_status_set_state(LED_STATE_WIFI_CONNECTED);
     remember_joined_wifi(ssid, password);
+    if (proxy) {
+        if (!wifi_known_set_proxy(ssid, proxy)) {
+            setup_fail_for_session("storage", "error_storage", session_generation);
+            goto done;
+        }
+        network_proxy_set_active(proxy);
+    }
     persist_connected_wifi_channel();
     config_erase_key("vm_url");
 

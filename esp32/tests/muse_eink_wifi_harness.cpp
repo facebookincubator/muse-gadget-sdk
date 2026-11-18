@@ -223,7 +223,7 @@ static void short_status() { wifi_state = {}; wifi_state.state = MUSE_WIFI_NO_NE
 static void tall_status() {
     wifi_state = {}; wifi_state.state = MUSE_WIFI_CONNECTING;
     strlcpy(wifi_state.ssid, "synthetic-long-network-name-ABCDE", sizeof(wifi_state.ssid));
-    strlcpy(wifi_state.detail, "Joining synthetic network while waiting for a local test response", sizeof(wifi_state.detail));
+    strlcpy(wifi_state.detail, "Waiting\none\ntwo\nthree\nfour\nfive\nsix", sizeof(wifi_state.detail));
 }
 static void assert_no_delete() {
     assert(forgotten.empty() && stored.size() == 2);

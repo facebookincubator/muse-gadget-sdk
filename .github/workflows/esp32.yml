@@ -65,7 +65,7 @@ jobs:
             set -e
             # test_noise_core links against the host PSA Crypto library.
             apt-get update -qq
-            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config
+            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config libssl-dev openssl
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure

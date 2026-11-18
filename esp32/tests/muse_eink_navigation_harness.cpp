@@ -180,6 +180,11 @@ static void navigation_test(const std::string &name) {
         select_ap({},nullptr); select_ap({},nullptr);
         assert(s_text_back == WIFI);
         assert(settings_back() && s_page == WIFI);
+    } else if (name == "proxy_back") {
+        show(PROXY);
+        open_text("Proxy server", "proxy.example", false, 127, "Host", on_wifi_pass, PROXY);
+        assert(settings_back() && s_page == PROXY);
+        assert(settings_back() && s_page == WIFI);
     } else if (name == "ssid_password_chain") {
         open_text("Other network", "test-ap", false, MUSE_SSID_MAX, "Network name", on_other_ssid, WIFI);
         text_ready();

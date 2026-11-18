@@ -44,6 +44,7 @@
 #include "muse_voice.h"
 #include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
+#include "network_proxy.h"
 #if CONFIG_MUSE_APP_VIEW
 #include "muse_app_view.h"
 #endif
@@ -84,6 +85,11 @@ static int s_text_scale = 466;
 static bool s_tiny;   /* round and under 300 px: see TINY_LIST_W */
 static lv_obj_t *s_tile;
 static lv_obj_t *s_current;
+static lv_obj_t *s_proxy;
+static char s_proxy_ssid[MUSE_SSID_MAX + 1];
+static network_proxy_config_t s_proxy_edit;
+static lv_obj_t *s_proxy_mode, *s_proxy_host, *s_proxy_port, *s_proxy_user, *s_proxy_pass, *s_proxy_status;
+static bool s_proxy_saving;
 static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text;
 
 /*
@@ -533,7 +539,7 @@ static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 
 static void drop(lv_obj_t *p)
 {
-    lv_obj_t **const pages[] = { &s_wifi, &s_hatch, &s_ble, &s_sound, &s_sleep, &s_battery, &s_power, &s_text };
+    lv_obj_t **const pages[] = { &s_wifi, &s_hatch, &s_ble, &s_sound, &s_sleep, &s_battery, &s_power, &s_text, &s_proxy };
     for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
         if (*pages[i] == p) {
             *pages[i] = NULL;
@@ -572,6 +578,11 @@ static void go_back(void)
 {
     if (s_current == s_text) {
         close_text();
+    } else if (s_current == s_proxy) {
+        lv_obj_t *prev = s_proxy;
+        network_proxy_wipe(&s_proxy_edit, sizeof(s_proxy_edit));
+        show(s_wifi);
+        drop(prev);
     } else if (s_current != s_home) {
         show(s_home);
     }
@@ -911,6 +922,84 @@ static bool same_saved(const muse_wifi_saved_t *a, int n)
     return true;
 }
 
+/* A proxy belongs to the selected remembered network. Saving uses Link's
+ * internal-stack keeper, just as the Wi-Fi credential editor does. */
+static void proxy_host_done(const char *text) { strlcpy(s_proxy_edit.host, text, sizeof(s_proxy_edit.host)); }
+static void proxy_user_done(const char *text) { strlcpy(s_proxy_edit.username, text, sizeof(s_proxy_edit.username)); }
+static void proxy_pass_done(const char *text) { strlcpy(s_proxy_edit.password, text, sizeof(s_proxy_edit.password)); }
+static void proxy_port_done(const char *text) {
+    char *end;
+    long port = strtol(text, &end, 10);
+    s_proxy_edit.port = *text && !*end && port > 0 && port <= 65535 ? port : 0;
+}
+
+static void on_proxy_mode(lv_event_t *e) {
+    (void)e;
+    s_proxy_edit.type = s_proxy_edit.type == NETWORK_PROXY_OFF ? NETWORK_PROXY_HTTP
+                       : s_proxy_edit.type == NETWORK_PROXY_HTTP ? NETWORK_PROXY_SOCKS5 : NETWORK_PROXY_OFF;
+    if (s_proxy_edit.type == NETWORK_PROXY_OFF) network_proxy_wipe(&s_proxy_edit, sizeof(s_proxy_edit));
+}
+
+static void on_proxy_field(lv_event_t *e) {
+    int field = (int)(intptr_t)lv_event_get_user_data(e);
+    char port[6];
+    snprintf(port, sizeof(port), "%u", s_proxy_edit.port);
+    if (field == 0) open_text("Proxy server", s_proxy_edit.host, false, NETWORK_PROXY_HOST_MAX, "Host name or IP", proxy_host_done, s_proxy);
+    if (field == 1) open_text("Proxy port", port, false, 5, "1-65535", proxy_port_done, s_proxy);
+    if (field == 2) open_text("Proxy username", s_proxy_edit.username, false, NETWORK_PROXY_AUTH_MAX, "Optional", proxy_user_done, s_proxy);
+    if (field == 3) open_text("Proxy password", s_proxy_edit.password, true, NETWORK_PROXY_AUTH_MAX, "Optional", proxy_pass_done, s_proxy);
+}
+
+static void on_proxy_save(lv_event_t *e) {
+    (void)e;
+    if (!network_proxy_valid(&s_proxy_edit)) {
+        set_text(s_proxy_status, "Check server, port and authentication");
+        return;
+    }
+    s_proxy_saving = muse_link_wifi_proxy_set(s_proxy_ssid, &s_proxy_edit);
+    set_text(s_proxy_status, s_proxy_saving ? "Saving..." : "Busy or network forgotten; try again");
+}
+
+static void on_wifi_proxy(lv_event_t *e) {
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    strlcpy(s_proxy_ssid, s_saved[i].ssid, sizeof(s_proxy_ssid));
+    muse_link_wifi_proxy_get(s_proxy_ssid, &s_proxy_edit);
+    s_proxy_saving = false;
+    lv_obj_t *list;
+    s_proxy = page(s_tile, "PROXY", true, &list);
+    note(list, s_proxy_ssid);
+    row(list, NULL, "Configure Proxy", &s_proxy_mode, on_proxy_mode, NULL);
+    row(list, NULL, "Server", &s_proxy_host, on_proxy_field, (void *)0);
+    row(list, NULL, "Port", &s_proxy_port, on_proxy_field, (void *)1);
+    row(list, NULL, "Username", &s_proxy_user, on_proxy_field, (void *)2);
+    row(list, NULL, "Password", &s_proxy_pass, on_proxy_field, (void *)3);
+    button(list, "Save", COLOR_ACCENT, on_proxy_save, NULL);
+    s_proxy_status = note(list, "Cloud connections use this network's proxy. Local traffic stays direct.");
+    show(s_proxy);
+}
+
+static void tick_proxy(void) {
+    const char *mode = s_proxy_edit.type == NETWORK_PROXY_OFF ? "Off"
+        : s_proxy_edit.type == NETWORK_PROXY_HTTP ? "Manual: HTTP CONNECT"
+        : s_proxy_edit.type == NETWORK_PROXY_SOCKS5 ? "Manual: SOCKS5" : "Invalid; select mode";
+    char port[6];
+    snprintf(port, sizeof(port), "%u", s_proxy_edit.port);
+    set_text(s_proxy_mode, mode);
+    set_text(s_proxy_host, s_proxy_edit.host);
+    set_text(s_proxy_port, s_proxy_edit.port ? port : "");
+    set_text(s_proxy_user, s_proxy_edit.username);
+    set_text(s_proxy_pass, s_proxy_edit.password[0] ? "********" : "");
+    if (s_proxy_saving) {
+        network_proxy_config_t check;
+        int state = muse_link_wifi_proxy_get(s_proxy_ssid, &check);
+        network_proxy_wipe(&check, sizeof(check));
+        if (state != 1) {
+            s_proxy_saving = false;
+            set_text(s_proxy_status, state == 0 ? "Saved" : "Save failed; try again");
+        }
+    }
+}
+
 static void rebuild_saved_list(void)
 {
     muse_wifi_saved_t saved[MUSE_WIFI_SAVED_MAX];
@@ -928,6 +1017,7 @@ static void rebuild_saved_list(void)
     }
     for (int i = 0; i < n; i++) {
         row(s_wifi_saved, LV_SYMBOL_WIFI, saved[i].ssid, &s_saved_vals[i], on_wifi_saved, (void *)(intptr_t)i);
+        row(s_wifi_saved, NULL, "Configure Proxy", NULL, on_wifi_proxy, (void *)(intptr_t)i);
     }
 }
 
@@ -1778,6 +1868,8 @@ void muse_settings_ui_tick(bool visible)
     }
     if (s_current == s_home) {
         tick_home();
+    } else if (s_current == s_proxy) {
+        tick_proxy();
     } else if (s_current == s_wifi) {
         tick_wifi();
     } else if (s_current == s_hatch) {

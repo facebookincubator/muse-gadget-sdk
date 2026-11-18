@@ -15,6 +15,8 @@
  */
 
 #include "wifi_mgr.h"
+#include "wifi_known.h"
+#include "network_proxy_tls.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -354,6 +356,11 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
         esp_wifi_disconnect();
         vTaskDelay(pdMS_TO_TICKS(500));
     }
+
+    network_proxy_config_t proxy;
+    wifi_known_get_proxy(ssid, &proxy);
+    network_proxy_set_active(&proxy);
+    network_proxy_wipe(&proxy, sizeof(proxy));
 
     s_retry = 0;
     s_connecting = true;

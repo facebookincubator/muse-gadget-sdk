@@ -22,6 +22,7 @@
 #include <stdlib.h>
 
 #include "esp_http_client.h"
+#include "network_proxy_tls.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "cJSON.h"
@@ -140,8 +141,23 @@ static int http_json(const char *url, esp_http_client_method_t method,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .disable_auto_redirect = true,
     };
+    network_proxy_config_t proxy;
+    network_proxy_get_active(&proxy);
+    bool use_proxy = proxy.type != NETWORK_PROXY_OFF;
+    network_proxy_wipe(&proxy, sizeof(proxy));
+    esp_transport_handle_t transport = use_proxy ? network_proxy_http_transport(strncasecmp(url, "https://", 8) == 0) : NULL;
+    if (use_proxy && !transport) return VM_API_ERR_FAILED;
+#if CONFIG_ESP_HTTP_CLIENT_ENABLE_CUSTOM_TRANSPORT
+    cfg.transport = transport;
+#else
+    if (transport) {
+        esp_transport_destroy(transport);
+        ESP_LOGE(TAG, "proxy requires CONFIG_ESP_HTTP_CLIENT_ENABLE_CUSTOM_TRANSPORT=y");
+        return VM_API_ERR_FAILED;
+    }
+#endif
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (!client) return VM_API_ERR_FAILED;
+    if (!client) { if (transport) esp_transport_destroy(transport); return VM_API_ERR_FAILED; }
 
     if (auth_header && *auth_header) {
         esp_http_client_set_header(client, "Authorization", auth_header);
@@ -155,6 +171,7 @@ static int http_json(const char *url, esp_http_client_method_t method,
     esp_err_t err = esp_http_client_perform(client);
     *status_out = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
+    if (transport) esp_transport_destroy(transport);
 
     // Check HTTP status first — esp_http_client_perform returns
     // ESP_ERR_NOT_SUPPORTED on 401 responses (authentication challenge),

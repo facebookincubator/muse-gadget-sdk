@@ -191,6 +191,7 @@ bool config_clear_setup(void) {
         "wifi_channel",
         "wifi_others",
         "wifi_hidden",
+        "wifi_proxy",
         "setup_complete",
     };
     return clear_and_verify(keys, sizeof(keys) / sizeof(keys[0]));
