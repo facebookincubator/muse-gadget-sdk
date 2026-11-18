@@ -20,6 +20,7 @@
 #endif
 
 #include <stdatomic.h>
+#include "muse_options_ui.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -46,6 +47,9 @@
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
+#if CONFIG_MUSE_MIRROR
+#include "muse_mirror.h"
+#endif
 #include "muse_pixel.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
@@ -153,7 +157,7 @@ static void tile_changed_cb(lv_event_t *e)
 }
 
 /* From any task: the face tile is the currently visible tile. */
-bool muse_ui_face_active(void)
+static bool face_shown(void)
 {
 #if CONFIG_MUSE_APP_VIEW
     if (muse_app_view_tick()) {
@@ -161,6 +165,12 @@ bool muse_ui_face_active(void)
     }
 #endif
     return s_face_active;
+}
+
+bool muse_ui_face_active(void)
+{
+    /* The option picker covers it too: a held touch chooses, it doesn't talk. */
+    return !muse_options_ui_open() && face_shown();
 }
 
 bool muse_ui_volume_swiping(void)
@@ -1280,7 +1290,7 @@ static void on_volume_swipe(lv_event_t *e)
     case LV_EVENT_PRESSED:
         s_volume_swipe = (muse_volume_swipe_t){0};
         if (volume_swipe_allowed()) {
-            lv_indev_get_point(s_indev, &point);
+            lv_indev_get_point(lv_indev_active(), &point);
             muse_volume_swipe_begin(&s_volume_swipe, point.x, point.y, s_h, muse_settings_volume());
         }
         break;
@@ -1290,7 +1300,7 @@ static void on_volume_swipe(lv_event_t *e)
             finish_volume_swipe();
             break;
         }
-        lv_indev_get_point(s_indev, &point);
+        lv_indev_get_point(lv_indev_active(), &point);
         int old_value = s_volume_swipe.value;
         if (muse_volume_swipe_move(&s_volume_swipe, point.x, point.y)) {
             s_volume_swiping = true;
@@ -1805,6 +1815,12 @@ static void build_overlays(void)
         update_control_hints(MUSE_MODE_BOOT);
     }
 
+#if CONFIG_MUSE_HATCH
+    /* Answers go out through the voice task, which display-only boards don't run. */
+    if (muse_board->touch && (muse_board->audio_init || muse_board->mic_init))
+        muse_options_ui_start(s_w, s_h, muse_board->round, caption_font());
+#endif
+
     /* BLE pairing code, or the Muse app's ask for the talk button: a centred
      * column in one typeface, the code large. The small card grows with the hint. */
     s_pair = lv_obj_create(lv_layer_top());
@@ -1933,6 +1949,9 @@ static const char *idle_name(muse_wifi_state_t wifi)
 
 static void update_chrome(float now)
 {
+    muse_options_ui_tick(face_shown() && !muse_voice_in_call() && !s_image_dsc.data &&
+                         muse_state_mode(NULL) != MUSE_MODE_LISTENING &&
+                         lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
     if (now < s_next_settings_tick) {
         return;
     }
@@ -2484,7 +2503,8 @@ static void frame_tick(lv_timer_t *timer)
     s_level += (level - s_level) * (level > s_level ? 0.6f : 0.2f);
 
     muse_pose_t pose = {
-        .mode = mode,
+        /* A pending reply keeps its green progress ring, but isn't speech. */
+        .mode = mode == MUSE_MODE_SPEAKING && muse_voice_reply_waiting() ? MUSE_MODE_IDLE : mode,
         .t = now,
         .mode_t = mode_t,
         .level = s_level,
@@ -2550,6 +2570,10 @@ esp_err_t muse_ui_start(void)
     }
     build_overlays();
     lv_timer_create(frame_tick, muse_board->frame_ms, NULL);
+#if CONFIG_MUSE_MIRROR
+    lv_indev_t *mirror_pointer = muse_mirror_start(disp);
+    if (mirror_pointer) lv_indev_add_event_cb(mirror_pointer, on_any_press, LV_EVENT_PRESSED, NULL);
+#endif
     s_ready = true;
     muse_board->display_unlock();
 

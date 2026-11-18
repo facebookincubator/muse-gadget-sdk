@@ -211,6 +211,36 @@ def test_network_reuses_setup_probe_with_timeout(
     probe.assert_called_once_with(timeout=5.0)
 
 
+@pytest.mark.parametrize("online,status,words", [
+    (True, "OK", "reachable on port 443 through the proxy"),
+    (False, "FAIL", "Could not reach"),
+])
+def test_network_names_the_proxy_without_its_credentials(
+    monkeypatch: pytest.MonkeyPatch, online: bool, status: str, words: str,
+) -> None:
+    monkeypatch.setattr(doctor.network, "api_proxy",
+                        Mock(return_value="http://user:secret@proxy.example:3128"))
+    probe: Mock = Mock(return_value=online)
+    monkeypatch.setattr(doctor.network, "is_online", probe)
+    result: doctor.CheckResult = doctor.check_network()
+    assert result["status"] == status
+    assert words in result["detail"] and "http://proxy.example:3128" in result["detail"]
+    assert "secret" not in doctor.format_check(result) and "user" not in doctor.format_check(result)
+    probe.assert_called_once_with(timeout=5.0)
+
+
+def test_network_fails_on_an_unsupported_proxy_without_probing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(doctor.network, "api_proxy", Mock(return_value="socks5://proxy.example:1080"))
+    probe: Mock = Mock(side_effect=AssertionError("must not probe"))
+    monkeypatch.setattr(doctor.network, "is_online", probe)
+    result: doctor.CheckResult = doctor.check_network()
+    assert result["status"] == "FAIL"
+    assert "not an http:// proxy" in result["detail"]
+    assert "HTTP CONNECT proxies only" in result["hint"]
+
+
 @pytest.mark.parametrize("problem", [
     "the system trust store still trusts emSign ECC Root CA - G3",
     "can't read the system trust store",

@@ -16,10 +16,13 @@
 
 from __future__ import annotations
 
+import base64
 import re
 import shutil
 import socket
 import subprocess
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from musegadget.muse_api import API_BASE
@@ -27,9 +30,83 @@ from musegadget.muse_api import API_BASE
 CURRENT_CONNECTION_LABEL = "Use current connection"
 
 
+def _api_host() -> str:
+    return API_BASE.split("://", 1)[-1].split("/", 1)[0]
+
+
+def api_proxy() -> str | None:
+    """The proxy URL for HTTPS to the Muse API, or None to connect directly.
+
+    The same rule urllib and websockets (15 and later) apply: ``https_proxy``
+    from the environment, unless ``no_proxy`` covers the host. A URL without
+    a scheme is an http:// one, as urllib reads it.
+    """
+    proxy = urllib.request.getproxies().get("https")
+    if not proxy or urllib.request.proxy_bypass(_api_host()):
+        return None
+    return proxy if "://" in proxy else f"http://{proxy}"
+
+
+def proxy_supported(proxy: str) -> bool:
+    """True for an http:// proxy, the only kind every connection here can use."""
+    return urllib.parse.urlsplit(proxy).scheme.lower() == "http"
+
+
+def proxy_display(proxy: str) -> str:
+    """The proxy URL without any user name or password, safe to print."""
+    parts = urllib.parse.urlsplit(proxy)
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    return f"{parts.scheme}://{host}" + (f":{port}" if port else "")
+
+
+def _tunnel_opens(proxy: str, host: str, timeout: float) -> bool:
+    """True if the proxy answers 2xx to an HTTP CONNECT for host:443."""
+    parts = urllib.parse.urlsplit(proxy)
+    try:
+        port = parts.port
+    except ValueError:
+        return False
+    # Without a port, urllib's HTTPS requests use 443 and websockets uses 80,
+    # so no probe could stand in for both.
+    if port is None or parts.scheme.lower() != "http" or not parts.hostname:
+        return False
+    request = f"CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n"
+    if parts.username is not None:
+        # urllib sends Basic credentials from the proxy URL the same way.
+        user_pass = (f"{urllib.parse.unquote(parts.username)}:"
+                     f"{urllib.parse.unquote(parts.password or '')}")
+        token = base64.b64encode(user_pass.encode()).decode("ascii")
+        request += f"Proxy-Authorization: Basic {token}\r\n"
+    request += "\r\n"
+    try:
+        with socket.create_connection((parts.hostname, port), timeout=timeout) as sock:
+            sock.sendall(request.encode())
+            with sock.makefile("rb") as reply:
+                status_line = reply.readline(1024)
+    except OSError:
+        return False
+    fields = status_line.split()
+    return (len(fields) >= 2 and fields[0].startswith(b"HTTP/")
+            and len(fields[1]) == 3 and fields[1].startswith(b"2"))
+
+
 def is_online(timeout: float = 5.0) -> bool:
-    """True if the Muse API host accepts a TCP connection."""
-    host = API_BASE.split("://", 1)[-1].split("/", 1)[0]
+    """True if the Muse API host is reachable on port 443.
+
+    Through the proxy when one applies (see ``api_proxy``), since the API and
+    the Muse connection go through it too; otherwise with a direct TCP
+    connection.
+    """
+    host = _api_host()
+    proxy = api_proxy()
+    if proxy is not None:
+        return _tunnel_opens(proxy, host, timeout)
     try:
         with socket.create_connection((host, 443), timeout=timeout):
             return True
