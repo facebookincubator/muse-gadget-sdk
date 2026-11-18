@@ -18,6 +18,9 @@
 
 #include "freertos/FreeRTOS.h"
 #include "sdkconfig.h"
+#if CONFIG_MUSE_MIRROR
+#include "freertos/task.h"
+#endif
 
 #if !CONFIG_MUSE_CONSOLE_UART
 #include "driver/usb_serial_jtag.h"
@@ -43,6 +46,32 @@ bool muse_console_getc(uint8_t *c)
 {
     return usb_serial_jtag_read_bytes(c, 1, portMAX_DELAY) == 1;
 }
+
+#if CONFIG_MUSE_MIRROR
+bool muse_console_read(uint8_t *buf, size_t n, int ms)
+{
+    TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(ms);
+    while (n) {
+        TickType_t left = until - xTaskGetTickCount();
+        int got = (int32_t)left > 0 ? usb_serial_jtag_read_bytes(buf, n, left) : 0;
+        if (got <= 0) return false;
+        buf += got;
+        n -= got;
+    }
+    return true;
+}
+
+int muse_console_write_bytes(const void *buf, size_t n, int ms)
+{
+    return usb_serial_jtag_write_bytes(buf, n, pdMS_TO_TICKS(ms));
+}
+
+bool muse_console_set_baud(int baud)
+{
+    (void)baud;
+    return false;
+}
+#endif
 
 /* A stalled host must not keep the UI snapshot timer holding its lock.
  * Queue each line in one driver call: the ring takes all of it or none. */
@@ -192,6 +221,36 @@ bool muse_console_write(const void *buf, size_t n)
 #endif
     return uart_write_bytes(PORT, buf, n) == (int)n;
 }
+
+#if CONFIG_MUSE_MIRROR
+bool muse_console_read(uint8_t *buf, size_t n, int ms)
+{
+    TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(ms);
+    while (n) {
+        TickType_t left = until - xTaskGetTickCount();
+        int got = (int32_t)left > 0 ? uart_read_bytes(PORT, buf, n, left) : 0;
+        if (got <= 0) return false;
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+        if (s_held) xTimerReset(s_awake_timer, 0);
+#endif
+        buf += got;
+        n -= got;
+    }
+    return true;
+}
+
+int muse_console_write_bytes(const void *buf, size_t n, int ms)
+{
+    (void)ms;  /* UART has no TX ring or flow control: this waits for wire time. */
+    return uart_write_bytes(PORT, buf, n);
+}
+
+bool muse_console_set_baud(int baud)
+{
+    uart_wait_tx_done(PORT, pdMS_TO_TICKS(500));
+    return uart_set_baudrate(PORT, baud ? baud : CONFIG_ESP_CONSOLE_UART_BAUDRATE) == ESP_OK;
+}
+#endif
 
 bool muse_console_host(void)
 {

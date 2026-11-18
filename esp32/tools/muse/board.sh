@@ -24,8 +24,12 @@
 # the other's.
 # MUSE_VIDEO=1 adds devices/sdkconfig.muse-video (the phone camera over
 # Wi-Fi, on boards whose panel driver has draw_frame) in build-muse-<profile>-video/.
+# MUSE_WAKEWORD=1 adds devices/sdkconfig.muse-wakeword (the "Hey Muse" wake
+# word) in build-muse-<profile>-wakeword/.
+# MUSE_POWER_TEST=1 adds the board's diagnostic overlay and a -power-test suffix.
 # MUSE_APPS=1 adds devices/sdkconfig.muse-apps (WebAssembly apps: app.run) in
 # build-muse-<profile>-apps/.
+# MUSE_MIRROR=1 adds the cable mirror in build-muse-<profile>-mirror/.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master
 # (IDF_EXPORT_S31) and Espressif's esp-mosaico-utils (MOSAICO_UTILS), and
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
@@ -115,8 +119,14 @@ defaults="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-$prof
 if [ -n "${MUSE_VIDEO:-}" ]; then
     B=$B-video; defaults="$defaults;devices/sdkconfig.muse-video"
 fi
+if [ -n "${MUSE_WAKEWORD:-}" ]; then
+    B=$B-wakeword; defaults="$defaults;devices/sdkconfig.muse-wakeword"
+fi
 if [ -n "${MUSE_APPS:-}" ]; then
     B=$B-apps; defaults="$defaults;devices/sdkconfig.muse-apps"
+fi
+if [ -n "${MUSE_MIRROR:-}" ]; then
+    B=$B-mirror; defaults="$defaults;devices/sdkconfig.muse-mirror"
 fi
 if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"
@@ -124,6 +134,13 @@ fi
 [ -n "${iris:-}" ] && defaults="$defaults;devices/sdkconfig.muse-$profile-iris"
 if [ -n "${vibe2:-}" ]; then
     B=$B-vibe2; defaults="$defaults;devices/sdkconfig.muse-$profile-vibe2"
+fi
+if [ -n "${MUSE_POWER_TEST:-}" ]; then
+    [ -z "${MUSE_VIDEO:-}${MUSE_BENCH:-}" ] || { echo "power-test cannot be combined with video/bench" >&2; exit 2; }
+    power_profile=$profile
+    [ "$board" = watcher ] && power_profile=watcher
+    [ -f "devices/sdkconfig.muse-$power_profile-power-test" ] || { echo "no power-test overlay for $board" >&2; exit 2; }
+    B=$B-power-test; defaults="$defaults;devices/sdkconfig.muse-$power_profile-power-test"
 fi
 log=/tmp/muse_build_$board.log
 # ESP-Mosaico: its Vibe Mode firmware installs an ESP-Iris System Update

@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass
 from typing import Iterable
 
-from musegadget import __version__, device_guide
+from musegadget import __version__, device_guide, reaper
 from musegadget.commands import DropInCommand, InvalidCommand
 from musegadget.link_client import (
     DEFAULT_MODEL_ID, DEFAULT_MODEL_NAME, DeviceDescription, MAX_CONTROL_MESSAGE_BYTES,
@@ -264,7 +264,7 @@ class Executor:
         On timeout the whole process group is killed. Raises OSError if it
         can't start.
         """
-        proc = subprocess.Popen(
+        proc = reaper.ReapingPopen(
             argv, cwd=cwd,
             stdin=subprocess.DEVNULL if stdin is None else subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
@@ -305,7 +305,7 @@ class Executor:
         existing = env.get("PYTHONPATH")
         env["PYTHONPATH"] = package_root + (os.pathsep + existing if existing else "")
         options["env"] = env
-        proc = subprocess.run(
+        proc = reaper.run(
             [sys.executable, "-m", "musegadget.fileops"], input=request.encode(),
             capture_output=True, timeout=60, cwd="/", **options,
         )

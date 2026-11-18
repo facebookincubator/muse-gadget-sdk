@@ -37,10 +37,14 @@
 #include "muse_ble.h"
 #include "muse_board.h"
 #include "muse_chat.h"
+#include "muse_options.h"
 #include "muse_console.h"
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
+#if CONFIG_MUSE_MIRROR
+#include "muse_mirror.h"
+#endif
 #include "muse_settings.h"
 #if !CONFIG_MUSE_UI_FREEINK
 #include "muse_settings_ui.h"   /* LVGL only; e-paper builds use FreeInk */
@@ -51,6 +55,7 @@
 #include "muse_latest_reply.h"
 #endif
 #include "muse_voice.h"
+#include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
@@ -104,6 +109,13 @@ static const char *TAG = "muse_input";
 static QueueHandle_t s_queue;
 static bool (*s_console_hook)(const char *line);
 static TaskHandle_t s_input;
+#if CONFIG_MUSE_MIRROR
+void muse_input_inject(unsigned events)
+{
+    atomic_fetch_or(&s_touch_talk_events, events);
+    if (s_input) xTaskNotifyGive(s_input);
+}
+#endif
 static bool s_talk_down;
 #if CONFIG_MUSE_VOICE_NOTE_TOGGLE
 static atomic_bool s_note_toggled;   /* a toggled voice note is recording, talk released */
@@ -621,6 +633,10 @@ static bool update_power(void)
     static bool paused;
     bool pause = muse_board->display_pause && muse_state_on_battery() && muse_state_asleep()
                  && muse_ui_dark() && muse_voice_resting();
+#if CONFIG_MUSE_MIRROR
+    /* The viewer needs LVGL timers even while the physical screen is dark. */
+    pause = pause && !muse_mirror_connected();
+#endif
     bool want_low = pause && !muse_console_host();
     if (pause == paused && want_low == s_cpu_low) {
         return paused;
@@ -946,9 +962,23 @@ static void set_face(const char *name)
  */
 static bool console_command(char *line, bool whole)
 {
+#if CONFIG_MUSE_HATCH
+    if (whole && muse_options_console(line)) {
+        muse_state_poke();
+        muse_state_set_asleep(false);
+        muse_state_nudge();
+        return true;
+    }
+#endif
     if (whole && s_console_hook && s_console_hook(line)) {
         return true;
     }
+#if CONFIG_MUSE_MIRROR
+    if (whole && (!strcmp(line, "mirror") || !strncmp(line, "mirror=", 7))) {
+        muse_mirror_serial_session(line[6] ? atoi(line + 7) : 0);
+        return true;
+    }
+#endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     if (!strcmp(line, "review.next") || !strcmp(line, "review.prev")) {
         set_asleep(false, "reply review");
@@ -1090,6 +1120,22 @@ static bool console_command(char *line, bool whole)
         return true;
     }
 #endif
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if (!strcmp(line, "wake") || !strcmp(line, "wake.on") || !strcmp(line, "wake.off")) {
+        if (line[4] == '.') {
+            muse_wakeword_set_enabled(!strcmp(line, "wake.on"));
+        }
+        muse_wakeword_status_t st;
+        muse_wakeword_status(&st);
+        printf("@wake {\"enabled\":%s,\"listening\":%s,\"runner\":\"%s\",\"wakes\":%u,\"cancels\":%u,"
+               "\"submits\":%u,\"drops\":%u}\n",
+               st.enabled ? "true" : "false", st.listening ? "true" : "false", st.runner,
+               (unsigned)st.wakes, (unsigned)st.cancels, (unsigned)st.submits,
+               (unsigned)st.dropped_frames);
+        fflush(stdout);
+        return true;
+    }
+#endif
     if (!strncmp(line, "face=", 5)) {
         set_face(line + 5);
         return true;
@@ -1125,7 +1171,8 @@ static bool console_command(char *line, bool whole)
  * the device's state, "power" the battery meter (muse_battery.h) and
  * "power.reset" starts it over, "nap" sleeps and leaves Wi-Fi at once (as
  * two minutes asleep on battery would; 'w' rejoins), "face=" shows a face
- * (see set_face), and "chat=" sends a typed message to Hatch (see chat_line
+ * (see set_face), "wake" prints the wake word state, "wake.on" and "wake.off"
+ * toggle listening, and "chat=" sends a typed message to Hatch (see chat_line
  * and tools/muse/chat.py).
  */
 static void serial_task(void *arg)

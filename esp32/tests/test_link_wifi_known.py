@@ -24,6 +24,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_cjson import cjson_source
+
 
 ROOT = Path(__file__).resolve().parents[1]
 # CI supplies pinned upstream sources; local IDF builds already have cJSON.
@@ -59,7 +61,7 @@ class LinkWifiKnownHarnessTest(unittest.TestCase):
                     str(ROOT / "tests" / "link_wifi_known_harness.c"),
                     str(ROOT / "main" / "wifi_known.c"),
                     str(ROOT / "main" / "config_store.c"),
-                    str(JSON / "cJSON.c"),
+                    *cjson_source(JSON),
                     "-lm",
                     "-o",
                     str(binary),

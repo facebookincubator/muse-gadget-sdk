@@ -20,6 +20,7 @@
 #endif
 
 #include <stdatomic.h>
+#include "muse_options_ui.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -46,6 +47,9 @@
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
+#if CONFIG_MUSE_MIRROR
+#include "muse_mirror.h"
+#endif
 #include "muse_pixel.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
@@ -156,7 +160,7 @@ static void tile_changed_cb(lv_event_t *e)
 }
 
 /* From any task: the face tile is the currently visible tile. */
-bool muse_ui_face_active(void)
+static bool face_shown(void)
 {
 #if CONFIG_MUSE_APP_VIEW
     if (muse_app_view_tick()) {
@@ -164,6 +168,12 @@ bool muse_ui_face_active(void)
     }
 #endif
     return s_face_active;
+}
+
+bool muse_ui_face_active(void)
+{
+    /* The option picker covers it too: a held touch chooses, it doesn't talk. */
+    return !muse_options_ui_open() && face_shown();
 }
 
 bool muse_ui_volume_swiping(void)
@@ -180,6 +190,9 @@ static lv_obj_t *s_dots[PAGE_DOTS];
 static lv_obj_t *s_wifi_icon;
 static lv_obj_t *s_ble_icon;
 static lv_obj_t *s_cover;
+#if CONFIG_MUSE_REPLY_NOTIFY
+static lv_obj_t *s_flash;   /* white veil that blinks when a reply arrives */
+#endif
 static lv_obj_t *s_pair;
 static lv_obj_t *s_pair_code;
 static lv_obj_t *s_pair_title;
@@ -1305,7 +1318,7 @@ static void on_volume_swipe(lv_event_t *e)
     case LV_EVENT_PRESSED:
         s_volume_swipe = (muse_volume_swipe_t){0};
         if (volume_swipe_allowed()) {
-            lv_indev_get_point(s_indev, &point);
+            lv_indev_get_point(lv_indev_active(), &point);
             muse_volume_swipe_begin(&s_volume_swipe, point.x, point.y, s_h, muse_settings_volume());
         }
         break;
@@ -1315,7 +1328,7 @@ static void on_volume_swipe(lv_event_t *e)
             finish_volume_swipe();
             break;
         }
-        lv_indev_get_point(s_indev, &point);
+        lv_indev_get_point(lv_indev_active(), &point);
         int old_value = s_volume_swipe.value;
         if (muse_volume_swipe_move(&s_volume_swipe, point.x, point.y)) {
             s_volume_swiping = true;
@@ -1343,6 +1356,15 @@ static void on_volume_swipe(lv_event_t *e)
         break;
     }
 }
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* Here rather than at the top, after the last assert: builds without the
+ * wake word then compile this file exactly as before (assert() records its
+ * line number). */
+#include "muse_wakeword_glue.h"
+static lv_obj_t *s_listen_icon;   /* status line: "Hey Muse" listening is on */
+static int s_shown_listen = -1;   /* 0 hidden, 1 on but paused, 2 listening */
+#endif
 
 static void build_screen(void)
 {
@@ -1467,6 +1489,11 @@ static void build_screen(void)
     lv_obj_align(status, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 40 : s_small ? 1 : 20 + s_dy);
     s_wifi_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_ble_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* Whenever the wake word is on, so it's never listening unseen. */
+    s_listen_icon = make_mic(status, s_small ? 10 : 14);
+    lv_obj_add_flag(s_listen_icon, LV_OBJ_FLAG_HIDDEN);
+#endif
     s_power_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
 
     /* The compact layout leaves the state to the avatar and the caption,
@@ -1948,6 +1975,12 @@ static void build_overlays(void)
     lv_label_set_text(s_notify_footer, "Tap to dismiss");
 #endif
 
+#if CONFIG_MUSE_HATCH
+    /* Answers go out through the voice task, which display-only boards don't run. */
+    if (muse_board->touch && (muse_board->audio_init || muse_board->mic_init))
+        muse_options_ui_start(s_w, s_h, muse_board->round, caption_font());
+#endif
+
     /* BLE pairing code, or the Muse app's ask for the talk button: a centred
      * column in one typeface, the code large. The small card grows with the hint. */
     s_pair = lv_obj_create(lv_layer_top());
@@ -1976,6 +2009,17 @@ static void build_overlays(void)
     /* Wraps: "bottom right button" is wider than the AIPI's card. */
     lv_obj_set_width(s_pair_hint, lv_pct(100));
     lv_label_set_long_mode(s_pair_hint, LV_LABEL_LONG_MODE_WRAP);
+
+#if CONFIG_MUSE_REPLY_NOTIFY
+    /* Reply flash: drawn over everything, never takes a touch. */
+    s_flash = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_flash);
+    lv_obj_set_size(s_flash, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(s_flash, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(s_flash, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(s_flash, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+#endif
 
     /* Sleep cover: swallows the waking touch. */
     s_cover = lv_obj_create(lv_layer_top());
@@ -2079,6 +2123,9 @@ static const char *idle_name(muse_wifi_state_t wifi)
 
 static void update_chrome(float now)
 {
+    muse_options_ui_tick(face_shown() && !muse_voice_in_call() && !s_image_dsc.data &&
+                         muse_state_mode(NULL) != MUSE_MODE_LISTENING &&
+                         lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
     if (now < s_next_settings_tick) {
         return;
     }
@@ -2127,6 +2174,17 @@ static void update_chrome(float now)
         lv_label_set_text(s_ble_icon, ble);
         lv_obj_set_style_text_color(s_ble_icon, lv_color_hex(b.state == MUSE_BLE_CONNECTED ? COLOR_ACCENT : COLOR_DIM), 0);
     }
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    /* Lit while the wake word is listening, dim while it's on but paused
+     * (Muse talking, a button turn, the runner stopped). */
+    int listen = !muse_wakeword_enabled() ? 0 : muse_wakeword_listening() ? 2 : 1;
+    if (listen != s_shown_listen) {
+        lv_obj_set_flag(s_listen_icon, LV_OBJ_FLAG_HIDDEN, listen == 0);
+        color_mic(s_listen_icon, listen == 2 ? COLOR_ACCENT : COLOR_DIM);
+        s_shown_listen = listen;
+    }
+#endif
 
     /* Paired, the name has done its job (picking this one out in the Muse
      * app) and the speaker button has replies to mute. */
@@ -2586,6 +2644,17 @@ static void frame_tick(lv_timer_t *timer)
     if (update_sleep()) {
         return;
     }
+#if CONFIG_MUSE_REPLY_NOTIFY
+    {
+        float flash = muse_state_flash_level();
+        if (flash > 0) {
+            lv_obj_set_style_bg_opa(s_flash, (lv_opa_t)(flash * 170), 0);
+            lv_obj_remove_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+        } else if (!lv_obj_has_flag(s_flash, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_add_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
 #if CONFIG_MUSE_VIDEO
     if (muse_video_tick()) {
         muse_menu_close();
@@ -2627,7 +2696,8 @@ static void frame_tick(lv_timer_t *timer)
     s_level += (level - s_level) * (level > s_level ? 0.6f : 0.2f);
 
     muse_pose_t pose = {
-        .mode = mode,
+        /* A pending reply keeps its green progress ring, but isn't speech. */
+        .mode = mode == MUSE_MODE_SPEAKING && muse_voice_reply_waiting() ? MUSE_MODE_IDLE : mode,
         .t = now,
         .mode_t = mode_t,
         .level = s_level,
@@ -2693,6 +2763,10 @@ esp_err_t muse_ui_start(void)
     }
     build_overlays();
     lv_timer_create(frame_tick, muse_board->frame_ms, NULL);
+#if CONFIG_MUSE_MIRROR
+    lv_indev_t *mirror_pointer = muse_mirror_start(disp);
+    if (mirror_pointer) lv_indev_add_event_cb(mirror_pointer, on_any_press, LV_EVENT_PRESSED, NULL);
+#endif
     s_ready = true;
     muse_board->display_unlock();
 

@@ -27,6 +27,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_cjson import HOST_CJSON
+
 
 ROOT = Path(__file__).resolve().parents[1]
 NOISE = (ROOT / "main" / "noise_control.cpp").read_text()
@@ -111,7 +113,7 @@ class DeviceDescriptionTest(unittest.TestCase):
         flags = ["-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter",
                  "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                  "-DCJSON_NESTING_LIMIT=16", "-I", str(CJSON)]
-        sources = [CJSON / "cJSON.c"]
+        sources = [HOST_CJSON]
         if ble:
             (tmp / "ble_client_stubs.c").write_text(BLE_CLIENT_STUBS)
             sources += [ROOT / "main/ble_commands.c", tmp / "ble_client_stubs.c"]

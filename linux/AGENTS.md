@@ -37,11 +37,12 @@ pairing and control protocols, so the same app pairs either.
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: the pairing's node id (`homelink-xxxxxx`, or `gadget-xxxxxx` with `MUSEGADGET_GADGET_NODE_ID=1`), `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
-| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a distrusted root CA |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a compromised root CA (a retired one only logs a warning) |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
 | `video_call.py`, `voice_video.py`, `rtc/` | Video calls: JOIN over Noise, SRTP media (ICE-lite over UDP/TCP, Opus, H.264), H.264 outputs |
+| `wakeword.py`, `wakeword_input.py`, `wakeword_check.py` | Optional Hey Muse detector (the native library from `wakeword/`), wake-word admission in front of a voice call, local check |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
@@ -75,7 +76,7 @@ Apple Silicon wheel, so run it under an x86-64 Python on a Mac:
 
 ```sh
 uv run --no-project --isolated --python cpython-3.9-macos-x86_64 \
-  --with pytest --with cryptography==3.3.2 --with websockets==13.1 \
+  --with pytest --with cryptography==3.3.2 --with websockets==15.0.1 \
   env PYTHONPATH=src python -m pytest -q
 ```
 
@@ -112,7 +113,7 @@ against a pinned checksum, and builds a new venv, before running anything there
 as root. Don't run that uv with `sudo` yourself.
 
 Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
-`--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
+`--from SOURCE`, `--proxy URL`, `--no-proxy HOSTS`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
 keep it that way. Root runs everything under `/opt/musegadget`, so the
 installer never runs a file there that another account could have changed.
 To move to a new uv, update `UV_VERSION` and both checksums for each target
@@ -237,6 +238,24 @@ never has a command's parameters, output or error message.
   bounded, restart idle after settlement, and never suspend the overall timer.
 - A validated end-call ACK is not undone by a delayed media EOF if a bounded
   stream reset succeeds; report the incomplete drain separately.
+- `voice-call --wake-word` waits for local detection before admitting a call;
+  the default is unchanged. `WakeWordInput` owns the capture iterator and a
+  bounded one-second pre-roll and a startup queue sized from the start
+  stages' limits (`wakeword_input.STARTUP_SECONDS`); always await `aclose()`.
+  The call reads the listener itself and sends its queued backlog at up to
+  three times real time (wall-clock paced) until it is down to one frame.
+  Its detector tap alone uses a streaming 24-to-16 kHz FIR (native from the
+  detector's `resampler()`; `Pcm24To16` is the Python reference). Active calls never
+  run detection, and live mode resets/re-arms only after successful cleanup.
+  Detection is `wakeword/build.sh`'s `libmuse_wakeword.so`: the ESP32 runner,
+  model and front end (`../esp32/components/muse_wakeword`), loaded with
+  ctypes; no Python ML packages. A wake-started voice call passes
+  `speech_timeout` with `speech_after_bytes` (the listener's pre-roll) and
+  ends as `no_speech` when no locally voiced audio follows the pre-roll;
+  server VAD events don't count, since the pre-roll is the wake word itself.
+  Video calls keep their idle timer and pace the queued backlog as voice does. See
+  `wakeword/README.md` and `../skills/gadget-linux-wakeword/SKILL.md` for setup.
+  Hardware-free tests use synthetic detectors and tones, never recordings.
 - Tests use self-authored tones/zeros and synthetic identities only. Never put
   real recordings, credentials, internal documents or captured events here.
   `test_streaming.py`, `test_voice_call.py` and `test_voice_cli.py` exercise real
@@ -327,7 +346,7 @@ listed here. Everything else is internal and can change.
   is an `executor.Executor` instance.
 - `await Service.run()` runs until `Service.stop()` is called or `serve()`
   returns `Outcome.STOPPED`. It first raises `tls.TrustStoreError` if the
-  system trust store can't be read or still has a distrusted root CA.
+  system trust store can't be read or still has a compromised root CA.
 - To describe your own device, or to run your own work while it is connected,
   subclass `Service` and override any of these three methods.
 - `describe()` returns the `DeviceDescription` to register with Muse.

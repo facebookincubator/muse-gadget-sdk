@@ -288,6 +288,12 @@ Boards without PSRAM, like the classic ESP32 and the ESP32-C6, run without the
 home-network tunnel, which needs more memory than they have. Muse can still
 reach the device and control it.
 
+## Cable screen mirror
+
+Full Muse LVGL builds can mirror their screen and controls over the console
+cable with `MUSE_MIRROR=1`. See [the mirror guide](docs/mirror.md) for building
+the opt-in firmware, starting the desktop viewer, and saving captures.
+
 ## Power characterization
 
 Start at [Power profiling](docs/power/README.md). Read the
@@ -359,6 +365,22 @@ shows replies in the original pixel caption font at twice its normal size
 such as the StopWatch). The text is centred beneath the smaller avatar;
 turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
 visible when the larger text fills the reading area.
+
+On PSRAM boards with the LVGL touchscreen UI, Muse's text-option questions
+open a scrollable picker. Tap one answer to send it as a follow-up message;
+the subsequent reply uses the normal caption path. The picker stays inside
+round displays, and repeated taps cannot submit the same question twice.
+See [reply option selection](docs/reply-option-selection.md) for supported
+prompts, USB diagnostics, validation, and the current server limitation on
+synchronizing selected-button state with the phone.
+
+The on-device "Hey Muse" wake word (off by default; not enabled on any
+board yet) runs its model with the ExecuTorch runtime and ESP-NN delegate
+and TensorFlow Lite Micro's microfrontend, which come from the ESP
+Component Registry only into builds with `MUSE_WAKEWORD_ENABLE`;
+[`docs/executorch.md`](docs/executorch.md) says how the pins are updated,
+and [`components/muse_wakeword/models/README.md`](components/muse_wakeword/models/README.md)
+describes the model.
 
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
@@ -559,6 +581,15 @@ their upstream licenses:
   copyright, with Google's patent grant. See
   [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
   [`PATENTS`](components/libvpx_vp8/PATENTS).
+- [`components/muse_wakeword/models/hey_muse.pte`](components/muse_wakeword/models),
+  the opt-in wake word model, was trained for this SDK on public-domain, CC0
+  and CC BY data; [`ATTRIBUTION.md`](components/muse_wakeword/models/ATTRIBUTION.md)
+  credits it as CC BY requires.
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
-under their own licenses.
+under their own licenses. For the opt-in wake word these are the ExecuTorch
+runtime with its ESP-NN delegate (`pytorch/executorch`: BSD-3-Clause and
+others, see its `LICENSE`), `espressif/esp-nn` (Apache-2.0) and
+`esphome/esp-micro-speech-features`, TensorFlow Lite Micro's microfrontend
+(Apache-2.0; its kissfft files BSD-3-Clause); builds without the wake word
+don't fetch them.

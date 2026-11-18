@@ -339,12 +339,12 @@ def copy_tree(dest):
 
 
 # board.sh's build options, in the order it adds their build directory suffixes
-PROFILE_ENV = (("MUSE_VIDEO", "-video"), ("MUSE_BENCH", "-bench"))
+PROFILE_ENV = (("MUSE_VIDEO", "-video"), ("MUSE_MIRROR", "-mirror"), ("MUSE_BENCH", "-bench"))
 
 
 def build_dir(key, root=ROOT):
-    """board.sh's build directory for `key`: build-muse-PROFILE, then -video under MUSE_VIDEO
-    and -bench under MUSE_BENCH."""
+    """board.sh's build directory for `key`: build-muse-PROFILE, then the enabled
+    -video, -mirror and -bench suffixes in that order."""
     with open(os.path.join(root, "tools", "muse", "board.sh"), encoding="utf-8") as f:
         m = re.search(rf"^\s*{re.escape(key)}\)\s+profile=([\w.-]+);", f.read(), re.M)
     if not m:
