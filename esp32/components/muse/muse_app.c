@@ -98,13 +98,19 @@ void muse_app_run(const muse_board_t *board)
     QueueHandle_t q = xQueueCreate(16, sizeof(muse_input_event_t));
     ESP_ERROR_CHECK(muse_input_start(q));
 
+    /* Start audio before the boot animation's pause: its I2S DMA buffers
+     * need internal RAM, which Link's Wi-Fi and TLS take during those 1.4 s.
+     * Started after it, the codec open can fail to get them and crash in
+     * i2s_rx_channel_start (Waveshare 1.75C with live voice calls). */
+    bool has_audio = board->audio_init || board->mic_init;
+    esp_err_t voice_rc = has_audio ? muse_voice_start(q) : ESP_OK;
     /* Let the boot animation (flame ignites, eyes open) play out. */
     vTaskDelay(pdMS_TO_TICKS(1400));
-    if (!board->audio_init && !board->mic_init) {
+    if (!has_audio) {
         ESP_LOGI(TAG, "display-only board: no microphone or speaker");
         muse_state_set_mode(MUSE_MODE_IDLE);
         muse_state_set_caption("%s", "");
-    } else if (muse_voice_start(q) != ESP_OK) {
+    } else if (voice_rc != ESP_OK) {
         ESP_LOGE(TAG, "voice pipeline unavailable");
     } else {
         muse_state_set_mode(MUSE_MODE_IDLE);

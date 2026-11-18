@@ -3,7 +3,7 @@
 #
 # Hash-pinned Python dependencies installed from PyPI. cryptography, dbus and
 # gi come from the distribution. Regenerate with:
-#   uv pip compile --universal --python-version 3.9 --generate-hashes --no-header - <<<"websockets>=13" -o src/musegadget/data/requirements.lock
+#   uv pip compile --universal --python-version 3.9 --generate-hashes --no-header - <<<"websockets>=15" -o src/musegadget/data/requirements.lock
 websockets==15.0.1 ; python_full_version < '3.10' \
     --hash=sha256:0701bc3cfcb9164d04a14b149fd74be7347a530ad3bbf15ab2c678a2cd3dd9a2 \
     --hash=sha256:0a34631031a8f05657e8e90903e656959234f3a04552259458aac0b0f9ae6fd9 \

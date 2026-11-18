@@ -23,6 +23,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "muse_lang.h"
 #include "muse_review.h"
 #include "muse_text.h"
 #include "muse_ui.h"
@@ -74,7 +75,7 @@ static void load_reply(void)
         if (!s_display) {
             ESP_LOGW("latest_reply", "display snapshot allocation failed");
             /* Leave an existing view intact; retry on the next visit. */
-            lv_label_set_text(s_label, "Latest reply unavailable");
+            lv_label_set_text(s_label, muse_lang_menu("Latest reply unavailable"));
             layout_reply();
             return;
         }
@@ -87,7 +88,9 @@ static void load_reply(void)
         lv_obj_set_style_text_font(s_label, s_font_for(s_display), 0);
         lv_label_set_text_static(s_label, s_display);
     } else {
-        lv_label_set_text(s_label, snapshot.failed ? "Latest reply unavailable" : "No reply yet");
+        const char *none = muse_lang_menu(snapshot.failed ? "Latest reply unavailable" : "No reply yet");
+        lv_obj_set_style_text_font(s_label, s_font_for(none), 0);
+        lv_label_set_text(s_label, none);
     }
     lv_obj_add_flag(s_new, LV_OBJ_FLAG_HIDDEN);
     layout_reply();
@@ -168,8 +171,8 @@ void muse_latest_reply_build(lv_obj_t *tileview, muse_latest_reply_font_t font_f
     lv_obj_set_scrollbar_mode(s_tile, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t *title = lv_label_create(s_tile);
-    lv_label_set_text(title, "LATEST REPLY");
-    lv_obj_set_style_text_font(title, &lv_font_unscii_16, 0);
+    lv_label_set_text(title, muse_lang_menu("LATEST REPLY"));
+    lv_obj_set_style_text_font(title, muse_lang_label_font(lv_label_get_text(title), &lv_font_unscii_16), 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0x8b84a8), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 55);
 
@@ -188,11 +191,11 @@ void muse_latest_reply_build(lv_obj_t *tileview, muse_latest_reply_font_t font_f
     s_label = lv_label_create(s_scroll);
     lv_obj_set_width(s_label, 308);
     lv_label_set_long_mode(s_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(s_label, s_font_for(""), 0);
+    lv_obj_set_style_text_font(s_label, s_font_for(muse_lang_menu("No reply yet")), 0);
     lv_obj_set_style_text_color(s_label, lv_color_hex(0xd8d2ff), 0);
     lv_obj_set_style_text_line_space(s_label, 6, 0);
     lv_obj_set_style_text_align(s_label, LV_TEXT_ALIGN_LEFT, 0);
-    lv_label_set_text(s_label, "No reply yet");
+    lv_label_set_text(s_label, muse_lang_menu("No reply yet"));
     lv_obj_remove_flag(s_label, LV_OBJ_FLAG_CLICKABLE);
 
 
@@ -203,8 +206,8 @@ void muse_latest_reply_build(lv_obj_t *tileview, muse_latest_reply_font_t font_f
     lv_obj_set_style_radius(s_new, 21, 0);
     lv_obj_set_style_shadow_width(s_new, 0, 0);
     lv_obj_t *new_label = lv_label_create(s_new);
-    lv_label_set_text(new_label, "New reply");
-    lv_obj_set_style_text_font(new_label, &lv_font_unscii_16, 0);
+    lv_label_set_text(new_label, muse_lang_menu("New reply"));
+    lv_obj_set_style_text_font(new_label, muse_lang_label_font(lv_label_get_text(new_label), &lv_font_unscii_16), 0);
     lv_obj_align(new_label, LV_ALIGN_CENTER, -16, 0);
     lv_obj_t *arrow = lv_label_create(s_new);
     lv_label_set_text(arrow, LV_SYMBOL_DOWN);

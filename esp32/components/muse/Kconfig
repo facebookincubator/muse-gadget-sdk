@@ -203,6 +203,14 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD_35
             bool "Waveshare ESP32-S3-Touch-LCD-3.5 (ESP32-S3, 480x320 touch LCD, ES8311 speaker and mic)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_VIRTUAL_DISPLAY
+            bool "Virtual display, seen only through the cable mirror (any ESP32-S3 with PSRAM)"
+            depends on IDF_TARGET_ESP32S3
+            help
+                No panel, touch, keys or codec: the UI draws into PSRAM and
+                tools/muse/mirror.py shows it and gives it touch, keys and
+                sound. Size and shape: Muse mirror menu (components/muse_mirror).
     endchoice
 
     config MUSE_ENABLED
@@ -258,6 +266,7 @@ menu "Muse"
         default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
         default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
         default "waveshare_s3_lcd_35" if MUSE_BOARD_WAVESHARE_S3_LCD_35
+        default "virtual_display" if MUSE_BOARD_VIRTUAL_DISPLAY
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -300,7 +309,7 @@ menu "Muse"
         bool "Isolated board BSP power-characterization firmware"
         # Boards implementing boards/muse_power_test_board.h; extend this list
         # only after the new board's diagnostic hooks and matrix pass tests.
-        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI || MUSE_BOARD_RETERMINAL_STICKY) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_ESP_MOSAICO) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
         default n
         help
             DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
@@ -378,7 +387,7 @@ menu "Muse"
             language you speak to it, and the serial console stays in
             English for the tools that read it. The button menu and the
             pairing card are translated; the touch boards' settings pages
-            aren't yet.
+            are in Brazilian Portuguese only.
 
         config MUSE_UI_LANG_EN
             bool "English"
@@ -386,6 +395,13 @@ menu "Muse"
         config MUSE_UI_LANG_VI
             bool "Vietnamese"
             select MUSE_LATIN_FONT
+
+        config MUSE_UI_LANG_PT_BR
+            bool "Brazilian Portuguese"
+            select MUSE_LATIN_FONT
+            help
+                Also translates the touch boards' settings pages and the
+                latest-reply page.
     endchoice
 
     choice MUSE_JC3248W535_MIC

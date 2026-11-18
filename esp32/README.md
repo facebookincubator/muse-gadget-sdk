@@ -287,6 +287,12 @@ Boards without PSRAM, like the classic ESP32 and the ESP32-C6, run without the
 home-network tunnel, which needs more memory than they have. Muse can still
 reach the device and control it.
 
+## Cable screen mirror
+
+Full Muse LVGL builds can mirror their screen and controls over the console
+cable with `MUSE_MIRROR=1`. See [the mirror guide](docs/mirror.md) for building
+the opt-in firmware, starting the desktop viewer, and saving captures.
+
 ## Power characterization
 
 Start at [Power profiling](docs/power/README.md). Read the
@@ -358,6 +364,14 @@ shows replies in the original pixel caption font at twice its normal size
 such as the StopWatch). The text is centred beneath the smaller avatar;
 turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
 visible when the larger text fills the reading area.
+
+On PSRAM boards with the LVGL touchscreen UI, Muse's text-option questions
+open a scrollable picker. Tap one answer to send it as a follow-up message;
+the subsequent reply uses the normal caption path. The picker stays inside
+round displays, and repeated taps cannot submit the same question twice.
+See [reply option selection](docs/reply-option-selection.md) for supported
+prompts, USB diagnostics, validation, and the current server limitation on
+synchronizing selected-button state with the phone.
 
 The on-device "Hey Muse" wake word (off by default; not enabled on any
 board yet) runs its model with the ExecuTorch runtime and ESP-NN delegate

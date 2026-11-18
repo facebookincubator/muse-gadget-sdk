@@ -63,6 +63,7 @@ extern "C" {
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_ui.h"
+#include "muse_voice.h"
 #include "muse_wifi.h"
 }
 
@@ -968,6 +969,7 @@ static void ui_task(void *arg)
                 muse_state_mode(&mode_t);
                 muse_pose_t pose = {.mode = s_face.mode, .t = now, .mode_t = mode_t,
                                     .level = s_level, .happy = muse_state_happiness(), .working = 0};
+                if (pose.mode == MUSE_MODE_SPEAKING && muse_voice_reply_waiting()) pose.mode = MUSE_MODE_IDLE;
                 muse_pixel_render(&pose);
                 render_art(s_face.answering ? s_read.px : s_canvas_px);
                 redraw = true;

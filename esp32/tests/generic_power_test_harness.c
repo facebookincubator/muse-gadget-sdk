@@ -21,9 +21,11 @@
 /* SDK stubs always succeed; only charging and capture boundaries are observed. */
 enum { CONFIG_ESP_CONSOLE_UART_NUM = 0, ESP_PM_CPU_FREQ_MAX = 2, ESP_PM_NO_LIGHT_SLEEP = 1 };
 typedef int esp_pm_lock_handle_t;
+#ifndef TEST_MOSAICO
 static inline esp_err_t esp_pm_lock_create(int type, int arg, const char *name, esp_pm_lock_handle_t *out) { *out = 1; return ESP_OK; }
 STUB(esp_err_t, esp_pm_lock_acquire, (esp_pm_lock_handle_t lock), ESP_OK)
 STUB(esp_err_t, esp_pm_lock_release, (esp_pm_lock_handle_t lock), ESP_OK)
+#endif
 /* Separate translation units let the backend override weak core hooks. */
 #ifdef TEST_CORE
 enum { ESP_LOG_NONE = 0, ESP_LOG_ERROR = 1 };
@@ -76,8 +78,10 @@ _Static_assert(sizeof(run_t) == 7648, "v3 run size");
 _Static_assert(sizeof(s_saved) == 7664, "v3 saved size");
 _Static_assert(offsetof(run_t, error) == 156, "v3 padding boundary");
 extern int64_t test_now;
+extern bool test_active;
+static void check_active(void) { assert(test_active == (s_run.status == RUN_ARMED || s_run.status == RUN_RUNNING)); }
 /* Exercise error cleanup directly; SDK fakes always succeed. */
-void test_error(void) { abort_run(ESP_FAIL, true); }
+void test_error(void) { abort_run(ESP_FAIL, true); check_active(); }
 bool test_running(void) { return s_run.status == RUN_RUNNING; }
 bool test_capture(void)
 {
@@ -85,18 +89,23 @@ bool test_capture(void)
     record_t *r = &s_run.records[s_run.count - 1];
     return r->measure_start_us && !r->end_us;
 }
-void test_command(const char *line) { command(line); }
+void test_command(const char *line) { command(line); check_active(); }
 void test_advance(unsigned ms)
 {
     for (unsigned i = 0; i < ms && (s_run.status == RUN_ARMED || s_run.status == RUN_RUNNING); i += 10) {
-        test_now += 10000; tick();
+        test_now += 10000; tick(); check_active();
     }
 }
 #else
 #define MUSE_PTEST_HOST 1
 #define CONFIG_MUSE_POWER_TEST 1
 static int test_aipi, test_216;
-#define CONFIG_MUSE_BOARD_WAVESHARE_S3_175C (!test_aipi && !test_216)
+#ifdef TEST_MOSAICO
+#define CONFIG_MUSE_BOARD_ESP_MOSAICO 1
+#else
+#define CONFIG_MUSE_BOARD_ESP_MOSAICO 0
+#endif
+#define CONFIG_MUSE_BOARD_WAVESHARE_S3_175C (!test_aipi && !test_216 && !CONFIG_MUSE_BOARD_ESP_MOSAICO)
 #define CONFIG_MUSE_BOARD_WAVESHARE_S3_216 test_216
 #define CONFIG_MUSE_BOARD_AIPI test_aipi
 #define CONFIG_IDF_TARGET_ESP32S3 1
@@ -108,10 +117,24 @@ STUB(TaskHandle_t, xTaskGetCurrentTaskHandle, (void), (TaskHandle_t)2)
 static inline void vTaskDelete(TaskHandle_t task) {}
 static inline int xTaskCreatePinnedToCore(void (*fn)(void *), const char *name, unsigned stack, void *arg, unsigned priority, TaskHandle_t *out, int core) { fn(arg); return pdPASS; }
 STUB(esp_err_t, bsp_i2c_init, (void), ESP_OK)
+#ifdef TEST_MOSAICO
+static int pauses, resumes;
+static void esp_lv_adapter_pause(int timeout) { assert(timeout == -1); ++pauses; }
+static void esp_lv_adapter_resume(void) { ++resumes; }
+#endif
 #include "../components/muse/boards/board_power_test_generic.c"
+#ifdef TEST_MOSAICO
+bool muse_ptest_iris_usb_connected(void) { return true; }
+esp_err_t muse_ptest_board_console_init(void) { return ESP_OK; }
+void muse_ptest_board_console_write(const char *p, size_t n) { fwrite(p, 1, n, stdout); }
+bool muse_ptest_board_console_getc(uint8_t *c) { return usb_serial_jtag_read_bytes(c, 1, 0) == 1; }
+esp_err_t muse_ptest_board_console_flush(void) { return ESP_OK; }
+#endif
 extern bool test_capture(void), test_running(void);
 extern void test_command(const char *), test_advance(unsigned), test_error(void);
 int64_t test_now = 1000000;
+bool test_active;
+void muse_ptest_board_run_active(bool active) { test_active = active; }
 static int pmu;
 static uint8_t pmu_reg; /* Charger disabled before boot recovery. */
 static unsigned pmu_failures; /* Next PMIC writes that fail without changing the register. */
@@ -119,7 +142,7 @@ esp_reset_reason_t esp_reset_reason(void) { return ESP_RST_POWERON; }
 static jmp_buf guard_wait;
 static void (*guard_entry)(void *);
 static unsigned notifications, guard_timeouts;
-static int speaker, microphone, bus;
+static int speaker, microphone, bus, gauge;
 int esp_codec_dev_open(esp_codec_dev_handle_t d, esp_codec_dev_sample_info_t *s) { assert(!test_capture()); return ESP_OK; }
 int esp_codec_dev_close(esp_codec_dev_handle_t d) { assert(!test_capture()); return ESP_OK; }
 int64_t esp_timer_get_time(void) { return test_now; }
@@ -139,16 +162,25 @@ static bool display_lock(int timeout) { return true; }
 static void display_unlock(void) {}
 static void brightness(int value) {}
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic) { *spk = &speaker; *mic = &microphone; return ESP_OK; }
-static esp_err_t power(muse_power_t *p) { p->usb = true; return ESP_OK; }
+static esp_err_t power(muse_power_t *p) { p->usb = true; return CONFIG_MUSE_BOARD_ESP_MOSAICO && test_now < 1200000 ? ESP_ERR_INVALID_STATE : ESP_OK; }
 static muse_board_t board = { .name = "Generic test board", .init = bsp_i2c_init, .display_start = display_start, .display_lock = display_lock,
     .display_unlock = display_unlock, .set_brightness = brightness,
     .audio_init = audio_init, .read_power = power, .mic_slot = -1 };
 const muse_board_t *muse_board_get(void) { return &board; }
 esp_err_t i2c_master_get_bus_handle(int port, i2c_master_bus_handle_t *out) { *out = &bus; return ESP_OK; }
-esp_err_t i2c_master_probe(i2c_master_bus_handle_t b, uint16_t addr, int ms) { return ESP_OK; }
-esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t b, const i2c_device_config_t *cfg, i2c_master_dev_handle_t *d) { *d = cfg->device_address == 0x34 ? &pmu : cfg->device_address == 0x40 ? &microphone : &speaker; return ESP_OK; }
+esp_err_t i2c_master_probe(i2c_master_bus_handle_t b, uint16_t addr, int ms) {
+    if (CONFIG_MUSE_BOARD_ESP_MOSAICO) { assert(addr == 0x19); }
+    return ESP_OK;
+}
+esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t b, const i2c_device_config_t *cfg, i2c_master_dev_handle_t *d) { *d = cfg->device_address == 0x55 ? &gauge : cfg->device_address == 0x34 ? &pmu : cfg->device_address == 0x40 ? &microphone : &speaker; return ESP_OK; }
 esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t d, const uint8_t *tx, size_t tn, uint8_t *rx, size_t rn, int ms)
 {
+    if (d == &gauge) {
+        assert(tn == 1 && rn == 2);
+        uint16_t value = *tx == 0x2c ? 100 : *tx == 0x08 ? 4200 : (uint16_t)-1;
+        rx[0] = value; rx[1] = value >> 8;
+        return ESP_OK;
+    }
     if (d == &pmu) { assert(*tx == 0x18); *rx = pmu_reg; return ESP_OK; }
     assert(!test_capture()); *rx = 0; return ESP_OK;
 }
@@ -167,16 +199,31 @@ int main(int argc, char **argv)
 {
     test_216 = !strcmp(argv[1], "216");
     test_aipi = !strcmp(argv[1], "aipi");
+#ifdef TEST_MOSAICO
+    int pct, mv, ma;
+    assert(muse_mosaico_ptest_battery(&pct, &mv, &ma) == ESP_ERR_INVALID_STATE);
+#endif
     muse_power_test_run();
 }
 void vTaskDelay(unsigned ticks)
 {
+#ifdef TEST_MOSAICO
+    if (!s_gauge_read && ticks == 100) { test_now += 100000; return; }
+#endif
     assert(!console_input || !*console_input);
     static char line[512];
     unsigned value;
     while (fgets(line, sizeof(line), stdin)) {
         line[strcspn(line, "\r\n")] = 0;
         if (sscanf(line, "advance %u", &value) == 1) { test_advance(value); }
+#ifdef TEST_MOSAICO
+        else if (!strcmp(line, "mosaico_readback")) {
+            int pct, mv, ma;
+            assert(muse_mosaico_ptest_battery(&pct, &mv, &ma) == ESP_OK);
+            assert(pct == 100 && mv == 4200 && ma == -1);
+            assert(pauses > 0 && resumes > 0 && board.display_pause == NULL);
+        }
+#endif
         else if (!strcmp(line, "capture")) { assert(test_capture()); }
         else if (sscanf(line, "charging %u", &value) == 1) { assert(!!(pmu_reg & 2) == (bool)value); }
         else if (sscanf(line, "pmufail %u", &value) == 1) { pmu_failures = value; }

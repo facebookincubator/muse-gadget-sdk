@@ -17,6 +17,7 @@
 #
 #   curl -fsSL <url>/install.sh | bash
 #   bash install.sh [--from SOURCE] [--run-as USER] [--sdk-token TOKEN] [--yes] [--no-pair]
+#                   [--proxy URL [--no-proxy HOSTS]]
 #   bash install.sh --uninstall [--purge]
 #
 # Installs system packages (bringing ca-certificates up to date), a pinned and
@@ -33,6 +34,9 @@ UNIT="/etc/systemd/system/musegadget.service"
 STATE_DIR="/var/lib/musegadget"
 BLUEZ_CONF="/etc/bluetooth/main.conf"
 BLUEZ_DROPIN="/etc/systemd/system/bluetooth.service.d/zz-musegadget.conf"
+PROXY_DIR="/etc/systemd/system/musegadget.service.d"
+PROXY_DROPIN="$PROXY_DIR/proxy.conf"
+PROXY_ENV="$PROXY_DIR/proxy.env"
 DEFAULT_SOURCE="git+https://github.com/facebookincubator/muse-gadget-sdk@main#subdirectory=linux"
 APT_PACKAGES=(bluez python3 python3-dbus python3-gi python3-cryptography curl ca-certificates)
 ARCH_PACKAGES=(bluez python python-dbus python-gobject python-cryptography curl ca-certificates)
@@ -55,6 +59,12 @@ Usage: install.sh [options]
                     only by root, in $STATE_DIR/sdk_token.
   --yes             Don't ask for confirmation.
   --no-pair         Install without opening Bluetooth pairing.
+  --proxy URL       Reach the internet through this HTTP proxy, given as
+                    http://[user:password@]host:port. This installer uses it,
+                    and the service keeps using it; later runs reuse it.
+                    --proxy none removes it.
+  --no-proxy HOSTS  With --proxy: hosts to reach directly, comma-separated,
+                    as in no_proxy.
   --uninstall       Remove musegadget. Keeps the device identity and pairing
                     in $STATE_DIR unless --purge is also given.
   -h, --help        Show this help.
@@ -71,9 +81,96 @@ ask() {
     case "$answer" in ""|y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
 
-as_root() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi; }
+# sudo drops the caller's environment, so with a proxy every root command
+# gets it explicitly: the package manager, curl, uv, git and musegadget pair.
+# It goes through the environment, not the command line, which other accounts
+# can read (ps, sudo's log) and the URL can hold a password.
+as_root() {
+    if [ -z "${PROXY:-}" ]; then
+        if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
+        return
+    fi
+    (
+        keep=http_proxy,https_proxy
+        export http_proxy="$PROXY" https_proxy="$PROXY"
+        if [ -n "${NO_PROXY_HOSTS:-}" ]; then export no_proxy="$NO_PROXY_HOSTS"; keep+=,no_proxy; fi
+        if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo --preserve-env="$keep" "$@"; fi
+    )
+}
 
 systemd_running() { [ -d /run/systemd/system ]; }
+
+# --- Proxy -------------------------------------------------------------------
+
+# Values go into systemd's EnvironmentFile= and onto command lines unquoted,
+# so refuse anything that would need quoting there.
+plain_value() {
+    [ -n "$1" ] || return 1
+    case "$1" in *[[:space:]]*) return 1 ;; esac
+    case "$1" in *[\"\'\\$\`]*) return 1 ;; esac
+}
+
+# HTTP CONNECT is the one kind of proxy that urllib, websockets and the setup
+# probe all support. websockets refuses a path, query or fragment, and its
+# error, which the service logs, shows the whole URL with any password. The
+# port is required: without one, urllib uses 443 and websockets 80.
+valid_proxy() {
+    local rest="${1#http://}" port
+    case "$1" in http://?*) ;; *) return 1 ;; esac
+    rest="${rest%/}"
+    case "$rest" in ""|*/*|*\?*|*\#*) return 1 ;; esac
+    port="${rest##*:}"
+    case "$port" in "$rest"|""|*[!0-9]*) return 1 ;; esac
+    plain_value "$1"
+}
+
+# The proxy URL without credentials, for messages.
+proxy_shown() { local rest="${1#http://}"; printf 'http://%s' "${rest##*@}"; }
+
+# A later run without --proxy keeps using the saved proxy.
+load_saved_proxy() {
+    local saved line
+    if [ -n "$PROXY" ] || [ "$REMOVE_PROXY" = 1 ] || ! as_root test -f "$PROXY_ENV"; then
+        return 0
+    fi
+    saved="$(as_root cat -- "$PROXY_ENV")" || die "couldn't read the saved proxy in $PROXY_ENV."
+    while IFS= read -r line; do
+        case "$line" in
+            https_proxy=*) PROXY="${line#https_proxy=}" ;;
+            no_proxy=*) NO_PROXY_HOSTS="${line#no_proxy=}" ;;
+        esac
+    done <<<"$saved"
+    valid_proxy "$PROXY" ||
+        die "the saved proxy in $PROXY_ENV is not valid. Rerun with --proxy URL, or --proxy none."
+    say "Using the saved proxy $(proxy_shown "$PROXY")"
+}
+
+remove_proxy() {
+    as_root rm -f -- "$PROXY_DROPIN" "$PROXY_ENV"
+    as_root rmdir -- "$PROXY_DIR" 2>/dev/null || true
+}
+
+# The service reads the proxy from a drop-in, so reinstalling the unit keeps
+# it. The URL can hold a password, and Environment= values are readable by
+# every account (systemctl show), so the drop-in points at a root-only
+# EnvironmentFile instead.
+save_proxy() {
+    if [ "$REMOVE_PROXY" = 1 ]; then
+        if as_root test -e "$PROXY_ENV" || as_root test -e "$PROXY_DROPIN"; then
+            remove_proxy
+            say "Removed the saved proxy; musegadget connects directly."
+        fi
+        return 0
+    fi
+    [ -n "$PROXY" ] || return 0
+    as_root install -d -o 0 -g 0 -m 0755 "$PROXY_DIR"
+    { printf 'https_proxy=%s\n' "$PROXY"
+      if [ -n "$NO_PROXY_HOSTS" ]; then printf 'no_proxy=%s\n' "$NO_PROXY_HOSTS"; fi
+    } | as_root install -o 0 -g 0 -m 0600 /dev/stdin "$PROXY_ENV"
+    printf '# Written by the musegadget installer (--proxy).\n[Service]\nEnvironmentFile=%s\n' "$PROXY_ENV" |
+        as_root install -o 0 -g 0 -m 0644 /dev/stdin "$PROXY_DROPIN"
+    say "The service will use the proxy $(proxy_shown "$PROXY") ($PROXY_DROPIN)"
+}
 
 # --- Checks ------------------------------------------------------------------
 
@@ -542,6 +639,7 @@ uninstall() {
         as_root systemctl disable --now musegadget.service >/dev/null 2>&1 || true
     fi
     as_root rm -f "$UNIT" /usr/local/bin/musegadget
+    remove_proxy
     if systemd_running; then as_root systemctl daemon-reload; fi
     as_root rm -rf "$PREFIX"
     if [ "$PURGE" = 1 ]; then
@@ -565,6 +663,7 @@ uninstall() {
 
 main() {
     SOURCE="$DEFAULT_SOURCE" RUN_AS="" SDK_TOKEN="" ASSUME_YES=0 NO_PAIR=0 UNINSTALL=0 PURGE=0 UV_TMP=""
+    PROXY="" NO_PROXY_HOSTS="" REMOVE_PROXY=0
     # Nothing the installer creates should be writable by group or others.
     umask 022
     while [ $# -gt 0 ]; do
@@ -576,16 +675,31 @@ main() {
             --no-pair) NO_PAIR=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --purge) PURGE=1; shift ;;
+            --proxy) PROXY="${2:?--proxy needs a value}"; shift 2 ;;
+            --no-proxy) NO_PROXY_HOSTS="${2:?--no-proxy needs a value}"; shift 2 ;;
             -h|--help) usage; exit 0 ;;
             *) usage >&2; die "unknown option: $1" ;;
         esac
     done
+    if [ "$PROXY" = none ]; then
+        PROXY="" REMOVE_PROXY=1
+        [ -z "$NO_PROXY_HOSTS" ] || die "--no-proxy goes with a proxy, not --proxy none."
+    elif [ -n "$PROXY" ]; then
+        valid_proxy "$PROXY" ||
+            die "--proxy needs an http:// URL with a port and without spaces or quotes, such as http://proxy.example:3128."
+    elif [ -n "$NO_PROXY_HOSTS" ]; then
+        die "--no-proxy goes with --proxy."
+    fi
+    if [ -n "$NO_PROXY_HOSTS" ] && ! plain_value "$NO_PROXY_HOSTS"; then
+        die "--no-proxy needs a comma-separated host list without spaces or quotes."
+    fi
     if [ "$(id -u)" -ne 0 ]; then
         command -v sudo >/dev/null || die "run this as root, or install sudo."
         sudo true || die "this installer needs sudo."
     fi
     if [ "$UNINSTALL" = 1 ]; then uninstall; return; fi
     if [ -d "$SOURCE" ]; then SOURCE="$(cd "$SOURCE" && pwd)"; fi
+    load_saved_proxy
 
     check_system
     prompt_sdk_token
@@ -603,6 +717,7 @@ main() {
     check_trust_store
     configure_bluez
     save_sdk_token
+    save_proxy
     install_service
     pair
     summary

@@ -139,7 +139,7 @@ board-neutral core and board hooks:
   compatibility. Acquisition/collect provenance, wire schema 1, matrix versions,
   journal layout/budget, prefix analysis and comparison semantics are unchanged.
 
-Waveshare ESP32-S3-Touch-AMOLED-1.75C, 2.16 and AIPI Lite are ported through
+Waveshare ESP32-S3-Touch-AMOLED-1.75C, 2.16, AIPI Lite and ESP-Mosaico are ported through
 one shared backend, `boards/board_power_test_generic.c` on `muse_board_t`, with
 an overlay per board. With `"usb_powered":1` a sweep runs with USB attached, so
 the board can be measured on its 5 V input with a POWER-Z KM003C: see
@@ -173,6 +173,7 @@ the board can be measured on its 5 V input with a POWER-Z KM003C: see
    | `usb_dryrun(on)` | Allow diagnostic USB rehearsal where board-safe, without changing PM or quantitative run state; clear on exit. |
    | `console_init`, `console_write`, `console_getc`, `console_flush` | Optional, weak: the default is the configured UART. Override for a board whose console is elsewhere (native USB Serial/JTAG on the generic backend). |
    | `charging_supported`, `charging(off, guard_ms)` | Optional, weak: the default rejects `charging_off`. Disable charging only with readback and a guard that restores it; restore on finish/abort/error and at boot. |
+   | `run_active(active)` | Optional, weak no-op: true before arm or resume, false after finish/abort restoration. A board can use it to refuse auxiliary reads during a run (the ESP-Mosaico's gauge RPC). |
 
 4. **Define the board-owned matrix** in your BSP, returned by
    `muse_ptest_board_matrix`; never insert board tables in the core. Each entry
