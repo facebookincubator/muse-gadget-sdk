@@ -524,12 +524,13 @@ class WasmAppsTest(unittest.TestCase):
 
     def test_a_control_message_held_for_dma_says_so(self):
         """Apps take internal RAM, and Link holds its registration and command
-        results back while DMA-capable RAM is under its reserve: in apps
-        builds that wait is logged, not silent."""
+        results back while DMA-capable RAM is under its reserve: that wait is
+        logged, not silent, in every build (apps or not)."""
         source = read("main/noise_control.cpp")
-        warn = block(source, "        // Apps builds run closest to the DMA reserve", "#endif")
-        before = source[:source.index("        // Apps builds run closest to the DMA reserve")]
-        self.assertTrue(before.endswith("#if CONFIG_MUSE_WASM_APPS\n"))
+        start = "        // A control message Link holds back while DMA-capable RAM"
+        warn = block(source, start, "#if CONFIG_HOMEHUB_DAEMON_REQUESTS")
+        before = source[:source.index(start)]
+        self.assertGreater(before.rfind("#endif"), before.rfind("#if CONFIG_MUSE_WASM_APPS"))
         for part in ["control_tx.json || uxQueueMessagesWaiting(s_result_q)", "!noise_tx_has_dma_headroom(&dma_free)",
                      "!noise_tx_has_contiguous_dma_headroom()", "ESP_LOGW(", '"link.register"', "5000000"]:
             self.assertIn(part, warn)

@@ -200,6 +200,9 @@ static std::deque<pending_result> result_queue;
 static auto *s_result_q = &result_queue;
 static unsigned result_receives, serializations, json_deletes;
 static bool fail_serialization;
+static UBaseType_t uxQueueMessagesWaiting(std::deque<pending_result> *q) {
+    return static_cast<unsigned>(q->size());
+}
 static int xQueueReceive(std::deque<pending_result> *q, pending_result *pr, int wait) {
     assert(wait == 0);
     ++result_receives;
@@ -285,6 +288,8 @@ static uint64_t last_activity_us;
 // by default every turn sees fresh RX; rx_silent_since_us opts a case into it.
 static bool rx_silent;
 static uint64_t rx_silent_since_us, last_ws_ping_us;
+// The held-message warning's clock, which the session loop keeps across turns.
+static int64_t dma_held_since_us, dma_held_warned_us;
 // A live connection: the peer answers a WebSocket ping at once.
 static bool ws_pong;
 static bool ws_send_ping(esp_tls_t *) {
@@ -355,6 +360,7 @@ static void reset_control() {
     last_activity_us = now_us;
     rx_silent = ws_pong = false;
     last_ws_ping_us = 0;
+    dma_held_since_us = dma_held_warned_us = 0;
 }
 static std::string payload(size_t len) {
     std::string json(len, ' ');
