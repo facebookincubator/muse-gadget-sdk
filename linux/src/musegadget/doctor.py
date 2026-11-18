@@ -143,6 +143,9 @@ def check_bluetooth() -> CheckResult:
 
 def check_network() -> CheckResult:
     """Use the setup TCP probe; this does not test TLS, credentials, or a VM session."""
+    proxy: str | None = network.api_proxy()
+    if proxy is not None:
+        return _check_network_through(proxy)
     if network.is_online(timeout=5.0):
         return {"name": "Muse API TCP", "status": "OK",
                 "detail": f"{API_BASE} accepts a TCP connection on port 443.",
@@ -152,20 +155,41 @@ def check_network() -> CheckResult:
             "hint": "Check DNS, internet access, and outbound HTTPS firewall rules."}
 
 
+def _check_network_through(proxy: str) -> CheckResult:
+    """The setup probe through the configured proxy, which is shown without credentials."""
+    shown: str = network.proxy_display(proxy)
+    if not network.proxy_supported(proxy):
+        return {"name": "Muse API TCP", "status": "FAIL",
+                "detail": f"The proxy {shown} is not an http:// proxy.",
+                "hint": "musegadget supports HTTP CONNECT proxies only; set https_proxy to an http:// URL."}
+    if network.is_online(timeout=5.0):
+        return {"name": "Muse API TCP", "status": "OK",
+                "detail": f"{API_BASE} is reachable on port 443 through the proxy {shown}.",
+                "hint": "TLS, token validity, and the Muse VM connection are not tested."}
+    return {"name": "Muse API TCP", "status": "FAIL",
+            "detail": f"Could not reach {API_BASE} on port 443 through the proxy {shown}.",
+            "hint": "Check the proxy address, its port and credentials, and that it allows CONNECT to port 443."}
+
+
 def _sentence(text: str) -> str:
     return text[:1].upper() + text[1:]
 
 
 def check_trust_store() -> CheckResult:
-    """Check the system trust store, which musegadget won't use while it holds a distrusted root."""
+    """Check the system trust store, which musegadget won't use while it holds a compromised root."""
     problem: str | None = tls.trust_store_problem()
-    if problem is None:
-        return {"name": "Root CAs", "status": "OK",
-                "detail": "The system trust store has none of the distrusted root CAs.",
-                "hint": "Keep the ca-certificates package up to date."}
-    return {"name": "Root CAs", "status": "FAIL",
-            "detail": f"{_sentence(problem)}, so musegadget won't connect.",
-            "hint": f"{_sentence(tls.FIX)}."}
+    if problem is not None:
+        return {"name": "Root CAs", "status": "FAIL",
+                "detail": f"{_sentence(problem)}, so musegadget won't connect.",
+                "hint": f"{_sentence(tls.FIX)}."}
+    warning: str | None = tls.trust_store_warning()
+    if warning is not None:
+        return {"name": "Root CAs", "status": "WARN",
+                "detail": f"{_sentence(warning)}. musegadget still connects.",
+                "hint": f"{_sentence(tls.RETIRED_FIX)}."}
+    return {"name": "Root CAs", "status": "OK",
+            "detail": "The system trust store has none of the distrusted root CAs.",
+            "hint": "Keep the ca-certificates package up to date."}
 
 
 def run_checks() -> tuple[CheckResult, ...]:

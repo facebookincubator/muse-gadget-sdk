@@ -23,8 +23,8 @@
 #include "sdkconfig.h"
 
 /*
- * Bring up the display and build the UI: the avatar on the first tile,
- * settings one swipe to the left. Also owns screen sleep and brightness.
+ * Bring up the display and build the UI: the avatar on the main tile,
+ * settings one swipe left, and optional Latest reply one swipe right. Also owns screen sleep and brightness.
  */
 esp_err_t muse_ui_start(void);
 
@@ -37,6 +37,8 @@ void muse_ui_app_brightness(int pct);
 
 /* From any task: the face tile is the currently visible tile. */
 bool muse_ui_face_active(void);
+/* From any task: a vertical volume drag owns the current touch (no hold PTT). */
+bool muse_ui_volume_swiping(void);
 
 /* The functions below run in the LVGL task (or with the display lock held). */
 

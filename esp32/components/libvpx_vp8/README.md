@@ -64,7 +64,11 @@ segmentation, 240 to 480 px).
 - Memory (`vp8/common/alloccommon.c`, `vp8/common/reconinter.c`,
   `vpx_scale/`): pictures are allocated when a frame first needs one, so a
   stream holds only as many as its references use (libvpx allocates four up
-  front, plus a scratch picture the decoder never uses). Their border is 8
+  front, plus a scratch picture the decoder never uses). A key frame of a
+  new size frees them all and clears the decoder's record of a decoded key
+  frame first (`vp8/vp8_dx_iface.c`), so if it then fails, inter frames
+  wait for the next key frame; an inter frame whose references have no
+  memory is refused all the same, as before a first key frame. Their border is 8
   pixels (16 on the S3 and the S31, whose SIMD code wants 16-byte aligned
   rows) instead of 32: a reference block that reaches past it is copied
   through an edge-emulation buffer with its coordinates clamped into the
@@ -72,7 +76,8 @@ segmentation, 240 to 480 px).
   buffer is in each decoder's state, as two decoders run at once (a
   picture's two bands, one per core). A stride that would be a multiple of
   256 bytes gets 32 more, so a block's rows don't share cache sets (480 px:
-  544, as upstream).
+  544, as upstream). A picture that fails to allocate releases only its
+  own slot.
 - Low-memory decoding (`vp8dx_mgx_set_lowmem()`, `vpx/vp8dx.h`;
   `vp8/decoder/decodeframe.c`), opt-in: an inter frame that replaces the
   last frame, and leaves no reference on its old content, is decoded over it

@@ -36,6 +36,9 @@ esp_err_t muse_ptest_board_power(muse_ptest_readback_t *out);
 esp_err_t muse_ptest_board_apply(const muse_ptest_state_t *state);
 esp_err_t muse_ptest_board_readback(muse_ptest_readback_t *out);
 esp_err_t muse_ptest_board_service(muse_ptest_load_t load);
+/* Optional actuator cleanup at run finish, abort or error, even when fw_apply
+ * fails before reaching the BSP (e.g. a radio/PM error). Weak default is a no-op. */
+esp_err_t muse_ptest_board_stop(void);
 esp_err_t muse_ptest_board_uart_restore(void);
 esp_err_t muse_ptest_board_prepare_deep(bool held);
 esp_err_t muse_ptest_board_release_deep_holds(void);
@@ -52,6 +55,9 @@ esp_err_t muse_ptest_board_console_init(void);
 void muse_ptest_board_console_write(const char *buf, size_t n);
 bool muse_ptest_board_console_getc(uint8_t *c);
 esp_err_t muse_ptest_board_console_flush(void);
+/* Optional run gate: default does nothing. True before arm/resume, false only
+ * after terminal restoration. A board can serialize auxiliary reads with it. */
+void muse_ptest_board_run_active(bool active);
 /* Optional charging hooks: weak defaults return false / ESP_ERR_NOT_SUPPORTED.
  * supported reports capability only; charging returns ESP_OK after readback.
  * off arms a nonzero guard_ms before disabling; !off restores (guard ignored).

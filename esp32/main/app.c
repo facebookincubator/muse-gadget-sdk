@@ -97,6 +97,7 @@
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
 #include "muse_input.h"
+#include "muse_wakeword_glue.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
 #else
@@ -845,11 +846,14 @@ static void defer_unpair_after_revocation(void) {
     atomic_store_explicit(&s_unpair_pending, true, memory_order_release);
 }
 
+// node_id: the id the tokens are for: identity_node_id(), except in setup,
+// which mints for the id it offers (identity_setup_node_id()).
 static bool mint_and_store_device_tokens_unlocked(const char *source_token,
                                                   const char *username,
+                                                  const char *node_id,
                                                   bool *revoked) {
     vm_device_tokens_t tokens = {0};
-    int rc = vm_api_mint_device_token(source_token, identity_node_id(), &tokens);
+    int rc = vm_api_mint_device_token(source_token, node_id, &tokens);
     if (rc == 0) {
         bool ok = store_token_pair_unlocked(tokens.access_token, tokens.refresh_token);
         if (ok) identity_note_paired_sdk_token();
@@ -875,7 +879,12 @@ static bool accept_pairing_credentials(const char *access_token,
     if (!access_token || !*access_token) return false;
     auth_lock_take();
     bool ok = false;
-    if (refresh_token && *refresh_token) {
+    // The node id device_info offered, which the app's tokens are for, goes
+    // with them: stored first, so no tokens from this setup are ever kept
+    // without it (a failed setup clears both).
+    if (!config_set_str("node_id", identity_setup_node_id())) {
+        ESP_LOGW(TAG, "could not store the node id");
+    } else if (refresh_token && *refresh_token) {
         ok = store_token_pair_unlocked(access_token, refresh_token);
         if (ok) {
             identity_note_paired_sdk_token();
@@ -886,9 +895,16 @@ static bool accept_pairing_credentials(const char *access_token,
         ok = false;
     } else {
         ESP_LOGI(TAG, "no refresh_token supplied; minting device token pair");
-        ok = mint_and_store_device_tokens_unlocked(access_token, username, NULL);
+        ok = mint_and_store_device_tokens_unlocked(access_token, username,
+                                                   identity_setup_node_id(), NULL);
     }
     auth_lock_give();
+    // From here the device goes by the new setup's id (a device set up by
+    // earlier firmware leaves its homelink- id behind with its old tokens).
+    if (ok && identity_refresh_node_id()) {
+        ESP_LOGI(TAG, "node id is now %s", identity_node_id());
+        noise_ctrl_set_node_id(identity_node_id());
+    }
     return ok;
 }
 
@@ -908,7 +924,7 @@ static bool migrate_legacy_auth_token_locked(bool *revoked) {
         return false;
     }
     ESP_LOGI(TAG, "migrating legacy auth_token to device token pair");
-    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, revoked);
+    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, identity_node_id(), revoked);
     free(legacy);
     return ok;
 }
@@ -961,7 +977,7 @@ static bool ensure_access_token_ready_with_gate_held(
     if (!refresh) {
         if (vm_auth_backoff_active_unlocked()) goto done;
         ESP_LOGI(TAG, "access_token has no refresh_token; minting device pair");
-        ok = mint_and_store_device_tokens_unlocked(access, NULL, &revoked);
+        ok = mint_and_store_device_tokens_unlocked(access, NULL, identity_node_id(), &revoked);
         goto done;
     }
 
@@ -1525,7 +1541,8 @@ static void on_get_device_info(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "device_info");
-    cJSON_AddStringToObject(root, "node_id", identity_node_id());
+    // The id a setup on this connection takes (identity.h).
+    cJSON_AddStringToObject(root, "node_id", identity_setup_node_id());
     cJSON_AddStringToObject(root, "version", desc ? desc->version : "unknown");
     link_pairing_add_device_info(root);
     char build_sha[17] = {0};
@@ -1957,6 +1974,29 @@ static cJSON *bug_report_command(
 
 #endif  // CONFIG_HOMEHUB_BLE_COMMANDS
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* Muse may only turn listening off. Turning it on is the device's own
+ * choice (Settings, the quick menu, serial), so no remote command can make
+ * the gadget start sending audio. */
+static cJSON *wakeword_disable_command(void) {
+    muse_wakeword_set_enabled(false);
+    muse_wakeword_status_t st;
+    muse_wakeword_status(&st);
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_CreateObject();
+    if (!result || !payload) {
+        cJSON_Delete(result);
+        cJSON_Delete(payload);
+        return command_error("out_of_memory", "failed to allocate wake word result");
+    }
+    cJSON_AddBoolToObject(payload, "enabled", st.enabled);
+    cJSON_AddBoolToObject(payload, "listening", st.listening);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddItemToObject(result, "payload", payload);
+    return result;
+}
+#endif
+
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
@@ -2046,6 +2086,11 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
     if (strcmp(command, "sensors.read") == 0) {
         return waveshare_154g_shtc3_command();
+    }
+#endif
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if (strcmp(command, "wakeword.disable") == 0) {
+        return wakeword_disable_command();
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {
@@ -2722,7 +2767,8 @@ void app_run(void) {
     }
     ESP_LOGI(TAG, "========================");
 
-    link_pairing_init(identity_node_id(), identity_device_id(), identity_mac(),
+    // Setup offers the new-setup id (identity.h).
+    link_pairing_init(identity_setup_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
 #if !CONFIG_MUSE_ENABLED
@@ -2913,12 +2959,15 @@ void app_run(void) {
         ble_coex_set_active(true);
         ui_set_ble("companion");
 #endif
-#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43 && \
+    !CONFIG_MUSE_BOARD_WAVESHARE_S3_175 && !CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
         // so bring the stack up now; it stays silent until advertising is on.
         // The CrowPanel starts it lazily instead, after muse_app_run() has
-        // reserved its internal I2S DMA buffers.
+        // reserved its internal I2S DMA buffers. So do the 1.75 and 1.75C:
+        // the idle stack leaves no 8 KB block for the muse_vm task and chat
+        // never connects (#351).
         start_ble_setup_server_if_needed();
 #endif
     }

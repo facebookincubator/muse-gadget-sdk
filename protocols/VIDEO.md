@@ -95,8 +95,11 @@ The gadget's ring (`muse_vstream.c`) takes the bytes as they come and
 hands the decoder one whole frame at a time. A damaged header makes it
 search for the next one (a header is believed when a start code follows it,
 or for VP8 a frame tag that fits the frame and, on a keyframe, the sync
-code); the frame after a gap is marked so the decoder
-drops it unless it's a keyframe, and asks for one.
+code; with two bands, a top band length that fits, then the top band's
+start code, or both VP8 bands' tags). Every frame is checked in the band
+layout `start` gave, which the decoder then splits it by. The frame after
+a gap is marked so the decoder drops it unless it's a keyframe, and asks
+for one.
 
 ## Wi-Fi
 

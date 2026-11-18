@@ -331,8 +331,14 @@ int vp8dx_receive_compressed_data(VP8D_COMP *pbi) {
 
   /* Muse gadget port: in low-memory mode the new picture's memory is
    * decided in vp8_decode_frame, once its header and motion vectors are known
-   * (vp8_mgx_lowmem_plan). */
-  cm->new_fb_idx = pbi->lowmem_k ? get_free_fb_index(cm) : get_free_fb(cm);
+   * (lowmem_plan). Otherwise it's allocated here, on first use: the slot is
+   * recorded as new_fb_idx first, so if the allocation fails the error path
+   * releases this reservation, not the previous frame's (now a reference). */
+  cm->new_fb_idx = get_free_fb_index(cm);
+  if (!pbi->lowmem_k && vp8_alloc_fb(cm, cm->new_fb_idx)) {
+    vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                       "Failed to allocate frame buffer");
+  }
 
   /* setup reference frames for vp8_decode_frame */
   pbi->dec_fb_ref[INTRA_FRAME] = &cm->yv12_fb[cm->new_fb_idx];

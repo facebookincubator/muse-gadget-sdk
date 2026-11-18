@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|triviapod|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
+#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -24,14 +24,18 @@
 # the other's.
 # MUSE_VIDEO=1 adds devices/sdkconfig.muse-video (the phone camera over
 # Wi-Fi, on boards whose panel driver has draw_frame) in build-muse-<profile>-video/.
+# MUSE_WAKEWORD=1 adds devices/sdkconfig.muse-wakeword (the "Hey Muse" wake
+# word) in build-muse-<profile>-wakeword/.
+# MUSE_POWER_TEST=1 adds the board's diagnostic overlay and a -power-test suffix.
 # MUSE_APPS=1 adds devices/sdkconfig.muse-apps (WebAssembly apps: app.run) in
 # build-muse-<profile>-apps/.
+# MUSE_MIRROR=1 adds the cable mirror in build-muse-<profile>-mirror/.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master
 # (IDF_EXPORT_S31) and Espressif's esp-mosaico-utils (MOSAICO_UTILS), and
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|stopwatch|triviapod|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
+cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -59,6 +63,7 @@ case $board in
     # so pace the writes (paced_esptool.py) at the baud they were tested at.
     watcher) profile=sensecap-watcher;     target=esp32s3; baud=115200; paced=1 ;;
     cardputer-adv) profile=m5stack-cardputer-adv; target=esp32s3 ;;
+    atoms3) profile=m5stack-atoms3; target=esp32s3 ;;
     sticks3) profile=m5stack-sticks3;      target=esp32s3 ;;
     crowpanel-43) profile=crowpanel-advance-43; target=esp32s3 ;;
     stopwatch) profile=m5stack-stopwatch;  target=esp32s3 ;;
@@ -114,8 +119,14 @@ defaults="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-$prof
 if [ -n "${MUSE_VIDEO:-}" ]; then
     B=$B-video; defaults="$defaults;devices/sdkconfig.muse-video"
 fi
+if [ -n "${MUSE_WAKEWORD:-}" ]; then
+    B=$B-wakeword; defaults="$defaults;devices/sdkconfig.muse-wakeword"
+fi
 if [ -n "${MUSE_APPS:-}" ]; then
     B=$B-apps; defaults="$defaults;devices/sdkconfig.muse-apps"
+fi
+if [ -n "${MUSE_MIRROR:-}" ]; then
+    B=$B-mirror; defaults="$defaults;devices/sdkconfig.muse-mirror"
 fi
 if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"
@@ -123,6 +134,13 @@ fi
 [ -n "${iris:-}" ] && defaults="$defaults;devices/sdkconfig.muse-$profile-iris"
 if [ -n "${vibe2:-}" ]; then
     B=$B-vibe2; defaults="$defaults;devices/sdkconfig.muse-$profile-vibe2"
+fi
+if [ -n "${MUSE_POWER_TEST:-}" ]; then
+    [ -z "${MUSE_VIDEO:-}${MUSE_BENCH:-}" ] || { echo "power-test cannot be combined with video/bench" >&2; exit 2; }
+    power_profile=$profile
+    [ "$board" = watcher ] && power_profile=watcher
+    [ -f "devices/sdkconfig.muse-$power_profile-power-test" ] || { echo "no power-test overlay for $board" >&2; exit 2; }
+    B=$B-power-test; defaults="$defaults;devices/sdkconfig.muse-$power_profile-power-test"
 fi
 log=/tmp/muse_build_$board.log
 # ESP-Mosaico: its Vibe Mode firmware installs an ESP-Iris System Update

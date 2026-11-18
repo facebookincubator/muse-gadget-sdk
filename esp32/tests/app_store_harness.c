@@ -18,6 +18,7 @@
  * the host, in a temporary directory standing in for the "apps" partition. */
 
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,17 @@
 #include <unistd.h>
 
 #include "muse_apps_catalog.h"
+
+char stat_fault_path[128];
+
+int stat_fault(const char *path, struct stat *st) {
+    size_t n = strlen(path), k = strlen(stat_fault_path);
+    if (k && n >= k && !strcmp(path + n - k, stat_fault_path)) {
+        errno = EIO;
+        return -1;
+    }
+    return (stat)(path, st);
+}
 
 static int failures;
 #define CHECK(cond) do { if (!(cond)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #cond); failures++; } } while (0)
@@ -165,6 +177,15 @@ int main(int argc, char **argv) {
     muse_apps_catalog_open(dir);
     CHECK(muse_apps_catalog_count() == 0);
 
+    /* ... but not one a flash error hides: only a missing module (ENOENT) is gone. */
+    CHECK(install("b", NULL, "b1", NULL, ROOM, &changed) == NULL);
+    sha_of("b1", sha);
+    snprintf(stat_fault_path, sizeof(stat_fault_path), "/%s.wasm", sha);
+    muse_apps_catalog_open(dir);
+    stat_fault_path[0] = '\0';
+    CHECK(muse_apps_catalog_count() == 1 && has_module("b1"));
+    CHECK(muse_apps_catalog_remove("b", &removed, err, sizeof(err)) == NULL && removed && files() == 1);
+
     /* At most MUSE_APPS_MAX. */
     for (int i = 0; i < MUSE_APPS_MAX; i++) {
         char id[8], tag[8];
@@ -197,6 +218,11 @@ int main(int argc, char **argv) {
         chmod(cat, 0000);
         muse_apps_catalog_open(dir);
         CHECK(muse_apps_catalog_count() == 0 && files() == before);
+        /* nor when a flash error hides it from stat too */
+        snprintf(stat_fault_path, sizeof(stat_fault_path), "/catalog.json");
+        muse_apps_catalog_open(dir);
+        stat_fault_path[0] = '\0';
+        CHECK(muse_apps_catalog_count() == 0 && files() == before);
         /* and nothing saves over it meanwhile, which would drop its apps */
         CHECK(!strcmp(install("late", NULL, "late", NULL, ROOM, &changed), "storage_failed") && files() == before);
         chmod(cat, 0600);
@@ -206,6 +232,9 @@ int main(int argc, char **argv) {
         snprintf(name, sizeof(name), "%s/%s.wasm", dir, sha);
         chmod(name, 0000);
         CHECK(!strcmp(muse_apps_catalog_read("app0", &data, &len, err, sizeof(err)), "no_memory") && data == NULL);
+        snprintf(stat_fault_path, sizeof(stat_fault_path), "/%s.wasm", sha);
+        CHECK(!strcmp(muse_apps_catalog_read("app0", &data, &len, err, sizeof(err)), "no_memory") && data == NULL);
+        stat_fault_path[0] = '\0';
         chmod(name, 0600);
         CHECK(muse_apps_catalog_count() == MUSE_APPS_MAX && has_module("t0"));
     }

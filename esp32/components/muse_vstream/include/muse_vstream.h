@@ -78,6 +78,7 @@ typedef struct {
     uint8_t flags;            /* MUSE_VIDEO_FRAME_KEY */
     uint32_t len;
     bool after_gap;           /* bytes before it were lost or skipped */
+    uint8_t bands;            /* the layout it was checked in (muse_vstream_t.bands): 2, or 1 */
 } muse_vframe_t;
 
 typedef struct {
@@ -100,6 +101,10 @@ typedef struct {
      * before muse_vstream_start; 0 is H.264): H.264 access units start with
      * a start code, VP8 frames with a frame tag (and keyframes a sync code). */
     uint8_t codec;
+    /* The stream's bands as the decoder takes them (muse_video_params_t.tiles),
+     * set with codec: 2, the top band's length first (both bands checked);
+     * anything else, one. */
+    uint8_t bands;
 } muse_vstream_t;
 
 /* buf of size bytes (a power of two), max_frame the largest access unit. */
