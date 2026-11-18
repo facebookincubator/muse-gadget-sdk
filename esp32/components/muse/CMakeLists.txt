@@ -83,6 +83,11 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "fonts/muse_font_vi_12.c" "fonts/muse_font_vi_14.c"
                          "fonts/muse_font_vi_20.c" "fonts/muse_font_vi_28.c")
     endif()
+    if(CONFIG_MUSE_UI_LANG_PT_BR)
+        # Montserrat's Portuguese letters: menu, pairing card, settings pages
+        list(APPEND srcs "fonts/muse_font_pt_12.c" "fonts/muse_font_pt_14.c" "fonts/muse_font_pt_16.c"
+                         "fonts/muse_font_pt_20.c" "fonts/muse_font_pt_28.c")
+    endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
     # default is in avatar/ at the top of the project.

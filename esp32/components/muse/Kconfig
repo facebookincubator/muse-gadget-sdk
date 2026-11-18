@@ -387,7 +387,7 @@ menu "Muse"
             language you speak to it, and the serial console stays in
             English for the tools that read it. The button menu and the
             pairing card are translated; the touch boards' settings pages
-            aren't yet.
+            are in Brazilian Portuguese only.
 
         config MUSE_UI_LANG_EN
             bool "English"
@@ -395,6 +395,13 @@ menu "Muse"
         config MUSE_UI_LANG_VI
             bool "Vietnamese"
             select MUSE_LATIN_FONT
+
+        config MUSE_UI_LANG_PT_BR
+            bool "Brazilian Portuguese"
+            select MUSE_LATIN_FONT
+            help
+                Also translates the touch boards' settings pages and the
+                latest-reply page.
     endchoice
 
     choice MUSE_JC3248W535_MIC
