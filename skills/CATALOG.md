@@ -1,6 +1,6 @@
 # Skill Catalog
 
-58 active skills: 56 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+61 active skills: 59 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
@@ -20,6 +20,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Meross smart plugs](gadget-meross-smart-plugs/SKILL.md) — local switching with supplied keys.
 - [TP-Link Kasa EP10](gadget-tplink-kasa-ep10/SKILL.md) — relay and LED; no metering.
 - [TP-Link Kasa EP25](gadget-tplink-kasa-ep25/SKILL.md) — relay, LED, energy and supported auto-off.
+- [Nanoleaf](gadget-nanoleaf/SKILL.md) — power, brightness and color through the local API after button pairing.
 
 ## Speakers, displays and TVs
 
@@ -39,9 +40,11 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Insignia Fire TVs](gadget-insignia-fire-tv/SKILL.md) — PIN-paired local remote, app launch, volume and mute through Home Link.
 - [LG webOS TVs](gadget-lg-webos-tvs/SKILL.md) — local remote/apps/inputs; Cast when advertised.
 - [Logitech Squeezebox](gadget-logitech-squeezebox/SKILL.md) — playback through an existing Lyrion server.
+- [Music Assistant](gadget-music-assistant/SKILL.md) — playback, volume and queues on named players, authorized with a long-lived token.
 - [Roku TVs and players](gadget-roku-tvs-and-players/SKILL.md) — local remote, apps, text entry and power over ECP; network-control setting must allow it.
 - [Samsung Tizen TVs](gadget-samsung-tizen-tvs/SKILL.md) — local remote and model-specific Frame Art.
 - [Sonos speakers](gadget-sonos-speakers/SKILL.md) — playback, volume and grouping.
+- [Sony Bravia TVs](gadget-sony-bravia-tvs/SKILL.md) — local REST control of power, volume, inputs and apps with Pre-Shared Key authentication.
 - [VIZIO D40f-G9](gadget-vizio-d40f-g9/SKILL.md) — SmartCast management; Cast when advertised.
 
 ## Printers and appliances
@@ -52,8 +55,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 - [Dyson HP04](gadget-dyson-pure-hot-cool-hp04/SKILL.md) — local status and supported fan/heating controls.
 - [Miele G 7566](gadget-miele-g7566-dishwasher/SKILL.md) — local status; commands only if supported and permitted.
 - [Moonraker 3D printers](gadget-moonraker-3d-printers/SKILL.md) — existing-service status and print/job controls.
-- [Bambu Lab printers](gadget-bambu-lab-printers/SKILL.md) — local status, filament and owner-approved prints in Developer Mode.
-- [Bambu Lab P2S](gadget-bambu-lab-p2s/SKILL.md) — status, chamber-camera snapshots, monitoring and agreed failure pauses.
+- [Bambu Lab printers](gadget-bambu-lab-printers/SKILL.md) — local status, filament, P2S chamber-camera snapshots and monitoring, and owner-approved prints in Developer Mode.
 - [HomeWhiz laundry](gadget-homewhiz-laundry/SKILL.md) — cloud only; needs internet and a HomeWhiz account: washer and dryer cycle state, read-only.
 - [VeSync purifiers](gadget-vesync-purifier/SKILL.md) — cloud only; needs internet and a VeSync account: Levoit purifier power, mode, fan level and filter life, guarded per exact model.
 
@@ -78,6 +80,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 ## Read-only network and camera access
 
+- [NUT UPS](gadget-nut-ups/SKILL.md) — read-only UPS and battery status from a Network UPS Tools upsd server, using upsc on a Linux gadget.
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
 - [Wyze RTSP cameras](gadget-wyze-rtsp-cameras/SKILL.md) — viewing/capture with compatible legacy firmware already installed.
 - [yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
