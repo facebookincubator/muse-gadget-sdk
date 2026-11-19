@@ -65,6 +65,7 @@ int muse_settings_sleep_s(void) { return 120; }
 void muse_ble_status(muse_ble_status_t *p) { memset(p,0,sizeof(*p)); }
 muse_link_state_t muse_link_state(void) { return MUSE_LINK_ONLINE; }
 bool muse_link_talk_press(void) { return pairing; }
+bool muse_link_confirm_press(int64_t released_us) { (void)released_us; return pairing; }
 bool muse_menu_is_open(void) { return menu; }
 void muse_menu_key(muse_menu_key_t key) { selected=key; }
 static esp_err_t board_off(void) { assert(shutdown==1); ++powered_off; return ESP_FAIL; }
