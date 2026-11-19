@@ -1,0 +1,29 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The Camera Module in the ESP-Mosaico's left expansion slot, for
+# camera.capture. Load after devices/sdkconfig.muse-esp-mosaico
+# (MUSE_CAMERA=1 tools/muse/board.sh build mosaico). Its two sensors at the
+# UYVY sizes Espressif's mosaico_module_camera picks for them; the SC101IOT at
+# 15 fps, esp_cam_sensor's default for it.
+CONFIG_MUSE_MOSAICO_CAMERA=y
+CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE=y
+CONFIG_CAMERA_OV3640=y
+CONFIG_CAMERA_OV3640_AUTO_DETECT_DVP_INTERFACE_SENSOR=y
+CONFIG_CAMERA_OV3640_DVP_YUV422_UYVY_1024X768_25FPS=y
+CONFIG_CAMERA_OV3640_DVP_DEFAULT_FMT_YUV422_UYVY_1024X768_25FPS=y
+CONFIG_CAMERA_SC101IOT=y
+CONFIG_CAMERA_SC101IOT_AUTO_DETECT_DVP_INTERFACE_SENSOR=y
+CONFIG_CAMERA_SC101IOT_DVP_YUV422_1280X720_15FPS=y
+CONFIG_CAMERA_SC101IOT_DVP_DEFAULT_FMT_YUV422_1280X720_15FPS=y
