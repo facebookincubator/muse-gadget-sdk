@@ -73,6 +73,11 @@ only root can read, since the URL can hold a password
 lists hosts to reach directly, `--proxy none` removes the proxy, and
 `--uninstall` removes it too.
 
+Avoid a user name or password that needs percent-encoding in the URL, such
+as `p%40ss` for `p@ss`. websockets before 17.2, which the installer uses,
+sends it still encoded, so pairing works but the proxy refuses the Muse
+connection with a 407.
+
 `sudo` drops your shell's proxy settings, so when you run `musegadget pair`
 or `musegadget doctor` yourself, set `https_proxy` (and `no_proxy`) and keep
 them:
