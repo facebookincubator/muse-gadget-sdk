@@ -31,6 +31,7 @@ FAKES = r"""
 #include <stddef.h>
 #define ESP_OK 0
 #define GPIO_NUM_21 21
+#define GPIO_NUM_40 40
 #define GPIO_MODE_OUTPUT 1
 #define ADC_UNIT_1 0
 #define ADC_CHANNEL_0 0
@@ -60,11 +61,11 @@ HARNESS = r"""
 #include "reterminal_battery.h"
 static int failure, enabled, deleted, allocations, samples, pin_mv=1900;
 int gpio_config(const gpio_config_t *c) {
-    assert(c->pin_bit_mask == (1ULL<<21) && c->mode == GPIO_MODE_OUTPUT);
+    assert(c->pin_bit_mask == (1ULL << EXPECTED_ENABLE_GPIO) && c->mode == GPIO_MODE_OUTPUT);
     return failure==1 ? -1 : 0;
 }
 int gpio_set_level(int pin, int level) {
-    assert(pin==21);
+    assert(pin == EXPECTED_ENABLE_GPIO);
     if (failure==2 && level) return -1;
     enabled=level; return 0;
 }
@@ -139,6 +140,7 @@ class ReterminalBatteryTest(unittest.TestCase):
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.out = Path(cls.tmp.name)
         (cls.out / "fake.h").write_text(FAKES)
+        (cls.out / "sdkconfig.h").write_text("")
         for name in ("driver/gpio.h", "esp_adc/adc_cali.h",
                      "esp_adc/adc_cali_scheme.h", "esp_adc/adc_oneshot.h", "esp_log.h"):
             path = cls.out / name
@@ -148,11 +150,16 @@ class ReterminalBatteryTest(unittest.TestCase):
         cls.cc = shlex.split(os.environ.get("CC", "cc"))
         cls.flags = ["-std=c11", "-Wall", "-Wextra", "-Werror",
                      "-I", str(cls.out), "-I", str(ROOT / "main")]
-        result = subprocess.run([*cls.cc, *cls.flags, str(cls.out / "harness.c"),
-                                 str(ROOT / "main/reterminal_battery.c"),
-                                 "-o", str(cls.out / "battery")], capture_output=True, text=True)
-        if result.returncode:
-            raise AssertionError(result.stdout + result.stderr)
+        for gpio in (21, 40):
+            result = subprocess.run([*cls.cc, *cls.flags,
+                                     f"-DEXPECTED_ENABLE_GPIO={gpio}",
+                                     f"-DCONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951={int(gpio == 40)}",
+                                     str(cls.out / "harness.c"),
+                                     str(ROOT / "main/reterminal_battery.c"),
+                                     "-o", str(cls.out / f"battery-{gpio}.exe")],
+                                    capture_output=True, text=True)
+            if result.returncode:
+                raise AssertionError(result.stdout + result.stderr)
 
     def test_calibrated_voltage_percentage_and_invalid_readings(self):
         self.run_case(0)
@@ -163,9 +170,11 @@ class ReterminalBatteryTest(unittest.TestCase):
                 self.run_case(failure)
 
     def run_case(self, failure):
-        result = subprocess.run([str(self.out / "battery"), str(failure)],
-                                capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for gpio in (21, 40):
+            with self.subTest(gpio=gpio):
+                result = subprocess.run([str(self.out / f"battery-{gpio}.exe"), str(failure)],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_initialization_compiles_without_sht4x_for_both_panels(self):
         app = (ROOT / "main/app.c").read_text()
