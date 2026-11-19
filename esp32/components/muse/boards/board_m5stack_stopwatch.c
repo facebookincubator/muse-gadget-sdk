@@ -310,13 +310,17 @@ static int pmic_mv(uint8_t reg)
     return reg_read(s_pmic, reg, b, sizeof(b)) == ESP_OK ? b[0] | b[1] << 8 : 0;
 }
 
-/* Writing 0 clears every status bit and lets the IRQ line go high again. */
-static esp_err_t pmic_irq_clear(void)
+/* Writing 0 clears every status bit and lets the IRQ line go high again.
+ * *key (if set) says whether STATUS3, the power key's, cleared. */
+static esp_err_t pmic_irq_clear(bool *key)
 {
     esp_err_t err = ESP_OK;
     for (uint8_t reg = PMIC_IRQ_STATUS1; reg <= PMIC_IRQ_STATUS3; reg++) {
         esp_err_t e = reg_write(s_pmic, reg, (uint8_t[]){ 0 }, 1);
         err = err == ESP_OK ? e : err;
+        if (key && reg == PMIC_IRQ_STATUS3) {
+            *key = e == ESP_OK;
+        }
     }
     return err;
 }
@@ -352,7 +356,7 @@ static esp_err_t pmic_irq_setup(void)
                                    PMIC_CLICK_DELAY_125MS | PMIC_DBL_DELAY_250MS), TAG, "click timing");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_GPIO_OD, PMIC_IRQ_PIN, PMIC_IRQ_PIN), TAG, "irq open drain");
     ESP_RETURN_ON_ERROR(pmic_update(PMIC_GPIO_FUNC0, PMIC_FUNC_GPIO1_MASK, PMIC_FUNC_GPIO1_IRQ), TAG, "gpio1 irq");
-    return pmic_irq_clear();
+    return pmic_irq_clear(NULL);
 }
 
 /*
@@ -374,8 +378,10 @@ static unsigned take_power_irq(void)
     uint8_t st = 0;
     bool read = reg_read(s_pmic, PMIC_IRQ_STATUS3, &st, 1) == ESP_OK;
     /* A click whose status didn't clear is read again on the next poll:
-     * report it then, so it isn't counted twice. */
-    bool cleared = pmic_irq_clear() == ESP_OK;
+     * report it then, so it isn't counted twice. Only STATUS3 decides: if
+     * just another status fails to clear, the click is gone from the chip. */
+    bool cleared = false;
+    pmic_irq_clear(&cleared);
     s_irq_stuck = gpio_get_level(PMIC_IRQ_GPIO) == 0;
     if (!read || !cleared) {
         return 0;

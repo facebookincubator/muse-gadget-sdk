@@ -211,11 +211,16 @@ int main(int argc, char **argv) {
         reset_wait(); wait_buttons(1000); assert(waited_n == 3 && waited_ms == 1000);
         reset_wait(); wait_buttons(400); assert(waited_n == 3 && waited_ms == 400);
         s_pmic_irq = false; reset_wait(); wait_buttons(10000); assert(waited_n == 2 && waited_ms == 200);
-    } else if (test == 11) {   /* a click whose status won't clear counts once, when it clears */
+    } else if (test == 11) {   /* a click whose status won't clear counts once, when it clears; other statuses don't matter */
         regs[0x42] = 0x01; fail_write_reg = 0x42;
         assert(sample(0, 10000) == 0 && !line() && s_irq_stuck);
         fail_write_reg = -1; assert(sample(0, 10000) == TAP && line());
         assert(sample(0, 10000) == 0);
+        for (int reg = 0x40; reg <= 0x41; reg++) {   /* another status failing loses no click */
+            now += 2000000; regs[0x42] = 0x01; fail_write_reg = reg;
+            assert(sample(0, 10000) == TAP && line());
+            fail_write_reg = -1; assert(sample(0, 10000) == 0);
+        }
     } else {   /* a line that won't clear is distrusted until it reads high again */
         stuck = 1; assert(sample(0, 10000) == 0 && s_irq_stuck);
         reset_wait(); wait_buttons(1000); assert(waited_n == 2 && waited_ms == 200);
