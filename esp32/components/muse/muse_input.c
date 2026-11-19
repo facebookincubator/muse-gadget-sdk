@@ -327,9 +327,9 @@ static void aux_key(bool pressed, bool edge)
  * still held once awake. A display-only board (no audio_init or mic_init)
  * runs no voice task to take presses off the queue, so there the press only
  * wakes, selects or confirms pairing. Pairing takes a press that began after
- * its prompt: only a press's own edge can confirm (`can_confirm`; not the
- * Watcher's wheel, reported after its hold), with the time the control was
- * last let go. */
+ * its prompt: only a press's own edge can confirm (`can_confirm`; not a press
+ * reported after its hold, MUSE_BTN_TALK_HELD or the Watcher's wheel), with
+ * the time the control was last let go. */
 static void talk_input(unsigned ev, bool can_confirm)
 {
     bool talk_down = s_talk_down;
@@ -384,7 +384,7 @@ static void talk_input(unsigned ev, bool can_confirm)
 
 static void talk_button(unsigned ev)
 {
-    talk_input(ev, true);
+    talk_input(ev, !(ev & MUSE_BTN_TALK_HELD));
 }
 
 /* Keyboard menus don't repurpose Space/GO as Select. Navigation wakes the

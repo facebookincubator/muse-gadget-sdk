@@ -30,6 +30,7 @@ MUSE_HARNESS = r'''
 #include <string.h>
 #define MUSE_BTN_TALK_PRESS 1u
 #define MUSE_BTN_TALK_RELEASE 2u
+#define MUSE_BTN_TALK_HELD (1u << 17)
 typedef int gpio_num_t;
 typedef struct { gpio_num_t gpio; bool active_high; bool pressed; uint8_t stable; } muse_gpio_button_t;
 static int64_t clock_us;
@@ -140,6 +141,22 @@ static void replaced_prompt(void) {
     assert(confirms == 1);
 }
 
+/* A finger held on the face to talk is reported once the hold passes 500 ms
+ * (MUSE_BTN_TALK_HELD), long after it began: it talks and never confirms, even
+ * a hold that began after the prompt. The talk button then confirms. */
+static void held_face(void) {
+    reset();
+    prompt(1100);              /* the finger went down at 1000 ms */
+    clock_us = 1500 * 1000; talk_button(MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD);
+    assert(!confirms && pending && downs == 1);
+    clock_us = 2000 * 1000; talk_button(MUSE_BTN_TALK_RELEASE);
+    clock_us = 3000 * 1000; talk_button(MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD);
+    assert(!confirms && pending && downs == 2);
+    clock_us = 3500 * 1000; talk_button(MUSE_BTN_TALK_RELEASE);
+    run(3500, 3600); level = 0; run(3600, 3700);
+    assert(confirms == 1 && downs == 2 && ups == 2);
+}
+
 /* Screen confirmation: touch taps report press and release together
  * (muse_input_touch_talk()), and boards that confirm on a tap themselves call
  * muse_link_talk_press(). A tap too soon after the prompt to have begun after
@@ -166,6 +183,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "after")) press_after_the_prompt();
     else if (!strcmp(argv[1], "replaced")) replaced_prompt();
     else if (!strcmp(argv[1], "screen")) screen_taps();
+    else if (!strcmp(argv[1], "held")) held_face();
     else return 2;
     return 0;
 }
@@ -286,6 +304,9 @@ class PairingFreshPress(unittest.TestCase):
 
     def test_a_press_for_a_replaced_prompt_does_not_confirm(self):
         self.run_case("replaced")
+
+    def test_a_face_held_to_talk_does_not_confirm(self):
+        self.run_case("held")
 
     def test_screen_confirmation_still_works(self):
         self.run_case("screen")

@@ -2375,7 +2375,7 @@ static void on_button_short_press(void) {
             notify_pairing_confirmed(session_generation);
             ESP_LOGI(TAG, "button short-press confirmed active pairing session");
         } else {
-            ESP_LOGI(TAG, "button short-press ignored; it began before the pairing prompt");
+            ESP_LOGI(TAG, "button short-press didn't confirm (prompt not armed or expired, or the press began before it)");
         }
         return;
     }
@@ -2596,7 +2596,7 @@ bool app_confirm_pairing_press(int64_t pressed_after_us) {
         notify_pairing_confirmed(session_generation);
         ESP_LOGI(TAG, "talk button confirmed active pairing session");
     } else {
-        ESP_LOGI(TAG, "talk press ignored; it began before the pairing prompt");
+        ESP_LOGI(TAG, "talk press didn't confirm (prompt not armed or expired, or the press began before it)");
     }
     return true;
 }

@@ -35,6 +35,7 @@ class EchoEarInputTest(unittest.TestCase):
 #include "ostb_echoear_touch.h"
 #define MUSE_BTN_TALK_PRESS 1u
 #define MUSE_BTN_TALK_RELEASE 2u
+#define MUSE_BTN_TALK_HELD (1u << 17)
 #define MUSE_PTT_DOWN 1
 #define MUSE_PTT_UP 2
 #define MUSE_MENU_SELECT 1

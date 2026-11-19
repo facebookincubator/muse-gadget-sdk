@@ -267,6 +267,7 @@ static void long_reply(void) {
 
 #define MUSE_BTN_TALK_PRESS 1
 #define MUSE_BTN_TALK_RELEASE 2
+#define MUSE_BTN_TALK_HELD (1u << 17)
 #define MUSE_BTN_REVIEW_PREV (1u << 15)
 #define MUSE_BTN_REVIEW_NEXT (1u << 16)
 #define portTICK_PERIOD_MS 1
