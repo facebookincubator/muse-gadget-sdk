@@ -167,6 +167,8 @@ static const muse_lang_entry_t MENU[] = {
     { "Small", "Nhỏ" },
     { "Medium", "Vừa" },
     { "Large", "Lớn" },
+    { "Extra small", "Rất nhỏ" },
+    { "Extra large", "Rất lớn" },
     { "Custom", "Tuỳ chỉnh" },
     /* Titles, upper case */
     { "MENU", "CÀI ĐẶT" },
@@ -352,6 +354,8 @@ static const muse_lang_entry_t MENU[] = {
     { "Small", "Pequeno" },
     { "Medium", "Médio" },
     { "Large", "Grande" },
+    { "Extra small", "Muito pequeno" },
+    { "Extra large", "Muito grande" },
     { "Custom", "Personalizado" },
     /* Titles, upper case */
     { "MENU", "MENU" },

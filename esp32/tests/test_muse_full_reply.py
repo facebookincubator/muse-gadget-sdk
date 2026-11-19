@@ -74,13 +74,17 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap);
 
 /* LVGL 9.5's line heights and glyph advances, ' ' to '~'. */
 static const unsigned char M14_W[95] = {4,4,6,10,9,12,10,3,5,5,6,8,3,5,3,5,9,5,8,8,9,8,9,8,9,9,3,3,8,8,8,8,15,10,11,10,12,9,9,11,11,4,7,10,8,13,11,12,10,12,10,9,8,11,10,16,9,9,9,5,5,5,8,7,8,8,10,8,10,9,5,10,10,4,4,9,4,15,10,9,10,10,6,7,6,10,8,13,8,8,7,5,4,5,8};
+static const unsigned char M16_W[95] = {4,4,6,11,10,14,11,3,5,5,6,9,4,6,4,6,11,6,9,9,11,9,10,10,10,10,4,4,9,9,9,9,17,12,12,12,13,11,10,12,13,5,8,12,10,15,13,13,12,13,12,10,9,13,11,18,11,10,11,5,6,5,9,8,10,10,11,9,11,10,6,11,11,4,5,10,4,17,11,10,11,11,7,8,7,11,9,14,9,9,8,6,5,6,9};
 static const unsigned char M20_W[95] = {5,5,8,14,12,17,14,4,7,7,8,12,5,8,5,7,13,7,12,11,13,12,12,12,13,12,5,5,12,12,12,11,21,15,15,14,17,13,13,15,16,6,10,14,12,19,16,17,14,17,15,12,12,16,14,23,13,13,13,7,7,7,12,10,12,12,14,11,14,12,7,14,14,6,6,12,6,21,14,13,14,14,8,10,8,14,11,18,11,11,10,7,6,7,12};
+static const unsigned char M28_W[95] = {8,8,11,20,17,24,19,6,9,9,11,16,6,11,6,10,19,10,16,16,19,16,17,17,18,17,6,6,16,16,16,16,29,21,21,20,23,19,18,22,23,9,14,20,17,27,23,24,20,24,20,17,16,22,20,32,19,18,18,9,10,9,16,14,17,17,19,16,19,17,10,19,19,8,8,17,8,30,19,18,19,19,12,14,12,19,16,25,15,16,15,10,8,10,16};
 /* wide: glyphs past ASCII (CJK, accented letters) are in the font. */
 typedef struct { int line_h, glyph_w; const unsigned char *adv; bool wide; } lv_font_t;
 static const lv_font_t lv_font_unscii_8 = { 9, 8, NULL, false };
 static const lv_font_t lv_font_unscii_16 = { 17, 16, NULL, false };
 static const lv_font_t lv_font_montserrat_14 = { 16, 10, M14_W, false };
+static const lv_font_t lv_font_montserrat_16 = { 18, 11, M16_W, false };
 static const lv_font_t lv_font_montserrat_20 = { 22, 14, M20_W, false };
+static const lv_font_t lv_font_montserrat_28 = { 30, 19, M28_W, false };
 static const lv_font_t cjk_font = { 17, 16, NULL, true };   /* unscii-16 with the CJK fallback */
 static const lv_font_t muse_font_latin_16 = { 16, 8, NULL, true };   /* Unifont's 8x16 */
 static const lv_font_t *caption_font(void) { return &cjk_font; }
@@ -165,7 +169,7 @@ static void lv_label_set_long_mode(lv_obj_t *o, int m) { o->long_mode = m; }
 static void lv_obj_align(lv_obj_t *o, int a, int x, int y) { (void)x; o->align = a; o->y = y; }
 static void lv_obj_set_flag(lv_obj_t *o, int f, bool on) { (void)f; o->hidden = on; }
 
-static int s_size = MUSE_TEXT_MEDIUM;
+static int s_size = MUSE_TEXT_SMALL;
 int muse_settings_text_size(void) { return s_size; }
 
 /* muse_state.c's pages, with a mode that puts every line on one page. */
@@ -397,7 +401,7 @@ int main(int argc, char **argv)
     full_reply_setup();
 
     /* Every line of a reply reaches the screen, at every size. */
-    for (s_size = MUSE_TEXT_LARGE; s_size >= MUSE_TEXT_SMALL; s_size--) {
+    for (s_size = MUSE_TEXT_XLARGE; s_size >= MUSE_TEXT_XSMALL; s_size--) {
         apply_text_size();
         CHECK(s_lines >= 2 && s_cols >= 8, "size %d: page %dx%d", s_size, s_cols, s_lines);
         ascii_reply(text, sizeof(text), s_cols < 16 ? s_cols : 16);
@@ -421,7 +425,7 @@ int main(int argc, char **argv)
     }
 
     /* Every page fits at its Text size, capitals and lines of W too. */
-    for (s_size = MUSE_TEXT_LARGE; s_size >= MUSE_TEXT_SMALL; s_size--) {
+    for (s_size = MUSE_TEXT_XLARGE; s_size >= MUSE_TEXT_XSMALL; s_size--) {
         apply_text_size();
         snprintf(text, sizeof(text), "%s%s%s", prose, prose, prose);
         pages_fit("prose", text);
@@ -448,7 +452,7 @@ int main(int argc, char **argv)
     }
 
     /* A reply: the first page, then the next ones as they come. */
-    s_size = MUSE_TEXT_MEDIUM;
+    s_size = MUSE_TEXT_SMALL;
     apply_text_size();
     show("It's mild today.", false);
     band("before the reply");

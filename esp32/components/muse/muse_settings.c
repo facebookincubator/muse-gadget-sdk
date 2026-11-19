@@ -35,6 +35,8 @@ static const char *TAG = "muse_settings";
 
 #define NS "muse"
 #define DEFAULT_HOST "hatch.metaaivm.com"
+#define TEXT_SIZE_KEY "text_sz5"     /* MUSE_TEXT_*; "text_size" had three */
+#define TEXT_SIZE_UNSET 0xff
 
 static struct {
     uint8_t volume;
@@ -56,7 +58,7 @@ static struct {
     .mic_gain = 30,
     .brightness = 100,
     .sleep_s = 120,
-    .text_size = MUSE_TEXT_MEDIUM,
+    .text_size = TEXT_SIZE_UNSET,
     .wifi_on = true,
     .host = DEFAULT_HOST,
 };
@@ -69,6 +71,7 @@ static bool s_apps_on;
 #endif
 static nvs_handle_t s_nvs;
 static muse_setting_cb_t s_listener;
+static int s_text_default = MUSE_TEXT_SMALL;
 
 #define LOCKED(body) do { xSemaphoreTake(s_lock, portMAX_DELAY); body; xSemaphoreGive(s_lock); } while (0)
 
@@ -108,6 +111,21 @@ static void notify(muse_setting_t what)
     }
 }
 
+/* The text size someone chose. Before there were five sizes, "text_size"
+ * kept one of three for small screens' full-screen replies: their Small
+ * (unscii-8), Medium (Montserrat 14) and Large (Montserrat 20) are now Extra
+ * small, Small and Large. */
+static void load_text_size(void)
+{
+    static const uint8_t FROM_THREE[] = { MUSE_TEXT_XSMALL, MUSE_TEXT_SMALL, MUSE_TEXT_LARGE };
+    uint8_t v;
+    if (nvs_get_u8(s_nvs, TEXT_SIZE_KEY, &v) == ESP_OK) {
+        s.text_size = v < MUSE_TEXT_SIZES ? v : TEXT_SIZE_UNSET;
+    } else if (nvs_get_u8(s_nvs, "text_size", &v) == ESP_OK && v < sizeof(FROM_THREE)) {
+        s.text_size = FROM_THREE[v];
+    }
+}
+
 esp_err_t muse_settings_init(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -138,7 +156,7 @@ esp_err_t muse_settings_init(void)
 #endif
     load_u8("bright", &s.brightness);
     nvs_get_u16(s_nvs, "sleep_s", &s.sleep_s);
-    load_u8("text_size", &s.text_size);
+    load_text_size();
     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
         s.wifi_on = b;
     }
@@ -159,7 +177,6 @@ esp_err_t muse_settings_init(void)
     s.volume = clampi(s.volume, 0, 100);
     s.mic_gain = clampi(s.mic_gain, 0, MUSE_MIC_GAIN_MAX);
     s.brightness = clampi(s.brightness, 10, 100);
-    s.text_size = clampi(s.text_size, MUSE_TEXT_SMALL, MUSE_TEXT_LARGE);
     ESP_LOGI(TAG, "vol %d%s, mic %d dB, bright %d, sleep %ds, wifi %s (%s), ble %s, muse %s",
              s.volume, s.speaker_on ? "" : " (speaker off)", s.mic_gain, s.brightness, s.sleep_s, s.wifi_on ? "on" : "off",
              "network saved by Link", s.ble_on ? "on" : "off", s.token[0] ? "token set" : "no token");
@@ -176,7 +193,7 @@ bool muse_settings_speaker_on(void) { return s.speaker_on; }
 int muse_settings_mic_gain(void) { return s.mic_gain; }
 int muse_settings_brightness(void) { return s.brightness; }
 int muse_settings_sleep_s(void) { return s.sleep_s; }
-int muse_settings_text_size(void) { return s.text_size; }
+int muse_settings_text_size(void) { return s.text_size == TEXT_SIZE_UNSET ? s_text_default : s.text_size; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
 bool muse_settings_voice_notes(void) { return atomic_load(&s_voice_notes); }
@@ -273,8 +290,13 @@ void muse_settings_set_sleep_s(int secs)
 
 void muse_settings_set_text_size(int size)
 {
-    s.text_size = clampi(size, MUSE_TEXT_SMALL, MUSE_TEXT_LARGE);
-    save_u8("text_size", s.text_size);   /* the UI polls it */
+    s.text_size = clampi(size, MUSE_TEXT_XSMALL, MUSE_TEXT_XLARGE);
+    save_u8(TEXT_SIZE_KEY, s.text_size);   /* the UI polls it */
+}
+
+void muse_settings_set_text_size_default(int size)
+{
+    s_text_default = clampi(size, MUSE_TEXT_XSMALL, MUSE_TEXT_XLARGE);
 }
 
 void muse_settings_set_wifi_on(bool on)

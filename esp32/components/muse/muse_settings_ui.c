@@ -133,6 +133,7 @@ static lv_obj_t *s_ble_sw, *s_ble_status;
 static lv_obj_t *s_notes_sw;
 #endif
 static lv_obj_t *s_spk_sw, *s_vol_val, *s_vol_sl, *s_gain_val, *s_gain_sl, *s_bright_val, *s_bright_sl, *s_mic_bar, *s_mic_val;
+static lv_obj_t *s_text_val, *s_text_sl;
 #if CONFIG_MUSE_WAKEWORD_ENABLE
 static lv_obj_t *s_wake_sw;
 #endif
@@ -1408,6 +1409,30 @@ static void on_bright(lv_event_t *e)
     }
 }
 
+static const char *const TEXT_SIZE_NAMES[MUSE_TEXT_SIZES] = {
+    "Extra small", "Small", "Medium", "Large", "Extra large",
+};
+
+static void on_text_size(lv_event_t *e)
+{
+    int v = lv_slider_get_value(s_text_sl);
+    set_text(s_text_val, TEXT_SIZE_NAMES[v]);
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+        muse_settings_set_text_size(v);   /* the face picks it up on its next frame */
+    }
+}
+
+/* Reply text size, under Brightness, on screens whose replies follow it. */
+static void text_size_row(lv_obj_t *list)
+{
+    if (!muse_ui_text_size_applies()) {
+        return;
+    }
+    s_text_sl = slider(list, "Text size", MUSE_TEXT_XSMALL, MUSE_TEXT_XLARGE, muse_settings_text_size(),
+                       &s_text_val, on_text_size);
+    set_text(s_text_val, TEXT_SIZE_NAMES[muse_settings_text_size()]);
+}
+
 static void build_sound_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
@@ -1416,6 +1441,7 @@ static void build_sound_page(lv_obj_t *tile)
         s_sound = page(tile, "SCREEN", true, &list);
         s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
         set_val(s_bright_val, "%d%%", muse_settings_brightness());
+        text_size_row(list);
         return;
     }
     s_sound = page(tile, "SOUND", true, &list);
@@ -1458,6 +1484,9 @@ static void build_sound_page(lv_obj_t *tile)
     if (!muse_board->epaper) {
         s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
         set_val(s_bright_val, "%d%%", muse_settings_brightness());
+    }
+    if (!muse_board->epaper) {
+        text_size_row(list);
     }
     if (s_vol_val) set_val(s_vol_val, "%d%%", muse_settings_volume());
     set_val(s_gain_val, "%d dB", muse_settings_mic_gain() / 3 * 3);
