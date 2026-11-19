@@ -617,7 +617,7 @@ static bool hatch_reply(bool *delivered, bool incoming)
     static int16_t buf[MUSE_AUDIO_CHUNK];
     static const int16_t silence[MUSE_AUDIO_CHUNK];
     char text[96];
-    static char page[MUSE_CAPTION_MAX];
+    MUSE_CAPTION_BSS static char page[MUSE_CAPTION_MAX];
     char incomplete[sizeof(text)] = "";
     bool done = false, speaking = false, replied = false;
     size_t played = 0;

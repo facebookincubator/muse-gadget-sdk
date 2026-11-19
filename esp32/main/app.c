@@ -87,6 +87,13 @@
 #if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
 #include "waveshare_154g_shtc3.h"
 #endif
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+#include "boards/board_wxm_wg1200.h"
+#include "muse_settings.h"
+#include "muse_ui.h"
+#include "wxm_boot_mgr.h"
+#include "wg1200_weather.h"
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #define camera_capture_base64 watcher_camera_capture
@@ -1974,6 +1981,68 @@ static cJSON *bug_report_command(
 
 #endif  // CONFIG_HOMEHUB_BLE_COMMANDS
 
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+static cJSON *wg1200_notify_command(cJSON *params) {
+    cJSON *msg_item = params ? cJSON_GetObjectItem(params, "message") : NULL;
+    if (!cJSON_IsString(msg_item) || !msg_item->valuestring || !msg_item->valuestring[0]) {
+        return command_error("missing_param", "message is required");
+    }
+
+    const char *title_str = "Muse Alert";
+    cJSON *title_item = params ? cJSON_GetObjectItem(params, "title") : NULL;
+    if (title_item && !cJSON_IsNull(title_item)) {
+        if (!cJSON_IsString(title_item) || !title_item->valuestring) {
+            return command_error("invalid_params", "title must be a string");
+        }
+        if (title_item->valuestring[0]) {
+            title_str = title_item->valuestring;
+        }
+    }
+
+    int beep_ms = 120;
+    cJSON *beep_item = params ? cJSON_GetObjectItem(params, "beep_ms") : NULL;
+    if (beep_item && !cJSON_IsNull(beep_item)) {
+        if (!cJSON_IsNumber(beep_item) || beep_item->valueint < 0 || beep_item->valueint > 1000) {
+            return command_error("invalid_params", "beep_ms must be an integer between 0 and 1000");
+        }
+        beep_ms = beep_item->valueint;
+    }
+
+    int duration_s = 30;
+    cJSON *dur_item = params ? cJSON_GetObjectItem(params, "duration_s") : NULL;
+    if (dur_item && !cJSON_IsNull(dur_item)) {
+        if (!cJSON_IsNumber(dur_item) || dur_item->valueint < 0 || dur_item->valueint > 3600) {
+            return command_error("invalid_params", "duration_s must be an integer between 0 and 3600");
+        }
+        duration_s = dur_item->valueint;
+    }
+
+    if (!muse_ui_notify_show(title_str, msg_item->valuestring, duration_s)) {
+        return command_error("unavailable", "display UI is not ready");
+    }
+
+    bool muted = !muse_settings_speaker_on();
+    if (beep_ms > 0 && !muted) {
+        wg1200_buzzer_beep_async((uint32_t)beep_ms);   /* this is the Link session's task */
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_CreateObject();
+    if (!result || !payload) {
+        cJSON_Delete(result);
+        cJSON_Delete(payload);
+        return command_error("out_of_memory", "failed to allocate notify result");
+    }
+    cJSON_AddStringToObject(payload, "title", title_str);
+    cJSON_AddNumberToObject(payload, "beep_ms", muted ? 0 : beep_ms);
+    cJSON_AddNumberToObject(payload, "duration_s", duration_s);
+    cJSON_AddBoolToObject(payload, "muted", muted);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddItemToObject(result, "payload", payload);
+    return result;
+}
+#endif
+
 #if CONFIG_MUSE_WAKEWORD_ENABLE
 /* Muse may only turn listening off. Turning it on is the device's own
  * choice (Settings, the quick menu, serial), so no remote command can make
@@ -2086,6 +2155,14 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
     if (strcmp(command, "sensors.read") == 0) {
         return waveshare_154g_shtc3_command();
+    }
+#endif
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    if (strcmp(command, "sensors.read") == 0) {
+        return wg1200_weather_sensors_command();
+    }
+    if (strcmp(command, "wg1200.notify") == 0) {
+        return wg1200_notify_command(params);
     }
 #endif
 #if CONFIG_MUSE_WAKEWORD_ENABLE
@@ -2719,6 +2796,9 @@ static void *psram_malloc(size_t sz) {
 }
 
 void app_run(void) {
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+    wxm_boot_guard_init();
+#endif
     cJSON_Hooks hooks = { .malloc_fn = psram_malloc, .free_fn = free };
     cJSON_InitHooks(&hooks);
 
@@ -2967,8 +3047,15 @@ void app_run(void) {
         // The CrowPanel starts it lazily instead, after muse_app_run() has
         // reserved its internal I2S DMA buffers. So do the 1.75 and 1.75C:
         // the idle stack leaves no 8 KB block for the muse_vm task and chat
-        // never connects (#351).
+        // never connects (#351). On WG1200, keep ~49 KB of internal DMA RAM
+        // free unless Phone Setup is explicitly enabled.
+#if CONFIG_MUSE_BOARD_WXM_WG1200
+        if (muse_settings_ble_on()) {
+            start_ble_setup_server_if_needed();
+        }
+#else
         start_ble_setup_server_if_needed();
+#endif
 #endif
     }
 

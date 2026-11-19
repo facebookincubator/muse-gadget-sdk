@@ -45,7 +45,7 @@ static volatile int64_t s_flash_start_us;   /* 0 = no reply flash */
 static volatile bool s_asleep;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
-static char s_caption[MUSE_CAPTION_MAX];
+MUSE_CAPTION_BSS static char s_caption[MUSE_CAPTION_MAX];
 static uint32_t s_caption_version;
 static volatile int64_t s_hint_until_us;   /* hint caption expiry; 0 = none pending */
 static SemaphoreHandle_t s_format_lock;
@@ -118,7 +118,7 @@ float muse_state_progress(void)
  * can never land on a caption set after it. */
 static void set_caption(int64_t until_us, const char *fmt, va_list ap)
 {
-    static char buf[sizeof(s_caption)];   /* too big for some callers' stacks */
+    MUSE_CAPTION_BSS static char buf[sizeof(s_caption)];   /* too big for some callers' stacks */
     xSemaphoreTake(s_format_lock, portMAX_DELAY);
     /* A format the screen's language has ("LISTENING %.1fs"), then a caption
      * passed whole as "%s" (a turn's failure). */

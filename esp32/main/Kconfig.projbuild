@@ -684,6 +684,9 @@ menu "ESP32 Device SDK"
     config HOMEHUB_NVS_ENCRYPTION
         bool "Encrypt NVS with an HMAC-derived key"
         default n
+        # The WG1200 mounts its own muse_nvs partition in plaintext
+        # (components/muse/wxm_boot_mgr.c), so the option couldn't apply.
+        depends on !MUSE_BOARD_WXM_WG1200
         select NVS_ENCRYPTION
         select NVS_SEC_KEY_PROTECT_USING_HMAC
         help
@@ -693,7 +696,7 @@ menu "ESP32 Device SDK"
             still be set, the application generates a key automatically.
             Boards with no HMAC key and a locked eFuse fall back to plaintext
             NVS. When this option is off, NVS is always plaintext regardless
-            of eFuse state.
+            of eFuse state. Not available on the WeatherXM WG1200.
 
     config HOMEHUB_PAIRING_EFUSE_AUTH
         bool "Enable manufacturer eFuse pairing attestation"

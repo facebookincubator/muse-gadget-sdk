@@ -1,0 +1,74 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# WeatherXM WG1200 (D1 Wi-Fi Gateway, OEM variant of Seeed SenseCAP Indicator):
+# ESP32-S3-WROOM-1-N16R8 (16 MB flash, 8 MB octal PSRAM), 4.0" 480x480 ST7701S
+# RGB565 panel + FT6336U touch, PCA9535 I/O expander, BMP390 barometer (0x77),
+# SX1262 sub-GHz LoRa receiver, passive buzzer, and dual USB (USB Serial/JTAG
+# 303a:1001 + CH340 1a86:7523 behind an onboard USB 2.0 hub).
+# Load last, after sdkconfig.defaults and devices/sdkconfig.muse.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-wxm-wg1200"
+CONFIG_MUSE_DEVICE_MODEL_NAME="WeatherXM WG1200"
+CONFIG_MUSE_DEVICE_GUIDE="devices/guides/wxm-wg1200.md"
+CONFIG_MUSE_BOARD_WXM_WG1200=y
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-WG1200"
+CONFIG_HOMEHUB_BUTTON_GPIO=38
+
+# Non-destructive dual-boot layout matching the WG1200 bootloader (table at
+# 0xC000): preserves stock WeatherXM factory (0x20000), ota_0 (0x420000),
+# esp_secure_cert (0xD000), nvs (0xF000), nvs_key (0xC20000) and spiffs
+# (0xC21000); installs Muse in ota_1 (0x820000) with isolated muse_nvs
+# (0xF21000). Retail WG1200 units verify RSA-3072 Secure Boot V2 app signatures;
+# see devices/wxm-wg1200.md and tools/wg1200_dualboot.sh.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_wg1200_dualboot.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0xc000
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n
+
+# Primary console on UART0 (CH340 1a86:7523), with secondary USB Serial/JTAG
+# (303a:1001) mirrored so both ports behind the WG1200's internal USB hub work.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# 8 MB octal PSRAM + XIP + 64 KB D-cache (64B line) for tear-free RGB565 DMA.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=n
+
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=n
+CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+
+# Wall-powered desktop console; light sleep is off.
+CONFIG_PM_ENABLE=n
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=n
+
+# Set your SDK token in build-muse-wxm-wg1200/sdkconfig (ignored by Git) or
+# send >sdk_token=mgst_... over USB serial after flashing, not here.
