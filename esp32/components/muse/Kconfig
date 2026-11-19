@@ -135,6 +135,10 @@ menu "Muse"
             bool "M5Stack CoreS3 (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_M5STACK_CORES3LITE
+            bool "M5Stack CoreS3 Lite (ESP32-S3, 320x240 touch LCD, speaker and microphones)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_M5STACK_CORE2
             bool "M5Stack Core2 v1.0 (ESP32, touch LCD, touch-strip talk)"
             depends on IDF_TARGET_ESP32
@@ -220,6 +224,7 @@ menu "Muse"
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "seeed_xiao_s3_147" if MUSE_BOARD_SEEED_XIAO_S3_147
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
+        default "m5stack_cores3lite" if MUSE_BOARD_M5STACK_CORES3LITE
         default "m5stack_core2" if MUSE_BOARD_M5STACK_CORE2
         default "fnk0104b" if MUSE_BOARD_FNK0104B
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
