@@ -461,7 +461,10 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
             pStorage->dbRowsDone,
             pStorage->currImage->width * pStorage->currImage->height);
         pStorage->dbNextMb = pStorage->dbRowsDone = pStorage->dbBad = 0;
-        if (pStorage->progressFn)
+        /* OPT: a picture concealed without a single valid slice isn't
+         * reported: it isn't stored, and the rest of the call may reuse or
+         * free its buffer */
+        if (pStorage->progressFn && pStorage->validSliceInAccessUnit)
             pStorage->progressFn(pStorage->progressCtx, pStorage->currImage->data,
                 pStorage->currImage->width, pStorage->currImage->height,
                 pStorage->currImage->height * 16);
@@ -525,12 +528,21 @@ u32 h264bsdDecode(storage_t *pStorage, u8 *byteStrm, u32 len, u8 **picture, u32 
       len -= readBytes;
       byteStrm += readBytes;
       retCode = h264bsdDecodeInternal(pStorage, byteStrm, len, &readBytes);
-    } while (retCode == 0 || retCode == 2);
+      /* OPT: a picture concealed without a single valid slice is not stored,
+       * so it has nothing to output: go on with the rest of the buffer (the
+       * NAL unit that ended it is decoded again) */
+    } while (retCode == 0 || retCode == 2 ||
+             (retCode == H264BSD_PIC_RDY &&
+              pStorage->dpb->outIndex >= pStorage->dpb->numOut));
 
     if (retCode == H264BSD_PIC_RDY) {
+      /* OPT: never dereference a missing output picture */
+      dpbOutPicture_t *out = h264bsdDpbOutputPicture(pStorage->dpb);
+      if (!out)
+        return(H264BSD_ERROR);
       *width = (pStorage->activeSps->picWidthInMbs)*16;
       *height = (pStorage->activeSps->picHeightInMbs)*16;
-      *picture = h264bsdDpbOutputPicture(pStorage->dpb)->data;
+      *picture = out->data;
     }
 
     return retCode;
