@@ -667,14 +667,28 @@ class VideoDrawingTest(unittest.TestCase):
 # (muse_vstream) as from the network, then each band to a decoder of its own,
 # with may_realloc asked of both bands as the decode task does.
 REALLOC_HARNESS = r'''
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "muse_vdec.h"
 #include "muse_vstream.h"
 static uint8_t buf[1 << 20], ring[1 << 21], frame[8 + (1 << 20)];
-static const uint8_t *held[2];
-static size_t held_n[2];
+static const uint8_t *held[2], *shown[2];
+static size_t held_n[2], shown_n[2];
+/* What progress reported: muse_video.c's show task may draw it at any time
+ * during that call and after, until an access unit that
+ * muse_vdec_may_realloc() named. Read the picture reported before, as the show
+ * task could be drawing it now. */
+static void on_progress(void *ctx, const muse_pic_t *pic, int rows)
+{
+    int k = (int)(intptr_t)ctx;
+    volatile unsigned sum = 0;
+    (void)rows;
+    for (size_t i = 0; shown[k] && i < shown_n[k]; i++) sum += shown[k][i];
+    shown[k] = pic->y;
+    shown_n[k] = (size_t)pic->y_stride * pic->h;
+}
 static void hold(int k, int rc, const muse_pic_t *pic)
 {
     if (rc == MUSE_VDEC_PICTURE) {
@@ -687,6 +701,7 @@ static void read_held(void)
     volatile unsigned sum = 0;
     for (int k = 0; k < 2; k++) {
         for (size_t i = 0; held[k] && i < held_n[k]; i++) sum += held[k][i];
+        for (size_t i = 0; shown[k] && i < shown_n[k]; i++) sum += shown[k][i];
     }
 }
 int main(int argc, char **argv)
@@ -695,6 +710,7 @@ int main(int argc, char **argv)
     muse_vdec_t *d[2] = { muse_vdec_open(MUSE_VIDEO_CODEC_H264, 240, 240),
                           muse_vdec_open(MUSE_VIDEO_CODEC_H264, 240, 240) };
     if (!d[0] || !d[1]) return 2;
+    for (int k = 0; k < 2; k++) muse_vdec_set_progress(d[k], on_progress, (void *)(intptr_t)k);
     muse_vstream_t vs;
     muse_vstream_init(&vs, ring, sizeof(ring), sizeof(buf));
     vs.bands = bands ? 2 : 1;
@@ -706,7 +722,7 @@ int main(int argc, char **argv)
         fclose(f);
         if (!bands) {
             int may = muse_vdec_may_realloc(d[0], buf, n);
-            if (may) held[0] = NULL;
+            if (may) held[0] = shown[0] = NULL;
             muse_pic_t pic;
             int rc = muse_vdec_decode(d[0], buf, n, &pic);
             read_held();
@@ -728,7 +744,7 @@ int main(int argc, char **argv)
         uint32_t len[2] = { len0, n - 4 - len0 };
         /* muse_video.c asks the top band's decoder about both bands. */
         int may = muse_vdec_may_realloc(d[0], au[0], len[0]) || muse_vdec_may_realloc(d[0], au[1], len[1]);
-        if (may) held[0] = held[1] = NULL;
+        if (may) held[0] = held[1] = shown[0] = shown[1] = NULL;
         muse_pic_t pic[2];
         int rc[2];
         for (int k = 0; k < 2; k++) rc[k] = muse_vdec_decode(d[k], au[k], len[k], &pic[k]);
@@ -826,22 +842,39 @@ class PicturesKeptTest(unittest.TestCase):
                                two_bands(non_idr(120, frame_num=2), non_idr(4, pps_id=1)[4:]), bands=True)
         self.assertEqual(lines, [(1, 1, 1), (1, 1, 1), (0, 1, 1)])
 
-    def test_a_slice_whose_header_fails_then_a_keyframe(self):
+    def test_a_slice_whose_header_fails(self):
         # A slice header that fails after the picture started (an unknown
         # slice type) leaves a picture with no valid slice; the next access
         # unit conceals it, and tinyh264 had no picture to output for it
-        # (h264bsdDecode dereferenced NULL). The keyframe after it decodes.
+        # (h264bsdDecode dereferenced NULL). That access unit now fails, as
+        # muse_video.c then waits for a keyframe, and the next keyframe decodes.
         b = Bits()
         b.ue(0)       # first_mb_in_slice
         b.ue(30)      # slice_type: none
         b.ue(0)       # pic_parameter_set_id
         b.u(4, 1)     # frame_num
         broken = nal(0x61, b)
-        lines = self.run_units(au(2, 2), broken, au(2, 2), non_idr(4, frame_num=1))
-        self.assertEqual([rc for _, rc in lines], [1, -1, 1, 1])
-        # A picture after it decodes too.
-        lines = self.run_units(au(2, 2), broken, non_idr(4, frame_num=2))
-        self.assertEqual([rc for _, rc in lines], [1, -1, 1])
+        lines = self.run_units(au(2, 2), broken, au(2, 2), au(2, 2))
+        self.assertEqual([rc for _, rc in lines], [1, -1, -1, 1])
+        lines = self.run_units(au(2, 2), broken, non_idr(4, frame_num=2), au(2, 2))
+        self.assertEqual([rc for _, rc in lines], [1, -1, -1, 1])
+
+    def test_a_concealed_picture_shown_then_a_new_size(self):
+        # The picture concealment finishes without a valid slice is reported
+        # through progress (the show task may draw it); an IDR in the same
+        # access unit that changes the size must not free it in that call.
+        b = Bits()
+        b.ue(0)       # first_mb_in_slice
+        b.ue(30)      # slice_type: none
+        b.ue(0)       # pic_parameter_set_id
+        b.u(4, 1)     # frame_num
+        broken = nal(0x61, b)
+        lines = self.run_units(au(2, 2), broken, au(1, 1), au(1, 1))
+        self.assertEqual([rc for _, rc in lines], [1, -1, -1, 1])
+        # Two bands, each with its own decoder.
+        lines = self.run_units(two_bands(au(2, 2), au(2, 2)), two_bands(broken, broken),
+                               two_bands(au(1, 1), au(1, 1)), two_bands(au(1, 1), au(1, 1)), bands=True)
+        self.assertEqual([rcs for _, *rcs in lines], [[1, 1], [-1, -1], [-1, -1], [1, 1]])
 
 
 if __name__ == "__main__":
