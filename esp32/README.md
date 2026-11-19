@@ -423,8 +423,19 @@ See [reply option selection](docs/reply-option-selection.md) for supported
 prompts, USB diagnostics, validation, and the current server limitation on
 synchronizing selected-button state with the phone.
 
-The on-device "Hey Muse" wake word (off by default; not enabled on any
-board yet) runs its model with the ExecuTorch runtime and ESP-NN delegate
+To start a voice note by saying "Hey Muse" instead of holding the talk
+button, build a board that has PSRAM and the LVGL UI (not e-paper) with
+`MUSE_WAKEWORD=1 tools/muse/board.sh build|flash <board>`; it has run on
+the SenseCAP Watcher and the ESP32-S3-BOX-3. Then turn listening on at the
+device: **Sound > Wake word** in Settings, the quick menu's **Wake word** row
+on button boards, or `>wake.on` over serial. The web flasher's images don't
+include it. While listening, the microphone stays powered when the screen
+sleeps, so battery life is much shorter.
+[`components/muse_wakeword/README.md`](components/muse_wakeword/README.md)
+has the details and costs.
+
+The wake word (off by default; no board overlay enables it) runs its model
+with the ExecuTorch runtime and ESP-NN delegate
 and TensorFlow Lite Micro's microfrontend, which come from the ESP
 Component Registry only into builds with `MUSE_WAKEWORD_ENABLE`;
 [`docs/executorch.md`](docs/executorch.md) says how the pins are updated,
