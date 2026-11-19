@@ -51,6 +51,7 @@ bool muse_latest_reply_bench(const char *command)
 /* Mark truncation in the display copy without growing its fixed buffer. */
 static void prepare_display(char *text, bool shortened)
 {
+    muse_text_strip_markdown(text);
     muse_text_to_caption(text, MUSE_REVIEW_CAP);
     if (!shortened) return;
     size_t end = strlen(text);

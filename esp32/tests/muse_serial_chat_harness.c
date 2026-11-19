@@ -149,12 +149,18 @@ int main(int argc, char **argv)
         muse_text_keep_latin();
         muse_text_to_caption(shown, sizeof(shown));
         printf("%d:%s", muse_text_has_latin(shown), shown);
+    } else if (argc > 1 && !strcmp(argv[1], "markdown")) {
+        size_t n = muse_text_strip_markdown(in);
+        if (n != strlen(in)) {
+            return 3;
+        }
+        fputs(in, stdout);
     } else if (argc > 1 && !strcmp(argv[1], "page")) {
         static char page[1 << 16];
         muse_hatch_caption_at(in, 0, page, sizeof(page));
         printf("%s %s\n", muse_text_has_cjk(in) ? "cjk" : "latin", s_page_cjk ? "cjk" : "latin");
     } else {
-        fprintf(stderr, "usage: %s console|unescape|caption COLS|[latin-]pages COLS PX LINES [CAP]|ascii|latin|page < input\n", argv[0]);
+        fprintf(stderr, "usage: %s console|unescape|caption COLS|[latin-]pages COLS PX LINES [CAP]|ascii|latin|markdown|page < input\n", argv[0]);
         return 2;
     }
     free(in);

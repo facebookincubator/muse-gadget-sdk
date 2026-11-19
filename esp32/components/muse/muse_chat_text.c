@@ -204,7 +204,7 @@ static bool next_line(const char **text, int cols, int px, const char **start, s
  * one starts at that line, so lines of multibyte characters aren't skipped
  * either.
  */
-bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
+static bool caption_at(const char *text, size_t at, char *out, size_t cap)
 {
     int cols, lines;
     muse_state_page(text, &cols, &lines);
@@ -236,6 +236,17 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
         }
         page = next;
     }
+}
+
+/* The page is wrapped from the reply as Muse sent it, so `at` and the page
+ * turns stay in step with the speech; only the page shown loses its Markdown. */
+bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
+{
+    bool found = caption_at(text, at, out, cap);
+    if (cap) {
+        muse_text_strip_markdown(out);
+    }
+    return found;
 }
 
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
@@ -281,6 +292,7 @@ int muse_chat_caption_page(const char *text, int page, char *out, size_t cap)
         if (!next_line(&rest, cols, s_caption_px, &start, &len)) break;
         first = n > 1 ? last : p;
     }
+    muse_text_strip_markdown(out);
     return pages;
 }
 #endif
