@@ -86,6 +86,7 @@ static const muse_lang_entry_t MESSAGES[] = {
     { "COULDN'T SEND A SAVED NOTE", "Không gửi được tin nhắn đã lưu" },
     { "SAVED NOTE: WILL TRY AGAIN", "Tin nhắn đã lưu: sẽ thử lại" },
     { "NOTES STILL WAITING TO SEND", "Còn tin nhắn chờ gửi" },
+    { "MAY HAVE SENT - SEE MUSE APP", "Có thể đã gửi: xem app Muse" },
     /* A turn that failed */
     { "CAN'T REACH MUSE", "Không kết nối được Muse" },
     { "MUSE NOT SET UP", "Chưa cài đặt Muse" },
@@ -266,6 +267,7 @@ static const muse_lang_entry_t MESSAGES[] = {
     { "COULDN'T SEND A SAVED NOTE", "NÃO DEU PARA ENVIAR O ÁUDIO SALVO" },
     { "SAVED NOTE: WILL TRY AGAIN", "ÁUDIO SALVO: VOU TENTAR DE NOVO" },
     { "NOTES STILL WAITING TO SEND", "ÁUDIOS AINDA AGUARDANDO ENVIO" },
+    { "MAY HAVE SENT - SEE MUSE APP", "PODE TER SIDO ENVIADO: VEJA NO APP" },
     /* A turn that failed */
     { "CAN'T REACH MUSE", "SEM CONEXÃO COM O MUSE" },
     { "MUSE NOT SET UP", "MUSE NÃO CONFIGURADO" },

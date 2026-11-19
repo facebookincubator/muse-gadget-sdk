@@ -101,6 +101,21 @@ typedef enum {
 /* Non-blocking; copies the event's text. Events of cancelled turns are dropped. */
 muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap);
 
+/* What a voice note's failed turn means for the note (CONFIG_MUSE_RESEND_NOTES). */
+typedef enum {
+    MUSE_CHAT_FAIL_NONE,      /* no failure reported */
+    MUSE_CHAT_FAIL_RETRY,     /* Muse never had all of it: worth sending again */
+    MUSE_CHAT_FAIL_REFUSED,   /* Muse answered that it won't take it */
+    MUSE_CHAT_FAIL_UNKNOWN,   /* all of it went up, unacknowledged: Muse may have it */
+} muse_chat_fail_t;
+
+/*
+ * The failure that the last MUSE_HATCH_EV_ERROR muse_hatch_turn_event()
+ * returned since muse_hatch_turn_begin() reported, or MUSE_CHAT_FAIL_NONE
+ * (CONFIG_MUSE_RESEND_NOTES only). Voice task only.
+ */
+muse_chat_fail_t muse_chat_turn_failure(void);
+
 /*
  * For the voice task, while idle. True once a reply has come for a request
  * whose turn ended before it (Muse said it was still working, and the turn

@@ -201,8 +201,20 @@ size_t muse_hatch_mp3_selftest(int16_t **p) { *p=NULL; return 0; }
 float muse_audio_dbfs(const int16_t *p,size_t n) { (void)n; return (float)p[0]/100-50; }
 float muse_audio_level(const int16_t *p,size_t n) { assert(n); return (float)p[0]/1000; }
 
+/* Scripted turn events (resend scenarios), arriving once the note has all
+ * gone (muse_hatch_turn_end): each ERROR carries its failure. */
+static struct { muse_hatch_ev_t ev; muse_chat_fail_t fail; const char *text; } ev_script[32];
+static int ev_script_n, ev_script_at, ev_script_gate;
+static muse_chat_fail_t last_fail;
+static int turn_ends, turn_cancels;
+static void script(muse_hatch_ev_t ev, muse_chat_fail_t fail, const char *text) {
+    assert(ev_script_n<32);
+    ev_script_gate=turn_ends;
+    ev_script[ev_script_n].ev=ev; ev_script[ev_script_n].fail=fail; ev_script[ev_script_n++].text=text;
+}
+muse_chat_fail_t muse_chat_turn_failure(void) { return last_fail; }
 /* Legacy path is a tripwire, not another implementation of the note engine. */
-void muse_hatch_turn_begin(void) { ++notes; if(VOICE_LOOP) longjmp(finish,3); if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
+void muse_hatch_turn_begin(void) { ++notes; last_fail=MUSE_CHAT_FAIL_NONE; if(VOICE_LOOP) longjmp(finish,3); if(scenario>=50) return; if(scenario>=20) longjmp(finish,2); assert(!"PTT opened a note"); }
 void muse_hatch_turn_audio(const int16_t *p,size_t n) {
     if(verify_pcm) {
         assert(note_frames+n<=MAX_FRAMES);
@@ -214,7 +226,6 @@ void muse_hatch_turn_audio(const int16_t *p,size_t n) {
 size_t muse_hatch_turn_audio_wait(const int16_t *p,size_t n,int ms) {
     (void)ms; muse_hatch_turn_audio(p,n); return n;
 }
-static int turn_ends, turn_cancels;
 void muse_hatch_turn_end(void) { ++turn_ends; }
 void muse_hatch_turn_cancel(void) { ++turn_cancels; }
 bool muse_hatch_incoming(void) { return false; }
@@ -223,6 +234,11 @@ void muse_state_set_asleep(bool v) { (void)v; }
 static muse_hatch_ev_t hatch_end = MUSE_HATCH_EV_NONE;
 static const char *hatch_end_text = "";
 muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) {
+    if(ev_script_at<ev_script_n && turn_ends>ev_script_gate) {
+        snprintf(p,n,"%s",ev_script[ev_script_at].text);
+        if(ev_script[ev_script_at].ev==MUSE_HATCH_EV_ERROR) last_fail=ev_script[ev_script_at].fail;
+        return ev_script[ev_script_at++].ev;
+    }
     muse_hatch_ev_t ev=hatch_end;
     if(ev==MUSE_HATCH_EV_NONE) return ev;
     hatch_end=MUSE_HATCH_EV_NONE;
@@ -490,6 +506,102 @@ esp_err_t muse_audio_write(const int16_t *p,size_t n) {
 int main(int argc,char **argv) {
     assert(argc==2); scenario=atoi(argv[1]); s_queue=input_queue=&queue; ready=true;
     s_pre=calloc(PRE_CAP_CHUNKS,sizeof(*s_pre));
+#if CONFIG_MUSE_RESEND_NOTES
+    if(scenario>=110 && scenario<=115) {
+        /* Notes that didn't send (CONFIG_MUSE_RESEND_NOTES): this build keeps
+         * HELD_MAX 3 in 1024 KB. */
+        assert(HELD_MAX==3 && HELD_BYTES==1024*1024);
+        clock_us=1000000;
+#define SECS(s) ((size_t)(s)*MUSE_AUDIO_RATE)
+#define REC(secs, live) do { s_rec=calloc(MAX_FRAMES,sizeof(*s_rec)); s_rec_n=SECS(secs); \
+                             s_sent=(live)?s_rec_n:0; s_live=s_tried=(live); } while(0)
+        if(scenario==110) {
+            /* Each new note fits by dropping the oldest, by count and by bytes. */
+            static const int secs[]={8,4,4,6,15,10,15};
+            static const int kept[][3]={{8},{8,4},{8,4,4},{4,4,6},{4,6,15},{6,15,10},{10,15}};
+            for(int i=0;i<7;i++) {
+                REC(secs[i],false); s_tried=true;
+                hold_rec(true);
+                assert(!s_rec && !strcmp(caption,"SAVED, WILL TRY AGAIN") && mode==MUSE_MODE_IDLE);
+                int n=0; while(n<3 && kept[i][n]) n++;
+                assert(s_held_count==n);
+                for(int k=0;k<n;k++) assert(s_held[k].frames==SECS(kept[i][k]));
+            }
+            /* The oldest is due 5 s after its first try failed. */
+            assert(s_next_send_us==clock_us+5000000);
+        }
+        if(scenario==111) {
+            /* Tries go on quietly, past the old limit of 8, until the note lands. */
+            REC(5,true); hold_rec(true);
+            assert(s_held_count==1 && s_held[0].tries==1 && s_next_send_us==clock_us+5000000);
+            snprintf(caption,sizeof(caption),"IDLE"); int sets=mode_sets;
+            push(MUSE_PTT_DOWN);   /* a press goes first: the note stays, untried */
+            assert(!send_held(false) && s_held_count==1 && s_held[0].tries==1 && queue.n==1);
+            queue.n=0;
+            static const int64_t waits[]={15,30,60,60,60,60,60,60,60,60};
+            for(int i=0;i<10;i++) {
+                script(MUSE_HATCH_EV_ERROR,MUSE_CHAT_FAIL_RETRY,"CAN'T REACH MUSE");
+                assert(!send_held(i%2));
+                assert(s_held_count==1 && s_held[0].tries==i+2);
+                assert(s_next_send_us==clock_us+waits[i]*1000000);
+            }
+            assert(!strcmp(caption,"IDLE") && mode_sets==sets);   /* nothing on screen */
+            script(MUSE_HATCH_EV_SENT,MUSE_CHAT_FAIL_NONE,"");
+            script(MUSE_HATCH_EV_DONE,MUSE_CHAT_FAIL_NONE,"");
+            assert(!send_held(false));
+            assert(!s_held_count && !s_next_send_us && !strcmp(caption,"SAVED NOTE SENT"));
+            assert(mode==MUSE_MODE_THINKING);   /* the reply played, as any turn's */
+        }
+        if(scenario==112) {
+            /* Refused, or up whole and unacknowledged: dropped, and the screen says so. */
+            static const struct { muse_chat_fail_t fail; bool asleep; const char *caption; } ways[]={
+                {MUSE_CHAT_FAIL_REFUSED,false,"MUSE DIDN'T TAKE IT"},
+                {MUSE_CHAT_FAIL_UNKNOWN,true,MAY_HAVE_IT},
+            };
+            for(int i=0;i<2;i++) {
+                REC(5,true); hold_rec(true);
+                script(MUSE_HATCH_EV_ERROR,ways[i].fail,"MUSE DIDN'T TAKE IT");
+                assert(!send_held(ways[i].asleep));
+                assert(!s_held_count && !strcmp(caption,ways[i].caption));
+            }
+        }
+        if(scenario==113) {
+            /* All of it went up and no word came: Muse may have it. */
+            REC(5,true); hold_rec(true);
+            int64_t t0=clock_us;
+            assert(!send_held(false));
+            assert(clock_us-t0>=ACK_WAIT_US && !s_held_count && !strcmp(caption,MAY_HAVE_IT));
+        }
+        if(scenario==114) {
+            /* After the release: kept only if Muse can't have it. */
+            static const struct { bool live; muse_chat_fail_t fail; int held; const char *caption; } ways[]={
+                {true,MUSE_CHAT_FAIL_UNKNOWN,0,MAY_HAVE_IT},
+                {true,MUSE_CHAT_FAIL_REFUSED,0,"MUSE DIDN'T TAKE IT"},
+                {true,MUSE_CHAT_FAIL_RETRY,1,"SAVED, WILL TRY AGAIN"},
+                {false,MUSE_CHAT_FAIL_NONE,2,"SAVED, SENDS WHEN ONLINE"},
+            };
+            for(int i=0;i<4;i++) {
+                REC(5,ways[i].live);
+                if(ways[i].live) script(MUSE_HATCH_EV_ERROR,ways[i].fail,"LOST CONNECTION TO MUSE");
+                assert(!finish_note());
+                assert(!s_rec && s_held_count==ways[i].held && !strcmp(caption,ways[i].caption));
+            }
+        }
+        if(scenario==115) {
+            /* A full queue doesn't refuse a press: the oldest makes room later. */
+            for(int i=0;i<3;i++) { REC(2,false); hold_rec(false); }
+            ready=false;
+            assert(s_held_count==3 && can_record() && s_rec);
+            assert(strcmp(caption,"NOTES STILL WAITING TO SEND"));
+            s_rec_n=SECS(3); hold_rec(false);
+            assert(s_held_count==3 && s_held[2].frames==SECS(3));
+        }
+#undef REC
+#undef SECS
+        while(s_held_count) drop_oldest();
+        free(s_pre); return 0;
+    }
+#endif
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     if(scenario==90) {
         /* A wake word press that interrupts a reply stays synthetic, and a
