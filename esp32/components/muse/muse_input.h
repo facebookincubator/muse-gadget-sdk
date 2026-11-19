@@ -100,3 +100,6 @@ void muse_input_inject(unsigned events);
 
 /* Plays the goodbye animation and powers off (from the input task). */
 void muse_input_request_power_off(void);
+
+/* Ends a call, says so on screen and restarts the chip (from the input task). */
+void muse_input_request_restart(void);
