@@ -39,6 +39,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_tls.h"
+#include "network_proxy_tls.h"
 #include "esp_crt_bundle.h"
 #include "esp_random.h"
 #include "esp_heap_caps.h"
@@ -2129,7 +2130,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.timeout_ms = 15000;
 
-    int r = esp_tls_conn_new_sync(s_noise_host, static_cast<int>(strlen(s_noise_host)),
+    int r = network_proxy_tls_connect(s_noise_host, static_cast<int>(strlen(s_noise_host)),
                                   NOISE_PORT, &cfg, tls);
     if (r != 1) {
         ESP_LOGE(TAG, "TLS connect failed: %d", r);

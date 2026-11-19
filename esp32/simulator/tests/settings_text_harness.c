@@ -30,6 +30,10 @@ void muse_hatch_test(void) { abort(); }
 void muse_input_request_power_off(void) { abort(); }
 void muse_link_reset_setup(void) { abort(); }
 bool muse_link_sdk_token_set(const char *s) { (void)s; abort(); }
+int muse_link_wifi_proxy_get(const char *s, network_proxy_config_t *p) { (void)s; (void)p; abort(); }
+bool muse_link_wifi_proxy_set(const char *s, const network_proxy_config_t *p) { (void)s; (void)p; abort(); }
+bool network_proxy_valid(const network_proxy_config_t *p) { (void)p; abort(); }
+void network_proxy_wipe(void *data, unsigned len) { memset(data, 0, len); }
 bool muse_settings_ble_on(void) { abort(); }
 int muse_settings_brightness(void) { return 60; }
 void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]) { (void)out; abort(); }

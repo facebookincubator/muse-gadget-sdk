@@ -24,6 +24,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
+#include "network_proxy_tls.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -63,8 +64,24 @@ static int fetch(const char *auth, resp_t *r)
         .crt_bundle_attach = esp_crt_bundle_attach,
         .disable_auto_redirect = true,
     };
+    network_proxy_config_t proxy;
+    network_proxy_get_active(&proxy);
+    bool use_proxy = proxy.type != NETWORK_PROXY_OFF;
+    network_proxy_wipe(&proxy, sizeof(proxy));
+    esp_transport_handle_t transport = use_proxy ? network_proxy_http_transport(true) : NULL;
+    if (use_proxy && !transport) return 0;
+#if CONFIG_ESP_HTTP_CLIENT_ENABLE_CUSTOM_TRANSPORT
+    cfg.transport = transport;
+#else
+    if (transport) {
+        esp_transport_destroy(transport);
+        ESP_LOGE(TAG, "proxy requires CONFIG_ESP_HTTP_CLIENT_ENABLE_CUSTOM_TRANSPORT=y");
+        return 0;
+    }
+#endif
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
     if (!c) {
+        if (transport) esp_transport_destroy(transport);
         return 0;
     }
     esp_http_client_set_header(c, "Authorization", auth);
@@ -72,6 +89,7 @@ static int fetch(const char *auth, resp_t *r)
     esp_err_t err = esp_http_client_perform(c);
     int status = esp_http_client_get_status_code(c);
     esp_http_client_cleanup(c);
+    if (transport) esp_transport_destroy(transport);
     /* perform() reports 401 as an error; the status still tells us what happened. */
     if (status == 401 || status == 403) {
         return status;

@@ -52,6 +52,7 @@ set(GADGET_SRCS
 
 set(GADGET_REQUIRES
     nvs_flash
+    network_proxy
     esp_wifi
     esp_event
     esp_netif

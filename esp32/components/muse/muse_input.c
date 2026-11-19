@@ -1088,6 +1088,7 @@ static void serial_task(void *arg)
             if (line && !console_command(line, whole)) {
                 muse_ble_command(line);
             }
+            if (line) { volatile char *p = line; for (int i = 0; i < SERIAL_LINE; i++) p[i] = 0; }
             free(line);
         } else if (c == 'd' || c == 'u') {
             muse_state_poke();

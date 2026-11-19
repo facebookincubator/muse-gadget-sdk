@@ -61,6 +61,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_tls.h"
+#include "network_proxy_tls.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
@@ -896,7 +897,7 @@ static bool connect_once(char *err, size_t err_cap, int *http_status)
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.timeout_ms = 15000;
     int64_t t0 = now_us();
-    if (esp_tls_conn_new_sync(s_host, strlen(s_host), NOISE_PORT, &cfg, c.tls) != 1) {
+    if (network_proxy_tls_connect(s_host, strlen(s_host), NOISE_PORT, &cfg, c.tls) != 1) {
         snprintf(err, err_cap, "Can't reach %s", s_host);
         return false;
     }

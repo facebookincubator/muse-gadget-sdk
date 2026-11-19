@@ -89,6 +89,9 @@ class MuseEinkNavigationTest(unittest.TestCase):
     def test_editor_return_page_is_explicit_even_on_reentry(self):
         self.run_case("explicit_back")
 
+    def test_proxy_editor_returns_to_proxy_then_wifi(self):
+        self.run_case("proxy_back")
+
     def test_other_ssid_to_password_preserves_return_page_and_wipes_text(self):
         self.run_case("ssid_password_chain")
 

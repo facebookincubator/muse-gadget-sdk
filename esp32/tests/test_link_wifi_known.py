@@ -60,6 +60,7 @@ class LinkWifiKnownHarnessTest(unittest.TestCase):
                     str(ROOT / "main"),
                     str(ROOT / "tests" / "link_wifi_known_harness.c"),
                     str(ROOT / "main" / "wifi_known.c"),
+                    str(ROOT / "components/network_proxy/network_proxy.c"),
                     str(ROOT / "main" / "config_store.c"),
                     *cjson_source(JSON),
                     "-lm",

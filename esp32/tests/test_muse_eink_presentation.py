@@ -89,7 +89,7 @@ class MuseEinkWifiOwnershipTest(_CompiledFixture):
         settings = (EINK / "muse_eink_settings.cpp").read_text()
         header = (ROOT / "components/muse/muse_wifi.h").read_text()
         max_aps = re.search(r"#define MAX_APS (\d+)", settings).group(1)
-        globals_text = section(settings, "/* Wi-Fi. */", "/* Muse. */")
+        globals_text = section(settings, "/* Wi-Fi. */", "/* Proxy. */")
         cls.compile("muse_eink_wifi_harness.cpp", {
             "wifi_types.inc": "#define MAX_APS " + max_aps + "\n" + section(header, "typedef enum {", "esp_err_t muse_wifi_start("),
             "wifi_page_types.inc": section(settings, "#define LIST_W", "enum Page {")
@@ -100,7 +100,7 @@ class MuseEinkWifiOwnershipTest(_CompiledFixture):
             "wifi_setters.inc": section(settings, "/* Text that changed since", "/* ─── Drawing:"),
             "wifi_drawing.inc": section(settings, "struct Column {", "/* Label and value on a line,"),
             "wifi_drawing_pipeline.inc": section(ui, "int line_height(", "static void dot("),
-            "wifi_page.inc": section(settings, "static void page_wifi(", "static void page_hatch("),
+            "wifi_page.inc": section(settings, "static void page_wifi(", "static void page_proxy("),
             "wifi_draw.inc": section(ui, "static void draw(", "static void set_page("),
             "wifi_tick.inc": section(settings, "static bool is_saved(", "static void tick_hatch("),
             "wifi_input.inc": section(ui, "static void handle_touch(", "static void ui_task("),
@@ -112,13 +112,13 @@ class MuseEinkWifiOwnershipTest(_CompiledFixture):
             "status_globals.inc": section(settings, "/* Muse. */", "/* Sound. */")
                 + section(settings, "/* Battery. */", "/* Text entry. */"),
             "status_tick.inc": section(settings, "static void tick_hatch(", "static void tick_sound(")
-                + section(settings, "static void set_pm(", "bool settings_tick("),
+                + section(settings, "static void set_pm(", "static void tick_proxy("),
             "status_page.inc": section(settings, "static void page_hatch(", "static void page_sound(")
                 + section(settings, "static void page_battery(", "static void page_power("),
             "status_actions.inc": section(settings, "    case ACT_HATCH_RESET:", "    case ACT_HATCH_HOST:")
                 + section(settings, "    case ACT_BLE_FORGET:", "    case ACT_SPK_SW:")
                 + section(settings, "    case ACT_BATT_RESET:", "    case ACT_POWER_OFF:"),
-            "wifi_actions.inc": section(settings, "    case ACT_WIFI_AP:", "    case ACT_WIFI_OTHER:"),
+            "wifi_actions.inc": section(settings, "    case ACT_WIFI_AP:", "    case ACT_WIFI_PROXY:"),
         })
 
     def test_queued_confirmations_only_remove_the_visible_saved_record(self):
