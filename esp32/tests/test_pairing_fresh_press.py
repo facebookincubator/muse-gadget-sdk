@@ -249,10 +249,14 @@ int gpio_get_level(int gpio);
 int64_t esp_timer_get_time(void);
 void vTaskDelay(int ticks);
 #define pdMS_TO_TICKS(ms) (ms)
-#define xTaskCreate(fn, name, stack, arg, prio, handle) ((void)(fn), 1)
-#define ESP_LOGI(...) ((void)0)
-#define ESP_LOGW(...) ((void)0)
-#define ESP_LOGE(...) ((void)0)
+static inline int xTaskCreate(void (*fn)(void *), const char *name, int stack, void *arg, int prio, void *handle)
+{
+    (void)fn; (void)name; (void)stack; (void)arg; (void)prio; (void)handle;
+    return 1;
+}
+#define ESP_LOGI(tag, ...) ((void)(tag))
+#define ESP_LOGW(tag, ...) ((void)(tag))
+#define ESP_LOGE(tag, ...) ((void)(tag))
 '''
 
 
