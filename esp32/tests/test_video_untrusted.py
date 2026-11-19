@@ -662,7 +662,9 @@ class VideoDrawingTest(unittest.TestCase):
 # caller holds the last picture (the show task may still be drawing it) and lets
 # go of it first only when muse_vdec_may_realloc() says the next access unit may
 # free it. Prints each unit's may_realloc and result; a held picture freed
-# under its reader shows as an AddressSanitizer use-after-free. With -2 first,
+# under its reader shows as an AddressSanitizer use-after-free, as does one
+# that progress reported during the call (the show task draws it as it
+# decodes) and the rest of the call freed. With -2 first,
 # each unit is a two-band frame's access unit: it goes through the ring
 # (muse_vstream) as from the network, then each band to a decoder of its own,
 # with may_realloc asked of both bands as the decode task does.
@@ -689,12 +691,36 @@ static void read_held(void)
         for (size_t i = 0; held[k] && i < held_n[k]; i++) sum += held[k][i];
     }
 }
+static const uint8_t *shown[2][4];
+static size_t shown_n[2][4];
+static int shown_k[2];
+static void progress(void *ctx, const muse_pic_t *pic, int rows)
+{
+    int k = (int)(intptr_t)ctx, j = 0;
+    (void)rows;
+    while (j < shown_k[k] && shown[k][j] != pic->y) j++;
+    if (j == 4) abort();
+    shown[k][j] = pic->y;
+    shown_n[k][j] = (size_t)pic->y_stride * pic->h;
+    shown_k[k] += j == shown_k[k];
+}
+static void read_shown(void)
+{
+    volatile unsigned sum = 0;
+    for (int k = 0; k < 2; k++) {
+        for (int j = 0; j < shown_k[k]; j++) {
+            for (size_t i = 0; i < shown_n[k][j]; i++) sum += shown[k][j][i];
+        }
+        shown_k[k] = 0;
+    }
+}
 int main(int argc, char **argv)
 {
     int bands = argc > 1 && !strcmp(argv[1], "-2");
     muse_vdec_t *d[2] = { muse_vdec_open(MUSE_VIDEO_CODEC_H264, 240, 240),
                           muse_vdec_open(MUSE_VIDEO_CODEC_H264, 240, 240) };
     if (!d[0] || !d[1]) return 2;
+    for (int k = 0; k < 2; k++) muse_vdec_set_progress(d[k], progress, (void *)(intptr_t)k);
     muse_vstream_t vs;
     muse_vstream_init(&vs, ring, sizeof(ring), sizeof(buf));
     vs.bands = bands ? 2 : 1;
@@ -710,6 +736,7 @@ int main(int argc, char **argv)
             muse_pic_t pic;
             int rc = muse_vdec_decode(d[0], buf, n, &pic);
             read_held();
+            read_shown();
             printf("%d %d\n", may, rc);
             hold(0, rc, &pic);
             continue;
@@ -733,6 +760,7 @@ int main(int argc, char **argv)
         int rc[2];
         for (int k = 0; k < 2; k++) rc[k] = muse_vdec_decode(d[k], au[k], len[k], &pic[k]);
         read_held();
+        read_shown();
         printf("%d %d %d\n", may, rc[0], rc[1]);
         for (int k = 0; k < 2; k++) hold(k, rc[k], &pic[k]);
     }
@@ -762,7 +790,8 @@ class PicturesKeptTest(unittest.TestCase):
         src.write_text(REALLOC_HARNESS)
         cc = shlex.split(os.environ.get("CC", "cc"))
         vstream = ROOT / "components/muse_vstream"
-        build = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", "-fsanitize=address", f"-I{tmp}",
+        san = sanitizers(cc, tmp) or ["-fsanitize=address"]
+        build = subprocess.run([*cc, "-std=gnu11", "-O1", "-g", "-w", *san, f"-I{tmp}",
                                 f"-I{TINY}", f"-I{MUSE}", f"-I{vstream / 'include'}",
                                 "-o", str(cls.exe), str(src), str(MUSE / "muse_vdec.c"),
                                 str(vstream / "muse_vstream.c"), *[str(p) for p in sorted(TINY.glob("*.c"))]],
@@ -825,6 +854,47 @@ class PicturesKeptTest(unittest.TestCase):
         lines = self.run_units(two_bands(top_key, bottom_key), two_bands(top, bottom),
                                two_bands(non_idr(120, frame_num=2), non_idr(4, pps_id=1)[4:]), bands=True)
         self.assertEqual(lines, [(1, 1, 1), (1, 1, 1), (0, 1, 1)])
+
+    def test_a_slice_whose_header_fails_then_a_keyframe(self):
+        # A slice header that fails after the picture started (an unknown
+        # slice type) leaves a picture with no valid slice; the next access
+        # unit conceals it, and tinyh264 had no picture to output for it
+        # (h264bsdDecode dereferenced NULL). The keyframe after it decodes.
+        b = Bits()
+        b.ue(0)       # first_mb_in_slice
+        b.ue(30)      # slice_type: none
+        b.ue(0)       # pic_parameter_set_id
+        b.u(4, 1)     # frame_num
+        broken = nal(0x61, b)
+        lines = self.run_units(au(2, 2), broken, au(2, 2), non_idr(4, frame_num=1))
+        self.assertEqual([rc for _, rc in lines], [1, -1, 1, 1])
+        # A picture after it decodes too.
+        lines = self.run_units(au(2, 2), broken, non_idr(4, frame_num=2))
+        self.assertEqual([rc for _, rc in lines], [1, -1, 1])
+
+    def test_an_idr_slice_whose_header_fails_then_a_delimiter(self):
+        # An IDR slice whose first_mb_in_slice is past the picture starts a
+        # picture with no valid slice; an access unit delimiter ends it, and
+        # concealment stores nothing to output for it. Nothing of it is
+        # reported either: a keyframe in the same access unit may free it.
+        b = Bits()
+        b.ue(4)       # first_mb_in_slice: past a 2x2 picture
+        b.ue(7)       # slice_type: I
+        b.ue(0)       # pic_parameter_set_id
+        b.u(4, 0)     # frame_num
+        b.ue(1)       # idr_pic_id
+        broken = nal(0x65, b)
+        b = Bits()
+        b.u(3, 7)     # primary_pic_type
+        aud = nal(0x09, b)
+        lines = self.run_units(au(2, 2), broken, aud, non_idr(4, frame_num=1))
+        self.assertEqual(lines, [(1, 1), (1, -1), (0, -1), (0, 1)])
+        lines = self.run_units(au(2, 2), broken, aud + au(3, 3))
+        self.assertEqual(lines, [(1, 1), (1, -1), (1, 1)])
+        # In the bottom band, with a picture after the delimiter.
+        lines = self.run_units(two_bands(au(2, 2), au(2, 2)), two_bands(non_idr(4, frame_num=1), broken),
+                               two_bands(aud + non_idr(4, frame_num=2), aud + non_idr(4, frame_num=1)), bands=True)
+        self.assertEqual(lines, [(1, 1, 1), (1, 1, -1), (0, 1, 1)])
 
 
 if __name__ == "__main__":
