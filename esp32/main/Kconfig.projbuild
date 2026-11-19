@@ -446,9 +446,9 @@ menu "ESP32 Device SDK"
             along the top and bottom edges, with an animation in between. The
             Home Assistant Voice PE shows the status colour on its LED ring.
             Seeed reSpeaker Lite shows it on a single RGB LED.
-            The reTerminal E1001 and E1002 show a still status screen on
-            their e-paper instead (black and white on the E1001, six colours
-            on the E1002).
+            The reTerminal E1001, E1002 and E1003 show a still status screen on
+            their e-paper instead (black and white on the E1001 and E1003,
+            six colours on the E1002).
             The Waveshare ESP32-S3-ePaper-1.54G does the same in four colours.
             The ESP32-C3 with a 0.42 inch OLED shows the status and the
             agent's name as text.
@@ -485,6 +485,10 @@ menu "ESP32 Device SDK"
 
         config HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
             bool "reTerminal E1002 7.3 inch Spectra 6 colour e-paper (status screen)"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+
+        config HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+            bool "reTerminal E1003 10.3 inch IT8951 e-paper (status screen)"
             depends on IDF_TARGET_ESP32S3 && SPIRAM
 
         config HOMEHUB_LED_BACKEND_STICKY_SSD1677
@@ -559,6 +563,7 @@ menu "ESP32 Device SDK"
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
         default y if HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default y if HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
         default y if HOMEHUB_LED_BACKEND_STICKY_SSD1677
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681
         default y if HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G

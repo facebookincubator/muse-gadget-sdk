@@ -444,6 +444,8 @@ int main(void) {
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "reterminal_battery.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "reterminal_battery.c"\)\s*'
+                                r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951\)\s*'
+                                r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_it8951.c" "reterminal_battery.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677\)\s*'
                                 r'list\(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c"\)\s*'
                                 r'elseif\(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681\)\s*'
