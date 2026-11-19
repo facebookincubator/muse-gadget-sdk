@@ -1123,7 +1123,7 @@ class WasmAppsTest(unittest.TestCase):
         dev_cmake = (ROOT / "components/capabilities_registry/CMakeLists.txt").read_text()
         self.assertRegex(dev_cmake, r'if\(CONFIG_CAPABILITIES_REGISTRY\)\s*list\(APPEND srcs "capabilities_registry.c"\)')
         cmake = (ROOT / "components/muse/CMakeLists.txt").read_text()
-        for src in ("board_capabilities.c",):
+        for src in ("board_capabilities.c", "boards/bmi270_device.c", "boards/imu_events.c"):
             i = cmake.index(src)
             guard = cmake.rfind("if(", 0, i)
             self.assertIn("CONFIG_CAPABILITIES_REGISTRY", cmake[guard:i], src + " is built without CONFIG_CAPABILITIES_REGISTRY")

@@ -42,6 +42,21 @@ dependencies:
     version: 2c047df7792cedece1191503793f18f5d8f1c695
     rules:
       - if: "$CONFIG{MUSE_FREEINK_DEVICE} != \"\""
+  # Only fetched/linked for the StopWatch's enabled capability registry.
+  # 0.4.1 includes an ESP-IDF 6.0 / ESP32-S3 prebuilt driver and Base firmware.
+  espressif/bmi270_sensor:
+    version: "==0.4.1"
+    rules:
+      - if: '$CONFIG{MUSE_BMI270_DRIVER} == "y"'
+  # The prebuilt driver calls i2c_bus directly; pin its reviewed ABI too.
+  espressif/i2c_bus:
+    version: "==1.5.2"
+    rules:
+      - if: '$CONFIG{MUSE_BMI270_DRIVER} == "y"'
+  espressif/cmake_utilities:
+    version: "==0.5.3"
+    rules:
+      - if: '$CONFIG{MUSE_BMI270_DRIVER} == "y"'
   espressif/esp_codec_dev:
     version: "~1.5"
     public: true
