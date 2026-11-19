@@ -223,7 +223,9 @@ events. Other devices describe themselves, with no new WASM imports.
 capabilities register in `components/muse/board_capabilities.c` (battery
 on boards with `read_power`). Board files register other hardware under
 `CONFIG_CAPABILITIES_REGISTRY`; chip drivers belong in their board's CMake
-block. Apps know only the registry. `tests/test_apps_dev.py` checks
+block, such as `components/muse/boards/bmi270_device.c` (`accel`, `gyro` and
+`steps`; the chip stays suspended until an app opens one). Apps know only the
+registry. `tests/test_apps_dev.py` checks
 board-defined descriptors against well-known definitions.
 
 ## VM requests and storage
