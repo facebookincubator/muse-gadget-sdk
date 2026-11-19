@@ -402,6 +402,20 @@ menu "Muse"
             one font. Small screens show such a caption one 16 px line at a
             time. Takes about 10 KB of flash and no RAM.
 
+    config MUSE_EMOJI
+        bool "Show emoji in captions"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            Without it, captions drop emoji. With it, screens whose captions
+            use the 16 px caption font (the round and larger ones, such as
+            the SenseCAP Watcher) show 190 of the emoji most common in
+            replies in colour: Twemoji's, scaled to 16 px, two caption cells
+            wide. Others still go, as do skin tones and anything joined to
+            an emoji with U+200D. Small screens, whose captions are 8 px
+            text, keep dropping them. Takes about 150 KB of flash and 48
+            bytes of RAM.
+
     choice MUSE_UI_LANGUAGE
         prompt "Language of the screen's own text"
         depends on MUSE_ENABLED && !MUSE_UI_FREEINK

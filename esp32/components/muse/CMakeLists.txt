@@ -78,6 +78,9 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_LATIN_FONT)
         list(APPEND srcs "fonts/muse_font_latin_16.c")   # captions with accented letters
     endif()
+    if(CONFIG_MUSE_EMOJI)
+        list(APPEND srcs "fonts/muse_font_emoji_16.c")   # captions' emoji
+    endif()
     if(CONFIG_MUSE_UI_LANG_VI)
         # Montserrat's Vietnamese letters, for the menu and the pairing card
         list(APPEND srcs "fonts/muse_font_vi_12.c" "fonts/muse_font_vi_14.c"
