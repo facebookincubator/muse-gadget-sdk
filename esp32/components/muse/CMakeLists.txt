@@ -155,7 +155,7 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_crowpanel_advance_43.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STICKC_PLUS2)
         list(APPEND srcs "boards/board_m5stack_stickc_plus2.c")
-    elseif(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH)
+    elseif(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY)
         list(APPEND srcs "boards/board_m5stack_stopwatch.c" "boards/muse_lcd_bands.c")
         if(CONFIG_CAPABILITIES_REGISTRY)
             # BMI270 registry/lifecycle adapter; vendor driver is a gated managed dependency.

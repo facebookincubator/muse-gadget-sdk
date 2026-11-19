@@ -772,7 +772,7 @@ class BoardDevices(unittest.TestCase):
         kconfig = (MUSE / "Kconfig").read_text()
         gate = kconfig.split("config MUSE_BMI270_DRIVER", 1)[1].split("\n    config ", 1)[0]
         self.assertIn('string', gate)
-        self.assertIn('default "y" if MUSE_BOARD_M5STACK_STOPWATCH && CAPABILITIES_REGISTRY', gate)
+        self.assertIn('default "y" if MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CAPABILITIES_REGISTRY', gate)
         self.assertIn('default "n"', gate)
         for name, version in (("i2c_bus", "1.5.2"), ("cmake_utilities", "0.5.3")):
             dependency = manifest.split("espressif/" + name + ":", 1)[1].split("\n  espressif/", 1)[0]
