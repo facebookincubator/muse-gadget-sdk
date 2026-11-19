@@ -28,6 +28,9 @@ class WatcherControls(unittest.TestCase):
         start = source.index("static void watcher_buttons(")
         end = source.index("\n/* A pairing prompt", start)
         watcher = source[start:end].rsplit("\n#endif", 1)[0]
+        # The real talk button too: whether a delayed wheel press can confirm pairing is decided there.
+        talk_start = source.index("/* Talk button: push-to-talk")
+        talk = source[talk_start:source.index("\n/* Keyboard menus", talk_start)]
         harness = out / "controls.c"
         harness.write_text(r'''#include <assert.h>
 #include <stdint.h>
@@ -268,11 +271,19 @@ static void long_reply(void) {
 #define MUSE_BTN_REVIEW_NEXT (1u << 16)
 #define portTICK_PERIOD_MS 1
 #define ESP_LOGI(...) ((void)0)
-static bool asleep, confirm;
+static bool asleep, confirm, armed;
 static uint32_t tick;
-static int talks, releases, cameras;
+static int talks, releases, cameras, confirmations;
 static uint32_t xTaskGetTickCount(void) { return tick; }
-static bool muse_link_talk_press(void) { bool c = confirm; confirm = false; return c; }
+static int64_t esp_timer_get_time(void) { return (int64_t)tick * 1000; }
+/* `confirm`: the next press confirms; `armed`: a pairing prompt waits for a press. */
+static bool muse_link_confirm_press(int64_t released_us) {
+    (void)released_us;
+    bool c = confirm || armed;
+    confirm = armed = false;
+    confirmations += c;
+    return c;
+}
 static bool muse_state_asleep(void) { return asleep; }
 static void muse_state_poke(void) {}
 typedef enum { MUSE_MODE_IDLE = 1, MUSE_MODE_ERROR = 5 } muse_mode_t;
@@ -281,7 +292,17 @@ static char caption[64];
 static muse_mode_t muse_state_mode(float *since) { (void)since; return mode; }
 static void muse_state_set_caption(const char *text) { strlcpy(caption, text, sizeof(caption)); }
 static void set_asleep(bool value, const char *why) { (void)why; asleep = value; }
-static void talk_button(unsigned ev) { talks += !!(ev & 1); releases += !!(ev & 2); }
+typedef enum { MUSE_PTT_DOWN, MUSE_PTT_UP } muse_ptt_t;
+static void post(muse_ptt_t type, bool wake) { (void)wake; talks += type == MUSE_PTT_DOWN; releases += type == MUSE_PTT_UP; }
+static int fake_audio(void) { return 0; }
+static const struct { int (*audio_init)(void), (*mic_init)(void); bool keyboard; const char *talk_button; } board = {
+    .audio_init = fake_audio, .talk_button = "wheel" }, *muse_board = &board;
+enum { MUSE_MENU_SELECT };
+static bool muse_menu_is_open(void) { return false; }
+static void muse_menu_key(int key) { (void)key; }
+static bool s_talk_down;
+static int64_t s_talk_released_us;
+''' + talk + r'''
 #if CONFIG_MUSE_WATCHER_CAMERA
 static void watcher_camera_preview_toggle(void) { cameras++; }
 #endif
@@ -307,6 +328,23 @@ static void routing(void) {
     muse_review_store(1, "the quick brown fox jumps over the lazy dog");
     input(MUSE_BTN_REVIEW_NEXT, 4200);
     assert(muse_review_active() && talks == 1);
+}
+/* A pairing prompt that appears while the wheel is already held (a BLE peer
+ * finishing its handshake just after the press) waits for a press of its own:
+ * the hold that started before it only talks. */
+static void late_prompt(void) {
+    muse_review_init();
+    input(1, 0);   /* the press edge: nothing to confirm yet */
+    assert(!confirmations);
+    armed = true;  /* the prompt arrives mid-hold */
+    input(0, 100); input(0, 300);   /* the hold becomes push-to-talk */
+    assert(!confirmations && armed && talks == 1);
+    input(2, 400);
+    assert(releases == 1 && armed);
+    input(1, 1000);   /* a fresh press confirms it, and doesn't talk */
+    assert(confirmations == 1 && !armed);
+    input(0, 1400); input(2, 1500);
+    assert(talks == 1 && releases == 1);
 }
 /* Let go on the very poll the hold would start: a click, not a press and release. */
 static void threshold(void) {
@@ -343,6 +381,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "routing")) routing();
     else if (!strcmp(argv[1], "threshold")) threshold();
     else if (!strcmp(argv[1], "empty")) nothing_to_review();
+    else if (!strcmp(argv[1], "late")) late_prompt();
     else return 2;
     return 0;
 }
@@ -404,6 +443,11 @@ int main(int argc, char **argv) {
     def test_release_on_the_hold_poll_is_a_click(self):
         for binary in (self.binary, self.camera_binary):
             result = subprocess.run([str(binary), "threshold"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_hold_started_before_a_pairing_prompt_does_not_confirm_it(self):
+        for binary in (self.binary, self.camera_binary):
+            result = subprocess.run([str(binary), "late"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_nothing_to_review_keeps_an_error_caption(self):

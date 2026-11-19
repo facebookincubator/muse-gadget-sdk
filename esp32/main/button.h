@@ -17,11 +17,16 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef void (*button_cb)(void);
 
 bool button_init(button_cb on_short_press, button_cb on_double_press,
                  button_cb on_long_press);
+
+// From the short-press callback: a time (esp_timer's clock) the button was
+// last seen up before that press began.
+int64_t button_pressed_after_us(void);
 
 // Called from the button task on each press and release. Returning true from
 // a press claims it: it then counts as neither a tap nor a hold, and its
