@@ -171,6 +171,11 @@ void muse_settings_set_speaker_on(bool on)
     sim_services_set_speaker(on);
 }
 
+/* Text size: the screen's default until someone picks one, as on a board. */
+static int s_text_default = MUSE_TEXT_SMALL;
+int muse_settings_text_size(void) { return s_text_default; }
+void muse_settings_set_text_size_default(int size) { s_text_default = size; }
+
 void muse_wifi_status(muse_wifi_status_t *out)
 {
     if (out) {

@@ -48,6 +48,9 @@ void muse_ui_show_face(void);
 void muse_ui_set_swipe_enabled(bool enabled);
 /* Temporarily applies a brightness while a slider is dragged. */
 void muse_ui_preview_brightness(int pct);
+/* Whether this screen's replies follow the Text size setting: a bigger
+ * screen's reading page, or a small one's full-screen reply. */
+bool muse_ui_text_size_applies(void);
 
 /*
  * display.draw_url, from any task. An image covers the face until a tap, a

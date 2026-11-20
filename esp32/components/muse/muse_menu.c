@@ -165,7 +165,7 @@ static const int GAIN_STEPS[] = { 0, 6, 12, 18, 24, 30, 36 };
 static const int SLEEP_STEPS[] = { 0, 30, 60, 120, 300, 600 };
 static const char *const SLEEP_NAMES[] = { "Never", "30 s", "1 min", "2 min", "5 min", "10 min" };
 #if CONFIG_MUSE_SMALL_FULL_REPLY
-static const char *const TEXT_NAMES[] = { "Small", "Medium", "Large" };
+static const char *const TEXT_NAMES[MUSE_TEXT_SIZES] = { "Extra small", "Small", "Medium", "Large", "Extra large" };
 #endif
 #define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
