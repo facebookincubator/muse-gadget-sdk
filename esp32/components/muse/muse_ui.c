@@ -613,21 +613,53 @@ LV_FONT_DECLARE(muse_font_cjk_16)
 #if CONFIG_MUSE_LATIN_FONT
 LV_FONT_DECLARE(muse_font_latin_16)
 #endif
+#if CONFIG_MUSE_EMOJI
+LV_FONT_DECLARE(muse_font_emoji_16)
+#endif
+
+#if CONFIG_MUSE_LATIN_FONT
+/* Unifont's 8x16 for a caption with accented letters; with CONFIG_MUSE_EMOJI,
+ * a copy that falls back to the emoji. */
+static const lv_font_t *latin_caption_font(void)
+{
+#if CONFIG_MUSE_EMOJI
+    static lv_font_t font;
+    if (!font.get_glyph_dsc) {
+        font = muse_font_latin_16;
+        font.fallback = &muse_font_emoji_16;
+    }
+    return &font;
+#else
+    return &muse_font_latin_16;
+#endif
+}
+#endif
 
 /* unscii-16 for captions and replies; with CONFIG_MUSE_CJK_FONT, a copy that
- * falls back to Unifont's 16x16 CJK, the same cell, for what unscii lacks. */
+ * falls back to Unifont's 16x16 CJK, the same cell, for what unscii lacks.
+ * With CONFIG_MUSE_EMOJI, the last fallback is the emoji, 16 px images two
+ * cells wide. */
 static const lv_font_t *caption_font(void)
 {
-#if CONFIG_MUSE_CJK_FONT
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_EMOJI
     static lv_font_t font;
     if (!font.get_glyph_dsc) {
         font = lv_font_unscii_16;
+#if CONFIG_MUSE_EMOJI
+        font.fallback = &muse_font_emoji_16;
+#endif
+#if CONFIG_MUSE_CJK_FONT
         font.fallback = &CJK_FONT;
-#if CONFIG_MUSE_LATIN_FONT
-        static lv_font_t cjk;   /* and a copy of that for accented letters among CJK */
+#if CONFIG_MUSE_LATIN_FONT || CONFIG_MUSE_EMOJI
+        static lv_font_t cjk;   /* and a copy of that for accented letters and emoji among CJK */
         cjk = CJK_FONT;
-        cjk.fallback = &muse_font_latin_16;
+#if CONFIG_MUSE_LATIN_FONT
+        cjk.fallback = latin_caption_font();
+#else
+        cjk.fallback = &muse_font_emoji_16;
+#endif
         font.fallback = &cjk;
+#endif
 #endif
     }
     return &font;
@@ -667,7 +699,7 @@ static const lv_font_t *caption_font_for(const char *text)
     }
 #endif
     if (muse_text_has_latin(text)) {
-        return &muse_font_latin_16;
+        return latin_caption_font();
     }
 #endif
     (void)text;
@@ -1499,6 +1531,13 @@ static void build_screen(void)
     lv_obj_set_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
 
     s_caption_lbl = make_label(face, font_pick(caption_font(), &lv_font_unscii_8), COLOR_CAPTION);
+#if CONFIG_MUSE_EMOJI
+    if (!s_small) {
+        /* Captions and replies here are in caption_font(), which draws the
+         * emoji it has. A small screen's band and pages don't: they drop them. */
+        muse_text_keep_emoji();
+    }
+#endif
     if (s_small) {
         /* Two lines over the bottom of the face, on a dark band so they stay
          * legible. A tall screen has room to keep them above the mic icon. */

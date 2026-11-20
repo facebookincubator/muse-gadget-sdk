@@ -25,7 +25,10 @@
  *   latin      the same with CONFIG_MUSE_LATIN_FONT's accented letters kept,
  *              after "1:" if it has any or "0:"
  *   page       stdin is a reply's text: prints "cjk" or "latin" for the caption
- *              font it takes, then for the page it asks for (test_muse_caption_wrap.py) */
+ *              font it takes, then for the page it asks for (test_muse_caption_wrap.py)
+ *   emoji      built with CONFIG_MUSE_EMOJI: the caption muse_text_to_caption()
+ *              makes of a reply with CONFIG_MUSE_EMOJI's emoji kept
+ *   emoji-pages  as pages, with the emoji kept and 16 px wide in the fake font */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,7 +50,8 @@ void muse_state_page(const char *text, int *cols, int *lines)
 }
 
 /* A proportional font for the pixel-wrapped pages: wide W and M, narrow i, l,
- * spaces and stops, 10 px otherwise, and A pulled 2 px towards a V after it. */
+ * spaces and stops, 16 px emoji, 10 px otherwise, and A pulled 2 px towards a
+ * V after it. */
 static int fake_glyph_px(uint32_t letter, uint32_t next)
 {
     int w = 10;
@@ -55,6 +59,8 @@ static int fake_glyph_px(uint32_t letter, uint32_t next)
         w = 18;
     } else if (letter == 'i' || letter == 'l' || letter == ' ' || letter == '.') {
         w = 4;
+    } else if ((letter >= 0x2300 && letter <= 0x2BFF) || letter >= 0x1F000) {
+        w = 16;   /* an emoji: two of the caption font's cells */
     } else if (letter >= 0x80) {
         w = 11;
     }
@@ -116,7 +122,8 @@ int main(int argc, char **argv)
         if (muse_hatch_caption_at(in, 0, page, sizeof(page))) {
             fputs(page, stdout);
         }
-    } else if (argc > 4 && (!strcmp(argv[1], "pages") || !strcmp(argv[1], "latin-pages"))) {
+    } else if (argc > 4 && (!strcmp(argv[1], "pages") || !strcmp(argv[1], "latin-pages") ||
+                            !strcmp(argv[1], "emoji-pages"))) {
         /* Every page the reply turns through, pixel-wrapped (PX 0: by
          * characters only), one per offset where it changes, separated by form
          * feeds. CAP is the page buffer, the voice task's by default.
@@ -124,6 +131,13 @@ int main(int argc, char **argv)
         if (argv[1][0] == 'l') {
             muse_text_keep_latin();
         }
+#if CONFIG_MUSE_EMOJI
+        if (argv[1][0] == 'e') {
+            muse_text_keep_emoji();
+            muse_text_to_caption(in, len + 1);   /* as muse_state.c does before paging */
+            len = strlen(in);
+        }
+#endif
         s_cols = atoi(argv[2]);
         muse_chat_set_caption_px(atoi(argv[3]), fake_glyph_px);
         s_lines = atoi(argv[4]);
@@ -149,12 +163,20 @@ int main(int argc, char **argv)
         muse_text_keep_latin();
         muse_text_to_caption(shown, sizeof(shown));
         printf("%d:%s", muse_text_has_latin(shown), shown);
+#if CONFIG_MUSE_EMOJI
+    } else if (argc > 1 && !strcmp(argv[1], "emoji")) {
+        static char shown[1 << 16];
+        strlcpy(shown, in, sizeof(shown));
+        muse_text_keep_emoji();
+        muse_text_to_caption(shown, sizeof(shown));
+        fputs(shown, stdout);
+#endif
     } else if (argc > 1 && !strcmp(argv[1], "page")) {
         static char page[1 << 16];
         muse_hatch_caption_at(in, 0, page, sizeof(page));
         printf("%s %s\n", muse_text_has_cjk(in) ? "cjk" : "latin", s_page_cjk ? "cjk" : "latin");
     } else {
-        fprintf(stderr, "usage: %s console|unescape|caption COLS|[latin-]pages COLS PX LINES [CAP]|ascii|latin|page < input\n", argv[0]);
+        fprintf(stderr, "usage: %s console|unescape|caption COLS|[latin-|emoji-]pages COLS PX LINES [CAP]|ascii|latin|emoji|page < input\n", argv[0]);
         return 2;
     }
     free(in);
