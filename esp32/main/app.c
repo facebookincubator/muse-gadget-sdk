@@ -533,13 +533,16 @@ static app_wifi_join_t join_saved_networks(int timeout_ms, join_mode_t mode,
 
     // Rejoining the network it was on (after a drop): straight to the
     // access point cached at that join (wifi_mgr_has_cached_ap), without
-    // probing its channel first. A miss drops the cache (wifi_mgr_connect),
-    // and the probe and the scan below follow. The cap leaves time for a slow
-    // DHCP: a shorter one re-triggered the connect while DHCP was still
-    // running.
-    if (mode == JOIN_ANY && wifi_mgr_has_cached_ap(list->nets[0].ssid)) {
+    // probing its channel first, if it was near enough (the probe's floor:
+    // on a mesh, a weak one probes for a nearer node). A miss drops the cache
+    // (wifi_mgr_connect), and the probe and the scan below follow. The cap
+    // leaves time for a slow DHCP: a shorter one re-triggered the connect
+    // while DHCP was still running.
+    if (mode == JOIN_ANY && wifi_mgr_has_cached_ap(list->nets[0].ssid, WIFI_QUICK_MIN_RSSI)) {
         restore_wifi_channel_hint(list->nets[0].ssid);
-        tries++;   // not tried[]: after a miss the full scan below may still find it elsewhere
+        // Neither tries nor tried[]: the probe and the scan below count what
+        // they find, so a miss away from home is still "not nearby", and the
+        // scan may still find this network through another access point.
         int ms = join_ms_left(deadline) / 2;
         ok = join_saved_network(list, 0, ms < WIFI_REJOIN_MS ? ms : WIFI_REJOIN_MS, led, -1, joined);
         if (ok) goto done;

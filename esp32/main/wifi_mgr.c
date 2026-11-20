@@ -117,12 +117,12 @@ static void cache_connected_ap(void) {
     portEXIT_CRITICAL(&s_bssid_lock);
 }
 
-bool wifi_mgr_has_cached_ap(const char *ssid) {
+bool wifi_mgr_has_cached_ap(const char *ssid, int min_rssi) {
     if (!ssid || !ssid[0]) return false;
     bool found = false;
     portENTER_CRITICAL(&s_bssid_lock);
     for (int i = 0; i < s_bssid_cache_count && !found; i++) {
-        found = strcmp(s_bssid_cache[i].ssid, ssid) == 0;
+        found = strcmp(s_bssid_cache[i].ssid, ssid) == 0 && s_bssid_cache[i].rssi >= min_rssi;
     }
     portEXIT_CRITICAL(&s_bssid_lock);
     return found;
