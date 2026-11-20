@@ -230,7 +230,6 @@ muse_hatch_ev_t muse_hatch_turn_event(char *p,size_t n) {
     snprintf(p,n,"%s",hatch_end_text);
     return ev;
 }
-bool muse_chat_needs_voice_poll(void) { return false; }
 bool muse_hatch_turn_caption(size_t x,char *p,size_t n) { (void)x;(void)p;(void)n;return false; }
 float muse_turn_progress(size_t played,int *message) {
     (void)played;

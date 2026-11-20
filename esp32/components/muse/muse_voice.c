@@ -33,9 +33,11 @@
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_chat.h"
-#include "muse_chat_priv.h"
 #include "muse_input.h"
 #include "muse_mem.h"
+#if CONFIG_MUSE_PHOTO_NOTES
+#include "muse_photo_note.h"
+#endif
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_wakeword_glue.h"
@@ -480,6 +482,14 @@ static bool record(bool seeded, char *why, size_t cap)
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
         go_live();
     }
+#if CONFIG_MUSE_PHOTO_NOTES
+    /* A photo at the press, for a note the person's press started that goes now. */
+    muse_photo_note_begin(s_live && !seeded);
+    const char *photo = muse_photo_note_label();
+    if (photo) {
+        muse_state_set_caption("%s", photo);
+    } else
+#endif
     muse_state_set_caption(s_live ? "LISTENING..." : "RECORDING...");
     bool heard = false, ok = true;
     bool gave_up = false;   /* Hatch failed this note: it's kept, and goes later */
@@ -553,6 +563,11 @@ static bool record(bool seeded, char *why, size_t cap)
         }
         muse_state_set_progress((float)n / MAX_FRAMES);
         if (!heard && ok && tick) {
+#if CONFIG_MUSE_PHOTO_NOTES
+            if ((photo = muse_photo_note_label())) {
+                muse_state_set_caption("%s • %.1fs", photo, (double)n / MUSE_AUDIO_RATE);
+            } else
+#endif
             muse_state_set_caption(s_live ? "LISTENING %.1fs" : "RECORDING %.1fs", (double)n / MUSE_AUDIO_RATE);
         }
         /*
@@ -1197,6 +1212,11 @@ static bool held_due(void)
 static bool finish_note(void)
 {
     bool delivered;
+#if CONFIG_MUSE_PHOTO_NOTES
+    if (s_live) {
+        muse_photo_note_wait();   /* the press's photo goes up with the note's end */
+    }
+#endif
 #if HOLD_NOTES
     if (s_rec) {
         bool fed = false, interrupted = false;
@@ -1265,19 +1285,6 @@ static bool can_record(void)
         return false;
     }
     return true;
-}
-
-/* The Link-backed chat has no task of its own: while the voice task is idle it
- * still owns ACK, timeout and terminal-error progress for an image turn. */
-static bool poll_idle_chat(void)
-{
-    if (!muse_chat_needs_voice_poll()) {
-        return false;
-    }
-    char text[96];
-    while (muse_hatch_turn_event(text, sizeof(text)) != MUSE_HATCH_EV_NONE) {
-    }
-    return muse_chat_needs_voice_poll();
 }
 
 #if CONFIG_MUSE_REALTIME_VOICE
@@ -1599,9 +1606,7 @@ static void voice_task(void *arg)
             /* The wake word opt-in keeps the codecs powered. Not
              * muse_wakeword_listening(): it reads false while resting, and
              * briefly after a reply until the wake task applies playback off. */
-            bool chat_pending = poll_idle_chat();
-            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && !muse_wakeword_enabled()
-                        && !chat_pending;
+            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && !muse_wakeword_enabled();
 #if HOLD_NOTES
             /* A press goes first: send_held() leaves it queued and returns
              * without backing off, so retrying before it's read would spin. */

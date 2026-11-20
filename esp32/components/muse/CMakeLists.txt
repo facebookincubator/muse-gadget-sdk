@@ -60,6 +60,9 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_options_json.c")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
+        if(CONFIG_MUSE_PHOTO_NOTES)
+            list(APPEND srcs "muse_photo_note.c" "muse_chat_image.c")   # a photo with each voice note
+        endif()
         if(CONFIG_MUSE_REALTIME_VOICE)
             list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
             if(CONFIG_MUSE_VOICE_SOFTWARE_AEC)
@@ -69,7 +72,7 @@ if(CONFIG_MUSE_ENABLED)
     else()
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
     endif()
-    list(APPEND srcs "muse_chat_text.c" "muse_chat_image.c")
+    list(APPEND srcs "muse_chat_text.c")
     if(CONFIG_MUSE_CJK_FONT_NOTO)
         list(APPEND srcs "fonts/muse_font_cjk_noto_16.c")   # captions' CJK fallback
     elseif(CONFIG_MUSE_CJK_FONT)
@@ -232,7 +235,7 @@ if(CONFIG_MUSE_ENABLED)
 elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
     # voice_muse_chat.c stands in for the Muse settings, Wi-Fi and Link hooks.
-    list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_chat_text.c" "muse_chat_image.c" "muse_text.c")
+    list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_chat_text.c" "muse_text.c")
     # The shared session handles option events even without a touchscreen.
     list(APPEND srcs "muse_options.c" "muse_options_json.c")
     list(APPEND embed "test_reply.mp3")

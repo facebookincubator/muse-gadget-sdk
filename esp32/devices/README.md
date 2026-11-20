@@ -1089,7 +1089,17 @@ Capture runs asynchronously and reports initialization, timeout, or busy errors.
 The camera uses the existing Himax firmware. It's powered only while a capture
 or the live view runs (a capture takes under a second, start-up included), and
 nothing polls it in between.
-Photo attachments to voice messages are not included.
+
+Camera builds also add **Photo with voice notes** to Settings > Sound
+(`CONFIG_MUSE_PHOTO_NOTES`), off until you turn it on. Then holding the wheel
+to talk also takes a photo, the live view's frame while that's open: the
+screen shows TAKING A PHOTO, then PHOTO TAKEN (or NO PHOTO) beside the
+note's length, and the photo goes to Muse after the note's audio, in the same
+message, so you can ask about what the Watcher sees. Only your own hold takes
+one this way: not a wake word note, and not a note saved to send later, which
+goes without it. The photo isn't kept once it has gone up. If the camera
+isn't done within 3 s of letting go, the note goes without it, and a press
+while the photo uploads cancels the note, as during recording.
 
 ## reSpeaker Lite setup (experimental)
 
