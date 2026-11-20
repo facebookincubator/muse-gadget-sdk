@@ -43,7 +43,9 @@
 #include "lwip/ip4_addr.h"
 
 #include "identity.h"
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE
 #include "sdk_token_console.h"
+#endif
 #if CONFIG_MUSE_WASM_APPS
 #include "muse_apps.h"
 #endif
@@ -2999,7 +3001,7 @@ void app_run(void) {
     link_pairing_init(identity_setup_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
-#if !CONFIG_MUSE_ENABLED
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE && !CONFIG_MUSE_ENABLED
     // Muse boards' own console takes the command (muse_glue_start).
     sdk_token_console_start();
 #endif
