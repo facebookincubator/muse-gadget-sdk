@@ -9,6 +9,12 @@
  * limitations under the License.
  */
 #include <assert.h>
+#include "esp_log.h"
+/* Retain log-tag references when compiling the settings source with host stubs. */
+#undef ESP_LOGI
+#undef ESP_LOGW
+#define ESP_LOGI(tag, ...) ((void)(tag))
+#define ESP_LOGW(tag, ...) ((void)(tag))
 #include "muse_settings.c"
 #include "muse_theme.h"
 static bool present, fail_set, fail_commit;
@@ -50,7 +56,12 @@ esp_err_t nvs_get_u8(nvs_handle_t h,const char *key,uint8_t *v) {
 esp_err_t nvs_get_u16(nvs_handle_t h,const char *key,uint16_t *v) { (void)h;(void)key;(void)v;return ESP_FAIL; }
 esp_err_t nvs_get_str(nvs_handle_t h,const char *key,char *v,size_t *n) { (void)h;(void)key;(void)v;(void)n;return ESP_FAIL; }
 esp_err_t nvs_set_u8(nvs_handle_t h,const char *key,uint8_t v) {
-    assert(h==1 && !strcmp(key,"ui_theme_v1")); if(fail_set)return ESP_FAIL;pending=v;return ESP_OK;
+    assert(h==1 && !strcmp(key,"ui_theme_v1"));
+    if (fail_set) {
+        return ESP_FAIL;
+    }
+    pending=v;
+    return ESP_OK;
 }
 esp_err_t nvs_commit(nvs_handle_t h) {
     assert(h==1);++commits;
@@ -60,7 +71,12 @@ esp_err_t nvs_commit(nvs_handle_t h) {
         muse_theme_request_mode((muse_theme_mode_t)mode);
     }
 #endif
-    if(fail_commit)return ESP_FAIL;stored=pending;present=true;return ESP_OK;
+    if (fail_commit) {
+        return ESP_FAIL;
+    }
+    stored=pending;
+    present=true;
+    return ESP_OK;
 }
 SemaphoreHandle_t xSemaphoreCreateMutex(void) { return (void *)1; }
 BaseType_t xSemaphoreTake(SemaphoreHandle_t h, TickType_t wait) { (void)wait; assert(h==(void *)1); return pdTRUE; }
