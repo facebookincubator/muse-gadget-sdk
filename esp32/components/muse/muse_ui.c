@@ -991,7 +991,7 @@ static void add_hides(answer_layout_t *l, int n)
 }
 
 /* Montserrat `base` for a reply page, falling back to what draws the letters
- * it lacks: the screen language's, or the caption's CJK or accented ones.
+ * it lacks: the screen language's, or the caption's CJK, accented ones or emoji.
  * `copy` holds the font when it needs one of its own. */
 static const lv_font_t *reply_font(const lv_font_t *base, lv_font_t *copy)
 {
@@ -1005,7 +1005,11 @@ static const lv_font_t *reply_font(const lv_font_t *base, lv_font_t *copy)
     return copy;
 #elif CONFIG_MUSE_LATIN_FONT
     *copy = *base;
-    copy->fallback = &muse_font_latin_16;
+    copy->fallback = latin_caption_font();
+    return copy;
+#elif CONFIG_MUSE_EMOJI
+    *copy = *base;
+    copy->fallback = &muse_font_emoji_16;
     return copy;
 #else
     (void)copy;
