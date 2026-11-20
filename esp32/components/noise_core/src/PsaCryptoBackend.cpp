@@ -319,23 +319,21 @@ Status PsaCryptoBackend::X25519GenerateKeypair(
   }
 
 #if NOISE_CORE_X25519_HACL
-  {
-    std::array<uint8_t, kX25519KeySize> privateKey{};
-    std::array<uint8_t, kX25519KeySize> publicKey{};
-    status = PsaStatusToStatus(
-        psa_generate_random(privateKey.data(), privateKey.size()));
-    if (!status.ok()) {
-      SecureZeroize(privateKey);
-      return status;
-    }
-    noise_core_x25519_hacl(
-        publicKey.data(), privateKey.data(), kX25519BasePoint);
-    std::copy(privateKey.begin(), privateKey.end(), privateKey32.data());
-    std::copy(publicKey.begin(), publicKey.end(), publicKey32.data());
+  std::array<uint8_t, kX25519KeySize> privateKey{};
+  std::array<uint8_t, kX25519KeySize> publicKey{};
+  status = PsaStatusToStatus(
+      psa_generate_random(privateKey.data(), privateKey.size()));
+  if (!status.ok()) {
     SecureZeroize(privateKey);
-    return OkStatus();
+    return status;
   }
-#endif
+  noise_core_x25519_hacl(
+      publicKey.data(), privateKey.data(), kX25519BasePoint);
+  std::copy(privateKey.begin(), privateKey.end(), privateKey32.data());
+  std::copy(publicKey.begin(), publicKey.end(), publicKey32.data());
+  SecureZeroize(privateKey);
+  return OkStatus();
+#else
   psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
   psa_set_key_usage_flags(
       &attributes, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
@@ -372,6 +370,7 @@ Status PsaCryptoBackend::X25519GenerateKeypair(
   std::copy(publicKey.begin(), publicKey.end(), publicKey32.data());
   SecureZeroize(privateKey);
   return OkStatus();
+#endif
 }
 
 Status PsaCryptoBackend::X25519PublicFromPrivate(
@@ -389,8 +388,7 @@ Status PsaCryptoBackend::X25519PublicFromPrivate(
   noise_core_x25519_hacl(
       publicKey32.data(), privateKey32.data(), kX25519BasePoint);
   return OkStatus();
-#endif
-
+#else
   PsaKey key;
   status = ImportX25519PrivateKey(
       privateKey32, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT, key);
@@ -410,6 +408,7 @@ Status PsaCryptoBackend::X25519PublicFromPrivate(
     return Status::Internal();
   }
   return OkStatus();
+#endif
 }
 
 Status PsaCryptoBackend::X25519Dh(
@@ -437,7 +436,7 @@ Status PsaCryptoBackend::X25519Dh(
   }
   SecureZeroize(shared);
   return status;
-#endif
+#else
   PsaKey key;
   status = ImportX25519PrivateKey(privateKey32, PSA_KEY_USAGE_DERIVE, key);
   if (!status.ok()) {
@@ -464,6 +463,7 @@ Status PsaCryptoBackend::X25519Dh(
   }
   SecureZeroize(shared);
   return status;
+#endif
 }
 
 Status PsaCryptoBackend::Sha256(
