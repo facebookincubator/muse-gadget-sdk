@@ -93,6 +93,22 @@ class HelperTaskContractTest(unittest.TestCase):
         self.assertIn("CONFIG_SPIRAM_RODATA=y", overlay)
         self.assertIn("CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024", overlay)
 
+    def test_aipi_lite_opts_into_psram_setup_stacks(self) -> None:
+        overlay = (ROOT / "devices" / "sdkconfig.muse-aipi").read_text()
+        # The AIPI Lite's largest free internal block is about 7 KB once
+        # Wi-Fi, BLE and the tunnel are up (#384): the 8 KB Muse VM lookup
+        # stack only fits in PSRAM. The gate in helper_task.h takes effect
+        # only where code and rodata run from PSRAM, and the static buffers
+        # need BSS in PSRAM; the overlay sets all of them.
+        for line in (
+            "CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y",
+            "CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y",
+            "CONFIG_SPIRAM_RODATA=y",
+            "CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y",
+            "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y",
+        ):
+            self.assertIn(line, overlay.splitlines())
+
     def test_setup_tasks_do_not_choose_psram_stacks_themselves(self) -> None:
         for path in (APP_C, BLE_SERVER_C):
             source = _strip_comments(path.read_text())
