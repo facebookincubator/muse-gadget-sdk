@@ -47,6 +47,9 @@
 #include "muse_mirror.h"
 #endif
 #include "muse_settings.h"
+#if CONFIG_MUSE_UI_THEME
+#include "muse_theme.h"
+#endif
 #if !CONFIG_MUSE_UI_FREEINK
 #include "muse_settings_ui.h"   /* LVGL only; e-paper builds use FreeInk */
 #endif
@@ -1054,6 +1057,22 @@ static bool console_command(char *line, bool whole)
                (unsigned)st.wakes, (unsigned)st.cancels, (unsigned)st.submits,
                (unsigned)st.dropped_frames);
         fflush(stdout);
+        return true;
+    }
+#endif
+#if CONFIG_MUSE_UI_THEME
+    if (!strcmp(line,"theme") || !strncmp(line,"theme=",6)) {
+        if(line[5]=='=') {
+            const char *name=line+6;
+            if(!strcmp(name,"auto"))muse_theme_request_mode(MUSE_THEME_AUTO);
+            else if(!strcmp(name,"dark"))muse_theme_request_mode(MUSE_THEME_DARK);
+            else if(!strcmp(name,"light"))muse_theme_request_mode(MUSE_THEME_LIGHT);
+            else {printf("@theme error invalid\n");return true;}
+        }
+        static const char *const names[]={"auto","dark","light"};
+        uint32_t hint=muse_theme_hint();
+        printf("@theme {\"mode\":\"%s\",\"hint_valid\":%s,\"hint_rgb\":%u,\"save_error\":%d}\n",
+            names[muse_theme_mode()],(hint&0x1000000u)?"true":"false",(unsigned)(hint&0xffffff),muse_theme_save_error());
         return true;
     }
 #endif

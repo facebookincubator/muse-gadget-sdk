@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "muse_theme_lvgl.h"
 #include "muse_keypad.h"
 
 #include <ctype.h>
@@ -270,11 +271,11 @@ lv_obj_t *muse_keypad_create(lv_obj_t *parent, lv_obj_t *ta, bool round)
     lv_obj_remove_style_all(s_kp);
     lv_obj_set_style_pad_gap(s_kp, 6, 0);
     lv_obj_set_style_text_font(s_kp, &lv_font_montserrat_20, LV_PART_ITEMS);
-    lv_obj_set_style_text_color(s_kp, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
+    muse_theme_set_style_text_color(s_kp, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
     lv_obj_set_style_bg_opa(s_kp, LV_OPA_COVER, LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(s_kp, lv_color_hex(COLOR_CARD), LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(s_kp, lv_color_hex(COLOR_CARD_PRESSED), LV_PART_ITEMS | LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(s_kp, lv_color_hex(COLOR_ACCENT), LV_PART_ITEMS | LV_STATE_CHECKED);
+    muse_theme_set_style_bg_color(s_kp, lv_color_hex(COLOR_CARD), LV_PART_ITEMS);
+    muse_theme_set_style_bg_color(s_kp, lv_color_hex(COLOR_CARD_PRESSED), LV_PART_ITEMS | LV_STATE_PRESSED);
+    muse_theme_set_style_bg_color(s_kp, lv_color_hex(COLOR_ACCENT), LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_set_style_radius(s_kp, 12, LV_PART_ITEMS);
     /* A swipe across the keys is sloppy typing, not "back": it would lose the text. */
     lv_obj_remove_flag(s_kp, LV_OBJ_FLAG_GESTURE_BUBBLE);

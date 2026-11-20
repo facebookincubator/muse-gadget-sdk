@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "muse_theme_lvgl.h"
 #include "muse_settings_ui.h"
 
 #include <stdio.h>
@@ -90,6 +91,9 @@ static char s_proxy_ssid[MUSE_SSID_MAX + 1];
 static network_proxy_config_t s_proxy_edit;
 static lv_obj_t *s_proxy_mode, *s_proxy_host, *s_proxy_port, *s_proxy_user, *s_proxy_pass, *s_proxy_status;
 static bool s_proxy_saving;
+#if CONFIG_MUSE_UI_THEME
+static lv_obj_t *s_appearance,*s_appearance_mode,*s_home_appearance,*s_appearance_status;
+#endif
 static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text;
 
 /*
@@ -233,7 +237,7 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, 
     char shown[SHOWN_MAX];
     lv_obj_t *l = lv_label_create(parent);
     lv_obj_set_style_text_font(l, settings_font(font), 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
+    muse_theme_set_style_text_color(l, lv_color_hex(color), 0);
     text = T(text);
     lv_label_set_text(l, muse_lang_showable(text) ? text : muse_text_showable(text, shown, sizeof(shown)));
     return l;
@@ -371,8 +375,8 @@ static lv_obj_t *card(lv_obj_t *list, bool clickable)
     lv_obj_set_size(c, lv_pct(100), wide_layout() ? 84 : s_tiny ? TINY_ROW_H : ROW_H);
     lv_obj_set_style_radius(c, s_tiny ? 12 : 18, 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD), 0);
-    lv_obj_set_style_bg_color(c, lv_color_hex(COLOR_CARD_PRESSED), LV_STATE_PRESSED);
+    muse_theme_set_style_bg_color(c, lv_color_hex(COLOR_CARD), 0);
+    muse_theme_set_style_bg_color(c, lv_color_hex(COLOR_CARD_PRESSED), LV_STATE_PRESSED);
     lv_obj_set_style_pad_hor(c, wide_layout() ? 24 : stacked_rows() ? 10 : 16, 0);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -438,8 +442,8 @@ static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_
     }
     lv_obj_t *sw = lv_switch_create(c);
     lv_obj_set_size(sw, wide_layout() ? 76 : stacked_rows() ? 44 : 60, wide_layout() ? 42 : s_tiny ? 24 : 32);
-    lv_obj_set_style_bg_color(sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    muse_theme_set_style_bg_color(sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
+    muse_theme_set_style_bg_color(sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (on) {
         lv_obj_add_state(sw, LV_STATE_CHECKED);
     }
@@ -486,9 +490,9 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_align(s, LV_ALIGN_TOP_MID, 0, wide_layout() ? 50 : s_tiny ? 30 : 40);
     lv_slider_set_range(s, lo, hi);
     lv_slider_set_value(s, value, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(s, lv_color_hex(0x2a2345), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(s, lv_color_hex(COLOR_TEXT), LV_PART_KNOB);
+    muse_theme_set_style_bg_color(s, lv_color_hex(0x2a2345), LV_PART_MAIN);
+    muse_theme_set_style_bg_color(s, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
+    muse_theme_set_style_bg_color(s, lv_color_hex(COLOR_TEXT), LV_PART_KNOB);
     lv_obj_set_style_pad_all(s, 6, LV_PART_KNOB);
     lv_obj_set_ext_click_area(s, 16);
     lv_obj_add_event_cb(s, cb, LV_EVENT_VALUE_CHANGED, NULL);
@@ -540,7 +544,11 @@ static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 
 static void drop(lv_obj_t *p)
 {
-    lv_obj_t **const pages[] = { &s_wifi, &s_hatch, &s_ble, &s_sound, &s_sleep, &s_battery, &s_power, &s_text, &s_proxy };
+    lv_obj_t **const pages[] = { &s_wifi, &s_hatch, &s_ble, &s_sound, &s_sleep, &s_battery, &s_power, &s_text, &s_proxy,
+#if CONFIG_MUSE_UI_THEME
+        &s_appearance,
+#endif
+    };
     for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
         if (*pages[i] == p) {
             *pages[i] = NULL;
@@ -698,7 +706,7 @@ static void build_keyboard(void)
     lv_obj_set_size(s_text_show, 70, text_field_h());
     lv_obj_set_style_radius(s_text_show, 14, 0);
     lv_obj_set_style_bg_opa(s_text_show, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(s_text_show, lv_color_hex(COLOR_CARD), 0);
+    muse_theme_set_style_bg_color(s_text_show, lv_color_hex(COLOR_CARD), 0);
     lv_obj_add_event_cb(s_text_show, on_text_show, LV_EVENT_CLICKED, NULL);
     lv_obj_center(label(s_text_show, &lv_font_montserrat_16, COLOR_TEXT, "Show"));
 
@@ -717,8 +725,8 @@ static void build_keyboard(void)
     lv_obj_set_style_pad_all(s_text_kb, 2, 0);
     lv_obj_set_style_pad_gap(s_text_kb, 4, 0);
     lv_obj_set_style_text_font(s_text_kb, settings_font(&lv_font_montserrat_20), LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(s_text_kb, lv_color_hex(COLOR_CARD), LV_PART_ITEMS);
-    lv_obj_set_style_text_color(s_text_kb, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
+    muse_theme_set_style_bg_color(s_text_kb, lv_color_hex(COLOR_CARD), LV_PART_ITEMS);
+    muse_theme_set_style_text_color(s_text_kb, lv_color_hex(COLOR_TEXT), LV_PART_ITEMS);
     lv_obj_set_style_radius(s_text_kb, 8, LV_PART_ITEMS);
     lv_obj_set_style_border_width(s_text_kb, 0, LV_PART_ITEMS);
     lv_obj_remove_flag(s_text_kb, LV_OBJ_FLAG_GESTURE_BUBBLE);   /* a sloppy swipe mustn't lose the text */
@@ -754,9 +762,9 @@ static void build_text_page(lv_obj_t *tile)
     lv_obj_set_style_text_font(s_text_ta, display_font, 0);
     lv_obj_set_style_pad_ver(s_text_ta, pad > 0 ? pad : 0, 0);
     lv_obj_set_style_pad_hor(s_text_ta, 14, 0);
-    lv_obj_set_style_bg_color(s_text_ta, lv_color_hex(COLOR_CARD), 0);
-    lv_obj_set_style_text_color(s_text_ta, lv_color_hex(COLOR_TEXT), 0);
-    lv_obj_set_style_border_color(s_text_ta, lv_color_hex(COLOR_ACCENT), 0);
+    muse_theme_set_style_bg_color(s_text_ta, lv_color_hex(COLOR_CARD), 0);
+    muse_theme_set_style_text_color(s_text_ta, lv_color_hex(COLOR_TEXT), 0);
+    muse_theme_set_style_border_color(s_text_ta, lv_color_hex(COLOR_ACCENT), 0);
     lv_obj_set_style_border_width(s_text_ta, border, 0);
     lv_obj_set_style_radius(s_text_ta, 14, 0);
     if (wide_layout()) {
@@ -764,7 +772,7 @@ static void build_text_page(lv_obj_t *tile)
         lv_obj_set_style_anim_duration(s_text_ta, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);
     }
     lv_obj_set_style_text_font(s_text_ta, settings_font(&lv_font_montserrat_16), LV_PART_TEXTAREA_PLACEHOLDER);
-    lv_obj_set_style_text_color(s_text_ta, lv_color_hex(COLOR_DIM), LV_PART_TEXTAREA_PLACEHOLDER);
+    muse_theme_set_style_text_color(s_text_ta, lv_color_hex(COLOR_DIM), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_add_state(s_text_ta, LV_STATE_FOCUSED);
     if (muse_board->epaper) {
         /* The theme blinks the cursor every 400 ms, and an e-paper panel
@@ -1040,7 +1048,7 @@ static void tick_saved_list(const muse_wifi_status_t *w)
             text = "Hidden";
         }
         set_text(s_saved_vals[i], text);
-        lv_obj_set_style_text_color(s_saved_vals[i], lv_color_hex(color), 0);
+        muse_theme_set_style_text_color(s_saved_vals[i], lv_color_hex(color), 0);
     }
 }
 
@@ -1146,7 +1154,7 @@ static void tick_wifi(void)
         break;
     }
     set_text(s_wifi_status, buf);
-    lv_obj_set_style_text_color(s_wifi_status, lv_color_hex(w.state == MUSE_WIFI_CONNECTED ? COLOR_OK :
+    muse_theme_set_style_text_color(s_wifi_status, lv_color_hex(w.state == MUSE_WIFI_CONNECTED ? COLOR_OK :
                                                             w.state == MUSE_WIFI_FAILED ? COLOR_WARN : COLOR_DIM), 0);
 
     bool on = w.state != MUSE_WIFI_OFF;
@@ -1271,7 +1279,7 @@ static void tick_hatch(void)
         strlcpy(buf, muse_hatch_state_name(h.state), sizeof(buf));
     }
     set_text(s_hatch_status, buf);
-    lv_obj_set_style_text_color(s_hatch_status, lv_color_hex(h.state == MUSE_HATCH_REACHABLE ? COLOR_OK :
+    muse_theme_set_style_text_color(s_hatch_status, lv_color_hex(h.state == MUSE_HATCH_REACHABLE ? COLOR_OK :
                                                              h.state == MUSE_HATCH_UNREACHABLE ? COLOR_WARN : COLOR_DIM), 0);
 
     char host[MUSE_HOST_MAX + 1], vm[MUSE_VM_MAX + 1];
@@ -1338,7 +1346,7 @@ static void tick_ble(void)
         break;
     }
     set_text(s_ble_status, buf);
-    lv_obj_set_style_text_color(s_ble_status, lv_color_hex(b.state == MUSE_BLE_CONNECTED && b.secure ? COLOR_OK : COLOR_DIM), 0);
+    muse_theme_set_style_text_color(s_ble_status, lv_color_hex(b.state == MUSE_BLE_CONNECTED && b.secure ? COLOR_OK : COLOR_DIM), 0);
     bool on = muse_settings_ble_on();
     if (on != lv_obj_has_state(s_ble_sw, LV_STATE_CHECKED)) {
         lv_obj_set_state(s_ble_sw, LV_STATE_CHECKED, on);
@@ -1475,7 +1483,7 @@ static void build_sound_page(lv_obj_t *tile)
     lv_obj_set_size(s_mic_bar, lv_pct(94), 10);
     lv_obj_align(s_mic_bar, LV_ALIGN_TOP_MID, 0, narrow_panel() ? 48 : 26);
     lv_bar_set_range(s_mic_bar, 0, 60);   /* -70..-10 dBFS */
-    lv_obj_set_style_bg_color(s_mic_bar, lv_color_hex(0x2a2345), LV_PART_MAIN);
+    muse_theme_set_style_bg_color(s_mic_bar, lv_color_hex(0x2a2345), LV_PART_MAIN);
     lv_obj_set_style_anim_duration(s_mic_bar, 80, 0);
     if (muse_board->epaper) {
         lv_obj_add_flag(meter, LV_OBJ_FLAG_HIDDEN);
@@ -1536,7 +1544,7 @@ static void tick_sound(void)
     v = v < 0 ? 0 : (v > 60 ? 60 : v);
     lv_bar_set_value(s_mic_bar, v, LV_ANIM_ON);
     uint32_t color = db > -12.0f ? COLOR_WARN : (db > -30.0f ? COLOR_OK : COLOR_ACCENT);
-    lv_obj_set_style_bg_color(s_mic_bar, lv_color_hex(color), LV_PART_INDICATOR);
+    muse_theme_set_style_bg_color(s_mic_bar, lv_color_hex(color), LV_PART_INDICATOR);
     set_val(s_mic_val, "%d dBFS", (int)db);
 }
 
@@ -1566,7 +1574,7 @@ static void build_sleep_page(lv_obj_t *tile)
     for (int i = 0; i < SLEEP_COUNT; i++) {
         s_sleep_rows[i] = row(list, NULL, SLEEP_NAMES[i], &s_sleep_checks[i], on_sleep_choice,
                               (void *)(intptr_t)i);
-        lv_obj_set_style_text_color(s_sleep_checks[i], lv_color_hex(COLOR_ACCENT), 0);
+        muse_theme_set_style_text_color(s_sleep_checks[i], lv_color_hex(COLOR_ACCENT), 0);
     }
     button(list, LV_SYMBOL_EYE_CLOSE "  Sleep now", COLOR_ACCENT, on_sleep_now, NULL);
     note(list, "Tap the screen or press either button to wake.");
@@ -1588,7 +1596,7 @@ static void tick_sleep(void)
     for (int i = 0; i < SLEEP_COUNT; i++) {
         set_text(s_sleep_checks[i], SLEEP_CHOICES[i] == cur ? LV_SYMBOL_OK : "");
         if (muse_board->epaper && cur != s_sleep_shown) {
-            lv_obj_set_style_bg_color(s_sleep_rows[i],
+            muse_theme_set_style_bg_color(s_sleep_rows[i],
                                       lv_color_hex(SLEEP_CHOICES[i] == cur ? COLOR_CARD_PRESSED : COLOR_CARD), 0);
         }
     }
@@ -1743,6 +1751,27 @@ static void build_power_page(lv_obj_t *tile)
 
 /* ---------- Home ---------- */
 
+#if CONFIG_MUSE_UI_THEME
+static const char *appearance_name(void) {
+    static const char *const names[]={"Automatic","Dark","Light"};
+    return names[muse_theme_mode()];
+}
+static void on_appearance(lv_event_t *e) {
+    (void)e;muse_theme_request_mode((muse_theme_mode_t)((muse_theme_mode()+1)%3));
+}
+static void tick_appearance(void) {
+    set_text(s_appearance_mode,appearance_name());
+    set_text(s_appearance_status,muse_theme_save_error()?"Could not save appearance":"");
+}
+static void build_appearance(lv_obj_t *tile) {
+    lv_obj_t *list;s_appearance=page(tile,"APPEARANCE",true,&list);
+    row(list,NULL,"Theme",&s_appearance_mode,on_appearance,NULL);
+    note(list,"Automatic follows the content background when available.");
+    s_appearance_status=note(list,"");tick_appearance();
+}
+static const page_t APPEARANCE={&s_appearance,build_appearance};
+#endif
+
 static const page_t WIFI = { &s_wifi, build_wifi_page };
 static const page_t HATCH = { &s_hatch, build_hatch_page };
 static const page_t BLE = { &s_ble, build_ble_page };
@@ -1778,6 +1807,9 @@ static void build_home(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_home = page(tile, "SETTINGS", false, &list);
+#if CONFIG_MUSE_UI_THEME
+    row(list,LV_SYMBOL_IMAGE,"Appearance",&s_home_appearance,on_nav,(void *)&APPEARANCE);
+#endif
 #if CONFIG_MUSE_APP_VIEW
     switch_row(list, "Run apps", muse_settings_apps_on(), on_apps_sw);
     if (muse_settings_apps_on()) {
@@ -1807,6 +1839,9 @@ static void build_home(lv_obj_t *tile)
 
 static void tick_home(void)
 {
+#if CONFIG_MUSE_UI_THEME
+    set_text(s_home_appearance,appearance_name());
+#endif
     muse_wifi_status_t w;
     muse_wifi_status(&w);
     static const char *const WIFI_VALUES[] = { "Off", "Not set", "Joining", "", "Failed", "Not nearby" };
@@ -1868,7 +1903,11 @@ static volatile int s_bench_open = -1;   /* applied in the LVGL task, by the nex
 
 bool muse_settings_ui_bench_open(const char *name)
 {
-    static const char *const NAMES[] = { "home", "wifi", "muse", "ble", "sound", "sleep", "battery", "power" };
+    static const char *const NAMES[] = { "home", "wifi", "muse", "ble", "sound", "sleep", "battery", "power"
+#if CONFIG_MUSE_UI_THEME
+        , "appearance"
+#endif
+    };
     for (int i = 0; i < (int)(sizeof(NAMES) / sizeof(NAMES[0])); i++) {
         if (!strcmp(name, NAMES[i])) {
             s_bench_open = i;
@@ -1880,7 +1919,11 @@ bool muse_settings_ui_bench_open(const char *name)
 
 static void bench_open_pending(void)
 {
-    static const page_t *const PAGES[] = { NULL, &WIFI, &HATCH, &BLE, &SOUND, &SLEEP, &BATTERY, &POWER };
+    static const page_t *const PAGES[] = { NULL, &WIFI, &HATCH, &BLE, &SOUND, &SLEEP, &BATTERY, &POWER
+#if CONFIG_MUSE_UI_THEME
+        , &APPEARANCE
+#endif
+    };
     int i = s_bench_open;
     if (i < 0) {
         return;
@@ -1917,6 +1960,10 @@ void muse_settings_ui_tick(bool visible)
     }
     if (s_current == s_home) {
         tick_home();
+#if CONFIG_MUSE_UI_THEME
+    } else if (s_current == s_appearance) {
+        tick_appearance();
+#endif
     } else if (s_current == s_proxy) {
         tick_proxy();
     } else if (s_current == s_wifi) {

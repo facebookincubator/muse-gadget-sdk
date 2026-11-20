@@ -22,6 +22,9 @@
 
 #include "esp_err.h"
 #include "sdkconfig.h"
+#if CONFIG_MUSE_UI_THEME
+#include "muse_theme_policy.h"
+#endif
 
 /*
  * User settings, persisted in NVS. Setters save immediately and then notify the
@@ -57,6 +60,11 @@ typedef void (*muse_setting_cb_t)(muse_setting_t what);
 
 esp_err_t muse_settings_init(void);
 void muse_settings_set_listener(muse_setting_cb_t cb);
+
+#if CONFIG_MUSE_UI_THEME
+muse_theme_mode_t muse_settings_theme(void);
+esp_err_t muse_settings_set_theme(muse_theme_mode_t mode);
+#endif
 
 int muse_settings_volume(void);         /* 0..100 */
 bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */
