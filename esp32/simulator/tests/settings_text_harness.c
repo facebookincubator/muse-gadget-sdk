@@ -50,12 +50,15 @@ void muse_settings_set_speaker_on(bool v) { (void)v; abort(); }
 void muse_settings_set_volume(int v) { (void)v; abort(); }
 void muse_settings_set_wifi_on(bool v) { (void)v; abort(); }
 int muse_settings_sleep_s(void) { abort(); }
+int muse_settings_text_size(void) { return MUSE_TEXT_SMALL; }
+void muse_settings_set_text_size(int v) { (void)v; abort(); }
 bool muse_settings_speaker_on(void) { return true; }
 int muse_settings_volume(void) { return volume_setting; }
 bool muse_settings_wifi_on(void) { abort(); }
 void muse_state_set_asleep(bool v) { (void)v; abort(); }
 void muse_ui_preview_brightness(int v) { (void)v; abort(); }
 void muse_ui_show_face(void) { abort(); }
+bool muse_ui_text_size_applies(void) { return true; }
 void muse_voice_request_chirp(void) { abort(); }
 esp_err_t muse_wifi_scan(void) { abort(); }
 esp_err_t esp_read_mac(uint8_t *mac, int type) { (void)mac; (void)type; abort(); }
