@@ -124,6 +124,9 @@ static int host_bind(int fd, const struct sockaddr *addr, socklen_t n) {
 // Vendor replies, each for the socket bound to its port (0: the probe socket).
 typedef struct { uint16_t port; const void *data; size_t len; const char *ip; uint16_t from; } vendor_reply_t;
 static const vendor_reply_t *vendor_replies;
+// mDNS packets to answer with, in order (NULL: one generated PTR per packet).
+typedef struct { const uint8_t *data; size_t len; } mdns_packet_t;
+static const mdns_packet_t *mdns_packets;
 static size_t vendor_count;
 static unsigned vendor_queries_sent;
 static uint8_t kasa_query_sent[64];
@@ -178,6 +181,10 @@ static ssize_t host_recvfrom(int fd, void *data, size_t size, int flags,
     memset(p, 0, size);
     switch (active_source) {
         case 1: {
+            if (mdns_packets) {
+                memcpy(p, mdns_packets[sequence].data, mdns_packets[sequence].len);
+                return (ssize_t)mdns_packets[sequence].len;
+            }
             p[7] = 1;
             size_t n = 12;
             p[n++] = 0; p[n++] = 0; p[n++] = 12;
@@ -245,7 +252,7 @@ static void reset(const char *ip, const char *mask) {
     seen_bytes = 0; now = 0; receive_tick = 1000;
     memset(packets, 0, sizeof(packets)); memset(received, 0, sizeof(received));
     vendor_replies = NULL; vendor_count = 0; vendor_queries_sent = 0;
-    refuse_bind_port = 0;
+    mdns_packets = NULL; refuse_bind_port = 0;
 }
 static cJSON *run_source(const char *name) {
     cJSON *params = cJSON_CreateObject();
@@ -572,8 +579,127 @@ static void check_vendor(void) {
     cJSON_Delete(r);
     reset("10.0.0.4", "255.255.255.0");
 }
+// One resource record, all in the answer section (the parser reads every section alike).
+static size_t mdns_rr(uint8_t *p, size_t n, const char *name, uint16_t type,
+                      const uint8_t *rdata, size_t rdlen) {
+    int nl = dns_encode_name(name, p + n, 128);
+    assert(nl > 0);
+    n += (size_t)nl;
+    p[n++] = (uint8_t)(type >> 8); p[n++] = (uint8_t)type;
+    p[n++] = 0x80; p[n++] = 1;                       /* class IN, cache flush */
+    p[n++] = 0; p[n++] = 0; p[n++] = 0x11; p[n++] = 0x94;   /* TTL */
+    p[n++] = (uint8_t)(rdlen >> 8); p[n++] = (uint8_t)rdlen;
+    memcpy(p + n, rdata, rdlen);
+    p[7]++;                                          /* ANCOUNT */
+    return n + rdlen;
+}
+static size_t mdns_ptr(uint8_t *p, size_t n, const char *service, const char *instance) {
+    uint8_t rd[128]; int l = dns_encode_name(instance, rd, sizeof(rd)); assert(l > 0);
+    return mdns_rr(p, n, service, 12, rd, (size_t)l);
+}
+static size_t mdns_srv(uint8_t *p, size_t n, const char *instance, uint16_t port, const char *target) {
+    uint8_t rd[128] = {0, 0, 0, 0, (uint8_t)(port >> 8), (uint8_t)port};
+    int l = dns_encode_name(target, rd + 6, sizeof(rd) - 6); assert(l > 0);
+    return mdns_rr(p, n, instance, 33, rd, 6 + (size_t)l);
+}
+static size_t mdns_a(uint8_t *p, size_t n, const char *host, const char *ip) {
+    uint32_t a = inet_addr(ip);
+    return mdns_rr(p, n, host, 1, (const uint8_t *)&a, 4);
+}
+static size_t mdns_txt(uint8_t *p, size_t n, const char *instance, const char *kv) {
+    uint8_t rd[64] = {(uint8_t)strlen(kv)};
+    memcpy(rd + 1, kv, strlen(kv));
+    return mdns_rr(p, n, instance, 16, rd, 1 + strlen(kv));
+}
+static cJSON *mdns_find(cJSON *r, const char *instance) {
+    cJSON *o;
+    cJSON_ArrayForEach(o, cJSON_GetObjectItem(r, "observations"))
+        if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(o, "instance")), instance)) return o;
+    assert(!"instance not reported");
+    return NULL;
+}
+static const char *mdns_ip(cJSON *o) {
+    cJSON *ip = cJSON_GetObjectItem(o, "ip");
+    return ip ? ip->valuestring : "";
+}
+
+// Several devices' answers interleaved, as a home network sends them: A
+// records before the SRV that names their host, in another packet too, a host
+// whose name holds another's, one host with two services, an instance with no
+// SRV, and names in another case or with the root's trailing dot. Each
+// instance gets its own host's address or none, never a neighbor's.
+static void check_mdns_interleaved(void) {
+    reset("10.1.2.97", "255.255.255.0");
+    static uint8_t p1[512], p2[512], p3[512];
+    size_t n1 = 12, n2 = 12, n3 = 12;
+    n1 = mdns_ptr(p1, n1, "_http._tcp.local", "Lutron Bridge._http._tcp.local");   /* PTR only */
+    n1 = mdns_ptr(p1, n1, "_http._tcp.local", "sprinkler-0A1B2C._http._tcp.local");
+    n1 = mdns_a(p1, n1, "Lutron-0123.local", "10.1.2.92");
+    n1 = mdns_srv(p1, n1, "sprinkler-0A1B2C._http._tcp.local", 80, "sprinkler-0A1B2C.local");
+    n1 = mdns_a(p1, n1, "SPRINKLER-0a1b2c.local.", "10.1.2.70");
+    n2 = mdns_a(p2, n2, "macmini.local", "10.1.2.90");
+    n2 = mdns_a(p2, n2, "desk-macmini.local", "10.1.2.139");
+    n2 = mdns_a(p2, n2, "desk-macmini.local", "10.1.2.140");   /* a second address: the first stays */
+    /* A host name too long for the host table, which cut short would be another
+       host's: the instance gets no host and no address. */
+    char long_host[80], short_host[80];
+    snprintf(short_host, sizeof(short_host), "%.57s.local", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    snprintf(long_host, sizeof(long_host), "%.57s.localx.local", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    n2 = mdns_ptr(p2, n2, "_http._tcp.local", "Long._http._tcp.local");
+    n2 = mdns_srv(p2, n2, "Long._http._tcp.local", 80, long_host);
+    n2 = mdns_a(p2, n2, short_host, "10.1.2.150");
+    n3 = mdns_ptr(p3, n3, "_airplay._tcp.local", "Desk._airplay._tcp.local");
+    n3 = mdns_ptr(p3, n3, "_raop._tcp.local", "ABC@Desk._raop._tcp.local");
+    n3 = mdns_srv(p3, n3, "Desk._airplay._tcp.local", 7000, "desk-macmini.local");
+    n3 = mdns_txt(p3, n3, "desk._airplay._tcp.local", "model=Mac");
+    n3 = mdns_srv(p3, n3, "ABC@Desk._raop._tcp.local", 7000, "desk-macmini.local");
+    n3 = mdns_ptr(p3, n3, "_http._tcp.local", "Garage._http._tcp.local");
+    n3 = mdns_srv(p3, n3, "Garage._http._tcp.local", 80, "garage-cam.local");   /* no A record */
+    const mdns_packet_t set[] = {{p1, n1}, {p2, n2}, {p3, n3}};
+    mdns_packets = set;
+    packets[1] = 3;
+    cJSON *r = run_source("mdns");
+    assert(number(report(r, "mdns"), "found") == 6);
+    cJSON *o = mdns_find(r, "sprinkler-0A1B2C._http._tcp.local");
+    assert(!strcmp(mdns_ip(o), "10.1.2.70") && number(o, "port") == 80);
+    o = mdns_find(r, "Lutron Bridge._http._tcp.local");
+    assert(!*mdns_ip(o) && !cJSON_GetObjectItem(o, "hostname"));
+    o = mdns_find(r, "Desk._airplay._tcp.local");
+    assert(!strcmp(mdns_ip(o), "10.1.2.139") && number(o, "port") == 7000);
+    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(o, "txt")), "model=Mac"));
+    assert(!strcmp(mdns_ip(mdns_find(r, "ABC@Desk._raop._tcp.local")), "10.1.2.139"));
+    o = mdns_find(r, "Garage._http._tcp.local");
+    assert(!*mdns_ip(o) && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(o, "hostname")), "garage-cam.local"));
+    o = mdns_find(r, "Long._http._tcp.local");
+    assert(!*mdns_ip(o) && !cJSON_GetObjectItem(o, "hostname") && number(o, "port") == 80);
+    cJSON_Delete(r);
+
+    // More hosts than the address table holds: the instance whose host
+    // didn't fit has no address, and the scan says it isn't complete.
+    reset("10.1.2.97", "255.255.255.0");
+    enum { HOSTS = 129 };
+    static uint8_t hosts[HOSTS + 1][128];
+    static mdns_packet_t many[HOSTS + 1];
+    char name[32], ip[16];
+    for (int i = 0; i < HOSTS; i++) {
+        snprintf(name, sizeof(name), "host-%d.local", i);
+        snprintf(ip, sizeof(ip), "10.1.3.%d", i + 1);
+        many[i] = (mdns_packet_t){hosts[i], mdns_a(hosts[i], 12, name, ip)};
+    }
+    size_t last = mdns_ptr(hosts[HOSTS], 12, "_http._tcp.local", "Last._http._tcp.local");
+    last = mdns_srv(hosts[HOSTS], last, "Last._http._tcp.local", 80, "host-128.local");
+    many[HOSTS] = (mdns_packet_t){hosts[HOSTS], last};
+    mdns_packets = many;
+    packets[1] = HOSTS + 1;
+    r = run_source("mdns");
+    assert(number(report(r, "mdns"), "found") == 1 && flag(report(r, "mdns"), "truncated"));
+    assert(!*mdns_ip(mdns_find(r, "Last._http._tcp.local")) && !flag(r, "complete"));
+    cJSON_Delete(r);
+}
+
 int main(void) {
     check_arp(); check_caps(); check_network_strings(); check_oom(); check_budget(); check_vendor();
-    puts("PASS discovery: clamp and subnet edges, synchronous 8-request batches/16-entry cache, transient ARP pressure, sanitized network strings, all seven source caps and budgets, vendor probes and their fields, shared envelope limit, allocation failures and cleanup");
+    check_mdns_interleaved();
+    puts("PASS discovery: clamp and subnet edges, synchronous 8-request batches/16-entry cache, transient ARP pressure, sanitized network strings, all seven source caps and budgets, vendor probes and their fields, mDNS addresses only from the instance's own host, shared envelope limit, allocation failures and cleanup");
     return 0;
 }

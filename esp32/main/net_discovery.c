@@ -329,10 +329,27 @@ typedef struct {
     char txt[256];
 } mdns_entry_t;
 
+// An A record: which host has which address. When the listen ends, an
+// instance gets the address of the host its SRV record names, whichever of
+// the two records came first.
+typedef struct {
+    char name[64];
+    char ip_str[16];
+} mdns_addr_t;
+#define MAX_MDNS_ADDRS 128
+
+// DNS names match case-insensitively, with or without the root's trailing dot.
+static bool dns_name_eq(const char *a, const char *b) {
+    size_t la = strlen(a), lb = strlen(b);
+    if (la && a[la - 1] == '.') la--;
+    if (lb && b[lb - 1] == '.') lb--;
+    return la == lb && strncasecmp(a, b, la) == 0;
+}
+
 static int mdns_find_or_add(mdns_entry_t *arr, int *count, int max,
                             const char *instance) {
     for (int i = 0; i < *count; i++)
-        if (strcmp(arr[i].instance, instance) == 0) return i;
+        if (dns_name_eq(arr[i].instance, instance)) return i;
     if (*count >= max) return -1;
     int idx = (*count)++;
     memset(&arr[idx], 0, sizeof(arr[idx]));
@@ -341,7 +358,8 @@ static int mdns_find_or_add(mdns_entry_t *arr, int *count, int max,
 }
 
 static void parse_mdns_pkt(const uint8_t *pkt, int len,
-                           mdns_entry_t *found, int *fc, int max) {
+                           mdns_entry_t *found, int *fc, int max,
+                           mdns_addr_t *addrs, int *ac, bool *addrs_full) {
     if (len < 12) return;
     int qdcount = (pkt[4] << 8) | pkt[5];
     int total = ((pkt[6] << 8) | pkt[7]) + ((pkt[8] << 8) | pkt[9]) +
@@ -372,30 +390,32 @@ static void parse_mdns_pkt(const uint8_t *pkt, int len,
                 mdns_find_or_add(found, fc, max, inst);
         } else if (rtype == 33 && rdlen >= 6) {
             uint16_t port = (pkt[pos + 4] << 8) | pkt[pos + 5];
-            char target[64];
+            // Decoded as long as rname, so a target too long for the host
+            // table is dropped instead of cut to another host's name.
+            char target[sizeof(rname)];
             if (dns_decode_name(pkt, len, pos + 6, target, sizeof(target)) > 0) {
                 for (int i = 0; i < *fc; i++) {
-                    if (strstr(rname, found[i].instance) ||
-                        !strcmp(rname, found[i].instance)) {
+                    if (dns_name_eq(rname, found[i].instance)) {
                         found[i].port = port;
-                        if (!found[i].hostname[0])
-                            snprintf(found[i].hostname, sizeof(found[i].hostname),
-                                     "%s", target);
+                        if (!found[i].hostname[0] && strlen(target) < sizeof(found[i].hostname))
+                            memcpy(found[i].hostname, target, strlen(target) + 1);
                         break;
                     }
                 }
             }
         } else if (rtype == 1 && rdlen == 4) {
-            char aip[16];
-            snprintf(aip, sizeof(aip), "%d.%d.%d.%d",
-                     pkt[pos], pkt[pos+1], pkt[pos+2], pkt[pos+3]);
-            for (int i = 0; i < *fc; i++) {
-                if (!found[i].ip_str[0] &&
-                    (strstr(rname, found[i].hostname) ||
-                     strstr(found[i].hostname, rname) ||
-                     !found[i].hostname[0])) {
-                    snprintf(found[i].ip_str, sizeof(found[i].ip_str), "%s", aip);
-                    break;
+            // A name too long for an SRV target's buffer couldn't match one.
+            size_t nl = strlen(rname);
+            int a = 0;
+            while (a < *ac && !dns_name_eq(addrs[a].name, rname)) a++;
+            if (a == *ac && nl < sizeof(addrs[a].name)) {
+                if (a < MAX_MDNS_ADDRS) {
+                    memcpy(addrs[a].name, rname, nl + 1);   // a host's first address
+                    snprintf(addrs[a].ip_str, sizeof(addrs[a].ip_str), "%d.%d.%d.%d",
+                             pkt[pos], pkt[pos+1], pkt[pos+2], pkt[pos+3]);
+                    (*ac)++;
+                } else {
+                    *addrs_full = true;   // an instance may miss its address
                 }
             }
         } else if (rtype == 16) {
@@ -411,9 +431,7 @@ static void parse_mdns_pkt(const uint8_t *pkt, int len,
             }
             tb[to] = '\0';
             for (int i = 0; i < *fc; i++) {
-                if (!found[i].txt[0] &&
-                    (strstr(rname, found[i].instance) ||
-                     !strcmp(rname, found[i].instance))) {
+                if (!found[i].txt[0] && dns_name_eq(rname, found[i].instance)) {
                     snprintf(found[i].txt, sizeof(found[i].txt), "%s", tb);
                     break;
                 }
@@ -459,8 +477,15 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
     }
 
     mdns_entry_t *found = calloc(MAX_MDNS, sizeof(mdns_entry_t));
-    if (!found) { source->error = "out_of_memory"; close(sock); return; }
-    int fc = 0;
+    mdns_addr_t *addrs = found ? calloc(MAX_MDNS_ADDRS, sizeof(mdns_addr_t)) : NULL;
+    if (!addrs) {
+        free(found);
+        source->error = "out_of_memory";
+        close(sock);
+        return;
+    }
+    int fc = 0, ac = 0;
+    bool addrs_full = false;
 
     struct timeval tv = { .tv_sec = MDNS_LISTEN_MS / 1000,
                           .tv_usec = (MDNS_LISTEN_MS % 1000) * 1000 };
@@ -471,10 +496,19 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
     while (esp_timer_get_time() < deadline && fc < MAX_MDNS) {
         int n = recvfrom(sock, rbuf, sizeof(rbuf), 0, NULL, NULL);
         if (n <= 0) break;
-        parse_mdns_pkt(rbuf, n, found, &fc, MAX_MDNS);
+        parse_mdns_pkt(rbuf, n, found, &fc, MAX_MDNS, addrs, &ac, &addrs_full);
     }
 
-    source->truncated = fc >= MAX_MDNS;
+    // An instance without an SRV record, or whose host sent no A record,
+    // keeps no address rather than another host's.
+    for (int i = 0; i < fc; i++)
+        for (int a = 0; a < ac && found[i].hostname[0]; a++)
+            if (dns_name_eq(found[i].hostname, addrs[a].name)) {
+                snprintf(found[i].ip_str, sizeof(found[i].ip_str), "%s", addrs[a].ip_str);
+                break;
+            }
+
+    source->truncated = fc >= MAX_MDNS || addrs_full;
     for (int i = 0; i < fc; i++) {
         sanitize_ascii(found[i].instance);
         sanitize_ascii(found[i].hostname);
@@ -496,6 +530,7 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
     }
 
     free(found);
+    free(addrs);
     setsockopt(sock, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mr, sizeof(mr));
     close(sock);
     ESP_LOGI(TAG, "mDNS: %d unique services", fc);
