@@ -2128,6 +2128,51 @@ static void note_attempt_failed(const char *reason) {
     s_last_attempt_failure = reason;
 }
 
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+// TLS session resumption for the VM WebSocket (CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS):
+// a reconnect offers the last session's id (or RFC 5077 ticket), and an edge
+// that kept it resumes, skipping the certificate chain and the ECDHE. The
+// server was verified against the CA bundle when the session was made; a
+// server that doesn't resume falls back to a full handshake, verified against
+// the same bundle (crt_bundle_attach stays set). Kept per host: a session is
+// never offered to another one. Session-task-owned.
+struct tls_resume_t {
+    esp_tls_client_session_t *session;
+    char *host;   // the host it was made with (heap copy)
+};
+
+static tls_resume_t s_tls_resume;
+
+static void tls_resume_forget(tls_resume_t *t) {
+    if (t->session) esp_tls_free_client_session(t->session);
+    free(t->host);
+    t->session = nullptr;
+    t->host = nullptr;
+}
+
+static void tls_resume_offer(tls_resume_t *t, const char *host, esp_tls_cfg_t *cfg) {
+    if (t->session && (!t->host || strcmp(t->host, host) != 0)) tls_resume_forget(t);
+    cfg->client_session = t->session;
+}
+
+// After a successful handshake: keep this connection's session for the next.
+static void tls_resume_keep(tls_resume_t *t, const char *host, esp_tls_t *tls) {
+    size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    esp_tls_client_session_t *fresh = esp_tls_get_client_session(tls);
+    char *copy = fresh ? strdup(host) : nullptr;
+    if (!copy) {   // no memory: no resumption next time, nothing else changes
+        if (fresh) esp_tls_free_client_session(fresh);
+        tls_resume_forget(t);
+        return;
+    }
+    tls_resume_forget(t);
+    t->session = fresh;
+    t->host = copy;
+    ESP_LOGI(TAG, "TLS session kept for resumption: %d B of internal RAM",
+             (int)before - (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+}
+#endif
+
 static session_result_t run_session(stack_monitor_t *stack) {
     session_result_t result = SESSION_FAILED;
     const char *end_reason = "stopped";
@@ -2140,26 +2185,47 @@ static session_result_t run_session(stack_monitor_t *stack) {
     pending_json_body control_tx;
     identity_fetch identity = {};
 
-    // 1. TLS connect
-    esp_tls_t *tls = esp_tls_init();
+    // 1. TLS connect. One copy of the host for the whole handshake: setup can
+    // rewrite s_noise_host from another task (noise_ctrl_set_host()), and a
+    // kept session must be filed under the host it was made with.
+    char *tls_host = strdup(s_noise_host);
+    esp_tls_t *tls = tls_host ? esp_tls_init() : nullptr;
     if (!tls) {
+        free(tls_host);
         ESP_LOGE(TAG, "esp_tls_init failed");
         note_attempt_failed("TLS init failed");
         return SESSION_FAILED;
     }
     esp_tls_cfg_t cfg = {};
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;   // a fallback full handshake verifies as always
     cfg.timeout_ms = 15000;
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+    tls_resume_offer(&s_tls_resume, tls_host, &cfg);
+#endif
+    int64_t tls_t0 = esp_timer_get_time();
 
-    int r = network_proxy_tls_connect(s_noise_host, static_cast<int>(strlen(s_noise_host)),
+    int r = network_proxy_tls_connect(tls_host, static_cast<int>(strlen(tls_host)),
                                   NOISE_PORT, &cfg, tls);
     if (r != 1) {
         ESP_LOGE(TAG, "TLS connect failed: %d", r);
         esp_tls_conn_destroy(tls);
+        free(tls_host);
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+        tls_resume_forget(&s_tls_resume);   // never retry with a session that may be what failed
+#endif
         note_attempt_failed("TLS connect failed");
         return SESSION_FAILED;
     }
-    ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s)", s_noise_host, NOISE_PORT, s_vm_id);
+    {
+        bool offered = false;
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+        offered = cfg.client_session != nullptr;
+        tls_resume_keep(&s_tls_resume, tls_host, tls);
+#endif
+        ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s) in %lld ms%s", tls_host, NOISE_PORT, s_vm_id,
+                 (long long)((esp_timer_get_time() - tls_t0) / 1000), offered ? ", last session offered" : "");
+        free(tls_host);
+    }
     // Send each write at once. With Nagle's algorithm on, a small write (a
     // tunnel batch holding a lone handshake packet or a short reply) waited
     // until everything sent before it was acknowledged, adding ~100 ms to

@@ -915,6 +915,51 @@ static bool open_subscription(void)
     return s_conn.sub_id != 0;
 }
 
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+/* TLS session resumption for the voice session's WebSocket, as Link's own
+ * (main/noise_control.cpp, CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS): a
+ * reconnect offers the last session, and an edge that kept it resumes (no
+ * certificate chain, no ECDHE); one it doesn't resume falls back to a full
+ * handshake, verified against the same CA bundle. Kept per host.
+ * Session-task-owned. */
+static esp_tls_client_session_t *s_tls_session;
+static char *s_tls_session_host;
+
+static void tls_resume_forget(void)
+{
+    if (s_tls_session) {
+        esp_tls_free_client_session(s_tls_session);
+    }
+    free(s_tls_session_host);
+    s_tls_session = nullptr;
+    s_tls_session_host = nullptr;
+}
+
+static void tls_resume_offer(esp_tls_cfg_t &cfg)
+{
+    if (s_tls_session && (!s_tls_session_host || strcmp(s_tls_session_host, s_host) != 0)) {
+        tls_resume_forget();
+    }
+    cfg.client_session = s_tls_session;
+}
+
+static void tls_resume_keep(esp_tls_t *tls)
+{
+    esp_tls_client_session_t *fresh = esp_tls_get_client_session(tls);
+    char *copy = fresh ? strdup(s_host) : nullptr;
+    if (!copy) {
+        if (fresh) {
+            esp_tls_free_client_session(fresh);
+        }
+        tls_resume_forget();
+        return;
+    }
+    tls_resume_forget();
+    s_tls_session = fresh;
+    s_tls_session_host = copy;
+}
+#endif
+
 static bool connect_once(char *err, size_t err_cap, int *http_status)
 {
     *http_status = 0;
@@ -925,13 +970,24 @@ static bool connect_once(char *err, size_t err_cap, int *http_status)
         return false;
     }
     esp_tls_cfg_t cfg = {};
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;   // a fallback full handshake verifies as always
     cfg.timeout_ms = 15000;
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+    tls_resume_offer(cfg);
+#endif
     int64_t t0 = now_us();
     if (network_proxy_tls_connect(s_host, strlen(s_host), NOISE_PORT, &cfg, c.tls) != 1) {
         snprintf(err, err_cap, "Can't reach %s", s_host);
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+        tls_resume_forget();   // never retry with a session that may be what failed
+#endif
         return false;
     }
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+    ESP_LOGI(TAG, "TLS in %lld ms%s", (long long)((now_us() - t0) / 1000),
+             cfg.client_session ? ", last session offered" : "");
+    tls_resume_keep(c.tls);
+#endif
     int status = ws_upgrade(c.tls, s_vm.vm_id, s_vm.vm_token);
     *http_status = status;
     if (status != 101) {
