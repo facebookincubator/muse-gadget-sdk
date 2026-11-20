@@ -71,6 +71,7 @@ static unsigned phase;
 static int esp_codec_dev_set_in_gain(esp_codec_dev_handle_t h, float db) { (void)h; (void)db; codec_gain_calls++; return 0; }
 static int esp_codec_dev_read(esp_codec_dev_handle_t h, void *b, int n) { (void)h; (void)b; (void)n; return 0; }
 static bool codecs_reachable(void) { return true; }
+static void muse_mirror_audio_capture(const int16_t *mono, size_t frames) { (void)mono; (void)frames; }
 static esp_err_t board_mic_read(int16_t *mono, size_t frames) {
     reads++;
     for (size_t i = 0; i < frames; i++, phase++) {

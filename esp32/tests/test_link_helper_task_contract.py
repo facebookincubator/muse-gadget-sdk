@@ -83,6 +83,16 @@ class HelperTaskContractTest(unittest.TestCase):
             self.assertIn(plain, internal)
             self.assertNotIn(caps, internal)
 
+    def test_waveshare_175c_opts_into_psram_setup_stacks(self) -> None:
+        overlay = (ROOT / "devices" / "sdkconfig.muse-waveshare-s3-175c").read_text()
+        # The gate in helper_task.h only takes effect where code and rodata
+        # run from PSRAM; the 1.75C overlay sets all three, like the
+        # StopWatch, so its 8 KB lookup stack leaves internal RAM.
+        self.assertIn("CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y", overlay)
+        self.assertIn("CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y", overlay)
+        self.assertIn("CONFIG_SPIRAM_RODATA=y", overlay)
+        self.assertIn("CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024", overlay)
+
     def test_setup_tasks_do_not_choose_psram_stacks_themselves(self) -> None:
         for path in (APP_C, BLE_SERVER_C):
             source = _strip_comments(path.read_text())

@@ -67,6 +67,9 @@
 #include "muse_board.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
+#if CONFIG_MUSE_MOSAICO_CAMERA
+#include "mosaico_camera.h"
+#endif
 
 static const char *TAG = "board";
 
@@ -195,6 +198,10 @@ static esp_err_t init(void)
         .flags.enable_internal_pullup = true,
     };
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus, &s_i2c), TAG, "i2c");
+#if CONFIG_MUSE_MOSAICO_CAMERA
+    /* The expansion slots' I2C: this bus on v1.0, their own on v1.2. */
+    mosaico_camera_register(s_pins == &s_v1_0 ? s_i2c : NULL);
+#endif
     const i2c_device_config_t gauge = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = GAUGE_ADDR,

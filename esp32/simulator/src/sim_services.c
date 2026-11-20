@@ -30,6 +30,7 @@
 /* The preview drives modes directly; it has no live call transport. */
 static bool s_in_call;
 bool muse_voice_in_call(void) { return s_in_call; }
+bool muse_voice_reply_waiting(void) { return false; }
 muse_voice_view_t muse_voice_call_view(void) { return s_in_call ? MUSE_VOICE_VIEW_SPEAKING : MUSE_VOICE_VIEW_NONE; }
 
 #define SIM_DEFAULT_NAME "MuseGadget-SIM001"

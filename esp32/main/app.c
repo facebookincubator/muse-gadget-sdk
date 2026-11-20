@@ -30,7 +30,7 @@
 #include "cJSON.h"
 
 #include "esp_heap_caps.h"
-#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA || CONFIG_MUSE_MOSAICO_CAMERA
 #include "freertos/idf_additions.h"
 #endif
 #include "esp_timer.h"
@@ -50,6 +50,7 @@
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
+#include "network_proxy_tls.h"
 #include "customer_product_info.h"
 #include "ble_coex.h"
 #if CONFIG_HOMEHUB_BLE_COMMANDS
@@ -93,6 +94,9 @@
 #elif CONFIG_MUSE_P4_CSI_CAMERA
 #include "boards/p4_csi_camera.h"
 #define camera_capture_base64 p4_csi_camera_capture
+#elif CONFIG_MUSE_MOSAICO_CAMERA
+#include "boards/mosaico_camera.h"
+#define camera_capture_base64 mosaico_camera_capture
 #endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
@@ -1263,6 +1267,7 @@ static void on_provision(const char *ssid, const char *password,
                          const char *api_url,
                          const char *api_url_v2,
                          const char *noise_host,
+                         const network_proxy_config_t *proxy,
                          uint32_t session_generation) {
     if (session_generation == 0) return;
     if (!operation_gate_take(0, "BLE provision")) {
@@ -1290,6 +1295,13 @@ static void on_provision(const char *ssid, const char *password,
     ui_set_status("wifi_connected");
     led_status_set_state(LED_STATE_WIFI_CONNECTED);
     remember_joined_wifi(ssid, password);
+    if (proxy) {
+        if (!wifi_known_set_proxy(ssid, proxy)) {
+            setup_fail_for_session("storage", "error_storage", session_generation);
+            goto done;
+        }
+        network_proxy_set_active(proxy);
+    }
     persist_connected_wifi_channel();
     config_erase_key("vm_url");
 
@@ -1680,7 +1692,7 @@ static void draw_url_done(const image_fetch_result_t *r, void *user) {
 }
 #endif
 
-#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA || CONFIG_MUSE_MOSAICO_CAMERA
 typedef struct {
     noise_ctrl_session_generation_t session_generation;
     char request_id[64];
@@ -2052,7 +2064,7 @@ static cJSON *on_ws_command(
         return result;
     }
 #endif
-#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA || CONFIG_MUSE_MOSAICO_CAMERA
     if (strcmp(command, "camera.capture") == 0) {
         watcher_camera_task_args_t *args = calloc(1, sizeof(*args));
         if (!args) return command_error("out_of_memory", "failed to allocate camera request");
@@ -2357,10 +2369,13 @@ static void on_button_short_press(void) {
             ESP_LOGI(TAG, "button short-press ignored; no active BLE session");
             return;
         }
-        uint32_t session_generation = link_pairing_confirm_active_session();
+        uint32_t session_generation =
+            link_pairing_confirm_active_session(button_pressed_after_us());
         if (session_generation) {
             notify_pairing_confirmed(session_generation);
             ESP_LOGI(TAG, "button short-press confirmed active pairing session");
+        } else {
+            ESP_LOGI(TAG, "button short-press didn't confirm (prompt not armed or expired, or the press began before it)");
         }
         return;
     }
@@ -2571,15 +2586,17 @@ void app_ble_companion_set(bool advertise) {
     if (config_setup_complete()) ui_set_ble(advertise ? "companion" : "off");
 }
 
-bool app_confirm_pairing_press(void) {
+bool app_confirm_pairing_press(int64_t pressed_after_us) {
     factory_test_on_button_press();
     if (!link_pairing_confirmation_required() || !ble_server_has_connection()) {
         return false;
     }
-    uint32_t session_generation = link_pairing_confirm_active_session();
+    uint32_t session_generation = link_pairing_confirm_active_session(pressed_after_us);
     if (session_generation) {
         notify_pairing_confirmed(session_generation);
         ESP_LOGI(TAG, "talk button confirmed active pairing session");
+    } else {
+        ESP_LOGI(TAG, "talk press didn't confirm (prompt not armed or expired, or the press began before it)");
     }
     return true;
 }
@@ -2959,12 +2976,15 @@ void app_run(void) {
         ble_coex_set_active(true);
         ui_set_ble("companion");
 #endif
-#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43 && \
+    !CONFIG_MUSE_BOARD_WAVESHARE_S3_175 && !CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
         // so bring the stack up now; it stays silent until advertising is on.
         // The CrowPanel starts it lazily instead, after muse_app_run() has
-        // reserved its internal I2S DMA buffers.
+        // reserved its internal I2S DMA buffers. So do the 1.75 and 1.75C:
+        // the idle stack leaves no 8 KB block for the muse_vm task and chat
+        // never connects (#351).
         start_ble_setup_server_if_needed();
 #endif
     }

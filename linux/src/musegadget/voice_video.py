@@ -33,6 +33,8 @@ import subprocess
 import threading
 import time
 
+from musegadget import reaper
+
 log = logging.getLogger(__name__)
 
 VIDEO_FPS = 25  # Muse paces call video at one frame per 40 ms.
@@ -165,7 +167,7 @@ class VideoPlayer:
     """Runs a player that reads raw H.264 on standard input and streams units to it."""
 
     def __init__(self, command: list) -> None:
-        self._process = subprocess.Popen(command, stdin=subprocess.PIPE,
+        self._process = reaper.ReapingPopen(command, stdin=subprocess.PIPE,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             fd = os.dup(self._process.stdin.fileno())

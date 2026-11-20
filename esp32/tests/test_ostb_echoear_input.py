@@ -35,6 +35,7 @@ class EchoEarInputTest(unittest.TestCase):
 #include "ostb_echoear_touch.h"
 #define MUSE_BTN_TALK_PRESS 1u
 #define MUSE_BTN_TALK_RELEASE 2u
+#define MUSE_BTN_TALK_HELD (1u << 17)
 #define MUSE_PTT_DOWN 1
 #define MUSE_PTT_UP 2
 #define MUSE_MENU_SELECT 1
@@ -53,6 +54,9 @@ static int lv_event_get_code(lv_event_t *e) { return *e; }
 static int muse_link_state(void) { return link_state; }
 #define muse_board (&board)
 static bool muse_link_talk_press(void) { if (pending_pair) { confirmed++; return true; } return false; }
+static bool muse_link_confirm_press(int64_t released_us) { (void)released_us; return muse_link_talk_press(); }
+static int64_t esp_timer_get_time(void) { return 0; }
+static int64_t s_talk_released_us;
 static bool muse_state_asleep(void) { return false; }
 static bool muse_menu_is_open(void) { return false; }
 static void muse_state_poke(void) {}
@@ -63,7 +67,7 @@ static bool s_touch_talk_down;
 static int swipe_updates;
 static void update_tileview_swipe(void) { swipe_updates++; }
 '''
-        code += function(source, 'muse_input_touch_talk') + '\n' + function(source, 'talk_button')
+        code += function(source, 'muse_input_touch_talk') + '\n' + function(source, 'talk_input') + '\n' + function(source, 'talk_button')
         ui = (ROOT / 'components/muse/muse_ui.c').read_text()
         code += '\n' + function(ui, 'on_touch_mic') + '\n' + function(ui, 'on_any_press')
         code += r'''

@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 import unittest
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 JSON = Path(os.environ.get(
     'CJSON_SOURCE_DIR', ROOT / 'managed_components/espressif__cjson/cJSON'
@@ -43,6 +45,7 @@ class ChatSession(unittest.TestCase):
 #include <initializer_list>
 #include "host_compat.h"
 #include "cJSON.h"
+#include "muse_options.h"
 #include "minimp3.h"
 #include "muse_chat_priv.h"
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
@@ -691,9 +694,112 @@ static void late_rows_by_their_own_order_and_content() {
     assert(s_turn.nmsgs == 3 && !strcmp(s_turn.msgs[0].id, "late") && s_turn.msgs[0].done);
     assert(s_turn.msgs[0].len == 6 && s_turn.msgs[1].done && !strcmp(s_turn.msgs[2].id, "outer"));
 }
+static void canonical_reply(const char *id, const char *parent, const char *text) {
+    cJSON *line = cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{
+        "display_text":"","content":"","transcript":{"messages":[
+            {"role":"user","content":[{"type":"text","text":"Private request"}]},
+            {"role":"tool","content":[{"type":"text","text":"Private tool result"}]},
+            {"role":"assistant","content":[{"type":"thinking","text":"Private reasoning"},
+                {"type":"text","text":"First line"},{"type":"text","text":"Second line"}]}]}}})");
+    assert(line);
+    cJSON *payload = cJSON_GetObjectItem(line, "payload");
+    cJSON_AddStringToObject(payload, "message_id", id);
+    cJSON_AddStringToObject(payload, "reply_to_message_id", parent);
+    if (text) {
+        cJSON *rows = cJSON_GetObjectItem(cJSON_GetObjectItem(payload, "transcript"), "messages");
+        cJSON *blocks = cJSON_GetObjectItem(cJSON_GetArrayItem(rows, 2), "content");
+        cJSON_SetValuestring(cJSON_GetObjectItem(cJSON_GetArrayItem(blocks, 1), "text"), text);
+        cJSON_DeleteItemFromArray(blocks, 2);
+    }
+    on_event(line);
+    cJSON_Delete(line);
+}
+static void canonical_late_progress_and_completion() {
+    detach();
+    canonical_reply("foreign", "elsewhere", "Another request");
+    assert(!s_incoming);
+    canonical_reply("progress", "note", nullptr);
+    assert(s_incoming && cJSON_GetArraySize(s_pending.replies) == 1);
+    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(s_pending.replies, 0),
+        "display_text")), "First line\nSecond line"));
+    incoming_play(s_turn.gen + 1);
+    assert(s_turn.nmsgs == 1 && s_turn.msgs[0].done && s_turn.msgs[0].tts == TTS_QUEUED);
+    assert(s_turn.msgs[0].len == strlen("First line\nSecond line"));
+    settle();
+    assert(s_pending.active);
+    canonical_reply("progress", "note", nullptr);
+    assert(!s_incoming);
+    status("online");
+    canonical_reply("finished", "progress", "The task is complete.");
+    assert(s_incoming);
+    incoming_play(s_turn.gen + 1);
+    assert(s_turn.nmsgs == 1 && !strcmp(s_turn.msgs[0].id, "finished"));
+    assert(s_turn.msgs[0].tts == TTS_QUEUED && s_turn.msgs[0].len == 21);
+    settle();
+    assert(s_turn.phase == P_IDLE && !s_pending.active);
+}
+static void canonical_reply_during_notice() {
+    begin();
+    status("working");
+    clock_us += DETACH_US + 1;
+    check_turn();
+    assert(s_turn.detached);
+    canonical_reply("progress", "note", "I am checking now.");
+    assert(s_turn.nmsgs == 2 && s_turn.msgs[1].tts == TTS_QUEUED && s_turn.msgs[1].len == 18);
+    settle();
+    assert(s_pending.active);
+    canonical_reply("finished", "note", "All done.");
+    assert(s_incoming);
+}
+static void canonical_reply_is_bounded_at_a_whole_character() {
+    detach();
+    static char long_text[TEXT_MAX + 100];
+    memset(long_text, 'a', TEXT_MAX - 2);
+    strcpy(long_text + TEXT_MAX - 2, "\xc3\xa9" "overflow");
+    canonical_reply("long", "note", long_text);
+    assert(s_incoming);
+    cJSON *row = cJSON_GetArrayItem(s_pending.replies, 0);
+    const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(row, "display_text"));
+    assert(text && strlen(text) == TEXT_MAX - 2 && !strchr(text, '\xc3'));
+    incoming_play(s_turn.gen + 1);
+    assert(s_turn.nmsgs == 1 && s_turn.msgs[0].tts == TTS_QUEUED && s_turn.msgs[0].len == TEXT_MAX - 2);
+}
+static void canonical_reply_reads_one_message_without_commentary() {
+    detach();
+    cJSON *line = cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{
+        "message_id":"final","reply_to_message_id":"note","transcript":{"messages":[
+            {"id":"assistant-msg-early","role":"assistant","content":[{"type":"text","text":"Already said"}]},
+            {"id":"assistant-msg-final","role":"assistant","content":[
+                {"type":"text","recipient":"commentary","text":"Hidden aside"},
+                {"type":"text","text":"Final answer"}]},
+            {"id":"assistant-msg-after","role":"assistant","content":[{"type":"text","text":"Not this row"}]}]}}})");
+    assert(line);
+    on_event(line);
+    cJSON_Delete(line);
+    assert(s_incoming && cJSON_GetArraySize(s_pending.replies) == 1);
+    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(s_pending.replies, 0),
+        "display_text")), "Final answer"));
+}
+static void canonical_reply_never_reads_another_message() {
+    detach();
+    cJSON *line = cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{
+        "message_id":"tool","reply_to_message_id":"note","transcript":{"messages":[
+            {"id":"assistant-msg-early","role":"assistant","content":[{"type":"text","text":"Already said"}]},
+            {"id":"assistant-msg-tool","role":"assistant","content":[
+                {"type":"text","recipient":"commentary","text":"Hidden aside"}]}]}}})");
+    assert(line);
+    on_event(line);
+    cJSON_Delete(line);
+    assert(!s_incoming && cJSON_GetArraySize(s_pending.replies) == 0);
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
+    case 36: canonical_late_progress_and_completion(); break;
+    case 37: canonical_reply_during_notice(); break;
+    case 38: canonical_reply_is_bounded_at_a_whole_character(); break;
+    case 39: canonical_reply_reads_one_message_without_commentary(); break;
+    case 40: canonical_reply_never_reads_another_message(); break;
     case 0: rejected_deltas(); break;
     case 1: valid_parents(); break;
     case 2: bounded_rejections(); break;
@@ -722,6 +828,47 @@ int main(int argc, char **argv) {
     case 28: others_status_and_late_play(); break;
     case 29: chained_and_mid_stream_replies(); break;
     case 30: late_rows_by_their_own_order_and_content(); break;
+    case 31: {
+        muse_options_clear();
+        s_turn.phase = P_IDLE;
+        cJSON *line = cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{"message_id":"question","widgets":[{"kind":"option","widget_id":"choices","data":{"options":["Red","Green"]}}]}})");
+        on_event(line); cJSON_Delete(line);
+        muse_options_t q;
+        assert(muse_options_snapshot(&q) && q.count == 2 && q.status == MUSE_OPTIONS_READY);
+        assert(muse_options_request(q.generation,1));
+        line = cJSON_Parse(R"({"type":"event","event":"widget.state_updated","payload":{"host_message_id":"question","widget_id":"choices","state":{"version":1,"data":{"selectedText":"Green"}}}})");
+        on_event(line); cJSON_Delete(line);
+        assert(muse_options_snapshot(&q) && q.selected == 1 && q.saved);
+        break;
+    }
+    case 32: {
+        s_turn.texts=static_cast<char *>(calloc(MAX_MSGS,TEXT_MAX));
+        assert(s_turn.texts);
+        for (bool typed : {false, true}) {
+            muse_options_clear(); begin(typed);
+            event("delta.message_start","lunch","note");
+            event("delta.text_append","lunch","","What do you want for lunch?");
+            event("delta.text_append","lunch","","\n\n[[hatch_widget:meal]]");
+            cJSON *line=cJSON_Parse(R"({"type":"event","event":"delta.message_done","payload":{"message_id":"lunch","widgets":[{"kind":"option","widget_id":"meal","data":{"options":["Pasta","Salad"]}}]}})");
+            on_event(line); cJSON_Delete(line);
+            muse_options_t q;
+            assert(muse_options_snapshot(&q) && !strcmp(q.question,"What do you want for lunch?"));
+            /* Another message must not borrow the lunch question's streamed text. */
+            line=cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{"message_id":"other-question","widgets":[{"kind":"option","widget_id":"other-choices","data":{"options":["Yes","No"]}}]}})");
+            on_event(line); cJSON_Delete(line);
+            assert(muse_options_snapshot(&q) && !q.question[0]);
+        }
+        free(s_turn.texts); s_turn.texts=nullptr;
+        break;
+    }
+    case 33: {
+        muse_options_clear(); s_turn.phase=P_IDLE;
+        cJSON *line=cJSON_Parse(R"({"type":"event","event":"message.assistant","payload":{"message_id":"lunch","transcript":{"messages":[{"role":"assistant","content":[{"type":"text","text":"What do you want for lunch?\n[[hatch_widget:meal]]"}]}]},"widgets":[{"kind":"option","widget_id":"meal","data":{"options":["Pasta","Salad"]}}]}})");
+        on_event(line); cJSON_Delete(line);
+        muse_options_t q;
+        assert(muse_options_snapshot(&q) && !strcmp(q.question,"What do you want for lunch?"));
+        break;
+    }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -737,10 +884,14 @@ int main(int argc, char **argv) {
                  '-I', str(ROOT / 'tests'), '-I', str(ROOT / 'components/muse'),
                  '-I', str(ROOT / 'components/minimp3/include')]
         commands = [
+            [*shlex.split(os.environ.get('CC', 'cc')), '-std=c11', *flags, '-pthread',
+             '-I', str(ROOT / 'simulator/compat'), '-c', str(ROOT / 'components/muse/muse_options.c'), '-o', str(out / 'options.o')],
             [*shlex.split(os.environ.get('CC', 'cc')), '-std=c11', *flags,
-             '-c', str(JSON / 'cJSON.c'), '-o', str(out / 'cjson.o')],
+             '-c', str(ROOT / 'components/muse/muse_options_json.c'), '-o', str(out / 'options-json.o')],
+            [*shlex.split(os.environ.get('CC', 'cc')), '-std=c11', *flags,
+             '-c', *cjson_source(JSON), '-o', str(out / 'cjson.o')],
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags,
-             str(out / 'session.cpp'), str(out / 'cjson.o'), '-o', str(out / 'session')],
+             str(out / 'session.cpp'), str(out / 'options.o'), str(out / 'options-json.o'), str(out / 'cjson.o'), '-o', str(out / 'session')],
         ]
         # The Watcher keeps whole replies for review: the same handlers, with the
         # real review store and fake FreeRTOS/heap headers.
@@ -759,12 +910,13 @@ int main(int argc, char **argv) {
             [*shlex.split(os.environ.get('CC', 'cc')), '-std=gnu11', *flags, *watcher,
              '-c', str(ROOT / 'components/muse/muse_review.c'), '-o', str(out / 'review.o')],
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags, *watcher,
-             str(out / 'session.cpp'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-watcher')],
+             str(out / 'session.cpp'), str(out / 'options.o'), str(out / 'options-json.o'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-watcher')],
         ]
         latest = [flag.replace('CONFIG_MUSE_BOARD_SENSECAP_WATCHER', 'CONFIG_MUSE_LATEST_REPLY') for flag in watcher]
         commands += [
             [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', *flags, *latest,
-             str(out / 'session.cpp'), str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-latest')],
+             str(out / 'session.cpp'), str(out / 'options.o'), str(out / 'options-json.o'),
+             str(out / 'cjson.o'), str(out / 'review.o'), '-o', str(out / 'session-latest')],
         ]
         for command in commands:
             result = subprocess.run(command, capture_output=True, text=True)
@@ -777,6 +929,15 @@ int main(int argc, char **argv) {
         binary = self.watcher_binary if watcher else self.binary
         result = subprocess.run([str(binary), str(case)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_idle_widget_and_phone_selection_use_the_real_adapter(self):
+        self.run_case(31)
+
+    def test_widget_done_uses_only_its_own_streamed_question(self):
+        self.run_case(32)
+
+    def test_idle_canonical_transcript_supplies_the_picker_question(self):
+        self.run_case(33)
 
     def test_rejected_deltas_do_not_emit_or_complete_voice_or_typed_replies(self):
         self.run_case(0)
@@ -848,6 +1009,21 @@ int main(int argc, char **argv) {
 
     def test_slow_reply_detaches_only_while_muse_says_it_is_working(self):
         self.run_case(23)
+
+    def test_transcript_only_progress_and_final_reply_play_after_detaching(self):
+        self.run_case(36)
+
+    def test_transcript_only_reply_arriving_during_the_notice_is_spoken(self):
+        self.run_case(37)
+
+    def test_long_transcript_only_late_reply_keeps_whole_utf8_characters(self):
+        self.run_case(38)
+
+    def test_transcript_only_reply_reads_its_own_message_without_commentary(self):
+        self.run_case(39)
+
+    def test_transcript_only_reply_never_reads_another_message_in_its_place(self):
+        self.run_case(40)
 
     def test_late_reply_is_the_row_naming_the_request_and_plays_once(self):
         self.run_case(24)

@@ -33,6 +33,7 @@ class MuseWifiKeeper(unittest.TestCase):
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <setjmp.h>
+#include <string.h>
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
 #define pdFALSE 0
@@ -46,6 +47,7 @@ class MuseWifiKeeper(unittest.TestCase):
 #define KEEP_FORGET 4
 #define KEEP_RELOAD 8
 #define KEEP_WIFI 16
+#define KEEP_PROXY 32
 #define STACK_MONITOR_INIT 0
 #define BIT_CONNECTED 1
 #define BIT_GOT_IP 2
@@ -107,6 +109,22 @@ static app_wifi_join_t app_wifi_join_saved(int timeout, bool first) {
     connected = true;
     return APP_WIFI_JOINED;
 }
+typedef struct { int type; } network_proxy_config_t;
+typedef struct { unsigned char ssid[33]; } wifi_ap_record_t;
+#define ESP_OK 0
+#define portENTER_CRITICAL(p) ((void)(p))
+#define portEXIT_CRITICAL(p) ((void)(p))
+static int s_lock, s_proxy_result, s_saved_count = 1;
+static bool s_proxy_pending, proxy_write_ok = true, proxy_read_ok = true;
+static char s_proxy_ssid[33] = "Office", ap_ssid[33] = "Office";
+static network_proxy_config_t s_proxy_next = {2}, active_proxy;
+static struct { char ssid[33]; network_proxy_config_t proxy; } s_saved[1] = {{"Office", {0}}};
+static bool wifi_known_set_proxy(const char *ssid, const network_proxy_config_t *p) { (void)ssid; (void)p; return proxy_write_ok; }
+static bool wifi_known_get_proxy(const char *ssid, network_proxy_config_t *p) { (void)ssid; *p = s_proxy_next; return proxy_read_ok; }
+static bool network_proxy_equal(const network_proxy_config_t *a, const network_proxy_config_t *b) { return a->type == b->type; }
+static void network_proxy_wipe(void *p, unsigned n) { memset(p, 0, n); }
+static void network_proxy_set_active(const network_proxy_config_t *p) { active_proxy = *p; }
+static int esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap) { strcpy((char *)ap->ssid, ap_ssid); return ESP_OK; }
 static void set_fail(const char *s) { (void)s; }
 static void stack_monitor_poll(stack_monitor_t *s) { (void)s; }
 static void apply_tick(void) {
@@ -127,7 +145,7 @@ static void xTaskNotifyWait(int a, unsigned b, uint32_t *pending, int wait) {
     apply_tick();
     *pending = KEEP_WIFI;
 }
-''' + constants + function_source(glue, "static void keeper_task(") + r'''
+''' + constants + function_source(glue, "static void save_proxy(") + function_source(glue, "static void keeper_task(") + r'''
 static void run(void) {
     apply_tick();
     if (!setjmp(tick_end)) keeper_task(NULL);
@@ -187,6 +205,27 @@ int main(int argc, char **argv) {
         nticks = 1; run();
         assert(disconnects == 0 && connects == 0 && joins == 0);
         break;
+    case 9: { // Only a durably saved active-network proxy restarts the connection.
+        connected = true; s_proxy_pending = true;
+        int64_t next = 99; save_proxy(&next);
+        assert(disconnects == 1 && next == 0 && active_proxy.type == 2);
+        assert(!s_proxy_pending && s_proxy_result == 0 && s_saved[0].proxy.type == 2 && s_proxy_next.type == 0);
+        break;
+    }
+    case 10: { // Failed persistence/readback keeps the working connection intact.
+        connected = true; s_proxy_pending = true; proxy_read_ok = false;
+        int64_t next = 99; save_proxy(&next);
+        assert(disconnects == 0 && next == 99 && active_proxy.type == 0);
+        assert(!s_proxy_pending && s_proxy_result == -2 && s_proxy_next.type == 0);
+        break;
+    }
+    case 11: { // Editing another network never interrupts the active one.
+        connected = true; strcpy(ap_ssid, "Home"); s_proxy_pending = true;
+        int64_t next = 99; save_proxy(&next);
+        assert(disconnects == 0 && next == 99 && active_proxy.type == 0);
+        assert(!s_proxy_pending && s_proxy_result == 0 && s_saved[0].proxy.type == 2);
+        break;
+    }
     default: return 2;
     }
     return 0;
@@ -232,6 +271,15 @@ int main(int argc, char **argv) {
 
     def test_off_does_not_interrupt_setup_while_gate_is_busy(self):
         self.run_case(8)
+
+    def test_saved_active_proxy_restarts_only_after_readback(self):
+        self.run_case(9)
+
+    def test_failed_proxy_save_keeps_working_connection(self):
+        self.run_case(10)
+
+    def test_another_networks_proxy_keeps_active_connection(self):
+        self.run_case(11)
 
 
 if __name__ == "__main__":

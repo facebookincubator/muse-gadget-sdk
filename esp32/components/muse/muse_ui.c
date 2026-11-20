@@ -20,6 +20,7 @@
 #endif
 
 #include <stdatomic.h>
+#include "muse_options_ui.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -46,6 +47,9 @@
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_menu.h"
+#if CONFIG_MUSE_MIRROR
+#include "muse_mirror.h"
+#endif
 #include "muse_pixel.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
@@ -153,7 +157,7 @@ static void tile_changed_cb(lv_event_t *e)
 }
 
 /* From any task: the face tile is the currently visible tile. */
-bool muse_ui_face_active(void)
+static bool face_shown(void)
 {
 #if CONFIG_MUSE_APP_VIEW
     if (muse_app_view_tick()) {
@@ -161,6 +165,12 @@ bool muse_ui_face_active(void)
     }
 #endif
     return s_face_active;
+}
+
+bool muse_ui_face_active(void)
+{
+    /* The option picker covers it too: a held touch chooses, it doesn't talk. */
+    return !muse_options_ui_open() && face_shown();
 }
 
 bool muse_ui_volume_swiping(void)
@@ -177,6 +187,9 @@ static lv_obj_t *s_dots[PAGE_DOTS];
 static lv_obj_t *s_wifi_icon;
 static lv_obj_t *s_ble_icon;
 static lv_obj_t *s_cover;
+#if CONFIG_MUSE_REPLY_NOTIFY
+static lv_obj_t *s_flash;   /* white veil that blinks when a reply arrives */
+#endif
 static lv_obj_t *s_pair;
 static lv_obj_t *s_pair_code;
 static lv_obj_t *s_pair_title;
@@ -213,7 +226,7 @@ static lv_obj_t *s_meter[METER_SEGS];
 static lv_obj_t *s_speaker;
 static lv_obj_t *s_speaker_icon;
 static lv_obj_t *s_aux_icon;
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
 static lv_obj_t *s_talk_hint_lbl, *s_end_hint_lbl;
 #define CALL_HINT_OUT 26   /* px outwards from the rim icon's x: the 320 px avatar's sparkles reach ~125 */
 #endif
@@ -1280,7 +1293,7 @@ static void on_volume_swipe(lv_event_t *e)
     case LV_EVENT_PRESSED:
         s_volume_swipe = (muse_volume_swipe_t){0};
         if (volume_swipe_allowed()) {
-            lv_indev_get_point(s_indev, &point);
+            lv_indev_get_point(lv_indev_active(), &point);
             muse_volume_swipe_begin(&s_volume_swipe, point.x, point.y, s_h, muse_settings_volume());
         }
         break;
@@ -1290,7 +1303,7 @@ static void on_volume_swipe(lv_event_t *e)
             finish_volume_swipe();
             break;
         }
-        lv_indev_get_point(s_indev, &point);
+        lv_indev_get_point(lv_indev_active(), &point);
         int old_value = s_volume_swipe.value;
         if (muse_volume_swipe_move(&s_volume_swipe, point.x, point.y)) {
             s_volume_swiping = true;
@@ -1787,7 +1800,7 @@ static void build_overlays(void)
         lv_obj_align(s_ptt_hint, muse_board->talk_hint.align, muse_board->talk_hint.x, muse_board->talk_hint.y);
         s_spk_hint = make_control_icon(scr, &muse_board->speaker_hint, LV_SYMBOL_VOLUME_MID, 0xffd060);
         s_pwr_hint = make_control_icon(scr, &muse_board->power_hint, LV_SYMBOL_POWER, 0xff8080);
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
         /* During a push-to-talk call: what yellow does now, and that blue
          * hangs up. Under each rim icon, pushed out towards the rim, clear of
          * the avatar and its sparkles (CALL_HINT_OUT). */
@@ -1804,6 +1817,12 @@ static void build_overlays(void)
 #endif
         update_control_hints(MUSE_MODE_BOOT);
     }
+
+#if CONFIG_MUSE_HATCH
+    /* Answers go out through the voice task, which display-only boards don't run. */
+    if (muse_board->touch && (muse_board->audio_init || muse_board->mic_init))
+        muse_options_ui_start(s_w, s_h, muse_board->round, caption_font());
+#endif
 
     /* BLE pairing code, or the Muse app's ask for the talk button: a centred
      * column in one typeface, the code large. The small card grows with the hint. */
@@ -1833,6 +1852,17 @@ static void build_overlays(void)
     /* Wraps: "bottom right button" is wider than the AIPI's card. */
     lv_obj_set_width(s_pair_hint, lv_pct(100));
     lv_label_set_long_mode(s_pair_hint, LV_LABEL_LONG_MODE_WRAP);
+
+#if CONFIG_MUSE_REPLY_NOTIFY
+    /* Reply flash: drawn over everything, never takes a touch. */
+    s_flash = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_flash);
+    lv_obj_set_size(s_flash, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_color(s_flash, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(s_flash, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(s_flash, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+#endif
 
     /* Sleep cover: swallows the waking touch. */
     s_cover = lv_obj_create(lv_layer_top());
@@ -1933,6 +1963,9 @@ static const char *idle_name(muse_wifi_state_t wifi)
 
 static void update_chrome(float now)
 {
+    muse_options_ui_tick(face_shown() && !muse_voice_in_call() && !s_image_dsc.data &&
+                         muse_state_mode(NULL) != MUSE_MODE_LISTENING &&
+                         lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
     if (now < s_next_settings_tick) {
         return;
     }
@@ -2162,7 +2195,7 @@ static void update_status(muse_mode_t mode, float now)
         uint32_t working = muse_pixel_working_accent();
         if (working) accent = working;   /* the ring and label match the working avatar */
     }
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
     const char *call_name = muse_voice_call_label();
     const char *hint = muse_voice_call_hint();
     if (call_name) name = call_name;
@@ -2443,6 +2476,17 @@ static void frame_tick(lv_timer_t *timer)
     if (update_sleep()) {
         return;
     }
+#if CONFIG_MUSE_REPLY_NOTIFY
+    {
+        float flash = muse_state_flash_level();
+        if (flash > 0) {
+            lv_obj_set_style_bg_opa(s_flash, (lv_opa_t)(flash * 170), 0);
+            lv_obj_remove_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+        } else if (!lv_obj_has_flag(s_flash, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_add_flag(s_flash, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
 #if CONFIG_MUSE_VIDEO
     if (muse_video_tick()) {
         muse_menu_close();
@@ -2484,7 +2528,8 @@ static void frame_tick(lv_timer_t *timer)
     s_level += (level - s_level) * (level > s_level ? 0.6f : 0.2f);
 
     muse_pose_t pose = {
-        .mode = mode,
+        /* A pending reply keeps its green progress ring, but isn't speech. */
+        .mode = mode == MUSE_MODE_SPEAKING && muse_voice_reply_waiting() ? MUSE_MODE_IDLE : mode,
         .t = now,
         .mode_t = mode_t,
         .level = s_level,
@@ -2550,6 +2595,10 @@ esp_err_t muse_ui_start(void)
     }
     build_overlays();
     lv_timer_create(frame_tick, muse_board->frame_ms, NULL);
+#if CONFIG_MUSE_MIRROR
+    lv_indev_t *mirror_pointer = muse_mirror_start(disp);
+    if (mirror_pointer) lv_indev_add_event_cb(mirror_pointer, on_any_press, LV_EVENT_PRESSED, NULL);
+#endif
     s_ready = true;
     muse_board->display_unlock();
 
@@ -2593,17 +2642,25 @@ void muse_ui_preview_brightness(int pct)
 
 bool muse_ui_image_size(int *w, int *h)
 {
-    if (!s_ready || !heap_caps_get_total_size(MALLOC_CAP_SPIRAM)) {
+    if (!heap_caps_get_total_size(MALLOC_CAP_SPIRAM)) {
         return false;
     }
-    *w = s_w;
-    *h = s_h;
-    return true;
+    if (s_ready) {
+        *w = s_w;
+        *h = s_h;
+        return true;
+    }
+    if (muse_board && muse_board->width > 0 && muse_board->height > 0) {
+        *w = muse_board->width;
+        *h = muse_board->height;
+        return true;
+    }
+    return false;
 }
 
 int muse_ui_image_bits(void)
 {
-    return muse_board->epaper ? 2 : 16;
+    return (muse_board && muse_board->epaper) ? 2 : 16;
 }
 
 /* Floyd-Steinberg to four grays, in place: each pixel becomes black, 85, 170
@@ -2637,7 +2694,11 @@ static void dither_gray4_565(uint16_t *px, int w, int h, int16_t *err)
 
 void muse_ui_image_done(void)
 {
-    if (!s_ready || muse_ui_image_bits() != 2) {
+    if (!s_ready) {
+        return;
+    }
+    muse_state_poke();
+    if (muse_ui_image_bits() != 2) {
         return;   /* a colour panel shows each rectangle as it comes */
     }
     int16_t *err = malloc(2 * (size_t)(s_w + 2) * sizeof(int16_t));
@@ -2660,6 +2721,7 @@ bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels)
         return false;
     }
     xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    bool wake = false;
     if (!s_image_buf) {
         /* The first rectangle of an image: a black screen to draw onto. */
         s_image_buf = heap_caps_calloc((size_t)s_w * s_h, sizeof(uint16_t), MALLOC_CAP_SPIRAM);
@@ -2667,6 +2729,18 @@ bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels)
             xSemaphoreGive(s_image_mutex);
             return false;
         }
+        wake = true;
+    }
+#if CONFIG_MUSE_WATCHER_CAMERA
+    else if (!watcher_camera_preview_active()) {
+        wake = true;
+    }
+#else
+    else {
+        wake = true;
+    }
+#endif
+    if (wake) {
         /* Now, not when it's shown: asleep, the display may be paused (muse_input.c). */
         muse_state_set_asleep(false);
     }

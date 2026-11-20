@@ -110,6 +110,7 @@ BOARDS = {
     "M5Stack AtomS3 + Atomic Voice Base": "atoms3",
     "M5Stack StickC Plus2": "plus2",
     "M5Stack StopWatch": "stopwatch",
+    "M5Stack TriviaPOD": "triviapod",
     "Seeed XIAO ESP32-S3 1.47 Touch Display": "xiao147",
     "M5Stack CoreS3": "cores3",
     "M5Stack Core2": "core2",
@@ -127,7 +128,7 @@ BOARDS = {
     "VIEWE SmartRing-Plus": "smartring-plus",
     "Waveshare ESP32-S3-Touch-LCD-3.5": "s3lcd35",
 }
-CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "lilygo175", "aipi", "atk-box", "atk-box2", "box3", "sticks3", "watcher", "stopwatch", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35")
+CHAT_BOARDS = ("k10", "s3", "s3n", "s3-18", "s3-216", "s3-206", "185b", "185c", "143c", "143", "146", "lilygo175", "aipi", "atk-box", "atk-box2", "box3", "sticks3", "watcher", "stopwatch", "triviapod", "xiao147", "cores3", "crowpanel-43", "core2", "fnk0104b", "jc3248w535", "lcd7", "lcd128", "lcd349", "spotpear", "vn183", "echoear", "p4lcd35", "rorolee", "lcd19", "smartring-plus", "s3lcd35")
 
 
 class Stop(Exception):
@@ -338,12 +339,12 @@ def copy_tree(dest):
 
 
 # board.sh's build options, in the order it adds their build directory suffixes
-PROFILE_ENV = (("MUSE_VIDEO", "-video"), ("MUSE_BENCH", "-bench"))
+PROFILE_ENV = (("MUSE_VIDEO", "-video"), ("MUSE_MIRROR", "-mirror"), ("MUSE_BENCH", "-bench"))
 
 
 def build_dir(key, root=ROOT):
-    """board.sh's build directory for `key`: build-muse-PROFILE, then -video under MUSE_VIDEO
-    and -bench under MUSE_BENCH."""
+    """board.sh's build directory for `key`: build-muse-PROFILE, then the enabled
+    -video, -mirror and -bench suffixes in that order."""
     with open(os.path.join(root, "tools", "muse", "board.sh"), encoding="utf-8") as f:
         m = re.search(rf"^\s*{re.escape(key)}\)\s+profile=([\w.-]+);", f.read(), re.M)
     if not m:

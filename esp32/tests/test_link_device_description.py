@@ -27,6 +27,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_cjson import HOST_CJSON
+
 
 ROOT = Path(__file__).resolve().parents[1]
 NOISE = (ROOT / "main" / "noise_control.cpp").read_text()
@@ -111,7 +113,7 @@ class DeviceDescriptionTest(unittest.TestCase):
         flags = ["-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter",
                  "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                  "-DCJSON_NESTING_LIMIT=16", "-I", str(CJSON)]
-        sources = [CJSON / "cJSON.c"]
+        sources = [HOST_CJSON]
         if ble:
             (tmp / "ble_client_stubs.c").write_text(BLE_CLIENT_STUBS)
             sources += [ROOT / "main/ble_commands.c", tmp / "ble_client_stubs.c"]
@@ -396,6 +398,15 @@ int main(void) {
         self.assertIn("Seeed reSpeaker XVF3800 running", voice)
         self.assertIn("The reSpeaker XVF3800 shows no state", voice)
         self.assertNotIn("sdkconfig.muse-waveshare-s3-lcd7", guides)
+        self.assertEqual(guides["sdkconfig.muse-waveshare-s3-175c"],
+                         "devices/guides/muse-waveshare-s3-175c.md")
+        waveshare = " ".join(
+            (ROOT / "devices/guides/muse-waveshare-s3-175c.md").read_text().split())
+        self.assertIn("Waveshare ESP32-S3-Touch-AMOLED-1.75C", waveshare)
+        self.assertIn("Top button (upper right side): hold to record a voice note",
+                      waveshare)
+        self.assertIn("Drag up or down on the avatar to change the volume",
+                      waveshare)
         self.assertEqual(guides["sdkconfig.muse"], "devices/guides/muse.md")
         muse = " ".join((ROOT / "devices/guides/muse.md").read_text().split())
         self.assertIn("on boards with a microphone, people talk to Muse", muse)

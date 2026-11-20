@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "sdkconfig.h"
+#include "network_proxy.h"
 
 typedef void (*ble_provision_cb)(const char *ssid, const char *password,
                                  const char *access_token,
@@ -30,6 +31,7 @@ typedef void (*ble_provision_cb)(const char *ssid, const char *password,
                                  const char *api_url,
                                  const char *api_url_v2,
                                  const char *noise_host,
+                                 const network_proxy_config_t *proxy,
                                  uint32_t session_generation);
 typedef void (*ble_ota_cb)(const char *url, bool force);
 typedef void (*ble_simple_cb)(void);

@@ -26,6 +26,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components/muse"
 VSTREAM = ROOT / "components/muse_vstream"
@@ -44,7 +46,7 @@ class MuseVideoTest(unittest.TestCase):
                 [*cc, "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter",
                  f"-I{VSTREAM / 'include'}", f"-I{MUSE}", f"-I{JSON}", "-o", str(exe),
                  str(ROOT / "tests/muse_video_harness.c"), str(VSTREAM / "muse_vstream.c"),
-                 str(MUSE / "muse_video_wire.c"), str(JSON / "cJSON.c"), "-lm"],
+                 str(MUSE / "muse_video_wire.c"), *cjson_source(JSON), "-lm"],
                 capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)

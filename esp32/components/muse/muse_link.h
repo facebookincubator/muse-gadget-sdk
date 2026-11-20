@@ -27,6 +27,8 @@
 
 #include "muse_wifi.h"
 
+typedef struct network_proxy_config network_proxy_config_t;
+
 /*
  * Muse runs inside Home Link, which owns the radios, the setup credentials and
  * the Hatch account. Link registers these operations at boot
@@ -68,7 +70,10 @@ typedef struct {
     /* Fills the VM whose id is want_vm (empty: Link's preferred VM). *vm_token is heap. */
     bool (*hatch_vm)(const char *want_vm, char *vm_id, size_t id_cap, char *vm_name, size_t name_cap,
                      char **vm_token);
-    bool (*talk_press)(void);                     /* true: Link used the press (pairing confirm) */
+    /* A press that began after pressed_after_us (esp_timer's clock). true: Link
+     * used it (a pairing waits for a press, which confirms it if it began after
+     * the prompt). */
+    bool (*talk_press)(int64_t pressed_after_us);
     void (*reset_setup)(void);                    /* forget Link setup and reboot */
     /* Requests to the VM on Link's own Noise session, for boards without PSRAM for their own. */
     bool (*req_ready)(void);                      /* the session is up */
@@ -83,6 +88,8 @@ typedef struct {
     void (*wifi_nap)(bool nap);                   /* screen off a while: leave Wi-Fi until false */
     void (*ble_quiet)(bool quiet);                /* a Wi-Fi video stream: no BLE advertising until false */
     int (*wifi_saved)(muse_wifi_saved_t *out, int max);   /* most recently joined first */
+    int (*wifi_proxy_get)(const char *ssid, network_proxy_config_t *out);
+    bool (*wifi_proxy_set)(const char *ssid, const network_proxy_config_t *proxy);
     void (*wifi_forget)(const char *ssid);        /* one saved network; empty forgets them all */
 } muse_link_ops_t;
 
@@ -105,6 +112,11 @@ bool muse_link_sdk_token_set(const char *token);
 bool muse_link_sdk_token_changed(void);
 bool muse_link_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *vm_name, size_t name_cap,
                         char **vm_token);
+/* A press, now, of a control that can confirm pairing; true: Link used it.
+ * Only a press that began after the pairing prompt confirms it. released_us
+ * is when that control was last let go (esp_timer's clock), or 0 if the caller
+ * doesn't track it; muse_link_talk_press() passes 0. */
+bool muse_link_confirm_press(int64_t released_us);
 bool muse_link_talk_press(void);
 void muse_link_reset_setup(void);
 /* The first saved network, owned by Link. Return false when Link hasn't registered. */
@@ -123,3 +135,8 @@ void muse_link_req_cancel(int64_t id);
 size_t muse_link_req_max_body(void);
 #endif
 void muse_link_ble_apply(void);
+
+/* Proxy state: 0 saved, 1 saving, -1 unknown network, -2 last save failed.
+ * Set queues a write on Link's internal-stack keeper; get polls its result. */
+int muse_link_wifi_proxy_get(const char *ssid, network_proxy_config_t *out);
+bool muse_link_wifi_proxy_set(const char *ssid, const network_proxy_config_t *proxy);

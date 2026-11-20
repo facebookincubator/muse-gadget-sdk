@@ -17,11 +17,16 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef void (*button_cb)(void);
 
 bool button_init(button_cb on_short_press, button_cb on_double_press,
                  button_cb on_long_press);
+
+// From the short-press callback: a time (esp_timer's clock) the button was
+// last seen up before that press began.
+int64_t button_pressed_after_us(void);
 
 // For a setup button that isn't a GPIO (one read over I2C, say): set before
 // button_init(), which then reads it with `read` instead of

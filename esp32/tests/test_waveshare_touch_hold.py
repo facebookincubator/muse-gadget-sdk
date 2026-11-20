@@ -71,7 +71,7 @@ static void hold_talks(void) {
     pressed = true;
     assert(step(10) == 0);
     assert(step(400) == 0);
-    assert(step(100) == MUSE_BTN_TALK_PRESS);
+    assert(step(100) == (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD));
     assert(step(10) == 0);
     pressed = false;
     assert(step(10) == MUSE_BTN_TALK_RELEASE);
@@ -90,7 +90,7 @@ static void slow_swipe_never_talks(void) {
     assert(step(10) == 0);   /* No talk started, so no release either. */
     pressed = true;          /* The next press is a fresh hold. */
     assert(step(10) == 0);
-    assert(step(500) == MUSE_BTN_TALK_PRESS);
+    assert(step(500) == (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD));
     pressed = false;
     assert(step(10) == MUSE_BTN_TALK_RELEASE);
 }

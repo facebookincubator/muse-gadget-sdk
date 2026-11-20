@@ -428,6 +428,134 @@ int main(int argc, char **argv)
 '''
 
 
+IMU_EVENTS_HARNESS = r'''
+#include <assert.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "imu_events.h"
+
+static imu_events_t s;
+static unsigned all;
+static int counts[5], first_at[5], t;
+
+static void feed(float x, float y, float z)
+{
+    float a[3] = {x, y, z};
+    unsigned ev = imu_events_feed(&s, a);
+    for (int i = 0; i < 5; i++) {
+        if (ev & (1u << i)) {
+            if (!counts[i]++) first_at[i] = t;
+        }
+    }
+    all |= ev;
+    t++;
+}
+
+static void hold(float x, float y, float z, int n)
+{
+    for (int i = 0; i < n; i++) feed(x, y, z);
+}
+
+/* A sharp knock along z out of stillness (y, z: the gravity it's held at). */
+static void knock(float y, float z)
+{
+    feed(0, y, z + 1.6f);
+    feed(0, y, z - 0.5f);
+    feed(0, y, z + 0.1f);
+}
+
+static void report(void)
+{
+    printf("tap %d double %d shake %d up %d down %d\n", counts[0], counts[1], counts[2], counts[3], counts[4]);
+}
+
+int main(int argc, char **argv)
+{
+    assert(argc == 2);
+    int test = atoi(argv[1]);
+    imu_events_init(&s);
+    const float ty = 0.6f, tz = 0.8f;   /* held up, tilted back: not flat */
+    if (test == 0) {   /* lying flat: the first orientation is taken quietly, then each flip is told */
+        hold(0, 0, 1, 200);
+        assert(all == 0);
+        for (int i = 0; i <= 30; i++) {   /* turned over about x in 0.3 s */
+            float a = 3.14159265f * i / 30;
+            feed(0, sinf(a), cosf(a));
+        }
+        hold(0, 0, -1, 200);
+        report();
+        assert(counts[4] == 1 && counts[3] == 0 && counts[0] == 0 && counts[1] == 0 && counts[2] == 0);
+        for (int i = 0; i <= 30; i++) {
+            float a = 3.14159265f * i / 30;
+            feed(0, sinf(a), -cosf(a));
+        }
+        hold(0, 0, 1, 200);
+        assert(counts[3] == 1 && counts[4] == 1);
+    } else if (test == 1) {   /* picked up from tilted, laid face up: told */
+        hold(0, ty, tz * 0.5f + 0.1f, 100);
+        hold(0, 0.1f, 0.99f, 200);
+        report();
+        assert(counts[3] == 1 && counts[4] == 0);
+    } else if (test == 2) {   /* one tap, told once no second followed */
+        hold(0, ty, tz, 100);
+        int at = t;
+        knock(ty, tz);
+        hold(0, ty, tz, 100);
+        report();
+        assert(counts[0] == 1 && counts[1] == 0 && counts[2] == 0);
+        assert(first_at[0] - at >= 40 && first_at[0] - at <= 60);
+    } else if (test == 3) {   /* two taps 0.2 s apart: a double tap and no single one */
+        hold(0, ty, tz, 100);
+        knock(ty, tz);
+        hold(0, ty, tz, 17);
+        knock(ty, tz);
+        hold(0, ty, tz, 100);
+        report();
+        assert(counts[1] == 1 && counts[0] == 0 && counts[2] == 0);
+        /* Then a lone tap again. */
+        knock(ty, tz);
+        hold(0, ty, tz, 100);
+        assert(counts[0] == 1 && counts[1] == 1);
+    } else if (test == 4) {   /* two taps 0.6 s apart: two taps */
+        hold(0, ty, tz, 100);
+        knock(ty, tz);
+        hold(0, ty, tz, 60);
+        knock(ty, tz);
+        hold(0, ty, tz, 100);
+        report();
+        assert(counts[0] == 2 && counts[1] == 0);
+    } else if (test == 5) {   /* shaken hard: a shake, and no taps */
+        hold(0, ty, tz, 100);
+        for (int i = 0; i < 150; i++) {
+            feed(2.5f * sinf(2 * 3.14159265f * 4 * i / 100.0f), ty, tz);
+        }
+        hold(0, ty, tz, 100);
+        report();
+        assert(counts[2] >= 1 && counts[0] == 0 && counts[1] == 0);
+    } else if (test == 6) {   /* walking, a slow push, wobbles: nothing */
+        hold(0, ty, tz, 100);
+        for (int i = 0; i < 400; i++) {
+            float w = 0.4f * sinf(2 * 3.14159265f * 2 * i / 100.0f);
+            feed(0.1f * w, ty + w, tz);
+        }
+        hold(0, ty, tz, 50);
+        hold(1.0f, ty, tz, 10);   /* a push lasting 0.1 s */
+        hold(0, ty, tz, 100);
+        report();
+        assert(all == 0);
+    } else if (test == 7) {   /* junk readings are ignored */
+        hold(0, ty, tz, 50);
+        feed(NAN, 0, 0);
+        feed(INFINITY, 0, 0);
+        hold(0, ty, tz, 50);
+        assert(all == 0);
+    }
+    return 0;
+}
+'''
+
+
 def c_arrays(source, ctype):
     """name -> the entries of each `static const <ctype> name[] = {...};`."""
     out = {}
@@ -509,6 +637,20 @@ class DevCalls(unittest.TestCase):
         self.assertIn("#define CAPABILITY_FIELDS 8", (DEV / "include/capabilities_registry.h").read_text())
 
 
+class ImuEvents(unittest.TestCase):
+    def test_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            compile_and_run(self, tmp, "imu_events",
+                            [MUSE / "boards/imu_events.c", ("harness.c", IMU_EVENTS_HARNESS)],
+                            [MUSE / "boards"], 8)
+
+    def test_event_bits_follow_the_well_known_order(self):
+        accel = next(d for d in API["devices"]["well_known"] if d[0] == "accel")
+        header = (MUSE / "boards/imu_events.h").read_text()
+        for i, event in enumerate(accel[4]):
+            self.assertRegex(header, r"#define IMU_%s \(1u << %d\)" % (event.upper(), i))
+
+
 def preprocessor_frames(text, pos):
     """The #if conditions in force at pos, outermost first."""
     stack = []
@@ -544,6 +686,7 @@ class BoardDevices(unittest.TestCase):
         cls.sources = {path: path.read_text() for path in sorted((MUSE / "boards").glob("*.c"))}
         cls.sources[MUSE / "board_capabilities.c"] = (MUSE / "board_capabilities.c").read_text()
         cls.common = cls.sources[MUSE / "board_capabilities.c"]
+        cls.imu = (MUSE / "boards/bmi270_device.c").read_text()
         cls.known = {d[0]: d for d in API["devices"]["well_known"]}
         cls.devices = [(path, name, dev) for path, text in cls.sources.items()
                        for name, dev in devices_in(text).items() if name in cls.known]
@@ -569,6 +712,7 @@ class BoardDevices(unittest.TestCase):
     def test_registered(self):
         self.assertIn("muse_board->read_power", self.common)
         self.assertIn("capabilities_registry_register(&s_battery)", self.common)
+        self.assertIn("capabilities_registry_register(&s_devs[i])", self.imu)
         glue = (ROOT / "main/muse_glue.c").read_text()   # once the board is up
         self.assertLess(glue.index("muse_app_run(muse_board_get());"), glue.index("board_capabilities_init();"))
         cmake = (MUSE / "CMakeLists.txt").read_text()
@@ -576,11 +720,11 @@ class BoardDevices(unittest.TestCase):
         self.assertIn("capabilities_registry", cmake[cmake.index("set(muse_priv_requires"):])
         # A board file registers its devices only in builds with the registry,
         # and builds the chip drivers it uses in its own CMake block.
-        drivers = {}   # a chip driver's register call: the sources its board must build
+        drivers = {"bmi270_device_register(": ("boards/bmi270_device.c", "boards/imu_events.c")}
         for path, text in self.sources.items():
             if path.parent != MUSE / "boards" or not path.name.startswith("board_"):
                 continue
-            for m in re.finditer(r"\b(capabilities_registry_register)\(", text):
+            for m in re.finditer(r"\b(capabilities_registry_register|bmi270_device_register)\(", text):
                 with self.subTest(board=path.name, at=m.start()):
                     self.assertTrue(any("CONFIG_CAPABILITIES_REGISTRY" in f for f in preprocessor_frames(text, m.start())),
                                     "%s registers a device outside CONFIG_CAPABILITIES_REGISTRY" % path.name)
@@ -605,6 +749,40 @@ class BoardDevices(unittest.TestCase):
                 with self.subTest(source=path.name, callback=m.group(2)):
                     self.assertNotIn("vTaskDelay", body)
                     self.assertNotRegex(body, r"\bi2c_master_(transmit|receive|transmit_receive)\(")
+
+    def test_imu_driver(self):
+        # Registering writes nothing to the chip, which stays suspended until a start.
+        register = self.imu[self.imu.index("bool bmi270_device_register("):]
+        register = register[:register.index("\n}\n")]
+        self.assertNotRegex(register, r"\bwr(_buf)?\(")
+        self.assertNotIn("xTaskCreate", register)
+        suspend = self.imu[self.imu.index("static bool suspend(void)"):]
+        suspend = suspend[:suspend.index("\n}\n")]
+        self.assertIn("bmi270_sensor_disable(sensors, sizeof(sensors), s.sensor)", suspend)
+        self.assertIn("bmi2_set_adv_power_save(BMI2_ENABLE, s.sensor)", suspend)
+        self.assertNotIn("bmi270_sensor_create", register)
+        self.assertIn("MALLOC_CAP_SPIRAM", self.imu[self.imu.index("static int imu_start("):])
+
+    def test_vendor_driver_is_pinned_and_optional(self):
+        self.assertFalse((MUSE / "boards/bmi270_config.c").exists())
+        manifest = (MUSE / "idf_component.yml").read_text()
+        driver = manifest.split("espressif/bmi270_sensor:", 1)[1].split("\n  espressif/", 1)[0]
+        self.assertIn('version: "==0.4.1"', driver)
+        self.assertIn('$CONFIG{MUSE_BMI270_DRIVER} == "y"', driver)
+        kconfig = (MUSE / "Kconfig").read_text()
+        gate = kconfig.split("config MUSE_BMI270_DRIVER", 1)[1].split("\n    config ", 1)[0]
+        self.assertIn('string', gate)
+        self.assertIn('default "y" if MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CAPABILITIES_REGISTRY', gate)
+        self.assertIn('default "n"', gate)
+        for name, version in (("i2c_bus", "1.5.2"), ("cmake_utilities", "0.5.3")):
+            dependency = manifest.split("espressif/" + name + ":", 1)[1].split("\n  espressif/", 1)[0]
+            self.assertIn('version: "==' + version + '"', dependency)
+            self.assertIn('$CONFIG{MUSE_BMI270_DRIVER} == "y"', dependency)
+        self.assertIn("bmi270_sensor_create_from_master_bus_with_address(", self.imu)
+        self.assertIn("bmi270_get_feature_data(&data, 1, s.sensor)", self.imu)
+        self.assertIn("bmi2_get_sensor_data(&data, s.sensor)", self.imu)
+        self.assertNotIn("REG_FEAT_PAGE", self.imu)
+        self.assertNotIn("bmi270_config_file", self.imu)
 
 
 if __name__ == "__main__":

@@ -69,6 +69,9 @@ extern "C" {
 #define MUSE_BTN_REVIEW_PREV  (1u << 15)
 #define MUSE_BTN_REVIEW_NEXT  (1u << 16)
 #endif
+/* With TALK_PRESS: reported once a hold passes its threshold (a finger held on
+ * the face to talk), not at the press's own edge, so it never confirms pairing. */
+#define MUSE_BTN_TALK_HELD    (1u << 17)
 
 /* Where a button's icon goes on screen: beside the button, inside the panel. */
 typedef struct {

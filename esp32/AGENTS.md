@@ -85,6 +85,7 @@ before adding a feature to one.
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
 | Elecrow CrowPanel Advance 4.3 V1.3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-crowpanel-advance-43` | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
+| M5Stack TriviaPOD (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-triviapod` | `tools/muse/board.sh build triviapod` |
 | Seeed XIAO ESP32-S3 1.47 Touch Display | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147` | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
 | Freenove FNK0104B | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b` | `tools/muse/board.sh build fnk0104b` |
@@ -186,7 +187,7 @@ controls and unverified hardware behavior.
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|lilygo175|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|s3-18|s3-216|s3-206|185b|143c|143|146|lilygo175|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|core2|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35|k10> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -226,9 +227,10 @@ more, except the StickS3, StickC Plus2, Cardputer ADV, AtomS3, AI Passport and W
 
 On the Watcher, rotation opens and pages through the latest reply. A short
 wheel click sleeps/wakes; a 300 ms hold starts push-to-talk. Pairing still
-confirms on the initial press. `muse_review.c` keeps up to 32 KB of the reply
-in PSRAM across the end of the turn. `>review.next`, `>review.prev`, and
-`>review.close` exercise navigation over the serial console.
+confirms on the initial press, never on a hold's push-to-talk.
+`muse_review.c` keeps up to 32 KB of the reply in PSRAM across the end of the
+turn. `>review.next`, `>review.prev`, and `>review.close` exercise navigation
+over the serial console.
 
 All boards share `managed_components/` and `dependencies.lock` in this
 directory. If the component manager fails after you switch between a board
@@ -314,7 +316,7 @@ flash size and status backend.
 
    | Hint | Board |
    |---|---|
-   | `top-right`, or `top-left` with live calls (`yellow` on older firmware) | M5Stack StopWatch |
+   | `top-right`, or `top-left` with live calls (`yellow` on older firmware) | M5Stack StopWatch or TriviaPOD — tell them apart by the `muse: board:` line a reset logs |
    | `USR1` | Seeed XIAO ESP32-S3 1.47 Touch Display |
    | `power` | M5Stack CoreS3 |
    | `M`, `R`, `L` or `Q` | ALIENTEK ATK-DNESP32S3-BOX2 |
@@ -502,6 +504,11 @@ Button (BOOT on the dev boards):
   setup isn't complete
 - **hold for 5 s**: reset setup (unpair and forget Wi-Fi)
 
+Only a press that begins after the confirmation prompt confirms it, on every
+board: a press already under way (or held) when it appears doesn't count, so
+let go and press again (`link_pairing_confirm_active_session()`,
+`tests/test_pairing_fresh_press.py`).
+
 EchoEar-2ST confirms pending pairing with an explicit screen press; hold the
 on-screen microphone to record and release it to send once paired. It has no
 physical talk/setup button, so the GPIO button reset gesture does not apply.
@@ -541,7 +548,8 @@ The device still needs to be paired once for its token.
 `CONFIG_MUSE_REALTIME_VOICE` (off by default, "Live voice calls with Muse"
 under Muse in menuconfig) adds calls beside voice notes on boards with Muse's
 own voice session: the full-UI boards with PSRAM and the Voice PE (and
-reSpeaker Lite) builds. On StopWatch, hold yellow to talk or interrupt, release
+reSpeaker Lite) builds. On StopWatch (and the TriviaPOD, which shares its
+board file and controls), hold yellow to talk or interrupt, release
 to keep the call open, and tap blue to hang up; voice notes are an explicit
 Sound setting. With the option on, the StopWatch's yellow key is its talk
 button and blue its speaker button (`board_m5stack_stopwatch.c`), swapped from
@@ -699,7 +707,11 @@ too. Streamed pieces name no request, so the late reply is known by its
 finished `message.assistant` row, whose `reply_to_message_id` names the
 request. With no turn running, that row is held until the voice task is idle
 (`muse_hatch_incoming()`), then played as a turn of its own that wakes the
-screen. Messages the turn already played aren't announced again, and rows that
+screen. Reply text may be in `display_text`, `content`, or canonical
+`transcript.messages[].content[]` text blocks; from a transcript, only the
+message's own assistant text is used, without commentary. This applies to
+replies during a turn and late replies.
+Messages the turn already played aren't announced again, and rows that
 arrive together play in one turn. The request is forgotten once its reply
 plays, 10 s after Muse stops saying it's working, or 30 minutes after it was
 remembered. A battery board resting when the reply comes plays it when it
@@ -761,6 +773,33 @@ the design, the Wi-Fi protocol and the numbers.
 - **Untrusted input:** everything from the network is. Keep the checks in
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the
   decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
+
+## Cable mirror
+
+`MUSE_MIRROR=1 tools/muse/board.sh build|flash <board>` (overlay
+`devices/sdkconfig.muse-mirror`, `CONFIG_MUSE_MIRROR`) adds the mirror in
+`components/muse_mirror`. `tools/muse/mirror.py PORT` then shows the screen in
+a desktop window over the console cable, the chip's own USB or a USB-UART
+bridge: the mouse touches, the board's keys and typing go to the board, the
+computer can play and record its sound, and Ctrl/Cmd+S and +R save
+screenshots and recordings. `docs/mirror.md` is the guide,
+`../protocols/MIRROR.md` the wire format.
+
+- **Boards:** the full LVGL UI with PSRAM; not the FreeInk e-paper UI.
+- **The port:** the viewer holds the console. Close it before flashing or
+  `idf.py monitor`; it never resets the board.
+- **Trust:** whatever is on the cable controls the board, as the console
+  already does; there is no pairing or key.
+- **Without the board:** `devices/sdkconfig.muse-virtual-display` builds a
+  board with no panel, keys or codec for any ESP32-S3 with 8 MB of flash and
+  octal PSRAM. Its size, shape and name are in menuconfig (Muse mirror); a
+  name that holds a known model, such as "1.75C", gets that board drawn in the
+  window. Its sound is the computer's.
+- **ESP-Mosaico:** `tools/muse/mirror.py iris:DEVICE_ID` reaches it over ESP-Iris on
+  its USB-C (`CONFIG_MUSE_MIRROR_IRIS`, `components_mosaico/muse_mosaico_iris`).
+  The viewer then holds the Iris data port: close it before Vibe Mode installs.
+- **Test** with `tests/test_muse_mirror*.py`; the viewer's need PySide6 and
+  numpy (`tools/muse/requirements-mirror.txt`).
 
 ## WebAssembly apps
 

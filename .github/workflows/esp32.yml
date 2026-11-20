@@ -65,10 +65,12 @@ jobs:
             set -e
             # test_noise_core links against the host PSA Crypto library.
             apt-get update -qq
-            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config
+            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config libssl-dev openssl
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
+            # The mirror tests decode its messages with numpy (tools/muse/requirements-mirror.txt).
+            python -m pip install -q "numpy>=1.26"
             # Registry components for the wake word runner tests (ExecuTorch,
             # esp-nn, the microfrontend). No apostrophes in this command: the
             # action wraps it in single quotes.
@@ -292,6 +294,9 @@ jobs:
           - board: muse-m5stack-stopwatch-video
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
+          - board: muse-m5stack-triviapod
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-triviapod"
           - board: muse-m5stack-stopwatch-apps
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-apps"

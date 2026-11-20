@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 
@@ -89,9 +90,22 @@ bool muse_link_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *v
     return s_ops && s_ops->hatch_vm && s_ops->hatch_vm(want_vm, vm_id, id_cap, vm_name, name_cap, vm_token);
 }
 
+/* Longer than a press takes to be reported (debouncing, a touch read, the input
+ * task's poll), so a press reported now began less than this long ago. */
+#define CONFIRM_SETTLE_US (250 * 1000)
+
+bool muse_link_confirm_press(int64_t released_us)
+{
+    if (!s_ops || !s_ops->talk_press) {
+        return false;
+    }
+    int64_t after = esp_timer_get_time() - CONFIRM_SETTLE_US;
+    return s_ops->talk_press(released_us > after ? released_us : after);
+}
+
 bool muse_link_talk_press(void)
 {
-    return s_ops && s_ops->talk_press && s_ops->talk_press();
+    return muse_link_confirm_press(0);
 }
 
 void muse_link_reset_setup(void)
@@ -298,4 +312,14 @@ void muse_wifi_forget(const char *ssid)
     if (s_ops && s_ops->wifi_forget) {
         s_ops->wifi_forget(ssid);
     }
+}
+
+int muse_link_wifi_proxy_get(const char *ssid, network_proxy_config_t *out)
+{
+    return s_ops && s_ops->wifi_proxy_get ? s_ops->wifi_proxy_get(ssid, out) : -1;
+}
+
+bool muse_link_wifi_proxy_set(const char *ssid, const network_proxy_config_t *proxy)
+{
+    return s_ops && s_ops->wifi_proxy_set && s_ops->wifi_proxy_set(ssid, proxy);
 }

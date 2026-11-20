@@ -88,6 +88,34 @@ def main() -> None:
         recovered, _ = render(binary, after_off, tmp_path / "after-off.ppm")
         assert recovered == hashes["listening"], "Off prevented the next preview state"
 
+        # Drawing a second image over an undismissed image after idle sleep must
+        # wake the display and replace the canvas instead of staying behind the
+        # black sleep cover.
+        awake_img = tmp_path / "awake-img.txt"
+        awake_img.write_text("face=idle\nimage=1080e0\n")
+        expected_img, _ = render(binary, awake_img, tmp_path / "awake-img.ppm")
+        assert expected_img != hashes["idle"], "image draw did not cover the face"
+
+        asleep_img = tmp_path / "asleep-img.txt"
+        asleep_img.write_text("face=idle\nimage=e02010\nadvance=50\nasleep=true\n")
+        raw_asleep = tmp_path / "asleep-img.ppm"
+        env = {**os.environ, "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}
+        proc = subprocess.run(
+            [str(binary), "--headless", "--scenario", str(asleep_img),
+             "--run-ms", "50", "--screenshot", str(raw_asleep)],
+            env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+        )
+        assert proc.returncode == 0, f"asleep-img:\n{proc.stdout}\n{proc.stderr}"
+        header = f"P6\n{WIDTH} {HEIGHT}\n255\n".encode()
+        assert set(raw_asleep.read_bytes()[len(header):]) == {0}, "sleep cover was not black"
+
+        rewake_img = tmp_path / "rewake-img.txt"
+        rewake_img.write_text(
+            "face=idle\nimage=e02010\nadvance=50\nasleep=true\nadvance=50\nimage=1080e0\n"
+        )
+        woken_img, _ = render(binary, rewake_img, tmp_path / "rewake-img.ppm")
+        assert woken_img == expected_img, "repeat image draw did not wake the sleeping display"
+
         invalid = tmp_path / "invalid.txt"
         for setting in ("face=definitely-not-a-mode", "level=nan"):
             invalid.write_text(f"{setting}\n")
