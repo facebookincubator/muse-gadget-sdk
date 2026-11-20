@@ -271,11 +271,13 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Waveshare ESP32-C6-LCD-1.47 | Status on screen, images | `tools/board.sh waveshare-c6-lcd-147 build` |
 | ESP32-2432S028 Cheap Yellow Display (experimental) | Status on screen, images | `tools/board.sh esp32-2432s028 build` |
 | ESP32-C3 with 0.42" OLED | Status and agent name as text | `tools/board.sh c3-oled-042 build` |
+| M5Stack CoreMatrix | Status and 1-bit images on a 16×16 white LED matrix, and a button | `tools/board.sh m5stack-corematrix build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
 | Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours, push-to-talk | `tools/board.sh waveshare-s3-epaper-154g build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
+| Seeed reTerminal E1003 | Status on a 10.3" e-paper, black and white images | `tools/board.sh reterminal-e1003 build` |
 | Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI on FreeInk, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
 | Seeed reTerminal Sticky Link status (experimental) | 3.97" e-paper status screen and SHT40 only; no Muse UI | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
@@ -424,8 +426,19 @@ See [reply option selection](docs/reply-option-selection.md) for supported
 prompts, USB diagnostics, validation, and the current server limitation on
 synchronizing selected-button state with the phone.
 
-The on-device "Hey Muse" wake word (off by default; not enabled on any
-board yet) runs its model with the ExecuTorch runtime and ESP-NN delegate
+To start a voice note by saying "Hey Muse" instead of holding the talk
+button, build a board that has PSRAM and the LVGL UI (not e-paper) with
+`MUSE_WAKEWORD=1 tools/muse/board.sh build|flash <board>`; it has run on
+the SenseCAP Watcher and the ESP32-S3-BOX-3. Then turn listening on at the
+device: **Sound > Wake word** in Settings, the quick menu's **Wake word** row
+on button boards, or `>wake.on` over serial. The web flasher's images don't
+include it. While listening, the microphone stays powered when the screen
+sleeps, so battery life is much shorter.
+[`components/muse_wakeword/README.md`](components/muse_wakeword/README.md)
+has the details and costs.
+
+The wake word (off by default; no board overlay enables it) runs its model
+with the ExecuTorch runtime and ESP-NN delegate
 and TensorFlow Lite Micro's microfrontend, which come from the ESP
 Component Registry only into builds with `MUSE_WAKEWORD_ENABLE`;
 [`docs/executorch.md`](docs/executorch.md) says how the pins are updated,
@@ -595,6 +608,9 @@ their upstream licenses:
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
   Sticky's Link status profile), is MIT and retains the source's copyright and
   license notice.
+- [`main/epd_it8951.c`](main/epd_it8951.c), the reTerminal E1003 IT8951
+  driver with command framing and one-bit mode adapted from Seeed_GFX2, is
+  MIT and retains the source's copyright and license notice.
 - The ST7789 tuning table in
   [`components/muse/boards/board_atk_dnesp32s3_box2.c`](components/muse/boards/board_atk_dnesp32s3_box2.c),
   from 78/xiaozhi-esp32's ATK-DNESP32S3-BOX2 board, is MIT. See
@@ -621,6 +637,11 @@ their upstream licenses:
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
   Medium (SIL OFL 1.1); see its README.
+- [`components/muse/fonts/muse_font_emoji_16.c`](components/muse/fonts/muse_font_emoji_16.c),
+  the captions' emoji (`CONFIG_MUSE_EMOJI`), are 190 Twemoji v16.0.1 graphics
+  by Twitter, Inc, jdecked and other contributors, scaled to 16 px: CC-BY 4.0.
+  See [`components/muse/fonts/LICENSE-twemoji.txt`](components/muse/fonts/LICENSE-twemoji.txt)
+  and its README.
 - [`main/fonts/epaper_154g_caption_font.h`](main/fonts/epaper_154g_caption_font.h),
   the Waveshare 1.54G's reply font, is a subset of GNU Unifont 16.0.04 (SIL OFL
   1.1, or GPL-2.0+ with the font embedding exception); see

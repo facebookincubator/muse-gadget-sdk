@@ -53,6 +53,10 @@ static void check_rim_column(void)
     const answer_layout_t *l = &s_answers[ANSWER_READ];
     assert(l->scale == 1);
     assert(l->w <= 13 * lv_font_get_glyph_width(caption_font(), 'M', ' '));
+    for (int size = MUSE_TEXT_XSMALL; size <= MUSE_TEXT_XLARGE; size++) {
+        layout_read(size);   /* every Text size keeps to that column */
+        assert(l->w <= 13 * lv_font_get_glyph_width(caption_font(), 'M', ' '));
+    }
     muse_board = sim_board_get();
 }
 

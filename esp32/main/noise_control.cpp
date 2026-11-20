@@ -54,7 +54,8 @@ extern "C" {
 #include "cJSON.h"
 #include "led_status.h"
 #if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
-    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
 #include "reterminal_battery.h"
 #endif
 #include "tunnel_netif.h"
@@ -1499,15 +1500,36 @@ static char *build_register_json(void) {
         // The agent prepares images from this, so it states the bit depth
         // and, for e-paper, the exact inks.
         int bits = led_status_display_bits();
+        char desc[1536];
+        const char *restore;    // display.show_animation's description
+#if CONFIG_HOMEHUB_LED_MATRIX
+        restore = "Clear the image and bring back the status picture.";
+        snprintf(desc, sizeof(desc),
+                 "Download an image and draw it on the %dx%d LED matrix, "
+                 "1 bit per pixel: each pixel is lit or dark. Takes a baseline "
+                 "(not progressive) JPEG, shrunk 1/2, 1/4 or 1/8 on the device "
+                 "if needed and centred across, or raw RGB565 (high byte first, "
+                 "%d bytes per row). Pixels brighter than mid-gray light up and "
+                 "the rest stay dark, with no dithering, so draw it in white "
+                 "#ffffff (lit) on black #000000 (dark) at exactly %dx%d: "
+                 "icons, symbols and simple shapes work, photos and words "
+                 "don't. Plain http:// uses the least device memory. Replies "
+                 "when the image is drawn. Hides the status picture until "
+                 "display.show_animation.",
+                 disp_w, disp_h, disp_w * 2, disp_w, disp_h);
+#else
         bool mono = bits == 1;
         bool epaper = bits == 1 || bits == 2 || bits == 4;
+        restore = epaper ? "Clear the image and bring back the status screen "
+                           "and the agent's name."
+                         : "Clear the image and bring back the animation and "
+                           "the agent's name.";
         // 2 bits are four inks on the Waveshare 1.54G, four grays elsewhere.
 #if CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_EPD154G
         bool inks4 = bits == 2;
 #else
         bool inks4 = false;
 #endif
-        char desc[1536];
         snprintf(desc, sizeof(desc),
                  "Download an image and draw it on the %dx%d %s. Takes a "
                  "baseline "
@@ -1572,6 +1594,7 @@ static char *build_register_json(void) {
                  , epaper ? "status screen" : "animation"
 #endif
                  );
+#endif
         cJSON *url_required = cJSON_CreateObject();
         cJSON_AddItemToObject(url_required, "url",
                               string_param("http:// or https:// URL of the image."));
@@ -1597,12 +1620,7 @@ static char *build_register_json(void) {
         cJSON_AddNumberToObject(
             cJSON_GetObjectItem(commands, "display.draw_file"), "timeout_ms",
             bits == 4 ? 120000 : 60000);
-        add_command(commands, "display.show_animation",
-                    epaper ? "Clear the image and bring back the status screen "
-                           "and the agent's name."
-                         : "Clear the image and bring back the animation and "
-                           "the agent's name.",
-                    nullptr, nullptr);
+        add_command(commands, "display.show_animation", restore, nullptr, nullptr);
     }
 #endif
 
@@ -1751,7 +1769,8 @@ extern "C" cJSON *noise_ctrl_device_health_json(bool for_bug_report) {
     }
     usb_power = cJSON_CreateBool(power.usb);
 #elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
-    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
     // The status-screen boards do not populate muse_state_power().
     // Only voltage and estimated charge are measured; other fields stay null.
     int rt_mv, rt_pct;

@@ -311,12 +311,14 @@ int main(int argc, char **argv) {
 typedef void lv_obj_t;
 #define T(en) (en)
 #define LV_SYMBOL_POWER "P"
+#define LV_SYMBOL_REFRESH "R"
 #define COLOR_DANGER 1
 #define COLOR_TEXT 2
 static lv_obj_t *s_power;
 static char shown[128];
 static struct { const char *power_button, *talk_button, *aux_button; } board = {"red bottom-left", "top-right", NULL}, *muse_board = &board;
 static void on_power_off(void *p) { (void)p; }
+static void on_restart(void *p) { (void)p; }
 static void on_back(void *p) { (void)p; }
 static void *page(void *tile, const char *title, bool back, void **list) { (void)tile; (void)title; (void)back; *list = (void *)1; return *list; }
 static void note(void *list, const char *text) { (void)list; strcpy(shown, text); }

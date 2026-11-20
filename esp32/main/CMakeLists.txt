@@ -81,6 +81,8 @@ set(GADGET_REQUIRES
     muse
     # WebAssembly apps (CONFIG_MUSE_WASM_APPS); without them it builds nothing.
     muse_apps
+    # The M5Stack CoreMatrix's board support; it builds nothing on other boards.
+    m5stack_corematrix
     # The voice board's. Requirements are resolved before the configuration
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
@@ -88,11 +90,16 @@ set(GADGET_REQUIRES
 )
 
 # E-paper has its own status screen in place of led_status.c, with
-# a per-panel driver behind epd_panel.h.
-if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
+# a per-panel driver behind epd_panel.h; so does a 16x16 LED matrix, which
+# the board supplies as an esp_lcd panel.
+if(CONFIG_HOMEHUB_LED_MATRIX)
+    list(APPEND GADGET_SRCS "matrix_status.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "reterminal_battery.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "reterminal_battery.c")
+elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951)
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_it8951.c" "reterminal_battery.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681)

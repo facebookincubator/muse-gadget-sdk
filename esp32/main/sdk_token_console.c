@@ -42,6 +42,7 @@
                      (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG || CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG))
 #if USJ_CONSOLE
 #include "driver/usb_serial_jtag.h"
+#include "hal/usb_serial_jtag_ll.h"
 #endif
 
 static const char *TAG = "link.sdk_token";
@@ -192,6 +193,12 @@ void sdk_token_console_start(void) {
     }
 #endif
 #if USJ_CONSOLE
+    // Firmware flashed before this one can leave the port's interrupts on,
+    // and they outlast a reset: M5Stack's CoreMatrix factory firmware leaves
+    // the 1 ms start-of-frame one on, which the driver doesn't handle, so its
+    // handler would run without end and stop the boot. The driver turns on
+    // the ones it uses.
+    usb_serial_jtag_ll_disable_intr_mask(USB_SERIAL_JTAG_LL_INTR_MASK);
     usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     cfg.rx_buffer_size = COMMAND_LINE_MAX;
     if (usb_serial_jtag_driver_install(&cfg) == ESP_OK) {

@@ -58,7 +58,7 @@ class TurnSleepTest(unittest.TestCase):
         cls.input = INPUT.read_text()
 
     def test_reply_loop_pokes_the_idle_clock(self):
-        reply = body(self.voice, "static bool hatch_reply(bool *delivered, bool incoming)")
+        reply = body(self.voice, "static bool hatch_reply(bool *delivered, const char *opening)")
         loop = reply[reply.index("for (;;)") :]
         self.assertIn("muse_state_poke()", loop)
 

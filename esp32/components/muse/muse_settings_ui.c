@@ -133,6 +133,7 @@ static lv_obj_t *s_ble_sw, *s_ble_status;
 static lv_obj_t *s_notes_sw;
 #endif
 static lv_obj_t *s_spk_sw, *s_vol_val, *s_vol_sl, *s_gain_val, *s_gain_sl, *s_bright_val, *s_bright_sl, *s_mic_bar, *s_mic_val;
+static lv_obj_t *s_text_val, *s_text_sl;
 #if CONFIG_MUSE_WAKEWORD_ENABLE
 static lv_obj_t *s_wake_sw;
 #endif
@@ -1374,6 +1375,13 @@ static void on_wake_sw(lv_event_t *e)
 }
 #endif
 
+#if CONFIG_MUSE_PHOTO_NOTES
+static void on_photo_sw(lv_event_t *e)
+{
+    muse_settings_set_photo_notes(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+#endif
+
 static void on_volume(lv_event_t *e)
 {
     int v = lv_slider_get_value(s_vol_sl);
@@ -1408,6 +1416,30 @@ static void on_bright(lv_event_t *e)
     }
 }
 
+static const char *const TEXT_SIZE_NAMES[MUSE_TEXT_SIZES] = {
+    "Extra small", "Small", "Medium", "Large", "Extra large",
+};
+
+static void on_text_size(lv_event_t *e)
+{
+    int v = lv_slider_get_value(s_text_sl);
+    set_text(s_text_val, TEXT_SIZE_NAMES[v]);
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+        muse_settings_set_text_size(v);   /* the face picks it up on its next frame */
+    }
+}
+
+/* Reply text size, under Brightness, on screens whose replies follow it. */
+static void text_size_row(lv_obj_t *list)
+{
+    if (!muse_ui_text_size_applies()) {
+        return;
+    }
+    s_text_sl = slider(list, "Text size", MUSE_TEXT_XSMALL, MUSE_TEXT_XLARGE, muse_settings_text_size(),
+                       &s_text_val, on_text_size);
+    set_text(s_text_val, TEXT_SIZE_NAMES[muse_settings_text_size()]);
+}
+
 static void build_sound_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
@@ -1416,6 +1448,7 @@ static void build_sound_page(lv_obj_t *tile)
         s_sound = page(tile, "SCREEN", true, &list);
         s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
         set_val(s_bright_val, "%d%%", muse_settings_brightness());
+        text_size_row(list);
         return;
     }
     s_sound = page(tile, "SOUND", true, &list);
@@ -1454,10 +1487,17 @@ static void build_sound_page(lv_obj_t *tile)
     s_wake_sw = switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw);
     note(list, "Listens for \"Hey Muse\" so you can start a voice note without holding the talk button.");
 #endif
+#if CONFIG_MUSE_PHOTO_NOTES
+    switch_row(list, "Photo with voice notes", muse_settings_photo_notes(), on_photo_sw);
+    note(list, "Holding the talk button also takes a photo, which goes to Muse with your voice note.");
+#endif
 
     if (!muse_board->epaper) {
         s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
         set_val(s_bright_val, "%d%%", muse_settings_brightness());
+    }
+    if (!muse_board->epaper) {
+        text_size_row(list);
     }
     if (s_vol_val) set_val(s_vol_val, "%d%%", muse_settings_volume());
     set_val(s_gain_val, "%d dB", muse_settings_mic_gain() / 3 * 3);
@@ -1669,12 +1709,21 @@ static void on_power_off(lv_event_t *e)
     muse_input_request_power_off();
 }
 
+static void on_restart(lv_event_t *e)
+{
+    (void)e;
+    show(s_home);
+    muse_ui_show_face();
+    muse_input_request_restart();
+}
+
 static void build_power_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_power = page(tile, "POWER", true, &list);
     note(list, "Power Muse off completely?");
     button(list, LV_SYMBOL_POWER "  Power off", COLOR_DANGER, on_power_off, NULL);
+    button(list, LV_SYMBOL_REFRESH "  Restart", COLOR_TEXT, on_restart, NULL);
     button(list, "Cancel", COLOR_TEXT, on_back, NULL);
     char text[128];
     const char *power = muse_board->power_button ? muse_board->power_button : muse_board->talk_button;

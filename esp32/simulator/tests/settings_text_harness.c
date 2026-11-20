@@ -28,6 +28,7 @@ void muse_battery_reset(void) { abort(); }
 void muse_ble_forget_all(void) { abort(); }
 void muse_hatch_test(void) { abort(); }
 void muse_input_request_power_off(void) { abort(); }
+void muse_input_request_restart(void) { abort(); }
 void muse_link_reset_setup(void) { abort(); }
 bool muse_link_sdk_token_set(const char *s) { (void)s; abort(); }
 int muse_link_wifi_proxy_get(const char *s, network_proxy_config_t *p) { (void)s; (void)p; abort(); }
@@ -50,12 +51,15 @@ void muse_settings_set_speaker_on(bool v) { (void)v; abort(); }
 void muse_settings_set_volume(int v) { (void)v; abort(); }
 void muse_settings_set_wifi_on(bool v) { (void)v; abort(); }
 int muse_settings_sleep_s(void) { abort(); }
+int muse_settings_text_size(void) { return MUSE_TEXT_SMALL; }
+void muse_settings_set_text_size(int v) { (void)v; abort(); }
 bool muse_settings_speaker_on(void) { return true; }
 int muse_settings_volume(void) { return volume_setting; }
 bool muse_settings_wifi_on(void) { abort(); }
 void muse_state_set_asleep(bool v) { (void)v; abort(); }
 void muse_ui_preview_brightness(int v) { (void)v; abort(); }
 void muse_ui_show_face(void) { abort(); }
+bool muse_ui_text_size_applies(void) { return true; }
 void muse_voice_request_chirp(void) { abort(); }
 esp_err_t muse_wifi_scan(void) { abort(); }
 esp_err_t esp_read_mac(uint8_t *mac, int type) { (void)mac; (void)type; abort(); }
@@ -355,6 +359,11 @@ int main(int argc, char **argv)
         assert(s_current == s_power && !s_wifi && !s_text);
         assert(!strcmp(lv_textarea_get_text(ta), ""));
         lv_obj_t *list = lv_obj_get_child(s_power, 2);
+        /* The question, then Power off, Restart and Cancel, then how to wake it. */
+        assert(lv_obj_get_child_count(list) == 5);
+        assert(!strcmp(child_text(lv_obj_get_child(list, 1), 0), LV_SYMBOL_POWER "  Power off"));
+        assert(!strcmp(child_text(lv_obj_get_child(list, 2), 0), LV_SYMBOL_REFRESH "  Restart"));
+        assert(!strcmp(child_text(lv_obj_get_child(list, 3), 0), "Cancel"));
         const char *wake = child_text(list, (int)lv_obj_get_child_count(list) - 1);
         assert(!strcmp(wake, "Tap the screen to turn it back on."));
     } else {

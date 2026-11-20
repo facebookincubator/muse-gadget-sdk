@@ -22,6 +22,8 @@
 #   ideaspark  ideaspark ESP32 with a 1.9 inch ST7789 display
 #   c3-oled-042
 #              ESP32-C3 with a 0.42 inch 72x40 OLED status screen
+#   m5stack-corematrix
+#              M5Stack CoreMatrix (ESP32-C61) with a 16x16 LED matrix status
 #   esp32-2432s028
 #              ESP32-2432S028 Cheap Yellow Display with a 240x320 status screen
 #   sensecap-indicator
@@ -36,6 +38,8 @@
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
 #   reterminal-e1002
 #              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
+#   reterminal-e1003
+#              Seeed reTerminal E1003 (ESP32-S3) with a 10.3 inch e-paper
 #   reterminal-sticky
 #              Seeed reTerminal Sticky (ESP32-S3) with a 3.97 inch e-paper
 #   reterminal-sticky-link
@@ -56,7 +60,7 @@
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,54p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,58p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -90,13 +94,19 @@ case "$BOARD" in
     # The C3's own USB-Serial-JTAG (no UART bridge on this board).
     PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
     ;;
+  m5stack-corematrix)
+    TARGET=esp32c61
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
+    # The C61's own USB-Serial-JTAG.
+    PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
+    ;;
   esp32-2432s028)
     TARGET=esp32
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # CH340 bridge.
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
     ;;
-  reterminal-e1001|reterminal-e1002)
+  reterminal-e1001|reterminal-e1002|reterminal-e1003)
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"

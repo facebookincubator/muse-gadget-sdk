@@ -1,0 +1,36 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ESP32-C61 only: ESP-IDF loads this after sdkconfig.defaults for IDF_TARGET
+# esp32c61.
+
+# Unsigned: the C61 checks only ECDSA signatures, and an app signed with the
+# RSA dev_signing_key.pem aborts at start.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=n
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
+
+# Much less internal RAM than the C5 these defaults are tuned for: Wi-Fi, BLE
+# and the radio buffers left about 13 KB free while advertising. Keep the
+# Wi-Fi and lwIP hot paths in flash (as on the ideaspark), put Wi-Fi and lwIP
+# buffers in PSRAM (as on the C5, with the usual 16 KB windows) and use
+# tools/coexist/sdkconfig.ble-mem's BLE memory.
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+CONFIG_LWIP_IRAM_OPTIMIZATION=n
+CONFIG_LWIP_EXTRA_IRAM_OPTIMIZATION=n
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y
+CONFIG_SPI_FLASH_AUTO_SUSPEND=y

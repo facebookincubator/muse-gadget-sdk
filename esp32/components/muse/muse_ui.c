@@ -275,6 +275,7 @@ typedef struct {
     int cols, lines;          /* the reply's page */
     int w, h, top;            /* and where it goes */
     lv_text_align_t align;
+    bool own_font;            /* font draws the reply's letters itself, not caption_font_for()'s */
     lv_obj_t *hides[4];       /* what it covers */
 } answer_layout_t;
 
@@ -282,6 +283,8 @@ enum { ANSWER_HEARD, ANSWER_READ };
 static answer_layout_t s_answers[2];
 static int s_answer = -1;       /* the layout showing, or -1 */
 static int s_page_for = -1;     /* the layout the reply's page is sized for */
+static int s_read_size = -1;    /* the Text size the read layout is built for */
+static int s_read_top, s_ring_in;   /* where a read page may start, and the ring's inner edge */
 static int s_big_y;             /* Muse's centre at full size */
 static int s_muse_y;            /* and now */
 static bool s_muse_up;          /* long layout: up out of the reply's way */
@@ -613,21 +616,53 @@ LV_FONT_DECLARE(muse_font_cjk_16)
 #if CONFIG_MUSE_LATIN_FONT
 LV_FONT_DECLARE(muse_font_latin_16)
 #endif
+#if CONFIG_MUSE_EMOJI
+LV_FONT_DECLARE(muse_font_emoji_16)
+#endif
+
+#if CONFIG_MUSE_LATIN_FONT
+/* Unifont's 8x16 for a caption with accented letters; with CONFIG_MUSE_EMOJI,
+ * a copy that falls back to the emoji. */
+static const lv_font_t *latin_caption_font(void)
+{
+#if CONFIG_MUSE_EMOJI
+    static lv_font_t font;
+    if (!font.get_glyph_dsc) {
+        font = muse_font_latin_16;
+        font.fallback = &muse_font_emoji_16;
+    }
+    return &font;
+#else
+    return &muse_font_latin_16;
+#endif
+}
+#endif
 
 /* unscii-16 for captions and replies; with CONFIG_MUSE_CJK_FONT, a copy that
- * falls back to Unifont's 16x16 CJK, the same cell, for what unscii lacks. */
+ * falls back to Unifont's 16x16 CJK, the same cell, for what unscii lacks.
+ * With CONFIG_MUSE_EMOJI, the last fallback is the emoji, 16 px images two
+ * cells wide. */
 static const lv_font_t *caption_font(void)
 {
-#if CONFIG_MUSE_CJK_FONT
+#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_EMOJI
     static lv_font_t font;
     if (!font.get_glyph_dsc) {
         font = lv_font_unscii_16;
+#if CONFIG_MUSE_EMOJI
+        font.fallback = &muse_font_emoji_16;
+#endif
+#if CONFIG_MUSE_CJK_FONT
         font.fallback = &CJK_FONT;
-#if CONFIG_MUSE_LATIN_FONT
-        static lv_font_t cjk;   /* and a copy of that for accented letters among CJK */
+#if CONFIG_MUSE_LATIN_FONT || CONFIG_MUSE_EMOJI
+        static lv_font_t cjk;   /* and a copy of that for accented letters and emoji among CJK */
         cjk = CJK_FONT;
-        cjk.fallback = &muse_font_latin_16;
+#if CONFIG_MUSE_LATIN_FONT
+        cjk.fallback = latin_caption_font();
+#else
+        cjk.fallback = &muse_font_emoji_16;
+#endif
         font.fallback = &cjk;
+#endif
 #endif
     }
     return &font;
@@ -667,7 +702,7 @@ static const lv_font_t *caption_font_for(const char *text)
     }
 #endif
     if (muse_text_has_latin(text)) {
-        return &muse_font_latin_16;
+        return latin_caption_font();
     }
 #endif
     (void)text;
@@ -955,6 +990,83 @@ static void add_hides(answer_layout_t *l, int n)
     }
 }
 
+/* Montserrat `base` for a reply page, falling back to what draws the letters
+ * it lacks: the screen language's, or the caption's CJK, accented ones or emoji.
+ * `copy` holds the font when it needs one of its own. */
+static const lv_font_t *reply_font(const lv_font_t *base, lv_font_t *copy)
+{
+    const lv_font_t *font = muse_lang_montserrat(base);
+    if (font != base) {
+        return font;
+    }
+#if CONFIG_MUSE_CJK_FONT
+    *copy = *base;
+    copy->fallback = caption_font();
+    return copy;
+#elif CONFIG_MUSE_LATIN_FONT
+    *copy = *base;
+    copy->fallback = latin_caption_font();
+    return copy;
+#elif CONFIG_MUSE_EMOJI
+    *copy = *base;
+    copy->fallback = &muse_font_emoji_16;
+    return copy;
+#else
+    (void)copy;
+    return base;
+#endif
+}
+
+/*
+ * The read layout for Text size `size`: the biggest page of reply text that
+ * fits inside the ring under Muse and the speaker button. Extra large is
+ * unscii-16, doubled on screens 400 px and wider, as replies were before the
+ * setting; the others are Montserrat 14, 16, 20 and 28.
+ */
+static void layout_read(int size)
+{
+    static lv_font_t copies[4];
+    static const lv_font_t *const SIZES[] = {
+        [MUSE_TEXT_XSMALL] = &lv_font_montserrat_14,
+        [MUSE_TEXT_SMALL] = &lv_font_montserrat_16,
+        [MUSE_TEXT_MEDIUM] = &lv_font_montserrat_20,
+        [MUSE_TEXT_LARGE] = &lv_font_montserrat_28,
+    };
+    answer_layout_t *l = &s_answers[ANSWER_READ];
+    s_read_size = size;
+    l->own_font = size < MUSE_TEXT_XLARGE;
+    if (l->own_font) {
+        l->font = reply_font(SIZES[size], &copies[size]);
+        l->scale = 1;
+    } else {
+        l->font = caption_font();
+        /* Rim hints fix a narrow reading column; doubled letters wouldn't fit it. */
+        l->scale = s_w >= 400 && !muse_board->rim_controls ? 2 : 1;
+    }
+    int ring_in = s_ring_in, top = s_read_top;
+    int cw = lv_font_get_glyph_width(l->font, 'M', ' ') * l->scale;
+    int pitch = (lv_font_get_line_height(l->font) + CAPTION_LINE_SPACE) * l->scale;
+    set_reply_box(l, 4, 1, top, cw, pitch);
+    /* The widest page isn't the biggest: a round screen narrows towards the bottom. */
+    /* Keep read replies in a central column clear of dedicated rim hints:
+     * 13 of unscii-16's cells wide, at every size. */
+    int max_cols = muse_board->rim_controls ? 13 * 16 / cw : 24;
+    for (int c = 4; c <= max_cols && fits_across(c * cw, top, ring_in); c++) {
+        int n = (reply_bottom(c * cw, ring_in) - top + CAPTION_LINE_SPACE) / pitch;
+        /* A third of the caption spare for characters wider than a byte. */
+        while ((c + 1) * n > MUSE_CAPTION_MAX * 2 / 3) {
+            n--;
+        }
+        if (c * n > l->cols * l->lines) {
+            set_reply_box(l, c, n, top, cw, pitch);
+        }
+    }
+    /* Centre the reading area between the avatar and the round bezel. */
+    int available = reply_bottom(l->w, ring_in) - top;
+    l->top = top + (available - l->h) / 2;
+    ESP_LOGI(TAG, "read pages at text size %d: %d x %d", size, l->cols, l->lines);
+}
+
 /*
  * The answer layouts, both with Muse centred. Heard: Muse a size smaller,
  * where it was if there's room, over three lines at the bottom. Read: Muse
@@ -996,37 +1108,16 @@ static void build_answer(lv_obj_t *face, int ring_in)
         l->y -= art_bottom + 6 - l->top;   /* no room under Muse: it moves up */
     }
 
+    s_ring_in = ring_in;
     l = &s_answers[ANSWER_READ];
-    l->font = caption_font();
-    /* Rim hints fix a narrow reading column; doubled letters wouldn't fit it. */
-    l->scale = s_w >= 400 && !muse_board->rim_controls ? 2 : 1;
-    cw = lv_font_get_glyph_width(l->font, 'M', ' ') * l->scale;
-    pitch = (lv_font_get_line_height(l->font) + CAPTION_LINE_SPACE) * l->scale;
     int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 - s_h / 2;
     l->px = MUSE_PX_W * MINI_CELL_PX;
     l->y = status_bottom + 2 + l->px / 2;   /* its sparkles clear of the status line */
     l->align = LV_TEXT_ALIGN_CENTER;
     art_bottom = l->y + l->px / 2 - ART_BLANK_ROWS * MINI_CELL_PX;
-    int top = (art_bottom > spk_y + spk_r ? art_bottom : spk_y + spk_r) + 8;
-    set_reply_box(l, 4, 1, top, cw, pitch);
-    /* The widest page isn't the biggest: a round screen narrows towards the bottom. */
-    /* Keep read replies in a central column clear of dedicated rim hints. */
-    int max_cols = muse_board->rim_controls ? 13 : 24;
-    for (int c = 4; c <= max_cols && fits_across(c * cw, top, ring_in); c++) {
-        int n = (reply_bottom(c * cw, ring_in) - top + CAPTION_LINE_SPACE) / pitch;
-        /* A third of the caption spare for characters wider than a byte. */
-        while ((c + 1) * n > MUSE_CAPTION_MAX * 2 / 3) {
-            n--;
-        }
-        if (c * n > l->cols * l->lines) {
-            set_reply_box(l, c, n, top, cw, pitch);
-        }
-    }
-    /* Centre the reading area between the avatar and the round bezel. */
-    int available = reply_bottom(l->w, ring_in) - top;
-    l->top = top + (available - l->h) / 2;
-    ESP_LOGI(TAG, "reply pages: %d x %d heard, %d x %d read", s_answers[ANSWER_HEARD].cols,
-             s_answers[ANSWER_HEARD].lines, l->cols, l->lines);
+    s_read_top = (art_bottom > spk_y + spk_r ? art_bottom : spk_y + spk_r) + 8;
+    layout_read(muse_settings_text_size());
+    ESP_LOGI(TAG, "reply pages: %d x %d heard", s_answers[ANSWER_HEARD].cols, s_answers[ANSWER_HEARD].lines);
 
     s_reply_lbl = make_label(face, font, COLOR_CAPTION);
     lv_obj_set_style_text_line_space(s_reply_lbl, CAPTION_LINE_SPACE, 0);
@@ -1157,16 +1248,18 @@ static int full_rows(const lv_font_t *font, int space)
 }
 
 /* Picks the reply font for the Text size setting and pages replies to fit it:
- * unscii-8's fixed cell (the band's font), or Montserrat 14 or 20. The pager
+ * unscii-8's fixed cell (the band's font), or Montserrat 14, 16, 20 or 28. The pager
  * wraps each line to the label's width in pixels as the label measures it
  * (set up in build_screen): a line never wraps again on screen, and every page
  * fits at any size, capitals included. */
 static void apply_text_size(void)
 {
     static const lv_font_t *const SIZES[] = {
-        [MUSE_TEXT_SMALL] = &lv_font_unscii_8,
-        [MUSE_TEXT_MEDIUM] = &lv_font_montserrat_14,
+        [MUSE_TEXT_XSMALL] = &lv_font_unscii_8,
+        [MUSE_TEXT_SMALL] = &lv_font_montserrat_14,
+        [MUSE_TEXT_MEDIUM] = &lv_font_montserrat_16,
         [MUSE_TEXT_LARGE] = &lv_font_montserrat_20,
+        [MUSE_TEXT_XLARGE] = &lv_font_montserrat_28,
     };
     int size = muse_settings_text_size();
     if (size == s_full_size) {
@@ -1499,6 +1592,13 @@ static void build_screen(void)
     lv_obj_set_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
 
     s_caption_lbl = make_label(face, font_pick(caption_font(), &lv_font_unscii_8), COLOR_CAPTION);
+#if CONFIG_MUSE_EMOJI
+    if (!s_small) {
+        /* Captions and replies here are in caption_font(), which draws the
+         * emoji it has. A small screen's band and pages don't: they drop them. */
+        muse_text_keep_emoji();
+    }
+#endif
     if (s_small) {
         /* Two lines over the bottom of the face, on a dark band so they stay
          * legible. A tall screen has room to keep them above the mic icon. */
@@ -2284,6 +2384,7 @@ static void update_status(muse_mode_t mode, float now)
     bool fresh = muse_state_caption(caption, sizeof(caption), &s_caption_version);
     const char *shown = caption;
     int answer = -1;
+    bool relaid = false;   /* the read page moved under the reply showing */
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     /* The review page has its own buffer, so the live caption is still there to
      * go back to when review ends, including any that arrived meanwhile. */
@@ -2297,6 +2398,13 @@ static void update_status(muse_mode_t mode, float now)
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
         if (reviewing) layout = ANSWER_READ;
 #endif
+        if (muse_settings_text_size() != s_read_size) {
+            layout_read(muse_settings_text_size());
+            if (s_page_for == ANSWER_READ) {
+                s_page_for = -1;   /* its pages wrap again for the new size */
+            }
+            relaid = s_answer == ANSWER_READ;   /* set_answer() puts the label in its new place */
+        }
         if (layout != s_page_for) {
             s_page_for = layout;
             muse_chat_set_caption_px(s_answers[layout].w, reply_glyph_px);
@@ -2327,7 +2435,7 @@ static void update_status(muse_mode_t mode, float now)
         }
 #endif
     }
-    if (answer != s_answer) {
+    if (answer != s_answer || relaid) {
         set_answer(answer);
         fresh = true;   /* the caption moves between labels */
     }
@@ -2340,7 +2448,7 @@ static void update_status(muse_mode_t mode, float now)
         } else if (s_small) {
             set_caption_font(shown);
         }
-        if (!s_small || lbl != s_caption_lbl) {
+        if (lbl == s_caption_lbl ? !s_small : !s_answers[answer].own_font) {
             lv_obj_set_style_text_font(lbl, caption_font_for(shown), 0);
         }
 #endif
@@ -2587,6 +2695,16 @@ esp_err_t muse_ui_start(void)
 
     s_image_mutex = xSemaphoreCreateMutex();
     muse_board->display_lock(-1);
+    /* Until someone picks a Text size, replies keep the size they had before
+     * there was one: Montserrat 14 on a small screen's full-screen page,
+     * unscii-16 (doubled from 400 px) on a bigger screen's. Brazilian
+     * Portuguese has accented letters on most pages, which unscii lacks, so
+     * there a bigger screen starts at Large, Montserrat 28 with the letters. */
+#if CONFIG_MUSE_UI_LANG_PT_BR
+    muse_settings_set_text_size_default(s_small ? MUSE_TEXT_SMALL : MUSE_TEXT_LARGE);
+#else
+    muse_settings_set_text_size_default(s_small ? MUSE_TEXT_SMALL : MUSE_TEXT_XLARGE);
+#endif
     build_screen();
     if (s_settings) {
         muse_settings_ui_build(s_settings);
@@ -2633,6 +2751,16 @@ void muse_ui_app_brightness(int pct)
     atomic_store(&s_app_brightness, pct > 100 ? 100 : pct);
 }
 #endif
+
+bool muse_ui_text_size_applies(void)
+{
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    if (s_small && !s_long) {
+        return true;
+    }
+#endif
+    return !s_small;
+}
 
 void muse_ui_preview_brightness(int pct)
 {

@@ -72,6 +72,8 @@ available and LVGL was built with that configuration. After one successful
 fetch, CMake's
 `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` option reuses the populated dependency
 cache without network access. Installing SDL2 with Homebrew is optional.
+Add `-DMUSE_SIM_EMOJI=ON` to show emoji in captions, as the firmware's
+`CONFIG_MUSE_EMOJI` does.
 
 ## Automated tests
 

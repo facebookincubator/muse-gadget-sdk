@@ -165,7 +165,7 @@ static const int GAIN_STEPS[] = { 0, 6, 12, 18, 24, 30, 36 };
 static const int SLEEP_STEPS[] = { 0, 30, 60, 120, 300, 600 };
 static const char *const SLEEP_NAMES[] = { "Never", "30 s", "1 min", "2 min", "5 min", "10 min" };
 #if CONFIG_MUSE_SMALL_FULL_REPLY
-static const char *const TEXT_NAMES[] = { "Small", "Medium", "Large" };
+static const char *const TEXT_NAMES[MUSE_TEXT_SIZES] = { "Extra small", "Small", "Medium", "Large", "Extra large" };
 #endif
 #define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
@@ -371,7 +371,7 @@ static void status_text(char *buf, size_t n)
              w.state == MUSE_WIFI_CONNECTED ? w.ip : "-", muse_lang_menu(muse_link_state_name(muse_link_state())),
              muse_lang_menu(muse_hatch_state_name(h.state)), phone, batt,
              esp_app_get_description()->version);
-    muse_text_to_caption(buf, n);   /* network and phone names can have curly quotes */
+    muse_text_to_label(buf, n);   /* network and phone names can have curly quotes */
 }
 
 static void pm_text(char out[24], int pm)
