@@ -79,6 +79,11 @@ bool muse_settings_wakeword_on(void);   /* hands-free listening opt-in; default 
  * restarts the gadget, so Muse learns of the app commands as it reconnects. */
 bool muse_settings_apps_on(void);
 void muse_settings_set_apps_on(bool on);
+#if CONFIG_MUSE_PHOTO_NOTES
+/* Photo with voice notes (muse_photo_note.h); default off. */
+bool muse_settings_photo_notes(void);
+void muse_settings_set_photo_notes(bool on);
+#endif
 
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1]);
 void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]);

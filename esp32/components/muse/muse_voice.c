@@ -35,6 +35,9 @@
 #include "muse_chat.h"
 #include "muse_input.h"
 #include "muse_mem.h"
+#if CONFIG_MUSE_PHOTO_NOTES
+#include "muse_photo_note.h"
+#endif
 #include "muse_settings.h"
 #include "muse_state.h"
 #include "muse_wakeword_glue.h"
@@ -489,6 +492,14 @@ static bool record(bool seeded, char *why, size_t cap)
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
         go_live();
     }
+#if CONFIG_MUSE_PHOTO_NOTES
+    /* A photo at the press, for a note the person's press started that goes now. */
+    muse_photo_note_begin(s_live && !seeded);
+    const char *photo = muse_photo_note_label();
+    if (photo) {
+        muse_state_set_caption("%s", photo);
+    } else
+#endif
     muse_state_set_caption(s_live ? "LISTENING..." : "RECORDING...");
     bool heard = false, ok = true;
     bool gave_up = false;   /* Hatch failed this note: it's kept, and goes later */
@@ -562,6 +573,11 @@ static bool record(bool seeded, char *why, size_t cap)
         }
         muse_state_set_progress((float)n / MAX_FRAMES);
         if (!heard && ok && tick) {
+#if CONFIG_MUSE_PHOTO_NOTES
+            if ((photo = muse_photo_note_label())) {
+                muse_state_set_caption("%s • %.1fs", photo, (double)n / MUSE_AUDIO_RATE);
+            } else
+#endif
             muse_state_set_caption(s_live ? "LISTENING %.1fs" : "RECORDING %.1fs", (double)n / MUSE_AUDIO_RATE);
         }
         /*
@@ -1305,6 +1321,11 @@ static bool held_due(void)
 static bool finish_note(void)
 {
     bool delivered;
+#if CONFIG_MUSE_PHOTO_NOTES
+    if (s_live) {
+        muse_photo_note_wait();   /* the press's photo goes up with the note's end */
+    }
+#endif
 #if HOLD_NOTES
     if (s_rec) {
         bool fed = false, interrupted = false;

@@ -1374,6 +1374,13 @@ static void on_wake_sw(lv_event_t *e)
 }
 #endif
 
+#if CONFIG_MUSE_PHOTO_NOTES
+static void on_photo_sw(lv_event_t *e)
+{
+    muse_settings_set_photo_notes(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+#endif
+
 static void on_volume(lv_event_t *e)
 {
     int v = lv_slider_get_value(s_vol_sl);
@@ -1453,6 +1460,10 @@ static void build_sound_page(lv_obj_t *tile)
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     s_wake_sw = switch_row(list, "Wake word", muse_wakeword_enabled(), on_wake_sw);
     note(list, "Listens for \"Hey Muse\" so you can start a voice note without holding the talk button.");
+#endif
+#if CONFIG_MUSE_PHOTO_NOTES
+    switch_row(list, "Photo with voice notes", muse_settings_photo_notes(), on_photo_sw);
+    note(list, "Holding the talk button also takes a photo, which goes to Muse with your voice note.");
 #endif
 
     if (!muse_board->epaper) {

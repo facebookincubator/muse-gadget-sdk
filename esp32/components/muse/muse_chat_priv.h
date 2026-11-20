@@ -86,6 +86,15 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44
 
+/* A voice note's photo (CONFIG_MUSE_PHOTO_NOTES) follows its audio as an
+ * image item: the request ends PHOTO_HEAD, the base64 JPEG, PHOTO_TAIL in
+ * place of NOTE_TAIL. */
+#define MUSE_CHAT_PHOTO_HEAD \
+    "\"},{\"type\":\"image\",\"mime_type\":\"image/jpeg\",\"filename\":\"photo.jpg\",\"data_base64\":\""
+#define MUSE_CHAT_PHOTO_TAIL "\"}]}"
+/* Whether `data` is `len` bytes of base64 for a JPEG (muse_chat_image.c). */
+bool muse_chat_is_jpeg_base64(const char *data, size_t len);
+
 /* Voice note helpers (muse_chat_text.c). The note's length isn't known until
  * the release, so the WAV header gives the streaming "unknown" size. */
 void muse_hatch_wav_header(uint8_t h[MUSE_HATCH_WAV_HEADER], uint32_t rate);
