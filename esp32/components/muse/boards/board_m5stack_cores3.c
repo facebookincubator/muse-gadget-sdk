@@ -159,7 +159,14 @@ static esp_err_t power_off(void)
 }
 
 static const muse_board_t s_board = {
+#if CONFIG_MUSE_BOARD_M5STACK_CORES3LITE
+    /* The CoreS3 Lite (K128-Lite) is the CoreS3 without the camera, proximity
+     * sensor, IMU, RTC and SD slot, with a 200 mAh battery: everything this
+     * file drives is the same part on the same pins. */
+    .name = "M5Stack CoreS3 Lite",
+#else
     .name = "M5Stack CoreS3",
+#endif
     .width = BSP_LCD_H_RES,
     .height = BSP_LCD_V_RES,
     .round = false,

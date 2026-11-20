@@ -93,7 +93,7 @@ dependencies:
   espressif/m5stack_core_s3:
     version: "4.1.0"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} == \"m5stack_cores3\""
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"m5stack_cores3\", \"m5stack_cores3lite\"]"
   waveshare/esp32_c6_touch_amoled_1_8:
     version: "^1.0.0"
     rules:
