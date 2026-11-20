@@ -60,6 +60,9 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_options_json.c")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
+        if(CONFIG_MUSE_RESEND_NOTES)
+            list(APPEND srcs "muse_resend.c")   # when a note that didn't send goes again
+        endif()
         if(CONFIG_MUSE_PHOTO_NOTES)
             list(APPEND srcs "muse_photo_note.c" "muse_chat_image.c")   # a photo with each voice note
         endif()

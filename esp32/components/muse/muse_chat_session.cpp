@@ -90,6 +90,9 @@ extern "C" {
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 #include "muse_review.h"
 #endif
+#if CONFIG_MUSE_RESEND_NOTES
+#include "muse_resend.h"
+#endif
 
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
@@ -184,6 +187,9 @@ struct ev_t {
     muse_hatch_ev_t type;
     uint32_t gen;
     char text[EV_TEXT];
+#if CONFIG_MUSE_RESEND_NOTES
+    muse_chat_fail_t fail;   /* MUSE_HATCH_EV_ERROR: what it means for the note */
+#endif
 };
 
 static QueueHandle_t s_cmds, s_events;
@@ -272,6 +278,10 @@ struct turn_t {
     size_t note_len;
     size_t pcm_bytes;        /* the note so far */
     size_t body_sent;
+#if CONFIG_MUSE_RESEND_NOTES
+    bool note_up;            /* the note's last body chunk went out */
+    int note_status;         /* the note request's HTTP status, 0 before one */
+#endif
     char *texts;             /* MAX_MSGS * TEXT_MAX: each message's text */
     uint32_t pcm_out;        /* reply audio frames handed to the voice task */
     char committed[512];     /* finals that arrived before the half-close */
@@ -391,6 +401,11 @@ static void emit(muse_hatch_ev_t type, const char *text)
     } else if (text) {
         strlcpy(ev.text, text, sizeof(ev.text));
     }
+#if CONFIG_MUSE_RESEND_NOTES
+    if (type == MUSE_HATCH_EV_ERROR) {
+        ev.fail = muse_resend_failure(s_turn.note_status, s_turn.note_up);
+    }
+#endif
     /* Captions are lossy; the end of a turn, and whether the note got there, must get through. */
     TickType_t wait = (type == MUSE_HATCH_EV_DONE || type == MUSE_HATCH_EV_ERROR || type == MUSE_HATCH_EV_SENT)
                           ? pdMS_TO_TICKS(200)
@@ -1325,6 +1340,9 @@ static bool record_note(void)
     if (!send_note_part(true)) {
         return false;
     }
+#if CONFIG_MUSE_RESEND_NOTES
+    s_turn.note_up = true;   /* from here Muse may have it, ack or not */
+#endif
     ESP_LOGI(TAG, "voice note: %.2fs, %u byte request", secs, (unsigned)s_turn.body_sent);
     mark(M_SENT);
     s_turn.chat_posted = true;
@@ -2360,6 +2378,9 @@ static bool stream_end(stream_t *s, bool ok)
         close_stream(s);
         s_turn.chat_id = 0;
         if (!ok) {
+#if CONFIG_MUSE_RESEND_NOTES
+            s_turn.note_status = s->status;
+#endif
             turn_fail("MUSE DIDN'T TAKE IT");
         }
         break;
@@ -2825,8 +2846,20 @@ extern "C" bool muse_hatch_ready(void)
     return s_cmds && muse_hatch_configured() && muse_wifi_connected();
 }
 
+#if CONFIG_MUSE_RESEND_NOTES
+static muse_chat_fail_t s_last_fail;   /* voice task: muse_chat_turn_failure() */
+
+extern "C" muse_chat_fail_t muse_chat_turn_failure(void)
+{
+    return s_last_fail;
+}
+#endif
+
 extern "C" void muse_hatch_turn_begin(void)
 {
+#if CONFIG_MUSE_RESEND_NOTES
+    s_last_fail = MUSE_CHAT_FAIL_NONE;
+#endif
     uint32_t gen = ++s_gen;
     xStreamBufferReset(s_in);
     drain_out();
@@ -2974,6 +3007,11 @@ extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
     while (xQueueReceive(s_events, &ev, 0) == pdTRUE) {
         if (ev.gen == s_gen.load()) {
             strlcpy(text, ev.text, cap);
+#if CONFIG_MUSE_RESEND_NOTES
+            if (ev.type == MUSE_HATCH_EV_ERROR) {
+                s_last_fail = ev.fail;
+            }
+#endif
             return ev.type;
         }
     }

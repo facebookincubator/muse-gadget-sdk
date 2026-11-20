@@ -45,8 +45,8 @@ class StopWatchPTT(unittest.TestCase):
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.binaries = {}
         # Board 1 is the StopWatch, 2 the AI Passport (low memory), 3 a
-        # press-toggle voice-note build.
-        for board, realtime in ((1, 1), (0, 1), (1, 0), (0, 0), (2, 0), (3, 0)):
+        # press-toggle voice-note build, 4 one that resends failed notes.
+        for board, realtime in ((1, 1), (0, 1), (1, 0), (0, 0), (2, 0), (3, 0), (4, 0)):
             stage = Path(cls.tmp.name) / f'{board}-{realtime}'
             stage.mkdir()
             # Byte-identical production units/headers. No function extraction or
@@ -72,8 +72,11 @@ class StopWatchPTT(unittest.TestCase):
                 f'#define CONFIG_MUSE_BOARD_AI_PASSPORT {int(board == 2)}\n'
                 f'#define CONFIG_MUSE_REALTIME_VOICE {realtime}\n'
                 f'#define CONFIG_MUSE_VOICE_NOTE_TOGGLE {int(board == 3)}\n'
-                f'#define CONFIG_MUSE_HATCH {int(board in (1, 3) or realtime)}\n'
-                f'#define CONFIG_SPIRAM {int(board in (1, 3) or realtime)}\n'
+                f'#define CONFIG_MUSE_HATCH {int(board in (1, 3, 4) or realtime)}\n'
+                f'#define CONFIG_SPIRAM {int(board in (1, 3, 4) or realtime)}\n'
+                f'#define CONFIG_MUSE_RESEND_NOTES {int(board == 4)}\n'
+                '#define CONFIG_MUSE_RESEND_NOTES_MAX 3\n'
+                '#define CONFIG_MUSE_RESEND_NOTES_KB 1024\n'
                 '#define CONFIG_MUSE_DEFAULT_VOLUME 20\n')
             ui = (MUSE / 'muse_ui.c').read_text()
             start = ui.index('static void frame_tick(')
@@ -102,6 +105,7 @@ class StopWatchPTT(unittest.TestCase):
                     command.append(str(MUSE / 'muse_voice_call_core.c'))
                 if kind == 'voice':
                     command.append(str(MUSE / 'muse_adpcm.c'))
+                    command.append(str(MUSE / 'muse_resend.c'))
                 result = subprocess.run([*command, '-lm', '-o', str(out)], capture_output=True, text=True)
                 if result.returncode:
                     raise AssertionError(result.stdout + result.stderr)
@@ -121,6 +125,23 @@ class StopWatchPTT(unittest.TestCase):
         block = kconfig.split("config MUSE_VOICE_NOTE_TOGGLE", 1)[1].split("\n\n", 1)[0]
         self.assertIn("!MUSE_BOARD_SENSECAP_WATCHER", block)
         self.assertIn("!MUSE_UI_FREEINK", block)
+    def test_failed_notes_make_room_by_dropping_the_oldest(self):
+        self.run_case('voice', 110, board=4, realtime=0)
+
+    def test_failed_notes_retry_quietly_until_they_land(self):
+        self.run_case('voice', 111, board=4, realtime=0)
+
+    def test_refused_or_unacknowledged_notes_are_not_sent_again(self):
+        for scenario in (112, 113):
+            with self.subTest(scenario=scenario):
+                self.run_case('voice', scenario, board=4, realtime=0)
+
+    def test_a_note_is_kept_after_the_release_only_if_muse_cannot_have_it(self):
+        self.run_case('voice', 114, board=4, realtime=0)
+
+    def test_a_full_resend_queue_does_not_refuse_a_press(self):
+        self.run_case('voice', 115, board=4, realtime=0)
+
     def test_reply_ring_advances_without_rewinding_across_messages(self):
         for board, realtime in ((1, 1), (0, 1), (3, 0)):
             with self.subTest(board=board, realtime=realtime):
