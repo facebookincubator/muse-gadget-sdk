@@ -22,6 +22,9 @@
 
 #include "esp_err.h"
 #include "sdkconfig.h"
+#if CONFIG_MUSE_AVATAR_SYNC
+#include "muse_avatar_render.h"
+#endif
 
 /*
  * User settings, persisted in NVS. Setters save immediately and then notify the
@@ -48,6 +51,9 @@ typedef enum {
     MUSE_SETTING_BLE,
     MUSE_SETTING_HATCH,
     MUSE_SETTING_VOICE_NOTES,
+#if CONFIG_MUSE_AVATAR_SYNC
+    MUSE_SETTING_AVATAR,
+#endif
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     MUSE_SETTING_WAKEWORD,      /* the wake word opt-in changed */
 #endif
@@ -57,6 +63,11 @@ typedef void (*muse_setting_cb_t)(muse_setting_t what);
 
 esp_err_t muse_settings_init(void);
 void muse_settings_set_listener(muse_setting_cb_t cb);
+#if CONFIG_MUSE_AVATAR_SYNC
+muse_avatar_source_t muse_settings_avatar_source(void);
+/* Call from the backend's flash-safe worker, not a UI event handler. */
+esp_err_t muse_settings_set_avatar_source(muse_avatar_source_t source);
+#endif
 
 int muse_settings_volume(void);         /* 0..100 */
 bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */

@@ -14,6 +14,34 @@
 
 menu "Muse"
 
+    config MUSE_AVATAR_SYNC
+        bool "Sync the paired Muse avatar (experimental)"
+        depends on MUSE_ENABLED && SPIRAM && !MUSE_UI_FREEINK
+        depends on HOMEHUB_DAEMON_REQUESTS
+        default n
+        help
+            Adds an optional My Muse avatar source. Built-in remains the
+            default and can be selected without restarting. Requires PSRAM
+            for bounded image decoding. Initially validated on the 1.75C.
+
+    config MUSE_AVATAR_ANIMATIONS
+        bool "Experimental phone-avatar clip playback"
+        depends on MUSE_AVATAR_SYNC && IDF_TARGET_ESP32S3
+        default n
+        help
+            Adds bounded local H.264 clip packs to My Muse, rendered in the
+            existing home canvas. Requires conversion of phone MP4 assets.
+            Missing interactive clips keep the personal image with local
+            feedback. This does not provide a personal face or mouth rig.
+            No camera view, Wi-Fi listener, or video transport is enabled.
+
+    # Always present in sdkconfig.json, including when the bool is disabled.
+    # The component manager resolves manifests before all managed Kconfigs.
+    config MUSE_AVATAR_DEPS
+        string
+        default "y" if MUSE_AVATAR_SYNC
+        default "n"
+
     config MUSE_LATEST_REPLY
         bool "Latest reply screen"
         depends on MUSE_BOARD_WAVESHARE_S3_175C && SPIRAM && MUSE_HATCH

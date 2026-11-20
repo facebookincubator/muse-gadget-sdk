@@ -76,6 +76,13 @@ bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
 // while a download runs. image_fetch_drawn() counts the bands downloads have
 // drawn: a change means an image went up.
 bool image_fetch_claim(void);
+#if CONFIG_MUSE_AVATAR_SYNC
+#if CONFIG_HOMEHUB_DISPLAY_COMMANDS
+bool image_fetch_busy(void);
+#else
+static inline bool image_fetch_busy(void) { return false; }
+#endif
+#endif
 void image_fetch_release(void);
 unsigned image_fetch_drawn(void);
 

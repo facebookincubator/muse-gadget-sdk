@@ -16,6 +16,10 @@ dependencies:
   idf:
     version: ">=5.5"
   espressif/cjson: "~1.7"
+  joltwallet/littlefs:
+    version: "^1.23"
+    rules:
+      - if: '$CONFIG{MUSE_AVATAR_DEPS} == "y"'
   # Optional software echo cancellation on ESP32-S3 voice boards.
   espressif/esp-sr:
     version: "==2.5.2"

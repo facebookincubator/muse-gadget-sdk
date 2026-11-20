@@ -21,6 +21,9 @@
 #include "freertos/task.h"
 
 #include "muse_audio.h"
+#if CONFIG_MUSE_AVATAR_SYNC
+#include "muse_avatar.h"
+#endif
 #include "muse_battery.h"
 #include "muse_board.h"
 #include "muse_ble.h"
@@ -58,6 +61,9 @@ static void on_setting(muse_setting_t what)
         muse_ble_apply();
         break;
     case MUSE_SETTING_HATCH:
+#if CONFIG_MUSE_AVATAR_SYNC
+        muse_avatar_pairing_changed();
+#endif
         muse_hatch_config_changed();
         break;
     default:
@@ -75,6 +81,9 @@ void muse_app_run(const muse_board_t *board)
     ESP_ERROR_CHECK(muse_settings_init());
     muse_settings_set_listener(on_setting);
     muse_state_init();
+#if CONFIG_MUSE_AVATAR_SYNC
+    muse_avatar_start();
+#endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 #if CONFIG_MUSE_LATEST_REPLY
     if (muse_review_init() != ESP_OK) ESP_LOGW(TAG, "latest reply storage unavailable");

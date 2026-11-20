@@ -130,6 +130,11 @@ muse_vdec_t *muse_vdec_open(uint8_t codec, int max_w, int max_h)
     return d;
 }
 
+void muse_vdec_limit_refs(muse_vdec_t *d, unsigned max_refs)
+{
+    if (d && d->h264) h264bsdSetMaxReferences(d->h264, (u32)max_refs);
+}
+
 void muse_vdec_close(muse_vdec_t *d)
 {
     if (!d) {

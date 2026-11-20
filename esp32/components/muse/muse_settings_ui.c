@@ -19,6 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if LV_USE_SNAPSHOT && CONFIG_MUSE_AVATAR_SYNC && CONFIG_MUSE_UI_THEME
+#include <stdatomic.h>
+#endif
 
 #include "esp_app_desc.h"
 #include "esp_mac.h"
@@ -38,6 +41,9 @@
 #include "muse_keypad.h"
 #include "muse_link.h"
 #include "muse_settings.h"
+#if CONFIG_MUSE_AVATAR_SYNC
+#include "muse_avatar.h"
+#endif
 #include "muse_state.h"
 #include "muse_text.h"
 #include "muse_ui.h"
@@ -91,6 +97,9 @@ static network_proxy_config_t s_proxy_edit;
 static lv_obj_t *s_proxy_mode, *s_proxy_host, *s_proxy_port, *s_proxy_user, *s_proxy_pass, *s_proxy_status;
 static bool s_proxy_saving;
 static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text;
+#if CONFIG_MUSE_AVATAR_SYNC
+static lv_obj_t *s_avatar, *s_avatar_source, *s_avatar_status, *s_home_avatar, *s_avatar_refresh;
+#endif
 
 /*
  * Only home is kept. A sub-page is built when it opens and deleted on the way
@@ -540,7 +549,11 @@ static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 
 static void drop(lv_obj_t *p)
 {
-    lv_obj_t **const pages[] = { &s_wifi, &s_hatch, &s_ble, &s_sound, &s_sleep, &s_battery, &s_power, &s_text, &s_proxy };
+    lv_obj_t **const pages[] = { &s_wifi, &s_hatch, &s_ble, &s_sound, &s_sleep, &s_battery, &s_power, &s_text, &s_proxy,
+#if CONFIG_MUSE_AVATAR_SYNC
+        &s_avatar,
+#endif
+    };
     for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
         if (*pages[i] == p) {
             *pages[i] = NULL;
@@ -1743,6 +1756,31 @@ static void build_power_page(lv_obj_t *tile)
 
 /* ---------- Home ---------- */
 
+#if CONFIG_MUSE_AVATAR_SYNC
+static void on_avatar_source(lv_event_t *e) {
+    (void)e;
+    muse_avatar_select(muse_avatar_source() == MUSE_AVATAR_PERSONAL ? MUSE_AVATAR_BUILTIN : MUSE_AVATAR_PERSONAL);
+}
+static void on_avatar_refresh(lv_event_t *e) { (void)e; muse_avatar_refresh(); }
+static void on_avatar_clear(lv_event_t *e) { (void)e; muse_avatar_clear(); }
+static void tick_avatar(void) {
+    set_text(s_avatar_source, muse_avatar_source() == MUSE_AVATAR_PERSONAL ? "My Muse" : "Built-in");
+    set_text(s_avatar_status, muse_avatar_status());
+    if (muse_avatar_source() == MUSE_AVATAR_PERSONAL) lv_obj_remove_state(s_avatar_refresh, LV_STATE_DISABLED);
+    else lv_obj_add_state(s_avatar_refresh, LV_STATE_DISABLED);
+}
+static void build_avatar_page(lv_obj_t *tile) {
+    lv_obj_t *list;
+    s_avatar = page(tile, "AVATAR", true, &list);
+    row(list, NULL, "Source", &s_avatar_source, on_avatar_source, NULL);
+    s_avatar_status = info_row(list, "Status");
+    s_avatar_refresh = row(list, LV_SYMBOL_REFRESH, "Refresh now", NULL, on_avatar_refresh, NULL);
+    row(list, LV_SYMBOL_TRASH, "Clear saved avatar", NULL, on_avatar_clear, NULL);
+    tick_avatar();
+}
+static const page_t AVATAR = { &s_avatar, build_avatar_page };
+#endif
+
 static const page_t WIFI = { &s_wifi, build_wifi_page };
 static const page_t HATCH = { &s_hatch, build_hatch_page };
 static const page_t BLE = { &s_ble, build_ble_page };
@@ -1778,6 +1816,9 @@ static void build_home(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_home = page(tile, "SETTINGS", false, &list);
+#if CONFIG_MUSE_AVATAR_SYNC
+    row(list, LV_SYMBOL_IMAGE, "Avatar", &s_home_avatar, on_nav, (void *)&AVATAR);
+#endif
 #if CONFIG_MUSE_APP_VIEW
     switch_row(list, "Run apps", muse_settings_apps_on(), on_apps_sw);
     if (muse_settings_apps_on()) {
@@ -1807,6 +1848,9 @@ static void build_home(lv_obj_t *tile)
 
 static void tick_home(void)
 {
+#if CONFIG_MUSE_AVATAR_SYNC
+    set_text(s_home_avatar, muse_avatar_source() == MUSE_AVATAR_PERSONAL ? "My Muse" : "Built-in");
+#endif
     muse_wifi_status_t w;
     muse_wifi_status(&w);
     static const char *const WIFI_VALUES[] = { "Off", "Not set", "Joining", "", "Failed", "Not nearby" };
@@ -1868,7 +1912,14 @@ static volatile int s_bench_open = -1;   /* applied in the LVGL task, by the nex
 
 bool muse_settings_ui_bench_open(const char *name)
 {
-    static const char *const NAMES[] = { "home", "wifi", "muse", "ble", "sound", "sleep", "battery", "power" };
+    static const char *const NAMES[] = { "home", "wifi", "muse", "ble", "sound", "sleep", "battery", "power"
+#if CONFIG_MUSE_UI_THEME
+        , "appearance"
+#endif
+#if CONFIG_MUSE_AVATAR_SYNC
+        , "avatar"
+#endif
+    };
     for (int i = 0; i < (int)(sizeof(NAMES) / sizeof(NAMES[0])); i++) {
         if (!strcmp(name, NAMES[i])) {
             s_bench_open = i;
@@ -1880,7 +1931,14 @@ bool muse_settings_ui_bench_open(const char *name)
 
 static void bench_open_pending(void)
 {
-    static const page_t *const PAGES[] = { NULL, &WIFI, &HATCH, &BLE, &SOUND, &SLEEP, &BATTERY, &POWER };
+    static const page_t *const PAGES[] = { NULL, &WIFI, &HATCH, &BLE, &SOUND, &SLEEP, &BATTERY, &POWER
+#if CONFIG_MUSE_UI_THEME
+        , &APPEARANCE
+#endif
+#if CONFIG_MUSE_AVATAR_SYNC
+        , &AVATAR
+#endif
+    };
     int i = s_bench_open;
     if (i < 0) {
         return;
@@ -1897,6 +1955,31 @@ static void bench_open_pending(void)
         show(*PAGES[i]->obj);
     }
 }
+
+#if CONFIG_MUSE_AVATAR_SYNC && CONFIG_MUSE_UI_THEME
+static atomic_uint s_bench_action;
+bool muse_settings_ui_bench_action(const char *action)
+{
+    unsigned wanted = !strcmp(action,"primary") ? 1 : !strcmp(action,"back") ? 2 : 0;
+    unsigned empty = 0;
+    return wanted && atomic_compare_exchange_strong(&s_bench_action,&empty,wanted);
+}
+static void bench_action_pending(void)
+{
+    unsigned action = atomic_exchange(&s_bench_action,0);
+    if (!action) return;
+    lv_obj_t *target = NULL;
+    if (s_current == s_appearance || s_current == s_avatar) {
+        if (action == 2) target = lv_obj_get_child(s_current,1);
+        else target = lv_obj_get_parent(s_current == s_appearance ? s_appearance_mode : s_avatar_source);
+    }
+    if (target) lv_obj_send_event(target,LV_EVENT_CLICKED,NULL);
+    printf("@ui_settings_action {\"action\":\"%s\",\"ok\":%s,\"page\":\"%s\"}\n",
+           action == 1 ? "primary" : "back",target ? "true" : "false",
+           s_current == s_appearance ? "appearance" : s_current == s_avatar ? "avatar" : s_current == s_home ? "home" : "other");
+    fflush(stdout);
+}
+#endif
 #endif
 
 void muse_settings_ui_tick(bool visible)
@@ -1905,6 +1988,9 @@ void muse_settings_ui_tick(bool visible)
 #if LV_USE_SNAPSHOT
     if (visible) {
         bench_open_pending();
+#if CONFIG_MUSE_AVATAR_SYNC && CONFIG_MUSE_UI_THEME
+        bench_action_pending();
+#endif
     }
 #endif
     if (visible != was_visible) {
@@ -1917,6 +2003,10 @@ void muse_settings_ui_tick(bool visible)
     }
     if (s_current == s_home) {
         tick_home();
+#if CONFIG_MUSE_AVATAR_SYNC
+    } else if (s_current == s_avatar) {
+        tick_avatar();
+#endif
     } else if (s_current == s_proxy) {
         tick_proxy();
     } else if (s_current == s_wifi) {

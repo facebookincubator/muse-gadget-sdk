@@ -245,6 +245,10 @@ It works on boards with the full UI, using their existing console commands.
 
 ## Boards
 
+The experimental [My Muse avatar source](docs/avatar-sources.md) can sync the
+paired Muse's current still image on supported LVGL/PSRAM builds. It is off by
+default and adds a runtime choice between Built-in and My Muse in Settings.
+
 On LVGL touch-screen boards with speaker audio, drag up or down on the main
 avatar or its background to raise or lower volume. A temporary percentage
 appears above a vertical filled bar while dragging; lifting your finger saves

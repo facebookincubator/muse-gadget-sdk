@@ -1040,6 +1040,13 @@ static bool console_command(char *line, bool whole)
         }
         return true;
     }
+#if CONFIG_MUSE_AVATAR_SYNC && CONFIG_MUSE_UI_THEME
+    if (!strncmp(line,"ui.settings.action=",19)) {
+        if (muse_settings_ui_bench_action(line+19)) muse_ui_bench_page(true);
+        else {printf("@ui.error settings action must be primary or back, with no action pending\n");fflush(stdout);}
+        return true;
+    }
+#endif
 #endif
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     if (!strcmp(line, "wake") || !strcmp(line, "wake.on") || !strcmp(line, "wake.off")) {

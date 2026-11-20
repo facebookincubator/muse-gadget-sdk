@@ -15,6 +15,7 @@
  */
 
 #include "image_fetch.h"
+#include "vm_file_path.h"
 #include "led_status.h"
 #include "noise_control.h"
 #include "sdkconfig.h"
@@ -162,6 +163,9 @@ typedef struct {
 #define TOP_ROW(f) (CENTRED(f) ? 0 : (f)->row)
 
 static atomic_bool s_busy;
+#if CONFIG_MUSE_AVATAR_SYNC
+bool image_fetch_busy(void) { return atomic_load(&s_busy); }
+#endif
 // Bands downloads have drawn, ever: see image_fetch_drawn().
 static atomic_uint s_bands_drawn;
 
@@ -856,25 +860,7 @@ static void fetch_task(void *arg) {
 
 // GET /fs/raw/ and the path, without its leading slashes, percent-encoded
 // but for its slashes. NULL if out of memory.
-static char *vm_request_path(const char *path) {
-    while (*path == '/') path++;
-    size_t prefix = strlen(VM_PATH_PREFIX);
-    char *out = malloc(prefix + strlen(path) * 3 + 1);
-    if (!out) return NULL;
-    memcpy(out, VM_PATH_PREFIX, prefix);
-    char *p = out + prefix;
-    for (const unsigned char *c = (const unsigned char *)path; *c; c++) {
-        if (isalnum(*c) || strchr("-._~/", *c)) {
-            *p++ = (char)*c;
-        } else {
-            *p++ = '%';
-            *p++ = "0123456789ABCDEF"[*c >> 4];
-            *p++ = "0123456789ABCDEF"[*c & 15];
-        }
-    }
-    *p = '\0';
-    return out;
-}
+static char *vm_request_path(const char *path) { return vm_file_request_path(path); }
 
 // Allocate the largest safe range once. Future allocations must leave Noise's
 // TX margin: the task stack, either decoder or raw rows, and the queued GET.

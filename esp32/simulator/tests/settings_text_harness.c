@@ -16,6 +16,16 @@ const muse_board_t *muse_board = &test_board;
 static char saved_ssid[MUSE_SSID_MAX + 1], saved_pass[MUSE_PASS_MAX + 1];
 static unsigned saves;
 static int volume_setting = 70;
+#if CONFIG_MUSE_AVATAR_SYNC
+static muse_avatar_source_t avatar_source;
+static const char *avatar_status_text = "Built-in";
+static unsigned avatar_refreshes, avatar_clears;
+muse_avatar_source_t muse_avatar_source(void) { return avatar_source; }
+void muse_avatar_select(muse_avatar_source_t source) { avatar_source=source; }
+const char *muse_avatar_status(void) { return avatar_status_text; }
+void muse_avatar_refresh(void) { avatar_refreshes++; }
+void muse_avatar_clear(void) { avatar_clears++; }
+#endif
 
 void muse_voice_set_monitor(bool on) { (void)on; }
 float muse_voice_monitor_db(void) { abort(); }   /* no meter without a microphone */
@@ -238,7 +248,95 @@ int main(int argc, char **argv)
         s_text_scale = test_board.height;
     }
     s_tiny = test_board.round && test_board.width < 300;   /* as muse_settings_ui_build */
-    if (!strcmp(scenario, "volume")) {
+#if CONFIG_MUSE_AVATAR_SYNC
+    if (!strcmp(scenario, "avatar")) {
+        build_avatar_page(s_tile);show(s_avatar);lv_obj_update_layout(s_avatar);
+        assert(!strcmp(lv_label_get_text(s_avatar_source),"Built-in"));
+        assert(lv_obj_has_state(s_avatar_refresh,LV_STATE_DISABLED));
+        lv_obj_send_event(lv_obj_get_parent(s_avatar_source),LV_EVENT_CLICKED,NULL);
+        tick_avatar();assert(avatar_source==MUSE_AVATAR_PERSONAL);
+        assert(!lv_obj_has_state(s_avatar_refresh,LV_STATE_DISABLED));
+        assert(!strcmp(lv_label_get_text(s_avatar_source),"My Muse"));
+        const char *states[]={"Up to date","Using saved avatar","Up to date (not saved)","Waiting for Muse"};
+        for(size_t i=0;i<sizeof(states)/sizeof(states[0]);i++) {
+            avatar_status_text=states[i];tick_avatar();lv_obj_update_layout(s_avatar);
+            one_line_in(s_avatar_status,lv_obj_get_parent(s_avatar_status));
+        }
+        lv_obj_t *list=lv_obj_get_child(s_avatar,2);
+        lv_obj_send_event(lv_obj_get_child(list,2),LV_EVENT_CLICKED,NULL);
+        lv_obj_send_event(lv_obj_get_child(list,3),LV_EVENT_CLICKED,NULL);
+        assert(avatar_refreshes==1&&avatar_clears==1);
+        lv_obj_send_event(lv_obj_get_parent(s_avatar_source),LV_EVENT_CLICKED,NULL);
+        tick_avatar();assert(avatar_source==MUSE_AVATAR_BUILTIN);
+        drop(s_avatar);s_current=NULL;assert(!s_avatar);
+    } else
+#endif
+    if (!strcmp(scenario, "theme-navigation")) {
+#if CONFIG_MUSE_UI_THEME
+        muse_theme_lvgl_init();
+        build_home(s_tile);
+        show(s_home);
+        for (unsigned visit = 0; visit < 200; ++visit) {
+            lv_obj_send_event(lv_obj_get_parent(s_home_appearance), LV_EVENT_CLICKED, NULL);
+            assert(s_current == s_appearance && lv_obj_is_valid(s_appearance));
+            assert(!strcmp(child_text(s_appearance, 0), "APPEARANCE"));
+            for (unsigned change = 0; change < 3; ++change) {
+#if CONFIG_MUSE_AVATAR_SYNC
+                muse_avatar_source_t unchanged_source = avatar_source;
+#endif
+                muse_theme_mode_t wanted = (muse_theme_mode_t)((muse_theme_mode() + 1) % 3);
+                lv_obj_send_event(lv_obj_get_parent(s_appearance_mode), LV_EVENT_CLICKED, NULL);
+                muse_theme_lvgl_tick();
+                muse_settings_ui_tick(true);
+                assert(muse_theme_mode() == wanted && theme_setting == wanted);
+                assert(!strcmp(lv_label_get_text(s_appearance_mode), appearance_name()));
+#if CONFIG_MUSE_AVATAR_SYNC
+                assert(avatar_source == unchanged_source);
+#endif
+            }
+            lv_obj_send_event(lv_obj_get_child(s_appearance, 1), LV_EVENT_CLICKED, NULL);
+            assert(s_current == s_home);
+            lv_tick_inc(1);
+            lv_timer_handler();   /* run the production deferred deletion */
+            assert(!s_appearance);
+#if CONFIG_MUSE_AVATAR_SYNC
+            muse_theme_mode_t previous_theme = muse_theme_mode();
+            muse_avatar_source_t wanted_source = avatar_source == MUSE_AVATAR_PERSONAL ? MUSE_AVATAR_BUILTIN : MUSE_AVATAR_PERSONAL;
+            lv_obj_send_event(lv_obj_get_parent(s_home_avatar), LV_EVENT_CLICKED, NULL);
+            assert(s_current == s_avatar && lv_obj_is_valid(s_avatar));
+            assert(!strcmp(child_text(s_avatar, 0), "AVATAR"));
+            lv_obj_send_event(lv_obj_get_parent(s_avatar_source), LV_EVENT_CLICKED, NULL);
+            muse_settings_ui_tick(true);
+            assert(avatar_source == wanted_source && muse_theme_mode() == previous_theme);
+            lv_obj_send_event(lv_obj_get_child(s_avatar, 1), LV_EVENT_CLICKED, NULL);
+            lv_tick_inc(1);
+            lv_timer_handler();
+            assert(s_current == s_home && !s_avatar);
+#endif
+        }
+#if LV_USE_SNAPSHOT && CONFIG_MUSE_AVATAR_SYNC
+        assert(muse_settings_ui_bench_open("appearance"));bench_open_pending();
+        muse_theme_mode_t previous_theme=muse_theme_mode();
+        muse_avatar_source_t previous_source=avatar_source;
+        assert(!muse_settings_ui_bench_action("nope"));
+        assert(muse_settings_ui_bench_action("primary"));
+        assert(!muse_settings_ui_bench_action("primary")); /* one pending action */
+        bench_action_pending();
+        assert(muse_theme_mode()==(muse_theme_mode_t)((previous_theme+1)%3) && avatar_source==previous_source);
+        assert(muse_settings_ui_bench_action("back"));bench_action_pending();
+        assert(s_current==s_home && !s_appearance);
+        assert(muse_settings_ui_bench_open("avatar"));bench_open_pending();
+        previous_theme=muse_theme_mode();
+        assert(muse_settings_ui_bench_action("primary"));bench_action_pending();
+        assert(avatar_source!=previous_source && muse_theme_mode()==previous_theme);
+        assert(muse_settings_ui_bench_action("back"));bench_action_pending();
+        lv_tick_inc(1);lv_timer_handler();
+        assert(s_current==s_home && !s_avatar);
+#endif
+#else
+        abort();
+#endif
+    } else if (!strcmp(scenario, "volume")) {
         test_board.epaper = true;   /* no microphone meter services */
         s_vol_sl = lv_slider_create(s_tile);
         s_vol_val = lv_label_create(s_tile);

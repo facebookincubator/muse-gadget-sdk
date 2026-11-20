@@ -53,6 +53,9 @@
 #include "muse_apps_flash.h"
 #include "nvs.h"
 #include "muse_apps_priv.h"
+#if CONFIG_MUSE_AVATAR_SYNC
+#include "muse_avatar.h"
+#endif
 
 static const char *TAG = "muse_apps_store";
 
@@ -601,7 +604,11 @@ void muse_apps_store_start(void) {
         return;
     }
     s_persistent = mount(LABEL, ROOT, "installed apps last until restart");
+#if CONFIG_MUSE_AVATAR_SYNC
+    s_files = muse_avatar_files_mount();
+#else
     s_files = mount(FILES_LABEL, FILES_ROOT, "no files on the gadget");
+#endif
     if (s_files) muse_apps_flash_tidy(FILES_ROOT);
     // Without its task a queue would take requests nobody answers: drop it, and they're refused.
     if (xTaskCreateWithCaps(store_task, "muse_apps_store", TASK_STACK_BYTES, NULL, TASK_PRIORITY, NULL,

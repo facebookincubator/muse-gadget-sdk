@@ -143,7 +143,9 @@ u32 h264bsdStoreSeqParamSet(storage_t *pStorage, seqParamSet_t *pSeqParamSet)
     if ( (pStorage->maxWidthMbs &&
           pSeqParamSet->picWidthInMbs > pStorage->maxWidthMbs) ||
          (pStorage->maxHeightMbs &&
-          pSeqParamSet->picHeightInMbs > pStorage->maxHeightMbs) )
+          pSeqParamSet->picHeightInMbs > pStorage->maxHeightMbs) ||
+         (pStorage->maxRefFrames &&
+          pSeqParamSet->numRefFrames > pStorage->maxRefFrames) )
     {
         FREE(pSeqParamSet->offsetForRefFrame);
         FREE(pSeqParamSet->vuiParameters);

@@ -2830,6 +2830,17 @@ extern "C" bool noise_ctrl_connect(const char *vm_id, const char *auth_token,
     return true;
 }
 
+#if CONFIG_MUSE_AVATAR_SYNC
+extern "C" bool noise_ctrl_copy_vm_id(char *out, size_t capacity) {
+    if (!out || !capacity || !s_connect_mutex) return false;
+    if (xSemaphoreTake(s_connect_mutex, pdMS_TO_TICKS(50)) != pdTRUE) return false;
+    strlcpy(out, s_vm_id, capacity);
+    bool have = s_vm_id[0] && strlen(s_vm_id) < capacity;
+    xSemaphoreGive(s_connect_mutex);
+    return have;
+}
+#endif
+
 extern "C" bool noise_ctrl_reconnect(const char *network_ssid) {
     if (!s_connect_mutex) return false;
     char vm_id[sizeof(s_vm_id)];
