@@ -170,24 +170,46 @@ idf_build_get_property(gadget_project_dir PROJECT_DIR)
 muse_device_guide_assemble("${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" "${gadget_project_dir}")
 target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" TEXT)
 
-# lwIP's NAPT keeps idle UDP mappings for IP_NAPT_TIMEOUT_MS_UDP, 2 s unless
-# defined: only ip4_napt.c reads it, and ESP-IDF has no option for it. This
-# leans on ESP-IDF's lwIP sources, so it's checked on v6.0.x only, with the
-# default still overridable in lwip_napt.h; elsewhere NAPT keeps lwIP's 2 s.
+# Two of lwIP's compile-time defaults, for the tunnel. ESP-IDF has no option
+# for either, so they're compiled into its lwIP; that leans on its sources, so
+# each applies on ESP-IDF v6.0.x only, while lwIP still lets it be overridden.
+# Elsewhere the build warns and lwIP keeps its own.
 if(CONFIG_HOMEHUB_TUNNEL)
-    set(lwip_napt_h "${IDF_PATH}/components/lwip/lwip/src/include/lwip/lwip_napt.h")
+    set(lwip_inc "${IDF_PATH}/components/lwip/lwip/src/include/lwip")
     set(idf_ver "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}")
     set(napt_udp_default "")
-    if(NOT idf_ver VERSION_LESS 6.0 AND idf_ver VERSION_LESS 6.1 AND EXISTS "${lwip_napt_h}")
-        file(STRINGS "${lwip_napt_h}" napt_udp_default REGEX "^#ifndef IP_NAPT_TIMEOUT_MS_UDP")
+    set(arp_table_default "")
+    if(NOT idf_ver VERSION_LESS 6.0 AND idf_ver VERSION_LESS 6.1)
+        if(EXISTS "${lwip_inc}/lwip_napt.h")
+            file(STRINGS "${lwip_inc}/lwip_napt.h" napt_udp_default
+                 REGEX "^#ifndef IP_NAPT_TIMEOUT_MS_UDP")
+        endif()
+        if(EXISTS "${lwip_inc}/opt.h")
+            file(STRINGS "${lwip_inc}/opt.h" arp_table_default
+                 REGEX "^#if !defined ARP_TABLE_SIZE")
+        endif()
     endif()
+    idf_component_get_property(lwip_lib lwip COMPONENT_LIB)
+    # NAPT keeps idle UDP mappings for IP_NAPT_TIMEOUT_MS_UDP, 2 s unless
+    # defined; only ip4_napt.c reads it.
     if(napt_udp_default)
-        idf_component_get_property(lwip_lib lwip COMPONENT_LIB)
         math(EXPR napt_udp_ms "${CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S} * 1000")
         target_compile_definitions(${lwip_lib} PRIVATE "IP_NAPT_TIMEOUT_MS_UDP=${napt_udp_ms}")
     elseif(NOT CMAKE_BUILD_EARLY_EXPANSION)
         message(WARNING "HOMEHUB_TUNNEL_UDP_IDLE_S is checked on ESP-IDF v6.0.x only "
                         "(this is v${idf_ver}): NAPT keeps lwIP's 2 s for idle UDP")
+    endif()
+    # 64 ARP entries, not lwIP's 10 (24 bytes each): device.discover's sweep
+    # reads replies from the table, and a full one overwrites replies not yet
+    # read (entries age in whole seconds). NAPT to many LAN hosts re-resolves
+    # less too. Below 0x80, so struct netif keeps its layout; main reads the
+    # table (net_discovery.c), so it gets the same size.
+    if(arp_table_default)
+        target_compile_definitions(${lwip_lib} PRIVATE "ARP_TABLE_SIZE=64")
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE "ARP_TABLE_SIZE=64")
+    elseif(NOT CMAKE_BUILD_EARLY_EXPANSION)
+        message(WARNING "The 64-entry ARP table is checked on ESP-IDF v6.0.x only "
+                        "(this is v${idf_ver}): device.discover's ARP sweep may miss replies")
     endif()
 endif()
 

@@ -910,9 +910,10 @@ For app authoring and the guide to send Muse, see
   (`main/tunnel_relay.c`, `docs/home-link-network.md`, which is the behavior
   the VM side builds on). NAPT's idle UDP time is
   `CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S`, which `main/CMakeLists.txt` compiles
-  into ESP-IDF's lwIP. That relies on lwIP's own default, so it's checked on
-  ESP-IDF v6.0.x only: on another version the build warns and NAPT keeps
-  lwIP's 2 s.
+  into ESP-IDF's lwIP, along with a 64-entry ARP table for `device.discover`
+  (1,296 bytes of internal RAM). Both rely on lwIP's own defaults, so they're
+  checked on ESP-IDF v6.0.x only: on another version the build warns and lwIP
+  keeps its 2 s and 10 entries.
 - Don't move offsets in `partitions.csv`. `prod_data` and `prod_bak` are fixed
   manufacturing locations, and the table offset of `0x10000` leaves room for a
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
