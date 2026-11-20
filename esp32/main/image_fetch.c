@@ -298,6 +298,7 @@ static UINT jpeg_out(JDEC *jd, void *bitmap, JRECT *rect) {
     int w = rect->right - rect->left + 1;
     int h = rect->bottom - rect->top + 1;
     const uint8_t *rgb = bitmap;
+    if (w <= 0 || h <= 0 || w * h > JPEG_MCU_PIXELS) return 0;
     for (int i = 0; i < w * h; i++, rgb += 3) {
         uint16_t px = ((rgb[0] & 0xF8) << 8) | ((rgb[1] & 0xFC) << 3) | (rgb[2] >> 3);
         f->mcu[i] = (uint16_t)((px >> 8) | (px << 8));
@@ -309,7 +310,9 @@ static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale)
     void *pool = malloc(JPEG_POOL_BYTES);
     if (!pool) return "out of memory";
     const char *err = NULL;
-    JDEC jd;
+    // The ROM decoder doesn't clear this, and a JPEG with no SOF0 would
+    // otherwise decode with whatever MCU size was on the stack.
+    JDEC jd = {0};
     JRESULT rc = jd_prepare(&jd, jpeg_in, pool, JPEG_POOL_BYTES, f);
     if (rc == JDR_OK) {
         // Shrink by the smallest power of two that fits below `row`.
