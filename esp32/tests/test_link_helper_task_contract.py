@@ -112,7 +112,8 @@ class HelperTaskContractTest(unittest.TestCase):
     def test_setup_tasks_do_not_choose_psram_stacks_themselves(self) -> None:
         for path in (APP_C, BLE_SERVER_C):
             source = _strip_comments(path.read_text())
-            for name in ("scan_refresh_task", "provision_task"):
+            for name in ("scan_refresh_task", "provision_task",
+                         "confirm_timeout_task", "confirmed_idle_timeout_task"):
                 self.assertNotRegex(
                     source, rf"xTaskCreate(?:PinnedToCore)?WithCaps\(\s*{name}\b",
                     f"{path.name}: {name} bypasses helper_task_create()",
@@ -133,6 +134,7 @@ class HelperTaskContractTest(unittest.TestCase):
             for name in re.findall(r"helper_task_create\(\s*(\w+)\s*,", ble)
         }
         self.assertIn((APP_C.name, "scan_refresh_task"), started)
+        self.assertIn((APP_C.name, "confirm_timeout_task"), started)
         self.assertIn((BLE_SERVER_C.name, "provision_task"), started)
 
         sources = {APP_C.name: app, BLE_SERVER_C.name: ble}
