@@ -451,7 +451,8 @@ menu "ESP32 Device SDK"
             six colours on the E1002).
             The Waveshare ESP32-S3-ePaper-1.54G does the same in four colours.
             The ESP32-C3 with a 0.42 inch OLED shows the status and the
-            agent's name as text.
+            agent's name as text. The M5Stack CoreMatrix shows it as a
+            picture on its 16x16 white LED matrix.
             Boards with the full UI have no status LED; their screen shows Link's pairing
             and connection state instead.
 
@@ -514,6 +515,11 @@ menu "ESP32 Device SDK"
         config HOMEHUB_LED_BACKEND_MUSE
             bool "Muse display"
             depends on MUSE_ENABLED
+
+        config HOMEHUB_LED_BACKEND_M5_COREMATRIX
+            bool "M5Stack CoreMatrix (16x16 white LED matrix status)"
+            depends on IDF_TARGET_ESP32C61
+            select HOMEHUB_LED_MATRIX
 
         config HOMEHUB_LED_BACKEND_C3_SSD1306
             bool "ESP32-C3 0.42 inch SSD1306 OLED (72x40 text status)"
@@ -668,15 +674,23 @@ menu "ESP32 Device SDK"
             tenths of a degree Celsius. Waveshare's own SHTC3 example for this
             board subtracts 4 C, hence -40.
 
+    config HOMEHUB_LED_MATRIX
+        bool
+        help
+            The status and images on a 16x16 one-bit LED matrix
+            (main/matrix_status.c), which the board supplies as an esp_lcd
+            panel. Selected by the boards that have one.
+
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
+        default y if HOMEHUB_LED_MATRIX
         default y if HOMEHUB_LED_BACKEND_MUSE && SPIRAM && (ESP_ROM_HAS_JPEG_DECODE || SOC_JPEG_DECODE_SUPPORTED)
         select HOMEHUB_DAEMON_REQUESTS   # display.draw_file reads from the VM
         help
             Set when display.draw_url and display.draw_file can draw an
-            image: the display backends, and boards with the full UI, PSRAM
-            for the image and a JPEG decoder in ROM or hardware.
+            image: the display backends, the LED matrix, and boards with the
+            full UI, PSRAM for the image and a JPEG decoder in ROM or hardware.
 
     config HOMEHUB_PRE_DVT_GPIO
         bool "Use pre-DVT GPIO assignments"

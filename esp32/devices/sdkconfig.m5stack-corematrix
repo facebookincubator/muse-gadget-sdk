@@ -1,0 +1,29 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# M5Stack CoreMatrix (C158): ESP32-C61HR8, 16 MB flash, 8 MB quad PSRAM,
+# native USB. Link's status and Muse's images show on its 16x16 white LED
+# matrix (main/matrix_status.c) and BtnA (KEY1) is the setup button, both
+# through I2C chips (components/m5stack_corematrix).
+# https://docs.m5stack.com/en/core/CoreMatrix
+# Load last, after sdkconfig.defaults.
+CONFIG_IDF_TARGET="esp32c61"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-m5stack-corematrix"
+CONFIG_MUSE_DEVICE_MODEL_NAME="M5Stack CoreMatrix"
+CONFIG_MUSE_DEVICE_GUIDE="devices/guides/corematrix.md"
+CONFIG_HOMEHUB_LED_BACKEND_M5_COREMATRIX=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
