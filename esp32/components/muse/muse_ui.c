@@ -1048,8 +1048,9 @@ static void layout_read(int size)
     int pitch = (lv_font_get_line_height(l->font) + CAPTION_LINE_SPACE) * l->scale;
     set_reply_box(l, 4, 1, top, cw, pitch);
     /* The widest page isn't the biggest: a round screen narrows towards the bottom. */
-    /* Keep read replies in a central column clear of dedicated rim hints. */
-    int max_cols = muse_board->rim_controls ? 13 : 24;
+    /* Keep read replies in a central column clear of dedicated rim hints:
+     * 13 of unscii-16's cells wide, at every size. */
+    int max_cols = muse_board->rim_controls ? 13 * 16 / cw : 24;
     for (int c = 4; c <= max_cols && fits_across(c * cw, top, ring_in); c++) {
         int n = (reply_bottom(c * cw, ring_in) - top + CAPTION_LINE_SPACE) / pitch;
         /* A third of the caption spare for characters wider than a byte. */
