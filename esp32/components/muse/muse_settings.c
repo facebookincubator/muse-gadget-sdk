@@ -371,3 +371,27 @@ void muse_settings_set_wakeword_on(bool on)
     notify(MUSE_SETTING_WAKEWORD);
 }
 #endif
+
+#if CONFIG_MUSE_PHOTO_NOTES
+/* Photo with voice notes, kept apart like the wake word so builds without it
+ * compile this file as before. Read from NVS on first use. Default off: the
+ * camera takes photos only once the person turns it on. */
+static atomic_bool s_photo_notes, s_photo_notes_loaded;
+
+bool muse_settings_photo_notes(void)
+{
+    if (!atomic_load(&s_photo_notes_loaded)) {
+        uint8_t b = 0;
+        atomic_store(&s_photo_notes, nvs_get_u8(s_nvs, "photo_notes", &b) == ESP_OK && b);
+        atomic_store(&s_photo_notes_loaded, true);
+    }
+    return atomic_load(&s_photo_notes);
+}
+
+void muse_settings_set_photo_notes(bool on)
+{
+    atomic_store(&s_photo_notes, on);
+    atomic_store(&s_photo_notes_loaded, true);
+    save_u8("photo_notes", on);
+}
+#endif

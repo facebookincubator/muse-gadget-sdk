@@ -113,7 +113,7 @@ int main(void) {
     for (scenario=0;scenario<3;scenario++) {
         step=0; now=1000000; progress=0; captions=0; silence_writes=0;
         bool delivered=false;
-        bool interrupted=hatch_reply(&delivered,false);
+        bool interrupted=hatch_reply(&delivered,"SENDING VOICE NOTE");
         assert(interrupted==(scenario==1));
         assert(!atomic_load(&s_reply_waiting));
         assert(silence_writes>=2 && captions>0);

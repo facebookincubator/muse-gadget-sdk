@@ -69,3 +69,14 @@ CONFIG_PM_PROFILING=y
 
 # Replies fill the screen while Muse answers; Text size in the menu.
 CONFIG_MUSE_SMALL_FULL_REPLY=y
+
+# With Wi-Fi, BLE and the tunnel up, internal RAM is fragmented: the
+# heartbeat shows about 19 KB free but a largest block of about 7 KB, too
+# small for the 8 KB Muse VM lookup stack, so every voice turn failed with
+# "Can't reach Muse's server" (#384). Code and rodata run from PSRAM above, so:
+# - setup task stacks (pairing, provisioning, the Muse VM lookup) go to
+#   PSRAM (main/helper_task.h), as on the StopWatch and CrowPanel;
+# - the avatar's and audio's static buffers (about 17 KB) go to PSRAM, as on
+#   the SenseCAP Watcher, leaving Wi-Fi, BLE and the tunnel more internal RAM.
+CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y
+CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y

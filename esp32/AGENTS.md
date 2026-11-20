@@ -58,6 +58,7 @@ before adding a feature to one.
 | Seeed SenseCAP Indicator | `esp32s3` | `devices/sdkconfig.sensecap-indicator` | `tools/board.sh sensecap-indicator` |
 | Seeed reTerminal E1001 | `esp32s3` | `devices/sdkconfig.reterminal-e1001` | `tools/board.sh reterminal-e1001` |
 | Seeed reTerminal E1002 | `esp32s3` | `devices/sdkconfig.reterminal-e1002` | `tools/board.sh reterminal-e1002` |
+| Seeed reTerminal E1003 | `esp32s3` | `devices/sdkconfig.reterminal-e1003` | `tools/board.sh reterminal-e1003` |
 | Seeed reTerminal Sticky (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.reterminal-sticky` | `tools/board.sh reterminal-sticky` |
 | Seeed reTerminal Sticky Link status (experimental) | `esp32s3` | `devices/sdkconfig.reterminal-sticky-link` | `tools/board.sh reterminal-sticky-link` |
 | Home Assistant Voice Preview Edition | `esp32s3` | `devices/sdkconfig.home-assistant-voice` | `tools/board.sh home-assistant-voice` |
@@ -228,6 +229,10 @@ more, except the StickS3, StickC Plus2, Cardputer ADV, AtomS3, AI Passport and W
 On the Watcher, rotation opens and pages through the latest reply. A short
 wheel click sleeps/wakes; a 300 ms hold starts push-to-talk. Pairing still
 confirms on the initial press, never on a hold's push-to-talk.
+With the camera built in (`CONFIG_MUSE_PHOTO_NOTES`) and Photo with voice
+notes turned on in Settings, that hold also takes a photo, which
+`muse_photo_note.c` sends with the note (`muse_chat_attach_jpeg()`); see
+`devices/README.md`.
 `muse_review.c` keeps up to 32 KB of the reply in PSRAM across the end of the
 turn. `>review.next`, `>review.prev`, and `>review.close` exercise navigation
 over the serial console.
@@ -474,6 +479,7 @@ Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `components/muse/boards/waveshare_s3_185b_init.h` (Apache-2.0, Waveshare),
 `components/esp_lcd_gc9107` (Apache-2.0, Espressif),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
+`main/epd_it8951.c` (MIT, Seeed_GFX2),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
 Each third-party file is listed under License in `README.md` and the root
@@ -515,7 +521,7 @@ physical talk/setup button, so the GPIO button reset gesture does not apply.
 The VIEWE SmartRing-Plus works the same way; its BOOT button is inside the case.
 
 The device advertises as `MuseGadget-XXXXXX` (`MuseGadget-Disp-XXXXXX` on the
-ideaspark, CYD, SenseCAP Indicator, Waveshare S3 LCD 3.5 status-screen and reTerminal E1001 and E1002 overlays, `MuseGadget-ha-voice-XXXXXX` on the
+ideaspark, CYD, SenseCAP Indicator, Waveshare S3 LCD 3.5 status-screen and reTerminal E1001, E1002 and E1003 overlays, `MuseGadget-ha-voice-XXXXXX` on the
 Voice PE, `MuseGadget-respeaker-XXXXXX` on the reSpeaker Lite,
 `MuseGadget-xvf3800-XXXXXX` on the reSpeaker XVF3800,
 `MuseGadget-Oled-XXXXXX` on the ESP32-C3 OLED, which shows the status as words). Its

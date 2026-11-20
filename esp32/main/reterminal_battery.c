@@ -15,6 +15,7 @@
  */
 
 #include "reterminal_battery.h"
+#include "sdkconfig.h"
 
 #include "driver/gpio.h"
 #include "esp_adc/adc_cali.h"
@@ -30,7 +31,12 @@ static const char *TAG = "link.battery";
 // Keep the divider enabled after init so it settles before health requests.
 #define BATTERY_ADC_UNIT ADC_UNIT_1
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_0
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+// E1003 V1.0 uses GPIO40 for the divider and GPIO21 for IT8951 power.
+#define BATTERY_ENABLE_GPIO GPIO_NUM_40
+#else
 #define BATTERY_ENABLE_GPIO GPIO_NUM_21
+#endif
 
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_cali;

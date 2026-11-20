@@ -18,6 +18,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +30,8 @@ extern "C" {
  * ASCII stand-ins for what they lack: curly quotes become straight ones, an em
  * dash "--", accented letters their plain ones. Emoji go; anything else stays,
  * and with CONFIG_MUSE_CJK_FONT the captions draw CJK from a fallback font.
- * With CONFIG_MUSE_LATIN_FONT, captions keep their accented letters too.
+ * With CONFIG_MUSE_LATIN_FONT, captions keep their accented letters too, and
+ * with CONFIG_MUSE_EMOJI, the emoji their emoji font has.
  */
 
 /* The stand-in for the UTF-8 character at s into out, and its length (0 drops
@@ -58,14 +60,42 @@ void muse_text_to_ascii(char *s, size_t cap);
  * now on muse_text_to_caption() keeps them and muse_text_has_latin() sees them. */
 void muse_text_keep_latin(void);
 
-/* muse_text_to_ascii() for a caption, which may keep accented letters. */
+/* The caption has a font for emoji (CONFIG_MUSE_EMOJI, on screens whose
+ * captions use the 16 px caption font): from now on muse_text_to_caption()
+ * keeps the ones it has, without their style, skin tone or anything joined to
+ * them with U+200D. Other emoji still go. */
+void muse_text_keep_emoji(void);
+
+/* Whether the UTF-8 character at s is an emoji a caption keeps; *len is its
+ * length in bytes. CONFIG_MUSE_EMOJI only. */
+bool muse_text_emoji(const char *s, size_t *len);
+
+/* muse_text_to_ascii() for a caption, which may keep accented letters and emoji. */
 void muse_text_to_caption(char *s, size_t cap);
+
+/* muse_text_to_caption() for text in fonts without emoji, such as the menu's. */
+void muse_text_to_label(char *s, size_t cap);
 
 /* Whether s has accented letters a caption keeps. */
 bool muse_text_has_latin(const char *s);
 
 /* text, or if it needs stand-ins and fits in cap bytes, a copy with them in buf. */
 const char *muse_text_showable(const char *text, char *buf, size_t cap);
+
+/*
+ * Muse often answers in Markdown, which the screen would show as is. Takes
+ * the markers out of s, in place, so a caption reads as plain text:
+ * **bold**, *italic*, _italic_, ~~struck~~ and `code` keep only their text
+ * (code as it is); "# " headings and "> " quotes lose their marker; "* " and
+ * "+ " bullets become "- "; [text](url) links keep their text; table rows
+ * lose their outer bars and separate cells with ", "; table dividers, "---"
+ * rules and ``` fences go. A lone * or _ inside a word or between spaces
+ * ("2 * 3", "snake_case") stays. Works a line ("\n") at a time, so it can
+ * run on a wrapped page: bit i of `wrapped` marks line i as wrapped from the
+ * line before, so the "+" of a wrapped "7 + 5" isn't taken for a bullet
+ * (lines past the 64th count as unwrapped). Returns the new length.
+ */
+size_t muse_text_strip_markdown(char *s, uint64_t wrapped);
 
 #ifdef __cplusplus
 }

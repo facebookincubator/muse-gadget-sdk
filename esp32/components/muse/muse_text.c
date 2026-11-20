@@ -16,9 +16,17 @@
 
 #include "muse_text.h"
 
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+
+#if CONFIG_MUSE_EMOJI
+#include "fonts/muse_emoji.h"
+#endif
 
 /* Punctuation and symbols, and the letters that take two, by code point. */
 static const struct {
@@ -143,6 +151,9 @@ static const char VIETNAMESE[] =
     "UuUuUuUuUuUuUuYyYyYyYy";
 
 static bool s_keep_latin;   /* muse_text_keep_latin() */
+#if CONFIG_MUSE_EMOJI
+static bool s_keep_emoji;   /* muse_text_keep_emoji() */
+#endif
 
 /* The code point at s, and its length in *len; -1 if it's broken. */
 static int32_t decode(const unsigned char *s, size_t *len)
@@ -273,12 +284,75 @@ bool muse_text_has_latin(const char *s)
     return false;
 }
 
-static void fold(char *s, size_t cap, bool keep_latin)
+#if CONFIG_MUSE_EMOJI
+/* The emoji the caption font draws (fonts/muse_font_emoji_16.c). */
+static bool emoji(int32_t cp)
+{
+    static const uint32_t CODES[] = { MUSE_EMOJI_CODE_POINTS };
+    size_t lo = 0, hi = sizeof(CODES) / sizeof(CODES[0]);
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (CODES[mid] == (uint32_t)cp) {
+            return true;
+        }
+        if (CODES[mid] < (uint32_t)cp) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return false;
+}
+
+void muse_text_keep_emoji(void)
+{
+    s_keep_emoji = true;
+}
+
+bool muse_text_emoji(const char *s, size_t *len)
+{
+    int32_t cp = decode((const unsigned char *)s, len);
+    return s_keep_emoji && cp > 0 && emoji(cp);
+}
+
+/* Drops what follows the emoji ending at p as part of it: its style and skin
+ * tone, and anything joined to it with U+200D, so a sequence shows as its
+ * first emoji. n is the text's length; returns the new one. */
+static size_t drop_joined(char *p, size_t n, const char *s)
+{
+    for (;;) {
+        size_t len, next = 0;
+        int32_t cp = decode((const unsigned char *)p, &len);
+        if (cp == 0x200D && p[len]) {
+            decode((const unsigned char *)p + len, &next);   /* and the character it joins */
+        } else if (cp != 0xFE0E && cp != 0xFE0F && !(cp >= 0x1F3FB && cp <= 0x1F3FF)) {
+            return n;
+        }
+        size_t cut = len + next;
+        memmove(p, p + cut, n - (p - s) - cut + 1);
+        n -= cut;
+    }
+}
+#endif
+
+static void fold(char *s, size_t cap, bool keep_latin, bool keep_emoji)
 {
     size_t n = strlen(s);
+#if CONFIG_MUSE_EMOJI
+    keep_emoji = keep_emoji && s_keep_emoji;
+#else
+    (void)keep_emoji;
+#endif
     for (char *p = s; *p;) {
         size_t len;
         char a[4];
+#if CONFIG_MUSE_EMOJI
+        if (keep_emoji && muse_text_emoji(p, &len)) {
+            p += len;
+            n = drop_joined(p, n, s);
+            continue;
+        }
+#endif
         int alen = keep_latin && latin_letter(decode((const unsigned char *)p, &len)) ? -1
                                                                                      : muse_text_ascii(p, &len, a);
         if (alen < 0) {
@@ -293,17 +367,27 @@ static void fold(char *s, size_t cap, bool keep_latin)
         memcpy(p, a, alen);
         n = n - len + alen;
         p += alen;
+#if CONFIG_MUSE_EMOJI
+        if (keep_emoji && !alen) {
+            n = drop_joined(p, n, s);   /* an emoji the font lacks takes its sequence with it */
+        }
+#endif
     }
 }
 
 void muse_text_to_ascii(char *s, size_t cap)
 {
-    fold(s, cap, false);
+    fold(s, cap, false, false);
 }
 
 void muse_text_to_caption(char *s, size_t cap)
 {
-    fold(s, cap, s_keep_latin);
+    fold(s, cap, s_keep_latin, true);
+}
+
+void muse_text_to_label(char *s, size_t cap)
+{
+    fold(s, cap, s_keep_latin, false);
 }
 
 const char *muse_text_showable(const char *text, char *buf, size_t cap)
@@ -317,4 +401,172 @@ const char *muse_text_showable(const char *text, char *buf, size_t cap)
     }
     muse_text_to_ascii(buf, cap);
     return buf;
+}
+
+/* ---- Markdown in replies ---- */
+
+static bool md_word(char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c & 0x80);
+}
+
+/* A line of only "|", "-", ":" and spaces with at least three dashes: a table
+ * divider or a "---" rule. */
+static bool md_rule(const char *p, const char *eol)
+{
+    int dashes = 0;
+    for (; p < eol; p++) {
+        if (*p == '-') {
+            dashes++;
+        } else if (*p != '|' && *p != ':' && *p != ' ') {
+            return false;
+        }
+    }
+    return dashes >= 3;
+}
+
+/* Where the * or _ at p, opening emphasis, closes on its line; NULL if it
+ * doesn't. It opens after a non-word character and before a non-space, and
+ * closes after a non-space and before a non-word character, so "2*3*4" and
+ * "snake_case_name" aren't emphasis. */
+static const char *md_closing(const char *line, const char *p, const char *eol)
+{
+    char mark = *p;
+    if ((p > line && md_word(p[-1])) || p + 1 >= eol || p[1] == ' ' || p[1] == mark) {
+        return NULL;
+    }
+    for (const char *q = p + 2; q < eol; q++) {
+        if (*q != mark || q[-1] == ' ') {
+            continue;
+        }
+        const char *last = q;   /* in "***" the last one closes, after "**" */
+        while (last + 1 < eol && last[1] == mark) {
+            last++;
+        }
+        if ((last - q) % 2 == 0 && (last + 1 >= eol || !md_word(last[1]))) {
+            return last;
+        }
+        q = last;   /* "**" closes bold inside the emphasis */
+    }
+    return NULL;
+}
+
+/* The [text](url) link at p: sets *text, *len and returns the end of the link,
+ * or NULL if p doesn't start one. */
+static const char *md_link(const char *p, const char *eol, const char **text, size_t *len)
+{
+    const char *close = memchr(p, ']', eol - p);
+    if (!close || close + 1 >= eol || close[1] != '(') {
+        return NULL;
+    }
+    const char *end = memchr(close + 2, ')', eol - (close + 2));
+    if (!end) {
+        return NULL;
+    }
+    *text = p + 1;
+    *len = close - (p + 1);
+    return end + 1;
+}
+
+size_t muse_text_strip_markdown(char *s, uint64_t wrapped)
+{
+    char *w = s;   /* writes never pass reads: every rule keeps or shortens */
+    const char *r = s;
+    for (int i = 0; *r; i++) {
+        const char *eol = strchr(r, '\n');
+        if (!eol) {
+            eol = r + strlen(r);
+        }
+        const char *next = *eol ? eol + 1 : eol;
+        const char *p = r;
+        while (p < eol && *p == ' ') {
+            p++;
+        }
+        bool starts = i >= 64 || !(wrapped >> i & 1);   /* only there are line markers */
+        if (starts && (md_rule(p, eol) || (eol - p >= 3 && !strncmp(p, "```", 3)))) {
+            r = next;   /* the line goes */
+            continue;
+        }
+        memmove(w, r, p - r);   /* the indent */
+        w += p - r;
+        if (starts && *p == '>') {
+            p += p + 1 < eol && p[1] == ' ' ? 2 : 1;
+        }
+        int hashes = 0;
+        while (p + hashes < eol && p[hashes] == '#') {
+            hashes++;
+        }
+        if (starts && hashes && hashes <= 6 && (p + hashes == eol || p[hashes] == ' ')) {
+            p += hashes;
+            while (p < eol && *p == ' ') {
+                p++;
+            }
+        } else if (starts && (*p == '*' || *p == '+') && p + 1 < eol && p[1] == ' ') {
+            *w++ = '-';
+            p++;
+        }
+        char *line = w;
+        const char *closing = NULL;   /* the * or _ that ends the emphasis opened before it */
+        if (p < eol && *p == '|') {
+            p++;
+            while (p < eol && *p == ' ') {
+                p++;
+            }
+        }
+        while (p < eol) {
+            const char *text;
+            size_t len;
+            const char *end;
+            if (*p == '\\' && p + 1 < eol && strchr("\\`*_~#[]()|>-+", p[1])) {
+                *w++ = p[1];   /* an escaped marker is just the character */
+                p += 2;
+            } else if ((*p == '*' || *p == '_' || *p == '~') && p + 1 < eol && p[1] == *p) {
+                p += 2;   /* **bold**, __bold__, ~~struck~~ */
+            } else if (*p == '`') {
+                const char *close = memchr(p + 1, '`', eol - (p + 1));
+                if (close) {   /* code keeps its text as it is */
+                    memmove(w, p + 1, close - (p + 1));
+                    w += close - (p + 1);
+                    p = close;
+                }
+                p++;
+            } else if (p == closing) {
+                closing = NULL;
+                p++;
+            } else if ((*p == '*' || *p == '_') && !closing && (closing = md_closing(r, p, eol))) {
+                p++;
+            } else if (*p == '[' && (end = md_link(p, eol, &text, &len))) {
+                memmove(w, text, len);
+                w += len;
+                p = end;
+            } else if (*p == '|') {
+                bool spaced = w > line && w[-1] == ' ';
+                while (w > line && w[-1] == ' ') {
+                    w--;
+                }
+                p++;
+                while (p < eol && *p == ' ') {
+                    p++;
+                    spaced = true;
+                }
+                if (p < eol && w > line) {   /* a bar between cells; one at either end just goes */
+                    *w++ = ',';
+                    if (spaced) {
+                        *w++ = ' ';
+                    }
+                }
+            } else {
+                *w++ = *p++;
+            }
+        }
+        while (w > line && w[-1] == ' ') {   /* left by a bar or marker at the end */
+            w--;
+        }
+        if (*eol) {
+            *w++ = '\n';
+        }
+        r = next;
+    }
+    *w = '\0';
+    return w - s;
 }

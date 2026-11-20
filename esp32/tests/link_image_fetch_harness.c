@@ -163,6 +163,7 @@ typedef struct {
     int status;
     const char *location;   // for redirects
     size_t body_len;        // raw RGB565 bytes, a pattern
+    bool jpeg;              // the body starts with a JPEG SOI marker
     int chunk;              // bytes per read, 0 for all at once
     int64_t read_us;        // time each read takes
     int64_t open_us;        // time the connection takes
@@ -274,7 +275,10 @@ int esp_http_client_read(esp_http_client_handle_t c, char *buffer, int len) {
         size_t n = (size_t)(len - got) < left ? (size_t)(len - got) : left;
         if (c->resp->chunk && n > (size_t)c->resp->chunk) n = (size_t)c->resp->chunk;
         spend(c, c->resp->read_us);
-        for (size_t i = 0; i < n; i++) buffer[got + i] = (char)(c->sent + i);
+        for (size_t i = 0; i < n; i++) {
+            size_t at = c->sent + i;
+            buffer[got + i] = c->resp->jpeg && at < 2 ? (char)(at ? 0xD8 : 0xFF) : (char)at;
+        }
         c->sent += n;
         got += (int)n;
         if (c->handler) {
@@ -512,12 +516,20 @@ bool led_status_display_info(int *width, int *height) {
 
 static int g_rows_drawn;
 static size_t g_next_byte;
+static bool g_drawing_jpeg;
+static long g_jpeg_pixels;
 
 // Every body is the pattern (uint8_t)offset, so the screen must get it in
-// order, nothing lost or repeated.
+// order, nothing lost or repeated. A JPEG arrives one decoder block at a time.
 bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
     (void)x;
     (void)y;
+    if (g_drawing_jpeg) {
+        CHECK(w > 0 && h > 0 && w * h <= 16 * 16, "a %dx%d block went through the MCU buffer",
+              w, h);
+        g_jpeg_pixels += (long)w * h;
+        return true;
+    }
     const uint8_t *b = (const uint8_t *)pixels;
     for (int i = 0; i < w * h * 2; i++, g_next_byte++) {
         CHECK(b[i] == (uint8_t)g_next_byte, "byte %u drawn as %u", (unsigned)g_next_byte, b[i]);
@@ -529,21 +541,58 @@ bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
 void led_status_draw_done(void) {
 }
 
+// A model of the ROM's TJpgDec (ChaN R0.01b). Its jd_prepare sets the image
+// and MCU size only from a SOF0 segment and never clears them, so a stream
+// with a scan but no SOF0 decodes with whatever the object held, and fails
+// only if that was zero. g_jpeg is what the stream says; without .scan the
+// stream isn't a JPEG it can decode.
+typedef struct {
+    bool scan;
+    bool sof0;
+    uint16_t width, height;
+    BYTE msx, msy;          // MCU size in 8x8 blocks
+} jpeg_stream_t;
+static jpeg_stream_t g_jpeg;
+static bool g_jpeg_cleared;
+
 JRESULT jd_prepare(JDEC *jd, UINT (*infunc)(JDEC *, BYTE *, UINT), void *pool,
                    UINT sz_pool, void *dev) {
-    (void)jd;
     (void)infunc;
     (void)pool;
     (void)sz_pool;
-    (void)dev;
-    return JDR_FMT1;
+    g_jpeg_cleared = !jd->width && !jd->height && !jd->msx && !jd->msy;
+    jd->device = dev;
+    if (!g_jpeg.scan) return JDR_FMT1;
+    if (g_jpeg.sof0) {
+        jd->width = g_jpeg.width;
+        jd->height = g_jpeg.height;
+        jd->msx = g_jpeg.msx;
+        jd->msy = g_jpeg.msy;
+    }
+    if (!jd->width || !jd->height || !jd->msx || !jd->msy) return JDR_FMT1;
+    return JDR_OK;
 }
 
+// Each MCU, clipped at the right and bottom edges and scaled, as the ROM does.
 JRESULT jd_decomp(JDEC *jd, UINT (*outfunc)(JDEC *, void *, JRECT *), BYTE scale) {
-    (void)jd;
-    (void)outfunc;
-    (void)scale;
-    return JDR_FMT1;
+    unsigned mx = jd->msx * 8u, my = jd->msy * 8u;
+    uint8_t *rgb = calloc(mx * my, 3);
+    CHECK(rgb, "calloc");
+    JRESULT rc = JDR_OK;
+    for (unsigned y = 0; y < jd->height && rc == JDR_OK; y += my) {
+        for (unsigned x = 0; x < jd->width && rc == JDR_OK; x += mx) {
+            unsigned rx = (x + mx <= jd->width ? mx : jd->width - x) >> scale;
+            unsigned ry = (y + my <= jd->height ? my : jd->height - y) >> scale;
+            if (!rx || !ry) continue;
+            JRECT rect = {
+                .left = (uint16_t)(x >> scale), .right = (uint16_t)((x >> scale) + rx - 1),
+                .top = (uint16_t)(y >> scale), .bottom = (uint16_t)((y >> scale) + ry - 1),
+            };
+            if (!outfunc(jd, rgb, &rect)) rc = JDR_INTR;
+        }
+    }
+    free(rgb);
+    return rc;
 }
 
 // ---- Cases -------------------------------------------------------------------
@@ -656,6 +705,46 @@ static void test_slow_redirect_chain_stops_at_the_limit(void) {
     CHECK(g_opens == 4, "expected the first open and 3 redirects, got %d", g_opens);
     CHECK(strcmp(g_result.message, "server answered HTTP 302") == 0, "%s", g_result.message);
     CHECK(g_max_timeout_overrun_us == 0, "an open could block past the deadline");
+}
+
+static void fetch_jpeg(void) {
+    reset_server();
+    g_width = 64;
+    add_response((response_t){.status = 200, .body_len = 2, .jpeg = true});
+    g_drawing_jpeg = true;
+    g_jpeg_pixels = 0;
+    fetch("http://host/a.jpg");
+    g_drawing_jpeg = false;
+    memset(&g_jpeg, 0, sizeof(g_jpeg));
+}
+
+static void test_jpeg_is_drawn_by_mcu(void) {
+    g_jpeg = (jpeg_stream_t){.scan = true, .sof0 = true, .width = 40, .height = 24,
+                             .msx = 2, .msy = 2};
+    fetch_jpeg();
+    CHECK(g_result.ok, "a 4:2:0 JPEG should draw: %s", g_result.message);
+    CHECK(strcmp(g_result.format, "jpeg") == 0, "format %s", g_result.format);
+    CHECK(g_jpeg_pixels == 40 * 24, "drew %ld pixels", g_jpeg_pixels);
+    CHECK(g_jpeg_cleared, "the decoder object must start cleared");
+}
+
+// The ROM decoder takes the MCU size from SOF0 only: without one, an object
+// that wasn't cleared would decode with whatever size was on the stack.
+static void test_jpeg_without_sof0_is_refused(void) {
+    g_jpeg = (jpeg_stream_t){.scan = true};
+    fetch_jpeg();
+    CHECK(g_jpeg_cleared, "the decoder object must start cleared");
+    expect_failure("not a valid JPEG");
+    CHECK(g_jpeg_pixels == 0, "drew %ld pixels", g_jpeg_pixels);
+}
+
+// A block larger than the MCU buffer is refused, not written past it.
+static void test_jpeg_block_larger_than_the_buffer_is_refused(void) {
+    g_jpeg = (jpeg_stream_t){.scan = true, .sof0 = true, .width = 32, .height = 32,
+                             .msx = 4, .msy = 4};
+    fetch_jpeg();
+    expect_failure("display write failed");
+    CHECK(g_jpeg_pixels == 0, "drew %ld pixels", g_jpeg_pixels);
 }
 
 static void test_vm_file_is_drawn(void) {
@@ -955,6 +1044,9 @@ int main(void) {
     test_same_scheme_redirects_are_followed();
     test_trickled_body_hits_the_deadline();
     test_slow_redirect_chain_stops_at_the_limit();
+    test_jpeg_is_drawn_by_mcu();
+    test_jpeg_without_sof0_is_refused();
+    test_jpeg_block_larger_than_the_buffer_is_refused();
     test_vm_file_is_drawn();
     test_vm_missing_file();
     test_vm_large_file_is_read_in_ranges();

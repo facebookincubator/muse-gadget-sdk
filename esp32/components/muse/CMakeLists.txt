@@ -60,6 +60,12 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_options_json.c")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
+        if(CONFIG_MUSE_RESEND_NOTES)
+            list(APPEND srcs "muse_resend.c")   # when a note that didn't send goes again
+        endif()
+        if(CONFIG_MUSE_PHOTO_NOTES)
+            list(APPEND srcs "muse_photo_note.c" "muse_chat_image.c")   # a photo with each voice note
+        endif()
         if(CONFIG_MUSE_REALTIME_VOICE)
             list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
             if(CONFIG_MUSE_VOICE_SOFTWARE_AEC)
@@ -77,6 +83,9 @@ if(CONFIG_MUSE_ENABLED)
     endif()
     if(CONFIG_MUSE_LATIN_FONT)
         list(APPEND srcs "fonts/muse_font_latin_16.c")   # captions with accented letters
+    endif()
+    if(CONFIG_MUSE_EMOJI)
+        list(APPEND srcs "fonts/muse_font_emoji_16.c")   # captions' emoji
     endif()
     if(CONFIG_MUSE_UI_LANG_VI)
         # Montserrat's Vietnamese letters, for the menu and the pairing card

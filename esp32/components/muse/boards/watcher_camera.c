@@ -48,6 +48,8 @@ static atomic_bool s_busy;           /* a capture, or the preview starting or st
 
 #define CAMERA_PREVIEW_SIZE 412
 #define CAMERA_JPEG_POOL 3100
+/* Largest block the decoder emits: a 16x16 MCU. */
+#define CAMERA_MCU_PIXELS (16 * 16)
 
 typedef struct {
     const uint8_t *data;
@@ -76,7 +78,8 @@ static UINT jpeg_draw(JDEC *jd, void *bitmap, JRECT *rect)
     int source_w = rect->right - rect->left + 1;
     int width = right - left + 1;
     int height = bottom - top + 1;
-    uint16_t pixels[16 * 16];
+    if (width * height > CAMERA_MCU_PIXELS) return 0;
+    uint16_t pixels[CAMERA_MCU_PIXELS];
     uint8_t *pixel_bytes = (uint8_t *)pixels;
     const uint8_t *rgb = bitmap;
     for (int y = top; y <= bottom; y++) {
@@ -97,7 +100,7 @@ static void preview_draw(const uint8_t *jpeg, size_t len)
     void *pool = heap_caps_malloc(CAMERA_JPEG_POOL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!pool) return;
     jpeg_source_t src = { .data = jpeg, .length = len };
-    JDEC jd;
+    JDEC jd = {0};  /* the ROM decoder doesn't clear it */
     if (jd_prepare(&jd, jpeg_read, pool, CAMERA_JPEG_POOL, &src) == JDR_OK) {
         if (jd.width > 416 || jd.height > 416) {
             muse_state_set_caption("CAMERA FRAME TOO LARGE");
@@ -223,6 +226,20 @@ static void preview_toggle_task(void *arg)
 bool watcher_camera_preview_active(void)
 {
     return s_preview_active;
+}
+
+void watcher_camera_preview_close(void)
+{
+    if (!s_preview_active || atomic_exchange(&s_busy, true)) return;
+    s_preview_active = false;
+    camera_stream_stop();   /* no frame draws after this */
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    free(s_last);
+    s_last = NULL;
+    xSemaphoreGive(s_lock);
+    muse_ui_camera_hint(false);
+    muse_ui_image_hide();
+    atomic_store(&s_busy, false);
 }
 
 void watcher_camera_preview_toggle(void)

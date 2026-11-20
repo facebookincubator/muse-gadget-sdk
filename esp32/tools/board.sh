@@ -38,6 +38,8 @@
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
 #   reterminal-e1002
 #              Seeed reTerminal E1002 (ESP32-S3) with a 7.3 inch colour e-paper
+#   reterminal-e1003
+#              Seeed reTerminal E1003 (ESP32-S3) with a 10.3 inch e-paper
 #   reterminal-sticky
 #              Seeed reTerminal Sticky (ESP32-S3) with a 3.97 inch e-paper
 #   reterminal-sticky-link
@@ -58,7 +60,7 @@
 # matching serial port, if there is exactly one.
 set -euo pipefail
 
-usage() { sed -n '16,56p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '16,58p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 [ $# -ge 1 ] || usage 2
 case "$1" in -h|--help) usage ;; esac
@@ -104,7 +106,7 @@ case "$BOARD" in
     # CH340 bridge.
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
     ;;
-  reterminal-e1001|reterminal-e1002)
+  reterminal-e1001|reterminal-e1002|reterminal-e1003)
     TARGET=esp32s3
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"

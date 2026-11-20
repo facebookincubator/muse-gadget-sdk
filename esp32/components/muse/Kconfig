@@ -342,6 +342,19 @@ menu "Muse"
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
 
+    config MUSE_PHOTO_NOTES
+        bool "Photo with voice notes"
+        depends on MUSE_WATCHER_CAMERA && MUSE_HATCH
+        default y
+        help
+            Adds "Photo with voice notes" to Settings, off until the person
+            turns it on. Then holding the talk button for a voice note also
+            takes a photo at the press, shows TAKING A PHOTO, and sends the
+            photo after the note's audio, in the same message. Only the
+            person's own press takes one this way (not a wake word note), and
+            the photo isn't kept once it has gone up. Another camera board
+            adds its capture to muse_photo_note.c and to this dependency.
+
     config MUSE_P4_CSI_CAMERA
         bool "ESP32-P4 MIPI-CSI camera capture"
         depends on MUSE_BOARD_WAVESHARE_P4_LCD35 && SPIRAM
@@ -401,6 +414,20 @@ menu "Muse"
             shows in GNU Unifont's 8x16 bitmaps, the whole caption in that
             one font. Small screens show such a caption one 16 px line at a
             time. Takes about 10 KB of flash and no RAM.
+
+    config MUSE_EMOJI
+        bool "Show emoji in captions"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            Without it, captions drop emoji. With it, screens whose captions
+            use the 16 px caption font (the round and larger ones, such as
+            the SenseCAP Watcher) show 190 of the emoji most common in
+            replies in colour: Twemoji's, scaled to 16 px, two caption cells
+            wide. Others still go, as do skin tones and anything joined to
+            an emoji with U+200D. Small screens, whose captions are 8 px
+            text, keep dropping them. Takes about 150 KB of flash and 48
+            bytes of RAM.
 
     choice MUSE_UI_LANGUAGE
         prompt "Language of the screen's own text"
@@ -523,6 +550,43 @@ menu "Muse"
             a short two-note ping plays first. For boards without a vibration
             motor (the SenseCAP Watcher), so a reply is noticed with the
             device out of hand.
+
+    config MUSE_RESEND_NOTES
+        bool "Keep sending a voice note until Muse has it"
+        depends on MUSE_HATCH
+        default n
+        help
+            Changes how voice notes that didn't reach Muse are kept in PSRAM
+            and sent again. Without it, up to 4 wait, each is tried up to 8
+            times with the wait doubling from 15 s to 2 minutes, and a press
+            is refused while 4 wait. With it, up to MUSE_RESEND_NOTES_MAX
+            notes in MUSE_RESEND_NOTES_KB of PSRAM wait, and a new one
+            drops the oldest to make room. Each is tried again after 5, 15
+            and 30 s, then every 60 s, oldest first, until Muse has it. The
+            screen says SAVED, WILL TRY AGAIN once; later tries show
+            nothing until the note lands, and then its reply plays (asleep,
+            the reply waits in the Muse app, as before).
+
+            A note Muse refused (an HTTP 4xx other than 408 or 429) isn't
+            sent again. Neither is one that went up whole without Muse
+            acknowledging it: the chat has no way to tell a repeat, and
+            Muse may have it already, so the screen says to check the Muse
+            app. Kept notes are in RAM only, and a restart loses them.
+
+    config MUSE_RESEND_NOTES_MAX
+        int "Voice notes kept to send again"
+        depends on MUSE_RESEND_NOTES
+        range 1 8
+        default 6
+
+    config MUSE_RESEND_NOTES_KB
+        int "PSRAM for voice notes kept to send again (KB)"
+        depends on MUSE_RESEND_NOTES
+        range 512 4096
+        default 1536
+        help
+            A second of a note takes about 31 KB, so the longest, 15
+            seconds, takes 469 KB.
 
     config MUSE_REALTIME_VOICE
         bool "Live voice calls with Muse (experimental)"
