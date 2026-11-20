@@ -88,6 +88,23 @@ void muse_hatch_turn_end(void);
 /* Abandons the turn (tap, or barge-in during the reply). */
 void muse_hatch_turn_cancel(void);
 
+/*
+ * Photo with voice notes (CONFIG_MUSE_PHOTO_NOTES): sends a photo with a
+ * voice note being recorded. Once the note's audio has gone, the photo
+ * follows as an image item in the same request, so Muse gets them as one
+ * message. `note` is muse_chat_note_id() from when the note started.
+ * `jpeg_base64` is a malloc'd base64 JPEG of up to MUSE_CHAT_PHOTO_MAX bytes;
+ * this takes ownership and frees it in every case, as soon as it has gone up
+ * or been dropped. Call it before muse_hatch_turn_end(): a photo for a note
+ * whose end has gone, or that was cancelled or followed by another press, is
+ * dropped. False if it can't be queued (not a base64 JPEG, too large, or no
+ * voice session).
+ */
+#define MUSE_CHAT_PHOTO_MAX (256u * 1024u)
+bool muse_chat_attach_jpeg(char *jpeg_base64, size_t len, uint32_t note);
+/* The note muse_hatch_turn_begin() just started (voice task). */
+uint32_t muse_chat_note_id(void);
+
 typedef enum {
     MUSE_HATCH_EV_NONE,
     MUSE_HATCH_EV_HEARD,    /* transcript so far (partial while talking, then final) */

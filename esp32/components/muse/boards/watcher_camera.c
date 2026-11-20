@@ -228,6 +228,20 @@ bool watcher_camera_preview_active(void)
     return s_preview_active;
 }
 
+void watcher_camera_preview_close(void)
+{
+    if (!s_preview_active || atomic_exchange(&s_busy, true)) return;
+    s_preview_active = false;
+    camera_stream_stop();   /* no frame draws after this */
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    free(s_last);
+    s_last = NULL;
+    xSemaphoreGive(s_lock);
+    muse_ui_camera_hint(false);
+    muse_ui_image_hide();
+    atomic_store(&s_busy, false);
+}
+
 void watcher_camera_preview_toggle(void)
 {
     if (watcher_camera_prepare() != ESP_OK) {

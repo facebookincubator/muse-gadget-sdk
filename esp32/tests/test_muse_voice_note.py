@@ -403,5 +403,361 @@ typedef struct fake_stream *StreamBufferHandle_t;
         self.assert_sent(run, pcm[:20 * self.MIC])
 
 
+
+# A voice note's photo (CONFIG_MUSE_PHOTO_NOTES): an image item after the audio.
+PHOTO_HEAD = b'"},{"type":"image","mime_type":"image/jpeg","filename":"photo.jpg","data_base64":"'
+CHAT_PART = 16 * 1024
+
+PHOTO_DRIVER = r"""
+static std::atomic<uint32_t> s_gen{5};
+
+/* The photo is malloc'd, as the camera's is: a free of it is counted. */
+static char *photo;
+static int photo_frees;
+static void counted_free(void *p) { photo_frees += p && p == photo; std::free(p); }
+#define free counted_free
+
+/* send_body() fails at photo piece fail_at (from 1), and moves the
+ * generation (a press during the upload) once cancel_at pieces have gone. */
+static long fail_at = -1, cancel_at = -1;
+static size_t photo_pieces, resets;
+static bool in_photo;
+static void turn_finish(void) { resets++; s_turn.phase = P_IDLE; free(s_turn.photo); s_turn.photo = nullptr; }
+"""
+
+PHOTO_SEND = r"""
+static bool send_body(int64_t id, const uint8_t *data, size_t len, bool end_body)
+{
+    CHECK(id == 7 && nparts < 256 && sent_len + len <= sizeof(sent));
+    CHECK(!nparts || !part_end[nparts - 1]);
+    if (len == sizeof(MUSE_CHAT_PHOTO_HEAD) - 1 && !memcmp(data, MUSE_CHAT_PHOTO_HEAD, len)) {
+        in_photo = true;
+    } else if (in_photo && !end_body) {
+        CHECK(len <= CHAT_PART && (const char *)data >= photo);   /* straight from the photo */
+        if ((long)photo_pieces + 1 == fail_at) return false;
+        if ((long)++photo_pieces == cancel_at) s_gen++;
+    }
+    memcpy(sent + sent_len, data, len);
+    sent_len += len;
+    part_len[nparts] = len;
+    part_end[nparts++] = end_body;
+    return true;
+}
+"""
+
+PHOTO_MAIN = r"""
+/* argv: bytes the mic adds between polls, the photo's base64 length (0 for
+ * none), the photo piece where send_body() fails and the one after which the
+ * generation moves (-1 for neither), and how the photo is offered:
+ * "note" (to the note recording), "gen" (another press's), "text" (a typed
+ * turn), "ended" (after the note's end went) or "twice". */
+int main(int argc, char **argv)
+{
+    CHECK(argc == 6);
+    size_t step = strtoul(argv[1], nullptr, 10), photo_len = strtoul(argv[2], nullptr, 10), cap = 1 << 21;
+    fail_at = strtol(argv[3], nullptr, 10);
+    cancel_at = strtol(argv[4], nullptr, 10);
+    const char *how = argv[5];
+    mic = static_cast<uint8_t *>(malloc(cap));
+    for (size_t got; (got = fread(mic + mic_len, 1, cap - mic_len, stdin)) > 0;) mic_len += got;
+    s_turn.chunk = static_cast<uint8_t *>(malloc(DICT_CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL)));
+    s_turn.note = static_cast<uint8_t *>(malloc(NOTE_PART_BYTES));
+    s_turn.phase = P_LISTEN;
+    s_turn.gen = 5;
+    s_turn.text = !strcmp(how, "text");
+    bool ok = open_note();
+    while (ok && s_turn.phase == P_LISTEN && mic_avail < mic_len) {
+        mic_avail = mic_len - mic_avail < step ? mic_len : mic_avail + step;
+        ok = record_note();
+    }
+    if (photo_len) {
+        photo = static_cast<char *>(malloc(photo_len));
+        memcpy(photo, "/9j/", 4);
+        for (size_t i = 4; i < photo_len; i++) photo[i] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[(i * 7) % 64];
+        if (!strcmp(how, "ended")) s_turn.phase = P_WAIT_REPLY;
+        photo_attach(photo, photo_len, !strcmp(how, "gen") ? 4 : 5);
+        if (!strcmp(how, "twice")) {
+            char *second = static_cast<char *>(malloc(8));
+            photo_attach(second, 8, 5);   /* one photo per note: the second is dropped */
+        }
+        if (!strcmp(how, "ended")) s_turn.phase = P_LISTEN;
+    }
+    if (ok && s_turn.phase == P_LISTEN) {
+        s_turn.end_requested = true;
+        ok = record_note();
+    }
+    printf("ok=%d failed=", ok);
+    for (const char *c = failed; *c; c++) putchar(*c == ' ' ? '_' : *c);
+    static const char *const phases[] = {"idle", "listen", "wait_final", "wait_reply"};
+    CHECK(s_turn.phase <= P_WAIT_REPLY);
+    printf(" phase=%s chat_posted=%d chat_us=%lld", phases[s_turn.phase], s_turn.chat_posted,
+           (long long)s_turn.chat_us);
+    printf(" pcm=%zu body_sent=%zu resets=%zu photo_frees=%d kept=%d parts=", s_turn.pcm_bytes, s_turn.body_sent,
+           resets, photo_frees, s_turn.photo != nullptr);
+    for (size_t i = 0; i < nparts; i++) printf("%s%zu:%d", i ? "," : "", part_len[i], part_end[i]);
+    putchar('\n');
+    fwrite(sent, 1, sent_len, stdout);
+#undef free
+    free(mic);
+    free(s_turn.chunk);
+    free(s_turn.note);
+    return 0;
+}
+"""
+
+
+def photo_base64(n):
+    """The harness's stand-in photo: /9j/ and a fixed run of the alphabet."""
+    alphabet = b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    return b'/9j/' + bytes(alphabet[(i * 7) % 64] for i in range(4, n))
+
+
+class HatchPhotoNote(unittest.TestCase):
+    """The same voice note code with CONFIG_MUSE_PHOTO_NOTES: a photo attached
+    while the note records goes up after its audio, in the same request."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        out = Path(cls.tmp.name)
+        source = (MUSE / 'muse_chat_session.cpp').read_text()
+
+        def line(start):
+            at = source.index(start)
+            return source[at:source.index('\n', at) + 1]
+
+        constants = source[source.index('#define MIC_RATE'):source.index('/* ---- Voice task')]
+        types = source[source.index('enum phase_t'):source.index('/* 10 KB')]
+        note = source[source.index('static bool send_note_part('):source.index('static void send_chat(')]
+        driver = HATCH_DRIVER[:HATCH_DRIVER.index('static char sent[')] + HATCH_DRIVER[
+            HATCH_DRIVER.index('static int64_t open_stream('):]
+        sent = 'static char sent[1 << 20];\nstatic size_t sent_len, part_len[256], nparts;\nstatic bool part_end[256];\n'
+        code = r"""
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include "host_compat.h"
+#include "minimp3.h"
+#include "muse_chat_priv.h"
+#define ESP_LOGI(...) ((void)0)
+#define ESP_LOGW(...) ((void)0)
+#define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #c); exit(3); } } while (0)
+typedef struct fake_stream *StreamBufferHandle_t;
+""" + constants + line('enum kind_t') + line('enum mark_t') + types + driver + sent + PHOTO_DRIVER + PHOTO_SEND + note + PHOTO_MAIN
+        (out / 'photo.cpp').write_text(code)
+        flags = ['-Wall', '-Wextra', '-Werror', *SANITIZE, '-DCONFIG_MUSE_PHOTO_NOTES=1',
+                 '-I', str(ROOT / 'tests'), '-I', str(MUSE),
+                 '-I', str(ROOT / 'components/minimp3/include')]
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        cxx = shlex.split(os.environ.get('CXX', 'c++'))
+        commands = [
+            [*cc, '-std=gnu11', *flags, '-include', str(ROOT / 'tests/host_compat.h'),
+             '-c', str(MUSE / 'muse_chat_text.c'), '-o', str(out / 'text.o')],
+            [*cc, '-std=gnu11', *flags, '-include', str(ROOT / 'tests/host_compat.h'),
+             '-c', str(MUSE / 'muse_text.c'), '-o', str(out / 'muse_text.o')],
+            [*cxx, '-std=gnu++17', *flags, str(out / 'photo.cpp'),
+             str(out / 'text.o'), str(out / 'muse_text.o'), '-o', str(out / 'photo')],
+        ]
+        for command in commands:
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode:
+                raise AssertionError(result.stdout + result.stderr)
+        cls.binary = out / 'photo'
+
+    def record(self, pcm, photo_len, how='note', fail_at=-1, cancel_at=-1, step=4000):
+        ran = subprocess.run([str(self.binary), str(step), str(photo_len), str(fail_at), str(cancel_at), how],
+                             input=pcm, capture_output=True, env=ENV)
+        self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
+        self.assertEqual(ran.stderr, b'')
+        meta, body = ran.stdout.split(b'\n', 1)
+        run = parse_run(ran.stdout)
+        fields = dict(item.split('=', 1) for item in meta.decode().split())
+        run.update(resets=int(fields['resets']), photo_frees=int(fields['photo_frees']), kept=fields['kept'] == '1')
+        return run
+
+    def assert_photo_note(self, run, pcm, photo):
+        wav = riff_header(16000) + pcm
+        self.assertTrue(run['ok'])
+        self.assertEqual((run['phase'], run['chat_posted'], run['resets']), ('wait_reply', True, 0))
+        self.assertEqual(run['body'], HEAD + base64.b64encode(wav) + PHOTO_HEAD + photo + TAIL)
+        self.assertEqual(run['body_sent'], len(run['body']))
+        self.assertEqual(run['ends'], [False] * (len(run['parts']) - 1) + [True])
+        request = json.loads(run['body'])
+        audio, image = request['items']
+        self.assertEqual(base64.b64decode(audio.pop('data_base64'), validate=True), wav)
+        self.assertEqual(audio, {'type': 'file', 'mime_type': 'audio/wav', 'filename': 'voice_note.wav'})
+        self.assertEqual(image, {'type': 'image', 'mime_type': 'image/jpeg', 'filename': 'photo.jpg',
+                                 'data_base64': photo.decode()})
+        # The photo goes straight from its buffer in CHAT_PART pieces, then the tail.
+        at = run['parts'].index(len(PHOTO_HEAD))
+        pieces = run['parts'][at + 1:-1]
+        self.assertEqual(pieces, [CHAT_PART] * (len(photo) // CHAT_PART) + ([len(photo) % CHAT_PART] if len(photo) % CHAT_PART else []))
+        self.assertEqual(run['parts'][-1], len(TAIL))
+        self.assertEqual((run['photo_frees'], run['kept']), (1, False))
+
+    def test_note_without_a_photo_is_unchanged(self):
+        pcm = pcm_bytes(16000, 7)
+        run = self.record(pcm, 0)
+        self.assertEqual(run['body'], HEAD + base64.b64encode(riff_header(16000) + pcm) + TAIL)
+        self.assertEqual(run['ends'][-1], True)
+
+    def test_photo_follows_the_audio_in_one_request(self):
+        for pcm_len, photo_len in ((16000, 1200), (2 * 6144 - 44, 4 * CHAT_PART), (40000, 3 * CHAT_PART + 4)):
+            with self.subTest(pcm=pcm_len, photo=photo_len):
+                pcm = pcm_bytes(pcm_len, pcm_len)
+                self.assert_photo_note(self.record(pcm, photo_len), pcm, photo_base64(photo_len))
+
+    def test_cancel_during_the_upload_resets_the_request(self):
+        # A press or cancel after the first photo piece: nothing more goes, the
+        # request never ends (the reset discards it), and the photo is freed.
+        pcm = pcm_bytes(16000, 8)
+        for cancel_at in (1, 2):
+            with self.subTest(cancel_at=cancel_at):
+                run = self.record(pcm, 3 * CHAT_PART, cancel_at=cancel_at)
+                self.assertTrue(run['ok'])
+                self.assertEqual((run['phase'], run['chat_posted'], run['resets']), ('idle', False, 1))
+                self.assertNotIn(True, run['ends'])
+                at = run['parts'].index(len(PHOTO_HEAD))
+                self.assertEqual(run['parts'][at + 1:], [CHAT_PART] * cancel_at)
+                self.assertEqual((run['photo_frees'], run['kept']), (1, False))
+
+    def test_failed_send_frees_the_photo(self):
+        pcm = pcm_bytes(16000, 9)
+        run = self.record(pcm, 3 * CHAT_PART, fail_at=2)
+        self.assertFalse(run['ok'])
+        self.assertNotIn(True, run['ends'])
+        self.assertEqual((run['photo_frees'], run['kept']), (1, False))
+
+    def test_only_the_note_recording_takes_a_photo(self):
+        pcm = pcm_bytes(16000, 10)
+        for how in ('gen', 'text', 'ended'):
+            with self.subTest(how=how):
+                run = self.record(pcm, 1200, how=how)
+                self.assertEqual(run['photo_frees'], 1)   # dropped at once
+                self.assertNotIn(PHOTO_HEAD, run['body'])
+        run = self.record(pcm, 1200, how='twice')
+        self.assert_photo_note(run, pcm, photo_base64(1200))
+
+    def test_short_note_drops_its_photo(self):
+        run = self.record(pcm_bytes(3200, 11), 1200)
+        self.assertEqual(run['failed'], "DIDN'T CATCH THAT")
+        self.assertNotIn(PHOTO_HEAD, run['body'])
+
+
+
+ATTACH_MAIN = r"""
+typedef int QueueHandle_t;
+static QueueHandle_t s_cmds;
+static std::atomic<uint32_t> s_gen{9};
+static cmd_t queued;
+static int sends, frees;
+static bool queue_full;
+#define pdTRUE 1
+#define pdMS_TO_TICKS(ms) (ms)
+static int xQueueSend(QueueHandle_t q, const cmd_t *cmd, int wait)
+{
+    CHECK(q == 1 && wait == 1000);
+    sends++;
+    if (queue_full) return 0;
+    queued = *cmd;
+    return pdTRUE;
+}
+static void counted_free(void *p) { frees++; free(p); }
+#define free counted_free
+""" + "{attach}" + r"""
+#undef free
+/* stdin: the photo. argv: "full" for a full queue, "stopped" before the
+ * session starts. Prints ok, the queued command and the frees. */
+int main(int argc, char **argv)
+{
+    CHECK(argc == 2);
+    s_cmds = strcmp(argv[1], "stopped") ? 1 : 0;
+    queue_full = !strcmp(argv[1], "full");
+    CHECK(muse_chat_note_id() == 9);
+    size_t cap = 1 << 20, len = 0;
+    char *photo = static_cast<char *>(malloc(cap));
+    for (size_t got; (got = fread(photo + len, 1, cap - len, stdin)) > 0;) len += got;
+    bool ok = muse_chat_attach_jpeg(photo, len, 7);
+    printf("ok=%d sends=%d frees=%d", ok, sends, frees);
+    if (ok) {
+        CHECK(queued.type == CMD_PHOTO && queued.gen == 7 && queued.text == photo && queued.len == len);
+        free(queued.text);
+    }
+    putchar('\n');
+    return 0;
+}
+"""
+
+
+class HatchPhotoAttach(unittest.TestCase):
+    """muse_chat_attach_jpeg(): checks the photo, then hands it to the session
+    task tagged with its note; whatever it refuses, it frees."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        out = Path(cls.tmp.name)
+        source = (MUSE / 'muse_chat_session.cpp').read_text()
+        cmds = source[source.index('enum cmd_type_t'):source.index('struct ev_t')]
+        attach = source[source.index('extern "C" uint32_t muse_chat_note_id('):source.index('#endif', source.index(
+            'extern "C" bool muse_chat_attach_jpeg('))]
+        code = r"""
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include "muse_chat.h"
+#include "muse_chat_priv.h"
+#define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #c); exit(3); } } while (0)
+""" + cmds + ATTACH_MAIN.replace('{attach}', attach)
+        (out / 'attach.cpp').write_text(code)
+        flags = ['-Wall', '-Wextra', '-Werror', *SANITIZE, '-DCONFIG_MUSE_PHOTO_NOTES=1',
+                 '-I', str(ROOT / 'tests'), '-I', str(MUSE), '-include', str(ROOT / 'tests/host_compat.h')]
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        cxx = shlex.split(os.environ.get('CXX', 'c++'))
+        for command in ([*cc, '-std=gnu11', *flags, '-c', str(MUSE / 'muse_chat_image.c'), '-o', str(out / 'image.o')],
+                        [*cxx, '-std=gnu++17', *flags, str(out / 'attach.cpp'), str(out / 'image.o'),
+                         '-o', str(out / 'attach')]):
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode:
+                raise AssertionError(result.stdout + result.stderr)
+        cls.binary = out / 'attach'
+
+    def attach(self, photo, how='-'):
+        ran = subprocess.run([str(self.binary), how], input=photo, capture_output=True, text=True, env=ENV)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        return dict(item.split('=', 1) for item in ran.stdout.split())
+
+    def test_queues_a_base64_jpeg_for_its_note(self):
+        photo = base64.b64encode(b'\xff\xd8\xff\xe0' + bytes(range(256))).decode()
+        self.assertEqual(self.attach(photo), {'ok': '1', 'sends': '1', 'frees': '0'})
+
+    def test_refuses_and_frees_anything_else(self):
+        jpeg = base64.b64encode(b'\xff\xd8\xff\xe0 a photo').decode()
+        cases = {
+            'not a JPEG': base64.b64encode(b'\x89PNG\r\n\x1a\n').decode(),
+            'unpadded': jpeg.rstrip('=') + 'A',
+            'padding inside': '/9j/' + 'AA==' + 'AAAA',
+            'not base64': '/9j/' + 'AA*A',
+            'too short': '/9j',
+        }
+        for name, photo in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.attach(photo), {'ok': '0', 'sends': '0', 'frees': '1'})
+        self.assertEqual(self.attach(jpeg, 'stopped'), {'ok': '0', 'sends': '0', 'frees': '1'})
+        self.assertEqual(self.attach(jpeg, 'full'), {'ok': '0', 'sends': '1', 'frees': '1'})
+
+    def test_refuses_a_photo_over_the_limit(self):
+        limit = 256 * 1024
+        over = '/9j/' + 'A' * (limit - 4 + 4)
+        self.assertEqual(self.attach(over), {'ok': '0', 'sends': '0', 'frees': '1'})
+        self.assertEqual(self.attach('/9j/' + 'A' * (limit - 4)), {'ok': '1', 'sends': '1', 'frees': '0'})
+
+
 if __name__ == '__main__':
     unittest.main()

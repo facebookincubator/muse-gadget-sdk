@@ -227,6 +227,10 @@ more, except the StickS3, StickC Plus2, Cardputer ADV, AtomS3, AI Passport and W
 On the Watcher, rotation opens and pages through the latest reply. A short
 wheel click sleeps/wakes; a 300 ms hold starts push-to-talk. Pairing still
 confirms on the initial press, never on a hold's push-to-talk.
+With the camera built in (`CONFIG_MUSE_PHOTO_NOTES`) and Photo with voice
+notes turned on in Settings, that hold also takes a photo, which
+`muse_photo_note.c` sends with the note (`muse_chat_attach_jpeg()`); see
+`devices/README.md`.
 `muse_review.c` keeps up to 32 KB of the reply in PSRAM across the end of the
 turn. `>review.next`, `>review.prev`, and `>review.close` exercise navigation
 over the serial console.

@@ -342,6 +342,19 @@ menu "Muse"
             memory and preview decoding shares CPU time with voice and Link.
             Leave disabled to build without camera support.
 
+    config MUSE_PHOTO_NOTES
+        bool "Photo with voice notes"
+        depends on MUSE_WATCHER_CAMERA && MUSE_HATCH
+        default y
+        help
+            Adds "Photo with voice notes" to Settings, off until the person
+            turns it on. Then holding the talk button for a voice note also
+            takes a photo at the press, shows TAKING A PHOTO, and sends the
+            photo after the note's audio, in the same message. Only the
+            person's own press takes one this way (not a wake word note), and
+            the photo isn't kept once it has gone up. Another camera board
+            adds its capture to muse_photo_note.c and to this dependency.
+
     config MUSE_P4_CSI_CAMERA
         bool "ESP32-P4 MIPI-CSI camera capture"
         depends on MUSE_BOARD_WAVESHARE_P4_LCD35 && SPIRAM
