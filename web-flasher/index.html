@@ -26,7 +26,7 @@ limitations under the License.
     (function () {
       var params = new URLSearchParams(location.search);
       if (params.has("classic")) return;
-      var target = new URL("https://gadgets.muse.ai/flash");
+      var target = new URL("https://gadgets.muse.ai/install");
       var board = params.get("board");
       if (board) target.searchParams.set("board", board);
       location.replace(target.href);
