@@ -371,7 +371,7 @@ static void status_text(char *buf, size_t n)
              w.state == MUSE_WIFI_CONNECTED ? w.ip : "-", muse_lang_menu(muse_link_state_name(muse_link_state())),
              muse_lang_menu(muse_hatch_state_name(h.state)), phone, batt,
              esp_app_get_description()->version);
-    muse_text_to_caption(buf, n);   /* network and phone names can have curly quotes */
+    muse_text_to_label(buf, n);   /* network and phone names can have curly quotes */
 }
 
 static void pm_text(char out[24], int pm)
