@@ -42,6 +42,7 @@
 #include "muse_console.h"
 #include "muse_link.h"
 #include "muse_mem.h"
+#include "muse_motion.h"
 #include "muse_menu.h"
 #if CONFIG_MUSE_MIRROR
 #include "muse_mirror.h"
@@ -732,6 +733,11 @@ static void input_task(void *arg)
     TickType_t powered = xTaskGetTickCount() - pdMS_TO_TICKS(POWER_MS);
 
     for (;;) {
+#if CONFIG_MUSE_MOTION_GESTURES
+        if (muse_motion_tick((uint32_t)(esp_timer_get_time() / 1000))) {
+            set_asleep(false, "lift");
+        }
+#endif
         unsigned ev = muse_board->poll_buttons() | atomic_exchange(&s_touch_talk_events, 0);
 #if CONFIG_MUSE_VIDEO
         /* Any press leaves the video view (its release then does nothing). */
@@ -816,7 +822,11 @@ static void input_task(void *arg)
          * noticed within REST_WAIT_MS. Napping, nothing comes over the
          * network; USB power arriving is noticed within NAP_WAIT_MS. */
         if (paused && muse_board->wait_buttons) {
-            muse_board->wait_buttons(napping ? NAP_WAIT_MS : REST_WAIT_MS);
+            int wait_ms = napping ? NAP_WAIT_MS : REST_WAIT_MS;
+#if CONFIG_MUSE_MOTION_GESTURES
+            if (muse_motion_active()) wait_ms = (int)muse_motion_poll_ms();
+#endif
+            muse_board->wait_buttons(wait_ms);
         } else {
             vTaskDelay(pdMS_TO_TICKS(paused ? REST_POLL_MS : POLL_MS));
         }
@@ -991,6 +1001,12 @@ static bool console_command(char *line, bool whole)
         }
         return true;
     }
+#if CONFIG_MUSE_MOTION_GESTURES
+    if (!strcmp(line, "motion")) {
+        muse_motion_status();
+        return true;
+    }
+#endif
     bool reset = !strcmp(line, "power.reset");
     if (reset || !strcmp(line, "power")) {
         if (reset) {

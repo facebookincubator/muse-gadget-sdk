@@ -34,6 +34,9 @@ typedef uint8_t lv_align_t;
 #endif
 
 #include "muse_state.h"
+#if CONFIG_MUSE_MOTION_GESTURES
+#include "muse_motion_core.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -169,6 +172,11 @@ typedef struct {
      * light sleep), the task is notified or timeout_ms passes, so the
      * buttons needn't be polled. NULL: polled. */
     void (*wait_buttons)(int timeout_ms);
+#if CONFIG_MUSE_MOTION_GESTURES
+    /* Owned by the input task; read returns ESP_ERR_NOT_FINISHED for no new sample. */
+    esp_err_t (*motion_enable)(bool enable);
+    esp_err_t (*motion_read)(muse_motion_sample_t *out);
+#endif
     esp_err_t (*read_power)(muse_power_t *out);
     /* Turns the board off; returns only on failure. NULL: it can't from
      * software (a physical switch does), and Settings has no Power off. */

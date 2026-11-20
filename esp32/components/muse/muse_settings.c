@@ -66,6 +66,9 @@ static struct {
 static SemaphoreHandle_t s_lock;
 /* StopWatch samples this at the next press, never during an active call. */
 static atomic_bool s_voice_notes;
+#if CONFIG_MUSE_MOTION_GESTURES
+static atomic_bool s_lift_wake, s_face_down_quiet;
+#endif
 #if CONFIG_MUSE_APP_VIEW
 static bool s_apps_on;
 #endif
@@ -144,6 +147,10 @@ esp_err_t muse_settings_init(void)
     }
 
     uint8_t b;
+#if CONFIG_MUSE_MOTION_GESTURES
+    if (nvs_get_u8(s_nvs, "lift_wake", &b) == ESP_OK) atomic_store(&s_lift_wake, b != 0);
+    if (nvs_get_u8(s_nvs, "face_quiet", &b) == ESP_OK) atomic_store(&s_face_down_quiet, b != 0);
+#endif
     load_u8("volume", &s.volume);
     if (nvs_get_u8(s_nvs, "speaker", &b) == ESP_OK) {
         s.speaker_on = b;
@@ -197,6 +204,20 @@ int muse_settings_text_size(void) { return s.text_size == TEXT_SIZE_UNSET ? s_te
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
 bool muse_settings_voice_notes(void) { return atomic_load(&s_voice_notes); }
+#if CONFIG_MUSE_MOTION_GESTURES
+bool muse_settings_lift_wake(void) { return atomic_load(&s_lift_wake); }
+bool muse_settings_face_down_quiet(void) { return atomic_load(&s_face_down_quiet); }
+void muse_settings_set_lift_wake(bool on)
+{
+    atomic_store(&s_lift_wake, on);
+    save_u8("lift_wake", on);
+}
+void muse_settings_set_face_down_quiet(bool on)
+{
+    atomic_store(&s_face_down_quiet, on);
+    save_u8("face_quiet", on);
+}
+#endif
 
 void muse_settings_set_voice_notes(bool on)
 {

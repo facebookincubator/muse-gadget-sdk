@@ -173,6 +173,12 @@ static void run_command(char *cmd)
         muse_settings_set_brightness(n);
     } else if (!strcmp(cmd, "sleep") && parse_int(v, 0, 3600, &n)) {
         muse_settings_set_sleep_s(n);
+#if CONFIG_MUSE_MOTION_GESTURES
+    } else if (!strcmp(cmd, "motion.lift") && parse_int(v, 0, 1, &n)) {
+        muse_settings_set_lift_wake(n);
+    } else if (!strcmp(cmd, "motion.quiet") && parse_int(v, 0, 1, &n)) {
+        muse_settings_set_face_down_quiet(n);
+#endif
     } else {
         res = "error: unknown command or bad value";
     }
