@@ -142,6 +142,11 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 CONFIG_ESP_TLS_USING_MBEDTLS=y
 
+# Noise's X25519 on HACL* Curve25519 (components/noise_core/Kconfig): formally
+# verified, constant-time, mbedTLS's own Everest copy, same bytes as PSA's.
+# About 5x faster than PSA's on the ESP32-S3 and 7.7x on the ESP32-C6.
+CONFIG_NOISE_CORE_X25519_HACL=y
+
 # Community v5 pairing uses ephemeral ECDH without a manufacturer credential.
 # Release overlays opt into deterministic eFuse ECDSA for official v5 pairing.
 # The production fleet scalar is shared, so deterministic signing is mandatory.
