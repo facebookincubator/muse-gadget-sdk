@@ -533,8 +533,9 @@ static app_wifi_join_t join_saved_networks(int timeout_ms, join_mode_t mode,
 
     // Rejoining the network it was on (after a drop): straight to the
     // access point cached at that join (wifi_mgr_has_cached_ap), without
-    // probing its channel first, if it was near enough (the probe's floor:
-    // on a mesh, a weak one probes for a nearer node). A miss drops the cache
+    // probing its channel first, if it was last heard (at the join, or as the
+    // link dropped) at the probe's floor or better: on a mesh, a weak one
+    // probes for a nearer node. A miss drops the cache
     // (wifi_mgr_connect), and the probe and the scan below follow. The cap
     // leaves time for a slow DHCP: a shorter one re-triggered the connect
     // while DHCP was still running.

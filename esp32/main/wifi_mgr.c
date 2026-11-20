@@ -117,6 +117,20 @@ static void cache_connected_ap(void) {
     portEXIT_CRITICAL(&s_bssid_lock);
 }
 
+// A drop leaves the joined AP's cached signal at the last one heard, so a
+// gadget that moved away from it probes for a nearer one next time
+// (wifi_mgr_has_cached_ap's floor) instead of going straight back.
+static void cache_disconnect_rssi(const wifi_event_sta_disconnected_t *ev) {
+    if (!ev || ev->rssi >= 0) return;
+    portENTER_CRITICAL(&s_bssid_lock);
+    for (int i = 0; i < s_bssid_cache_count; i++) {
+        if (memcmp(s_bssid_cache[i].bssid, ev->bssid, sizeof(ev->bssid)) == 0) {
+            s_bssid_cache[i].rssi = ev->rssi;
+        }
+    }
+    portEXIT_CRITICAL(&s_bssid_lock);
+}
+
 bool wifi_mgr_has_cached_ap(const char *ssid, int min_rssi) {
     if (!ssid || !ssid[0]) return false;
     bool found = false;
@@ -213,6 +227,7 @@ static void event_handler(void *arg, esp_event_base_t base,
             s_ip_lost_us = esp_timer_get_time();
             link_events_record(LINK_EVENT_WIFI_DOWN, "esp-idf reason=%u rssi=%d",
                                ev ? ev->reason : 0u, ev ? ev->rssi : 0);
+            cache_disconnect_rssi(ev);
         }
 
         xEventGroupClearBits(s_events, BIT_CONNECTED | BIT_GOT_IP);

@@ -37,12 +37,13 @@ typedef struct { char ssid[33]; char password[65]; bool hidden; } wifi_known_net
 typedef struct { int count; wifi_known_net_t nets[WIFI_KNOWN_MAX]; } wifi_known_list_t;
 typedef struct { char ssid[33]; int8_t rssi; uint8_t auth_mode; } wifi_scan_entry_t;
 typedef struct { char ssid[33]; uint8_t bssid[6]; int8_t rssi; uint8_t channel; } bssid_cache_entry_t;
+typedef struct { uint8_t bssid[6]; uint8_t reason; int8_t rssi; } wifi_event_sta_disconnected_t;
 static bssid_cache_entry_t s_bssid_cache[MAX_CACHED_SCANS];
 static int s_bssid_cache_count, s_bssid_lock;
 static int64_t s_now;
 static bool s_ap_here, s_password_ok;
 static int s_scans, s_connects, s_pinned_connects, s_scans_before_connect = -1;
-static int8_t s_ap_rssi;
+static int8_t s_ap_rssi, s_drop_rssi;
 static int64_t esp_timer_get_time(void) { return s_now; }
 static void vTaskDelay(int ms) { s_now += ms * 1000LL; }
 static void ui_set_status(const char *s) { (void)s; }
@@ -89,7 +90,13 @@ static int run(int cached_rssi, bool here, int8_t rssi, bool password_ok) {
     s_ap_here = here; s_ap_rssi = rssi; s_password_ok = password_ok;
     s_bssid_cache_count = 1;
     strcpy(s_bssid_cache[0].ssid, "home");
+    memcpy(s_bssid_cache[0].bssid, "\x02\x11\x22\x33\x44\x55", 6);
     s_bssid_cache[0].rssi = (int8_t)cached_rssi;
+    if (s_drop_rssi) {   /* the link dropped from that AP at this signal */
+        wifi_event_sta_disconnected_t ev = { .reason = 200, .rssi = s_drop_rssi };
+        memcpy(ev.bssid, s_bssid_cache[0].bssid, 6);
+        cache_disconnect_rssi(&ev);
+    }
     char joined[WIFI_KNOWN_SSID_MAX + 1];
     return join_saved_networks(20000, JOIN_ANY, false, joined);
 }
@@ -110,6 +117,11 @@ int main(int argc, char **argv) {
     case 3:   /* in range but the join fails: a failure */
         assert(run(-60, true, -60, false) == APP_WIFI_FAILED);
         break;
+    case 4:   /* joined near, dropped far from it: probe first */
+        s_drop_rssi = -84;
+        assert(run(-60, true, -55, true) == APP_WIFI_JOINED);
+        assert(s_scans_before_connect == 1);
+        break;
     default: return 2;
     }
     return 0;
@@ -127,7 +139,9 @@ class WifiRejoinShortcut(unittest.TestCase):
         wifi = (ROOT / "main/wifi_mgr.c").read_text()
         defines = "\n".join(re.findall(r"^#define WIFI_(?:JOIN_\w+|QUICK_MIN_RSSI|REJOIN_MS)\b.*$", app, re.M))
         join = app[app.index("static int64_t s_none_nearby_us;"):app.index("// A network the phone set up")]
-        code = HARNESS.replace("@@WIFI_MGR@@", function_source(wifi, "bool wifi_mgr_has_cached_ap(")).replace(
+        cache = function_source(wifi, "static void cache_disconnect_rssi(") + "\n" + function_source(
+            wifi, "bool wifi_mgr_has_cached_ap(")
+        code = HARNESS.replace("@@WIFI_MGR@@", cache).replace(
             "@@APP@@", defines + "\n" + join)
         source = out / "rejoin.c"
         source.write_text(code)
@@ -153,6 +167,9 @@ class WifiRejoinShortcut(unittest.TestCase):
 
     def test_failed_join_in_range_is_failure(self):
         self.run_case(3)
+
+    def test_drop_far_from_cached_ap_probes_first(self):
+        self.run_case(4)
 
 
 if __name__ == "__main__":
