@@ -17,7 +17,7 @@
 #pragma once
 
 /*
- * Short-lived setup tasks (pairing timers, Wi-Fi scan refresh, provisioning)
+ * Short-lived setup tasks (Wi-Fi scan refresh, provisioning, a pairing timeout)
  * whose stacks go to PSRAM on boards that opt in with
  * CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM, sparing internal RAM.
  *

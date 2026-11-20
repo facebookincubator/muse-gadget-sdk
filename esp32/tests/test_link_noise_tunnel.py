@@ -41,7 +41,7 @@ class LinkNoiseTunnelTest(unittest.TestCase):
             start = control.index("static char s_register_req_id[")
             end = control.index("static TaskHandle_t", start)
             registration_state = control[start:end]
-            start = control.index("static void process_inbound_body_chunk(")
+            start = control.index("// A /link-control message cut across BodyChunks")
             end = control.index("// The session loop's pause", start)
             (out / "control_inbound.inc").write_text(
                 registration_state + control[start:end])

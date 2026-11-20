@@ -124,23 +124,17 @@ class HelperTaskContractTest(unittest.TestCase):
         app = _strip_comments(APP_C.read_text())
         ble = _strip_comments(BLE_SERVER_C.read_text())
 
-        # start_confirm_timeout() starts whichever worker it is handed.
-        confirm = _function_body(app, "static BaseType_t start_confirm_timeout(")
-        self.assertIn("helper_task_create(task,", confirm)
-        confirm_workers = set(re.findall(r"start_confirm_timeout\(\s*(\w+)\s*,", app))
-        self.assertEqual(confirm_workers, {"confirm_timeout_task", "confirmed_idle_timeout_task"})
-
         started = {
             (APP_C.name, name)
             for name in re.findall(r"helper_task_create\(\s*(\w+)\s*,", app)
             if name != "task"
         }
-        started |= {(APP_C.name, name) for name in confirm_workers}
         started |= {
             (BLE_SERVER_C.name, name)
             for name in re.findall(r"helper_task_create\(\s*(\w+)\s*,", ble)
         }
         self.assertIn((APP_C.name, "scan_refresh_task"), started)
+        self.assertIn((APP_C.name, "confirm_timeout_task"), started)
         self.assertIn((BLE_SERVER_C.name, "provision_task"), started)
 
         sources = {APP_C.name: app, BLE_SERVER_C.name: ble}
@@ -149,12 +143,6 @@ class HelperTaskContractTest(unittest.TestCase):
             self.assertIn("helper_task_delete(NULL);", body, f"{name} must free its WithCaps stack")
             self.assertNotIn("vTaskDelete(", body, f"{name} leaks a WithCaps stack")
             self.assertNotRegex(body, r"\breturn\s*;", f"{name} exits without deleting itself")
-
-        # A pending confirmation timer is cancelled (disconnect, new session)
-        # before it ever fires: that path frees the stack too.
-        cancel = _function_body(app, "static uint32_t advance_confirm_generation_locked(")
-        self.assertIn("helper_task_delete(s_confirm_timeout_task);", cancel)
-        self.assertNotIn("vTaskDelete(s_confirm_timeout_task)", app)
 
 
 if __name__ == "__main__":
