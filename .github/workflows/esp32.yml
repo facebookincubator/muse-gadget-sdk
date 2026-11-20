@@ -32,6 +32,7 @@ jobs:
   host-tests:
     name: Host tests
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -83,6 +84,7 @@ jobs:
   simulator:
     name: UI simulator (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +119,9 @@ jobs:
   build:
     name: Build ${{ matrix.board }}
     runs-on: ubuntu-latest
+    # Healthy builds take 5-8 minutes; a stalled ESP-IDF image pull fails
+    # here instead of after GitHub's six-hour default.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -404,6 +409,7 @@ jobs:
     name: Assemble web flasher
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -436,6 +442,7 @@ jobs:
     needs: web-flasher
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       pages: write
       id-token: write
