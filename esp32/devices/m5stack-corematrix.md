@@ -20,8 +20,9 @@ ESP32-C61HR8 with 16 MB of flash, 8 MB of quad PSRAM and native USB, behind a
 16x16 white LED matrix. This profile shows Link's status on the matrix,
 draws Muse's images on it (`display.draw_url` and `display.draw_file`,
 16x16, a pixel lit where the image is brighter than mid-gray), and uses BtnA
-(KEY1) as the setup button: tap to confirm a pairing or retry, hold
-for 5 s to reset setup. It advertises as `MuseGadget-XXXXXX`.
+(KEY1) as the setup button: tap to confirm a pairing (or reopen setup
+before it's finished), hold for 5 s to reset setup. It advertises as
+`MuseGadget-XXXXXX`.
 
 ```sh
 tools/board.sh m5stack-corematrix build

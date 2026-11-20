@@ -26,9 +26,8 @@ white LEDs: icons, symbols and simple shapes work, but words, photos and
 replies don't fit.
 
 BtnA, labelled KEY1, is the setup button: it confirms a pending pairing,
-otherwise a tap retries the connection, a double tap rescans Wi-Fi, and a
-five-second hold resets setup. The separate power button turns it on or
-resets it with a click, turns it off with a double click, and a long hold
+and a five-second hold resets setup. The separate power button turns it on
+or resets it with a click, turns it off with a double click, and a long hold
 starts download mode for flashing. BtnB and BtnC do nothing.
 
 It has no microphone or speaker for voice, and its motion sensor, buzzer
