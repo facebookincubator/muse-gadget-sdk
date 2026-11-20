@@ -2232,8 +2232,9 @@ static void confirmed_idle_timeout_task(void *arg) {
     helper_task_delete(NULL);
 }
 
-// On the esp_timer task, which mustn't block: the timeout's status send waits
-// for the BLE TX lock and paces its chunks, so it runs on a short-lived task.
+// On the esp_timer task, which mustn't be held up: the timeout's status send
+// waits for the BLE TX lock and paces its chunks, so it runs on a short-lived
+// task.
 static void confirm_timer_fire(void *arg) {
     (void)arg;
     setup_window_lock_take();
@@ -2250,7 +2251,20 @@ static void confirm_timer_fire(void *arg) {
     } else if (kind == CONFIRM_TO_IDLE) {
         rc = helper_task_create(confirmed_idle_timeout_task, "pair_idle_to", 4096, g, 4, NULL);
     }
-    if (rc != pdPASS) ESP_LOGE(TAG, "no memory for the pairing timeout's task");
+    if (rc != pdPASS) {
+        // No memory for the task: still end the session, without its status
+        // (the disconnect only queues work for NimBLE, and resets the
+        // session's keys even when it can't).
+        setup_window_lock_take();
+        bool current = s_confirm_generation == generation;
+        uint32_t session_generation = current ? s_confirm_session_generation : 0;
+        current = current && link_pairing_session_is_current(session_generation)
+                  && (kind == CONFIRM_TO_PRESS || !link_pairing_provisioning_session_valid(0));
+        if (current) ui_set_status("pairing_confirm_timeout");
+        setup_window_lock_give();
+        ESP_LOGE(TAG, "no memory for the pairing timeout's task");
+        if (current) ble_server_disconnect_pairing_session(session_generation);
+    }
 }
 
 static void notify_pairing_confirmed(uint32_t session_generation) {

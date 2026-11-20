@@ -238,8 +238,10 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         self.assertIn("esp_timer_is_active(s_confirm_timer) ? CONFIRM_TO_NONE", fire)
         self.assertIn("helper_task_create(confirm_timeout_task,", fire)
         self.assertIn("helper_task_create(confirmed_idle_timeout_task,", fire)
-        self.assertNotIn("ble_server_", fire)
+        self.assertNotIn("ble_server_send", fire)
         self.assertNotIn("vTaskDelay", fire)
+        # Without memory for the task, the session still ends.
+        self.assertIn("ble_server_disconnect_pairing_session(session_generation)", fire)
         advance = _function_body(app, "static uint32_t advance_confirm_generation_locked(void) {")
         self.assertIn("esp_timer_stop(s_confirm_timer)", advance)
         disconnect = _function_body(ble, "static void disconnect_pairing_session_event(")
