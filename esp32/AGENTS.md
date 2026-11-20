@@ -227,9 +227,10 @@ more, except the StickS3, StickC Plus2, Cardputer ADV, AtomS3, AI Passport and W
 
 On the Watcher, rotation opens and pages through the latest reply. A short
 wheel click sleeps/wakes; a 300 ms hold starts push-to-talk. Pairing still
-confirms on the initial press. `muse_review.c` keeps up to 32 KB of the reply
-in PSRAM across the end of the turn. `>review.next`, `>review.prev`, and
-`>review.close` exercise navigation over the serial console.
+confirms on the initial press, never on a hold's push-to-talk.
+`muse_review.c` keeps up to 32 KB of the reply in PSRAM across the end of the
+turn. `>review.next`, `>review.prev`, and `>review.close` exercise navigation
+over the serial console.
 
 All boards share `managed_components/` and `dependencies.lock` in this
 directory. If the component manager fails after you switch between a board
@@ -503,6 +504,11 @@ Button (BOOT on the dev boards):
 - **short press**: confirm a pending pairing, or reopen the setup window if
   setup isn't complete
 - **hold for 5 s**: reset setup (unpair and forget Wi-Fi)
+
+Only a press that begins after the confirmation prompt confirms it, on every
+board: a press already under way (or held) when it appears doesn't count, so
+let go and press again (`link_pairing_confirm_active_session()`,
+`tests/test_pairing_fresh_press.py`).
 
 EchoEar-2ST confirms pending pairing with an explicit screen press; hold the
 on-screen microphone to record and release it to send once paired. It has no

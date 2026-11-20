@@ -2370,10 +2370,13 @@ static void on_button_short_press(void) {
             ESP_LOGI(TAG, "button short-press ignored; no active BLE session");
             return;
         }
-        uint32_t session_generation = link_pairing_confirm_active_session();
+        uint32_t session_generation =
+            link_pairing_confirm_active_session(button_pressed_after_us());
         if (session_generation) {
             notify_pairing_confirmed(session_generation);
             ESP_LOGI(TAG, "button short-press confirmed active pairing session");
+        } else {
+            ESP_LOGI(TAG, "button short-press didn't confirm (prompt not armed or expired, or the press began before it)");
         }
         return;
     }
@@ -2584,15 +2587,17 @@ void app_ble_companion_set(bool advertise) {
     if (config_setup_complete()) ui_set_ble(advertise ? "companion" : "off");
 }
 
-bool app_confirm_pairing_press(void) {
+bool app_confirm_pairing_press(int64_t pressed_after_us) {
     factory_test_on_button_press();
     if (!link_pairing_confirmation_required() || !ble_server_has_connection()) {
         return false;
     }
-    uint32_t session_generation = link_pairing_confirm_active_session();
+    uint32_t session_generation = link_pairing_confirm_active_session(pressed_after_us);
     if (session_generation) {
         notify_pairing_confirmed(session_generation);
         ESP_LOGI(TAG, "talk button confirmed active pairing session");
+    } else {
+        ESP_LOGI(TAG, "talk press didn't confirm (prompt not armed or expired, or the press began before it)");
     }
     return true;
 }

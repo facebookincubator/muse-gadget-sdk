@@ -36,6 +36,7 @@ option(MUSE_SIM_FETCH_DEPS
        ON)
 option(MUSE_SIM_SANITIZERS "Build the simulator with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(MUSE_SIM_WARNINGS_AS_ERRORS "Treat simulator warnings as errors" OFF)
+option(MUSE_SIM_EMOJI "Show emoji in captions, as CONFIG_MUSE_EMOJI does" OFF)
 
 set(MUSE_SIM_LVGL_VERSION "9.5.0")
 set(MUSE_SIM_SDL_MIN_VERSION "2.0.18")
@@ -195,6 +196,11 @@ if(APPLE)
     # that framework in this configuration.
     find_library(MUSE_SIM_IOKIT_FRAMEWORK IOKit REQUIRED)
     target_link_libraries(muse_simulator PRIVATE ${MUSE_SIM_IOKIT_FRAMEWORK})
+endif()
+
+if(MUSE_SIM_EMOJI)
+    target_sources(muse_simulator PRIVATE "${MUSE_COMPONENT_DIR}/fonts/muse_font_emoji_16.c")
+    target_compile_definitions(muse_simulator PRIVATE CONFIG_MUSE_EMOJI=1)
 endif()
 
 target_compile_options(muse_simulator PRIVATE -Wall -Wextra -Wpedantic)

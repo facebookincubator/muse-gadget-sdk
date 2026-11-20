@@ -444,8 +444,8 @@ static bool op_sdk_token_changed(void) {
     return identity_sdk_token_changed_since_pairing(NULL, 0);
 }
 
-static bool op_talk_press(void) {
-    return app_confirm_pairing_press();
+static bool op_talk_press(int64_t pressed_after_us) {
+    return app_confirm_pairing_press(pressed_after_us);
 }
 
 static void op_reset_setup(void) {

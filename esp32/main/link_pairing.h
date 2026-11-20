@@ -39,7 +39,10 @@ uint32_t link_pairing_handle_client_finished(void);
 bool link_pairing_confirmation_required(void);
 // Arm physical input only after the encrypted prompt has been emitted.
 bool link_pairing_arm_confirmation(uint32_t generation);
-uint32_t link_pairing_confirm_active_session(void);
+// Only a press that began after the prompt was armed confirms it.
+// pressed_after_us (esp_timer's clock) is a time before the press began: when
+// its control was last seen up, at the latest.
+uint32_t link_pairing_confirm_active_session(int64_t pressed_after_us);
 bool link_pairing_session_confirmed(void);
 uint32_t link_pairing_mark_provisioning_active(void);
 // A nonzero token binds a worker to its originating provisioning session.
