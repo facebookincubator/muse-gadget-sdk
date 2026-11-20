@@ -439,6 +439,12 @@ size_t muse_text_strip_markdown(char *s, uint64_t wrapped)
             } else if ((*p == '*' || *p == '_' || *p == '~') && p + 1 < eol && p[1] == *p) {
                 p += 2;   /* **bold**, __bold__, ~~struck~~ */
             } else if (*p == '`') {
+                const char *close = memchr(p + 1, '`', eol - (p + 1));
+                if (close) {   /* code keeps its text as it is */
+                    memmove(w, p + 1, close - (p + 1));
+                    w += close - (p + 1);
+                    p = close;
+                }
                 p++;
             } else if (p == closing) {
                 closing = NULL;

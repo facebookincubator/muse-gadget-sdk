@@ -84,6 +84,12 @@ class MarkdownCaptionTest(unittest.TestCase):
         ):
             self.assertEqual(self.plain(text), shown, text)
 
+    def test_code_keeps_its_text_as_it_is(self) -> None:
+        self.assertEqual(
+            self.plain("Use `__init__`, `a|b` or `**kwargs`, not **this**."),
+            "Use __init__, a|b or **kwargs, not this.",
+        )
+
     def test_text_that_only_looks_like_markdown_stays(self) -> None:
         for text in (
             "2 * 3 = 6",
