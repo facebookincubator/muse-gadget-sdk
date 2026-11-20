@@ -85,5 +85,33 @@
     "usb": [
       "1a86:55d3"
     ]
+  },
+  {
+    "board": "muse-aipi",
+    "name": "AIPI Lite",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "muse-m5stack-sticks3",
+    "name": "M5Stack StickS3",
+    "usb": [
+      "303a:1001"
+    ]
+  },
+  {
+    "board": "ideaspark",
+    "name": "ideaspark ESP32 with 1.9\" display",
+    "usb": [
+      "1a86:7523"
+    ]
+  },
+  {
+    "board": "home-assistant-voice",
+    "name": "Home Assistant Voice Preview Edition",
+    "usb": [
+      "303a:1001"
+    ]
   }
 ]
