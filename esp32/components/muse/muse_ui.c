@@ -2340,6 +2340,7 @@ static void update_status(muse_mode_t mode, float now)
     bool fresh = muse_state_caption(caption, sizeof(caption), &s_caption_version);
     const char *shown = caption;
     int answer = -1;
+    bool relaid = false;   /* the read page moved under the reply showing */
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     /* The review page has its own buffer, so the live caption is still there to
      * go back to when review ends, including any that arrived meanwhile. */
@@ -2358,9 +2359,7 @@ static void update_status(muse_mode_t mode, float now)
             if (s_page_for == ANSWER_READ) {
                 s_page_for = -1;   /* its pages wrap again for the new size */
             }
-            if (s_answer == ANSWER_READ) {
-                s_answer = -1;     /* and set_answer() puts the label in its new place */
-            }
+            relaid = s_answer == ANSWER_READ;   /* set_answer() puts the label in its new place */
         }
         if (layout != s_page_for) {
             s_page_for = layout;
@@ -2392,7 +2391,7 @@ static void update_status(muse_mode_t mode, float now)
         }
 #endif
     }
-    if (answer != s_answer) {
+    if (answer != s_answer || relaid) {
         set_answer(answer);
         fresh = true;   /* the caption moves between labels */
     }
