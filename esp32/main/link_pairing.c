@@ -39,13 +39,36 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
+#if CONFIG_SPIRAM
+#include "esp_heap_caps.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
 #include "pairing_signer_policy.h"
 #include "pairing_transcript.h"
+#include "token_fp.h"
 
 static const char *TAG = "link.pairing";
+
+// Pairing's transient buffers (base64, the AES-GCM records: up to ~3 KB each,
+// under the always-internal threshold) go to PSRAM where there is some, so
+// they don't compete with setup's tasks for internal RAM. Freed with free();
+// zeroized by their callers as before.
+static void *lp_malloc(size_t n) {
+#if CONFIG_SPIRAM
+    void *p = heap_caps_malloc(n ? n : 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p) return p;
+#endif
+    return malloc(n);
+}
+
+static void *lp_calloc(size_t n) {
+    void *p = lp_malloc(n);
+    if (p) memset(p, 0, n);
+    return p;
+}
 
 #define PAIRING_RECORD_LABEL "hatch-link ble setup v1"
 #define PAIRING_TIMEOUT_US (120LL * 1000000LL)
@@ -268,7 +291,7 @@ static bool hkdf_expand32(const uint8_t prk[KEY_BYTES],
 static bool base64url_encode(const uint8_t *data, size_t len, char *out, size_t out_cap) {
     size_t need = 0;
     mbedtls_base64_encode(NULL, 0, &need, data, len);
-    char *tmp = calloc(1, need + 1);
+    char *tmp = lp_calloc(need + 1);
     if (!tmp) return false;
     size_t olen = 0;
     int rc = mbedtls_base64_encode((uint8_t *)tmp, need + 1, &olen, data, len);
@@ -294,7 +317,7 @@ static bool base64url_decode(const char *in, uint8_t *out, size_t out_cap, size_
     size_t n = strlen(in);
     if (n == 0 || n > 4096 || (n % 4) == 1) return false;
     size_t padded = n + ((4 - (n % 4)) % 4);
-    char *tmp = malloc(padded + 1);
+    char *tmp = lp_malloc(padded + 1);
     if (!tmp) return false;
     for (size_t i = 0; i < n; i++) {
         unsigned char c = (unsigned char)in[i];
@@ -586,7 +609,7 @@ static bool aes_gcm_decrypt(const uint8_t *key, const uint8_t *cipher, size_t ci
 static char *make_envelope(const char *kind, uint64_t counter,
                            const uint8_t *cipher, size_t cipher_len,
                            const uint8_t tag[GCM_TAG_BYTES]) {
-    char *cipher_b64 = malloc(((cipher_len + 2) / 3) * 4 + 1);
+    char *cipher_b64 = lp_malloc(((cipher_len + 2) / 3) * 4 + 1);
     char tag_b64[32];
     if (!cipher_b64) return NULL;
     if (!base64url_encode(cipher, cipher_len, cipher_b64,
@@ -889,8 +912,8 @@ const char *link_pairing_decrypt_command(cJSON *root, char **plaintext_json) {
     // so 3 KB): two fixed 8 KB buffers don't fit beside the UI on boards
     // without PSRAM.
     size_t cipher_cap = strlen(cipher_b64) / 4 * 3 + 3;
-    uint8_t *cipher = malloc(cipher_cap);
-    uint8_t *plain = malloc(cipher_cap + 1);
+    uint8_t *cipher = lp_malloc(cipher_cap);
+    uint8_t *plain = lp_malloc(cipher_cap + 1);
     if (!cipher || !plain) {
         ESP_LOGE(TAG, "no memory to decrypt a %u-byte command", (unsigned)cipher_cap);
     }
@@ -912,6 +935,10 @@ const char *link_pairing_decrypt_command(cJSON *root, char **plaintext_json) {
         reset_locked();
     }
     free(cipher);
+    if (plain) {
+        // A failed tag check leaves unauthenticated plaintext behind.
+        mbedtls_platform_zeroize(plain, cipher_cap + 1);
+    }
     free(plain);
     lock_give();
     return ok ? NULL : "error_pairing_decrypt";
@@ -1025,7 +1052,7 @@ static char *encrypt_json_for_session(const char *plain_json, uint32_t generatio
     }
 
     size_t plain_len = strlen(plain_json);
-    uint8_t *cipher = malloc(plain_len);
+    uint8_t *cipher = lp_malloc(plain_len);
     uint8_t tag[GCM_TAG_BYTES];
     char *envelope = NULL;
     if (cipher && aes_gcm_encrypt(s_tx_key, (const uint8_t *)plain_json,
@@ -1058,7 +1085,8 @@ static char *status_plain_json(const char *status) {
         return NULL;
     }
     if (s_sdk_token && strcmp(status, "pairing_confirmed") == 0) {
-        ESP_LOGI(TAG, "pairing_confirmed carries SDK token %.12s", s_sdk_token);
+        char fp[TOKEN_FP_TEXT_LEN];
+        ESP_LOGI(TAG, "pairing_confirmed carries the SDK token (%s)", token_fp_text(s_sdk_token, fp));
     }
     char *plain_json = cJSON_PrintUnformatted(plain);
     cJSON_Delete(plain);

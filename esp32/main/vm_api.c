@@ -446,7 +446,7 @@ static int do_refresh(const char *auth_header, const char *device_id,
     }
     char url[320];
     make_api_url(url, sizeof(url), REFRESH_TOKEN_PATH);
-    if (s_sdk_token[0]) ESP_LOGI(TAG, "refresh carries SDK token %.12s", s_sdk_token);
+    if (s_sdk_token[0]) ESP_LOGI(TAG, "refresh carries the SDK token");   // never any of it
 
     resp_buf_t resp = {0};
     int rc = http_json_with_retries(url, HTTP_METHOD_POST, auth_header, body,
